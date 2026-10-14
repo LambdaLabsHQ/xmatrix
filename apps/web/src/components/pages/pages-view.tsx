@@ -29,9 +29,10 @@ import { pagesViewPath } from "@/components/dashboard/workspace-shell-navigation
 import type { CursorPresence, Discussion, HeadingActions, PageSectionActions, SectionNote } from "./page-editor";
 import { PageAttached, type PageScheduleInput } from "./page-attached";
 import {
-  ConversationList, DeletePageDialog, PageDialog, PageHistory, PageOffscreenPeople, PageScrollMarks, PresenceStack, ShareDialog, type OffscreenPerson, type PresentPerson, type PageScrollMark,
+  ConversationList, DeletePageDialog, PageDialog, PageEditorsRail, PageHistory, PageOffscreenPeople, PageScrollMarks, PresenceStack, ShareDialog, type OffscreenPerson, type PageEditor as FloatingEditor, type PresentPerson, type PageScrollMark,
 } from "./page-chrome";
 import { PageMargin } from "./page-margin";
+import { PageReaderChangesBar } from "./page-reader-changes-bar";
 import { marginConversations, sectionConversationCounts, withOpenConversation, type LiveConversation } from "./page-margin-model";
 import { formatRelativeAge, mobileChatTimeLabel } from "@/components/dashboard/time-display";
 import { ListSectionHeading } from "@/components/dashboard/list-section-heading";
@@ -610,6 +611,10 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
       if (baselineFor.current === opened) setReaderBaseline(result.page.body);
     }, () => { if (baselineFor.current === opened) setReaderChanges(0); });
   }, [headRevision, opened, pageId, spaceId, token]);
+  const viewDiff = () => {
+    setDiffViewed(true);
+    if (headRevision !== null) markSeen(headRevision);
+  };
   const readerDiff = useMemo(() => readerBaseline === null || headRevision === null || diffViewed || !drawn ? null
     : { body: readerBaseline, head: headRevision }, [diffViewed, drawn, headRevision, readerBaseline]);
   const queryClient = useQueryClient();
@@ -1078,6 +1083,17 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     if (top === null || !article) return followBlock(person.blockId);
     article.scrollTo({ top: Math.max(0, top - article.clientHeight / 3), behavior: "smooth" });
   };
+  // On a phone, whoever is editing floats at the right edge beside their line, wherever it is.
+  const floatingEditors = ((): FloatingEditor[] => {
+    if (!phone || mode !== "page" || !drawn || !viewport.height) return [];
+    const editors: FloatingEditor[] = [];
+    for (const person of people) {
+      const top = person.editing ? contentTop(person.anchor) : null;
+      if (top !== null) editors.push({ person, top: top - viewport.top });
+    }
+    return editors;
+  })();
+  const floating = new Set(floatingEditors.map((editor) => editor.person.key));
   // Who is out of view above or below, at the page's edges (§3.2). A line of room keeps
   // someone on the very edge counted as seen.
   const offscreen = ((): { above: OffscreenPerson[]; below: OffscreenPerson[] } => {
@@ -1085,7 +1101,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     const below: OffscreenPerson[] = [];
     if (mode !== "page" || !drawn || !viewport.height) return { above, below };
     for (const person of people) {
-      const top = contentTop(person.anchor);
+      const top = floating.has(person.key) ? null : contentTop(person.anchor);
       if (top === null) continue;
       if (top < viewport.top + 8) above.push({ person, distance: viewport.top - top });
       else if (top > viewport.top + viewport.height - 24) below.push({ person, distance: top - viewport.top - viewport.height });
@@ -1133,6 +1149,8 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     await queryClient.invalidateQueries({ predicate: (query) => query.queryKey.includes("page-tree") });
   };
 
+  // On a phone the diff is walked from a floating bar under the thumb instead of a line above the text.
+  const phoneDiff = phone && mode === "page" && drawn && !diffViewed && !!readerChanges;
   const controls = (
     <>
       <PresenceStack people={people} onFollow={jumpTo} />
@@ -1162,8 +1180,10 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
       <PageScrollMarks marks={scrollMarks} />
       <div className="relative flex min-h-0 min-w-0 flex-1">
         <PageOffscreenPeople above={offscreen.above} below={offscreen.below} onJump={jumpTo} />
-        <article ref={measureArticle} className={phone ? "app-mobile-page-article min-h-0 min-w-0 flex-1 overflow-y-auto px-6"
-          : "app-page-article min-h-0 min-w-0 flex-1 overflow-y-auto px-6 py-6 lg:px-12"}>
+        <PageEditorsRail editors={floatingEditors} height={viewport.height} bottomInset={phoneDiff ? 76 : 16}
+          onJump={jumpTo} />
+        <article ref={measureArticle} className={phone ? cn("app-mobile-page-article min-h-0 min-w-0 flex-1 overflow-y-auto px-6",
+          phoneDiff && "has-reader-changes") : "app-page-article min-h-0 min-w-0 flex-1 overflow-y-auto px-6 py-6 lg:px-12"}>
           <div className={cn("mx-auto max-w-3xl", marginOn && "max-w-[calc(48rem+21.5rem)]")}>
             {phone ? (
               <>
@@ -1207,12 +1227,12 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
                     <div className="min-h-[50vh]"><PageDocumentStatic body={document.data.body} testId="page-preview"
                       references={references} /></div>
                   )}
-                  {drawn && !!readerChanges && (
+                  {drawn && !!readerChanges && !phone && (
                     <label className="mb-3 flex w-fit cursor-pointer items-center gap-2 text-xs text-muted-foreground"
                       data-testid="page-reader-diff">
                       <input type="checkbox" checked={diffViewed} onChange={(event) => {
-                        setDiffViewed(event.target.checked);
-                        if (event.target.checked && headRevision !== null) markSeen(headRevision);
+                        if (event.target.checked) viewDiff();
+                        else setDiffViewed(false);
                       }} />
                       <span className="text-foreground">Viewed</span>
                       <span>{readerChanges === 1 ? "1 change" : `${readerChanges} changes`} since you last read this page</span>
@@ -1246,6 +1266,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
           </div>
         </article>
       </div>
+      {phoneDiff && <PageReaderChangesBar document={docColumn} changes={readerChanges ?? 0} onViewed={viewDiff} />}
       {docked && renderConversation?.("dock")}
       {page && (
         <>

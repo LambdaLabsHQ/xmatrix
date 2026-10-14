@@ -374,6 +374,81 @@ test.describe("on a phone", () => {
     await expect(browser.getByTestId("pages-view")).toBeVisible();
     await expect(browser).toHaveURL(/\/pages\?page=p-relay/u);
   });
+
+  test("what changed is walked and ticked viewed from a floating bar under the thumb", async ({ page: browser }) => {
+    const editor = await openChangedPage(browser);
+    // A phone opens on the list of pages.
+    await browser.getByRole("button", { name: /^Relay/u }).click();
+    const bar = browser.getByRole("toolbar", { name: "Changes since you last read this page" });
+    await expect(bar).toContainText("3 changes"); // one stop per changed paragraph
+    const box = (await bar.boundingBox())!;
+    expect(box.y + box.height, "it floats at the bottom of the screen").toBeGreaterThan(852 - 48);
+    const viewed = bar.getByRole("button", { name: "Viewed" });
+    expect((await viewed.boundingBox())!.height, "a thumb-sized target").toBeGreaterThanOrEqual(44);
+    await bar.getByRole("button", { name: "Next change" }).click();
+    await expect(bar).toContainText("1 of 3");
+    await bar.getByRole("button", { name: "Previous change" }).click();
+    await expect(bar).toContainText("3 of 3");
+    await expect(editor.locator(".page-reader-change").filter({ hasText: "Late reviews" })).toBeInViewport();
+    await browser.screenshot({ path: test.info().outputPath("pages-reader-changes-phone.png") });
+    expect(await fixtureRequestBodies(browser, "page-mark-read")).toEqual([]);
+
+    await viewed.click();
+    await expect(bar).toBeHidden();
+    await expect(editor.locator(".page-reader-change")).toHaveCount(0);
+    await expect.poll(async () => (await fixtureRequestBodies(browser, "page-mark-read")).map((body) => body.revision))
+      .toContain(3);
+  });
+
+  test("an Agent editing out of view floats at the right edge, pointing the way, and a tap goes to its line", async ({ page: browser }) => {
+    const filler = Array.from({ length: 40 }, (_, index) => `Background paragraph ${index + 1}.`).join("\n\n");
+    const server = pageDocument(`# Relay\n\n## Status\n\nIn progress\n\n${filler}\n\n## Notes\n\nnone\n`);
+    const AGENT = 1_234_567;
+    let push: (data: Uint8Array) => void = () => {};
+    await stubPages(browser, [page("p-relay", null, "Relay", "V")]);
+    await fixtureJson(browser, "page-links", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\?.*$/u, { links: [] });
+    await fixtureJson(browser, "page-agents", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\/agents$/u, {
+      pages: [{ pageId: "p-relay", agents: [{ instanceId: "i-claude", name: "claude:2", status: "busy",
+        conversationId: E2E_CHANNEL.id, activity: "editing", blockId: "notes" }] }],
+    });
+    await servePageSession(browser, server, { connect: (send) => { push = send; } });
+    await browser.goto("/app", { waitUntil: "domcontentloaded" });
+    await browser.getByRole("button", { name: "Pages", exact: true }).first().click();
+    await browser.getByRole("button", { name: /^Relay/u }).click();
+    const editor = browser.getByTestId("page-editor");
+    await expect(editor).toContainText("In progress");
+    const own = server.clientID;
+    server.clientID = AGENT;
+    editPageMarkdown(server, (markdown) => markdown.replace("none", "none yet, shipping Friday"), "agent");
+    server.clientID = own;
+    push(awarenessFrom(server, AGENT, 1, { user: { name: "claude:2", color: "#7c3aed", kind: "agent",
+      conversationId: E2E_CHANNEL.id }, activity: "editing", block: "notes" }, "shipping Friday"));
+
+    const disc = browser.getByTestId("page-editors").getByRole("button", { name: "claude:2 is editing below" });
+    await expect(disc).toBeVisible();
+    // It pops in, then rests as a thumb-sized face at the right edge, not a chip on the heading.
+    await expect.poll(async () => (await disc.boundingBox())?.width).toBeGreaterThanOrEqual(44);
+    // Held inside the screen at its bottom edge.
+    await expect.poll(async () => { const at = (await disc.boundingBox())!; return at.y + at.height; })
+      .toBeLessThanOrEqual(852 - 16);
+    const box = (await disc.boundingBox())!;
+    expect(box.x + box.width, "at the right edge").toBeGreaterThan(393 - 24);
+    // It replaces the edge pill for the one editing, rather than saying it twice.
+    await expect(browser.getByTestId("page-people-below")).toHaveCount(0);
+    await browser.screenshot({ path: test.info().outputPath("pages-editor-floating-below.png") });
+
+    await disc.click();
+    await expect(editor.getByText("none yet, shipping Friday")).toBeInViewport();
+    const beside = browser.getByTestId("page-editors").getByRole("button", { name: "claude:2 is editing", exact: true });
+    await expect(beside).toBeVisible();
+    // Beside its line now: the disc glides there with the page.
+    const line = (await editor.getByText("none yet, shipping Friday").boundingBox())!;
+    await expect.poll(async () => {
+      const at = (await beside.boundingBox())!;
+      return Math.abs(at.y + at.height / 2 - (line.y + line.height / 2));
+    }).toBeLessThan(40);
+    await browser.screenshot({ path: test.info().outputPath("pages-editor-floating-beside.png") });
+  });
 });
 
 test("a page: reference in a message is a chip with preview that opens the page", async ({ page: browser }) => {
@@ -658,7 +733,8 @@ test("a page shows its document at once, and the live editor takes over when its
   }
 });
 
-test("what changed since the reader last read the page stays as a diff until it is ticked viewed, and the page is then read", async ({ page: browser }) => {
+/** Opens a page whose reader last read revision 2, and that has since changed in three places. */
+async function openChangedPage(browser: Page) {
   await stubPages(browser, [page("p-relay", null, "Relay", "V")]);
   await fixtureJson(browser, "page-links", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\?.*$/u, { links: [] });
   await fixtureJson(browser, "page-read", /\/api\/xmatrix\/spaces\/[^/]+\/pages\/p-relay\/read$/u, { revision: 2 },
@@ -668,9 +744,12 @@ test("what changed since the reader last read the page stays as a diff until it 
   await fixtureJson(browser, "page-revision-2", /\/api\/xmatrix\/spaces\/[^/]+\/pages\/p-relay\?revision=2$/u, { page: {
     ...page("p-relay", null, "Relay", "V"), body: "# Relay\n\n## Status\n\nPlanned for next week\n\n## Notes\n\nnone\n",
     revisionInfo: { revision: 2, kind: "edit", authors: [], conversationIds: [], createdAt: NOW } } });
-  const editor = await openLivePage(browser,
+  return openLivePage(browser,
     "# Relay\n\n## Status\n\nShipped this week\n\n## Notes\n\nnone\n\n## Risks\n\nLate reviews\n");
+}
 
+test("what changed since the reader last read the page stays as a diff until it is ticked viewed, and the page is then read", async ({ page: browser }) => {
+  const editor = await openChangedPage(browser);
   const added = editor.locator(".page-reader-change");
   await expect(added.filter({ hasText: "Shipped" })).toBeVisible();
   await expect(added.filter({ hasText: "Late reviews" })).toHaveCount(1);

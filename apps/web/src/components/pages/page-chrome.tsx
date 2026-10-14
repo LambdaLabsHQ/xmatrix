@@ -123,6 +123,64 @@ export function PageOffscreenPeople({ above, below, onJump }: {
   return <>{edge("above", above)}{edge("below", below)}</>;
 }
 
+/** Someone editing the page, and where their line is in the visible page, in pixels from its top. */
+export interface PageEditor { person: PresentPerson; top: number }
+
+const EDITOR_DISC = 44;
+
+/**
+ * On a phone, everyone changing the page floats at its right edge (§3.2): each a disc with their face,
+ * haloed in their caret's colour while they write, gliding beside their line as the page scrolls and
+ * held at the top or bottom edge, pointing the way, while their line is out of view. A tap goes there.
+ */
+export function PageEditorsRail({ editors, height, bottomInset, onJump }: {
+  editors: PageEditor[]; height: number; bottomInset: number; onJump: (person: PresentPerson) => void;
+}) {
+  if (editors.length === 0 || !height) return null;
+  const min = 12;
+  const max = height - bottomInset - EDITOR_DISC - 12;
+  // Discs held at one edge stack inward instead of covering each other.
+  const placed: { editor: PageEditor; y: number; edge: "above" | "below" | null }[] = [];
+  for (const editor of [...editors].sort((a, b) => a.top - b.top)) {
+    const wanted = editor.top - EDITOR_DISC / 2;
+    const edge = editor.top < 0 ? "above" : editor.top > height - bottomInset ? "below" : null;
+    placed.push({ editor, y: Math.min(max, Math.max(min, wanted)), edge });
+  }
+  for (let index = 1; index < placed.length; index++) {
+    placed[index]!.y = Math.max(placed[index]!.y, placed[index - 1]!.y + EDITOR_DISC + 8);
+  }
+  for (let index = placed.length - 2; index >= 0; index--) {
+    if (placed[index + 1]!.y > max) placed[index + 1]!.y = max;
+    placed[index]!.y = Math.min(placed[index]!.y, placed[index + 1]!.y - EDITOR_DISC - 8);
+  }
+  return (
+    <div className="pointer-events-none absolute inset-y-0 right-3 z-20 w-11" data-testid="page-editors">
+      {placed.map(({ editor: { person }, y, edge }) => {
+        const Arrow = edge === "above" ? ArrowUp : ArrowDown;
+        const where = edge ? ` ${edge}` : "";
+        return (
+          <button key={person.key} type="button" onClick={() => onJump(person)}
+            aria-label={`${person.name} is ${person.idle ? "on this page" : "editing"}${where}`}
+            title={`${person.name} · ${person.detail}`}
+            className={cn("page-editor-disc pointer-events-auto absolute right-0 rounded-full", person.idle && "is-idle")}
+            style={{ transform: `translate3d(0, ${y}px, 0)`, ["--page-editor-color" as string]: person.color }}>
+            <svg className="page-editor-halo" viewBox="0 0 44 44" aria-hidden="true">
+              <circle className="page-editor-halo-track" cx="22" cy="22" r="20.5" />
+              <circle className="page-editor-halo-arc" cx="22" cy="22" r="20.5" pathLength="100" />
+            </svg>
+            <IdentityAvatar kind={person.agent ? "agent" : "human"} label={person.name} imageUrl={person.avatarUrl}
+              initials={!person.agent || person.avatarUrl ? avatarInitials(person.name) : undefined}
+              size="md" shape="circle" className="page-editor-face rounded-full" />
+            {edge && (
+              <span className="page-editor-way" aria-hidden="true"><Arrow className="size-3" /></span>
+            )}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 /** A place on the page worth finding, drawn along its scrollbar (§3.2). */
 export interface PageScrollMark { key: string; fraction: number; kind: "person" | "discussion" | "owed"; color?: string;
   title: string }
