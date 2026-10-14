@@ -668,10 +668,12 @@ export interface AgentRuntimeWaiting {
   kind: AgentRuntimeWaitingKind;
   /**
    * What it waits on, as the harness says it: a tool call's own description,
-   * else its command, URL, query or tool name; for background tasks, their
-   * count ("2 tasks").
+   * else its command, URL, query or tool name. An older runtime also put the
+   * background count here as text ("2 tasks").
    */
   label?: string;
+  /** For background tasks, how many are still running; clients word it. */
+  count?: number;
   /**
    * The rest of what the harness says: the command under a described call,
    * or each background task's description.

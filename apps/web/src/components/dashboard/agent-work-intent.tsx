@@ -63,10 +63,12 @@ export function agentWaitingPhrase(waiting: AgentRuntimeWaiting, now: number): s
   return `waiting: ${agentWaitingSubject(waiting).word} · ${elapsedLabel(now - waiting.sinceMillis)}`;
 }
 
-/** What the plaque names after "Waiting": the runtime's label as it is, with its kind's icon. */
+/** What the plaque names after "Waiting": the runtime's label as it is, or its task count, with its kind's icon. */
 export function agentWaitingSubject(waiting: AgentRuntimeWaiting): { word: string; icon: LucideIcon } {
   const background = waiting.kind === "background";
-  return { word: waiting.label || (background ? "tasks" : "a tool call"), icon: background ? Layers : SquareTerminal };
+  const tasks = background && typeof waiting.count === "number"
+    ? `${waiting.count} ${waiting.count === 1 ? "task" : "tasks"}` : undefined;
+  return { word: tasks || waiting.label || (background ? "tasks" : "a tool call"), icon: background ? Layers : SquareTerminal };
 }
 
 function elapsedLabel(ms: number): string {
