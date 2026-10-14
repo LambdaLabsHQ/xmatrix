@@ -1450,15 +1450,18 @@ impl CommandEffectJournal {
         }
     }
 
-    /// Write the journal within its size budget. Effects Hub can no longer
-    /// redeliver are dropped first, then the oldest, so a full journal never
-    /// refuses the next command: a refused command is dropped unanswered, and
-    /// every later one with it.
+    /// Write the journal within its size budget. Short-lived effects Hub has
+    /// expired are dropped on every write. Over budget, acknowledged effects
+    /// and short-lived ones journaled by an older CLI (necessarily a process
+    /// that has exited) go next, oldest first. Unacknowledged spawns, stops
+    /// and in-window actions are never dropped: they fence a redelivery
+    /// against running twice.
     fn store(&self, payload: &EffectJournalPayload) -> Result<(), ContinuityError> {
         let mut payload = payload.clone();
+        let now = unix_millis();
         payload
             .effects
-            .retain(|_, effect| !expired_short_lived(effect, unix_millis()));
+            .retain(|_, effect| !expired_short_lived(effect, now));
         loop {
             let envelope = EffectJournalEnvelope {
                 checksum_sha256: payload_checksum(&payload)?,
@@ -1468,17 +1471,21 @@ impl CommandEffectJournal {
             if bytes.len() <= MAX_EFFECT_JOURNAL_BYTES {
                 return atomic_replace(&self.path, &bytes);
             }
-            if payload.effects.len() <= 1 {
-                return Err(ContinuityError::FrameTooLarge(bytes.len()));
-            }
-            let mut oldest = payload
+            let mut evictable = payload
                 .effects
                 .iter()
+                .filter(|(_, effect)| {
+                    effect.phase == EffectPhase::HubCompletionAcked
+                        || short_lived(effect) && effect.received_unix_ms.is_none()
+                })
                 .map(|(id, effect)| (effect.received_unix_ms.unwrap_or(0), id.clone()))
                 .collect::<Vec<_>>();
-            oldest.sort();
-            let evict = (oldest.len() / 8).max(1).min(oldest.len() - 1);
-            for (_, id) in oldest.into_iter().take(evict) {
+            if evictable.is_empty() {
+                return Err(ContinuityError::FrameTooLarge(bytes.len()));
+            }
+            evictable.sort();
+            let evict = (evictable.len() / 8).max(1);
+            for (_, id) in evictable.into_iter().take(evict) {
                 payload.effects.remove(&id);
             }
         }
@@ -1495,13 +1502,17 @@ const SHORT_LIVED_COMMANDS: [&str; 4] = [
 ];
 const SHORT_LIVED_EFFECT_TTL_MS: u64 = 60 * 60 * 1000;
 
-fn expired_short_lived(effect: &CommandEffect, now_unix_ms: u64) -> bool {
+fn short_lived(effect: &CommandEffect) -> bool {
     // A profile daemon journals `<profile>:<type>`.
     let command_type = effect.command_type.rsplit(':').next().unwrap_or_default();
     SHORT_LIVED_COMMANDS.contains(&command_type)
+}
+
+fn expired_short_lived(effect: &CommandEffect, now_unix_ms: u64) -> bool {
+    short_lived(effect)
         && effect
             .received_unix_ms
-            .is_none_or(|at| now_unix_ms.saturating_sub(at) > SHORT_LIVED_EFFECT_TTL_MS)
+            .is_some_and(|at| now_unix_ms.saturating_sub(at) > SHORT_LIVED_EFFECT_TTL_MS)
 }
 
 fn unix_millis() -> u64 {
@@ -2257,34 +2268,52 @@ mod tests {
     }
 
     #[test]
-    fn a_full_effect_journal_drops_its_oldest_effects_instead_of_refusing_commands() {
+    fn a_full_effect_journal_drops_older_cli_short_lived_effects_but_keeps_spawn_fences() {
         let root = std::env::temp_dir().join(format!(
             "xmatrix-effect-journal-full-{}",
             uuid::Uuid::new_v4()
         ));
         let journal = CommandEffectJournal::new(root.join("effects.json"));
         let bulk = "x".repeat(MAX_EFFECT_JOURNAL_BYTES / 5);
-        for index in 0..12 {
-            let effect = journal
-                .receive(&format!("spawn-{index}"), "spawn", &"a".repeat(64))
-                .unwrap();
-            journal.admit(&effect.stable_id()).unwrap();
-            journal
-                .commit_result(&effect.stable_id(), serde_json::json!({"bulk": bulk}))
-                .unwrap();
+        let commit = |control_id: &str, command_type: &str| {
+            let effect = journal.receive(control_id, command_type, &"a".repeat(64))?;
+            journal.admit(&effect.stable_id())?;
+            journal.commit_result(&effect.stable_id(), serde_json::json!({"bulk": bulk}))
+        };
+        commit("spawn-1", "spawn").unwrap();
+        commit("spawn-2", "spawn").unwrap();
+        for index in 0..2 {
+            commit(&format!("probe-{index}"), "quota_probe").unwrap();
         }
-        let effects = journal.load_or_empty().unwrap().effects;
-        assert!(effects.len() < 12);
-        assert!(
-            effects
-                .values()
-                .any(|effect| effect.control_id == "spawn-11")
-        );
-        assert!(
-            !effects
-                .values()
-                .any(|effect| effect.control_id == "spawn-0")
-        );
+        // Journaled by an older CLI: no wall-clock receipt.
+        let mut payload = journal.load_or_empty().unwrap();
+        for effect in payload.effects.values_mut() {
+            if effect.command_type == "quota_probe" {
+                effect.received_unix_ms = None;
+            }
+        }
+        journal.store(&payload).unwrap();
+        commit("probe-new", "quota_probe").unwrap();
+        commit("probe-newer", "quota_probe").unwrap();
+        let kept = journal
+            .load_or_empty()
+            .unwrap()
+            .effects
+            .into_values()
+            .map(|effect| effect.control_id)
+            .collect::<BTreeSet<_>>();
+        assert!(kept.contains("spawn-1") && kept.contains("spawn-2"));
+        assert!(kept.contains("probe-newer"));
+        assert!(!kept.contains("probe-0"));
+        // With nothing safe left to drop, a command is refused, never a fence lost.
+        assert!(matches!(
+            commit("spawn-3", "spawn"),
+            Err(ContinuityError::FrameTooLarge(_))
+        ));
+        let replayed = journal
+            .receive("spawn-1", "spawn", &"a".repeat(64))
+            .unwrap();
+        assert_eq!(replayed.phase, EffectPhase::EffectCommitted);
         assert!(
             fs::metadata(root.join("effects.json")).unwrap().len()
                 <= MAX_EFFECT_JOURNAL_BYTES as u64
