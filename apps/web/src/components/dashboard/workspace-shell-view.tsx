@@ -1,6 +1,7 @@
 "use client";
 
 import { AnimatedIcon } from "@/components/ui/animated-icon";
+import { AnimationActivityScope } from "@/components/ui/decoration-animation";
 import { ChannelTransferQueue } from "./channel-transfer-queue";
 import { spaceRoleFor as transferSpaceRole } from "./workspace-shell-recovered";
 
@@ -1495,6 +1496,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
                   )}
                   inert={mobileDockCovered}
                 >
+                  <AnimationActivityScope active={!mobileDockCovered}>
                   <div
                     className="app-mobile-dock-track"
                     style={{ "--app-mobile-dock-slot": mobileDockSlot } as CSSProperties}
@@ -1503,18 +1505,19 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
                         Channels, Status, More. Each is independent; nothing is
                         swapped in place, so a tab's screen never rebuilds. */}
                     <div className="app-mobile-dock-page" inert={mobileDockSlot !== 0}>
-                      {pagesDockPane}
+                      <AnimationActivityScope active={mobileDockSlot === 0}>{pagesDockPane}</AnimationActivityScope>
                     </div>
                     <div className="app-mobile-dock-page" inert={mobileDockSlot !== 1}>
-                      {mobileChannelListPane}
+                      <AnimationActivityScope active={mobileDockSlot === 1}>{mobileChannelListPane}</AnimationActivityScope>
                     </div>
                     <div className="app-mobile-dock-page" inert={mobileDockSlot !== 2}>
-                      {statusSurface}
+                      <AnimationActivityScope active={mobileDockSlot === 2}>{statusSurface}</AnimationActivityScope>
                     </div>
                     <div className="app-mobile-dock-page" inert={mobileDockSlot !== 3}>
-                      {moreSurface}
+                      <AnimationActivityScope active={mobileDockSlot === 3}>{moreSurface}</AnimationActivityScope>
                     </div>
                   </div>
+                  </AnimationActivityScope>
                 </div>
               )}
               {view === "messages" && composingConversation && newConversationSurface}

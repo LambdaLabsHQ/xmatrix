@@ -3178,7 +3178,6 @@ html[data-app-theme="wood"] .xmatrix-app .app-agent-work-dock > div {
   width: 1.125rem;
   height: 1.125rem;
   transform-origin: center;
-  animation: app-agent-work-intent-ring-spin 1.6s linear infinite;
 }
 
 .xmatrix-app .app-agent-work-intent-ring-face {
@@ -3187,10 +3186,6 @@ html[data-app-theme="wood"] .xmatrix-app .app-agent-work-dock > div {
   height: 100%;
   fill: none;
   stroke-width: 2.5;
-}
-
-@keyframes app-agent-work-intent-ring-spin {
-  to { transform: rotate(360deg); }
 }
 
 .xmatrix-app .app-agent-work-intent-ring-face > circle:first-child {
@@ -3639,10 +3634,6 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app .app-agent-work-item[d
   .xmatrix-app .app-agent-work-morph,
   .xmatrix-app .app-agent-work-action {
     transition: none !important;
-  }
-
-  .xmatrix-app .app-agent-work-intent-ring {
-    animation: none;
   }
 
   .xmatrix-app .app-agent-work-intent:not(.app-agent-work-intent-stale) .app-agent-work-intent-ink-base { opacity: 1; }

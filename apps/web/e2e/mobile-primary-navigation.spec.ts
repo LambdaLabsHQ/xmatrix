@@ -1,5 +1,6 @@
 import { expect, test } from "./fixtures";
 import { type Page } from "@playwright/test";
+import { workingAgentsSpace } from "./working-agents-fixtures";
 import {
   E2E_CHANNEL,
   E2E_NOW,
@@ -193,8 +194,14 @@ test("returning to the mobile channel list does not create a history loop", asyn
 });
 
 test("back from a conversation shows the channel list that was already painted", async ({ page }) => {
-  await openGeneralChannelList(page);
+  const space = workingAgentsSpace(1, "mobile-decoration");
+  await openGeneralChannelList(page, space.channels[0]);
   await expect(generalChannelRow(page)).toBeVisible();
+  const dot = generalChannelRow(page).locator(".identity-avatar-status").first();
+  const running = () => dot.evaluate(node => node.getAnimations().filter(animation =>
+    animation.playState === "running" && animation.effect?.getTiming().iterations === Infinity).length);
+  await expect.poll(running).toBe(1);
+  const clock = await dot.evaluateHandle(node => node.getAnimations()[0]!);
   // Rebuilding the list on Back painted it empty for a frame while its rows measured.
   await generalChannelRow(page).evaluate((row) => {
     (window as typeof window & { __listRow?: Element }).__listRow = row;
@@ -204,12 +211,23 @@ test("back from a conversation shows the channel list that was already painted",
   const backToChannels = page.getByRole("button", { name: "Back to channels" });
   await expect(backToChannels).toBeVisible();
   await expect(page.locator(".app-mobile-channel-list-pane")).toBeHidden();
+  // The list stays mounted behind the conversation. Its clocks must rest
+  // even though none of its rows were removed or scrolled out of that list.
+  await expect(dot).toHaveCount(1);
+  await expect.poll(running).toBe(0);
+  const heldTime = await clock.evaluate(animation => Number(animation.currentTime));
+  await page.waitForTimeout(100);
+  expect(await clock.evaluate(animation => Number(animation.currentTime))).toBe(heldTime);
   await backToChannels.tap();
 
   await expectChannelListVisible(page);
   await expect(generalChannelRow(page)).toBeVisible();
   expect(await generalChannelRow(page).evaluate((row) =>
     (window as typeof window & { __listRow?: Element }).__listRow === row)).toBe(true);
+  await expect.poll(running).toBe(1);
+  expect(await dot.evaluate((node, animation) => node.getAnimations().includes(animation), clock)).toBe(true);
+  expect(await clock.evaluate(animation => Number(animation.currentTime))).toBeGreaterThanOrEqual(heldTime);
+  await clock.dispose();
 });
 
 test("channel details keeps web back navigation above the material sheet", async ({ page }) => {
