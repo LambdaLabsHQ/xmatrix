@@ -9,7 +9,9 @@ const compiled = ts.transpileModule(
   { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } },
 ).outputText;
 
-function timeline() {
+const IPHONE = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148";
+
+function timeline({ userAgent = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/141.0 Safari/537.36" } = {}) {
   let now = 0;
   let nextTimerId = 0;
   let contentTop = 100;
@@ -42,6 +44,7 @@ function timeline() {
         useRef: (current) => ({ current }),
       };
     },
+    navigator: { userAgent },
     performance: { now: () => now },
     setTimeout: (callback, delay) => {
       const id = ++nextTimerId;
@@ -61,6 +64,10 @@ function timeline() {
     start() { const key = {}; anchor.snapshot(key); anchor.apply(key); },
     resize() { for (const observer of observers) if (observer.connected) observer.callback(); },
     scrollDrift() { contentTop += 1; listeners.get("scroll")?.(); },
+    /** Someone else scrolls the timeline: the reader, or the virtualizer. */
+    scrollBy(delta) { root.scrollTop += delta; contentTop -= delta; listeners.get("scroll")?.(); },
+    /** A row above grows; the next resize puts the reader's row back. */
+    growAbove(delta) { contentTop += delta; },
     advance(to) {
       while (true) {
         const next = [...timers.entries()].filter(([, timer]) => timer.at <= to)
@@ -115,4 +122,25 @@ test("explicit release and replacement cancel every previous timer", () => {
   assert.equal(view.pendingTimers(), 0);
   view.advance(20_000);
   assert.equal(view.active(), false);
+});
+
+test("on iOS a scroll that is not the anchor's own releases it, so nothing is written mid-momentum", () => {
+  const view = timeline({ userAgent: IPHONE });
+  view.start();
+  view.growAbove(40);
+  view.resize();
+  // The anchor's correction raises its own scroll event: still holding.
+  view.scrollDrift();
+  assert.equal(view.active(), true);
+  view.scrollBy(-80);
+  assert.equal(view.active(), false);
+  assert.equal(view.pendingTimers(), 0);
+});
+
+test("elsewhere the anchor follows the reader's scroll and keeps holding", () => {
+  const view = timeline();
+  view.start();
+  view.resize();
+  view.scrollBy(-80);
+  assert.equal(view.active(), true);
 });
