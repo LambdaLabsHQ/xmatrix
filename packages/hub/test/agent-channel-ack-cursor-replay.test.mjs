@@ -130,6 +130,24 @@ test("a newcomer's join window is context, and a catch-up backlog is work", asyn
   });
   assert.deepEqual(replayed(catchUp), [18, 19, 20]);
   assert.deepEqual(intents(catchUp), ["work", "work", "work"]);
+  // Hub, not the runtime, says whether catch-up cancels the running turn,
+  // exactly as for live delivery; a join window says nothing.
+  assert.deepEqual(catchUp.filter((frame) => frame.type === "channel_history_replay")
+    .map((frame) => frame.interruptRequested), [true, true, true]);
+  assert.ok(birth.filter((frame) => frame.type === "channel_history_replay")
+    .every((frame) => !("interruptRequested" in frame)));
+});
+
+test("catch-up steers like live delivery: an Agent's exact address interrupts, its other replies queue", async () => {
+  const agent = (sequence, body) => ({ ...CORPUS[sequence - 1], body,
+    from: { kind: "agent", label: "codex", identityId: "agent-peer", agentName: "codex", userId: "user-2" } });
+  const corpus = CORPUS.map((message) => message.sequence === 19 ? agent(19, "@builder:3 stop that")
+    : message.sequence === 20 ? agent(20, "done on my side") : message);
+  const runtime = { ...session("instance-steer"), principal: { ...session("instance-steer").principal, agentName: "builder" },
+    run: { ...session("instance-steer").run, channelInstanceId: "3" } };
+  const batch = await port(18, corpus).join(runtime, { type: "join_channel", channelId: CHANNEL_ID, historyLimit: 50 });
+  assert.deepEqual(batch.filter((frame) => frame.type === "channel_history_replay")
+    .map((frame) => [frame.message.sequence, frame.interruptRequested]), [[19, true], [20, false]]);
 });
 
 test("a reconnect that offers its own waterline is work, never orientation", async () => {

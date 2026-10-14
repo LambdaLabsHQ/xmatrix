@@ -257,6 +257,12 @@ type AgentLiveChannelDelivery = AgentChannelDelivery & {
 
 type AgentReplayChannelDelivery = AgentChannelDelivery & {
   type: "channel_history_replay";
+  /**
+   * Hub's verdict on whether catch-up cancels the active turn, decided exactly
+   * as for live delivery. Always present on catch-up from a Hub that decides
+   * it; a runtime keeps its own older rule only when it is absent.
+   */
+  interruptRequested?: boolean;
 };
 
 /** Channel-local deliveries and typed controls accepted by one running Instance. */

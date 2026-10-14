@@ -131,18 +131,21 @@ fn active_turn_interrupt_covers_marked_live_messages_and_catch_up() {
             message: test_channel_message("m3", "chan-a", "replay"),
             ack_required: Some(true),
             delivery_intent: None,
+            interrupt_requested: None,
         });
     let foreign_replay =
         AgentInstanceConnectionEvent::Server(AgentInstanceServerMessage::ChannelHistoryReplay {
             message: test_channel_message("m5", "chan-b", "replay"),
             ack_required: Some(true),
             delivery_intent: None,
+            interrupt_requested: None,
         });
     let own_replay =
         AgentInstanceConnectionEvent::Server(AgentInstanceServerMessage::ChannelHistoryReplay {
             message: agent_channel_message("m6", "chan-a", "agent:self", "my own send"),
             ack_required: Some(true),
             delivery_intent: None,
+            interrupt_requested: None,
         });
 
     assert!(event_requests_active_turn_interrupt(
@@ -209,6 +212,43 @@ fn active_turn_interrupt_covers_marked_live_messages_and_catch_up() {
     assert!(event_requests_active_turn_interrupt(
         &foreign,
         None,
+        Some("agent:self")
+    ));
+}
+
+#[test]
+fn hub_verdict_decides_whether_catch_up_interrupts() {
+    let replay = |message, interrupt_requested| {
+        AgentInstanceConnectionEvent::Server(AgentInstanceServerMessage::ChannelHistoryReplay {
+            message,
+            ack_required: Some(true),
+            delivery_intent: None,
+            interrupt_requested: Some(interrupt_requested),
+        })
+    };
+    // A person's message the Hub judged not to steer (say, a stop it already
+    // carried out) queues, though the older host rule would have interrupted.
+    assert!(!event_requests_active_turn_interrupt(
+        &replay(test_channel_message("m1", "chan-a", "context"), false),
+        Some("chan-a"),
+        Some("agent:self")
+    ));
+    // An Agent's exact `@codex:1` steering interrupts in catch-up exactly as
+    // it does live, though the older host rule queued every Agent replay.
+    assert!(event_requests_active_turn_interrupt(
+        &replay(agent_channel_message("m2", "chan-a", "agent:peer", "@codex:1 stop"), true),
+        Some("chan-a"),
+        Some("agent:self")
+    ));
+    // Neither this instance's own message nor another channel's ever does.
+    assert!(!event_requests_active_turn_interrupt(
+        &replay(agent_channel_message("m3", "chan-a", "agent:self", "my own send"), true),
+        Some("chan-a"),
+        Some("agent:self")
+    ));
+    assert!(!event_requests_active_turn_interrupt(
+        &replay(test_channel_message("m4", "chan-b", "elsewhere"), true),
+        Some("chan-a"),
         Some("agent:self")
     ));
 }

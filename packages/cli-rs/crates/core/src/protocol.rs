@@ -1631,6 +1631,10 @@ pub enum AgentInstanceServerMessage {
         ack_required: Option<bool>,
         #[serde(skip_serializing_if = "Option::is_none", default)]
         delivery_intent: Option<String>,
+        /// Hub's verdict on whether this catch-up cancels the running turn,
+        /// decided exactly as for live delivery. Absent from an older Hub.
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        interrupt_requested: Option<bool>,
     },
     ChannelMessageUpdated {
         channel_id: String,
