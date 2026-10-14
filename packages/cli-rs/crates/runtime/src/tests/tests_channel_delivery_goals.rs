@@ -1497,7 +1497,7 @@ fn codex_goal_resume_sets_active_status_without_replacing_objective() {
 }
 
 #[test]
-fn codex_goal_resume_reactivates_the_pause_gate() {
+fn codex_goal_resume_reports_an_active_goal() {
     let resumed = codex_goal_status_from_response(
         &GoalCommand::Resume,
         &serde_json::json!({
@@ -1510,7 +1510,6 @@ fn codex_goal_resume_reactivates_the_pause_gate() {
 
     assert_eq!(resumed.active, Some(true));
     assert_eq!(resumed.status.as_deref(), Some("active"));
-    assert!(!codex_goal_is_paused(Some(&resumed)));
 }
 
 #[test]
@@ -1769,43 +1768,6 @@ fn codex_goal_status_from_get_response_maps_paused_goal() {
 fn codex_goal_status_from_get_response_ignores_missing_goal() {
     assert!(codex_goal_status_from_get_response(&serde_json::json!({})).is_none());
     assert!(codex_goal_status_from_get_response(&serde_json::json!({"goal": null})).is_none());
-}
-
-#[test]
-fn codex_goal_is_paused_matches_status_only() {
-    let paused = protocol::AgentGoalStatus {
-        active: Some(false),
-        objective: Some("ship it".to_string()),
-        status: Some("paused".to_string()),
-        updated_at: None,
-        ..Default::default()
-    };
-    let active = protocol::AgentGoalStatus {
-        active: Some(true),
-        objective: Some("ship it".to_string()),
-        status: Some("active".to_string()),
-        updated_at: None,
-        ..Default::default()
-    };
-
-    assert!(codex_goal_is_paused(Some(&paused)));
-    assert!(!codex_goal_is_paused(Some(&active)));
-    assert!(!codex_goal_is_paused(None));
-}
-
-#[test]
-fn codex_paused_goal_notice_points_to_explicit_resume() {
-    let paused = protocol::AgentGoalStatus {
-        active: Some(false),
-        objective: Some("resume paused work".to_string()),
-        status: Some("paused".to_string()),
-        updated_at: None,
-        ..Default::default()
-    };
-
-    let notice = codex_paused_goal_notice(Some(&paused));
-    assert!(notice.contains("resume paused work"));
-    assert!(notice.contains("/goal resume"));
 }
 
 #[test]
