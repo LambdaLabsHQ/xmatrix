@@ -12,7 +12,7 @@ import { connectionCredentials } from "./connection-credentials";
 import { discordActionCapability } from "./discord-native";
 import { feishuActionCapability } from "./feishu-native";
 import { googleChatActionCapability } from "./googlechat-native";
-import { connectorActionPolicyRepository, connectorActionRequestRepository } from "./credentials";
+import { connectorActionPolicyRepository, connectorActionRequestRepository, connectorCredentialRepository } from "./credentials";
 import { ProviderRequestError } from "./http";
 import { notifyWorkspaceResource } from "../workspace-resource-notification";
 import type { Env } from "../types";
@@ -225,7 +225,12 @@ async function actionContext(providerId: string, input: ConnectorCommandInput, s
   const instanceId = input.senderKind === "agent" ? input.senderId : undefined;
   const caller = { userId: input.actorUserId,
     ...(instanceId ? { agent: () => agentRegistrationOf(input.env, { ownerUserId: input.actorUserId, instanceId }) } : {}) };
-  return { credentials, caller, authorizeWrite, ...(teams ? { teams } : {}), ...(googleChat ? { googleChat } : {}),
+  const declared = (getAppConnectorProvider(providerId)!.credentials ?? []).map(field => field.id);
+  const saveCredentials = async (fields: Readonly<Record<string, string>>) => {
+    await connectorCredentialRepository(input.env).put({ requestId: crypto.randomUUID(), spaceId, providerId, actorUserId: "hub:provider-renewal",
+      fields: { ...fields }, policy: { allowed: declared }, at: new Date().toISOString(), asHub: true });
+  };
+  return { credentials, caller, authorizeWrite, ...(native ? {} : { saveCredentials }), ...(teams ? { teams } : {}), ...(googleChat ? { googleChat } : {}),
     ...(discord ? { discord } : {}), ...(feishu ? { feishu } : {}), ...(telegram ? { telegram } : {}),
     ...(wecom ? { wecom } : {}), ...(dingtalk ? { dingtalk } : {}) };
 }

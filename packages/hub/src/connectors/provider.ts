@@ -45,6 +45,11 @@ export interface ConnectorActionContext {
   /** The connection's decrypted credential values. */
   credentials: Readonly<Record<string, string>>;
   /**
+   * Stores values the provider itself renewed during the call (a web session's rotated cookies) in the same
+   * encrypted connection credentials, as the Hub's own write. Only fields the manifest declares are accepted.
+   */
+  saveCredentials?: (fields: Readonly<Record<string, string>>) => Promise<void>;
+  /**
    * Who runs the action: the Human, or an Agent and the user whose Run it is.
    * `agent` resolves the Agent's registration only when an action needs it.
    */

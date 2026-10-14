@@ -279,8 +279,24 @@ against Apple's vocabulary and none is defaulted. `set_review_contact`
 refuses a sign-in password, which is entered in App Store Connect, and its
 receipt names the fields it set and never their values. Out of reach of the
 API and left to a person: creating the app record, the App Privacy answers,
-agreements, and reading or replying to App Review's messages; Apple's
-specification (4.5.1) has no resource for any of them.
+agreements, and replying to App Review; Apple's specification (4.5.1) has no
+resource for them.
+
+App Review's messages are read through the App Store Connect website's own
+`iris` endpoints, which take a signed-in web session instead of an API key.
+The connection keeps that session as one optional credential, `webSession`:
+the Cookie header of a signed-in appstoreconnect.apple.com page. Every request
+goes from the Hub, so no machine has to stay on, and only to Apple's website
+origin under `/iris/v1/` or `/olympus/v1/`, without following redirects, which
+mean Apple wants a new sign-in. Cookies Apple rotates during a call are saved
+back into the same credential once, as the Hub's own write through the action
+context's `saveCredentials`. The session never goes to the public API, and the
+API key's token never goes to the website. `review_messages` reads the newest
+thread's rejection reasons (section, description, code) and messages as plain
+text, fenced as untrusted; `web_session` says whose session it is. The Apple
+ID password never reaches xMatrix; the session lasts about 30 days, and signing
+in again is the only renewal. These endpoints are not a published contract and
+can change without notice.
 
 Files reach Apple in three steps, so the bytes never pass through the Hub and
 the machine that has the file needs no API key: a reservation
