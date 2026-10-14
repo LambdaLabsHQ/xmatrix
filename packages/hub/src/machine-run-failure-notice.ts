@@ -1,4 +1,4 @@
-import { sha256Hex, type RepositoryBaseline } from "@xmatrix/protocol";
+import { publicMachineStartupFailure, sha256Hex, type RepositoryBaseline } from "@xmatrix/protocol";
 import { appendChannelMessage } from "./channel-messages";
 import { humanizeMachineRunFailureDetail, machineStopFailureCode } from "./machine-run-failure";
 import { XMATRIX_SYSTEM_AVATAR_URL, XMATRIX_SYSTEM_LABEL } from "./xmatrix-system-identity";
@@ -55,10 +55,9 @@ export interface MachineStopResultNotice {
   startupFailed?: boolean;
 }
 
-/** Stable per stop and outcome. The raw daemon error can carry host paths,
- * command lines or usernames, and Channel history (body and metadata) reaches
- * every member, so only a stable classification code ships; the detail stays
- * in the daemon's local audit log, which the body points at. */
+/** Stable per stop and outcome. The daemon's error passes the same boundary
+ * redaction as a startup failure (credentials, URL secrets, local paths), so
+ * the notice shows the originating error rather than pointing at a log. */
 export async function machineStopResultNoticeCommand(input: MachineStopResultNotice) {
   const outcome = input.ok ? "completed" : "failed";
   const digest = await sha256Hex(`${input.controlKey}\0${outcome}`);
@@ -67,8 +66,8 @@ export async function machineStopResultNoticeCommand(input: MachineStopResultNot
       ? `Startup failed for @${input.agentName}${onMachine(input)}. Cleanup confirmed no process remains. See the startup failure notice or invocation details for the cause.`
       : `Stopped @${input.agentName}${onMachine(input)}. The Workstation confirmed the process tree is terminated.`
     : [`Couldn't stop @${input.agentName}${onMachine(input)}.`, "",
-      "The Workstation reported the stop failed, so the process may still be running.", "",
-      "Retry the stop, or check that machine's daemon logs for details."].join("\n");
+      publicMachineStartupFailure(input.detail)?.summary ?? "The Workstation reported the stop failed without an error.", "",
+      "The process may still be running. Retry the stop."].join("\n");
   return {
     commandId: `machine-stop-result-notice:${digest}`.slice(0, 200),
     messageId: `system:machine-stop-result:${digest}`.slice(0, 200), channelId: input.channelId, body,

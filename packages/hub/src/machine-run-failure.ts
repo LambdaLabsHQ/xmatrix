@@ -44,12 +44,7 @@ export function humanizeMachineRunFailureDetail(detail: string): {
   return failure;
 }
 
-/**
- * Classify a daemon stop error into a stable channel-safe code. The raw error
- * can carry host paths, command lines, or usernames and therefore never enters
- * channel-visible fields; complete diagnostics stay in the daemon's local
- * audit log.
- */
+/** Classify a daemon stop error into a stable code for consumers. */
 export function machineStopFailureCode(detail: string): string {
   const text = detail.toLowerCase();
   if (!text.trim()) return "unspecified";

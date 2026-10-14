@@ -52,7 +52,7 @@ use crate::runtime_harness_questions::{
 };
 use crate::runtime_trusted_role_prompt::claude_stream_extra_args;
 use crate::runtime_trusted_role_prompt::trusted_role_system_prompt_from_env;
-use crate::runtime_usage_limit::{claude_rate_limit_rejection, usage_limit_from_error};
+use crate::runtime_usage_limit::claude_rate_limit_rejection;
 use crate::runtime_waiting::{ToolWaits, background_wait, claude_tool_wait};
 use crate::{
     AgentPresentationFacts, CliError, PresencePatch, agent_instance_connection,
@@ -1008,6 +1008,7 @@ pub(crate) async fn claude_stream_watchdog(
             .unwrap_or_else(|poison| poison.into_inner())
             .take();
         if let Some(channel_id) = channel_id {
+            let error = "Claude stopped responding while working on its own (after a background task finished). The session resumes on the next message.";
             send_llm_trace_with_source(
                 &relay,
                 &channel_id,
@@ -1017,12 +1018,13 @@ pub(crate) async fn claude_stream_watchdog(
                 None,
                 None,
                 serde_json::json!({
-                    "error": "Claude stopped responding while working on its own (after a background task finished). The session resumes on the next message.",
+                    "error": error,
                     "executionState": "unknown",
                     "origin": "task-notification",
                 }),
             )
             .await;
+            crate::report_turn_failure(&relay, Some(channel_id.as_str()), &agent, error, true);
             send_presence(&relay, Some("idle"), PresencePatch::default());
             alive.store(false, Ordering::SeqCst);
             break;
@@ -1095,7 +1097,7 @@ fn set_cli_turn_channel(cli_turn_channel: &Mutex<Option<String>>, channel_id: Op
 }
 
 /// The `turn_completed` / `turn_failed` trace for a turn the CLI started
-/// itself, and the usage limit it ran into.
+/// itself, and its failure.
 async fn publish_cli_turn_finished(
     relay: &Arc<agent_instance_connection::AgentInstanceConnectionClient>,
     agent: &protocol::SerializedAgent,
@@ -1128,23 +1130,19 @@ async fn publish_cli_turn_finished(
         }),
     )
     .await;
-    // A background task's completion can start a turn on an account that is
-    // already used up. Nobody else reports that turn, so its usage limit
-    // reaches the Hub (and hands the Instance off) only from here.
+    // A background task's completion can start a turn by itself. Nobody else
+    // reports that turn, so its failure, with the provider's own error,
+    // reaches the Hub only from here; Hub reads a usage limit from it.
     if !failed {
-        crate::clear_pending_usage_limit();
+        crate::clear_pending_turn_failure();
     } else {
         let (answer, _) = claude_result_answer(result, &trace.visible_assistant_text);
-        if let Some(limit) = usage_limit_from_error(&answer) {
-            crate::report_turn_failure_with_usage_limit(
-                relay,
-                Some(channel_id),
-                agent,
-                &answer,
-                false,
-                Some(limit),
-            );
-        }
+        let error = if answer.trim().is_empty() {
+            "Claude failed a turn it started after a background task finished."
+        } else {
+            answer.as_str()
+        };
+        crate::report_turn_failure(relay, Some(channel_id), agent, error, false);
     }
 }
 
