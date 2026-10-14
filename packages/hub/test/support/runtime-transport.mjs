@@ -2,6 +2,10 @@
 // Agent Instance socket carries across hibernation, and the product port.
 import { AgentInstanceRuntimeTransport } from "../../src/runtime-transport/agent-instance-port.ts";
 import {
+  MachineDaemonRuntimeTransport,
+  MACHINE_DAEMON_AUTHORITY_REQUIRED_CAPABILITIES,
+} from "../../src/runtime-transport/machine-daemon-port.ts";
+import {
   createProductionRelayRuntimeProductPortFactory,
 } from "../../src/runtime-transport/production-product-port-factory.ts";
 
@@ -88,4 +92,36 @@ export function productionAgentInstanceTransport(runtime) {
     readHistory: async () => { throw Error("unexpected history"); },
   });
   return { factory, transport: new AgentInstanceRuntimeTransport(factory.agentInstance()) };
+}
+
+export const socketFrame = (type, fields = {}) => JSON.stringify({ type, ...fields });
+
+/** The connect frame a Machine Daemon on `principal`'s machine opens with. */
+export const machineDaemonConnectFrame = (principal) => socketFrame("machine_daemon_connect", {
+  requestId: "connect", token: "test-token", displayName: "Laptop",
+  machineId: principal.machineId, hostId: principal.hostId,
+  clientVersion: "1.0.350", protocolVersion: 2,
+});
+
+/** A Machine Daemon transport whose authority admits `principal` at `connectionEpoch`. */
+export function machineDaemonTransport(principal, overrides = {}, connectionEpoch = 1) {
+  return new MachineDaemonRuntimeTransport({
+    capabilities: new Set(MACHINE_DAEMON_AUTHORITY_REQUIRED_CAPABILITIES),
+    async authenticate() {
+      return {
+        principal,
+        connected: {
+          type: "machine_daemon_connected", connectionEpoch,
+          daemon: {
+            id: `${principal.machineId}-daemon`, userId: principal.ownerUserId,
+            email: principal.ownerEmail, machineId: principal.machineId,
+          },
+        },
+      };
+    },
+    async refresh() { return principal; },
+    async execute() {},
+    async disconnected() {},
+    ...overrides,
+  });
 }
