@@ -3,7 +3,7 @@ import type {
   AgentInstanceServerMessage,
 } from "@xmatrix/protocol/connections/agent-instance";
 import { crossChannelReplyRelay, type ChannelMessage, type SerializedAgent, utf8ByteLength } from "@xmatrix/protocol";
-import { agentChannelMessageDeliveryIntent, channelMessage } from "./channel-message-frame";
+import { agentChannelMessageDeliveryIntent, agentChannelMessageRequestsInterrupt, channelMessage } from "./channel-message-frame";
 import type { AgentInstanceRuntimeSession } from "./agent-instance-port";
 import type { AgentChannelHistoryPort } from "./postgres-agent-instance-port";
 
@@ -328,11 +328,17 @@ export class AgentChannelHistory implements AgentChannelHistoryPort {
       const deliveryIntent = metric.mode === "join_birth" || answerIsAnothers
         ? "context" as const
         : agentChannelMessageDeliveryIntent(message, recipient);
+      // Whether catch-up cancels the running turn is Hub's to say, exactly as
+      // for live delivery: the same message must not steer differently
+      // because a reconnect, not live fanout, carried it.
       return [{
         type: "channel_history_replay" as const,
         message,
         ackRequired: true,
         ...(deliveryIntent === "context" ? { deliveryIntent } : {}),
+        ...(metric.mode === "join_birth" ? {} : {
+          interruptRequested: deliveryIntent !== "context" && agentChannelMessageRequestsInterrupt(message, recipient),
+        }),
       }];
     });
     const sequences = page.messages
