@@ -40,6 +40,9 @@ pub(crate) trait ChannelControlledRuntime {
 
     /// The presence reported once a parameter control is answered.
     fn parameter_presence(&self) -> PresencePatch;
+
+    /// The harness parameters as the session holds them now.
+    fn parameter_catalog(&self) -> Vec<protocol::HarnessParameter>;
 }
 
 /// What a vendor run loop acts on next.
@@ -215,14 +218,21 @@ impl<'a> RunLoopEvents<'a> {
                 continue;
             };
             if let Some(command) = crate::single_message_parameter_control(&messages, agent) {
+                let requested = command.clone();
                 let outcome = runtime
                     .parameter_control(command, &messages[0], agent)
                     .await;
                 ack_inbound_channel_messages(relay, &messages);
                 send_presence(relay, Some("idle"), runtime.parameter_presence());
-                let notice =
-                    outcome.unwrap_or_else(|error| format!("Parameter control failed: {error}"));
-                let _ = relay.send_channel_message(channel_id, notice).await;
+                crate::harness_parameters::report_parameter_control(
+                    relay,
+                    &channel_id,
+                    &messages[0].message_id,
+                    &requested,
+                    &runtime.parameter_catalog(),
+                    outcome,
+                )
+                .await;
                 continue;
             }
             let passthrough = crate::single_message_slash_passthrough(&messages, agent);

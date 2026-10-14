@@ -799,4 +799,8 @@ impl ChannelControlledRuntime for CodexRun<'_> {
     fn parameter_presence(&self) -> PresencePatch {
         PresencePatch::presentation(self.catalog_presentation()).parameters(self.parameters())
     }
+
+    fn parameter_catalog(&self) -> Vec<protocol::HarnessParameter> {
+        self.parameters()
+    }
 }

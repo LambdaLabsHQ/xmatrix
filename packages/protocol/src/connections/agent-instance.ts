@@ -163,6 +163,27 @@ export interface AgentInstanceTurnRetryMessage {
   attemptToken?: string;
 }
 
+/**
+ * What a `/config` or `/fast` control did, reported as facts by the Instance
+ * that applied it; the Hub words the Channel notice.
+ */
+export interface AgentInstanceParameterControlResultMessage {
+  type: "agent_parameter_control_result";
+  requestId?: string;
+  channelId: string;
+  /** The control message this answers. */
+  sourceMessageId: string;
+  parameter?: string;
+  action: "query" | "select" | "toggle";
+  /** The parameter's value as the session holds it after the control. */
+  current?: string;
+  choices?: string[];
+  /** The provider's own note on the parameter (cooldown, disabled). */
+  notice?: string;
+  /** The original error when the control failed. */
+  error?: string;
+}
+
 export type AgentInstanceNetworkSampleMessage = ClientNetworkSample & {
   type: "client_network_sample";
   requestId?: string;
@@ -222,6 +243,7 @@ export type AgentInstanceClientMessage =
   | AgentInstanceEffortSwitchResultMessage
   | AgentInstanceLifecycleMessage
   | AgentInstanceTurnRetryMessage
+  | AgentInstanceParameterControlResultMessage
   | AgentInstanceNetworkSampleMessage
   | AgentInstanceEventPublishMessage
   | AgentInstanceTraceHistoryResultMessage;

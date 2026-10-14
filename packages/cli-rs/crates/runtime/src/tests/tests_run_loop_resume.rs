@@ -27,6 +27,10 @@ impl crate::ChannelControlledRuntime for SwitchAcceptingRuntime {
     fn parameter_presence(&self) -> crate::PresencePatch {
         crate::PresencePatch::usage(None)
     }
+
+    fn parameter_catalog(&self) -> Vec<crate::protocol::HarnessParameter> {
+        Vec::new()
+    }
 }
 
 fn model_switch_event(model: &str) -> AgentInstanceConnectionEvent {
