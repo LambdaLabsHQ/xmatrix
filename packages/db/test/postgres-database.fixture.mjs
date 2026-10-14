@@ -225,3 +225,20 @@ export async function connectorSubscriptionChannel(sql, spaceId, index, provider
     [channelId, spaceId, providerId]);
   return channelId;
 }
+
+/**
+ * A fresh Space with one open conversation for message tests: clears what an
+ * earlier run left in `tables` for that Space, then places and creates both.
+ */
+export async function seedMessageSpace(client, { space, channel, at, tables }) {
+  for (const table of tables) await client.query(`DELETE FROM ${table} WHERE space_id=$1`, [space]);
+  await client.query(`DELETE FROM control.space_placement WHERE space_id=$1`, [space]);
+  await seedTestSpacePlacement(client, space, at);
+  await client.query(`INSERT INTO data.spaces
+    (space_id,owner_user_id,name,search_rank_sequence,version,metadata_json,created_at,updated_at)
+    VALUES ($2,'owner',$2,$3,1,'{}',$1,$1)`, [at, space, `space-rank:${space}`]);
+  await client.query(`INSERT INTO data.channels
+    (channel_id,space_id,name,name_key,mode,search_rank_sequence,version,metadata_json,
+     created_at,updated_at,activity_at)
+    VALUES ($3,$2,'Conversation',$3,'open',$4,1,'{}',$1,$1,$1)`, [at, space, channel, `rank:${channel}`]);
+}

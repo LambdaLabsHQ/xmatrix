@@ -19,7 +19,8 @@ import {
 
 import type { AppendMessageCommand, AuthorityPrincipal } from "./product-message-command";
 import { agentAvatarUrlFromMetadata, CHANNEL_ACTIVITY_MESSAGE_KIND, messagePublicationEvidence, normalizeAgentPresetRuntime,
-  supersededByOf, sha256Hex , utf8ByteLength, type MessageSearchHit, type MessageSearchPage } from "@xmatrix/protocol";
+  questionnaireStateOf, supersededByOf, sha256Hex , utf8ByteLength, type MessageSearchHit, type MessageSearchPage,
+  type QuestionnaireState } from "@xmatrix/protocol";
 import { REDACTED_CONTENT_HASH, productGatewayAttachmentKind } from "./product-message-command";
 import { XMATRIX_SYSTEM_AVATAR_URL, XMATRIX_SYSTEM_LABEL } from "./xmatrix-system-identity";
 import {
@@ -741,6 +742,8 @@ export function postgresProductMessage(message: Record<string, unknown>): Record
       annotations: message.annotations,
       ...(!message.recalledAt && supersededByOf(message.annotations)
         ? { supersededBy: supersededByOf(message.annotations) } : {}),
+      ...(!message.recalledAt && questionnaireStateOf(message.annotations)
+        ? { questionnaireState: questionnaireStateOf(message.annotations) } : {}),
       // A withdrawn message withdraws its files too: their bytes already answer 404.
       attachments: message.recalledAt || message.deletedAt ? [] : Array.isArray(message.attachments)
         ? message.attachments.map((attachment: Record<string, unknown>) => ({
@@ -942,6 +945,53 @@ export async function postgresMessageSystemAnnotation(
     annotationId: input.annotationId,
     payload: input.payload,
     requestDigest: await sha256Hex(JSON.stringify([input.namespace, input.messageId, input.payload])),
+  });
+}
+
+/**
+ * The card's settled state as its reader may see it, or undefined while it is
+ * open or when there is no such card to read.
+ */
+export async function postgresQuestionnaireState(
+  env: Env,
+  input: { channelId: string; messageId: string; principal: AuthorityPrincipal },
+  dependencies: PostgresMessageDependencies = {},
+): Promise<QuestionnaireState | undefined> {
+  const { actor, requestId, channelId, spaceId, messages } =
+    await postgresMessageQueryContextFromDependencies(env, input, "message-questionnaire-state", dependencies);
+  try {
+    const card = await messages.mutationCandidate({
+      requestId, spaceId, channelId, messageId: input.messageId, principal: actor, access: "participant",
+    });
+    return questionnaireStateOf(card.annotations);
+  } catch (error) {
+    if (error instanceof MessageAuthorityError && error.code === "message_not_found") return undefined;
+    throw error;
+  }
+}
+
+/**
+ * Settle a questionnaire card once, as answered or withdrawn: the Hub's own
+ * annotation records it and the card stops waiting on its person.
+ */
+export async function postgresSettleQuestionnaire(
+  env: Env,
+  input: {
+    channelId: string;
+    messageId: string;
+    settlement: QuestionnaireState;
+    askedByInstanceId?: string;
+  },
+  dependencies: PostgresMessageDependencies = {},
+): Promise<{ state: QuestionnaireState; changed: boolean } | null> {
+  const { requestId, channelId, spaceId, messages } = await postgresMessageBackgroundContext(
+    env, input.channelId, "message-questionnaire-settle", dependencies);
+  return messages.settleQuestionnaire({
+    requestId, spaceId, channelId,
+    messageId: input.messageId,
+    settlement: input.settlement,
+    ...(input.askedByInstanceId ? { askedByInstanceId: input.askedByInstanceId } : {}),
+    requestDigest: await sha256Hex(JSON.stringify([input.messageId, input.settlement])),
   });
 }
 

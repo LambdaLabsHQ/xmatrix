@@ -1,4 +1,5 @@
 import { reportAgentTurnRetry } from "../agent-turn-retry";
+import { postgresSettleQuestionnaire } from "../postgres-message-authority";
 import { subscribeConversationToPullRequest } from "../github-pull-request-subscription";
 import { RuntimeAuthorityOperationError, RuntimeClientOperationError } from "./runtime-operation-failure";
 import type {
@@ -87,7 +88,7 @@ type HistoryMessage = Message<"join_channel"> | Message<"leave_channel"> |
 type RuntimeSignalMessage = Exclude<
   PortMessage,
   HistoryMessage | Message<"unregister"> | Message<"channel_message"> | Message<"channel_activity"> |
-  Message<"channel_message_ack"> | Message<"agent_turn_retry">
+  Message<"channel_message_ack"> | Message<"agent_turn_retry"> | Message<"harness_question_closed">
 >;
 type AuthorityOutput = AgentInstanceServerMessage | readonly AgentInstanceServerMessage[] | undefined;
 
@@ -96,10 +97,13 @@ type AuthorityOutput = AgentInstanceServerMessage | readonly AgentInstanceServer
  * connect: a Hub closes the socket on an unknown type, so a newer runtime
  * sends one only when its Hub lists it.
  */
-export const AGENT_INSTANCE_HUB_CAPABILITIES = ["channel_activity", "agent_turn_retry", "agent_turn_retry_channel_message"] as const;
+export const AGENT_INSTANCE_HUB_CAPABILITIES = ["channel_activity", "agent_turn_retry", "agent_turn_retry_channel_message",
+  "harness_question_closed"] as const;
 
 /** The card a Run posts when its harness asks its own question (runtime_harness_questions.rs). */
 const HARNESS_QUESTIONNAIRE_KIND = "xmatrix.questionnaire.v1";
+/** The Hub's notice that a card's question was withdrawn: a fact, not anyone's speech. */
+const QUESTIONNAIRE_WITHDRAWN_KIND = "xmatrix.questionnaire.withdrawn";
 
 /** Channel history for an Agent Instance socket: join, leave, catch-up replay and paged reads. */
 export interface AgentChannelHistoryPort {
@@ -139,6 +143,8 @@ export interface PostgresAgentInstancePortDependencies {
   pullRequestOpened?(input: { spaceId: string; channelId: string; ownerUserId: string; repository: string;
     number: number; commandId: string }): Promise<unknown>;
   turnRetry?(session: Readonly<AgentInstanceRuntimeSession>, message: Message<"agent_turn_retry">): Promise<AuthorityOutput>;
+  /** Settle a questionnaire card once (postgresSettleQuestionnaire). */
+  settleQuestionnaire?(input: Parameters<typeof postgresSettleQuestionnaire>[1]): ReturnType<typeof postgresSettleQuestionnaire>;
   observeAgentLaunchStage?(stage: string, outcome: "ok" | "error", durationMs: number): void;
 }
 
@@ -175,6 +181,7 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
         holdUsageLimit: (hold) => holdRegistrationUsageLimit(input.env, hold),
       },
       turnRetry: (session, message) => reportAgentTurnRetry(input.env, session, message),
+      settleQuestionnaire: (settle) => postgresSettleQuestionnaire(input.env, settle),
       history: input.history,
       signals: input.signals,
       atomicInstanceConnect: true,
@@ -290,6 +297,7 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
         }
         return decision;
       }
+      case "harness_question_closed": return this.withdrawQuestion(session, message);
       case "agent_lifecycle": {
         const failure = classifiedTurnFailure(message);
         const published = await this.dependencies.signals.publish(session, failure);
@@ -587,6 +595,52 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
         })
       : undefined;
     return { user, principal, run, presentation };
+  }
+
+  /**
+   * The asking Instance's harness withdrew a card's question. Hub settles the
+   * card (only this Instance's own), which ends its wait, and says so in the
+   * Channel, so an answer sent later is refused with a reason rather than
+   * becoming a new task.
+   */
+  private async withdrawQuestion(
+    session: Readonly<AgentInstanceRuntimeSession>,
+    message: Message<"harness_question_closed">,
+  ): Promise<AuthorityOutput> {
+    if (!session.principal.channelWriteAllowed || session.run.kind !== "channel-instance") {
+      throw new RuntimeClientOperationError("agent_read_only_session");
+    }
+    if (typeof message.cardRequestId !== "string" || !/^[a-zA-Z0-9_-]{1,160}$/u.test(message.cardRequestId)) {
+      throw new RuntimeClientOperationError("invalid_agent_message_fields");
+    }
+    if (!this.dependencies.settleQuestionnaire) throw new Error("Questionnaire authority is unavailable");
+    const channelId = session.run.channelId;
+    const cardMessageId = runtimeCommandId("message", message.cardRequestId);
+    const settled = await this.dependencies.settleQuestionnaire({
+      channelId, messageId: cardMessageId, settlement: { state: "cancelled" },
+      askedByInstanceId: session.run.instanceId,
+    });
+    // The host keeps this report until Hub answers it under its requestId.
+    const receipt: AuthorityOutput = message.requestId
+      ? { type: "pong", requestId: message.requestId, ts: new Date().toISOString() } : undefined;
+    if (!settled?.changed) return receipt;
+    const ownerUserId = session.principal.ownerUserId;
+    const label = session.principal.agentName.replace(/[@＠`\r\n]/gu, " ").trim() || "The agent";
+    const noticeId = runtimeCommandId("questionnaire-withdrawn", cardMessageId);
+    await this.dependencies.messages.append({
+      commandId: runtimeCommandId("agent-append", noticeId),
+      messageId: noticeId,
+      channelId,
+      body: `${label} withdrew this question and is no longer waiting for an answer here.`,
+      messageKind: QUESTIONNAIRE_WITHDRAWN_KIND,
+      principal: { kind: "user", id: ownerUserId },
+      senderSnapshot: productAgentSystemNoticeSenderSnapshot(ownerUserId),
+      residual: { replyToMessageId: cardMessageId, appMetadata: { xmatrixProvenance: "system_fact", xmatrixSystemNotice: true,
+        xmatrixQuestionnaireState: { messageId: cardMessageId, state: "cancelled" } } },
+    }, { actorUserId: ownerUserId }).catch((error) => {
+      if (!(error instanceof RuntimeAuthorityOperationError && error.committedIdentityConflict)) throw error;
+    });
+    return receipt;
   }
 
   private async persistTurnFailureNotice(
