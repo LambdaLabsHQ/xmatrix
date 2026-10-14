@@ -2,10 +2,11 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
-  MachineDaemonRuntimeTransport,
-  MACHINE_DAEMON_AUTHORITY_REQUIRED_CAPABILITIES,
-} from "../src/runtime-transport/machine-daemon-port.ts";
-import { FakeSocket } from "./support/runtime-transport.mjs";
+  FakeSocket,
+  machineDaemonConnectFrame,
+  machineDaemonTransport,
+  socketFrame as frame,
+} from "./support/runtime-transport.mjs";
 
 const principal = {
   ownerUserId: "heartbeat-owner",
@@ -13,34 +14,8 @@ const principal = {
   machineId: "heartbeat-machine",
   hostId: "heartbeat-host",
 };
-const frame = (type, fields = {}) => JSON.stringify({ type, ...fields });
-const connect = () => frame("machine_daemon_connect", {
-  requestId: "connect", token: "test-token", displayName: "Laptop",
-  machineId: principal.machineId, hostId: principal.hostId,
-  clientVersion: "1.0.350", protocolVersion: 2,
-});
-
-function transport(overrides = {}) {
-  return new MachineDaemonRuntimeTransport({
-    capabilities: new Set(MACHINE_DAEMON_AUTHORITY_REQUIRED_CAPABILITIES),
-    async authenticate() {
-      return {
-        principal,
-        connected: {
-          type: "machine_daemon_connected", connectionEpoch: 1,
-          daemon: {
-            id: "heartbeat-daemon", userId: principal.ownerUserId,
-            email: principal.ownerEmail, machineId: principal.machineId,
-          },
-        },
-      };
-    },
-    async refresh() { return principal; },
-    async execute() {},
-    async disconnected() {},
-    ...overrides,
-  });
-}
+const connect = () => machineDaemonConnectFrame(principal);
+const transport = (overrides) => machineDaemonTransport(principal, overrides);
 
 test("daemon heartbeat answers while authenticated connect catches up commands", async () => {
   const started = Promise.withResolvers();
