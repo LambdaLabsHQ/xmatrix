@@ -6,7 +6,7 @@ import type { AgentRuntimeWaiting } from "@xmatrix/protocol";
 
 import { cn } from "@/lib/utils";
 import { statusInkClass } from "@/components/ui/status-tone";
-import { useDecorationAnimation } from "@/components/ui/decoration-animation";
+import { useDecorationAnimation, useDecorationAnimationGroup } from "@/components/ui/decoration-animation";
 import type { AgentWorkItem } from "./workspace-shell-message-model";
 
 /**
@@ -121,13 +121,13 @@ export function AgentWorkIntent({
             <span className="app-agent-work-intent-caption">Waiting</span>
             <span className="app-agent-work-intent-main">
               <subject.icon className="size-3.5 shrink-0" aria-hidden="true" />
-              <IntentInk text={subject.word} />
+              <IntentInk text={subject.word} animated={!stale} />
             </span>
           </>
         ) : (
           <>
             {busy && <span className="app-agent-work-intent-caption">Working on</span>}
-            <span className="app-agent-work-intent-main"><IntentInk text={intent} /></span>
+            <span className="app-agent-work-intent-main"><IntentInk text={intent} animated={!stale} /></span>
           </>
         )}
       </span>
@@ -143,8 +143,27 @@ export function AgentWorkIntent({
 
 /** The ink stays in place while a feathered window carries the highlight.
  * Its duplicate is a hidden paint layer, never a second accessible label. */
-function IntentInk({ text }: { text: string | undefined }) {
-  return <span className="app-agent-work-intent-ink truncate">
+function createIntentInkEffects(element: HTMLElement): readonly KeyframeEffect[] {
+  const window = element.querySelector<HTMLElement>(".app-agent-work-intent-ink-window");
+  const shine = element.querySelector<HTMLElement>(".app-agent-work-intent-ink-shine");
+  if (!window || !shine) return [];
+  const timing: KeyframeEffectOptions = { duration: 2200, iterations: Infinity, easing: "linear" };
+  return [
+    new KeyframeEffect(window, [{ transform: "translateX(0)" }, { transform: "translateX(333.333333%)" }], timing),
+    new KeyframeEffect(shine, [{ transform: "translateX(80%)" }, { transform: "translateX(-120%)" }], timing),
+  ];
+}
+
+function intentInkVisibility(element: HTMLElement) {
+  return {
+    element: element.closest<HTMLElement>(".app-agent-work-item") ?? element,
+    root: element.closest<HTMLElement>(".app-agent-work-scroller"),
+  };
+}
+
+function IntentInk({ text, animated }: { text: string | undefined; animated: boolean }) {
+  const animationRef = useDecorationAnimationGroup(createIntentInkEffects, animated, intentInkVisibility);
+  return <span ref={animationRef} className="app-agent-work-intent-ink truncate">
     <span className="app-agent-work-intent-ink-base">{text}</span>
     <span className="app-agent-work-intent-ink-window" aria-hidden="true">
       <span className="app-agent-work-intent-ink-shine" data-ink={text} />
