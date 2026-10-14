@@ -31,6 +31,8 @@ type UseChannelReadSyncOptions = {
   viewRef: MutableRefObject<AppView>;
   setChannels: Dispatch<SetStateAction<SerializedChannel[]>>;
   updateChannelReadCounts: ReadCountsUpdater;
+  /** Told as the Hub's answer for a Channel is applied: a read asked before it is older than it. */
+  onReadStateAnswered?: (channelId: string) => void;
 };
 
 export function useChannelReadSync({
@@ -42,6 +44,7 @@ export function useChannelReadSync({
   viewRef,
   setChannels,
   updateChannelReadCounts,
+  onReadStateAnswered,
 }: UseChannelReadSyncOptions) {
   const lastSyncedReadSequenceRef = useRef<Record<string, number>>({});
   const coordinatorRef = useRef<ChannelReadSyncCoordinator<ChannelReadStateUpdate> | null>(null);
@@ -57,6 +60,7 @@ export function useChannelReadSync({
       readState.readSequence || 0,
     );
     lastSyncedReadSequenceRef.current[channelId] = readSequence;
+    onReadStateAnswered?.(channelId);
     setChannels((current) => updateChannelReadState(current, channelId, {
       ...readState,
       readSequence,
@@ -72,7 +76,7 @@ export function useChannelReadSync({
         readStates: new Map([[channelId, { ...readState, readSequence }]]),
       });
     }
-  }, [queryClient, setChannels]);
+  }, [onReadStateAnswered, queryClient, setChannels]);
   const applyReadStateRef = useRef(applyReadState);
   applyReadStateRef.current = applyReadState;
 

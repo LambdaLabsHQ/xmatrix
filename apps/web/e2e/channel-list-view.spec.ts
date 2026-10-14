@@ -70,6 +70,27 @@ test("hovered channel rows stay on the sidebar compositor surface", async ({ pag
   expect(hoverChrome.afterContent === "none" || hoverChrome.afterContent === "").toBeTruthy();
 });
 
+test("nothing in a conversation row filters the paper behind it", async ({ page }) => {
+  // A working Agent and two unread messages: the row carries a face, a status dot and a count.
+  const busy = { ...E2E_CHANNEL, id: "channel-busy", name: "busy", messageCount: 5, historyHeadSequence: 5, readSequence: 3,
+    memberPresence: { "agent:codex": { kind: "agent", label: "Codex", status: "busy", instances: [{
+      id: "instance-codex-1", channelInstanceId: "1", label: "Codex:1", channelId: "channel-busy", status: "busy",
+      connectedAt: E2E_CHANNEL.updatedAt, lastSeenAt: E2E_CHANNEL.updatedAt, activity: "Working",
+    }] } } };
+  await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL, busy] });
+  const row = page.locator(`[data-channel-row-id="${busy.id}"]`);
+  await expect(row.locator(".identity-avatar-face")).toBeVisible();
+  await expect(row.locator(".app-count-pill-value")).toHaveText("2");
+  // Glass chips on paper keep their fill and edge; a filter of the backdrop
+  // would draw nothing there and cost each chip a compositor layer.
+  const filtering = await row.evaluate((element) => [element, ...Array.from(element.querySelectorAll("*"))]
+    .filter((node) => getComputedStyle(node).backdropFilter !== "none")
+    .map((node) => node.className.toString().split(" ").slice(0, 3).join(".")));
+  expect(filtering).toEqual([]);
+  expect(await row.locator(".identity-avatar-face").evaluate((face) => getComputedStyle(face).backgroundColor))
+    .not.toBe("rgba(0, 0, 0, 0)");
+});
+
 test("hovered and selected rows take the conversation's paper, a shade off the list", async ({ page }) => {
   const other = { ...E2E_CHANNEL, id: "channel-other", name: "other" };
   await openGeneralChannelWithHistory(page, E2E_CHANNEL, [], [other]);

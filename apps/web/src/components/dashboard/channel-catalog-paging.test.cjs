@@ -410,6 +410,69 @@ test("a window's reads that end on both sides of a lost sign-in list nothing and
   } finally { t.client.clear(); }
 });
 
+test("an authorization reads for itself: no read under way and no fresh answer of one that ended is handed on", async () => {
+  const { QueryClient } = require("@tanstack/react-query");
+  const refresh = await import("./channel-catalog-refresh.ts");
+  const { createViewerReads, readAskedNow } = await import("./channel-message-summary.ts");
+  const client = new QueryClient({ defaultOptions: { queries: { gcTime: Infinity } } });
+  const session = "xmatrix\u0000hub\u0000user";
+  const reads = createViewerReads();
+  const outdated = [];
+  // Who asks, in which Space, for which Channels: the same for every read below.
+  const queryKey = ["xmatrix", "hub", "user", "channels", "space", "resolve", ["far"], null, true];
+  let leases = refresh.nextCatalogLeases(refresh.NO_CATALOG_LEASES, session, ["space"]);
+  const asked = [];
+  const committed = [];
+  // The hook's own read: a real fetchQuery of the leased query, its commit behind the lease.
+  const read = () => {
+    const lease = leases.bySpace.get("space");
+    return refresh.readChannelsIntoStore({
+      authorized: () => lease !== undefined && leases.bySpace.get("space") === lease,
+      read: () => client.fetchQuery(refresh.leasedResolveQuery({ queryKey, lease, asked: readAskedNow,
+        read: () => new Promise((resolve) => asked.push((revision) => resolve(
+          { protocolVersion: 1, pathsByChannelId: {}, channels: [{ id: "far", spaceId: "space", revision }] }))) })),
+      commit: (channels) => {
+        committed.push(...channels.map((channel) => channel.revision));
+        outdated.push(...channels.map((channel) => reads.outdated(channel)));
+      },
+    });
+  };
+  const signInLostAndBack = () => {
+    leases = refresh.nextCatalogLeases(leases, session, []);
+    leases = refresh.nextCatalogLeases(leases, session, ["space"]);
+  };
+  try {
+    // A read is under way when the sign-in is lost and comes back with the same values.
+    const old = read();
+    signInLostAndBack();
+    const current = read();
+    await new Promise((resolve) => setImmediate(resolve));
+    // The new authorization asked the Hub itself instead of waiting on the old one's read.
+    assert.equal(asked.length, 2);
+    asked[0]("read for the authorization that ended");
+    asked[1]("read for this one");
+    await Promise.all([old, current]);
+    assert.deepEqual(committed, ["read for this one"]);
+
+    // An answer still fresh in the cache is this authorization's own: the next read reuses it.
+    await read();
+    assert.equal(asked.length, 2);
+    assert.deepEqual(committed, ["read for this one", "read for this one"]);
+    // It is not the next authorization's: that one asks again.
+    signInLostAndBack();
+    const next = read();
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(asked.length, 3);
+    // The Hub answers the reader's read state while that read is under way:
+    // the read was asked before the answer, and its Channels say so.
+    reads.answered("far");
+    asked[2]("read after coming back again");
+    await next;
+    assert.equal(committed.at(-1), "read after coming back again");
+    assert.deepEqual(outdated, [false, false, true]);
+  } finally { client.clear(); }
+});
+
 test("a read that fails while its authorization stands leaves the list to be read again", async () => {
   const t = await openResolveOwner();
   try {

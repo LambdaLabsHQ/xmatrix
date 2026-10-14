@@ -60,6 +60,19 @@ export function channelAfterMessage(channel: SerializedChannel, arrival: Channel
   };
 }
 
+/* The order of what the Hub is asked and what it answers about one reader's
+   read state. A read of a Channel is as old as when it was asked, not as when
+   its answer came: one asked before the reader's acknowledgement can arrive
+   after it and say what the acknowledgement has since cleared. */
+let viewerOrder = 0;
+const askedOrders = new WeakMap<SerializedChannel, number>();
+
+/** Marks the Channels of a read with when it was asked; gives back the mark for those that follow. */
+export function readAskedNow(): (channel: SerializedChannel) => void {
+  const askedAt = (viewerOrder += 1);
+  return (channel) => { askedOrders.set(channel, askedAt); };
+}
+
 const UNPLACED_CHANNELS = 512;
 const UNPLACED_ARRIVALS = 32;
 
@@ -76,7 +89,12 @@ const UNPLACED_ARRIVALS = 32;
 export function createViewerReads(place: (channel: SerializedChannel, arrival: ChannelMessageArrival) => SerializedChannel = channelAfterMessage) {
   const read = new Set<string>();
   const unplaced = new Map<string, ChannelMessageArrival[]>();
+  const answeredAt = new Map<string, number>();
   return {
+    /** The Hub has just told this reader what they have read of the Channel, or what waits on them there. */
+    answered(channelId: string) { answeredAt.set(channelId, (viewerOrder += 1)); },
+    /** Whether this copy of the Channel comes from a read asked before the last such answer. */
+    outdated: (channel: SerializedChannel) => (askedOrders.get(channel) ?? Infinity) < (answeredAt.get(channel.id) ?? 0),
     /** Whether a read made for this reader has brought the Channel. */
     has: (channelId: string) => read.has(channelId),
     /** A message for a Channel no read of theirs has brought yet. */
