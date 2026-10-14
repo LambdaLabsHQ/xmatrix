@@ -54,7 +54,12 @@ export function bucketSubjectSelectors(selectorText, cap = MAX_SELECTORS) {
         const guard = selectorParser.pseudo({ value: ":where", nodes: [selectorParser.selector({
           nodes: [selectorParser.className({ value: key })],
         })] });
-        copy.insertBefore(copy.nodes[at], guard);
+        const subject = copy.nodes[at];
+        // List-leading space belongs before both predicates; between them it
+        // would become a descendant combinator.
+        guard.rawSpaceBefore = subject.rawSpaceBefore;
+        subject.rawSpaceBefore = "";
+        copy.insertBefore(subject, guard);
         selectors.push(copy);
         if (selectors.length > limit) return null;
       }

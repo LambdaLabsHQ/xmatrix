@@ -18,6 +18,8 @@ const css = String.raw`
   #fixture :is(.interactive-a, .interactive-b):hover { outline-color: rgb(170, 180, 190); }
   #fixture :is(.interactive-a, .interactive-b):focus { color: rgb(200, 210, 220); }
   #fixture .ancestor:is(.state-a, .state-b) > :is(.desc-a, .desc-b) { font-weight: 700; }
+  :is(.list-first-a, .list-first-b),
+  :is(.list-next-a, .list-next-b) { border-top: 3px solid rgb(12, 34, 56); }
 
   @layer early, late;
   @layer late {
@@ -59,6 +61,8 @@ const html = `
     <span class="low-alt" data-case="low-alt">low alternative</span>
     <span class="before-a after-b" data-case="generated">generated</span>
     <button class="interactive-a" data-case="interactive">interactive</button>
+    <span class="list-first-b" data-case="list-first">first selector</span>
+    <span class="list-next-b" data-case="list-next">selector after a comma</span>
     <div class="ancestor state-b"><span class="desc-a" data-case="descendant">descendant</span></div>
     <div class="ancestor"><span class="desc-a" data-case="wrong-ancestor">wrong ancestor</span></div>
     <span class="layer-a" data-case="layer">layer</span>
@@ -106,6 +110,8 @@ test("class guards preserve selector matching, specificity and generated content
     descendant: { weight: "700" },
     "wrong-ancestor": { weight: "400" },
   });
+  await expect(page.locator('[data-case="list-first"]')).toHaveCSS("border-top-width", "3px");
+  await expect(page.locator('[data-case="list-next"]')).toHaveCSS("border-top-width", "3px");
   const generated = await page.locator('[data-case="generated"]').evaluate((element) =>
     ["::before", "::after"].map((pseudo) => {
       const style = getComputedStyle(element, pseudo);
