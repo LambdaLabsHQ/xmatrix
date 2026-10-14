@@ -296,7 +296,7 @@ export const SPACE_PURGE_STEPS: readonly { table: string; predicate: string }[] 
     "data.message_attachment_refs", "data.message_attachments", "data.message_attention",
     "data.message_attention_revisions", "data.message_mutations", "data.message_reactions",
     "data.message_sequence_reservations", "data.messages", "data.page_access", "data.page_block_competitions",
-    "data.page_claims", "data.page_links", "data.page_migrations", "data.page_reads",
+    "data.page_claims", "data.page_co_writing", "data.page_links", "data.page_migrations", "data.page_reads",
     "data.page_revisions", "data.pages", "data.registration_access_changes",
     "data.registration_launch_intents", "data.registration_stop_intents",
     "data.run_agent_registrations", "data.space_action_claims",

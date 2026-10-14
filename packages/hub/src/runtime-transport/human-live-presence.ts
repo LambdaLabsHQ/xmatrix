@@ -148,6 +148,12 @@ export function overlayHumanPresenceOnChannel(
  * carries that reader's private projection. Never let those fields hitch a
  * ride on the shared update: clients merge-preserve their own copy when the
  * partial payload omits them.
+ *
+ * Nor does it say what was said: the last message, the count and the history
+ * head move only with the message frames themselves. Read here they could
+ * reach a client before the message did, and its list showed a message its
+ * conversation had not received yet (as Telegram does, a chat's last message
+ * is only ever the newest message the client holds).
  */
 export function channelForSharedPresenceFanout(
   channel: SerializedChannel,
@@ -155,6 +161,9 @@ export function channelForSharedPresenceFanout(
   const {
     attention: _viewerAttention,
     readSequence: _viewerReadSequence,
+    lastMessage: _lastMessage,
+    messageCount: _messageCount,
+    historyHeadSequence: _historyHeadSequence,
     ...shared
   } = channel;
   return shared;

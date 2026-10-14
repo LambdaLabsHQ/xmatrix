@@ -8,7 +8,9 @@ import * as Y from "yjs";
 import { expect, test } from "./fixtures";
 import { fixtureJson, fixtureRequestBodies, fixtureRequestRecords } from "./in-page-api-fixtures";
 import { editPageMarkdown, pageDocument, pageMarkdown } from "./page-document-fixture";
-import { E2E_CHANNEL, E2E_DESKTOP_CONTEXT, E2E_SPACE, E2E_USER_SENDER, installWorkspaceStubs } from "./workspace-fixtures";
+import {
+  E2E_CHANNEL, E2E_DESKTOP_CONTEXT, E2E_SPACE, E2E_USER_SENDER, harnessRegistrations, installWorkspaceStubs,
+} from "./workspace-fixtures";
 
 test.use(E2E_DESKTOP_CONTEXT);
 
@@ -97,6 +99,54 @@ async function stubPageConversation(browser: Page, channel: typeof E2E_CHANNEL, 
   await fixtureJson(browser, "link-create", /\/api\/xmatrix\/spaces\/[^/]+\/page-links$/u, { link: {
     ...link, conversationId: channel.id, pageId: "p-relay", source: "manual", createdAt: NOW, lastSeenAt: NOW,
     anchor: null, resolvedAt: null } }, { method: "POST" });
+}
+
+/** The runtimes the Space can start, which a page's reader may call to write with them. */
+async function stubWriters(browser: Page, harnesses: string[]) {
+  const registrations = harnessRegistrations(harnesses);
+  await fixtureJson(browser, "registration-catalog", "**/agent-registrations", { registrations,
+    capabilities: registrations.map((registration) => ({ harness: registration.key.harness, models: [], locations: [registration] })) });
+}
+
+/** A page as it is, and the suggestion an Agent co-writing it made against it. */
+const SUGGEST_LIVE = "# Relay\n\n## Status\n\nPlanned for next week.\n\n## Plan\n\nMove the relay.\n\n## Notes\n\nnone\n";
+const SUGGEST_BODY = "# Relay\n\n## Status\n\nShipped this week.\n\n## Plan\n\nMove the relay, then drain the queue.\n\n" +
+  "## Risks\n\nLate reviews\n\n## Notes\n\nDNS is ready.\n";
+
+/** One suggestion waiting on the page, revision 5 against revision 3, and the review that ends its wait. */
+async function stubSuggestion(browser: Page) {
+  await fixtureJson(browser, "page-suggestions", /\/api\/xmatrix\/spaces\/[^/]+\/pages\/p-relay\/suggestions$/u, { suggestions: [
+    { revision: 5, kind: "suggestion", basedOnRevision: 3, authors: [{ kind: "agent", id: "a-claude", label: "claude:2" }],
+      conversationIds: [E2E_CHANNEL.id], createdAt: NOW }] }, { method: "GET" });
+  for (const [revision, body] of [[3, SUGGEST_LIVE], [5, SUGGEST_BODY]] as const) {
+    await fixtureJson(browser, `revision-${revision}`, new RegExp(`/api/xmatrix/spaces/[^/]+/pages/p-relay\\?revision=${revision}$`, "u"),
+      { page: { ...page("p-relay", null, "Relay", "V"), body,
+        revisionInfo: { revision, kind: revision === 5 ? "suggestion" : "edit", authors: [], conversationIds: [], createdAt: NOW } } });
+  }
+  await fixtureJson(browser, "suggestion-review", /\/api\/xmatrix\/spaces\/[^/]+\/pages\/p-relay\/suggestions\/review$/u,
+    { reviewedThrough: 5 }, { method: "POST" });
+}
+
+/** On a phone Pages opens on its list: this opens Relay from it, its live session holding `session`. */
+async function openRelayOnPhone(browser: Page, session: Y.Doc, on: Parameters<typeof servePageSession>[2] = {}) {
+  await servePageSession(browser, session, on);
+  await browser.goto("/app", { waitUntil: "domcontentloaded" });
+  await browser.getByRole("button", { name: "Pages", exact: true }).first().click();
+  await browser.getByRole("button", { name: /^Relay/u }).click();
+  return browser.getByTestId("page-editor");
+}
+
+/** Relay, ready to co-write: the conversation calling the Agent, its link, the co-writing and its first message. */
+async function stubCoWriting(browser: Page, blockId: string) {
+  await stubPages(browser, [page("p-relay", null, "Relay", "V")]);
+  await fixtureJson(browser, "page-links", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\?.*$/u, { links: [] });
+  const writing = { ...E2E_CHANNEL, id: "channel-write", name: "Co-writing Relay" };
+  await stubPageConversation(browser, writing, { linkId: "l-write", blockId });
+  await fixtureJson(browser, "co-writing", /\/api\/xmatrix\/spaces\/[^/]+\/pages\/p-relay\/co-writing$/u,
+    { startedAt: NOW }, { method: "POST" });
+  await fixtureJson(browser, "write-message", /\/api\/xmatrix\/channels\/channel-write\/messages$/u, { message: {} },
+    { method: "POST" });
+  return writing;
 }
 
 /** Opens Pages on a page whose live session holds `body`, and returns its editor. */
@@ -373,6 +423,170 @@ test.describe("on a phone", () => {
     await chip.click();
     await expect(browser.getByTestId("pages-view")).toBeVisible();
     await expect(browser).toHaveURL(/\/pages\?page=p-relay/u);
+  });
+
+  test("what changed since the reader last read is walked from the right edge, beside each change, until viewed", async ({ page: browser }) => {
+    const editor = await openChangedPage(browser);
+    // A phone opens on the list of pages.
+    await browser.getByRole("button", { name: /^Relay/u }).click();
+    const mark = browser.getByRole("toolbar", { name: "Changes since you last read this page" });
+    await expect(mark).toContainText("1/4");
+    // It stands at the right edge beside the first change, not in a bar across the bottom.
+    const [markBox, changeBox] = [(await mark.boundingBox())!,
+      (await editor.locator(".page-reader-change").first().boundingBox())!];
+    expect(markBox.x + markBox.width).toBeGreaterThan(393 - 8);
+    expect(markBox.y).toBeLessThan(changeBox.y + changeBox.height);
+    // A paragraph that is all new is marked in the margin, even beside one whose words changed.
+    await expect(editor.locator(".page-reader-change.is-block", { hasText: "The second region is next" })).toHaveCount(1);
+    await expect(editor.locator(".page-reader-change:not(.is-block)", { hasText: "The second region" })).toHaveCount(0);
+    await expect(editor.locator(".page-reader-change:not(.is-block)", { hasText: "Shipped" })).toHaveCount(1);
+    await mark.getByRole("button", { name: "Next change" }).click();
+    await expect(mark).toContainText("2/4");
+    await browser.screenshot({ path: test.info().outputPath("pages-reader-changes-phone.png") });
+    expect(await fixtureRequestBodies(browser, "page-mark-read")).toEqual([]);
+
+    await mark.getByRole("button", { name: "Viewed" }).click();
+    await expect(mark).toBeHidden();
+    await expect(editor.locator(".page-reader-change")).toHaveCount(0);
+    await expect.poll(async () => (await fixtureRequestBodies(browser, "page-mark-read")).map((body) => body.revision))
+      .toContain(3);
+  });
+
+  test("co-writing starts with one tap on an Agent's face, and the reader stays on the page", async ({ page: browser }) => {
+    const writing = await stubCoWriting(browser, "");
+    await stubWriters(browser, ["claude", "codex"]);
+    await expect(await openRelayOnPhone(browser, pageDocument(BODY))).toContainText("In progress");
+
+    // The page's button is the face of the Agent the reader writes with, on glass.
+    const call = browser.getByRole("button", { name: "Write with claude" });
+    await expect(call.locator("img")).toHaveAttribute("src", /claude\.svg/u);
+    await call.click();
+    // Nothing to type: the reader picks who, and the Agent infers what.
+    const picker = browser.getByTestId("page-write-with");
+    await expect(picker.locator("textarea, input")).toHaveCount(0);
+    await picker.getByRole("button", { name: "codex" }).click();
+
+    await expect.poll(async () => (await fixtureRequestBodies(browser, "write-message"))[0]?.body).toMatch(
+      /^@codex launch:force Co-write page:p-relay with me\./u);
+    expect((await fixtureRequestBodies(browser, "link-create"))[0]).toMatchObject({ conversationId: writing.id, pageId: "p-relay" });
+    // The conversation co-writes the page before its Agent is called, so its edits arrive as suggestions.
+    expect(await fixtureRequestBodies(browser, "co-writing")).toEqual([{ conversationId: writing.id }]);
+    await expect(picker).toBeHidden();
+    await expect(browser).not.toHaveURL(/conversation=/u);
+    await expect(browser.getByRole("status")).toHaveText(/codex is starting/u);
+    // The one picked is the one the button offers next time.
+    expect(await browser.evaluate(() => window.localStorage.getItem("xmatrix.page-writer.space-personal"))).toBe("codex");
+  });
+
+  test("a heading's actions are named in one menu, and Co-write starts on that section", async ({ page: browser }) => {
+    await stubCoWriting(browser, "status");
+    await stubWriters(browser, ["claude"]);
+    const editor = await openRelayOnPhone(browser, pageDocument(BODY));
+    const status = editor.locator("h2", { hasText: "Status" });
+    await status.click();
+    // No row of bare icons by the heading: one "⋯", whose menu names each action.
+    await expect(status.getByRole("button", { name: "Copy a link to this section" })).toHaveCount(0);
+    await status.getByRole("button", { name: "Actions for Status" }).click();
+    const menu = browser.getByRole("menu", { name: "Actions for Status" });
+    await expect(menu.getByRole("menuitem")).toHaveText(["Co-write with claude", "Discuss", "Copy link", "Claim", "Schedule"]);
+    await browser.screenshot({ path: test.info().outputPath("pages-heading-menu-phone.png") });
+
+    await menu.getByRole("menuitem", { name: "Co-write with claude" }).click();
+    await expect(menu).toBeHidden();
+    await expect.poll(async () => (await fixtureRequestBodies(browser, "write-message"))[0]?.body).toMatch(
+      /^@claude launch:force Co-write page:p-relay \(section #status\) with me\./u);
+    expect((await fixtureRequestBodies(browser, "link-create"))[0]).toMatchObject({ blockId: "status" });
+  });
+
+  test("an Agent's suggestions are taken or left one change at a time, its face beside the change", async ({ page: browser }) => {
+    await stubPages(browser, [page("p-relay", null, "Relay", "V")]);
+    await fixtureJson(browser, "page-links", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\?.*$/u, { links: [] });
+    await stubSuggestion(browser);
+    const editor = await openRelayOnPhone(browser, pageDocument(SUGGEST_LIVE));
+    const mark = browser.getByRole("toolbar", { name: /^claude:2 suggests this change/u });
+    await expect(mark).toHaveAccessibleName(/1 of 4$/u);
+    // Each change shows where it would land, and nothing is in the page until it is taken.
+    await expect(editor.locator(".page-suggest-out.is-current")).toHaveText("Planned for next");
+    await expect(editor.locator(".page-suggest-in.is-current")).toHaveText("Shipped this");
+    await expect(editor.locator(".page-suggest-in.is-block")).toContainText("Late reviews");
+    // The Agent writes the change out in the line, its face moving with the words at their height, and the
+    // paragraph's words are marked in its colour; what to do with the change stands at the right edge beside
+    // it, and nothing across the bottom.
+    const face = editor.locator(".page-suggest-pen-face");
+    await expect(face).toHaveAttribute("src", /claude\.svg/u);
+    const marked = editor.locator(".page-suggest-ink").first();
+    const [faceBox, wordsBox] = [(await face.boundingBox())!, (await editor.locator(".page-suggest-in.is-current").boundingBox())!];
+    expect(Math.abs(faceBox.y + faceBox.height / 2 - (wordsBox.y + wordsBox.height / 2))).toBeLessThan(6);
+    const take = mark.getByRole("button", { name: "Take this change" });
+    const [takeBox, lineBox] = [(await take.boundingBox())!, (await marked.boundingBox())!];
+    expect(takeBox.x + takeBox.width).toBeGreaterThan(393 - 12);
+    expect(Math.abs(takeBox.y - lineBox.y)).toBeLessThan(24);
+    await browser.screenshot({ path: test.info().outputPath("pages-suggestions-phone.png") });
+
+    await mark.getByRole("button", { name: "Take this change" }).click();
+    await expect(mark).toHaveAccessibleName(/1 of 3$/u);
+    await expect(editor.locator("p", { hasText: "Shipped this week." })).toHaveCount(1);
+    await mark.getByRole("button", { name: "Leave this change" }).click();
+    await expect(mark).toHaveAccessibleName(/1 of 2$/u);
+    await mark.getByRole("button", { name: "Take this change" }).click();
+    await mark.getByRole("button", { name: "Take this change" }).click();
+    // All taken or left: the suggestion stops waiting, and the page has what was taken.
+    await expect(mark).toBeHidden();
+    await expect.poll(async () => fixtureRequestBodies(browser, "suggestion-review")).toEqual([{ through: 5 }]);
+    await expect(editor).toContainText("Late reviews");
+    await expect(editor).toContainText("DNS is ready.");
+    await expect(editor).not.toContainText("drain the queue");
+  });
+
+  test("an Agent writing out of view waits at the right edge, pointing the way, and a tap goes to its line", async ({ page: browser }) => {
+    const filler = Array.from({ length: 40 }, (_, index) => `Background paragraph ${index + 1}.`).join("\n\n");
+    const server = pageDocument(`# Relay\n\n## Status\n\nIn progress\n\n${filler}\n\n## Notes\n\nnone\n`);
+    const AGENT = 1_234_567;
+    let push: (data: Uint8Array) => void = () => {};
+    await stubPages(browser, [page("p-relay", null, "Relay", "V")]);
+    await fixtureJson(browser, "page-links", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\?.*$/u, { links: [] });
+    await fixtureJson(browser, "page-agents", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\/agents$/u, {
+      pages: [{ pageId: "p-relay", agents: [{ instanceId: "i-claude", name: "claude:2", status: "busy",
+        conversationId: E2E_CHANNEL.id, activity: "editing", blockId: "notes", avatarUrl: "/agent-vendors/claude.svg" }] }],
+    });
+    const editor = await openRelayOnPhone(browser, server, { connect: (send) => { push = send; } });
+    await expect(editor).toContainText("In progress");
+    const own = server.clientID;
+    server.clientID = AGENT;
+    editPageMarkdown(server, (markdown) => markdown.replace("none", "none yet, shipping Friday"), "agent");
+    server.clientID = own;
+    push(awarenessFrom(server, AGENT, 1, { user: { name: "claude:2", color: "#7c3aed", kind: "agent",
+      conversationId: E2E_CHANNEL.id }, activity: "editing", block: "notes" }, "shipping Friday"));
+
+    // Its face waits at the bottom of the right edge, pointing down to its line.
+    const pens = browser.getByTestId("page-pens");
+    const away = pens.getByRole("button", { name: "claude:2 is writing, below" });
+    await expect(away).toBeInViewport();
+    await expect(away.locator("img")).toHaveAttribute("src", /claude\.svg/u);
+    const face = (await away.boundingBox())!;
+    expect(face.x + face.width, "at the right edge").toBeGreaterThan(393 - 8);
+    // It is not named twice: no edge pill for it, and no button to call another while it writes.
+    await expect(browser.getByTestId("page-people-below")).toHaveCount(0);
+    await expect(browser.getByRole("button", { name: /^Write with/u })).toHaveCount(0);
+    await browser.screenshot({ path: test.info().outputPath("pages-pen-away.png") });
+
+    await away.click();
+    const line = editor.getByText("none yet, shipping Friday");
+    await expect(line).toBeInViewport();
+    // Back beside its line, where it travels with the text.
+    const beside = pens.getByRole("button", { name: "claude:2 is writing", exact: true });
+    await expect.poll(async () => {
+      const [face, text] = [(await beside.boundingBox())!, (await line.boundingBox())!];
+      return Math.abs(face.y + face.height / 2 - (text.y + text.height / 2));
+    }).toBeLessThan(16);
+    await browser.screenshot({ path: test.info().outputPath("pages-pen-beside.png") });
+    // Beside its line, a tap says what it is doing and opens the conversation it works from.
+    await beside.click();
+    const card = browser.getByTestId("page-write-with");
+    await expect(card).toContainText("claude:2");
+    await expect(card).toContainText("Notes");
+    await card.getByRole("button", { name: "Conversation" }).click();
+    await expect(browser).toHaveURL(new RegExp(`conversation=${E2E_CHANNEL.id}`, "u"));
   });
 });
 
@@ -658,7 +872,8 @@ test("a page shows its document at once, and the live editor takes over when its
   }
 });
 
-test("what changed since the reader last read the page stays as a diff until it is ticked viewed, and the page is then read", async ({ page: browser }) => {
+/** Opens a page whose reader last read revision 2, and that has since changed in three places. */
+async function openChangedPage(browser: Page) {
   await stubPages(browser, [page("p-relay", null, "Relay", "V")]);
   await fixtureJson(browser, "page-links", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\?.*$/u, { links: [] });
   await fixtureJson(browser, "page-read", /\/api\/xmatrix\/spaces\/[^/]+\/pages\/p-relay\/read$/u, { revision: 2 },
@@ -668,9 +883,12 @@ test("what changed since the reader last read the page stays as a diff until it 
   await fixtureJson(browser, "page-revision-2", /\/api\/xmatrix\/spaces\/[^/]+\/pages\/p-relay\?revision=2$/u, { page: {
     ...page("p-relay", null, "Relay", "V"), body: "# Relay\n\n## Status\n\nPlanned for next week\n\n## Notes\n\nnone\n",
     revisionInfo: { revision: 2, kind: "edit", authors: [], conversationIds: [], createdAt: NOW } } });
-  const editor = await openLivePage(browser,
-    "# Relay\n\n## Status\n\nShipped this week\n\n## Notes\n\nnone\n\n## Risks\n\nLate reviews\n");
+  return openLivePage(browser,
+    "# Relay\n\n## Status\n\nShipped this week\n\nThe second region is next\n\n## Notes\n\nnone\n\n## Risks\n\nLate reviews\n");
+}
 
+test("what changed since the reader last read the page stays as a diff until it is ticked viewed, and the page is then read", async ({ page: browser }) => {
+  const editor = await openChangedPage(browser);
   const added = editor.locator(".page-reader-change");
   await expect(added.filter({ hasText: "Shipped" })).toBeVisible();
   await expect(added.filter({ hasText: "Late reviews" })).toHaveCount(1);
@@ -1240,4 +1458,27 @@ test("a page with children cannot be deleted from the confirmation", async ({ pa
   const dialog = browser.getByRole("dialog", { name: "Delete this page?" });
   await expect(dialog).toContainText("child pages first");
   await expect(dialog.getByRole("button", { name: "Delete page" })).toBeDisabled();
+});
+
+
+test("on a keyboard, Tab takes the suggested change in front of the reader and Escape leaves it, as in Cursor", async ({ page: browser }) => {
+  await browser.setViewportSize({ width: 1280, height: 860 });
+  await stubPages(browser, [page("p-relay", null, "Relay", "V")]);
+  await fixtureJson(browser, "page-links", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\?.*$/u, { links: [] });
+  await stubSuggestion(browser);
+  const editor = await openLivePage(browser, SUGGEST_LIVE);
+  const mark = browser.getByRole("toolbar", { name: /^claude:2 suggests this change/u });
+  await expect(mark).toHaveAccessibleName(/1 of 4$/u);
+  await expect(mark.getByRole("button", { name: "Take this change" })).toHaveAttribute("title", "Accept (Tab)");
+  await editor.locator("h2", { hasText: "Plan" }).click();
+  await browser.keyboard.press("Tab");
+  await expect(mark).toHaveAccessibleName(/1 of 3$/u);
+  await expect(editor).toContainText("Shipped this week.");
+  await browser.keyboard.press("Escape");
+  await browser.keyboard.press("Tab");
+  await browser.keyboard.press("Tab");
+  await expect(mark).toBeHidden();
+  await expect(editor).not.toContainText("drain the queue");
+  await expect(editor).toContainText("DNS is ready.");
+  await expect.poll(async () => fixtureRequestBodies(browser, "suggestion-review")).toEqual([{ through: 5 }]);
 });

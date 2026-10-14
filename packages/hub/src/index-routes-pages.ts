@@ -302,6 +302,26 @@ export function registerPageRoutes(app: Hono<{ Bindings: Env }>): void {
       pageId: c.req.param("pageId"), principal: await principal(c), revision: integer(body.revision) });
   }));
 
+  // Co-writing (docs/design/pages-live-document.md §4.2): a person starts it from the page for a
+  // conversation linked to it, and the Agent there suggests; its suggestions wait until reviewed.
+  app.post(`${base}/:pageId/co-writing`, async (c) => run(c, async () => {
+    const body = await json(c);
+    return repository(c.env).startCoWriting({ requestId: crypto.randomUUID(), spaceId: c.req.param("spaceId"),
+      pageId: c.req.param("pageId"), principal: await principal(c),
+      conversationId: typeof body.conversationId === "string" ? body.conversationId : "" });
+  }));
+  app.delete(`${base}/:pageId/co-writing/:conversationId`, async (c) => run(c, async () =>
+    repository(c.env).endCoWriting({ requestId: crypto.randomUUID(), spaceId: c.req.param("spaceId"),
+      pageId: c.req.param("pageId"), principal: await principal(c), conversationId: c.req.param("conversationId") })));
+  app.get(`${base}/:pageId/suggestions`, async (c) => run(c, async () => repository(c.env).suggestions({
+    requestId: crypto.randomUUID(), spaceId: c.req.param("spaceId"), pageId: c.req.param("pageId"),
+    principal: await principal(c) })));
+  app.post(`${base}/:pageId/suggestions/review`, async (c) => run(c, async () => {
+    const body = await json(c);
+    return repository(c.env).reviewSuggestions({ requestId: crypto.randomUUID(), spaceId: c.req.param("spaceId"),
+      pageId: c.req.param("pageId"), principal: await principal(c), through: integer(body.through) });
+  }));
+
   // A page's summary, written for the revision its writer read.
   app.put(`${base}/:pageId/summary`, async (c) => run(c, async () => {
     const body = await json(c);

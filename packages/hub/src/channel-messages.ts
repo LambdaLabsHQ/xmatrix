@@ -158,11 +158,31 @@ export async function appendChannelMessage(
     const routedCommand = Array.isArray(command.attachments) && command.attachments.length > 0
       ? { ...command, sealedAttachments: await sealAttachments(env, channelId, command) }
       : command;
-    return postgresMessageAppend(
+    const { liveRouting, ...committed } = await postgresMessageAppend(
       env, channelId, routedCommand, { ...scope, spaceId, placement,
         agentSendFingerprint: httpEvidence?.agentSendFingerprint },
     );
+    if (isLiveRouting(liveRouting)) committedRouting.set(committed, liveRouting);
+    return committed;
   });
+}
+
+type LiveRouting = { recipientUserIds: string[]; recipientNotifications: Record<string, unknown>[] };
+
+/* Who a just-committed message reaches, as its append read it in the same
+   transaction. Kept beside the receipt, never in it: the receipt goes back to
+   the sender, the recipients do not. */
+const committedRouting = new WeakMap<object, LiveRouting>();
+
+function isLiveRouting(value: unknown): value is LiveRouting {
+  return Boolean(value && typeof value === "object" &&
+    Array.isArray((value as LiveRouting).recipientUserIds) &&
+    Array.isArray((value as LiveRouting).recipientNotifications));
+}
+
+/** The live routing the append of `committed` read, when this request made it; a replay has none. */
+export function committedLiveRouting(committed: Record<string, unknown>): LiveRouting | undefined {
+  return committedRouting.get(committed);
 }
 
 export async function readSpaceAttentionProjection(
@@ -244,9 +264,10 @@ export async function publishChannelLiveDelivery(
   channelId: string,
   payload: Omit<Record<string, unknown>, "recipientUserIds">,
   self?: RuntimeLiveDeliverySelf,
+  committedRouting?: LiveRouting,
 ): Promise<void> {
-
-  const routing = await withPostgresMessageRequestScope(
+  // The append read who it reaches as it committed; only a replay reads it again.
+  const routing = committedRouting ?? await withPostgresMessageRequestScope(
     env,
     (scope) => postgresMessageLiveDeliveryRouting(
       env, channelId, String(payload.messageId || ""), scope,
@@ -363,8 +384,9 @@ export function scheduleChannelLiveDelivery(
   waitUntil: (task: Promise<unknown>) => void,
   channelId: string,
   payload: Omit<Record<string, unknown>, "recipientUserIds">,
+  committedRouting?: LiveRouting,
 ): void {
-  const task = publishChannelLiveDelivery(env, waitUntil, channelId, payload).catch((error: unknown) => {
+  const task = publishChannelLiveDelivery(env, waitUntil, channelId, payload, undefined, committedRouting).catch((error: unknown) => {
     console.error("Channel family live delivery failed", {
       channelId,
       error: error instanceof Error ? error.message : String(error),

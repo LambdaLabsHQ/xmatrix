@@ -136,38 +136,22 @@ fn runtime_accepts_channel_delivery(bound_channel_id: Option<&str>, channel_id: 
 
 /// Whether a delivery should cancel the turn that is running right now.
 ///
-/// Live deliveries say so themselves: the hub sets `interrupt_requested` on
-/// every one. Catch-up cannot, because it arrives as `ChannelHistoryReplay`,
-/// which carries no such field — yet the hub describes that window as "exactly
-/// the work the cursor says this principal never received". Matching only the
-/// live frame therefore made the interrupt an accident of which hop delivered
-/// the message: one that missed live fanout lost its urgency for good and
-/// waited out the current turn, however long that ran.
+/// Hub decides, for live delivery (`interrupt_requested`) and catch-up replay
+/// alike, so the same message means the same thing whichever hop carried it:
+/// steering cancels, an ordinary Agent peer reply queues behind the active
+/// turn, and a stop or switch the Hub already carried out is context. A replay
+/// from a Hub that predates its verdict falls back to the older host rule
+/// (replay interrupts unless an Agent wrote it).
 ///
-/// Replay needs no equivalent of the flag. Orientation frames are acknowledged
-/// and dropped in the connection before any runtime sees them, so every replay
-/// that arrives here is already work. Agent-authored replay is queued rather
-/// than interrupting: unlike live delivery, replay has no exact-target hint,
-/// and treating every peer reply as steering cancels slower multi-Agent turns.
-///
-/// One exception, and the connection cannot cover it: this instance's own
-/// messages are filtered out of live delivery but deliberately kept in replay,
-/// where they stay valid context. That was safe only while replay carried no
-/// interrupt. Now that it does, an instance reconnecting mid-turn would meet
-/// its own earlier `xmatrix send` and cancel the turn that produced it, so own
-/// authorship is excluded here rather than dropped there.
+/// This instance's own messages never interrupt it: they are filtered out of
+/// live delivery but kept in replay as context, and an instance reconnecting
+/// mid-turn must not cancel the turn that produced its own `xmatrix send`.
 ///
 /// A live model/effort switch steers just as hard and cancels the turn too. It
-/// cannot say so through `interrupt_requested`, because it does not arrive as a
-/// channel message at all: the hub delivers a control command as `context` so it
-/// cannot burn the addressed Instance's turn, then dispatches the switch on its
-/// own `agent_*_switch_requested` frame. Left out of this predicate the switch
-/// was neither applied nor interrupting — it sat in `pending_events` until the
-/// turn ended, by which point the hub's 10s control waiter had already reported
-/// `timeout`. Naming it here is the whole fix: the cancelled turn hands control
-/// straight back to the run loop that already knows how to apply a switch, so
-/// no runtime needs a second, mid-turn way to do it. The run loop then resumes
-/// the cancelled work on the new selection (`RunLoopInput::Resume`).
+/// does not arrive as a channel message: the hub delivers a control command as
+/// `context` and dispatches the switch on its own `agent_*_switch_requested`
+/// frame. The cancelled turn hands control back to the run loop, which applies
+/// the switch and resumes the cancelled work on the new selection.
 fn event_requests_active_turn_interrupt(
     event: &agent_instance_connection::AgentInstanceConnectionEvent,
     bound_channel_id: Option<&str>,
@@ -182,7 +166,7 @@ fn event_requests_active_turn_interrupt_with_replay(
     own_identity_id: Option<&str>,
     interrupt_history_replay: bool,
 ) -> bool {
-    let (message, replayed) = match event {
+    let (message, replayed, hub_verdict) = match event {
         agent_instance_connection::AgentInstanceConnectionEvent::Server(
             protocol::AgentInstanceServerMessage::AgentModelSwitchRequested { .. }
             | protocol::AgentInstanceServerMessage::AgentEffortSwitchRequested { .. },
@@ -193,10 +177,14 @@ fn event_requests_active_turn_interrupt_with_replay(
                 interrupt_requested: Some(true),
                 ..
             },
-        ) => (message, false),
+        ) => (message, false, None),
         agent_instance_connection::AgentInstanceConnectionEvent::Server(
-            protocol::AgentInstanceServerMessage::ChannelHistoryReplay { message, .. },
-        ) if interrupt_history_replay => (message, true),
+            protocol::AgentInstanceServerMessage::ChannelHistoryReplay {
+                message,
+                interrupt_requested,
+                ..
+            },
+        ) if interrupt_history_replay => (message, true, *interrupt_requested),
         _ => return false,
     };
     if bound_channel_id.is_some_and(|bound| bound != message.channel_id) {
@@ -205,7 +193,12 @@ fn event_requests_active_turn_interrupt_with_replay(
     let authored_here = message.from.kind == "agent"
         && own_identity_id
             .is_some_and(|identity| message.from.identity_id.as_deref() == Some(identity));
-    !(authored_here || (replayed && message.from.kind == "agent"))
+    if authored_here {
+        return false;
+    }
+    // Hub decides catch-up exactly as it decides live delivery. Only a Hub
+    // that predates that verdict leaves it to this host's older rule.
+    hub_verdict.unwrap_or(!(replayed && message.from.kind == "agent"))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -542,11 +535,6 @@ fn codex_goal_status_from_get_response(value: &Value) -> Option<protocol::AgentG
         .map(codex_goal_status_from_value)
 }
 
-fn codex_goal_is_paused(goal: Option<&protocol::AgentGoalStatus>) -> bool {
-    goal.and_then(|goal| goal.status.as_deref())
-        .is_some_and(|status| status.eq_ignore_ascii_case("paused"))
-}
-
 fn codex_goal_is_active(goal: Option<&protocol::AgentGoalStatus>) -> bool {
     goal.is_some_and(|goal| match goal.active {
         Some(active) => active,
@@ -555,19 +543,6 @@ fn codex_goal_is_active(goal: Option<&protocol::AgentGoalStatus>) -> bool {
             .as_deref()
             .is_some_and(|status| status.eq_ignore_ascii_case("active")),
     })
-}
-
-fn codex_paused_goal_notice(goal: Option<&protocol::AgentGoalStatus>) -> String {
-    let objective = goal
-        .and_then(|goal| goal.objective.as_deref())
-        .map(str::trim)
-        .filter(|objective| !objective.is_empty());
-    match objective {
-        Some(objective) => {
-            format!("Goal is paused: {objective}\nSend `/goal resume` to continue it.")
-        }
-        None => "Goal is paused. Send `/goal resume` to continue it.".to_string(),
-    }
 }
 
 fn codex_goal_status_from_app_event(value: &Value) -> Option<protocol::AgentGoalStatus> {

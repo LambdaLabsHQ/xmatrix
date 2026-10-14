@@ -146,6 +146,9 @@ function agentAppendDatabase({ calls = [], sequenceChannelId, commitChannelId = 
             accepted: true, channel_id: commitChannelId, sequence_confirmed: true,
             result_json: JSON.parse(query.values[4]),
           }];
+          // Who the message reaches, read in the append's own transaction.
+          if (query.name === "message_live_routing_recipients_v4") return [{ user_id: "owner-1", recipient_count: 1 }];
+          if (query.name === "message_live_routing_attention_summary_v3") return [];
           if (query.name === "run_registration_authority_mode_v3" ||
               query.name === "run_registration_access_binding_v3") return [];
           throw new Error(`unexpected query ${query.name}`);

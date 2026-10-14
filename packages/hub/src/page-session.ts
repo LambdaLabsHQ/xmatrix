@@ -94,8 +94,8 @@ export interface PageSessionPorts {
   broadcast(data: Uint8Array, exceptConnectionId?: string): void;
 }
 
-/** A committed revision as the repository answers it. */
-export type PageSessionCommit = Omit<PageEditResult, "removedSections">;
+/** A committed revision as the repository answers it, and whether the page takes Agent edits as suggestions. */
+export type PageSessionCommit = Omit<PageEditResult, "removedSections"> & { agentSuggestOnly: boolean };
 
 export interface PageSessionPresent {
   name: string;
@@ -568,10 +568,11 @@ export class PageSession {
       const result = await this.ports.commit(principal, { baseRevision: this.base.revision, body: merged.text,
         conversationIds: input.conversationIds, coAuthors: [],
         blockIds: pageChangedBlocks(current, merged.text).filter((id) => id) });
-      // The repository decides what the edit became. A suggestion (the page
-      // turned suggest-only meanwhile) waits for a person and never reaches the text.
+      // The repository decides what the edit became. A suggestion (the page turned suggest-only
+      // meanwhile, or the Agent co-writes it with a person) waits for a person and never reaches the
+      // text. Only a suggest-only page sends later Agent edits straight to suggestions.
       if (result.kind === "suggestion") {
-        this.base = { ...this.base, agentSuggestOnly: true };
+        this.base = { ...this.base, agentSuggestOnly: result.agentSuggestOnly };
         this.ports.broadcast(encodeNotice({ type: "suggestion", revision: result.revision, author: principal.label }));
         return { ...result, removedSections: [] };
       }

@@ -1526,45 +1526,6 @@ impl AgentInstanceConnectionClient {
         }
     }
 
-    /// Deliver history that was read from the verified daemon Local Replica.
-    /// This is deliberately a local event injection: it never sends a history
-    /// request over the Agent WebSocket and therefore cannot reach Authority payload
-    /// storage or a retained legacy authority.
-    pub fn publish_local_history_replay(
-        &self,
-        channel_id: &str,
-        messages: Vec<ChannelMessage>,
-    ) -> Result<()> {
-        let mut previous = 0_u64;
-        for entry in messages {
-            if entry.channel_id != channel_id {
-                return Err(CliError::Relay(
-                    "Local Replica history crossed the requested channel".into(),
-                ));
-            }
-            let sequence = entry.sequence.ok_or_else(|| {
-                CliError::Relay("Local Replica history entry has no sequence".into())
-            })?;
-            if sequence <= previous {
-                return Err(CliError::Relay(
-                    "Local Replica history is not strictly ordered".into(),
-                ));
-            }
-            previous = sequence;
-            let replay = AgentInstanceServerMessage::ChannelHistoryReplay {
-                message: entry,
-                ack_required: Some(true),
-                // Verified Local Replica history answers an explicit request
-                // for undelivered work, so it keeps the default work intent.
-                delivery_intent: None,
-            };
-            self.event_tx
-                .send(AgentInstanceConnectionEvent::Server(replay))
-                .map_err(|_| CliError::Relay("Local Replica history receiver closed".into()))?;
-        }
-        Ok(())
-    }
-
     pub async fn send_channel_message(&self, channel_id: String, body: String) -> Result<()> {
         // Wait for the hub's dispatch receipt for explicit send commands.
         match self
@@ -4469,6 +4430,7 @@ pub(crate) mod tests {
             detail: None,
             snapshot: None,
             resets_at: None,
+            pending_tasks: None,
             ts: None,
         };
         client.prepare_outbound_message(&mut terminal);
@@ -4566,53 +4528,6 @@ pub(crate) mod tests {
 
         assert_eq!(metadata["workspaceCwd"], "/work/project");
         assert_eq!(metadata["previousInstanceId"], "instance-1");
-    }
-
-    #[test]
-    fn verified_local_history_is_emitted_without_a_websocket_request() {
-        let mut client = super::AgentInstanceConnectionClient::new(
-            "wss://relay.example/ws/agent-instances".into(),
-            "token".into(),
-            "agent".into(),
-            "codex".into(),
-            None,
-        );
-        let mut events = client.event_rx.take().expect("event receiver");
-        let sender = crate::channel_fixtures::sender(
-            Some("user:1"),
-            "user",
-            "Human",
-            "user:1",
-            "human@example.test",
-        );
-        let item = |sequence| {
-            crate::channel_fixtures::message(
-                &format!("message:{sequence}"),
-                "channel:1",
-                Some(sequence),
-                sender.clone(),
-                &format!("body {sequence}"),
-                "2026-07-17T00:00:00.000Z",
-            )
-        };
-
-        client
-            .publish_local_history_replay("channel:1", vec![item(4), item(5)])
-            .expect("local replay");
-        for expected in [4, 5] {
-            match events.try_recv().expect("replay event") {
-                AgentInstanceConnectionEvent::Server(
-                    AgentInstanceServerMessage::ChannelHistoryReplay { message, .. },
-                ) => assert_eq!(message.sequence, Some(expected)),
-                other => panic!("unexpected event: {other:?}"),
-            }
-        }
-        assert!(client.write_tx_clone().is_none());
-        assert!(
-            client
-                .publish_local_history_replay("channel:1", vec![item(5), item(4)])
-                .is_err()
-        );
     }
 }
 

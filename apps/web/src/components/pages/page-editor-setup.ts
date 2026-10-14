@@ -24,6 +24,7 @@ import { automationChips } from "./page-automation-chips";
 import { referenceChips, type PageReferenceTargets } from "./page-reference-chips";
 import { githubFileEmbeds, type ReadGitHubFile } from "./page-github-file-embeds";
 import { markdownShortcuts, syntaxPlugin, typoraKeymap } from "./page-editor-syntax";
+import { mountHeadingMenu, type HeadingMenu } from "./page-heading-menu";
 import { mountSectionAgents, type SectionAgent } from "./page-section-agents";
 
 /**
@@ -350,6 +351,10 @@ export interface HeadingActions {
   attach?: (blockId: string) => void;
   /** Lists the section's conversations, the quiet ones too. */
   showConversations?: (blockId: string) => void;
+  /** On a phone the tools open from one "⋯" as a menu of named actions. */
+  phone?: boolean;
+  /** Asks an Agent to write the section with this person, named in the menu ("Write with claude"). */
+  write?: { label: string; run: (blockId: string) => void };
 }
 
 export const sectionsKey = new PluginKey<{ notes: Map<string, SectionNote>; decorations: DecorationSet }>("page-sections");
@@ -362,6 +367,7 @@ const ICONS = {
   schedule: '<path d="M16 14v2.2l1.6 1"/><path d="M16 2v4"/><path d="M21 7.5V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h3.5"/>'
     + '<path d="M3 10h5"/><path d="M8 2v4"/><circle cx="16" cy="16" r="6"/>',
   talk: '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>',
+  more: '<circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/>',
 } as const;
 
 function icon(name: keyof typeof ICONS, size = 14): string {
@@ -385,6 +391,36 @@ function control(className: string, label: string, run: () => void, content: str
 
 /** Takes down the React stack in a heading's widget when the editor drops the widget. */
 const unmountAgents = new WeakMap<Element, () => void>();
+
+const unmountMenus = new WeakMap<Element, () => void>();
+
+/** A phone's heading tools: one "⋯" that opens them as a menu of named actions. */
+function phoneHeadingTools(tools: HTMLElement, blockId: string, title: string, current: HeadingActions,
+  claim: SectionNote["claim"] | null): HTMLElement {
+  tools.classList.add("is-phone");
+  const menu: HeadingMenu = {};
+  if (current.canEdit && current.write) menu.write = { label: current.write.label, run: () => current.write!.run(blockId) };
+  if (current.discuss) menu.discuss = () => current.discuss!(blockId);
+  if (current.copyLink) menu.copyLink = () => current.copyLink!(blockId);
+  if (current.canEdit && claim?.mine && current.release) menu.claim = { label: "Release", run: () => current.release!(claim.claimId) };
+  else if (current.canEdit && !claim && current.claim) menu.claim = { label: "Claim", run: () => current.claim!(blockId) };
+  if (current.canEdit && current.attach) menu.attach = () => current.attach!(blockId);
+  const holder = document.createElement("span");
+  const close = () => {
+    unmountMenus.get(holder)?.();
+    unmountMenus.delete(holder);
+    more.setAttribute("aria-expanded", "false");
+  };
+  const more = control("page-heading-more", `Actions for ${title}`, () => {
+    if (unmountMenus.has(holder)) return close();
+    unmountMenus.set(holder, mountHeadingMenu(holder, more, title, menu, close));
+    more.setAttribute("aria-expanded", "true");
+  }, icon("more", 18));
+  more.setAttribute("aria-expanded", "false");
+  more.setAttribute("aria-haspopup", "menu");
+  tools.append(more, holder);
+  return tools;
+}
 
 function sectionDecorations(doc: DocNode, notes: Map<string, SectionNote>,
   openConversation: (conversationId: string) => void, actions: () => HeadingActions): DecorationSet {
@@ -447,6 +483,7 @@ function sectionDecorations(doc: DocNode, notes: Map<string, SectionNote>,
       const tools = document.createElement("span");
       tools.className = "page-heading-tools";
       tools.contentEditable = "false";
+      if (current.phone) return phoneHeadingTools(tools, block.id, block.title, current, claim);
       if (current.discuss) tools.append(control("", "Discuss this section", () => current.discuss!(block.id), icon("discuss")));
       if (current.copyLink) tools.append(control("", "Copy a link to this section", () => current.copyLink!(block.id), icon("link")));
       if (current.canEdit && claim?.mine && current.release) {
@@ -461,7 +498,10 @@ function sectionDecorations(doc: DocNode, notes: Map<string, SectionNote>,
       }
       return tools;
     }, { side: 2, ignoreSelection: true,
-      key: `tools:${block.id}:${claim?.claimId ?? ""}:${String(claim?.mine)}:${String(actions().canEdit)}` }));
+      key: `tools:${block.id}:${claim?.claimId ?? ""}:${String(claim?.mine)}:${String(actions().canEdit)}:${String(actions().phone)}:${actions().write?.label ?? ""}`,
+      destroy: (node) => {
+        for (const holder of (node as HTMLElement).querySelectorAll(":scope > span")) unmountMenus.get(holder)?.();
+      } }));
   });
   return DecorationSet.create(doc, decorations);
 }
@@ -899,6 +939,18 @@ function readerChanges(fragment: Y.XmlFragment): Plugin {
 }
 
 /**
+ * Where a change that is all of one paragraph starts as a block: the paragraph, or the list item or
+ * list that holds nothing else. A new paragraph is marked in the margin, not word by word.
+ */
+function wholeBlockAt(doc: DocNode, from: number, to: number): number | null {
+  const start = doc.resolve(from);
+  if (!start.parent.isTextblock || from !== start.start() || to !== start.end()) return null;
+  let depth = start.depth;
+  while (depth > 1 && start.node(depth - 1).childCount === 1) depth -= 1;
+  return start.before(depth);
+}
+
+/**
  * Shows what changed since the revision the reader last read, given as its
  * markdown, against the document the editor holds now, and says how many
  * changes that is. Without a baseline the page is shown as it is.
@@ -907,11 +959,14 @@ export function showReaderChanges(view: EditorView, fragment: Y.XmlFragment, bas
   const mapping = yMapping(view.state);
   if (!mapping) return 0;
   const relative = (pos: number) => absolutePositionToRelativePosition(pos, fragment, mapping as never);
-  const changes = baseline === null ? [] : pageDocChanges(markdownToPageDoc(baseline), view.state.doc).map((change, id): ReaderChange =>
-    change.kind === "added"
-      ? { id, kind: "added", block: change.block, from: relative(change.from), to: change.block ? null : relative(change.to),
-        text: "" }
-      : { id, kind: "removed", block: change.block, from: relative(change.at), to: null, text: change.text });
+  const doc = view.state.doc;
+  const changes = baseline === null ? [] : pageDocChanges(markdownToPageDoc(baseline), doc).map((change, id): ReaderChange => {
+    if (change.kind === "removed") return { id, kind: "removed", block: change.block, from: relative(change.at), to: null, text: change.text };
+    const block = change.block ? null : wholeBlockAt(doc, change.from, change.to);
+    if (block !== null) return { id, kind: "added", block: true, from: relative(block), to: null, text: "" };
+    return { id, kind: "added", block: change.block, from: relative(change.from), to: change.block ? null : relative(change.to),
+      text: "" };
+  });
   view.dispatch(view.state.tr.setMeta(readerChangesKey, changes));
   return changes.length;
 }

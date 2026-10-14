@@ -3,7 +3,7 @@ import { gfmFromMarkdown, gfmToMarkdown } from "mdast-util-gfm";
 import { toMarkdown } from "mdast-util-to-markdown";
 import { gfm } from "micromark-extension-gfm";
 import { diffIndices } from "node-diff3";
-import { Schema, type Mark, type Node as DocNode } from "prosemirror-model";
+import { Fragment, Schema, type Mark, type Node as DocNode } from "prosemirror-model";
 import { pageBlocks } from "./page-markdown.js";
 
 /**
@@ -648,4 +648,63 @@ export function pageDocChanges(before: DocNode, after: DocNode): PageDocChange[]
     if (changes.length === before) blocks();
   }
   return changes.slice(0, MAX_DOC_CHANGES);
+}
+
+/**
+ * A suggestion against the document as it is now, as the changes a person
+ * takes or leaves one at a time (pages-live-document.md §4.2). Each replaces a
+ * run of whole top-level blocks of the document with the suggested blocks, so
+ * taking one is always a well-formed edit, whatever was typed meanwhile.
+ * `changes` say what it does word by word, in the document's positions: text it
+ * takes out is `added` (in the document, not the suggestion) and text it puts
+ * in is `removed` (in the suggestion, not the document).
+ */
+export interface PageDocHunk {
+  from: number;
+  to: number;
+  content: Fragment;
+  changes: PageDocChange[];
+}
+
+/** At most this many changes are offered one by one; past it the suggestion is a rewrite. */
+const MAX_DOC_HUNKS = 200;
+
+export function pageDocHunks(doc: DocNode, suggested: DocNode): PageDocHunk[] {
+  const blocks = (node: DocNode) => {
+    const out: Array<{ node: DocNode; pos: number; key: string }> = [];
+    node.forEach((child, pos) => out.push({ node: child, pos, key: JSON.stringify(child.toJSON()) }));
+    return out;
+  };
+  const now = blocks(doc);
+  const next = blocks(suggested);
+  const hunks: PageDocHunk[] = [];
+  const offer = (taken: typeof now, put: typeof next, at: number) => {
+    const last = taken[taken.length - 1];
+    const from = taken[0]?.pos ?? at;
+    const to = last ? last.pos + last.node.nodeSize : from;
+    // Word by word within the run: what is in the document's blocks and not the suggestion's is taken out.
+    const changes = pageDocChanges(pageSchema.topNodeType.create(null, put.map((block) => block.node)),
+      pageSchema.topNodeType.create(null, taken.map((block) => block.node)))
+      .map((change) => change.kind === "added" ? { ...change, from: change.from + from, to: change.to + from }
+        : { ...change, at: change.at + from });
+    hunks.push({ from, to, content: Fragment.fromArray(put.map((block) => block.node)), changes });
+  };
+  for (const hunk of diffIndices(now.map((block) => block.key), next.map((block) => block.key))) {
+    const [takenStart, takenLength] = hunk.buffer1;
+    const [putStart, putLength] = hunk.buffer2;
+    const taken = now.slice(takenStart, takenStart + takenLength);
+    const put = next.slice(putStart, putStart + putLength);
+    const before = takenStart > 0 ? now[takenStart - 1]! : null;
+    let at = before ? before.pos + before.node.nodeSize : 0;
+    // A run of changed blocks is offered block by block, so each is taken on its own; what one side has
+    // more of is offered after them, as one.
+    const paired = Math.min(taken.length, put.length);
+    for (let index = 0; index < paired; index++) {
+      offer(taken.slice(index, index + 1), put.slice(index, index + 1), at);
+      at = taken[index]!.pos + taken[index]!.node.nodeSize;
+    }
+    if (taken.length > paired || put.length > paired) offer(taken.slice(paired), put.slice(paired), at);
+    if (hunks.length >= MAX_DOC_HUNKS) break;
+  }
+  return hunks.slice(0, MAX_DOC_HUNKS);
 }

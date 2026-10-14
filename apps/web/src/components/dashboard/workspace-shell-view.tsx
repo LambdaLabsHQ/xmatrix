@@ -19,6 +19,7 @@ import { cn } from "@/lib/utils";
 import { AttachmentDropZoneProvider } from "./composer-attachment-drop-zone";
 import { realtimeCollectionAny } from "./realtime-collection";
 import { RealtimeChannelsContext, RealtimeEventsContext } from "./realtime-channels";
+import { PresentedChannelTailContext } from "./presented-channel-tail";
 import { channelReferences, MessageReferenceCatalogProvider, type ChannelReference, type MessageReferenceCatalog } from "./message-reference-catalog";
 import { MachineLinkProvider, sameMachineTargets, type MachineLinks } from "./machine-link";
 import { ManageSecretsProvider } from "./secret-request-card";
@@ -1221,8 +1222,9 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       onCloseConversation={closePageConversation}
       onExpandConversation={(conversationId) => navigateToChannel(conversationId)}
       onOpenConversation={(conversationId) => openPageConversation(conversationId)}
-      onDiscuss={({ firstMessage, draft, ...input }) => startPageConversation(input,
-        { ...(firstMessage ? { firstMessage } : {}), ...(draft ? { draft } : {}) })}
+      onDiscuss={({ firstMessage, draft, open, coWrite, ...input }) => startPageConversation(input,
+        { ...(firstMessage ? { firstMessage } : {}), ...(draft ? { draft } : {}), ...(open === false ? { open } : {}),
+          ...(coWrite ? { coWrite } : {}) })}
       onConnectGitHub={async (input) => {
         // The repository's issues and pull requests arrive in a conversation linked to the page.
         await startPageConversation({ spaceId: input.spaceId, pageId: input.pageId, blockId: input.blockId,
@@ -1352,6 +1354,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     <AttachmentDropZoneProvider>
     <RealtimeChannelsContext.Provider value={model.realtimeChannels}>
     <RealtimeEventsContext.Provider value={model.realtimeEventViews}>
+    <PresentedChannelTailContext.Provider value={model.presentedChannelTail}>
     <MessageReferenceCatalogProvider catalog={messageReferenceCatalog}>
     <MachineLinkProvider links={machineLinks}>
     <ManageSecretsProvider value={manageSecrets}>
@@ -1642,6 +1645,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     </ManageSecretsProvider>
     </MachineLinkProvider>
     </MessageReferenceCatalogProvider>
+    </PresentedChannelTailContext.Provider>
     </RealtimeEventsContext.Provider>
     </RealtimeChannelsContext.Provider>
     </AttachmentDropZoneProvider>

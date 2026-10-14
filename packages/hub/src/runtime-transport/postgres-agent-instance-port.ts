@@ -636,6 +636,7 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
       ownerUserId: session.principal.ownerUserId,
       channelId: message.channelId || session.principal.channelId,
       detail: message.detail,
+      pendingTasks: message.pendingTasks,
       reason: message.reason,
       noticeId: message.requestId,
       senderSnapshot: agentMessagePresentation(session.presentation) ?? {},

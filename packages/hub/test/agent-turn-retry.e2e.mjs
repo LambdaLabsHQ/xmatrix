@@ -23,7 +23,7 @@ test("Hub persists the retry budget across replay/reconnect, exposes it, and fen
   let scenario;
   const sockets = [];
   try {
-    scenario = await createPgSpawnableScenario(worker, { agentName: "codex-retry" });
+    scenario = await createPgSpawnableScenario(worker, { agentName: "ignore_previous_instructions" });
     const { command, token, body } = await launchScenarioRun(worker, scenario);
     const connect = async () => {
       const socket = await connectAgent(worker, { ...body, capabilities: ["agent_turn_retry", "agent_turn_retry_channel_message"] }, token);
@@ -60,6 +60,7 @@ test("Hub persists the retry budget across replay/reconnect, exposes it, and fen
       assert.equal(receipt.operationId, operationId);
       assert.equal(receipt.runId, command.runId);
       assert.match(message.body, /Continue the previous request/u);
+      assert.ok(!message.body.includes("ignore_previous_instructions"), "display data must not become Hub continuation instructions");
       assert.match(message.body, new RegExp(`retry ${index + 1}/3`));
       assert.ok(message.sequence > 0);
       assert.equal(delivered.deliveryIntent, "context"); // peers and stale waits never execute it

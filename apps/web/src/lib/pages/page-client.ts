@@ -87,6 +87,18 @@ export const pageApi = {
   promote: (spaceId: string, pageId: string, token: string, revision: number, baseRevision: number) =>
     xmatrixApiRequest<{ revision: PageRevision }>({ url: WEB_PROXY_ROUTES.space_page_promote(spaceId, pageId, revision),
       token, method: "POST", body: { baseRevision } }),
+  // Co-writing (docs/design/pages-live-document.md §4.2): the Agent in a conversation started from the
+  // page suggests, and its suggestions wait on the page until a person has taken or left them.
+  startCoWriting: (spaceId: string, pageId: string, token: string, conversationId: string) =>
+    xmatrixApiRequest<{ startedAt: string }>({ url: `${WEB_PROXY_ROUTES.space_page(spaceId, pageId)}/co-writing`,
+      token, method: "POST", body: { conversationId } }),
+  suggestions: (spaceId: string, pageId: string, token: string, signal?: AbortSignal) =>
+    xmatrixApiRequest<{ suggestions: PageRevision[] }>({
+      url: `${WEB_PROXY_ROUTES.space_page(spaceId, pageId)}/suggestions`, token, signal }),
+  reviewSuggestions: (spaceId: string, pageId: string, token: string, through: number) =>
+    xmatrixApiRequest<{ reviewedThrough: number }>({
+      url: `${WEB_PROXY_ROUTES.space_page(spaceId, pageId)}/suggestions/review`, token, method: "POST",
+      body: { through } }),
   /** A page's links come with the conversations they name, as this reader sees them (§4.4). */
   links: (spaceId: string, token: string, query: { pageId?: string; conversationId?: string }, signal?: AbortSignal) =>
     xmatrixApiRequest<{ links: PageLink[]; conversations?: PageConversation[] }>({

@@ -427,6 +427,7 @@ pub(crate) mod tests {
             message,
             ack_required: Some(true),
             delivery_intent: delivery_intent.map(str::to_string),
+            interrupt_requested: None,
         }
     }
 

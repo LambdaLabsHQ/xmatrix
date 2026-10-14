@@ -79,6 +79,7 @@ import {
 } from "./workspace-shell-helpers-extra";
 
 import { ChannelRowPreview } from "./channel-row-preview";
+import { useChannelAsTimelineShows } from "./presented-channel-tail";
 import { MentionMark } from "./mention-mark";
 import { CONVERSATION_QUERY, INTAKE_QUERY, type SpaceChannelCatalog } from "./use-channel-catalog-paging";
 
@@ -1063,7 +1064,7 @@ export const MobileChannelChatRow = memo(function MobileChannelChatRow({
   onOpen: (channel: SerializedChannel) => void;
   onOpenActions: (channel: SerializedChannel) => void;
 }) {
-  const displayChannel = useRealtimeChannel(catalogChannel)!;
+  const displayChannel = useChannelAsTimelineShows(useRealtimeChannel(catalogChannel)!);
   const badgeCount = displayChannel === catalogChannel || readCountsBaselineReady === undefined
     ? listedBadgeCount
     : Math.max(
@@ -1537,7 +1538,7 @@ export const ChannelNavItem = memo(function ChannelNavItem({
   onMarkDone,
   onOpenContextMenu,
 }: ChannelNavItemProps) {
-  const channel = useRealtimeChannel(catalogChannel)!;
+  const channel = useChannelAsTimelineShows(useRealtimeChannel(catalogChannel)!);
   const unreadCount = rowUnreadCount(channel, catalogChannel, listedUnreadCount, readCount, readCountsBaselineReady);
   const { onRowPointerDown, onRowClick } = usePointerFirstSelect(() => onSelect(channel));
   const focusedHumanMembers = channelFocusedHumanMembers(channel);

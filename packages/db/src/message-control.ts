@@ -710,6 +710,62 @@ async function liveRecipientUserIds(
   return recipients.map((row) => row.user_id);
 }
 
+/**
+ * Who a committed message reaches live, and which of them it notifies with
+ * their unread attention summary. `attention` is the message's attention rows;
+ * the append computes this in its own transaction so the message can be
+ * delivered the moment it commits, with no read after it.
+ */
+async function messageLiveRouting(
+  transaction: DatabaseTransaction,
+  spaceId: string,
+  channelId: string,
+  attention: readonly { subject_id: string; kind: string }[],
+): Promise<MessageLiveRouting> {
+  const recipientUserIds = await liveRecipientUserIds(transaction, spaceId, channelId);
+  const recipientSet = new Set(recipientUserIds);
+  const notifications = new Map<string, Record<string, unknown>>();
+  const notified = attention.filter(row => recipientSet.has(row.subject_id.slice("user:".length)));
+  // A mention notification carries the recipient's unread attention summary
+  // (everything after their acknowledged cursor), exactly as a later catalog
+  // read would report it; without it the client cannot badge the Channel.
+  const summaries = new Map((notified.length ? await transaction.query<QueryResultRow & {
+    subject_id: string; unread_count: string | number; message_id: string; kind: string;
+    timeline_sequence: string | number; created_at: Date | string; kinds: string[];
+  }>({
+    name: "message_live_routing_attention_summary_v3",
+    text: `SELECT subject.subject_id,COUNT(*) AS unread_count,
+        (ARRAY_AGG(a.message_id ORDER BY a.timeline_sequence DESC))[1] AS message_id,
+        (ARRAY_AGG(a.kind ORDER BY a.timeline_sequence DESC))[1] AS kind,
+        MAX(a.timeline_sequence) AS timeline_sequence,
+        (ARRAY_AGG(a.created_at ORDER BY a.timeline_sequence DESC))[1] AS created_at,
+        ARRAY_AGG(DISTINCT a.kind) AS kinds
+      FROM unnest($3::text[]) subject(subject_id)
+      JOIN data.message_attention a ON a.space_id=$1 AND a.channel_id=$2 AND a.subject_id=subject.subject_id
+      WHERE (${declaredWaitStandsSql("a")} OR a.timeline_sequence>COALESCE((SELECT acknowledged_sequence FROM data.delivery_cursors cursor_row
+        WHERE cursor_row.space_id=$1 AND cursor_row.channel_id=$2 AND cursor_row.subject_id=subject.subject_id), 0))
+      GROUP BY subject.subject_id`,
+    values: [spaceId, channelId, notified.map(row => row.subject_id)], maxRows: notified.length,
+  }) : []).map(row => {
+    const at = row.created_at instanceof Date ? row.created_at.toISOString() : String(row.created_at);
+    return [row.subject_id, { channelId, unreadAttentionCount: Number(row.unread_count), lastAttentionAt: at,
+      lastMessageId: row.message_id, lastMessageSequence: Number(row.timeline_sequence),
+      primaryTriggerKind: row.kind,
+      triggerKinds: ["broadcast", "mention", "reply"].filter(kind => row.kinds.includes(kind)), updatedAt: at }];
+  }));
+  for (const row of notified) {
+    const attentionSummary = summaries.get(row.subject_id);
+    notifications.set(row.subject_id.slice("user:".length), { userId: row.subject_id.slice("user:".length),
+      notification: { reason: row.kind, ...(attentionSummary ? { attention: attentionSummary } : {}) } });
+  }
+  return { recipientUserIds, recipientNotifications: [...notifications.values()] };
+}
+
+export interface MessageLiveRouting {
+  recipientUserIds: string[];
+  recipientNotifications: Record<string, unknown>[];
+}
+
 interface MessagePublishRow extends QueryResultRow {
   channel_id: string | null;
   accepted: boolean;
@@ -1690,9 +1746,16 @@ export class PostgresMessageRepository {
         "Message sequence confirmation failed",
       );
       if (dingtalkEffect) await finishDingTalkEffect(transaction,dingtalkEffect);
-      return publishedResult(admission, this.billing, {
+      const published = publishedResult(admission, this.billing, {
         billable: !messageKind.startsWith("xmatrix.system."), now: sentAt,
       });
+      // Who the message reaches, read in its own transaction: it is delivered
+      // the moment it commits, never after a second read. Not part of the
+      // stored receipt; a replay reads it again (liveDeliveryRouting).
+      const liveRouting = await messageLiveRouting(transaction, spaceId, channelId,
+        [...targets].filter(([subjectId]) => subjectId.startsWith("user:")).sort(([left], [right]) =>
+          left < right ? -1 : left > right ? 1 : 0).map(([subject_id, kind]) => ({ subject_id, kind })));
+      return { ...published, liveRouting };
     });
   }
 
@@ -2735,8 +2798,6 @@ export class PostgresMessageRepository {
         values: [spaceId, channelId, messageId], maxRows: 1,
       });
       if (!messages[0]) throw new MessageAuthorityError("message_not_found", 404, "Message not found");
-      const recipientUserIds = await liveRecipientUserIds(transaction, spaceId, channelId);
-      const recipientSet = new Set(recipientUserIds);
       const attention = await transaction.query<QueryResultRow & {
         subject_id: string; kind: string;
       }>({
@@ -2746,41 +2807,7 @@ export class PostgresMessageRepository {
           ORDER BY subject_id LIMIT 10000`,
         values: [spaceId, channelId, messageId], maxRows: 10_000,
       });
-      const notifications = new Map<string, Record<string, unknown>>();
-      const notified = attention.filter(row => recipientSet.has(row.subject_id.slice("user:".length)));
-      // A mention notification carries the recipient's unread attention summary
-      // (everything after their acknowledged cursor), exactly as a later catalog
-      // read would report it; without it the client cannot badge the Channel.
-      const summaries = new Map((notified.length ? await transaction.query<QueryResultRow & {
-        subject_id: string; unread_count: string | number; message_id: string; kind: string;
-        timeline_sequence: string | number; created_at: Date | string; kinds: string[];
-      }>({
-        name: "message_live_routing_attention_summary_v3",
-        text: `SELECT subject.subject_id,COUNT(*) AS unread_count,
-            (ARRAY_AGG(a.message_id ORDER BY a.timeline_sequence DESC))[1] AS message_id,
-            (ARRAY_AGG(a.kind ORDER BY a.timeline_sequence DESC))[1] AS kind,
-            MAX(a.timeline_sequence) AS timeline_sequence,
-            (ARRAY_AGG(a.created_at ORDER BY a.timeline_sequence DESC))[1] AS created_at,
-            ARRAY_AGG(DISTINCT a.kind) AS kinds
-          FROM unnest($3::text[]) subject(subject_id)
-          JOIN data.message_attention a ON a.space_id=$1 AND a.channel_id=$2 AND a.subject_id=subject.subject_id
-          WHERE (${declaredWaitStandsSql("a")} OR a.timeline_sequence>COALESCE((SELECT acknowledged_sequence FROM data.delivery_cursors cursor_row
-            WHERE cursor_row.space_id=$1 AND cursor_row.channel_id=$2 AND cursor_row.subject_id=subject.subject_id), 0))
-          GROUP BY subject.subject_id`,
-        values: [spaceId, channelId, notified.map(row => row.subject_id)], maxRows: notified.length,
-      }) : []).map(row => {
-        const at = row.created_at instanceof Date ? row.created_at.toISOString() : String(row.created_at);
-        return [row.subject_id, { channelId, unreadAttentionCount: Number(row.unread_count), lastAttentionAt: at,
-          lastMessageId: row.message_id, lastMessageSequence: Number(row.timeline_sequence),
-          primaryTriggerKind: row.kind,
-          triggerKinds: ["broadcast", "mention", "reply"].filter(kind => row.kinds.includes(kind)), updatedAt: at }];
-      }));
-      for (const row of notified) {
-        const attentionSummary = summaries.get(row.subject_id);
-        notifications.set(row.subject_id.slice("user:".length), { userId: row.subject_id.slice("user:".length),
-          notification: { reason: row.kind, ...(attentionSummary ? { attention: attentionSummary } : {}) } });
-      }
-      return { recipientUserIds, recipientNotifications: [...notifications.values()] };
+      return messageLiveRouting(transaction, spaceId, channelId, attention);
     });
   }
 

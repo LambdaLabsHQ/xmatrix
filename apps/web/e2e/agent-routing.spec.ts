@@ -1,5 +1,5 @@
 import { expect, test } from "./fixtures";
-import { E2E_CHANNEL, E2E_SPACE, fixtureJson, fixtureRequestBodies,
+import { E2E_CHANNEL, E2E_SPACE, fixtureJson, fixtureRequestBodies, harnessRegistrations,
   installWorkspaceStubs } from "./workspace-fixtures";
 
 test.use({ viewport: { width: 1280, height: 900 }, isMobile: false, hasTouch: false, deviceScaleFactor: 1 });
@@ -37,11 +37,7 @@ for (const mobile of [false, true]) {
   test.use({ viewport: mobile ? { width: 393, height: 852 } : { width: 1280, height: 900 }, isMobile: mobile, hasTouch: mobile });
   test("bare @ shows active Channel instances in their own category beside a full harness catalog", async ({ page }, testInfo) => {
   const harnesses = ["claude", "codex", "cursor", "grok", "opencode", "windsurf"];
-  const locations = harnesses.map(harness => ({
-    key: { spaceId: E2E_SPACE.id, ownerUserId: "owner", machineId: "machine", harness },
-    displayName: harness, ownerName: "Owner", machineName: "Workstation", version: 1, state: "enabled",
-    models: [], routingReady: true, canManageOwnerGrant: false, canConfigureSpace: false, canRemoveFromSpace: false,
-  }));
+  const locations = harnessRegistrations(harnesses);
   await installWorkspaceStubs(page, { spaces: [E2E_SPACE], channels: [{ ...E2E_CHANNEL,
     memberPresence: { "agent:codex": { kind: "agent", status: "busy", label: "codex",
       instances: [{ id: "instance-codex", channelInstanceId: "1", label: "codex:1", status: "busy",
