@@ -34,6 +34,13 @@ test("a hunk says word by word what it takes out and puts in, in the document's 
   assert.deepEqual(put, ["Shipped this"]);
 });
 
+test("words put in at the end of a line keep the space that parts them from it", () => {
+  const doc = markdownToPageDoc("The relay moves\n");
+  const [hunk] = pageDocHunks(doc, markdownToPageDoc("The relay moves to the new region\n"));
+  const put = hunk.changes.find((change) => change.kind === "removed");
+  assert.equal(`${doc.textBetween(0, put.at)}${put.text}`, "The relay moves to the new region");
+});
+
 test("new blocks are put in between blocks, and removed ones are taken out whole", () => {
   const now = "# Plan\n\nOne\n\nTwo\n";
   assert.equal(taking(now, "# Plan\n\nOne\n\nOne and a half\n\nTwo\n", [0]).markdown,
