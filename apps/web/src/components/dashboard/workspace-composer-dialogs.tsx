@@ -1707,10 +1707,7 @@ export const ChannelDetails = memo(function ChannelDetails({
 
           <ChannelSubscriptionsBlock
             connections={connectorConnections}
-            userId={currentUserMemberId || "anonymous"}
-            spaceId={channelSpaceId}
             channelId={channelId}
-            token={token}
             connectorRevision={connectorRevision}
             onRunConnectorCommand={onRunChannelCommand}
             onManageApps={onManageApps}
