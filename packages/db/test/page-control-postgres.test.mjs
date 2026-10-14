@@ -236,6 +236,13 @@ integration("pages: recent changes are the readable pages that changed last, eac
     assert.equal(latest.block.title, "Goals");
     assert.deepEqual(latest.authors.map((author) => author.id), [ids.owner]);
 
+    const { page: styled } = await call("create", { principal: owner, title: "Styled",
+      body: "## Goals\n* ship\n\n## Next\nIdle\n" });
+    await call("edit", { principal: owner, pageId: styled.pageId, baseRevision: 1,
+      body: "## Goals\n\n- ship\n\n## Next\n\nlaunch\n" });
+    assert.deepEqual(shown((await call("recentChanges", { principal: owner, limit: 1 })).changes),
+      [["Styled", "next", "launch", false]], "the gist is what the edit added, not the markdown style the page was created in");
+
     await call("edit", { principal: member, pageId: notes.pageId, baseRevision: 1, body: "" });
     assert.deepEqual(shown((await call("recentChanges", { principal: member, limit: 1 })).changes),
       [["Notes", null, null, false]], "a change that only removed text has no gist");
