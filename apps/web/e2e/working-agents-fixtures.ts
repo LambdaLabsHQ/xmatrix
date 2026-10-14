@@ -93,7 +93,7 @@ export async function openWorkingAgentsSpace(
   space: ReturnType<typeof workingAgentsSpace>,
   messages: unknown[],
   lastRowText: string,
-  options: { routeSocket?: typeof routeHumanSocket } = {},
+  options: { routeSocket?: typeof routeHumanSocket; initialAgentList?: typeof space.agents } = {},
 ): Promise<((frame: unknown) => void) & { connections(): number }> {
   let send: ((frame: unknown) => void) | null = null;
   let connections = 0;
@@ -101,7 +101,7 @@ export async function openWorkingAgentsSpace(
     if (frame.type === "ping") reply({ type: "pong", requestId: frame.requestId });
     if (frame.type === "human_connect") {
       connections += 1;
-      reply({ type: "agent_list", agents: space.agents });
+      reply({ type: "agent_list", agents: options.initialAgentList ?? space.agents });
       send = reply;
     }
     if (frame.type === "user_focus_channel") {
