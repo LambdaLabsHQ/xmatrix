@@ -14,9 +14,9 @@ async fn capacity_fixture_relay(
         let mut socket = trace_fixture_socket::registered_agent_socket(
             &listener,
             AgentInstanceServerMessage::AgentInstanceConnected {
-                agent: connected_agent,
+                agent: connected_agent.clone(),
                 peers: vec![],
-                hub_capabilities: Some(vec!["agent_turn_retry".into()]),
+                hub_capabilities: Some(vec!["agent_turn_retry".into(), "agent_turn_retry_channel_message".into()]),
             },
         )
         .await;
@@ -39,7 +39,22 @@ async fn capacity_fixture_relay(
                     }
                 }
                 let retry = value["action"] == "failed" && failures == 1 && mode != "stop";
-                Some(serde_json::json!({
+                if retry && mode == "permit" {
+                    Some(serde_json::json!({
+                        "type":"channel_message_received", "ackRequired":true, "deliveryIntent":"context",
+                        "message": { "messageId":"retry-message", "channelId":"channel-1", "sequence":7,
+                            "body":"Continue the previous request approved by Hub.",
+                            "sentAt":"2026-10-14T10:00:00Z",
+                            "from":{"identityId":"system:xmatrix", "kind":"system", "label":"xMatrix", "userId":"owner", "email":""},
+                            "metadata":{"xmatrixProvenance":"system_fact", "xmatrixSystemNotice":true,
+                                "xmatrixTurnRetry":{"version":1, "state":"issued", "requestId":value["requestId"],
+                                    "operationId":value["operationId"], "attemptToken":"hub-permit",
+                                    "runId":"run-1", "ownerUserId":"owner", "instanceId":connected_agent.instance_id,
+                                    "expiresAt": std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as u64 + 120_000}},
+                        }
+                    }))
+                } else {
+                    Some(serde_json::json!({
                     "type":"agent_turn_retry_decision", "requestId":value["requestId"],
                     "operationId": if mode == "wrong_scope" { serde_json::json!("other-operation") } else { value["operationId"].clone() },
                     "threadId":value["threadId"].as_str().unwrap_or("none"),
@@ -48,6 +63,7 @@ async fn capacity_fixture_relay(
                     "input":if retry {Some("Continue the previous request approved by Hub.")} else {None},
                     "reason":"exhausted",
                 }))
+                }
             } else {
                 None
             };
@@ -70,7 +86,7 @@ async fn capacity_fixture_relay(
         "codex".into(),
         None,
     );
-    relay.set_runtime_capabilities(vec!["agent_turn_retry".into()]);
+    relay.set_runtime_capabilities(vec!["agent_turn_retry".into(), "agent_turn_retry_channel_message".into()]);
     relay.register().await.unwrap();
     (Arc::new(relay), frames)
 }
@@ -100,8 +116,9 @@ async fn codex_capacity_never_retries_without_hub_authority() {
 }
 
 #[tokio::test]
-async fn codex_capacity_follows_hub_input_and_retains_selected_settings() {
-    let agent = test_serialized_agent("capacity");
+async fn codex_capacity_executes_channel_message_body_and_retains_selected_settings() {
+    let mut agent = test_serialized_agent("capacity");
+    agent.instance_id = Some("channel-1:1".into());
     let (relay, frames) = capacity_fixture_relay("permit", &agent).await;
     let mut codex = initialized_codex_fixture("codex-capacity-hub-recover").await;
     let turn = tokio::time::timeout(
@@ -141,7 +158,7 @@ async fn codex_capacity_follows_hub_input_and_retains_selected_settings() {
 
 #[tokio::test]
 async fn codex_capacity_obeys_hub_stop_and_rejects_foreign_permits() {
-    for mode in ["permit", "stop", "wrong_scope"] {
+    for mode in ["permit", "stop", "wrong_scope", "private_permit"] {
         let agent = test_serialized_agent("capacity");
         let (relay, _) = capacity_fixture_relay(mode, &agent).await;
         let mut codex = initialized_codex_fixture("codex-capacity-exhausted").await;
@@ -157,7 +174,7 @@ async fn codex_capacity_obeys_hub_stop_and_rejects_foreign_permits() {
         .expect("host ignored Hub decision")
         .unwrap();
         assert!(turn.failed);
-        assert_eq!(turn.failure_reported_by_hub, mode != "wrong_scope");
+        assert_eq!(turn.failure_reported_by_hub, matches!(mode, "permit" | "stop"));
         assert_eq!(
             codex
                 .request("thread/goal/get", serde_json::json!({}))
