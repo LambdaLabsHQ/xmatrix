@@ -1373,6 +1373,29 @@ pub enum AgentInstanceClientMessage {
         #[serde(skip_serializing_if = "Option::is_none", default)]
         attempt_token: Option<String>,
     },
+    /// What a `/config` or `/fast` control did, as facts; Hub words the notice.
+    AgentParameterControlResult {
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        request_id: Option<String>,
+        channel_id: String,
+        /// The control message this answers.
+        source_message_id: String,
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        parameter: Option<String>,
+        /// `query`, `select` or `toggle`.
+        action: String,
+        /// The parameter's value as the session holds it after the control.
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        current: Option<String>,
+        #[serde(skip_serializing_if = "Vec::is_empty", default)]
+        choices: Vec<String>,
+        /// The provider's own note on the parameter (cooldown, disabled).
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        notice: Option<String>,
+        /// The original error when the control failed.
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        error: Option<String>,
+    },
     AgentLifecycle {
         #[serde(skip_serializing_if = "Option::is_none", default)]
         request_id: Option<String>,
