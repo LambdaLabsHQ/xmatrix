@@ -119,6 +119,8 @@ export interface AgentInstanceModelSwitchResultMessage {
   requestId: string;
   model?: string;
   error?: string;
+  /** The switch cancelled a turn that was running; Hub decides its continuation. */
+  interruptedTurn?: boolean;
 }
 
 export interface AgentInstanceEffortSwitchResultMessage {
@@ -126,6 +128,8 @@ export interface AgentInstanceEffortSwitchResultMessage {
   requestId: string;
   effort?: string;
   error?: string;
+  /** The switch cancelled a turn that was running; Hub decides its continuation. */
+  interruptedTurn?: boolean;
 }
 
 export interface AgentInstanceLifecycleMessage {
@@ -389,6 +393,18 @@ export type AgentInstanceServerMessage =
 
 /** Hub-authored Channel message binding, stored under reserved xmatrixTurnRetry metadata.
  * The instruction is exclusively the canonical message body, never a private input field. */
+/**
+ * The Hub's instruction that one Instance continue the turn a live switch
+ * cancelled, committed in the Channel like a capacity retry. Only the named
+ * Instance, still waiting on one of the named switches, runs it.
+ */
+export interface ChannelSwitchContinuation {
+  version: 1;
+  instanceId: string;
+  /** The switch requests that cancelled the turn and landed. */
+  requestIds: string[];
+}
+
 export interface ChannelTurnRetry {
   version: 1;
   state: "issued";

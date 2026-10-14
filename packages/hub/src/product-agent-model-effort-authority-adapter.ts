@@ -1,4 +1,5 @@
 import { plainRecord as record } from "@xmatrix/protocol";
+import type { ChannelSwitchContinuation } from "@xmatrix/protocol/connections/agent-instance";
 import {
   orchestrateProductAgentControlCommands,
   parseProductAgentControlCommands,
@@ -21,11 +22,15 @@ import type { Env } from "./types";
  */
 function outcomeFromRuntime(value: unknown): ProductAgentControlOutcome {
   const outcome = record(value);
+  const owed = record(outcome?.continuation);
+  const continuation = typeof owed?.instanceId === "string" && owed.instanceId &&
+      typeof owed.requestId === "string" && owed.requestId
+    ? { continuation: { instanceId: owed.instanceId, requestId: owed.requestId } } : {};
   switch (outcome?.status) {
     case "switched":
       return typeof outcome.selected === "string" && outcome.selected.trim()
-        ? { status: "switched", selected: outcome.selected.trim() }
-        : { status: "error", message: "the Runtime confirmed no selection." };
+        ? { status: "switched", selected: outcome.selected.trim(), ...continuation }
+        : { status: "error", message: "the Runtime confirmed no selection.", ...continuation };
     case "catalog": {
       const options = Array.isArray(outcome.options)
         ? outcome.options.filter((option): option is string => typeof option === "string")
@@ -46,6 +51,7 @@ function outcomeFromRuntime(value: unknown): ProductAgentControlOutcome {
         message: typeof outcome.message === "string" && outcome.message.trim()
           ? outcome.message.trim()
           : "the Runtime reported an unspecified failure.",
+        ...continuation,
       };
     default:
       return { status: "error", message: "the Runtime returned an unreadable result." };
@@ -96,6 +102,8 @@ export function createProductAgentControlAuthorityPort(input: {
         messageId,
         channelId,
         body,
+        // The Hub's receipt, not the owner's speech: it answers none of their waits.
+        messageKind: "xmatrix.system.control-switch",
         principal,
         senderSnapshot: productAgentSystemNoticeSenderSnapshot(input.actorUserId),
         residual: {
@@ -116,6 +124,31 @@ export function createProductAgentControlAuthorityPort(input: {
           : "";
         throw new Error(`control switch notice failed (${response.status})${detail}`);
       }
+    },
+
+    /* The continuation is a committed Channel instruction, as a capacity retry
+       is: only the named Instance, still waiting on one of these switches,
+       runs it, and it checks it has no newer input first. */
+    async publishContinuation(channelId, { instanceId, requestIds, body }) {
+      const messageId = `system:${input.sourceMessageId}:switch-continuation:${instanceId}`.slice(0, 200);
+      const response = await dispatchProductMessageAppend(input.env, channelId, {
+        commandId: `product:switch-continuation:${messageId}`.slice(0, 200),
+        messageId,
+        channelId,
+        body,
+        messageKind: "xmatrix.switch-continuation",
+        principal,
+        xmatrixAuthor: true,
+        residual: {
+          appMetadata: {
+            xmatrixProvenance: "system_fact",
+            xmatrixSystemNotice: true,
+            sourceMessageId: input.sourceMessageId,
+            xmatrixSwitchContinuation: { version: 1, instanceId, requestIds } satisfies ChannelSwitchContinuation,
+          },
+        },
+      });
+      if (!response.ok) throw new Error(`switch continuation failed (${response.status})`);
     },
   };
 }

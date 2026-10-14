@@ -11,10 +11,14 @@ export type { ProductAgentControlCommand, ProductAgentControlKind };
 export const RELAY_RUNTIME_AGENT_CONTROL_SWITCH_PATH = "/internal/product-agent/control-switch";
 
 export type ProductAgentControlOutcome =
-  | { status: "switched"; selected: string }
+  | { status: "switched"; selected: string;
+      /** The switch cancelled this Instance's running turn under `requestId`. */
+      continuation?: { instanceId: string; requestId: string } }
   | { status: "catalog"; current?: string; options: readonly string[] }
   | { status: "no_instance" }
-  | { status: "error"; message: string };
+  | { status: "error"; message: string;
+      /** A refused switch still cancelled this Instance's running turn. */
+      continuation?: { instanceId: string; requestId: string } };
 
 export interface ProductAgentControlPort {
   switchControl(input: {
@@ -24,6 +28,24 @@ export interface ProductAgentControlPort {
     value?: string;
   }): Promise<ProductAgentControlOutcome>;
   publishSystemNotice(channelId: string, body: string): Promise<void>;
+  /** Commit the instruction that one Instance continue the turn its switches cancelled. */
+  publishContinuation?(channelId: string, input: { instanceId: string; requestIds: string[]; body: string }): Promise<void>;
+}
+
+/**
+ * The input a continued turn starts from. Every harness needs input to start
+ * inference, and the cancelled turn ends on the harness's own record of the
+ * cancellation, which a model otherwise reads as a person rejecting its work.
+ * So it says who cancelled the turn and why, and nothing else.
+ */
+export function switchContinuationPrompt(selections: readonly string[]): string {
+  const cause = selections.length === 0
+    ? "for a model or effort switch, which was not applied"
+    : `so that the switch to ${selections.join(" and ")} took effect at once`;
+  return `[xMatrix] xMatrix interrupted your previous turn ${cause}; no person interrupted or `
+    + "rejected anything. A tool call cancelled by that interrupt may have partly run: check its side "
+    + "effects before retrying it. Continue the interrupted work from where it stopped. If it was "
+    + "already complete, end the turn without doing anything more.";
 }
 
 export interface ProductAgentControlResult {
@@ -104,5 +126,27 @@ export async function orchestrateProductAgentControlCommands(input: {
       ? notices[0]!
       : notices.map((notice) => `- ${notice}`).join("\n"),
   );
+  /* A turn a switch cancelled continues on what is selected now, once per
+     Instance after every statement has landed: the first switch cancels the
+     turn and the next must not cancel its continuation again. */
+  if (input.port.publishContinuation) {
+    const byTarget = new Map<string, { instanceId?: string; requestIds: string[]; selections: string[] }>();
+    for (const [index, { kind, outcome }] of results.entries()) {
+      if (outcome.status !== "switched" && outcome.status !== "error") continue;
+      const target = commands[index]!.target.toLowerCase();
+      const entry = byTarget.get(target) ?? { requestIds: [], selections: [] };
+      if (outcome.status === "switched") entry.selections.push(`${kind} \`${outcome.selected}\``);
+      if (outcome.continuation) {
+        entry.instanceId = outcome.continuation.instanceId;
+        entry.requestIds.push(outcome.continuation.requestId);
+      }
+      byTarget.set(target, entry);
+    }
+    for (const { instanceId, requestIds, selections } of byTarget.values()) {
+      if (!instanceId) continue;
+      await input.port.publishContinuation(input.channelId, { instanceId, requestIds,
+        body: switchContinuationPrompt(selections) });
+    }
+  }
   return results;
 }

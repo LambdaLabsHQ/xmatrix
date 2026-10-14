@@ -532,6 +532,9 @@ pub struct AgentRuntimeWaiting {
     pub kind: String,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub label: Option<String>,
+    /// For background tasks, how many are still running; clients word it.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub count: Option<u32>,
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
     pub details: Vec<String>,
     pub since_millis: u64,
@@ -747,43 +750,72 @@ pub struct ChannelTurnRetry {
     pub expires_at: u64,
 }
 
-pub fn channel_turn_retry(message: &ChannelMessage) -> Option<ChannelTurnRetry> {
+/// The metadata of an unedited Hub-written Channel instruction, whose body is
+/// the input it carries.
+fn hub_instruction_metadata(message: &ChannelMessage) -> Option<&serde_json::Value> {
     let metadata = message.metadata.as_ref()?;
-    if message.from.kind != "system"
-        || metadata["xmatrixProvenance"] != "system_fact"
-        || metadata["xmatrixSystemNotice"] != true
-        || message.sequence.is_none_or(|sequence| sequence == 0)
-        || message.body.is_empty()
-        || message.body.len() > 2_000
-        || message.edited_at.is_some()
-        || message.recalled_at.is_some()
-        || message.deleted_at.is_some()
-    {
-        return None;
-    }
-    let retry: ChannelTurnRetry =
-        serde_json::from_value(metadata["xmatrixTurnRetry"].clone()).ok()?;
-    if retry.version != 1
-        || retry.state != "issued"
-        || retry.instance_id.is_empty()
-        || retry.instance_id.len() > 300
-        || retry
-            .instance_id
+    (message.from.kind == "system"
+        && metadata["xmatrixProvenance"] == "system_fact"
+        && metadata["xmatrixSystemNotice"] == true
+        && message.sequence.is_some_and(|sequence| sequence > 0)
+        && !message.body.is_empty()
+        && message.body.len() <= 2_000
+        && message.edited_at.is_none()
+        && message.recalled_at.is_none()
+        && message.deleted_at.is_none())
+    .then_some(metadata)
+}
+
+fn instruction_instance_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 300
+        && !id
             .bytes()
             .any(|byte| byte.is_ascii_whitespace() || byte.is_ascii_control())
-        || [&retry.request_id, &retry.operation_id, &retry.attempt_token]
+}
+
+fn instruction_token(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 160
+        && id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
+}
+
+pub fn channel_turn_retry(message: &ChannelMessage) -> Option<ChannelTurnRetry> {
+    let metadata = hub_instruction_metadata(message)?;
+    let retry: ChannelTurnRetry =
+        serde_json::from_value(metadata["xmatrixTurnRetry"].clone()).ok()?;
+    (retry.version == 1
+        && retry.state == "issued"
+        && instruction_instance_id(&retry.instance_id)
+        && [&retry.request_id, &retry.operation_id, &retry.attempt_token]
             .iter()
-            .any(|id| {
-                id.is_empty()
-                    || id.len() > 160
-                    || !id
-                        .bytes()
-                        .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
-            })
-    {
-        return None;
-    }
-    Some(retry)
+            .all(|id| instruction_token(id)))
+    .then_some(retry)
+}
+
+/// Hub-written instruction that one Instance continue the turn a live switch
+/// cancelled. The body is the continuation input; only the named Instance,
+/// still waiting on one of the named switches, runs it.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChannelSwitchContinuation {
+    pub version: u8,
+    pub instance_id: String,
+    pub request_ids: Vec<String>,
+}
+
+pub fn channel_switch_continuation(message: &ChannelMessage) -> Option<ChannelSwitchContinuation> {
+    let metadata = hub_instruction_metadata(message)?;
+    let continuation: ChannelSwitchContinuation =
+        serde_json::from_value(metadata["xmatrixSwitchContinuation"].clone()).ok()?;
+    (continuation.version == 1
+        && instruction_instance_id(&continuation.instance_id)
+        && !continuation.request_ids.is_empty()
+        && continuation.request_ids.len() <= 16
+        && continuation.request_ids.iter().all(|id| instruction_token(id)))
+    .then_some(continuation)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1349,6 +1381,9 @@ pub enum AgentInstanceClientMessage {
         model: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none", default)]
         error: Option<String>,
+        /// The switch cancelled a turn that was running; Hub decides its continuation.
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        interrupted_turn: Option<bool>,
     },
     AgentEffortSwitchResult {
         request_id: String,
@@ -1356,6 +1391,9 @@ pub enum AgentInstanceClientMessage {
         effort: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none", default)]
         error: Option<String>,
+        /// The switch cancelled a turn that was running; Hub decides its continuation.
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        interrupted_turn: Option<bool>,
     },
     AgentTurnRetry {
         #[serde(skip_serializing_if = "Option::is_none", default)]
@@ -2542,6 +2580,7 @@ mod tests {
             request_id: "req-1".into(),
             model: Some("gpt-5.5".into()),
             error: None,
+            interrupted_turn: None,
         };
         let json = serde_json::to_value(result).unwrap();
         assert_eq!(json["type"], "agent_model_switch_result");
@@ -2565,6 +2604,7 @@ mod tests {
             request_id: "req-2".into(),
             effort: Some("high".into()),
             error: None,
+            interrupted_turn: None,
         };
         let json = serde_json::to_value(result).unwrap();
         assert_eq!(json["type"], "agent_effort_switch_result");

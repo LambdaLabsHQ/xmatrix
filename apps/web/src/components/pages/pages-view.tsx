@@ -861,6 +861,12 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   }, [liveOnPage]);
   const present = useMemo(() => presence.filter(({ state }) => cursorPresence(state) !== null),
     [cursorPresence, presence]);
+  // On a phone an Agent on the page is its face at the right edge, beside its line (§3.2): the conversations
+  // they work from, whose Agents a section's heading does not draw again.
+  const atEdge = useMemo(() => !phone ? "" : [...new Set([
+    ...present.flatMap(({ state }) => state.user?.kind === "agent" && state.user.conversationId ? [state.user.conversationId] : []),
+    ...staying.map((agent) => agent.conversationId),
+  ])].sort().join("\n"), [phone, present, staying]);
 
   // Claims arrive live from the session; the interval lets lapsed ones go.
   const claims = useQuery({
@@ -894,8 +900,9 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
       }
     }
     // The Agents working in each section's conversations, on the page or not (§3.2).
+    const edge = new Set(atEdge.split("\n"));
     for (const item of conversations) {
-      if (item.agents.length === 0) continue;
+      if (item.agents.length === 0 || edge.has(item.conversationId)) continue;
       const working = note(item.blockId).working ??= [];
       for (const agent of item.agents) {
         working.push({ name: agent.name, busy: agent.status === "busy", avatarUrl: agent.avatarUrl,
@@ -909,7 +916,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
         claimId: claim.claimId, mine: claim.ownerUserId === userId };
     }
     return notes;
-  }, [awareness.data, claims.data, conversationName, conversations, userId]);
+  }, [atEdge, awareness.data, claims.data, conversationName, conversations, userId]);
 
   const document = useQuery({
     ...pageDocumentQuery(user?.id ?? null, spaceId ?? "", pageId ?? "", token),
@@ -1334,7 +1341,8 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
                   query.queryKey.includes("page-tree") })} />
             ) : (
               <div className="flex gap-6">
-                <div ref={docColumn} className="relative min-w-0 max-w-3xl flex-1">
+                <div ref={docColumn} className={cn("relative min-w-0 max-w-3xl flex-1",
+                  phone && phoneDiff && !suggestionMark && "has-reader-mark")}>
                   <PagePens pens={pens} onJump={jumpTo} onOpen={(person) => setDialog({ kind: "agent", key: person.key })} />
                   {suggestionMark && suggestedBy && (
                     <PageChangeMark top={suggestionMark.top} away={suggestionMark.away} testId="page-suggestions"
