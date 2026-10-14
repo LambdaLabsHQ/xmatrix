@@ -2,6 +2,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { fixtureRequestRecords } from "./in-page-api-fixtures";
 import { readNativeHumanSocketTraffic, routeNativeHumanSocket, type NativeHumanSocketTraffic } from "./native-human-socket-fixture";
 import { installRenderCounter } from "./render-counts";
+import { rendererBudget } from "./renderer-budget";
 import { expect, test } from "./fixtures";
 import { E2E_CHANNEL, E2E_DESKTOP_CONTEXT, conversationOpened } from "./workspace-fixtures";
 import { channelHistory, openWorkingAgentsSpace, workingAgentsSpace } from "./working-agents-fixtures";
@@ -88,21 +89,14 @@ test("a minute of messages into a thousand conversations costs each of them once
     } };
   };
 
-  const cdp = await page.context().newCDPSession(page);
-  await cdp.send("Performance.enable");
-  const metrics = async () => Object.fromEntries(
-    (await cdp.send("Performance.getMetrics")).metrics.map((metric) => [metric.name, metric.value]),
-  );
   const catalogBefore = (await fixtureRequestRecords(page, "channel-catalog")).length;
   await page.evaluate(() => {
     (window as unknown as { __nativeHumanSocketTraffic: NativeHumanSocketTraffic }).__nativeHumanSocketTraffic.counting = true;
     (window as unknown as { __messageArrivals: Arrivals }).__messageArrivals.counting = true;
     (window as unknown as { __renderCounts: RenderCounts }).__renderCounts.counting = true;
   });
-  const before = await metrics();
-  let windowBefore = before;
+  const budget = await rendererBudget(page);
   const startedAt = Date.now();
-  const windows: number[] = [];
   let latest = 0;
   let toOthers = 0;
   let toOpen = 0;
@@ -117,15 +111,10 @@ test("a minute of messages into a thousand conversations costs each of them once
     const due = startedAt + (tick + 1) * TICK_MS;
     latest = Math.max(latest, Date.now() - due);
     await delay(Math.max(0, due - Date.now()));
-    if ((tick + 1) % (10_000 / TICK_MS) === 0) {
-      const current = await metrics();
-      windows.push((current.TaskDuration - windowBefore.TaskDuration) / (current.Timestamp - windowBefore.Timestamp));
-      windowBefore = current;
-    }
+    if ((tick + 1) % (10_000 / TICK_MS) === 0) await budget.closeWindow();
   }
   // The last message has had its normal interval before this read; nothing is drained.
-  const after = await metrics();
-  const elapsed = after.Timestamp - before.Timestamp;
+  const spent = await budget.total();
   const traffic = await readNativeHumanSocketTraffic(page);
   const { arrivals, renders } = await page.evaluate(() => {
     const state = window as unknown as { __messageArrivals: Arrivals; __renderCounts: RenderCounts };
@@ -137,14 +126,12 @@ test("a minute of messages into a thousand conversations costs each of them once
   const catalogAsked = (await fixtureRequestRecords(page, "channel-catalog")).slice(catalogBefore);
   const listReads = catalogAsked.filter((request) => /\/channels\/page(\?|$)/u.test(request.url)).length;
   const resolves = catalogAsked.filter((request) => /\/channels\/resolve(\?|$)/u.test(request.url)).length;
-  const busy = (after.TaskDuration - before.TaskDuration) / elapsed;
+  const { busy, elapsed, windows } = spent;
   console.log(`[message-arrival] ${toOthers} + ${toOpen} messages in ${elapsed.toFixed(1)}s: ${JSON.stringify({
-    mainThreadBusy: Number(busy.toFixed(3)),
+    ...spent,
+    busy: Number(busy.toFixed(3)),
+    elapsed: Number(elapsed.toFixed(1)),
     windows: windows.map((value) => Number(value.toFixed(3))),
-    script: Number((after.ScriptDuration - before.ScriptDuration).toFixed(2)),
-    style: Number((after.RecalcStyleDuration - before.RecalcStyleDuration).toFixed(2)),
-    layout: Number((after.LayoutDuration - before.LayoutDuration).toFixed(2)),
-    styleUpdates: after.RecalcStyleCount - before.RecalcStyleCount,
     received: traffic.byType.channel_message_received ?? 0,
     consumed: { others: arrivals.total - arrivals.open, open: arrivals.open },
     renders, listReads, resolves, latestTickMs: latest, connections: send.connections(),

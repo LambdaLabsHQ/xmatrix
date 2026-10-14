@@ -95,10 +95,20 @@ async function openMessageRefresh() {
     fetched.push(key[6] + ":" + key[7]);
     return { pages, pageParams: pages.map((_, index) => index ? `cursor-${index}` : null) };
   } });
-  return { refreshSpaceCatalogForMessages, client, prefix, fetched, page, hold,
+  const countsKey = [...prefix, "catalog-counts"];
+  /** A window's messages against the Channels the entity table holds; gives back what was sent to resolve. */
+  const arrive = (entities, details) => {
+    const resolved = [];
+    refreshSpaceCatalogForMessages({
+      client, spaceId: "space", prefix, countsKey, viewerId: "user", details,
+      hasChannel: (id) => entities.has(id), channel: (id) => entities.get(id),
+      resolveChannel: (...args) => resolved.push(args),
+    });
+    return resolved;
+  };
+  return { refreshSpaceCatalogForMessages, client, prefix, fetched, page, hold, arrive, countsKey,
     conversations: [...prefix, "catalog", "flat", "all", null, ""],
-    unread: [...prefix, "catalog", "flat", "unread", null, ""],
-    countsKey: [...prefix, "catalog-counts"] };
+    unread: [...prefix, "catalog", "flat", "unread", null, ""] };
 }
 
 const catalogRow = (id, at) => ({ channel: { id, spaceId: "space" }, ownActivityAt: at });
@@ -116,16 +126,10 @@ test("a window's messages bring known conversations into the list without readin
       ["quiet", { id: "quiet", spaceId: "space", updatedAt: "2026-10-02T00:00:00.000Z" }],
       ["paged", { id: "paged", spaceId: "space" }],
     ]);
-    const resolved = [];
-    t.refreshSpaceCatalogForMessages({
-      client: t.client, spaceId: "space", prefix: t.prefix, countsKey: t.countsKey, viewerId: "user",
-      details: [
-        { kind: "message", channelId: "quiet", at: "2026-10-06T02:00:00.000Z" },
-        { kind: "message", channelId: "paged", at: "2026-10-06T03:00:00.000Z" },
-      ],
-      hasChannel: (id) => entities.has(id), channel: (id) => entities.get(id),
-      resolveChannel: (...args) => resolved.push(args),
-    });
+    const resolved = t.arrive(entities, [
+      { kind: "message", channelId: "quiet", at: "2026-10-06T02:00:00.000Z" },
+      { kind: "message", channelId: "paged", at: "2026-10-06T03:00:00.000Z" },
+    ]);
     await new Promise((resolve) => setImmediate(resolve));
     const data = t.client.getQueryData(t.conversations);
     // Newest first, each Channel once, and every page keeps its own cursor.
@@ -150,13 +154,8 @@ test("a conversation the reader's list cannot hold is not put into it", async ()
       ["mine", { id: "mine", spaceId: "space", metadata: { intakeOf: "user" } }],
       ["elsewhere", { id: "elsewhere", spaceId: "other-space" }],
     ]);
-    const resolved = [];
-    t.refreshSpaceCatalogForMessages({
-      client: t.client, spaceId: "space", prefix: t.prefix, countsKey: t.countsKey, viewerId: "user",
-      details: ["theirs", "mine", "elsewhere", "unknown"].map((channelId) => ({ kind: "message", channelId })),
-      hasChannel: (id) => entities.has(id), channel: (id) => entities.get(id),
-      resolveChannel: (...args) => resolved.push(args),
-    });
+    const resolved = t.arrive(entities,
+      ["theirs", "mine", "elsewhere", "unknown"].map((channelId) => ({ kind: "message", channelId })));
     // Only the reader's own intake is theirs to list. What the list lacks is
     // answered by the Hub: one read for the three it could not place.
     assert.deepEqual(t.client.getQueryData(t.conversations).pages[0].rows.map((row) => row.channel.id), ["mine", "first"]);
