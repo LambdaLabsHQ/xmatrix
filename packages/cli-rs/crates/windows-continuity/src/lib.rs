@@ -1452,9 +1452,9 @@ impl CommandEffectJournal {
 
     /// Write the journal within its size budget. Short-lived effects Hub has
     /// expired are dropped on every write. Over budget, acknowledged effects
-    /// and short-lived ones journaled by an older CLI (necessarily a process
-    /// that has exited) go next, oldest first. Unacknowledged spawns, stops
-    /// and in-window actions are never dropped: they fence a redelivery
+    /// and quota probes an older CLI journaled (no receipt time; a probe only
+    /// reads, so answering it again is harmless) go next, oldest first. Any
+    /// other unacknowledged effect is never dropped: it fences a redelivery
     /// against running twice.
     fn store(&self, payload: &EffectJournalPayload) -> Result<(), ContinuityError> {
         let mut payload = payload.clone();
@@ -1476,7 +1476,8 @@ impl CommandEffectJournal {
                 .iter()
                 .filter(|(_, effect)| {
                     effect.phase == EffectPhase::HubCompletionAcked
-                        || short_lived(effect) && effect.received_unix_ms.is_none()
+                        || effect.received_unix_ms.is_none()
+                            && effect.command_type.rsplit(':').next() == Some("quota_probe")
                 })
                 .map(|(id, effect)| (effect.received_unix_ms.unwrap_or(0), id.clone()))
                 .collect::<Vec<_>>();
@@ -2293,6 +2294,27 @@ mod tests {
             }
         }
         journal.store(&payload).unwrap();
+        // Older-CLI actions of unknown age may have acted; they stay.
+        let mut payload = journal.load_or_empty().unwrap();
+        for (control_id, command_type) in [
+            ("harness-old", "harness_action"),
+            ("worktree-old", "worktree_action"),
+        ] {
+            let effect = CommandEffect {
+                control_id: control_id.into(),
+                command_type: command_type.into(),
+                payload_digest: "c".repeat(64),
+                phase: EffectPhase::Admitted,
+                result_digest: None,
+                result: None,
+                received_monotonic_ms: None,
+                admitted_monotonic_ms: None,
+                effect_committed_monotonic_ms: None,
+                received_unix_ms: None,
+            };
+            payload.effects.insert(effect.stable_id(), effect);
+        }
+        journal.store(&payload).unwrap();
         commit("probe-new", "quota_probe").unwrap();
         commit("probe-newer", "quota_probe").unwrap();
         let kept = journal
@@ -2303,6 +2325,7 @@ mod tests {
             .map(|effect| effect.control_id)
             .collect::<BTreeSet<_>>();
         assert!(kept.contains("spawn-1") && kept.contains("spawn-2"));
+        assert!(kept.contains("harness-old") && kept.contains("worktree-old"));
         assert!(kept.contains("probe-newer"));
         assert!(!kept.contains("probe-0"));
         // With nothing safe left to drop, a command is refused, never a fence lost.
