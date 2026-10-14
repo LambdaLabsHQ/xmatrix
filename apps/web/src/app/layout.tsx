@@ -7,7 +7,6 @@ import { AuthProvider } from "@/lib/auth-context";
 import { LiquidGlassFilter } from "@/components/ui/liquid-glass-filter";
 import { LiquidGlassLensDefs } from "@/components/ui/liquid-glass-lens";
 import { OverlayScrollbars } from "@/components/ui/overlay-scrollbars";
-import { NO_ANIMATION_ITERATION_EVENTS_SCRIPT } from "@/components/ui/animation-iteration-events";
 import { OVERLAY_SCROLLBARS_MODE_SCRIPT } from "@/components/ui/overlay-scrollbars-mode";
 import { siteUrl } from "@/lib/site-url";
 
@@ -69,7 +68,6 @@ export default function RootLayout(props: { children: React.ReactNode }) {
       }
     })();
     ${OVERLAY_SCROLLBARS_MODE_SCRIPT}
-    ${NO_ANIMATION_ITERATION_EVENTS_SCRIPT}
   `;
 
   return (
