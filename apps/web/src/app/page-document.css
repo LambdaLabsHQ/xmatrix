@@ -524,8 +524,17 @@ html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-com
   border-radius: 2px;
   animation: page-remote-change 4s ease-out forwards;
 }
+/* An Agent co-writing live: its words come in softly as they stream, rather than popping in. */
+@keyframes page-agent-words-in {
+  from { opacity: 0.25; }
+  to { opacity: 1; }
+}
+.page-document .page-remote-change[data-agent] {
+  animation: page-remote-change 4s ease-out forwards, page-agent-words-in 0.6s ease-out both;
+}
 @media (prefers-reduced-motion: reduce) {
   .page-document .page-remote-change { animation-timing-function: steps(1, end); }
+  .page-document .page-remote-change[data-agent] { animation: page-remote-change 4s steps(1, end) forwards; }
 }
 
 /*

@@ -347,6 +347,19 @@ export function registerPageRoutes(app: Hono<{ Bindings: Env }>): void {
     if (ended.ended) await tellPageCoWriter(c.env, { ...at, userId: authUser.id, active: false });
     return ended;
   }));
+  // A person takes back what an Agent co-writing the page live last wrote (page-co-writer.ts).
+  app.post(`${base}/:pageId/co-writing/:conversationId/undo`, async (c) => {
+    try {
+      const { spaceId, pageId, authUser, page } = await readAsCaller(c);
+      if (authUser.agentRun || !page.canEdit) {
+        throw new PageControlError("page_co_writing_human_only", 403, "Only a person who may edit the page takes back an Agent's change");
+      }
+      return await sessionResponse(c, () => sessionCall(c.env, spaceId, pageId, "/internal/co-write-undo",
+        { principal: sessionPrincipal(authUser), conversationId: c.req.param("conversationId") }));
+    } catch (error) {
+      return failure(c, error);
+    }
+  });
   app.get(`${base}/:pageId/suggestions`, async (c) => run(c, async () => repository(c.env).suggestions({
     requestId: crypto.randomUUID(), spaceId: c.req.param("spaceId"), pageId: c.req.param("pageId"),
     principal: await principal(c) })));

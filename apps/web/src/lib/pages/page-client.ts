@@ -96,6 +96,11 @@ export const pageApi = {
     xmatrixApiRequest<{ ended: boolean }>({
       url: `${WEB_PROXY_ROUTES.space_page(spaceId, pageId)}/co-writing/${encodeURIComponent(conversationId)}`,
       token, method: "DELETE" }),
+  /** Takes back what the Agent co-writing from the conversation last wrote, unless someone changed it since. */
+  undoCoWriting: (spaceId: string, pageId: string, token: string, conversationId: string) =>
+    xmatrixApiRequest<{ outcome: "undone" | "changed" | "nothing" }>({
+      url: `${WEB_PROXY_ROUTES.space_page(spaceId, pageId)}/co-writing/${encodeURIComponent(conversationId)}/undo`,
+      token, method: "POST", body: {} }),
   suggestions: (spaceId: string, pageId: string, token: string, signal?: AbortSignal) =>
     xmatrixApiRequest<{ suggestions: PageRevision[] }>({
       url: `${WEB_PROXY_ROUTES.space_page(spaceId, pageId)}/suggestions`, token, signal }),
@@ -162,6 +167,8 @@ export interface PagePresenceState {
   block?: string;
   /** Ten minutes in a hidden tab. */
   idle?: boolean;
+  /** An Agent co-writing live: its last change can still be taken back. */
+  undo?: boolean;
 }
 
 export type PageSessionNotice =

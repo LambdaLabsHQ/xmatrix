@@ -1119,6 +1119,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
       // Placed by their caret where they have one, so the edge hints point at the line.
       anchor: anchorTops.has(`client:${clientId}`) ? `client:${clientId}` : sectionAnchor(state.block ?? ""),
       editing: state.activity === "editing", conversationId: state.user!.conversationId ?? null,
+      undoable: state.user!.kind === "agent" && state.undo === true,
       detail: whereDetail(state.activity ?? "viewing", state.block ?? "", state.user!.conversationId) })),
     ...staying.map((agent) => ({ key: `agent:${agent.instanceId}:${agent.conversationId}`, name: agent.name,
       color: pageAuthorColor({ kind: "agent", id: agent.instanceId }), agent: true, avatarUrl: agent.avatarUrl, blockId: agent.blockId,
@@ -1428,6 +1429,14 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
                 setDialog(null);
                 void pageApi.endCoWriting(spaceId ?? "", page.pageId, token, tapped.conversationId!)
                   .catch((cause: unknown) => setNotice(userErrorMessage(cause, "Couldn't stop the Agent")));
+              } : null}
+              onUndo={tapped?.conversationId && tapped.undoable && canEdit ? () => {
+                setDialog(null);
+                void pageApi.undoCoWriting(spaceId ?? "", page.pageId, token, tapped.conversationId!)
+                  .then(({ outcome }) => {
+                    if (outcome === "changed") setNotice("Someone changed it since, so it stays");
+                  })
+                  .catch((cause: unknown) => setNotice(userErrorMessage(cause, "Couldn't undo the Agent's change")));
               } : null} />
           )}
           <DeletePageDialog open={dialog === "delete"} title={page.title} hasChildren={hasChildren}

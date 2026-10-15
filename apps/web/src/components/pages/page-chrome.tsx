@@ -48,6 +48,8 @@ export interface PresentPerson {
   idle?: boolean;
   /** The conversation an Agent works from, where it is talked to. */
   conversationId?: string | null;
+  /** An Agent co-writing live whose last change can still be taken back. */
+  undoable?: boolean;
 }
 
 /** Everyone on the page, as in Google Docs: hover says who and where, a click goes there. */
