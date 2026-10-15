@@ -15,13 +15,15 @@ English is the default language for repository documentation, guardrails, releas
 
 ## Current behavior
 
-Agent placement uses measured inference throughput alongside semantic fit,
-machine headroom and quota pace. Recent real output-token/inference-time
-observations remain scoped to the registration, model and effort; tool time,
-failed turns, stale readings and unsupported harnesses cannot become fabricated
-speed measurements. Native Claude/Codex wrappers supply the optional fact,
-existing Instance presentations persist it, and invocation details show it.
-See [Space agent routing](../architecture/space-agent-routing.md#observed-agent-throughput).
+Machine placement uses bounded active HTTPS network measurements alongside
+semantic fit, CPU/memory headroom and provider quota. Daemons measure latency,
+jitter, request failures, loaded latency and adaptive download/upload goodput
+against fixed Cloudflare Speed endpoints; ICMP probe loss to 1.1.1.1 stays a
+separate direct-path diagnostic. The authenticated live daemon connection owns
+the network fact in its existing machine resources. No model-call timing or
+Agent token throughput influences placement. Unknown/expired measurements keep
+the compatible fallback; no private URLs, proxy credentials or response headers
+are reported. See [network measurement](../architecture/space-agent-routing.md#machine-network-measurement).
 
 Parameter-control notices distinguish an unconfirmed local selection from the
 provider's observed value. Codex turn-only Fast selections remain pending until

@@ -58,7 +58,6 @@ impl ProviderInbox {
         }
         let value = self.rx.try_recv().ok()?.value;
         crate::runtime_wake_metrics::record_provider_message(&value);
-        crate::runtime_agent_throughput::record_provider(&value);
         Some(value)
     }
 
@@ -70,7 +69,6 @@ impl ProviderInbox {
         // Every provider message passes here exactly once (deferred ones are
         // replayed from the backlog, not received again).
         crate::runtime_wake_metrics::record_provider_message(&value);
-        crate::runtime_agent_throughput::record_provider(&value);
         Some(value)
     }
 

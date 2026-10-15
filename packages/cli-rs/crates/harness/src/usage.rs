@@ -11,8 +11,6 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "camelCase")]
 pub struct LlmUsage {
     #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub throughput: Option<AgentThroughputObservation>,
-    #[serde(skip_serializing_if = "Option::is_none", default)]
     pub input_tokens: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub output_tokens: Option<u64>,
@@ -50,20 +48,6 @@ pub struct LlmUsage {
     pub tool_call_count: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub cost_usd: Option<f64>,
-}
-
-/// Recent real inference work for one model/effort, never a speed estimate
-/// from text length or the lifetime of a process.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AgentThroughputObservation {
-    pub model: String,
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub effort: Option<String>,
-    pub observed_at: String,
-    pub output_tokens: u64,
-    pub inference_ms: u64,
-    pub samples: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -107,8 +91,7 @@ pub struct LlmQuotaCredits {
 
 /// Whether a usage report carries any fact at all.
 pub fn has_llm_usage(usage: &LlmUsage) -> bool {
-    usage.throughput.is_some()
-        || usage.input_tokens.is_some()
+    usage.input_tokens.is_some()
         || usage.output_tokens.is_some()
         || usage.total_tokens.is_some()
         || usage.context_used_tokens.is_some()
@@ -134,14 +117,6 @@ mod tests {
 
     fn full_usage() -> LlmUsage {
         LlmUsage {
-            throughput: Some(AgentThroughputObservation {
-                model: "model-a".into(),
-                effort: Some("high".into()),
-                observed_at: "2026-10-15T17:00:00Z".into(),
-                output_tokens: 2400,
-                inference_ms: 30_000,
-                samples: 3,
-            }),
             input_tokens: Some(1),
             output_tokens: Some(2),
             total_tokens: Some(3),
@@ -175,11 +150,9 @@ mod tests {
         }
     }
 
-    /// The public wire shape, including the optional inference observation.
+    /// The exact JSON the Hub protocol has always carried for these types.
     fn full_usage_wire() -> serde_json::Value {
         json!({
-            "throughput": { "model": "model-a", "effort": "high", "observedAt": "2026-10-15T17:00:00Z",
-                "outputTokens": 2400, "inferenceMs": 30000, "samples": 3 },
             "inputTokens": 1,
             "outputTokens": 2,
             "totalTokens": 3,
@@ -213,14 +186,6 @@ mod tests {
         assert_eq!(encoded, full_usage_wire());
         let decoded: LlmUsage = serde_json::from_value(full_usage_wire()).unwrap();
         assert_eq!(serde_json::to_value(decoded).unwrap(), full_usage_wire());
-        let mut older = full_usage_wire();
-        older.as_object_mut().unwrap().remove("throughput");
-        assert!(
-            serde_json::from_value::<LlmUsage>(older)
-                .unwrap()
-                .throughput
-                .is_none()
-        );
     }
 
     #[test]

@@ -46,6 +46,7 @@ mod runtime_daemon_harness_inventory;
 mod runtime_daemon_harness_login;
 mod runtime_daemon_harness_policy;
 mod runtime_daemon_host;
+mod runtime_machine_network;
 mod runtime_daemon_idle_sleep;
 mod runtime_daemon_lease_retry;
 use runtime_daemon_host::{
@@ -99,7 +100,6 @@ include!("runtime_codex_app_transport.rs");
 include!("runtime_codex_typed_channel_controls.rs");
 include!("runtime_codex_channel_delivery.rs");
 mod runtime_agent_goal_status;
-mod runtime_agent_throughput;
 mod runtime_claude_messages;
 mod runtime_claude_stream_io;
 mod runtime_claude_stream_session;

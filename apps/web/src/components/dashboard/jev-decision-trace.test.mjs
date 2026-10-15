@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { jevDecisions, jevReadings, placementReason, fitLevel, roomText, throughputText } from "./jev-decision-trace.ts";
+import { jevDecisions, jevReadings, placementReason, fitLevel, roomText } from "./jev-decision-trace.ts";
 
 const NOW = "2026-10-06T08:45:00.000Z";
 const LATER = "2026-10-06T08:45:02.000Z";
@@ -125,11 +125,6 @@ test("the placement reason names the trade-off routing made", () => {
     "All equally suited; most room here (85% room). codex has no description here, so it was judged by name");
   assert.deepEqual([fitLevel(0.32), fitLevel(0.68), fitLevel(0), fitLevel(1)], ["Capable", "Strong fit", "Unsuitable", "Asked for"]);
   assert.deepEqual([roomText(undefined), roomText(-0.2), roomText(0.414)], ["room unknown", "overloaded", "41% room"]);
-  const measured = (machine, rate) => ({ ...at("codex", machine, 1 / 3, .85), throughput: {
-    model: "model-a", tokensPerSecond: rate, samples: 3 } });
-  assert.equal(placementReason([measured("fast", 80), measured("slow", 20)], false),
-    "Faster measured inference for codex on model-a: 80.0 tokens/s · 3 inference samples. Tool time is excluded");
-  assert.equal(throughputText(undefined), "throughput unknown");
 });
 
 test("a fit score's answer is the level Jev weighed most, matching the share shown", () => {

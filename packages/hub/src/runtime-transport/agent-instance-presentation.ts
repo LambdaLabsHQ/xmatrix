@@ -1,7 +1,6 @@
 import { plainRecord } from "@xmatrix/protocol";
 import {
   parseLlmQuotaAccount,
-  agentThroughputObservation,
   parseQuotaObservedAt,
   localLlmUsage,
   parseHarnessParameters,
@@ -627,8 +626,6 @@ function cleanStatusChips(value: unknown): AgentStatusChip[] | undefined {
 function cleanUsage(value: unknown): LlmUsage | undefined {
   if (!record(value)) return undefined;
   const usage: LlmUsage = {};
-  const throughput = agentThroughputObservation(value.throughput, Date.now());
-  if (throughput) usage.throughput = throughput;
   for (const key of [
     "inputTokens",
     "outputTokens",

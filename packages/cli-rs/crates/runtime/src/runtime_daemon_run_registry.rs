@@ -2546,6 +2546,9 @@ fn sample_machine_resources() -> Option<serde_json::Value> {
         .ok()?;
     let (system, previous) = &mut *guard;
     let mut value = sample_machine_resources_at(system, previous, Instant::now())?;
+    if let Some(network) = runtime_machine_network::snapshot() {
+        value["network"] = network;
+    }
     value["hostCapabilities"] = serde_json::json!(host_capabilities());
     if host_is_laptop() {
         value["formFactor"] = serde_json::json!("laptop");

@@ -7,47 +7,25 @@ const candidates = ['first', 'last'].map(id => ({ key: { spaceId: 'space', owner
   description: id, models: ['small', 'large'], workspaceReferences: ['workspace-a', 'workspace-b'], workspaces: ['a', 'b'].map(letter => ({ reference: `workspace-${letter}`, machineId: id, canonicalCwd: `/projects/${letter}`, description: `Project ${letter}` })) }));
 // Two harnesses, so Jev scores each one's fit.
 const twoHarnesses = [candidates[0], { ...candidates[1], key: { ...candidates[1].key, harness: 'claude' } }];
-
-test('measured inference throughput chooses between machines without mixing models, efforts or stale samples', async () => {
-  const now = Date.now();
-  const sample = (outputTokens, extra = {}) => ({ model: 'large', observedAt: new Date(now - 1000).toISOString(),
-    outputTokens, inferenceMs: 30_000, samples: 3, ...extra });
-  const at = (id, throughput, quota = 100) => ({ ...candidates[0], models: [], parameterModel: 'large',
-    key: { ...candidates[0].key, machineId: id }, workspaces: candidates[0].workspaces.map(place => ({ ...place, machineId: id })),
-    observations: { evaluatedAt: new Date(now).toISOString(), outstandingMachineAllocations: 0, outstandingRegistrationAllocations: 0,
-      quota: { remainingPercent: quota, assumed: false }, machineResources: { cpuUsagePercent: 10 }, throughput } });
-  const slow = at('slow', [sample(600)]), fast = at('fast', [sample(2400)], 50);
-  const ranked = jointRanking([slow, fast], () => 1 / 3, now);
-  assert.equal(ranked[0].candidate.key.machineId, 'fast', '80 tokens/s wins over 20 despite less quota');
-  assert.deepEqual(ranked.map(item => item.throughput.tokensPerSecond), [80, 20]);
-  assert.deepEqual(ranked.map(item => item.throughput.relative), [1, .25]);
-  const choose = fleet => registrationLaunchChooser(async input => answer(input))({ message: '@codex fix it', tags: {}, candidates: fleet });
-  const selected = await choose([slow, fast]);
-  assert.equal(selected.key.machineId, 'fast');
-  assert.equal(selected.parameterEvidence.placement.ranking[0].throughput.tokensPerSecond, 80);
-  const { parseLaunchParameterEvidence } = await import('@xmatrix/protocol');
-  assert.deepEqual(parseLaunchParameterEvidence(selected.parameterEvidence), selected.parameterEvidence);
-  const forged = structuredClone(selected.parameterEvidence);
-  forged.placement.ranking[0].throughput.tokensPerSecond = 999999;
-  assert.equal(parseLaunchParameterEvidence(forged), undefined, 'displayed rates must match the recorded work');
-  for (const extra of [{ model: 'other' }, { effort: 'high' }, { samples: 2 },
-    { observedAt: new Date(now - 1_800_001).toISOString() }]) {
-    const ignored = jointRanking([slow, at('unknown', [sample(2400, extra)])], () => 1 / 3, now);
-    assert.equal(ignored.find(item => item.candidate.key.machineId === 'unknown').throughput, undefined);
-    assert.equal(ignored[0].candidate.key.machineId, 'slow', 'unknown throughput preserves the previous tie-break');
-  }
-  assert.equal(jointRanking([slow, { ...fast, observations: { ...fast.observations,
-    machineResources: { cpuUsagePercent: 100 } } }], () => 1 / 3, now)[0].candidate.key.machineId, 'slow', 'speed does not bypass resource pressure');
-  const otherHarness = { ...fast, key: { ...fast.key, harness: 'claude' } };
-  assert.equal(jointRanking([slow, otherHarness], () => 1 / 3, now)[0].candidate.key.machineId, 'slow', 'different tokenizers are not a speed comparison');
-  const a = { ...slow, models: ['small', 'large'], parameterModel: 'small', observations: { ...slow.observations,
-    throughput: [sample(3000, { model: 'small' }), sample(600)] } };
-  const b = { ...fast, models: ['small', 'large'], parameterModel: 'small', observations: { ...fast.observations,
-    throughput: [sample(600, { model: 'small' }), sample(2400)] } };
-  const reranked = await choose([a, b]);
-  assert.equal(reranked.model, 'large');
-  assert.equal(reranked.key.machineId, 'fast', 'machine ranking follows the model actually selected');
-  assert.equal(reranked.parameterEvidence.placement.ranking[0].machineId, 'fast');
+test('network placement favours HTTPS reliability/tail latency and never confuses ICMP with proxy traffic', () => {
+  const now = Date.parse('2026-10-15T18:00:00Z');
+  const observedAt = new Date(now - 1000).toISOString();
+  const at = (candidate, latency, failures = 0, extra = {}) => ({ ...candidate, observations: {
+    evaluatedAt: observedAt, quota: { remainingPercent: 100, assumed: true },
+    machineResources: { observedAt, cpuUsagePercent: 10, network: {
+      observedAt, target: 'cloudflare-speed', protocol: 'https', attempts: 10, failures,
+      latencyP95Ms: latency, latencyMedianMs: latency, ...extra } } } });
+  const slow = at(candidates[0], 200), fast = at(candidates[1], 20);
+  assert.equal(jointRanking([slow, fast], () => 1 / 3, now)[0].candidate, fast);
+  const lossy = at(candidates[1], 20, 10);
+  assert.equal(jointRanking([lossy, slow], () => 1 / 3, now)[0].candidate, slow);
+  const directLoss = at(candidates[0], 20, 0, { packetLoss: {
+    protocol: 'icmp', target: '1.1.1.1', sent: 20, received: 1 } });
+  assert.equal(jointRanking([directLoss, fast], () => 1 / 3, now)[0].candidate, directLoss);
+  const stale = at(candidates[0], 1, 0, { observedAt: new Date(now - 3600_000).toISOString() });
+  const staleRanking = jointRanking([stale, fast], () => 1 / 3, now);
+  assert.equal(staleRanking[0].network, undefined);
+  assert.equal(staleRanking[0].candidate, stale, 'missing network facts preserve candidate order');
 });
 /** Choices default to the last option; a fit score defaults to "capable". */
 function answer(input, options = {}) {
