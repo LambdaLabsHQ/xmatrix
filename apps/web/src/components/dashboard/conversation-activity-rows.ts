@@ -130,20 +130,14 @@ function foldRow(items: TimelineItem[]): TimelineItem {
  * Rows for the timeline, in order. `timeline` is ordered oldest first; the
  * rows keep that order, a fold standing where its first entry stood.
  */
-export function buildConversationRows(
-  timeline: readonly TimelineItem[],
-  /** Judgments that arrived after their messages were loaded, by message id. */
-  supersessions?: ReadonlyMap<string, string>,
-): TimelineItem[] {
+export function buildConversationRows(timeline: readonly TimelineItem[]): TimelineItem[] {
   const rows: TimelineItem[] = [];
   let run: TimelineItem[] = [];
   const flush = () => {
     if (run.length > 0) rows.push(foldRow(run));
     run = [];
   };
-  for (const loaded of timeline) {
-    const judged = loaded.messageId && !loaded.supersededBy ? supersessions?.get(loaded.messageId) : undefined;
-    const item = judged ? { ...loaded, supersededBy: judged } : loaded;
+  for (const item of timeline) {
     if (foldable(item)) {
       if (run.length > 0 && actorKey(run[0]!) !== actorKey(item)) flush();
       run.push(item);

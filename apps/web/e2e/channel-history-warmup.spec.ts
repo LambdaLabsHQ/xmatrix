@@ -62,8 +62,9 @@ test("tapping a read-ahead Channel paints before its open read returns", async (
 
 for (const returnToList of [false, true]) {
   test(`read-ahead skips a waiting Channel that is ${returnToList ? "already cached" : "now open"}`, async ({ page }) => {
+    // Each holds the one message its history serves, so a window read of it is current.
     const channels = ["first", "second", "third", "fourth"].map((name, index) => ({
-      ...CHANNEL, id: `channel-${name}`, name,
+      ...CHANNEL, id: `channel-${name}`, name, messageCount: 1, historyHeadSequence: 1,
       updatedAt: new Date(Date.parse(E2E_NOW) - index * 1_000).toISOString(),
     }));
     await installWorkspaceStubs(page, { spaces: [E2E_SPACE], channels });

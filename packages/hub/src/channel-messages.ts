@@ -1,4 +1,5 @@
 import { MessageAuthorityError } from "@xmatrix/db";
+import { SYSTEM_ANNOTATION_AUTHOR, type ObservabilityEvent } from "@xmatrix/protocol";
 import type { AuthorityPrincipal } from "./product-message-command";
 import type { Env } from "./types";
 import { resolveChannelCatalog } from "./spaces";
@@ -345,6 +346,52 @@ export async function publishChannelMemberRead(
     throw new Error("Runtime rejected PostgreSQL read-state delivery");
   }
   return true;
+}
+
+/**
+ * Tell a Channel's people that the Hub folded one message under a later one
+ * (docs/design/conversation-activity.md §3.3). The judgment lands seconds
+ * after the later message, so every client holding the Channel's rows,
+ * opened or not, applies it as it comes instead of finding out when the
+ * Channel is next read. Only the two ids travel; a dropped frame is repaired
+ * by the next history read, which carries `supersededBy`.
+ */
+export async function publishChannelMessageSuperseded(
+  env: Env,
+  input: { channelId: string; messageId: string; supersededBy: string },
+): Promise<void> {
+  const recipientUserIds = await withPostgresMessageRequestScope(
+    env,
+    (scope) => postgresMessageLiveRecipientUserIds(env, input.channelId, scope),
+  );
+  const tasks: Promise<unknown>[] = [];
+  const responses = await Promise.all(recipientBatches(recipientUserIds).map((recipients) =>
+    publishRuntimeChannelObservableEvent({
+      env,
+      waitUntil: (task) => tasks.push(task),
+      channelId: input.channelId,
+      payload: {
+        recipientUserIds: recipients,
+        event: channelMessageSupersededEvent(input) as unknown as Record<string, unknown>,
+      },
+    })));
+  await Promise.allSettled(tasks);
+  if (responses.some((response) => !response.ok)) {
+    throw new Error("Runtime rejected PostgreSQL supersession delivery");
+  }
+}
+
+function channelMessageSupersededEvent(
+  input: { channelId: string; messageId: string; supersededBy: string },
+): ObservabilityEvent {
+  return {
+    id: crypto.randomUUID(),
+    type: "channel_message_superseded",
+    workspaceUserId: SYSTEM_ANNOTATION_AUTHOR,
+    channelId: input.channelId,
+    metadata: { messageId: input.messageId, supersededBy: input.supersededBy },
+    timestamp: new Date().toISOString(),
+  };
 }
 
 /**

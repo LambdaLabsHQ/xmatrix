@@ -147,7 +147,6 @@ import {
   sinceDigestLine,
   type SinceDigest,
 } from "./conversation-activity-rows";
-import { useChannelSupersessions } from "./use-channel-supersessions";
 import { AgentWorkIntent, AgentWorkIntentCard, agentWaitingPhrase, useIntentSince, useNow } from "./agent-work-intent";
 import { AgentRuntimeNotice, agentRuntimeIssuePhrase, agentRuntimeNoticePhrase } from "./agent-runtime-notice";
 
@@ -708,12 +707,11 @@ export const MessageTimeline = memo(function MessageTimeline({
   const hasTimelineContent = timeline.length > 0 || Boolean(threadRootMessage);
   // Talk stays whole; activity and superseded reports fold into one row per
   // run of the same Instance (docs/design/conversation-activity.md §4.1).
-  const supersessions = useChannelSupersessions(channel?.id, token, timeline);
   // Rows that say what they said stay the objects they were, so only a row
   // that changed draws again: folds and headed rows are rebuilt each time.
   const heldRowsRef = useRef<TimelineItem[]>([]);
   const rows = useMemo(() => (heldRowsRef.current = shareByKey(heldRowsRef.current,
-    buildConversationRows(timeline, supersessions), (row) => row.id)), [timeline, supersessions]);
+    buildConversationRows(timeline), (row) => row.id)), [timeline]);
   const [expandedFolds, setExpandedFolds] = useState<{ channelId?: string; ids: ReadonlySet<string> }>(
     () => ({ ids: new Set() }),
   );

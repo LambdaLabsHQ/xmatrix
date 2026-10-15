@@ -8,6 +8,7 @@ import {
   postgresMessageHistory,
   postgresMessageSystemAnnotation,
 } from "./postgres-message-authority";
+import { publishChannelMessageSuperseded } from "./channel-messages";
 import type { Env } from "./types";
 
 /**
@@ -101,6 +102,7 @@ export async function judgeMessageSupersession(input: {
   history?: (request: { channelId: string; beforeSequence: number; limit: number;
     principal: { kind: "user" | "agent"; id: string } }) => Promise<{ messages: unknown[] }>;
   annotate?: typeof postgresMessageSystemAnnotation;
+  publish?: typeof publishChannelMessageSuperseded;
 }): Promise<{ supersededMessageId: string | null; reason: string }> {
   const evaluate = input.evaluate ?? (input.env.JEV_AI_GATEWAY_API_KEY?.trim()
     ? createJevClient({ apiKey: input.env.JEV_AI_GATEWAY_API_KEY, timeoutMs: 5_000 }).evaluate as SupersessionEvaluate
@@ -147,12 +149,18 @@ export async function judgeMessageSupersession(input: {
   if (typeof probability !== "number" || probability < SUPERSEDED_PROBABILITY) {
     return { supersededMessageId: null, reason: "still_needed" };
   }
-  await (input.annotate ?? postgresMessageSystemAnnotation)(input.env, {
+  const annotation = await (input.annotate ?? postgresMessageSystemAnnotation)(input.env, {
     channelId: input.channelId,
     messageId: earlier.messageId,
     namespace: SUPERSEDED_ANNOTATION_NAMESPACE,
     annotationId: `${SUPERSEDED_ANNOTATION_NAMESPACE}:${earlier.messageId}`.slice(0, 200),
     payload: { supersededBy: latest.messageId },
   });
+  // Clients already holding the earlier message fold it now, not on their next read.
+  if (annotation) {
+    await (input.publish ?? publishChannelMessageSuperseded)(input.env, {
+      channelId: input.channelId, messageId: earlier.messageId, supersededBy: latest.messageId,
+    });
+  }
   return { supersededMessageId: earlier.messageId, reason: "superseded" };
 }

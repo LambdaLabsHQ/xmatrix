@@ -132,6 +132,18 @@ export function useWorkspaceShellTailCache(deps: {
     );
   }, [relaySocketLive]);
 
+  /* A read taken outside the open path: its window is contiguous only if
+     the socket was up when it started and has not dropped since. */
+  const beginHistoryTailRead = useCallback(() => {
+    const generation = relaySocketLive() ? relaySocketGenerationRef.current : -1;
+    return (channelId: string): void => {
+      historyTailBaseGenerationRef.current.set(
+        channelId,
+        generation === relaySocketGenerationRef.current ? generation : -1,
+      );
+    };
+  }, [relaySocketLive]);
+
   const historyTailContiguous = useCallback((channelId: string): boolean => (
     relaySocketLive() &&
     historyTailBaseGenerationRef.current.get(channelId) === relaySocketGenerationRef.current
@@ -358,6 +370,7 @@ export function useWorkspaceShellTailCache(deps: {
     productTailCacheStoreRef,
     relaySocketLive,
     recordHistoryTailBase,
+    beginHistoryTailRead,
     historyTailContiguous,
     productTailCacheHydrationTick,
     scheduleProductTailCachePersist,
