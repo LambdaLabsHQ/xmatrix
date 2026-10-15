@@ -15,6 +15,20 @@ import { APPLE_BUNDLE_ID, appleSubscriptionConfig, AppleBillingError, retrieveAp
  */
 
 /**
+ * Why Apple refused, in terms of what to fix. Only an outage or rate limit is
+ * retryable; a key Apple rejects or a notification URL that is not set is a
+ * configuration fault, reported as a failure.
+ */
+export function appleRefusal(status: number, errorCode: number): string {
+  const code = errorCode ? ` (errorCode ${errorCode})` : "";
+  if (errorCode === 4040007 || status === 404) {
+    return `Apple has no App Store Server Notifications URL for this environment${code}; set it in App Store Connect → App Information`;
+  }
+  if (status === 401 || status === 403) return `Apple rejected the In-App Purchase key in APPLE_SUBSCRIPTIONS_CONFIG${code} (HTTP ${status})`;
+  return `Apple's test notification service returned ${status}${code}`;
+}
+
+/**
  * Ask Apple to send a TEST notification to the URL configured for this
  * environment, and read back what our server answered: App Store Connect's
  * URL, Apple's signature and our verification, end to end.
@@ -33,9 +47,9 @@ export async function appleTestNotificationRoundTrip(config: AppleSubscriptionCo
         redirect: "manual", signal: AbortSignal.timeout(10_000) });
     } catch { throw new AppleBillingError("apple_request_failed", "Apple's test notification service is unreachable", true); }
     if (!response.ok) {
-      await response.body?.cancel();
-      throw new AppleBillingError("apple_request_failed", `Apple's test notification service returned ${response.status}`,
-        response.status >= 500 || response.status === 429);
+      const problem: unknown = await response.json().catch(() => null);
+      const code = Number((problem as { errorCode?: unknown } | null)?.errorCode) || 0;
+      throw new AppleBillingError("apple_request_failed", appleRefusal(response.status, code), response.status >= 500 || response.status === 429);
     }
     const body: unknown = await response.json().catch(() => null);
     return body && typeof body === "object" ? body as Record<string, unknown> : {};
@@ -67,6 +81,7 @@ async function main(): Promise<number> {
     if (results.includes("SUCCESS")) console.log(`Apple's ${realm} TEST notification reached the Hub and was accepted.`);
     else { console.log(`::error::Apple's ${realm} TEST notification was not accepted by the Hub: ${results.join(", ")}`); failed = true; }
   } catch (error) {
+    // An outage is a warning; a configuration fault fails, with what to fix.
     if (!(error instanceof AppleBillingError) || !error.retryable) throw error;
     console.log(`::warning::${error.message}; the notification path was not checked this time.`);
   }

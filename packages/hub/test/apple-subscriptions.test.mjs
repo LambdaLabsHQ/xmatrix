@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { generateKeyPairSync } from "node:crypto";
 import test from "node:test";
-import { appleTestNotificationRoundTrip } from "../scripts/apple-notification-smoke.ts";
+import { appleRefusal, appleTestNotificationRoundTrip } from "../scripts/apple-notification-smoke.ts";
 import { appleSubscriptionConfig, AppleBillingError, subscriptionFact, appleBillingFact, appleOrganizationGroup, appleSeatGroupFact, retrieveAppleSubscription, verifyAppleNotification } from "../src/apple/subscriptions.ts";
 
 const privateKey = generateKeyPairSync("ec", { namedCurve: "prime256v1" }).privateKey.export({ type: "pkcs8", format: "pem" });
@@ -166,4 +166,15 @@ test("a TEST notification round trip reports what our server answered Apple", as
     (error) => error.code === "apple_request_failed" && error.retryable);
   await assert.rejects(appleTestNotificationRoundTrip(config, "Sandbox", { fetchImpl: async () => Response.json({}) }),
     { code: "apple_response_invalid" });
+});
+
+test("Apple's refusals are classified: an outage may be retried, a configuration fault names what to fix", async () => {
+  const refused = (status, body) => async () => Response.json(body, { status });
+  await assert.rejects(appleTestNotificationRoundTrip(config, "Sandbox", { fetchImpl: refused(404, { errorCode: 4040007, errorMessage: "x" }) }),
+    (error) => !error.retryable && /no App Store Server Notifications URL for this environment \(errorCode 4040007\); set it in App Store Connect/u.test(error.message));
+  await assert.rejects(appleTestNotificationRoundTrip(config, "Sandbox", { fetchImpl: refused(401, {}) }),
+    (error) => !error.retryable && /rejected the In-App Purchase key/u.test(error.message));
+  await assert.rejects(appleTestNotificationRoundTrip(config, "Sandbox", { fetchImpl: refused(429, { errorCode: 4290000 }) }),
+    (error) => error.retryable);
+  assert.equal(appleRefusal(400, 4000002), "Apple's test notification service returned 400 (errorCode 4000002)");
 });
