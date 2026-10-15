@@ -37,7 +37,7 @@ integration("a page summary sends text only to a Machine whose owner currently r
     const open = await create({ title: "Open", body: "Public plan\n" });
     let candidates = [member];
     const commands = [];
-    const { startPageSummary } = await loadCommonJsSourceModule(new URL("../src/page-summary.ts", import.meta.url), name => {
+    const resolve = name => {
       if (name === "@xmatrix/protocol") return protocol;
       if (name === "@xmatrix/db") return { ...db, PostgresMachineControlRepository: class {
         async getDaemon() { return { daemon: { id: "daemon", email: "machine@example.test", status: "online",
@@ -54,7 +54,10 @@ integration("a page summary sends text only to a Machine whose owner currently r
       if (name === "./postgres-authority-http") return { POSTGRES_AUTHORITY_TIMEOUTS: {} };
       if (name === "./postgres-message-database-policy") return { POSTGRES_MESSAGE_CONNECT_TIMEOUT_MS: 1000 };
       assert.fail(`unexpected import: ${name}`);
-    });
+    };
+    const machines = await loadCommonJsSourceModule(new URL("../src/text-task-machines.ts", import.meta.url), resolve);
+    const { startPageSummary } = await loadCommonJsSourceModule(new URL("../src/page-summary.ts", import.meta.url),
+      name => name === "./text-task-machines" ? machines : resolve(name));
     const start = page => startPageSummary({}, { spaceId, pageId: page.pageId });
     for (const page of [parent, child]) {
       assert.equal((await start(page)).started, false, "a member's Machine must not receive a restricted page");

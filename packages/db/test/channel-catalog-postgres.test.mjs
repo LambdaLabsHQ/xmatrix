@@ -764,6 +764,57 @@ integration("a summary records the Run that wrote it, when, and the newest messa
   }
 });
 
+integration("xMatrix writes a task's About for a member's Machine, never over a person's change or a further reading", async () => {
+  const { client, repository } = await seededSpaceControl();
+  try {
+    await client.query(`UPDATE data.channels SET metadata_json = metadata_json || '{"autoName":true}'::jsonb
+      WHERE channel_id='child'`);
+    const current = async () => (await client.query(
+      "SELECT name, version, metadata_json FROM data.channels WHERE channel_id='child'")).rows[0];
+    let step = 0;
+    const write = async (fields, actorUserId = "user-1") => repository.mutateChannel({
+      requestId: `task-${++step}`, commandId: `task-${step}`, kind: "channel_configure", channelId: "child",
+      actorUserId, expectedVersion: Number((await current()).version), at: now, ...fields });
+    const task = (readRevision, throughSequence, summary, name) => ({ summary,
+      ...(name ? { name, automaticName: true } : {}),
+      summaryAuthor: { taskId: `channel-about:child:${readRevision}:${throughSequence}`, agentName: "codex",
+        readRevision, throughSequence } });
+    const conflict = (error) => error.code === "metadata_revision_conflict";
+
+    // The member may not edit the conversation; the About from their Machine is xMatrix's to write.
+    await assert.rejects(write({ name: "By hand" }), (error) => error.code === "forbidden");
+    await write(task(0, 1, "Fixing login", "Login fixes"));
+    let row = await current();
+    assert.equal(row.name, "Login fixes");
+    assert.equal(row.metadata_json.autoName, true, "the name xMatrix chose stays automatic");
+    assert.deepEqual(row.metadata_json.summarySource, {
+      author: { kind: "task", agentName: "codex" }, generatedAt: now, throughSequence: 1 });
+    const [revision] = (await client.query(`SELECT source_json FROM data.channel_metadata_revisions
+      WHERE channel_id='child' ORDER BY revision DESC LIMIT 1`)).rows;
+    assert.deepEqual(revision.source_json, { kind: "about_task", actorUserId: "user-1", commandId: `task-${step}`,
+      taskId: "channel-about:child:0:1", agentName: "codex", readRevision: 0, throughSequence: 1 });
+
+    // Two readings of the same revision: one that read further replaces an older one, never the reverse.
+    await write(task(0, 5, "Fixing login and signup"));
+    assert.equal((await current()).metadata_json.summary, "Fixing login and signup");
+    await assert.rejects(write(task(0, 3, "Fixing login again")), conflict);
+    await assert.rejects(write(task(0, 5, "The same reading twice")), conflict);
+    assert.equal((await current()).metadata_json.summary, "Fixing login and signup");
+
+    // A person's change after a reading stands.
+    await write({ name: "Login reliability" }, "admin");
+    await assert.rejects(write(task(2, 9, "Read before the rename")), conflict);
+    await write(task(3, 9, "Login reliability work"));
+    row = await current();
+    assert.equal(row.name, "Login reliability");
+    assert.equal(row.metadata_json.summary, "Login reliability work");
+    // Nobody outside the Space writes one.
+    await assert.rejects(write(task(4, 10, "From a stranger"), "stranger"), (error) => error.code === "forbidden");
+  } finally {
+    await client.end();
+  }
+});
+
 async function seededSpaceControl() {
   await seed();
   const db = createAuthorityDatabase({ connectionString, shardId: "shard-0" });

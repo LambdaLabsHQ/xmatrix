@@ -1,4 +1,4 @@
-import { appendMetadataRevision, metadataRevision } from "./channel-metadata-revisions.js";
+import { aboutTaskAuthor, appendMetadataRevision, metadataRevision, type SummaryAuthor } from "./channel-metadata-revisions.js";
 import { DetailedControlError } from "./control-error.js";
 import type { DatabaseRequestContext } from "./context.js";
 import { readsOnly } from "./space-roles.js";
@@ -130,10 +130,10 @@ export type PostgresChannelMutation = PostgresChannelMutationBase & {
   topic?: string | null;
   summary?: string | null;
   /**
-   * The Run writing `summary`. The summary's source is recorded from it; a
+   * The Run or one-shot task writing `summary`. The summary's source is recorded from it; a
    * summary written without one keeps no source rather than an earlier one.
    */
-  summaryAuthor?: { runId: string; agentName: string; throughMessageId?: string };
+  summaryAuthor?: SummaryAuthor;
   spaceId?: string;
   moveTree?: Array<{ channelId: string; expectedVersion: number }>;
 };
@@ -584,6 +584,11 @@ async function recordSummarySource(
   delete metadata.summarySource;
   const author = input.summaryAuthor;
   if (input.summary === null || input.summary === undefined || !author) return;
+  if (aboutTaskAuthor(author)) {
+    metadata.summarySource = { author: { kind: "task", agentName: author.agentName }, generatedAt: at,
+      ...(author.throughSequence > 0 ? { throughSequence: author.throughSequence } : {}) };
+    return;
+  }
   let throughSequence: number | undefined;
   if (author.throughMessageId) {
     const rows = await transaction.query<QueryResultRow & { timeline_sequence: string | number }>({
@@ -2982,21 +2987,23 @@ export class PostgresSpaceControlRepository {
       if (Number(root.version) !== expectedVersion) {
         throw new SpaceControlError("conflict", 409, "channel version conflict");
       }
-      const admins = await transaction.query({
-        name: "channel_mutation_admin_v1",
-        text: `SELECT user_id FROM data.space_members
-          WHERE space_id = $1 AND user_id = $2 AND role IN ('owner', 'admin') LIMIT 1`,
+      const actors = await transaction.query<QueryResultRow & { role: string }>({
+        name: "channel_mutation_actor_role_v1",
+        text: `SELECT role FROM data.space_members WHERE space_id = $1 AND user_id = $2 LIMIT 1`,
         values: [root.space_id, actorUserId], maxRows: 1,
       });
-      if (!admins[0] && !transfer) throw new SpaceControlError("forbidden", 403, "Space admin required");
+      // xMatrix writes a task's About itself; the task ran on a member's Machine, as that member.
+      const admitted = actors[0] && (["owner", "admin"].includes(actors[0].role) || aboutTaskAuthor(input.summaryAuthor));
+      if (!admitted && !transfer) throw new SpaceControlError("forbidden", 403, "Space admin required");
 
       if (input.actorRunId) {
         const actor = await transaction.query<QueryResultRow & { metadata_json: Record<string, unknown> }>({
           name: "channel_metadata_actor_run_v1", text: `SELECT metadata_json FROM data.runs
             WHERE run_id=$1 AND owner_user_id=$2 AND status IN (${ACTIVE_RUN_STATUS_SQL}) FOR SHARE`,
           values: [input.actorRunId,actorUserId], maxRows: 1 });
+        const aboutRunId = input.summaryAuthor && !aboutTaskAuthor(input.summaryAuthor) ? input.summaryAuthor.runId : undefined;
         if (!actor[0] || (actor[0].metadata_json.routedAs === "management_channel_about" &&
-            input.summaryAuthor?.runId !== input.actorRunId)) throw new SpaceControlError(
+            aboutRunId !== input.actorRunId)) throw new SpaceControlError(
           "channel_about_scope_invalid", 403, "Run cannot use an unscoped metadata writer");
       }
       if (input.summaryAuthor && (input.mode !== undefined || input.topic !== undefined ||
