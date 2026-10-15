@@ -478,6 +478,9 @@ export function registerPageRoutes(app: Hono<{ Bindings: Env }>): void {
       // An Agent's runtime joins to co-write the page live (page-co-writer.ts): its Run writes, so it must
       // be able to edit, and a page that takes Agent edits only as suggestions is not written live.
       const coWriter = request.coWrite === true;
+      if (authUser.agentRun && !coWriter) {
+        throw new PageControlError("page_co_writing_required", 403, "An Agent joins only as a page co-writer");
+      }
       if (coWriter && (!authUser.agentRun || !page.canEdit)) {
         throw new PageControlError("page_co_writing_forbidden", 403, "Only an Agent that may edit the page co-writes it");
       }

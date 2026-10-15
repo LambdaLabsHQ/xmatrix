@@ -266,7 +266,10 @@ fact is about.
     stopping it (`DELETE`) puts its end there. The runtime of the Agent in the
     conversation reads it and joins the page's live session as a co-writer
     (`POST …/live` with `coWrite`, a Run that may edit the page, not on a
-    suggest-only page; `runtime_page_co_write.rs`). The connection preserves
+    suggest-only page; `runtime_page_co_write.rs`). The Run HTTP gate admits
+    only the live-ticket POST; the Page route proves the live Run and its
+    owner’s edit access and refuses a Run joining as a raw document-sync
+    client. Human readers and editors retain ordinary document sync. The connection preserves
     validated co-writing controls through its context filter, including startup
     replay; the run loop consumes them without a harness turn. A fresh Run's
     startup history read also restores the newest validated co-writing state
