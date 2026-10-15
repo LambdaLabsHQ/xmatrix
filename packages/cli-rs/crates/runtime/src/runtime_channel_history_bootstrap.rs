@@ -38,6 +38,31 @@ use xmatrix_cli_core::channel_read_context::{OpenedChannelThread, thread_root_ma
 /// history limit are both in hand, and consumed when each backend builds its
 /// first prompt.
 static CHANNEL_HISTORY_BLOCK: OnceLock<String> = OnceLock::new();
+// The prompt read advances the join floor past these controls. Preserve their
+// latest typed state for the runtime instead of leaving them only in prose.
+static CHANNEL_CO_WRITE: OnceLock<crate::protocol::ChannelPageCoWrite> = OnceLock::new();
+
+fn co_write_from_history(
+    messages: &[ChannelMessage],
+) -> Option<crate::protocol::ChannelPageCoWrite> {
+    messages
+        .iter()
+        .filter_map(|message| {
+            crate::protocol::channel_page_co_write(message)
+                .map(|instruction| (message.sequence.unwrap_or_default(), instruction))
+        })
+        .max_by_key(|(sequence, _)| *sequence)
+        .map(|(_, instruction)| instruction)
+}
+
+pub(crate) fn follow_bootstrap_co_write(
+    relay: &xmatrix_cli_core::agent_instance_connection::AgentInstanceConnectionClient,
+    channel_id: &str,
+) {
+    if let Some(instruction) = CHANNEL_CO_WRITE.get() {
+        crate::runtime_page_co_write::follow(relay, channel_id, instruction);
+    }
+}
 
 /// Whether this run only resumes a session and has nothing to say: then it
 /// is prompted with nothing, not even the bootstrap. Pure so the rule is
@@ -114,6 +139,9 @@ pub(crate) async fn prime_channel_history_bootstrap(
             return;
         }
     };
+    if let Some(instruction) = co_write_from_history(&messages) {
+        let _ = CHANNEL_CO_WRITE.set(instruction);
+    }
     if let Some(through) = messages.iter().filter_map(|message| message.sequence).max() {
         xmatrix_cli_core::agent_instance_connection::record_prompt_carried_history(
             &channel_id,
@@ -380,6 +408,34 @@ mod tests {
             "sentAt": format!("2026-08-10T17:0{sequence}:00.000Z"),
         }))
         .expect("channel message fixture")
+    }
+
+    #[test]
+    fn the_prompt_read_preserves_the_latest_hub_co_write_state_before_advancing_the_join_floor() {
+        let mut start = message("start", 1, "xMatrix", "Co-writing page live.");
+        start.from.kind = "system".into();
+        start.metadata = Some(serde_json::json!({
+            "xmatrixProvenance": "system_fact", "xmatrixSystemNotice": true,
+            "xmatrixPageCoWrite": { "version": 1, "spaceId": "space-qa", "pageId": "page-qa", "active": true }
+        }));
+        assert!(
+            co_write_from_history(&[start.clone()])
+                .expect("the start must survive the prompt read")
+                .active
+        );
+        let mut stop = start.clone();
+        stop.sequence = Some(2);
+        stop.metadata.as_mut().unwrap()["xmatrixPageCoWrite"]["active"] = false.into();
+        let mut fake = start.clone();
+        fake.from.kind = "user".into();
+        fake.sequence = Some(3);
+        let latest =
+            co_write_from_history(&[fake.clone(), stop, start]).expect("latest valid state");
+        assert!(
+            !latest.active,
+            "an old start cannot reopen stopped co-writing"
+        );
+        assert!(co_write_from_history(&[fake]).is_none());
     }
 
     /// A peer never got a turn for a stop, so its next turn has to say it.

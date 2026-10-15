@@ -266,7 +266,12 @@ fact is about.
     stopping it (`DELETE`) puts its end there. The runtime of the Agent in the
     conversation reads it and joins the page's live session as a co-writer
     (`POST …/live` with `coWrite`, a Run that may edit the page, not on a
-    suggest-only page; `runtime_page_co_write.rs`). Each turn the session sends
+    suggest-only page; `runtime_page_co_write.rs`). The connection preserves
+    validated co-writing controls through its context filter, including startup
+    replay; the run loop consumes them without a harness turn. A fresh Run's
+    startup history read also restores the newest validated co-writing state
+    before its join floor advances beyond those messages. Ordinary notices
+    and caller-authored lookalikes stay context. Each turn the session sends
     reaches the run loop as a resume of that conversation, so every backend runs
     it as any turn; the harness's text, which every backend reports as
     `assistant_delta` traces (Claude with `--include-partial-messages`, in
