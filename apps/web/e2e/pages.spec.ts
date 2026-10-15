@@ -1284,32 +1284,47 @@ function awarenessFrom(server: Y.Doc, clientId: number, clock: number, state: Re
   return encoding.toUint8Array(message);
 }
 
-test("on a long page, who works out of view shows at its edges, and what an Agent writes is highlighted as its own", async ({ page: browser }) => {
+/** The Agent's client on a long page, writing as its own client. */
+const AGENT_CLIENT = 1_234_567;
+
+/** A long page, Status at its top and Notes far below, open live; `stub` serves more before it opens. */
+async function openLongPage(browser: Page, stub: () => Promise<void> = async () => {}) {
   const filler = Array.from({ length: 60 }, (_, index) => `Background paragraph ${index + 1}.`).join("\n\n");
   const server = pageDocument(`# Relay\n\n## Status\n\nIn progress\n\n${filler}\n\n## Notes\n\nnone\n`);
-  const AGENT = 1_234_567;
-  let push: (data: Uint8Array) => void = () => {};
+  let send: (data: Uint8Array) => void = () => {};
   await stubPages(browser, [page("p-relay", null, "Relay", "V")]);
   await fixtureJson(browser, "page-links", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\?.*$/u, { links: [] });
-  await fixtureJson(browser, "page-agents", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\/agents$/u, {
-    pages: [{ pageId: "p-relay", agents: [{ instanceId: "i-claude", name: "claude:2", status: "busy",
-      conversationId: E2E_CHANNEL.id, activity: "editing", blockId: "notes" }] }],
-  });
-  await servePageSession(browser, server, { connect: (send) => { push = send; } });
+  await stub();
+  await servePageSession(browser, server, { connect: (next) => { send = next; } });
   await browser.goto("/app", { waitUntil: "domcontentloaded" });
   await browser.getByRole("button", { name: "Pages", exact: true }).first().click();
   const editor = browser.getByTestId("page-editor");
   await expect(editor).toContainText("In progress");
+  return { server, editor, push: (data: Uint8Array) => send(data) };
+}
+
+/** The Agent replaces `from` with `to` in the Notes, its caret after what it wrote. */
+function agentWrites(server: Y.Doc, push: (data: Uint8Array) => void, clock: number, from: string, to: string,
+  activity: string, caret = to) {
+  const own = server.clientID;
+  server.clientID = AGENT_CLIENT;
+  editPageMarkdown(server, (markdown) => markdown.replace(from, to), "agent");
+  server.clientID = own;
+  push(awarenessFrom(server, AGENT_CLIENT, clock, { user: { name: "claude:2", color: "#7c3aed", kind: "agent",
+    conversationId: E2E_CHANNEL.id }, activity, block: "notes" }, caret));
+}
+
+test("on a long page, who works out of view shows at its edges, and what an Agent writes is highlighted as its own", async ({ page: browser }) => {
+  const { server, editor, push } = await openLongPage(browser, () => fixtureJson(browser, "page-agents",
+    /\/api\/xmatrix\/spaces\/[^/]+\/page-links\/agents$/u, {
+      pages: [{ pageId: "p-relay", agents: [{ instanceId: "i-claude", name: "claude:2", status: "busy",
+        conversationId: E2E_CHANNEL.id, activity: "editing", blockId: "notes" }] }],
+    }));
 
   // Someone reads the Status at the top; an Agent edits the Notes far below, writing as its own client.
   push(awarenessFrom(server, 7_654_321, 1, { user: { name: "Ada", color: "#0891b2", kind: "user" },
     activity: "viewing", block: "status" }, "In progress"));
-  const own = server.clientID;
-  server.clientID = AGENT;
-  editPageMarkdown(server, (markdown) => markdown.replace("none", "none yet, shipping Friday"), "agent");
-  server.clientID = own;
-  push(awarenessFrom(server, AGENT, 1, { user: { name: "claude:2", color: "#7c3aed", kind: "agent",
-    conversationId: E2E_CHANNEL.id }, activity: "editing", block: "notes" }, "shipping Friday"));
+  agentWrites(server, push, 1, "none", "none yet, shipping Friday", "editing", "shipping Friday");
 
   // The Agent is its face at the right edge, as on a phone, waiting at the bottom and pointing down to its line.
   const below = browser.getByTestId("page-pens").getByRole("button", { name: "claude:2 is writing, below" });
@@ -1317,10 +1332,10 @@ test("on a long page, who works out of view shows at its edges, and what an Agen
   await expect(browser.getByTestId("page-people-below"), "an Agent is not named in the middle of the page").toHaveCount(0);
   await expect(browser.getByTestId("page-people-above"), "Ada is in view").toHaveCount(0);
   // The Agent's new words are tinted in its colour, and the whole paragraph is highlighted as its own.
-  const tinted = editor.locator(`.page-remote-change[data-client="${AGENT}"]`);
+  const tinted = editor.locator(`.page-remote-change[data-client="${AGENT_CLIENT}"]`);
   await expect(tinted.first()).toBeAttached();
   await expect(tinted).toContainText(["shipping Friday"]);
-  const inked = editor.locator(`.page-agent-ink[data-client="${AGENT}"]`);
+  const inked = editor.locator(`.page-agent-ink[data-client="${AGENT_CLIENT}"]`);
   await expect.poll(async () => (await inked.allTextContents()).join("")).toBe("none yet, shipping Friday");
   await browser.screenshot({ path: test.info().outputPath("pages-people-below.png") });
 
@@ -1341,7 +1356,7 @@ test("on a long page, who works out of view shows at its edges, and what an Agen
   await expect.poll(async () => (await inked.allTextContents()).join("")).toBe("none yet, shipping Friday");
 
   // Its caret rests where its edit ended while its Run lives; its name is at the edge, not in the text.
-  const caret = editor.locator(`.ProseMirror-yjs-cursor[data-client="${AGENT}"]`);
+  const caret = editor.locator(`.ProseMirror-yjs-cursor[data-client="${AGENT_CLIENT}"]`);
   await expect(caret).toHaveCount(1);
   await expect(caret.locator("div")).toBeHidden();
   const committed = (headRevision: number) => {
@@ -1369,29 +1384,10 @@ test("typing fast at the top of a busy page while an Agent writes keeps every ke
   // React #185 in production: on a slow device, every key and the page state derived from it (outline,
   // presence, anchor offsets) queued commit after commit until React gave up, and the editor then fell
   // behind the session and wrote its stale document back over what an Agent had written.
-  const filler = Array.from({ length: 60 }, (_, index) => `Background paragraph ${index + 1}.`).join("\n\n");
-  const server = pageDocument(`# Relay\n\n## Status\n\nIn progress\n\n${filler}\n\n## Notes\n\nnone\n`);
-  const AGENT = 1_234_567;
-  let push: (data: Uint8Array) => void = () => {};
   const errors: string[] = [];
   browser.on("pageerror", (error) => errors.push(error.message));
-  await stubPages(browser, [page("p-relay", null, "Relay", "V")]);
-  await fixtureJson(browser, "page-links", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\?.*$/u, { links: [] });
-  await servePageSession(browser, server, { connect: (send) => { push = send; } });
-  await browser.goto("/app", { waitUntil: "domcontentloaded" });
-  await browser.getByRole("button", { name: "Pages", exact: true }).first().click();
-  const editor = browser.getByTestId("page-editor");
-  await expect(editor).toContainText("In progress");
-
-  const agentWrites = (clock: number, from: string, to: string) => {
-    const own = server.clientID;
-    server.clientID = AGENT;
-    editPageMarkdown(server, (markdown) => markdown.replace(from, to), "agent");
-    server.clientID = own;
-    push(awarenessFrom(server, AGENT, clock, { user: { name: "claude:2", color: "#7c3aed", kind: "agent",
-      conversationId: E2E_CHANNEL.id }, activity: "writing", block: "notes" }, to));
-  };
-  agentWrites(1, "none", "none yet");
+  const { server, editor, push } = await openLongPage(browser);
+  agentWrites(server, push, 1, "none", "none yet", "writing");
 
   // A slow device: the page renders slower than the keys arrive.
   const cdp = await browser.context().newCDPSession(browser);
@@ -1404,7 +1400,7 @@ test("typing fast at the top of a busy page while an Agent writes keeps every ke
   const typing = browser.keyboard.type(typed);
   for (let step = 2; step <= 6; step += 1) {
     await browser.waitForTimeout(150);
-    agentWrites(step, step === 2 ? "none yet" : `none yet ${step - 1}`, `none yet ${step}`);
+    agentWrites(server, push, step, step === 2 ? "none yet" : `none yet ${step - 1}`, `none yet ${step}`, "writing");
   }
   await typing;
   await cdp.send("Emulation.setCPUThrottlingRate", { rate: 1 });
