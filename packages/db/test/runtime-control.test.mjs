@@ -287,7 +287,7 @@ test("a pre-spawn failure still owes a notice when launch update already failed 
     machineId: "machine-1", hostId: "host-1", executionKey: "execution-1" } };
   const context = { run_id: "run-1", channel_id: "channel-1", owner_user_id: "user-1",
     agent_name: "Codex", status: "failed", startup_failed: true, metadata_json: run.metadata_json };
-  const db = lifecycleDatabase(run, { machine_lifecycle_notice_context_v5: [context],
+  const db = lifecycleDatabase(run, { machine_lifecycle_notice_context_v6: [context],
     machine_lifecycle_head_advance_v1: [{ commit_sequence: 15 }] });
   const value = await new PostgresMachineLifecycleRepository(db).apply(machineReport("spawn-failed", "machine_spawn_result",
     { ...spawnedPayload, ok: false, error: "base_ref_unresolved" }));
@@ -297,13 +297,13 @@ test("a pre-spawn failure still owes a notice when launch update already failed 
   assert.ok(JSON.stringify(replay.values).includes("startupFailureNoticeContext"), "notice delivery survives report replay");
 });
 
-for (const [status, recoverableLaunchFailure, routedAs, executionCancellation] of [["stopped", false], ["completed", false],
-  ["starting", true], ["failed", false, "management_channel_about"], ["failed", false, undefined, { reason: "timeout" }]]) {
-  test(`late spawn failure does not announce ${executionCancellation ? "cancelled" : routedAs ?? status} as a new startup failure`, async () => {
-    const body = { machineId: "machine-1", hostId: "host-1", executionKey: "execution-1", routedAs, executionCancellation };
+for (const [status, recoverableLaunchFailure, executionCancellation] of [["stopped", false], ["completed", false],
+  ["starting", true], ["failed", false, { reason: "timeout" }]]) {
+  test(`late spawn failure does not announce ${executionCancellation ? "cancelled" : status} as a new startup failure`, async () => {
+    const body = { machineId: "machine-1", hostId: "host-1", executionKey: "execution-1", executionCancellation };
     const db = lifecycleDatabase({ status, version: 3, metadata_json: body }, {
-      machine_lifecycle_notice_context_v5: [{ run_id: "run-1", channel_id: "channel-1", owner_user_id: "user-1",
-        agent_name: "Codex", status, routed_as: routedAs, metadata_json: body }],
+      machine_lifecycle_notice_context_v6: [{ run_id: "run-1", channel_id: "channel-1", owner_user_id: "user-1",
+        agent_name: "Codex", status, metadata_json: body }],
       machine_lifecycle_head_advance_v1: [{ commit_sequence: 15 }],
     });
     const value = await new PostgresMachineLifecycleRepository(db).apply(machineReport("spawn-failed", "machine_spawn_result",
@@ -317,7 +317,7 @@ for (const cancelled of [false, true]) {
     const body = { machineId: "machine-1", hostId: "host-1", executionKey: "execution-1",
       ...(cancelled ? { executionCancellation: { reason: "timeout", processCleanup: { status: "pending" } } } : {}) };
     const db = lifecycleDatabase({ status: "failed", version: 3, metadata_json: body }, {
-      machine_lifecycle_notice_context_v5: [{ run_id: "run-1", channel_id: "channel-1", owner_user_id: "user-1",
+      machine_lifecycle_notice_context_v6: [{ run_id: "run-1", channel_id: "channel-1", owner_user_id: "user-1",
         agent_name: "Codex", status: "failed", startup_failed: true, metadata_json: body }],
       machine_lifecycle_head_advance_v1: [{ commit_sequence: 15 }],
     });
@@ -334,7 +334,7 @@ test("a confirmed channel stop leaves the receipt on the command instead of a Ch
   const body = { machineId: "machine-1", hostId: "host-1", executionKey: "execution-1",
     stopRequest: { sourceMessageId: "message-1", requestedAt: "2026-10-06T08:46:35.000Z" } };
   const db = lifecycleDatabase({ status: "stopping", version: 4, metadata_json: body, finished_at: null, instance_id: null }, {
-    machine_lifecycle_notice_context_v5: [{ run_id: "run-1", channel_id: "channel-1", owner_user_id: "user-1",
+    machine_lifecycle_notice_context_v6: [{ run_id: "run-1", channel_id: "channel-1", owner_user_id: "user-1",
       agent_name: "Codex", status: "stopping", metadata_json: body }],
     machine_lifecycle_run_update_v1: [{ run_id: "run-1" }],
     machine_lifecycle_head_advance_v1: [{ commit_sequence: 16 }],
@@ -348,7 +348,7 @@ test("a confirmed channel stop leaves the receipt on the command instead of a Ch
 test("a confirmed stop with no channel command still posts its notice", async () => {
   const body = { machineId: "machine-1", hostId: "host-1", executionKey: "execution-1" };
   const db = lifecycleDatabase({ status: "running", version: 4, metadata_json: body, finished_at: null, instance_id: null }, {
-    machine_lifecycle_notice_context_v5: [{ run_id: "run-1", channel_id: "channel-1", owner_user_id: "user-1",
+    machine_lifecycle_notice_context_v6: [{ run_id: "run-1", channel_id: "channel-1", owner_user_id: "user-1",
       agent_name: "Codex", status: "running", metadata_json: body }],
     machine_lifecycle_run_update_v1: [{ run_id: "run-1" }],
     machine_lifecycle_head_advance_v1: [{ commit_sequence: 16 }],
@@ -363,7 +363,7 @@ test("a failed channel stop still posts because acceptance is not termination", 
   const body = { machineId: "machine-1", hostId: "host-1", executionKey: "execution-1",
     stopRequest: { sourceMessageId: "message-1" } };
   const db = lifecycleDatabase({ status: "stopping", version: 4, metadata_json: body, finished_at: null, instance_id: null }, {
-    machine_lifecycle_notice_context_v5: [{ run_id: "run-1", channel_id: "channel-1", owner_user_id: "user-1",
+    machine_lifecycle_notice_context_v6: [{ run_id: "run-1", channel_id: "channel-1", owner_user_id: "user-1",
       agent_name: "Codex", status: "stopping", metadata_json: body }],
     machine_lifecycle_head_advance_v1: [{ commit_sequence: 16 }],
   });

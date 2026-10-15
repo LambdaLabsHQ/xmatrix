@@ -502,10 +502,6 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
     if (!liveRunIsAdmitted(snapshotLiveRunFromProductGateway(value), principal, LIVE_RUN_ROUTED_FIELDS)) {
       throw new RuntimeClientOperationError("agent_run_binding_mismatch");
     }
-    // Retired Run kinds: a Run started as one before it was retired never connects.
-    if (metadata.routedAs === "management_assistant_mention" || metadata.routedAs === "management_channel_about") {
-      throw new RuntimeClientOperationError("management_agent_retired");
-    }
     // Every PostgreSQL handshake claims its own version before becoming live,
     // including a reconnect that races the predecessor's offline write.
     let instanceStatus = value.instanceStatus;

@@ -35,11 +35,6 @@ const withdrawnExecution = `(a.grant_state IS DISTINCT FROM 'active'
             OR (r.status='starting' AND (a.grant_revision<>b.grant_revision
               OR a.policy_revision<>b.policy_revision)))`;
 
-/** A Channel About Run. A conversation's About is a one-shot text task now
- * (#533); a Run started as one before that has nothing left to do, so it
- * stops like a withdrawn execution. */
-const CHANNEL_ABOUT_RUN = `r.metadata_json->>'routedAs'='management_channel_about'`;
-
 /** Internal shard coordinator. There is no public command that accepts a
  * caller-authored stop target or permission-withdrawal decision. */
 export class PostgresRegistrationRevocationRepository {
@@ -62,8 +57,7 @@ export class PostgresRegistrationRevocationRepository {
 
   /** Re-evaluate one Channel's registration Runs against current authority:
    * a withdrawn or ended execution gets its stop intent and fence. Run by the
-   * Channel's coordinator when an authority change or a Run ending wakes it,
-   * or when the Machine of a Channel About Run comes back.
+   * Channel's coordinator when an authority change or a Run ending wakes it.
    * `disabled` are registrations whose owner turned them off on their machine,
    * read by the caller from the directory; their Runs stop in every Space. */
   async prepare(channelId: string, disabled: readonly AgentRegistrationKey[] = []): Promise<number> {
@@ -73,7 +67,7 @@ export class PostgresRegistrationRevocationRepository {
       key.machineId === String(row.machine_id) && key.harness === String(row.harness));
     const batch = await this.database.transaction({ requestId: `registration-revoke:${crypto.randomUUID()}`,
       operation: "registration.revocation.prepare" }, async tx => {
-      const candidates = await tx.query({ name: "registration_revocation_candidates_v6", text: `SELECT
+      const candidates = await tx.query({ name: "registration_revocation_candidates_v7", text: `SELECT
         r.run_id,r.channel_id,r.owner_user_id,r.status,r.version,r.metadata_json,COALESCE(i.instance_id,l.instance_id) AS instance_id,
         b.space_id,b.machine_id,b.harness,b.allocation_id
         FROM data.run_agent_registrations b JOIN data.runs r ON r.run_id=b.run_id AND r.owner_user_id=b.owner_user_id
@@ -85,7 +79,7 @@ export class PostgresRegistrationRevocationRepository {
         WHERE r.channel_id=$1
           AND COALESCE(i.instance_id,l.instance_id) IS NOT NULL
           AND NOT EXISTS (SELECT 1 FROM data.registration_stop_intents s WHERE s.run_id=r.run_id)
-          AND (r.status IN (${TERMINAL_RUN_STATUS_SQL}) OR ${CHANNEL_ABOUT_RUN} OR ${withdrawnExecution}
+          AND (r.status IN (${TERMINAL_RUN_STATUS_SQL}) OR ${withdrawnExecution}
             OR EXISTS (SELECT 1 FROM jsonb_to_recordset($2::jsonb) AS off(owner text,machine text,harness text)
               WHERE off.owner=b.owner_user_id AND off.machine=b.machine_id AND off.harness=b.harness))
         ORDER BY CASE WHEN length(r.metadata_json->>'executionKey') BETWEEN 1 AND 300 THEN 0 ELSE 1 END,
@@ -97,7 +91,6 @@ export class PostgresRegistrationRevocationRepository {
         const metadata = row.metadata_json as Record<string, unknown> | null;
         try {
           if (terminal) throw new RegistrationAccessError(reason, 403);
-          if (metadata?.routedAs === "management_channel_about") throw new RegistrationAccessError("registration_run_retired", 403);
           if (isDisabled(row)) throw new RegistrationAccessError("registration_environment_disabled", 403);
           await requireRunRegistrationAccess(tx, { runId: String(row.run_id), channelId: String(row.channel_id),
             phase: row.status === "starting" ? "admission" : "continuation",

@@ -29,14 +29,13 @@ export async function fenceChannelRunsForStop(tx: DatabaseTransaction, input: {
 }): Promise<number> {
   const stopRequest = { sourceMessageId: input.sourceMessageId, actorUserId: input.actorUserId,
     requestedAt: input.at };
-  const fenced = await tx.query<QueryResultRow>({ name: "channel_stop_fence_v3", text: `WITH authorized AS (
+  const fenced = await tx.query<QueryResultRow>({ name: "channel_stop_fence_v4", text: `WITH authorized AS (
       SELECT c.channel_id FROM data.channels c WHERE c.space_id=$1 AND c.channel_id=$2
         AND ${channelCapabilityPredicate({ capability: "runtime_terminalize", channelAlias: "c",
           principalKindSql: "'user'", principalIdSql: "$3::text" })}
     ), target AS (
       SELECT r.run_id FROM data.runs r JOIN authorized a ON a.channel_id=r.channel_id
       WHERE r.status IN ('starting','running')
-        AND COALESCE(r.metadata_json->>'routedAs','')<>'management_channel_about'
         AND ($5::text IS NULL OR r.run_id=$5)
       ORDER BY r.run_id LIMIT ${CHANNEL_STOP_FENCE_LIMIT} FOR UPDATE OF r
     ), cancelled AS (

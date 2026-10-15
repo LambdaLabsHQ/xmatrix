@@ -725,7 +725,7 @@ test("a Human stop command fences its Runs before the message's first write", as
     const db = database((query) => placement(query) ?? appendReservation(query) ?? (
       query.name === "message_append_preflight_v4"
         ? [appendPreflight()]
-        : (committedAppend(query, "pg:00000000000000000042") ?? (query.name === "channel_stop_fence_v3"
+        : (committedAppend(query, "pg:00000000000000000042") ?? (query.name === "channel_stop_fence_v4"
           ? [{ run_id: "run-1", version: 2, instance_id: "instance-1" }]
         : query.name === "message_agent_target_resolve_v5"
           ? JSON.parse(query.values[2]).filter((request) => request.address === "@codex:1")
@@ -744,7 +744,7 @@ test("a Human stop command fences its Runs before the message's first write", as
 
   const { db, result } = await append({ attentionBody: "/kill all" });
   assert.equal(result.messageId, "message-1");
-  const fence = db.calls.findIndex((call) => call.name === "channel_stop_fence_v3");
+  const fence = db.calls.findIndex((call) => call.name === "channel_stop_fence_v4");
   assert.ok(fence >= 0);
   assert.deepEqual([...db.calls[fence].values.slice(0, 3), ...db.calls[fence].values.slice(4)],
     ["space-1", "channel-1", "user-1", null]);
@@ -755,13 +755,13 @@ test("a Human stop command fences its Runs before the message's first write", as
   // An exact address fences only the Run its message resolves to.
   for (const attentionBody of ["@codex:1:stop", "/stop codex:1 wrong branch"]) {
     const exact = await append({ attentionBody });
-    const call = exact.db.calls.find((query) => query.name === "channel_stop_fence_v3");
+    const call = exact.db.calls.find((query) => query.name === "channel_stop_fence_v4");
     assert.deepEqual(call?.values.slice(4), ["run-1"], attentionBody);
   }
   // `@xMatrix:stop` addressed the retired management delegate; it fences nothing now.
   for (const attentionBody of ["@xMatrix:stop", "please /kill all", "`/kill all`", "@codex:2:stop", "@codex:stop", "hello", undefined]) {
     const ordinary = await append(attentionBody === undefined ? {} : { attentionBody });
-    assert.equal(ordinary.db.calls.some((call) => call.name === "channel_stop_fence_v3"), false,
+    assert.equal(ordinary.db.calls.some((call) => call.name === "channel_stop_fence_v4"), false,
       String(attentionBody));
   }
 });
@@ -775,7 +775,7 @@ instance_status: "online",
 channel_instance_id: 1})]
         : query.name?.startsWith("channel_capability_message_")
           ? [{ channel_id: "channel-1", space_id: "space-1", mode: "open", metadata_json: {} }]
-          : (committedAppend(query, "pg:00000000000000000044") ?? (query.name === "channel_stop_fence_v3"
+          : (committedAppend(query, "pg:00000000000000000044") ?? (query.name === "channel_stop_fence_v4"
           ? [{ run_id: "run-2", version: 2, instance_id: "instance-2" }]
         : query.name === "runtime_control_head_advance_v1"
           ? [{ commit_sequence: 9 }]
@@ -797,13 +797,13 @@ channel_instance_id: 1})]
   };
 
   const db = await append("/stop all verification");
-  const fence = db.calls.findIndex((call) => call.name === "channel_stop_fence_v3");
+  const fence = db.calls.findIndex((call) => call.name === "channel_stop_fence_v4");
   assert.ok(fence >= 0, "an Agent's stop takes effect when its message commits");
   assert.deepEqual(db.calls[fence].values.slice(0, 3), ["space-1", "channel-1", "user-owner"],
     "the stop acts with the Run owner's authority, never the Agent's");
   assert.ok(fence < db.calls.findIndex((call) => call.name === "message_append_commit_facts_v5"));
   for (const body of ["hello", "please /stop all", undefined]) {
-    assert.equal((await append(body)).calls.some((call) => call.name === "channel_stop_fence_v3"), false,
+    assert.equal((await append(body)).calls.some((call) => call.name === "channel_stop_fence_v4"), false,
       String(body));
   }
 });
