@@ -2998,18 +2998,27 @@ html[data-app-theme="wood"] .xmatrix-app .app-agent-work-dock > div {
   box-shadow: none !important;
 }
 
-/* An Agent's disc wears one presence mark, beside its messages and above the
-   composer alike: on the disc's corner, cut out of the face by the page colour,
-   with no glow. A waiting/waking ring is drawn inside the cutout by the
-   hollow-ring rule. The limit word is on the bottom rim, so the two marks no
-   longer cover each other. */
+/* A disc wears one presence mark, beside messages and above the composer
+   alike, for a person or an Agent: a plain dot on the disc's corner, sized in
+   proportion to its disc, with no cutout or glow. A page-coloured cutout bit
+   into a photo but vanished into an Agent's white face, so the same mark read
+   differently. The limit word is on the bottom rim, so the two marks no longer
+   cover each other. */
+.xmatrix-app .message-author-avatar {
+  --app-presence-disc: var(--app-message-avatar-size);
+}
+
+.xmatrix-app .app-agent-work-avatar {
+  --app-presence-disc: var(--app-agent-work-disc);
+}
+
 .xmatrix-app :is(.message-author-avatar, .app-agent-work-avatar) .identity-avatar-status {
   top: 0 !important;
   right: 0 !important;
   z-index: 3 !important;
-  width: 0.75rem !important;
-  height: 0.75rem !important;
-  border: 2px solid var(--background) !important;
+  width: calc(var(--app-presence-disc) * 0.25) !important;
+  height: calc(var(--app-presence-disc) * 0.25) !important;
+  border: 0 !important;
   box-shadow: none !important;
 }
 
