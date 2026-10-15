@@ -714,8 +714,11 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
       setSaveState("idle"); };
   }, [spaceId, pageId, hasToken, userId, userName, queryClient]);
 
-  // The editor reads the page's sections from its document as it changes.
-  const [blocks, setBlocks] = useState<PageDocBlock[]>([]);
+  // The editor reads the page's sections from its document as it changes. They count for its session only:
+  // until the next page's editor reads them, the last page's first heading would put its name in the header.
+  const [editorBlocks, setEditorBlocks] = useState<{ session: PageLiveSession; blocks: PageDocBlock[] } | null>(null);
+  const blocks = useMemo(() => editorBlocks && editorBlocks.session === session ? editorBlocks.blocks : [],
+    [editorBlocks, session]);
   const presence = usePresence(session);
   const links = useQuery({
     queryKey: xmatrixQueryKeys.domain({ userId: user?.id ?? "anonymous" }, "page-links", [spaceId, pageId, headRevision]),
@@ -1390,7 +1393,8 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
                       onReady={() => setEditorReady(true)} readerBaseline={readerDiff} onReaderChanges={setReaderChanges}
                       suggestions={drawn ? waiting.suggestions : null} onSuggestions={setSuggesting}
                       suggestionControl={suggestionControl}
-                      actions={sectionActions} headingActions={headingActions} onBlocks={setBlocks} sections={sections}
+                      actions={sectionActions} headingActions={headingActions} sections={sections}
+                      onBlocks={(next) => setEditorBlocks({ session, blocks: next })}
                       follow={follow} onOpenConversation={openConversation} discussions={discussions}
                       automations={automationsById} references={references}
                       focusedConversationId={activeConversationId ?? focused} onFocusConversation={setFocused}
