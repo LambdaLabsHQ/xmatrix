@@ -217,7 +217,8 @@ async fn cmd_external_inner(
     let event_rx = relay.event_rx.take().unwrap();
 
     if let Some(channel_id) = auto_join_channel_id {
-        join_long_lived_initial_channel(&relay, channel_id, history_limit).await?;
+        join_long_lived_initial_channel(&relay, channel_id.clone(), history_limit).await?;
+        runtime_channel_history_bootstrap::follow_bootstrap_co_write(&relay, &channel_id);
     }
     // Registered with the Hub and in the channel: this wrapper is serving. A
     // live-update handoff waits for this stamp before retiring the wrapper
