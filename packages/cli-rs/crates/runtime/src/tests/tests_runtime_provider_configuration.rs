@@ -903,6 +903,107 @@ fn kimi_adapter_normalizes_config_options_without_inventing_missing_facts() {
 }
 
 #[test]
+fn cursor_reasoning_control_is_effort_and_boolean_thinking_is_not() {
+    let adapter = agent_presentation_adapter_for_acp_runtime("cursor");
+    let mut facts = AgentPresentationFacts::default();
+    adapter.observe_acp(
+        &serde_json::json!({
+            "configOptions": [
+                {
+                    "id": "model",
+                    "name": "Model",
+                    "currentValue": "gpt-5.6-sol",
+                    "options": [{ "value": "gpt-5.6-sol", "name": "GPT-5.6 Sol" }]
+                },
+                {
+                    "id": "reasoning",
+                    "name": "Reasoning",
+                    "category": "thought_level",
+                    "currentValue": "medium",
+                    "options": [
+                        { "value": "low", "name": "Low" },
+                        { "value": "medium", "name": "Medium" },
+                        { "value": "high", "name": "High" },
+                        { "value": "xhigh", "name": "Extra High" }
+                    ]
+                },
+                {
+                    "id": "fast",
+                    "name": "Fast",
+                    "category": "model_config",
+                    "type": "select",
+                    "currentValue": "false",
+                    "options": [
+                        { "value": "false", "name": "Off" },
+                        { "value": "true", "name": "Fast" }
+                    ]
+                }
+            ]
+        }),
+        &mut facts,
+    );
+    assert_eq!(facts.effort_config_id.as_deref(), Some("reasoning"));
+    assert_eq!(facts.effort.as_deref(), Some("medium"));
+    let presentation = adapter.present(&facts, &[]);
+    assert_eq!(presentation.effort.as_deref(), Some("medium"));
+    let efforts = presentation
+        .models
+        .as_ref()
+        .and_then(|models| models.iter().find(|model| model.id == "gpt-5.6-sol"))
+        .and_then(|model| model.supported_reasoning_efforts.as_ref())
+        .expect("leveled reasoning");
+    assert!(efforts.iter().any(|effort| effort.reasoning_effort == "high"));
+    assert!(!efforts.iter().any(|effort| effort.reasoning_effort == "true"));
+
+    // Claude lists a boolean thinking toggle before the leveled effort select.
+    // The toggle must not become the control `effort:high` writes.
+    adapter.observe_acp(
+        &serde_json::json!({
+            "configOptions": [
+                {
+                    "id": "model",
+                    "currentValue": "claude-opus-4-8",
+                    "options": [{ "value": "claude-opus-4-8", "name": "Claude Opus 4.8" }]
+                },
+                {
+                    "id": "thinking",
+                    "name": "Thinking",
+                    "category": "thought_level",
+                    "currentValue": "true",
+                    "options": [
+                        { "value": "false", "name": "Off" },
+                        { "value": "true", "name": "On" }
+                    ]
+                },
+                {
+                    "id": "effort",
+                    "name": "Effort",
+                    "category": "thought_level",
+                    "currentValue": "high",
+                    "options": [
+                        { "value": "low", "name": "Low" },
+                        { "value": "high", "name": "High" },
+                        { "value": "max", "name": "Max" }
+                    ]
+                }
+            ]
+        }),
+        &mut facts,
+    );
+    assert_eq!(facts.effort_config_id.as_deref(), Some("effort"));
+    assert_eq!(facts.effort.as_deref(), Some("high"));
+    let claude = adapter.present(&facts, &[]);
+    let claude_efforts = claude
+        .models
+        .as_ref()
+        .and_then(|models| models.first())
+        .and_then(|model| model.supported_reasoning_efforts.as_ref())
+        .expect("claude effort levels");
+    assert!(claude_efforts.iter().any(|effort| effort.reasoning_effort == "max"));
+    assert!(!claude_efforts.iter().any(|effort| effort.reasoning_effort == "true"));
+}
+
+#[test]
 fn generic_acp_spawn_args_default_to_acp_subcommand() {
     // Explicit CLI args always win and never touch the env.
     let explicit = generic_acp_spawn_args(&["acp".to_string(), "--verbose".to_string()], None);
