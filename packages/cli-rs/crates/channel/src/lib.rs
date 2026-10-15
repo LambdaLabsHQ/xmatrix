@@ -1,6 +1,5 @@
 #![deny(warnings)]
 
-mod about_input;
 mod cross_space_access;
 pub use cross_space_access::cmd_access;
 mod invocation_diagnostics;
@@ -48,8 +47,6 @@ struct ChannelHistoryResponse {
     messages: Vec<serde_json::Value>,
     #[serde(default)]
     has_more: bool,
-    #[serde(default)]
-    about_input: Option<serde_json::Value>,
 }
 
 pub async fn cmd_channels(
@@ -1380,32 +1377,10 @@ pub async fn cmd_channel(hub_url: &str, token: &str, command: ChannelCommand) ->
             let channel_id = resolve_channel_reference(hub_url, token, &channel_id).await?;
             cmd_channel_rename(hub_url, token, &channel_id, name).await
         }
-        ChannelCommand::About {
-            channel_id,
-            summary,
-            name,
-            stdin,
-            through,
-            expected_revision,
-        } => {
-            let input = about_input::read(summary, name, stdin).await?;
-            let channel_id = resolve_channel_reference(hub_url, token, &channel_id).await?;
-            cmd_channel_about(
-                hub_url,
-                token,
-                &channel_id,
-                input.summary,
-                input.name,
-                through,
-                expected_revision,
-            )
-            .await
-        }
         ChannelCommand::MetadataHistory {
             channel_id,
             before_revision,
             revision,
-            input,
             limit,
         } => {
             let channel_id = resolve_channel_reference(hub_url, token, &channel_id).await?;
@@ -1418,9 +1393,6 @@ pub async fn cmd_channel(hub_url: &str, token: &str, command: ChannelCommand) ->
             }
             if let Some(n) = revision {
                 route.push_str(&format!("&revision={n}"));
-            }
-            if let Some(id) = input {
-                route.push_str(&format!("&inputId={}", urlencoding::encode(&id)));
             }
             let response: serde_json::Value =
                 http::request_json(&with_route(hub_url, &route), "GET", Some(token), None).await?;
@@ -1514,12 +1486,9 @@ pub async fn cmd_channel(hub_url: &str, token: &str, command: ChannelCommand) ->
             cmd_channel_worktree(hub_url, token, &channel_id, state).await
         }
         ChannelCommand::Send(args) => cmd_send_args(hub_url, token, args).await,
-        ChannelCommand::History {
-            channel_id,
-            authoritative,
-        } => {
+        ChannelCommand::History { channel_id } => {
             let channel_id = resolve_channel_reference(hub_url, token, &channel_id).await?;
-            cmd_channel_history(hub_url, token, &channel_id, authoritative).await
+            cmd_channel_history(hub_url, token, &channel_id).await
         }
         ChannelCommand::Chat { channel_id, limit } => {
             let channel_id = resolve_channel_reference(hub_url, token, &channel_id).await?;
@@ -1948,59 +1917,6 @@ async fn cmd_channel_rename(
     Ok(())
 }
 
-/// The channel's own About session saves its summary, and may name a channel
-/// nobody has named yet, through the ordinary channel update.
-async fn cmd_channel_about(
-    hub_url: &str,
-    token: &str,
-    channel_id: &str,
-    summary: String,
-    name: Option<String>,
-    through: Option<String>,
-    expected_revision: Option<u64>,
-) -> error::Result<()> {
-    #[derive(Deserialize)]
-    struct AboutResponse {
-        channel: protocol::SerializedChannel,
-    }
-
-    let summary = summary.trim().to_string();
-    if summary.is_empty() {
-        return Err(CliError::Launch("channel About summary is required".into()));
-    }
-    let mut body = serde_json::json!({ "summary": summary });
-    if let Some(revision) = expected_revision {
-        body["expectedRevision"] = serde_json::json!(revision);
-    }
-    if let Some(name) = name.map(|name| name.trim().trim_start_matches('#').to_string())
-        && !name.is_empty()
-    {
-        body["name"] = serde_json::Value::String(name);
-    }
-    if let Some(through) = through.map(|through| through.trim().to_string())
-        && !through.is_empty()
-    {
-        body["throughMessageId"] = serde_json::Value::String(through);
-    }
-    let response: AboutResponse = http::request_json(
-        &with_route(
-            hub_url,
-            &format!("/api/channels/{}", urlencoding::encode(channel_id)),
-        ),
-        "PATCH",
-        Some(token),
-        Some(body),
-    )
-    .await?;
-
-    println!(
-        "{} Saved the About of {}",
-        "✓".green().bold(),
-        channel_label(&response.channel)
-    );
-    Ok(())
-}
-
 async fn cmd_channel_visibility(
     hub_url: &str,
     token: &str,
@@ -2095,10 +2011,11 @@ pub async fn load_full_channel_history(
         sort_channel_history(&mut messages);
         return Ok(messages);
     }
-    load_authoritative_channel_history(hub_url, token, channel_id).await
+    load_hub_channel_history(hub_url, token, channel_id).await
 }
 
-async fn load_authoritative_channel_history(
+/// Every page of a Channel's history, read from the Hub.
+async fn load_hub_channel_history(
     hub_url: &str,
     token: &str,
     channel_id: &str,
@@ -2123,9 +2040,6 @@ async fn load_authoritative_channel_history(
 
         let response: ChannelHistoryResponse =
             http::request_json(&with_route(hub_url, &route), "GET", Some(token), None).await?;
-        if let Some(input) = &response.about_input {
-            println!("About authoritative input: {input}");
-        }
         if response.messages.is_empty() {
             if response.has_more {
                 return Err(CliError::Relay(
@@ -2287,17 +2201,8 @@ async fn daemon_cached_channel_history(
     Some((messages, repairs, unreadable.len()))
 }
 
-async fn cmd_channel_history(
-    hub_url: &str,
-    token: &str,
-    channel_id: &str,
-    authoritative: bool,
-) -> error::Result<()> {
-    let messages = if authoritative {
-        load_authoritative_channel_history(hub_url, token, channel_id).await?
-    } else {
-        load_full_channel_history(hub_url, token, channel_id).await?
-    };
+async fn cmd_channel_history(hub_url: &str, token: &str, channel_id: &str) -> error::Result<()> {
+    let messages = load_full_channel_history(hub_url, token, channel_id).await?;
     let threads = match load_channel_read_context(hub_url, token, channel_id).await {
         Ok(context) => {
             println!("{}", context.text);

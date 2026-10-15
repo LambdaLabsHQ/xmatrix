@@ -1311,9 +1311,6 @@ mod tests {
     #[test]
     fn metadata_history_and_restore_have_bounded_explicit_revision_arguments() {
         assert!(
-            Cli::try_parse_from(["xmatrix", "channel", "history", "c", "--authoritative"]).is_ok()
-        );
-        assert!(
             Cli::try_parse_from([
                 "xmatrix",
                 "channel",
@@ -1321,17 +1318,6 @@ mod tests {
                 "c",
                 "--revision",
                 "0"
-            ])
-            .is_ok()
-        );
-        assert!(
-            Cli::try_parse_from([
-                "xmatrix",
-                "channel",
-                "metadata-history",
-                "c",
-                "--input",
-                "input-id"
             ])
             .is_ok()
         );
@@ -1370,56 +1356,8 @@ mod tests {
             ])
             .is_ok()
         );
-        assert!(
-            Cli::try_parse_from([
-                "xmatrix",
-                "channel",
-                "about",
-                "c",
-                "--summary",
-                "text",
-                "--expected-revision",
-                "2"
-            ])
-            .is_ok()
-        );
     }
 
-    #[test]
-    fn channel_about_accepts_direct_text_or_one_json_stdin_input() {
-        let about = |extra: &[&str]| {
-            let mut argv = vec!["xmatrix", "channel", "about", "channel-1"];
-            argv.extend_from_slice(extra);
-            Cli::try_parse_from(argv)
-        };
-        let cli = about(&["--stdin", "--through", "m-9", "--expected-revision", "2"])
-            .expect("about should accept JSON stdin");
-        let Some(Commands::Channel {
-            command:
-                ChannelCommand::About {
-                    summary,
-                    name,
-                    stdin,
-                    through,
-                    expected_revision,
-                    ..
-                },
-        }) = cli.command
-        else {
-            panic!("expected channel about command");
-        };
-        assert!(stdin);
-        assert_eq!(summary, None);
-        assert_eq!(name, None);
-        assert_eq!(through.as_deref(), Some("m-9"));
-        assert_eq!(expected_revision, Some(2));
-        assert!(about(&["--summary", "中文摘要", "--name", "频道标题"]).is_ok());
-        assert!(about(&[]).is_err());
-        assert!(about(&["--stdin", "--summary", "text"]).is_err());
-        assert!(about(&["--stdin", "--name", "name"]).is_err());
-        assert!(about(&["--summary-file", "a.md"]).is_err());
-        assert!(about(&["--summary", "text", "--name-file", "n.txt"]).is_err());
-    }
 }
 
 #[derive(Subcommand)]
@@ -1913,38 +1851,13 @@ pub enum ChannelCommand {
         #[arg(required = true)]
         name: Vec<String>,
     },
-    /// Replace a channel's About summary (the channel's own About session only).
-    /// Submit text directly, or pipe a JSON object with summary and optional name
-    /// to --stdin. No intermediate files are read.
-    About {
-        /// Channel ID or xmatrix.sh channel URL
-        channel_id: String,
-        /// The new About summary
-        #[arg(long, required_unless_present = "stdin", conflicts_with = "stdin")]
-        summary: Option<String>,
-        /// Name a channel nobody has named yet
-        #[arg(long, conflicts_with = "stdin")]
-        name: Option<String>,
-        /// Read a UTF-8 JSON object containing summary and optional name from stdin
-        #[arg(long)]
-        stdin: bool,
-        /// The newest message the summary covers
-        #[arg(long)]
-        through: Option<String>,
-        /// Revision printed by the authoritative history read
-        #[arg(long)]
-        expected_revision: Option<u64>,
-    },
-    /// Read immutable title / About revisions and their recorded input
+    /// Read immutable title / About revisions
     MetadataHistory {
         channel_id: String,
         #[arg(long)]
         before_revision: Option<u64>,
-        #[arg(long, conflicts_with_all = ["before_revision", "input"])]
-        revision: Option<u64>,
-        /// Inspect one input id listed in a revision's source
         #[arg(long, conflicts_with = "before_revision")]
-        input: Option<String>,
+        revision: Option<u64>,
         #[arg(long, default_value_t = 20, value_parser = clap::value_parser!(u32).range(1..=100))]
         limit: u32,
     },
@@ -1994,10 +1907,6 @@ pub enum ChannelCommand {
     History {
         /// Channel ID or xmatrix.sh channel URL
         channel_id: String,
-
-        /// Bypass the daemon cache and record About input at the Hub
-        #[arg(long)]
-        authoritative: bool,
     },
     /// Open a simple line-based channel chat with manual refresh
     Chat {

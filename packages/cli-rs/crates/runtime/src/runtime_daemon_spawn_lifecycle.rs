@@ -155,7 +155,6 @@ async fn handle_daemon_spawn_request(
     .await?;
 
     let mut workspace = intent.workspace.clone();
-    let is_management_workspace = daemon_workspace_is_management(workspace.metadata.as_ref());
 
     if let Some(managed_workspace_key) = intent.management_space_id.as_deref() {
         if intent.run_worktree || intent.remote_repo.is_some() {
@@ -168,22 +167,10 @@ async fn handle_daemon_spawn_request(
                 "xMatrix-managed workspace run targeted a different machine".into(),
             ));
         }
-        let cwd = if is_management_workspace {
-            daemon_management_run_workspace_cwd(
-                managed_workspace_key,
-                intent.run_id.as_deref(),
-                intent.execution_key.as_deref(),
-            )?
-        } else {
-            daemon_managed_workspace_cwd(managed_workspace_key)?
-        };
+        let cwd = daemon_managed_workspace_cwd(managed_workspace_key)?;
         std::fs::create_dir_all(&cwd)?;
         workspace.canonical_cwd = cwd.display().to_string();
-        workspace.display_name = if is_management_workspace {
-            "xMatrix management".to_string()
-        } else {
-            "xMatrix managed workspace".to_string()
-        };
+        workspace.display_name = "xMatrix managed workspace".to_string();
         workspace.repo_root = None;
         workspace.git_remote = None;
         workspace.git_branch = None;
@@ -929,40 +916,6 @@ pub(crate) fn daemon_managed_workspace_cwd(key: &str) -> error::Result<PathBuf> 
     // collision negligible as machines accumulate workspace keys.
     let dir_name = lowercase_hex(&Sha256::digest(normalized.as_bytes())[..16]);
     Ok(daemon_management_root().join(dir_name))
-}
-
-pub(crate) fn daemon_management_run_workspace_cwd(
-    space_key: &str,
-    run_id: Option<&str>,
-    execution_key: Option<&str>,
-) -> error::Result<PathBuf> {
-    let base = daemon_managed_workspace_cwd(space_key)?;
-    let run_id = run_id
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| CliError::Launch("management Run is missing its Run id".into()))?;
-    let execution_key = execution_key
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| CliError::Launch("management Run is missing its execution key".into()))?;
-    if run_id.len() > 200 || execution_key.len() > 200 {
-        return Err(CliError::Launch(
-            "management Run identity exceeds its path-isolation bound".into(),
-        ));
-    }
-    let material = format!("management-run\0{space_key}\0{run_id}\0{execution_key}");
-    let dir_name = lowercase_hex(&Sha256::digest(material.as_bytes())[..16]);
-    let root = base
-        .parent()
-        .ok_or_else(|| CliError::Launch("management workspace root is unavailable".into()))?;
-    Ok(root.join(dir_name))
-}
-
-fn daemon_workspace_is_management(metadata: Option<&Value>) -> bool {
-    metadata
-        .and_then(|value| value.get("syntheticManagementWorkspace"))
-        .and_then(Value::as_bool)
-        == Some(true)
 }
 
 fn push_unique_workspace_cwd(cwds: &mut Vec<PathBuf>, cwd: &str) {

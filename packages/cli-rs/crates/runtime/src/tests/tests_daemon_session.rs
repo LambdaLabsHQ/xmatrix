@@ -415,7 +415,7 @@ use super::{
     daemon_broker_binding_from_values, daemon_managed_workspace_cwd,
     daemon_restart_waits_for_lock_from_env, daemon_run_exit_detail,
     daemon_run_exit_from_status_file, daemon_self_update_timeout, daemon_spawn_claim_key,
-    daemon_spawn_cwd_from_values, daemon_spawn_uses_claude_print, daemon_workspace_is_management,
+    daemon_spawn_cwd_from_values, daemon_spawn_uses_claude_print,
     decode_channel_image_attachment_data_url, default_downstream_kkp_flags,
     drain_pending_inbound_channel_messages, drain_ready_inbound_channel_messages,
     encode_submission_enter, event_requests_active_turn_interrupt, external_registration_cwd,
@@ -562,30 +562,6 @@ fn headless_wrapper_fails_closed_when_no_exact_executable_remains() {
 }
 
 #[test]
-fn management_run_workspaces_are_isolated_per_run() {
-    let first =
-        super::daemon_management_run_workspace_cwd("space-1", Some("run-1"), Some("exec-1"))
-            .expect("first management Run cwd");
-    let same = super::daemon_management_run_workspace_cwd("space-1", Some("run-1"), Some("exec-1"))
-        .expect("stable management Run cwd");
-    let second =
-        super::daemon_management_run_workspace_cwd("space-1", Some("run-2"), Some("exec-2"))
-            .expect("second management Run cwd");
-
-    assert_eq!(first, same);
-    assert_ne!(first, second);
-    assert_eq!(first.parent(), second.parent());
-    assert_eq!(
-        first
-            .file_name()
-            .and_then(|value| value.to_str())
-            .map(str::len),
-        Some(32)
-    );
-    assert!(super::daemon_management_run_workspace_cwd("space-1", None, Some("exec-1")).is_err());
-}
-
-#[test]
 fn daemon_grok_runs_disable_shared_leader_processes() {
     assert_eq!(
         super::daemon_isolated_runtime_args("grok", &[]).expect("default Grok args"),
@@ -677,20 +653,6 @@ fn daemon_managed_workspace_cwd_rejects_path_traversal() {
             "accepted {value:?}"
         );
     }
-}
-
-#[test]
-fn only_management_workspace_metadata_enables_management_projection() {
-    assert!(daemon_workspace_is_management(Some(&serde_json::json!({
-        "syntheticManagementWorkspace": true
-    }))));
-    assert!(!daemon_workspace_is_management(Some(&serde_json::json!({
-        "syntheticManagementWorkspace": false
-    }))));
-    assert!(!daemon_workspace_is_management(Some(&serde_json::json!({
-        "syntheticManagementWorkspace": "true"
-    }))));
-    assert!(!daemon_workspace_is_management(None));
 }
 
 fn assert_workspace_spawn_env(
