@@ -135,7 +135,9 @@ pub(crate) fn observe_trace(channel_id: &str, phase: &str, payload: &serde_json:
                 bridge.send(delta_frame(turn, text));
             }
         }
-        "turn_completed" | "turn_failed" | "turn_interrupted" => {
+        // A turn stopped from the conversation (a chat message, a model switch) is cancelled; it ends the
+        // page's turn there and then, or the page would wait on it and never ask the Agent again.
+        "turn_completed" | "turn_failed" | "turn_interrupted" | "turn_cancelled" => {
             if let Some(turn) = bridge.answering.take() {
                 bridge.send(done_frame(turn, phase == "turn_failed"));
             }
@@ -300,5 +302,22 @@ mod tests {
         let sent: Vec<_> = std::iter::from_fn(|| frames.try_recv().ok()).map(body).collect();
         assert_eq!(sent, vec![serde_json::json!({ "type": "done", "turn": 4 })]);
         bridges().remove(channel);
+    }
+
+    #[test]
+    fn a_turn_stopped_from_the_conversation_ends_the_page_turn_at_once() {
+        for (turn, phase) in [(5, "turn_interrupted"), (6, "turn_cancelled")] {
+            let channel = format!("c-co-write-{phase}");
+            let mut frames = bridge_for_test(&channel);
+            turn_queued(&channel, turn);
+            observe_trace(&channel, "turn_started", &serde_json::json!({}));
+            observe_trace(&channel, phase, &serde_json::json!({}));
+            assert_eq!(
+                frames.try_recv().ok().map(body),
+                Some(serde_json::json!({ "type": "done", "turn": turn })),
+                "{phase} ends the page's turn"
+            );
+            bridges().remove(&channel);
+        }
     }
 }

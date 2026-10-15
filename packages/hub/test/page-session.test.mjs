@@ -13,7 +13,7 @@ import {
   PAGE_DOCUMENT_FRAGMENT, PAGE_MESSAGE_AWARENESS, PAGE_MESSAGE_NOTICE, PAGE_MESSAGE_SYNC, PageSession,
   PageSessionConflict, pageFragmentMarkdown, setPageFragmentMarkdown,
 } from "../src/page-session.ts";
-import { CO_WRITER_PAUSE_MS } from "../src/page-co-writer.ts";
+import { CO_WRITER_PAUSE_MS, CO_WRITER_TURN_MS } from "../src/page-co-writer.ts";
 import { PAGE_MESSAGE_CO_WRITE } from "@xmatrix/protocol";
 import { pageSchema } from "@xmatrix/protocol/page-document";
 import { absolutePositionToRelativePosition, initProseMirrorDoc } from "y-prosemirror";
@@ -666,11 +666,15 @@ function joinCoWriter(h, id = "w-agent", { canEdit = true, resumed = false } = {
     encoding.writeVarString(encoder, JSON.stringify(frame));
     h.session.receive(id, encoding.toUint8Array(encoder));
   };
+  const turns = () => asked.filter((frame) => frame.type === "turn");
+  // Turns are named by the order they were asked in: the session numbers them from the clock.
+  const turnId = (n) => turns()[n - 1]?.turn ?? n;
   return {
     asked,
-    turns: () => asked.filter((frame) => frame.type === "turn"),
-    write: (turn, text) => reply({ type: "delta", turn, text }),
-    done: (turn) => reply({ type: "done", turn }),
+    turns,
+    turnId,
+    write: (n, text) => reply({ type: "delta", turn: turnId(n), text }),
+    done: (n) => reply({ type: "done", turn: turnId(n) }),
   };
 }
 
@@ -706,17 +710,18 @@ test("live co-writing follows current edit access and suggestion policy, includi
     writer.write(1, '⟦after "none"⟧\nNot allowed');
     writer.done(1);
     assert.equal(ann.text.toString(), before, "accepted text stays; later text is refused");
-    assert.deepEqual(writer.asked.at(-1), { type: "interrupt", turn: 1 });
+    assert.deepEqual(writer.asked.at(-1), { type: "interrupt", turn: writer.turnId(1) });
     ann.text.insert(ann.text.length, "\nA person's edit\n");
     t.mock.timers.tick(CO_WRITER_PAUSE_MS);
     assert.equal(writer.turns().length, 1, "no new work while live writes are disallowed");
     writable(true);
     const next = writer.turns().at(-1);
-    assert.equal(next.turn, 2, "restoring permission starts a fresh turn");
+    assert.equal(next.turn, writer.turnId(2), "restoring permission starts a fresh turn");
+    assert.ok(next.turn > writer.turnId(1));
     assert.match(next.text, /A person's edit/u);
     writer.write(1, '⟦after "none"⟧\nA late reply');
-    writer.write(next.turn, '⟦after "none"⟧\nAllowed now');
-    writer.done(next.turn);
+    writer.write(2, '⟦after "none"⟧\nAllowed now');
+    writer.done(2);
     assert.match(ann.text.toString(), /Allowed now/u);
     assert.doesNotMatch(ann.text.toString(), /Not allowed|A late reply/u);
     ann.text.insert(ann.text.length, "\nAnother edit\n");
@@ -735,7 +740,7 @@ test("a page head reloaded as suggest-only also pauses a connected co-writer", a
   writer.write(1, '⟦after "none"⟧\nNot allowed');
   writer.done(1);
   assert.equal(ann.text.toString(), HEAD);
-  assert.deepEqual(writer.asked.at(-1), { type: "interrupt", turn: 1 });
+  assert.deepEqual(writer.asked.at(-1), { type: "interrupt", turn: writer.turnId(1) });
 });
 
 test("new and resumed co-writers cannot write without current live write permission", async () => {
@@ -793,13 +798,30 @@ test("a co-writing Agent hears what changed when people pause, and stops when so
   // Ann edits the very paragraph it is writing: it stops there, and the rest of its answer is not written.
   const at = ann.text.toString().indexOf("A paragraph");
   ann.text.insert(at, "Ann: ");
-  assert.deepEqual(writer.asked.at(-1), { type: "interrupt", turn: 2 });
+  assert.deepEqual(writer.asked.at(-1), { type: "interrupt", turn: writer.turnId(2) });
   assert.equal(coWriterOf(ann).activity, "waiting");
   writer.write(2, "keeps writing after being stopped.");
   writer.done(2);
   assert.doesNotMatch(ann.text.toString(), /after being stopped/u);
   t.mock.timers.tick(CO_WRITER_PAUSE_MS);
   assert.match(writer.turns()[2].text, /You were stopped: someone edited what you were writing\./u);
+});
+
+test("a co-writing Agent whose answer goes quiet is asked afresh, instead of the page waiting on it for good", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const { ann, writer } = await annCoWriting();
+  writer.write(1, "⟦after \"none\"⟧\n- a first");
+  // Its harness's turn was cancelled from the conversation and never said it ended.
+  ann.text.insert(HEAD.indexOf("In progress") + "In progress".length, ", blocked");
+  t.mock.timers.tick(CO_WRITER_PAUSE_MS);
+  assert.equal(writer.turns().length, 1, "the open turn is waited on");
+  t.mock.timers.tick(CO_WRITER_TURN_MS);
+  assert.deepEqual(writer.asked.at(-2), { type: "interrupt", turn: writer.turnId(1) });
+  assert.equal(writer.turns().length, 2, "what changed meanwhile is asked about at once");
+  assert.match(writer.turns()[1].text, /Your last answer went quiet and was given up\./u);
+  writer.write(2, "⟦after \"a first\"⟧\n- a second\n");
+  writer.done(2);
+  assert.match(ann.text.toString(), /a second/u, "and it writes again");
 });
 
 /** Ann on the page, and an Agent that has just joined to co-write it. */
@@ -830,7 +852,7 @@ test("what a co-writing Agent is writing is taken back too", async () => {
   const { h, ann, writer } = await annCoWriting();
   writer.write(1, "⟦after \"none\"⟧\n- half a point");
   assert.equal(h.session.undoCoWriting("conv-1", "Ann"), "undone");
-  assert.deepEqual(writer.asked.at(-1), { type: "interrupt", turn: 1 }, "it stops writing");
+  assert.deepEqual(writer.asked.at(-1), { type: "interrupt", turn: writer.turnId(1) }, "it stops writing");
   assert.equal(ann.text.toString(), HEAD);
   writer.done(1);
 });

@@ -163,8 +163,11 @@ export function pageChildren(pages: readonly PageSummary[]): Map<string | null, 
 
 export interface PagePresenceState {
   user?: { name: string; color: string; kind?: "user" | "agent"; conversationId?: string | null };
-  activity?: "viewing" | "editing";
+  /** A person views or edits; an Agent co-writing live watches, thinks, writes or waits for someone. */
+  activity?: "viewing" | "editing" | "watching" | "thinking" | "writing" | "waiting";
   block?: string;
+  /** An Agent co-writing live: its note to the people on the page, while it lasts. */
+  say?: string;
   /** Ten minutes in a hidden tab. */
   idle?: boolean;
   /** An Agent co-writing live: its last change can still be taken back. */
