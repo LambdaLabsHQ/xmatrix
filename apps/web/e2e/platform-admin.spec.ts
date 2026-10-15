@@ -1,6 +1,7 @@
 import { expect, test } from "./fixtures";
 import { fixtureRequests, fixtureRule, releaseFixture } from "./in-page-api-fixtures";
 import { OVERVIEW, openWorkspaceAs } from "./platform-admin-fixtures";
+import { fixtureJson } from "./workspace-fixtures";
 
 // The operator rail entry is desktop-only (md:flex), so this spec runs wide.
 test.use({ viewport: { width: 1280, height: 900 } });
@@ -56,13 +57,34 @@ test("the Spaces table searches and sorts, keeping its state in the address", as
 
 test("opening a user shows their metadata-only detail, and Back returns to the list", async ({ page }) => {
   await openWorkspaceAs(page, true);
+  // Recent access alone must not outrank a person who actually sent a message.
+  await fixtureJson(page, "admin-overview", /\/api\/xmatrix\/admin\/overview(?:\?.*)?$/, {
+    overview: { ...OVERVIEW, users: [
+      { ...OVERVIEW.users[0], userId: "idle", name: "Idle daemon", email: "idle@example.com",
+        lastSessionAt: "2026-08-05T12:00:00.000Z", lastMessageAt: undefined },
+      { ...OVERVIEW.users[0], userId: "older", name: "Older sender", email: "older@example.com",
+        lastSessionAt: "2026-08-05T11:00:00.000Z", lastMessageAt: "2026-08-03T11:00:00.000Z" },
+      OVERVIEW.users[0],
+    ] },
+  });
   await page.goto("/app/personal-sspaceperso/admin?item=users");
 
   const users = page.getByRole("region", { name: "Registered users" });
+  await expect(users.getByRole("columnheader", { name: "Last message" })).toHaveAttribute("aria-sort", "descending");
+  const rows = users.locator("tbody tr");
+  await expect(rows.nth(0)).toContainText("owner@example.com");
+  await expect(rows.nth(1)).toContainText("older@example.com");
+  await expect(rows.nth(2)).toContainText("Never");
+  await expect(rows.nth(0).locator('[title="2026-08-04T11:00:00.000Z"]')).toBeVisible();
+  await users.getByRole("button", { name: "Last access", exact: true }).click();
+  await expect(rows.first()).toContainText("idle@example.com");
   await users.getByText("owner@example.com").click();
   await expect(page).toHaveURL(/user=user%3A1/);
 
   await expect(page.getByRole("heading", { name: "Owner" })).toBeVisible();
+  const account = page.getByRole("region", { name: "Account", exact: true });
+  await expect(account.getByText("Last message", { exact: true })).toBeVisible();
+  await expect(account.locator('[title="2026-08-04T11:00:00.000Z"]')).toBeVisible();
   await expect(page.getByRole("region", { name: "Spaces (1)" }).getByText("pro · active · 4 seats")).toBeVisible();
   await expect(page.getByRole("region", { name: "Agents (1)" }).getByText("claude-reviewer")).toBeVisible();
   await expect(page.getByRole("region", { name: "Machines (1)" }).getByText("online", { exact: true })).toBeVisible();

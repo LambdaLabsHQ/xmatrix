@@ -443,14 +443,25 @@ export function registerPageRoutes(app: Hono<{ Bindings: Env }>): void {
       // A page is a document now (pages-live-document.md §4.1). A client that
       // still edits it as markdown text would write where nobody reads, so it
       // is told to reload instead of joining.
-      if ((await json(c)).document !== PAGE_DOCUMENT_FRAGMENT) {
+      const request = await json(c);
+      if (request.document !== PAGE_DOCUMENT_FRAGMENT) {
         return c.json({ error: "This page editor is out of date; reload to keep editing", code: "page_client_outdated" },
           409, NO_STORE);
       }
       const { spaceId, pageId, authUser, page } = await readAsCaller(c);
+      // An Agent's runtime joins to co-write the page live (page-co-writer.ts): its Run writes, so it must
+      // be able to edit, and a page that takes Agent edits only as suggestions is not written live.
+      const coWriter = request.coWrite === true;
+      if (coWriter && (!authUser.agentRun || !page.canEdit)) {
+        throw new PageControlError("page_co_writing_forbidden", 403, "Only an Agent that may edit the page co-writes it");
+      }
+      if (coWriter && page.agentSuggestOnly) {
+        throw new PageControlError("page_co_writing_suggest_only", 409,
+          "This page takes Agent edits as suggestions, so it is not co-written live");
+      }
       const ticket = `${crypto.randomUUID()}${crypto.randomUUID()}`.replaceAll("-", "");
       const registered = await sessionCall(c.env, spaceId, pageId, "/internal/ticket", {
-        ticket, principal: sessionPrincipal(authUser), canEdit: page.canEdit,
+        ticket, principal: sessionPrincipal(authUser), canEdit: page.canEdit, ...(coWriter ? { coWriter: true } : {}),
       });
       if (!registered.ok) throw new ServiceUnavailable("page_session_unavailable", "Page session is unavailable");
       return c.json({ protocol: `${PAGE_SESSION_SUBPROTOCOL_PREFIX}${ticket}`,

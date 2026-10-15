@@ -55,6 +55,8 @@ test("a phone shares a filtered user list, opens a user, and Back restores the f
   await expect(users.getByRole("textbox")).toHaveCSS("border-radius", "0px");
   await expect(users.getByRole("button", { name: "Export Registered users as CSV" })).toHaveCSS("box-shadow", "none");
   await expect(users.locator("table")).toHaveCount(0);
+  await expect(users.getByText("Last message", { exact: true })).toBeVisible();
+  await expect(users.locator('[title="2026-08-04T11:00:00.000Z"]')).toBeVisible();
   await expectPaperFits(page);
   await page.screenshot({ path: testInfo.outputPath("mobile-users.png") });
   await users.getByRole("button", { name: /owner@example.com/ }).click();

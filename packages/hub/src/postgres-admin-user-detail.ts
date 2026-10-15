@@ -19,6 +19,7 @@ import {
 import type { AuthorityDatabase } from "@xmatrix/db";
 import type { QueryResultRow } from "pg";
 
+import { POSTGRES_ADMIN_MESSAGE_FACTS_QUERY } from "./postgres-admin-message-facts";
 import { adminActivityUtcWindow } from "./admin-overview-merge";
 import {
   createPostgresAuthorityFleet,
@@ -153,12 +154,12 @@ async function readShard(
 
     const messages = spaceIds.length ? (await transaction.query<MessageRow>({
       name: "postgres_admin_user_messages_v1",
-      text: `SELECT COUNT(*) AS total,
-          COUNT(*) FILTER (WHERE created_at >= $3) AS last_7d,
-          COUNT(*) FILTER (WHERE created_at >= $4) AS last_30d,
+      text: `WITH admin_message_facts AS (${POSTGRES_ADMIN_MESSAGE_FACTS_QUERY})
+        SELECT COUNT(*) FILTER (WHERE author_kind = 'user') AS total,
+          COUNT(*) FILTER (WHERE author_kind = 'user' AND created_at >= $3) AS last_7d,
+          COUNT(*) FILTER (WHERE author_kind = 'user' AND created_at >= $4) AS last_30d,
           MAX(created_at) AS last_message_at
-        FROM data.messages WHERE space_id = ANY($1::text[]) AND author_kind = 'user'
-          AND author_id = $2 AND deleted_at IS NULL`,
+        FROM admin_message_facts WHERE space_id = ANY($1::text[]) AND activity_user_id = $2`,
       values: [spaceIds, userId, since7d, since30d],
       maxRows: 1,
     }))[0] : undefined;
