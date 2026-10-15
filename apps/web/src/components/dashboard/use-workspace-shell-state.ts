@@ -60,6 +60,7 @@ import {
   mergeChannelHistory,
   sameChannelHistoryWindow,
   sortChannelHistory,
+  supersededHistoryMessage,
 } from "@/components/dashboard/channel-history";
 import {
   readChannelComposerDraft,
@@ -532,6 +533,9 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
 
   const [historyCacheRevision, setHistoryCacheRevision] = useState(0);
 
+  /** The live socket's connection, as state: a new one may leave cached windows behind. */
+  const [connectedSocketGeneration, setConnectedSocketGeneration] = useState(0);
+
   const [historyRevision, setHistoryRevision] = useState(0);
 
   const historyRevisionRef = useRef(0);
@@ -865,7 +869,7 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
   const {
     relaySocketGenerationRef, historyTailBaseGenerationRef, productTailCacheGapRef,
     productTailCacheHydratedStampsRef, productTailCacheStoreRef,
-    relaySocketLive, recordHistoryTailBase, historyTailContiguous, productTailCacheHydrationTick,
+    relaySocketLive, recordHistoryTailBase, beginHistoryTailRead, historyTailContiguous, productTailCacheHydrationTick,
     scheduleProductTailCachePersist, purgeProductTailCacheChannel,
     cachedCatalogChannels, setCachedCatalogChannels,
   } = useWorkspaceShellTailCache({
@@ -1447,6 +1451,10 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
     selectedChannelId,
     selectedChannelIdRef,
     historyCacheRef,
+    socketGeneration: connectedSocketGeneration,
+    socketLive: relaySocketLive,
+    historyTailContiguous,
+    beginHistoryTailRead,
   });
 
   useEffect(() => {
@@ -1606,6 +1614,7 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
           }
           relayPushConnectedRef.current = true;
           setHumanPushConnected(true);
+          setConnectedSocketGeneration(relaySocketGenerationRef.current);
           connection.markHealthy();
           if (connectedBefore) {
             // Frames pushed while the socket was down are gone, and polling
@@ -1683,6 +1692,15 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
           // updates in place, without refetching the channel.
           if (message.event.type === "channel_member_read_updated") {
             setChannels((current) => applyMemberReadEvent(current, message.event));
+          }
+          // The Hub folded a progress report under its sender's next one.
+          // Whichever window holds it, open or cached, folds it now, so the
+          // Channel never opens on rows its next read would rearrange.
+          if (message.event.type === "channel_message_superseded" && message.event.channelId) {
+            const channelId = message.event.channelId;
+            const folded = supersededHistoryMessage(
+              heldChannelWindow(channelId, false).messages, message.event.metadata);
+            if (folded) mergeAndRememberChannelHistory(channelId, [folded], undefined, false);
           }
           if (message.event.type === "agent_disconnected") {
             const instanceId = message.event.metadata?.instanceId;
@@ -2073,6 +2091,7 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
   }, [
     viewerReadsOf,
     applyChannelHistory,
+    heldChannelWindow,
     authorizeHistoryRender,
     bumpHistoryRevision,
     cancelAgentTraceHistoryBootstrap,

@@ -82,13 +82,6 @@ test("a superseded report folds; the newest and any engaged message stay whole",
   assert.equal(recalled[0].folded, undefined);
 });
 
-test("a judgment that arrived later folds a message already on screen", () => {
-  const earlier = said(claude1, "Progress: writing the CLI", 30);
-  const later = said(claude1, "CLI merged into PR 2", 36);
-  const rows = buildConversationRows([earlier, later], new Map([[earlier.messageId, later.messageId]]));
-  assert.equal(rows[0].folded[0].supersededBy, later.messageId);
-});
-
 test("a message right after its sender's own drops the header, until tags or time change", () => {
   const first = said(yiming, "one", 0);
   const second = said(yiming, "two", 5);

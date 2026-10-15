@@ -125,11 +125,11 @@ export function sortChannelHistory<T extends ChannelHistoryLike>(messages: T[]):
 }
 
 /**
- * A refresh that produced the identical window (same messages, edit and
- * recall markers, in the same order) must not re-render the timeline.
+ * A refresh that produced the identical window (same messages, edit, recall
+ * and supersession markers, in the same order) must not re-render the timeline.
  */
 export function sameChannelHistoryWindow<
-  T extends ChannelHistoryLike & { editedAt?: string; recalledAt?: string },
+  T extends ChannelHistoryLike & { editedAt?: string; recalledAt?: string; supersededBy?: string },
 >(
   left: readonly T[],
   right: readonly T[],
@@ -141,10 +141,29 @@ export function sameChannelHistoryWindow<
     if (
       a.messageId !== b.messageId ||
       a.editedAt !== b.editedAt ||
-      a.recalledAt !== b.recalledAt
+      a.recalledAt !== b.recalledAt ||
+      a.supersededBy !== b.supersededBy
     ) return false;
   }
   return true;
+}
+
+/**
+ * The held message a live supersession judgment folds, carrying it; undefined
+ * when this window does not hold it or already shows the judgment. The event
+ * names only the two messages (docs/design/conversation-activity.md §3.3).
+ */
+export function supersededHistoryMessage<
+  T extends ChannelHistoryLike & { recalledAt?: string; supersededBy?: string },
+>(messages: readonly T[], metadata: Record<string, unknown> | undefined): T | undefined {
+  const messageId = metadata?.messageId;
+  const supersededBy = metadata?.supersededBy;
+  if (typeof messageId !== "string" || typeof supersededBy !== "string" || !messageId || !supersededBy) {
+    return undefined;
+  }
+  const held = messages.find((message) => message.messageId === messageId);
+  if (!held || held.recalledAt || held.supersededBy === supersededBy) return undefined;
+  return { ...held, supersededBy };
 }
 
 export function mergeChannelHistory<T extends ChannelHistoryLike>(
