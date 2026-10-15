@@ -7,7 +7,7 @@ import { declaredWaitStandsSql, messageIsSpeech } from "./message-attention-wait
 import { requireRunRegistrationAccess } from "./agent-registration-run.js";
 import { authorizeMessageInvocationSelections, bodyWithoutInvocationSelections } from "./message-invocation-selections.js";
 import type { AgentRegistrationKey, MessageCommitReceipt } from "@xmatrix/protocol";
-import { channelVisibilityScope, isReservedAnnotationNamespace, QUESTIONNAIRE_STATE_ANNOTATION_NAMESPACE, questionnaireStateOf,
+import { parseAgentRegistrationKey, channelVisibilityScope, isReservedAnnotationNamespace, QUESTIONNAIRE_STATE_ANNOTATION_NAMESPACE, questionnaireStateOf,
   SYSTEM_ANNOTATION_AUTHOR , utf8ByteLength, type QuestionnaireState } from "@xmatrix/protocol";
 import { atomicAttentionTargets, MAX_ATTENTION_TARGETS } from "./message-attention-targets.js";
 
@@ -3030,11 +3030,12 @@ export class PostgresMessageRepository {
  *  names its exact Instance, so live delivery of the relay can skip it: an
  *  Instance answering its own link must not get its answer back as a turn. */
 function replierPresentation(snapshot: Record<string, unknown>): {
-  kind: "user" | "agent"; label: string; avatarUrl?: string; agentId?: string; instanceId?: string;
+  kind: "user" | "agent"; label: string; avatarUrl?: string; agentId?: string; instanceId?: string; registration?: AgentRegistrationKey;
 } {
   const text = (value: unknown) => typeof value === "string" && value.trim() ? value : undefined;
   const agent = snapshot.kind === "agent";
   return {
+    ...(agent && snapshot.registration ? { registration: parseAgentRegistrationKey(snapshot.registration) } : {}),
     kind: agent ? "agent" : "user",
     label: text(snapshot.label) ?? text(snapshot.name) ?? text(snapshot.agentName) ?? "Someone",
     ...(text(snapshot.avatarUrl) ? { avatarUrl: text(snapshot.avatarUrl) } : {}),

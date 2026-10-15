@@ -307,6 +307,13 @@ only when it is off.
    rewritten to `hostname`.
 8. Contract migration drops every `host_id` column.
 
+Cross-Channel reply relays preserve the actual Agent replier’s send-time
+registration in optional metadata, separate from the link owner’s append
+authority. Message headers use that registration to read the current Machine
+name even after the replier stops. Older relays can resolve only their exact
+replier Instance in the authorized catalog; they never borrow the link owner’s
+Machine or a local namesake. Older clients ignore the added metadata.
+
 Machine labels in Channel details, message headers and failure notices read the
 current owner-chosen name from the authorized registration catalog or the owning
 Machine directory, using exact owner and Machine scope. A missing or ambiguous
