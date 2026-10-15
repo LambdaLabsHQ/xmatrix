@@ -88,6 +88,7 @@ export interface AdminUserSummary {
   profileCompleted?: boolean;
   providers?: string[];
   firstSeenAt?: string;
+  /** Latest retained message from this user or their Agents; counts stay user-authored. */
   lastMessageAt?: string;
 }
 
@@ -268,6 +269,7 @@ export interface AdminUserMessageSummary {
   total: number;
   last7d: number;
   last30d: number;
+  /** Latest retained message from the user or their Agents. */
   lastMessageAt?: string;
 }
 

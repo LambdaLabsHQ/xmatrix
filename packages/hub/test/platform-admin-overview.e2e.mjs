@@ -55,9 +55,34 @@ test("platform admin reads a cross-Space overview of spaces, users, and message 
     await postChannelMessage(worker, MOCK_TOKEN, channel.id, "first admin overview message");
     await postChannelMessage(worker, MOCK_TOKEN, channel.id, "second admin overview message");
 
+    const lastAgentMessageAt = new Date(Date.now() + 1_000).toISOString();
+    const later = new Date(Date.now() + 2_000).toISOString();
     const client = new Client({ connectionString: worker.postgresUrl });
     await client.connect();
     try {
+      // Send-time ownership must survive an absent Instance and must not be
+      // inferred from a display name, another owner's Agent, or system traffic.
+      for (const [index, [kind, owner, at, deleted]] of [
+        ["agent", userId, lastAgentMessageAt, false],
+        ["agent", "another-user", later, false],
+        ["agent", null, later, false],
+        ["system", userId, later, false],
+        ["agent", userId, later, true],
+      ].entries()) {
+        await client.query(`INSERT INTO data.messages SELECT (jsonb_populate_record(
+          NULL::data.messages, to_jsonb(source) || jsonb_build_object(
+            'message_id', $2::text, 'author_kind', $3::text, 'author_id', $4::text,
+            'timeline_sequence', $5::bigint, 'search_rank_sequence', 'admin-agent:' || $2::text,
+            'created_at', $6::timestamptz,
+            'updated_at', $6::timestamptz, 'sent_at', $6::timestamptz,
+            'deleted_at', CASE WHEN $7::boolean THEN $6::timestamptz ELSE NULL END,
+            'preview_json', jsonb_build_object('bodyPreview', 'private agent message',
+              'senderSnapshot', jsonb_build_object('kind', $3::text, 'userId', $8::text,
+                'name', 'same-display-name'))))).*
+          FROM data.messages source WHERE channel_id = $1 AND author_kind = 'user' LIMIT 1`,
+        [channel.id, randomUUID(), kind, `instance:${randomUUID()}`, 10_000 + index,
+        at, deleted, owner]);
+      }
       await client.query(`INSERT INTO data.machine_daemons
         (daemon_id, owner_user_id, owner_email, machine_id, hostname, status,
          capabilities_json, metadata_json, connection_epoch, version, created_at, updated_at)
@@ -89,8 +114,8 @@ test("platform admin reads a cross-Space overview of spaces, users, and message 
     assert.equal(summary?.ownerUserId, userId);
     assert.equal(summary?.members, 1);
     assert.equal(summary?.activeChannels, 1);
-    assert.equal(summary?.messages, 2);
-    assert.equal(summary?.messagesLast7d, 2);
+    assert.equal(summary?.messages, 6);
+    assert.equal(summary?.messagesLast7d, 6);
     assert.ok(summary?.lastMessageAt, "an active Space reports its last message time");
 
     const user = overview.users.find((entry) => entry.userId === userId);
@@ -98,6 +123,15 @@ test("platform admin reads a cross-Space overview of spaces, users, and message 
     assert.equal(user.messages, 2);
     assert.equal(user.machines, 1);
     assert.ok(user.spaces >= 1);
+
+    assert.equal(user.lastMessageAt, lastAgentMessageAt,
+      "the owner's Agent advances activity, with foreign/system/deleted/unattributed messages excluded");
+    const { detail } = await json(await worker.fetch(
+      `/api/admin/users/${encodeURIComponent(userId)}`, { headers: auth },
+    ));
+    assert.equal(detail.user.lastMessageAt, lastAgentMessageAt);
+    assert.equal(detail.messages.lastMessageAt, lastAgentMessageAt);
+    assert.equal(detail.messages.total, 2, "message counts remain user-authored");
 
     // Daily volume is a dense oldest-first series that sums to the window total.
     const dailyTotal = overview.activity.reduce((sum, point) => sum + point.messages, 0);
@@ -112,6 +146,8 @@ test("platform admin reads a cross-Space overview of spaces, users, and message 
     const serialized = JSON.stringify(overview);
     assert.equal(serialized.includes("first admin overview message"), false);
     assert.equal(serialized.includes(channel.name), false);
+    assert.equal(serialized.includes("private agent message"), false);
+    assert.equal(serialized.includes("same-display-name"), false);
     assert.equal(serialized.includes("private-admin-machine-host"), false);
     assert.equal(serialized.includes("must-not-appear"), false);
   } finally {

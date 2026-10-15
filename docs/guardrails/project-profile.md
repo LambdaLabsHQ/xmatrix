@@ -153,6 +153,10 @@ dates, filters, explicit offsets and fresh/hourly data within bounded calls.
 See [app connectors](../operations/app-connectors.md) for onboarding and policy.
 
 Platform admin user lists show Last message and default to the latest retained
-user-authored message, with the exact UTC timestamp on hover and the same field
-in user details. Last access remains a separate session metric; daemon presence
-and Agent messages do not advance a user's Last message.
+message sent by the user or their Agents, with the exact UTC timestamp on hover
+and the same field in user details. Agent ownership comes from the stored
+send-time sender snapshot; messages predating previews use their persisted Run
+registration when available. Missing or erased ownership stays unattributed.
+Last access remains a separate session metric; daemon presence does not advance
+Last message. Existing message counts and daily user charts remain user-authored
+message counts.
