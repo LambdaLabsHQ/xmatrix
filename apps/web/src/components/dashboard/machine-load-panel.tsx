@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils";
 
 import { MachineLoadHistoryChart } from "./machine-load-history-chart";
 import { machineGlanceReadings, machineLoadReadings, meterTone } from "./machine-load";
-import { machineNetworkText } from "./machine-network";
+import { MachineNetworkPanel } from "./machine-network-panel";
 import type { MachineSummary } from "./workspace-shell-helpers";
 
 /** One measured share, shown as a labelled value over a bar. */
@@ -36,14 +36,7 @@ export function MachineLoadPanel({ machine, now, token }: { machine: MachineSumm
       <div className="mt-4 border-t border-border/70 pt-3">
         <MeterReadingList label="Machine load" readings={readings}
           empty="No recent load sample from this daemon." />
-        <p className="mt-3 text-xs text-muted-foreground" aria-label="Machine network quality">
-          {machineNetworkText(resources?.network)}
-        </p>
-        {resources?.network && <p className="mt-1 text-xs text-muted-foreground">
-          HTTPS to Cloudflare Speed; ICMP directly to 1.1.1.1. Sampled {resources.network.observedAt}.
-          {resources.network.download && ` Download sampled ${resources.network.download.observedAt}.`}
-          {resources.network.upload && ` Upload sampled ${resources.network.upload.observedAt}.`}
-        </p>}
+        <MachineNetworkPanel network={resources?.network} now={now} />
       </div>
       {history}
     </>
