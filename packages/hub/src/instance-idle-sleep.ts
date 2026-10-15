@@ -12,6 +12,12 @@ import type { Env } from "./types";
 export const INSTANCE_IDLE_SLEEP_MS = 30 * 60 * 1000;
 
 /**
+ * A Run whose conversation co-writes a page live stays awake, however long people pause, for this long
+ * after co-writing started: asleep, it would drop off the page and not be there when they type again.
+ */
+export const CO_WRITING_AWAKE_HOURS = 24;
+
+/**
  * Whether an Instance's presence says its Run rests: it is not busy, runs no
  * turn and waits on nothing, so a background watch or a long tool call keeps
  * it awake however quiet it looks.
@@ -31,18 +37,21 @@ export function presenceRests(status: LiveAgentStatus | undefined, runtimeState:
 export async function reconcileIdleSleeps(env: Env, database: AuthorityDatabase, channelId: string,
   issue: (input: Record<string, unknown>) => Promise<unknown> = (input) => machineDaemonCommand(env, input)): Promise<void> {
   const due = await database.transaction({ requestId: `idle-sleep:${crypto.randomUUID()}`, operation: "runtime.idle-sleep.due" },
-    tx => tx.query<QueryResultRow>({ name: "runtime_idle_sleep_due_v2", text: `SELECT
+    tx => tx.query<QueryResultRow>({ name: "runtime_idle_sleep_due_v3", text: `SELECT
         run.run_id,run.owner_user_id,run.status,run.metadata_json,run.idle_sleep_at::text AS idle_sleep_at,
-        instance.instance_id
+        instance.instance_id,
+        EXISTS (SELECT 1 FROM data.page_co_writing co WHERE co.conversation_id=run.channel_id AND co.ended_at IS NULL
+          AND co.started_at>clock_timestamp()-make_interval(hours => $2)) AS co_writing
       FROM data.runs run LEFT JOIN data.instances instance ON instance.run_id=run.run_id
       WHERE run.channel_id=$1 AND run.idle_sleep_at<=clock_timestamp()
       ORDER BY run.idle_sleep_at,run.run_id LIMIT 100`,
-    values: [channelId], maxRows: 100 }));
+    values: [channelId, CO_WRITING_AWAKE_HOURS], maxRows: 100 }));
   for (const run of due) {
     const metadata = (run.metadata_json ?? {}) as Record<string, unknown>;
     const machineId = typeof metadata.machineId === "string" ? metadata.machineId : "";
     const executionKey = typeof metadata.executionKey === "string" ? metadata.executionKey : "";
-    if (run.status === "running" && run.instance_id && machineId && executionKey) {
+    // Co-writing a page live: the resting period passes without sleep, and the next one is due again.
+    if (run.status === "running" && run.instance_id && machineId && executionKey && run.co_writing !== true) {
       const ownerUserId = String(run.owner_user_id);
       // Keep PostgreSQL's full timestamp precision and long Run ids. The
       // fixed idle threshold also makes retries byte-identical as time passes.

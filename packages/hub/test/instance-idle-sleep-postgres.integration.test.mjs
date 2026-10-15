@@ -58,6 +58,22 @@ integration("sleep handoff preserves its deadline until durable acceptance, with
     await reconcile(async () => { throw new MachineControlError("sleep_unavailable", 409, "old daemon"); });
     assert.equal(await due(), null, "an incapable daemon is left alone");
 
+    // Its conversation co-writes a page live: the Run stays on the page however long people pause.
+    await run(`INSERT INTO data.page_co_writing (space_id,page_id,conversation_id,started_by_user_id,started_at)
+      VALUES ('space','page',$1,'owner',now())`, [channel]);
+    await setDue(first);
+    await reconcile(async () => { assert.fail("a Run co-writing a page live is not put to sleep"); });
+    assert.equal(await due(), null, "its resting period passes without sleep");
+    // Ended, or started long enough ago, co-writing no longer keeps it awake.
+    await run("UPDATE data.page_co_writing SET started_at=now()-interval '25 hours'");
+    await setDue(first);
+    await reconcile(record);
+    assert.equal(commands.length, 4, "a co-writing started over a day ago keeps it awake no longer");
+    await run("UPDATE data.page_co_writing SET started_at=now(), ended_at=now()");
+    await setDue(first);
+    await reconcile(record);
+    assert.equal(commands.length, 5, "an ended co-writing keeps it awake no longer");
+
     await run(`INSERT INTO data.runs (run_id,owner_user_id,channel_id,status,version,metadata_json,created_at,updated_at,idle_sleep_at)
       SELECT $2||':'||(n+1)||'#1','owner',$2,'exited',1,'{}',now(),now(),$1::timestamptz
       FROM generate_series(1,101) n`, [first, channel]);

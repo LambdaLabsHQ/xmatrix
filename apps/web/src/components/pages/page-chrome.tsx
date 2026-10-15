@@ -132,7 +132,7 @@ export function PageOffscreenPeople({ above, below, onJump }: {
 export interface PagePen { person: PresentPerson; top: number; away: "above" | "below" | null }
 
 /**
- * On a phone, each Agent on the page is its face at the right edge beside the line its pen is at, where
+ * Each Agent on the page, on a phone and a desktop alike, is its face at the right edge beside the line its pen is at, where
  * Google Docs keeps what others do to the text (§3.2). The face travels with the text, and when the line
  * is scrolled out of view it waits at the top or bottom of the edge, pointing the way. A tap on a face
  * that is away goes back to its line; on one beside its line, it opens what the Agent is doing.
@@ -156,6 +156,12 @@ export function PagePens({ pens, onJump, onOpen }: {
               <IdentityAvatar kind="agent" label={person.name} imageUrl={person.avatarUrl}
                 initials={person.avatarUrl ? avatarInitials(person.name) : undefined} size="sm" shape="circle"
                 className="page-pen-face pointer-events-none rounded-full" />
+              {/* While it writes, the dots under its face run in its colour, as a chat shows someone typing. */}
+              {person.editing && !person.idle && (
+                <span className="page-writer-dots page-pen-dots" style={{ color: person.color }} aria-hidden="true">
+                  <i /><i /><i />
+                </span>
+              )}
               {away && <Chevron className="page-pen-way" aria-hidden="true" strokeWidth={2.5} />}
             </button>
           </div>
