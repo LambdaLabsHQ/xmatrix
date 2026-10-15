@@ -1365,6 +1365,61 @@ test("on a long page, who works out of view shows at its edges, and what an Agen
   await expect(browser.getByTestId("page-now").getByRole("button", { name: /^claude:2/u })).toHaveCount(0);
 });
 
+test("typing fast at the top of a busy page while an Agent writes keeps every key and the Agent's words", async ({ page: browser }) => {
+  // React #185 in production: on a slow device, every key and the page state derived from it (outline,
+  // presence, anchor offsets) queued commit after commit until React gave up, and the editor then fell
+  // behind the session and wrote its stale document back over what an Agent had written.
+  const filler = Array.from({ length: 60 }, (_, index) => `Background paragraph ${index + 1}.`).join("\n\n");
+  const server = pageDocument(`# Relay\n\n## Status\n\nIn progress\n\n${filler}\n\n## Notes\n\nnone\n`);
+  const AGENT = 1_234_567;
+  let push: (data: Uint8Array) => void = () => {};
+  const errors: string[] = [];
+  browser.on("pageerror", (error) => errors.push(error.message));
+  await stubPages(browser, [page("p-relay", null, "Relay", "V")]);
+  await fixtureJson(browser, "page-links", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\?.*$/u, { links: [] });
+  await servePageSession(browser, server, { connect: (send) => { push = send; } });
+  await browser.goto("/app", { waitUntil: "domcontentloaded" });
+  await browser.getByRole("button", { name: "Pages", exact: true }).first().click();
+  const editor = browser.getByTestId("page-editor");
+  await expect(editor).toContainText("In progress");
+
+  const agentWrites = (clock: number, from: string, to: string) => {
+    const own = server.clientID;
+    server.clientID = AGENT;
+    editPageMarkdown(server, (markdown) => markdown.replace(from, to), "agent");
+    server.clientID = own;
+    push(awarenessFrom(server, AGENT, clock, { user: { name: "claude:2", color: "#7c3aed", kind: "agent",
+      conversationId: E2E_CHANNEL.id }, activity: "writing", block: "notes" }, to));
+  };
+  agentWrites(1, "none", "none yet");
+
+  // A slow device: the page renders slower than the keys arrive.
+  const cdp = await browser.context().newCDPSession(browser);
+  await cdp.send("Emulation.setCPUThrottlingRate", { rate: 6 });
+  // An empty paragraph opens the page, and the title is typed into its heading, key after key.
+  await editor.locator("h1").click({ position: { x: 5, y: 8 } });
+  await browser.keyboard.press("Home");
+  await browser.keyboard.press("Enter");
+  const typed = "Please keep the relay notes current while the migration runs this week ";
+  const typing = browser.keyboard.type(typed);
+  for (let step = 2; step <= 6; step += 1) {
+    await browser.waitForTimeout(150);
+    agentWrites(step, step === 2 ? "none yet" : `none yet ${step - 1}`, `none yet ${step}`);
+  }
+  await typing;
+  await cdp.send("Emulation.setCPUThrottlingRate", { rate: 1 });
+
+  await expect(editor.locator("h1")).toContainText(typed.trim());
+  await expect.poll(() => pageMarkdown(server)).toContain(typed.trim());
+  expect(errors, "no update loop while typing").toEqual([]);
+  // Later input leaves the Agent's words as the session has them.
+  await browser.waitForTimeout(1_000);
+  await browser.keyboard.type("!");
+  await expect.poll(() => pageMarkdown(server)).toContain(`${typed}!`);
+  expect(pageMarkdown(server)).toContain("none yet 6");
+  await expect(editor).toContainText("none yet 6");
+});
+
 test("everyday editing works as in Google Docs: rename the page, grow a table, links from typed URLs", async ({ page: browser }) => {
   await browser.setViewportSize({ width: 1280, height: 800 });
   // A page is named by the heading its document opens with; one that opens without a name offers it above,
