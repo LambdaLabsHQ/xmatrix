@@ -14,84 +14,64 @@ content update. That baseline explicitly has unknown provenance. This does not
 reconstruct overwritten history or determine the reported cross-Channel incident
 (2026-10-07, remote About execution #6 still missing).
 
-## Input evidence and About authority
+## How an About is written
 
-About sessions have only their own Channel's history, metadata history and
-metadata write HTTP capabilities. Their catalog response queries only that
-Channel, with no Space catalog manifests or attention context. The task injects
-its Channel id, current title, About and revision, trigger request and message
-id. The generator is instructed to use only the scoped authoritative history;
-conversation data is not executable instruction authority. Automatic titles may
-continue to change while `autoName` is true.
+A conversation's About is written by one text task (`machine_text_task`,
+`packages/hub/src/channel-about.ts`), the way a page's summary is. A task starts
+after the fifth message and every fifth after it, after the first message while
+nobody has named the conversation, and when someone who reads the conversation
+asks for it again (`POST /api/spaces/:spaceId/channel-about`).
 
-Each authorized About history page records its metadata snapshot, content
-revision and the exact message window in `data.channel_about_inputs`. References
-carry message id, Channel id, sequence, entity version, content hash, immutable
-payload kind/ref and record/body digests. Inline encoded payload bundles are
-preserved because an object reference alone cannot recover that input. Input inspection omits payloads and refs after their message is recalled,
-deleted, or edited to different content; stored audit digests remain. Ordinary
-retention and Space purge still apply. History references are audit evidence,
-not an additional content-read capability.
+- The Hub picks the first of the Space's enabled Agents whose Machine is online
+  and takes text tasks, and whose owner may read the conversation. It reads the
+  conversation as that owner before any of it reaches the Machine.
+- The harness is handed the conversation's name, current summary and newest
+  messages (at most 64 KiB, each message cut at 2,000 characters) and an
+  instruction in the Space's language setting. Nothing else reaches it: no token,
+  no tools, no workspace, no other conversation. It starts fresh in an empty
+  private directory and keeps nothing: Claude runs with
+  `--no-session-persistence --safe-mode --strict-mcp-config` and Codex with
+  `--ephemeral --ignore-user-config`, each flag where the installed version
+  lists it.
+- It answers one JSON object: the summary (at most 240 characters) and, while
+  nobody has named the conversation, a name (at most 40).
+- The Hub writes the answer as a revision with source `about_task`: the task id,
+  the harness, the revision it read and the newest message it was given. The
+  actor is the Machine's owner, who needs only Space membership, since the write
+  is xMatrix's. A revision made after the reading wins if it is a person's change
+  or an About that read as far or further. The answer is then dropped, and the
+  next reading writes the About.
+- The task id `channel-about:<channel>:<revision read>:<newest sequence>:<name|summary>:<uuid>`
+  names the reading, so the answer needs no other record. The machine command is
+  the task's only record.
 
-`xmatrix channel history <channel> --authoritative` bypasses the daemon's shared
-history cache and prints the input id and `expectedRevision`. An oversized About
-page is refused rather than silently trimming the recorded window; request a
-smaller history limit through the API in that case. A Run may record up to 1000
-pages for one generated revision. Inputs from different metadata revisions
-require a fresh session.
-
-The write transaction rechecks that the Run is live, belongs to the exact
-Channel, is a registration-backed About session, and its owner is still a Space
-admin. It rejects other metadata operations, foreign or unrecorded through
-messages, missing inputs and stale revisions. The revision stores the trigger
-and input ids from server-owned records. Coalesced successor tasks carry their
-pending trigger message rather than substituting the original one.
-
-## Direct About submission
-
-The generated summary and optional automatic title are sent directly through
-`xmatrix channel about <id> --summary "<text>" [--name "<title>"]
---through <message-id> --expected-revision N`.
-The new CLI also accepts the same text as JSON with `--stdin`.
-Stdin is a UTF-8 JSON object containing `summary` and optional `name` only;
-On Windows, ASCII-only PowerShell source can decode JSON Unicode escapes
-with `ConvertFrom-Json` and pass Unicode native arguments; ASCII-only JSON
-escapes also work with stdin. No local files are written or read:
-`--summary-file` and `--name-file` have been removed, along with the file-age
-check. Input is bounded to 64 KiB and malformed or unsupported fields are
-refused before the Hub update.
-
-The CLI forwards the text to the existing scoped Channel PATCH. The Hub's
-transaction updates the database row and appends its immutable revision and
-recorded input evidence. This changes input transport, not database or Run
-authority. Hub prompts and CLI ship together. Prompts default to existing
-inline arguments so daemons awaiting CLI updates still work, and offer JSON
-stdin only when the CLI advertises support. An older prompt using file flags is rejected by
-the new CLI rather than reading a residual file.
+Until 2026-10-15, an About Agent Run wrote the About. It read history through
+`xmatrix channel history --authoritative` and submitted through
+`xmatrix channel about`. Those Runs carried context between conversations inside
+their harnesses, which caused the cross-Channel replays of 2026-10-07 to
+2026-10-15. Their recorded inputs (`data.channel_about_inputs`) and their
+revisions with source `about` stay readable. The Run machinery is being removed.
 
 ## Reading and restoring
 
 - `GET /api/channels/:id/metadata-history` returns newest first, with
   `currentRevision` and `hasMore`. `limit` is 1–100 (default 20),
   `beforeRevision` pages backwards, and `revision` selects a single version.
-- The same endpoint with `inputId` returns one recorded input window, bounded
-  to 200 references. Both queries use the Channel's current content-read policy.
+- The same endpoint with `inputId` returns one input window an About Run
+  recorded, bounded to 200 references. Both queries use the Channel's current
+  content-read policy.
 - `POST /api/channels/:id/metadata-restore` takes `{ revision, expectedRevision }`.
-  The existing configuration permission and exact Run delegation apply; an About
-  Run cannot restore. Restoring copies the content and original summary source
-  into a new revision attributed to the restorer. The bad version stays visible.
+  The existing configuration permission and exact Run delegation apply.
+  Restoring copies the content and original summary source into a new revision
+  attributed to the restorer. The bad version stays visible.
 - CLI: `xmatrix channel metadata-history <id> [--revision N|--before-revision N]`
   and `--input <input-id>` inspect evidence;
   `xmatrix channel metadata-restore <id> --revision N --expected-revision M`
-  restores it. `channel about` accepts `--expected-revision M`.
+  restores it.
 
 The ordinary PATCH accepts `expectedRevision`; stale values return HTTP 409
-`metadata_revision_conflict`. About clients that omit it are pinned to their
-server-recorded input revision, preserving CAS without trusting a latest-read
-fallback. Existing manual title clients may omit it during coordinated client
-rollout; they still append history. Restoration always requires the revision.
-Hub and CLI ship together through the release train. Old About clients that
-only consumed a daemon cache fail closed if no authoritative input was recorded.
+`metadata_revision_conflict`. Manual title clients may omit it; they still append
+history. Restoration always requires the revision.
 
 Content fields are protected against SQL UPDATE by triggers. Only storage
 `space_id` may change during an authorized Channel transfer; original Space and
@@ -103,7 +83,8 @@ There is no product operation for editing or deleting individual history rows.
 
 PostgreSQL regressions exercise full snapshots, append restoration, replay,
 concurrent CAS, failure rollback, immutable-content triggers, Channel permission
-revocation and About Run/input scope. Hub end-to-end coverage crosses real
-registration launch, recorded history, stale and foreign input refusal, a
-successful About update, history inspection, restoration and a coalesced
-successor. CLI argument and Channel tests cover the command surface.
+revocation, and task-written Abouts: a member's Machine, a further reading over
+an older one, never the reverse, and a person's change standing. Hub end-to-end
+coverage sends the About task to a real daemon connection and checks that
+another conversation's text never reaches it. It writes the answer, drops one
+read before a rename, and runs an asked-for reading again.

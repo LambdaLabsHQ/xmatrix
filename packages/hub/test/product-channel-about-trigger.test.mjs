@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
-  channelAboutRequestId,
+  channelAboutDue,
   dispatchProductMessageLaunches,
   productMessageControlFinishesBeforeResponse,
   summonFirstMessageHarness,
@@ -138,15 +138,16 @@ test("an Agent's harness shout launches through its derived registration selecti
   assert.deepEqual(calls, ["owner"], "the Agent's owner is the launch actor");
 });
 
-test("Channel About runs after the first message and again on each fifth message", () => {
-  assert.equal(channelAboutRequestId("ch-1", 1), "channel-about:ch-1:0");
-  assert.equal(channelAboutRequestId("ch-1", 2), undefined);
-  assert.equal(channelAboutRequestId("ch-1", 4), undefined);
-  assert.equal(channelAboutRequestId("ch-1", 5), "channel-about:ch-1:1");
-  assert.equal(channelAboutRequestId("ch-1", 9), undefined);
-  assert.equal(channelAboutRequestId("ch-1", 10), "channel-about:ch-1:2");
-  assert.equal(channelAboutRequestId("ch-1", 100), "channel-about:ch-1:20");
-  assert.equal(channelAboutRequestId("ch-1", 101), undefined);
+test("Channel About runs after the first message while unnamed and again on each fifth message", () => {
+  assert.deepEqual(channelAboutDue(1), { unnamedOnly: true });
+  assert.equal(channelAboutDue(2), undefined);
+  assert.equal(channelAboutDue(4), undefined);
+  assert.deepEqual(channelAboutDue(5), { unnamedOnly: false });
+  assert.equal(channelAboutDue(9), undefined);
+  assert.deepEqual(channelAboutDue(10), { unnamedOnly: false });
+  assert.deepEqual(channelAboutDue(100), { unnamedOnly: false });
+  assert.equal(channelAboutDue(101), undefined);
+  assert.equal(channelAboutDue(undefined), undefined);
 });
 
 test("an unconfirmed launch names its diagnostic reference and stable code, never the exception text", async () => {

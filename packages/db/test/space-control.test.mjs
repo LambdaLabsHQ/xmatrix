@@ -490,9 +490,8 @@ function channelMutationDatabase(respond) {
     if (query.name === "transfer_members_snapshot_v1") return transferTestSnapshot.members;
     if (query.name === "transfer_access_snapshot_v1") return [];
     if (query.name === "transfer_target_placement_fence_v1") return [{ space_id: "target" }];
-    if (query.name === "channel_mutation_admin_v1" || query.name === "channel_move_target_admin_v1") {
-      return [{ user_id: "u" }];
-    }
+    if (query.name === "channel_mutation_actor_role_v1") return [{ role: "admin" }];
+    if (query.name === "channel_move_target_admin_v1") return [{ user_id: "u" }];
     if (query.name === "channel_mutation_tree_v1") {
       return [{ ...channelRoot }];
     }

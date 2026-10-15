@@ -262,6 +262,12 @@ export function listChannelTransfers(env: SpacesEnv, input: { spaceId: string; p
   return repository.listTransferProposals({ requestId, ...input });
 }
 
+/** The Space a Channel is in now. */
+export async function channelSpaceId(env: SpacesEnv, channelId: string): Promise<string> {
+  const { repository, requestId } = spaces(env);
+  return repository.resolveChannelSpaceId({ requestId, channelId });
+}
+
 /**
  * A Channel as its reader may see it, in its own Space unless one is named.
  * `purpose` names a non-request read path (a live fanout) in its observation.

@@ -36,11 +36,11 @@ integration("Apple purchase ownership is immutable under concurrent claims and b
     const winner = claims[0].status === "fulfilled" ? a : b;
     const binding = await apple.resolve(randomUUID(), winner.appAccountToken);
     await apple.claim(randomUUID(), "Production", "1000001", winner.appAccountToken);
-    const apply = (end, commandId, signedAt) => billing.applyProviderEvent({ requestId: commandId,
+    const apply = (end, commandId, signedAt, quantity = 1) => billing.applyProviderEvent({ requestId: commandId,
       commandId, providerEventId: commandId, eventType: "apple.subscription.reconciled",
       payloadDigest: "a".repeat(64), eventCreatedAt: signedAt,
       subscription: { billingProvider: "apple", id: "apple:Production:1000001", customerId: winner.appAccountToken,
-        priceId: "sh.xmatrix.app.pro.monthly", status: "active", quantity: 1,
+        priceId: "sh.xmatrix.app.pro.monthly", status: "active", quantity,
         currentPeriodEnd: end, cancelAtPeriodEnd: true, spaceId: binding.spaceId, billingOwnerUserId: "apple-owner" },
     });
     const signedAt = new Date().toISOString();
@@ -48,6 +48,13 @@ integration("Apple purchase ownership is immutable under concurrent claims and b
     const first = await apply(future, "apple-first", signedAt);
     assert.equal(first.plan, "pro");
     assert.equal((await apply(future, "apple-first", signedAt)).plan, "pro");
+    // A multiseat purchase covers a Space with more than one person.
+    await f.run(`INSERT INTO data.space_members(space_id,user_id,role,version,created_at,updated_at)
+      VALUES ($1,'apple-member','member',1,now(),now())`, [binding.spaceId]);
+    const multiseat = await apply(future, "apple-multiseat", new Date(Date.parse(signedAt) + 1_000).toISOString(), 3);
+    assert.equal(multiseat.plan, "pro");
+    const seats = await billing.readSpaceBilling({ requestId: randomUUID(), spaceId: binding.spaceId, actorUserId: "apple-owner" });
+    assert.deepEqual(seats.billing.seats, { used: 2, limit: 3 });
     await assert.rejects(billing.createCheckoutIntent({ requestId: "stripe-conflict", commandId: "stripe-conflict",
       actorUserId: "apple-owner", spaceId: binding.spaceId, interval: "month", priceId: "price_test", seatQuantity: 1 }));
     await f.run("UPDATE data.space_billing_subscriptions SET current_period_end=now()-interval '1 second' WHERE space_id=$1", [binding.spaceId]);

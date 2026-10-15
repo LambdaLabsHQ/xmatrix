@@ -6,11 +6,11 @@ import { deploymentPinnedSpace, finishScheduledSpaceDeletion } from "./space-del
 import { checkAppConnection } from "./app-connection-check";
 import { appCommand, findAppConnection, listAppConnections, listAppExecutions, upsertAppConnection } from "./apps";
 import { schedulerRepository } from "./automations";
-import { changeMembership, createSpaceInvite, deleteSpace, getSpace, listSpaceDeletions, restoreSpace } from "./spaces";
+import { changeMembership, createSpaceInvite, deleteSpace, getChannel, getSpace, listSpaceDeletions, restoreSpace } from "./spaces";
 import { SpaceControlError } from "@xmatrix/db";
 import { buildGitHubAppInstallUrl, describeGitHubInstallation, githubConnectionInstallationIds, resolveAppConnectorCompletionOptions, type AppConnectorConnectionView } from "./app-connectors";
 import { githubConnectAuthorizeUrl, githubConnectReturnUrl, githubGrantInstallationIds } from "./github-connect-authorization";
-import { dispatchProductChannelAbout } from "./product-agent-mention-authority-adapter";
+import { startChannelAbout, type ChannelAboutStart } from "./channel-about";
 import { dispatchProductGitHubWebhook } from "./product-github-webhook-authority-adapter";
 import { fireGitHubAutomationTriggers } from "./automation-triggers";
 import { checkPullRequestClaims } from "./github-claim-check";
@@ -61,41 +61,31 @@ async function emailCreatedInvite(
   return c.json({ invite: { ...invite, url: inviteUrl }, sent: result.sent, failed: result.failed });
 }
 
-/** The Channel and request id a Channel About refresh names; undefined when either is missing or too long. */
-async function readLaunchRequest(c: Context): Promise<{ channelId: string; requestId: string } | undefined> {
-  const body = (await c.req.json().catch(() => ({}))) as { channelId?: unknown; requestId?: unknown };
+/** The Channel a Channel About refresh names; undefined when it is missing or too long. */
+async function readAboutChannelId(c: Context): Promise<string | undefined> {
+  const body = (await c.req.json().catch(() => ({}))) as { channelId?: unknown };
   const channelId = typeof body.channelId === "string" ? body.channelId.trim() : "";
-  const requestId = typeof body.requestId === "string" ? body.requestId.trim() : "";
-  return channelId && channelId.length <= 180 && requestId && requestId.length <= 180
-    ? { channelId, requestId }
-    : undefined;
+  return channelId && channelId.length <= 180 ? channelId : undefined;
 }
+
+const ABOUT_NOT_STARTED: Record<Extract<ChannelAboutStart, { started: false }>["reason"], string> = {
+  named: "This conversation already has a name",
+  empty: "This conversation has nothing to summarize yet",
+  no_machine: "No Agent's Machine in this Space can write the About now",
+};
 
 
 export function registerIndexRoutesAuthSpaceManagement(app: Hono<{ Bindings: Env }>): void {
   app.post("/api/spaces/:spaceId/channel-about", (c) => jsonErrors(c, async () => {
     const authUser = await requireAuth(c.req.raw, c.env);
     const spaceId = c.req.param("spaceId");
-    const launch = await readLaunchRequest(c);
-    if (!spaceId || !launch) {
-      return c.json({ error: "Channel About requires valid Space, Channel, and request ids" }, 400);
-    }
-    const { channelId, requestId } = launch;
-    const result = await dispatchProductChannelAbout({
-      env: c.env,
-      spaceId,
-      channelId,
-      requestId,
-      actorUserId: authUser.id,
-    });
-    // A session already serving the Channel takes the request as its pending refresh.
-    if (result.spawned !== 1 && result.coalesced !== 1) {
-      return c.json({
-        error: result.notices[0] || "Could not start Channel About",
-        code: "channel_about_not_started",
-      }, 409);
-    }
-    return c.json({ accepted: true, coalesced: result.coalesced === 1 });
+    const channelId = await readAboutChannelId(c);
+    if (!spaceId || !channelId) return c.json({ error: "Channel About requires valid Space and Channel ids" }, 400);
+    // Whoever reads the conversation may have its About written again.
+    await getChannel(c.env, { channelId, spaceId, principal: { kind: "user", id: authUser.id } });
+    const result = await startChannelAbout(c.env, { channelId, spaceId });
+    if (!result.started) return c.json({ error: ABOUT_NOT_STARTED[result.reason], code: "channel_about_not_started" }, 409);
+    return c.json({ accepted: true });
   }));
   app.post("/api/spaces/:spaceId/claims", (c) => jsonErrors(c, async () => {
     const authUser = await requireAuth(c.req.raw, c.env);

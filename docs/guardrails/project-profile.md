@@ -89,7 +89,9 @@ launch authorization remains server-owned, and unread or unavailable previews
 retain post-send checks. See [invocation status](../design/mention-invocation/README.md).
 
 Windows Agent children enforce UTF-8 transport settings and use managed PowerShell
-entrypoints that initialize console and pipeline encoding for each command. See
+entrypoints that initialize console and pipeline encoding for each command.
+Entrypoints are isolated by CLI executable digest so active commands do not
+block Agent launches after upgrades. See
 [Agent text encoding](../design/agent-text-encoding.md).
 
 The component map is `docs/ARCHITECTURE.md`. The rest of this snapshot is split into the files below. They keep the previous text.
