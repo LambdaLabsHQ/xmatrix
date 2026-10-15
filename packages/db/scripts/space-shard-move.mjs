@@ -21,7 +21,6 @@ export const MOVABLE_SPACE_TABLES = Object.freeze([
   "channel_message_sequences",
   "channels",
   "channel_metadata_revisions",
-  "channel_about_inputs",
   "content_gc_candidates",
   "content_objects",
   "content_refs",
