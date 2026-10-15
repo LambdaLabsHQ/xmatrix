@@ -215,7 +215,7 @@ integration("pages: how far a person has read a page is theirs, only moves forwa
   }
 });
 
-integration("co-writing: an Agent in the conversation a person started on the page suggests until it ends", async () => {
+integration("co-writing: a person starts it from a linked conversation, and the Agent's edits go straight in", async () => {
   const { client, ids, pages, owner, member, viewer, agent } = await pageTest("co-writing");
   try {
     const call = (method, input) => pages[method]({ spaceId: ids.space, ...input, requestId: crypto.randomUUID() });
@@ -227,29 +227,30 @@ integration("co-writing: an Agent in the conversation a person started on the pa
     await assert.rejects(call("startCoWriting", { principal: agent, pageId, conversationId: ids.open }),
       code("page_co_writing_human_only"));
     await assert.rejects(call("startCoWriting", { principal: viewer, pageId, conversationId: ids.open }),
-      code("page_edit_forbidden"), "a person who cannot edit the page cannot take suggestions into it");
+      code("page_edit_forbidden"), "a person who cannot edit the page cannot write it with an Agent");
     await call("startCoWriting", { principal: member, pageId, conversationId: ids.open });
 
-    // The Agent's edit from that conversation waits for the person; the page is as it was.
-    const suggested = await call("edit", { principal: agent, pageId, baseRevision: 1,
+    // The Agent writes beside the person: its edit from that conversation is the page's next revision.
+    const edited = await call("edit", { principal: agent, pageId, baseRevision: 1,
       body: "# Plan\n\nOne and two\n", conversationIds: [ids.open] });
+    assert.equal(edited.revision.kind, "edit");
+    assert.equal(edited.page.headRevision, 2);
+
+    // A page that takes Agent edits as suggestions still does; a person reviews them.
+    await call("update", { principal: owner, pageId, agentSuggestOnly: true });
+    const suggested = await call("edit", { principal: agent, pageId, baseRevision: 2,
+      body: "# Plan\n\nOne and two, maybe three\n", conversationIds: [ids.open] });
     assert.equal(suggested.revision.kind, "suggestion");
-    assert.equal(suggested.page.headRevision, 1);
+    assert.equal(suggested.page.headRevision, 2);
     const waiting = async () => (await call("suggestions", { principal: viewer, pageId })).suggestions
       .map((revision) => [revision.revision, revision.basedOnRevision]);
-    assert.deepEqual(await waiting(), [[2, 1]]);
-    // A person reviews them; then nothing waits.
-    await assert.rejects(call("reviewSuggestions", { principal: agent, pageId, through: 2 }),
+    assert.deepEqual(await waiting(), [[3, 2]]);
+    await assert.rejects(call("reviewSuggestions", { principal: agent, pageId, through: 3 }),
       code("page_suggestion_review_human_only"));
-    assert.deepEqual(await call("reviewSuggestions", { principal: member, pageId, through: 99 }), { reviewedThrough: 2 },
+    assert.deepEqual(await call("reviewSuggestions", { principal: member, pageId, through: 99 }), { reviewedThrough: 3 },
       "a review never runs past the page's last revision");
     assert.deepEqual(await waiting(), []);
-
-    // Ended, the same Agent edits the page again.
     assert.deepEqual(await call("endCoWriting", { principal: member, pageId, conversationId: ids.open }), { ended: true });
-    const edited = await call("edit", { principal: agent, pageId, baseRevision: 1, body: "# Plan\n\nOne, done\n",
-      conversationIds: [ids.open] });
-    assert.equal(edited.revision.kind, "edit");
 
     await call("remove", { principal: owner, pageId });
     const { rows } = await client.query("SELECT 1 FROM data.page_co_writing WHERE space_id=$1", [ids.space]);

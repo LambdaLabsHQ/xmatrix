@@ -814,7 +814,7 @@ function remoteChangeDecorations(state: EditorState, fragment: Y.XmlFragment, aw
   if (!mapping || !fragment.doc || changes.length === 0) return DecorationSet.empty;
   const decorations: Decoration[] = [];
   for (const change of changes) {
-    const user = (awareness.getStates().get(change.client) as { user?: { color?: string } } | undefined)?.user;
+    const user = (awareness.getStates().get(change.client) as { user?: { color?: string; kind?: string } } | undefined)?.user;
     // Text from someone who has left, or the session's own merges, is not anyone's to mark.
     if (!user?.color) continue;
     const resolve = (position: Y.RelativePosition) => {
@@ -826,8 +826,9 @@ function remoteChangeDecorations(state: EditorState, fragment: Y.XmlFragment, aw
     };
     const from = resolve(change.from);
     if (from === null || from >= state.doc.content.size) continue;
-    const attrs = { class: "page-remote-change", "data-client": String(change.client),
-      style: `--page-change-color: ${user.color}; animation-delay: -${Math.max(0, now - change.at)}ms` };
+    const attrs: Record<string, string> = { class: "page-remote-change", "data-client": String(change.client),
+      style: `--page-change-color: ${user.color}; animation-delay: -${Math.max(0, now - change.at)}ms`,
+      ...(user.kind === "agent" ? { "data-agent": "" } : {}) };
     if (change.node) {
       appendBlockChangeDecoration(decorations, state, from, attrs);
       continue;

@@ -54,8 +54,6 @@ const MAX_HISTORY = 200;
 const OWED_WINDOW_DAYS = 7;
 /** How far back a section's last change is looked for; older changes read as unknown. */
 const BLOCK_UPDATE_REVISIONS = 30;
-/** A co-writing lapses this long after it started, ended or not. */
-const CO_WRITING_HOURS = 12;
 /** Suggestions older than this no longer wait on the page; History still has them. */
 const SUGGESTION_WAIT_DAYS = 14;
 /** At most this many suggestions wait on a page at once. */
@@ -699,14 +697,7 @@ export class PostgresPageRepository {
     const revision = Number(next.next);
     const now = new Date().toISOString();
     const authors = dedupeAuthors([actor.author, ...input.coAuthors.map(validAuthor)]);
-    // An Agent co-writing the page with a person, from the conversation they started, suggests.
-    const coWriting = input.kind === "edit" && actor.isAgent && !row.agent_suggest_only && conversationIds.length > 0
-      && (await tx.query({ name: "page_co_writing_active_v1",
-        text: `SELECT 1 FROM data.page_co_writing WHERE space_id=$1 AND page_id=$2
-          AND conversation_id = ANY($3::text[]) AND ended_at IS NULL
-          AND started_at > now() - interval '${CO_WRITING_HOURS} hours' LIMIT 1`,
-        values: [spaceId, pageId, conversationIds], maxRows: 1 })).length > 0;
-    const suggestion = input.kind === "edit" && actor.isAgent && (row.agent_suggest_only || coWriting);
+    const suggestion = input.kind === "edit" && actor.isAgent && row.agent_suggest_only;
     if (!suggestion && input.baseRevision !== head) {
       const current = (await tx.query<RevisionRow>({
         name: "page_revision_head_v1",

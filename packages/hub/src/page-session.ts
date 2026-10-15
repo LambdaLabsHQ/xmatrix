@@ -400,6 +400,14 @@ export class PageSession {
     if (owned?.size) awarenessProtocol.removeAwarenessStates(this.awareness, [...owned], "close");
   }
 
+  /** A person takes back what the Agent co-writing from `conversationId` last wrote. */
+  undoCoWriting(conversationId: string, by: string): "undone" | "changed" | "nothing" {
+    for (const [id, writer] of this.coWriters) {
+      if (this.connections.get(id)?.principal.conversationId === conversationId) return writer.undo(by);
+    }
+    return "nothing";
+  }
+
   setCanEdit(connectionId: string, canEdit: boolean): void {
     const connection = this.connections.get(connectionId);
     if (!connection || connection.canEdit === canEdit) return;
@@ -532,22 +540,20 @@ export class PageSession {
   private coWriterHost(connection: PageSessionConnection): PageCoWriterHost {
     const principal = connection.principal;
     const clientId = agentClientId(principalKey(principal));
-    // Its edits commit as its own. Without its conversation: a co-writing conversation would
-    // turn the Agent's commit into a suggestion, and these words are already in the page.
-    const { conversationId: _conversation, ...author } = principal;
     return {
       doc: this.doc,
       fragment: this.fragment,
       markdown: () => this.markdown(),
       write: (change) => {
         authoredAs(this.doc, clientId, () => this.doc.transact(change, coWriteOrigin(connection.id)));
-        this.noteEditor(author);
+        // Its edits commit as its own, from the conversation it co-writes from.
+        this.noteEditor(principal);
       },
-      present: ({ activity, cursor, say }) => {
+      present: ({ activity, cursor, say, undoable }) => {
         const at = cursor ? Y.relativePositionToJSON(cursor) : null;
         this.agentAwareness(principal, { user: { name: principal.label, color: pageAuthorColor(principal),
           kind: principal.kind, conversationId: principal.conversationId ?? null }, activity,
-        ...(at ? { cursor: { anchor: at, head: at } } : {}), ...(say ? { say } : {}) });
+        ...(at ? { cursor: { anchor: at, head: at } } : {}), ...(say ? { say } : {}), ...(undoable ? { undo: true } : {}) });
       },
       people: () => this.people(),
       send: (request) => this.ports.send(connection.id, encodeCoWrite(request)),
