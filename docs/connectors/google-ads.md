@@ -60,8 +60,9 @@ token or consenting to an unrelated scope.
 
 ## Actions
 
-Commands use `@googleads:<action>:<target> <text>`. The Run's connectors MCP
-exposes the same actions with `target` and `text` parameters.
+Commands use `@googleads:<action>:<target> <text>`, posted as visible Channel
+messages with `xmatrix send`. The result replies to the command; `xmatrix
+connector list` lists the available actions. There is no connector MCP.
 
 | Action | Target and text | Effect |
 | --- | --- | --- |

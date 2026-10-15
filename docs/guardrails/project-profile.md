@@ -82,9 +82,14 @@ The Gmail connector preserves ordered inline mixed body segments, excludes
 attachment subtrees, and marks incomplete MIME previews. Native availability
 uses Composio's managed client with its approved full-mailbox grant; the Hub
 limits calls to an endpoint list. `send`/`reply` ask for a Space admin's
-approval of each email by default. Search/read post their results, including mail content, to the calling Channel,
-where its members can read them. Every action starts as a visible Channel
-command; the former connector MCP and caller-only result path are retired.
+approval of each email by default. Search/read post their results, including
+mail content, to the calling Channel, where its members can read them;
+execution history keeps a bounded excerpt. Every action starts as a visible
+Channel command; the former connector MCP and caller-only result path are retired.
+Gmail-to-Space-secret transfer is not implemented, so these reads cannot satisfy
+a QA rule that login codes stay out of messages. The supported manual secret
+card and process injection path is documented in
+[connector operations](../operations/app-connectors.md#qa-login-codes).
 Its Composio path is independent of runtime-provided Gmail plugins; see
 [connector platform](../design/connector-platform.md).
 
