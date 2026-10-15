@@ -165,7 +165,8 @@ export function PagePens({ pens, room = 0, onJump, onOpen }: {
         return (
           // A spacer, not a margin, sets the line: a sticky face may not leave its own margin box.
           <div key={person.key} className="absolute inset-0">
-            <div style={{ height: Math.max(0, top) }} />
+            {/* Its height eases, so the face glides to the line the Agent moves on to. */}
+            <div className="page-pen-spacer" style={{ height: Math.max(0, top) }} />
             <button type="button" onClick={() => (away ? onJump(person) : onOpen(person))} data-away={away ?? undefined}
               className={cn("page-pen pointer-events-auto", person.idle && "is-idle", person.editing && "is-writing")}
               style={{ "--page-pen-color": person.color } as CSSProperties}
@@ -177,7 +178,9 @@ export function PagePens({ pens, room = 0, onJump, onOpen }: {
               {named && (
                 <span className="page-pen-label" aria-hidden="true">
                   {penName(person.name)}
-                  {person.doing && person.doing !== "writing" && <span className="page-pen-doing"> {person.doing}</span>}
+                  {person.doing && person.doing !== "writing" && (
+                    <span className={cn("page-pen-doing", person.doing === "thinking" && "is-thinking")}> {person.doing}</span>
+                  )}
                 </span>
               )}
               {/* While it writes, its dots run, as a chat shows someone typing. */}

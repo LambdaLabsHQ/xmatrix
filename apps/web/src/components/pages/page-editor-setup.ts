@@ -845,9 +845,11 @@ function remoteChangeDecorations(state: EditorState, fragment: Y.XmlFragment, aw
     if (to !== null && to > from && to <= state.doc.content.size) decorations.push(Decoration.inline(from, to, attrs));
   }
   for (const [from, { to, color, client, at }] of inked) {
-    decorations.push(Decoration.inline(from, to, { class: `page-agent-ink${at === null ? " is-writing" : ""}`,
-      "data-client": String(client),
-      style: `--page-change-color: ${color}${at === null ? "" : `; animation-delay: -${Math.max(0, now - at)}ms`}` }));
+    const style = `--page-change-color: ${color}${at === null ? "" : `; animation-delay: -${Math.max(0, now - at)}ms`}`;
+    const state = at === null ? " is-writing" : "";
+    decorations.push(Decoration.inline(from, to, { class: `page-agent-ink${state}`, "data-client": String(client), style }));
+    // Barred in the margin in its colour too, as a change waiting on the reader is.
+    decorations.push(Decoration.node(from - 1, to + 1, { class: `page-agent-block${state}`, style }));
   }
   return DecorationSet.create(state.doc, decorations);
 }

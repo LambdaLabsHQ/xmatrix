@@ -541,7 +541,29 @@ html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-com
   animation: none;
   background-color: color-mix(in oklab, var(--page-change-color) 28%, transparent);
 }
+/* …and barred in the margin in its colour, as a change waiting on the reader is barred in brass. */
+@keyframes page-agent-bar {
+  0%, 80% { opacity: 1; }
+  100% { opacity: 0; }
+}
+.page-document .page-agent-block { position: relative; }
+.page-document .page-agent-block::before {
+  content: "";
+  position: absolute;
+  top: 0.2em;
+  bottom: 0.2em;
+  left: -14px;
+  width: 3px;
+  border-radius: 3px;
+  background: var(--page-change-color);
+  pointer-events: none;
+  animation: page-agent-bar 20s linear forwards;
+  animation-delay: inherit;
+}
+.page-document .page-agent-block.is-writing::before { animation: none; }
+.page-document li > .page-agent-block::before { left: calc(-1.3em - 14px); }
 @media (prefers-reduced-motion: reduce) {
+  .page-document .page-agent-block::before { animation-timing-function: steps(1, end); }
   .page-document .page-remote-change { animation-timing-function: steps(1, end); }
   .page-document .page-remote-change[data-agent] { animation: page-remote-change 4s steps(1, end) forwards; }
   .page-document .page-agent-ink { animation-timing-function: steps(1, end); }
@@ -679,26 +701,43 @@ html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-com
   gap: 6px;
   width: max-content;
   max-width: 100%;
-  height: 30px;
-  margin-top: -4px;
-  padding: 0 11px 0 3px;
+  height: 32px;
+  margin-top: -5px;
+  padding: 0 12px 0 3px;
   border-radius: 999px;
   background: var(--page-pen-color);
   color: #fff;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   line-height: 1;
   white-space: nowrap;
   box-shadow: 0 6px 16px -8px color-mix(in oklab, var(--page-pen-color) 80%, black);
 }
 .page-pens.is-named .page-pen .page-pen-face .identity-avatar-face {
-  width: 24px;
-  height: 24px;
+  width: 26px;
+  height: 26px;
   background: #fff;
   box-shadow: none;
 }
 .page-pens.is-named .page-pen-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .page-pens.is-named .page-pen-doing { font-weight: 500; opacity: 0.85; }
+/* Thinking: a light sweeps across the word, left to right, as Codex's desktop shows a working turn. */
+@keyframes page-pen-thinking {
+  from { background-position: 150% 0; }
+  to { background-position: -50% 0; }
+}
+.xmatrix-app .page-pens.is-named .page-pen-doing.is-thinking.is-thinking.is-thinking {
+  opacity: 1;
+  background-image: linear-gradient(90deg, rgb(255 255 255 / 0.55) 30%, #fff 50%, rgb(255 255 255 / 0.55) 70%) !important;
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: page-pen-thinking 1.6s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .xmatrix-app .page-pens.is-named .page-pen-doing.is-thinking.is-thinking.is-thinking { animation: none; }
+}
 .page-pens.is-named .page-pen .page-pen-dots {
   position: static;
   transform: none;
