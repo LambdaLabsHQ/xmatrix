@@ -52,8 +52,12 @@ type Message<Type extends AgentInstanceClientMessage["type"]> = Extract<
   { type: Type }
 >;
 
-/** A live switch is interactive: fail loudly well before the human retries. */
-export const AGENT_INSTANCE_CONTROL_SWITCH_TIMEOUT_MS = 10_000;
+/**
+ * A running turn must finish cancelling before its live switch is applied.
+ * Claude allows 10s for that cancellation and another 8s for the control
+ * response, so retain enough server-side headroom for both phases.
+ */
+export const AGENT_INSTANCE_CONTROL_SWITCH_TIMEOUT_MS = 30_000;
 
 export const AGENT_INSTANCE_AUTHORITY_REQUIRED_CAPABILITIES = [
   "client_network_sample",

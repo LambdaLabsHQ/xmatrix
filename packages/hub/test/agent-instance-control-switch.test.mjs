@@ -48,9 +48,11 @@ test("a stable Profile address switches the selected Instance without relying on
 
 test("a switch reaches the addressed instance and reports what it confirmed", async () => {
   let seen;
+  let timeoutMs;
   const { transport, socket } = liveTransport({
-    awaitControlResult: (binding) => {
+    awaitControlResult: (binding, timeout) => {
       seen = binding;
+      timeoutMs = timeout;
       return Promise.resolve({ value: "fable" });
     },
   });
@@ -70,6 +72,8 @@ test("a switch reaches the addressed instance and reports what it confirmed", as
   assert.equal(seen.instanceId, "instance-1");
   // The waiter must be keyed by the same request the socket was told to answer.
   assert.equal(seen.requestId, socket.sent[0].requestId);
+  // Cancellation and provider confirmation are separate phases for Claude.
+  assert.equal(timeoutMs, 30_000);
 });
 
 test("the production waiter preserves a cancelled turn for continuation", async () => {

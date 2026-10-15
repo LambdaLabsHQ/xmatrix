@@ -88,9 +88,9 @@ impl Default for ClaudeWatchdogTimings {
 pub(crate) const CLAUDE_INTERRUPT_RECEIPT_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// How long a switch control request (`set_model`, `apply_flag_settings`) may
-/// wait for its `control_response`. Must stay under the hub's 10s
-/// `AGENT_INSTANCE_CONTROL_SWITCH_TIMEOUT_MS` so the hub receives a definite
-/// result instead of timing out first.
+/// wait for its `control_response`. The Hub's timeout also covers cancellation
+/// of the active turn before this wait begins, so it must leave room for both
+/// phases and receive this definite result before timing out.
 pub(crate) const CLAUDE_CONTROL_SWITCH_TIMEOUT: Duration = Duration::from_secs(8);
 
 /// The switchable session controls — model and reasoning effort — shared
