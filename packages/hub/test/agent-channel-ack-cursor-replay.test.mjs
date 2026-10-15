@@ -16,7 +16,7 @@ const CORPUS = Array.from({ length: TAIL }, (_, index) => ({
 }));
 
 /** Session identity is stable across instances; the session object is not. */
-function session(instanceId, channelDeliveryEnabled = true) {
+function session(instanceId) {
   return {
     principal: {
       ownerUserId: "user-1",
@@ -25,7 +25,7 @@ function session(instanceId, channelDeliveryEnabled = true) {
       executionKey: "exec-1",
       channelId: CHANNEL_ID,
     },
-    run: { instanceId, channelId: CHANNEL_ID, channelDeliveryEnabled },
+    run: { instanceId, channelId: CHANNEL_ID },
   };
 }
 
@@ -234,33 +234,6 @@ test("a headless join owed nothing is not served the channel's oldest messages a
     historyLimit: 0,
   });
   assert.deepEqual(batch.map((frame) => frame.type), ["channel_joined"]);
-});
-
-test("a system management run advances to tail without receiving channel history", async () => {
-  const history = port(0);
-  const runtime = session("instance-system", false);
-  const joined = await history.join(runtime, {
-    type: "join_channel",
-    channelId: CHANNEL_ID,
-    historyLimit: 0,
-  });
-  assert.deepEqual(joined.map((frame) => frame.type), ["channel_joined"]);
-  assert.deepEqual(replayed(joined), []);
-
-  const replay = await history.replay(runtime, {
-    type: "replay_channel_history",
-    channelId: CHANNEL_ID,
-    afterSequence: 0,
-    historyLimit: 50,
-  });
-  assert.deepEqual(replay, []);
-
-  const explicit = await history.history(runtime, {
-    type: "get_channel_history",
-    channelId: CHANNEL_ID,
-    limit: 50,
-  });
-  assert.deepEqual(explicit.messages, []);
 });
 
 test("catch-up skips a relayed reply this Instance wrote to its own cross-Channel link", async () => {

@@ -4,7 +4,6 @@ import test from "node:test";
 
 import {
   agentRunCreatedByMetadata,
-  agentRunDelegationDenied,
   messageMutationActor,
 } from "../src/agent-run-channel-delegation.ts";
 import { AGENT_RUN as run, agentRunAllowed as allowed } from "./support/agent-run-routes.mjs";
@@ -52,37 +51,16 @@ test("approval, membership and destructive Channel routes stay Human-only", () =
   assert.equal(allowed("PATCH", "/api/channels/channel-2/messages/message-1/extra"), false);
 });
 
-test("ordinary Run secret creation is write-only and rejects About and read-only Runs", () => {
+test("ordinary Run secret creation is write-only", () => {
   assert.equal(allowed("POST", "/api/secrets"), true);
   for (const method of ["GET", "PATCH", "DELETE"]) assert.equal(allowed(method, "/api/secrets"), false);
   assert.equal(allowed("GET", "/api/secrets/key"), false);
   assert.equal(allowed("DELETE", "/api/secrets/key"), false);
-  assert.equal(allowed("POST", "/api/secrets", { ...run, channelWriteAllowed: false }), false);
   assert.equal(allowed("POST", "/api/run-secrets"), true, "read the secrets its registration admits");
-  assert.equal(allowed("POST", "/api/run-secrets", { ...run, channelWriteAllowed: false }), false);
   assert.equal(allowed("POST", "/api/secret-requests"), true, "ask its owner to type in a secret");
   for (const path of ["/api/secret-requests/fulfill", "/api/secret-requests/status"]) {
     assert.equal(allowed("POST", path), false, "only the owner answers a secret request");
   }
-  assert.equal(allowed("POST", "/api/secrets", { ...run, runKind: "channel-about-session" }), false);
-  // An About session, the only Run that carries a Space id, is refused for being read-only.
-  assert.equal(allowed("POST", "/api/secrets", { ...run, runKind: "channel-about-session",
-    managementSpaceId: "space-1", channelWriteAllowed: false }), false);
-});
-
-test("a Channel About session gains none of the collaboration routes", () => {
-  const about = { ...run, runKind: "channel-about-session", channelWriteAllowed: false };
-  assert.equal(allowed("POST", "/api/channels", about), false);
-  assert.equal(allowed("PATCH", "/api/channels/channel-2", about), false);
-  assert.equal(allowed("DELETE", "/api/channels/channel-1/messages/message-1", about), false);
-  assert.equal(allowed("POST", "/api/cross-space-read/requests", about), false);
-});
-
-test("delegation refuses a read-only Run before touching any authority", async () => {
-  const denied = await agentRunDelegationDenied({},
-    { ...run, channelWriteAllowed: false }, ["channel-2"]);
-  assert.equal(denied.status, 403);
-  assert.equal((await denied.json()).code, "agent_run_forbidden");
 });
 
 test("a Human edits as a user and never goes through Run delegation", async () => {

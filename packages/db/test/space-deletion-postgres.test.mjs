@@ -112,7 +112,9 @@ integration("every Space- or Channel-keyed table is either purged or deliberatel
       ORDER BY 1`);
     const classified = new Set([...SPACE_PURGE_STEPS.map((step) => step.table),
       ...Object.keys(SPACE_PURGE_EXCLUDED_TABLES)]);
-    assert.deepEqual(rows.map((row) => row.name).filter((name) => !classified.has(name)), []);
+    // Retired Channel About Run inputs go with their Channel (ON DELETE CASCADE) until the table is dropped.
+    const dropping = new Set(["data.channel_about_inputs"]);
+    assert.deepEqual(rows.map((row) => row.name).filter((name) => !classified.has(name) && !dropping.has(name)), []);
     const { rows: tables } = await client.query(`SELECT table_schema||'.'||table_name AS name
       FROM information_schema.tables WHERE table_type='BASE TABLE' AND table_schema IN ('data','control')`);
     const live = new Set(tables.map((row) => row.name));

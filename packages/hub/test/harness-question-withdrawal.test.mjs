@@ -40,10 +40,9 @@ test("a card already settled, or not this Instance's, gets no second notice", as
   }
 });
 
-test("a malformed or read-only withdrawal is refused", async () => {
+test("a malformed withdrawal is refused", async () => {
   const { port } = recordingAgentInstancePort({ settleQuestionnaire: async () => null });
   await assert.rejects(port.execute(session, { ...withdrawal, cardRequestId: "bad id" }));
-  await assert.rejects(port.execute({ ...session, principal: { ...session.principal, channelWriteAllowed: false } }, withdrawal));
 });
 
 test("an answer names its card, and a settled card refuses it with the reason", () => {

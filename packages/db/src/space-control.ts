@@ -1,4 +1,4 @@
-import { aboutTaskAuthor, appendMetadataRevision, metadataRevision, type SummaryAuthor } from "./channel-metadata-revisions.js";
+import { appendMetadataRevision, metadataRevision, type AboutTaskAuthor } from "./channel-metadata-revisions.js";
 import { DetailedControlError } from "./control-error.js";
 import type { DatabaseRequestContext } from "./context.js";
 import { readsOnly } from "./space-roles.js";
@@ -130,10 +130,10 @@ export type PostgresChannelMutation = PostgresChannelMutationBase & {
   topic?: string | null;
   summary?: string | null;
   /**
-   * The Run or one-shot task writing `summary`. The summary's source is recorded from it; a
+   * The one-shot task writing `summary`. The summary's source is recorded from it; a
    * summary written without one keeps no source rather than an earlier one.
    */
-  summaryAuthor?: SummaryAuthor;
+  summaryAuthor?: AboutTaskAuthor;
   spaceId?: string;
   moveTree?: Array<{ channelId: string; expectedVersion: number }>;
 };
@@ -570,40 +570,18 @@ async function terminalizeArchivedChannelTree(
 
 /**
  * Record who wrote a Channel's summary, when, and the sequence of the newest
- * message they read. The sequence is looked up here, so only a message of this
- * Channel counts; a cleared or unattributed summary keeps no source at all.
+ * message they read; a cleared or unattributed summary keeps no source at all.
  */
-async function recordSummarySource(
-  transaction: DatabaseTransaction,
+function recordSummarySource(
   metadata: Record<string, unknown>,
-  spaceId: string,
-  channelId: string,
   input: Pick<Extract<PostgresChannelMutation, { kind: "channel_configure" }>, "summary" | "summaryAuthor">,
   at: string,
-): Promise<void> {
+): void {
   delete metadata.summarySource;
   const author = input.summaryAuthor;
   if (input.summary === null || input.summary === undefined || !author) return;
-  if (aboutTaskAuthor(author)) {
-    metadata.summarySource = { author: { kind: "task", agentName: author.agentName }, generatedAt: at,
-      ...(author.throughSequence > 0 ? { throughSequence: author.throughSequence } : {}) };
-    return;
-  }
-  let throughSequence: number | undefined;
-  if (author.throughMessageId) {
-    const rows = await transaction.query<QueryResultRow & { timeline_sequence: string | number }>({
-      name: "channel_summary_through_sequence_v1",
-      text: `SELECT timeline_sequence FROM data.messages
-        WHERE space_id = $1 AND message_id = $2 AND channel_id = $3`,
-      values: [spaceId, author.throughMessageId, channelId], maxRows: 1,
-    });
-    if (rows[0]) throughSequence = Number(rows[0].timeline_sequence);
-  }
-  metadata.summarySource = {
-    author: { kind: "run", runId: author.runId, agentName: author.agentName },
-    generatedAt: at,
-    ...(throughSequence ? { throughSequence } : {}),
-  };
+  metadata.summarySource = { author: { kind: "task", agentName: author.agentName }, generatedAt: at,
+    ...(author.throughSequence > 0 ? { throughSequence: author.throughSequence } : {}) };
 }
 
 /**
@@ -672,10 +650,8 @@ async function moveChannelSpaceFacts(
   channelIds: readonly string[],
 ): Promise<void> {
   const values = [sourceSpaceId, targetSpaceId, channelIds];
-  for (const table of ["channel_metadata_revisions", "channel_about_inputs"] as const) {
-    await transaction.query({ name: `channel_move_${table}_v1`,
-      text: `UPDATE data.${table} ${CHANNEL_MOVE_FACT_SQL}`, values, maxRows: 0 });
-  }
+  await transaction.query({ name: "channel_move_channel_metadata_revisions_v1",
+    text: `UPDATE data.channel_metadata_revisions ${CHANNEL_MOVE_FACT_SQL}`, values, maxRows: 0 });
   // Reborn history follows its Channel; releaseChannelTreeForMove has already
   // ended any of it that was still in progress.
   await transaction.query({
@@ -1800,37 +1776,21 @@ export class PostgresSpaceControlRepository {
   }
 
   async metadataHistory(input: { requestId: string; spaceId: string; channelId: string;
-    principal: SpaceControlPrincipal; beforeRevision?: number; revision?: number; inputId?: string; limit?: number }) {
+    principal: SpaceControlPrincipal; beforeRevision?: number; revision?: number; limit?: number }) {
     const { requestId, spaceId, principalId } = principalScope(input);
     const limit = input.limit ?? 20;
-    if ([input.beforeRevision,input.revision,input.inputId].filter(value => value !== undefined).length > 1 ||
-        (input.inputId !== undefined && (!input.inputId || input.inputId.length > 300)) ||
+    if ([input.beforeRevision,input.revision].filter(value => value !== undefined).length > 1 ||
         !Number.isSafeInteger(limit) || limit < 1 || limit > 100 ||
         [input.beforeRevision,input.revision].some((n) => n !== undefined && (!Number.isSafeInteger(n) || n < 0))) {
       throw new SpaceControlError("invalid_command", 400, "Invalid metadata history bounds");
     }
     return this.inSpace(requestId, "channel.metadata-history", spaceId, async (tx) => {
-      const visible = await tx.query<ChannelRow>({ name: "channel_metadata_history_access_v1",
+      const visible = await tx.query<ChannelRow>({ name: "channel_metadata_history_access_v2",
         text: `SELECT c.* FROM data.channels c WHERE c.space_id=$1 AND c.channel_id=$2
           AND ${channelCapabilityPredicate({ capability: "message_content_read", channelAlias: "c",
-            principalKindSql: "$3", principalIdSql: "$4", channelAboutSessionRead: true })} FOR SHARE OF c`,
+            principalKindSql: "$3", principalIdSql: "$4" })} FOR SHARE OF c`,
         values: [spaceId,input.channelId,input.principal.kind,principalId], maxRows: 1 });
       if (!visible[0]) throw new SpaceControlError("channel_not_found", 404, "Channel not found");
-      if (input.inputId) {
-        const sources = await tx.query({ name: "channel_metadata_input_read_v1",
-          text: `SELECT input.space_id,input.origin_space_id,input.channel_id,input.input_id,input.run_id,
-            input.metadata_revision,input.snapshot_json,input.created_at,
-            (SELECT COALESCE(jsonb_agg(CASE WHEN EXISTS (SELECT 1 FROM data.messages current
-              WHERE current.channel_id=input.channel_id AND current.message_id=ref->>'messageId'
-                AND current.content_hash=ref->>'contentHash'
-                AND current.deleted_at IS NULL AND current.recalled_at IS NULL)
-              THEN ref ELSE (ref-'payloadBundleBase64'-'payloadRef') || '{"contentUnavailable":true}'::jsonb END
-              ORDER BY ordinal),'[]'::jsonb)
-              FROM jsonb_array_elements(input.references_json) WITH ORDINALITY refs(ref,ordinal)) AS references_json
-            FROM data.channel_about_inputs input WHERE input.channel_id=$1 AND input.input_id=$2`,
-          values: [input.channelId,input.inputId], maxRows: 1 });
-        return { input: sources[0] ?? null };
-      }
       const revisions = await tx.query({ name: "channel_metadata_history_read_v1",
         text: `SELECT * FROM data.channel_metadata_revisions WHERE channel_id=$1
           AND ($2::bigint IS NULL OR revision<$2) AND ($3::bigint IS NULL OR revision=$3)
@@ -2993,18 +2953,15 @@ export class PostgresSpaceControlRepository {
         values: [root.space_id, actorUserId], maxRows: 1,
       });
       // xMatrix writes a task's About itself; the task ran on a member's Machine, as that member.
-      const admitted = actors[0] && (["owner", "admin"].includes(actors[0].role) || aboutTaskAuthor(input.summaryAuthor));
+      const admitted = actors[0] && (["owner", "admin"].includes(actors[0].role) || input.summaryAuthor !== undefined);
       if (!admitted && !transfer) throw new SpaceControlError("forbidden", 403, "Space admin required");
 
       if (input.actorRunId) {
-        const actor = await transaction.query<QueryResultRow & { metadata_json: Record<string, unknown> }>({
-          name: "channel_metadata_actor_run_v1", text: `SELECT metadata_json FROM data.runs
+        const actor = await transaction.query({
+          name: "channel_metadata_actor_run_v2", text: `SELECT 1 FROM data.runs
             WHERE run_id=$1 AND owner_user_id=$2 AND status IN (${ACTIVE_RUN_STATUS_SQL}) FOR SHARE`,
           values: [input.actorRunId,actorUserId], maxRows: 1 });
-        const aboutRunId = input.summaryAuthor && !aboutTaskAuthor(input.summaryAuthor) ? input.summaryAuthor.runId : undefined;
-        if (!actor[0] || (actor[0].metadata_json.routedAs === "management_channel_about" &&
-            aboutRunId !== input.actorRunId)) throw new SpaceControlError(
-          "channel_about_scope_invalid", 403, "Run cannot use an unscoped metadata writer");
+        if (!actor[0]) throw new SpaceControlError("agent_run_forbidden", 403, "The acting Agent Run is not live");
       }
       if (input.summaryAuthor && (input.mode !== undefined || input.topic !== undefined ||
           input.spaceId !== undefined ||
@@ -3121,7 +3078,7 @@ export class PostgresSpaceControlRepository {
           if (input.summary !== undefined) {
             if (input.summary === null) delete rootMetadata.summary;
             else rootMetadata.summary = input.summary.trim();
-            await recordSummarySource(transaction, rootMetadata, root.space_id, channelId, input, at);
+            recordSummarySource(rootMetadata, input, at);
           }
           explicitProjectionMutations = [];
           for (const row of moveRows) {
@@ -3214,7 +3171,7 @@ export class PostgresSpaceControlRepository {
         if (input.summary !== undefined) {
           if (input.summary === null) delete nextMetadata.summary;
           else nextMetadata.summary = input.summary.trim();
-          await recordSummarySource(transaction, nextMetadata, root.space_id, channelId, input, at);
+          recordSummarySource(nextMetadata, input, at);
         }
         if (input.name !== undefined || input.summary !== undefined || input.restoreRevision !== undefined) {
           await appendMetadataRevision(transaction, root,

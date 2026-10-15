@@ -41,8 +41,7 @@ function decision(r: HubTurnRetry): RetryDecision {
  * an attempt number, delay, model replacement or continuation input. */
 export async function reportAgentTurnRetry(env: Env, session: Readonly<AgentInstanceRuntimeSession>,
   report: AgentInstanceTurnRetryMessage): Promise<RetryDecision | undefined> {
-  if (!reportIsValid(report) || session.run.kind !== "channel-instance" || !session.principal.channelWriteAllowed)
-    throw new Error("Invalid model-capacity retry report");
+  if (!reportIsValid(report)) throw new Error("Invalid model-capacity retry report");
   if (report.action === "failed" && !session.clientCapabilities?.includes("agent_turn_retry_channel_message"))
     return { type: "agent_turn_retry_decision", requestId: report.requestId!, operationId: report.operationId,
       threadId: report.threadId!, turnId: report.turnId!, attemptToken: "none", action: "stop", reason: "unsupported" };

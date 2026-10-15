@@ -54,7 +54,7 @@ changing registration keys cannot weaken that check.
 | Owner grant to a Space | The same four-column tuple | Resources and operations the machine owner permits in this Space; grant revision and revocation state |
 | Space usage policy | The same four-column tuple | Space-local usage restrictions and policy revision |
 | Instance | `(channel_id, channel_instance_id)`, plus a structured Space registration reference | One Agent's place in one Channel |
-| Run | `(channel_id, channel_instance_id, run_ordinal)`; About Runs `(channel_id, about_run_ordinal)` | One execution and its admitted permissions |
+| Run | `(channel_id, channel_instance_id, run_ordinal)`; the retired About Runs `(channel_id, about_run_ordinal)` | One execution and its admitted permissions |
 | Invocation attempt | Its existing lifecycle key | The unique startup receipt |
 
 The grant and policy can be typed, separately versioned fields in the Space
@@ -285,7 +285,7 @@ a binding, while a prepared Space cannot execute a new composite binding.
 
 Transitional exception: entry points that do not yet launch through a
 registration still create Profile Runs after cutover. These are Focus review,
-Channel About, `@xmatrix` management activation, management `agent_dispatch`,
+`@xmatrix` management activation, management `agent_dispatch`,
 direct-conversation wake, Automations, handoff and
 `@ProfileName:new` for a name that is not a registration. In a composite Space,
 such a Run is admitted only under the registration its Profile was cut over to

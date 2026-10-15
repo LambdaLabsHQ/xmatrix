@@ -24,7 +24,7 @@ test("archived Channels retain history, annotations, attachments, and viewer ACK
   const hash = "a".repeat(64);
   const db = database((query) => {
     // Archive does not narrow the read capability the fused history page checks.
-    if (query.name === "message_history_page_v3") {
+    if (query.name === "message_history_page_v4") {
       assert.doesNotMatch(query.text, /archived_at/u);
       return [{ history_authorized: true, acknowledged_sequence: 0, content_revision: 1,
         history_head_sequence: 0, message_id: null }];

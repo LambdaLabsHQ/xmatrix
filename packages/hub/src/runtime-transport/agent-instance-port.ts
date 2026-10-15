@@ -88,12 +88,9 @@ export interface AgentInstanceRunPrincipal {
   channelId: string;
   machineId: string;
   hostId: string;
-  runKind: "channel-instance" | "channel-about-session";
-  channelWriteAllowed: boolean;
 }
 
 export interface AgentInstanceAuthorityRunBinding {
-  kind: "channel-instance" | "channel-about-session";
   runId: string;
   agentId: string;
   instanceId: string;
@@ -105,8 +102,6 @@ export interface AgentInstanceAuthorityRunBinding {
   instanceStatus: LiveAgentStatus;
   /** Authority version claimed by this connection, retained across hibernation. */
   connectionVersion?: number;
-  /** System management Runs use the channel only as execution scope. */
-  channelDeliveryEnabled?: boolean;
   /** Dense per-channel ordinal for `@agent:N` / memberPresence cards. */
   channelInstanceId?: string;
   cwd?: string;
@@ -250,9 +245,7 @@ export class AgentInstanceRuntimeTransport {
           Array.from(this.sockets.entries(), ([, live]) => live),
           session.run.instanceId,
         )) return;
-        if (session.run.kind === "channel-instance") {
-          await this.onPresenceChange?.({ reason: "disconnect", session });
-        }
+        await this.onPresenceChange?.({ reason: "disconnect", session });
       },
     );
 
@@ -320,9 +313,7 @@ export class AgentInstanceRuntimeTransport {
     }
     this.sockets.restore(ws, attachment.session);
     void this.bindLiveDelivery(ws, attachment.session);
-    if (attachment.session.run.kind === "channel-instance") {
-      void this.onPresenceChange?.({ reason: "connect", session: attachment.session });
-    }
+    void this.onPresenceChange?.({ reason: "connect", session: attachment.session });
     return true;
   }
   accept(ws: WebSocket): void { this.controller.socket.accept(ws); }
@@ -332,8 +323,7 @@ export class AgentInstanceRuntimeTransport {
   }
   handleFrame(ws: WebSocket, frame: string | ArrayBuffer): Promise<void> { return this.sockets.ordered.run(ws, () => this.controller.handleFrame(ws, frame)); }
   liveSessions(): readonly Readonly<AgentInstanceRuntimeSession>[] {
-    return Array.from(this.sockets.entries(), ([, session]) => session)
-      .filter((session) => session.run.kind === "channel-instance");
+    return Array.from(this.sockets.entries(), ([, session]) => session);
   }
 
   /**
@@ -355,7 +345,7 @@ export class AgentInstanceRuntimeTransport {
     const channelId = message.channelId;
     const profilesByName = new Map<string, Set<string>>();
     for (const [, session] of this.sockets.entries()) {
-      if (session.run.channelId !== channelId || session.run.kind !== "channel-instance") continue;
+      if (session.run.channelId !== channelId) continue;
       const name = session.principal.agentName.trim().toLowerCase();
       const ids = profilesByName.get(name) ?? new Set<string>();
       ids.add(session.principal.agentId);
@@ -367,14 +357,12 @@ export class AgentInstanceRuntimeTransport {
     // is work for whoever is here, so it is never stranded.
     const requester = relay?.requesterInstanceId;
     const requesterIsLive = !!requester && Array.from(this.sockets.entries()).some(([, session]) =>
-      session.run.channelId === channelId && session.run.kind === "channel-instance" &&
-      session.run.instanceId === requester);
+      session.run.channelId === channelId && session.run.instanceId === requester);
     let matched = 0;
     let delivered = 0;
     let interrupted = 0;
     for (const [socket, session] of this.sockets.entries()) {
       if (session.run.channelId !== channelId) continue;
-      if (session.run.kind !== "channel-instance") continue;
       if (input.deliveryKind !== "update" && deliveryWasAuthoredBy(input.from, session)) continue;
       // The Instance id alone names the replier: the relay's Agent id is the
       // sender snapshot's, which need not equal this socket principal's agentId.
@@ -436,7 +424,7 @@ export class AgentInstanceRuntimeTransport {
     message: Extract<AgentInstanceServerMessage, { type: "agent_turn_retry_decision" }> }): boolean {
     if (input.message.action !== "stop" || input.message.input !== undefined) return false;
     const targets = Array.from(this.sockets.entries()).filter(([, session]) =>
-      session.run.kind === "channel-instance" && session.run.runId === input.runId &&
+      session.run.runId === input.runId &&
       session.run.instanceId === input.instanceId && session.principal.ownerUserId === input.ownerUserId &&
       session.run.channelId === input.channelId &&
       session.clientCapabilities?.includes("agent_turn_retry"));
@@ -453,7 +441,6 @@ export class AgentInstanceRuntimeTransport {
   }): Promise<AgentInstanceControlSwitchOutcome> {
     const wanted = input.target.trim().toLowerCase();
     const candidates = Array.from(this.sockets.entries()).filter(([, session]) =>
-      session.run.kind === "channel-instance" &&
       session.run.channelId === input.channelId &&
       (agentInstanceMentionTarget(session).toLowerCase() === wanted ||
         `${session.principal.agentId}:${session.run.channelInstanceId}`.toLowerCase() === wanted)
@@ -701,9 +688,7 @@ export class AgentInstanceRuntimeTransport {
         failureStage = "relay.bind_delivery";
         await this.bindLiveDelivery(ws, this.sockets.get(ws)!);
         failureStage = "relay.publish_presence";
-        if (authentication.run.kind === "channel-instance") {
-          await this.onPresenceChange?.({ reason: "connect", session: this.sockets.get(ws)! });
-        }
+        await this.onPresenceChange?.({ reason: "connect", session: this.sockets.get(ws)! });
         setupComplete = true;
       }, () => failureStage);
     } finally {
@@ -759,18 +744,16 @@ export class AgentInstanceRuntimeTransport {
           session.run.instanceStatus = message.status;
         }
         session.lastSeenAt = new Date().toISOString();
-        if (session.run.kind === "channel-instance") {
-          await this.onPresenceChange?.({
-            reason: "update",
-            session,
-            status: message.status,
-            ...(session.presentation?.activity
-              ? { activity: session.presentation.activity }
-              : {}),
-          });
-        }
+        await this.onPresenceChange?.({
+          reason: "update",
+          session,
+          status: message.status,
+          ...(session.presentation?.activity
+            ? { activity: session.presentation.activity }
+            : {}),
+        });
       }
-      if (session.run.kind === "channel-instance" && message.type === "client_network_sample") {
+      if (message.type === "client_network_sample") {
         await this.onClientNetworkSample?.({ session, message });
       }
       if (message.type === "unregister") {
@@ -782,9 +765,7 @@ export class AgentInstanceRuntimeTransport {
           reason: "host_expired",
         });
         this.sockets.remove(ws);
-        if (session.run.kind === "channel-instance") {
-          await this.onPresenceChange?.({ reason: "disconnect", session });
-        }
+        await this.onPresenceChange?.({ reason: "disconnect", session });
       }
     });
   }

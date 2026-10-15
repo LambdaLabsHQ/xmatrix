@@ -6,8 +6,8 @@ carries, without a permanent Agent token. Every registration Run receives
 
 ## Default collaboration capabilities
 
-Every ordinary Channel Run (not a Channel About session) collaborates like a
-person in its Space by default, with no permission setting:
+Every Channel Run collaborates like a person in its Space by default, with no
+permission setting:
 
 | Capability | CLI | Hub route | Acts as |
 | --- | --- | --- | --- |
@@ -113,8 +113,7 @@ A live ordinary Run may add a new secret to its Space with
 an authorized local source; do not put it in command arguments, chat, logs or
 attachments. `POST /api/secrets` refuses an alias the Space already has. The
 new secret is `ask` and approved for that Run only; a Space admin decides who
-else may read it. Channel About, management and read-only Runs cannot use this
-route.
+else may read it.
 
 ## Channel file uploads
 

@@ -285,8 +285,6 @@ test("an Agent Run reads its connector usage, but not a read-only Channel About 
     spaceId: "s", channelId: "c", machineId: "m", hostId: "h", permissions: [] };
   assert.equal(agentRunHttpRouteAllowed(request("GET"), run), true);
   assert.equal(agentRunHttpRouteAllowed(request("POST"), run), false);
-  assert.equal(agentRunHttpRouteAllowed(request("GET"), { ...run, runKind: "channel-about-session",
-    managementSpaceId: "s", channelWriteAllowed: false }), false);
   assert.equal(agentRunHttpRouteAllowed(request("POST", "/api/connectors/mcp"), run), false);
 });
 

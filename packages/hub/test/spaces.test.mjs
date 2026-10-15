@@ -145,7 +145,7 @@ test("a cross-Space move publishes separate ACL-bounded watermarks", async (t) =
   assert.deepEqual(woken, ["channel-1"]);
 });
 
-// 2026-10-09: every summary an About session wrote rechecked each Channel of its Space.
+// 2026-10-09: every About summary written rechecked each Channel of its Space.
 test("a rename, topic or summary rechecks nothing; a mode change rechecks only that Channel", async (t) => {
   const woken = [];
   configuredChannel(t, "space-1", "space-1", { id: "channel-1", spaceId: "space-1", name: "Renamed" });

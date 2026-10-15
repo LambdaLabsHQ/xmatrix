@@ -130,39 +130,6 @@ function failureDetail(payload: Record<string, unknown>): string {
   return "Machine Daemon did not complete the Agent Run successfully";
 }
 
-async function channelAboutFollowUp(tx: DatabaseTransaction, runId: string) {
-  const rows = await tx.query<QueryResultRow>({ name: "machine_lifecycle_about_run_v1", text: `SELECT
-    run_id,channel_id,status,metadata_json FROM data.runs WHERE run_id=$1 LIMIT 1`,
-  values: [runId], maxRows: 1 });
-  const run = rows[0];
-  if (!run || !isTerminalRunStatus(run.status)) return undefined;
-  const latestRows = await tx.query<QueryResultRow>({ name: "machine_lifecycle_about_latest_v1", text: `SELECT
-    run_id,status,metadata_json FROM data.runs WHERE channel_id=$1
-    AND metadata_json->>'routedAs'='management_channel_about'
-    ORDER BY created_at DESC,run_id DESC LIMIT 1`, values: [run.channel_id], maxRows: 1 });
-  const latest = latestRows[0];
-  if (!latest || latest.run_id !== runId || !isTerminalRunStatus(latest.status)) return undefined;
-  const body = metadata(latest);
-  const trigger = typeof body.channelAboutTriggerRequestId === "string"
-    ? body.channelAboutTriggerRequestId.trim() : typeof body.sourceMessageId === "string"
-      ? body.sourceMessageId.trim() : "";
-  const pending = typeof body.channelAboutPendingRequestId === "string"
-    ? body.channelAboutPendingRequestId.trim() : trigger;
-  const actor = typeof body.channelAboutPendingActorUserId === "string"
-    ? body.channelAboutPendingActorUserId.trim() : typeof body.summonedByUserId === "string"
-      ? body.summonedByUserId.trim() : "";
-  const spaceId = typeof body.managementSpaceId === "string" ? body.managementSpaceId.trim() : "";
-  if (!trigger || !pending || pending === trigger || !actor || !spaceId) return undefined;
-  const duplicate = await tx.query({ name: "machine_lifecycle_about_successor_v1", text: `SELECT 1
-    FROM data.runs WHERE channel_id=$1 AND run_id<>$2
-      AND metadata_json->>'routedAs'='management_channel_about'
-      AND metadata_json->>'channelAboutTriggerRequestId'=$3 LIMIT 1`,
-  values: [run.channel_id, runId, pending], maxRows: 1 });
-  return duplicate[0] ? undefined : { spaceId, channelId: String(run.channel_id), requestId: pending,
-    successorOfRunId: runId, actorUserId: actor,
-    ...(typeof body.channelAboutPendingMessageId === "string" ? { triggerMessageId: body.channelAboutPendingMessageId } : {}) };
-}
-
 export interface MachineLifecycleInput {
   commandId: string;
   ownerUserId: string;
@@ -303,14 +270,8 @@ export class PostgresMachineLifecycleRepository {
         : [await this.applyEvent(tx, { ...input, ownerUserId, machineId, hostId, channelId,
           connectionEpoch, eventType, payload, at, spaceId: placement.spaceId, registryCausal })]
           .filter((value): value is string => Boolean(value));
-      const followUps = [];
-      for (const runId of changedRunIds) {
-        const followUp = await channelAboutFollowUp(tx, runId);
-        if (followUp) followUps.push(followUp);
-      }
       const value = { commandId, kind: "machine_run_lifecycle", reused: false,
-        entityId: changedRunIds[0] ?? channelId, entityVersion: 1,
-        changedRunIds, ...(followUps.length ? { channelAboutFollowUps: followUps } : {}) };
+        entityId: changedRunIds[0] ?? channelId, entityVersion: 1, changedRunIds };
       // A failed stop changes no Run, yet the Channel must hear the process may
       // still run; the notice's stable ids keep a replayed result from repeating it.
       const stopNotice = eventType === "machine_stop_result" && input.preserveInstanceForReborn !== true;
@@ -487,9 +448,7 @@ export class PostgresMachineLifecycleRepository {
       // A recoverable failure is offered again, to whichever daemon holds the
       // machine next, as a new spawn command: the failed one already completed.
       const retry = input.payload.ok !== true && input.recoverableLaunchFailure === true;
-      // A background session (a Channel's About) has no Instance to connect:
-      // its spawn is its start, so its Run ending later is no failed launch.
-      const launchState = input.payload.ok === true ? run.instance_id ? "spawned" : "connected" : retry ? "queued" : "failed";
+      const launchState = input.payload.ok === true ? "spawned" : retry ? "queued" : "failed";
       const retried = await tx.query({ name: "machine_lifecycle_launch_update_v2", text: `WITH input AS (SELECT
         $1::text AS run_id,$2::text AS launch_state,$3::boolean AS succeeded,
         $4::text AS failure_detail,$5::boolean AS retryable,$6::timestamptz AS at)

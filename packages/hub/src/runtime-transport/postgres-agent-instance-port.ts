@@ -218,7 +218,7 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
    */
   private async recordResting(session: Readonly<AgentInstanceRuntimeSession>, resting: boolean,
     runtimeUpdatedAt: number | undefined): Promise<void> {
-    if (session.run.kind !== "channel-instance" || !this.dependencies.runtime.markResting) return;
+    if (!this.dependencies.runtime.markResting) return;
     const key = `${session.run.runId}:${session.run.instanceId}`;
     const observed = `${resting}:${runtimeUpdatedAt ?? ""}`;
     if (this.restingByInstance.get(key) === observed) return;
@@ -283,20 +283,6 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
     message: PortMessage,
   ): Promise<AuthorityOutput> {
     assertBoundChannel(session, message);
-    if (session.run.kind === "channel-about-session") {
-      if (message.type === "channel_message" || message.type === "channel_activity") {
-        throw new RuntimeClientOperationError("agent_read_only_session");
-      }
-      if (message.type === "channel_message_ack" ||
-          message.type === "presence_update" ||
-          message.type === "agent_model_switch_result" ||
-          message.type === "agent_effort_switch_result" ||
-          message.type === "agent_lifecycle" ||
-          message.type === "client_network_sample" ||
-          message.type === "event_publish") {
-        return undefined;
-      }
-    }
     switch (message.type) {
       case "join_channel": {
         const result = await this.dependencies.history.join(session, message);
@@ -401,7 +387,6 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
     status?: string,
   ): Promise<void> {
     if (!this.dependencies.atomicInstanceConnect) return;
-    if (session.run.kind !== "channel-instance") return;
     const instanceId = session.run.instanceId;
     // Routing reads provider observations from this Instance row. Message
     // headers intentionally omit usage, so their projection is insufficient
@@ -437,8 +422,6 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
   }
 
   async disconnected(session: Readonly<AgentInstanceRuntimeSession>): Promise<void> {
-    if (session.run.kind === "channel-about-session" ||
-        session.run.channelDeliveryEnabled === false) return;
     // Drop this connection's ephemeral state before awaiting the database. A
     // successor may register while its predecessor's offline CAS is in flight.
     this.persistedPresentationDigests.delete(session.run.instanceId);
@@ -478,8 +461,6 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
     session: Readonly<AgentInstanceRuntimeSession>,
     deliver: (message: AgentInstanceServerMessage) => Promise<void>,
   ): void | Promise<void> {
-    if (session.run.kind === "channel-about-session" ||
-        session.run.channelDeliveryEnabled === false) return;
     // Presentation is deliberately not written here. Registration is a fenced
     // critical path that reports its own failing phase, and a display-state
     // write has no business being able to fail it or to slow it by a round
@@ -521,31 +502,24 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
     if (!liveRunIsAdmitted(snapshotLiveRunFromProductGateway(value), principal, LIVE_RUN_ROUTED_FIELDS)) {
       throw new RuntimeClientOperationError("agent_run_binding_mismatch");
     }
-    // The retired management delegate; a Run started before it was retired never connects.
-    if (metadata.routedAs === "management_assistant_mention") {
+    // Retired Run kinds: a Run started as one before it was retired never connects.
+    if (metadata.routedAs === "management_assistant_mention" || metadata.routedAs === "management_channel_about") {
       throw new RuntimeClientOperationError("management_agent_retired");
     }
     // Every PostgreSQL handshake claims its own version before becoming live,
     // including a reconnect that races the predecessor's offline write.
-    const channelAboutSession = metadata.routedAs === "management_channel_about";
-    const channelDeliveryEnabled = !channelAboutSession;
-    const runtimeSessionId = channelAboutSession
-      ? requiredString(metadata.runtimeSessionId, "run.metadata.runtimeSessionId")
-      : undefined;
     let instanceStatus = value.instanceStatus;
-    if (refreshSession && !channelAboutSession &&
+    if (refreshSession &&
         (refreshSession.run.connectionVersion === undefined ||
          value.instanceId !== refreshSession.run.instanceId ||
          Number(value.instanceVersion) !== refreshSession.run.connectionVersion)) {
       throw new AgentInstanceReconnectRequiredError("Agent Instance connection claim is missing or superseded; reconnect required");
     }
     let connectionVersion = refreshSession?.run.connectionVersion ?? (
-      connectMessage && !channelAboutSession
-        ? requiredNonnegativeInteger(value.instanceVersion, "run.instanceVersion")
-        : undefined
+      connectMessage ? requiredNonnegativeInteger(value.instanceVersion, "run.instanceVersion") : undefined
     );
     if (
-      connectMessage && !channelAboutSession &&
+      connectMessage &&
       (this.dependencies.atomicInstanceConnect || instanceStatus === "offline") &&
       (value.status === "starting" || value.status === "running") &&
       typeof value.instanceId === "string" &&
@@ -603,30 +577,24 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
         ? metadata.canonicalCwd.trim()
         : undefined;
     const run: AgentInstanceAuthorityRunBinding = {
-      kind: channelAboutSession ? "channel-about-session" : "channel-instance",
       runId: requiredString(value.runId ?? value.id, "run.runId"),
-      // A Run acts as its Instance (a background session as its session).
-      agentId: requiredString(value.instanceId ?? runtimeSessionId, "run.instanceId"),
-      instanceId: channelAboutSession
-        ? runtimeSessionId!
-        : requiredString(value.instanceId, "run.instanceId"),
+      // A Run acts as its Instance.
+      agentId: requiredString(value.instanceId, "run.instanceId"),
+      instanceId: requiredString(value.instanceId, "run.instanceId"),
       executionKey: requiredString(metadata.executionKey, "run.metadata.executionKey"),
       channelId: requiredString(value.channelId, "run.channelId"),
       machineId: requiredString(metadata.machineId, "run.metadata.machineId"),
       hostId: typeof metadata.hostId === "string" ? metadata.hostId : "",
       status: liveRunStatus(value.status),
-      instanceStatus: channelAboutSession ? "online" : liveInstanceStatus(instanceStatus),
+      instanceStatus: liveInstanceStatus(instanceStatus),
       ...(connectionVersion !== undefined ? { connectionVersion } : {}),
-      channelDeliveryEnabled,
       ...(channelInstanceId ? { channelInstanceId } : {}),
       ...(cwd ? { cwd } : {}),
       ...(typeof metadata.remoteRepo === "string" && repoSummonReference(metadata.remoteRepo)
         ? { repository: repoSummonReference(metadata.remoteRepo) } : {}),
     };
     if (run.runId !== principal.runId ||
-        !liveRunIsAdmitted(run, principal, LIVE_RUN_ROUTED_FIELDS) ||
-        run.kind !== principal.runKind ||
-        (run.kind === "channel-about-session" && principal.channelWriteAllowed)) {
+        !liveRunIsAdmitted(run, principal, LIVE_RUN_ROUTED_FIELDS)) {
       throw new RuntimeClientOperationError("agent_run_binding_mismatch");
     }
     const presentation = connectMessage
@@ -674,7 +642,6 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
     session: Readonly<AgentInstanceRuntimeSession>,
     message: Message<"harness_question_closed">,
   ): Promise<AuthorityOutput> {
-    requireChannelWriter(session);
     if (typeof message.cardRequestId !== "string" || !/^[a-zA-Z0-9_-]{1,160}$/u.test(message.cardRequestId)) {
       throw new RuntimeClientOperationError("invalid_agent_message_fields");
     }
@@ -709,7 +676,6 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
     session: Readonly<AgentInstanceRuntimeSession>,
     message: Message<"agent_parameter_control_result">,
   ): Promise<AuthorityOutput> {
-    requireChannelWriter(session);
     if (message.channelId !== session.run.channelId || typeof message.sourceMessageId !== "string" ||
         !message.sourceMessageId.trim() || message.sourceMessageId.length > 300) {
       throw new RuntimeClientOperationError("invalid_agent_message_fields");
@@ -730,9 +696,6 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
     noticeId: string | undefined,
   ): Promise<void> {
     if (!shouldPersistAgentTurnFailureNotice(message)) return;
-    if (!session.principal.channelWriteAllowed || session.run.kind === "channel-about-session") {
-      return;
-    }
     const command = agentTurnFailureAppendCommand({
       runId: session.principal.runId,
       instanceId: session.run.instanceId,
@@ -761,7 +724,7 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
         return;
       }
     }
-    if (isAgentUsageLimitLifecycle(message) && session.run.kind === "channel-instance") {
+    if (isAgentUsageLimitLifecycle(message)) {
       await this.handOffUsageLimitedInstance(session, message, command.messageId);
     }
   }
@@ -818,9 +781,6 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
     session: Readonly<AgentInstanceRuntimeSession>,
     message: Message<"channel_message">,
   ): Promise<AgentInstanceServerMessage> {
-    if (!session.principal.channelWriteAllowed || session.run.kind === "channel-about-session") {
-      throw new RuntimeClientOperationError("agent_read_only_session");
-    }
     assertAgentAppendEnvelope(message);
     const appMetadata: Record<string, unknown> = {
       ...callerMessageMetadata(message.metadata),
@@ -851,9 +811,6 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
     session: Readonly<AgentInstanceRuntimeSession>,
     message: Message<"channel_activity">,
   ): Promise<AgentInstanceServerMessage> {
-    if (!session.principal.channelWriteAllowed) {
-      throw new RuntimeClientOperationError("agent_read_only_session");
-    }
     const allowed = new Set(["activity", "channelId", "requestId", "type"]);
     if (Object.keys(message).some((field) => !allowed.has(field))) {
       throw new RuntimeClientOperationError("invalid_agent_message_fields");
@@ -1041,9 +998,6 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
     session: Readonly<AgentInstanceRuntimeSession>,
     requestId?: string,
   ): Promise<AgentInstanceServerMessage> {
-    if (session.run.kind === "channel-about-session") {
-      return { type: "unregistered", requestId };
-    }
     const response = await queryAgentInstanceRun(this.dependencies.runtime, {
       runId: session.run.runId,
       ownerUserId: session.principal.ownerUserId,
@@ -1089,10 +1043,6 @@ function runPrincipal(value: AgentRunPrincipal): AgentInstanceRunPrincipal {
     channelId: value.channelId,
     machineId: value.machineId,
     hostId: value.hostId,
-    runKind: value.runKind === "channel-about-session"
-      ? "channel-about-session"
-      : "channel-instance",
-    channelWriteAllowed: value.channelWriteAllowed !== false,
   };
 }
 
@@ -1277,9 +1227,3 @@ export function parameterControlNotice(label: string,
   return `Set ${named} to \`${current}\` for ${who}${providerNote}.`;
 }
 
-/** Only a writing Channel Instance states facts in its Channel. */
-function requireChannelWriter(session: Readonly<AgentInstanceRuntimeSession>): void {
-  if (!session.principal.channelWriteAllowed || session.run.kind !== "channel-instance") {
-    throw new RuntimeClientOperationError("agent_read_only_session");
-  }
-}

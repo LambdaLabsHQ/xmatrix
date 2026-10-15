@@ -4,7 +4,7 @@ export class BillingReadAccessDenied extends Error {}
 
 /** This is only a route admission gate; every handler must revalidate the live Run. */
 export function agentBillingReadRoute(request: Request, principal: AgentRunPrincipal): boolean {
-  if (request.method !== "GET" || principal.runKind === "channel-about-session") return false;
+  if (request.method !== "GET") return false;
   const path = new URL(request.url).pathname;
   const space = /^\/api\/spaces\/([^/]+)\/billing$/.exec(path);
   if (!space) return false;
@@ -18,8 +18,7 @@ export async function billingReadSubject(
 ): Promise<{ userId: string; agentRun?: AgentRunPrincipal }> {
   if (!user.agentRun) return { userId: user.id };
   const principal = await revalidate();
-  if (!principal.ownerUserId || principal.runKind === "channel-about-session" ||
-      (spaceId !== undefined && spaceId !== principal.spaceId)) {
+  if (!principal.ownerUserId || (spaceId !== undefined && spaceId !== principal.spaceId)) {
     throw new BillingReadAccessDenied("Agent billing access is limited to its owner and birth Space");
   }
   return { userId: principal.ownerUserId, agentRun: principal };

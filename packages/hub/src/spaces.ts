@@ -193,7 +193,7 @@ export async function createChannel(env: SpacesEnv, input: {
  * Space decide what the executions running in it (and in the threads a move
  * takes along) may do, so a change to either has those Channels recheck them;
  * a name, topic or summary decides nothing and wakes none (2026-10-09: every
- * summary an About session wrote rechecked each Channel of its Space). The
+ * About summary written rechecked each Channel of its Space). The
  * answer is the Channel as its actor now reads it.
  */
 export async function configureChannel(env: SpacesEnv,
@@ -417,7 +417,7 @@ export async function changeMembership(env: SpacesEnv, change: MembershipChange,
 
 /** Immutable metadata history is visible only to the Channel's current readers. */
 export async function channelMetadataHistory(env: SpacesEnv, input: {
-  channelId: string; principal: Principal; beforeRevision?: number; revision?: number; inputId?: string; limit?: number;
+  channelId: string; principal: Principal; beforeRevision?: number; revision?: number; limit?: number;
 }) {
   const { repository, requestId } = spaces(env);
   const spaceId = await repository.resolveChannelSpaceId({ requestId, channelId: input.channelId });

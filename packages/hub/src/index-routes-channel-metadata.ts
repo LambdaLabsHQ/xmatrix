@@ -12,7 +12,6 @@ export function registerChannelMetadataRoutes(app: Hono<{ Bindings: Env }>): voi
       channelId: c.req.param("channelId"), principal: run ? { kind: "agent", id: run.agentId } : { kind: "user", id: user.id },
       ...(c.req.query("beforeRevision") !== undefined ? { beforeRevision: Number(c.req.query("beforeRevision")) } : {}),
       ...(c.req.query("revision") !== undefined ? { revision: Number(c.req.query("revision")) } : {}),
-      ...(c.req.query("inputId") ? { inputId: c.req.query("inputId") } : {}),
       ...(c.req.query("limit") !== undefined ? { limit: Number(c.req.query("limit")) } : {}),
     });
     return c.json(result, 200, { "cache-control": "private, no-store" });

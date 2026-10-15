@@ -93,7 +93,7 @@ export const REGISTRATION_PREPARATION_REJECTION_CODES = [
   "registration_launch_aborted", "registration_launch_recovery_unavailable", "invalid_registration_launch",
   "invalid_registration_repository", "registration_repo_route_unavailable", "registration_managed_route_unavailable",
   "registration_environment_ineligible", "registration_environment_missing", "registration_not_granted",
-  "space_policy_exceeds_owner_grant", "registration_resource_not_admitted", "about_session_active", "about_session_limit",
+  "space_policy_exceeds_owner_grant", "registration_resource_not_admitted",
   ...SUMMON_INTENT_REJECTION_CODES,
   ...(["environment", "parameter"] as const).flatMap(phase =>
     Object.keys(REGISTRATION_JEV_FAILURES).map(reason => `registration_${phase}_${reason}`)),
@@ -165,8 +165,6 @@ export const PREPARATION_REJECTION_MESSAGES: Readonly<Record<string, string>> = 
   registration_not_granted: "The registration owner has not granted this Space or Channel use of the selected environment. No launch was allocated.",
   space_policy_exceeds_owner_grant: "The Space policy asks for more than the registration owner granted. No launch was allocated.",
   registration_resource_not_admitted: "A requested workspace, model, secret or capability is not admitted for the selected registration. No launch was allocated.",
-  about_session_active: "An About session is already active for this Channel. No launch was allocated.",
-  about_session_limit: "The Channel has reached its About session limit. No launch was allocated.",
   routing_no_eligible: "No eligible environment matched this summon. No launch was allocated.",
   routing_selection_unconfigured: "Environment selection is not configured on this deployment. No launch was allocated.",
   routing_quota_refresh_failed: "Environment availability refresh failed. No launch was allocated.",

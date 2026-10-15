@@ -506,22 +506,6 @@ for (const ok of [true, false]) test(`an applied ${ok ? "successful" : "recovera
     { controlId: "control-1", ok, at: undefined });
 });
 
-test("a Channel About session's spawn is its start: its launch connects, so its Run ending is no failure", async () => {
-  const body = { machineId: "machine-1", hostId: "host-1", executionKey: "execution-1", spawnControlId: "control-1",
-    routedAs: "management_channel_about" };
-  for (const [instance, expected] of [[{}, "connected"], [{ instance_id: "instance-1", instance_status: "offline",
-    instance_version: 1, channel_instance_id: 1 }, "spawned"]]) {
-    const db = lifecycleDatabase({ status: "starting", version: 3, metadata_json: body, ...instance }, {
-      machine_lifecycle_run_update_v1: [{ run_id: "run-1" }],
-      machine_lifecycle_head_advance_v1: [{ commit_sequence: 15 }],
-    });
-    await new PostgresMachineLifecycleRepository(db).apply(machineReport(`spawn-${expected}`, "machine_spawn_result",
-      { requestId: "control-1", runId: "run-1", executionKey: "execution-1", ok: true, pid: 1 }));
-    const launch = db.calls.find(q => q.name === "machine_lifecycle_launch_update_v2");
-    assert.equal(launch.values[1], expected, instance.instance_id ? "an Instance's launch connects when it does" : "no Instance to wait for");
-  }
-});
-
 for (const rejectionCode of ['routing_no_eligible', 'routing_selection_failed', 'routing_parameter_selection_failed',
   'routing_parameter_constraints_invalid', 'routing_parameter_models_empty', 'routing_parameter_workspaces_empty',
   'routing_parameter_catalog_invalid', 'routing_parameter_catalog_unavailable', 'routing_parameter_invalid_answer',

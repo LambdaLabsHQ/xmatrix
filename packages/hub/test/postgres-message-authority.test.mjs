@@ -39,7 +39,7 @@ test("PostgreSQL history presents an authorized archived Channel through the Hub
           placement_shard_id: "shard-0", placement_placement_epoch: 1, placement_state: "active",
           placement_target_shard_id: null, placement_plan_class: "shared",
         }];
-        if (query.name === "message_history_page_v3") return [{
+        if (query.name === "message_history_page_v4") return [{
           history_authorized: true, acknowledged_sequence: 0, content_revision: 3,
           history_head_sequence: 30, message_id: null,
         }];
@@ -53,7 +53,7 @@ test("PostgreSQL history presents an authorized archived Channel through the Hub
   // A warm history request is two statements: the directory read that selects
   // the shard, then the fenced page read that authorizes the reader.
   assert.deepEqual(statements.map((statement) => statement.name),
-    ["channel_space_directory_resolve_placed_v1", "message_history_page_v3"]);
+    ["channel_space_directory_resolve_placed_v1", "message_history_page_v4"]);
   assert.equal(statements[0].context.placement, undefined);
   assert.deepEqual(statements[1].context.placement,
     { spaceId: "space-1", shardId: "shard-0", placementEpoch: 1 });
@@ -180,11 +180,11 @@ function openAppendRows(channelId) {
 
 for (const scenario of [
   { name: "ordinary Agent" },
-  // The retired xMatrix management delegate: a Run started before it was retired posts nothing.
+  // Retired Run kinds: a Run started as one before it was retired posts nothing.
   { name: "retired management delegate", routedAs: "management_assistant_mention", error: "agent_run_forbidden",
-    message: /management agent is retired/u },
-  { name: "Channel About cannot post", routedAs: "management_channel_about", error: "agent_run_forbidden",
-    message: /Channel About Runs cannot post/u },
+    message: /Agent Run is retired/u },
+  { name: "retired Channel About Run", routedAs: "management_channel_about", error: "agent_run_forbidden",
+    message: /Agent Run is retired/u },
 ]) test(`PostgreSQL sender identity: ${scenario.name}`, async () => {
   const calls = [];
   const observations = [];

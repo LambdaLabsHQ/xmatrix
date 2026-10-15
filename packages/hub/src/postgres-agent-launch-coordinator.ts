@@ -120,8 +120,7 @@ const CLAIMABLE_LAUNCH_SQL = `EXISTS (SELECT 1 FROM data.runs claim_run WHERE cl
  * A Launch the coordinator still has to act on. Once its spawn is recorded a
  * re-read can no longer change it: settlement keeps a spawned Launch spawned
  * whatever the command says. Its Instance connecting, its Run ending or a stop
- * moves it, and each of those writes the row or wakes the Channel. A Channel
- * About session has no Instance: its spawn result connects its Launch.
+ * moves it, and each of those writes the row or wakes the Channel.
  */
 const ACTIVE_LAUNCH_SQL = `(launch.state IN ('prepared','queued','admitted') OR
             (launch.state='spawned' AND (launch.spawned_at IS NULL OR launch.command_durable_at IS NULL)) OR
@@ -168,7 +167,6 @@ export async function claim(database: AuthorityDatabase, shardId: string, owner:
               AND instance_route.placement_epoch=placement.placement_epoch
               AND instance_route.state='active')) AS directory_published
         FROM claimed JOIN data.runs run ON run.run_id=claimed.run_id
-        -- A Channel About session is a background Run with no Channel Instance.
         LEFT JOIN data.instances instance ON instance.instance_id=claimed.instance_id
         JOIN data.space_control_heads head ON head.space_id=claimed.space_id
         JOIN control.space_placement placement ON placement.space_id=claimed.space_id

@@ -49,23 +49,23 @@ Until 2026-10-15, an About Agent Run wrote the About. It read history through
 `xmatrix channel history --authoritative` and submitted through
 `xmatrix channel about`. Those Runs carried context between conversations inside
 their harnesses, which caused the cross-Channel replays of 2026-10-07 to
-2026-10-15. Their recorded inputs (`data.channel_about_inputs`) and their
-revisions with source `about` stay readable. The Run machinery is being removed.
+2026-10-15. Their revisions with source `about` stay readable. Their recorded
+inputs (`data.channel_about_inputs`) are no longer read and go with their
+Channel until the table is dropped. A retired About Run is refused wherever it
+still appears: its credential, its connection, its messages and its access.
 
 ## Reading and restoring
 
 - `GET /api/channels/:id/metadata-history` returns newest first, with
   `currentRevision` and `hasMore`. `limit` is 1–100 (default 20),
   `beforeRevision` pages backwards, and `revision` selects a single version.
-- The same endpoint with `inputId` returns one input window an About Run
-  recorded, bounded to 200 references. Both queries use the Channel's current
-  content-read policy.
+- The query uses the Channel's current content-read policy.
 - `POST /api/channels/:id/metadata-restore` takes `{ revision, expectedRevision }`.
   The existing configuration permission and exact Run delegation apply.
   Restoring copies the content and original summary source into a new revision
   attributed to the restorer. The bad version stays visible.
 - CLI: `xmatrix channel metadata-history <id> [--revision N|--before-revision N]`
-  and `--input <input-id>` inspect evidence;
+  inspects revisions;
   `xmatrix channel metadata-restore <id> --revision N --expected-revision M`
   restores it.
 

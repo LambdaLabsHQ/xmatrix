@@ -511,9 +511,8 @@ export class MachineDaemonRuntimeTransport {
           message.type === "machine_stop_result" ||
           message.type === "machine_run_snapshot" && message.snapshotComplete === true)
       ) {
-        // These reports can issue Channel About successors (a partial snapshot
-        // only records progress and never does). Claiming on this
-        // same frame avoids a Runtime→Runtime wake fetch that would deadlock
+        // Work issued while these reports were applied is claimed on this same
+        // frame, which avoids a Runtime→Runtime wake fetch that would deadlock
         // the isolate. Activation and other inbound frames must not catch-up
         // here: StableGranted already does that once.
         await this.catchUpReverseDelivery(ws, session);

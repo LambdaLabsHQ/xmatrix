@@ -35,7 +35,6 @@ import {
   machineDaemonRouteKey,
   type MachineDaemonAuthorityPrincipal,
   type MachineDaemonSocketBackend,
-  type MachineDaemonRouteIdentity,
   type MachineDaemonRuntimeSession,
 } from "./machine-daemon-port";
 import {
@@ -95,22 +94,12 @@ export interface PostgresMachineDaemonPortDependencies {
   /** Moves an Agent Launch along as the daemon admits or spawns it. */
   launchUpdate(input: Parameters<typeof updateAgentLaunch>[1]): Promise<unknown>;
   terminateInstance?(instanceId: string): void;
-  dispatchChannelAboutFollowUp?(input: {
-    spaceId: string;
-    channelId: string;
-    requestId: string;
-    triggerMessageId?: string;
-    successorOfRunId: string;
-    actorUserId: string;
-  }): Promise<unknown>;
   observeAgentLaunchStage?(stage: string, outcome: "ok" | "error", durationMs: number): void;
   /**
    * Hand committed work to its Channel's coordinator before answering.
    * Best-effort: finalization and reborn also advance on the coordinator's alarm.
    */
   wakeCoordinator?(channelId: string, work: readonly ScheduledStep[]): Promise<void>;
-  /** Deliver this machine's pending commands on its socket, behind that socket's frames. */
-  deliverPending?(identity: MachineDaemonRouteIdentity): Promise<unknown>;
   /** Retain work that outlives the frame that started it. */
   keepAlive?(task: Promise<unknown>): void;
   quotaChanged?(route: { ownerUserId: string; machineId: string }): Promise<void>;
@@ -129,7 +118,6 @@ export class PostgresMachineDaemonPort implements MachineDaemonSocketBackend {
   private readonly snapshotFanouts = new Map<string, { next?: () => Promise<void> }>();
 
   static fromEnv(input: { env: Env; terminateInstance?: (instanceId: string) => void;
-    deliverPending?: PostgresMachineDaemonPortDependencies["deliverPending"];
     quotaChanged?: PostgresMachineDaemonPortDependencies["quotaChanged"];
     keepAlive?: (task: Promise<unknown>) => void }): PostgresMachineDaemonPort {
     return new PostgresMachineDaemonPort({
@@ -146,7 +134,6 @@ export class PostgresMachineDaemonPort implements MachineDaemonSocketBackend {
         env: input.env, stage, outcome, durationMs,
       }),
       wakeCoordinator: (channelId, work) => wakeAgentLaunchCoordinator(input.env, channelId, work),
-      ...(input.deliverPending ? { deliverPending: input.deliverPending } : {}),
       ...(input.keepAlive ? { keepAlive: input.keepAlive } : {}),
     });
   }
@@ -333,9 +320,8 @@ export class PostgresMachineDaemonPort implements MachineDaemonSocketBackend {
     const runLifecycleChannelId = optionalString(result.runLifecycleChannelId) ?? messageChannelId ??
       (runId ? this.activeRunChannels.get(runId) : undefined);
     // A committed terminal report is the Authority's to finalize: the
-    // coordinator commits the Run lifecycle and issues
-    // Channel About successors. The frame answers now instead of holding this
-    // socket's order through those round trips.
+    // coordinator commits the Run lifecycle. The frame answers now instead of
+    // holding this socket's order through those round trips.
     const terminalRecorded = result.runTerminalReportRecorded === true;
     if (terminalRecorded) {
       if (runLifecycleChannelId) await this.dependencies.wakeCoordinator?.(runLifecycleChannelId, ["runTerminal", "reborn"]);
@@ -362,7 +348,6 @@ export class PostgresMachineDaemonPort implements MachineDaemonSocketBackend {
         // now. Best effort — the parked stop is also re-checked on its own.
         await this.dependencies.wakeCoordinator?.(runLifecycleChannelId, ["registrationStop"])?.catch(() => undefined);
       }
-      await this.dispatchChannelAboutFollowUps(lifecycleResult);
       this.closeCommittedTerminalInstances(lifecycleResult);
       if (message.type === "machine_run_exited" || message.type === "machine_stop_result") {
         this.activeRunChannels.delete(runId);
@@ -375,7 +360,6 @@ export class PostgresMachineDaemonPort implements MachineDaemonSocketBackend {
       if (message.snapshotComplete === true) this.fanOutSnapshot(session, message, requestId, result);
       else await this.reconcileSnapshotChannels(session, message, requestId, result);
     }
-    await this.dispatchChannelAboutFollowUps(result);
     if (action === "complete" && leaseKey) this.activeLeases.delete(leaseKey);
     if (message.type === "machine_request_notice") {
       const messageId = requiredString(
@@ -464,7 +448,6 @@ export class PostgresMachineDaemonPort implements MachineDaemonSocketBackend {
       ? `${message.registryConnectionEpoch}:${message.registrySequence}`
       : requestId ?? crypto.randomUUID();
     const retiredRunIds = new Set<string>();
-    let followUps = 0;
     for (const channelId of channels) {
       const lifecycleResult = await this.dependencies.runLifecycleReport({
         ...sessionCommand(session, "report", message),
@@ -481,35 +464,8 @@ export class PostgresMachineDaemonPort implements MachineDaemonSocketBackend {
         }
       }
       this.closeCommittedTerminalInstances(lifecycleResult);
-      followUps += await this.dispatchChannelAboutFollowUps(lifecycleResult);
     }
     for (const retiredRunId of retiredRunIds) this.activeRunChannels.delete(retiredRunId);
-    // Successors were issued without a wake; no frame of this socket will
-    // catch them up, so deliver them now.
-    if (followUps > 0) await this.dependencies.deliverPending?.(session.principal);
-  }
-
-  private async dispatchChannelAboutFollowUps(result: Record<string, unknown>): Promise<number> {
-    if (!this.dependencies.dispatchChannelAboutFollowUp ||
-        !Array.isArray(result.channelAboutFollowUps)) return 0;
-    if (result.channelAboutFollowUps.length > 50) {
-      throw new Error("PostgreSQL returned oversized Channel About follow-up work");
-    }
-    for (const item of result.channelAboutFollowUps) {
-      const followUp = recordValue(item, "channelAboutFollowUps[]");
-      await this.dependencies.dispatchChannelAboutFollowUp({
-        spaceId: requiredString(followUp.spaceId, "channelAboutFollowUps[].spaceId"),
-        channelId: requiredString(followUp.channelId, "channelAboutFollowUps[].channelId"),
-        requestId: requiredString(followUp.requestId, "channelAboutFollowUps[].requestId"),
-        successorOfRunId: requiredString(
-          followUp.successorOfRunId,
-          "channelAboutFollowUps[].successorOfRunId",
-        ),
-        actorUserId: requiredString(followUp.actorUserId, "channelAboutFollowUps[].actorUserId"),
-        ...(followUp.triggerMessageId !== undefined ? { triggerMessageId: requiredString(followUp.triggerMessageId, "channelAboutFollowUps[].triggerMessageId") } : {}),
-      });
-    }
-    return result.channelAboutFollowUps.length;
   }
 
   async disconnected(session: Readonly<MachineDaemonRuntimeSession>): Promise<void> {

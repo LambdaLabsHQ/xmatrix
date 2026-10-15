@@ -50,7 +50,7 @@ export function recordingAgentInstancePort({ respond = () => ({}), signals = { a
 export function channelInstanceSession() {
   return {
     principal: { ownerUserId: "owner", spaceId: "space", channelId: "channel", agentId: "agent-1",
-      agentName: "codex", runId: "run-1", executionKey: "execution-1", channelWriteAllowed: true },
-    run: { kind: "channel-instance", instanceId: "instance-1", channelId: "channel", channelInstanceId: "2" },
+      agentName: "codex", runId: "run-1", executionKey: "execution-1" },
+    run: { instanceId: "instance-1", channelId: "channel", channelInstanceId: "2" },
   };
 }

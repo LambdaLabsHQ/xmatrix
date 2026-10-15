@@ -1,7 +1,5 @@
 import { registerChannelMetadataRoutes } from "./index-routes-channel-metadata.js";
 import { ControlError, PostgresAgentChannelAccessRepository } from "@xmatrix/db";
-import { stopChannelAboutSessions } from "./channel-about-session-stop";
-import { channelAboutTextRefusal } from "./channel-about-text";
 import { acceptSpaceInvite, changeMembership, configureChannel, createChannel, getChannel, getSpaceInvite, listSpaces, readVisibleLiveAgentPresence } from "./spaces";
 import { readChannelViewPreference, readLocalePreference, updateChannelViewPreference,
   updateLocalePreference } from "./user-preference-postgres-authority";
@@ -200,17 +198,6 @@ export function registerIndexRoutesChannelAgent(app: Hono<{ Bindings: Env }>): v
   }));
   app.get(HUB_ROUTES.channels, (c) => jsonErrors(c, async () => {
     const authUser = await requireAuth(c.req.raw, c.env);
-    // About has a single Channel capability. Do not read the Space catalog and
-    // filter afterwards: manifests, attention and pagination also carry inputs.
-    if (authUser.agentRun?.runKind === "channel-about-session") {
-      const run = authUser.agentRun;
-      if ((c.req.query("spaceId") && c.req.query("spaceId") !== run.spaceId) ||
-          (c.req.query("familyOfChannelId") && c.req.query("familyOfChannelId") !== run.channelId)) {
-        return c.json({ error: "About context is limited to its own Channel", code: "channel_about_scope_invalid" }, 403);
-      }
-      const result = await getChannel(c.env, { channelId: run.channelId, principal: { kind: "user", id: run.ownerUserId } });
-      return c.json({ channels: [result.channel] }, 200, NO_STORE);
-    }
     const spaceId = c.req.query("spaceId");
     // `familyOfChannelId` narrows the read to one Channel and its direct children.
     const familyOfChannelId = c.req.query("familyOfChannelId")?.trim() || undefined;
@@ -418,35 +405,18 @@ export function registerIndexRoutesChannelAgent(app: Hono<{ Bindings: Env }>): v
     if (["parentChannelId", "archived", "archiveReason"].some((field) =>
       Object.prototype.hasOwnProperty.call(patch, field))) return c.json(CHANNEL_HIERARCHY_RETIRED, 410);
     const run = authUser.agentRun;
-    // Only the Channel's own About session writes its summary, and through the
-    // same request may name a Channel nobody has named yet.
-    const about = run?.runKind === "channel-about-session" ? run : undefined;
-    if (about && (about.channelId !== channelId || typeof patch.summary !== "string" ||
-        Object.keys(patch).some((field) => !["summary", "name", "throughMessageId", "expectedRevision"].includes(field)))) {
-      return c.json({
-        error: "A Channel About session may only replace its Channel's summary and automatic name",
-        code: "channel_about_operation_forbidden",
-      }, 403);
-    }
-    if (!about && Object.prototype.hasOwnProperty.call(patch, "summary")) {
+    // xMatrix writes the summary (channel-about.ts); nobody else does.
+    if (Object.prototype.hasOwnProperty.call(patch, "summary")) {
       return c.json({
         error: "Channel Summary is maintained by xMatrix",
         code: "channel_summary_ai_managed",
       }, 403);
     }
-    const summary = about ? String(patch.summary).trim().slice(0, 4_000) : undefined;
-    // Text a code-page shell already turned into `?` is refused, not saved;
-    // the session stays open to write it again.
-    const mangled = about ? channelAboutTextRefusal({ summary, name: patch.name }) : undefined;
-    if (mangled) return c.json(mangled, 422);
-    const throughMessageId = typeof patch.throughMessageId === "string" && patch.throughMessageId.trim()
-      ? patch.throughMessageId.trim().slice(0, 200) : undefined;
     if (patch.expectedRevision !== undefined && (!Number.isSafeInteger(patch.expectedRevision) || Number(patch.expectedRevision) < 0)) {
       return c.json({ error: "expectedRevision must be a non-negative safe integer" }, 400);
     }
     const actingUserId = run ? run.ownerUserId : authUser.id;
-    // The About session is scoped to this Channel already; it is not a delegate.
-    if (run && !about) {
+    if (run) {
       // Cross-Space moves go through transfer proposals, which a Run may file
       // but only a human acknowledges.
       if (Object.prototype.hasOwnProperty.call(patch, "spaceId")) {
@@ -465,22 +435,9 @@ export function registerIndexRoutesChannelAgent(app: Hono<{ Bindings: Env }>): v
       ...(run ? { actorRunId: run.runId } : {}),
       ...(typeof patch.expectedRevision === "number" ? { expectedRevision: patch.expectedRevision } : {}),
       ...(typeof patch.name === "string" ? { name: patch.name } : {}),
-      ...(about && typeof patch.name === "string" ? { automaticName: true } : {}),
-      ...(about ? { summary, summaryAuthor: {
-        runId: about.runId, agentName: about.agentName, ...(throughMessageId ? { throughMessageId } : {}),
-      } } : {}),
       ...(patch.mode === "open" || patch.mode === "closed" ? { mode: patch.mode } : {}),
       ...(typeof patch.spaceId === "string" ? { spaceId: patch.spaceId } : {}),
     });
-    // An About session's one job is done once its summary is saved. Ending it
-    // lets the refresh it was handed meanwhile start as its successor.
-    if (about) {
-      await stopChannelAboutSessions(c.env, [{
-        runId: about.runId, channelId: about.channelId, sessionId: about.agentId,
-        machineOwnerUserId: about.ownerUserId, machineId: about.machineId, hostId: about.hostId,
-        ...(about.executionKey ? { executionKey: about.executionKey } : {}),
-      }], "Channel About summary saved", "summary");
-    }
     const migratedChannels = (result as { migratedChannels?: unknown }).migratedChannels;
     return c.json({
       channel: await committedChannelWithLiveHumanPresence({
