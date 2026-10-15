@@ -1,6 +1,6 @@
 # App Store subscriptions
 
-The official metered service offers one human seat per Space through StoreKit. Web/Stripe remains the team-seat purchase path. Community deployments do not expose these routes.
+The official metered service sells App Store Pro through StoreKit. A purchase from the app is one human seat; an App Store multiseat purchase gives its Space as many seats as Apple's signed transaction quantity. Web/Stripe remains the team-seat purchase path. As with Stripe, a Space with more billable humans than its seats is held at its seat limit rather than refused a provider update. Community deployments do not expose these routes.
 
 ## Ownership and entitlement
 
