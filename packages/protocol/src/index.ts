@@ -411,7 +411,7 @@ export type {
   RuntimeOperationFailure,
 } from "./runtime-operation-failure.js";
 export {
-  createInstanceMentions, deriveHarnessInvocationSelections, parseAgentInvocationSelections,
+  createInstanceMentions, deriveHarnessInvocationSelections, isOperationalInvocationSpan, parseAgentInvocationSelections,
   selectionLaunchConditions,
 } from "./agent-invocation-selection.js";
 export type {

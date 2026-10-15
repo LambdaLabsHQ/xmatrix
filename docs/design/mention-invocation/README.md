@@ -15,6 +15,13 @@ then its description truncated in the remaining width), inset rounded selections
 and plain expansion rows inside the composer's single Liquid Glass surface.
 Category labels and rows add no separate backdrop-filter material.
 
+A picked Agent's target follows edits only while its token remains an operational
+mention. Changing its surrounding delimiters or moving it into quoted, code or
+linked text retires the pick even if its letters stay unchanged. Removing that
+syntax later does not restore the old target. Send validates the final body
+after substituting picked Page and Channel references; server envelope and
+authorization checks remain strict.
+
 The Web composer asks Jev about summon intent after a 350 ms typing pause,
 using the exact outgoing body, summon ranges and the author's authorized
 Channel context. Mention bands show the reading. A declined address has a clickable dotted
