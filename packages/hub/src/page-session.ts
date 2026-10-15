@@ -1,5 +1,6 @@
 import {
-  PAGE_DOCUMENT_FRAGMENT, mergePageText, pageAuthorColor, pageChangedBlocks, pageRemovedSections, type PageEditResult,
+  PAGE_DOCUMENT_FRAGMENT, PAGE_MESSAGE_CO_WRITE, mergePageText, pageAuthorColor, pageChangedBlocks, pageRemovedSections,
+  parsePageCoWriteReply, type PageCoWriteRequest, type PageEditResult,
 } from "@xmatrix/protocol";
 import {
   canonicalPageMarkdown, markdownToPageDoc, pageDocBlockAt, pageDocToMarkdown, pageSchema,
@@ -11,6 +12,7 @@ import { absolutePositionToRelativePosition, updateYFragment, yXmlFragmentToPros
 import * as awarenessProtocol from "y-protocols/awareness";
 import * as syncProtocol from "y-protocols/sync";
 import * as Y from "yjs";
+import { PageCoWriter, type PageCoWriterHost, type PageCoWriterPerson } from "./page-co-writer";
 
 /**
  * A page's live co-editing session (docs/design/pages-and-conversations.md
@@ -110,6 +112,11 @@ export interface PageSessionConnection {
   id: string;
   principal: PageSessionPrincipal;
   canEdit: boolean;
+  /**
+   * An Agent's runtime co-writing the page live (page-co-writer.ts): it is not a replica of the
+   * document; it hears turns and answers with the Agent's words.
+   */
+  coWriter?: boolean;
 }
 
 const MAX_BODY_BYTES = 256 * 1024;
@@ -122,6 +129,11 @@ const AGENT_PRESENT_MS = 30_000;
 
 function principalKey(principal: PageSessionPrincipal): string {
   return `${principal.kind}:${principal.id}`;
+}
+
+/** The origin of a co-writer's writes, so its own words are not news to it. */
+function coWriteOrigin(connectionId: string): string {
+  return `cowrite:${connectionId}`;
 }
 
 /** Stable 31-bit awareness client id for an Agent, distinct from Yjs's random ids in practice. */
@@ -143,6 +155,13 @@ function authoredAs<T>(doc: Y.Doc, clientId: number, change: () => T): T {
   } finally {
     doc.clientID = own;
   }
+}
+
+function encodeCoWrite(request: PageCoWriteRequest): Uint8Array {
+  const encoder = encoding.createEncoder();
+  encoding.writeVarUint(encoder, PAGE_MESSAGE_CO_WRITE);
+  encoding.writeVarString(encoder, JSON.stringify(request));
+  return encoding.toUint8Array(encoder);
 }
 
 export function encodeNotice(notice: Record<string, unknown>): Uint8Array {
@@ -187,6 +206,8 @@ export class PageSession {
   private editSeq = 0;
   private agentClocks = new Map<number, number>();
   private readonly resting = new Map<number, RestingAgent>();
+  /** Agents co-writing the page live, by their runtime's connection. */
+  private readonly coWriters = new Map<string, PageCoWriter>();
   /** Bumped by every change to the document; its markdown is read at most once per change. */
   private version = 0;
   private cached: { version: number; markdown: string } | null = null;
@@ -213,6 +234,7 @@ export class PageSession {
         const connection = this.connections.get(origin);
         if (connection) this.noteEditor(connection.principal);
       }
+      for (const [id, writer] of this.coWriters) if (origin !== coWriteOrigin(id)) writer.othersEdited();
       void this.persist();
     });
     this.awareness.on("update", ({ added, updated, removed }: {
@@ -224,6 +246,7 @@ export class PageSession {
         for (const id of [...added, ...updated]) owned.add(id);
         for (const id of removed) owned.delete(id);
         this.connectionClients.set(origin, owned);
+        for (const writer of this.coWriters.values()) writer.othersMoved();
       }
       const encoder = encoding.createEncoder();
       encoding.writeVarUint(encoder, PAGE_MESSAGE_AWARENESS);
@@ -337,8 +360,15 @@ export class PageSession {
     if (outdated.length) awarenessProtocol.removeAwarenessStates(this.awareness, outdated, "timeout");
   }
 
-  connect(connection: PageSessionConnection): void {
+  /** `resumed`: the connection was open before the session woke, so a co-writer has read the page already. */
+  connect(connection: PageSessionConnection, options: { resumed?: boolean } = {}): void {
     this.connections.set(connection.id, connection);
+    if (connection.coWriter) {
+      const writer = new PageCoWriter(this.coWriterHost(connection));
+      this.coWriters.set(connection.id, writer);
+      writer.start(options.resumed === true);
+      return;
+    }
     const encoder = encoding.createEncoder();
     encoding.writeVarUint(encoder, PAGE_MESSAGE_SYNC);
     syncProtocol.writeSyncStep1(encoder, this.doc);
@@ -357,6 +387,13 @@ export class PageSession {
   }
 
   disconnect(connectionId: string): void {
+    const writer = this.coWriters.get(connectionId);
+    if (writer) {
+      writer.stop();
+      this.coWriters.delete(connectionId);
+      const principal = this.connections.get(connectionId)?.principal;
+      if (principal) this.agentAwareness(principal, null);
+    }
     const owned = this.connectionClients.get(connectionId);
     this.connections.delete(connectionId);
     this.connectionClients.delete(connectionId);
@@ -376,6 +413,13 @@ export class PageSession {
     if (!connection) return;
     const decoder = decoding.createDecoder(data);
     const type = decoding.readVarUint(decoder);
+    if (connection.coWriter) {
+      // A co-writer only answers its turns; the document is written for it, under its caret.
+      if (type !== PAGE_MESSAGE_CO_WRITE) return;
+      const reply = parsePageCoWriteReply(JSON.parse(decoding.readVarString(decoder)) as unknown);
+      if (reply) this.coWriters.get(connectionId)?.receive(reply);
+      return;
+    }
     if (type === PAGE_MESSAGE_SYNC) {
       const subtype = decoding.peekVarUint(decoder);
       if (!connection.canEdit && subtype !== syncProtocol.messageYjsSyncStep1) return;
@@ -466,6 +510,48 @@ export class PageSession {
     // Where the change overlaps what people typed meanwhile, their text stays
     // and remains pending; the other side is already a revision in history.
     return setPageFragmentMarkdown(this.fragment, merged.ok ? merged.text : live, origin);
+  }
+
+  /** People on the page and their carets, as their editors share them. */
+  private people(): PageCoWriterPerson[] {
+    const people: PageCoWriterPerson[] = [];
+    for (const [clientId, state] of this.awareness.getStates()) {
+      const { user, cursor } = state as { user?: { name?: unknown; kind?: unknown }; cursor?: { head?: unknown } };
+      if (typeof user?.name !== "string" || user.kind === "agent" || this.resting.has(clientId)) continue;
+      let caret: Y.RelativePosition | null = null;
+      try {
+        caret = cursor?.head ? Y.createRelativePositionFromJSON(cursor.head) : null;
+      } catch {
+        caret = null;
+      }
+      people.push({ name: user.name, caret });
+    }
+    return people;
+  }
+
+  private coWriterHost(connection: PageSessionConnection): PageCoWriterHost {
+    const principal = connection.principal;
+    const clientId = agentClientId(principalKey(principal));
+    // Its edits commit as its own. Without its conversation: a co-writing conversation would
+    // turn the Agent's commit into a suggestion, and these words are already in the page.
+    const { conversationId: _conversation, ...author } = principal;
+    return {
+      doc: this.doc,
+      fragment: this.fragment,
+      markdown: () => this.markdown(),
+      write: (change) => {
+        authoredAs(this.doc, clientId, () => this.doc.transact(change, coWriteOrigin(connection.id)));
+        this.noteEditor(author);
+      },
+      present: ({ activity, cursor, say }) => {
+        const at = cursor ? Y.relativePositionToJSON(cursor) : null;
+        this.agentAwareness(principal, { user: { name: principal.label, color: pageAuthorColor(principal),
+          kind: principal.kind, conversationId: principal.conversationId ?? null }, activity,
+        ...(at ? { cursor: { anchor: at, head: at } } : {}), ...(say ? { say } : {}) });
+      },
+      people: () => this.people(),
+      send: (request) => this.ports.send(connection.id, encodeCoWrite(request)),
+    };
   }
 
   private agentAwareness(principal: PageSessionPrincipal, state: Record<string, unknown> | null): void {
@@ -637,6 +723,8 @@ export class PageSession {
 
   /** Releases the awareness and the document. */
   destroy(): void {
+    for (const writer of this.coWriters.values()) writer.stop();
+    this.coWriters.clear();
     this.awareness.destroy();
     this.doc.destroy();
   }
