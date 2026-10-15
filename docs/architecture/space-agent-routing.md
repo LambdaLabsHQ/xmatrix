@@ -126,6 +126,15 @@ untouched. No synthetic default option or model tag is emitted. A non-empty
 list is the complete set of allowed models, compared literally; without a
 matching observed catalog entry, the declared models themselves are offered.
 An explicit `model:` or `effort:` tag still requires a matching allowed option.
+An explicit effort is a feasibility constraint before fit or headroom ranking:
+the daemon must support forwarding it and a fresh runtime model catalog must
+list that value for the selected model. With no declared model override, the
+catalog must identify the currently observed default model through
+`parameterModel`. Missing observations and empty effort lists do not prove
+support; they return `registration_effort_unavailable` when no candidate remains.
+Summons without an effort retain runtime defaults, including harnesses with no
+effort control. The runtime still validates the selection during startup in
+case provider capabilities changed after observation.
 The runtime reports the actual model after startup. The environment that runs
 the work offers the model/effort (when chosen) and location Jev chose. When
 environments of one harness mix empty and non-empty model lists, only declared

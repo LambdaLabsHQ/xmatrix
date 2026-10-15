@@ -27,7 +27,8 @@ function modelPairs(candidate: RegistrationLaunchCandidate, tags: AutoLaunchTags
     }));
   });
   if (fromCatalog.length || catalog.length && (requested || tags.effort)) return fromCatalog;
-  if (tags.effort && !candidate.supportsRequestedEffort) return [];
+  // A daemon's ability to carry effort is not evidence the harness can apply it.
+  if (tags.effort) return [];
   return allowed.filter(model => !requested || model === requested).map(model => ({
     model, description: "Owner-declared model", effort: tags.effort,
     effortDescription: tags.effort ? "Requested effort" : "Runtime default effort" }));
@@ -36,15 +37,15 @@ function modelPairs(candidate: RegistrationLaunchCandidate, tags: AutoLaunchTags
 /**
  * No declared models means the runtime's own default model, and a named model
  * still refuses. A requested effort applies to that default model when the
- * daemon carries it there and the runtime's report of the model, when there
- * is one, lists it; the runtime refuses an effort its model does not have.
+ * daemon carries it there and the runtime's report of the current model
+ * explicitly lists it. Missing evidence cannot prove an effort is supported.
  */
 function usesRuntimeDefaults(candidate: RegistrationLaunchCandidate, tags: AutoLaunchTags): boolean {
   if (candidate.models.length || tags.model) return false;
   if (!tags.effort) return true;
   if (!candidate.supportsDefaultModelEffort) return false;
   const reported = candidate.modelCatalog?.find(observed => observed.model === candidate.parameterModel);
-  return !reported?.efforts.length || reported.efforts.some(effort => effort.value === tags.effort);
+  return reported?.efforts.some(effort => effort.value === tags.effort) === true;
 }
 
 function selectionFailure(phase: "environment" | "parameter", error: unknown): RegistrationAccessError {
