@@ -475,6 +475,21 @@ test("a timed-out single read is retried once on a fresh checkout", async () => 
   }
 });
 
+test("a single read retries a severed Hyperdrive egress on a fresh checkout", async () => {
+  const failure = Object.assign(new Error("Egress connection severed outside of Hyperdrive"), { code: "58000" });
+  const fake = retryPool(/single_read/u, [failure]);
+  const sessions = [];
+  const session = createAuthorityDatabase({
+    connectionString: "postgres://example.invalid/xmatrix", shardId: "shard-0", poolFactory: fake.factory,
+    sessionObserver: (summary) => sessions.push(summary),
+  }).openSession();
+  assert.deepEqual(await session.transaction(singleRead, readOne), [{ id: 1 }]);
+  await session.close();
+  assert.equal(fake.clients.length, 2);
+  assert.deepEqual(fake.clients.map((client) => client.releases), [[true], [false]]);
+  assert.equal(sessions[0].errorCode, "CONNECTION_TERMINATED");
+});
+
 test("a second single-read timeout surfaces without a third attempt", async () => {
   const second = new Error("Query read timeout");
   const fake = retryPool(/single_read/u, [new Error("Query read timeout"), second, new Error("third")]);
@@ -489,14 +504,12 @@ test("a second single-read timeout surfaces without a third attempt", async () =
 });
 
 test("answered single-read failures, explicit transactions and stale fences are never retried", async () => {
-  for (const failure of [Object.assign(new Error("canceling statement"), { code: "57014" }),
-    new Error("Connection terminated unexpectedly")]) {
-    const fake = retryPool(/single_read/u, [failure]);
-    await assert.rejects(createAuthorityDatabase({
-      connectionString: "postgres://example.invalid/xmatrix", shardId: "shard-0", poolFactory: fake.factory,
-    }).transaction(singleRead, readOne), (error) => error === failure);
-    assert.equal(fake.clients.length, 1);
-  }
+  const answered = Object.assign(new Error("canceling statement"), { code: "57014" });
+  const answeredRead = retryPool(/single_read/u, [answered]);
+  await assert.rejects(createAuthorityDatabase({
+    connectionString: "postgres://example.invalid/xmatrix", shardId: "shard-0", poolFactory: answeredRead.factory,
+  }).transaction(singleRead, readOne), (error) => error === answered);
+  assert.equal(answeredRead.clients.length, 1);
 
   const timeout = new Error("Query read timeout");
   const explicit = retryPool(/^SELECT one$/u, [timeout]);
