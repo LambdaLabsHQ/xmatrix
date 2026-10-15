@@ -15,6 +15,10 @@ English is the default language for repository documentation, guardrails, releas
 
 ## Current behavior
 
+Parameter-control notices distinguish an unconfirmed local selection from the
+provider's observed value. Codex turn-only Fast selections remain pending until
+the provider confirms them; see [harness parameters](../architecture/harness-parameters.md).
+
 Agent traces support host receive-order pages and live cursors across all trace
 adapters. Stream positions preserve upstream order independently of wall clocks;
 legacy hosts retain the timestamp compatibility path. See

@@ -194,6 +194,8 @@ export interface AgentInstanceParameterControlResultMessage {
   action: "query" | "select" | "toggle";
   /** The parameter's value as the session holds it after the control. */
   current?: string;
+  /** A retained selection the provider has not confirmed yet; never an observed value. */
+  pending?: string;
   choices?: string[];
   /** The provider's own note on the parameter (cooldown, disabled). */
   notice?: string;

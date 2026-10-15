@@ -1455,6 +1455,9 @@ pub enum AgentInstanceClientMessage {
         /// The parameter's value as the session holds it after the control.
         #[serde(skip_serializing_if = "Option::is_none", default)]
         current: Option<String>,
+        /// A retained selection the provider has not confirmed yet.
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        pending: Option<String>,
         #[serde(skip_serializing_if = "Vec::is_empty", default)]
         choices: Vec<String>,
         /// The provider's own note on the parameter (cooldown, disabled).

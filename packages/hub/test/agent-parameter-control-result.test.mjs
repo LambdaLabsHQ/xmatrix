@@ -43,3 +43,14 @@ test("a result for another channel is refused", async () => {
   const { port } = recordingAgentInstancePort();
   await assert.rejects(port.execute(session, { ...result, channelId: "elsewhere" }));
 });
+
+test("a pending selection never announces the previous observed value as applied", async () => {
+  const { port, commands } = recordingAgentInstancePort();
+  await port.execute(session, { ...result, action: "select", current: "off", pending: "on" });
+  assert.equal(commands[0].input.body,
+    "Selected `fast` to `on` for codex:2; awaiting provider confirmation (current: `off`).");
+  assert.equal(parameterControlNotice("codex:2", { ...result, action: "query", current: undefined, pending: "on" }),
+    "codex:2 `fast`: `not reported`. Pending selection: `on`. Choices: on, off.");
+  assert.equal(parameterControlNotice("codex:2", { ...result, current: undefined }),
+    "The provider has not reported `fast` for codex:2.");
+});

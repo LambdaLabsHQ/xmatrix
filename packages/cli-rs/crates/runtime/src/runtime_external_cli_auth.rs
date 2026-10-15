@@ -1118,6 +1118,7 @@ async fn run_zcode_app_external(run: ExternalRun<'_>) -> error::Result<()> {
                         &inbound_messages[0].message_id,
                         &requested,
                         &[],
+                        None,
                         Err("ZCode app-server does not advertise configurable parameters".into()),
                     )
                     .await;

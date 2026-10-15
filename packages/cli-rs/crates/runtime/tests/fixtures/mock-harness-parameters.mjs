@@ -18,7 +18,7 @@ readline.createInterface({ input: process.stdin }).on("line", line => {
       if (backend === "acp" && !request.params.clientCapabilities?.session?.configOptions?.boolean) throw new Error("Boolean capability was not declared");
       reply(request, {}); break;
     case "thread/start":
-      reply(request, { thread: { id: "parameter-thread", model: "model" }, ...(native ? {serviceTier:settings.serviceTier} : {}) }); break;
+      reply(request, { thread: { id: "parameter-thread", model: "model" }, ...(native || backend === "codex-turn-only" ? {serviceTier:settings.serviceTier} : {}) }); break;
     case "model/list":
       reply(request, { data: [{ id: "model", model: "model", displayName: "Model",
         supportedReasoningEfforts: [], serviceTiers: removed ? [] : [{ id: "future-priority", name: "Fast" }] }] });
@@ -49,6 +49,7 @@ readline.createInterface({ input: process.stdin }).on("line", line => {
       const { threadId, serviceTier, futureSpeed, futureQuiet } = request.params;
       const turnId = "parameter-turn";
       reply(request, { turn: { id: turnId } });
+      if (backend === "codex-turn-only") send({ method: "thread/settings/updated", params: { threadId, threadSettings: { serviceTier } } });
       send({ method: "turn/started", params: { threadId, turn: { id: turnId } } });
       send({ method: "item/completed", params: { threadId, turnId,
         item: { id: "reply", type: "agentMessage", phase: "final_answer", text: JSON.stringify({ serviceTier, futureSpeed, futureQuiet }) } } });
