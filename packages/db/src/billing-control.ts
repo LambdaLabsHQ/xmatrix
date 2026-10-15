@@ -470,7 +470,7 @@ export class PostgresBillingRepository {
     const eventCreatedAt = text(input.eventCreatedAt, "eventCreatedAt", 64);
     const subscription = input.subscription;
     const provider = subscription.billingProvider ?? "stripe";
-    if (!["stripe", "apple"].includes(provider) || (provider === "apple" && (subscription.quantity !== 1 || !subscription.currentPeriodEnd))) throw new BillingControlError("invalid_billing_event", 400, "Invalid billing provider fact");
+    if (!["stripe", "apple"].includes(provider) || (provider === "apple" && !subscription.currentPeriodEnd)) throw new BillingControlError("invalid_billing_event", 400, "Invalid billing provider fact");
     const spaceId = text(subscription.spaceId, "subscription.spaceId");
     const ownerUserId = text(subscription.billingOwnerUserId, "subscription.billingOwnerUserId");
     const subscriptionId = text(subscription.id, "subscription.id");
@@ -538,12 +538,6 @@ export class PostgresBillingRepository {
         text: "SELECT * FROM data.space_billing_subscriptions WHERE space_id = $1 FOR UPDATE",
         values: [spaceId], maxRows: 1,
       });
-      if (provider === "apple" && ["active", "trialing"].includes(subscription.status)) {
-        const seats = await tx.query<{ count: string | number }>({ name: "apple_subscription_seats_v1",
-          text: "SELECT COUNT(*) AS count FROM data.space_members WHERE space_id=$1 AND role IN ('owner','admin','member')",
-          values: [spaceId], maxRows: 1 });
-        if (Number(seats[0]?.count ?? 0) !== 1) throw new BillingControlError("apple_single_seat_required", 409, "App Store Pro requires exactly one human seat in this Space");
-      }
       const existing = existingRows[0];
       const incomingCanEntitle = ["active", "trialing", "past_due"].includes(subscription.status);
       if (existing && existing.provider_subscription_id !== subscriptionId &&

@@ -79,6 +79,8 @@ export interface VerifiedAppleSubscription {
   active: boolean;
   retrying: boolean;
   cancelAtPeriodEnd: boolean;
+  /** Seats the purchaser bought; Apple's multiseat purchases carry more than one. */
+  seats: number;
 }
 
 export async function retrieveAppleSubscription(config: AppleSubscriptionConfig, transactionId: unknown,
@@ -128,7 +130,8 @@ export function subscriptionFact(config: AppleSubscriptionConfig, realm: AppleEn
       !transaction.appAccountToken || !/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(transaction.appAccountToken) ||
       !transaction.originalTransactionId || !/^[0-9]{1,100}$/.test(transaction.originalTransactionId) ||
       !transaction.transactionId || !Number.isFinite(transaction.expiresDate) || !Number.isFinite(transaction.signedDate) ||
-      transaction.environment !== realm || transaction.bundleId !== APPLE_BUNDLE_ID || ![1, 2, 3, 4, 5].includes(status ?? 0)) {
+      transaction.environment !== realm || transaction.bundleId !== APPLE_BUNDLE_ID || ![1, 2, 3, 4, 5].includes(status ?? 0) ||
+      !Number.isSafeInteger(transaction.quantity ?? 1) || (transaction.quantity ?? 1) < 1 || (transaction.quantity ?? 1) > 99) {
     throw new AppleBillingError("invalid_apple_transaction", "Apple subscription fields are invalid");
   }
   const now = Date.now();
@@ -139,14 +142,15 @@ export function subscriptionFact(config: AppleSubscriptionConfig, realm: AppleEn
     appAccountToken: transaction.appAccountToken.toLowerCase(), productId: transaction.productId,
     transactionId: transaction.transactionId, expiresAt: new Date(expires).toISOString(), signedAt: new Date(signedDate).toISOString(),
     active: !transaction.revocationDate && (status === 1 || status === 4) && expires > now,
-    retrying: !transaction.revocationDate && status === 3, cancelAtPeriodEnd: renewal.autoRenewStatus === 0 };
+    retrying: !transaction.revocationDate && status === 3, cancelAtPeriodEnd: renewal.autoRenewStatus === 0,
+    seats: transaction.quantity ?? 1 };
 }
 
 export function appleBillingFact(subscription: VerifiedAppleSubscription, binding: { spaceId: string; ownerUserId: string; accountDeleted?: boolean }): BillingSubscriptionFact {
   if (binding.accountDeleted) throw new AppleBillingError("apple_purchase_account_deleted", "Deleted accounts cannot receive subscription access");
   return { billingProvider: "apple", id: `apple:${subscription.environment}:${subscription.originalTransactionId}`,
     customerId: subscription.appAccountToken, priceId: subscription.productId,
-    status: subscription.active ? "active" : subscription.retrying ? "unpaid" : "canceled", quantity: 1,
+    status: subscription.active ? "active" : subscription.retrying ? "unpaid" : "canceled", quantity: subscription.seats,
     currentPeriodEnd: subscription.expiresAt, cancelAtPeriodEnd: subscription.cancelAtPeriodEnd,
     spaceId: binding.spaceId, billingOwnerUserId: binding.ownerUserId };
 }
