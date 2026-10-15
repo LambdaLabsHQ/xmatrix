@@ -94,7 +94,8 @@ import type { WorkspaceShellModel } from "./use-workspace-shell-actions";
 import { ListColumnResizeHandle, ListColumnResizeProvider } from "./list-column-resize";
 import { mobileBackState, DOCK_TAB_VIEWS, MORE_TAB_VIEWS, SPLIT_TOOL_VIEWS, viewForRouteSegment, type AppView } from "./workspace-shell-navigation";
 import { PageTreePanel, PagesView, usePageTree } from "@/components/pages/pages-view";
-import { usePageCreation } from "@/components/pages/page-creation";
+import { NEW_PAGE_ID, NEW_PAGE_TITLE, usePageCreation } from "@/components/pages/page-creation";
+import { PageDraft } from "@/components/pages/page-draft";
 import { searchWorkspacePages } from "./workspace-message-search";
 import { channelTitle } from "@/components/dashboard/channel-links";
 import { WorkspaceSearchDialog, WorkspaceSearchView } from "./workspace-search";
@@ -606,7 +607,8 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
   // The route owns whether a page is open; its tree entry may arrive later.
   // Keep the back bar and its content spacing while the title is loading.
   const openedPage = phonePageOpen
-    ? pageTree.data?.find((page) => page.pageId === selectedPageId) ?? { title: "Page" }
+    ? selectedPageId === NEW_PAGE_ID ? { title: NEW_PAGE_TITLE }
+      : pageTree.data?.find((page) => page.pageId === selectedPageId) ?? { title: "Page" }
     : null;
   // A conversation, a new one and an open page are pushed screens: their back bar replaces the dock.
   const nativeMobileTabVisible = !loading && Boolean(user) &&
@@ -1211,10 +1213,11 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
 
   // One Pages document surface, whether read on the desktop, pushed over the
   // phone's Pages list, or shown while the Space is being moved to pages.
-  const pagesViewSurface = (
+  const pagesViewSurface = selectedPageId === NEW_PAGE_ID ? (
+    <PageDraft key={currentSpaceId} creation={pageCreation} layout={isMobileViewport ? "phone" : "desktop"} />
+  ) : (
     <PagesView spaceId={currentSpaceId} token={token ?? ""} selectedPageId={selectedPageId}
       onSelectPage={openPage} onOpenSection={openPageAt} onPageDeleted={closePage} conversation={pageConversation} focusSection={pageSectionRequest}
-      freshPageId={pageCreation.freshPageId}
       activeConversationId={selectedPageId ? selectedChannelId : null}
       {...(selectedChannel && selectedPageId ? { renderConversation: (placement: "margin" | "dock") =>
         renderConversationSurface(placement === "margin" ? "page-margin" : "beside-page") } : {})}

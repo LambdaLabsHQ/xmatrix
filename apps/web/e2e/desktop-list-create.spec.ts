@@ -77,12 +77,30 @@ test("the page tree leads with New page, and Ctrl+N there makes a page", async (
   expect(headingBox!.y - (createBox!.y + createBox!.height)).toBeCloseTo(0, 0);
   expect(rowBox!.y - (headingBox!.y + headingBox!.height)).toBeCloseTo(0, 0);
 
-  // Ctrl+N makes an untitled page at once, as Notion does; it is named on the page.
+  // Ctrl+N opens an untitled page at once, as Notion does; it is named on the page.
   await stubPageCreate(page);
   await page.keyboard.press("Control+n");
-  await expect.poll(() => fixtureRequestBodies(page, "page-create")).toEqual([{ title: "Untitled", parentPageId: null }]);
+  await expect(page.getByTestId("page-draft")).toBeVisible();
+  await expect(page.getByTestId("page-title")).toBeFocused();
   await expect(page.getByRole("dialog")).toHaveCount(0);
   await expect(page.getByTestId("new-conversation")).toBeHidden();
+  // Left with nothing written, it is not kept.
+  await page.locator(".app-sidebar").getByText("Home", { exact: true }).click();
+  await expect(page.getByTestId("page-draft")).toBeHidden();
+  expect(await fixtureRequestBodies(page, "page-create")).toEqual([]);
+
+  // It is made once something is written on it and the writer moves on, with what was written.
+  await page.keyboard.press("Control+n");
+  await page.keyboard.type("Plans");
+  await page.keyboard.press("Enter");
+  await expect(page.getByTestId("page-draft-text")).toBeFocused();
+  await page.keyboard.type("What we do next");
+  expect(await fixtureRequestBodies(page, "page-create")).toEqual([]);
+  await page.getByTestId("page-draft-text").blur();
+  await expect.poll(() => fixtureRequestBodies(page, "page-create")).toEqual([
+    { title: "Plans", parentPageId: null, body: "# Plans\n\nWhat we do next\n" },
+  ]);
+  await expect(page).toHaveURL(/page=p-new/u);
 });
 
 test("the agent list leads with Manage machines, and an agent, its machines and the + are one height", async ({ page }) => {
@@ -116,6 +134,9 @@ test("a page row makes a page under it from its own +, shown while the row is ho
 
   await stubPageCreate(page);
   await create.click();
-  await expect.poll(() => fixtureRequestBodies(page, "page-create")).toEqual([{ title: "Untitled", parentPageId: "p-home" }]);
+  await expect(page.getByTestId("page-title")).toBeFocused();
   await expect(page.getByRole("dialog")).toHaveCount(0);
+  await page.keyboard.type("Child");
+  await page.getByTestId("page-title").blur();
+  await expect.poll(() => fixtureRequestBodies(page, "page-create")).toEqual([{ title: "Child", parentPageId: "p-home" }]);
 });
