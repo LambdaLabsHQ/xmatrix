@@ -281,6 +281,13 @@ Unicode code points; the action's full bounded context remains in the Channel
 receipt. Multibyte issue titles and stack metadata therefore
 do not prevent an otherwise successful read from finalizing.
 
+Sentry issue reads include the latest event's terminal twenty exception frames
+and up to eight earlier `src/` callers outside `node_modules`, in stack order.
+This keeps application entry points visible when dependency frames fill the
+tail. Only frame names, paths and positions are returned; local variables,
+source context, requests and breadcrumbs remain excluded. The full receipt
+still has the shared 12,000-character context limit.
+
 Gmail search/read answer in the Channel receipt that replies to the command,
 like every other action, so everyone who can read the Channel reads the mail.
 Read mail in a Channel only the people who may see it are in. Search is

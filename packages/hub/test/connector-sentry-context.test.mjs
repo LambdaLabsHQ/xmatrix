@@ -6,6 +6,28 @@ import { actionRefusal, isPolicyAction } from "../src/connectors/connector-comma
 import { stubFetchResponses } from "./support/fetch-responses.mjs";
 
 const read = SENTRY_ACTIONS.read_issue;
+// WEB-F: dependency frames hid the application effect that entered the loop.
+test("long Sentry stacks retain application callers before the dependency tail", async () => {
+  const caller = { module: "src/components/pages/page-editor", function: "refreshSections",
+    filename: "./src/components/pages/page-editor.tsx", lineNo: 381, vars: { token: "private-local" } };
+  const frames = [
+    ...Array.from({ length: 12 }, (_, n) => ({ ...caller, function: `olderCaller${n}` })),
+    { ...caller, function: "dependencySource", filename: "node_modules/library/src/caller.ts" },
+    caller, ...Array.from({ length: 25 }, (_, n) => ({
+    filename: `node_modules/react/frame-${n}.js`, function: `dependency${n}`, lineNo: n + 1,
+  }))];
+  const { result } = await run([{ body: issue }, { body: { ...event, entries: [
+    { type: "exception", data: { values: [{ type: "Error", value: "Maximum update depth exceeded",
+      stacktrace: { frames } }] } },
+  ] } }], undefined, "123");
+  assert.match(result.summary, /refreshSections.*page-editor\.tsx · line 381/);
+  assert.match(result.summary, /dependency24/);
+  assert.doesNotMatch(result.summary, /private-local/);
+  assert.doesNotMatch(result.summary, /olderCaller0\b|dependencySource/);
+  assert.equal((result.summary.match(/Frame:/g) ?? []).length, 28);
+  assert.equal((result.summary.match(/refreshSections/g) ?? []).length, 1);
+});
+
 const issue = { id: "123", shortId: "WEB-1A", title: "Payment worker failed", status: "unresolved", culprit: "worker.process",
   assignedTo: { email: "private-assignee" }, permalink: "https://attacker.example/private-link" };
 const event = { groupID: "123", eventID: "a".repeat(32), platform: "python",
