@@ -817,7 +817,7 @@ fn observe_config_options(options: &[Value], facts: &mut AgentPresentationFacts,
         }
         if matches!(
             key.as_str(),
-            "effort" | "reasoning_effort" | "thinking" | "thinking_effort" | "thought_level"
+            "effort" | "reasoning" | "reasoning_effort" | "thinking" | "thinking_effort" | "thought_level"
         ) {
             facts.effort_config_id = Some(id);
             let supported: Vec<_> = option
