@@ -151,3 +151,8 @@ separate from OAuth credentials, and are published through the site's own DNS or
 website workflow. Advanced analytics supports validated JSON, Pacific calendar
 dates, filters, explicit offsets and fresh/hourly data within bounded calls.
 See [app connectors](../operations/app-connectors.md) for onboarding and policy.
+
+Platform admin user lists show Last message and default to the latest retained
+user-authored message, with the exact UTC timestamp on hover and the same field
+in user details. Last access remains a separate session metric; daemon presence
+and Agent messages do not advance a user's Last message.
