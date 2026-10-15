@@ -908,6 +908,12 @@ fn cursor_reasoning_control_is_effort_and_boolean_thinking_is_not() {
     let mut facts = AgentPresentationFacts::default();
     adapter.observe_acp(
         &serde_json::json!({
+            // Native session/new and session/load return both fields. The
+            // model inventory must not erase its config-derived effort levels.
+            "models": {
+                "currentModelId": "gpt-5.6-sol",
+                "availableModels": [{ "modelId": "gpt-5.6-sol", "name": "GPT-5.6 Sol" }]
+            },
             "configOptions": [
                 {
                     "id": "model",
