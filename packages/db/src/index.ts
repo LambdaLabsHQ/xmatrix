@@ -309,7 +309,7 @@ export type { DingTalkEffectAuthority, DingTalkEffectDestination } from "./dingt
 export { DingTalkEffectCoordinator,type DingTalkCoordinationNativeProof } from "./dingtalk-effect-coordinator.js";
 export type { DingTalkPreparedPathCapability } from "./dingtalk-prepared-port.js";
 
-export { PostgresAppleBillingRepository, type AppleAccountBinding } from "./apple-billing-control.js";
+export { PostgresAppleBillingRepository, type AppleAccountBinding, type AppleAssignedSeat, type AppleSeatGroupState } from "./apple-billing-control.js";
 export {
   MAX_PUSH_DEVICES_PER_USER, PostgresPushDeviceRepository, PushDeviceError, type PushDevice, type PushPlatform,
 } from "./push-devices.js";
