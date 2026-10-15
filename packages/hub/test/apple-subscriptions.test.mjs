@@ -177,4 +177,17 @@ test("Apple's refusals are classified: an outage may be retried, a configuration
   await assert.rejects(appleTestNotificationRoundTrip(config, "Sandbox", { fetchImpl: refused(429, { errorCode: 4290000 }) }),
     (error) => error.retryable);
   assert.equal(appleRefusal(400, 4000002), "Apple's test notification service returned 400 (errorCode 4000002)");
+  assert.equal(appleRefusal(404, 0), "Apple's test notification service returned 404", "a 404 alone does not claim a missing URL");
+  let polls = 0;
+  const early = async (url, init) => {
+    if (init.method === "POST") return Response.json({ testNotificationToken: "token-2" });
+    polls += 1;
+    return polls < 3 ? Response.json({ errorCode: 4040008, errorMessage: "not found" }, { status: 404 })
+      : Response.json({ sendAttempts: [{ sendAttemptResult: "SUCCESS" }] });
+  };
+  assert.deepEqual(await appleTestNotificationRoundTrip(config, "Sandbox", { fetchImpl: early, delayMs: 1 }), ["SUCCESS"],
+    "a status Apple has not recorded yet is asked for again");
+  await assert.rejects(appleTestNotificationRoundTrip(config, "Sandbox", { delayMs: 1, attempts: 2, fetchImpl: async (url, init) => init.method === "POST"
+    ? Response.json({ testNotificationToken: "token-3" }) : Response.json({ errorCode: 4040008 }, { status: 404 }) }),
+    (error) => error.retryable && /no attempt/u.test(error.message), "never recorded is a warning, not a configuration fault");
 });

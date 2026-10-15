@@ -14,18 +14,24 @@ import { APPLE_BUNDLE_ID, appleSubscriptionConfig, AppleBillingError, retrieveAp
  * release; the Hub refusing Apple's notification is a failure.
  */
 
+const TEST_NOTIFICATION_NOT_FOUND = 4040008;
+
 /**
  * Why Apple refused, in terms of what to fix. Only an outage or rate limit is
  * retryable; a key Apple rejects or a notification URL that is not set is a
- * configuration fault, reported as a failure.
+ * configuration fault, reported as a failure. Apple's errorCode decides, not
+ * the HTTP status alone: a 404 also answers a status asked for too early.
  */
 export function appleRefusal(status: number, errorCode: number): string {
   const code = errorCode ? ` (errorCode ${errorCode})` : "";
-  if (errorCode === 4040007 || status === 404) {
-    return `Apple has no App Store Server Notifications URL for this environment${code}; set it in App Store Connect → App Information`;
-  }
+  if (errorCode === 4040007) return `Apple has no App Store Server Notifications URL for this environment${code}; set it in App Store Connect → App Information`;
+  if (errorCode === TEST_NOTIFICATION_NOT_FOUND) return `Apple has not recorded the test notification yet${code}`;
   if (status === 401 || status === 403) return `Apple rejected the In-App Purchase key in APPLE_SUBSCRIPTIONS_CONFIG${code} (HTTP ${status})`;
   return `Apple's test notification service returned ${status}${code}`;
+}
+
+class AppleRefusal extends AppleBillingError {
+  constructor(readonly errorCode: number, message: string, retryable: boolean) { super("apple_request_failed", message, retryable); }
 }
 
 /**
@@ -49,7 +55,7 @@ export async function appleTestNotificationRoundTrip(config: AppleSubscriptionCo
     if (!response.ok) {
       const problem: unknown = await response.json().catch(() => null);
       const code = Number((problem as { errorCode?: unknown } | null)?.errorCode) || 0;
-      throw new AppleBillingError("apple_request_failed", appleRefusal(response.status, code), response.status >= 500 || response.status === 429);
+      throw new AppleRefusal(code, appleRefusal(response.status, code), response.status >= 500 || response.status === 429);
     }
     const body: unknown = await response.json().catch(() => null);
     return body && typeof body === "object" ? body as Record<string, unknown> : {};
@@ -59,8 +65,14 @@ export async function appleTestNotificationRoundTrip(config: AppleSubscriptionCo
     ? sent.testNotificationToken : "";
   if (!testToken) throw new AppleBillingError("apple_response_invalid", "Apple did not return a test notification token");
   for (let attempt = 0; attempt < (options.attempts ?? 12); attempt += 1) {
-    if (attempt) await new Promise((resolve) => setTimeout(resolve, options.delayMs ?? 5_000));
-    const status = await call(`/inApps/v1/notifications/test/${testToken}`, "GET");
+    // Apple records the send a moment after accepting the request.
+    await new Promise((resolve) => setTimeout(resolve, options.delayMs ?? 5_000));
+    let status: Record<string, unknown>;
+    try { status = await call(`/inApps/v1/notifications/test/${testToken}`, "GET"); }
+    catch (error) {
+      if (error instanceof AppleRefusal && error.errorCode === TEST_NOTIFICATION_NOT_FOUND) continue;
+      throw error;
+    }
     const results = (Array.isArray(status.sendAttempts) ? status.sendAttempts : []).slice(0, 6)
       .map((item) => String((item as { sendAttemptResult?: unknown } | null)?.sendAttemptResult ?? "UNKNOWN"));
     if (results.length) return results;
