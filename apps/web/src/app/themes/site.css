@@ -533,6 +533,97 @@ html:has(.site-page) {
   }
 }
 
+/* The agents people already use, passing under the hero as one row of glass chips. */
+.site-agent-strip {
+  padding-block: 1.5rem 0.5rem;
+  overflow: hidden;
+  mask-image: linear-gradient(90deg, transparent, #000 8%, #000 92%, transparent);
+}
+
+.site-agent-strip-label {
+  margin-bottom: 1rem;
+  text-align: center;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--muted-foreground);
+}
+
+.site-agent-strip-track {
+  display: flex;
+  width: max-content;
+  animation: site-agent-strip 48s linear infinite;
+}
+
+.site-agent-strip-row {
+  display: flex;
+  gap: 0.75rem;
+  padding-right: 0.75rem;
+}
+
+.site-agent-chip,
+.site-machine-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  height: 2.5rem;
+  padding-inline: 1rem;
+  border-radius: 999px;
+  background: oklch(1 0 0 / 0.62);
+  -webkit-backdrop-filter: blur(14px) saturate(1.3);
+  backdrop-filter: blur(14px) saturate(1.3);
+  box-shadow: inset 0 0 0 0.5px oklch(1 0 0 / 0.9), 0 0 0 0.5px oklch(0 0 0 / 0.08), 0 8px 22px -14px oklch(0.25 0.03 60 / 0.45);
+  font-size: 0.875rem;
+  font-weight: 600;
+  white-space: nowrap;
+  color: var(--foreground);
+}
+
+.site-machine-chip {
+  font-weight: 400;
+}
+
+.site-machine-dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 999px;
+  background: #22c55e;
+}
+
+@keyframes site-agent-strip {
+  to { transform: translateX(-50%); }
+}
+
+/* One project's page, written live, as a sheet of paper on the page. */
+.site-live-page-window {
+  overflow: hidden;
+  border-radius: 12px;
+  background: var(--background);
+  box-shadow:
+    0 0 0 0.5px oklch(0 0 0 / 0.16),
+    0 22px 70px 4px oklch(0.25 0.03 60 / 0.24),
+    0 6px 16px oklch(0.25 0.03 60 / 0.1);
+}
+
+.site-live-page {
+  padding: 3rem 3.5rem 3.5rem;
+  pointer-events: none;
+  user-select: none;
+}
+
+.site-live-page-column {
+  max-width: 44rem;
+}
+
+.site-why-ours {
+  border-bottom: 1px solid oklch(0 0 0 / 0.1);
+  font-weight: 500;
+  color: var(--foreground);
+}
+
+.site-faq summary::-webkit-details-marker {
+  display: none;
+}
+
 @media (max-width: 767px) {
   .site-canvas {
     background-attachment: scroll;
@@ -551,5 +642,9 @@ html:has(.site-page) {
 @media (prefers-reduced-motion: reduce) {
   .site-page :is(.app-material-liquid-card, .app-material-liquid-pill) {
     transition: none;
+  }
+
+  .site-agent-strip-track {
+    animation: none;
   }
 }
