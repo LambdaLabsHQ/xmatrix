@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState, type RefObject } from "react";
 import { Check, ChevronDown } from "lucide-react";
 import { PageChangeMark } from "./page-chrome";
+import { sameValue } from "@/lib/same-value";
 
 /** The blocks of the page that hold a change, in reading order: several marks in one paragraph are one stop. */
 function changedBlocks(root: HTMLElement | null): HTMLElement[] {
@@ -40,8 +41,7 @@ export function PageReaderChangeMark({ column, article, changes, onViewed }: {
     const next = { top: Math.round(box.top - frame.top), of: blocks.length,
       away: box.bottom < view.top ? "above" as const : box.top > view.bottom - 96 ? "below" as const : null };
     // Scrolling measures every frame; only a change of place draws again.
-    setPlace((current) => current && current.top === next.top && current.of === next.of && current.away === next.away
-      ? current : next);
+    setPlace((current) => sameValue(current, next) ? current : next);
   }, [article, column, index]);
   useEffect(() => {
     const frameId = requestAnimationFrame(measure);

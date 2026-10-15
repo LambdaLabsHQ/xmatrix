@@ -2,6 +2,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
+require("./typescript-require.cjs").installTypeScriptRequire();
 
 const paging = fs.readFileSync(path.join(__dirname, "use-channel-catalog-paging.ts"), "utf8").replace(/\r\n/g, "\n");
 
@@ -9,7 +10,7 @@ const refresh = fs.readFileSync(path.join(__dirname, "channel-catalog-refresh.ts
 
 async function openCatalogRefresh() {
   const { QueryClient } = require("@tanstack/react-query");
-  const { refreshSpaceCatalogForEvent } = await import("./channel-catalog-refresh.ts");
+  const { refreshSpaceCatalogForEvent } = require("./channel-catalog-refresh.ts");
   return {
     refreshSpaceCatalogForEvent,
     client: new QueryClient({ defaultOptions: { queries: { gcTime: Infinity } } }),
@@ -86,7 +87,7 @@ test("message activity promotes a loaded flat row and refetches only the lists t
 
 async function openMessageRefresh() {
   const { QueryClient } = require("@tanstack/react-query");
-  const { refreshSpaceCatalogForMessages } = await import("./channel-catalog-refresh.ts");
+  const { refreshSpaceCatalogForMessages } = require("./channel-catalog-refresh.ts");
   const prefix = ["xmatrix", "hub", "user", "channels", "space"];
   const client = new QueryClient({ defaultOptions: { queries: { gcTime: Infinity } } });
   const fetched = [];
@@ -207,7 +208,7 @@ test("Channels nobody here knows wait for the Hub's one answer instead of a read
 
 test("a row that moves in the list stays the row it was, and a read that repeats the list changes nothing", async () => {
   const { QueryClient } = require("@tanstack/react-query");
-  const { refreshSpaceCatalogForMessages, shareCatalogRows } = await import("./channel-catalog-refresh.ts");
+  const { refreshSpaceCatalogForMessages, shareCatalogRows } = require("./channel-catalog-refresh.ts");
   const client = new QueryClient({ defaultOptions: { queries: { gcTime: Infinity } } });
   const prefix = ["xmatrix", "hub", "user", "channels", "space"];
   const queryKey = [...prefix, "catalog", "flat", "all", null, ""];
@@ -250,7 +251,7 @@ test("a row that moves in the list stays the row it was, and a read that repeats
 });
 
 test("a read asked under an authorization that ended stays ended when the same values come back", async () => {
-  const { NO_CATALOG_LEASES, nextCatalogLeases } = await import("./channel-catalog-refresh.ts");
+  const { NO_CATALOG_LEASES, nextCatalogLeases } = require("./channel-catalog-refresh.ts");
   const session = "xmatrix\u0000hub\u0000user";
   const signedIn = nextCatalogLeases(NO_CATALOG_LEASES, session, ["space", "other"]);
   const asked = signedIn.bySpace.get("space");
@@ -279,9 +280,9 @@ test("a read asked under an authorization that ended stays ended when the same v
    collection, real leases, and reads this test holds until it lets them go. */
 async function openResolveOwner() {
   const { QueryClient } = require("@tanstack/react-query");
-  const refresh = await import("./channel-catalog-refresh.ts");
-  const { createRealtimeCollection } = await import("./realtime-collection.ts");
-  const { createViewerReads } = await import("./channel-message-summary.ts");
+  const refresh = require("./channel-catalog-refresh.ts");
+  const { createRealtimeCollection } = require("./realtime-collection.ts");
+  const { createViewerReads } = require("./channel-message-summary.ts");
   const session = "xmatrix\u0000hub\u0000user";
   const prefix = ["xmatrix", "hub", "user", "channels", "space"];
   const conversations = [...prefix, "catalog", "flat", "all", null, ""];
@@ -412,8 +413,8 @@ test("a window's reads that end on both sides of a lost sign-in list nothing and
 
 test("an authorization reads for itself: no read under way and no fresh answer of one that ended is handed on", async () => {
   const { QueryClient } = require("@tanstack/react-query");
-  const refresh = await import("./channel-catalog-refresh.ts");
-  const { createViewerReads, readAskedNow } = await import("./channel-message-summary.ts");
+  const refresh = require("./channel-catalog-refresh.ts");
+  const { createViewerReads, readAskedNow } = require("./channel-message-summary.ts");
   const client = new QueryClient({ defaultOptions: { queries: { gcTime: Infinity } } });
   const session = "xmatrix\u0000hub\u0000user";
   const reads = createViewerReads();
@@ -533,7 +534,7 @@ test("a page is loaded once the catalog has answered, even when it is empty", ()
 
 test("catalog revisions discard unopened speculative pages without crossing Space identity", async () => {
   const { QueryClient } = require("@tanstack/react-query");
-  const { observeSpaceCatalogRevision, refreshSpaceCatalogForEvent } = await import("./channel-catalog-refresh.ts");
+  const { observeSpaceCatalogRevision, refreshSpaceCatalogForEvent } = require("./channel-catalog-refresh.ts");
   const client = new QueryClient({ defaultOptions: { queries: { gcTime: Infinity } } });
   const prefix = ["xmatrix", "hub", "user", "channels", "space"];
   const speculative = [...prefix, "child-prefetch", "tree", "all", "parent", ""];

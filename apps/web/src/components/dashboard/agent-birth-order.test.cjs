@@ -2,7 +2,7 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 const { loadWorkspaceShellModuleMap, loadShellFunctions } = require("./workspace-shell-source-fixture.cjs");
 
-const shellModules = loadWorkspaceShellModuleMap(__dirname, ["use-channel-catalog-paging.ts", "channel-viewer-state.ts"]);
+const shellModules = loadWorkspaceShellModuleMap(__dirname, ["use-channel-catalog-paging.ts", "channel-viewer-state.ts", "../../lib/same-value.ts"]);
 require("./typescript-require.cjs").installTypeScriptRequire();
 const { withChannelReadState } = require("./channel-read-state.ts");
 const { createViewerReads, readAskedNow } = require("./channel-message-summary.ts");
@@ -19,8 +19,8 @@ const ORDERING_FUNCTIONS = [
   "earliestTimestamp",
   "latestTimestamp",
   "compareChannelAgentAvatarBirthOrder",
-  "reportedPresenceEntries",
-  "sameReportedPresenceValue",
+  "isPlainObject",
+  "sameValue",
   "instanceLifecycleReportApplies",
   "mergeAgentInstancePresence",
   "mergeAccountLevelLlmUsage",
@@ -160,7 +160,7 @@ test("a read asked before the reader answered a wait does not bring the wait bac
 
 test("a read's answer taken again from the cache is as old as when it was asked", async () => {
   const { QueryClient } = require("@tanstack/react-query");
-  const { leasedResolveQuery } = await import("./channel-catalog-refresh.ts");
+  const { leasedResolveQuery } = require("./channel-catalog-refresh.ts");
   const attentionAt = (sequence) => ({ channelId: "channel-1", unreadAttentionCount: 1, lastMessageId: `m${sequence}`,
     lastMessageSequence: sequence, updatedAt: "2026-10-13T08:00:00Z" });
   const client = new QueryClient({ defaultOptions: { queries: { gcTime: Infinity } } });

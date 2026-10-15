@@ -2,7 +2,7 @@
 
 import { createContext, useCallback, useContext, useMemo, useSyncExternalStore } from "react";
 import type { SerializedChannel } from "@xmatrix/protocol";
-import { samePreview } from "./channel-message-summary";
+import { sameValue } from "../../lib/same-value";
 
 type Preview = NonNullable<SerializedChannel["lastMessage"]>;
 
@@ -22,7 +22,7 @@ export function channelAsTimelineShows(
 ): SerializedChannel {
   if (!tail || tail.channelId !== channel.id) return channel;
   const messageCount = tail.sequence > 0 ? tail.sequence : channel.messageCount;
-  if (samePreview(channel.lastMessage, tail.preview) && messageCount === channel.messageCount) return channel;
+  if (sameValue(channel.lastMessage, tail.preview) && messageCount === channel.messageCount) return channel;
   return { ...channel, lastMessage: tail.preview, messageCount };
 }
 
@@ -36,8 +36,7 @@ export function createPresentedChannelTail() {
   return {
     get: (channelId: string) => (current?.channelId === channelId ? current : null),
     set(next: PresentedChannelTail | null) {
-      if (current === next || (current && next && current.channelId === next.channelId &&
-          current.sequence === next.sequence && samePreview(current.preview, next.preview))) return;
+      if (sameValue(current, next)) return;
       const previous = current?.channelId;
       current = next;
       notify(previous);

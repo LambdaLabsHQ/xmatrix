@@ -52,6 +52,28 @@ async function openReactedMessage(page: Page) {
 test.describe("desktop", () => {
   test.use(E2E_DESKTOP_CONTEXT);
 
+  test("a reaction the reader adds appears on the message", async ({ page }) => {
+    // The Hub answers with the message as it now stands: the same id, body and
+    // markers, one reaction more. That alone must reach the open conversation.
+    const plain = { ...REACTED_MESSAGE, reactions: [] };
+    await openGeneralChannelWithHistory(
+      page,
+      { ...E2E_CHANNEL, messageCount: 1, lastMessageSequence: 1, updatedAt: E2E_NOW },
+      [plain],
+    );
+    await fixtureJson(
+      page,
+      REACTION_TOGGLE_RULE,
+      "**/api/xmatrix/channels/*/messages/*/reactions",
+      { message: { ...plain, reactions: [{ emoji: "👍", reactors: [{ identityId: "user:e2e-user", label: "E2E Tester" }] }] } },
+      { method: "POST" },
+    );
+    await page.locator(".app-message-timeline").getByText(MESSAGE_BODY).hover();
+    await page.getByRole("button", { name: "Add reaction" }).click();
+    await page.getByRole("button", { name: "React 👍" }).click();
+    await expect(page.getByRole("button", { name: "You reacted with 👍" })).toBeVisible();
+  });
+
   test("hovering a reaction shows who reacted without toggling it", async ({ page }) => {
     const { chip, card, reactionToggles } = await openReactedMessage(page);
     await expect(card).toBeHidden();

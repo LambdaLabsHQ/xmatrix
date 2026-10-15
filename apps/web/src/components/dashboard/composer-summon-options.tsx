@@ -8,6 +8,7 @@ import { X, Zap } from "lucide-react";
 import type { DraftSummonIntent } from "@xmatrix/protocol";
 import { LiquidGlassCard } from "@/components/ui/material-surfaces";
 import { useAppPortalContainer } from "./app-portal-container";
+import { sameValue } from "../../lib/same-value";
 
 type PositionedReading = { reading: DraftSummonIntent; left: number; top: number; width: number; height: number };
 
@@ -59,7 +60,7 @@ export function ComposerSummonOptions({ readings, textareaRef, disabled, onStart
         return [{ reading, left: (box.left - hostBox.left) / scale, top: (box.top - hostBox.top) / scale,
           width: box.width / scale, height: box.height / scale }];
       });
-      setPositions(previous => JSON.stringify(previous) === JSON.stringify(next) ? previous : next);
+      setPositions(previous => sameValue(previous, next) ? previous : next);
     };
     sync();
     const observer = new ResizeObserver(sync);

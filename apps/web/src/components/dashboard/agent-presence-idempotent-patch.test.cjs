@@ -5,7 +5,7 @@ installTypeScriptRequire();
 const { createRealtimeCollection } = require("./realtime-collection.ts");
 const { loadWorkspaceShellModuleMap, loadShellFunctions } = require("./workspace-shell-source-fixture.cjs");
 
-const shellModules = loadWorkspaceShellModuleMap(__dirname, ["channel-viewer-state.ts", "channel-links.ts"]);
+const shellModules = loadWorkspaceShellModuleMap(__dirname, ["channel-viewer-state.ts", "channel-links.ts", "../../lib/same-value.ts"]);
 
 const PRESENCE_FUNCTIONS = [
   "timestampMs",
@@ -18,8 +18,8 @@ const PRESENCE_FUNCTIONS = [
   "accountQuotaUsageFromCandidates",
   "usageWithoutQuota",
   "mergeUsageAttributes",
-  "reportedPresenceEntries",
-  "sameReportedPresenceValue",
+  "isPlainObject",
+  "sameValue",
   "instanceLifecycleReportApplies",
   "mergeAgentInstancePresence",
   "replaceChannelMemberPresence",

@@ -129,6 +129,7 @@ import { BrowserPushSetting, browserPushSummary } from "./browser-push-setting";
 import { browserPushState, type BrowserPushState } from "@/lib/push-subscription";
 import { SectionedToolView, ToolDetailSection, ToolSettingRow, type ToolSection } from "./tool-split";
 import { spacePlansAbsent } from "./space-plan-mark";
+import { sameValue } from "../../lib/same-value";
 import {
   SPACE_BILLING_SECTION,
   SpaceBillingSection,
@@ -2142,7 +2143,7 @@ export function mergeChannelMemberReadSequences(
 export function sameChannelCatalogState(left: SerializedChannel, right: SerializedChannel): boolean {
   const { memberPresence: _leftPresence, ...leftState } = left;
   const { memberPresence: _rightPresence, ...rightState } = right;
-  if (!sameReportedPresenceValue(leftState, rightState)) return false;
+  if (!sameValue(leftState, rightState)) return false;
   const ids = (channel: SerializedChannel) => new Set(Object.values(channel.memberPresence ?? {})
     .flatMap(presence => presence.kind === "agent" ? (presence.instances ?? []).map(instance => instance.id) : []));
   const before = ids(left);
@@ -2512,7 +2513,7 @@ function patchChannelAgentMemberFromAgent(
     }
     if (sharedUsage) {
       const mergedUsage = mergeAccountLevelLlmUsage(instance.usage, sharedUsage);
-      if (!sameReportedPresenceValue(mergedUsage, instance.usage)) {
+      if (!sameValue(mergedUsage, instance.usage)) {
         instanceChanged = true;
         return { ...instance, usage: mergedUsage };
       }
@@ -2521,7 +2522,7 @@ function patchChannelAgentMemberFromAgent(
   });
 
   const mergedUsage = mergeAccountLevelLlmUsage(presence.usage, hasChannelReport ? agent.usage : sharedUsage);
-  const nextUsage = sameReportedPresenceValue(mergedUsage, presence.usage) ? presence.usage : mergedUsage;
+  const nextUsage = sameValue(mergedUsage, presence.usage) ? presence.usage : mergedUsage;
   const usageChanged = nextUsage !== presence.usage;
   // The card reports one Run. Its activity/intent/clock must not leak into
   // sibling Channels of the same Agent; only account quota is shared there.
@@ -2623,32 +2624,6 @@ export function agentMessageInstanceIdentityIncomplete(entry: ChannelMessage): b
 }
 
 /**
- * Compares two presence values by what they say rather than by identity.
- *
- * Presence frames mostly repeat themselves, and the transport hands over a
- * freshly parsed object every time, so `===` cannot tell a real change from a
- * restatement. A key carrying `undefined` says nothing, so it reads the same
- * as an absent key.
- */
-export function sameReportedPresenceValue(left: unknown, right: unknown): boolean {
-  if (left === right) return true;
-  if (typeof left !== "object" || typeof right !== "object") return false;
-  if (left === null || right === null) return false;
-  if (Array.isArray(left) !== Array.isArray(right)) return false;
-  const leftEntries = reportedPresenceEntries(left as Record<string, unknown>);
-  const rightEntries = reportedPresenceEntries(right as Record<string, unknown>);
-  if (leftEntries.length !== rightEntries.length) return false;
-  return leftEntries.every(([key, value]) =>
-    Object.prototype.hasOwnProperty.call(right, key) &&
-    sameReportedPresenceValue(value, (right as Record<string, unknown>)[key])
-  );
-}
-
-function reportedPresenceEntries(value: Record<string, unknown>): [string, unknown][] {
-  return Object.entries(value).filter(([, entry]) => entry !== undefined);
-}
-
-/**
  * Whether a report about an Instance is newer than what we hold, judged on
  * the Instance's lifecycle (status, rest and offlineReason) together with the
  * `lastSeenAt` it was observed at.
@@ -2718,7 +2693,7 @@ export function mergeAgentInstancePresence(
   // already hold. The Channel tree re-renders on Channel identity, so a new
   // instance object for an unchanged report moves the sidebar and the
   // timeline under the reader for no reported reason.
-  return sameReportedPresenceValue(current, merged) ? current : merged;
+  return sameValue(current, merged) ? current : merged;
 }
 
 export function replaceChannelMemberPresence(

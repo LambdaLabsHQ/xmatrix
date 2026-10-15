@@ -27,15 +27,12 @@ export async function installRenderCounter(page: Page) {
         const visit = (fiber: Fiber | null) => {
           for (let node = fiber; node; node = node.sibling) {
             const props = node.memoizedProps;
-            // Function components only: the row bodies, not their memo wrappers.
-            if (node.tag === 0 && props && (node.flags & PERFORMED_WORK)) {
+            // Function components only, never their memo wrappers: a body (0),
+            // or a simple memo function, which carries its own work (15).
+            if ((node.tag === 0 || node.tag === 15) && props && (node.flags & PERFORMED_WORK)) {
               if ("model" in props) counts.workspaceViews += 1;
               if ("isPinnedRoot" in props && "onSelect" in props) counts.navRows += 1;
               if ("message" in props && "onRetryAgentLaunch" in props) counts.messageRows += 1;
-            }
-            // Simple memo functions carry their own performed work (tag 15),
-            // unlike a separate memo wrapper above a normal function body.
-            if ((node.tag === 0 || node.tag === 15) && props && (node.flags & PERFORMED_WORK)) {
               if ("stoppingAgentInstanceId" in props && "onStopAgentInstance" in props) counts.workDocks += 1;
               if ("intentSince" in props && "stopDisabled" in props) counts.workAvatars += 1;
             }
