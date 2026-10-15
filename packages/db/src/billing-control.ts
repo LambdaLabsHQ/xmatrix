@@ -470,7 +470,7 @@ export class PostgresBillingRepository {
     const eventCreatedAt = text(input.eventCreatedAt, "eventCreatedAt", 64);
     const subscription = input.subscription;
     const provider = subscription.billingProvider ?? "stripe";
-    if (!["stripe", "apple"].includes(provider) || (provider === "apple" && (subscription.quantity !== 1 || !subscription.currentPeriodEnd))) throw new BillingControlError("invalid_billing_event", 400, "Invalid billing provider fact");
+    if (!["stripe", "apple"].includes(provider) || (provider === "apple" && !subscription.currentPeriodEnd)) throw new BillingControlError("invalid_billing_event", 400, "Invalid billing provider fact");
     const spaceId = text(subscription.spaceId, "subscription.spaceId");
     const ownerUserId = text(subscription.billingOwnerUserId, "subscription.billingOwnerUserId");
     const subscriptionId = text(subscription.id, "subscription.id");
