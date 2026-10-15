@@ -26,7 +26,7 @@ async fn acp_model_switch_refreshes_effort_control_and_requires_confirmation() {
                 .initialize(Some(env!("CARGO_MANIFEST_DIR")), None, false, None)
                 .await
                 .unwrap();
-            assert_eq!(session.current_effort().as_deref(), Some("high"));
+            assert_eq!(session.current_effort(), Some("high"));
             if backend != "acp-model-effort" {
                 assert!(session.set_effort("low").await.is_err(), "{backend}");
             } else {
