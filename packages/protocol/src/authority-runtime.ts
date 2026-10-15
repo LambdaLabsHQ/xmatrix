@@ -848,6 +848,8 @@ export type ObservabilityEventType =
   | "channel_mention"
   | "channel_attention_updated"
   | "channel_member_read_updated"
+  /** The Hub judged a message superseded by a later one; `metadata` names both. */
+  | "channel_message_superseded"
   | "channel_history_loaded"
   | "channel_history_replayed"
   | "client_network_sample"
