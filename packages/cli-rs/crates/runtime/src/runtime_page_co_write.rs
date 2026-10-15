@@ -135,7 +135,9 @@ pub(crate) fn observe_trace(channel_id: &str, phase: &str, payload: &serde_json:
                 bridge.send(delta_frame(turn, text));
             }
         }
-        "turn_completed" | "turn_failed" | "turn_interrupted" => {
+        // A turn stopped from the conversation (a chat message, a model switch) is cancelled; it ends the
+        // page's turn there and then, or the page would wait on it and never ask the Agent again.
+        "turn_completed" | "turn_failed" | "turn_interrupted" | "turn_cancelled" => {
             if let Some(turn) = bridge.answering.take() {
                 bridge.send(done_frame(turn, phase == "turn_failed"));
             }
@@ -299,6 +301,25 @@ mod tests {
         observe_trace(channel, "turn_failed", &serde_json::json!({}));
         let sent: Vec<_> = std::iter::from_fn(|| frames.try_recv().ok()).map(body).collect();
         assert_eq!(sent, vec![serde_json::json!({ "type": "done", "turn": 4 })]);
+        bridges().remove(channel);
+    }
+
+    #[test]
+    fn a_cancelled_turn_ends_the_page_turn_at_once() {
+        let channel = "c-co-write-cancelled";
+        let mut frames = bridge_for_test(channel);
+        turn_queued(channel, 5);
+        observe_trace(channel, "turn_started", &serde_json::json!({}));
+        observe_trace(channel, "assistant_delta", &serde_json::json!({ "delta": "half" }));
+        observe_trace(channel, "turn_cancelled", &serde_json::json!({}));
+        let sent: Vec<_> = std::iter::from_fn(|| frames.try_recv().ok()).map(body).collect();
+        assert_eq!(
+            sent,
+            vec![
+                serde_json::json!({ "type": "delta", "turn": 5, "text": "half" }),
+                serde_json::json!({ "type": "done", "turn": 5 }),
+            ]
+        );
         bridges().remove(channel);
     }
 }

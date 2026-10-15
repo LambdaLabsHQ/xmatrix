@@ -454,6 +454,8 @@ const CO_WRITER_DOING: Partial<Record<string, string>> = { thinking: "thinking",
 
 /** Room at the bottom of a phone's page that its button and capsule cover, so a line there counts as out of view. */
 const PEN_BOTTOM_ROOM = 110;
+/** On a desktop only a face waiting at the bottom edge covers it. */
+const DESKTOP_PEN_BOTTOM_ROOM = 44;
 
 /** How long an Agent called to write shows on the page's button before its Run is on the page. */
 const CALLED_SHOWS_MS = 3 * 60_000;
@@ -1171,6 +1173,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   };
   // Who is out of view above or below, at the page's edges (§3.2). A line of room keeps
   // someone on the very edge counted as seen.
+  const bottomRoom = phone ? PEN_BOTTOM_ROOM : DESKTOP_PEN_BOTTOM_ROOM;
   // Whose suggestion is in front of the reader: its face, and what to do with the change, stand beside
   // the change at the right edge, as if the Agent were writing that line.
   const suggestedBy = suggesting.count > 0 && suggesting.author ? suggesting.author : null;
@@ -1180,7 +1183,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     const at = contentTop("suggestion");
     if (!suggestedBy || !drawn || mode !== "page" || top === undefined || at === null) return null;
     return { top: top - 4, away: !viewport.height ? null
-      : at < viewport.top ? "above" : at > viewport.top + viewport.height - PEN_BOTTOM_ROOM ? "below" : null };
+      : at < viewport.top ? "above" : at > viewport.top + viewport.height - bottomRoom ? "below" : null };
   })();
   // Each Agent on the page is its face in the margin beside its line (§3.2), on a phone and a desktop alike.
   const pens = ((): PagePen[] => {
@@ -1190,7 +1193,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
       const at = contentTop(person.anchor);
       if (top === undefined || at === null) return [];
       const away = !viewport.height ? null
-        : at < viewport.top ? "above" : at > viewport.top + viewport.height - PEN_BOTTOM_ROOM ? "below" : null;
+        : at < viewport.top ? "above" : at > viewport.top + viewport.height - bottomRoom ? "below" : null;
       return [{ person, top: top + 2, away }];
     });
   })();

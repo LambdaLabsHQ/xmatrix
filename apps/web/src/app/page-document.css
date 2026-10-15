@@ -531,7 +531,8 @@ html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-com
   100% { background-color: transparent; }
 }
 .page-document .page-agent-ink {
-  border-radius: 3px;
+  /* Square ends: where the newest words' tint splits the paragraph into pieces, they meet without a seam. */
+  border-radius: 0;
   -webkit-box-decoration-break: clone;
   box-decoration-break: clone;
   animation: page-agent-ink 20s linear forwards;
@@ -651,6 +652,8 @@ html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-com
   margin-top: -3px;
   -webkit-tap-highlight-color: transparent;
 }
+/* A desktop has no capsule at the bottom: a face waits just above the edge. */
+.app-page-article .page-pen { bottom: 16px; }
 .page-pen .page-pen-face .identity-avatar-face {
   width: 28px;
   height: 28px;

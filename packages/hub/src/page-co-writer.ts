@@ -25,6 +25,12 @@ import * as Y from "yjs";
 
 /** People pause this long before the Agent hears what changed. */
 export const CO_WRITER_PAUSE_MS = 1_500;
+/**
+ * A turn that has said nothing for this long is given up: the Agent is asked afresh at the next pause
+ * instead of the page waiting on an answer that will not come. While a turn is open this timer also
+ * keeps the session awake, so an answer is never lost to hibernation between its words.
+ */
+export const CO_WRITER_TURN_MS = 120_000;
 /** After this many turns of changes alone, the Agent reads the whole page again. */
 const FULL_PAGE_EVERY = 8;
 /** More changed sections than this, and the Agent reads the whole page. */
@@ -136,8 +142,10 @@ const INSTRUCTIONS = [
 ].join("\n");
 
 export class PageCoWriter {
-  private turns = 0;
+  /** Turn numbers start from the clock, so one asked after the session woke is never taken for one before. */
+  private turns = Date.now();
   private active: Turn | null = null;
+  private turnTimer: ReturnType<typeof setTimeout> | null = null;
   /** The page as the Agent last read it. */
   private seen = "";
   private readCount = 0;
@@ -186,7 +194,30 @@ export class PageCoWriter {
     this.ended = true;
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
+    this.close();
+  }
+
+  /** The open turn ends: nothing more of it is waited on. */
+  private close(): void {
+    if (this.turnTimer) clearTimeout(this.turnTimer);
+    this.turnTimer = null;
     this.active = null;
+  }
+
+  /** Waits on the open turn's next words, for so long. */
+  private awaitTurn(turn: Turn): void {
+    if (this.turnTimer) clearTimeout(this.turnTimer);
+    this.turnTimer = setTimeout(() => {
+      this.turnTimer = null;
+      if (this.active !== turn || this.ended) return;
+      this.outcome.push("Your last answer went quiet and was given up.");
+      this.host.send({ type: "interrupt", turn: turn.id });
+      this.close();
+      this.show({ activity: "watching" });
+      if (this.changed && !this.timer) this.ask();
+    }, CO_WRITER_TURN_MS);
+    // In Node (tests, local runs) a waiting turn does not keep the process alive; Workers have no unref.
+    (this.turnTimer as { unref?: () => void }).unref?.();
   }
 
   /** Someone else changed the page. If it touched what the Agent is writing, the Agent stops there. */
@@ -221,12 +252,13 @@ export class PageCoWriter {
     const turn = this.active;
     if (this.ended || !this.writable || !turn || reply.turn !== turn.id) return;
     if (reply.type === "delta") {
+      this.awaitTurn(turn);
       if (!turn.stopped) for (const event of turn.parser.push(reply.text)) this.apply(turn, event);
       return;
     }
     if (!turn.stopped) for (const event of turn.parser.finish()) this.apply(turn, event);
     if (reply.type === "failed") this.outcome.push(`Your last answer failed${reply.reason ? `: ${reply.reason}` : ""}.`);
-    this.active = null;
+    this.close();
     this.show({ activity: "watching" });
     // People who changed the page while it answered, and have paused since, are answered now.
     if (this.changed && !this.timer) this.ask();
@@ -271,6 +303,7 @@ export class PageCoWriter {
     this.changed = false;
     const turn: Turn = { id: ++this.turns, parser: new PageCoWriteParser(), action: null, stopped: false };
     this.active = turn;
+    this.awaitTurn(turn);
     this.show({ activity: "thinking" });
     this.host.send({ type: "turn", turn: turn.id, text: lines.join("\n") });
   }
@@ -471,7 +504,7 @@ export class PageCoWriter {
     turn.stopped = true;
     turn.action = null;
     // Its turn ends here: what it still sends for it is not written, and the next pause asks again.
-    this.active = null;
+    this.close();
     this.outcome.push(`You were stopped: ${why}.`);
     this.host.send({ type: "interrupt", turn: turn.id });
     this.show({ activity: "waiting" });

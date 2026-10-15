@@ -1284,7 +1284,7 @@ function awarenessFrom(server: Y.Doc, clientId: number, clock: number, state: Re
   return encoding.toUint8Array(message);
 }
 
-test("on a long page, who works out of view shows at its edges, and what an Agent writes is tinted as its own", async ({ page: browser }) => {
+test("on a long page, who works out of view shows at its edges, and what an Agent writes is highlighted as its own", async ({ page: browser }) => {
   const filler = Array.from({ length: 60 }, (_, index) => `Background paragraph ${index + 1}.`).join("\n\n");
   const server = pageDocument(`# Relay\n\n## Status\n\nIn progress\n\n${filler}\n\n## Notes\n\nnone\n`);
   const AGENT = 1_234_567;
@@ -1311,31 +1311,39 @@ test("on a long page, who works out of view shows at its edges, and what an Agen
   push(awarenessFrom(server, AGENT, 1, { user: { name: "claude:2", color: "#7c3aed", kind: "agent",
     conversationId: E2E_CHANNEL.id }, activity: "editing", block: "notes" }, "shipping Friday"));
 
-  const below = browser.getByTestId("page-people-below");
-  await expect(below).toHaveText(/claude:2 is editing below/u);
+  // The Agent is its face at the right edge, as on a phone, waiting at the bottom and pointing down to its line.
+  const below = browser.getByTestId("page-pens").getByRole("button", { name: "claude:2 is writing, below" });
+  await expect(below).toBeVisible();
+  await expect(browser.getByTestId("page-people-below"), "an Agent is not named in the middle of the page").toHaveCount(0);
   await expect(browser.getByTestId("page-people-above"), "Ada is in view").toHaveCount(0);
-  // The Agent's words are marked in its colour where they landed.
+  // The Agent's new words are tinted in its colour, and the whole paragraph is highlighted as its own.
   const tinted = editor.locator(`.page-remote-change[data-client="${AGENT}"]`);
   await expect(tinted.first()).toBeAttached();
   await expect(tinted).toContainText(["shipping Friday"]);
+  const inked = editor.locator(`.page-agent-ink[data-client="${AGENT}"]`);
+  await expect.poll(async () => (await inked.allTextContents()).join("")).toBe("none yet, shipping Friday");
   await browser.screenshot({ path: test.info().outputPath("pages-people-below.png") });
 
-  // The hint takes the reader to the Agent's line; the one now above is named at the top edge.
+  // Its face takes the reader to the Agent's line, beside which it now stands; the one now above is
+  // named at the top edge.
   await below.click();
   await expect(editor.getByText("none yet, shipping Friday")).toBeInViewport();
-  await expect(below).toHaveCount(0);
+  await expect(browser.getByTestId("page-pens").getByRole("button", { name: "claude:2 is writing", exact: true }))
+    .toBeVisible();
+  await browser.screenshot({ path: test.info().outputPath("pages-agent-pen-beside.png") });
   await expect(browser.getByTestId("page-people-above")).toHaveText(/Ada is reading above/u);
   await browser.screenshot({ path: test.info().outputPath("pages-people-above.png") });
   await browser.getByTestId("page-people-above").click();
   await expect(editor.getByText("In progress")).toBeInViewport();
 
-  // The tint fades away once the change is a few seconds old.
+  // The words' tint fades once they are a few seconds old; the paragraph stays highlighted for longer.
   await expect(tinted).toHaveCount(0, { timeout: 10_000 });
+  await expect.poll(async () => (await inked.allTextContents()).join("")).toBe("none yet, shipping Friday");
 
-  // Its caret rests where its edit ended while its Run lives, its name tucked away, as Google Docs leaves one.
+  // Its caret rests where its edit ended while its Run lives; its name is at the edge, not in the text.
   const caret = editor.locator(`.ProseMirror-yjs-cursor[data-client="${AGENT}"]`);
   await expect(caret).toHaveCount(1);
-  await expect(caret.locator("div")).toHaveCSS("opacity", "0", { timeout: 8_000 });
+  await expect(caret.locator("div")).toBeHidden();
   const committed = (headRevision: number) => {
     const notice = encoding.createEncoder();
     encoding.writeVarUint(notice, 2);
