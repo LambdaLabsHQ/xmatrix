@@ -1,5 +1,5 @@
-import { MAX_PAGE_CONVERSATIONS, PageControlError, PostgresPageRepository, readPageConversations,
-  type PagePrincipal } from "@xmatrix/db";
+import { MAX_PAGE_CONVERSATIONS, PageControlError, PostgresPageRepository, pageTitle, readPageConversations,
+  renamedPageBody, type PagePrincipal } from "@xmatrix/db";
 import { ServiceUnavailable } from "./error-contract";
 import { relayResponse } from "./private-response";
 import type { Context, Hono } from "hono";
@@ -116,6 +116,27 @@ export function sessionPrincipal(authUser: AuthUser, conversationId?: string): P
   return { kind: "agent", id: run.agentId, label: run.agentName || run.agentId, ownerUserId: run.ownerUserId,
     runProof: { runId: run.runId, instanceId: run.instanceId ?? "", executionKey: run.executionKey },
     conversationId: conversationId ?? run.channelId };
+}
+
+/**
+ * A page is named by the heading its document opens with (pages-live-document.md §4.1), so a
+ * rename edits that line, through the live session like any edit: people on the page see it at
+ * once, and what they are typing elsewhere stays. A head that moves meanwhile is read again once.
+ */
+async function renamePage(env: Env, spaceId: string, pageId: string, authUser: AuthUser, title: string): Promise<void> {
+  const name = pageTitle(title);
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const { page } = await repository(env).read({ requestId: crypto.randomUUID(), spaceId, pageId,
+      principal: runPrincipalOf(authUser) });
+    if (page.title === name) return;
+    const response = await sessionCall(env, spaceId, pageId, "/internal/edit", { principal: sessionPrincipal(authUser),
+      baseRevision: page.headRevision, body: renamedPageBody(page.body, name), conversationIds: [] });
+    if (response.ok) return;
+    if (response.status === 409 && attempt === 0) continue;
+    const refusal = await response.json().catch(() => ({})) as { error?: string; code?: string };
+    throw new PageControlError(refusal.code ?? "page_rename_failed", response.status,
+      refusal.error ?? "The page could not be renamed");
+  }
 }
 
 /** Tells a live session that the head or its settings changed outside it. */
@@ -469,10 +490,16 @@ export function registerPageRoutes(app: Hono<{ Bindings: Env }>): void {
   app.patch(`${base}/:pageId`, async (c) => run(c, async () => {
     const body = await json(c);
     const authUser = await requireAuth(c.req.raw, c.env);
+    if (typeof body.title === "string") await renamePage(c.env, c.req.param("spaceId"), c.req.param("pageId"), authUser, body.title);
+    const structural = ["parentPageId", "afterPageId", "accessMode", "agentSuggestOnly", "access"]
+      .some((field) => body[field] !== undefined);
+    if (!structural) {
+      return repository(c.env).read({ requestId: crypto.randomUUID(), spaceId: c.req.param("spaceId"),
+        pageId: c.req.param("pageId"), principal: runPrincipalOf(authUser) });
+    }
     const result = await repository(c.env).update({
       requestId: crypto.randomUUID(), spaceId: c.req.param("spaceId"), pageId: c.req.param("pageId"),
       principal: runPrincipalOf(authUser),
-      ...(typeof body.title === "string" ? { title: body.title } : {}),
       ...(body.parentPageId !== undefined ? { parentPageId: body.parentPageId as string | null } : {}),
       ...(body.afterPageId !== undefined ? { afterPageId: body.afterPageId as string | null } : {}),
       ...(body.accessMode !== undefined ? { accessMode: body.accessMode as "open" | "restricted" } : {}),

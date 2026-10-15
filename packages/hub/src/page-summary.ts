@@ -39,9 +39,12 @@ export function pageSummaryLine(text: string): string {
   return [...line].slice(0, PAGE_SUMMARY_MAX_CHARACTERS).join("");
 }
 
-/** The page's text as the Run reads it, cut at a character boundary when it is longer than a task carries. */
-export function pageSummaryInput(title: string, body: string): string {
-  let input = `# ${title}\n\n${body}`;
+/**
+ * The page's document as the Run reads it, its name opening it, cut at a character boundary when it
+ * is longer than a task carries.
+ */
+export function pageSummaryInput(body: string): string {
+  let input = body;
   while (utf8ByteLength(input) > TEXT_TASK_INPUT_MAX_BYTES) input = input.slice(0, Math.floor(input.length * 0.9));
   return input;
 }
@@ -98,7 +101,7 @@ export async function startPageSummary(env: Env, input: { spaceId: string; pageI
       commandId: `issue:${requestId}`, action: "issue", controlId: requestId, commandType: "text_task",
       principal: { kind: "user", id: route.ownerUserId },
       payload: { type: "machine_text_task", requestId, presetId: target.harness, instruction: INSTRUCTION,
-        input: pageSummaryInput(source.title, source.body) },
+        input: pageSummaryInput(source.body) },
     });
     return { started: true, requestId, revision: source.headRevision };
   }
