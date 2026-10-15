@@ -30,6 +30,8 @@ selections fail rather than choosing an order.
 Cursor exposes model-dependent effort through native ACP `configOptions`:
 for example `reasoning`, `reasoning_effort`, or `effort`. The adapter retains
 the advertised config ID and uses its returned choices and current value.
+Opening and restoring a session combine the native model inventory with the
+config-derived effort levels after the complete response is parsed.
 When a model picker is advertised, model changes use `session/set_config_option`
 so its full response refreshes the model-dependent controls before effort is
 applied. Both selections require confirmation in the returned snapshot;

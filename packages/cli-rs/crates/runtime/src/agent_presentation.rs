@@ -964,6 +964,11 @@ fn observe_acp_presentation(
     facts.usage =
         super::merge_llm_usage(facts.usage.clone(), super::extract_llm_usage(value));
     observe_acp_node(value, facts, source, 0);
+    if revision != facts.parameter_revision {
+        // session/new and session/load can also carry a model inventory.
+        // Attach config-derived levels after that inventory has been read.
+        attach_config_efforts_to_selected_model(facts);
+    }
     if model != facts.model && revision == facts.parameter_revision {
         facts.parameters = Some(Vec::new());
     }
