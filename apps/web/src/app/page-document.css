@@ -375,8 +375,6 @@ html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-com
   width: 1rem;
   height: 1rem;
 }
-/* An Agent's caret label opens the conversation it works from. */
-.ProseMirror-yjs-cursor > [data-conversation] { cursor: pointer; }
 .page-section-owed {
   display: inline-flex;
   align-items: center;
@@ -405,25 +403,18 @@ html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-com
   background: currentColor;
   pointer-events: none;
 }
-/* An Agent co-writing live keeps its name and what it is doing in view, and its note below the line. */
-.ProseMirror-yjs-cursor[data-live] > div { opacity: 1; animation: none; }
-.ProseMirror-yjs-cursor > .page-cursor-note {
-  position: absolute;
-  top: 1.5em;
-  left: -2px;
-  z-index: 1;
-  width: max-content;
-  max-width: 18rem;
-  padding: 4px 8px;
-  border-radius: 6px;
-  background: color-mix(in oklab, currentColor 12%, var(--background));
-  color: var(--foreground);
-  font-size: 12px;
-  font-weight: 400;
-  font-style: normal;
-  line-height: 1.4;
-  white-space: normal;
-  user-select: none;
+/* An Agent's caret: its face at the right edge says who it is and what it is doing (.page-pen), so the
+   text carries no name tag in the middle of the page, only the caret, a little bolder than a person's,
+   blinking while it thinks or writes. Its note to the people opens from its face. */
+.ProseMirror-yjs-cursor[data-agent] > div { display: none; }
+.ProseMirror-yjs-cursor[data-agent] { border-left-width: 2px; margin-left: -1px; }
+@keyframes page-agent-caret {
+  0%, 50% { opacity: 1; }
+  51%, 100% { opacity: 0.2; }
+}
+.ProseMirror-yjs-cursor[data-agent][data-live] { animation: page-agent-caret 1s steps(1, end) infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .ProseMirror-yjs-cursor[data-agent][data-live] { animation: none; }
 }
 /* Someone idle, or an Agent whose Run is not working: its caret stays where it was, dimmed. */
 .ProseMirror-yjs-cursor.is-idle { opacity: 0.45; }
@@ -532,9 +523,27 @@ html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-com
 .page-document .page-remote-change[data-agent] {
   animation: page-remote-change 4s ease-out forwards, page-agent-words-in 0.6s ease-out both;
 }
+/* The paragraph an Agent is writing, or just wrote, marked whole in its colour as a highlighter marks
+   lines (as its suggestions are): steady while it writes there, held for AGENT_CHANGE_MS after its last
+   word, then fading. Its words' own tint above sits on top while they are new. */
+@keyframes page-agent-ink {
+  0%, 80% { background-color: color-mix(in oklab, var(--page-change-color) 20%, transparent); }
+  100% { background-color: transparent; }
+}
+.page-document .page-agent-ink {
+  border-radius: 3px;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+  animation: page-agent-ink 20s linear forwards;
+}
+.page-document .page-agent-ink.is-writing {
+  animation: none;
+  background-color: color-mix(in oklab, var(--page-change-color) 20%, transparent);
+}
 @media (prefers-reduced-motion: reduce) {
   .page-document .page-remote-change { animation-timing-function: steps(1, end); }
   .page-document .page-remote-change[data-agent] { animation: page-remote-change 4s steps(1, end) forwards; }
+  .page-document .page-agent-ink { animation-timing-function: steps(1, end); }
 }
 
 /*
@@ -627,7 +636,7 @@ html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-com
   .page-writer-dots i { animation: none; opacity: 0.7; }
 }
 
-/* An Agent's face at the right edge beside the line its pen is at, on a phone. Sticky both ways, so the
+/* An Agent's face at the right edge beside the line its pen is at, on a phone and a desktop alike. Sticky both ways, so the
    page's own scroll is all that moves it: it rides with its line, and waits at the top or bottom of the
    edge, clear of the capsule there, while the line is out of view, a chevron pointing to it. */
 .page-pen {
@@ -648,6 +657,16 @@ html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-com
   box-shadow: 0 4px 12px -4px oklch(0 0 0 / 0.35);
 }
 .page-pen.is-idle .page-pen-face { opacity: 0.5; }
+/* While it writes, its dots run under its face in its colour. */
+.page-pen .page-pen-dots {
+  position: absolute;
+  bottom: -7px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 2px 3px;
+  border-radius: 999px;
+  background: var(--background);
+}
 .page-pen-way {
   position: absolute;
   left: 50%;
