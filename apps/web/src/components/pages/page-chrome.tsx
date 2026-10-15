@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { pageAuthorColor, pageAuthorLabel, pageLineDiff, type PageLineDiff } from "@xmatrix/protocol";
 import type { PageDocBlock } from "@xmatrix/protocol/page-document";
@@ -50,6 +50,8 @@ export interface PresentPerson {
   conversationId?: string | null;
   /** An Agent co-writing live whose last change can still be taken back. */
   undoable?: boolean;
+  /** What an Agent co-writing live is doing now, in a word or two. */
+  doing?: string;
 }
 
 /** Everyone on the page, as in Google Docs: hover says who and where, a click goes there. */
@@ -128,6 +130,15 @@ export function PageOffscreenPeople({ above, below, onJump }: {
   return <>{edge("above", above)}{edge("below", below)}</>;
 }
 
+/** Room a face needs to carry its name beside it. */
+const NAMED_PEN_ROOM = 110;
+
+/** An Agent's name as its face says it: "claude:2" is Claude. */
+function penName(name: string): string {
+  const base = name.split(":")[0] ?? name;
+  return base.charAt(0).toUpperCase() + base.slice(1);
+}
+
 /** An Agent on the page, by the line it is at: its top in the document column, and whether that is out of view. */
 export interface PagePen { person: PresentPerson; top: number; away: "above" | "below" | null }
 
@@ -137,12 +148,18 @@ export interface PagePen { person: PresentPerson; top: number; away: "above" | "
  * is scrolled out of view it waits at the top or bottom of the edge, pointing the way. A tap on a face
  * that is away goes back to its line; on one beside its line, it opens what the Agent is doing.
  */
-export function PagePens({ pens, onJump, onOpen }: {
-  pens: PagePen[]; onJump: (person: PresentPerson) => void; onOpen: (person: PresentPerson) => void;
+export function PagePens({ pens, room = 0, onJump, onOpen }: {
+  pens: PagePen[];
+  /** Room beside the text column. Where a face fits with its name (a desktop), it carries its name and what it
+   *  is doing, filled in its colour; on a phone it is the face alone. */
+  room?: number;
+  onJump: (person: PresentPerson) => void; onOpen: (person: PresentPerson) => void;
 }) {
   if (pens.length === 0) return null;
+  const named = room >= NAMED_PEN_ROOM;
   return (
-    <div className="page-pens pointer-events-none absolute inset-y-0 -right-6 w-8" data-testid="page-pens">
+    <div className={cn("page-pens pointer-events-none absolute inset-y-0", named ? "is-named left-full ml-2.5" : "-right-6 w-8")}
+      style={named ? { width: room - 18 } : undefined} data-testid="page-pens">
       {pens.map(({ person, top, away }) => {
         const Chevron = away === "above" ? ChevronUp : ChevronDown;
         return (
@@ -151,16 +168,21 @@ export function PagePens({ pens, onJump, onOpen }: {
             <div style={{ height: Math.max(0, top) }} />
             <button type="button" onClick={() => (away ? onJump(person) : onOpen(person))} data-away={away ?? undefined}
               className={cn("page-pen pointer-events-auto", person.idle && "is-idle", person.editing && "is-writing")}
+              style={{ "--page-pen-color": person.color } as CSSProperties}
               aria-label={`${person.name} is ${person.editing ? "writing" : "here"}${away ? `, ${away}` : ""}`}
               title={`${person.name} · ${person.detail}`}>
               <IdentityAvatar kind="agent" label={person.name} imageUrl={person.avatarUrl}
                 initials={person.avatarUrl ? avatarInitials(person.name) : undefined} size="sm" shape="circle"
                 className="page-pen-face pointer-events-none rounded-full" />
-              {/* While it writes, the dots under its face run in its colour, as a chat shows someone typing. */}
-              {person.editing && !person.idle && (
-                <span className="page-writer-dots page-pen-dots" style={{ color: person.color }} aria-hidden="true">
-                  <i /><i /><i />
+              {named && (
+                <span className="page-pen-label" aria-hidden="true">
+                  {penName(person.name)}
+                  {person.doing && person.doing !== "writing" && <span className="page-pen-doing"> {person.doing}</span>}
                 </span>
+              )}
+              {/* While it writes, its dots run, as a chat shows someone typing. */}
+              {person.editing && !person.idle && (
+                <span className="page-writer-dots page-pen-dots" aria-hidden="true"><i /><i /><i /></span>
               )}
               {away && <Chevron className="page-pen-way" aria-hidden="true" strokeWidth={2.5} />}
             </button>

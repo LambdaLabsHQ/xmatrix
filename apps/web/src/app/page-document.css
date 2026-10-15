@@ -527,7 +527,7 @@ html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-com
    lines (as its suggestions are): steady while it writes there, held for AGENT_CHANGE_MS after its last
    word, then fading. Its words' own tint above sits on top while they are new. */
 @keyframes page-agent-ink {
-  0%, 80% { background-color: color-mix(in oklab, var(--page-change-color) 20%, transparent); }
+  0%, 80% { background-color: color-mix(in oklab, var(--page-change-color) 28%, transparent); }
   100% { background-color: transparent; }
 }
 .page-document .page-agent-ink {
@@ -539,7 +539,7 @@ html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-com
 }
 .page-document .page-agent-ink.is-writing {
   animation: none;
-  background-color: color-mix(in oklab, var(--page-change-color) 20%, transparent);
+  background-color: color-mix(in oklab, var(--page-change-color) 28%, transparent);
 }
 @media (prefers-reduced-motion: reduce) {
   .page-document .page-remote-change { animation-timing-function: steps(1, end); }
@@ -669,7 +669,46 @@ html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-com
   padding: 2px 3px;
   border-radius: 999px;
   background: var(--background);
+  color: var(--page-pen-color);
 }
+/* On a wide window the face carries its name and what it is doing, filled in its colour, so whoever looks
+   up from the page sees at once which Agent writes the highlighted line, and that it is writing now. */
+.page-pens.is-named .page-pen {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: max-content;
+  max-width: 100%;
+  height: 30px;
+  margin-top: -4px;
+  padding: 0 11px 0 3px;
+  border-radius: 999px;
+  background: var(--page-pen-color);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  box-shadow: 0 6px 16px -8px color-mix(in oklab, var(--page-pen-color) 80%, black);
+}
+.page-pens.is-named .page-pen .page-pen-face .identity-avatar-face {
+  width: 24px;
+  height: 24px;
+  background: #fff;
+  box-shadow: none;
+}
+.page-pens.is-named .page-pen-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.page-pens.is-named .page-pen-doing { font-weight: 500; opacity: 0.85; }
+.page-pens.is-named .page-pen .page-pen-dots {
+  position: static;
+  transform: none;
+  padding: 0;
+  background: none;
+  color: #fff;
+}
+.page-pens.is-named .page-pen.is-idle { background: color-mix(in oklab, var(--page-pen-color) 45%, var(--background)); }
+.page-pens.is-named .page-pen.is-idle .page-pen-face { opacity: 1; }
+.page-pens.is-named .page-pen-way { left: 15px; }
 .page-pen-way {
   position: absolute;
   left: 50%;

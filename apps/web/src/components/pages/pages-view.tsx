@@ -1125,6 +1125,8 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
       anchor: anchorTops.has(`client:${clientId}`) ? `client:${clientId}` : sectionAnchor(state.block ?? ""),
       editing: state.activity === "editing" || state.activity === "writing" || state.activity === "thinking",
       conversationId: state.user!.conversationId ?? null,
+      ...(state.user!.kind === "agent" && CO_WRITER_DOING[state.activity ?? ""]
+        ? { doing: CO_WRITER_DOING[state.activity ?? ""]! } : {}),
       undoable: state.user!.kind === "agent" && state.undo === true,
       // An Agent co-writing live says what it is doing, and its note to the people on the page.
       detail: [whereDetail(CO_WRITER_DOING[state.activity ?? ""] ?? state.activity ?? "viewing", state.block ?? "",
@@ -1198,6 +1200,13 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     });
   })();
   const penned = new Set(pens.map((pen) => pen.person.key));
+  // Room beside the text column for a face to carry its name: from the column's edge to the article's.
+  const penRoom = ((): number => {
+    const article = articleElement.current;
+    const column = docColumn.current;
+    if (phone || !article || !column) return 0;
+    return article.getBoundingClientRect().right - column.getBoundingClientRect().right;
+  })();
   // The page's button: the face of the Agent the reader co-writes with, while no Agent is on the page;
   // an Agent just called shows there, starting, until it is on the page beside its line.
   const caller = ((): { agent: { name: string; avatarUrl?: string }; starting: boolean } | null => {
@@ -1347,7 +1356,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
               <div className="flex gap-6">
                 <div ref={docColumn} className={cn("relative min-w-0 max-w-3xl flex-1",
                   phone && phoneDiff && !suggestionMark && "has-reader-mark")}>
-                  <PagePens pens={pens} onJump={jumpTo} onOpen={(person) => setDialog({ kind: "agent", key: person.key })} />
+                  <PagePens pens={pens} room={penRoom} onJump={jumpTo} onOpen={(person) => setDialog({ kind: "agent", key: person.key })} />
                   {suggestionMark && suggestedBy && (
                     <PageChangeMark top={suggestionMark.top} away={suggestionMark.away} testId="page-suggestions"
                       label={`${suggestedBy} suggests this change, ${suggesting.current + 1} of ${suggesting.count}`}>
