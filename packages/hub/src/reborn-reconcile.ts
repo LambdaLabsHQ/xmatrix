@@ -222,9 +222,8 @@ export async function reconcileRebornWithPort(database: AuthorityDatabase, shard
   return rows.length;
 }
 
-/** The read of the exact stop this intent issued. A reborn's stop keeps the
- * Instance; a handoff's retires it and carries no `preserveInstanceForReborn`,
- * so the authority must expect what this intent stored, not always a reborn. */
+/** Read the exact stop this intent issued. New handoffs and reborns retain
+ * their Instance; legacy handoffs omitted the flag, so read the stored value. */
 export function continuationStopStatusQuery(row: { stop_control_id: string; source_run_id: string;
   source_instance_id: string; owner_user_id: string; machine_id: string; hostname: string | null;
   stop_payload_json: Record<string, unknown> }) {
