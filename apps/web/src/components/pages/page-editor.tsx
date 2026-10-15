@@ -73,6 +73,12 @@ interface Toolbar {
   slash: SlashState | null;
 }
 
+function sameToolbar(a: Toolbar | null, b: Toolbar): boolean {
+  return a !== null && a.kind === b.kind && a.link === b.link && a.empty === b.empty && a.inTable === b.inTable
+    && a.focused === b.focused && a.slash?.query === b.slash?.query && a.slash?.from === b.slash?.from
+    && a.slash?.to === b.slash?.to;
+}
+
 function readToolbar(view: EditorView): Toolbar {
   const { state } = view;
   return {
@@ -237,6 +243,11 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
     });
   }, [session]);
   const [toolbar, setToolbar] = useState<Toolbar | null>(null);
+  const shownToolbar = useRef<Toolbar | null>(null);
+  const showToolbar = useCallback((next: Toolbar) => {
+    shownToolbar.current = next;
+    setToolbar(next);
+  }, []);
   const [slashIndex, setSlashIndex] = useState(0);
   const [linkDraft, setLinkDraft] = useState<string | null>(null);
   // A GitHub file link being pasted to embed, and why the last one was not a file.
@@ -331,15 +342,17 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
           setSlashIndex(0);
         }
         menu.current.slash = next.slash;
-        setToolbar(next);
+        // Metadata-only transactions do not move the selection menu. Document and selection changes
+        // still render it, even when its controls match, to update its position.
+        if (tr.docChanged || tr.selectionSet || tr.storedMarksSet || !sameToolbar(shownToolbar.current, next)) showToolbar(next);
         measure();
       },
       handleDOMEvents: {
-        focus: (focused) => { setToolbar(readToolbar(focused)); return false; },
+        focus: (focused) => { showToolbar(readToolbar(focused)); return false; },
         blur: (blurred, event) => {
           // Leaving for the page's own menus keeps them open.
           if (frame.current?.contains(event.relatedTarget as Node | null)) return false;
-          setToolbar(readToolbar(blurred));
+          showToolbar(readToolbar(blurred));
           return false;
         },
         click: (_view, event) => {
@@ -352,7 +365,7 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
       },
     });
     view.current = editor;
-    setToolbar(readToolbar(editor));
+    showToolbar(readToolbar(editor));
     readBlocks(editor);
     const resized = new ResizeObserver(() => measure());
     resized.observe(editor.dom);
