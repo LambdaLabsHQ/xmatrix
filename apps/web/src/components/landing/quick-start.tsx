@@ -1,5 +1,6 @@
 import { AppWindow } from "@/components/landing/app-window";
 import { CopySetupPrompt } from "@/components/landing/copy-setup-prompt";
+import { LiquidGlassPill } from "@/components/ui/material-surfaces";
 
 const MACHINES = [["Mac Studio", 7], ["Linux server", 5], ["Windows build", 3], ["MacBook Pro", 8]] as const;
 
@@ -19,11 +20,11 @@ export function QuickStart() {
 
         <ul className="mt-8 flex flex-wrap items-center gap-2" aria-label="Machines in a Space">
           {MACHINES.map(([machine, agents]) => (
-            <li key={machine} className="site-machine-chip">
+            <LiquidGlassPill as="li" key={machine} className="site-machine-chip">
               <span className="site-machine-dot" aria-hidden />
               <span className="font-semibold">{machine}</span>
               <span className="text-muted-foreground">{agents} agents</span>
-            </li>
+            </LiquidGlassPill>
           ))}
           <li className="px-2 text-sm text-muted-foreground">12 conversations · 23 agents working now</li>
         </ul>

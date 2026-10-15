@@ -1,5 +1,7 @@
 import Image from "next/image";
 
+import { LiquidGlassPill } from "@/components/ui/material-surfaces";
+
 const AGENTS = [
   ["Claude Code", "claude.svg"], ["Codex", "openai.svg"], ["Cursor", "cursor.png"], ["Gemini", "gemini.svg"],
   ["Grok", "grok.svg"], ["Kimi", "kimi.svg"], ["Copilot", "copilot.svg"], ["OpenCode", "opencode.svg"],
@@ -11,10 +13,10 @@ export function AgentStrip() {
   const row = (hidden: boolean) => (
     <ul className="site-agent-strip-row" aria-hidden={hidden || undefined}>
       {AGENTS.map(([name, logo]) => (
-        <li key={name} className="site-agent-chip">
+        <LiquidGlassPill as="li" key={name} className="site-agent-chip">
           <Image src={`/agent-vendors/${logo}`} alt="" width={18} height={18} className="size-[18px] object-contain" />
           {name}
-        </li>
+        </LiquidGlassPill>
       ))}
     </ul>
   );
