@@ -730,6 +730,46 @@ fn commands_from_acp_value(value: &Value) -> Vec<protocol::AgentInstanceCommand>
         .collect()
 }
 
+fn is_effort_config(key: &str, category: Option<&str>) -> bool {
+    matches!(
+        key,
+        "effort"
+            | "reasoning"
+            | "reasoning_effort"
+            | "thinking"
+            | "thinking_effort"
+            | "thought_level"
+    ) || category == Some("thought_level")
+}
+
+/// Cursor's Claude models advertise a boolean `thinking` toggle beside the
+/// leveled `effort` select. True/false is that toggle, not a reasoning level.
+fn boolean_effort_toggle(values: &[protocol::AgentModelReasoningEffort]) -> bool {
+    !values.is_empty()
+        && values.iter().all(|effort| {
+            matches!(
+                effort.reasoning_effort.to_ascii_lowercase().as_str(),
+                "true" | "false"
+            )
+        })
+}
+
+/// Higher wins when a snapshot has more than one effort-shaped control.
+/// Boolean toggles are not selectable.
+fn effort_control_rank(key: &str, values: &[protocol::AgentModelReasoningEffort]) -> Option<u8> {
+    if boolean_effort_toggle(values) {
+        return None;
+    }
+    Some(match key {
+        "effort" => 50,
+        "reasoning_effort" => 40,
+        "reasoning" => 30,
+        "thinking_effort" | "thought_level" => 20,
+        "thinking" => 10,
+        _ => 10,
+    })
+}
+
 fn attach_config_efforts_to_selected_model(facts: &mut AgentPresentationFacts) {
     let Some(selected) = facts.model.as_deref() else {
         return;
@@ -772,6 +812,7 @@ fn observe_config_options(options: &[Value], facts: &mut AgentPresentationFacts,
 
     facts.parameter_revision = facts.parameter_revision.saturating_add(1);
     facts.parameters = Some(crate::harness_parameters::acp_parameters(options));
+    let mut best_effort_rank = 0_u8;
     for option in options {
         let Some(id) = clean_string(option.get("id"), 64) else {
             continue;
@@ -815,11 +856,12 @@ fn observe_config_options(options: &[Value], facts: &mut AgentPresentationFacts,
             attach_config_efforts_to_selected_model(facts);
             continue;
         }
-        if matches!(
-            key.as_str(),
-            "effort" | "reasoning_effort" | "thinking" | "thinking_effort" | "thought_level"
-        ) {
-            facts.effort_config_id = Some(id);
+        let category = option.get("category").and_then(Value::as_str);
+        if is_effort_config(&key, category) {
+            // Cursor publishes one leveled control per model (`reasoning`,
+            // `effort`, or `reasoning_effort`, category `thought_level`) and,
+            // on Claude, a separate boolean `thinking` toggle. The boolean is
+            // not a reasoning level. Keep the leveled control when both exist.
             let supported: Vec<_> = option
                 .get("options")
                 .and_then(Value::as_array)
@@ -829,13 +871,22 @@ fn observe_config_options(options: &[Value], facts: &mut AgentPresentationFacts,
                     let reasoning_effort = option_value(entry)?;
                     Some(protocol::AgentModelReasoningEffort {
                         reasoning_effort,
-                        description: clean_string(entry.get("description"), 256),
+                        description: clean_string(
+                            entry.get("description").or_else(|| entry.get("name")),
+                            256,
+                        ),
                     })
                 })
                 .collect();
-            facts.supported_efforts = supported;
-            facts.effort = current;
-            attach_config_efforts_to_selected_model(facts);
+            if let Some(rank) = effort_control_rank(&key, &supported)
+                && rank > best_effort_rank
+            {
+                best_effort_rank = rank;
+                facts.effort_config_id = Some(id);
+                facts.supported_efforts = supported;
+                facts.effort = current;
+                attach_config_efforts_to_selected_model(facts);
+            }
             continue;
         }
         if key == "mode" {
