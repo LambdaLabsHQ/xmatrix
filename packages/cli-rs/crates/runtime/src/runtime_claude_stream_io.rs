@@ -603,6 +603,7 @@ pub(crate) async fn claude_stream_reader(
             continue;
         }
         crate::runtime_wake_metrics::record_claude_frame(&value);
+        crate::runtime_agent_throughput::record_claude(&value);
 
         // Track the model actually serving this session (init events carry the
         // resolved id, assistant events the id that produced the message) so

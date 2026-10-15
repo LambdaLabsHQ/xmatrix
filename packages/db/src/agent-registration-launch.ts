@@ -24,6 +24,8 @@ import {
   routingModelCatalogObservation,
   hostObservedRequirements,
   machineResourceObservation,
+  agentThroughputObservation,
+  type AgentThroughputObservation,
   machineMentionValue, machineTagSelects,
   type MachineResourceObservation,
   type RoutingModelOption,
@@ -93,12 +95,14 @@ export interface RegistrationLaunchCandidate {
   modelCatalog?: RoutingModelOption[];
   parameters?: HarnessParameter[];
   parameterModel?: string;
+  parameterEffort?: string;
   supportsRequestedEffort?: boolean;
   /** Its daemon applies a requested effort to the runtime's own default model. */
   supportsDefaultModelEffort?: boolean;
   supportsRequestedParameters?: boolean;
   modelAliases?: Record<string, string>;
   observations?: {
+    throughput?: AgentThroughputObservation[];
     evaluatedAt: string; machineResources?: MachineResourceObservation;
     outstandingMachineAllocations: number; outstandingRegistrationAllocations: number;
     quota: { remainingPercent: number; assumed: boolean; observedAt?: string; expiresAt?: string; source?: string;
@@ -828,7 +832,7 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
     });
     const observed = await this.database.transaction({ requestId: `registration-models:${target.harness ?? "auto"}`,
       operation: "registration.launch.model-catalog", placement: this.placement }, tx => tx.query({
-      name: "registration_launch_model_catalog_v2", text: `SELECT requested.owner,requested.machine,requested.harness,catalog.models,catalog.observed_at,parameter_catalog.parameters,parameter_catalog.parameter_model,parameter_catalog.parameters_observed_at
+      name: "registration_launch_model_catalog_v3", text: `SELECT requested.owner,requested.machine,requested.harness,catalog.models,catalog.observed_at,parameter_catalog.parameters,parameter_catalog.parameter_model,parameter_catalog.parameter_effort,parameter_catalog.parameters_observed_at,throughput_catalog.throughput
         FROM jsonb_to_recordset($1::jsonb) AS requested(owner text,machine text,harness text)
         LEFT JOIN LATERAL (SELECT i.presentation_json->'models' AS models,
           i.presentation_json->>'modelsObservedAt' AS observed_at
@@ -840,14 +844,25 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
               ELSE FALSE END
           ORDER BY (i.presentation_json->>'modelsObservedAt')::timestamptz DESC,i.instance_id LIMIT 1) catalog ON TRUE
         LEFT JOIN LATERAL (SELECT i.presentation_json->'parameters' AS parameters,
-          i.presentation_json->>'model' AS parameter_model,i.presentation_json->>'parametersObservedAt' AS parameters_observed_at
+          i.presentation_json->>'model' AS parameter_model,i.presentation_json->>'effort' AS parameter_effort,
+          i.presentation_json->>'parametersObservedAt' AS parameters_observed_at
           FROM data.run_agent_registrations r JOIN data.instances i ON i.run_id=r.run_id
           WHERE r.space_id=$2 AND r.owner_user_id=requested.owner AND r.machine_id=requested.machine AND r.harness=requested.harness
             AND jsonb_typeof(i.presentation_json->'parameters')='array'
             AND CASE WHEN pg_input_is_valid(i.presentation_json->>'parametersObservedAt','timestamp with time zone')
               THEN (i.presentation_json->>'parametersObservedAt')::timestamptz BETWEEN statement_timestamp()-interval '24 hours' AND statement_timestamp()
               ELSE FALSE END
-          ORDER BY (i.presentation_json->>'parametersObservedAt')::timestamptz DESC,i.instance_id LIMIT 1) parameter_catalog ON TRUE`,
+          ORDER BY (i.presentation_json->>'parametersObservedAt')::timestamptz DESC,i.instance_id LIMIT 1) parameter_catalog ON TRUE
+        LEFT JOIN LATERAL (SELECT jsonb_agg(recent.observation) AS throughput FROM (
+          SELECT i.presentation_json->'usage'->'throughput' AS observation
+          FROM data.run_agent_registrations r JOIN data.instances i ON i.run_id=r.run_id
+          WHERE r.space_id=$2 AND r.owner_user_id=requested.owner AND r.machine_id=requested.machine AND r.harness=requested.harness
+            AND jsonb_typeof(i.presentation_json->'usage'->'throughput')='object'
+            AND CASE WHEN pg_input_is_valid(i.presentation_json->'usage'->'throughput'->>'observedAt','timestamp with time zone')
+              THEN (i.presentation_json->'usage'->'throughput'->>'observedAt')::timestamptz
+                BETWEEN statement_timestamp()-interval '30 minutes' AND statement_timestamp() ELSE FALSE END
+          ORDER BY (i.presentation_json->'usage'->'throughput'->>'observedAt')::timestamptz DESC,i.instance_id LIMIT 8
+        ) recent) throughput_catalog ON TRUE`,
       values: [JSON.stringify(candidates.map(candidate => ({ owner: candidate.key.ownerUserId,
         machine: candidate.key.machineId, harness: candidate.key.harness }))),this.placement.spaceId], maxRows: 100 }));
     // Resolve only references explicitly granted to this registration. Directory
@@ -917,10 +932,16 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
         const observation = observed.find(row => row.owner === candidate.key.ownerUserId &&
           row.machine === candidate.key.machineId && row.harness === candidate.key.harness);
         const modelCatalog = routingModelCatalogObservation(observation?.models, observation?.observed_at, Date.now())?.value;
+        const throughput = Array.isArray(observation?.throughput) ? observation.throughput.flatMap(value => {
+          const reading = agentThroughputObservation(value, Date.parse(evaluatedAt));
+          return reading ? [reading] : [];
+        }) : [];
         const parameterObservation = daemonCapable(daemon, "machine_routing_parameters_v1")
           ? harnessParameterObservation(observation?.parameters, observation?.parameters_observed_at,
               observation?.parameter_model, models.map(model => environment.modelAliases?.[model] ?? model), Date.now()) : undefined;
         offered.push({ ...candidate, workspaceReferences, models, modelCatalog, ...parameterObservation,
+          ...(parameterObservation && typeof observation?.parameter_effort === "string"
+            ? { parameterEffort: observation.parameter_effort } : {}),
           modelAliases: environment.modelAliases,
           // A machine tag selects by the owner's name or id, never a hostname.
           machineName: String(daemon.machine_name || ""),
@@ -928,6 +949,7 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
           ...(daemon.auto_assign === false && !target.machineId ? { autoAssign: false as const } : {}),
           ...(fact ? { observations: { evaluatedAt,
             machineResources,
+            ...(throughput.length ? { throughput } : {}),
             outstandingMachineAllocations: Number(fact.machine_allocations), outstandingRegistrationAllocations: Number(fact.registration_allocations),
             quota: quota ? { ...quota, assumed: false, source: fact.source,
               ...(quotaWindows.length ? { windows: quotaWindows } : {}) }
