@@ -36,7 +36,7 @@ export const pageApi = {
     xmatrixApiRequest<{ page: PageDocument }>({
       url: `${WEB_PROXY_ROUTES.space_page(spaceId, pageId)}${revision ? `?revision=${revision}` : ""}`, token, signal,
     }),
-  create: (spaceId: string, token: string, input: { title: string; parentPageId?: string | null;
+  create: (spaceId: string, token: string, input: { title: string; parentPageId?: string | null; body?: string;
     accessMode?: "open" | "restricted" }) =>
     xmatrixApiRequest<{ page: PageSummary }>({ url: WEB_PROXY_ROUTES.space_pages(spaceId), token,
       method: "POST", body: input }),

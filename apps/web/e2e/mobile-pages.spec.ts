@@ -85,10 +85,11 @@ test("switching dock tabs keeps the Pages list mounted instead of reloading it",
   await expect(list).toBeVisible();
 });
 
-// Like Notion, + makes an untitled page at once and opens it with its title
-// selected, so typing names it. No prompt or form: native shells decline prompts.
+// Like Notion, + opens an untitled page at once with its title focused, so typing
+// names it; the page is made only once something is written. No prompt or form:
+// native shells decline prompts.
 for (const entry of ["FAB", "first page", "sub-page", "stale tree"] as const) {
-  test(`a phone makes an untitled page from the ${entry} and names it on the page`, async ({ page }) => {
+  test(`a phone opens an untitled page from the ${entry} and makes it once it is named`, async ({ page }) => {
     const parent = summary("p-lambda", null, "Lambda Labs");
     const initial = entry === "first page" ? [] : [parent];
     // A member sees the empty list; owners see the migration screen instead.
@@ -116,8 +117,6 @@ for (const entry of ["FAB", "first page", "sub-page", "stale tree"] as const) {
       encoding.writeVarString(notice, JSON.stringify({ type: "session", headRevision: 3, canEdit: true }));
       socket.send(Buffer.from(encoding.toUint8Array(notice)));
     });
-    await fixtureJson(page, "page-rename", /\/pages\/p-new$/u, { page: { ...created, title: "New notes" } },
-      { method: "PATCH" });
 
     let create;
     if (entry === "first page") {
@@ -141,11 +140,28 @@ for (const entry of ["FAB", "first page", "sub-page", "stale tree"] as const) {
       { pages: entry === "stale tree" ? initial : [...initial, created] }, { method: "GET" });
     await create.tap();
     await expect(page.getByRole("dialog")).toHaveCount(0);
-    // A second tap while the first is on its way does not make a second page.
-    await create.tap({ force: true }).catch(() => undefined);
+    // It opens at once, untitled, with nothing made yet.
+    await expect(page).toHaveURL(/page=new/u);
+    await expect(page.getByRole("button", { name: "Back to pages", exact: true })).toBeVisible();
+    const backBar = await page.locator(".app-topbar").boundingBox();
+    const title = page.getByTestId("page-title");
+    const titleBox = await title.boundingBox();
+    expect(backBar).not.toBeNull();
+    expect(titleBox).not.toBeNull();
+    expect(titleBox!.y).toBeGreaterThanOrEqual(backBar!.y + backBar!.height);
+    await expect(title).toBeFocused();
+    await expect(title).toHaveValue("");
+    await expect(title).toHaveAttribute("placeholder", "Untitled");
+    expect(await fixtureRequestBodies(page, "page-create")).toEqual([]);
+    // Named and left, it is made under the page it was opened from.
+    await page.keyboard.type("New notes");
+    await title.blur();
     await expect.poll(() => fixtureRequestBodies(page, "page-create")).toEqual([
-      { title: "Untitled", parentPageId: created.parentPageId },
+      { title: "New notes", parentPageId: created.parentPageId },
     ]);
+    // Leaving the field again while it is on its way does not make a second page.
+    await title.focus();
+    await title.blur();
     await releaseFixture(page, "page-create");
     await expect(page).toHaveURL(/page=p-new/u);
     await expect(page.getByRole("button", { name: "Back to pages", exact: true })).toBeVisible();
@@ -155,34 +171,28 @@ for (const entry of ["FAB", "first page", "sub-page", "stale tree"] as const) {
       await expect(page).not.toHaveURL(/page=p-new/u);
       return;
     }
-    const backBar = await page.locator(".app-topbar").boundingBox();
-    const controls = await page.getByTestId("page-controls").boundingBox();
-    expect(backBar).not.toBeNull();
-    expect(controls).not.toBeNull();
-    expect(controls!.y).toBeGreaterThanOrEqual(backBar!.y + backBar!.height);
-    const title = page.getByTestId("page-title");
-    await expect(title).toBeFocused();
-    await expect(title).toHaveValue("Untitled");
-    await page.keyboard.type("New notes");
-    await page.keyboard.press("Enter");
-    await expect.poll(() => fixtureRequestBodies(page, "page-rename")).toEqual([{ title: "New notes" }]);
+    await expect(page.getByTestId("page-controls")).toBeVisible();
     expect(await fixtureRequestBodies(page, "page-create")).toHaveLength(1);
   });
 }
 
-test("a phone shows why a page could not be made, and + tries again", async ({ page }) => {
+test("a phone shows why a page could not be made, and leaving the field again tries again", async ({ page }) => {
   await installMobilePages(page, [summary("p-lambda", null, "Lambda Labs")]);
   await fixtureJson(page, "failed-create", PAGE_TREE_PATTERN, { error: "Could not create the page" },
     { method: "POST", status: 500 });
-  const { list } = await openMobilePages(page);
-  const create = page.locator(".app-mobile-create-fab");
-  await create.tap();
-  await expect(list).toContainText("Couldn't create the page");
-  await expect(page).not.toHaveURL(/page=/u);
+  await openMobilePages(page);
+  await page.locator(".app-mobile-create-fab").tap();
+  const title = page.getByTestId("page-title");
+  await expect(title).toBeFocused();
+  await page.keyboard.type("Retry");
+  await title.blur();
+  await expect(page.getByTestId("page-draft")).toContainText("Couldn't create the page");
+  await expect(page).toHaveURL(/page=new/u);
   await fixtureJson(page, "retry-create", PAGE_TREE_PATTERN,
-    { page: summary("p-retry", null, "Untitled") }, { method: "POST" });
-  await create.tap();
+    { page: summary("p-retry", null, "Retry") }, { method: "POST" });
+  await title.focus();
+  await title.blur();
   await expect(page).toHaveURL(/page=p-retry/u);
   expect(await fixtureRequestBodies(page, "failed-create")).toHaveLength(1);
-  expect(await fixtureRequestBodies(page, "retry-create")).toEqual([{ title: "Untitled", parentPageId: null }]);
+  expect(await fixtureRequestBodies(page, "retry-create")).toEqual([{ title: "Retry", parentPageId: null }]);
 });

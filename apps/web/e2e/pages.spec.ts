@@ -749,7 +749,9 @@ test("an owner may start a Space's pages from a repository or a first page, and 
   await fixtureJson(browser, "page-create", pageTree, { page: page("p-first", null, "First document", "V") },
     { method: "POST" });
   await browser.getByRole("button", { name: "Create the first page" }).click();
-  await expect.poll(() => fixtureRequestBodies(browser, "page-create")).toEqual([{ title: "Untitled", parentPageId: null }]);
+  await browser.keyboard.type("First document");
+  await browser.getByTestId("page-title").blur();
+  await expect.poll(() => fixtureRequestBodies(browser, "page-create")).toEqual([{ title: "First document", parentPageId: null }]);
   await expect(browser.getByTestId("page-migration-review")).toBeHidden();
   await expect(browser.getByTestId("pages-view")).toContainText("First document");
   // An owner publishes the page for anyone with the link.

@@ -470,8 +470,7 @@ type PageDialogState =
   | { kind: "agent"; key: string };
 
 export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpenSection, onPageDeleted, conversation, activeConversationId = null,
-  renderConversation, onConversationDockChange, onCloseConversation, onExpandConversation, onOpenConversation, onDiscuss, onConnectGitHub, canMigrate, layout = "desktop", focusSection = null,
-  freshPageId = null }: {
+  renderConversation, onConversationDockChange, onCloseConversation, onExpandConversation, onOpenConversation, onDiscuss, onConnectGitHub, canMigrate, layout = "desktop", focusSection = null }: {
   spaceId: string | null;
   token: string;
   selectedPageId: string | null;
@@ -503,8 +502,6 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   layout?: "desktop" | "phone";
   /** A section a reference opened the page at; a new `seq` brings it into view again. */
   focusSection?: { pageId: string; blockId: string; seq: number } | null;
-  /** A page just made with +: it opens with its title selected, ready to type over. */
-  freshPageId?: string | null;
 }) {
   const { user } = useAuth();
   const tree = usePageTree(spaceId, token);
@@ -948,16 +945,6 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     }
   };
 
-  const titleInput = useRef<HTMLInputElement>(null);
-  const titledPageId = useRef<string | null>(null);
-  useEffect(() => {
-    const input = titleInput.current;
-    if (!input || !page || page.pageId !== freshPageId || titledPageId.current === page.pageId) return;
-    titledPageId.current = page.pageId;
-    input.focus();
-    input.select();
-  }, [canEdit, freshPageId, page]);
-
   const renamePage = async (value: string) => {
     const title = value.trim();
     if (!spaceId || !page || !title || title === page.title) return;
@@ -971,7 +958,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
 
   // The page's name, when the document does not already open with it. Plain text: a field well would repeat the heading.
   const titleField = page && !documentOpensWithTitle(page.title, blocks, document.data?.body) ? (canEdit ? (
-    <input ref={titleInput} key={`${page.pageId}:${page.title}`} defaultValue={page.title} aria-label="Page title"
+    <input key={`${page.pageId}:${page.title}`} defaultValue={page.title} aria-label="Page title"
       data-testid="page-title" placeholder={NEW_PAGE_TITLE} onKeyDown={(event) => {
         if (isImeKeyDown(event.nativeEvent)) return;
         if (event.key === "Enter") event.currentTarget.blur();
