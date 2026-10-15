@@ -84,6 +84,39 @@ export function pageTitle(value: unknown): string {
   return value.trim();
 }
 
+/** What a page is called while its document does not open with a name. */
+export const UNNAMED_PAGE = "Untitled";
+
+/**
+ * A page's name is the top-level heading its document opens with
+ * (pages-live-document.md §4.1): one datum, kept in the document and nowhere
+ * else. `data.page_name` reads it the same way in SQL.
+ */
+export function pageNameFrom(body: string): string | null {
+  const line = body.trimStart().split("\n", 1)[0]?.trim() ?? "";
+  return /^#[ \t]+(\S.*)$/u.exec(line)?.[1]?.trim() ?? null;
+}
+
+/** A document that opens with a name: its own, or `name` above it. */
+export function namedPageBody(body: string, name: string): string {
+  if (pageNameFrom(body) !== null) return body;
+  const heading = `# ${pageTitle(name)}\n`;
+  return body.trim() ? `${heading}\n${body.replace(/^\s*\n/u, "")}` : heading;
+}
+
+/** The same document under another name: the heading it opens with is rewritten, or added. */
+export function renamedPageBody(body: string, name: string): string {
+  const heading = `# ${pageTitle(name)}`;
+  if (pageNameFrom(body) === null) return namedPageBody(body, name);
+  const start = body.length - body.trimStart().length;
+  const end = body.indexOf("\n", start);
+  return `${body.slice(0, start)}${heading}${end < 0 ? "\n" : body.slice(end)}`;
+}
+
+/** A page row joined to its head revision, whose document carries the page's name. */
+const HEAD_REVISION = `LEFT JOIN data.page_revisions r
+  ON r.space_id=p.space_id AND r.page_id=p.page_id AND r.revision=p.head_revision`;
+
 export function pageBody(value: unknown): string {
   if (typeof value !== "string") throw new PageControlError("invalid_page_body", 400, "A page body is text");
   if (utf8ByteLength(value) > MAX_BODY_BYTES) {
@@ -100,10 +133,15 @@ function pageSearchSnippet(text: string, at: number, length: number): string {
   return `${start > 0 ? "…" : ""}${slice}${end < text.length ? "…" : ""}`;
 }
 
-/** A title hit, or the section whose current text contains the query. Body wins when both match. */
+/**
+ * The section whose text contains the query, or a title hit when only the page's name does: the
+ * name is the heading its document opens with, so a match on that line is a title hit. Body wins.
+ */
 function pageSearchHit(title: string, body: string, pageId: string, query: string): PageSearchHit {
   const needle = query.toLocaleLowerCase();
-  const bodyAt = body.toLocaleLowerCase().indexOf(needle);
+  const nameLine = body.length - body.trimStart().length;
+  const afterName = pageNameFrom(body) === null ? 0 : (body.indexOf("\n", nameLine) + 1 || body.length);
+  const bodyAt = body.toLocaleLowerCase().indexOf(needle, afterName);
   if (bodyAt >= 0) {
     const blockId = pageBlockAt(body, bodyAt);
     const block = pageBlocks(body).find((item) => item.id === blockId);
@@ -144,7 +182,7 @@ export function pagePositionBetween(before: string | null, after: string | null)
 }
 
 type PageRow = QueryResultRow & {
-  page_id: string; parent_page_id: string | null; title: string; position: string;
+  page_id: string; parent_page_id: string | null; title: string | null; position: string;
   access_mode: "open" | "restricted"; head_revision: string | number; agent_suggest_only: boolean;
   updated_at: Date | string; version: string | number; published_at: Date | string | null;
   summary?: string | null; summary_revision?: string | number | null; summary_at?: Date | string | null;
@@ -288,10 +326,12 @@ type TreeRow = PageRow & AccessView & { governance: boolean };
 /** Every page in the Space with the actor's effective access, parents first. */
 async function accessibleTree(tx: DatabaseTransaction, spaceId: string, actor: Actor): Promise<TreeRow[]> {
   const rows = await tx.query<PageRow>({
-    name: "page_tree_v3",
-    text: `SELECT page_id,parent_page_id,title,position,access_mode,head_revision,
-        agent_suggest_only,updated_at,version,published_at,summary,summary_revision,summary_at
-      FROM data.pages WHERE space_id=$1 ORDER BY parent_page_id NULLS FIRST, position, page_id
+    name: "page_tree_v4",
+    text: `SELECT p.page_id,p.parent_page_id,data.page_name(r.body) AS title,p.position,p.access_mode,
+        p.head_revision,p.agent_suggest_only,p.updated_at,p.version,p.published_at,p.summary,p.summary_revision,
+        p.summary_at
+      FROM data.pages p ${HEAD_REVISION}
+      WHERE p.space_id=$1 ORDER BY p.parent_page_id NULLS FIRST, p.position, p.page_id
       LIMIT ${MAX_PAGES + 1}`,
     values: [spaceId], maxRows: MAX_PAGES + 1,
   });
@@ -389,7 +429,7 @@ export class PostgresPageRepository {
 
   private summary(row: TreeRow): PageSummary {
     return {
-      pageId: row.page_id, parentPageId: row.parent_page_id, title: row.title, position: row.position,
+      pageId: row.page_id, parentPageId: row.parent_page_id, title: row.title ?? UNNAMED_PAGE, position: row.position,
       accessMode: row.access_mode, headRevision: Number(row.head_revision),
       agentSuggestOnly: row.agent_suggest_only,
       canEdit: row.canEdit,
@@ -484,20 +524,19 @@ export class PostgresPageRepository {
       const actor = await pageActor(tx, spaceId, input.principal, false);
       const tree = await this.accessibleTree(tx, spaceId, actor);
       if (tree.length === 0) return { results: [] };
-      const rows = await tx.query<QueryResultRow & { page_id: string; title: string; body: string }>({
-        name: "page_search_heads_v1",
-        text: `SELECT p.page_id, p.title, r.body
+      const rows = await tx.query<QueryResultRow & { page_id: string; title: string | null; body: string }>({
+        name: "page_search_heads_v2",
+        text: `SELECT p.page_id, data.page_name(r.body) AS title, r.body
           FROM data.pages p
           JOIN data.page_revisions r
             ON r.space_id=p.space_id AND r.page_id=p.page_id AND r.revision=p.head_revision
-          WHERE p.space_id=$1 AND p.page_id = ANY($2::text[])
-            AND (strpos(lower(p.title), lower($3)) > 0 OR strpos(lower(r.body), lower($3)) > 0)
+          WHERE p.space_id=$1 AND p.page_id = ANY($2::text[]) AND strpos(lower(r.body), lower($3)) > 0
           ORDER BY p.updated_at DESC
           LIMIT ${PAGE_SEARCH_RESULT_LIMIT}`,
         values: [spaceId, tree.map((row) => row.page_id), query],
         maxRows: PAGE_SEARCH_RESULT_LIMIT,
       });
-      return { results: rows.map((row) => pageSearchHit(row.title, row.body ?? "", row.page_id, query)) };
+      return { results: rows.map((row) => pageSearchHit(row.title ?? UNNAMED_PAGE, row.body ?? "", row.page_id, query)) };
     });
   }
 
@@ -532,8 +571,8 @@ export class PostgresPageRepository {
     parentPageId?: string | null; title: string; body?: string; afterPageId?: string | null;
     accessMode?: "open" | "restricted" }): Promise<{ page: PageSummary }> {
     const spaceId = bounded(input.spaceId, "spaceId");
-    const newTitle = pageTitle(input.title);
-    const newBody = pageBody(input.body ?? `# ${newTitle}\n`);
+    // The name is written into the document, unless the document already opens with one of its own.
+    const newBody = pageBody(namedPageBody(input.body ?? "", input.title));
     const accessMode = input.accessMode ?? "open";
     if (accessMode !== "open" && accessMode !== "restricted") {
       throw new PageControlError("invalid_request", 400, "accessMode is open or restricted");
@@ -550,11 +589,11 @@ export class PostgresPageRepository {
       const pageId = crypto.randomUUID();
       const now = new Date().toISOString();
       await tx.query({
-        name: "page_create_v1",
-        text: `INSERT INTO data.pages (space_id,page_id,parent_page_id,title,position,access_mode,
+        name: "page_create_v2",
+        text: `INSERT INTO data.pages (space_id,page_id,parent_page_id,position,access_mode,
             head_revision,agent_suggest_only,version,created_by_user_id,created_at,updated_at)
-          VALUES ($1,$2,$3,$4,$5,$6,1,FALSE,1,$7,$8,$8)`,
-        values: [spaceId, pageId, parentPageId, newTitle, position, accessMode, actor.userId, now],
+          VALUES ($1,$2,$3,$4,$5,1,FALSE,1,$6,$7,$7)`,
+        values: [spaceId, pageId, parentPageId, position, accessMode, actor.userId, now],
         maxRows: 0,
       });
       if (accessMode === "restricted") {
@@ -1003,7 +1042,7 @@ export class PostgresPageRepository {
         const older = before && (Number(before.revision) === 1 ? canonicalPageMarkdown(before.body ?? "") : before.body ?? "");
         const { blockId, gist } = older !== undefined ? pageChangeGist(older, after) : { blockId: null, gist: null };
         const block = blockId ? pageBlocks(after).find((item) => item.id === blockId) : undefined;
-        changes.push({ pageId: page.page_id, title: page.title, revision, createdAt, authors, created,
+        changes.push({ pageId: page.page_id, title: page.title ?? UNNAMED_PAGE, revision, createdAt, authors, created,
           block: block ? { id: block.id, title: block.title } : null, gist });
       }
       changes.sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
@@ -1012,7 +1051,7 @@ export class PostgresPageRepository {
   }
 
   async update(input: { requestId: string; spaceId: string; pageId: string; principal: PagePrincipal;
-    title?: string; parentPageId?: string | null; afterPageId?: string | null;
+    parentPageId?: string | null; afterPageId?: string | null;
     accessMode?: "open" | "restricted"; agentSuggestOnly?: boolean;
     access?: Array<{ userId: string; access: "read" | "edit" }> }): Promise<{ page: PageSummary }> {
     const spaceId = bounded(input.spaceId, "spaceId");
@@ -1044,12 +1083,11 @@ export class PostgresPageRepository {
         throw new PageControlError("invalid_request", 400, "accessMode is open or restricted");
       }
       await tx.query({
-        name: "page_update_v1",
-        text: `UPDATE data.pages SET title=$3, parent_page_id=$4, position=$5, access_mode=$6,
-            agent_suggest_only=$7, version=version+1, updated_at=$8
+        name: "page_update_v2",
+        text: `UPDATE data.pages SET parent_page_id=$3, position=$4, access_mode=$5,
+            agent_suggest_only=$6, version=version+1, updated_at=$7
           WHERE space_id=$1 AND page_id=$2`,
-        values: [spaceId, pageId, input.title === undefined ? row.title : pageTitle(input.title), parent, position,
-          accessMode, input.agentSuggestOnly ?? row.agent_suggest_only, now],
+        values: [spaceId, pageId, parent, position, accessMode, input.agentSuggestOnly ?? row.agent_suggest_only, now],
         maxRows: 0,
       });
       if (input.access !== undefined) {
@@ -1376,9 +1414,10 @@ export class PostgresPageRepository {
         values: [spaceId], maxRows: 1 });
       if (!space[0]) return null;
       const pages = await tx.query<QueryResultRow & Pick<PageRow, "page_id" | "parent_page_id" | "access_mode" | "title">>({
-        name: "page_claim_pull_request_tree_v1",
-        text: `SELECT page_id,parent_page_id,access_mode,title FROM data.pages WHERE space_id=$1
-          ORDER BY page_id LIMIT ${MAX_PAGES + 1}`, values: [spaceId], maxRows: MAX_PAGES + 1 });
+        name: "page_claim_pull_request_tree_v2",
+        text: `SELECT p.page_id,p.parent_page_id,p.access_mode,data.page_name(r.body) AS title
+          FROM data.pages p ${HEAD_REVISION} WHERE p.space_id=$1
+          ORDER BY p.page_id LIMIT ${MAX_PAGES + 1}`, values: [spaceId], maxRows: MAX_PAGES + 1 });
       const page = pages.find((row) => row.page_id === pageId);
       const claim = !page || input.ownerUserId === null ? undefined
         : (await this.activeClaims(tx, spaceId, pageId, block, bounded(input.ownerUserId, "ownerUserId")))[0];
@@ -1387,7 +1426,7 @@ export class PostgresPageRepository {
           text: "UPDATE data.page_claims SET pull_request_url=$3, updated_at=now() WHERE space_id=$1 AND claim_id=$2",
           values: [spaceId, claim.claimId, pullRequestUrl], maxRows: 0 });
       }
-      return { spaceOwnerUserId: space[0].owner_user_id, pageTitle: page?.title ?? null,
+      return { spaceOwnerUserId: space[0].owner_user_id, pageTitle: page ? page.title ?? UNNAMED_PAGE : null,
         restricted: !openToEveryMember(pages, pageId), claim: claim ? { ...claim, pullRequestUrl } : null };
     });
   }
@@ -1399,17 +1438,19 @@ export class PostgresPageRepository {
     const spaceId = bounded(input.spaceId, "spaceId");
     return this.inSpace(bounded(input.requestId, "requestId"), "page.claim.complete", spaceId, async (tx) => {
       const rows = await tx.query<QueryResultRow & { page_id: string; block_id: string; conversation_id: string | null;
-        owner_user_id: string; title: string | null }>({
-        name: "page_claims_complete_v2",
+        owner_user_id: string; title: string | null; present: boolean }>({
+        name: "page_claims_complete_v3",
         text: `WITH completed AS (
             UPDATE data.page_claims SET state='completed', updated_at=now()
             WHERE space_id=$1 AND pull_request_url=$2 AND state='active'
             RETURNING page_id, block_id, conversation_id, owner_user_id)
-          SELECT c.page_id, c.block_id, c.conversation_id, c.owner_user_id, p.title
-          FROM completed c LEFT JOIN data.pages p ON p.space_id=$1 AND p.page_id=c.page_id`,
+          SELECT c.page_id, c.block_id, c.conversation_id, c.owner_user_id,
+            data.page_name(r.body) AS title, p.page_id IS NOT NULL AS present
+          FROM completed c LEFT JOIN data.pages p ON p.space_id=$1 AND p.page_id=c.page_id ${HEAD_REVISION}`,
         values: [spaceId, input.pullRequestUrl.slice(0, 500)], maxRows: MAX_LINKS,
       });
-      return { completed: rows.map((row) => ({ pageId: row.page_id, pageTitle: row.title, blockId: row.block_id,
+      return { completed: rows.map((row) => ({ pageId: row.page_id,
+        pageTitle: row.present ? row.title ?? UNNAMED_PAGE : null, blockId: row.block_id,
         conversationId: row.conversation_id, ownerUserId: row.owner_user_id })) };
     });
   }
@@ -1467,8 +1508,8 @@ export class PostgresPageRepository {
       if (!space[0]) throw new PageControlError("space_not_found", 404);
       return {
         spaceName: space[0].name,
-        pages: readable.map((row) => ({ pageId: row.page_id, parentPageId: row.parent_page_id, title: row.title,
-          position: row.position })),
+        pages: readable.map((row) => ({ pageId: row.page_id, parentPageId: row.parent_page_id,
+          title: row.title ?? UNNAMED_PAGE, position: row.position })),
         revisions: rows.map((row) => ({ pageId: row.page_id, revision: Number(row.revision), body: row.body ?? "",
           authors: revisionOf(row).authors, conversationIds: row.conversation_ids ?? [], createdAt: iso(row.created_at) })),
       };
@@ -1481,10 +1522,11 @@ export class PostgresPageRepository {
     const pageId = bounded(input.pageId, "pageId");
     return this.inSpace(bounded(input.requestId, "requestId"), "page.public.read", spaceId, async (tx) => {
       const rows = await tx.query<PageRow>({
-        name: "page_public_tree_v1",
-        text: `SELECT page_id,parent_page_id,title,position,access_mode,head_revision,
-            agent_suggest_only,updated_at,version,published_at
-          FROM data.pages WHERE space_id=$1 ORDER BY position, page_id LIMIT ${MAX_PAGES + 1}`,
+        name: "page_public_tree_v2",
+        text: `SELECT p.page_id,p.parent_page_id,data.page_name(r.body) AS title,p.position,p.access_mode,
+            p.head_revision,p.agent_suggest_only,p.updated_at,p.version,p.published_at
+          FROM data.pages p ${HEAD_REVISION}
+          WHERE p.space_id=$1 ORDER BY p.position, p.page_id LIMIT ${MAX_PAGES + 1}`,
         values: [spaceId], maxRows: MAX_PAGES + 1,
       });
       const isPublic = (row: PageRow | undefined): row is PageRow =>
@@ -1505,11 +1547,11 @@ export class PostgresPageRepository {
       const revision = head[0];
       if (!revision) throw new PageControlError("page_not_found", 404);
       return { page: {
-        spaceId, spaceName: space[0]?.name ?? "", pageId, title: row.title, body: revision.body ?? "",
+        spaceId, spaceName: space[0]?.name ?? "", pageId, title: row.title ?? UNNAMED_PAGE, body: revision.body ?? "",
         headRevision: Number(row.head_revision), updatedAt: iso(row.updated_at),
         authors: revisionOf(revision).authors.map((author) => ({ kind: author.kind, label: author.label })),
         children: rows.filter((child) => child.parent_page_id === pageId && isPublic(child))
-          .map((child) => ({ pageId: child.page_id, title: child.title })),
+          .map((child) => ({ pageId: child.page_id, title: child.title ?? UNNAMED_PAGE })),
         openToJoin: space[0]?.open_to_join === true,
       } };
     });

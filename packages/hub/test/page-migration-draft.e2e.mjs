@@ -73,7 +73,11 @@ test("a launched Agent Run drafts the move to pages and the owner applies it", a
     const moved = await worker.fetch(`${pagesRoute}/${encodeURIComponent(notes.pageId)}`, { method: "PATCH",
       headers: asRun, body: JSON.stringify({ parentPageId: null, title: "Notes" }) });
     assert.equal(moved.status, 200, await moved.clone().text());
-    assert.deepEqual([(await moved.json()).page.parentPageId, "Notes"], [null, "Notes"]);
+    const movedPage = (await moved.json()).page;
+    assert.deepEqual([movedPage.parentPageId, movedPage.title], [null, "Notes"]);
+    // A page is named by the heading its document opens with, so the rename was written there.
+    const renamed = await json(await worker.fetch(`${pagesRoute}/${encodeURIComponent(notes.pageId)}`, { headers: auth }));
+    assert.equal(renamed.page.body, "# Notes\n");
     // A retry, even by the owner, returns the first application unchanged.
     const again = await json(await worker.fetch(`${route}/apply`, { method: "POST", headers: auth,
       body: JSON.stringify({ version: reviewed.version }) }));
