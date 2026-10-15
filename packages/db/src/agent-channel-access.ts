@@ -52,8 +52,7 @@ export async function requireAgentChannelAccess(tx: DatabaseTransaction, input: 
   if (!run || !["starting", "running"].includes(String(run.status)) ||
       run.channel_id !== run.instance_channel_id || metadata?.executionKey !== proof.executionKey ||
       metadata.instanceDeletion !== undefined || metadata.instanceHandoff !== undefined ||
-      metadata.executionCancellation !== undefined ||
-      metadata.routedAs === "management_channel_about") {
+      metadata.executionCancellation !== undefined) {
     throw new AgentChannelAccessError("agent_run_forbidden", 403);
   }
   await requireRunRegistrationAccess(tx, { runId: proof.runId, channelId: String(run.channel_id),

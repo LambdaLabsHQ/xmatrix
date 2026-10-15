@@ -233,8 +233,6 @@ async function verifyAgentRunToken(token: string, env: Env): Promise<AuthUser | 
     const raw = (payload as { xmatrixAgentRun?: unknown }).xmatrixAgentRun;
     if (!raw || typeof raw !== "object") return null;
     const value = raw as Record<string, unknown>;
-    // A Channel About session's credential, minted before those Runs were retired, is no longer one.
-    if (value.runKind === "channel-about-session" || value.channelWriteAllowed === false) return null;
     const principal: AgentRunPrincipal = {
       ownerUserId: stringValue(value.ownerUserId) || "",
       agentId: stringValue(value.agentId) || "",

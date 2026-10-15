@@ -67,7 +67,6 @@ test("PostgreSQL Channel Presence keys each registered Run by its Instance", asy
   assert.doesNotMatch(query.text, /agent_profile/u);
   assert.match(query.text, /i\.status IN \('online','busy','idle'\)/u);
   assert.match(query.text, /r\.status IN \('running','stopping'\)/u);
-  assert.match(query.text, /management_channel_about/u);
   assert.match(query.text, /LIMIT 513/u);
 });
 
@@ -90,9 +89,9 @@ test("an Instance is labelled by its registration, whatever its Run was routed a
 test("live and sleeping repo Instances project the Run repository without checkout or credential leakage", async () => {
   const presence = (await loadChannelAgentPresence({ async query(input) {
     return [row({
-      instance_id: input.name === "channel_agent_presence_v9" ? "live" : "sleeping",
-      status: input.name === "channel_agent_presence_v9" ? "online" : "offline",
-      rest_state: input.name === "channel_agent_presence_v9" ? undefined : "sleeping",
+      instance_id: input.name === "channel_agent_presence_v10" ? "live" : "sleeping",
+      status: input.name === "channel_agent_presence_v10" ? "online" : "offline",
+      rest_state: input.name === "channel_agent_presence_v10" ? undefined : "sleeping",
       workspace_canonical_cwd: ".xmatrix-management/registration-123",
       run_metadata_json: { remoteRepo: "https://token:private@github.com/LambdaLabsHQ/xmatrix.git?secret=hidden" },
     })];
@@ -119,7 +118,7 @@ test("a resting Instance stays in its Channel's Presence as offline with its res
   const transaction = {
     async query(input) {
       queries.push(input);
-      if (input.name === "channel_agent_presence_v9") return [row()];
+      if (input.name === "channel_agent_presence_v10") return [row()];
       return [
         row({ instance_id: "instance-2", channel_instance_id: 7, status: "offline", rest_state: "sleeping",
           waking: false }),
@@ -186,7 +185,7 @@ test("sleeping and live catalogs keep Instance counters while discarding a legac
   const usage = { totalTokens: 7, contextUsedTokens: 3, quotaSource: "provider_api", quotaObservedAt: "2026-09-05T00:00:00Z",
     quotaUsages: [{ label: "5h", percent: 99 }] };
   const result = await loadChannelAgentPresence({ async query(input) {
-    return input.name === "channel_agent_presence_v9" ? [row({ instance_usage: usage })]
+    return input.name === "channel_agent_presence_v10" ? [row({ instance_usage: usage })]
       : [row({ instance_id: "sleeping", status: "offline", rest_state: "sleeping", instance_usage: usage })];
   } }, "space-1", ["channel-1"]);
   for (const presence of Object.values(result.get("channel-1"))) {
@@ -216,11 +215,10 @@ test("visible live agents are the channels this principal may read", async () =>
   const names = [];
   const found = await loadVisibleLiveAgentPresence({ async query(input) {
     names.push(input.name);
-    if (input.name === "visible_live_agent_channels_v1") {
+    if (input.name === "visible_live_agent_channels_v2") {
       assert.deepEqual(input.values, ["space-1", "agent", "agent-1"]);
       assert.match(input.text, /channel_member\.user_id=\$3/u);
       assert.match(input.text, /subject_kind='agent'/u);
-      assert.match(input.text, /management_channel_about/u);
       assert.match(input.text, /LIMIT 200/u);
       return [{ channel_id: "channel-1" }];
     }
@@ -228,8 +226,8 @@ test("visible live agents are the channels this principal may read", async () =>
     return [row()];
   } }, "space-1", { kind: "agent", id: "agent-1" });
   assert.deepEqual(names, [
-    "visible_live_agent_channels_v1",
-    "channel_agent_presence_v9",
+    "visible_live_agent_channels_v2",
+    "channel_agent_presence_v10",
     "channel_agent_resting_presence_v6",
   ]);
   assert.equal(found.get("channel-1")["instance-1"].instances[0].id, "instance-1");
