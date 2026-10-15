@@ -2116,7 +2116,6 @@ impl CodexAppSession {
             .and_then(|thread| thread.get("id"))
             .and_then(Value::as_str)
             .map(ToString::to_string);
-        runtime_agent_throughput::bind_thread(self.thread_id.as_deref());
         self.current_model = result
             .get("thread")
             .and_then(|thread| thread.get("model"))

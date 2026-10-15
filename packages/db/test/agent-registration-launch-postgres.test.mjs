@@ -296,11 +296,8 @@ integration("launch survives a hostname change with stale Workspace metadata and
     const coldPayload = (await sql(`SELECT spawn_payload_json FROM data.agent_launches WHERE launch_id=$1`,
       [coldLaunch.prepared[0].launchId])).rows[0].spawn_payload_json;
     assert.deepEqual(coldPayload.context.requestedParameters, { serviceTier: "future-priority" });
-    const throughput = { model: "provider/model", effort: "high", observedAt: new Date().toISOString(),
-      outputTokens: 2400, inferenceMs: 30_000, samples: 3 };
     await sql(`UPDATE data.instances SET presentation_json=$1 WHERE instance_id=$2`, [{
       model: "provider/model", parametersObservedAt: new Date().toISOString(),
-      effort: "high", usage: { throughput },
       parameters: [{ id: "serviceTier", label: "Service tier", options: ["future-priority"] }],
       modelsObservedAt: new Date().toISOString(), models: [{ model: "provider/model", description: "Observed model",
         supportedReasoningEfforts: [{ reasoningEffort: "high", description: "Thorough" }] }],
@@ -322,8 +319,6 @@ integration("launch survives a hostname change with stale Workspace metadata and
         const boundary = await sql("SELECT timeline_sequence FROM data.messages WHERE message_id=$1", ["dispatch-source"]);
         assert.equal(sourceSequence, Number(boundary.rows[0].timeline_sequence));
         assert.deepEqual(candidates[0].observations.quota, { remainingPercent: 100, assumed: true });
-        assert.deepEqual(candidates[0].observations.throughput, [throughput]);
-        assert.equal(candidates[0].parameterEffort, "high");
         assert.deepEqual(candidates[0].parameters, [{ id: "serviceTier", label: "Service tier", options: ["future-priority"] }]);
         return { key: candidates[0].key, model: "model", workspaceReference: "workspace" };
       });
@@ -351,7 +346,9 @@ integration("launch survives a hostname change with stale Workspace metadata and
     await sql(`UPDATE data.machine_daemons SET metadata_json=jsonb_build_object('machineResources',
       $1::jsonb||jsonb_build_object('connectionEpoch',connection_epoch))`, [{
       observedAt: new Date(Date.now() - 3_600_000).toISOString(), cpuLogicalCount: 8, cpuUsagePercent: 97,
-      memoryTotalBytes: 10000, memoryAvailableBytes: 100 }]);
+      memoryTotalBytes: 10000, memoryAvailableBytes: 100, network: {
+        observedAt: new Date(Date.now() - 1000).toISOString(), target: "cloudflare-speed", protocol: "https",
+        attempts: 10, failures: 0, latencyMedianMs: 20, latencyP95Ms: 30, jitterMs: 3 } }]);
     await sql(`INSERT INTO data.space_harness_profiles VALUES ('space','codex','Reviews and audits.',2,now())`);
     const routed = await launches.dispatchFromMessage({ commandId: "capability", actorUserId: "caller",
       channelId: "channel", sourceMessageId: "capability", body: capabilityBody }, async ({ candidates, tags }) => {
@@ -364,6 +361,7 @@ integration("launch survives a hostname change with stale Workspace metadata and
         assert.equal(candidates[0].observations.quota.assumed, false);
         assert.equal(candidates[0].observations.quota.source, "provider");
         assert.equal(candidates[0].observations.machineResources.cpuUsagePercent, 97);
+        assert.equal(candidates[0].observations.machineResources.network.latencyP95Ms, 30);
         assert.ok(candidates[0].observations.outstandingMachineAllocations >= 3);
         assert.deepEqual(candidates[0].modelCatalog, [{ model: "provider/model", description: "Observed model",
           efforts: [{ value: "high", description: "Thorough" }] }]);

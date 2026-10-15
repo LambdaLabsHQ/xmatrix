@@ -249,11 +249,10 @@ fn presence_message(
     patch: PresencePatch,
 ) -> protocol::AgentInstanceClientMessage {
     let PresencePatch {
-        mut presentation,
+        presentation,
         goal,
         runtime_state,
     } = patch;
-    runtime_agent_throughput::decorate(&mut presentation);
     let capabilities = relay.runtime_capabilities();
     protocol::AgentInstanceClientMessage::PresenceUpdate {
         request_id: None,
@@ -725,9 +724,6 @@ fn merge_llm_usage(
         (None, next) => next,
         (current, None) => current,
         (Some(mut current), Some(next)) => {
-            if next.throughput.is_some() {
-                current.throughput = next.throughput;
-            }
             if next.input_tokens.is_some() {
                 current.input_tokens = next.input_tokens;
             }

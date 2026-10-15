@@ -204,8 +204,6 @@ export type {
   RoutingModelOption, RoutingObservation,
 } from "./agent-routing.js";
 export { MACHINE_RESOURCE_HISTORY_RANGES } from "./machine-resource-history.js";
-export { agentThroughputObservation } from "./agent-throughput.js";
-export type { AgentThroughputObservation } from "./agent-throughput.js";
 export type {
   MachineResourceHistory, MachineResourceHistoryPoint, MachineResourceHistoryRange,
 } from "./machine-resource-history.js";
@@ -583,3 +581,4 @@ export { agentTraceOrderCursor, parseAgentTraceOrder, parseAgentTraceOrderCursor
 export { connectorActionPolicy, type ConnectorActionPolicy } from "./app-connector-policy.js";
 
 export { parseGmailWatchConfig, GMAIL_WATCH_KEYS } from "./gmail-watch-config.js";
+export { machineNetworkObservation, type MachineNetworkObservation, type NetworkTransferObservation } from "./machine-network.js";
