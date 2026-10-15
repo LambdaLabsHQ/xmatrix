@@ -939,11 +939,14 @@
   }
 
   /* Jump-target marker is a faint tint with a square-ended strip on the left
-     edge; no rounding, so it never reads as a card around the message. */
+     edge; no rounding, so it never reads as a card around the message.
+     A headed row opens with 12px but closes with 2px, so the tint closes with
+     the same 12px below its last line or card instead of touching it. */
   .xmatrix-app .message-jump-highlight {
     background: color-mix(in oklab, var(--primary) 10%, transparent);
     box-shadow: inset 3px 0 0 var(--primary);
     border-radius: 0;
+    padding-bottom: 0.625rem;
   }
 
   /* Image/video attachments stay cards rather than inheriting surrounding
