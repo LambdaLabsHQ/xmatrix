@@ -1,11 +1,8 @@
-import { PageControlError, PostgresMachineControlRepository, PostgresPageRepository } from "@xmatrix/db";
-import { MACHINE_TEXT_TASK_CAPABILITY, TEXT_TASK_HARNESSES, TEXT_TASK_INPUT_MAX_BYTES, utf8ByteLength,
-  type PageDocument } from "@xmatrix/protocol";
-import { registrationQuotaProbeTargetReader } from "./agent-routing-quota-refresh";
-import { machineDaemonCommand, machineDatabase } from "./machines";
-import { createPostgresAuthorityDatabase, createPostgresAuthorityFleet } from "./postgres-authority-fleet";
-import { POSTGRES_AUTHORITY_TIMEOUTS } from "./postgres-authority-http";
+import { PageControlError, PostgresPageRepository } from "@xmatrix/db";
+import { TEXT_TASK_INPUT_MAX_BYTES, utf8ByteLength, type PageDocument } from "@xmatrix/protocol";
+import { createPostgresAuthorityDatabase } from "./postgres-authority-fleet";
 import { POSTGRES_MESSAGE_CONNECT_TIMEOUT_MS } from "./postgres-message-database-policy";
+import { issueTextTask, textTaskMachines } from "./text-task-machines";
 import type { Env } from "./types";
 
 /**
@@ -70,24 +67,13 @@ export type PageSummaryStart = { started: true; requestId: string; revision: num
 export async function startPageSummary(env: Env, input: { spaceId: string; pageId: string; triedRevision?: number }):
   Promise<PageSummaryStart> {
   const pages = summaryPages(env);
-  const database = createPostgresAuthorityDatabase(env, { applicationName: "xmatrix-page-summary-targets",
-    connectTimeoutMs: POSTGRES_MESSAGE_CONNECT_TIMEOUT_MS, statementTimeoutMs: 5_000, transactionTimeoutMs: 10_000,
-    lockTimeoutMs: 2_000 });
-  const directory = createPostgresAuthorityFleet(env, { applicationName: "xmatrix-page-summary-targets",
-    ...POSTGRES_AUTHORITY_TIMEOUTS }).directoryDatabase;
-  const targets = (await registrationQuotaProbeTargetReader(database, directory)(input.spaceId))
-    .filter((target) => TEXT_TASK_HARNESSES.includes(target.harness));
-  const machines = new PostgresMachineControlRepository(machineDatabase(env));
-  for (const target of targets) {
-    const route = { ownerUserId: target.ownerUserId, machineId: target.machineId, hostId: target.hostId };
-    const { daemon } = await machines.getDaemon({ requestId: crypto.randomUUID(), ...route });
-    if (!daemon || daemon.status !== "online" || !daemon.capabilities.includes(MACHINE_TEXT_TASK_CAPABILITY)) continue;
+  for await (const machine of textTaskMachines(env, input.spaceId, "page-summary")) {
     // A Machine is its owner's environment. Read through the ordinary page
     // authority as that owner before disclosing any text to its harness.
     let source: PageDocument;
     try {
       ({ page: source } = await pages.read({ requestId: crypto.randomUUID(), spaceId: input.spaceId,
-        pageId: input.pageId, principal: { kind: "user", id: route.ownerUserId } }));
+        pageId: input.pageId, principal: { kind: "user", id: machine.ownerUserId } }));
     } catch (error) {
       if (error instanceof PageControlError && error.status === 404) continue;
       throw error;
@@ -96,13 +82,7 @@ export async function startPageSummary(env: Env, input: { spaceId: string; pageI
     if (input.triedRevision === source.headRevision) return { started: false, reason: "tried" };
     if (!source.body.trim()) return { started: false, reason: "empty" };
     const requestId = `page-summary:${input.spaceId}:${input.pageId}:${source.headRevision}:${crypto.randomUUID()}`;
-    await machineDaemonCommand(env, {
-      ...route, ownerEmail: daemon.email, daemonId: daemon.id,
-      commandId: `issue:${requestId}`, action: "issue", controlId: requestId, commandType: "text_task",
-      principal: { kind: "user", id: route.ownerUserId },
-      payload: { type: "machine_text_task", requestId, presetId: target.harness, instruction: INSTRUCTION,
-        input: pageSummaryInput(source.body) },
-    });
+    await issueTextTask(env, machine, { requestId, instruction: INSTRUCTION, input: pageSummaryInput(source.body) });
     return { started: true, requestId, revision: source.headRevision };
   }
   return { started: false, reason: "no_machine" };

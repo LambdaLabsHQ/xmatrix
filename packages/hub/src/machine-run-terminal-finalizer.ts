@@ -11,7 +11,7 @@ import { machineRunLifecycleReport } from "./machine-run-lifecycle-report";
 import { relayRuntimeCellsForOwners } from "./relay-authority-locator";
 import { RELAY_RUNTIME_AGENT_TRACE_TERMINATE_PATH } from "./runtime-transport/relay-runtime-product-adapter";
 import type { Env } from "./types";
-import { dispatchProductChannelAbout } from "./product-agent-mention-authority-adapter";
+import { startChannelAbout } from "./channel-about";
 
 type TerminalReportRepository = Pick<PostgresMachineRunTerminalReportRepository,
   "pruneFinalized" | "claim" | "settle">;
@@ -109,8 +109,9 @@ export function machineRunTerminalPort(env: Env): MachineRunTerminalPort {
       const failed = responses.find((response) => !response.ok);
       if (failed) throw new Error(`instance terminal notification ${failed.status}`);
     },
+    // A Channel About Run that ended with a refresh pending: the refresh is a text task now.
     async dispatchChannelAbout(followUp) {
-      return dispatchProductChannelAbout({ env, ...followUp });
+      return startChannelAbout(env, { channelId: followUp.channelId, spaceId: followUp.spaceId });
     },
   };
 }

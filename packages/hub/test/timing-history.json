@@ -260,7 +260,7 @@
       "failures": 0,
       "timeouts": 0
     },
-    "test/channel-about-session.e2e.mjs": {
+    "test/channel-about.e2e.mjs": {
       "durationMs": 8056,
       "peakRssBytes": 912640283,
       "peakFdCount": 50,

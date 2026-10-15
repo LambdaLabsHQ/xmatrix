@@ -4,17 +4,15 @@ import type { ChannelAttachment } from "@xmatrix/protocol";
 import type { HubAuthorityEnv } from "./postgres-authority-fleet";
 import { appendChannelMessage } from "./channel-messages";
 import type { Env } from "./types";
-import { decideNewConversationLaunch, dispatchRegistrationInput, prepareRegistrationHandoff,
+import { decideNewConversationLaunch, prepareRegistrationHandoff,
   prepareRegistrationReborn } from "./registration-launch-dispatch";
 import { runtimeRepository } from "./runtime";
 import { launchHandoffSuccessorElsewhere } from "./handoff-elsewhere";
 import { ControlError, RegistrationAccessError } from "@xmatrix/db";
-import { getChannel, getSpace } from "./spaces";
+import { getChannel } from "./spaces";
 import {
   orchestrateProductAgentMentions,
-  orchestrateProductChannelAbout,
   orchestrateProductNewConversationStart,
-  productSpacePreferredLanguage,
   type ProductAgentMentionPort,
   type ProductAgentMentionOrchestrationResult,
   type ProductChannelView } from "./product-agent-mention";
@@ -22,7 +20,6 @@ import { XMATRIX_SYSTEM_AVATAR_URL, XMATRIX_SYSTEM_LABEL } from "./xmatrix-syste
 import { wakeAgentLaunchCoordinator } from "./agent-launch-coordinator-wake";
 import { AgentLaunchHandoverUnavailable, wakeAgentLaunchChannel } from "./agent-launch-coordinator-wake";
 import { sha256Hex } from "@xmatrix/protocol";
-import { stopChannelAboutSessions } from "./channel-about-session-stop";
 
 export async function dispatchPreparedAgentLaunchWake(input: {
   /** One coordinator per Channel: a Launch never waits behind another Channel's. */
@@ -142,11 +139,6 @@ export function createProductAgentMentionAuthorityPort(input: {
   actorUserId: string;
   /** Stable message id used for system-notice idempotency keys. */
   sourceMessageId: string;
-  /**
-   * Runtime inbound frames already own the live session. A wake fetch back
-   * into that same isolate deadlocks; the frame delivers locally after issue.
-   */
-  skipDaemonWake?: boolean;
 }): ProductAgentMentionPort {
   /** One registration handoff under a command stable per source message, Instance and successor. */
   const handoffPrepare = (handoff: { channelId: string; sourceInstanceId: string; sourceMessageId: string;
@@ -165,16 +157,10 @@ export function createProductAgentMentionAuthorityPort(input: {
   };
 
   return {
-    launchRegistrationInput: (launch) => dispatchRegistrationInput({
-      env: input.env as Env, actorUserId: input.actorUserId, ...launch }),
     async decideFirstMessageLaunch(decision) {
       return decideNewConversationLaunch(input.env as Env, {
         commandId: `new-conversation:${decision.messageId}`.slice(0, 200), actorUserId: input.actorUserId, ...decision,
       });
-    },
-    async stopChannelAboutSessions(targets, attempt) {
-      await stopChannelAboutSessions(input.env as Parameters<typeof stopChannelAboutSessions>[0], targets,
-        "Channel About session finished its turn", attempt);
     },
     async getChannel(channelId) {
       const payload = await readOrLog("get-channel", () => getChannel(input.env, { channelId, principal }),
@@ -193,12 +179,6 @@ export function createProductAgentMentionAuthorityPort(input: {
           ? { metadata: channel.metadata as Record<string, unknown> }
           : {}),
       } satisfies ProductChannelView;
-    },
-
-    async getSpacePreferredLanguage(spaceId) {
-      const space = await readOrLog("get-space", () => getSpace(input.env, { spaceId, principal }),
-        { spaceId, sourceMessageId: input.sourceMessageId });
-      return productSpacePreferredLanguage(space?.metadata);
     },
 
     async prepareRegisteredReborn({ channelId, sourceInstanceId, sourceMessageId, sourceMention, prompt }) {
@@ -357,33 +337,5 @@ export async function dispatchProductNewConversationStart(input: {
     ...(input.authorKind ? { authorKind: input.authorKind } : {}),
     port: createProductAgentMentionAuthorityPort({
       env: input.env, actorUserId: input.actorUserId, sourceMessageId: input.messageId }),
-  });
-}
-
-export async function dispatchProductChannelAbout(input: {
-  env: ProductAgentMentionAuthorityEnv;
-  spaceId?: string;
-  channelId: string;
-  requestId: string;
-  triggerMessageId?: string;
-  successorOfRunId?: string;
-  actorUserId: string;
-  skipDaemonWake?: boolean;
-  automaticNameOnly?: boolean;
-}): Promise<ProductAgentMentionOrchestrationResult> {
-  return orchestrateProductChannelAbout({
-    ...(input.automaticNameOnly ? { automaticNameOnly: true } : {}),
-    ...(input.spaceId ? { spaceId: input.spaceId } : {}),
-    channelId: input.channelId,
-    requestId: input.requestId,
-    ...(input.triggerMessageId ? { triggerMessageId: input.triggerMessageId } : {}),
-    ...(input.successorOfRunId ? { successorOfRunId: input.successorOfRunId } : {}),
-    actorUserId: input.actorUserId,
-    port: createProductAgentMentionAuthorityPort({
-      env: input.env,
-      actorUserId: input.actorUserId,
-      sourceMessageId: input.requestId,
-      ...(input.skipDaemonWake === true ? { skipDaemonWake: true } : {}),
-    }),
   });
 }
