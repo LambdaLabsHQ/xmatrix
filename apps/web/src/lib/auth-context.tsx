@@ -15,6 +15,7 @@ import {
   verifyBetterAuthPassword,
   type WebAuthSession,
 } from "./auth-client";
+import { sameValue } from "./same-value";
 import {
   isTransientNetworkSessionError,
   isTransientAuthStatus,
@@ -131,7 +132,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const applySessionState = useCallback((next: Omit<AuthState, "loading">) => {
     setState((prev) => {
       const candidate = { ...next, loading: false };
-      return authStatesEqual(prev, candidate) ? prev : candidate;
+      return sameValue(prev, candidate) ? prev : candidate;
     });
   }, []);
 
@@ -362,22 +363,6 @@ async function loadSessionState(): Promise<Omit<AuthState, "loading">> {
 
   if (transientError) throw transientError;
   return { session: null, user: null };
-}
-
-function authStatesEqual(left: AuthState, right: AuthState): boolean {
-  return (
-    left.loading === right.loading &&
-    left.user?.id === right.user?.id &&
-    left.user?.email === right.user?.email &&
-    left.user?.name === right.user?.name &&
-    left.user?.avatarUrl === right.user?.avatarUrl &&
-    left.session?.access_token === right.session?.access_token &&
-    left.session?.refresh_token === right.session?.refresh_token &&
-    left.session?.expires_at === right.session?.expires_at &&
-    left.session?.token_type === right.session?.token_type &&
-    left.session?.user.id === right.session?.user.id &&
-    left.session?.user.email === right.session?.user.email
-  );
 }
 
 async function persistNativeSession(payload: AuthResponse): Promise<void> {

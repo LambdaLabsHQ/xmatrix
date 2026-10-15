@@ -1,4 +1,5 @@
 import type { ChannelMessage, SerializedChannel } from "@xmatrix/protocol";
+import { sameValue } from "../../lib/same-value";
 
 /** What one arrived message says about its Channel's line in the list. */
 export interface ChannelMessageArrival {
@@ -16,12 +17,6 @@ export interface ChannelMessageArrival {
 function time(value: string | undefined): number {
   const parsed = value ? Date.parse(value) : Number.NaN;
   return Number.isFinite(parsed) ? parsed : 0;
-}
-
-/** Whether two previews say the same about the same message. */
-export function samePreview(left: SerializedChannel["lastMessage"], right: SerializedChannel["lastMessage"]): boolean {
-  return left === right || Boolean(left && right && left.messageId === right.messageId &&
-    left.sentAt === right.sentAt && left.bodyPreview === right.bodyPreview && left.recalledAt === right.recalledAt);
 }
 
 /**
@@ -46,7 +41,7 @@ export function channelAfterMessage(channel: SerializedChannel, arrival: Channel
     : channel.readSequence;
   const updatedAt = time(entry.sentAt) > time(channel.updatedAt) ? entry.sentAt : channel.updatedAt;
   const newest = arrival.preview && (!channel.lastMessage || time(arrival.preview.sentAt) >= time(channel.lastMessage.sentAt));
-  const lastMessage = newest && !samePreview(arrival.preview, channel.lastMessage) ? arrival.preview : channel.lastMessage;
+  const lastMessage = newest && !sameValue(arrival.preview, channel.lastMessage) ? arrival.preview : channel.lastMessage;
   if (messageCount === channel.messageCount && historyHeadSequence === channel.historyHeadSequence &&
       readSequence === channel.readSequence && updatedAt === channel.updatedAt && lastMessage === channel.lastMessage) {
     return channel;

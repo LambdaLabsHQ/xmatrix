@@ -166,7 +166,7 @@ import {
 } from "./workspace-shell-modules";
 import { MESSAGE_SEND_FAILED_FALLBACK, type UnsentMessageAction } from "./message-unsent-notice";
 import { channelEventViews } from "./workspace-shell-presence";
-import { shareTimelineItems } from "./workspace-shell-message-model";
+import { sameValue, shareByKey } from "../../lib/same-value";
 import { useAgentRegistrationCatalog } from "./agent-capability-select";
 import { registrationSpaceCommand } from "./registration-space-command";
 import { errorFromResponse, xmatrixApiRequest, requireResponseOk, unexpectedResponse } from "@/lib/query/api-client";
@@ -422,10 +422,14 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
   const parentTimelineEvents = timelineEventViews.get(
     metadataString(s.selectedChannel?.metadata, "threadRootChannelId")) ?? NO_TIMELINE_EVENTS;
 
+  /* The timeline is rebuilt whenever a Channel or Agent presence changes, which
+     in a busy Space is many times a second. Items that say the same keep their
+     identity, so everything keyed on them (row memos, the launch query's
+     per-message key) recomputes only for messages that changed. */
   const previousTimelineRef = useRef<readonly TimelineItem[]>([]);
   const timeline = useMemo(
     () => {
-      const shared = shareTimelineItems(previousTimelineRef.current, appendOutgoingTimelineItems(
+      const shared = shareByKey(previousTimelineRef.current, appendOutgoingTimelineItems(
         buildTimeline(
           s.renderableHistory,
           s.selectedChannel,
@@ -441,7 +445,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
         renderableOutgoingMessages,
         s.selectedChannel?.id,
         s.user
-      ));
+      ), (item) => item.id);
       previousTimelineRef.current = shared;
       return shared;
     },
@@ -458,6 +462,9 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     ]
   );
 
+  // The root is rebuilt with every Channel change; while it says the same it
+  // stays the message it was, as the timeline's own items do.
+  const threadRootRef = useRef<TimelineItem | undefined>(undefined);
   const selectedThreadRootContext = useMemo(() => {
     if (!s.selectedChannel || !isThreadChannel(s.selectedChannel)) return null;
     const parentChannelId = metadataString(s.selectedChannel.metadata, "threadRootChannelId");
@@ -490,7 +497,9 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
       s.currentSpace?.members,
     );
     const message = rootTimeline[0];
-    return message ? { message, channel: parentChannel } : null;
+    if (!message) return null;
+    const held = threadRootRef.current;
+    return { message: (threadRootRef.current = held && sameValue(held, message) ? held : message), channel: parentChannel };
   }, [
     parentTimelineEvents,
     s.currentSpace?.members,

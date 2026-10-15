@@ -8,6 +8,7 @@ import { IdentityAvatar } from "@/components/dashboard/identity-avatar";
 import { formatRelativeAge } from "@/components/dashboard/time-display";
 import { avatarInitials } from "@/components/dashboard/completion-option-button";
 import { cn } from "@/lib/utils";
+import { sameValue } from "@/lib/same-value";
 import { anchorTop, layoutMargin, type MarginConversation } from "./page-margin-model";
 
 /** A card's height before it is measured. */
@@ -222,8 +223,7 @@ export function PageMargin({ conversations, tops, focusedId, openId = null, rend
     const measure = () => setHeights((current) => {
       const next = new Map<string, number>();
       for (const [id, node] of nodes.current) next.set(id, node.offsetHeight);
-      const same = next.size === current.size && [...next].every(([id, height]) => current.get(id) === height);
-      return same ? current : next;
+      return sameValue(current, next) ? current : next;
     });
     measure();
     const observer = new ResizeObserver(measure);

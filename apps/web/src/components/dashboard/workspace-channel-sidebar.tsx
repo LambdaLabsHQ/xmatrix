@@ -29,7 +29,6 @@ import { channelRowIndentPx, SIDEBAR_CHANNEL_HIGHLIGHT_ROW_CLASS_NAME } from "./
 import {
   ChannelPinState,
   type ChannelPinLookup,
-  areChannelNavItemPropsEqual,
   readStoredDesktopSidebarWidth,
   usePointerFirstSelect,
   useStableCallback,
@@ -1637,4 +1636,4 @@ export const ChannelNavItem = memo(function ChannelNavItem({
       />
     </LiquidGlassPill>
   );
-}, areChannelNavItemPropsEqual);
+});

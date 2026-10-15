@@ -33,6 +33,7 @@ import { IdentityAvatar } from "@/components/dashboard/identity-avatar";
 import { actionClass } from "@/components/ui/action-tone";
 import { noticeClass } from "@/components/ui/status-tone";
 import { cn } from "@/lib/utils";
+import { sameValue } from "../../lib/same-value";
 import {
   buildAgentChannelMessageTraceStream,
   buildAgentConversationTraceTimeline,
@@ -579,30 +580,8 @@ function AgentTraceTimeline({ rows, animateAfter }: { rows: AgentTraceRow[]; ani
   );
 }
 
-/*
- * The timeline is rebuilt as new objects on every change, so cards compare by
- * content: a step that did not change skips its (markdown) render entirely.
- */
-function sameTraceItem(
-  { item: left }: { item: AgentTraceTimelineItem },
-  { item: right }: { item: AgentTraceTimelineItem }
-): boolean {
-  return left === right || (
-    left.timestamp === right.timestamp &&
-    left.kind === right.kind &&
-    left.title === right.title &&
-    left.body === right.body &&
-    sameList(left.fields, right.fields, (a, b) => a.label === b.label && a.value === b.value) &&
-    sameList(left.blocks, right.blocks, (a, b) => a.label === b.label && a.text === b.text && a.format === b.format)
-  );
-}
-
-function sameList<T>(left: T[] | undefined, right: T[] | undefined, same: (a: T, b: T) => boolean): boolean {
-  if (left === right) return true;
-  if ((left?.length ?? 0) !== (right?.length ?? 0)) return false;
-  return (left ?? []).every((value, index) => same(value, right![index]!));
-}
-
+/* The timeline is rebuilt as new objects on every change, so cards compare by
+   content: a step that did not change skips its (markdown) render entirely. */
 const AgentTraceTimelineCard = memo(function AgentTraceTimelineCard({ item }: { item: AgentTraceTimelineItem }) {
   const Icon = agentTraceTimelineIcon(item.kind);
   const fields = item.fields || [];
@@ -669,7 +648,7 @@ const AgentTraceTimelineCard = memo(function AgentTraceTimelineCard({ item }: { 
       </div>
     </div>
   );
-}, sameTraceItem);
+}, sameValue);
 
 /** Collapsed until asked for, and mounts its content only once opened. */
 function AgentTraceDisclosure({ label, children }: { label: string; children: ReactNode }) {

@@ -6,6 +6,7 @@ import { traceEventChannelInstanceId } from "@/components/dashboard/agent-trace-
 import type { AgentTraceTarget } from "./workspace-shell-message-model";
 import { isChannelResidentInstance, isLiveAgentStatus } from "@xmatrix/protocol";
 import { formatRelativeAge } from "./time-display";
+import { sameValue } from "../../lib/same-value";
 import type {
   ChannelMemberPresence,
   ChannelHumanMemberPresence,
@@ -251,15 +252,7 @@ export function channelEventViews(
     const ownEvents = own.get(channelId);
     const view = ownEvents ? (unscoped.length ? ownEvents.concat(unscoped) : ownEvents) : unscoped;
     const before = previous.get(channelId);
-    views.set(channelId, before && sameEvents(before, view) ? before : view);
+    views.set(channelId, before && sameValue(before, view) ? before : view);
   }
   return views;
-}
-
-function sameEvents(left: readonly ObservabilityEvent[], right: readonly ObservabilityEvent[]): boolean {
-  if (left.length !== right.length) return false;
-  for (let index = 0; index < left.length; index += 1) {
-    if (left[index] !== right[index]) return false;
-  }
-  return true;
 }

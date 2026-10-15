@@ -69,26 +69,6 @@ export type MentionReadIndex = {
   byToken: Map<string, MentionReadTarget>;
 };
 
-/**
- * Whether two indexes resolve every written name to the same member, drawn
- * the same way. A Channel is replaced by each message and presence report it
- * receives; nearly all of them leave its members as they were, and the text
- * that was resolved against the index then has nothing to do again.
- */
-export function sameMentionReadIndex(left: MentionReadIndex, right: MentionReadIndex): boolean {
-  if (left === right) return true;
-  if (left.tokens.length !== right.tokens.length || left.byToken.size !== right.byToken.size) return false;
-  if (left.tokens.some((token, position) => token !== right.tokens[position])) return false;
-  for (const [token, target] of left.byToken) {
-    const other = right.byToken.get(token);
-    if (!other) return false;
-    // Every field a target has, so one added later is compared too.
-    const fields = new Set([...Object.keys(target), ...Object.keys(other)]) as Set<keyof MentionReadTarget>;
-    for (const field of fields) if (target[field] !== other[field]) return false;
-  }
-  return true;
-}
-
 /** Display names and legacy handles share one ambiguity-checked namespace. */
 export function buildMentionReadIndex(
   candidates: readonly MentionCandidate[],

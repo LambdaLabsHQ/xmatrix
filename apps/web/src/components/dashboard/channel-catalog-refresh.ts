@@ -1,7 +1,8 @@
-import { replaceEqualDeep, type InfiniteData, type QueryClient, type QueryKey } from "@tanstack/react-query";
+import type { InfiniteData, QueryClient, QueryKey } from "@tanstack/react-query";
 import type {
   ChannelCatalogPage, ChannelCatalogPageRow, ChannelCatalogResolveResult, SerializedChannel,
 } from "@xmatrix/protocol";
+import { sameValue } from "../../lib/same-value";
 
 /** Flatten an infinite catalog query's pages into one row per channel, last write winning. */
 export function rowsFromData(
@@ -37,7 +38,7 @@ export function shareCatalogRows<Data extends InfiniteData<ChannelCatalogPage, u
   const pages = next.pages.map((page) => {
     const rows = page.rows.map((row) => {
       const prior = heldRows.get(row.channel.id);
-      return prior && replaceEqualDeep(prior, row) === prior ? prior : row;
+      return prior && sameValue(prior, row) ? prior : row;
     });
     return rows.every((row, index) => row === page.rows[index]) ? page : { ...page, rows };
   });
@@ -51,10 +52,6 @@ export function shareCatalogRows<Data extends InfiniteData<ChannelCatalogPage, u
     return held;
   }
   return pages.every((page, index) => page === next.pages[index]) ? next : { ...next, pages };
-}
-
-function sameValue(before: unknown, after: unknown): boolean {
-  return replaceEqualDeep(before, after) === before;
 }
 
 /** One authorization to read a Space. Its number tells its reads from those of any other. */
