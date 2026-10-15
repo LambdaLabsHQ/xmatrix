@@ -187,7 +187,7 @@ function historyPage(rows = [], meta = {}) {
 
 test("Message history reads the fenced page in one statement of the request session", async () => {
   const db = database((query) => placement(query) ?? (
-    query.name === "message_history_page_v3"
+    query.name === "message_history_page_v4"
       ? historyPage([], { acknowledged_sequence: 4, content_revision: 9, history_head_sequence: 17 })
       : []
   ));
@@ -206,13 +206,13 @@ test("Message history reads the fenced page in one statement of the request sess
   assert.equal(db.sessionOpens, 1);
   assert.equal(db.sessionCloses, 1);
   assert.deepEqual(db.calls.filter((call) => call.name).map((call) => call.name),
-    ["space_placement_resolve_v1", "message_history_page_v3"],
+    ["space_placement_resolve_v1", "message_history_page_v4"],
     "capability, page, Thread summaries and head counters share one statement");
-  const pageContext = db.calls[db.calls.findIndex((call) => call.name === "message_history_page_v3") - 1].context;
+  const pageContext = db.calls[db.calls.findIndex((call) => call.name === "message_history_page_v4") - 1].context;
   assert.equal(pageContext.statement, "single_read");
   assert.deepEqual(pageContext.placement, { spaceId: "space-1", shardId: "shard-0", placementEpoch: 1 },
     "the single read carries the placement it must fence");
-  const page = db.calls.find((call) => call.name === "message_history_page_v3");
+  const page = db.calls.find((call) => call.name === "message_history_page_v4");
   assert.match(page.text, /authorized_channel AS MATERIALIZED/u);
   assert.match(page.text, /thread_summaries AS MATERIALIZED/u,
     "each Thread's reply count runs once, not once per history row");
@@ -224,7 +224,7 @@ test("Message history reads the fenced page in one statement of the request sess
 
 test("Message history refuses a reader without the Channel capability and reads nothing further", async () => {
   const db = database((query) => placement(query) ?? (
-    query.name === "message_history_page_v3"
+    query.name === "message_history_page_v4"
       ? [{ history_authorized: false, acknowledged_sequence: null, content_revision: null,
           history_head_sequence: null, message_id: null }]
       : []
@@ -234,7 +234,7 @@ test("Message history refuses a reader without the Channel capability and reads 
     principal: { kind: "user", id: "stranger" },
   }), (error) => error instanceof MessageAuthorityError && error.code === "channel_not_found");
   assert.deepEqual(db.calls.filter((call) => call.name).map((call) => call.name),
-    ["space_placement_resolve_v1", "message_history_page_v3"]);
+    ["space_placement_resolve_v1", "message_history_page_v4"]);
   const empty = database((query) => placement(query) ?? []);
   await assert.rejects(new PostgresMessageRepository(empty).history({
     requestId: "history-no-row", spaceId: "space-1", channelId: "channel-1",
@@ -245,7 +245,7 @@ test("Message history refuses a reader without the Channel capability and reads 
 test("Message history uses a caller-resolved placement only while it is active", async () => {
   const resolvedPlacement = { spaceId: "space-1", shardId: "shard-2", placementEpoch: 5,
     state: "active", targetShardId: null, planClass: "shared" };
-  const db = database((query) => query.name === "message_history_page_v3" ? historyPage() : []);
+  const db = database((query) => query.name === "message_history_page_v4" ? historyPage() : []);
   const input = { requestId: "history-placed", spaceId: "space-1", channelId: "channel-1",
     principal: { kind: "user", id: "user-1" }, resolvedPlacement };
   await new PostgresMessageRepository(db).history(input);
@@ -271,7 +271,7 @@ test("Message history accepts the protocol's initial afterSequence zero cursor",
     afterSequence: 0,
   });
 
-  const historyQuery = db.calls.find((call) => call.name === "message_history_page_v3");
+  const historyQuery = db.calls.find((call) => call.name === "message_history_page_v4");
   assert.deepEqual(historyQuery.values,
     ["space-1", "channel-1", null, 0, null, 51, "agent", "instance-1", 50, "agent:instance-1"]);
   assert.match(historyQuery.text, /ORDER BY timeline_sequence ASC LIMIT \$6/u);
@@ -281,7 +281,7 @@ test("Message history is a pure read, so an owner-scoped cross-Space read moves 
   // docs/cross-space-read-grants.md: a granted Agent reads history as its owner.
   // That is safe only while this read writes nothing a Human's own read would.
   const db = database((query) => placement(query) ?? (
-    query.name === "message_history_page_v3"
+    query.name === "message_history_page_v4"
       ? historyPage([], { acknowledged_sequence: 3, content_revision: 1 })
       : []
   ));
@@ -307,7 +307,7 @@ test("Message history applies the protocol's before timestamp bound", async () =
     before: "2026-09-10T00:00:00.000Z",
   });
 
-  const historyQuery = db.calls.find((call) => call.name === "message_history_page_v3");
+  const historyQuery = db.calls.find((call) => call.name === "message_history_page_v4");
   assert.deepEqual(historyQuery.values, [
     "space-1", "channel-1", null, null, "2026-09-10T00:00:00.000Z", 51,
     "agent", "instance-1", 50, "agent:instance-1",
@@ -328,7 +328,7 @@ test("Message history projects an authorized Thread summary without counting its
     ...overrides,
   });
   const db = database((query) => placement(query) ?? (
-    query.name === "message_history_page_v3"
+    query.name === "message_history_page_v4"
       ? historyPage([row({
           attachments_json: [{ id: "image-1", contentHash: "a".repeat(64) }],
           thread_channel_id: "thread-1", thread_updated_at: "2026-09-02T01:00:00.000Z", reply_count: 1,
@@ -349,7 +349,7 @@ test("Message history projects an authorized Thread summary without counting its
   assert.equal(result.messages[0].attachments[0].version, 5);
   assert.equal(result.messages[0].threadSummary.replyCount, 1);
   assert.deepEqual(result.messages[0].threadSummary.replies.map((reply) => reply.messageId), ["reply-1"]);
-  const page = db.calls.find((call) => call.name === "message_history_page_v3");
+  const page = db.calls.find((call) => call.name === "message_history_page_v4");
   assert.match(page.text, /root_copy_message_id/u);
   assert.match(page.text, /ORDER BY reply.timeline_sequence DESC LIMIT 2/u);
   assert.match(page.text, /jsonb_agg\(to_jsonb\(reply_row\) ORDER BY reply_row.timeline_sequence\)/u);
@@ -358,7 +358,7 @@ test("Message history projects an authorized Thread summary without counting its
   assert.doesNotMatch(page.text, /author_kind NOT IN \('agent','app'\)/u);
   // Only the legacy attachment edge needed a further read; it is fenced like the page.
   assert.deepEqual(db.calls.filter((call) => call.name).map((call) => call.name),
-    ["space_placement_resolve_v1", "message_history_page_v3", "message_history_attachment_versions_v1"]);
+    ["space_placement_resolve_v1", "message_history_page_v4", "message_history_attachment_versions_v1"]);
   const followUp = db.calls[db.calls.findIndex((call) => call.name === "message_history_attachment_versions_v1") - 1];
   assert.equal(followUp.context.statement, "single_read");
   assert.equal(followUp.context.placement.shardId, "shard-0");
@@ -1083,7 +1083,7 @@ test("a Run routed to the retired xMatrix management agent posts nothing", async
     principal: { kind: "agent", id: "instance-1" }, senderPrincipal: { kind: "agent", id: "instance-1" },
     runProof: { runId: "run-1", executionKey: "execution-1", instanceId: "instance-1" } }),
   error => error instanceof MessageAuthorityError && error.code === "agent_run_forbidden" &&
-    error.status === 403 && /management agent is retired/u.test(error.message));
+    error.status === 403 && /Agent Run is retired/u.test(error.message));
   assert.equal(db.calls.some((call) => /space_management_configs/u.test(call.text ?? "")), false,
     "no Space management configuration is consulted");
 });
@@ -1228,5 +1228,5 @@ function messageCommandFields() {
 }
 
 function historyDatabase() {
-  return database(query => placement(query) ?? (query.name === "message_history_page_v3" ? historyPage() : []));
+  return database(query => placement(query) ?? (query.name === "message_history_page_v4" ? historyPage() : []));
 }

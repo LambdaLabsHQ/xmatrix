@@ -99,7 +99,7 @@ test("a Run routed to the retired xMatrix management agent never connects", asyn
   await assert.rejects(port.authenticate({ type: "agent_instance_connect", token: "fixture",
     identityId: "agent", name: "Agent" }),
   error => error.failure?.code === "management_agent_retired" &&
-    /management agent is retired/u.test(error.publicMessage));
+    /Agent Run is retired/u.test(error.publicMessage));
   assert.deepEqual(transitions, []);
 });
 
