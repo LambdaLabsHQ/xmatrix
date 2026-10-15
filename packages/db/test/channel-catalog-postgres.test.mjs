@@ -694,10 +694,7 @@ integration("a registered Instance reads its Space's catalog as the Instance it 
 integration("xMatrix renames a conversation only while its name is automatic; a person's name stays", async () => {
   const { client, repository } = await seededSpaceControl();
   try {
-    await client.query(`UPDATE data.channels SET metadata_json = metadata_json || '{"autoName":true}'::jsonb
-      WHERE channel_id='child'`);
-    const current = async () => (await client.query(
-      "SELECT name, version, metadata_json FROM data.channels WHERE channel_id='child'")).rows[0];
+    const current = await autoNamedChild(client);
     const rename = async (name, automaticName) => repository.mutateChannel({
       requestId: `rename-${name}`, commandId: `rename-${name}`, kind: "channel_configure", channelId: "child",
       actorUserId: "owner", expectedVersion: Number((await current()).version), at: new Date().toISOString(),
@@ -767,10 +764,7 @@ integration("a summary records the Run that wrote it, when, and the newest messa
 integration("xMatrix writes a task's About for a member's Machine, never over a person's change or a further reading", async () => {
   const { client, repository } = await seededSpaceControl();
   try {
-    await client.query(`UPDATE data.channels SET metadata_json = metadata_json || '{"autoName":true}'::jsonb
-      WHERE channel_id='child'`);
-    const current = async () => (await client.query(
-      "SELECT name, version, metadata_json FROM data.channels WHERE channel_id='child'")).rows[0];
+    const current = await autoNamedChild(client);
     let step = 0;
     const write = async (fields, actorUserId = "user-1") => repository.mutateChannel({
       requestId: `task-${++step}`, commandId: `task-${step}`, kind: "channel_configure", channelId: "child",
@@ -814,6 +808,14 @@ integration("xMatrix writes a task's About for a member's Machine, never over a 
     await client.end();
   }
 });
+
+/** The `child` conversation, still named automatically, and a reader of its row. */
+async function autoNamedChild(client) {
+  await client.query(`UPDATE data.channels SET metadata_json = metadata_json || '{"autoName":true}'::jsonb
+    WHERE channel_id='child'`);
+  return async () => (await client.query(
+    "SELECT name, version, metadata_json FROM data.channels WHERE channel_id='child'")).rows[0];
+}
 
 async function seededSpaceControl() {
   await seed();
