@@ -644,7 +644,9 @@ export function anchorOffsets(view: EditorView, fragment: Y.XmlFragment, frame: 
     const at = anchorPosition(view.state, fragment, head);
     if (at === null) continue;
     try {
-      out.set(`client:${clientId}`, view.coordsAtPos(at).top - origin);
+      // Measured on the text before the caret where there is some: at the end of a heading, the side after it
+      // is the heading's tools, which stand elsewhere.
+      out.set(`client:${clientId}`, view.coordsAtPos(at, view.state.doc.resolve(at).parentOffset > 0 ? -1 : 1).top - origin);
     } catch {
       // As above.
     }
@@ -836,7 +838,7 @@ function remoteChangeDecorations(state: EditorState, fragment: Y.XmlFragment, aw
     // An Agent's new block is marked by the ink over its paragraph, not tinted whole as well.
     if (now - change.at >= REMOTE_CHANGE_MS || (change.node && user.kind === "agent")) continue;
     const attrs: Record<string, string> = { class: "page-remote-change", "data-client": String(change.client),
-      style: `--page-change-color: ${user.color}; animation-delay: -${Math.max(0, now - change.at)}ms`,
+      style: `--page-change-color: ${user.color}; --page-words-delay: -${Math.max(0, now - change.at)}ms`,
       ...(user.kind === "agent" ? { "data-agent": "" } : {}) };
     if (change.node) {
       appendBlockChangeDecoration(decorations, state, from, attrs);
@@ -846,7 +848,7 @@ function remoteChangeDecorations(state: EditorState, fragment: Y.XmlFragment, aw
     if (to !== null && to > from && to <= state.doc.content.size) decorations.push(Decoration.inline(from, to, attrs));
   }
   for (const [from, { to, color, client, at }] of inked) {
-    const style = `--page-change-color: ${color}${at === null ? "" : `; animation-delay: -${Math.max(0, now - at)}ms`}`;
+    const style = `--page-change-color: ${color}${at === null ? "" : `; --page-ink-delay: -${Math.max(0, now - at)}ms`}`;
     const state = at === null ? " is-writing" : "";
     decorations.push(Decoration.inline(from, to, { class: `page-agent-ink${state}`, "data-client": String(client), style }));
     // Barred in the margin in its colour too, as a change waiting on the reader is.

@@ -192,8 +192,11 @@ a.page-section-claim:hover { text-decoration: underline; }
   color: var(--muted-foreground);
 }
 .page-heading-tools button:hover { background: var(--accent); color: var(--foreground); }
+/* On a desktop they show only while the reader is there: hovering the heading, or typing in its section.
+   A page someone only reads, or watches others write, carries none. */
 .page-document :is(h1, h2, h3, h4, h5, h6):hover .page-heading-tools,
-.page-document .page-heading-current .page-heading-tools,
+.page-document.ProseMirror-focused .page-heading-current .page-heading-tools,
+.page-document .page-heading-current .page-heading-tools.is-phone,
 .page-heading-tools:focus-within { opacity: 1; pointer-events: auto; }
 /* On a phone the heading of the section the reader is in carries one quiet "⋯"; its menu names each action. */
 /* Its button stands taller than the heading's line: it hangs below the line rather than pushing aside the
@@ -506,7 +509,9 @@ html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-com
 .page-github-file-unfold:hover { color: var(--foreground); }
 .page-github-file-body .page-github-file-unfold { border-top: 0; padding: 4px 0; width: auto; }
 
-/* What someone else just wrote (§3.1): tinted in their caret's colour, fading over REMOTE_CHANGE_MS. */
+/* What someone else just wrote (§3.1): tinted in their caret's colour, fading over REMOTE_CHANGE_MS. Each
+   mark's age is its own custom property, so where marks overlap and their styles are merged into one span,
+   neither clobbers the other's timing. */
 @keyframes page-remote-change {
   0%, 40% { background-color: color-mix(in oklab, var(--page-change-color) 24%, transparent); }
   100% { background-color: transparent; }
@@ -514,32 +519,41 @@ html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-com
 .page-document .page-remote-change {
   border-radius: 2px;
   animation: page-remote-change 4s ease-out forwards;
+  animation-delay: var(--page-words-delay, 0ms);
 }
-/* An Agent co-writing live: its words come in softly as they stream, rather than popping in. */
+/* An Agent co-writing live: its words come in softly as they stream, rather than popping in; their colour
+   is the ink over their paragraph. */
 @keyframes page-agent-words-in {
   from { opacity: 0.25; }
   to { opacity: 1; }
 }
-.page-document .page-remote-change[data-agent] {
-  animation: page-remote-change 4s ease-out forwards, page-agent-words-in 0.6s ease-out both;
-}
+.page-document .page-remote-change[data-agent] { animation-name: page-agent-words-in; animation-duration: 0.6s; }
 /* The paragraph an Agent is writing, or just wrote, marked whole in its colour as a highlighter marks
    lines (as its suggestions are): steady while it writes there, held for AGENT_CHANGE_MS after its last
-   word, then fading. Its words' own tint above sits on top while they are new. */
+   word, then fading. */
 @keyframes page-agent-ink {
   0%, 80% { background-color: color-mix(in oklab, var(--page-change-color) 28%, transparent); }
   100% { background-color: transparent; }
 }
 .page-document .page-agent-ink {
-  /* Square ends: where the newest words' tint splits the paragraph into pieces, they meet without a seam. */
+  /* Square ends: where the newest words split the paragraph into pieces, they meet without a seam. */
   border-radius: 0;
   -webkit-box-decoration-break: clone;
   box-decoration-break: clone;
   animation: page-agent-ink 20s linear forwards;
+  animation-delay: var(--page-ink-delay, 0ms);
+}
+.page-document .page-agent-ink.page-remote-change[data-agent] {
+  animation: page-agent-ink 20s linear forwards, page-agent-words-in 0.6s ease-out both;
+  animation-delay: var(--page-ink-delay, 0ms), var(--page-words-delay, 0ms);
 }
 .page-document .page-agent-ink.is-writing {
   animation: none;
   background-color: color-mix(in oklab, var(--page-change-color) 28%, transparent);
+}
+.page-document .page-agent-ink.is-writing.page-remote-change[data-agent] {
+  animation: page-agent-words-in 0.6s ease-out both;
+  animation-delay: var(--page-words-delay, 0ms);
 }
 /* …and barred in the margin in its colour, as a change waiting on the reader is barred in brass. */
 @keyframes page-agent-bar {
@@ -558,16 +572,16 @@ html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-com
   background: var(--page-change-color);
   pointer-events: none;
   animation: page-agent-bar 20s linear forwards;
-  animation-delay: inherit;
+  animation-delay: var(--page-ink-delay, 0ms);
 }
 .page-document .page-agent-block.is-writing::before { animation: none; }
 /* A list item has its marker there; its ink alone says whose it is. */
 .page-document li .page-agent-block::before { content: none; }
 @media (prefers-reduced-motion: reduce) {
+  .page-document :is(.page-remote-change, .page-agent-ink) { animation-timing-function: steps(1, end); }
   .page-document .page-agent-block::before { animation-timing-function: steps(1, end); }
-  .page-document .page-remote-change { animation-timing-function: steps(1, end); }
-  .page-document .page-remote-change[data-agent] { animation: page-remote-change 4s steps(1, end) forwards; }
-  .page-document .page-agent-ink { animation-timing-function: steps(1, end); }
+  .page-document .page-remote-change[data-agent] { animation: none; }
+  .page-document .page-agent-ink.page-remote-change[data-agent] { animation: page-agent-ink 20s steps(1, end) forwards; }
 }
 
 /*
