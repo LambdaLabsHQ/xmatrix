@@ -120,22 +120,28 @@ export function playSentRowEntrance(scrollRoot: HTMLElement | null, sentRow: HTM
   if (scrollRoot) risingTimelines.get(scrollRoot)?.arrived(entrance);
 }
 
+/** Has the row's entrance last `duration` ms: its way up, then standing still. */
+function lastEntrance(entrance: Animation | null, duration: number) {
+  const effect = entrance?.effect as KeyframeEffect | null | undefined;
+  if (!entrance || !effect || entrance.playState !== "running") return;
+  const length = Math.max(SEND_RISE_MS, duration);
+  effect.setKeyframes(entranceKeyframes(length));
+  effect.updateTiming({ duration: length });
+}
+
 /**
  * Has the row's entrance end when the list's rise does, standing still after
  * its way up. The end of an animation wakes the page ahead of it and lays its
  * layers out again once it is over; ending together, the two do that once.
  */
 function endEntranceWith(entrance: Animation | null, rise: Animation, riseDuration: number) {
-  if (!entrance || entrance.playState !== "running") return;
+  if (!entrance) return;
+  // The rise starts when the compositor gets to it, which a busy page learns a
+  // few frames late; the row stands still in its place until then.
   void rise.ready.then(() => {
     const riseStart = rise.startTime === null ? NaN : Number(rise.startTime);
     const entranceStart = entrance.startTime === null ? NaN : Number(entrance.startTime);
-    if (!Number.isFinite(riseStart) || !Number.isFinite(entranceStart) || entrance.playState !== "running") return;
-    const duration = riseStart + riseDuration - entranceStart;
-    const effect = entrance.effect as KeyframeEffect | null;
-    if (!effect || duration <= SEND_RISE_MS) return;
-    effect.setKeyframes(entranceKeyframes(duration));
-    effect.updateTiming({ duration });
+    if (Number.isFinite(riseStart) && Number.isFinite(entranceStart)) lastEntrance(entrance, riseStart + riseDuration - entranceStart);
   }, () => undefined);
 }
 
@@ -235,6 +241,7 @@ export function beginTimelineSendRise(scrollRoot: HTMLElement) {
   const rest = () => {
     if (held === 0 || typeof content.animate !== "function") {
       hold(0);
+      lastEntrance(entrance, Number(entrance?.currentTime ?? 0));
       return;
     }
     const from = held;
@@ -323,6 +330,7 @@ export function beginTimelineSendRise(scrollRoot: HTMLElement) {
     scrollRoot.removeEventListener("touchmove", release);
     surface?.removeEventListener(MESSAGE_SURFACE_METRICS_EVENT, moved);
     hold(0);
+    lastEntrance(entrance, Number(entrance?.currentTime ?? 0));
     if (risingTimelines.get(scrollRoot)?.stop === stop) risingTimelines.delete(scrollRoot);
     return left;
   };
@@ -331,6 +339,11 @@ export function beginTimelineSendRise(scrollRoot: HTMLElement) {
     arrived: (rowEntrance) => {
       arrived = true;
       entrance = rowEntrance;
+      /* A busy page can take longer than the row's way up to see the layout
+         settle and the list set off. The row stands still in its place until
+         then, so the two can still end together. */
+      lastEntrance(entrance, SEND_RISE_FRESH_MS);
+      if (resting) endEntranceWith(entrance, resting.animation, resting.duration);
     },
     stop,
   });

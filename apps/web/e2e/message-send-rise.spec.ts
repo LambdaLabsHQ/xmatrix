@@ -1,5 +1,5 @@
 import { expect, test } from "./fixtures";
-import { fixtureJson } from "./in-page-api-fixtures";
+import { fixtureJson, fixtureRequests } from "./in-page-api-fixtures";
 import { paintedRowMoves, paintedRowOverlaps, paintedTimelineFrames, recordPaintedTimelineFrames } from "./painted-timeline-frames";
 import {
   E2E_CHANNEL,
@@ -133,21 +133,32 @@ function movesOfRowAbove(frames: Awaited<ReturnType<typeof paintedTimelineFrames
 
 test("the new row comes in and the list comes to rest in the same frame", async ({ page }) => {
   await openChannelRecordingRises(page);
-  await sendAndReadRises(page);
   // When each of the two animations ends, on the document's clock: the row's
   // own way up, and the list's way to rest. Ending apart, each would wake the
   // page ahead of its end and lay its layers out again once it is over.
-  const ends = () => page.evaluate(() => {
-    const list = document.querySelector(".app-message-timeline [data-timeline-rise-content]");
-    const row = Array.from(document.querySelectorAll(".app-message-timeline [data-timeline-rise-row='sent']")).at(-1);
-    const [rise] = list?.getAnimations() ?? [];
-    const [entrance] = row?.getAnimations() ?? [];
-    if (!rise?.effect || !entrance?.effect || rise.startTime === null || entrance.startTime === null) return null;
-    const end = (animation: Animation) => Number(animation.startTime) + Number(animation.effect!.getComputedTiming().endTime);
-    return Math.abs(end(rise) - end(entrance));
+  // Read in the page on every frame from before the send: the two run together
+  // for only part of a third of a second, which a busy page's round trips miss.
+  await page.evaluate(() => {
+    const aparts: number[] = [];
+    (window as unknown as { __riseEndsApart: number[] }).__riseEndsApart = aparts;
+    const read = () => {
+      const list = document.querySelector(".app-message-timeline [data-timeline-rise-content]");
+      const row = Array.from(document.querySelectorAll(".app-message-timeline [data-timeline-rise-row='sent']")).at(-1);
+      const [rise] = list?.getAnimations() ?? [];
+      const [entrance] = row?.getAnimations() ?? [];
+      if (rise?.effect && entrance?.effect && rise.startTime !== null && entrance.startTime !== null) {
+        const end = (animation: Animation) => Number(animation.startTime) + Number(animation.effect!.getComputedTiming().endTime);
+        aparts.push(Math.abs(end(rise) - end(entrance)));
+      }
+      requestAnimationFrame(read);
+    };
+    requestAnimationFrame(read);
   });
-  await expect.poll(ends).toBeLessThan(1);
+  await sendAndReadRises(page);
   await listAtRest(page);
+  const aparts = await page.evaluate(() => (window as unknown as { __riseEndsApart: number[] }).__riseEndsApart);
+  expect(aparts.length).toBeGreaterThan(0);
+  expect(aparts.at(-1)).toBeLessThan(1);
 });
 
 test("a sent message rises from the composer and lifts the rows above it", async ({ page }) => {
@@ -251,10 +262,14 @@ test("a message that comes in while the list is on its way to rest goes on from 
   await openChannelRecordingRises(page);
   const draft = page.locator("textarea.composer-textarea").first();
   await answerNextSend(page, HISTORY_LENGTH + 1, "One", 150);
-  await answerNextSend(page, HISTORY_LENGTH + 2, "Two, which is a longer message than the one before it.", 150);
   await recordPaintedTimelineFrames(page);
   await draft.fill("One");
   await draft.press("Enter");
+  /* The later answer takes over the route, so it is given once the first send
+     has its own: answered first, the first send would come back as the second
+     message, and the second send's row would fold into it as the list rests. */
+  await expect.poll(async () => (await fixtureRequests(page, `send-held-${HISTORY_LENGTH + 1}`)).length, { intervals: [16] }).toBe(1);
+  await answerNextSend(page, HISTORY_LENGTH + 2, "Two, which is a longer message than the one before it.", 150);
   await draft.fill("Two, which is a longer message than the one before it.");
   expect(await listOnItsWayToRest(page)).toBeGreaterThan(30);
   await draft.press("Enter");
