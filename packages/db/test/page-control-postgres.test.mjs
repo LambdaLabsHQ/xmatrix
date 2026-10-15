@@ -557,6 +557,36 @@ integration("claims: one holder per block, renewed by its holder, open for compe
   }
 });
 
+integration("pages: the top-level heading a page opens with is its name", async () => {
+  const { client, ids, pages, owner } = await pageTest("heading-title");
+  try {
+    const r = () => crypto.randomUUID();
+    const title = async (pageId) => (await pages.read({ requestId: r(), spaceId: ids.space, pageId,
+      principal: owner })).page.title;
+    const edit = (pageId, baseRevision, body) => pages.edit({ requestId: r(), spaceId: ids.space, pageId,
+      principal: owner, baseRevision, body });
+
+    const { page } = await pages.create({ requestId: r(), spaceId: ids.space, principal: owner, title: "Untitled" });
+    await edit(page.pageId, 1, "# 测试一下共同写作\n");
+    assert.equal(await title(page.pageId), "测试一下共同写作", "editing the heading renames the page");
+    await edit(page.pageId, 2, "Intro first.\n\n# Roadmap\n");
+    assert.equal(await title(page.pageId), "测试一下共同写作", "without an opening heading the name stays");
+
+    const { page: made } = await pages.create({ requestId: r(), spaceId: ids.space, principal: owner,
+      title: "Plans", body: "# Roadmap\n\nNext.\n" });
+    assert.equal(made.title, "Roadmap", "a page made with a heading is named by it");
+
+    // A section heading is not a name.
+    const { page: apart } = await pages.create({ requestId: r(), spaceId: ids.space, principal: owner,
+      title: "Goals", body: "## Search\n\nNext.\n" });
+    await edit(apart.pageId, 1, "## Billing\n\nLater.\n");
+    assert.equal(await title(apart.pageId), "Goals");
+  } finally {
+    await cleanup(client, ids);
+    await client.end();
+  }
+});
+
 integration("a released claim owes an update unless its conversation wrote the section while holding it", async () => {
   const { client, ids, pages, owner, agent } = await pageTest("claims-owed");
   try {
