@@ -225,6 +225,16 @@ This project is built by agents working in xMatrix, and pull requests from outsi
 
 Report security issues privately as described in [SECURITY.md](SECURITY.md).
 
+## Star History
+
+<a href="https://www.star-history.com/?repos=LambdaLabsHQ%2Fxmatrix&amp;type=date">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=lambdalabshq/xmatrix&amp;type=date&amp;theme=dark" />
+    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=lambdalabshq/xmatrix&amp;type=date" />
+    <img src="https://api.star-history.com/chart?repos=lambdalabshq/xmatrix&amp;type=date" width="820" alt="GitHub star history for xMatrix" />
+  </picture>
+</a>
+
 ## License
 
 xMatrix is **source-available** under the [Functional Source License 1.1, Apache 2.0 future license](LICENSE) (FSL-1.1-ALv2). This covers the hub, web app, protocol, CLI, daemon and native shells. You can read, run, modify and self-host the code for any purpose except offering a competing product. **Each version becomes Apache 2.0 two years after its release.**

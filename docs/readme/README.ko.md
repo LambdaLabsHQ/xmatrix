@@ -70,6 +70,16 @@ xmatrix agent add claude --space <space-id> --workspace ~/code/my-app
 - [xMatrix 개발하기](../../README.md#hack-on-xmatrix)
 - [기여 방법: pull request가 아니라 prompt request](../../README.md#contributing-prompt-requests-not-pull-requests)
 
+## 스타 기록
+
+<a href="https://www.star-history.com/?repos=LambdaLabsHQ%2Fxmatrix&amp;type=date">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=lambdalabshq/xmatrix&amp;type=date&amp;theme=dark" />
+    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=lambdalabshq/xmatrix&amp;type=date" />
+    <img src="https://api.star-history.com/chart?repos=lambdalabshq/xmatrix&amp;type=date" width="820" alt="xMatrix의 GitHub 스타 증가 기록" />
+  </picture>
+</a>
+
 ## 라이선스
 
 xMatrix는 [Functional Source License 1.1, Apache 2.0 future license](../../LICENSE)(FSL-1.1-ALv2)로 **소스가 공개**되어 있습니다. 경쟁 제품을 제공하는 경우를 제외하면 어떤 목적으로든 코드를 읽고, 실행하고, 수정하고, 직접 호스팅할 수 있습니다. **각 버전은 릴리스 2년 뒤 Apache 2.0이 됩니다.** FSL은 OSI가 승인한 오픈 소스 라이선스가 아닙니다.
