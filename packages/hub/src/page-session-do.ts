@@ -231,6 +231,16 @@ export class RelayPageSession extends DurableObject<Env> {
         else await this.session.reload(body.principal, body.redact);
         return Response.json({ ok: true });
       }
+      if (request.method === "POST" && url.pathname === "/internal/co-write-undo") {
+        const body = await request.json() as { spaceId: string; pageId: string; principal: PageSessionPrincipal;
+          conversationId: string };
+        this.bind(body.spaceId, body.pageId);
+        if (!this.ctx.getWebSockets().length) return Response.json({ outcome: "nothing" });
+        await this.ready(body.principal);
+        const outcome = this.session.loaded ? this.session.undoCoWriting(body.conversationId, body.principal.label) : "nothing";
+        if (this.session.hasPendingEdits) await this.scheduleAlarm(COMMIT_IDLE_MS);
+        return Response.json({ outcome });
+      }
       if (request.method === "GET" && url.pathname === "/internal/presence") {
         if (!this.ctx.getWebSockets().length) return Response.json({ present: [] });
         await this.ready();

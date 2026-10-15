@@ -281,8 +281,15 @@ fact is about.
   - **The session writes it** (`page-co-writer.ts`) through the same CRDT as
     everyone's typing: each piece of its answer brings its blocks to what it has
     written so far in one transaction under its own client id, so its text is
-    marked as its own, and its caret follows. Its edits commit with the
-    session's idle commit, as its own.
+    marked as its own, and its caret follows. Its words fade in as they arrive,
+    tinted in its colour like anyone's fresh change. Its edits commit with the
+    session's idle commit, as its own, from its conversation.
+  - **Taking it back.** A person who may edit the page takes back the Agent's
+    last change from its card (Undo; `POST …/co-writing/:conversationId/undo`):
+    its blocks return to what they were, and what it is still writing counts as
+    its last change and stops. A change someone has edited since stays. The
+    Agent hears at the next pause that it was taken back, and leaves it out
+    unless asked again.
   - **When it speaks.** It reads the whole page as it joins. Afterwards, each
     time people change the page and pause (1.5 s), it hears what changed, the
     changed sections only (the whole page every eighth time or after more than
@@ -296,7 +303,7 @@ fact is about.
     harness), the rest of that answer is dropped, and it hears why at the next
     pause. A quote that is not on the page, or is on it more than once, writes
     nothing and is reported back to it.
-- **Suggestions** wait on the page, from a co-writing or a suggest-only page,
+- **Suggestions** wait on a suggest-only page,
   for two weeks after the last one a person reviewed
   (`GET …/pages/:pageId/suggestions`). Each is rebased onto the text as it is
   now, so what was typed meanwhile stays, and offered one change at a time, as
@@ -703,13 +710,13 @@ Shipped:
    margin cards, the conversation docked beside the page, presence and claims
    on headings, the header's avatars, Share, History as a mode and the ⋯
    menu, with no side panel (§7).
+8. Live co-writing (§4.2) with any Agent: the session's engine (#529), the
+   runtime's bridge with start and stop and the caret's status and note
+   (#531, v1.0.427), then its words fading in and Undo; an Agent's edit while
+   it co-writes goes straight in, and suggestions are a suggest-only page's.
 
 Open:
 
-- Live co-writing (§4.2): the session side, the runtime's bridge, the page's
-  start and stop and the caret's status and note are built; next a fade-in and
-  an undo of the Agent's last change, and retiring the suggestion-based
-  co-writing and its `page_co_writing` rule.
 - Automations as live references in their section, with page access, event
   triggers and the removal of Channel-scoped Automations (§6).
 - Change events pushed to a Run when a block it read or claimed changes

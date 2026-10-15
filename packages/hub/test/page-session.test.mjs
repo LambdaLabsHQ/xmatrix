@@ -464,23 +464,6 @@ test("an edit the repository turned into a suggestion never reaches the live tex
   assert.equal(ann.text.toString(), HEAD);
 });
 
-test("an Agent co-writing with a person suggests, and the page still takes other Agents' edits", async () => {
-  const h = harness();
-  const ann = await annConnected(h);
-  const original = h.ports.commit;
-  // The repository keeps the co-writing conversation's edit as a suggestion; the page is not suggest-only.
-  h.ports.commit = async (principal, input) => principal.conversationId === "co-writing"
-    ? { revision: 9, kind: "suggestion", headRevision: 1, agentSuggestOnly: false } : original(principal, input);
-  const suggested = await h.session.submitEdit({ ...agent, conversationId: "co-writing" },
-    { baseRevision: 1, body: HEAD.replace("none", "none yet"), conversationIds: ["co-writing"] });
-  assert.equal(suggested.kind, "suggestion");
-  assert.equal(ann.text.toString(), HEAD);
-  const edited = await h.session.submitEdit(agent,
-    { baseRevision: 1, body: HEAD.replace("In progress", "Shipped"), conversationIds: [] });
-  assert.equal(edited.kind, "edit");
-  assert.match(ann.text.toString(), /Shipped/u, "an Agent working from another conversation still edits the page");
-});
-
 test("a removed page's session stores nothing once the write in flight finishes", async () => {
   const h = harness();
   const writes = h.persisted;
@@ -726,7 +709,7 @@ test("a co-writing Agent reads the page as it joins, and its words stream into t
 
   await h.session.commit();
   assert.equal(h.commits.at(-1).principal, agent.id, "its words are its own edit");
-  assert.deepEqual(h.commits.at(-1).conversationIds, [], "a co-writing conversation would make them a suggestion");
+  assert.deepEqual(h.commits.at(-1).conversationIds, ["conv-1"], "from the conversation it co-writes from");
 });
 
 test("a co-writing Agent hears what changed when people pause, and stops when someone edits what it writes", async (t) => {
@@ -757,6 +740,48 @@ test("a co-writing Agent hears what changed when people pause, and stops when so
   assert.doesNotMatch(ann.text.toString(), /after being stopped/u);
   t.mock.timers.tick(CO_WRITER_PAUSE_MS);
   assert.match(writer.turns()[2].text, /You were stopped: someone edited what you were writing\./u);
+});
+
+test("a person takes back what a co-writing Agent last wrote, and the Agent hears so", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const h = harness();
+  const ann = await annConnected(h);
+  const writer = joinCoWriter(h);
+  assert.equal(h.session.undoCoWriting("conv-1", "Ann"), "nothing", "it has written nothing yet");
+  writer.write(1, "⟦after \"none\"⟧\n- first point\n");
+  writer.done(1);
+  assert.match(ann.text.toString(), /- first point/u);
+  assert.equal(coWriterOf(ann).undo, true, "its change can be taken back");
+  assert.equal(h.session.undoCoWriting("conv-other", "Ann"), "nothing", "another conversation's Agent is not this one");
+  assert.equal(h.session.undoCoWriting("conv-1", "Ann"), "undone");
+  assert.equal(ann.text.toString(), HEAD);
+  assert.equal(coWriterOf(ann).undo, undefined, "only its last change could be taken back");
+  ann.text.insert(ann.text.length, "\nmore\n");
+  t.mock.timers.tick(CO_WRITER_PAUSE_MS);
+  assert.match(writer.turns().at(-1).text, /Ann took back your last change/u);
+});
+
+test("what a co-writing Agent is writing is taken back too, and a change someone edited since stays", async () => {
+  const h = harness();
+  const ann = await annConnected(h);
+  const writer = joinCoWriter(h);
+  writer.write(1, "⟦after \"none\"⟧\n- half a point");
+  assert.equal(h.session.undoCoWriting("conv-1", "Ann"), "undone");
+  assert.deepEqual(writer.asked.at(-1), { type: "interrupt", turn: 1 }, "it stops writing");
+  assert.equal(ann.text.toString(), HEAD);
+  writer.done(1);
+});
+
+test("a co-writing Agent's change that someone edited since is not taken back", async () => {
+  const h = harness();
+  const ann = await annConnected(h);
+  const writer = joinCoWriter(h);
+  writer.write(1, "⟦after \"none\"⟧\n- first point\n");
+  writer.done(1);
+  ann.text.insert(ann.text.toString().indexOf("first point"), "really ");
+  assert.equal(h.session.undoCoWriting("conv-1", "Ann"), "changed");
+  assert.match(ann.text.toString(), /- really first point/u);
+  assert.equal(coWriterOf(ann).undo, undefined);
 });
 
 test("a co-writing Agent keeps out of the paragraph someone is typing in, and hears what it quoted wrong", async (t) => {

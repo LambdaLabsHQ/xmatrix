@@ -46,8 +46,9 @@ export interface PageCoWriterHost {
   markdown(): string;
   /** Applies `change` as the Agent: the text it adds carries the Agent's id, and the edit is the Agent's. */
   write(change: () => void): void;
-  /** The Agent's presence on the page: what it is doing, and its caret. */
-  present(state: { activity: PageCoWriterActivity; cursor?: Y.RelativePosition | null; say?: string | null }): void;
+  /** The Agent's presence on the page: what it is doing, its caret, and whether its last change can be taken back. */
+  present(state: { activity: PageCoWriterActivity; cursor?: Y.RelativePosition | null; say?: string | null;
+    undoable: boolean }): void;
   /** The people on the page now. */
   people(): PageCoWriterPerson[];
   /** To the Agent's runtime. */
@@ -70,7 +71,12 @@ interface Action {
   written: DocNode[];
   /** The paragraph `replace` rewrites, as it read when the action started. */
   original: string;
+  /** What its blocks were before it wrote them: the paragraph `replace` rewrites, nothing for `after`. */
+  replaced: DocNode[];
 }
+
+/** Where the Agent wrote, what it wrote there, and what was there before. */
+type Written = Pick<Action, "before" | "written" | "replaced">;
 
 interface Turn {
   id: number;
@@ -142,6 +148,8 @@ export class PageCoWriter {
   private outcome: string[] = [];
   /** Its last note, shown beside its caret until it writes or notes again. */
   private note: string | null = null;
+  /** Its last finished change, which a person may take back until it writes again. */
+  private last: Written | null = null;
   private ended = false;
 
   constructor(private readonly host: PageCoWriterHost) {}
@@ -297,6 +305,8 @@ export class PageCoWriter {
     }
     this.write(turn, action, true);
     if (turn.stopped) return;
+    this.last = action.written.length || action.replaced.length ? action : null;
+    this.show({ activity: "writing" });
     this.outcome.push(action.kind === "after"
       ? `You added ${action.written.length ? `${action.written.length} block(s)` : "nothing"} after "${shortened(action.quote)}".`
       : `You replaced "${shortened(action.quote)}".`);
@@ -304,7 +314,7 @@ export class PageCoWriter {
 
   /** Finds where an action writes: the one block holding its words, and not a paragraph someone is typing in. */
   private begin(kind: PageCoWriteAction, quote: string): Action {
-    const action: Action = { kind, quote, text: "", skipped: true, before: null, written: [], original: "" };
+    const action: Action = { kind, quote, text: "", skipped: true, before: null, written: [], original: "", replaced: [] };
     const live = initProseMirrorDoc(this.host.fragment, pageSchema);
     const matches: number[] = [];
     let count = 0;
@@ -333,7 +343,10 @@ export class PageCoWriter {
     const before = kind === "after" ? blocks[at] : at > 0 ? blocks[at - 1] : null;
     const written = kind === "after" ? [] : [live.doc.child(at)];
     const original = kind === "replace" ? blockMarkdown(live.doc.child(at)) : "";
-    const started: Action = { ...action, skipped: false, before: (before ?? null) as Action["before"], written, original };
+    const started: Action = { ...action, skipped: false, before: (before ?? null) as Action["before"], written, original,
+      replaced: written };
+    // A new change is the one a person can take back.
+    this.last = null;
     // Its caret goes to where it will write, then the words follow it.
     this.note = null;
     this.show({ activity: "writing", cursor: this.caretAfter(live, at) });
@@ -341,7 +354,7 @@ export class PageCoWriter {
   }
 
   /** Where the blocks an action occupies start, or null when the block before them is gone. */
-  private region(action: Action, doc: DocNode): { from: number } | null {
+  private region(action: Pick<Action, "before">, doc: DocNode): { from: number } | null {
     if (!action.before) return { from: 0 };
     const index = this.host.fragment.toArray().indexOf(action.before);
     if (index < 0 || index >= doc.childCount) return null;
@@ -349,11 +362,41 @@ export class PageCoWriter {
   }
 
   /** The action's blocks still read as it wrote them: nobody else edited them. */
-  private intact(action: Action): boolean {
-    const live = initProseMirrorDoc(this.host.fragment, pageSchema);
+  private intact(action: Pick<Action, "before" | "written">, live = initProseMirrorDoc(this.host.fragment, pageSchema)): boolean {
     const region = this.region(action, live.doc);
     if (!region || region.from + action.written.length > live.doc.childCount) return false;
     return action.written.every((node, offset) => live.doc.child(region.from + offset).eq(node));
+  }
+
+  /**
+   * A person takes back what the Agent last wrote: the blocks return to what they were, unless
+   * someone changed them since. What it is writing now counts as its last change, and it stops.
+   */
+  undo(by: string): "undone" | "changed" | "nothing" {
+    const writing = this.active?.action;
+    const target: Written | null = writing && !writing.skipped && writing.kind !== "note" && writing.written.length
+      ? writing : this.last;
+    if (this.ended || !target) return "nothing";
+    this.last = null;
+    const live = initProseMirrorDoc(this.host.fragment, pageSchema);
+    if (!this.intact(target, live)) {
+      this.show({ activity: this.active ? "thinking" : "watching" });
+      return "changed";
+    }
+    if (target === writing) this.yieldTurn(`${by} took back what you were writing`);
+    const from = this.region(target, live.doc)!.from;
+    const children: DocNode[] = [];
+    live.doc.forEach((node, _offset, index) => {
+      if (index === from) children.push(...target.replaced);
+      if (index < from || index >= from + target.written.length) children.push(node);
+    });
+    if (from >= live.doc.childCount) children.push(...target.replaced);
+    if (!children.length) children.push(pageSchema.nodes.paragraph!.create());
+    const restored = pageSchema.topNodeType.create(live.doc.attrs, Fragment.fromArray(children));
+    this.host.write(() => updateYFragment(this.host.doc, this.host.fragment, restored, live.meta));
+    this.outcome.push(`${by} took back your last change; leave it out unless they ask again.`);
+    this.show({ activity: this.active ? "thinking" : target === writing ? "waiting" : "watching" });
+    return "undone";
   }
 
   /** Brings the action's blocks to what the Agent has written so far, as one change under its caret. */
@@ -399,7 +442,9 @@ export class PageCoWriter {
   }
 
   private show(state: { activity: PageCoWriterActivity; cursor?: Y.RelativePosition | null }): void {
-    this.host.present({ ...state, say: this.note });
+    const writing = this.active?.action;
+    this.host.present({ ...state, say: this.note,
+      undoable: this.last !== null || Boolean(writing && !writing.skipped && writing.kind !== "note" && writing.written.length) });
   }
 
   /** Someone edited where the Agent writes: it stops there, as a person would, and hears why when they pause. */
