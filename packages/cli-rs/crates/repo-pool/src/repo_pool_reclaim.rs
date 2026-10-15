@@ -246,6 +246,10 @@ fn demote_orphaned_leases(
         slot.state = SlotState::Retained;
         slot.spawn_claim_token = None;
         slot.quarantine_code = None;
+        for binding in manifest.bindings.iter_mut().filter(|binding| binding.slot_id == id && binding.state.is_some()) {
+            binding.state = Some(SlotState::Retained);
+            binding.spawn_claim_token = None;
+        }
         // Deliberately not stamped. Every other transition records when a run
         // touched the slot, and both the eviction budget and `pick_idle_pool_slot`
         // read that as recency. Stamping a correction would make the most
@@ -457,7 +461,7 @@ async fn reclaim_pool_slots_one(
                     let recorded =
                         match capture_rehydrate_record(&worktree, &binding, slot, snapshot).await {
                             Ok(record) => load_rehydrate_records(layout).and_then(|mut records| {
-                                remember_rehydrate_record(&mut records, record);
+                                remember_shared_rehydrate_records(&mut records, &manifest, record)?;
                                 save_rehydrate_records(layout, &records)
                             }),
                             Err(error) => Err(error),

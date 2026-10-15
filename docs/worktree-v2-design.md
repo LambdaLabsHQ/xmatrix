@@ -118,12 +118,13 @@ lifecycle wiring. Every eligible interactive explicit-repo launch uses it.
   only (no duplicated binding fields on the slot record). Load validates
   uniqueness and these state/binding invariants (fail-closed on contradiction):
   - **Available**: no binding; both `lastBaseRef`/`lastBaseOid` present.
-  - **Starting**: exactly one binding and one 128-bit one-shot
+  - **Starting**: at least one binding and a 128-bit one-shot
     `spawnClaimToken` required; base pair present. The daemon consumes the token
     immediately before OS spawn; it is not repo identity or a product-facing
-    capability.
-  - **Leased / Retained**: exactly one binding required; base pair present;
-    `spawnClaimToken` forbidden.
+    capability. Shared handoff bindings carry their own state/token; aggregate
+    slot state prefers Leased, then Starting, then Retained.
+  - **Leased / Retained**: at least one binding required; base pair present;
+    slot-level `spawnClaimToken` forbidden.
   - **Returning**: binding **required** (abandon in progress); base pair both
     present or both absent (no half pairs).
   - **Preparing**: binding optional (create/refresh crash window); base pair
@@ -167,7 +168,13 @@ alone):
   session binding, verifies the prior instance and repo authority, and rebinds
   the same slot/cwd. Same-machine handoff (`handoffTransfer`) also starts from
   an exact Retained binding, but the successor may use a new session key; the
-  slot is transferred without snapshot/reset/`git clean`.
+  source session stays Retained and the successor receives a separate binding
+  without snapshot/reset/`git clean`. Explicit reborn of the original Instance
+  may run alongside the successor. Releasing one reference never resets a peer
+  checkout; only the final abandon may return it to Available. Shared eviction
+  records and rehydrates every session together. Updated CLI is required to
+  read shared per-binding lifecycle fields; older exclusive manifests remain
+  supported.
 - A new or rebound slot enters **Starting**, not Leased. Before OS spawn the
   daemon writes a private provisional run sidecar containing the complete
   binding/grant authority. The daemon then proves the manifest-derived cwd,

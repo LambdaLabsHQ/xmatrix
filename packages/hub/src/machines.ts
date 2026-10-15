@@ -85,7 +85,7 @@ export const MACHINE_COMMAND_EXPECTATIONS = {
     resumeSessionKey: input.resumeSessionKey, worktreeDisposition: input.worktreeDisposition,
     repoIdentity: input.repoIdentity, repoKeyId: input.repoKeyId, slotId: input.slotId,
   }),
-  /* A reborn stop keeps the Instance; a handoff stop retires it and carries no such field. */
+  /* Continuation stops retain the Instance; legacy handoffs omitted the flag. */
   rebornStop: (controlId: string, input: Fields) => ({
     type: "machine_stop_agent", requestId: controlId,
     runId: input.runId, instanceId: input.instanceId,

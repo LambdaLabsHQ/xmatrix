@@ -127,6 +127,22 @@ fn remember_rehydrate_record(records: &mut Vec<RehydrateRecord>, record: Rehydra
     }
 }
 
+/// One checkout snapshot preserves every session sharing it. Refuse eviction
+/// if this one group cannot fit, rather than silently losing a peer's resume.
+fn remember_shared_rehydrate_records(records: &mut Vec<RehydrateRecord>, manifest: &RepoPoolManifest,
+    template: RehydrateRecord) -> Result<(), PoolError> {
+    let peers: Vec<_> = manifest.bindings.iter().filter(|binding| binding.slot_id == template.slot_id).collect();
+    if peers.len() > MAX_REHYDRATE_RECORDS {
+        return Err(PoolError::new(PoolErrorCode::InvalidBinding, "shared resume group exceeds snapshot capacity"));
+    }
+    for peer in peers {
+        let record = RehydrateRecord { session_key: peer.session_key.clone(), instance_id: peer.instance_id.clone(),
+            run_id: peer.run_id.clone(), execution_key: peer.execution_key.clone(), ..template.clone() };
+        remember_rehydrate_record(records, record);
+    }
+    Ok(())
+}
+
 /// Everything a reclaimed checkout was, read after the eviction snapshot so a
 /// dirty tree is already its snapshot commit.
 async fn capture_rehydrate_record(
@@ -287,6 +303,15 @@ pub async fn rehydrate_retained_lease_at(
         save_manifest_at(pool_root, &manifest)?;
         return Err(err);
     }
+    // Recreate the whole group atomically with the first waking session. Other
+    // sessions then rebind normally, even while that first session is running.
+    for peer in records.iter().filter(|peer| peer.slot_id == record.slot_id && peer.session_key != record.session_key) {
+        let request = LeaseRequest { session_key: peer.session_key.clone(), instance_id: peer.instance_id.clone(),
+            run_id: peer.run_id.clone(), execution_key: peer.execution_key.clone() };
+        let mut binding = BindingRecord::for_lease(&slot_id, &request);
+        binding.state = Some(SlotState::Retained);
+        manifest.bindings.push(binding);
+    }
     let spawn_claim_token = bind_new_starting_slot(
         pool_root,
         &mut manifest,
@@ -296,7 +321,7 @@ pub async fn rehydrate_retained_lease_at(
         &record.last_base_oid,
     )?;
     // The checkout is bound again; its record would only mislead a later reborn.
-    records.retain(|existing| existing.session_key != record.session_key);
+    records.retain(|existing| existing.slot_id != record.slot_id);
     save_rehydrate_records(layout, &records)?;
     Ok(LeaseResult {
         slot_id,
@@ -512,7 +537,7 @@ async fn record_lost_checkout(
     };
     validate_rehydrate_record(&record)?;
     let mut records = load_rehydrate_records(layout)?;
-    remember_rehydrate_record(&mut records, record);
+    remember_shared_rehydrate_records(&mut records, manifest, record)?;
     save_rehydrate_records(layout, &records)?;
     // Free the path for the rehydrated tree: git's entry first, then residue.
     let path_arg = path.display().to_string();

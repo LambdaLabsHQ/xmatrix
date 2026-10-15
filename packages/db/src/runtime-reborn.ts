@@ -28,11 +28,17 @@ function cancellationIdentity(value: unknown): Record<string, unknown> | null {
   // Cleanup progress is mutable evidence, not a new cancellation request.
   return { reason: cancellation.reason, requestedAt: cancellation.requestedAt };
 }
-function rejectFenced(metadata: Record<string, unknown>): void {
-  if (metadata.instanceDeletion !== undefined || metadata.instanceHandoff !== undefined) throw new RuntimeControlError(
+function rejectFenced(metadata: Record<string, unknown>, returningHandoff = false): void {
+  if (metadata.instanceDeletion !== undefined || metadata.instanceHandoff !== undefined && !returningHandoff) throw new RuntimeControlError(
     "reborn_source_fenced", 409, "Reborn predecessor was deleted, transferred or cancelled");
 }
-async function source(tx: DatabaseTransaction, instanceId: string): Promise<QueryResultRow> {
+function validateHandoffResume(previous: QueryResultRow, runId: string, instanceId: string): void {
+  const transfer = object(object(previous.metadata_json).instanceHandoff);
+  if (transfer.schemaVersion !== 1 || transfer.runId !== runId || transfer.instanceId !== instanceId) {
+    throw new RuntimeControlError("reborn_source_changed", 409, "Handoff predecessor binding changed");
+  }
+}
+async function source(tx: DatabaseTransaction, instanceId: string, returningHandoff = false): Promise<QueryResultRow> {
   const row = (await tx.query<QueryResultRow>({ name: "reborn_source_lock_v2", text: `SELECT
     instance.run_id,instance.channel_id,instance.channel_instance_id,instance.status AS instance_status,instance.rest_state,
     run.owner_user_id,run.status AS run_status,run.metadata_json,
@@ -40,7 +46,7 @@ async function source(tx: DatabaseTransaction, instanceId: string): Promise<Quer
     FROM data.instances instance JOIN data.runs run ON run.run_id=instance.run_id
     WHERE instance.instance_id=$1 FOR UPDATE OF instance,run`, values: [instanceId], maxRows: 1 }))[0];
   if (!row) throw new RuntimeControlError("not_found", 404, "Reborn predecessor not found");
-  rejectFenced(object(row.metadata_json));
+  rejectFenced(object(row.metadata_json), returningHandoff);
   return row;
 }
 
@@ -114,7 +120,7 @@ async function recordIntent(tx: DatabaseTransaction, input: { kind: Continuation
   const stopPayload = { type: "machine_stop_agent", requestId: stopControlId, runId: input.sourceRunId,
     channelId: input.channelId, executionKey: text(before.executionKey), agentId: sourceInstanceId, instanceId: sourceInstanceId,
     ...(before.resumeSessionKey ? { resumeSessionKey: text(before.resumeSessionKey) } : {}),
-    ...(input.kind !== "handoff" ? { preserveInstanceForReborn: true } : {}),
+    preserveInstanceForReborn: true,
     worktreeDisposition: "retain", reason: input.kind === "handoff" ? "Handoff requested" : "Durable reborn requested" };
   await tx.query({ name: "continuation_intent_insert_v1", text: `INSERT INTO data.agent_reborn_intents
     (intent_id,space_id,channel_id,actor_user_id,owner_user_id,source_run_id,source_instance_id,
@@ -167,7 +173,9 @@ export async function prepareReborn(tx: DatabaseTransaction, input: Record<strin
   }
   const reused = await existingIntent(tx, runId, actorUserId, sourceRunId, instanceId, instanceId);
   if (reused) return reused;
-  const previous = await source(tx, instanceId);
+  const returningHandoff = kind === "reborn" && metadata.resumeAfterHandoff === true;
+  const previous = await source(tx, instanceId, returningHandoff);
+  if (returningHandoff) validateHandoffResume(previous, sourceRunId, instanceId);
   const { before, machineId, hostId } = sourceMachineScope(previous);
   if (!sameSourceExecution(previous, { sourceRunId, channelId, machineId, hostId, run, metadata, spawn }) ||
       run.registration === undefined ||
@@ -245,13 +253,16 @@ export async function advanceReborn(tx: DatabaseTransaction, input: Record<strin
     return { entityId: intentId, state: "prepared", deferred: true };
   }
   if (row.state !== "waiting") return { entityId: intentId, state: row.state, deferred: true };
-  const previous = await source(tx, String(row.source_instance_id));
+  const successor = object(row.run_input_json);
+  const returningHandoff = successor.handoff !== true && row.kind !== "wake" &&
+    object(successor.metadata).resumeAfterHandoff === true;
+  const previous = await source(tx, String(row.source_instance_id), returningHandoff);
   if (previous.run_id !== row.source_run_id || previous.channel_id !== row.channel_id ||
       previous.owner_user_id !== row.owner_user_id) throw new RuntimeControlError(
     "reborn_source_changed", 409, "Reborn predecessor was replaced");
   const metadata = object(previous.metadata_json);
-  const successor = object(row.run_input_json);
   const spawn = object(row.spawn_payload_json);
+  if (returningHandoff) validateHandoffResume(previous, String(row.source_run_id), String(row.source_instance_id));
   // A handoff successor is a new Instance with its own session; a reborn
   // successor keeps the predecessor's Instance, slot and session.
   const handoff = successor.handoff === true;

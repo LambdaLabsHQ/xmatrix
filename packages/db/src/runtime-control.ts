@@ -1496,8 +1496,6 @@ export class PostgresRuntimeRepository {
       const runMetadata = metadata(row);
       if (runMetadata.instanceDeletion !== undefined) throw new RuntimeControlError(
         "instance_not_found", 404, "Agent Instance was deleted or is being deleted");
-      if (runMetadata.instanceHandoff !== undefined) throw new RuntimeControlError(
-        "instance_not_found", 404, "Agent Instance was already handed off");
       return { target: {
         instanceId: String(row.instance_id), instanceStatus: String(row.instance_status), channelId,
         channelInstanceId: Number(row.channel_instance_id), runId: String(row.run_id),

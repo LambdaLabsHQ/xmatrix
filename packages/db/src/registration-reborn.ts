@@ -19,6 +19,7 @@ import { commitRuntime, expireInstanceTraceAccess, runtimeChannelCapability } fr
 import { prepareReborn, prepareHandoff, advanceReborn } from "./runtime-reborn.js";
 import { naturalInstanceOrdinal, reserveNaturalKey } from "./natural-keys.js";
 import { readContinuationSource } from "./runtime-continuation-source.js";
+import { handoffResumeSource } from "./handoff-resume-source.js";
 import { currentRegistrationQuotaJoin, recordRegistrationUsageLimit, REGISTRATION_QUOTA_POOL_SQL,
   registrationQuotaReading } from "./agent-registration-quota-probe.js";
 
@@ -223,6 +224,8 @@ export class PostgresRegistrationRebornRepository extends RegistrationPreparatio
       scope: "run", channelInstanceId: Number(source.channelInstanceId), at: new Date().toISOString() })).runId;
     const executionKey = `exec:reborn:${suffix}`;
     const registration = await admitContinuation(tx, input, key, requested, model);
+    const legacyHandoff = source.handedOff && source.remoteRepo && source.repoPool
+      ? await handoffResumeSource(tx, source, input.channelId) : undefined;
     const launch = physical.environment.launch;
     // Preserve a hostname observation independently of the execution target.
     const hostId = continuationHost(source, physical);
@@ -230,6 +233,7 @@ export class PostgresRegistrationRebornRepository extends RegistrationPreparatio
       spawnControlId: `reborn:1-spawn:${suffix}`, resumeInstanceId: input.sourceInstanceId, identityKind: "instance",
       agentName: displayName, summonedByUserId: input.actorUserId,
       sourceMessageId: input.sourceMessageId, useRuntimeDefaultModel: !model, requestedRuntimeModel: model || null, modelResource: modelResource ?? null,
+      ...(source.handedOff ? { resumeAfterHandoff: true } : {}),
       ...(source.managedWorkspaceKey ? { managedWorkspaceKey: source.managedWorkspaceKey } : {}),
       ...(source.remoteRepo ? { remoteRepo: source.remoteRepo, runWorktree: true } : {}) };
     // The successor records the predecessor's Workspace columns verbatim. A
@@ -244,6 +248,7 @@ export class PostgresRegistrationRebornRepository extends RegistrationPreparatio
     const spawn = { type: "machine_spawn_agent", requestId: `reborn:1-spawn:${suffix}`, spaceId, channelId: input.channelId,
       runId, instanceId: input.sourceInstanceId, executionKey, identityId: input.sourceInstanceId,
       resumeInstanceId: input.sourceInstanceId, resume: true, resumeSessionKey: source.resumeSessionKey,
+      ...(source.handedOff && source.remoteRepo && source.repoPool ? { handoffTransfer: true, ...legacyHandoff } : {}),
       ...registrationLaunchSpawnFields(launch, key.harness),
       // The resumed Instance takes its source message as its first prompt: join
       // catch-up alone cannot deliver it to an Instance that never acknowledged
@@ -615,16 +620,14 @@ export class PostgresRegistrationRebornRepository extends RegistrationPreparatio
       registration.grantExecutionRevision, registration.policyRevision, registration.policyExecutionRevision,
       JSON.stringify(registration.requested)], maxRows: 0 });
     if (run.handoff === true) {
-      // The predecessor stopped; its directory now belongs to a new Instance,
-      // and the predecessor is fenced so nothing reborns or hands it off again.
+      // The predecessor stopped; fence its writer while keeping its identity.
       const sourceInstanceId = text(object(run.metadata).handoffSourceInstanceId);
       await tx.query({ name: "registration_handoff_instance_v1", text: `INSERT INTO data.instances
         (instance_id,run_id,channel_id,channel_instance_id,status,version,created_at,updated_at)
         VALUES ($1,$2,$3,$4,'offline',1,$5,$5)`,
       values: [instanceId, runId, channelId, Number(instance.channelInstanceId), at], maxRows: 0 });
-      const fenced = await tx.query({ name: "registration_handoff_source_fence_v2", text: HANDOFF_SOURCE_FENCE_SQL,
-      values: [instanceId, object(run.metadata).sourceMessageId ?? null, at, sourceInstanceId, channelId], maxRows: 1 });
-      if (!fenced[0]) throw new RegistrationAccessError("handoff_source_transferred", 409);
+      await this.fenceTransferredSource(tx, sourceInstanceId, instanceId,
+        channelId, object(run.metadata).sourceMessageId, at);
     } else {
       // The predecessor already stopped (the reborn intent waited for it), so the
       // Instance keeps its id and ordinal and moves to the successor Run.
@@ -648,6 +651,19 @@ export class PostgresRegistrationRebornRepository extends RegistrationPreparatio
     await commitRuntime(tx, registration.key.spaceId, { commandId: `reborn-create:${runId}`, kind: "registration_launch",
       entityId: runId, runId, instanceId, status: "starting" }, at);
     return spawnPayload;
+  }
+
+  /** Keep the transferred identity stopped and addressable. Only its writer
+   * authority is fenced; a later explicit reborn may share the directory. */
+  private async fenceTransferredSource(tx: DatabaseTransaction, sourceInstanceId: string, instanceId: string,
+    channelId: string, sourceMessageId: unknown, at: string) {
+    const fenced = await tx.query({ name: "registration_handoff_source_fence_v2", text: HANDOFF_SOURCE_FENCE_SQL,
+      values: [instanceId, sourceMessageId ?? null, at, sourceInstanceId, channelId], maxRows: 1 });
+    if (!fenced[0]) throw new RegistrationAccessError("handoff_source_transferred", 409);
+    await tx.query({ name: "registration_handoff_source_stopped_v1", text: `UPDATE data.instances
+      SET status='offline',rest_state='stopped',rest_reason=NULL,version=version+1,updated_at=$3
+      WHERE instance_id=$1 AND channel_id=$2`, values: [sourceInstanceId, channelId, at], maxRows: 0 });
+    await expireInstanceTraceAccess(tx, sourceInstanceId, at);
   }
 
   /** The predecessor's registration tuple, Workspace and session. */
@@ -679,6 +695,8 @@ export class PostgresRegistrationRebornRepository extends RegistrationPreparatio
       routedAs: typeof metadata.routedAs === "string" ? metadata.routedAs : undefined,
       agentName: typeof metadata.agentName === "string" ? metadata.agentName : undefined,
       handedOff: metadata.instanceHandoff !== undefined || metadata.instanceDeletion !== undefined,
+      handoffSuccessorInstanceId: typeof object(metadata.instanceHandoff).successorInstanceId === "string"
+        ? String(object(metadata.instanceHandoff).successorInstanceId) : undefined,
       repoPool: retainedRepoPool(metadata) };
   }
 }
