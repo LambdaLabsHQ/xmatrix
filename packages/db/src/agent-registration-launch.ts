@@ -7,7 +7,6 @@ import {
   AUTO_LAUNCH_FIELDS,
   agentPresetForLauncher,
   digestCanonicalCloneCborV1,
-  isTerminalRunStatus,
   parseSpaceAgentRegistrationKey,
   parseSpaceAgentConfiguration,
   REGISTRATION_PREPARATION_REJECTION_CODES,
