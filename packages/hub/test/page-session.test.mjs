@@ -809,9 +809,7 @@ test("a co-writing Agent hears what changed when people pause, and stops when so
 
 test("a co-writing Agent whose answer goes quiet is asked afresh, instead of the page waiting on it for good", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
-  const h = harness();
-  const ann = await annConnected(h);
-  const writer = joinCoWriter(h);
+  const { ann, writer } = await annCoWriting();
   writer.write(1, "⟦after \"none\"⟧\n- a first");
   // Its harness's turn was cancelled from the conversation and never said it ended.
   ann.text.insert(HEAD.indexOf("In progress") + "In progress".length, ", blocked");

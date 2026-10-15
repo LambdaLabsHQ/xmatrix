@@ -833,7 +833,8 @@ function remoteChangeDecorations(state: EditorState, fragment: Y.XmlFragment, aw
     const from = resolve(change.from);
     if (from === null || from >= state.doc.content.size) continue;
     if (user.kind === "agent") ink(textblockAt(state, change.node ? from + 1 : from), change.client, user.color, change.at);
-    if (now - change.at >= REMOTE_CHANGE_MS) continue;
+    // An Agent's new block is marked by the ink over its paragraph, not tinted whole as well.
+    if (now - change.at >= REMOTE_CHANGE_MS || (change.node && user.kind === "agent")) continue;
     const attrs: Record<string, string> = { class: "page-remote-change", "data-client": String(change.client),
       style: `--page-change-color: ${user.color}; animation-delay: -${Math.max(0, now - change.at)}ms`,
       ...(user.kind === "agent" ? { "data-agent": "" } : {}) };

@@ -305,21 +305,19 @@ mod tests {
     }
 
     #[test]
-    fn a_cancelled_turn_ends_the_page_turn_at_once() {
-        let channel = "c-co-write-cancelled";
-        let mut frames = bridge_for_test(channel);
-        turn_queued(channel, 5);
-        observe_trace(channel, "turn_started", &serde_json::json!({}));
-        observe_trace(channel, "assistant_delta", &serde_json::json!({ "delta": "half" }));
-        observe_trace(channel, "turn_cancelled", &serde_json::json!({}));
-        let sent: Vec<_> = std::iter::from_fn(|| frames.try_recv().ok()).map(body).collect();
-        assert_eq!(
-            sent,
-            vec![
-                serde_json::json!({ "type": "delta", "turn": 5, "text": "half" }),
-                serde_json::json!({ "type": "done", "turn": 5 }),
-            ]
-        );
-        bridges().remove(channel);
+    fn a_turn_stopped_from_the_conversation_ends_the_page_turn_at_once() {
+        for (turn, phase) in [(5, "turn_interrupted"), (6, "turn_cancelled")] {
+            let channel = format!("c-co-write-{phase}");
+            let mut frames = bridge_for_test(&channel);
+            turn_queued(&channel, turn);
+            observe_trace(&channel, "turn_started", &serde_json::json!({}));
+            observe_trace(&channel, phase, &serde_json::json!({}));
+            assert_eq!(
+                frames.try_recv().ok().map(body),
+                Some(serde_json::json!({ "type": "done", "turn": turn })),
+                "{phase} ends the page's turn"
+            );
+            bridges().remove(&channel);
+        }
     }
 }

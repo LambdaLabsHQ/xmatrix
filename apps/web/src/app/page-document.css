@@ -561,7 +561,8 @@ html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-com
   animation-delay: inherit;
 }
 .page-document .page-agent-block.is-writing::before { animation: none; }
-.page-document li > .page-agent-block::before { left: calc(-1.3em - 14px); }
+/* A list item has its marker there; its ink alone says whose it is. */
+.page-document li .page-agent-block::before { content: none; }
 @media (prefers-reduced-motion: reduce) {
   .page-document .page-agent-block::before { animation-timing-function: steps(1, end); }
   .page-document .page-remote-change { animation-timing-function: steps(1, end); }
