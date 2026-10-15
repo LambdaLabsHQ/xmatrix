@@ -405,6 +405,26 @@ html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-com
   background: currentColor;
   pointer-events: none;
 }
+/* An Agent co-writing live keeps its name and what it is doing in view, and its note below the line. */
+.ProseMirror-yjs-cursor[data-live] > div { opacity: 1; animation: none; }
+.ProseMirror-yjs-cursor > .page-cursor-note {
+  position: absolute;
+  top: 1.5em;
+  left: -2px;
+  z-index: 1;
+  width: max-content;
+  max-width: 18rem;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: color-mix(in oklab, currentColor 12%, var(--background));
+  color: var(--foreground);
+  font-size: 12px;
+  font-weight: 400;
+  font-style: normal;
+  line-height: 1.4;
+  white-space: normal;
+  user-select: none;
+}
 /* Someone idle, or an Agent whose Run is not working: its caret stays where it was, dimmed. */
 .ProseMirror-yjs-cursor.is-idle { opacity: 0.45; }
 .ProseMirror-yjs-cursor:hover > div { opacity: 1; animation: none; }

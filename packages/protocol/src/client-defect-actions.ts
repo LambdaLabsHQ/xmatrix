@@ -114,6 +114,7 @@ const CLIENT_DEFECT_ACTIONS = [
   "Couldn't start drafting pages",
   "Couldn't start the Agent",
   "Couldn't start the conversation",
+  "Couldn't stop the Agent",
   "Couldn't switch environments",
   "Couldn't update member permissions",
   "Couldn't update the Automation",

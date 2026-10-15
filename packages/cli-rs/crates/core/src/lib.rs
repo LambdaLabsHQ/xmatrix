@@ -26,6 +26,7 @@ pub mod local_http_response;
 pub mod machine_daemon_connection;
 pub mod machine_naming;
 pub mod message_interaction;
+pub mod page_co_write;
 pub mod presentation_barrier;
 pub mod profile;
 pub mod protocol;

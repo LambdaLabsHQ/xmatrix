@@ -1059,10 +1059,9 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     writers.choose(harness);
     const section = blockId ? blocks.find((block) => block.id === blockId)?.title ?? null : null;
     const where = `page:${page.pageId}${blockId ? ` (section #${blockId})` : ""}`;
-    const firstMessage = `@${harness} launch:force Co-write ${where} with me. Read it with \`xmatrix page read\`, ` +
-      "decide what it most needs, and write that with `xmatrix page edit`, a section at a time, each against a " +
-      "fresh read. Your edits arrive as suggestions I take or leave one by one; when you have none left, say here " +
-      "in a line what you suggested.";
+    // The page itself tells the Agent what it needs, live, as turns its runtime hands it (§4.2).
+    const firstMessage = `@${harness} launch:force You're co-writing ${where} with me live. The page sends you ` +
+      "what changed as I write, and you answer there, in the page; nothing to do here until it does.";
     try {
       const conversationId = await onDiscuss({ spaceId, pageId: page.pageId, blockId: blockId ?? "", restricted,
         name: `Co-writing ${section ? `${page.title} › ${section}` : page.title}`, firstMessage, open: false,
@@ -1424,7 +1423,12 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
                 doing: tapped.detail } : null}
               onStart={(harness) => { setDialog(null); void coWrite(harness, null); }}
               onOpenConversation={tapped?.conversationId
-                ? () => { setDialog(null); openConversation(tapped.conversationId!); } : null} />
+                ? () => { setDialog(null); openConversation(tapped.conversationId!); } : null}
+              onStop={tapped?.conversationId && canEdit ? () => {
+                setDialog(null);
+                void pageApi.endCoWriting(spaceId ?? "", page.pageId, token, tapped.conversationId!)
+                  .catch((cause: unknown) => setNotice(userErrorMessage(cause, "Couldn't stop the Agent")));
+              } : null} />
           )}
           <DeletePageDialog open={dialog === "delete"} title={page.title} hasChildren={hasChildren}
             onClose={() => setDialog(null)} onDelete={removePage} />

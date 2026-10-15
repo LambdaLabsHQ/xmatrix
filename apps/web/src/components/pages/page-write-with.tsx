@@ -19,12 +19,14 @@ export interface WritingAgent { name: string; avatarUrl?: string; doing: string 
  * starting is one tap on the face of the Agent to write with, and the Agent infers the rest from the
  * page. Tapping an Agent already on the page shows what it is doing, and the conversation it works from.
  */
-export function PageWriteWith({ agents, working, onStart, onOpenConversation, onClose }: {
+export function PageWriteWith({ agents, working, onStart, onOpenConversation, onStop, onClose }: {
   agents: readonly WriteAgent[];
   /** The Agent tapped on the page, or null to choose one to start with. */
   working: WritingAgent | null;
   onStart: (harness: string) => void;
   onOpenConversation: (() => void) | null;
+  /** Ends its co-writing: it leaves the page. */
+  onStop?: (() => void) | null;
   onClose: () => void;
 }) {
   const panel = useRef<HTMLDivElement>(null);
@@ -49,6 +51,11 @@ export function PageWriteWith({ agents, working, onStart, onOpenConversation, on
             {onOpenConversation && (
               <button type="button" onClick={onOpenConversation} className={actionClass({ variant: "secondary", size: "md" })}>
                 Conversation
+              </button>
+            )}
+            {onStop && (
+              <button type="button" onClick={onStop} className={actionClass({ variant: "secondary", size: "md" })}>
+                Stop
               </button>
             )}
           </div>

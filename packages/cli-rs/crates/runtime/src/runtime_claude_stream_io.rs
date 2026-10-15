@@ -23,6 +23,7 @@ use crate::runtime_channel_activity::{
     publish_effects, publish_intent,
 };
 use crate::runtime_claude_messages::claude_assistant_delta_for_message;
+use crate::runtime_claude_messages::claude_partial_assistant_delta;
 use crate::runtime_claude_messages::claude_assistant_text;
 use crate::runtime_claude_messages::claude_frame_is_subagent;
 use crate::runtime_claude_messages::claude_init_details;
@@ -1245,11 +1246,20 @@ pub(crate) fn claude_result_answer(value: &Value, visible_assistant_text: &str) 
     (answer, true)
 }
 
+/// Partial text waits for this much, or this long, before it is reported.
+const CLAUDE_PARTIAL_FLUSH_BYTES: usize = 160;
+const CLAUDE_PARTIAL_FLUSH_MS: u64 = 400;
+
 #[derive(Default)]
 pub(crate) struct ClaudeStreamTraceState {
     pub(crate) visible_assistant_text: String,
     pub(crate) current_message_text: String,
     pub(crate) last_message_id: Option<String>,
+    /// The message partial `stream_event`s are writing.
+    pub(crate) partial_message_id: Option<String>,
+    /// Partial text not reported yet, and when some last was.
+    partial_buffer: String,
+    partial_reported: Option<Instant>,
     seen_tool_uses: HashSet<String>,
     seen_tool_results: HashSet<String>,
     /// Bash commands that create pull requests, by tool use id, until their result.
@@ -1376,6 +1386,31 @@ pub(crate) async fn publish_claude_stream_trace(
         )
         .await;
         return;
+    }
+    // Partial text is reported in pieces, as Codex's is, rather than per token.
+    let partial = value.get("type").and_then(Value::as_str) == Some("stream_event");
+    if partial {
+        let delta = claude_partial_assistant_delta(state, value);
+        state.partial_buffer.push_str(&delta);
+    }
+    let due = state.partial_buffer.len() >= CLAUDE_PARTIAL_FLUSH_BYTES
+        || state
+            .partial_reported
+            .is_none_or(|at| at.elapsed() >= std::time::Duration::from_millis(CLAUDE_PARTIAL_FLUSH_MS));
+    if !state.partial_buffer.is_empty() && (!partial || due) {
+        let delta = std::mem::take(&mut state.partial_buffer);
+        state.partial_reported = Some(Instant::now());
+        send_llm_trace_with_source(
+            relay,
+            channel_id,
+            "assistant_delta",
+            "claude_code",
+            agent,
+            None,
+            None,
+            serde_json::json!({ "delta": delta, "messageId": state.partial_message_id }),
+        )
+        .await;
     }
     match value.get("type").and_then(Value::as_str) {
         Some("assistant") => {
