@@ -20,6 +20,18 @@ text; older native builds still report their legacy untyped failures until updat
 See [StoreKit errors](https://developer.apple.com/documentation/storekit/storekiterror)
 and [Apple's error handling guidance](https://developer.apple.com/documentation/storekit/handling-errors).
 
+## Organization seats
+
+An organization can buy App Store Pro seats through Apple Business Manager or Apple School Manager (Volume Purchasing) and assign them to its people. Each person's seat arrives as their own transaction with `inAppOwnershipType` `ASSIGNED` and no `appAccountToken`. Restore sends it to the Space's reconcile route like any other.
+
+- `control.apple_assigned_seats` binds each assigned transaction for good to the first xMatrix user who restores it.
+- The Hub asks Apple's Get Customer Groups for the seat's `ORGANIZATION` group. `control.apple_seat_groups` binds that group to the Space its first seat was restored from; the restorer must own that Space, and it must not already have a paid plan.
+- The group's Space holds one Apple subscription, `apple:<environment>:org:<groupId>`, whose seats are the group's active, unexpired assigned seats (1 to 99). A later member who restores is added to that Space as a member after its seats are updated.
+- Notifications for an assigned seat refresh it by transaction and recount the group; an older signature never replaces a newer one, and a seat no one has restored is not counted.
+- Get Customer Groups is sandbox-only at first. When Apple names no organization group, the seat counts toward a group of its own restorer (`user:<userId>`), so it still grants Pro in the Space it was restored from.
+
+Group membership decides where people meet; the signed transaction alone decides entitlement.
+
 ## Production configuration
 
 Store `APPLE_SUBSCRIPTIONS_CONFIG` as a GitHub **production environment Secret**. The gated Hub release validates it and transfers it to the Worker through the existing secret deployment path. It is private JSON containing:

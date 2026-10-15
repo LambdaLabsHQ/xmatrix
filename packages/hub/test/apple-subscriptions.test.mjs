@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { generateKeyPairSync } from "node:crypto";
 import test from "node:test";
-import { appleSubscriptionConfig, AppleBillingError, subscriptionFact, appleBillingFact, retrieveAppleSubscription, verifyAppleNotification } from "../src/apple/subscriptions.ts";
+import { appleSubscriptionConfig, AppleBillingError, subscriptionFact, appleBillingFact, appleOrganizationGroup, appleSeatGroupFact, retrieveAppleSubscription, verifyAppleNotification } from "../src/apple/subscriptions.ts";
 
 const privateKey = generateKeyPairSync("ec", { namedCurve: "prime256v1" }).privateKey.export({ type: "pkcs8", format: "pem" });
 const config = { keyId: "TESTKEY000", issuerId: "00000000-0000-4000-8000-000000000001", privateKey,
@@ -55,7 +55,7 @@ test("expiry, refunds, retry and grace use Apple facts, not the client's success
 
 test("bundle, product, environment, account binding and ownership are checked", () => {
   for (const changed of [{ bundleId: "another.app" }, { environment: "Sandbox" }, { productId: "other" },
-    { inAppOwnershipType: "FAMILY_SHARED" }, { inAppOwnershipType: "ASSIGNED" }, { appAccountToken: "not-a-uuid" }, { originalTransactionId: "../other" },
+    { inAppOwnershipType: "FAMILY_SHARED" }, { appAccountToken: "not-a-uuid" }, { originalTransactionId: "../other" },
     { signedDate: now + 3600_000 }, { expiresDate: undefined }]) {
     assert.throws(() => subscriptionFact(config, "Production", 1, { ...transaction, ...changed }, renewal));
   }
@@ -108,4 +108,38 @@ test("signing failures are distinguished from transport failures without reflect
     throw new Error("private sentinel");
   }), (error) => error.code === "apple_request_failed" && error.retryable && !error.message.includes("sentinel"));
   assert.equal(transportCalls, 1);
+});
+
+test("an organization's assigned seat is verified without an account token and only counts with its group", () => {
+  const assigned = subscriptionFact(config, "Production", 1, { ...transaction, inAppOwnershipType: "ASSIGNED", appAccountToken: undefined }, renewal);
+  assert.equal(assigned.assigned, true);
+  assert.equal(assigned.appAccountToken, "");
+  assert.equal(subscriptionFact(config, "Production", 1, transaction, renewal).assigned, false);
+  assert.throws(() => appleBillingFact(assigned, { spaceId: "space", ownerUserId: "owner" }), { code: "invalid_apple_transaction" });
+  const group = { groupKey: "org:900000000000000000", spaceId: "space", ownerUserId: "owner", holderRole: null,
+    activeSeats: 4, productId: config.annualProductId, periodEnd: new Date(now + 3600_000).toISOString() };
+  assert.deepEqual(appleSeatGroupFact("Production", group), { billingProvider: "apple", id: "apple:Production:org:900000000000000000",
+    customerId: "org:900000000000000000", priceId: config.annualProductId, status: "active", quantity: 4,
+    currentPeriodEnd: group.periodEnd, cancelAtPeriodEnd: false, spaceId: "space", billingOwnerUserId: "owner" });
+  const lapsed = appleSeatGroupFact("Production", { ...group, activeSeats: 0 });
+  assert.equal(lapsed.status, "canceled");
+  assert.equal(lapsed.quantity, 1, "a group with no seats left still names one seat, as every fact must");
+  assert.equal(appleSeatGroupFact("Production", { ...group, activeSeats: 250 }).quantity, 99);
+});
+
+test("the organization group comes from Apple's customer groups, and Apple not naming one is no error", async () => {
+  const answer = (body, status = 200) => async (url, init) => {
+    assert.equal(url, "https://api.storekit-sandbox.apple.com/groups/v1/currentGroups/101");
+    assert.equal(init.redirect, "manual");
+    assert.match(init.headers.authorization, /^Bearer eyJ/);
+    return new Response(typeof body === "string" ? body : JSON.stringify(body), { status });
+  };
+  const placeholder = { groups: [{ groupId: "900000000000000000", groupType: "ORGANIZATION",
+    roles: [{ productId: config.monthlyProductId, role: "ADMIN" }] }] };
+  assert.equal(await appleOrganizationGroup(config, "Sandbox", "101", answer(placeholder)), "900000000000000000");
+  assert.equal(await appleOrganizationGroup(config, "Sandbox", "101", answer({ groups: [{ groupId: "7", groupType: "CONSUMER" }] })), null);
+  assert.equal(await appleOrganizationGroup(config, "Sandbox", "101", answer({ groups: [] })), null);
+  assert.equal(await appleOrganizationGroup(config, "Sandbox", "101", answer("not found", 404)), null);
+  assert.equal(await appleOrganizationGroup(config, "Sandbox", "101", answer({ groups: [{ groupId: "../x", groupType: "ORGANIZATION" }] })), null);
+  assert.equal(await appleOrganizationGroup(config, "Sandbox", "../101", async () => { throw new Error("must not fetch"); }), null);
 });

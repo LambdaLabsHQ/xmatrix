@@ -2,7 +2,7 @@ import { parseAppleSubscriptionConfig, type AppleSubscriptionConfig } from "@xma
 import { Buffer } from "node:buffer";
 import type { JWSTransactionDecodedPayload } from "@apple/app-store-server-library";
 import { importPKCS8, SignJWT } from "jose";
-import type { BillingSubscriptionFact } from "@xmatrix/db";
+import type { AppleSeatGroupState, BillingSubscriptionFact } from "@xmatrix/db";
 import { APPLE_ROOT_G3 } from "./root-certificate";
 
 export const APPLE_BUNDLE_ID = "sh.xmatrix.app";
@@ -40,8 +40,11 @@ export async function verifyAppleNotification(config: AppleSubscriptionConfig, s
       const note = await check.verifyAndDecodeNotification(signedPayload);
       if (!note.data?.signedTransactionInfo) return null;
       const transaction = await check.verifyAndDecodeTransaction(note.data.signedTransactionInfo);
-      if (!transaction.originalTransactionId || !transaction.appAccountToken) return null;
-      return { transactionId: transaction.originalTransactionId, appAccountToken: transaction.appAccountToken, environment: realm };
+      if (!transaction.originalTransactionId) return null;
+      // An organization's assigned seat carries no account token; it is matched by its transaction.
+      if (transaction.inAppOwnershipType === "ASSIGNED") return { transactionId: transaction.originalTransactionId, environment: realm, assigned: true };
+      if (!transaction.appAccountToken) return null;
+      return { transactionId: transaction.originalTransactionId, appAccountToken: transaction.appAccountToken, environment: realm, assigned: false };
     } catch { /* A fixed second environment is allowed, never Xcode/local testing. */ }
   }
   throw new AppleBillingError("invalid_apple_notification", "Apple notification verification failed");
@@ -71,6 +74,9 @@ async function boundedJson(response: Response): Promise<unknown> {
 export interface VerifiedAppleSubscription {
   environment: AppleEnvironment;
   originalTransactionId: string;
+  /** An organization's seat assigned to this person: no account token, matched by its transaction. */
+  assigned: boolean;
+  /** Empty for an assigned seat. */
   appAccountToken: string;
   productId: string;
   transactionId: string;
@@ -83,18 +89,49 @@ export interface VerifiedAppleSubscription {
   seats: number;
 }
 
+async function serverToken(config: AppleSubscriptionConfig): Promise<string> {
+  try {
+    const key = await importPKCS8(config.privateKey, "ES256");
+    return await new SignJWT({ bid: APPLE_BUNDLE_ID }).setProtectedHeader({ alg: "ES256", kid: config.keyId, typ: "JWT" })
+      .setIssuer(config.issuerId).setAudience("appstoreconnect-v1").setIssuedAt().setExpirationTime("5m").sign(key);
+  } catch { throw new AppleBillingError("apple_signing_failed", "Apple subscription signing is temporarily unavailable", true); }
+}
+
+const storeKitHost = (realm: AppleEnvironment) => realm === "Production" ? "https://api.storekit.apple.com" : "https://api.storekit-sandbox.apple.com";
+
+/**
+ * The organization (Volume Purchasing) group a customer's seat comes from, or
+ * null when Apple names none or cannot say: Get Customer Groups is new, and at
+ * first Apple serves it only in the sandbox. Groups decide where people meet,
+ * never entitlement, which always comes from the signed transaction.
+ */
+export async function appleOrganizationGroup(config: AppleSubscriptionConfig, realm: AppleEnvironment, transactionId: string,
+  fetchImpl: typeof fetch = fetch): Promise<string | null> {
+  if (!/^[0-9]{1,100}$/.test(transactionId)) return null;
+  const token = await serverToken(config);
+  let response: Response;
+  try {
+    response = await fetchImpl(`${storeKitHost(realm)}/groups/v1/currentGroups/${transactionId}`, {
+      headers: { authorization: `Bearer ${token}` }, redirect: "manual", signal: AbortSignal.timeout(10_000) });
+  } catch { return null; }
+  if (!response.ok) { await response.body?.cancel(); return null; }
+  let body: unknown;
+  try { body = await boundedJson(response); } catch { return null; }
+  const groups = body && typeof body === "object" && Array.isArray((body as { groups?: unknown }).groups) ? (body as { groups: unknown[] }).groups : [];
+  for (const group of groups.slice(0, 20)) {
+    const entry = group && typeof group === "object" ? group as { groupId?: unknown; groupType?: unknown } : {};
+    if (entry.groupType === "ORGANIZATION" && typeof entry.groupId === "string" && /^[A-Za-z0-9._-]{1,100}$/.test(entry.groupId)) return entry.groupId;
+  }
+  return null;
+}
+
 export async function retrieveAppleSubscription(config: AppleSubscriptionConfig, transactionId: unknown,
   realmValue: unknown, fetchImpl: typeof fetch = fetch): Promise<VerifiedAppleSubscription> {
   const realm = environment(realmValue);
   if (typeof transactionId !== "string" || !/^[0-9]{1,100}$/.test(transactionId)) throw new AppleBillingError("invalid_apple_transaction", "Invalid Apple transaction");
-  const host = realm === "Production" ? "https://api.storekit.apple.com" : "https://api.storekit-sandbox.apple.com";
+  const host = storeKitHost(realm);
   let response: Response;
-  let token: string;
-  try {
-    const key = await importPKCS8(config.privateKey, "ES256");
-    token = await new SignJWT({ bid: APPLE_BUNDLE_ID }).setProtectedHeader({ alg: "ES256", kid: config.keyId, typ: "JWT" })
-      .setIssuer(config.issuerId).setAudience("appstoreconnect-v1").setIssuedAt().setExpirationTime("5m").sign(key);
-  } catch { throw new AppleBillingError("apple_signing_failed", "Apple subscription signing is temporarily unavailable", true); }
+  const token = await serverToken(config);
   try {
     response = await fetchImpl(`${host}/inApps/v1/subscriptions/${transactionId}`, {
       headers: { authorization: `Bearer ${token}` }, redirect: "manual", signal: AbortSignal.timeout(10_000),
@@ -111,9 +148,12 @@ export async function retrieveAppleSubscription(config: AppleSubscriptionConfig,
   const matches: VerifiedAppleSubscription[] = [];
   try {
     for (const record of records) {
-      if (!record.signedTransactionInfo || !record.signedRenewalInfo) continue;
+      if (!record.signedTransactionInfo) continue;
       const transaction = await check.verifyAndDecodeTransaction(record.signedTransactionInfo);
-      const renewal = await check.verifyAndDecodeRenewalInfo(record.signedRenewalInfo);
+      // An assigned seat renews on the organization's side; its renewal info may be absent.
+      if (!record.signedRenewalInfo && transaction.inAppOwnershipType !== "ASSIGNED") continue;
+      const renewal = record.signedRenewalInfo ? await check.verifyAndDecodeRenewalInfo(record.signedRenewalInfo)
+        : { originalTransactionId: transaction.originalTransactionId };
       if (renewal.originalTransactionId !== transaction.originalTransactionId) throw new Error();
       if (transaction.originalTransactionId !== transactionId) continue;
       matches.push(subscriptionFact(config, realm, record.status, transaction, renewal));
@@ -126,8 +166,9 @@ export async function retrieveAppleSubscription(config: AppleSubscriptionConfig,
 export function subscriptionFact(config: AppleSubscriptionConfig, realm: AppleEnvironment, status: number | undefined,
   transaction: JWSTransactionDecodedPayload, renewal: { originalTransactionId?: string; gracePeriodExpiresDate?: number; signedDate?: number; autoRenewStatus?: number }): VerifiedAppleSubscription {
   if (!transaction.productId || ![config.monthlyProductId, config.annualProductId].includes(transaction.productId) ||
-      transaction.type !== "Auto-Renewable Subscription" || transaction.inAppOwnershipType !== "PURCHASED" ||
-      !transaction.appAccountToken || !/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(transaction.appAccountToken) ||
+      transaction.type !== "Auto-Renewable Subscription" ||
+      (transaction.inAppOwnershipType === "PURCHASED" ? !transaction.appAccountToken ||
+        !/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(transaction.appAccountToken) : transaction.inAppOwnershipType !== "ASSIGNED") ||
       !transaction.originalTransactionId || !/^[0-9]{1,100}$/.test(transaction.originalTransactionId) ||
       !transaction.transactionId || !Number.isFinite(transaction.expiresDate) || !Number.isFinite(transaction.signedDate) ||
       transaction.environment !== realm || transaction.bundleId !== APPLE_BUNDLE_ID || ![1, 2, 3, 4, 5].includes(status ?? 0) ||
@@ -139,15 +180,24 @@ export function subscriptionFact(config: AppleSubscriptionConfig, realm: AppleEn
   if (signedDate > now + 60_000) throw new AppleBillingError("invalid_apple_transaction", "Apple subscription date is invalid");
   const expires = status === 4 ? (renewal.gracePeriodExpiresDate ?? transaction.expiresDate!) : transaction.expiresDate!;
   return { environment: realm, originalTransactionId: transaction.originalTransactionId,
-    appAccountToken: transaction.appAccountToken.toLowerCase(), productId: transaction.productId,
+    assigned: transaction.inAppOwnershipType === "ASSIGNED", appAccountToken: transaction.appAccountToken?.toLowerCase() ?? "", productId: transaction.productId,
     transactionId: transaction.transactionId, expiresAt: new Date(expires).toISOString(), signedAt: new Date(signedDate).toISOString(),
     active: !transaction.revocationDate && (status === 1 || status === 4) && expires > now,
     retrying: !transaction.revocationDate && status === 3, cancelAtPeriodEnd: renewal.autoRenewStatus === 0,
     seats: transaction.quantity ?? 1 };
 }
 
+/** The billing fact of an organization's seats in its Space: one subscription whose seats are the active assigned ones. */
+export function appleSeatGroupFact(environment: AppleEnvironment, group: AppleSeatGroupState): BillingSubscriptionFact {
+  const seats = Math.min(Math.max(group.activeSeats, 1), 99);
+  return { billingProvider: "apple", id: `apple:${environment}:${group.groupKey}`, customerId: group.groupKey, priceId: group.productId,
+    status: group.activeSeats > 0 && Date.parse(group.periodEnd) > Date.now() ? "active" : "canceled", quantity: seats,
+    currentPeriodEnd: group.periodEnd, cancelAtPeriodEnd: false, spaceId: group.spaceId, billingOwnerUserId: group.ownerUserId };
+}
+
 export function appleBillingFact(subscription: VerifiedAppleSubscription, binding: { spaceId: string; ownerUserId: string; accountDeleted?: boolean }): BillingSubscriptionFact {
   if (binding.accountDeleted) throw new AppleBillingError("apple_purchase_account_deleted", "Deleted accounts cannot receive subscription access");
+  if (subscription.assigned) throw new AppleBillingError("invalid_apple_transaction", "An assigned seat is counted with its organization");
   return { billingProvider: "apple", id: `apple:${subscription.environment}:${subscription.originalTransactionId}`,
     customerId: subscription.appAccountToken, priceId: subscription.productId,
     status: subscription.active ? "active" : subscription.retrying ? "unpaid" : "canceled", quantity: subscription.seats,
