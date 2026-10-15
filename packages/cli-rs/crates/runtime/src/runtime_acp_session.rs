@@ -424,6 +424,19 @@ impl AcpSession {
         if self.presentation.model.as_deref() == Some(model_id) {
             return Ok(model_id.to_string());
         }
+        // Native config selection returns the complete model-dependent controls.
+        // Cursor's legacy session/set_model returns {}, leaving effort stale.
+        let model_config_id = self
+            .presentation
+            .parameters
+            .as_deref()
+            .unwrap_or_default()
+            .iter()
+            .find(|parameter| matches!(parameter.id.as_str(), "model" | "models"))
+            .map(|parameter| parameter.id.clone());
+        if let Some(config_id) = model_config_id {
+            return self.set_parameter(&config_id, model_id).await;
+        }
         let result = self
             .request(
                 "session/set_model",
@@ -510,42 +523,13 @@ impl AcpSession {
                 self.config.display_name
             )));
         }
-        let config_id = self
-            .presentation
-            .effort_config_id
-            .as_deref()
-            .ok_or_else(|| {
-                CliError::Launch(format!(
-                    "{} does not advertise an ACP effort control",
-                    self.config.display_name
-                ))
-            })?;
-        let session_id = self.session_id.clone().ok_or_else(|| {
+        let config_id = self.presentation.effort_config_id.clone().ok_or_else(|| {
             CliError::Launch(format!(
-                "{} agent session not initialized",
-                self.config.log_name()
+                "{} does not advertise an ACP effort control",
+                self.config.display_name
             ))
         })?;
-        let result = self
-            .request(
-                "session/set_config_option",
-                Some(serde_json::json!({
-                    "sessionId": session_id,
-                    "configId": config_id,
-                    "value": effort,
-                })),
-            )
-            .await?;
-        self.config
-            .presentation_adapter
-            .observe_acp(&result, &mut self.presentation);
-        let selected = self
-            .presentation
-            .effort
-            .clone()
-            .unwrap_or_else(|| effort.to_string());
-        self.presentation.effort = Some(selected.clone());
-        Ok(selected)
+        self.set_parameter(&config_id, effort).await
     }
 
     /// Show a form elicitation as a card and park it for the answer; with no
