@@ -13,6 +13,10 @@ import {
   PAGE_DOCUMENT_FRAGMENT, PAGE_MESSAGE_AWARENESS, PAGE_MESSAGE_NOTICE, PAGE_MESSAGE_SYNC, PageSession,
   PageSessionConflict, pageFragmentMarkdown, setPageFragmentMarkdown,
 } from "../src/page-session.ts";
+import { CO_WRITER_PAUSE_MS } from "../src/page-co-writer.ts";
+import { PAGE_MESSAGE_CO_WRITE } from "@xmatrix/protocol";
+import { pageSchema } from "@xmatrix/protocol/page-document";
+import { absolutePositionToRelativePosition, initProseMirrorDoc } from "y-prosemirror";
 import { RelayPageSession } from "../src/page-session-do.ts";
 import { PageControlError, PostgresPageRepository } from "@xmatrix/db";
 import { compileCommonJsSourceModule } from "./support/commonjs-source-module.mjs";
@@ -656,3 +660,120 @@ test("summary: an Agent's edit starts one at once, and a second does not start b
   assert.equal(ended.issued.length, 1, "that one ended: a new task can be issued");
   assert.equal(ended.issued[0].triedRevision, 3, "the next dispatch remembers the revision already tried");
 });
+
+/**
+ * An Agent's runtime co-writing the page (page-co-writer.ts): what the session asks it, and its
+ * answers, streamed in as the harness writes them.
+ */
+function joinCoWriter(h, id = "w-agent") {
+  const asked = [];
+  const send = h.ports.send;
+  h.ports.send = (to, data) => {
+    if (to !== id) return send(to, data);
+    const decoder = decoding.createDecoder(data);
+    assert.equal(decoding.readVarUint(decoder), PAGE_MESSAGE_CO_WRITE);
+    asked.push(JSON.parse(decoding.readVarString(decoder)));
+  };
+  h.session.connect({ id, principal: agent, canEdit: true, coWriter: true });
+  const reply = (frame) => {
+    const encoder = encoding.createEncoder();
+    encoding.writeVarUint(encoder, PAGE_MESSAGE_CO_WRITE);
+    encoding.writeVarString(encoder, JSON.stringify(frame));
+    h.session.receive(id, encoding.toUint8Array(encoder));
+  };
+  return {
+    asked,
+    turns: () => asked.filter((frame) => frame.type === "turn"),
+    write: (turn, text) => reply({ type: "delta", turn, text }),
+    done: (turn) => reply({ type: "done", turn }),
+  };
+}
+
+/** A person's caret, shared as their editor shares it, at the end of the first text holding `words`. */
+function placeCaret(h, client, id, words) {
+  const fragment = client.doc.getXmlFragment(PAGE_DOCUMENT_FRAGMENT);
+  const { doc, mapping } = initProseMirrorDoc(fragment, pageSchema);
+  let at = null;
+  doc.descendants((node, pos) => {
+    if (at === null && node.isText && node.text.includes(words)) at = pos + node.text.indexOf(words) + words.length;
+  });
+  const head = Y.relativePositionToJSON(absolutePositionToRelativePosition(at, fragment, mapping));
+  client.awareness.setLocalState({ user: { name: id, color: "#123456" }, cursor: { anchor: head, head } });
+  const encoder = encoding.createEncoder();
+  encoding.writeVarUint(encoder, PAGE_MESSAGE_AWARENESS);
+  encoding.writeVarUint8Array(encoder, awarenessProtocol.encodeAwarenessUpdate(client.awareness, [client.doc.clientID]));
+  h.session.receive(`c-${id}`, encoding.toUint8Array(encoder));
+}
+
+const coWriterOf = (client) => [...client.awareness.getStates().values()].find((state) => state?.user?.kind === "agent");
+
+test("a co-writing Agent reads the page as it joins, and its words stream into the page under its caret", async () => {
+  const h = harness();
+  const ann = await annConnected(h);
+  const writer = joinCoWriter(h);
+  assert.equal(writer.turns().length, 1);
+  assert.match(writer.turns()[0].text, /The page now:\n<<<PAGE\n# Project\n/u);
+  assert.equal(coWriterOf(ann).activity, "thinking", "it is on the page while it thinks");
+
+  writer.write(1, "I'll fill the notes.\n⟦after \"none\"⟧\n- first ");
+  assert.match(ann.text.toString(), /none\n\n- first\n$/u, "its words show as they come, its talk does not");
+  assert.equal(coWriterOf(ann).activity, "writing");
+  assert.ok(coWriterOf(ann).cursor, "its caret is where it writes");
+  writer.write(1, "point\n- second point\n");
+  writer.done(1);
+  assert.equal(ann.text.toString(), HEAD.replace("none\n", "none\n\n- first point\n- second point\n"));
+  assert.equal(coWriterOf(ann).activity, "watching");
+
+  await h.session.commit();
+  assert.equal(h.commits.at(-1).principal, agent.id, "its words are its own edit");
+  assert.deepEqual(h.commits.at(-1).conversationIds, [], "a co-writing conversation would make them a suggestion");
+});
+
+test("a co-writing Agent hears what changed when people pause, and stops when someone edits what it writes", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const h = harness();
+  const ann = await annConnected(h);
+  const writer = joinCoWriter(h);
+  writer.write(1, "⟦pass⟧");
+  writer.done(1);
+
+  // Typing elsewhere is not news until the person pauses.
+  ann.text.insert(HEAD.indexOf("In progress") + "In progress".length, ", blocked on review");
+  assert.equal(writer.turns().length, 1);
+  t.mock.timers.tick(CO_WRITER_PAUSE_MS);
+  assert.equal(writer.turns().length, 2);
+  assert.match(writer.turns()[1].text, /<<<SECTION\n## Status\n\nIn progress, blocked on review\nSECTION>>>/u,
+    "only the section that changed");
+
+  writer.write(2, "⟦after \"none\"⟧\nA paragraph the Agent ");
+  assert.match(ann.text.toString(), /A paragraph the Agent\n$/u);
+  // Ann edits the very paragraph it is writing: it stops there, and the rest of its answer is not written.
+  const at = ann.text.toString().indexOf("A paragraph");
+  ann.text.insert(at, "Ann: ");
+  assert.deepEqual(writer.asked.at(-1), { type: "interrupt", turn: 2 });
+  assert.equal(coWriterOf(ann).activity, "waiting");
+  writer.write(2, "keeps writing after being stopped.");
+  writer.done(2);
+  assert.doesNotMatch(ann.text.toString(), /after being stopped/u);
+  t.mock.timers.tick(CO_WRITER_PAUSE_MS);
+  assert.match(writer.turns()[2].text, /You were stopped: someone edited what you were writing\./u);
+});
+
+test("a co-writing Agent keeps out of the paragraph someone is typing in, and hears what it quoted wrong", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const h = harness();
+  const ann = await annConnected(h);
+  placeCaret(h, ann, "ann", "In progress");
+  const writer = joinCoWriter(h);
+  assert.match(writer.turns()[0].text, /Typing now: ann in "In progress"\./u);
+  writer.write(1, "⟦replace \"In progress\"⟧Done⟦end⟧⟦after \"no such words\"⟧text⟦note \"In progress\"⟧Blocked on what?");
+  writer.done(1);
+  assert.equal(ann.text.toString(), HEAD, "nothing was written");
+  assert.equal(coWriterOf(ann).say, "Blocked on what?", "what it says to people shows beside its caret");
+  ann.text.insert(ann.text.length, "\nmore\n");
+  t.mock.timers.tick(CO_WRITER_PAUSE_MS);
+  const told = writer.turns()[1].text;
+  assert.match(told, /ann is typing in the paragraph holding "In progress"; it was left alone\./u);
+  assert.match(told, /Your ⟦after⟧ quoted "no such words", which is not on the page/u);
+});
+

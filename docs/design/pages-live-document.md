@@ -240,17 +240,45 @@ fact is about.
   - *Discuss* starts a conversation anchored to the selection (§4.3).
 - **`/` insert**: heading, list, task list, table, page reference, live
   reference, mention.
-- **Co-writing.** A person starts an Agent writing the page from the page
-  itself, typing nothing: one tap on the face of the Agent to write with (the
-  one they last wrote with is offered first), from the page's button, the
-  header, or a heading's menu for one section. It starts in a conversation of
-  its own linked to the page; the Hub records that the conversation co-writes
-  the page (`data.page_co_writing`, started by a person who may edit it) before
-  the Agent is called, and while it lasts — until ended, at most twelve hours —
-  the Agent's `page edit` from that conversation is kept as a suggestion and
-  never written into the page. The Agent infers what the page needs. Agents
-  working from any other conversation edit as before. The page stays open and
-  the conversation is reached from the Agent's face.
+- **Co-writing is live, as with a person** (decided 2026-10-15). A person
+  starts an Agent writing the page from the page itself, typing nothing: one
+  tap on the face of the Agent to write with. The Agent is then on the page
+  like a colleague in a shared document, until it is stopped or the people
+  leave: its face in the header, its caret in its colour with what it is doing
+  (watching, thinking, writing, waiting), and its words arriving as its harness
+  writes them.
+  - **Any Agent.** The co-writer is the Agent's own Run, whatever its harness:
+    the runtime already drives every harness through a structured session
+    (Claude stream-json, Codex app-server, ACP and the others), each able to
+    take input, be interrupted and stream its text. The runtime joins the
+    page's live session as a co-writer (`POST …/live` with `coWrite`, a Run
+    that may edit the page, not on a suggest-only page), hands each turn the
+    session sends to the harness as its next input, streams the harness's text
+    back as it comes, and interrupts the harness when told.
+  - **What reaches the page** is only what the Agent writes inside markers
+    (`page-co-writing.ts`): `⟦after "words on the page"⟧` then markdown added
+    after the block holding them, `⟦replace "words"⟧` then their new wording
+    within one paragraph, `⟦note "words"⟧` then a remark shown beside its caret,
+    `⟦pass⟧`. Plain text works in every harness, and streams; a tool call does
+    neither. Everything else it says is seen by nobody.
+  - **The session writes it** (`page-co-writer.ts`) through the same CRDT as
+    everyone's typing: each piece of its answer brings its blocks to what it has
+    written so far in one transaction under its own client id, so its text is
+    marked as its own, and its caret follows. Its edits commit with the
+    session's idle commit, as its own.
+  - **When it speaks.** It reads the whole page as it joins. Afterwards, each
+    time people change the page and pause (1.5 s), it hears what changed, the
+    changed sections only (the whole page every eighth time or after more than
+    three sections changed), and where each person's caret is. Most of the time
+    it passes. One turn at a time; changes made while it answers are told once
+    it finishes.
+  - **Manners.** Its own additions go straight in; it does not reword what
+    others wrote but leaves a note, fixing only plain typos. It never writes in
+    the paragraph a person's caret is in. When someone edits what it is writing,
+    or moves their caret into it, it stops there (the runtime interrupts the
+    harness), the rest of that answer is dropped, and it hears why at the next
+    pause. A quote that is not on the page, or is on it more than once, writes
+    nothing and is reported back to it.
 - **Suggestions** wait on the page, from a co-writing or a suggest-only page,
   for two weeks after the last one a person reviewed
   (`GET …/pages/:pageId/suggestions`). Each is rebased onto the text as it is
@@ -659,6 +687,12 @@ Shipped:
 
 Open:
 
+- Live co-writing (§4.2): the session side (the co-writer connection, the
+  markers, streaming into the document, turns on pauses, yielding) is built;
+  next the runtime's harness-agnostic bridge (with Claude's partial-message
+  stream), then the page's start and stop, the caret's status and note, a
+  fade-in and an undo of the Agent's last change, which retire the
+  suggestion-based co-writing and its `page_co_writing` rule.
 - Automations as live references in their section, with page access, event
   triggers and the removal of Channel-scoped Automations (§6).
 - Change events pushed to a Run when a block it read or claimed changes
