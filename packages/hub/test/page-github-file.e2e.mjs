@@ -42,7 +42,8 @@ test("a page reads only its referenced file, with current access even after a ca
       body: JSON.stringify({ published: true }) }));
     const publicUrl = `/api/public/spaces/${encodeURIComponent(space.id)}/pages/${encodeURIComponent(page.pageId)}`;
     const published = await json(await worker.fetch(publicUrl));
-    assert.equal(published.page.body, `[prompt.md](${reference})\n`, "publication contains only the reference");
+    assert.equal(published.page.body, `# Prompts\n\n[prompt.md](${reference})\n`,
+      "publication contains only the reference, under the page's name");
     assert.equal((await worker.fetch(`${publicUrl}/github-file?href=${encodeURIComponent(reference)}`)).status, 404,
       "there is no public file-content endpoint");
 

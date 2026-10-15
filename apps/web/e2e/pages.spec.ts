@@ -748,6 +748,10 @@ test("an owner may start a Space's pages from a repository or a first page, and 
   await fixtureJson(browser, "page-tree-first", pageTree, { pages: [page("p-first", null, "First document", "V")] });
   await fixtureJson(browser, "page-create", pageTree, { page: page("p-first", null, "First document", "V") },
     { method: "POST" });
+  // Its name is the heading its document opens with.
+  await fixtureJson(browser, "first-document", /\/pages\/p-first$/u, { page: { ...page("p-first", null, "First document", "V"),
+    body: "# First document\n", revisionInfo: { revision: 1, kind: "edit", authors: [], conversationIds: [], createdAt: NOW } } },
+  { method: "GET" });
   await browser.getByRole("button", { name: "Create the first page" }).click();
   await browser.keyboard.type("First document");
   await browser.getByTestId("page-title").blur();

@@ -963,8 +963,9 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   }, [headRevision, queryClient, renamedInDocument]);
 
   // A document that opens without a name offers one above it; what is typed there becomes its opening heading.
-  // Plain text: a field well would read as a form.
-  const titleField = page && opening === null ? (canEdit ? (
+  // Only once the document is read: one still on its way is not unnamed. Plain text: a field well would read as a form.
+  const documentRead = drawn || document.data !== undefined;
+  const titleField = page && documentRead && opening === null ? (canEdit ? (
     <input key={page.pageId} defaultValue="" aria-label="Page title"
       data-testid="page-title" placeholder={NEW_PAGE_TITLE} onKeyDown={(event) => {
         if (isImeKeyDown(event.nativeEvent)) return;
