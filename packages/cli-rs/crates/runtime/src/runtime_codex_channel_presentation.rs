@@ -790,4 +790,3 @@ fn json_u64(value: &Value) -> Option<u64> {
         .or_else(|| value.as_i64().and_then(|number| u64::try_from(number).ok()))
         .or_else(|| value.as_str()?.trim().parse::<u64>().ok())
 }
-
