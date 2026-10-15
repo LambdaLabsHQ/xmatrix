@@ -706,19 +706,24 @@ function namedCursor(user: { name?: string; color?: string; kind?: string; conve
 }
 
 /**
- * Dims a caret while its owner is idle. The cursor plugin keeps a caret's
- * element for as long as it shows, so its state is set on the element.
+ * Updates every caret the editor shows after each change. The cursor plugin keeps a caret's
+ * element for as long as it shows, so what a caret says is set on its element.
  */
-function cursorIdle(presenceOf: (clientId: number) => "active" | "idle" | null): Plugin {
+function everyCaret(update: (cursor: HTMLElement, clientId: number) => void): Plugin {
   return new Plugin({
     view: () => ({
       update: (view) => {
         for (const cursor of view.dom.querySelectorAll<HTMLElement>(".ProseMirror-yjs-cursor[data-client]")) {
-          cursor.classList.toggle("is-idle", presenceOf(Number(cursor.dataset.client)) === "idle");
+          update(cursor, Number(cursor.dataset.client));
         }
       },
     }),
   });
+}
+
+/** Dims a caret while its owner is idle. */
+function cursorIdle(presenceOf: (clientId: number) => "active" | "idle" | null): Plugin {
+  return everyCaret((cursor, clientId) => cursor.classList.toggle("is-idle", presenceOf(clientId) === "idle"));
 }
 
 /** What an Agent co-writing the page live is doing, said beside its name (page-co-writer.ts). */
@@ -726,32 +731,26 @@ const CO_WRITER_ACTIVITY: Record<string, string> = { thinking: "thinking…", wr
 
 /**
  * An Agent co-writing the page live says what it is doing beside its caret, and its note to the
- * people below it, while it lasts. As with idleness, the caret's element is kept, so it is updated.
+ * people below it, while it lasts.
  */
 function cursorStatus(awareness: Awareness): Plugin {
-  return new Plugin({
-    view: () => ({
-      update: (view) => {
-        for (const cursor of view.dom.querySelectorAll<HTMLElement>(".ProseMirror-yjs-cursor[data-client]")) {
-          const state = awareness.getStates().get(Number(cursor.dataset.client)) as
-            { user?: { name?: string; kind?: string }; activity?: unknown; say?: unknown } | undefined;
-          const live = state?.user?.kind === "agent" && typeof state.activity === "string"
-            ? CO_WRITER_ACTIVITY[state.activity] : undefined;
-          const label = cursor.querySelector<HTMLElement>(":scope > div");
-          if (label) label.textContent = live ? `${state?.user?.name ?? "Agent"} · ${live}` : state?.user?.name ?? "Someone";
-          cursor.toggleAttribute("data-live", Boolean(live));
-          const say = state?.user?.kind === "agent" && typeof state.say === "string" ? state.say : "";
-          let note = cursor.querySelector<HTMLElement>(":scope > .page-cursor-note");
-          if (!say) { note?.remove(); continue; }
-          if (!note) {
-            note = document.createElement("span");
-            note.className = "page-cursor-note";
-            cursor.append(note);
-          }
-          if (note.textContent !== say) note.textContent = say;
-        }
-      },
-    }),
+  return everyCaret((cursor, clientId) => {
+    const state = awareness.getStates().get(clientId) as
+      { user?: { name?: string; kind?: string }; activity?: unknown; say?: unknown } | undefined;
+    const live = state?.user?.kind === "agent" && typeof state.activity === "string"
+      ? CO_WRITER_ACTIVITY[state.activity] : undefined;
+    const label = cursor.querySelector<HTMLElement>(":scope > div");
+    if (label) label.textContent = live ? `${state?.user?.name ?? "Agent"} · ${live}` : state?.user?.name ?? "Someone";
+    cursor.toggleAttribute("data-live", Boolean(live));
+    const say = state?.user?.kind === "agent" && typeof state.say === "string" ? state.say : "";
+    let note = cursor.querySelector<HTMLElement>(":scope > .page-cursor-note");
+    if (!say) { note?.remove(); return; }
+    if (!note) {
+      note = document.createElement("span");
+      note.className = "page-cursor-note";
+      cursor.append(note);
+    }
+    if (note.textContent !== say) note.textContent = say;
   });
 }
 
