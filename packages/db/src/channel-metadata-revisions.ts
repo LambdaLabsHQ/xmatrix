@@ -19,9 +19,21 @@ export interface MetadataContent {
   space_id: string; channel_id: string; name: string; metadata_json: Record<string, unknown> | null;
   updated_at: string | Date;
 }
+/**
+ * An About that one harness execution wrote from the conversation the Hub read for it
+ * (channel-about.ts in the Hub): the metadata revision it read and the newest message it was given.
+ */
+export interface AboutTaskAuthor { taskId: string; agentName: string; readRevision: number; throughSequence: number }
+/** The Run, or the one-shot task, that wrote a summary. */
+export type SummaryAuthor = { runId: string; agentName: string; throughMessageId?: string } | AboutTaskAuthor;
+
+export function aboutTaskAuthor(author: SummaryAuthor | undefined): author is AboutTaskAuthor {
+  return author !== undefined && "taskId" in author;
+}
+
 export interface MetadataWrite {
   actorUserId: string; commandId: string; at: string; expectedRevision?: number;
-  summaryAuthor?: { runId: string; agentName: string; throughMessageId?: string };
+  summaryAuthor?: SummaryAuthor;
   actorRunId?: string;
   restoreRevision?: number;
 }
@@ -73,7 +85,18 @@ export async function appendMetadataRevision(tx: DatabaseTransaction, root: Meta
   let expected = input.expectedRevision;
   let source: Record<string, unknown> = { kind: "edit", actorUserId: input.actorUserId,
     commandId: input.commandId, ...(input.actorRunId ? { runId: input.actorRunId } : {}) };
-  if (input.summaryAuthor) {
+  if (aboutTaskAuthor(input.summaryAuthor)) {
+    const task = input.summaryAuthor;
+    // What changed the About after the task read the conversation stands: a person's edit, or an
+    // About that read as far or further. An older reading never replaces a newer one.
+    const later = await tx.query({ name: "channel_about_task_superseded_v1", text: `SELECT 1
+      FROM data.channel_metadata_revisions WHERE channel_id=$1 AND revision>$2
+        AND (source_json->>'kind' IS DISTINCT FROM 'about_task' OR (source_json->>'throughSequence')::bigint>=$3)
+      LIMIT 1`, values: [root.channel_id, task.readRevision, task.throughSequence], maxRows: 1 });
+    if (later[0]) return fail("metadata_revision_conflict", 409, "The About changed after this task read the conversation");
+    source = { kind: "about_task", actorUserId: input.actorUserId, commandId: input.commandId, taskId: task.taskId,
+      agentName: task.agentName, readRevision: task.readRevision, throughSequence: task.throughSequence };
+  } else if (input.summaryAuthor) {
     const author = input.summaryAuthor;
     const run = await requireAboutRun(tx, root, author.runId, input.actorUserId);
     const inputs = await tx.query<QueryResultRow & { input_id: string; metadata_revision: string | number;

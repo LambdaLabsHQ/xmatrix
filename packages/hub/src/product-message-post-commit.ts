@@ -3,9 +3,9 @@ import type { ChannelAttachment, DraftSummonIntent } from "@xmatrix/protocol";
 import { parseMessageInteraction, createInstanceMentions, filterOperationalMentions, hasRetiredAgentLaunchMention, parseAutoLaunchMentions,
   isLaunchHintRejection, parseHarnessCapabilityMentions, PREPARATION_REJECTION_MESSAGES, RETIRED_AGENT_LAUNCH_NOTICE,
   REGISTRATION_PREPARATION_REJECTION_CODES } from "@xmatrix/protocol";
+import { startChannelAbout } from "./channel-about";
 import {
   dispatchProductAgentMentionsAfterAuthorityMessage,
-  dispatchProductChannelAbout,
   dispatchProductNewConversationStart,
   dispatchProductAgentSystemNotice,
   type ProductAgentMentionAuthorityEnv,
@@ -68,12 +68,12 @@ export interface ProductMessagePostCommitInput {
 /**
  * When a conversation's About (summary, and its name while automatic) is
  * written: after every fifth message, and after the first one while nobody
- * has named the conversation, so a new conversation is named at once.
+ * has named the conversation (`unnamedOnly`), so a new conversation is named at once.
  */
-export function channelAboutRequestId(channelId: string, sequence: number | undefined): string | undefined {
-  if (sequence === 1) return `channel-about:${channelId}:0`;
+export function channelAboutDue(sequence: number | undefined): { unnamedOnly: boolean } | undefined {
+  if (sequence === 1) return { unnamedOnly: true };
   if (!Number.isInteger(sequence) || sequence! < 5 || sequence! % 5 !== 0) return undefined;
-  return `channel-about:${channelId}:${Math.floor(sequence! / 5)}`;
+  return { unnamedOnly: false };
 }
 
 /**
@@ -328,21 +328,13 @@ export async function dispatchProductMessagePostCommit(
       }),
     );
   }
-  const aboutRequestId = channelAboutRequestId(input.channelId, input.sequence);
-  if (aboutRequestId) {
+  const about = channelAboutDue(input.sequence);
+  if (about) {
     sideTasks.push(
-      dispatchProductChannelAbout({
-        env: input.env,
-        channelId: input.channelId,
-        requestId: aboutRequestId,
-        triggerMessageId: input.messageId,
-        actorUserId: input.actorUserId,
-        ...(input.sequence === 1 ? { automaticNameOnly: true } : {}),
-      }).catch((error) => {
-        console.error("Product Channel About orchestration failed", {
+      startChannelAbout(input.env, { channelId: input.channelId, unnamedOnly: about.unnamedOnly }).catch((error) => {
+        console.error("Channel About could not start", {
           channelId: input.channelId,
           messageId: input.messageId,
-          requestId: aboutRequestId,
           error: error instanceof Error ? error.message : String(error),
         });
       }),

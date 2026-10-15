@@ -29,7 +29,7 @@ import {
   type MachineDaemonPrincipal,
 } from "../connections/machine-daemon/auth";
 import type { Env } from "../types";
-import { dispatchProductChannelAbout } from "../product-agent-mention-authority-adapter";
+import { channelAboutAnswered, channelAboutRequest } from "../channel-about";
 import {
   MACHINE_DAEMON_AUTHORITY_REQUIRED_CAPABILITIES,
   machineDaemonRouteKey,
@@ -114,8 +114,8 @@ export interface PostgresMachineDaemonPortDependencies {
   /** Retain work that outlives the frame that started it. */
   keepAlive?(task: Promise<unknown>): void;
   quotaChanged?(route: { ownerUserId: string; machineId: string }): Promise<void>;
-  /** A Machine answered a text task; whoever issued it decides what the answer is for. */
-  textTaskAnswered?(task: { requestId: string; result: TextTaskResult }): Promise<void>;
+  /** A Machine of `ownerUserId` answered a text task; whoever issued it decides what the answer is for. */
+  textTaskAnswered?(task: { requestId: string; result: TextTaskResult; ownerUserId: string }): Promise<void>;
   /** The daemon connected: wake the Channels whose work waits on this Machine. */
   machineConnected?(route: { ownerUserId: string; machineId: string }): Promise<unknown>;
 }
@@ -138,14 +138,10 @@ export class PostgresMachineDaemonPort implements MachineDaemonSocketBackend {
       runLifecycleReport: (report) => machineRunLifecycleReport(input.env, report),
       launchUpdate: (update) => updateAgentLaunch(input.env, update),
       machineConnected: (route) => wakeMachineChannels(input.env, route),
-      textTaskAnswered: (task) => pageSummaryAnswered(input.env, task),
+      textTaskAnswered: (task) => channelAboutRequest(task.requestId)
+        ? channelAboutAnswered(input.env, task) : pageSummaryAnswered(input.env, task),
       terminateInstance: input.terminateInstance,
       quotaChanged: input.quotaChanged,
-      dispatchChannelAboutFollowUp: (followUp) => dispatchProductChannelAbout({
-        env: input.env,
-        ...followUp,
-        skipDaemonWake: true,
-      }),
       observeAgentLaunchStage: (stage, outcome, durationMs) => recordAgentLaunchStage({
         env: input.env, stage, outcome, durationMs,
       }),
@@ -299,7 +295,8 @@ export class PostgresMachineDaemonPort implements MachineDaemonSocketBackend {
     }
     if (message.type === "machine_text_task_result") {
       // The command is complete either way; what the answer is for must not fail the Machine's report.
-      await this.dependencies.textTaskAnswered?.({ requestId: message.requestId, result: message.result })
+      await this.dependencies.textTaskAnswered?.({ requestId: message.requestId, result: message.result,
+        ownerUserId: session.principal.ownerUserId })
         .catch((error: unknown) => console.error("Text task answer was not applied", {
           requestId: message.requestId, error: error instanceof Error ? error.message : String(error) }));
     }

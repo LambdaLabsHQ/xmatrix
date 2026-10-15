@@ -4,10 +4,8 @@ import { MessageAuthorityError } from "@xmatrix/db";
 
 import {
   orchestrateProductAgentMentions,
-  orchestrateProductChannelAbout,
   orchestrateProductNewConversationStart,
   parseProductHandoffInstanceMentions,
-  productSpacePreferredLanguage,
 } from "../src/product-agent-mention.ts";
 // The mention grammar the Hub executes is the same module the composer completes
 // against, so these assertions run directly against the shared definition.
@@ -91,19 +89,12 @@ test("agent new local-path syntax requires an absolute path", () => {
 
 function basePort(overrides = {}) {
   const notices = [];
-  const registrationLaunches = [];
   const reborns = [];
   const handoffs = [];
   const port = {
-    registrationLaunches,
     reborns,
     handoffs,
     notices,
-    async launchRegistrationInput(input) {
-      registrationLaunches.push(input);
-      return { runId: input.runId ?? `run:${input.commandId}`, instanceId: input.instanceId ?? `instance:${input.commandId}`,
-        launchId: `launch:${input.commandId}`, agentName: "codex", hostId: "host-1" };
-    },
     async prepareRegisteredReborn(input) {
       reborns.push(input);
       return { intentId: `intent:${input.sourceInstanceId}`, state: "waiting" };
@@ -114,9 +105,6 @@ function basePort(overrides = {}) {
     },
     async getChannel() {
       return { id: "ch-1", spaceId: "space-1", mode: "open" };
-    },
-    async getSpacePreferredLanguage() {
-      return "en";
     },
     async getRebornTarget() {
       return null;
@@ -249,161 +237,6 @@ test("handoff mention parse uses the shared existing-to-new grammar", () => {
   );
 });
 
-test("implicit Channel About starts a silent one-shot session through ordinary registration, with no Space config", async () => {
-  // The port has no management configuration to read: About is gated by nothing but its Channel.
-  const port = basePort({
-    async getSpacePreferredLanguage() {
-      return "zh";
-    },
-  });
-  const result = await orchestrateProductChannelAbout({
-    channelId: "ch-1",
-    requestId: "channel-about:ch-1:20",
-    triggerMessageId: "m-trigger",
-    actorUserId: "user-1",
-    port,
-  });
-
-  assert.equal(result.spawned, 1);
-  assert.equal(port.notices.length, 0, "implicit About work never posts a Channel notice");
-  const [launch] = port.registrationLaunches;
-  assert.equal(launch.commandId, "about:channel-about:ch-1:20");
-  assert.equal(Object.hasOwn(launch, "oneshot"), false);
-  assert.deepEqual(launch.aboutSession, { triggerRequestId: "channel-about:ch-1:20", triggerMessageId: "m-trigger" });
-  assert.deepEqual(launch.runMetadata, { routedAs: "management_channel_about",
-    channelAboutTriggerMessageId: "m-trigger", managementSpaceId: "space-1" });
-  // Only the About session itself selects its private directory; no management launch or summon tags ride along.
-  assert.equal(Object.hasOwn(launch, "management"), false);
-  assert.equal(Object.hasOwn(launch, "coalesce"), false);
-  assert.equal(Object.hasOwn(launch, "tags"), false);
-  assert.match(launch.body, /^You keep this Channel's About current\.\n/u);
-  assert.doesNotMatch(launch.body, /xMatrix system agent/u);
-  assert.match(launch.body, /Task context .*"channelId":"ch-1".*"triggerMessageId":"m-trigger"/);
-  assert.match(launch.body, /Other channels, pages, local transcripts, caches/);
-  assert.match(launch.body, /--expected-revision/);
-  // It reads its own Channel on demand; it never mirrors the Space.
-  assert.match(launch.body, /`xmatrix channel history ch-1 --authoritative`/u);
-  // The summary goes directly to the owning Hub; no local file can be reused.
-  assert.match(launch.body, /`xmatrix channel about ch-1 --stdin --through </u);
-  assert.match(launch.body, /`xmatrix channel about ch-1 --summary "<summary>" --through </u);
-  assert.match(launch.body, /If this CLI's help advertises --stdin/u);
-  assert.match(launch.body, /pipe one JSON object containing "summary"/u);
-  assert.match(launch.body, /do not write or read any intermediate file/u);
-  assert.match(launch.body, /JSON Unicode escapes/u);
-  assert.doesNotMatch(launch.body, /--summary-file|--name-file|xmatrix-about-/u);
-  assert.equal(launch.runMetadata.routedAs, "management_channel_about");
-  assert.equal(launch.initialMessageId, undefined);
-  assert.match(launch.body, /Always recompute and apply the About/u);
-  assert.match(launch.body, /Do not post an acknowledgement/u);
-  assert.match(launch.body, /entirely in Simplified Chinese \(zh\)/u);
-  assert.match(launch.body, /only source of the About output language/u);
-  assert.match(
-    launch.body,
-    /has been picked up in its thread\. Never describe such a message as unclaimed/u,
-    "the About must not call a thread's root unclaimed",
-  );
-});
-
-test("a conversation's first message names it only while nobody has named it", async () => {
-  const run = async (metadata) => {
-    const port = basePort({
-      async getChannel() { return { id: "ch-1", spaceId: "space-1", mode: "open", metadata }; },
-    });
-    const result = await orchestrateProductChannelAbout({ channelId: "ch-1", requestId: "channel-about:ch-1:0",
-      actorUserId: "user-1", automaticNameOnly: true, port });
-    return { result, launches: port.registrationLaunches };
-  };
-  const named = await run({});
-  assert.equal(named.result.spawned, 0, "a conversation a person named waits for the usual cadence");
-  assert.equal(named.launches.length, 0);
-  const automatic = await run({ autoName: true });
-  assert.equal(automatic.result.spawned, 1);
-  assert.match(automatic.launches[0].body, /Nobody has named this Channel yet/u);
-  assert.match(automatic.launches[0].body, /--summary "<summary>" --name "<name>"/u);
-  assert.match(automatic.launches[0].body, /pipe one JSON object containing "summary" and "name"/u);
-  assert.doesNotMatch(automatic.launches[0].body, /--summary-file|--name-file/u);
-});
-
-test("implicit Channel About joins the session already serving the Channel", async () => {
-  const port = basePort({
-    async launchRegistrationInput(input) {
-      this.registrationLaunches.push(input);
-      return { runId: "run:about", instanceId: "session:about", launchId: "", agentName: "codex",
-        hostId: "host-1", coalesced: true };
-    },
-  });
-  const result = await orchestrateProductChannelAbout({
-    channelId: "ch-1",
-    requestId: "channel-about:ch-1:21",
-    actorUserId: "user-1",
-    port,
-  });
-
-  assert.equal(result.spawned, 0);
-  assert.equal(result.coalesced, 1);
-});
-
-test("a Channel About session that finished its turn is ended by its daemon, not kept", async () => {
-  const retired = [{ runId: "run:about-done", channelId: "ch-1", sessionId: "session:done",
-    machineOwnerUserId: "owner-1", machineId: "machine-1", hostId: "host-1", executionKey: "execution:done" }];
-  const stopped = [];
-  const port = basePort({
-    async launchRegistrationInput(input) {
-      this.registrationLaunches.push(input);
-      return { runId: "run:about-next", instanceId: "session:next", launchId: "launch-1", agentName: "codex",
-        hostId: "host-1", retiredAboutSessions: retired };
-    },
-    async stopChannelAboutSessions(targets, attempt) { stopped.push(...targets); attempts.push(attempt); },
-  });
-  const attempts = [];
-  const result = await orchestrateProductChannelAbout({
-    channelId: "ch-1", requestId: "channel-about:ch-1:23", actorUserId: "user-1", port,
-  });
-
-  assert.equal(result.spawned, 1, "the trigger starts a fresh session");
-  assert.deepEqual(stopped, retired);
-  assert.deepEqual(attempts, ["about:channel-about:ch-1:23"], "each trigger is its own stop attempt");
-});
-
-test("a Channel About successor follows its exact predecessor", async () => {
-  const port = basePort({
-  });
-  await orchestrateProductChannelAbout({
-    channelId: "ch-1", requestId: "channel-about:ch-1:22", successorOfRunId: "run:about-prior",
-    actorUserId: "user-1", port,
-  });
-  const [launch] = port.registrationLaunches;
-  assert.equal(launch.commandId, "about-successor:run:about-prior");
-  assert.deepEqual(launch.aboutSession, { triggerRequestId: "channel-about:ch-1:22",
-    successorOfRunId: "run:about-prior" });
-});
-
-test("Channel About language comes only from the explicit Space preference", () => {
-  assert.equal(productSpacePreferredLanguage({
-    locale: { defaultLocale: "zh-CN", supportedLocales: ["zh-CN", "en"] },
-    preferredLanguage: "en",
-  }), "zh", "the versioned Space policy takes precedence");
-  assert.equal(productSpacePreferredLanguage({ preferredLanguage: "en" }), "en");
-  assert.equal(productSpacePreferredLanguage({ locale: { defaultLocale: "fr" } }), "en");
-  assert.equal(productSpacePreferredLanguage({ name: "中文频道", messages: ["English"] }), "en");
-});
-
-test("implicit Channel About uses the stable Space default without inferring from Channel content", async () => {
-  const port = basePort({
-  });
-  const result = await orchestrateProductChannelAbout({
-    channelId: "ch-1",
-    requestId: "channel-about:ch-1:25",
-    actorUserId: "user-1",
-    port,
-  });
-
-  assert.equal(result.spawned, 1);
-  assert.match(port.registrationLaunches[0].body, /entirely in English \(en\)/u);
-  assert.match(port.registrationLaunches[0].body, /only source of the About output language/u);
-  assert.equal(port.notices.length, 0, "missing language remains silent in the Channel");
-});
-
 test("a reborn mention prepares a registration reborn of the addressed Instance", async () => {
   const port = basePort({
     async getRebornTarget({ agentName, channelInstanceId }) {
@@ -418,7 +251,6 @@ test("a reborn mention prepares a registration reborn of the addressed Instance"
   assert.equal(result.spawned, 1);
   assert.deepEqual(port.reborns.map(({ sourceInstanceId, sourceMention }) => ({ sourceInstanceId, sourceMention })),
     [{ sourceInstanceId: "ch-1:1", sourceMention: "@codex:1:reborn" }]);
-  assert.equal(port.registrationLaunches.length, 0);
 });
 
 test("a refused registration reborn names its code in the Channel", async () => {
@@ -558,7 +390,6 @@ test("a new conversation's first message asks Jev which harness to summon and a 
       if (typeof outcome === "string") throw Object.assign(new Error(outcome), { code: outcome });
       return outcome ?? { claimed: true, harness: "codex" };
     },
-    async launchRegistrationInput() { throw new Error("a first message never launches directly"); },
     reportDiagnostic(value) { diagnostics.push(value); },
   });
   const input = { channelId: "ch-1", messageId: "m-1", body: "fix the flaky login test" };
