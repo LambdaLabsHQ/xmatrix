@@ -841,7 +841,11 @@ function remoteChangeDecorations(state: EditorState, fragment: Y.XmlFragment, aw
       style: `--page-change-color: ${user.color}; --page-words-delay: -${Math.max(0, now - change.at)}ms`,
       ...(user.kind === "agent" ? { "data-agent": "" } : {}) };
     if (change.node) {
-      appendBlockChangeDecoration(decorations, state, from, attrs);
+      // A new paragraph or heading is tinted on its words, as typing is, not as a band across the page; a
+      // new table or embed, which has no line of words, is tinted whole.
+      const words = state.doc.nodeAt(from)?.isTextblock ? textblockAt(state, from + 1) : null;
+      if (words) decorations.push(Decoration.inline(words.from, words.to, attrs));
+      else if (!state.doc.nodeAt(from)?.isTextblock) appendBlockChangeDecoration(decorations, state, from, attrs);
       continue;
     }
     const to = resolve(change.to);
