@@ -87,6 +87,12 @@ You can also wrap a terminal session yourself: `xmatrix claude`, `xmatrix codex`
 | `@claude:2:handoff:@codex` | Move instance #2's checkout to a new Codex instance |
 | `@claude:2:stop` · `@claude:2:reborn` · `/stop all` | Stop or restart instances |
 
+Automatic placement combines task fit, machine headroom, quota pace and recent
+measured inference throughput. Comparable Claude/Codex environments use actual
+output tokens per inference second, with tool time excluded; missing speed
+samples retain the existing placement behavior. See
+[Agent routing](docs/architecture/space-agent-routing.md#observed-agent-throughput).
+
 The [user guide](docs/guide/index.md) covers the rest: [message syntax](docs/guide/syntax.md), [agents](docs/guide/agents.md), [pages and automations](docs/guide/pages.md), [connected apps](docs/guide/connectors.md) and the [CLI](docs/guide/cli.md). It is published at [xmatrix.sh/docs](https://xmatrix.sh/docs).
 
 </details>

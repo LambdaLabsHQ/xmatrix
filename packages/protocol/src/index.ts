@@ -204,6 +204,8 @@ export type {
   RoutingModelOption, RoutingObservation,
 } from "./agent-routing.js";
 export { MACHINE_RESOURCE_HISTORY_RANGES } from "./machine-resource-history.js";
+export { agentThroughputObservation } from "./agent-throughput.js";
+export type { AgentThroughputObservation } from "./agent-throughput.js";
 export type {
   MachineResourceHistory, MachineResourceHistoryPoint, MachineResourceHistoryRange,
 } from "./machine-resource-history.js";

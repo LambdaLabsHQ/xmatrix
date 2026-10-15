@@ -99,6 +99,7 @@ include!("runtime_codex_app_transport.rs");
 include!("runtime_codex_typed_channel_controls.rs");
 include!("runtime_codex_channel_delivery.rs");
 mod runtime_agent_goal_status;
+mod runtime_agent_throughput;
 mod runtime_claude_messages;
 mod runtime_claude_stream_io;
 mod runtime_claude_stream_session;

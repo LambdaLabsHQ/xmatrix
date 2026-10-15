@@ -15,6 +15,14 @@ English is the default language for repository documentation, guardrails, releas
 
 ## Current behavior
 
+Agent placement uses measured inference throughput alongside semantic fit,
+machine headroom and quota pace. Recent real output-token/inference-time
+observations remain scoped to the registration, model and effort; tool time,
+failed turns, stale readings and unsupported harnesses cannot become fabricated
+speed measurements. Native Claude/Codex wrappers supply the optional fact,
+existing Instance presentations persist it, and invocation details show it.
+See [Space agent routing](../architecture/space-agent-routing.md#observed-agent-throughput).
+
 Parameter-control notices distinguish an unconfirmed local selection from the
 provider's observed value. Codex turn-only Fast selections remain pending until
 the provider confirms them; see [harness parameters](../architecture/harness-parameters.md).
