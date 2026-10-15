@@ -46,7 +46,7 @@ integration("revocation persists exact stop obligations and settles ledger only 
         expectedRevision, state, limits: resources, actorUserId: authority === "owner" ? "owner" : "admin",
         commandId: `change-${++sequence}` });
     await query(`INSERT INTO data.agent_registrations VALUES ('owner','machine','codex',1,now(),now())`);
-    for (const space of ["space", "other"]) {
+    for (const space of ["space", "other", "conversation"]) {
       await query(`INSERT INTO data.channels VALUES ($1,$1,'open','{}',1,NULL)`, [space]);
       await query(`INSERT INTO data.space_members VALUES ($1,'owner','member'),($1,'caller','member'),($1,'admin','admin')`, [space]);
       await query(`INSERT INTO data.agent_registration_authority VALUES ($1,'composite',repeat('a',64),1,now())`, [space]);
@@ -153,5 +153,14 @@ integration("revocation persists exact stop obligations and settles ledger only 
     assert.equal(await stops.prepare("other"), 1);
     assert.deepEqual((await query(`SELECT reason_code FROM data.registration_stop_intents WHERE run_id='other-second'`)).rows,
       [{ reason_code: "registration_disabled" }]);
+    // A Channel About Run left from before About became a text task stops;
+    // the conversation's other Runs keep their authority.
+    await addRun("about", "conversation", "running"); await addRun("agent", "conversation", "running");
+    await query(`UPDATE data.runs SET metadata_json=metadata_json||'{"routedAs":"management_channel_about"}' WHERE run_id='about'`);
+    assert.equal(await stops.prepare("conversation"), 1); assert.equal(await stops.prepare("conversation"), 0);
+    assert.deepEqual((await query(`SELECT r.run_id,r.status,s.reason_code FROM data.runs r
+      LEFT JOIN data.registration_stop_intents s ON s.run_id=r.run_id WHERE r.channel_id='conversation' ORDER BY r.run_id`)).rows, [
+      { run_id: "about", status: "stopping", reason_code: "registration_run_retired" },
+      { run_id: "agent", status: "running", reason_code: null }]);
   } finally { await client.query("ROLLBACK"); await client.end(); }
 });

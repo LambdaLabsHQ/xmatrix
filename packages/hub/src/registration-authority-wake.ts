@@ -37,11 +37,12 @@ export async function wakeRegistrationChannels(env: { RELAY_POSTGRES_AGENT_LAUNC
 /**
  * A Machine's daemon is back. What waited on it moves now rather than at its
  * next timed look, which backs off while the Machine is away: Launches queued
- * for it and registration stops pending on it. Only their Channels are told,
- * each about that work. A Channel whose Runs merely live on the Machine has
- * nothing to move (2026-10-09: every reconnect woke each such Channel into a
- * full registration re-check, about eight transactions apiece). Each shard is
- * asked once.
+ * for it, registration stops pending on it, and Channel About Runs still on it,
+ * which wait only to be stopped now that About is a text task. Only their
+ * Channels are told, each about that work. A Channel whose Runs merely live on
+ * the Machine has nothing to move (2026-10-09: every reconnect woke each such
+ * Channel into a full registration re-check, about eight transactions apiece).
+ * Each shard is asked once.
  */
 export async function wakeMachineChannels(env: PostgresAuthorityFleetEnv & {
   RELAY_POSTGRES_AGENT_LAUNCH_CHANNEL?: DurableObjectNamespace }, scope: { ownerUserId: string; machineId: string },
@@ -52,12 +53,17 @@ export async function wakeMachineChannels(env: PostgresAuthorityFleetEnv & {
   for (const { shardId, database } of shards) {
     const rows = await database.transaction({ requestId: `machine-reconnect-wake:${crypto.randomUUID()}`,
       operation: "registration.machine.waiting-channels" }, tx => tx.query<{ channel_id: string; work: string }>({
-      name: "machine_waiting_channels_v1",
+      name: "machine_waiting_channels_v2",
       text: `(SELECT DISTINCT channel_id, 'launch' AS work FROM data.agent_launches
           WHERE owner_user_id=$1 AND machine_id=$2 AND state IN ('prepared','queued') LIMIT ${AFFECTED_CHANNEL_LIMIT})
-        UNION ALL (SELECT DISTINCT channel_id, 'registrationStop' AS work FROM data.registration_stop_intents
-          WHERE owner_user_id=$1 AND machine_id=$2 AND state='pending' LIMIT ${AFFECTED_CHANNEL_LIMIT})`,
-      values: [scope.ownerUserId, scope.machineId], maxRows: 2 * AFFECTED_CHANNEL_LIMIT }));
+        UNION (SELECT DISTINCT channel_id, 'registrationStop' AS work FROM data.registration_stop_intents
+          WHERE owner_user_id=$1 AND machine_id=$2 AND state='pending' LIMIT ${AFFECTED_CHANNEL_LIMIT})
+        UNION (SELECT DISTINCT channel_id, 'registrationStop' AS work FROM data.runs run
+          WHERE owner_user_id=$1 AND metadata_json->>'machineId'=$2 AND status IN (${ACTIVE_RUN_STATUS_SQL})
+            AND metadata_json->>'routedAs'='management_channel_about'
+            AND NOT EXISTS (SELECT 1 FROM data.registration_stop_intents stop WHERE stop.run_id=run.run_id)
+          LIMIT ${AFFECTED_CHANNEL_LIMIT})`,
+      values: [scope.ownerUserId, scope.machineId], maxRows: 3 * AFFECTED_CHANNEL_LIMIT }));
     for (const row of rows) {
       // The shard is known here, so the Channel need not look it up.
       const channelId = String(row.channel_id);
