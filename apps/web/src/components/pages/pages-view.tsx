@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { startTransition, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import dynamic from "next/dynamic";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { PageDocBlock } from "@xmatrix/protocol/page-document";
@@ -418,13 +418,17 @@ function usePresence(session: PageLiveSession | null): Array<{ clientId: number;
   const [states, setStates] = useState<Array<{ clientId: number; state: PagePresenceState }>>([]);
   useEffect(() => {
     if (!session) return;
-    const read = () => setStates([...session.awareness.getStates().entries()]
+    const read = () => startTransition(() => setStates([...session.awareness.getStates().entries()]
       .filter(([clientId]) => clientId !== session.doc.clientID)
       .map(([clientId, state]) => ({ clientId, state: state as PagePresenceState }))
-      .filter(({ state }) => Boolean(state?.user)));
+      .filter(({ state }) => Boolean(state?.user))));
+    // This reader's own caret moves on every key; only others' presence is shown.
+    const changed = ({ added, updated, removed }: { added: number[]; updated: number[]; removed: number[] }) => {
+      if ([...added, ...updated, ...removed].some((clientId) => clientId !== session.doc.clientID)) read();
+    };
     read();
-    session.awareness.on("change", read);
-    return () => session.awareness.off("change", read);
+    session.awareness.on("change", changed);
+    return () => session.awareness.off("change", changed);
   }, [session]);
   return states;
 }
@@ -536,6 +540,9 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   // The conversation whose card is being read, so its passage is marked (§4.4).
   const [focused, setFocused] = useState<string | null>(null);
   const [anchorTops, setAnchorTops] = useState<ReadonlyMap<string, number>>(new Map());
+  // What is measured or derived from the editor follows typing as a transition: keys are handled first, so
+  // fast typing on a busy page never queues commit after commit (React #185, "Maximum update depth exceeded").
+  const placeAnchors = useCallback((tops: ReadonlyMap<string, number>) => startTransition(() => setAnchorTops(tops)), []);
   // The margin needs room beside a full document column; narrower pages show bubbles instead (§4.4).
   const [articleWidth, setArticleWidth] = useState(0);
   const observer = useRef<ResizeObserver | null>(null);
@@ -549,7 +556,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     scrollFrame.current = requestAnimationFrame(() => {
       scrollFrame.current = 0;
       const article = articleElement.current;
-      if (article) setViewport({ top: article.scrollTop, height: article.clientHeight });
+      if (article) startTransition(() => setViewport({ top: article.scrollTop, height: article.clientHeight }));
     });
   }, []);
   const measureArticle = useCallback((article: HTMLElement | null) => {
@@ -1404,11 +1411,11 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
                       suggestions={drawn ? waiting.suggestions : null} onSuggestions={setSuggesting}
                       suggestionControl={suggestionControl}
                       actions={sectionActions} headingActions={headingActions} sections={sections}
-                      onBlocks={(next) => setEditorBlocks({ session, blocks: next })}
+                      onBlocks={(next) => startTransition(() => setEditorBlocks({ session, blocks: next }))}
                       follow={follow} onOpenConversation={openConversation} discussions={discussions}
                       automations={automationsById} references={references}
                       focusedConversationId={activeConversationId ?? focused} onFocusConversation={setFocused}
-                      onAnchorOffsets={setAnchorTops} cursorPresence={cursorPresence} readGitHubFile={readGitHubFile} />}
+                      onAnchorOffsets={placeAnchors} cursorPresence={cursorPresence} readGitHubFile={readGitHubFile} />}
                   </div>
                 </div>
                 {/* The margin holds its room from the start, so the text does not reflow when the page has synced;

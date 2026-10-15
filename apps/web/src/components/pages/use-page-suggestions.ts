@@ -7,6 +7,9 @@ import { pageApi } from "@/lib/pages/page-client";
 import { xmatrixQueryKeys } from "@/lib/query/query-keys";
 import type { PageSuggestion } from "./page-suggestions";
 
+// Keep the editor's suggestions effect idle while no suggestions are waiting.
+const NONE_WAITING: readonly PageSuggestion[] = [];
+
 /**
  * The suggestions waiting on a page (pages-live-document.md §4.2), each with the text it was proposed
  * against, so the editor can lay it over the page as it is now. Revisions never change, so a
@@ -37,7 +40,7 @@ export function usePageSuggestions(spaceId: string | null, pageId: string | null
   });
   return {
     /** Null while the texts are read; empty when nothing waits. */
-    suggestions: waiting.length === 0 ? [] : texts.data ?? null,
+    suggestions: waiting.length === 0 ? NONE_WAITING : texts.data ?? null,
     /** The last suggestion a review of all of them covers. */
     through: waiting.reduce((last, suggestion) => Math.max(last, suggestion.revision), 0),
     refetch: () => void list.refetch(),
