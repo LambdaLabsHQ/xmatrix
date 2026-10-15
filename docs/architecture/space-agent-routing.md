@@ -237,7 +237,8 @@ inference calls or public network probes.
 
 Claude uses successful main-agent result `usage.output_tokens` and
 `duration_api_ms`; mixed-model results are excluded. Codex uses the delta of its
-provider-reported cumulative output token counter, with `tokenUsage.last` as
+provider-reported cumulative output token counter of the wrapper-created or
+resumed main thread (child threads are excluded), with `tokenUsage.last` as
 the first turn's baseline when needed, and monotonic turn time minus the union
 of command, file-change, MCP, dynamic, search, image and agent-tool intervals. Missing tool
 starts, incomplete counters, failed turns and a mid-turn model change produce

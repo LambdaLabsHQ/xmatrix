@@ -34,6 +34,7 @@ struct Sample {
 #[derive(Default)]
 struct Observer {
     scope: Option<Scope>,
+    thread: Option<String>,
     turns: HashMap<String, Turn>,
     totals: HashMap<String, u64>,
     samples: VecDeque<Sample>,
@@ -41,6 +42,14 @@ struct Observer {
 }
 
 impl Observer {
+    fn bind_thread(&mut self, thread: Option<&str>) {
+        self.thread = thread
+            .filter(|thread| !thread.is_empty() && thread.len() <= 256)
+            .map(str::to_string);
+        self.turns.clear();
+        self.totals.clear();
+    }
+
     fn scope(&mut self, model: Option<&str>, effort: Option<&str>) {
         let Some(model) = model.filter(|model| !model.is_empty()) else {
             return;
@@ -158,7 +167,7 @@ impl Observer {
         let Some(thread) = params.get("threadId").and_then(Value::as_str) else {
             return;
         };
-        if thread.len() > 256 {
+        if self.thread.as_deref() != Some(thread) {
             return;
         }
         let id = params
@@ -304,6 +313,17 @@ fn observer() -> &'static Mutex<Observer> {
     OBSERVER.get_or_init(|| Mutex::new(Observer::default()))
 }
 
+/// The app session, not a provider notification, identifies its main thread.
+pub(crate) fn bind_thread(thread: Option<&str>) {
+    if cfg!(test) {
+        return;
+    }
+    observer()
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner())
+        .bind_thread(thread);
+}
+
 pub(crate) fn record_provider(value: &Value) {
     if cfg!(test) {
         return;
@@ -350,6 +370,7 @@ mod tests {
     fn observer() -> Observer {
         let mut observer = Observer::default();
         observer.scope(Some("model-a"), Some("high"));
+        observer.bind_thread(Some("thread"));
         observer
     }
 
@@ -379,6 +400,31 @@ mod tests {
             "turn/completed",
             json!({"turn":{"id":"turn","status":status}}),
         )
+    }
+
+    #[test]
+    fn codex_child_thread_events_never_become_main_model_throughput() {
+        let mut observer = observer();
+        for (method, extra, at) in [
+            ("turn/started", json!({}), 0),
+            (
+                "thread/tokenUsage/updated",
+                json!({"tokenUsage":{"total":{"outputTokens":8000},"last":{"outputTokens":8000}}}),
+                1000,
+            ),
+            (
+                "turn/completed",
+                json!({"turn":{"id":"turn","status":"completed"}}),
+                2000,
+            ),
+        ] {
+            let mut value = event(method, extra);
+            value["params"]["threadId"] = json!("child-thread");
+            observer.codex(&value, at, at + 1000);
+        }
+        assert!(observer.observation().is_none());
+        assert!(observer.turns.is_empty());
+        assert!(observer.totals.is_empty());
     }
 
     #[test]
