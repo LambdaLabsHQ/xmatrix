@@ -2,6 +2,10 @@ import type { Metadata } from "next";
 import { Navbar } from "@/components/shared/navbar";
 import { Hero } from "@/components/landing/hero";
 import { QuickStart } from "@/components/landing/quick-start";
+import { AgentStrip } from "@/components/landing/agent-strip";
+import { LivePage } from "@/components/landing/live-page";
+import { Why } from "@/components/landing/why";
+import { Faq } from "@/components/landing/faq";
 import { HowItWorks } from "@/components/landing/how-it-works";
 import { FirstPage } from "@/components/landing/first-page";
 import { Connectors } from "@/components/landing/connectors";
@@ -26,11 +30,15 @@ export default function Home() {
     <div className="site-page">
       <Navbar />
       <Hero />
+      <AgentStrip />
+      <LivePage />
       <QuickStart />
+      <Why />
       <HowItWorks />
       <FirstPage />
       <Connectors />
       <Pricing />
+      <Faq />
       <Footer />
     </div>
   );

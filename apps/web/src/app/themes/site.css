@@ -533,6 +533,116 @@ html:has(.site-page) {
   }
 }
 
+/* The agents people already use, passing under the hero as one row of glass chips. */
+.site-agent-strip {
+  position: relative;
+  padding-block: 1.5rem 0.5rem;
+  overflow: hidden;
+}
+
+/* The row fades into the paper at both ends. Paper drawn over it, not a mask: a mask would hide the paper
+   from the glass chips, which take their look from what is behind them. */
+.site-agent-strip::before,
+.site-agent-strip::after {
+  content: "";
+  position: absolute;
+  inset-block: 0;
+  z-index: 1;
+  width: 8%;
+  pointer-events: none;
+}
+
+.site-agent-strip::before {
+  left: 0;
+  background: linear-gradient(90deg, var(--background), transparent);
+}
+
+.site-agent-strip::after {
+  right: 0;
+  background: linear-gradient(270deg, var(--background), transparent);
+}
+
+.site-agent-strip-label {
+  margin-bottom: 1rem;
+  text-align: center;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--muted-foreground);
+}
+
+.site-agent-strip-track {
+  display: flex;
+  width: max-content;
+  animation: site-agent-strip 48s linear infinite;
+}
+
+.site-agent-strip-row {
+  display: flex;
+  gap: 0.75rem;
+  padding-right: 0.75rem;
+}
+
+/* Glass comes from the shared LiquidGlassPill; these rules only lay out the chip. */
+.site-agent-chip,
+.site-machine-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  height: 2.5rem;
+  padding-inline: 1rem;
+  border-radius: 999px;
+  font-size: 0.875rem;
+  font-weight: 600;
+  white-space: nowrap;
+  color: var(--foreground);
+}
+
+.site-machine-chip {
+  font-weight: 400;
+}
+
+.site-machine-dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 999px;
+  background: #22c55e;
+}
+
+@keyframes site-agent-strip {
+  to { transform: translateX(-50%); }
+}
+
+/* One project's page, written live, as a sheet of paper on the page. */
+.site-live-page-window {
+  overflow: hidden;
+  border-radius: 12px;
+  background: var(--background);
+  box-shadow:
+    0 0 0 0.5px oklch(0 0 0 / 0.16),
+    0 22px 70px 4px oklch(0.25 0.03 60 / 0.24),
+    0 6px 16px oklch(0.25 0.03 60 / 0.1);
+}
+
+.site-live-page {
+  padding: 3rem 3.5rem 3.5rem;
+  pointer-events: none;
+  user-select: none;
+}
+
+.site-live-page-column {
+  max-width: 44rem;
+}
+
+.site-why-ours {
+  border-bottom: 1px solid oklch(0 0 0 / 0.1);
+  font-weight: 500;
+  color: var(--foreground);
+}
+
+.site-faq summary::-webkit-details-marker {
+  display: none;
+}
+
 @media (max-width: 767px) {
   .site-canvas {
     background-attachment: scroll;
@@ -551,5 +661,9 @@ html:has(.site-page) {
 @media (prefers-reduced-motion: reduce) {
   .site-page :is(.app-material-liquid-card, .app-material-liquid-pill) {
     transition: none;
+  }
+
+  .site-agent-strip-track {
+    animation: none;
   }
 }
