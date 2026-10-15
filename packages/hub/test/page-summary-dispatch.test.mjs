@@ -6,6 +6,28 @@ import * as protocol from "@xmatrix/protocol";
 import { connectionString, integration, savepointDatabase } from "../../db/test/postgres-database.fixture.mjs";
 import { loadCommonJsSourceModule } from "./support/commonjs-source-module.mjs";
 
+/** text-task-machines.ts's imports over one test database: the Space's Agents are `targets()`, in
+ *  selection order, and every task it issues lands in `commands`. */
+function textTaskImports(database, { targets, commands, xmatrixDb = db }) {
+  return name => {
+    if (name === "@xmatrix/protocol") return protocol;
+    if (name === "@xmatrix/db") return xmatrixDb;
+    if (name === "./postgres-authority-fleet") return {
+      createPostgresAuthorityDatabase: () => database,
+      createPostgresAuthorityFleet: () => ({ directoryDatabase: database }),
+    };
+    if (name === "./agent-routing-quota-refresh") return { registrationQuotaProbeTargetReader: () => async () => targets() };
+    if (name === "./machines") return { machineDatabase: () => database,
+      machineDaemonCommand: async (_env, command) => { commands.push(command); } };
+    if (name === "./postgres-authority-http") return { POSTGRES_AUTHORITY_TIMEOUTS: {} };
+    if (name === "./postgres-message-database-policy") return { POSTGRES_MESSAGE_CONNECT_TIMEOUT_MS: 1000 };
+    assert.fail(`unexpected import: ${name}`);
+  };
+}
+
+const loadTextTaskMachines = resolve =>
+  loadCommonJsSourceModule(new URL("../src/text-task-machines.ts", import.meta.url), resolve);
+
 integration("a page summary sends text only to a Machine whose owner currently reads that page", async () => {
   const client = new Client({ connectionString });
   await client.connect();
@@ -37,25 +59,14 @@ integration("a page summary sends text only to a Machine whose owner currently r
     const open = await create({ title: "Open", body: "Public plan\n" });
     let candidates = [member];
     const commands = [];
-    const resolve = name => {
-      if (name === "@xmatrix/protocol") return protocol;
-      if (name === "@xmatrix/db") return { ...db, PostgresMachineControlRepository: class {
+    const resolve = textTaskImports(database, { commands,
+      targets: () => candidates.map(candidate => ({ ownerUserId: candidate.id, machineId: candidate.id, hostId: "host",
+        harness: "claude" })),
+      xmatrixDb: { ...db, PostgresMachineControlRepository: class {
         async getDaemon() { return { daemon: { id: "daemon", email: "machine@example.test", status: "online",
           capabilities: [protocol.MACHINE_TEXT_TASK_CAPABILITY] } }; }
-      } };
-      if (name === "./postgres-authority-fleet") return {
-        createPostgresAuthorityDatabase: () => database,
-        createPostgresAuthorityFleet: () => ({ directoryDatabase: database }),
-      };
-      if (name === "./agent-routing-quota-refresh") return { registrationQuotaProbeTargetReader: () => async () =>
-        candidates.map(candidate => ({ ownerUserId: candidate.id, machineId: candidate.id, hostId: "host", harness: "claude" })) };
-      if (name === "./machines") return { machineDatabase: () => database,
-        machineDaemonCommand: async (_env, command) => { commands.push(command); } };
-      if (name === "./postgres-authority-http") return { POSTGRES_AUTHORITY_TIMEOUTS: {} };
-      if (name === "./postgres-message-database-policy") return { POSTGRES_MESSAGE_CONNECT_TIMEOUT_MS: 1000 };
-      assert.fail(`unexpected import: ${name}`);
-    };
-    const machines = await loadCommonJsSourceModule(new URL("../src/text-task-machines.ts", import.meta.url), resolve);
+      } } });
+    const machines = await loadTextTaskMachines(resolve);
     const { startPageSummary } = await loadCommonJsSourceModule(new URL("../src/page-summary.ts", import.meta.url),
       name => name === "./text-task-machines" ? machines : resolve(name));
     const start = page => startPageSummary({}, { spaceId, pageId: page.pageId });
@@ -88,6 +99,35 @@ integration("a page summary sends text only to a Machine whose owner currently r
     candidates = [member, owner];
     await assert.rejects(start(child), { code: "database_unavailable", status: 503 });
     assert.equal(commands.length, sent, "authority outages never turn into another disclosure attempt");
+  } finally {
+    await client.query("ROLLBACK");
+    await client.end();
+  }
+});
+
+// 2026-10-15: nobody names a Machine for a text task (a conversation's About, a page's summary), so a
+// Machine whose owner turned automatic assignment off ("Agents start here only when named") gets none.
+integration("a text task goes only to a Machine its owner leaves to automatic assignment", async () => {
+  const client = new Client({ connectionString });
+  await client.connect();
+  try {
+    await client.query("BEGIN");
+    const owner = `text-task-${crypto.randomUUID()}`;
+    const machineId = name => `machine:${owner}:${name}`;
+    for (const [name, autoAssign] of [["Laptop", false], ["Server", null]]) {
+      await client.query(`INSERT INTO data.machines (owner_user_id,machine_id,name,auto_assign) VALUES ($1,$2,$3,$4)`,
+        [owner, machineId(name), name, autoAssign]);
+      await client.query(`INSERT INTO data.machine_daemons (daemon_id,owner_user_id,owner_email,machine_id,hostname,status,
+          capabilities_json,metadata_json,connection_epoch,version,created_at,updated_at)
+        VALUES ($1,$2,'owner@example.test',$3,$4,'online',$5::jsonb,'{}',1,1,now(),now())`,
+      [`daemon:${owner}:${name}`, owner, machineId(name), name, JSON.stringify([protocol.MACHINE_TEXT_TASK_CAPABILITY])]);
+    }
+    const { textTaskMachines } = await loadTextTaskMachines(textTaskImports(savepointDatabase(client, text => text), {
+      commands: [], targets: () => ["Laptop", "Server"].map(name => ({ ownerUserId: owner, machineId: machineId(name),
+        hostId: name, harness: "claude" })) }));
+    const chosen = [];
+    for await (const machine of textTaskMachines({}, "space", "test")) chosen.push(machine.machineId);
+    assert.deepEqual(chosen, [machineId("Server")], "the Laptop comes first but takes only named work");
   } finally {
     await client.query("ROLLBACK");
     await client.end();

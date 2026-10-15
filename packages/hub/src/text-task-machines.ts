@@ -10,7 +10,8 @@ import type { Env } from "./types";
 /**
  * A Machine that can answer one text task now: one of the Space's enabled Agents' harnesses on it,
  * with its daemon online and able to take the task. A task's text is disclosed to that Machine's
- * owner's environment, so whoever issues one reads the text as that owner first.
+ * owner's environment, so whoever issues one reads the text as that owner first. Nobody names a
+ * Machine for a text task, so one its owner keeps out of automatic assignment never takes one.
  */
 export interface TextTaskMachine {
   ownerUserId: string;
@@ -33,7 +34,8 @@ export async function* textTaskMachines(env: Env, spaceId: string, purpose: stri
   for (const target of targets) {
     const route = { ownerUserId: target.ownerUserId, machineId: target.machineId, hostId: target.hostId };
     const { daemon } = await machines.getDaemon({ requestId: crypto.randomUUID(), ...route });
-    if (!daemon || daemon.status !== "online" || !daemon.capabilities.includes(MACHINE_TEXT_TASK_CAPABILITY)) continue;
+    if (!daemon || daemon.status !== "online" || daemon.autoAssign === false ||
+        !daemon.capabilities.includes(MACHINE_TEXT_TASK_CAPABILITY)) continue;
     yield { ...route, harness: target.harness, daemon: { id: daemon.id, email: daemon.email } };
   }
 }
