@@ -557,6 +557,38 @@ integration("claims: one holder per block, renewed by its holder, open for compe
   }
 });
 
+integration("pages: a page named in its document is renamed by editing the heading it opens with", async () => {
+  const { client, ids, pages, owner } = await pageTest("heading-title");
+  try {
+    const r = () => crypto.randomUUID();
+    const title = async (pageId) => (await pages.read({ requestId: r(), spaceId: ids.space, pageId,
+      principal: owner })).page.title;
+    const edit = (pageId, baseRevision, body) => pages.edit({ requestId: r(), spaceId: ids.space, pageId,
+      principal: owner, baseRevision, body });
+
+    const { page: named } = await pages.create({ requestId: r(), spaceId: ids.space, principal: owner, title: "Plans" });
+    await edit(named.pageId, 1, "# Roadmap\n\nNext.\n");
+    assert.equal(await title(named.pageId), "Roadmap", "the heading it opened with is its name");
+    await edit(named.pageId, 2, "Intro first.\n\n# Roadmap\n");
+    assert.equal(await title(named.pageId), "Roadmap", "a document that stops opening with a heading keeps the name");
+
+    // An untitled page takes whatever heading its document opens with.
+    const { page: untitled } = await pages.create({ requestId: r(), spaceId: ids.space, principal: owner,
+      title: "Untitled", body: "# Something else\n" });
+    await edit(untitled.pageId, 1, "# 测试一下共同写作\n");
+    assert.equal(await title(untitled.pageId), "测试一下共同写作");
+
+    // A page named apart from its document keeps its name whatever its first heading says.
+    const { page: apart } = await pages.create({ requestId: r(), spaceId: ids.space, principal: owner,
+      title: "Goals", body: "## Search\n\nNext.\n" });
+    await edit(apart.pageId, 1, "## Billing\n\nLater.\n");
+    assert.equal(await title(apart.pageId), "Goals");
+  } finally {
+    await cleanup(client, ids);
+    await client.end();
+  }
+});
+
 integration("a released claim owes an update unless its conversation wrote the section while holding it", async () => {
   const { client, ids, pages, owner, agent } = await pageTest("claims-owed");
   try {

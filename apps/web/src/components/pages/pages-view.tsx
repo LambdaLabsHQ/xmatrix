@@ -65,14 +65,11 @@ const PageDocumentStatic = dynamic(() => import("./page-document-static").then((
   loading: () => null,
 });
 
-/** The document already opens with this page's name, so the header must not say it again. */
-function documentOpensWithTitle(title: string, blocks: PageDocBlock[], markdown: string | undefined): boolean {
-  const name = title.trim();
-  if (!name) return false;
-  if (blocks.length > 0) return blocks[0].pos === 0 && blocks[0].title.trim() === name;
+/** The heading the document opens with: a page whose name is written in its document is named there. */
+function openingHeading(blocks: PageDocBlock[], markdown: string | undefined): string | null {
+  if (blocks.length > 0) return blocks[0].pos === 0 ? blocks[0].title.trim() || null : null;
   const line = markdown?.trimStart().split("\n", 1)[0]?.trim() ?? "";
-  const heading = /^(#{1,6})\s+(\S.*)$/u.exec(line);
-  return heading?.[2]?.trim() === name;
+  return /^#{1,6}\s+(\S.*)$/u.exec(line)?.[1]?.trim() ?? null;
 }
 
 /**
@@ -956,8 +953,21 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     }
   };
 
+  // A page is named in its document when it opened with its name, or, untitled, opens with any heading:
+  // editing that heading renames it (the Hub renames on commit), so the header must not say it again.
+  const opening = openingHeading(blocks, document.data?.body);
+  const namedIn = useRef<PageLiveSession | null>(null);
+  if (session && page && opening !== null && opening === page.title.trim()) namedIn.current = session;
+  const namedInDocument = Boolean(page && opening !== null && (opening === page.title.trim()
+    || page.title === NEW_PAGE_TITLE || (session !== null && namedIn.current === session)));
+  // The tree catches up with a rename the heading made.
+  const renamedInDocument = namedInDocument && opening !== page?.title.trim();
+  useEffect(() => {
+    if (renamedInDocument) void queryClient.invalidateQueries({ predicate: (query) => query.queryKey.includes("page-tree") });
+  }, [headRevision, queryClient, renamedInDocument]);
+
   // The page's name, when the document does not already open with it. Plain text: a field well would repeat the heading.
-  const titleField = page && !documentOpensWithTitle(page.title, blocks, document.data?.body) ? (canEdit ? (
+  const titleField = page && !namedInDocument ? (canEdit ? (
     <input key={`${page.pageId}:${page.title}`} defaultValue={page.title} aria-label="Page title"
       data-testid="page-title" placeholder={NEW_PAGE_TITLE} onKeyDown={(event) => {
         if (isImeKeyDown(event.nativeEvent)) return;

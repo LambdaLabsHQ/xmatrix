@@ -84,6 +84,25 @@ export function pageTitle(value: unknown): string {
   return value.trim();
 }
 
+/** What a page is called until its author names it; such a page takes the name its document opens with. */
+const UNNAMED_PAGE_TITLE = "Untitled";
+
+/** The heading a page's document opens with, which is where its name is read. */
+function openingHeading(body: string): string | null {
+  const line = body.trimStart().split("\n", 1)[0]?.trim() ?? "";
+  return /^#{1,6}\s+(\S.*)$/u.exec(line)?.[1]?.trim() ?? null;
+}
+
+/**
+ * A page whose document opens with its name is renamed by editing that heading: the name is
+ * written once, in the document. A page named elsewhere keeps its name whatever its first heading.
+ */
+function headingTitle(title: string, before: string, after: string): string | null {
+  const heading = openingHeading(after);
+  if (!heading || heading === title || [...heading].length > 200) return null;
+  return title === UNNAMED_PAGE_TITLE || openingHeading(before) === title ? heading : null;
+}
+
 export function pageBody(value: unknown): string {
   if (typeof value !== "string") throw new PageControlError("invalid_page_body", 400, "A page body is text");
   if (utf8ByteLength(value) > MAX_BODY_BYTES) {
@@ -652,6 +671,11 @@ export class PostgresPageRepository {
       values: [spaceId, pageId], maxRows: 1,
     }))[0];
     const head = Number(locked?.head_revision ?? row.head_revision);
+    const before = (await tx.query<QueryResultRow & { body: string | null }>({
+      name: "page_revision_body_v1",
+      text: "SELECT body FROM data.page_revisions WHERE space_id=$1 AND page_id=$2 AND revision=$3",
+      values: [spaceId, pageId, head], maxRows: 1,
+    }))[0]?.body ?? "";
     const next = (await tx.query<QueryResultRow & { next: string }>({
       name: "page_revision_next_v1",
       text: "SELECT (COALESCE(MAX(revision),0)+1)::text AS next FROM data.page_revisions WHERE space_id=$1 AND page_id=$2",
@@ -683,12 +707,12 @@ export class PostgresPageRepository {
       suggestion ? "suggestion" : input.kind, input.baseRevision, now);
     const anchoring = suggestion ? { channels: [], detached: [], attached: [] } : await (async () => {
       await tx.query({
-        name: "page_head_advance_v1",
-        text: `UPDATE data.pages SET head_revision=$3, version=version+1, updated_at=$4
+        name: "page_head_advance_v2",
+        text: `UPDATE data.pages SET head_revision=$3, title=COALESCE($5,title), version=version+1, updated_at=$4
           WHERE space_id=$1 AND page_id=$2`,
-        values: [spaceId, pageId, revision, now], maxRows: 0,
+        values: [spaceId, pageId, revision, now, headingTitle(row.title, before, text)], maxRows: 0,
       });
-      await this.settleEditedClaims(tx, spaceId, pageId, head, text, conversationIds);
+      await this.settleEditedClaims(tx, spaceId, pageId, before, text, conversationIds);
       return reconcilePageAutomations(tx, { spaceId, pageId, body: text, at: now, revision });
     })();
     for (const conversationId of conversationIds) {
@@ -710,7 +734,7 @@ export class PostgresPageRepository {
    * already ended, and those the editing conversation still holds. A claim
    * another conversation holds still owes its own write-back.
    */
-  private async settleEditedClaims(tx: DatabaseTransaction, spaceId: string, pageId: string, head: number,
+  private async settleEditedClaims(tx: DatabaseTransaction, spaceId: string, pageId: string, before: string,
     text: string, conversationIds: string[]): Promise<void> {
     const open = await tx.query<QueryResultRow & { claim_id: string; block_id: string }>({
       name: "page_claims_unsettled_v1",
@@ -722,11 +746,6 @@ export class PostgresPageRepository {
       values: [spaceId, pageId, conversationIds], maxRows: MAX_LINKS,
     });
     if (open.length === 0) return;
-    const before = (await tx.query<QueryResultRow & { body: string | null }>({
-      name: "page_revision_body_v1",
-      text: "SELECT body FROM data.page_revisions WHERE space_id=$1 AND page_id=$2 AND revision=$3",
-      values: [spaceId, pageId, head], maxRows: 1,
-    }))[0]?.body ?? "";
     // An empty block id claims the whole page: any changed section writes it back.
     const blocks = new Set(open.map((row) => row.block_id));
     const changed = new Set(pageChangedDocBlocks(before, text, canonicalPageMarkdown,
