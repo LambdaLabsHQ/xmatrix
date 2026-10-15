@@ -112,12 +112,12 @@ pub fn connect_inherited_control_pipe() -> Result<InheritedControlPipe, Continui
 fn create_one_way_pipe() -> Result<(OwnedHandle, OwnedHandle), ContinuityError> {
     let mut read: HANDLE = std::ptr::null_mut();
     let mut write: HANDLE = std::ptr::null_mut();
-    let mut attributes = SECURITY_ATTRIBUTES {
+    let attributes = SECURITY_ATTRIBUTES {
         nLength: size_of::<SECURITY_ATTRIBUTES>() as u32,
         lpSecurityDescriptor: std::ptr::null_mut(),
         bInheritHandle: 1,
     };
-    if unsafe { CreatePipe(&mut read, &mut write, &mut attributes, 0) } == 0 {
+    if unsafe { CreatePipe(&mut read, &mut write, &attributes, 0) } == 0 {
         return Err(ContinuityError::Io(std::io::Error::last_os_error()));
     }
     Ok((

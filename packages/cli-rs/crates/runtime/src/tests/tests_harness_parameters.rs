@@ -6,6 +6,59 @@ fn harness_parameter_fixture_path() -> String {
 }
 
 #[tokio::test]
+async fn acp_model_switch_refreshes_effort_control_and_requires_confirmation() {
+    tokio::time::timeout(Duration::from_secs(20), async {
+        for backend in [
+            "acp-model-effort",
+            "acp-model-effort-mismatch",
+            "acp-model-effort-no-snapshot",
+        ] {
+            let mut session = AcpSession::spawn_stdio_with_prefix_args(
+                "node",
+                &[harness_parameter_fixture_path(), backend.into()],
+                &[],
+                Some(env!("CARGO_MANIFEST_DIR")),
+                AcpVendorConfig::generic("cursor"),
+            )
+            .await
+            .unwrap();
+            session
+                .initialize(Some(env!("CARGO_MANIFEST_DIR")), None, false, None)
+                .await
+                .unwrap();
+            assert_eq!(session.current_effort(), Some("high"));
+            if backend != "acp-model-effort" {
+                assert!(session.set_effort("low").await.is_err(), "{backend}");
+            } else {
+                assert_eq!(session.set_effort("low").await.unwrap(), "low");
+                assert_eq!(session.set_model("model-b").await.unwrap(), "model-b");
+                assert_eq!(session.set_effort("low").await.unwrap(), "low");
+                let snapshot = session.presentation_snapshot(&[]);
+                assert_eq!(snapshot.effort.as_deref(), Some("low"));
+                let selected = snapshot
+                    .models
+                    .unwrap()
+                    .into_iter()
+                    .find(|m| m.model == "model-b")
+                    .unwrap();
+                assert_eq!(selected.supported_reasoning_efforts.unwrap().len(), 2);
+                assert_eq!(session.set_model("model-c").await.unwrap(), "model-c");
+                assert_eq!(session.set_effort("low").await.unwrap(), "low");
+                assert_eq!(session.set_model("plain").await.unwrap(), "plain");
+                assert!(session.current_effort().is_none());
+                assert!(session.set_effort("high").await.is_err());
+                assert_eq!(session.set_model("model-a").await.unwrap(), "model-a");
+                assert_eq!(session.set_effort("low").await.unwrap(), "low");
+                assert!(session.set_effort("invented").await.is_err());
+            }
+            session.shutdown().await;
+        }
+    })
+    .await
+    .expect("model/effort control must remain bounded");
+}
+
+#[tokio::test]
 async fn codex_turn_only_fast_selection_reports_pending_without_replacing_observed_state() {
     tokio::time::timeout(Duration::from_secs(10), async {
         let mut app = CodexAppSession::spawn_stdio_with_prefix_args(

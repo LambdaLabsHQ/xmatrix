@@ -27,6 +27,16 @@ catalog. The Fast alias maps only to an advertised tier identified as Fast;
 `off` sends a native null override. Conflicting `fast` and `serviceTier` launch
 selections fail rather than choosing an order.
 
+Cursor exposes model-dependent effort through native ACP `configOptions`:
+for example `reasoning`, `reasoning_effort`, or `effort`. The adapter retains
+the advertised config ID and uses its returned choices and current value.
+When a model picker is advertised, model changes use `session/set_config_option`
+so its full response refreshes the model-dependent controls before effort is
+applied. Both selections require confirmation in the returned snapshot;
+an empty RPC success cannot confirm effort. Legacy ACP providers without a
+model config option retain `session/set_model`. Auto or models without an
+effort control do not acquire one from other models' capabilities.
+
 Automatic discovery requires a provider-owned machine-readable interface.
 A harness that does not expose one cannot acquire new controls safely by
 scraping help text or guessing RPC methods. Extending those adapters requires

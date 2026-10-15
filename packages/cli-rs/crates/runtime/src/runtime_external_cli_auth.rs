@@ -2130,6 +2130,7 @@ async fn run_acp_app_external(config: AcpVendorConfig, run: ExternalRun<'_>) -> 
     };
     let mut events = RunLoopEvents::new(event_rx, &relay, auto_join_channel_id.as_deref(), &agent);
 
+    run.sync();
     if let Some(requested) =
         read_initial_spawn_context_from_env().and_then(|context| context.requested_parameters)
     {
