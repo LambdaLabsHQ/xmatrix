@@ -9,8 +9,6 @@ import {
   PostgresChannelSpaceDirectory, PostgresRegistrationLaunchRepository, PostgresRegistrationRebornRepository,
   PostgresSpacePlacementDirectory, PostgresRuntimeRepository, RegistrationAccessError, type AuthorityDatabase,
   PostgresFirstMessageLaunchChoiceRepository,
-  type RegistrationAboutSession,
-  type ChannelAboutSessionStopTarget,
 } from "@xmatrix/db";
 import { dispatchPreparedAgentLaunchWake } from "./product-agent-mention-authority-adapter";
 import { scheduleAgentRoutingQuotaRefresh } from "./agent-routing-quota-refresh";
@@ -60,10 +58,6 @@ export async function executeRegistrationLaunchDispatch(input: {
 
 interface RegistrationInputLaunch {
   runId: string; instanceId: string; launchId: string; agentName: string; hostId: string; reused: boolean;
-  /** Channel About sessions that finished their turn and still run; the caller stops them. */
-  retiredAboutSessions?: ChannelAboutSessionStopTarget[];
-  /** An About session already serves the Channel; nothing was launched. */
-  coalesced?: boolean;
 }
 
 /** What any-input launch callers state, whichever side of the relay they are on. */
@@ -73,7 +67,6 @@ interface RegistrationInputRequest {
   commandId: string; actorUserId: string; channelId: string; body: string; runMetadata?: Record<string, unknown>;
   runId?: string; instanceId?: string;
   initialMessageId?: string; presentationMessageId?: string; tags?: AutoLaunchTags;
-  aboutSession?: RegistrationAboutSession;
   /** Capabilities the work needs; those a daemon can prove gate where it runs. */
   requiredCapabilities?: readonly string[];
 }
@@ -244,9 +237,6 @@ export async function dispatchRegistrationInput(input: RegistrationInputRequest 
   if (!evaluate) throw new RegistrationAccessError("registration_selection_unconfigured", 503);
   const result = await executeRegistrationInputDispatch({ ...runtimePlacement(env), evaluate, ...request }) as
     RegistrationInputLaunch & { shardId?: string };
-  const retired = result.retiredAboutSessions?.length ? { retiredAboutSessions: result.retiredAboutSessions } : {};
-  if (result.coalesced) return { runId: result.runId, instanceId: result.instanceId, launchId: "",
-    agentName: result.agentName, hostId: result.hostId, reused: true, coalesced: true, ...retired };
   // The launch is answered only once its Channel's coordinator owns it; the
   // caller's retry of the same command recovers the prepare and wakes again.
   await dispatchPreparedAgentLaunchWake({
@@ -255,7 +245,7 @@ export async function dispatchRegistrationInput(input: RegistrationInputRequest 
     ...(typeof result.shardId === "string" ? { shardId: result.shardId } : {}),
   });
   return { runId: result.runId, instanceId: result.instanceId, launchId: result.launchId,
-    agentName: result.agentName, hostId: result.hostId, reused: result.reused, ...retired };
+    agentName: result.agentName, hostId: result.hostId, reused: result.reused };
 }
 
 /** The reborn/handoff repository placed on the Channel's Space shard. */

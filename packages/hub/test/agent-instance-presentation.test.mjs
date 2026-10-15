@@ -267,13 +267,17 @@ test("Agent presentation survives bounded hibernation with its required authorit
   assert.equal(restored.session.run.repository, "LambdaLabsHQ/xmatrix");
   assert.ok(new TextEncoder().encode(JSON.stringify(serialized)).byteLength <= 4_096);
 
-  const systemSession = runtimeSession();
-  systemSession.run.channelDeliveryEnabled = false;
-  const restoredSystem = parseAgentInstanceHibernationAttachment(
-    serializeAgentInstanceHibernationAttachment(systemSession),
-  );
-  assert.equal(restoredSystem.session.run.channelDeliveryEnabled, false);
-
+  // Sessions saved before Channel About Runs were retired named their kind: an Instance's is
+  // restored, an About session's is not.
+  const saved = () => serializeAgentInstanceHibernationAttachment(runtimeSession());
+  const instance = saved();
+  Object.assign(instance.session.principal, { runKind: "channel-instance", channelWriteAllowed: true });
+  instance.session.run.kind = "channel-instance";
+  assert.equal(parseAgentInstanceHibernationAttachment(instance).session.run.kind, undefined);
+  const about = saved();
+  Object.assign(about.session.principal, { runKind: "channel-about-session", channelWriteAllowed: false });
+  about.session.run.kind = "channel-about-session";
+  assert.equal(parseAgentInstanceHibernationAttachment(about), undefined);
 });
 
 test("Human channel presence and Agent peer cards receive the full live presentation", () => {

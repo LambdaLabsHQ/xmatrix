@@ -62,10 +62,9 @@ and does not create a Space management projection. Explicit repository or
 `pwd:` targets retain their authorization checks and cannot silently become an
 internal cwd. Replaying the message reuses its original Run and managed key.
 
-The management Agent and `@xMatrix` delegate are retired. Channel About uses an
-invisible channel-scoped session on an enabled ordinary registration, with its
-own managed cwd and channel-only projection. It reads channel facts on demand;
-ordinary conversation Runs do not acquire that projection or a Space mirror.
+The management Agent, the `@xMatrix` delegate and Channel About Runs are
+retired. A conversation's About is a text task, not a Run
+(`docs/design/channel-metadata-revisions.md`); no Run acquires a Space mirror.
 
 Registered workspace references may also name a canonical repository as
 `repo:<repository-reference>`. Such a reference must be present in the Space
@@ -99,7 +98,7 @@ append that commits it also moves the Runs it addresses to `stopping`. For
 Channel (up to 200). For `@<agent>:<N>:stop` or `/stop <agent>:<N>`, it is the
 one Run that the message's own exact-address resolver resolves; an ambiguous
 or unknown address fences nothing. For `@xMatrix:stop`, it is the Channel's
-management delegate. About Runs are never addressed. The append
+management delegate. The append
 records `stopRequest` on each Run, cancels its unfinished launch, and expires its
 one-shot trace grants, provided the Human holds `runtime_terminalize`.
 `stopping` is not an active Run, so from that commit on the Run cannot append a
@@ -235,12 +234,10 @@ auto-assign switch off; naming the machine, or a directory registered on it,
 still selects it. Evidence from `registration-parameters-v7` may record a
 `placement` choice. `registration-parameters-v8` does not ask one.
 
-The Hub also refuses Channel About text that arrived already destroyed. A
-PATCH from the Channel's About session whose `summary` or `name` contains
-U+FFFD, consists only of `?` (two or more), or has a run of three or more `?`
-that is at least 30% of its non-space characters answers 422
-`channel_about_text_mangled` naming the field. Nothing is saved and the session
-keeps running, so it can write the text again from a UTF-8 shell.
+The Hub also refuses About text that arrived already destroyed: an answer whose
+`summary` or `name` contains U+FFFD, consists only of `?` (two or more), or has
+a run of three or more `?` that is at least 30% of its non-space characters is
+not written, and the next reading writes the About again.
 
 Machine resources, concurrency, observed usage and provider quota are numerical
 decision facts. They do not impose a Profile capacity ceiling or Profile

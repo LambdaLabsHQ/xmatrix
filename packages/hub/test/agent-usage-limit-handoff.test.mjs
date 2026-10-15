@@ -22,9 +22,9 @@ function harness(hold = async () => ({ limitedUntil: "2026-10-01T13:00:00.000Z" 
   const session = {
     principal: {
       ownerUserId: "owner", spaceId: "space", channelId: "channel", agentId: "agent-1", agentName: "claude",
-      runId: "run-1", executionKey: "execution-1", channelWriteAllowed: true,
+      runId: "run-1", executionKey: "execution-1",
     },
-    run: { kind: "channel-instance", instanceId: "instance-1", channelId: "channel", channelInstanceId: "3" },
+    run: { instanceId: "instance-1", channelId: "channel", channelInstanceId: "3" },
     presentation: { model: "claude-opus-5-5" },
   };
   return { commands, port, session };
@@ -73,18 +73,6 @@ test("an ordinary turn failure never starts a handoff", async () => {
   const { commands, port, session } = harness();
   await port.execute(session, { ...limited, reason: "turn_failed", detail: "stream disconnected" });
   assert.deepEqual(commands.map(command => command.family), ["append-message"]);
-});
-
-test("a read-only or About session neither posts nor hands off", async () => {
-  for (const change of [
-    (session) => { session.principal.channelWriteAllowed = false; },
-    (session) => { session.run.kind = "channel-about-session"; },
-  ]) {
-    const { commands, port, session } = harness();
-    change(session);
-    await port.execute(session, limited);
-    assert.deepEqual(commands, []);
-  }
 });
 
 test("a refused hold still hands the work off", async () => {

@@ -131,10 +131,9 @@ baseline evidence; continued tasks preserve their recorded checkout and warn
 only on proven base divergence. Local shared Git objects are not purged by this
 feature. See [repository preparation](../daemon-service-model.md#repository-snapshot-preparation).
 
-Channel About sessions submit summary/title text directly through Hub using
-CLI arguments or bounded JSON stdin; they do not stage local files. Their
-own-Channel authorization and immutable database revision/input evidence are
-unchanged. See [Channel metadata revisions](../design/channel-metadata-revisions.md).
+A conversation's About is one text task: the Hub hands a fresh harness
+execution that conversation's text alone and writes its answer as an immutable
+metadata revision. See [Channel metadata revisions](../design/channel-metadata-revisions.md).
 
 Agent cards show the repository admitted for their Run instead of a managed
 checkout path. The optional Instance `repository` display field comes from

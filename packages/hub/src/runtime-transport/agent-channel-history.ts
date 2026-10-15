@@ -87,14 +87,6 @@ export class AgentChannelHistory implements AgentChannelHistoryPort {
       channelId: message.channelId,
       agent: this.dependencies.serializeAgent(session),
     }];
-    if (session.run.channelDeliveryEnabled === false) {
-      // Focus and Channel About Runs use this Channel only as execution scope.
-      // Advance their ephemeral socket cursor to the current tail without
-      // loading payloads or turning unrelated Channel history into work.
-      const { tail } = await this.head(session, message.channelId);
-      this.setCursor(session, message.channelId, tail);
-      return output;
-    }
     const clientAfter = message.afterSequence === undefined
       ? undefined
       : sequence(message.afterSequence, "afterSequence");
@@ -209,7 +201,6 @@ export class AgentChannelHistory implements AgentChannelHistoryPort {
       throw new Error("Agent Instance is not active in the requested channel");
     }
     assertRunChannelBinding(session, message.channelId);
-    if (session.run.channelDeliveryEnabled === false) return [];
     const requestedLimit = historyLimit(message.historyLimit, true);
     // A missing afterSequence falls back to the stored join cursor, and a stale
     // client waterline cannot rewind below it. Acknowledged messages are never
@@ -239,9 +230,6 @@ export class AgentChannelHistory implements AgentChannelHistoryPort {
     message: Message<"get_channel_history">,
   ): Promise<AgentInstanceServerMessage> {
     assertRunChannelBinding(session, message.channelId);
-    if (session.run.channelDeliveryEnabled === false) {
-      return { type: "channel_history", requestId: message.requestId, channelId: message.channelId, messages: [] };
-    }
     const query = historyQuery(message);
     const page = await this.read(session, message.channelId, query);
     return {

@@ -790,7 +790,7 @@ export class PostgresRuntimeRepository {
 
   private async reserveNaturalKey(tx: DatabaseTransaction, input: Record<string, unknown>, at: string) {
     const scope = text(input.scope, "scope", 20);
-    if (scope !== "instance" && scope !== "run" && scope !== "about") throw new RuntimeControlError(
+    if (scope !== "instance" && scope !== "run") throw new RuntimeControlError(
       "invalid_runtime_request", 400, "scope is invalid");
     try {
       const reservation = await reserveNaturalKey(tx, { creationKey: text(input.creationKey, "creationKey", 300),

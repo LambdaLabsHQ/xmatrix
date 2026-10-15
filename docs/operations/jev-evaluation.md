@@ -56,8 +56,7 @@ with `node packages/hub/scripts/summon-intent-eval.mjs --live`.
 
 This branch also adds `POST /api/ai/jev/evaluate` to the Hub. Send the same JSON
 with an ordinary xMatrix bearer token. The Hub verifies authentication; Agent
-callers additionally require a live Run and cannot use a restricted
-channel-about-session. Every authenticated Human or live Agent Run can evaluate;
+callers additionally require a live Run. Every authenticated Human or live Agent Run can evaluate;
 there is no separate account allowlist. Caller-supplied owner ids, keys, model
 names and endpoints are rejected. The provider key remains deployment-owned;
 unconfigured deployments return 503. Routing still rechecks current Channel

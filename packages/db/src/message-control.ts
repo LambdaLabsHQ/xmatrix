@@ -1,4 +1,3 @@
-import { recordAboutInput } from "./channel-metadata-revisions.js";
 import { authorizeDingTalkEffect, finishDingTalkEffect, type DingTalkEffectAuthority } from "./dingtalk-effect-authority.js";
 import { lockAgentRunChannels, requireAgentChannelAccess } from "./agent-channel-access.js";
 import type { QueryResultRow } from "pg";
@@ -522,13 +521,10 @@ async function effectiveAppendPrincipal(
       ? { presentation }
       : {}),
   };
-  if (metadata.routedAs === "management_channel_about") throw new MessageAuthorityError(
-    "agent_run_forbidden", 403, "Channel About Runs cannot post Channel messages",
-  );
-  // The retired management delegate; a Run started before it was retired posts nothing.
-  if (metadata.routedAs === "management_assistant_mention") throw new MessageAuthorityError(
-    "agent_run_forbidden", 403, "The xMatrix management agent is retired",
-  );
+  // Retired Run kinds: a Run started as one before it was retired posts nothing.
+  if (metadata.routedAs === "management_assistant_mention" || metadata.routedAs === "management_channel_about") {
+    throw new MessageAuthorityError("agent_run_forbidden", 403, "This kind of Agent Run is retired");
+  }
   if (run.channel_id !== input.channelId) {
     await requireAgentChannelAccess(transaction, {
       spaceId: input.spaceId, channelId: input.channelId, agentId: input.principal.id,
@@ -872,15 +868,10 @@ export interface MessageHistoryPage {
   principalAckedSequence: number;
   contentRevision: number;
   historyHeadSequence: number;
-  aboutInput?: { inputId: string; expectedRevision: number };
 }
 
 type HistoryPageRow = QueryResultRow & {
   history_authorized: boolean | null;
-  channel_name?: string;
-  channel_metadata?: Record<string, unknown>;
-  channel_updated_at?: Date | string;
-  about_run_id?: string | null;
   acknowledged_sequence: string | number | null;
   content_revision: string | number | null;
   history_head_sequence: string | number | null;
@@ -2923,13 +2914,11 @@ export class PostgresMessageRepository {
       }, callback);
     const direction = after === null ? "DESC" : "ASC";
     const rows = await read((transaction) => transaction.query<HistoryPageRow>({
-      name: "message_history_page_v3",
-      // A Channel About session reads the history of the Channel it summarizes.
+      name: "message_history_page_v4",
       text: `WITH history_input AS (
           SELECT $1::text AS space_id,$2::text AS channel_id,
             $7::text AS principal_kind,$8::text AS principal_id
-        ), ${channelCapabilityCte({ capability: "message_content_read", inputCte: "history_input",
-          channelAboutSessionRead: true })},
+        ), ${channelCapabilityCte({ capability: "message_content_read", inputCte: "history_input" })},
         history_page AS MATERIALIZED (
           SELECT message_id, channel_id, timeline_sequence, entity_version, author_kind,
             author_id, message_kind, content_hash, payload_kind, payload_ref, reactions_json,
@@ -2982,10 +2971,6 @@ export class PostgresMessageRepository {
           ) preview ON TRUE
         ), history_metadata AS MATERIALIZED (
           SELECT COALESCE(granted.authorized, FALSE) AS history_authorized,
-            context.name AS channel_name,context.metadata_json AS channel_metadata,
-            context.updated_at AS channel_updated_at,
-            (SELECT run_id FROM data.runs WHERE $7='agent' AND run_id=$8 AND channel_id=$2
-              AND metadata_json->>'routedAs'='management_channel_about' AND granted.authorized) AS about_run_id,
             CASE WHEN granted.authorized THEN COALESCE((SELECT acknowledged_sequence
               FROM data.delivery_cursors
               WHERE space_id=$1 AND channel_id=$2 AND subject_id=$10 LIMIT 1), 0) END
@@ -2997,10 +2982,9 @@ export class PostgresMessageRepository {
               FROM data.messages WHERE space_id = $1 AND channel_id = $2), 0) END
               AS history_head_sequence
           FROM (SELECT 1) one LEFT JOIN authorized_channel granted ON TRUE
-          LEFT JOIN data.channels context ON context.space_id=$1 AND context.channel_id=$2 AND granted.authorized
         )
         SELECT meta.history_authorized,meta.acknowledged_sequence,meta.content_revision,
-          meta.history_head_sequence,meta.channel_name,meta.channel_metadata,meta.channel_updated_at,meta.about_run_id,
+          meta.history_head_sequence,
           page.*,thread.thread_channel_id,thread.thread_updated_at,
           thread.reply_count,thread.reply_rows
         FROM history_metadata meta
@@ -3030,23 +3014,7 @@ export class PostgresMessageRepository {
     const threadSummaries = new Map(threadRows.map((row) => [
       row.root_message_id, serializeThreadSummary(row),
     ]));
-    const aboutInput = head?.about_run_id ? await this.database.transaction({
-      requestId, operation: "message.history.about-input",
-      placement: { spaceId, shardId: placement.shardId, placementEpoch: placement.placementEpoch },
-    }, (tx) => recordAboutInput(tx, {
-      channel: { space_id: spaceId, channel_id: channelId, name: head.channel_name!,
-        metadata_json: head.channel_metadata!, updated_at: head.channel_updated_at! },
-      runId: head.about_run_id!, contentRevision: Number(head.content_revision),
-      references: page.map((row) => ({ messageId: row.message_id, channelId: row.channel_id,
-        sequence: Number(row.timeline_sequence), entityVersion: Number(row.entity_version),
-        contentHash: row.content_hash, payloadKind: row.payload_kind, payloadRef: row.payload_ref,
-        recordDigest: row.record_digest, bodyHash: row.body_hash,
-        // Bundled records are stored inline rather than in a separately fetchable object.
-        ...(row.payload_bundle_base64 ? { payloadBundleBase64: row.payload_bundle_base64,
-          codecId: row.codec_id, payloadSchemaVersion: row.payload_schema_version } : {}) })),
-    })) : undefined;
     return {
-      ...(aboutInput ? { aboutInput } : {}),
       messages: page.map((row) => {
         const message = serializeMessage(row);
         const threadSummary = threadSummaries.get(row.message_id);

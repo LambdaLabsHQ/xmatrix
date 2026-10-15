@@ -38,12 +38,11 @@ for (const type of ["machine_run_exited", "machine_stop_result"]) {
   test(`a committed ${type} is answered at once and finalized by the coordinator`, async () => {
     const order = [];
     const port = lifecycleRecordingPort(order, { runTerminalReportRecorded: true }, {
-      async dispatchChannelAboutFollowUp() { order.push("about"); },
       async wakeCoordinator() { order.push("wake"); },
     });
     const reply = await port.execute(session, { type, requestId: "report-1", runId: "run-1",
       executionKey: "execution-1", ok: true });
-    // No lifecycle or About round trip holds the socket's frame.
+    // No lifecycle round trip holds the socket's frame.
     assert.deepEqual(order, ["report", "wake"]);
     if (type === "machine_run_exited") {
       assert.deepEqual(reply, { type: "machine_run_report_acked", requestId: "report-1", runId: "run-1" });
@@ -199,43 +198,6 @@ test("a sleep or reply-recovery result is not a Run lifecycle report", async () 
     assert.deepEqual(calls.map((call) => call.input.action), ["complete"]);
     assert.equal(calls.some((call) => call.input.runLifecycleReplica), false);
   }
-});
-
-test("terminal reports dispatch one durable coalesced Channel About successor", async () => {
-  const followUps = [];
-  const port = authorityPort({
-    commands: {
-      async command() {
-        return {
-          channelAboutFollowUps: [{
-            spaceId: "space-1",
-            channelId: "channel-1",
-            requestId: "channel-about:channel-1:2",
-            successorOfRunId: "run-about-1",
-            actorUserId: "user-1",
-          }],
-        };
-      },
-    },
-    async dispatchChannelAboutFollowUp(input) {
-      followUps.push(input);
-    },
-  });
-
-  await port.execute(session, {
-    type: "machine_run_exited",
-    runId: "run-about-1",
-    executionKey: "execution-about-1",
-    completed: true,
-  });
-
-  assert.deepEqual(followUps, [{
-    spaceId: "space-1",
-    channelId: "channel-1",
-    requestId: "channel-about:channel-1:2",
-    successorOfRunId: "run-about-1",
-    actorUserId: "user-1",
-  }]);
 });
 
 test("live-socket lease renew uses Authority renew and echoes leaseUntil", async () => {
@@ -558,7 +520,6 @@ test("every claimed spawn carries the Hub's harness preset", async () => {
 test("a snapshot frame answers before its Channel fan-out, and a newer snapshot replaces a waiting one", async () => {
   const replicas = [];
   const background = [];
-  const delivered = [];
   let release;
   const gate = new Promise((resolve) => { release = resolve; });
   const port = authorityPort({
@@ -567,12 +528,8 @@ test("a snapshot frame answers before its Channel fan-out, and a newer snapshot 
       replicas.push(input.commandId);
       // The first fan-out stalls: the socket must not wait for it.
       if (replicas.length === 1) await gate;
-      return { changedRunIds: [], ...(input.channelId === "channel-2" ? { channelAboutFollowUps: [{
-        spaceId: "space-1", channelId: "channel-2", requestId: `about-${replicas.length}`,
-        successorOfRunId: "run-1", actorUserId: "user-1" }] } : {}) };
+      return { changedRunIds: [] };
     } },
-    async dispatchChannelAboutFollowUp() {},
-    async deliverPending(principal) { delivered.push(principal.machineId); },
     keepAlive: (task) => background.push(task),
   });
   const causalSession = { ...session, capabilities: ["machine_run_snapshot_causal_v1"] };
@@ -593,7 +550,6 @@ test("a snapshot frame answers before its Channel fan-out, and a newer snapshot 
     : commandId.includes(":7:2") ? 2 : commandId.includes(":7:3") ? 3 : undefined);
   assert.equal(replicas.length, 4);
   assert.ok(!sequences.includes(2), "a superseded snapshot never reaches Authority");
-  assert.deepEqual(delivered, ["machine-1", "machine-1"], "issued successors are delivered after each fan-out");
 });
 
 

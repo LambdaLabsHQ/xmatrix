@@ -103,8 +103,8 @@ test("a peer whose socket refuses the frame does not fail the sender", async (t)
 
 test("a binding its transport gave up is reported once, then dropped", async (t) => {
   const { transport, sockets: [gone, sender] } = fixture();
-  // The same host restored without live delivery: the predecessor's socket closes, its binding stays.
-  assert.equal(transport.rehydrate(new FakeSocket(), attachment("a", {}, { channelDeliveryEnabled: false })), true);
+  // The transport lost the socket without its close running: its binding stays.
+  transport.sockets.remove(gone);
   const reported = t.mock.method(console, "error", () => {});
   for (const status of ["busy", "online"]) {
     await transport.handleFrame(sender, JSON.stringify({ type: "presence_update", status, requestId: status }));

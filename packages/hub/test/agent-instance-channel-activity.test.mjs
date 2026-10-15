@@ -14,9 +14,9 @@ function harness(options = {}) {
   const session = {
     principal: {
       ownerUserId: "owner", spaceId: "space", channelId: "channel", agentId: "agent-1",
-      runId: "run-1", executionKey: "execution-1", channelWriteAllowed: true,
+      runId: "run-1", executionKey: "execution-1",
     },
-    run: { kind: "channel-instance", instanceId: "instance-1", channelId: "channel" },
+    run: { instanceId: "instance-1", channelId: "channel" },
     presentation: { model: "claude-opus-5-5" },
   };
   return { commands, port, session };
@@ -79,16 +79,6 @@ test("a malformed or padded report is refused before anything is written", async
     type: "channel_activity", channelId: "channel", body: "extra",
     activity: { kind: "pull_request", url: "https://github.com/a/b/pull/1" },
   }), (error) => error.failure?.code === "invalid_agent_message_fields");
-  assert.equal(commands.length, 0);
-});
-
-test("a Channel About session cannot write activity", async () => {
-  const { commands, port, session } = harness();
-  session.run.kind = "channel-about-session";
-  await assert.rejects(port.execute(session, {
-    type: "channel_activity", channelId: "channel",
-    activity: { kind: "pull_request", url: "https://github.com/a/b/pull/1" },
-  }), (error) => error.failure?.code === "agent_read_only_session");
   assert.equal(commands.length, 0);
 });
 

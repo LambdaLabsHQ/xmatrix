@@ -157,10 +157,9 @@ export function createProductionRelayRuntimeProductPortFactory(
 
   return {
     human: () => PostgresHumanPort.fromEnv({ env }),
-    machineDaemon: (terminateInstance, deliverPending, quotaChanged) => PostgresMachineDaemonPort.fromEnv({
+    machineDaemon: (terminateInstance, quotaChanged) => PostgresMachineDaemonPort.fromEnv({
       env, terminateInstance,
       ...(quotaChanged ? { quotaChanged } : {}),
-      ...(deliverPending ? { deliverPending } : {}),
       ...(options.scheduleBackground ? { keepAlive: options.scheduleBackground } : {}),
     }),
     agentInstance: () => PostgresAgentInstancePort.fromEnv({

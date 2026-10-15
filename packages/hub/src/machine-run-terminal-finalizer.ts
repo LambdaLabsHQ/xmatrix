@@ -1,4 +1,3 @@
-import { requireNonblankText as text } from "./input-validation";
 import {
   PostgresMachineRunTerminalReportRepository,
   type AuthorityDatabase,
@@ -6,12 +5,10 @@ import {
 } from "@xmatrix/db";
 
 import { machineDaemonCommandPrincipal } from "./connections/machine-daemon/auth";
-import { plainRecord as record } from "@xmatrix/protocol";
 import { machineRunLifecycleReport } from "./machine-run-lifecycle-report";
 import { relayRuntimeCellsForOwners } from "./relay-authority-locator";
 import { RELAY_RUNTIME_AGENT_TRACE_TERMINATE_PATH } from "./runtime-transport/relay-runtime-product-adapter";
 import type { Env } from "./types";
-import { startChannelAbout } from "./channel-about";
 
 type TerminalReportRepository = Pick<PostgresMachineRunTerminalReportRepository,
   "pruneFinalized" | "claim" | "settle">;
@@ -22,9 +19,6 @@ export interface MachineRunTerminalPort {
   commitLifecycle(report: MachineRunTerminalReport): Promise<Record<string, unknown>>;
   /** Closes the Runtime socket of an Instance the lifecycle made terminal. */
   terminateInstance(instanceId: string, ownerUserId: string): Promise<void>;
-  dispatchChannelAbout(followUp: {
-    spaceId: string; channelId: string; requestId: string; successorOfRunId: string; actorUserId: string; triggerMessageId?: string;
-  }): Promise<unknown>;
 }
 
 
@@ -39,19 +33,6 @@ async function finalizeReport(report: MachineRunTerminalReport, port: MachineRun
   }
   for (const instanceId of terminal as string[]) {
     await port.terminateInstance(instanceId, report.ownerUserId);
-  }
-  const successors = Array.isArray(lifecycle.channelAboutFollowUps) ? lifecycle.channelAboutFollowUps : [];
-  if (successors.length > 50) throw new Error("Run lifecycle returned oversized Channel About follow-up work");
-  for (const item of successors) {
-    const followUp = record(item) ?? {};
-    await port.dispatchChannelAbout({
-      spaceId: text(followUp.spaceId, "channelAboutFollowUps[].spaceId"),
-      channelId: text(followUp.channelId, "channelAboutFollowUps[].channelId"),
-      requestId: text(followUp.requestId, "channelAboutFollowUps[].requestId"),
-      successorOfRunId: text(followUp.successorOfRunId, "channelAboutFollowUps[].successorOfRunId"),
-      actorUserId: text(followUp.actorUserId, "channelAboutFollowUps[].actorUserId"),
-      ...(followUp.triggerMessageId !== undefined ? { triggerMessageId: text(followUp.triggerMessageId, "channelAboutFollowUps[].triggerMessageId") } : {}),
-    });
   }
 }
 
@@ -108,10 +89,6 @@ export function machineRunTerminalPort(env: Env): MachineRunTerminalPort {
         .map((cell) => cell.fetch(new Request(url, { method: "POST" }))));
       const failed = responses.find((response) => !response.ok);
       if (failed) throw new Error(`instance terminal notification ${failed.status}`);
-    },
-    // A Channel About Run that ended with a refresh pending: the refresh is a text task now.
-    async dispatchChannelAbout(followUp) {
-      return startChannelAbout(env, { channelId: followUp.channelId, spaceId: followUp.spaceId });
     },
   };
 }

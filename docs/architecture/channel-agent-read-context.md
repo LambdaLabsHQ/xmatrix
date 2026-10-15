@@ -32,8 +32,8 @@ the launch bootstrap also stamp each thread-root transcript line with
 `[thread=<channelId>: ...]` (or `[thread=<channelId> archived=<at>: ...]`), so
 a reader working down the transcript sees the thread state on the message
 itself instead of having to cross-reference an opaque `rootMessageId` list.
-The Channel About prompt says the same thing to the summarizing Agent: an
-archived thread was closed out, not left unclaimed.
+The About text task's reading marks a message answered in its thread the same
+way, so its summary never calls one unclaimed.
 
 CLI reads fetch catalog context separately from cached message history. A failed
 context read is reported without suppressing readable history. Bootstrap uses the

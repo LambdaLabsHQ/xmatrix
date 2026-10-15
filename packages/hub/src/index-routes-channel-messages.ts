@@ -529,9 +529,8 @@ export function registerChannelMessageRoutes(app: Hono<{ Bindings: Env }>): void
     const actor = await messageMutationActor(c.env, authUser, channelId);
     if (actor instanceof Response) return actor;
     const run = actor.run;
-    if (!run || run.channelWriteAllowed === false) {
-      return c.json({ error: "Subscribing to a pull request requires a writing Agent Run",
-        code: "agent_run_required" }, 403);
+    if (!run) {
+      return c.json({ error: "Subscribing to a pull request requires an Agent Run", code: "agent_run_required" }, 403);
     }
     const body = (await c.req.json().catch(() => ({}))) as { url?: unknown };
     try {

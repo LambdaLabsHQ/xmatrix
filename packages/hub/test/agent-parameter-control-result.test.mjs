@@ -39,8 +39,7 @@ test("a query, a provider note and a refusal read from the facts, with the origi
   assert.doesNotMatch(parameterControlNotice("@auto", { action: "select", error: "ask @auto" }), /[@＠]/u);
 });
 
-test("a result for another channel or from a read-only session is refused", async () => {
+test("a result for another channel is refused", async () => {
   const { port } = recordingAgentInstancePort();
   await assert.rejects(port.execute(session, { ...result, channelId: "elsewhere" }));
-  await assert.rejects(port.execute({ ...session, principal: { ...session.principal, channelWriteAllowed: false } }, result));
 });

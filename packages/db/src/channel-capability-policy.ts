@@ -118,8 +118,6 @@ export function channelCapabilityPredicate(input: {
   channelAlias: string;
   principalKindSql: string;
   principalIdSql: string;
-  /** Also admit a live Channel About session reading its own Channel's content. */
-  channelAboutSessionRead?: boolean;
 }): string {
   const capability = CHANNEL_CAPABILITY_POLICIES[input.capability];
   const c = input.channelAlias;
@@ -146,16 +144,7 @@ export function channelCapabilityPredicate(input: {
     JOIN data.run_agent_registrations channel_registration ON channel_registration.run_id=channel_instance.run_id
     WHERE channel_instance.instance_id=${id} AND channel_registration.space_id=${c}.space_id
       AND (${openChannel} OR channel_instance.channel_id=${c}.channel_id OR ${agentGrant})))` : "FALSE";
-  // A Channel About session has no Instance: its session id is its live Run's
-  // id. Where a reader opts in, it reads the content of the one Channel it summarizes.
-  const aboutSession = input.channelAboutSessionRead && input.capability === "message_content_read" ? `(${kind}='agent' AND EXISTS (
-    SELECT 1 FROM data.runs about_run
-    JOIN data.run_agent_registrations about_registration ON about_registration.run_id=about_run.run_id
-    WHERE about_run.run_id=${id} AND about_run.channel_id=${c}.channel_id
-      AND about_registration.space_id=${c}.space_id AND about_run.status IN ('starting','running')
-      AND about_run.metadata_json->>'routedAs'='management_channel_about'
-      AND about_run.metadata_json->>'runtimeSessionId'=${id}))` : "FALSE";
-  return aboutSession === "FALSE" ? `((${user}) OR (${agent}))` : `((${user}) OR (${agent}) OR (${aboutSession}))`;
+  return `((${user}) OR (${agent}))`;
 }
 
 function lockClause(lock: LifecycleLock): string {
@@ -214,7 +203,6 @@ export function channelCapabilityCte(input: {
   capability: ChannelCapability;
   inputCte: string;
   cteName?: string;
-  channelAboutSessionRead?: boolean;
 }): string {
   const policy = CHANNEL_CAPABILITY_POLICIES[input.capability];
   const cteName = input.cteName ?? "authorized_channel";
@@ -223,8 +211,7 @@ export function channelCapabilityCte(input: {
     FROM data.channels c CROSS JOIN ${input.inputCte} input
     WHERE c.space_id=input.space_id AND c.channel_id=input.channel_id
       AND ${channelCapabilityPredicate({ capability: input.capability, channelAlias: "c",
-        principalKindSql: "input.principal_kind", principalIdSql: "input.principal_id",
-        ...(input.channelAboutSessionRead ? { channelAboutSessionRead: true } : {}) })}
+        principalKindSql: "input.principal_kind", principalIdSql: "input.principal_id" })}
     LIMIT 1${lockClause(policy.lock)}
   )`;
 }

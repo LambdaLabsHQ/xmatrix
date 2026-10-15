@@ -46,7 +46,7 @@ distinguished from one that never ran, and replaying it would violate the
 | Terminal trace purge | the Instance terminal-status transaction | No | No | `(instanceId, terminalAt)` |
 | Message redaction projection | the recall/delete/edit command transaction | No | No | `(scopeId, redactionHead)` |
 | Hot-capacity release scheduling | message append | No | Yes | `(channelId, triggerSequence)` |
-| Product interpretation (`dispatchProductMessagePostCommit`: recurrent eval, Channel About, agent intervention, management mention, direct-conversation wake, agent mentions) | message append (WS path); HTTP-route commits mirror the same rows | No | Yes — heavily | per-interpretation: `channel-about:{channelId}:{sequence/5}`, mention command ids, eval lineage |
+| Product interpretation (`dispatchProductMessagePostCommit`: recurrent eval, Channel About, agent intervention, management mention, direct-conversation wake, agent mentions) | message append (WS path); HTTP-route commits mirror the same rows | No | Yes — heavily | per-interpretation: the About text task's reading, mention command ids, eval lineage |
 
 Keys that a single scope can emit repeatedly carry a monotonic generation
 (`redactionHead`, `triggerSequence`, `terminalAt`): a second, independent
@@ -132,16 +132,10 @@ re-delivery of the *same* generation is a no-op.
    *after* the terminal mark does not re-arm the row — strictly narrower than
    today's three in-object attempts, which is exactly the "v1 does not
    upgrade delivery reliability" posture.
-6. **The About state machine's merge boundary does not move.** Today the
-   first trigger acquires and starts the summary session; only while a
-   session is active do later triggers merge into one latest pending
-   successor (`relay-authority-domain-command-resources.ts`,
-   `channel-about-session.ts`). The outbox changes the *durability and
-   execution home* of triggers, not this state machine: every every-5th
-   trigger writes its row; the consumer feeds triggers to the same
-   first-active + one-latest-successor logic. Backlog compaction applies
-   only where that machine already merges (the pending-successor slot),
-   never before a channel's first owed execution.
+6. **The About needs no merge boundary.** Each every-5th trigger starts one
+   text task, and the metadata write keeps only the reading that read
+   furthest (`channel-about.ts`). The outbox changes the *durability and
+   execution home* of triggers, not this rule.
 7. **Poison rows dead-letter.** `attempts` past a fixed budget parks the row
    (`done_at` set, `outcome = dead`) and emits an observability point; a
    parked row is diagnosable state, not a silent loss.

@@ -46,7 +46,6 @@ export interface RelayRuntimeProductPortFactory {
   human(): HumanSocketBackend;
   agentInstance(): AgentInstanceSocketBackend;
   machineDaemon(terminateInstance?: (instanceId: string) => void,
-    deliverPending?: (identity: MachineDaemonRouteIdentity) => Promise<unknown>,
     quotaChanged?: (route: { ownerUserId: string; machineId: string }) => Promise<void>): MachineDaemonSocketBackend;
   /** Who may see a Channel of this Space may have changed. */
   onChannelCatalogChanged?: (spaceId: string) => void;
@@ -148,12 +147,10 @@ export function createRelayRuntimeProductAdapter(
     },
     options.allowLegacyProtocol === true,
   );
-  // The port delivers work it issues outside a frame through this transport,
-  // which owns the socket order; the transport is built from the port.
   machineDaemon = new MachineDaemonRuntimeTransport(
     factory.machineDaemon(instanceId => {
       agentInstance.terminateTraceSession(instanceId, "Agent run ended on its authenticated host");
-    }, identity => machineDaemon.claimPending(identity), async route => {
+    }, async route => {
       await factory.onRegistrationQuotaChange?.({ ownerUserId: route.ownerUserId,
         deliver: (userId, message) => human.deliverToUser(userId, message) });
     }),
@@ -247,9 +244,7 @@ export class RelayRuntimeProductCallbackAdapter {
    * presence push can find their cell without registering every membership.
    */
   occupiedChannelIds(): string[] {
-    const ids = this.agentInstance.liveSessions()
-      .filter((session) => session.run.kind === "channel-instance")
-      .map((session) => session.run.channelId);
+    const ids = this.agentInstance.liveSessions().map((session) => session.run.channelId);
     for (const session of this.human.liveSessions()) {
       if (session.focusedChannelId) ids.push(session.focusedChannelId);
     }

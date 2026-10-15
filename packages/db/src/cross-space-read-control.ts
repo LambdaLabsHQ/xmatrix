@@ -120,8 +120,7 @@ export class PostgresCrossSpaceReadRepository {
 
   /**
    * Prove the exact live Run in its own Space, the way invocation diagnostics
-   * do, and return its owner. Channel About Runs never read outside their
-   * Channel, so they cannot hold a grant.
+   * do, and return its owner. A retired Channel About Run holds no grant.
    */
   private async proveRun(requestId: string, proof: CrossSpaceRunProof): Promise<{
     ownerUserId: string; agentName: string | null; executionKeyDigest: string }> {

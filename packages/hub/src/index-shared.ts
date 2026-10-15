@@ -498,24 +498,6 @@ export function agentRunHttpRouteAllowed(
 ): boolean {
   if (agentBillingReadRoute(request, principal)) return true;
   const path = new URL(request.url).pathname;
-  if (principal.runKind === "channel-about-session") {
-    const history = /^\/api\/channels\/([^/]+)\/(?:history|metadata-history)$/.exec(path);
-    if (request.method === "GET" && history) {
-      try {
-        return decodeURIComponent(history[1]) === principal.channelId;
-      } catch {
-        return false;
-      }
-    }
-    if (request.method === "GET" && path === "/api/channels") return true;
-    const channel = /^\/api\/channels\/([^/]+)$/.exec(path);
-    if (request.method !== "PATCH" || !channel) return false;
-    try {
-      return decodeURIComponent(channel[1]) === principal.channelId;
-    } catch {
-      return false;
-    }
-  }
   if (request.method === "GET" && /^\/api\/channels\/[^/]+\/metadata-history$/.test(path)) return true;
   if (request.method === "POST" && /^\/api\/channels\/[^/]+\/metadata-restore$/.test(path)) return true;
   if (request.method === "GET" && /^\/api\/channels\/[^/]+\/messages\/[^/]+\/decision-evidence$/.test(path)) return true;
@@ -525,18 +507,14 @@ export function agentRunHttpRouteAllowed(
   if (request.method === "POST" && path === "/api/invocations/diagnostics") return true;
   // Saves a credential the Run already holds into its Space: the route proves
   // the live Run and refuses an alias the Space already has.
-  if (request.method === "POST" && path === HUB_ROUTES.secrets &&
-      principal.channelWriteAllowed !== false) return true;
+  if (request.method === "POST" && path === HUB_ROUTES.secrets) return true;
   // Its Space's secrets the Run may read now: every `auto` one, and each
   // `ask` one a Space admin approved for it.
-  if (request.method === "POST" && path === HUB_ROUTES.run_secrets &&
-      principal.channelWriteAllowed !== false) return true;
+  if (request.method === "POST" && path === HUB_ROUTES.run_secrets) return true;
   // Ask a Space admin, on a card in its Channel, for a secret it may not read yet.
-  if (request.method === "POST" && path === HUB_ROUTES.secret_requests &&
-      principal.channelWriteAllowed !== false) return true;
+  if (request.method === "POST" && path === HUB_ROUTES.secret_requests) return true;
   // Its Channel's connected apps and their commands; acting is sending one.
-  if (request.method === "GET" && path === HUB_ROUTES.connector_usage &&
-      principal.channelWriteAllowed !== false) return true;
+  if (request.method === "GET" && path === HUB_ROUTES.connector_usage) return true;
   if (request.method === "POST" && path === "/api/ai/jev/evaluate") return true;
   if (request.method === "POST" && /^\/api\/channels\/[^/]+\/messages\/receipt$/u.test(path)) return true;
   // Channel memory authorizes the exact Run in the repository: read where both
@@ -642,7 +620,7 @@ export function agentRunHttpRouteAllowed(
   ) return true;
   if (request.method !== "POST") return false;
   return (
-    (principal.channelWriteAllowed && /^\/api\/channels\/[^/]+\/messages$/.test(path)) ||
+    /^\/api\/channels\/[^/]+\/messages$/.test(path) ||
     path === RELAY_V2_MESSAGE_ATTACHMENT_PRODUCT_MEDIA_PATH
   );
 }
