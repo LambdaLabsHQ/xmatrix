@@ -64,6 +64,10 @@ const USER_COLUMNS: AdminColumn<AdminUserSummary>[] = [
     render: (user) => <TimeCell value={user.registeredAt} />,
   },
   {
+    key: "lastMessage", label: "Last message", numeric: true, value: (user) => adminTime(user.lastMessageAt),
+    render: (user) => <TimeCell value={user.lastMessageAt} fallback="Never" />,
+  },
+  {
     key: "lastAccess", label: "Last access", numeric: true, value: (user) => adminTime(user.lastSessionAt),
     render: (user) => <TimeCell value={user.lastSessionAt} fallback="Never" />,
   },
@@ -79,10 +83,6 @@ const USER_COLUMNS: AdminColumn<AdminUserSummary>[] = [
   { key: "agents", mobile: "metric", label: "Agents", numeric: true, value: (user) => user.agentRegistrations, render: (user) => formatAdminCount(user.agentRegistrations) },
   { key: "machines", mobile: "metric", label: "Machines", numeric: true, value: (user) => user.machines, render: (user) => formatAdminCount(user.machines) },
   { key: "messages", mobile: "metric", label: "Messages", numeric: true, value: (user) => user.messages, render: (user) => formatAdminCount(user.messages) },
-  {
-    key: "lastMessage", label: "Last message", hidden: true, numeric: true, value: (user) => adminTime(user.lastMessageAt),
-    render: (user) => <TimeCell value={user.lastMessageAt} />,
-  },
 ];
 
 function userSearchText(user: AdminUserSummary): string {
@@ -110,7 +110,7 @@ function UsersList({ token, onOpen }: { token?: string; onOpen: (userId: string)
           rowKey={(user) => user.userId}
           search={userSearchText}
           searchPlaceholder="Name, email, handle, id"
-          defaultSort="lastAccess"
+          defaultSort="lastMessage"
           onRowClick={(user) => onOpen(user.userId)}
           empty="No user matches this search."
           note={overview.truncated.users
@@ -162,6 +162,7 @@ function UserDetailBody({ detail }: { detail: AdminUserDetail }) {
             <ToolFact label="Sign-in">{user.providers?.join(", ") || "—"}</ToolFact>
             <ToolFact label="Email verified">{user.emailVerified ? "Yes" : "No"}</ToolFact>
             <ToolFact label="Profile">{user.profileCompleted ? "Completed" : "Not completed"}</ToolFact>
+            <ToolFact label="Last message"><TimeCell value={user.lastMessageAt} fallback="Never" /></ToolFact>
             <ToolFact label="Last access">{age(user.lastSessionAt, "Never")}</ToolFact>
           </ToolFacts>
         </div>
