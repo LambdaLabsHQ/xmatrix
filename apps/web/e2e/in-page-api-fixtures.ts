@@ -63,7 +63,7 @@ export type FixtureResponder =
       held?: boolean;
     }
   /** One response per call, clamped to the last entry once exhausted. */
-  | { kind: "sequence"; responses: ReadonlyArray<{ status?: number; json: unknown }> }
+  | { kind: "sequence"; responses: ReadonlyArray<{ status?: number; json: unknown }>; delayMs?: number }
   /** Mirror the Hub-selected scoped upload path from an upload-intent body. */
   | { kind: "relayV2UploadIntent" }
   /**
@@ -436,7 +436,11 @@ function installInterceptor({
           persistLog();
 
           if (rule.responder.kind === "pagedHistory") return pagedHistory(rule, url);
-          if (rule.responder.kind === "sequence") return sequence(rule);
+          if (rule.responder.kind === "sequence") {
+            const delayMs = rule.responder.delayMs as number | undefined;
+            if (delayMs) await new Promise((resolve) => setTimeout(resolve, delayMs));
+            return sequence(rule);
+          }
           if (rule.responder.kind === "relayV2UploadIntent") {
             return relayV2UploadIntent(body);
           }
