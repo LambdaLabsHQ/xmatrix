@@ -188,25 +188,26 @@ function validatedQuery(query: DatabaseQuery): DatabaseQuery {
 }
 
 function errorCode(error: unknown): string {
+  // Hyperdrive can attach PostgreSQL's generic 58000 to a transport failure.
+  // Its exact driver message is more specific than that SQLSTATE.
+  if (error instanceof Error) {
+    const code = DRIVER_ERROR_CODES.get(error.message);
+    if (code) return code;
+  }
   if (error && typeof error === "object" && "code" in error &&
       typeof error.code === "string" && error.code.length <= 80) {
     return error.code;
   }
   if (error instanceof DatabaseContractError) return "DATABASE_CONTRACT_ERROR";
-  // node-postgres's client-side deadline has no SQLSTATE. Unlike a server
-  // statement timeout, it does not establish that the wire query has finished.
-  if (error instanceof Error) {
-    const code = DRIVER_ERROR_CODES.get(error.message);
-    if (code) return code;
-  }
   return "database_error";
 }
 
-/** node-postgres transport failures that carry no code, keyed by exact message. */
+/** Known node-postgres and Hyperdrive transport failures, keyed by exact message. */
 const DRIVER_ERROR_CODES = new Map([
   ["Query read timeout", "QUERY_READ_TIMEOUT"],
   ["Connection terminated", "CONNECTION_TERMINATED"],
   ["Connection terminated unexpectedly", "CONNECTION_TERMINATED"],
+  ["Egress connection severed outside of Hyperdrive", "CONNECTION_TERMINATED"],
   ["Client has encountered a connection error and is not queryable", "CONNECTION_UNUSABLE"],
   ["Client was closed and is not queryable", "CONNECTION_UNUSABLE"],
   ["Connection terminated due to connection timeout", "CONNECT_TIMEOUT"],
@@ -436,7 +437,7 @@ class PgSingleReadTransaction extends PgDatabaseTransaction {
     } catch (error) {
       // Only a lost response is retried; any answered failure, including a
       // refused placement fence, is final.
-      if (errorCode(error) !== "QUERY_READ_TIMEOUT") throw error;
+      if (!commitResultMayBeUnknown(error)) throw error;
       return this.retry(this.client, error, (client) => {
         this.client = client;
         return attempt();
@@ -770,10 +771,10 @@ class PgAuthorityDatabaseSession implements AuthorityDatabaseSession {
   }
 
   /**
-   * The single retry of a timed-out single read. The stalled checkout still
+   * The single retry of a single read whose response was lost. The stalled checkout still
    * has the query in flight, so it is destroyed, never reused or queued
    * behind; the retry takes a new checkout through the shard breaker, and an
-   * open breaker or failed checkout surfaces the original timeout. The
+   * open breaker or failed checkout surfaces the original failure. The
    * session stays usable only if the retry succeeds.
    */
   private async retrySingleRead<T>(

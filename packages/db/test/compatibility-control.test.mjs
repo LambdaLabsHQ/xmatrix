@@ -78,4 +78,6 @@ test("GitHub webhook routes are derived from PostgreSQL connector relations", as
     ["github:repo:lambdalabshq/xmatrix", "github:issue:lambdalabshq/xmatrix#7"], 1001, "pulls"]);
   assert.match(query.text, /features_json \? \$4/u, "an event nobody subscribed to finds no route");
   assert.doesNotMatch(query.text, /archived_at/u, "a once-archived conversation still receives webhooks");
+  assert.equal(db.calls.find((call) =>
+    call.context?.operation === "app.github-subscription-routes").context.statement, "single_read");
 });
