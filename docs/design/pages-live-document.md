@@ -250,11 +250,18 @@ fact is about.
   - **Any Agent.** The co-writer is the Agent's own Run, whatever its harness:
     the runtime already drives every harness through a structured session
     (Claude stream-json, Codex app-server, ACP and the others), each able to
-    take input, be interrupted and stream its text. The runtime joins the
-    page's live session as a co-writer (`POST …/live` with `coWrite`, a Run
-    that may edit the page, not on a suggest-only page), hands each turn the
-    session sends to the harness as its next input, streams the harness's text
-    back as it comes, and interrupts the harness when told.
+    take input, be interrupted and stream its text. Starting co-writing
+    (`POST …/co-writing` with `live`) puts the Hub's `xmatrixPageCoWrite`
+    instruction in the conversation, a system fact nobody takes as work;
+    stopping it (`DELETE`) puts its end there. The runtime of the Agent in the
+    conversation reads it and joins the page's live session as a co-writer
+    (`POST …/live` with `coWrite`, a Run that may edit the page, not on a
+    suggest-only page; `runtime_page_co_write.rs`). Each turn the session sends
+    reaches the run loop as a resume of that conversation, so every backend runs
+    it as any turn; the harness's text, which every backend reports as
+    `assistant_delta` traces (Claude with `--include-partial-messages`, in
+    pieces as Codex's are), streams back with the turn's end; a new turn or the
+    session's interrupt stops a turn still running.
   - **What reaches the page** is only what the Agent writes inside markers
     (`page-co-writing.ts`): `⟦after "words on the page"⟧` then markdown added
     after the block holding them, `⟦replace "words"⟧` then their new wording
@@ -687,12 +694,10 @@ Shipped:
 
 Open:
 
-- Live co-writing (§4.2): the session side (the co-writer connection, the
-  markers, streaming into the document, turns on pauses, yielding) is built;
-  next the runtime's harness-agnostic bridge (with Claude's partial-message
-  stream), then the page's start and stop, the caret's status and note, a
-  fade-in and an undo of the Agent's last change, which retire the
-  suggestion-based co-writing and its `page_co_writing` rule.
+- Live co-writing (§4.2): the session side, the runtime's bridge, the page's
+  start and stop and the caret's status and note are built; next a fade-in and
+  an undo of the Agent's last change, and retiring the suggestion-based
+  co-writing and its `page_co_writing` rule.
 - Automations as live references in their section, with page access, event
   triggers and the removal of Channel-scoped Automations (§6).
 - Change events pushed to a Run when a block it read or claimed changes

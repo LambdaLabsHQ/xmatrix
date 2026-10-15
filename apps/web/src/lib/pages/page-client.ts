@@ -88,10 +88,14 @@ export const pageApi = {
     xmatrixApiRequest<{ revision: PageRevision }>({ url: WEB_PROXY_ROUTES.space_page_promote(spaceId, pageId, revision),
       token, method: "POST", body: { baseRevision } }),
   // Co-writing (docs/design/pages-live-document.md §4.2): the Agent in a conversation started from the
-  // page suggests, and its suggestions wait on the page until a person has taken or left them.
+  // page joins the page's live session and writes into it as its words come, until it is stopped.
   startCoWriting: (spaceId: string, pageId: string, token: string, conversationId: string) =>
     xmatrixApiRequest<{ startedAt: string }>({ url: `${WEB_PROXY_ROUTES.space_page(spaceId, pageId)}/co-writing`,
-      token, method: "POST", body: { conversationId } }),
+      token, method: "POST", body: { conversationId, live: true } }),
+  endCoWriting: (spaceId: string, pageId: string, token: string, conversationId: string) =>
+    xmatrixApiRequest<{ ended: boolean }>({
+      url: `${WEB_PROXY_ROUTES.space_page(spaceId, pageId)}/co-writing/${encodeURIComponent(conversationId)}`,
+      token, method: "DELETE" }),
   suggestions: (spaceId: string, pageId: string, token: string, signal?: AbortSignal) =>
     xmatrixApiRequest<{ suggestions: PageRevision[] }>({
       url: `${WEB_PROXY_ROUTES.space_page(spaceId, pageId)}/suggestions`, token, signal }),

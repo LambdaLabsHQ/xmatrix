@@ -479,10 +479,10 @@ test.describe("on a phone", () => {
     await picker.getByRole("button", { name: "codex" }).click();
 
     await expect.poll(async () => (await fixtureRequestBodies(browser, "write-message"))[0]?.body).toMatch(
-      /^@codex launch:force Co-write page:p-relay with me\./u);
+      /^@codex launch:force You're co-writing page:p-relay with me live\./u);
     expect((await fixtureRequestBodies(browser, "link-create"))[0]).toMatchObject({ conversationId: writing.id, pageId: "p-relay" });
-    // The conversation co-writes the page before its Agent is called, so its edits arrive as suggestions.
-    expect(await fixtureRequestBodies(browser, "co-writing")).toEqual([{ conversationId: writing.id }]);
+    // The conversation co-writes the page live before its Agent is called, so the Agent joins the page when it starts.
+    expect(await fixtureRequestBodies(browser, "co-writing")).toEqual([{ conversationId: writing.id, live: true }]);
     await expect(picker).toBeHidden();
     await expect(browser).not.toHaveURL(/conversation=/u);
     await expect(browser.getByRole("status")).toHaveText(/codex is starting/u);
@@ -506,7 +506,7 @@ test.describe("on a phone", () => {
     await menu.getByRole("menuitem", { name: "Co-write with claude" }).click();
     await expect(menu).toBeHidden();
     await expect.poll(async () => (await fixtureRequestBodies(browser, "write-message"))[0]?.body).toMatch(
-      /^@claude launch:force Co-write page:p-relay \(section #status\) with me\./u);
+      /^@claude launch:force You're co-writing page:p-relay \(section #status\) with me live\./u);
     expect((await fixtureRequestBodies(browser, "link-create"))[0]).toMatchObject({ blockId: "status" });
   });
 

@@ -115,7 +115,8 @@ export function pageShellActions(input: {
     await pageApi.link(page.spaceId, token, { conversationId: channel.id, pageId: page.pageId,
       ...(page.blockId ? { blockId: page.blockId } : {}), ...(page.anchor ? { anchor: page.anchor } : {}) });
     input.setChannels((current) => replaceChannel(current, channel));
-    // Co-writing starts before its Agent is called, so the Agent's first edit is already a suggestion.
+    // Co-writing starts before its Agent is called, so the Hub's instruction to co-write the page live is
+    // in the conversation when the Agent joins it.
     if (options.coWrite) await pageApi.startCoWriting(page.spaceId, page.pageId, token, channel.id);
     if (options.draft) input.seedDraft(channel.id, options.draft);
     if (options.firstMessage) {

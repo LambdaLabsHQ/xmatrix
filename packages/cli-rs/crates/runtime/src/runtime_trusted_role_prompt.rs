@@ -31,6 +31,9 @@ pub(crate) fn claude_stream_extra_args(
         "--output-format".to_string(),
         "stream-json".to_string(),
         "--verbose".to_string(),
+        // Text as it is generated (`stream_event`), so a page co-written live
+        // sees the words come rather than whole blocks.
+        "--include-partial-messages".to_string(),
         // Echo each submitted user message back on stdout (`isReplay:true`) so
         // the reader can confirm the turn was accepted.
         "--replay-user-messages".to_string(),

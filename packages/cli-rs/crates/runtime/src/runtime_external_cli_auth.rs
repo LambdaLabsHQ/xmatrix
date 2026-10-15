@@ -171,6 +171,8 @@ async fn cmd_external_inner(
     );
     let mut runtime_capabilities = goal_runtime_capabilities(tool, cmd, cmd_args);
     runtime_capabilities.push("harness_parameters_v1".to_string());
+    // Every backend co-writes a page live (runtime_page_co_write).
+    runtime_capabilities.push("page_co_write_v1".to_string());
     if use_codex_app_backend(tool) {
         runtime_capabilities.extend(["agent_turn_retry".into(), "agent_turn_retry_channel_message".into()]);
     }

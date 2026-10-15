@@ -18,6 +18,7 @@ use crate::{
 };
 
 type ConnectionEvent = agent_instance_connection::AgentInstanceConnectionEvent;
+use xmatrix_cli_core::page_co_write::PageCoWriteEvent;
 
 /// A runtime whose model, effort and harness parameters the channel controls.
 pub(crate) trait ChannelControlledRuntime {
@@ -201,6 +202,28 @@ impl<'a> RunLoopEvents<'a> {
         }))
     }
 
+    /// The Hub's instruction that this conversation co-write a page, or stop:
+    /// acknowledged and acted on here; it is no turn. Whether `event` was one.
+    fn page_co_write(&mut self, event: &ConnectionEvent) -> bool {
+        let ConnectionEvent::Server(
+            protocol::AgentInstanceServerMessage::ChannelMessageReceived { message, .. }
+            | protocol::AgentInstanceServerMessage::ChannelHistoryReplay { message, .. },
+        ) = event
+        else {
+            return false;
+        };
+        let Some(instruction) = protocol::channel_page_co_write(message) else {
+            return false;
+        };
+        let _ = self.relay.ack_channel_message(
+            message.message_id.clone(),
+            message.channel_id.clone(),
+            message.sequence,
+        );
+        crate::runtime_page_co_write::follow(self.relay, &message.channel_id, &instruction);
+        true
+    }
+
     async fn next_event(&mut self) -> Option<ConnectionEvent> {
         if self.watch_termination {
             let signals = self
@@ -226,7 +249,24 @@ impl<'a> RunLoopEvents<'a> {
             if let Some(resume) = self.take_ready_resume() {
                 return Some(resume);
             }
-            let event = self.next_event().await?;
+            let event = match self.next_event().await? {
+                // The page this conversation co-writes asks for the Agent's next turn: it runs
+                // as a resume of that conversation, whatever the harness. An interrupt that
+                // arrives with no turn running has nothing to stop.
+                ConnectionEvent::PageCoWrite(PageCoWriteEvent::Turn {
+                    channel_id,
+                    turn,
+                    prompt,
+                }) => {
+                    crate::runtime_page_co_write::turn_queued(&channel_id, turn);
+                    return Some(RunLoopInput::Resume { channel_id, prompt });
+                }
+                ConnectionEvent::PageCoWrite(PageCoWriteEvent::Interrupt { .. }) => continue,
+                event => event,
+            };
+            if self.page_co_write(&event) {
+                continue;
+            }
             let interrupted = self.interrupted_turn.is_some();
             let event = match answer_switch_request(relay, runtime, event, interrupted).await {
                 SwitchAnswer::NotASwitch(event) => *event,

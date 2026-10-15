@@ -358,6 +358,9 @@ pub enum AgentInstanceConnectionEvent {
     /// turns instead of racing its own in-flight turn. The body is a verbatim
     /// slash command (e.g. `/goal <condition>`); see the goal inbox.
     LocalCommand { body: String },
+    /// A page this instance co-writes asks it something (the runtime's page
+    /// co-write bridge), through the same stream so it lands between turns.
+    PageCoWrite(crate::page_co_write::PageCoWriteEvent),
 }
 
 #[derive(Debug)]
@@ -539,6 +542,12 @@ impl AgentInstanceConnectionClient {
 
     pub fn runtime_capabilities(&self) -> Vec<String> {
         self.runtime_capabilities.clone()
+    }
+
+    /// How this instance joins a page's live session as its co-writer, with
+    /// the token it holds now and later renewals.
+    pub fn page_co_write_connector(&self) -> crate::page_co_write::PageCoWriteConnector {
+        crate::page_co_write::PageCoWriteConnector::new(self.relay_url.clone(), self.token.clone())
     }
 
     /// Sender for [`AgentInstanceConnectionEvent::LocalCommand`], so an
