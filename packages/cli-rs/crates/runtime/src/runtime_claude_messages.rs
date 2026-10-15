@@ -185,6 +185,46 @@ pub(crate) fn claude_assistant_delta_for_message(
     format!("{separator}{delta}")
 }
 
+/// Text a partial `stream_event` adds to the assistant message being written
+/// (`--include-partial-messages`), reported as the delta that message, once it
+/// lands whole, then no longer repeats.
+pub(crate) fn claude_partial_assistant_delta(
+    state: &mut ClaudeStreamTraceState,
+    value: &Value,
+) -> String {
+    let Some(event) = value.get("event") else {
+        return String::new();
+    };
+    match event.get("type").and_then(Value::as_str) {
+        Some("message_start") => {
+            state.partial_message_id = event
+                .get("message")
+                .and_then(|message| message.get("id"))
+                .and_then(Value::as_str)
+                .map(str::to_string);
+            String::new()
+        }
+        Some("content_block_delta") => {
+            let Some(text) = event
+                .get("delta")
+                .filter(|delta| delta.get("type").and_then(Value::as_str) == Some("text_delta"))
+                .and_then(|delta| delta.get("text"))
+                .and_then(Value::as_str)
+            else {
+                return String::new();
+            };
+            let id = state.partial_message_id.clone();
+            let whole = if id.is_some() && state.last_message_id == id {
+                format!("{}{text}", state.current_message_text)
+            } else {
+                text.to_string()
+            };
+            claude_assistant_delta_for_message(state, id.as_deref(), &whole)
+        }
+        _ => String::new(),
+    }
+}
+
 /// The `runtime_event` payload for a Claude stream event that tells a watcher
 /// why the agent is slow or stuck, or `None` for everything else. Shapes follow
 /// `@anthropic-ai/claude-agent-sdk` 0.3.281 (`SDKAPIRetryMessage`,

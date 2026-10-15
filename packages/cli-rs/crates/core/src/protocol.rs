@@ -795,6 +795,29 @@ pub fn channel_turn_retry(message: &ChannelMessage) -> Option<ChannelTurnRetry> 
     .then_some(retry)
 }
 
+/// Hub-written instruction that the Agent in this conversation co-write a page
+/// live (docs/design/pages-live-document.md §4.2): join the page's live session
+/// as its co-writer while `active`, and leave it once not. It names no
+/// Instance: the conversation is the co-writing, so its Agent answers it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChannelPageCoWrite {
+    pub version: u8,
+    pub space_id: String,
+    pub page_id: String,
+    pub active: bool,
+}
+
+pub fn channel_page_co_write(message: &ChannelMessage) -> Option<ChannelPageCoWrite> {
+    let metadata = hub_instruction_metadata(message)?;
+    let co_write: ChannelPageCoWrite =
+        serde_json::from_value(metadata["xmatrixPageCoWrite"].clone()).ok()?;
+    (co_write.version == 1
+        && instruction_token(&co_write.space_id)
+        && instruction_token(&co_write.page_id))
+    .then_some(co_write)
+}
+
 /// Hub-written instruction that one Instance continue the turn a live switch
 /// cancelled. The body is the continuation input; only the named Instance,
 /// still waiting on one of the named switches, runs it.

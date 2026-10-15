@@ -316,6 +316,7 @@ fn claude_stream_extra_args_enables_bidirectional_stream_json() {
     );
     assert!(args.iter().any(|a| a == "--print"));
     assert!(args.iter().any(|a| a == "--verbose"));
+    assert!(args.iter().any(|a| a == "--include-partial-messages"));
     assert!(args.iter().any(|a| a == "--replay-user-messages"));
     assert!(args.windows(2).any(|pair| pair == ["--permission-prompt-tool", "stdio"]));
     assert!(!args.iter().any(|a| a == "--resume"));
