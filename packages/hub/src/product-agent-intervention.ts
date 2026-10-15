@@ -38,16 +38,17 @@ export interface ProductAgentInterventionPort {
     waitForTermination?: boolean,
   ): Promise<void>;
   /**
-   * Stop the target so its daemon carries its checkout to a handoff branch,
-   * and wait up to `timeoutMs` for the daemon's report. `handoffExport` is the
-   * daemon's export outcome; a daemon that predates exports reports none.
+   * Stop the target, with `handoffExport` so its daemon carries its checkout
+   * to a handoff branch, and wait up to `timeoutMs` for the daemon's report.
+   * The reported `handoffExport` is the export outcome; a daemon that predates
+   * exports reports none.
    */
   issueHandoffStop?(
     target: ProductAgentKillTarget,
     controlId: string,
     reason: string,
     channelId: string,
-    handoffExport: ProductAgentHandoffExport,
+    handoffExport: ProductAgentHandoffExport | undefined,
     timeoutMs: number,
   ): Promise<{ stopped: boolean; handoffExport?: Record<string, unknown> }>;
   /**

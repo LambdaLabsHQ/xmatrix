@@ -44,7 +44,7 @@ label and only the candidates valid at that stage:
    remain.
 2. `@<agent>:` resolves channel-local instances, explicit reborn targets
    (kill-if-live, then resume-continuous restart in that channel slot),
-   same-machine handoff (`@<agent>:<n>:handoff:@<successor>`, existing or
+   handoff (`@<agent>:<n>:handoff:@<successor>`, existing or
    dead source to a new instance), and the
    current Channel's GitHub-connector repositories plus the agent's registered
    working-dir launch options inline — picking one inserts

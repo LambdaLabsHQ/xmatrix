@@ -4,10 +4,10 @@ import type { ChannelAttachment } from "@xmatrix/protocol";
 import type { HubAuthorityEnv } from "./postgres-authority-fleet";
 import { appendChannelMessage } from "./channel-messages";
 import type { Env } from "./types";
-import { decideNewConversationLaunch, prepareRegistrationHandoff,
+import { decideNewConversationLaunch,
   prepareRegistrationReborn } from "./registration-launch-dispatch";
 import { runtimeRepository } from "./runtime";
-import { launchHandoffSuccessorElsewhere } from "./handoff-elsewhere";
+import { launchHandoffSuccessor } from "./handoff-successor";
 import { ControlError, RegistrationAccessError } from "@xmatrix/db";
 import { getChannel } from "./spaces";
 import {
@@ -140,18 +140,10 @@ export function createProductAgentMentionAuthorityPort(input: {
   /** Stable message id used for system-notice idempotency keys. */
   sourceMessageId: string;
 }): ProductAgentMentionPort {
-  /** One registration handoff under a command stable per source message, Instance and successor. */
-  const handoffPrepare = (handoff: { channelId: string; sourceInstanceId: string; sourceMessageId: string;
-    sourceMention: string; successorHarness: string; prompt: string }) => prepareRegistrationHandoff(input.env as Env, {
-    commandId: `registration-handoff:${handoff.sourceMessageId}:${handoff.sourceInstanceId}:${handoff.successorHarness}`
-      .slice(0, 200),
-    actorUserId: input.actorUserId, ...handoff,
-  });
   const principal = { kind: "user" as const, id: input.actorUserId };
-  /** A prepared reborn or handoff is the Channel coordinator's to carry: tell it before answering. */
-  const handedToReborn = async (channelId: string, result: { intentId?: unknown; state?: unknown },
-    failure: "registration_reborn_failed" | "registration_handoff_failed") => {
-    if (typeof result.intentId !== "string") throw new RegistrationAccessError(failure, 502);
+  /** A prepared reborn is the Channel coordinator's to carry: tell it before answering. */
+  const handedToReborn = async (channelId: string, result: { intentId?: unknown; state?: unknown }) => {
+    if (typeof result.intentId !== "string") throw new RegistrationAccessError("registration_reborn_failed", 502);
     await wakeAgentLaunchCoordinator(input.env, channelId, ["reborn"]);
     return { intentId: result.intentId, state: String(result.state) };
   };
@@ -186,33 +178,11 @@ export function createProductAgentMentionAuthorityPort(input: {
         commandId: `registration-reborn:${sourceMessageId}:${sourceInstanceId}`.slice(0, 200),
         actorUserId: input.actorUserId, channelId, sourceInstanceId, sourceMessageId, sourceMention, prompt,
       }) as { intentId?: unknown; state?: unknown };
-      return handedToReborn(channelId, result, "registration_reborn_failed");
+      return handedToReborn(channelId, result);
     },
 
-    async prepareRegisteredHandoff({ channelId, sourceInstanceId, sourceMessageId, sourceMention, successorHarness, prompt }) {
-      const result = await handoffPrepare({ channelId, sourceInstanceId, sourceMessageId, sourceMention,
-        successorHarness, prompt });
-      return handedToReborn(channelId, result, "registration_handoff_failed");
-    },
-
-    async prepareRegisteredAutoHandoff({ channelId, sourceInstanceId, sourceMessageId, sourceMention, prompt }) {
-      const result = await handoffPrepare({ channelId, sourceInstanceId, sourceMessageId, sourceMention,
-        successorHarness: "auto", prompt });
-      const outcome = result.outcome;
-      if (outcome !== "handed_off" && outcome !== "no_successor" && outcome !== "not_transferable" &&
-          outcome !== "source_transferred" && outcome !== "refused") {
-        throw new RegistrationAccessError("registration_handoff_failed", 502);
-      }
-      return { outcome,
-        ...(typeof result.successorHarness === "string" ? { successorHarness: result.successorHarness } : {}),
-        ...(typeof result.repository === "string" && result.repository.trim()
-          ? { repository: result.repository.trim().slice(0, 1_000) } : {}),
-        ...(typeof result.code === "string" ? { code: result.code } : {}) };
-    },
-
-    async handOffElsewhere(handoff) {
-      const { agentName } = await launchHandoffSuccessorElsewhere(input.env as Env, handoff);
-      return { agentName };
+    async handOff(handoff) {
+      return launchHandoffSuccessor(input.env as Env, handoff);
     },
 
     async getRebornTarget({ channelId, agentName, channelInstanceId }) {

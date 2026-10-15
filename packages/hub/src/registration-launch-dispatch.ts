@@ -2,7 +2,7 @@ import type { AppConnectorEnv } from "./app-connectors";
 import { registrationRepositoryCatalog } from "./registration-repository-catalog";
 import { registrationLaunchContextReader } from "./registration-launch-context";
 import { START_INTENT_DECLINED, registrationLaunchChooser } from "./registration-launch-choice";
-import { REGISTRATION_PREPARATION_REJECTION_CODES, digestCanonicalCloneCborV1, isAutoHandoffSuccessor } from "@xmatrix/protocol";
+import { REGISTRATION_PREPARATION_REJECTION_CODES, digestCanonicalCloneCborV1 } from "@xmatrix/protocol";
 import type { RoutingEvaluator } from "./agent-routing-evaluation";
 import type { AutoLaunchTags, DraftSummonIntent } from "@xmatrix/protocol";
 import {
@@ -202,20 +202,6 @@ export function prepareRegistrationReborn(env: Env, input: {
   return executeRegistrationRebornPrepare({ ...runtimePlacement(env), ...input });
 }
 
-/** A handoff of a source Instance to a named successor harness, or to the one
- * Jev picks for `auto`; an automatic handoff that went through is handed to
- * the Channel's coordinator before it is answered. */
-export async function prepareRegistrationHandoff(env: Env, input: {
-  commandId: string; actorUserId: string; channelId: string; sourceMessageId: string;
-  sourceInstanceId: string; sourceMention?: string; successorHarness: string; prompt: string;
-}): Promise<Record<string, unknown>> {
-  const placed = { ...runtimePlacement(env), ...input };
-  if (!isAutoHandoffSuccessor(input.successorHarness)) return executeRegistrationHandoffPrepare(placed);
-  const result = await executeRegistrationAutoHandoff(placed);
-  if (result.outcome === "handed_off") await wakeAgentLaunchCoordinator(env, input.channelId, ["reborn", "launch"]);
-  return result;
-}
-
 /** Jev decides whether a new conversation's first message asks for an Agent;
  * a Human author may choose first within the window. */
 export function decideNewConversationLaunch(env: Env, input: {
@@ -280,26 +266,6 @@ export async function executeRestingInstanceWake(input: {
   channelId: string; sourceMessageId: string; prompt?: string;
 }) {
   return (await placedRebornRepository(input, "reborn")).wakeResting(input);
-}
-
-/** Handoff: a new Instance of `successorHarness`, registered on the source's
- * owner and machine, takes over the source's retained directory. */
-export async function executeRegistrationHandoffPrepare(input: {
-  env?: AppConnectorEnv; database: AuthorityDatabase; directory: AuthorityDatabase; commandId: string; actorUserId: string;
-  channelId: string; sourceMessageId: string; sourceInstanceId: string; sourceMention?: string; successorHarness: string;
-  prompt: string;
-}) {
-  return (await placedRebornRepository(input, "handoff")).prepareHandoff(input);
-}
-
-/** `handoff:@auto`: the first other harness on the source's machine with
- * headroom takes its retained directory, or the source's repository is named
- * so a successor can start on any machine. */
-export async function executeRegistrationAutoHandoff(input: {
-  env?: AppConnectorEnv; database: AuthorityDatabase; directory: AuthorityDatabase; commandId: string; actorUserId: string;
-  channelId: string; sourceMessageId: string; sourceInstanceId: string; sourceMention?: string; prompt: string;
-}) {
-  return (await placedRebornRepository(input, "handoff")).prepareAutoHandoff(input);
 }
 
 /** The source Instance's provider account is used up: its pool is held empty
