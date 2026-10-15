@@ -186,7 +186,7 @@ pub(crate) fn acp_parameters(options: &[Value]) -> Vec<protocol::HarnessParamete
             let category = option.get("category").and_then(Value::as_str);
             if category == Some("model") && !["model", "models"].contains(&id)
                 || category == Some("thought_level")
-                    && !["effort", "reasoning", "reasoning_effort"].contains(&id)
+                    && !["effort", "reasoning", "reasoning_effort", "thinking", "thinking_effort", "thought_level"].contains(&id)
             {
                 return None;
             }

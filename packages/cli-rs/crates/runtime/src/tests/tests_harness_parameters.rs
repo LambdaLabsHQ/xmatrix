@@ -42,6 +42,8 @@ async fn acp_model_switch_refreshes_effort_control_and_requires_confirmation() {
                     .find(|m| m.model == "model-b")
                     .unwrap();
                 assert_eq!(selected.supported_reasoning_efforts.unwrap().len(), 2);
+                assert_eq!(session.set_model("model-c").await.unwrap(), "model-c");
+                assert_eq!(session.set_effort("low").await.unwrap(), "low");
                 assert_eq!(session.set_model("plain").await.unwrap(), "plain");
                 assert!(session.current_effort().is_none());
                 assert!(session.set_effort("high").await.is_err());

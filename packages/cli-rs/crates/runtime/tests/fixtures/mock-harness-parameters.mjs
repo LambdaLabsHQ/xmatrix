@@ -14,8 +14,8 @@ let acpModel = "model-a", acpEffort = "high";
 const modelEffortBackend = backend.startsWith("acp-model-effort");
 const modelEffortOptions = () => [
   { id: "model", name: "Model", category: "model", type: "select", currentValue: acpModel,
-    options: ["model-a", "model-b", "plain"].map(value => ({ value, name: value })) },
-  ...(acpModel === "plain" ? [] : [{ id: acpModel === "model-a" ? "reasoning" : "reasoning_effort",
+    options: ["model-a", "model-b", "model-c", "plain"].map(value => ({ value, name: value })) },
+  ...(acpModel === "plain" ? [] : [{ id: acpModel === "model-a" ? "reasoning" : acpModel === "model-b" ? "reasoning_effort" : "thinking",
     name: "Effort", category: "thought_level", type: "select", currentValue: acpEffort,
     options: ["low", "high"].map(value => ({ value, name: value })) }]),
 ];
