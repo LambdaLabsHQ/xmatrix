@@ -4,7 +4,7 @@ import test from "node:test";
 
 import { Client } from "pg";
 
-import { PostgresPageRepository, pagePositionBetween } from "../dist/page-control.js";
+import { PostgresPageRepository, pageNameFrom, pagePositionBetween } from "../dist/page-control.js";
 import { readPageConversations } from "../dist/page-conversations.js";
 
 
@@ -285,13 +285,13 @@ integration("pages: recent changes are the readable pages that changed last, eac
     const { page: styled } = await call("create", { principal: owner, title: "Styled",
       body: "## Goals\n* ship\n\n## Next\nIdle\n" });
     await call("edit", { principal: owner, pageId: styled.pageId, baseRevision: 1,
-      body: "## Goals\n\n- ship\n\n## Next\n\nlaunch\n" });
+      body: "# Styled\n\n## Goals\n\n- ship\n\n## Next\n\nlaunch\n" });
     assert.deepEqual(shown((await call("recentChanges", { principal: owner, limit: 1 })).changes),
       [["Styled", "next", "launch", false]], "the gist is what the edit added, not the markdown style the page was created in");
 
-    await call("edit", { principal: member, pageId: notes.pageId, baseRevision: 1, body: "" });
+    await call("edit", { principal: member, pageId: notes.pageId, baseRevision: 1, body: "# Notes\n" });
     assert.deepEqual(shown((await call("recentChanges", { principal: member, limit: 1 })).changes),
-      [["Notes", null, null, false]], "a change that only removed text has no gist");
+      [["Notes", "notes", null, false]], "a change that only removed text has no gist");
   } finally {
     await cleanup(client, ids);
     await client.end();
@@ -557,8 +557,8 @@ integration("claims: one holder per block, renewed by its holder, open for compe
   }
 });
 
-integration("pages: the top-level heading a page opens with is its name", async () => {
-  const { client, ids, pages, owner } = await pageTest("heading-title");
+integration("pages: a page's name is the top-level heading its document opens with, read alike in SQL", async () => {
+  const { client, ids, pages, owner } = await pageTest("page-name");
   try {
     const r = () => crypto.randomUUID();
     const title = async (pageId) => (await pages.read({ requestId: r(), spaceId: ids.space, pageId,
@@ -566,21 +566,29 @@ integration("pages: the top-level heading a page opens with is its name", async 
     const edit = (pageId, baseRevision, body) => pages.edit({ requestId: r(), spaceId: ids.space, pageId,
       principal: owner, baseRevision, body });
 
+    // A new page's name is written into its document; a document that names itself keeps its own.
     const { page } = await pages.create({ requestId: r(), spaceId: ids.space, principal: owner, title: "Untitled" });
-    await edit(page.pageId, 1, "# 测试一下共同写作\n");
-    assert.equal(await title(page.pageId), "测试一下共同写作", "editing the heading renames the page");
-    await edit(page.pageId, 2, "Intro first.\n\n# Roadmap\n");
-    assert.equal(await title(page.pageId), "测试一下共同写作", "without an opening heading the name stays");
-
-    const { page: made } = await pages.create({ requestId: r(), spaceId: ids.space, principal: owner,
+    assert.equal((await pages.read({ requestId: r(), spaceId: ids.space, pageId: page.pageId, principal: owner }))
+      .page.body, "# Untitled\n");
+    const { page: notes } = await pages.create({ requestId: r(), spaceId: ids.space, principal: owner, title: "Notes",
+      body: "## Search\n\nNext.\n" });
+    assert.equal(notes.title, "Notes");
+    const { page: roadmap } = await pages.create({ requestId: r(), spaceId: ids.space, principal: owner,
       title: "Plans", body: "# Roadmap\n\nNext.\n" });
-    assert.equal(made.title, "Roadmap", "a page made with a heading is named by it");
+    assert.equal(roadmap.title, "Roadmap");
 
-    // A section heading is not a name.
-    const { page: apart } = await pages.create({ requestId: r(), spaceId: ids.space, principal: owner,
-      title: "Goals", body: "## Search\n\nNext.\n" });
-    await edit(apart.pageId, 1, "## Billing\n\nLater.\n");
-    assert.equal(await title(apart.pageId), "Goals");
+    // Editing the heading is renaming the page; a document that stops opening with one has no name.
+    await edit(page.pageId, 1, "# 测试一下共同写作\n");
+    assert.equal(await title(page.pageId), "测试一下共同写作");
+    await edit(page.pageId, 2, "Intro first.\n\n# Roadmap\n");
+    assert.equal(await title(page.pageId), "Untitled");
+
+    // SQL reads the name exactly as the Hub does.
+    for (const body of ["# Plain\n", "\n\n#   Spaced   \nmore", "#NoSpace\n", "## Section\n", "Text\n# Later\n",
+      "# \n", "# Windows\r\nline", "", "#\tTabbed\n"]) {
+      const [row] = (await client.query("SELECT data.page_name($1) AS name", [body])).rows;
+      assert.equal(row.name, pageNameFrom(body), JSON.stringify(body));
+    }
   } finally {
     await cleanup(client, ids);
     await client.end();

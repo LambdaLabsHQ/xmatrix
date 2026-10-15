@@ -69,7 +69,7 @@ const PageDocumentStatic = dynamic(() => import("./page-document-static").then((
 function openingHeading(blocks: PageDocBlock[], markdown: string | undefined): string | null {
   if (blocks.length > 0) return blocks[0].pos === 0 && blocks[0].depth === 1 ? blocks[0].title.trim() || null : null;
   const line = markdown?.trimStart().split("\n", 1)[0]?.trim() ?? "";
-  return /^#\s+(\S.*)$/u.exec(line)?.[1]?.trim() ?? null;
+  return /^#[ \t]+(\S.*)$/u.exec(line)?.[1]?.trim() ?? null;
 }
 
 /**
@@ -942,9 +942,10 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     }
   };
 
+  // Naming a page writes its name into the document as the heading it opens with.
   const renamePage = async (value: string) => {
     const title = value.trim();
-    if (!spaceId || !page || !title || title === page.title) return;
+    if (!spaceId || !page || !title) return;
     try {
       await pageApi.update(spaceId, page.pageId, token, { title });
       await queryClient.invalidateQueries({ predicate: (query) => query.queryKey.includes("page-tree") });
@@ -953,7 +954,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     }
   };
 
-  // A document that opens with a top-level heading names the page there; the Hub renames the page to it on commit.
+  // A page's name is the top-level heading its document opens with (pages-live-document.md §4.1).
   const opening = openingHeading(blocks, document.data?.body);
   // The tree catches up with a rename the heading made.
   const renamedInDocument = Boolean(page && opening !== null && opening !== page.title.trim());
@@ -961,21 +962,19 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     if (renamedInDocument) void queryClient.invalidateQueries({ predicate: (query) => query.queryKey.includes("page-tree") });
   }, [headRevision, queryClient, renamedInDocument]);
 
-  // The page's name, when the document does not already open with it. Plain text: a field well would repeat the heading.
+  // A document that opens without a name offers one above it; what is typed there becomes its opening heading.
+  // Plain text: a field well would read as a form.
   const titleField = page && opening === null ? (canEdit ? (
-    <input key={`${page.pageId}:${page.title}`} defaultValue={page.title} aria-label="Page title"
+    <input key={page.pageId} defaultValue="" aria-label="Page title"
       data-testid="page-title" placeholder={NEW_PAGE_TITLE} onKeyDown={(event) => {
         if (isImeKeyDown(event.nativeEvent)) return;
         if (event.key === "Enter") event.currentTarget.blur();
-        if (event.key === "Escape") { event.currentTarget.value = page.title; event.currentTarget.blur(); }
+        if (event.key === "Escape") { event.currentTarget.value = ""; event.currentTarget.blur(); }
       }}
-      onBlur={(event) => {
-        if (!event.currentTarget.value.trim()) event.currentTarget.value = page.title;
-        void renamePage(event.currentTarget.value);
-      }}
+      onBlur={(event) => void renamePage(event.currentTarget.value)}
       className="page-title mr-auto min-w-0 flex-1 appearance-none border-0 bg-transparent p-0 text-2xl font-black shadow-none outline-none" />
   ) : (
-    <h1 className="mr-auto text-2xl font-black">{page.title}</h1>
+    <h1 className="mr-auto text-2xl font-black text-muted-foreground">{NEW_PAGE_TITLE}</h1>
   )) : null;
 
   const toggleSuggestOnly = async () => {
