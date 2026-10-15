@@ -73,6 +73,15 @@ without inventing current state or closing the process. Known changed values sti
 require notification. Model switches clear model-dependent selections. Process recovery refreshes
 catalogs and revalidates/restores selections before work resumes.
 
+Parameter-control results keep `current` (provider observation) separate from
+`pending` (a retained local selection). Hub notices name the pending selection
+and the observed value separately, and never announce a missing observation as
+an applied setting. The `agent_parameter_control_pending_v1` Hub capability
+enables this additive result field; a new runtime uses its existing text-result
+compatibility path for pending selections against an older Hub. Existing
+runtimes keep their original result contract until upgraded. Deploy Hub and CLI
+together through the release train to complete the rollout.
+
 ## Type coverage
 
 | Native type | Parameter contract and execution | Presentation |

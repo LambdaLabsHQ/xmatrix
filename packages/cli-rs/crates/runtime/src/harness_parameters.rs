@@ -601,6 +601,7 @@ pub(crate) fn add_commands(
 
 /// The Hub capability that words parameter controls from their facts.
 pub(crate) const PARAMETER_CONTROL_RESULT: &str = "agent_parameter_control_result";
+const PARAMETER_CONTROL_PENDING: &str = "agent_parameter_control_pending_v1";
 
 /// Report what a parameter control did. A Hub that words these gets the facts
 /// (the parameter, its value now, its choices, or the original error); an
@@ -611,9 +612,12 @@ pub(crate) async fn report_parameter_control(
     source_message_id: &str,
     requested: &ParameterCommand,
     catalog: &[protocol::HarnessParameter],
+    pending: Option<String>,
     outcome: Result<String, String>,
 ) {
-    if !relay.hub_accepts(PARAMETER_CONTROL_RESULT) {
+    if !relay.hub_accepts(PARAMETER_CONTROL_RESULT)
+        || pending.is_some() && !relay.hub_accepts(PARAMETER_CONTROL_PENDING)
+    {
         let notice = outcome.unwrap_or_else(|error| format!("Parameter control failed: {error}"));
         let _ = relay
             .send_channel_message(channel_id.to_string(), notice)
@@ -625,6 +629,7 @@ pub(crate) async fn report_parameter_control(
         source_message_id,
         requested,
         catalog,
+        pending,
         outcome.err(),
     ));
 }
@@ -634,6 +639,7 @@ pub(crate) fn parameter_control_result(
     source_message_id: &str,
     requested: &ParameterCommand,
     catalog: &[protocol::HarnessParameter],
+    pending: Option<String>,
     error: Option<String>,
 ) -> protocol::AgentInstanceClientMessage {
     let (parameter, action) = match requested {
@@ -653,6 +659,7 @@ pub(crate) fn parameter_control_result(
         parameter,
         action: action.into(),
         current: entry.and_then(|entry| entry.current_value.clone()),
+        pending,
         choices: entry
             .map(|entry| entry.options.iter().take(100).cloned().collect())
             .unwrap_or_default(),
@@ -722,6 +729,7 @@ mod tests {
             &Ok(("fast".into(), ParameterAction::Toggle)),
             std::slice::from_ref(&fast),
             None,
+            None,
         );
         let json = serde_json::to_value(&result).unwrap();
         assert_eq!(json["type"], "agent_parameter_control_result");
@@ -738,6 +746,7 @@ mod tests {
             "message-1",
             &Err("Use /config <parameter> [value]".into()),
             &[],
+            None,
             None,
         );
         let json = serde_json::to_value(&refused).unwrap();

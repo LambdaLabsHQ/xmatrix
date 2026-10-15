@@ -101,7 +101,7 @@ type AuthorityOutput = AgentInstanceServerMessage | readonly AgentInstanceServer
  * sends one only when its Hub lists it.
  */
 export const AGENT_INSTANCE_HUB_CAPABILITIES = ["channel_activity", "agent_turn_retry", "agent_turn_retry_channel_message",
-  "harness_question_closed", "agent_parameter_control_result", "switch_continuation"] as const;
+  "harness_question_closed", "agent_parameter_control_result", "agent_parameter_control_pending_v1", "switch_continuation"] as const;
 
 /** The card a Run posts when its harness asks its own question (runtime_harness_questions.rs). */
 const HARNESS_QUESTIONNAIRE_KIND = "xmatrix.questionnaire.v1";
@@ -1210,7 +1210,7 @@ function turnFailureLifecycle(channelId: string, error: string): Message<"agent_
 
 /** Hub's words for what a parameter control did, from the Instance's facts. */
 export function parameterControlNotice(label: string,
-  result: Pick<Message<"agent_parameter_control_result">, "parameter" | "action" | "current" | "choices" | "notice" | "error">): string {
+  result: Pick<Message<"agent_parameter_control_result">, "parameter" | "action" | "current" | "pending" | "choices" | "notice" | "error">): string {
   const who = label.replace(/[@＠`\r\n]/gu, " ").trim() || "The agent";
   const text = (value: unknown) => typeof value === "string" ? boundAgentTurnFailureDetail(value).replace(/[@＠]/gu, "﹫") : "";
   const parameter = text(result.parameter);
@@ -1219,11 +1219,15 @@ export function parameterControlNotice(label: string,
     return `Could not ${result.action === "query" ? "read" : "change"} ${named} for ${who}: ${text(result.error)}`;
   }
   const current = text(result.current) || "not reported";
+  const pending = text(result.pending);
   const choices = Array.isArray(result.choices) ? result.choices.slice(0, 25).map(text).filter(Boolean) : [];
   const providerNote = text(result.notice) ? ` (${text(result.notice)})` : "";
   if (result.action === "query") {
-    return `${who} ${named}: \`${current}\`${providerNote}.${choices.length ? ` Choices: ${choices.join(", ")}.` : ""}`;
+    return `${who} ${named}: \`${current}\`${providerNote}.${pending ? ` Pending selection: \`${pending}\`.` : ""}${choices.length ? ` Choices: ${choices.join(", ")}.` : ""}`;
   }
+  if (pending) {
+    return `Selected ${named} to \`${pending}\` for ${who}; awaiting provider confirmation (current: \`${current}\`)${providerNote}.`;
+  }
+  if (!text(result.current)) return `The provider has not reported ${named} for ${who}${providerNote}.`;
   return `Set ${named} to \`${current}\` for ${who}${providerNote}.`;
 }
-

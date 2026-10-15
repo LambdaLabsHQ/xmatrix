@@ -203,7 +203,7 @@ pub(crate) async fn run_headless_external(run: ExternalRun<'_>) -> error::Result
                             if attachment_free && let Some(requested) = slash_command_passthrough(&body, &agent).and_then(crate::harness_parameters::command) {
                                 let _ = relay_for_events.ack_channel_message(message_id.clone(), channel_id.clone(), sequence);
                                 crate::harness_parameters::report_parameter_control(
-                                    &relay_for_events, &channel_id, &message_id, &requested, &[],
+                                    &relay_for_events, &channel_id, &message_id, &requested, &[], None,
                                     Err("This runtime does not advertise a parameter control interface".into()),
                                 ).await;
                                 continue;

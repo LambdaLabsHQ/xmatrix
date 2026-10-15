@@ -803,4 +803,8 @@ impl ChannelControlledRuntime for CodexRun<'_> {
     fn parameter_catalog(&self) -> Vec<protocol::HarnessParameter> {
         self.parameters()
     }
+
+    fn pending_parameter_selection(&self, id: &str) -> Option<String> {
+        self.app.pending_parameter_value(id, self.latest_model.as_deref())
+    }
 }

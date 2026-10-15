@@ -6,6 +6,93 @@ fn harness_parameter_fixture_path() -> String {
 }
 
 #[tokio::test]
+async fn codex_turn_only_fast_selection_reports_pending_without_replacing_observed_state() {
+    tokio::time::timeout(Duration::from_secs(10), async {
+        let mut app = CodexAppSession::spawn_stdio_with_prefix_args(
+            "node",
+            &[harness_parameter_fixture_path(), "codex-turn-only".into()],
+            Some(env!("CARGO_MANIFEST_DIR")),
+            None,
+        ).await.unwrap();
+        app.initialize(Some(env!("CARGO_MANIFEST_DIR")), None, false).await.unwrap();
+        let models = app.list_models().await.unwrap();
+        for value in ["on", "on", "off"] {
+            let parameters = app.parameters(&models, Some("model"), None);
+            app.apply_parameter(&parameters, Some("model"), "fast", value).await.unwrap();
+            let catalog = app.parameters(&models, Some("model"), None);
+            let pending = app.pending_parameter_value("fast", Some("model"));
+            let result = crate::harness_parameters::parameter_control_result(
+                "channel", "control", &crate::harness_parameters::command(&format!("/fast {value}")).unwrap(),
+                &catalog, pending, None,
+            );
+            let result = serde_json::to_value(result).unwrap();
+            assert_eq!(result["action"], "select");
+            assert_eq!(result["current"], "off", "a local selection is not a provider observation");
+            if value == "on" {
+                assert_eq!(result["pending"], "on");
+                assert_eq!(app.pending_parameter_value("serviceTier", Some("model")).as_deref(), Some("future-priority"));
+            } else {
+                assert!(result.get("pending").is_none());
+            }
+        }
+        let parameters = app.parameters(&models, Some("model"), None);
+        app.apply_parameter(&parameters, Some("model"), "fast", "on").await.unwrap();
+        let turn = app.submit_turn(CodexTurnRequest {
+            model: Some("model"),
+            ..CodexTurnRequest::new("work", &test_serialized_agent("codex"))
+        }).await.unwrap();
+        assert_eq!(serde_json::from_str::<serde_json::Value>(&turn.local_output).unwrap()["serviceTier"], "future-priority");
+        assert!(app.pending_parameter_value("fast", Some("model")).is_none());
+        app.shutdown().await;
+    }).await.expect("turn-only parameter control must remain bounded");
+}
+
+#[tokio::test]
+async fn pending_parameter_reports_use_text_until_the_hub_supports_pending_facts() {
+    use futures_util::{SinkExt as _, StreamExt as _};
+    for supports_pending in [false, true] {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let url = format!("ws://{}/ws/agent-instances", listener.local_addr().unwrap());
+            let hub = tokio::spawn(async move {
+                let mut capabilities = vec!["agent_parameter_control_result".into()];
+                if supports_pending {
+                    capabilities.push("agent_parameter_control_pending_v1".into());
+                }
+                let mut socket = trace_fixture_socket::registered_agent_socket(&listener,
+                    AgentInstanceServerMessage::AgentInstanceConnected {
+                        agent: test_serialized_agent("codex"), peers: Vec::new(),
+                        hub_capabilities: Some(capabilities),
+                    }).await;
+                let frame = socket.next().await.unwrap().unwrap().into_text().unwrap();
+                let value: serde_json::Value = serde_json::from_str(&frame).unwrap();
+                if value["type"] == "channel_message" {
+                    socket.send(tokio_tungstenite::tungstenite::Message::Text(serde_json::json!({
+                        "type":"channel_message_dispatched", "requestId":value["requestId"],
+                        "messageId":"notice", "channelId":"channel", "recipients":[]
+                    }).to_string().into())).await.unwrap();
+                }
+                value
+            });
+            let mut relay = AgentInstanceConnectionClient::new(url, "token".into(), "codex".into(), "codex".into(), None);
+            relay.register().await.unwrap();
+            crate::harness_parameters::report_parameter_control(
+                &relay, "channel", "control", &crate::harness_parameters::command("/fast on").unwrap(),
+                &[], Some("on".into()), Ok("Selected fast: on for subsequent turns".into()),
+            ).await;
+            let sent = hub.await.unwrap();
+            if supports_pending {
+                assert_eq!(sent["type"], "agent_parameter_control_result");
+                assert_eq!(sent["pending"], "on");
+            } else {
+                assert_eq!(sent["type"], "channel_message");
+                assert_eq!(sent["body"], "Selected fast: on for subsequent turns");
+            }
+        }).await.expect("parameter report negotiation must remain bounded");
+    }
+}
+
+#[tokio::test]
 async fn codex_native_parameters_are_observed_immediately_and_unconfirmed_values_block_work() {
     for mode in [
         "codex-native",

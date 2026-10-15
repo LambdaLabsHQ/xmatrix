@@ -44,6 +44,11 @@ pub(crate) trait ChannelControlledRuntime {
 
     /// The harness parameters as the session holds them now.
     fn parameter_catalog(&self) -> Vec<protocol::HarnessParameter>;
+
+    /// A local selection still awaiting provider confirmation.
+    fn pending_parameter_selection(&self, _id: &str) -> Option<String> {
+        None
+    }
 }
 
 /// What a vendor run loop acts on next.
@@ -329,6 +334,7 @@ impl<'a> RunLoopEvents<'a> {
                     &messages[0].message_id,
                     &requested,
                     &runtime.parameter_catalog(),
+                    requested.as_ref().ok().and_then(|(id, _)| runtime.pending_parameter_selection(id)),
                     outcome,
                 )
                 .await;

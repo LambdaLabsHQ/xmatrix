@@ -1998,22 +1998,17 @@ impl CodexAppSession {
         }
     }
 
-    fn parameter_status(
-        &self,
-        parameter: &protocol::HarnessParameter,
-        model: Option<&str>,
-    ) -> String {
-        let binding = if parameter.id == "fast" {
+    fn pending_parameter_value(&self, id: &str, model: Option<&str>) -> Option<String> {
+        let binding = if id == "fast" {
             "serviceTier"
         } else {
-            &parameter.id
+            id
         };
-        let pending = self
-            .selected_parameters
+        self.selected_parameters
             .get(binding)
             .filter(|value| !self.native_setting_confirmed(binding, value))
             .map(|value| {
-                if parameter.id == "fast" {
+                if id == "fast" {
                     if value.as_str().is_some_and(|tier| {
                         model
                             .and_then(|m| self.fast_tiers.get(m))
@@ -2030,7 +2025,15 @@ impl CodexAppSession {
                         .map(str::to_string)
                         .unwrap_or_else(|| value.to_string())
                 }
-            });
+            })
+    }
+
+    fn parameter_status(
+        &self,
+        parameter: &protocol::HarnessParameter,
+        model: Option<&str>,
+    ) -> String {
+        let pending = self.pending_parameter_value(&parameter.id, model);
         format!(
             "{}: {}; choices: {}{}",
             parameter.label,
