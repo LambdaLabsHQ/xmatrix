@@ -61,7 +61,15 @@ function exceptionContext(entries: unknown): { lines: string[]; partial: boolean
       const mechanism = sentryExceptionMechanism(value);
       if (mechanism) lines.push(mechanism);
       partial ||= frames.length > 20;
-      for (const frame of frames.slice(-20)) {
+      // Dependency-heavy stacks can hide the application effect that entered
+      // the failing path. Keep up to eight earlier source callers as well as
+      // the terminal twenty frames; export the same metadata-only projection.
+      const callers = frames.slice(0, -20).filter((frame: unknown) => {
+        if (!frame || typeof frame !== "object") return false;
+        const filename = (frame as { filename?: unknown }).filename;
+        return typeof filename === "string" && /(?:^|\/)src\//u.test(filename) && !filename.includes("node_modules/");
+      }).slice(-8);
+      for (const frame of [...callers, ...frames.slice(-20)]) {
         if (!frame || typeof frame !== "object") continue;
         const label = [frame.module, frame.function, frame.filename].filter(field => typeof field === "string");
         const line = frame.lineNo ?? frame.lineno;
