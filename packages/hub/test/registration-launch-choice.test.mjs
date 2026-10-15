@@ -7,8 +7,8 @@ const candidates = ['first', 'last'].map(id => ({ key: { spaceId: 'space', owner
   description: id, models: ['small', 'large'], workspaceReferences: ['workspace-a', 'workspace-b'], workspaces: ['a', 'b'].map(letter => ({ reference: `workspace-${letter}`, machineId: id, canonicalCwd: `/projects/${letter}`, description: `Project ${letter}` })) }));
 // Two harnesses, so Jev scores each one's fit.
 const twoHarnesses = [candidates[0], { ...candidates[1], key: { ...candidates[1].key, harness: 'claude' } }];
-test('network placement favours HTTPS reliability/tail latency and never confuses ICMP with proxy traffic', () => {
-  const now = Date.parse('2026-10-15T18:00:00Z');
+test('network placement favours HTTPS reliability/tail latency and never confuses ICMP with proxy traffic', async () => {
+  const now = Date.now();
   const observedAt = new Date(now - 1000).toISOString();
   const at = (candidate, latency, failures = 0, extra = {}) => ({ ...candidate, observations: {
     evaluatedAt: observedAt, quota: { remainingPercent: 100, assumed: true },
@@ -26,6 +26,11 @@ test('network placement favours HTTPS reliability/tail latency and never confuse
   const staleRanking = jointRanking([stale, fast], () => 1 / 3, now);
   assert.equal(staleRanking[0].network, undefined);
   assert.equal(staleRanking[0].candidate, stale, 'missing network facts preserve candidate order');
+  const result = await registrationLaunchChooser(answer)({ message: '@codex inspect', tags: {}, candidates: [slow, fast] });
+  assert.equal(result.key.machineId, fast.key.machineId);
+  assert.equal(result.parameterEvidence.placement.ranking[0].network.latencyP95Ms, 20);
+  const { parseLaunchParameterEvidence } = await import('@xmatrix/protocol');
+  assert.deepEqual(parseLaunchParameterEvidence(result.parameterEvidence), result.parameterEvidence);
 });
 /** Choices default to the last option; a fit score defaults to "capable". */
 function answer(input, options = {}) {

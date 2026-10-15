@@ -9,7 +9,7 @@ use serde_json::{Value, json};
 const DOWN: &str = "https://speed.cloudflare.com/__down";
 const UP: &str = "https://speed.cloudflare.com/__up";
 const INTERVAL: Duration = Duration::from_secs(300);
-const PACKETS: usize = 20;
+const PACKETS: usize = 100;
 static CACHE: OnceLock<Mutex<Option<Value>>> = OnceLock::new();
 static STARTED: AtomicBool = AtomicBool::new(false);
 
@@ -122,8 +122,7 @@ async fn idle_latency(client: &reqwest::Client) -> Vec<f64> {
 }
 
 async fn transfer(client: &reqwest::Client, upload: bool, bytes: usize) -> Option<Value> {
-    let start = Instant::now();
-    let response = if upload {
+    let request = if upload {
         let mut payload = vec![0_u8; bytes];
         getrandom::fill(&mut payload).ok()?;
         client.post(UP).body(payload)
@@ -132,12 +131,14 @@ async fn transfer(client: &reqwest::Client, upload: bool, bytes: usize) -> Optio
             "{DOWN}?bytes={bytes}&xmatrix={}",
             crate::unix_millis_now()
         ))
-    }
-    .header("Cache-Control", "no-cache")
-    .header("Accept-Encoding", "identity")
-    .send()
-    .await
-    .ok()?;
+    };
+    let start = Instant::now();
+    let response = request
+        .header("Cache-Control", "no-cache")
+        .header("Accept-Encoding", "identity")
+        .send()
+        .await
+        .ok()?;
     if !complete_response(response, if upload { 64 * 1024 } else { bytes }, !upload).await {
         return None;
     }
@@ -204,34 +205,47 @@ async fn direction(client: &reqwest::Client, upload: bool) -> (Option<Value>, Op
     tokio::join!(transfer, loaded_latency)
 }
 
+async fn echo_probe() -> Option<bool> {
+    let mut command = tokio::process::Command::new("ping");
+    #[cfg(windows)]
+    command.args(["-n", "1", "-w", "1000", "1.1.1.1"]);
+    #[cfg(target_os = "macos")]
+    command.args(["-n", "-c", "1", "-W", "1000", "1.1.1.1"]);
+    #[cfg(not(any(windows, target_os = "macos")))]
+    command.args(["-n", "-c", "1", "-W", "1", "1.1.1.1"]);
+    command.env("LC_ALL", "C").kill_on_drop(true);
+    let output = tokio::time::timeout(Duration::from_millis(1500), command.output())
+        .await
+        .ok()?
+        .ok()?;
+    // Exit 2 includes unsupported flags, missing permission or local error.
+    if output.status.code() == Some(2) {
+        return None;
+    }
+    let success = output.status.success();
+    // Windows ping may return success for a destination-unreachable reply.
+    #[cfg(windows)]
+    let success = success
+        && String::from_utf8_lossy(&output.stdout)
+            .to_ascii_lowercase()
+            .contains("ttl=");
+    Some(success)
+}
+
 async fn packet_loss() -> Option<Value> {
+    let mut probes = tokio::task::JoinSet::new();
     let mut received = 0;
     for _ in 0..PACKETS {
-        let mut command = tokio::process::Command::new("ping");
-        #[cfg(windows)]
-        command.args(["-n", "1", "-w", "1000", "1.1.1.1"]);
-        #[cfg(target_os = "macos")]
-        command.args(["-n", "-c", "1", "-W", "1000", "1.1.1.1"]);
-        #[cfg(not(any(windows, target_os = "macos")))]
-        command.args(["-n", "-c", "1", "-W", "1", "1.1.1.1"]);
-        command.env("LC_ALL", "C").kill_on_drop(true);
-        let output = tokio::time::timeout(Duration::from_millis(1500), command.output())
-            .await
-            .ok()?
-            .ok()?;
-        // Exit 2 includes unsupported flags, missing permission or local error.
-        if output.status.code() == Some(2) {
-            return None;
+        // At most ten launches/second and five children at once, including
+        // Windows where one native ping process otherwise waits a full second.
+        if probes.len() >= 5 {
+            received += usize::from(probes.join_next().await?.ok()??);
         }
-        let success = output.status.success();
-        // Windows ping may return success for a destination-unreachable reply.
-        #[cfg(windows)]
-        let success = success
-            && String::from_utf8_lossy(&output.stdout)
-                .to_ascii_lowercase()
-                .contains("ttl=");
-        received += usize::from(success);
-        tokio::time::sleep(Duration::from_millis(50)).await;
+        probes.spawn(echo_probe());
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    while let Some(result) = probes.join_next().await {
+        received += usize::from(result.ok()??);
     }
     // Total silence cannot distinguish filtered ICMP from actual path loss.
     (received > 0).then(|| {

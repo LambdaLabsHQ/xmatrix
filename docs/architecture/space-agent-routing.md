@@ -247,10 +247,11 @@ at the byte limit are explicitly marked short and excluded from bandwidth
 ranking. Concurrent small requests measure median latency under transfer load.
 Each direction retains its original timestamp, including its loaded RTT.
 
-Twenty bounded OS `ping` probes to fixed target `1.1.1.1` report ICMP round-trip
+One hundred bounded OS `ping` probes to fixed target `1.1.1.1` report ICMP round-trip
 probe loss. Missing tools/permissions and total silence produce unknown loss:
-filtered ICMP cannot establish 100% path loss. The count is shown because twenty
-probes cannot resolve sub-percent loss. This direct path may differ from HTTPS
+filtered ICMP cannot establish 100% path loss. The count is shown because one hundred
+probes cannot resolve sub-percent loss. Probe launches are spaced by at least
+100 ms, with at most five child processes at once. This direct path may differ from HTTPS
 through a proxy, so ICMP loss is diagnostic and never substituted for HTTPS
 reliability in placement. No elevated permissions or raw sockets are requested.
 
