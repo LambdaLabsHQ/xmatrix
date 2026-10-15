@@ -742,11 +742,16 @@ test("a co-writing Agent hears what changed when people pause, and stops when so
   assert.match(writer.turns()[2].text, /You were stopped: someone edited what you were writing\./u);
 });
 
-test("a person takes back what a co-writing Agent last wrote, and the Agent hears so", async (t) => {
-  t.mock.timers.enable({ apis: ["setTimeout"] });
+/** Ann on the page, and an Agent that has just joined to co-write it. */
+async function annCoWriting() {
   const h = harness();
   const ann = await annConnected(h);
-  const writer = joinCoWriter(h);
+  return { h, ann, writer: joinCoWriter(h) };
+}
+
+test("a person takes back what a co-writing Agent last wrote, and the Agent hears so", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const { h, ann, writer } = await annCoWriting();
   assert.equal(h.session.undoCoWriting("conv-1", "Ann"), "nothing", "it has written nothing yet");
   writer.write(1, "⟦after \"none\"⟧\n- first point\n");
   writer.done(1);
@@ -761,10 +766,8 @@ test("a person takes back what a co-writing Agent last wrote, and the Agent hear
   assert.match(writer.turns().at(-1).text, /Ann took back your last change/u);
 });
 
-test("what a co-writing Agent is writing is taken back too, and a change someone edited since stays", async () => {
-  const h = harness();
-  const ann = await annConnected(h);
-  const writer = joinCoWriter(h);
+test("what a co-writing Agent is writing is taken back too", async () => {
+  const { h, ann, writer } = await annCoWriting();
   writer.write(1, "⟦after \"none\"⟧\n- half a point");
   assert.equal(h.session.undoCoWriting("conv-1", "Ann"), "undone");
   assert.deepEqual(writer.asked.at(-1), { type: "interrupt", turn: 1 }, "it stops writing");
@@ -773,9 +776,7 @@ test("what a co-writing Agent is writing is taken back too, and a change someone
 });
 
 test("a co-writing Agent's change that someone edited since is not taken back", async () => {
-  const h = harness();
-  const ann = await annConnected(h);
-  const writer = joinCoWriter(h);
+  const { h, ann, writer } = await annCoWriting();
   writer.write(1, "⟦after \"none\"⟧\n- first point\n");
   writer.done(1);
   ann.text.insert(ann.text.toString().indexOf("first point"), "really ");
