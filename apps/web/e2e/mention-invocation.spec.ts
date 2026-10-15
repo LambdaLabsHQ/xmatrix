@@ -919,13 +919,18 @@ const fitLevels = ["Unsuitable: it lacks a capability this work needs, or its de
   "Strong fit: its description, its models or the discussion give a concrete reason it suits this work.",
   "Asked for: the message or the discussion explicitly wants this agent to do the work."];
 const fitQuestion = (harness: string) => ({ type: "score", instructions: `Rate how well the one harness below suits the work. Harness: ${JSON.stringify({ harness, descriptions: [], models: [] })}`, criteria: fitLevels });
+const placementNetwork = { observedAt: E2E_NOW, target: "cloudflare-speed", protocol: "https", attempts: 10, failures: 0,
+  latencyMedianMs: 50, latencyP95Ms: 100, jitterMs: 12,
+  packetLoss: { protocol: "icmp", target: "1.1.1.1", sent: 100, received: 99 },
+  download: { observedAt: E2E_NOW, bytes: 1_000_000, durationMs: 100, mbps: 80, shortSample: true },
+  upload: { observedAt: E2E_NOW, bytes: 1_000_000, durationMs: 1000, mbps: 8, shortSample: false, loadedLatencyMs: 200 } };
 const autoParameters = { rubricVersion: "registration-parameters-v10", evaluatedAt: E2E_NOW, inputDigest: "a".repeat(64),
   fit: { inputDigest: "b".repeat(64), scores: {
     codex: { score: 0.97, probabilities: { 0: 0.2, 1: 0.71, 2: 0.02, 3: 0.07 } },
     claude: { score: 2.05, probabilities: { 0: 0.1, 1: 0.32, 2: 0.01, 3: 0.57 } },
     opencode: { score: 0.77, probabilities: { 0: 0.34, 1: 0.59, 2: 0.02, 3: 0.05 } } } },
   placement: { profile: "balanced", ranking: [
-    { harness: "codex", machineId: "m-idle", machineName: "build-idle", fit: 0.323, headroom: 0.85, frontier: true, utility: 0.324 },
+    { harness: "codex", machineId: "m-idle", machineName: "build-idle", fit: 0.323, headroom: 0.85, frontier: true, utility: 0.324, network: placementNetwork, networkQuality: 1 },
     { harness: "claude", machineId: "m-busy", machineName: "build-busy", fit: 0.683, headroom: -0.045, frontier: true, utility: -0.044 },
     { harness: "opencode", machineId: "m-grok", machineName: "grok-box", fit: 0.257, headroom: 0.411, frontier: false, utility: 0.258 },
     { harness: "codex", machineId: "m-busy", machineName: "build-busy", fit: 0.323, headroom: -0.045, frontier: false, utility: -0.044 }] },
@@ -939,7 +944,8 @@ const autoLaunch = { launchId: "launch:auto", channelId: E2E_CHANNEL.id, sourceM
   activity: { runStatus: "running", phase: "turn_running", updatedAt: E2E_NOW, hostName: "build-idle" },
   routingDecision: { source: "jev", parameters: autoParameters, rows: [], machine: { id: "m-idle", name: "build-idle" } } };
 
-test("@auto shows the Agent and machine routing chose, and why, in one row", async ({ page }) => {
+for (const mobile of [false, true]) test(`@auto shows the Agent, machine and measured network without overflow on ${mobile ? "mobile" : "desktop"}`, async ({ page }) => {
+  await page.setViewportSize(mobile ? { width: 393, height: 852 } : { width: 1280, height: 900 });
   await installWorkspaceStubs(page, { spaces: [E2E_SPACE], channels: [{ ...E2E_CHANNEL, messageCount: 1, historyHeadSequence: 1 }] });
   await fixtureJson(page, "h", "**/api/xmatrix/channels/channel-general/history**", { messages: [{ messageId: autoMessageId, channelId: E2E_CHANNEL.id,
     sequence: 1, body: autoBody, sentAt: E2E_NOW, from: E2E_USER_SENDER }], hasMore: false });
@@ -966,6 +972,17 @@ test("@auto shows the Agent and machine routing chose, and why, in one row", asy
   const agent = jev.getByRole("list", { name: "Agent options" });
   await expect(agent.locator("li[data-selected]")).toContainText("codex · build-idle");
   await expect(agent.locator("li[data-selected]")).toContainText("Capable · 85% room");
+  const selected = agent.locator("li[data-selected]");
+  await expect(selected).toContainText("Cloudflare HTTPS p50/p95 50 ms/100 ms");
+  await expect(selected).toContainText("ICMP loss 1.0% (100 ICMP probes)");
+  await expect(selected).toContainText("↓ 80.0 Mbps (short sample)");
+  await expect(selected).toContainText("↑ 8.0 Mbps");
+  await expect(selected).toContainText("loaded RTT ↓ unknown / ↑ 200 ms");
+  expect(await selected.evaluate(element => element.scrollWidth <= element.clientWidth + 1),
+    "network measurements fit the option width").toBe(true);
+  const caption = selected.getByText("codex · build-idle", { exact: true });
+  expect(await caption.evaluate(element => element.clientWidth > 0 && element.scrollWidth <= element.clientWidth + 1),
+    "network measurements never hide the selected machine name").toBe(true);
   await expect(agent.getByRole("listitem").nth(1)).toContainText("claude · build-busy");
   await expect(agent.getByRole("listitem").nth(1)).toContainText("Strong fit · overloaded");
   await expect(jev).toContainText("claude fits better, but build-busy is overloaded");
