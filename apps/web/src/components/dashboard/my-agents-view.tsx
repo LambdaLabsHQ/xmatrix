@@ -45,7 +45,7 @@ import { useNow } from "./agent-work-intent";
 import { channelTitle } from "./channel-links";
 import { HarnessSignInSection } from "./harness-sign-in";
 import { IdentityAvatar } from "./identity-avatar";
-import { MeterReadingList } from "./machine-load-panel";
+import { MeterReadingList } from "./meter-reading-list";
 import {
   MY_AGENT_ACTION_LABEL,
   registrationActions,
