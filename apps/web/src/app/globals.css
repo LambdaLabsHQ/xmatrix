@@ -2113,7 +2113,7 @@ html[data-app-theme="wood"] .xmatrix-app :is(.app-sidebar, .app-mobile-chat-pane
 }
 
 /* The message author's disc is paper like the labels beside it: the same flat
-   ink tint, with no edge, lens or shadow. Its status dot drops its glow. */
+   ink tint, with no edge, lens or shadow. */
 /* The old value of a tag that changed within one turn (a → b): its ink fades,
    the label's material stays, since a translucent label would turn grey. */
 .xmatrix-app .app-message-retag-from > * {
@@ -2124,10 +2124,6 @@ html[data-app-theme="wood"] .xmatrix-app :is(.app-sidebar, .app-mobile-chat-pane
   background: color-mix(in oklch, var(--foreground) 5%, transparent) !important;
   -webkit-backdrop-filter: none !important;
   backdrop-filter: none !important;
-  box-shadow: none !important;
-}
-
-.xmatrix-app .message-author-avatar .identity-avatar-status {
   box-shadow: none !important;
 }
 
@@ -3002,21 +2998,19 @@ html[data-app-theme="wood"] .xmatrix-app .app-agent-work-dock > div {
   box-shadow: none !important;
 }
 
-/* Sits on the disc's corner. The limit word is on the bottom rim, so the
-   two marks no longer cover each other. */
-.xmatrix-app .app-agent-work-avatar .identity-avatar-status {
+/* An Agent's disc wears one presence mark, beside its messages and above the
+   composer alike: on the disc's corner, cut out of the face by the page colour,
+   with no glow. A waiting/waking ring is drawn inside the cutout by the
+   hollow-ring rule. The limit word is on the bottom rim, so the two marks no
+   longer cover each other. */
+.xmatrix-app :is(.message-author-avatar, .app-agent-work-avatar) .identity-avatar-status {
   top: 0 !important;
   right: 0 !important;
   z-index: 3 !important;
-  width: 0.875rem !important;
-  height: 0.875rem !important;
-  /* Solid dots only. A waiting/waking mark is just this ring, so a white
-     cutout here is the whole mark — the status-colour stroke is below,
-     after the hollow-ring rule. */
-  border: 2px solid oklch(1 0 0) !important;
-  box-shadow:
-    0 0 0 1px oklch(0 0 0 / 0.08),
-    0 0 8px 1px color-mix(in oklch, currentColor 46%, transparent) !important;
+  width: 0.75rem !important;
+  height: 0.75rem !important;
+  border: 2px solid var(--background) !important;
+  box-shadow: none !important;
 }
 
 /* The limit word used to share the status mark's corner, so the dot covered
@@ -5220,21 +5214,6 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app :is(.identity-avatar-s
   background: var(--background) !important;
   background-color: var(--background) !important;
   box-shadow: inset 0 0 0 var(--app-status-dot-ring, 1.5px) currentColor !important;
-}
-
-/* The work dock's white cutout (above) sits on this same disc. On a hollow
-   ring it replaced the status colour, so a waiting Agent read as a white
-   circle beside the Waiting chip. The stroke is the status colour. */
-html[data-app-theme] .xmatrix-app.xmatrix-app .app-agent-work-avatar .identity-avatar-status.app-status-dot-ring {
-  background: var(--background) !important;
-  background-color: var(--background) !important;
-  border-color: currentColor !important;
-  box-shadow: none !important;
-}
-
-html[data-app-theme] .xmatrix-app.xmatrix-app .app-agent-work-avatar .identity-avatar-status.app-status-dot-ring[class*="bg-amber-"] {
-  color: oklch(0.769 0.188 70.08) !important;
-  border-color: oklch(0.769 0.188 70.08) !important;
 }
 
 /* Usage fills are a semantic traffic-light scale, not material chrome. They
