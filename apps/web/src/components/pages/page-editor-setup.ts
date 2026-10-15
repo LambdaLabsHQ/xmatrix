@@ -644,7 +644,9 @@ export function anchorOffsets(view: EditorView, fragment: Y.XmlFragment, frame: 
     const at = anchorPosition(view.state, fragment, head);
     if (at === null) continue;
     try {
-      out.set(`client:${clientId}`, view.coordsAtPos(at).top - origin);
+      // Measured on the text before the caret where there is some: at the end of a heading, the side after it
+      // is the heading's tools, which stand elsewhere.
+      out.set(`client:${clientId}`, view.coordsAtPos(at, view.state.doc.resolve(at).parentOffset > 0 ? -1 : 1).top - origin);
     } catch {
       // As above.
     }
@@ -686,7 +688,7 @@ export type CursorPresence = (state: object) => "active" | "idle" | null;
  * shows while they move or type and fades a few seconds later, leaving the
  * caret with a square at its top; hovering the caret shows the name again.
  */
-function namedCursor(user: { name?: string; color?: string; kind?: string; conversationId?: string | null },
+function namedCursor(user: { name?: string; color?: string; kind?: string },
   clientId: number, idle: boolean): HTMLElement {
   const cursor = document.createElement("span");
   cursor.className = `ProseMirror-yjs-cursor is-active${idle ? " is-idle" : ""}`;
@@ -696,11 +698,7 @@ function namedCursor(user: { name?: string; color?: string; kind?: string; conve
   const label = document.createElement("div");
   label.style.backgroundColor = user.color ?? "#888";
   label.textContent = user.name ?? "Someone";
-  // An Agent's caret names the conversation it works from; its label opens it beside the page.
-  if (user.kind === "agent" && user.conversationId) {
-    label.dataset.conversation = user.conversationId;
-    label.title = "Open its conversation";
-  }
+  if (user.kind === "agent") cursor.dataset.agent = "";
   cursor.append("\u2060", label, "\u2060");
   return cursor;
 }
@@ -726,48 +724,15 @@ function cursorIdle(presenceOf: (clientId: number) => "active" | "idle" | null):
   return everyCaret((cursor, clientId) => cursor.classList.toggle("is-idle", presenceOf(clientId) === "idle"));
 }
 
-/** What an Agent co-writing the page live is doing, said beside its name (page-co-writer.ts). */
-const CO_WRITER_ACTIVITY: Record<string, string> = { thinking: "thinking…", writing: "writing…", waiting: "waiting for you" };
-
 /**
- * An Agent co-writing the page live says what it is doing beside its caret, and its note to the
- * people below it, while it lasts.
+ * An Agent co-writing the page live marks its caret while it thinks or writes, so the caret blinks there;
+ * who it is and what it is doing are said by its face at the right edge.
  */
 function cursorStatus(awareness: Awareness): Plugin {
   return everyCaret((cursor, clientId) => {
-    const state = awareness.getStates().get(clientId) as
-      { user?: { name?: string; kind?: string }; activity?: unknown; say?: unknown } | undefined;
-    const live = state?.user?.kind === "agent" && typeof state.activity === "string"
-      ? CO_WRITER_ACTIVITY[state.activity] : undefined;
-    const label = cursor.querySelector<HTMLElement>(":scope > div");
-    if (label) label.textContent = live ? `${state?.user?.name ?? "Agent"} · ${live}` : state?.user?.name ?? "Someone";
-    cursor.toggleAttribute("data-live", Boolean(live));
-    const say = state?.user?.kind === "agent" && typeof state.say === "string" ? state.say : "";
-    let note = cursor.querySelector<HTMLElement>(":scope > .page-cursor-note");
-    if (!say) { note?.remove(); return; }
-    if (!note) {
-      note = document.createElement("span");
-      note.className = "page-cursor-note";
-      cursor.append(note);
-    }
-    if (note.textContent !== say) note.textContent = say;
-  });
-}
-
-/** Opens the conversation an Agent's caret label names. */
-function cursorConversations(openConversation: (conversationId: string) => void): Plugin {
-  return new Plugin({
-    props: {
-      handleDOMEvents: {
-        mousedown: (_view, event) => {
-          const label = (event.target as HTMLElement | null)?.closest<HTMLElement>(".ProseMirror-yjs-cursor > [data-conversation]");
-          if (!label?.dataset.conversation) return false;
-          event.preventDefault();
-          openConversation(label.dataset.conversation);
-          return true;
-        },
-      },
-    },
+    const state = awareness.getStates().get(clientId) as { user?: { kind?: string }; activity?: unknown } | undefined;
+    cursor.toggleAttribute("data-live", state?.user?.kind === "agent"
+      && (state.activity === "writing" || state.activity === "thinking"));
   });
 }
 
@@ -799,6 +764,11 @@ function cursorActivity(awareness: Awareness): Plugin {
 interface RemoteChange { client: number; from: Y.RelativePosition; to: Y.RelativePosition; node: boolean; at: number }
 
 export const REMOTE_CHANGE_MS = 4000;
+/**
+ * An Agent's change stays marked far longer, over its whole paragraph, as a highlighter marks it: whoever
+ * looks up from their own typing still sees what it wrote and where.
+ */
+export const AGENT_CHANGE_MS = 20_000;
 const remoteChangesKey = new PluginKey<DecorationSet>("page-remote-changes");
 
 function appendBlockChangeDecoration(
@@ -808,13 +778,51 @@ function appendBlockChangeDecoration(
   if (node && !node.isText) decorations.push(Decoration.node(from, from + node.nodeSize, attrs));
 }
 
+type RemoteUser = { color?: string; kind?: string };
+
+function remoteUser(awareness: Awareness, client: number): RemoteUser | undefined {
+  return (awareness.getStates().get(client) as { user?: RemoteUser } | undefined)?.user;
+}
+
+/** How long a change stays marked: an Agent's for longer than a person's. */
+function changeLife(awareness: Awareness, change: RemoteChange): number {
+  return remoteUser(awareness, change.client)?.kind === "agent" ? AGENT_CHANGE_MS : REMOTE_CHANGE_MS;
+}
+
+/** The paragraph (or heading, list item…) holding `pos`, as the range of its text, or null outside text. */
+function textblockAt(state: EditorState, pos: number): { from: number; to: number } | null {
+  const $pos = state.doc.resolve(Math.min(Math.max(pos, 0), state.doc.content.size));
+  for (let depth = $pos.depth; depth > 0; depth--) {
+    const node = $pos.node(depth);
+    if (node.isTextblock) return node.content.size ? { from: $pos.start(depth), to: $pos.end(depth) } : null;
+  }
+  const after = $pos.nodeAfter;
+  return after?.isTextblock && after.content.size ? { from: $pos.pos + 1, to: $pos.pos + after.nodeSize - 1 } : null;
+}
+
 function remoteChangeDecorations(state: EditorState, fragment: Y.XmlFragment, awareness: Awareness,
   changes: readonly RemoteChange[], now: number): DecorationSet {
   const mapping = yMapping(state);
-  if (!mapping || !fragment.doc || changes.length === 0) return DecorationSet.empty;
+  if (!mapping || !fragment.doc) return DecorationSet.empty;
   const decorations: Decoration[] = [];
+  // Each paragraph an Agent is writing or just wrote, highlighted whole in its colour: steady while its
+  // caret is there writing, then held for AGENT_CHANGE_MS after its last word before it fades.
+  const inked = new Map<number, { to: number; color: string; client: number; at: number | null }>();
+  const ink = (range: { from: number; to: number } | null, client: number, color: string, at: number | null) => {
+    if (!range) return;
+    const had = inked.get(range.from);
+    if (had && (had.at === null || (at !== null && had.at >= at))) return;
+    inked.set(range.from, { to: range.to, color, client, at });
+  };
+  for (const [clientId, raw] of awareness.getStates()) {
+    const present = raw as { user?: RemoteUser; activity?: unknown; cursor?: { head?: unknown } | null };
+    if (clientId === awareness.clientID || present.user?.kind !== "agent" || !present.user.color) continue;
+    if (present.activity !== "writing" || !present.cursor?.head) continue;
+    const at = anchorPosition(state, fragment, present.cursor.head);
+    if (at !== null) ink(textblockAt(state, at), clientId, present.user.color, null);
+  }
   for (const change of changes) {
-    const user = (awareness.getStates().get(change.client) as { user?: { color?: string; kind?: string } } | undefined)?.user;
+    const user = remoteUser(awareness, change.client);
     // Text from someone who has left, or the session's own merges, is not anyone's to mark.
     if (!user?.color) continue;
     const resolve = (position: Y.RelativePosition) => {
@@ -826,8 +834,11 @@ function remoteChangeDecorations(state: EditorState, fragment: Y.XmlFragment, aw
     };
     const from = resolve(change.from);
     if (from === null || from >= state.doc.content.size) continue;
+    if (user.kind === "agent") ink(textblockAt(state, change.node ? from + 1 : from), change.client, user.color, change.at);
+    // An Agent's new block is marked by the ink over its paragraph, not tinted whole as well.
+    if (now - change.at >= REMOTE_CHANGE_MS || (change.node && user.kind === "agent")) continue;
     const attrs: Record<string, string> = { class: "page-remote-change", "data-client": String(change.client),
-      style: `--page-change-color: ${user.color}; animation-delay: -${Math.max(0, now - change.at)}ms`,
+      style: `--page-change-color: ${user.color}; --page-words-delay: -${Math.max(0, now - change.at)}ms`,
       ...(user.kind === "agent" ? { "data-agent": "" } : {}) };
     if (change.node) {
       appendBlockChangeDecoration(decorations, state, from, attrs);
@@ -835,6 +846,13 @@ function remoteChangeDecorations(state: EditorState, fragment: Y.XmlFragment, aw
     }
     const to = resolve(change.to);
     if (to !== null && to > from && to <= state.doc.content.size) decorations.push(Decoration.inline(from, to, attrs));
+  }
+  for (const [from, { to, color, client, at }] of inked) {
+    const style = `--page-change-color: ${color}${at === null ? "" : `; --page-ink-delay: -${Math.max(0, now - at)}ms`}`;
+    const state = at === null ? " is-writing" : "";
+    decorations.push(Decoration.inline(from, to, { class: `page-agent-ink${state}`, "data-client": String(client), style }));
+    // Barred in the margin in its colour too, as a change waiting on the reader is.
+    decorations.push(Decoration.node(from - 1, to + 1, { class: `page-agent-block${state}`, style }));
   }
   return DecorationSet.create(state.doc, decorations);
 }
@@ -858,10 +876,13 @@ function remoteChanges(fragment: Y.XmlFragment, awareness: Awareness): Plugin {
         redraw = requestAnimationFrame(() => {
           redraw = 0;
           const now = Date.now();
-          changes = changes.filter((change) => now - change.at < REMOTE_CHANGE_MS);
+          changes = changes.filter((change) => now - change.at < changeLife(awareness, change));
           view.dispatch(view.state.tr.setMeta(remoteChangesKey, true));
           window.clearTimeout(expiry);
-          if (changes.length) expiry = window.setTimeout(refresh, REMOTE_CHANGE_MS - (now - changes[0]!.at) + 20);
+          // Redrawn when the next mark ends: a person's words leave their tint, or an Agent's paragraph its ink.
+          const next = Math.min(...changes.flatMap((change) => [change.at + REMOTE_CHANGE_MS, change.at + changeLife(awareness, change)])
+            .filter((end) => end > now));
+          if (Number.isFinite(next)) expiry = window.setTimeout(refresh, next - now + 20);
         });
       };
       const observe = (events: Array<Y.YEvent<Y.XmlElement | Y.XmlText | Y.XmlFragment>>, transaction: Y.Transaction) => {
@@ -882,8 +903,9 @@ function remoteChanges(fragment: Y.XmlFragment, awareness: Awareness): Plugin {
         if (changes.length > 400) changes = changes.slice(-400);
         refresh();
       };
-      // An Agent's change can arrive before the presence that names it.
-      const presenceChanged = () => { if (changes.length) refresh(); };
+      // An Agent's change can arrive before the presence that names it, and the paragraph it writes in
+      // follows its caret.
+      const presenceChanged = () => refresh();
       fragment.observeDeep(observe);
       awareness.on("change", presenceChanged);
       return {
@@ -1108,7 +1130,6 @@ export function editorPlugins(input: {
     sectionOverlay(input.openConversation, input.headingActions),
     currentHeading(),
     discussionOverlay(input.fragment, input.openConversation, input.focusConversation),
-    cursorConversations(input.openConversation),
     remoteChanges(input.fragment, input.awareness),
     readerChanges(input.fragment),
     automationChips(input.openConversation),

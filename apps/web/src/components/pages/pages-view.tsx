@@ -449,8 +449,13 @@ function liveAgents(channel: SerializedChannel): LiveConversation["agents"] {
   });
 }
 
+/** What an Agent co-writing live is doing, as its face at the edge says it (page-co-writer.ts). */
+const CO_WRITER_DOING: Partial<Record<string, string>> = { thinking: "thinking", writing: "writing", waiting: "waiting for you" };
+
 /** Room at the bottom of a phone's page that its button and capsule cover, so a line there counts as out of view. */
 const PEN_BOTTOM_ROOM = 110;
+/** On a desktop only a face waiting at the bottom edge covers it. */
+const DESKTOP_PEN_BOTTOM_ROOM = 44;
 
 /** How long an Agent called to write shows on the page's button before its Run is on the page. */
 const CALLED_SHOWS_MS = 3 * 60_000;
@@ -858,12 +863,12 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   }, [liveOnPage]);
   const present = useMemo(() => presence.filter(({ state }) => cursorPresence(state) !== null),
     [cursorPresence, presence]);
-  // On a phone an Agent on the page is its face at the right edge, beside its line (§3.2): the conversations
+  // An Agent on the page is its face at the right edge, beside its line (§3.2): the conversations
   // they work from, whose Agents a section's heading does not draw again.
-  const atEdge = useMemo(() => !phone ? "" : [...new Set([
+  const atEdge = useMemo(() => [...new Set([
     ...present.flatMap(({ state }) => state.user?.kind === "agent" && state.user.conversationId ? [state.user.conversationId] : []),
     ...staying.map((agent) => agent.conversationId),
-  ])].sort().join("\n"), [phone, present, staying]);
+  ])].sort().join("\n"), [present, staying]);
 
   // Claims arrive live from the session; the interval lets lapsed ones go.
   const claims = useQuery({
@@ -1118,9 +1123,14 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
       idle: cursorPresence(state) === "idle",
       // Placed by their caret where they have one, so the edge hints point at the line.
       anchor: anchorTops.has(`client:${clientId}`) ? `client:${clientId}` : sectionAnchor(state.block ?? ""),
-      editing: state.activity === "editing", conversationId: state.user!.conversationId ?? null,
+      editing: state.activity === "editing" || state.activity === "writing" || state.activity === "thinking",
+      conversationId: state.user!.conversationId ?? null,
+      ...(state.user!.kind === "agent" && CO_WRITER_DOING[state.activity ?? ""]
+        ? { doing: CO_WRITER_DOING[state.activity ?? ""]! } : {}),
       undoable: state.user!.kind === "agent" && state.undo === true,
-      detail: whereDetail(state.activity ?? "viewing", state.block ?? "", state.user!.conversationId) })),
+      // An Agent co-writing live says what it is doing, and its note to the people on the page.
+      detail: [whereDetail(CO_WRITER_DOING[state.activity ?? ""] ?? state.activity ?? "viewing", state.block ?? "",
+        state.user!.conversationId), state.say].filter(Boolean).join(" — ") })),
     ...staying.map((agent) => ({ key: `agent:${agent.instanceId}:${agent.conversationId}`, name: agent.name,
       color: pageAuthorColor({ kind: "agent", id: agent.instanceId }), agent: true, avatarUrl: agent.avatarUrl, blockId: agent.blockId,
       idle: agent.status !== "busy",
@@ -1165,6 +1175,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   };
   // Who is out of view above or below, at the page's edges (§3.2). A line of room keeps
   // someone on the very edge counted as seen.
+  const bottomRoom = phone ? PEN_BOTTOM_ROOM : DESKTOP_PEN_BOTTOM_ROOM;
   // Whose suggestion is in front of the reader: its face, and what to do with the change, stand beside
   // the change at the right edge, as if the Agent were writing that line.
   const suggestedBy = suggesting.count > 0 && suggesting.author ? suggesting.author : null;
@@ -1174,21 +1185,28 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     const at = contentTop("suggestion");
     if (!suggestedBy || !drawn || mode !== "page" || top === undefined || at === null) return null;
     return { top: top - 4, away: !viewport.height ? null
-      : at < viewport.top ? "above" : at > viewport.top + viewport.height - PEN_BOTTOM_ROOM ? "below" : null };
+      : at < viewport.top ? "above" : at > viewport.top + viewport.height - bottomRoom ? "below" : null };
   })();
-  // On a phone each Agent on the page is its face in the margin beside its line (§3.2).
+  // Each Agent on the page is its face in the margin beside its line (§3.2), on a phone and a desktop alike.
   const pens = ((): PagePen[] => {
-    if (!phone || mode !== "page" || !drawn) return [];
+    if (mode !== "page" || !drawn) return [];
     return people.filter((person) => person.agent).flatMap((person) => {
       const top = anchorTops.get(person.anchor);
       const at = contentTop(person.anchor);
       if (top === undefined || at === null) return [];
       const away = !viewport.height ? null
-        : at < viewport.top ? "above" : at > viewport.top + viewport.height - PEN_BOTTOM_ROOM ? "below" : null;
+        : at < viewport.top ? "above" : at > viewport.top + viewport.height - bottomRoom ? "below" : null;
       return [{ person, top: top + 2, away }];
     });
   })();
   const penned = new Set(pens.map((pen) => pen.person.key));
+  // Room beside the text column for a face to carry its name: from the column's edge to the article's.
+  const penRoom = ((): number => {
+    const article = articleElement.current;
+    const column = docColumn.current;
+    if (phone || !article || !column) return 0;
+    return article.getBoundingClientRect().right - column.getBoundingClientRect().right;
+  })();
   // The page's button: the face of the Agent the reader co-writes with, while no Agent is on the page;
   // an Agent just called shows there, starting, until it is on the page beside its line.
   const caller = ((): { agent: { name: string; avatarUrl?: string }; starting: boolean } | null => {
@@ -1338,7 +1356,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
               <div className="flex gap-6">
                 <div ref={docColumn} className={cn("relative min-w-0 max-w-3xl flex-1",
                   phone && phoneDiff && !suggestionMark && "has-reader-mark")}>
-                  <PagePens pens={pens} onJump={jumpTo} onOpen={(person) => setDialog({ kind: "agent", key: person.key })} />
+                  <PagePens pens={pens} room={penRoom} onJump={jumpTo} onOpen={(person) => setDialog({ kind: "agent", key: person.key })} />
                   {suggestionMark && suggestedBy && (
                     <PageChangeMark top={suggestionMark.top} away={suggestionMark.away} testId="page-suggestions"
                       label={`${suggestedBy} suggests this change, ${suggesting.current + 1} of ${suggesting.count}`}>
