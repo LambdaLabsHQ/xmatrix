@@ -22,7 +22,7 @@ test("configuration is atomic and rejects unknown fields without exposing the su
   }
 });
 
-test("verified renewal has one seat, exact owner/Space and a namespaced immutable original transaction", () => {
+test("a single-seat renewal has one seat, exact owner/Space and a namespaced immutable original transaction", () => {
   const verified = subscriptionFact(config, "Production", 1, transaction, renewal);
   assert.equal(verified.active, true);
   assert.equal(verified.appAccountToken, token);
@@ -32,6 +32,15 @@ test("verified renewal has one seat, exact owner/Space and a namespaced immutabl
   assert.equal(fact.quantity, 1);
   assert.equal(fact.spaceId, "space");
   assert.equal(fact.billingOwnerUserId, "owner");
+});
+
+test("a multiseat purchase gives its Space as many seats as Apple says were bought", () => {
+  const verified = subscriptionFact(config, "Production", 1, { ...transaction, quantity: 5 }, renewal);
+  assert.equal(verified.seats, 5);
+  assert.equal(appleBillingFact(verified, { spaceId: "space", ownerUserId: "owner" }).quantity, 5);
+  for (const quantity of [0, 100, 2.5]) {
+    assert.throws(() => subscriptionFact(config, "Production", 1, { ...transaction, quantity }, renewal), AppleBillingError, String(quantity));
+  }
 });
 
 test("expiry, refunds, retry and grace use Apple facts, not the client's success screen", () => {
@@ -46,7 +55,7 @@ test("expiry, refunds, retry and grace use Apple facts, not the client's success
 
 test("bundle, product, environment, account binding and ownership are checked", () => {
   for (const changed of [{ bundleId: "another.app" }, { environment: "Sandbox" }, { productId: "other" },
-    { inAppOwnershipType: "FAMILY_SHARED" }, { appAccountToken: "not-a-uuid" }, { originalTransactionId: "../other" },
+    { inAppOwnershipType: "FAMILY_SHARED" }, { inAppOwnershipType: "ASSIGNED" }, { appAccountToken: "not-a-uuid" }, { originalTransactionId: "../other" },
     { signedDate: now + 3600_000 }, { expiresDate: undefined }]) {
     assert.throws(() => subscriptionFact(config, "Production", 1, { ...transaction, ...changed }, renewal));
   }
