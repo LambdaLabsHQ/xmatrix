@@ -676,6 +676,11 @@ html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-com
 }
 /* A desktop has no capsule at the bottom: a face waits just above the edge. */
 .app-page-article .page-pen { bottom: 16px; }
+/* An Agent moving on to another paragraph: its face glides there rather than jumping. */
+.page-pen-spacer { transition: height 520ms cubic-bezier(0.22, 1, 0.36, 1); }
+@media (prefers-reduced-motion: reduce) {
+  .page-pen-spacer { transition: none; }
+}
 .page-pen .page-pen-face .identity-avatar-face {
   width: 28px;
   height: 28px;

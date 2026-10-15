@@ -1534,30 +1534,3 @@ test("on a keyboard, Tab takes the suggested change in front of the reader and E
   await expect(editor).toContainText("DNS is ready.");
   await expect.poll(async () => fixtureRequestBodies(browser, "suggestion-review")).toEqual([{ through: 5 }]);
 });
-
-test("TMP promo shot: an Agent co-writing live on a desktop", async ({ page: browser }) => {
-  await browser.setViewportSize({ width: 1440, height: 900 });
-  const server = pageDocument(`# Launch plan\n\n## Goal\n\nShip the live co-writing demo for the promo video by Friday.\n\n## Open questions\n\nWho records the voice-over, and in which language do we cut the first version?\n\n## Notes\n\nnone\n\n## Risks\n\nThe staging hub may be slow during the recording.\n`);
-  const AGENT = 1_234_567;
-  let push: (data: Uint8Array) => void = () => {};
-  await stubPages(browser, [page("p-relay", null, "Launch plan", "V")]);
-  await fixtureJson(browser, "page-links", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\?.*$/u, { links: [] });
-  await stubClaudeWritingNotes(browser);
-  await servePageSession(browser, server, { connect: (send) => { push = send; } });
-  await browser.goto("/app", { waitUntil: "domcontentloaded" });
-  await browser.getByRole("button", { name: "Pages", exact: true }).first().click();
-  const editor = browser.getByTestId("page-editor");
-  await expect(editor).toContainText("Ship the live");
-  const own = server.clientID;
-  server.clientID = AGENT;
-  editPageMarkdown(server, (markdown) => markdown.replace("none", "Record two takes: one with Claude writing the risks section live, one with Codex answering the open questions"), "agent");
-  server.clientID = own;
-  push(awarenessFrom(server, AGENT, 1, { user: { name: "claude:2", color: "#7c3aed", kind: "agent",
-    conversationId: E2E_CHANNEL.id }, activity: "writing", block: "notes" }, "open questions"));
-  await browser.waitForTimeout(800);
-  await browser.screenshot({ path: "/tmp/cowrite-desktop-writing.png" });
-  push(awarenessFrom(server, AGENT, 2, { user: { name: "claude:2", color: "#7c3aed", kind: "agent",
-    conversationId: E2E_CHANNEL.id }, activity: "thinking", block: "notes" }, "open questions"));
-  await browser.waitForTimeout(500);
-  await browser.screenshot({ path: "/tmp/cowrite-desktop-thinking.png", clip: { x: 500, y: 280, width: 940, height: 140 } });
-});
