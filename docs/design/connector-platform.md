@@ -453,6 +453,23 @@ record keeps its bounded excerpt. Whoever can read the Channel reads the mail,
 so read mail in a Channel only the people who may see it are in. Search is
 `@gmail:search:* <Gmail query>`, or a connected mailbox address in place of `*`.
 
+This is not a secret-ingestion capability. Search snippets, headers and links
+can themselves contain login credentials, before a full-message read. There is
+no Gmail action that extracts a code into a Space secret without first publishing
+the read result. Do not use search/read for credentials that must stay out of
+messages; a closed Channel still stores messages and does not satisfy that rule.
+Piping a published receipt into `secret set` cannot undo the disclosure.
+
+The existing separate secret flow is a Run's `secret-add` request card, answered
+by a current Human Space admin, then `secret exec` injection into a process that
+does not expose the value. An Agent can also create a fresh secret from an
+already-authorized local value through `secret set --value-stdin`; this supplies
+no way to fetch mail privately and cannot overwrite an existing alias. An
+automated Gmail-to-secret transfer is not implemented. Adding one would require
+an explicit typed capability and secret-authority checks while keeping the
+command and value-free outcome visible; a hidden connector MCP is not a fallback.
+See the [operations guidance](../operations/app-connectors.md#qa-login-codes).
+
 Inline
 `multipart/mixed` body segments retain their order, choosing plain text or
 rendered HTML for each segment without duplicating alternative versions.

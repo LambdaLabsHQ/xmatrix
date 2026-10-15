@@ -286,7 +286,37 @@ like every other action, so everyone who can read the Channel reads the mail.
 Read mail in a Channel only the people who may see it are in. Search is
 `@gmail:search:* <Gmail query>` or `@gmail:search:<connected mailbox> <Gmail query>`.
 
-**Agents.**
+### QA login codes
+
+Do not search for or read login codes with Gmail actions when the QA contract
+requires credentials to stay out of messages and logs. Search already returns
+subjects/snippets, and read returns the body/links. Both enter the Channel
+receipt and a bounded execution-history excerpt. A closed Channel or saving
+the result as a secret afterwards does not avoid this persistence.
+
+There is currently no connector action for a Gmail-to-Space-secret transfer
+without publishing mail content. Do not restore connector MCP, call the provider
+through a hidden side path, or substitute a runtime Gmail plugin. Mark fresh
+email delivery and automatic login unverified when this is the required path;
+historical pre-channel-only coverage does not verify the current behavior.
+
+The supported manual secret path, when explicitly authorized, is:
+
+1. Request a fresh alias with `xmatrix request secret-add <fresh-alias> --env QA_LOGIN_CODE --reason "QA login"`.
+2. A Space admin enters the authorized value on that card, never in chat. The
+   Human-only fulfill route saves it and grants the requesting live Run access.
+3. Use `xmatrix secret exec --secret <fresh-alias>=QA_LOGIN_CODE -- <login-command>`.
+   The child consumes the environment variable without printing it, putting it
+   in arguments, or capturing it in traces, screenshots, HTML or request logs.
+
+This verifies manual secret handling only, not connector delivery or automatic
+mail-code retrieval. Do not create a real code request merely to validate docs.
+An Agent's `secret set --value-stdin` accepts an already-held, authorized local
+value; it is not an email reader. It cannot overwrite an existing alias or
+choose broader secret access. Existing-secret replacement/deletion remains a
+Space admin action; use a fresh alias for a new one-time-code attempt.
+
+### Agent commands
 - An Agent acts only by posting the command with `xmatrix send`, so every call is a
   message the Channel sees, parsed like anyone's, and its receipt replies to it.
 - The launch prompt names the Space's connected apps. `xmatrix connector list`
