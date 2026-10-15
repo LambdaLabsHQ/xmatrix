@@ -128,6 +128,33 @@ pub fn maybe_run_utf8_shell() -> Option<Result<i32, String>> {
 }
 
 #[cfg(windows)]
+fn shell_directory(root: &std::path::Path, bytes: &[u8]) -> std::path::PathBuf {
+    root.join(xmatrix_cli_core::hex::sha256_hex(bytes))
+}
+
+#[cfg(windows)]
+fn install_alias(
+    exe: &std::path::Path,
+    alias: &std::path::Path,
+    bytes: &[u8],
+) -> Result<(), String> {
+    if std::fs::read(alias).is_ok_and(|old| old == bytes) {
+        return Ok(());
+    }
+    let temporary = alias.with_extension(format!("{}.tmp", uuid::Uuid::new_v4()));
+    if std::fs::hard_link(exe, &temporary).is_err() {
+        std::fs::write(&temporary, bytes).map_err(|_| "Cannot write UTF-8 shell executable")?;
+    }
+    let installed = std::fs::rename(&temporary, alias);
+    let _ = std::fs::remove_file(&temporary);
+    // Concurrent launches may have installed the same immutable executable.
+    if installed.is_err() && !std::fs::read(alias).is_ok_and(|old| old == bytes) {
+        return Err("Cannot install UTF-8 shell executable".into());
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
 pub(crate) fn child_env(
     path: Option<&std::ffi::OsStr>,
 ) -> Result<Vec<(std::ffi::OsString, std::ffi::OsString)>, String> {
@@ -141,7 +168,8 @@ pub(crate) fn child_env(
     let exe = std::env::current_exe().map_err(|_| "Cannot resolve UTF-8 shell executable")?;
     let bytes = std::fs::read(&exe).map_err(|_| "Cannot read UTF-8 shell executable")?;
     let root = xmatrix_cli_core::config::config_dir().join("utf8-shells");
-    let directory = root.clone();
+    // Never replace a binary that another Run may still be executing on Windows.
+    let directory = shell_directory(&root, &bytes);
     std::fs::create_dir_all(&directory).map_err(|_| "Cannot prepare UTF-8 shell directory")?;
     let original = path
         .map(std::ffi::OsStr::to_os_string)
@@ -173,20 +201,7 @@ pub(crate) fn child_env(
             continue;
         };
         let alias = directory.join(name);
-        if std::fs::read(&alias)
-            .map(|old| old != bytes)
-            .unwrap_or(true)
-        {
-            let temporary = directory.join(format!("{}.tmp", uuid::Uuid::new_v4()));
-            if std::fs::hard_link(&exe, &temporary).is_err() {
-                std::fs::write(&temporary, &bytes)
-                    .map_err(|_| "Cannot write UTF-8 shell executable")?;
-            }
-            if std::fs::rename(&temporary, &alias).is_err() {
-                let _ = std::fs::remove_file(&temporary);
-                return Err("Cannot replace UTF-8 shell executable; retry after active shell commands finish".into());
-            }
-        }
+        install_alias(&exe, &alias, &bytes)?;
         env.push((key.into(), real.into_os_string()));
     }
     if env.is_empty() {
@@ -197,7 +212,7 @@ pub(crate) fn child_env(
         "PATH".into(),
         std::env::join_paths(paths).map_err(|_| "Cannot configure UTF-8 shell PATH")?,
     ));
-    let preferred = if directory.join("pwsh.exe").exists() {
+    let preferred = if env.iter().any(|(key, _)| key == "XMATRIX_UTF8_PWSH_REAL") {
         "pwsh.exe"
     } else {
         "powershell.exe"
@@ -212,6 +227,56 @@ pub(crate) fn child_env(
 #[cfg(test)]
 mod tests {
     use super::*;
+    // The existing alias execution test does not exercise installation during
+    // upgrades. Keep an old alias locked as Windows does for a running command.
+    #[cfg(windows)]
+    #[test]
+    fn upgrade_installs_while_old_alias_is_locked_and_concurrent_launches_reuse_it() {
+        use std::os::windows::fs::OpenOptionsExt as _;
+        let root = std::env::temp_dir().join(format!("xmatrix-shell-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let source = root.join("cli.exe");
+        let old = b"old CLI";
+        let new = b"new CLI";
+        std::fs::write(&source, old).unwrap();
+        let legacy = root.join("powershell.exe");
+        install_alias(&source, &legacy, old).unwrap();
+        let old_directory = shell_directory(&root, old);
+        std::fs::create_dir_all(&old_directory).unwrap();
+        let old_alias = old_directory.join("powershell.exe");
+        install_alias(&source, &old_alias, old).unwrap();
+        let locks = [&legacy, &old_alias].map(|path| {
+            std::fs::OpenOptions::new()
+                .read(true)
+                .share_mode(1)
+                .open(path)
+                .unwrap()
+        });
+        let next_source = root.join("next.exe");
+        std::fs::write(&next_source, new).unwrap();
+        let directory = shell_directory(&root, new);
+        std::fs::create_dir_all(&directory).unwrap();
+        let alias = directory.join("powershell.exe");
+        std::thread::scope(|scope| {
+            for _ in 0..8 {
+                let (source, alias) = (&next_source, &alias);
+                scope.spawn(move || install_alias(source, alias, new).unwrap());
+            }
+        });
+        let active = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(1)
+            .open(&alias)
+            .unwrap();
+        install_alias(&next_source, &alias, new).unwrap();
+        assert_eq!(std::fs::read(&alias).unwrap(), new);
+        assert_eq!(std::fs::read(&old_alias).unwrap(), old);
+        assert_eq!(std::fs::read(&legacy).unwrap(), old);
+        assert_eq!(std::fs::read_dir(&directory).unwrap().count(), 1);
+        drop((locks, active));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     fn decode(args: &[String]) -> String {
         let bytes = STANDARD.decode(args.last().unwrap()).unwrap();
         String::from_utf16(
