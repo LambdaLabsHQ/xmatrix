@@ -286,8 +286,8 @@ export const EVENT_CONNECTOR_MANIFESTS: AppConnectorProviderManifest[] = [
         tokenUrl: "https://backend.composio.dev/api/v3.1/connected_accounts", scopes: [], tokenField: "mailboxes", flow: "composio" },
       credentials: [{ id: "mailboxes", label: "Mailboxes", managed: true, description: "Each Connect adds a mailbox; a Space admin assigns each one to a member or an Agent. Never typed by hand." }],
       actions: [
-        readAction("search", "Search mail", 'The 10 newest messages per mailbox matching a Gmail query, with id, sender, subject and snippet, returned only to the calling tool; Channel receipts contain no mail content. MCP: set target to * or one connected mailbox address and text to the query, e.g. {"target":"*","text":"is:unread newer_than:1h"}.', "*|<mailbox> [gmail search]"),
-        readAction("read", "Read message", "Headers, text body and every link of one message, returned only to the calling tool; Channel receipts contain no mail content. Open a link yourself when the task needs it.", "<message id>"),
+        readAction("search", "Search mail", 'The 10 newest messages per mailbox matching a Gmail query, with id, sender, subject and snippet. Results are posted to this Channel and visible to its members. Use * for all available mailboxes or name one connected mailbox.', "*|<mailbox> [gmail search]"),
+        readAction("read", "Read message", "Headers, text body and every link of one message, posted to this Channel and visible to its members. Open a link yourself when the task needs it.", "<message id>"),
         gatedWriteAction("send", "Send email", "Send a plain-text email from the connected account; the first line is the subject. Asks a Space admin to approve each request by default.", "<to address> [from:<mailbox>] <subject>\n<body>"),
         gatedWriteAction("reply", "Reply", "Reply in the thread of one message, to its sender. Asks a Space admin to approve each request by default.", "<message id> <body>"),
       ],
