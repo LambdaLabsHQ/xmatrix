@@ -164,6 +164,18 @@ impl Observer {
         let Some(params) = value.get("params") else {
             return;
         };
+        if value.get("id").is_some()
+            && params
+                .get("threadId")
+                .and_then(Value::as_str)
+                .is_none_or(|thread| self.thread.as_deref() == Some(thread))
+        {
+            // Server requests can park on human input, approval, auth refresh,
+            // or a client-side tool without a complete item interval. Never
+            // infer model time from a turn containing such a wait.
+            self.turns.clear();
+            return;
+        }
         let Some(thread) = params.get("threadId").and_then(Value::as_str) else {
             return;
         };
@@ -178,6 +190,22 @@ impl Observer {
             return;
         }
         match method {
+            "error" => {
+                // A retry/backoff is not model inference, even if the turn
+                // eventually succeeds. No exact retry interval is available.
+                self.turns.remove(thread);
+            }
+            "thread/status/changed"
+                if params
+                    .pointer("/status/activeFlags")
+                    .and_then(Value::as_array)
+                    .is_some_and(|flags| !flags.is_empty())
+                    || params.pointer("/status/type").and_then(Value::as_str)
+                        == Some("systemError") =>
+            {
+                // Waiting flags also cover servers which omit the request.
+                self.turns.remove(thread);
+            }
             "turn/started" => {
                 let Some(id) = id else {
                     return;
@@ -473,6 +501,11 @@ mod tests {
             "missing_tool_start",
             "missing_usage",
             "model_change",
+            "user_input",
+            "approval",
+            "auth_refresh",
+            "waiting_status",
+            "retry_backoff",
         ] {
             let mut observer = observer();
             observer.codex(&event("turn/started", json!({})), 0, 1000);
@@ -487,6 +520,34 @@ mod tests {
                     3100,
                 ),
                 "model_change" => observer.scope(Some("model-b"), Some("high")),
+                "user_input" | "approval" | "auth_refresh" => {
+                    let mut request = event(
+                        match failure {
+                            "user_input" => "item/tool/requestUserInput",
+                            "approval" => "item/commandExecution/requestApproval",
+                            _ => "account/chatgptAuthTokens/refresh",
+                        },
+                        json!({}),
+                    );
+                    request["id"] = json!(42);
+                    if failure == "auth_refresh" {
+                        request["params"] = json!({});
+                    }
+                    observer.codex(&request, 2100, 3100);
+                }
+                "waiting_status" => observer.codex(
+                    &event(
+                        "thread/status/changed",
+                        json!({"status":{
+                            "type":"active", "activeFlags":["waitingOnUserInput"]
+                        }}),
+                    ),
+                    2100,
+                    3100,
+                ),
+                "retry_backoff" => {
+                    observer.codex(&event("error", json!({"willRetry":true})), 2100, 3100)
+                }
                 _ => {}
             }
             observer.codex(

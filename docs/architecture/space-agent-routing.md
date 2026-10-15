@@ -242,7 +242,11 @@ resumed main thread (child threads are excluded), with `tokenUsage.last` as
 the first turn's baseline when needed, and monotonic turn time minus the union
 of command, file-change, MCP, dynamic, search, image and agent-tool intervals. Missing tool
 starts, incomplete counters, failed turns and a mid-turn model change produce
-no observation. Other harnesses and older wrappers remain unknown.
+no observation. Codex turns containing server requests (including user input,
+approval and authentication refresh), waiting status flags or retry errors are
+also excluded: their unmeasured waiting/backoff time cannot become inference
+time. Idle time between turns never enters a sample. Other harnesses and older
+wrappers remain unknown.
 
 Each wrapper retains at most eight completed samples for its current model and
 effort. A sample needs at least 32 output tokens and 100 ms of known inference
