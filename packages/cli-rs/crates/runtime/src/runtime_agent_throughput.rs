@@ -47,6 +47,9 @@ impl Observer {
         };
         if model.len() > 160 || effort.is_some_and(|effort| effort.is_empty() || effort.len() > 80)
         {
+            self.scope = None;
+            self.samples.clear();
+            self.turns.clear();
             return;
         }
         let scope = Scope {
@@ -232,6 +235,7 @@ impl Observer {
                 if !matches!(
                     kind,
                     "commandExecution"
+                        | "fileChange"
                         | "mcpToolCall"
                         | "dynamicToolCall"
                         | "webSearch"
@@ -269,10 +273,10 @@ impl Observer {
                 }
             }
             "turn/completed" => {
-                if !self
+                if self
                     .turns
                     .get(thread)
-                    .is_some_and(|turn| Some(turn.id.as_str()) == id)
+                    .is_none_or(|turn| Some(turn.id.as_str()) != id)
                 {
                     return;
                 }
@@ -366,8 +370,8 @@ mod tests {
         )
     }
 
-    fn tool(method: &str, id: &str) -> Value {
-        event(method, json!({"item":{"id":id,"type":"commandExecution"}}))
+    fn tool(method: &str, id: &str, kind: &str) -> Value {
+        event(method, json!({"item":{"id":id,"type":kind}}))
     }
 
     fn done(status: &str) -> Value {
@@ -386,10 +390,22 @@ mod tests {
             100,
             1100,
         );
-        observer.codex(&tool("item/started", "tool-a"), 1100, 2100);
-        observer.codex(&tool("item/started", "tool-b"), 2100, 3100);
-        observer.codex(&tool("item/completed", "tool-a"), 3100, 4100);
-        observer.codex(&tool("item/completed", "tool-b"), 10100, 11100);
+        observer.codex(
+            &tool("item/started", "tool-a", "commandExecution"),
+            1100,
+            2100,
+        );
+        observer.codex(&tool("item/started", "tool-b", "fileChange"), 2100, 3100);
+        observer.codex(
+            &tool("item/completed", "tool-a", "commandExecution"),
+            3100,
+            4100,
+        );
+        observer.codex(
+            &tool("item/completed", "tool-b", "fileChange"),
+            10100,
+            11100,
+        );
         observer.codex(&usage(1240, 240), 11100, 12100);
         observer.codex(&usage(1240, 240), 11101, 12101); // replay is not extra tokens
         observer.codex(&done("completed"), 12100, 13100);
@@ -419,7 +435,11 @@ mod tests {
             }
             match failure {
                 "counter_reset" => observer.codex(&usage(10, 10), 2100, 3100),
-                "missing_tool_start" => observer.codex(&tool("item/completed", "lost"), 2100, 3100),
+                "missing_tool_start" => observer.codex(
+                    &tool("item/completed", "lost", "commandExecution"),
+                    2100,
+                    3100,
+                ),
                 "model_change" => observer.scope(Some("model-b"), Some("high")),
                 _ => {}
             }
