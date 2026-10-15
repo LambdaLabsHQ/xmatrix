@@ -529,6 +529,9 @@ export function agentRunHttpRouteAllowed(
   // access: Agents read, edit, arrange, restore and publish pages as the owner may.
   if (request.method === "GET" && /^\/api\/spaces\/[^/]+\/pages(?:\/[^/]+(?:\/history|\/awareness|\/changes|\/github-file)?)?$/u.test(path)) return true;
   if (request.method === "POST" && /^\/api\/spaces\/[^/]+\/pages$/u.test(path)) return true;
+  // The page route authorizes the live Run and edit access before issuing a
+  // co-writer ticket; Runs cannot join as raw document-sync clients.
+  if (request.method === "POST" && /^\/api\/spaces\/[^/]+\/pages\/[^/]+\/live$/u.test(path)) return true;
   if (["PUT", "PATCH", "DELETE"].includes(request.method) && /^\/api\/spaces\/[^/]+\/pages\/[^/]+$/u.test(path)) return true;
   if (request.method === "POST" && /^\/api\/spaces\/[^/]+\/pages\/[^/]+\/(?:revisions\/[^/]+\/promote|purge)$/u.test(path)) return true;
   if (request.method === "PUT" && /^\/api\/spaces\/[^/]+\/pages\/[^/]+\/(?:publication|competition|summary)$/u.test(path)) return true;
