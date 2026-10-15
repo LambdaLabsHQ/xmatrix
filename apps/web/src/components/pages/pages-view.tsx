@@ -540,9 +540,6 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   // The conversation whose card is being read, so its passage is marked (§4.4).
   const [focused, setFocused] = useState<string | null>(null);
   const [anchorTops, setAnchorTops] = useState<ReadonlyMap<string, number>>(new Map());
-  // What is measured or derived from the editor follows typing as a transition: keys are handled first, so
-  // fast typing on a busy page never queues commit after commit (React #185, "Maximum update depth exceeded").
-  const placeAnchors = useCallback((tops: ReadonlyMap<string, number>) => startTransition(() => setAnchorTops(tops)), []);
   // The margin needs room beside a full document column; narrower pages show bubbles instead (§4.4).
   const [articleWidth, setArticleWidth] = useState(0);
   const observer = useRef<ResizeObserver | null>(null);
@@ -1415,7 +1412,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
                       follow={follow} onOpenConversation={openConversation} discussions={discussions}
                       automations={automationsById} references={references}
                       focusedConversationId={activeConversationId ?? focused} onFocusConversation={setFocused}
-                      onAnchorOffsets={placeAnchors} cursorPresence={cursorPresence} readGitHubFile={readGitHubFile} />}
+                      onAnchorOffsets={setAnchorTops} cursorPresence={cursorPresence} readGitHubFile={readGitHubFile} />}
                   </div>
                 </div>
                 {/* The margin holds its room from the start, so the text does not reflow when the page has synced;
