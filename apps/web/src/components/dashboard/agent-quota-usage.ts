@@ -6,7 +6,7 @@
 
 import { currentRoutingQuotaWindows, type AgentRegistrationLiveState } from "@xmatrix/protocol";
 
-import type { MeterReading } from "./machine-load-panel";
+import type { MeterReading } from "./meter-reading-list";
 
 /** How often the Agents page reads the catalog while it is open. */
 export const AGENT_USAGE_REFRESH_MS = 15_000;

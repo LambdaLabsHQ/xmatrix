@@ -2,25 +2,11 @@
 
 import { machineResourceObservation } from "@xmatrix/protocol";
 
-import { statusInkClass } from "@/components/ui/status-tone";
-import { cn } from "@/lib/utils";
-
 import { MachineLoadHistoryChart } from "./machine-load-history-chart";
 import { machineGlanceReadings, machineLoadReadings, meterTone } from "./machine-load";
-import { machineNetworkText } from "./machine-network";
+import { MachineNetworkPanel } from "./machine-network-panel";
+import { MeterReadingList } from "./meter-reading-list";
 import type { MachineSummary } from "./workspace-shell-helpers";
-
-/** One measured share, shown as a labelled value over a bar. */
-export type MeterReading = {
-  key: string;
-  label: string;
-  value: string;
-  detail?: string;
-  /** Share in use, 0..1; absent when there is nothing to compare with. */
-  fraction?: number;
-  /** A person should look at this. */
-  high: boolean;
-};
 
 /** Live load of an online Machine, and for its owner how that load changed;
  * an offline Machine has no current load but keeps its history. */
@@ -36,14 +22,7 @@ export function MachineLoadPanel({ machine, now, token }: { machine: MachineSumm
       <div className="mt-4 border-t border-border/70 pt-3">
         <MeterReadingList label="Machine load" readings={readings}
           empty="No recent load sample from this daemon." />
-        <p className="mt-3 text-xs text-muted-foreground" aria-label="Machine network quality">
-          {machineNetworkText(resources?.network)}
-        </p>
-        {resources?.network && <p className="mt-1 text-xs text-muted-foreground">
-          HTTPS to Cloudflare Speed; ICMP directly to 1.1.1.1. Sampled {resources.network.observedAt}.
-          {resources.network.download && ` Download sampled ${resources.network.download.observedAt}.`}
-          {resources.network.upload && ` Upload sampled ${resources.network.upload.observedAt}.`}
-        </p>}
+        <MachineNetworkPanel network={resources?.network} now={now} />
       </div>
       {history}
     </>
@@ -79,46 +58,5 @@ export function MachineLoadGlanceBars({ glance, label, testId = "machine-load-gl
         </span>
       ))}
     </span>
-  );
-}
-
-/** Labelled readings, each over its bar; machine load and agent usage share it. */
-export function MeterReadingList({ label, readings, empty }: {
-  label: string; readings: readonly MeterReading[]; empty?: string;
-}) {
-  return (
-    <div className="space-y-2.5 text-sm" aria-label={label}>
-      {readings.length === 0 ? (
-        empty ? <p className="text-muted-foreground">{empty}</p> : null
-      ) : (
-        readings.map((reading) => (
-          <div key={reading.key} className="space-y-1">
-            <div className="flex min-w-0 items-baseline justify-between gap-3">
-              <span className="shrink-0 text-muted-foreground">{reading.label}</span>
-              <span className="min-w-0 text-right [overflow-wrap:anywhere]">
-                {reading.detail && <span className="mr-2 text-xs text-muted-foreground">{reading.detail}</span>}
-                <span className={cn("font-bold tabular-nums", reading.high && statusInkClass("attention"))}>{reading.value}</span>
-              </span>
-            </div>
-            {reading.fraction !== undefined && (
-              <div
-                role="meter"
-                aria-label={reading.label}
-                aria-valuemin={0}
-                aria-valuemax={100}
-                aria-valuenow={Math.round(reading.fraction * 100)}
-                className="h-1.5 w-full overflow-hidden rounded-full bg-foreground/10"
-              >
-                <div
-                  className={cn("h-full rounded-full transition-[width] duration-500 ease-out",
-                    reading.high ? "bg-[var(--m-ink-attention,var(--accent))]" : "bg-foreground/60")}
-                  style={{ width: `${reading.fraction * 100}%` }}
-                />
-              </div>
-            )}
-          </div>
-        ))
-      )}
-    </div>
   );
 }
