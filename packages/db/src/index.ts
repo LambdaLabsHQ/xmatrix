@@ -241,8 +241,8 @@ export { PostgresRegistrationRebornRepository, WAKE_FAILED_SQL } from "./registr
 
 export type { RegistrationRepositoryCatalog, RegistrationRepositoryReader } from "./registration-repository-authority.js";
 export {
-  inActiveSpace, pageAccess, pageAccessMap, pageActor, pageBody, PageControlError,
-  pagePositionBetween, pageTitle, PostgresPageRepository,
+  inActiveSpace, namedPageBody, pageAccess, pageAccessMap, pageActor, pageBody, PageControlError, pageNameFrom,
+  pagePositionBetween, pageTitle, PostgresPageRepository, renamedPageBody, UNNAMED_PAGE,
 } from "./page-control.js";
 export type {
   PageActor, PageAuthor, PageClaim, PageCommit, PageDocument, PageLink, PagePrincipal, PageRevision,

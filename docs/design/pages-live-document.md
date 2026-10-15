@@ -118,8 +118,10 @@ what the document already shows, and it separates each fact from the text the
 fact is about.
 
 - **Header**: the save state, and everyone on the page as a stack of
-  avatars. The page's name is here only when the document does not already
-  open with that heading, and then as plain text, not a field. Hovering an
+  avatars. The page's name is the document's opening heading (§4.1), so the
+  header shows none, except an "Untitled" placeholder above a document that
+  opens without one, as plain text, not a field; what is typed there is
+  written into the document as its opening heading. Hovering an
   avatar says who it is, what they are doing, where and in which
   conversation; clicking one scrolls to them. Idle people are dimmed. Beside
   the avatars: the page's conversation count (§4.4), History and Share. There
@@ -216,6 +218,14 @@ fact is about.
   update to the fragment in one transaction under the Agent's cursor.
   Revisions store the serialized markdown, so history, git and blame are
   unchanged.
+- **A page's name is the top-level heading its document opens with**, one
+  datum kept in the document. Renaming a page is editing that line, live like
+  any edit; the rename API, the CLI's `page rename` and git pushes all write
+  it there. Lists, search, links and git read it from the head revision
+  (`data.page_name` in SQL, `pageNameFrom` in the Hub, the same rule). A
+  document that opens with anything else has no name and reads as
+  "Untitled"; a page created with a name and a body that does not open with
+  one gets the name written above its text.
 - The Rust side (`yrs`) reads and writes the same fragment when the CLI or
   daemon joins a session.
 
@@ -659,12 +669,14 @@ conversation count in the header, headings and bubbles in the text,
 and Share and History in the page's top bar.
 
 Creating a page works as in Notion: the desktop list's + and Ctrl/⌘+N, the
-phone's FAB, the empty list and a parent row's sub-page + each make an
-"Untitled" page at once, with no dialog or browser prompt, and open it under
-the chosen parent. The page opens with its title field focused and selected, on
-a phone as on a desktop, so typing names it; Enter or leaving the field saves
-the name, and an emptied field keeps the old one. While one creation is on its
-way another cannot start; a failure shows its error above the page list.
+phone's FAB, the empty list and a parent row's sub-page + each open a new page
+at once, with no dialog or browser prompt, its title field focused, on a phone
+as on a desktop. It exists only on that screen until something is written: the
+page is made, under the chosen parent, when the writer leaves the title or the
+text, or the page, with the name as its document's opening heading and the
+text below it. One opened and left empty is not kept; closing the tab with text
+not yet kept asks first. A failure shows its error on the new page, and leaving
+a field again retries.
 
 ## 8. Build order
 

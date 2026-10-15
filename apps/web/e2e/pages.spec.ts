@@ -748,6 +748,10 @@ test("an owner may start a Space's pages from a repository or a first page, and 
   await fixtureJson(browser, "page-tree-first", pageTree, { pages: [page("p-first", null, "First document", "V")] });
   await fixtureJson(browser, "page-create", pageTree, { page: page("p-first", null, "First document", "V") },
     { method: "POST" });
+  // Its name is the heading its document opens with.
+  await fixtureJson(browser, "first-document", /\/pages\/p-first$/u, { page: { ...page("p-first", null, "First document", "V"),
+    body: "# First document\n", revisionInfo: { revision: 1, kind: "edit", authors: [], conversationIds: [], createdAt: NOW } } },
+  { method: "GET" });
   await browser.getByRole("button", { name: "Create the first page" }).click();
   await browser.keyboard.type("First document");
   await browser.getByTestId("page-title").blur();
@@ -1355,17 +1359,19 @@ test("on a long page, who works out of view shows at its edges, and what an Agen
 
 test("everyday editing works as in Google Docs: rename the page, grow a table, links from typed URLs", async ({ page: browser }) => {
   await browser.setViewportSize({ width: 1280, height: 800 });
-  // The page name differs from the opening heading, so the header still carries it, as plain text.
-  await stubPages(browser, [page("p-relay", null, "Service", "V")]);
+  // A page is named by the heading its document opens with; one that opens without a name offers it above,
+  // as plain text, and what is typed there is written into the document.
+  await stubPages(browser, [page("p-relay", null, "Untitled", "V")]);
   await fixtureJson(browser, "page-links", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\?.*$/u, { links: [] });
   await fixtureJson(browser, "page-rename", /\/api\/xmatrix\/spaces\/[^/]+\/pages\/p-relay$/u,
     { page: page("p-relay", null, "Relay service", "V") }, { method: "PATCH" });
-  const server = pageDocument("# Relay\n\n| Area | State |\n|---|---|\n| Search | Shipped |\n\nSee the notes.\n");
+  const server = pageDocument("## Relay\n\n| Area | State |\n|---|---|\n| Search | Shipped |\n\nSee the notes.\n");
   const editor = await openLivePage(browser, server);
 
-  // The title is the page's name, drawn as text: click, type, Enter. No field well.
+  // Click, type, Enter. No field well.
   const title = browser.getByTestId("page-title");
-  await expect(title).toHaveValue("Service");
+  await expect(title).toHaveValue("");
+  await expect(title).toHaveAttribute("placeholder", "Untitled");
   const titleChrome = await title.evaluate((element) => {
     const style = getComputedStyle(element);
     return { border: style.borderTopWidth, background: style.backgroundColor, shadow: style.boxShadow, appearance: style.appearance };

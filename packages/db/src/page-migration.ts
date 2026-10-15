@@ -4,7 +4,7 @@ import type { AuthorityDatabase, DatabaseTransaction } from "./contracts.js";
 import { MessageAuthorityError } from "./message-authority-error.js";
 import { channelCapabilityPredicate } from "./channel-capability-policy.js";
 import {
-  inActiveSpace, pageActor, pageBody, pagePositionBetween, pageTitle, type PageActor, type PagePrincipal,
+  inActiveSpace, pageActor, pageBody, pagePositionBetween, pageTitle, renamedPageBody, type PageActor, type PagePrincipal,
 } from "./page-control.js";
 import type {
   PageAuthor, PageMigration, PageMigrationApplied, PageMigrationDraft,
@@ -327,12 +327,11 @@ export class PostgresPageMigrationRepository {
       lastPosition.set(parentPageId, position);
       const closedSources = page.sources.filter((id) => readers.has(id));
       await tx.query({
-        name: "page_migration_page_v2",
-        text: `INSERT INTO data.pages (space_id,page_id,parent_page_id,title,position,access_mode,head_revision,
+        name: "page_migration_page_v3",
+        text: `INSERT INTO data.pages (space_id,page_id,parent_page_id,position,access_mode,head_revision,
             agent_suggest_only,version,created_by_user_id,created_at,updated_at)
-          VALUES ($1,$2,$3,$4,$5,$6,1,FALSE,1,$7,$8,$8)`,
-        values: [spaceId, pageId, parentPageId, page.title, position,
-          closedSources.length ? "restricted" : "open", userId, now],
+          VALUES ($1,$2,$3,$4,$5,1,FALSE,1,$6,$7,$7)`,
+        values: [spaceId, pageId, parentPageId, position, closedSources.length ? "restricted" : "open", userId, now],
         maxRows: 0,
       });
       await tx.query({
@@ -340,7 +339,9 @@ export class PostgresPageMigrationRepository {
         text: `INSERT INTO data.page_revisions (space_id,page_id,revision,body,authors_json,conversation_ids,
             kind,based_on_revision,created_at)
           VALUES ($1,$2,1,$3,$4::jsonb,$5::text[],'edit',NULL,$6)`,
-        values: [spaceId, pageId, page.body, JSON.stringify([drafter]), page.sources, now], maxRows: 0,
+        // The draft's title, as the owner last revised it, is the page's name: it is the heading the document opens with.
+        values: [spaceId, pageId, renamedPageBody(page.body, page.title), JSON.stringify([drafter]), page.sources, now],
+        maxRows: 0,
       });
       report.pages++;
       if (closedSources.length) {

@@ -17,9 +17,9 @@ test("an answer becomes one line of at most 240 characters, without the quotes a
   assert.equal(pageSummaryLine(" \n "), "");
 });
 
-test("the page's text is handed over under its title, cut when it is longer than a task carries", () => {
-  assert.equal(pageSummaryInput("Plan", "One\n"), "# Plan\n\nOne\n");
-  const long = pageSummaryInput("Plan", "字".repeat(200_000));
+test("the page's document is handed over as it reads, cut when it is longer than a task carries", () => {
+  assert.equal(pageSummaryInput("# Plan\n\nOne\n"), "# Plan\n\nOne\n");
+  const long = pageSummaryInput(`# Plan\n\n${"字".repeat(200_000)}`);
   assert.ok(new TextEncoder().encode(long).length <= 256 * 1024);
   assert.ok(long.startsWith("# Plan\n\n字"));
 });
