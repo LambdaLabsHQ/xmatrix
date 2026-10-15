@@ -5,7 +5,7 @@ import { storedObject as object } from "./stored-values.js";
  * handoff. New daemons retain it. Only the exact same directory's durable
  * successor may witness the legacy recovery; names and presence are irrelevant. */
 export async function handoffResumeSource(tx: DatabaseTransaction, source: {
-  handoffSuccessorInstanceId?: string; key: { ownerUserId: string; machineId: string };
+  handoffSuccessorInstanceId?: string; key: { spaceId: string; ownerUserId: string; machineId: string };
   canonicalCwd?: string; managedWorkspaceKey?: string; remoteRepo?: string;
   repoPool?: { repoIdentity: string; repoKeyId: string; slotId: string };
 }, channelId: string) {
@@ -15,9 +15,12 @@ export async function handoffResumeSource(tx: DatabaseTransaction, source: {
     seen.add(instanceId);
     const row = (await tx.query({ name: "handoff_resume_source_v1", text: `SELECT r.run_id,r.metadata_json
       FROM data.instances i JOIN data.runs r ON r.run_id=i.run_id AND r.channel_id=i.channel_id
+      JOIN data.run_agent_registrations binding ON binding.run_id=r.run_id
       WHERE i.instance_id=$1 AND i.channel_id=$2 AND r.owner_user_id=$3
-        AND r.metadata_json->>'machineId'=$4 AND r.workspace_canonical_cwd IS NOT DISTINCT FROM $5`,
-    values: [instanceId, channelId, source.key.ownerUserId, source.key.machineId, source.canonicalCwd ?? null], maxRows: 1 }))[0];
+        AND binding.owner_user_id=$3 AND binding.machine_id=$4 AND binding.space_id=$6
+        AND r.workspace_canonical_cwd IS NOT DISTINCT FROM $5`,
+    values: [instanceId, channelId, source.key.ownerUserId, source.key.machineId,
+      source.canonicalCwd ?? null, source.key.spaceId], maxRows: 1 }))[0];
     if (!row) return undefined;
     const metadata = object(row.metadata_json);
     if (metadata.instanceDeletion !== undefined || metadata.managedWorkspaceKey !== source.managedWorkspaceKey ||

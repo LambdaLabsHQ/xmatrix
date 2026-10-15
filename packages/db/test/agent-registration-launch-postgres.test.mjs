@@ -822,6 +822,22 @@ integration("launch survives a hostname change with stale Workspace metadata and
     await sql(`UPDATE data.runs SET status='running',metadata_json=metadata_json||$2::jsonb WHERE run_id=$1`,
       [pooledSuccessor.runId, { repoPool }]);
     await sql(`UPDATE data.instances SET status='online' WHERE instance_id=$1`, [pooledSuccessor.instanceId]);
+    await sql(`INSERT INTO data.agent_registrations SELECT owner_user_id,'other-machine',harness,version,created_at,updated_at
+      FROM data.agent_registrations WHERE machine_id='machine' AND harness='grok';
+      INSERT INTO data.space_agent_registrations SELECT space_id,owner_user_id,'other-machine',harness,display_name,
+        configuration_json,version,created_at,updated_at FROM data.space_agent_registrations
+        WHERE machine_id='machine' AND harness='grok'`);
+    await sql(`UPDATE data.run_agent_registrations SET machine_id='other-machine' WHERE run_id=$1`, [pooledSuccessor.runId]);
+    const withoutLegacyEvidence = await reborn.prepare({ commandId: "unrelated-holder", actorUserId: "caller", channelId: "channel",
+      sourceMessageId: "unrelated-holder-message", sourceInstanceId: repoInstanceId, prompt: "resume original" });
+    const untrustedHolder = (await sql(`SELECT spawn_payload_json FROM data.agent_reborn_intents WHERE intent_id=$1`,
+      [withoutLegacyEvidence.intentId])).rows[0].spawn_payload_json;
+    assert.equal(untrustedHolder.handoffSourceInstanceId, undefined,
+      "matching metadata cannot replace the successor's durable machine registration");
+    await sql(`UPDATE data.agent_reborn_intents SET state='failed' WHERE intent_id=$1`, [withoutLegacyEvidence.intentId]);
+    await sql(`UPDATE data.run_agent_registrations SET machine_id='machine' WHERE run_id=$1`, [pooledSuccessor.runId]);
+    await sql(`DELETE FROM data.space_agent_registrations WHERE machine_id='other-machine';
+      DELETE FROM data.agent_registrations WHERE machine_id='other-machine'`);
     const pooledResume = await reborn.prepare({ commandId: "pooled-handoff-resume", actorUserId: "caller", channelId: "channel",
       sourceMessageId: "pooled-resume-message", sourceInstanceId: repoInstanceId, prompt: "resume original" });
     const pooledRestored = await reborn.advance({ intentId: pooledResume.intentId, actorUserId: "caller", channelId: "channel" });
