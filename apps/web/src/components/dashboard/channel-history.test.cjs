@@ -10,7 +10,6 @@ const {
   formatMessageDateTime,
   formatMessageTimestamp,
   mergeChannelHistory,
-  sameChannelHistoryWindow,
 } = history.exports;
 
 test.after(history.dispose);
@@ -138,26 +137,3 @@ test("a compacted cache advertises omitted history instead of claiming exact EOF
   assert.equal(compacted.hasOlderMessages, true);
 });
 
-test("identical refresh windows are detected so the timeline does not re-render", () => {
-  const window = [
-    { messageId: "m1", channelId: "a", sequence: 1, sentAt: "2026-07-20T00:00:01.000Z" },
-    { messageId: "m2", channelId: "a", sequence: 2, sentAt: "2026-07-20T00:00:02.000Z" },
-  ];
-  assert.equal(sameChannelHistoryWindow(window, [...window]), true);
-  assert.equal(sameChannelHistoryWindow(window, [...window].reverse()), false);
-  assert.equal(sameChannelHistoryWindow(window, window.slice(0, 1)), false);
-  assert.equal(
-    sameChannelHistoryWindow(window, [window[0], { ...window[1], editedAt: "2026-07-20T01:00:00.000Z" }]),
-    false,
-    "an edit marker change must re-render",
-  );
-  assert.equal(
-    sameChannelHistoryWindow(window, [window[0], { ...window[1], recalledAt: "2026-07-20T01:00:00.000Z" }]),
-    false,
-    "a recall marker change must re-render",
-  );
-  assert.equal(
-    sameChannelHistoryWindow(window, [window[0], { ...window[1], messageId: "m3" }]),
-    false,
-  );
-});

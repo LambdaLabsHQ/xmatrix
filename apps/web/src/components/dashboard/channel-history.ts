@@ -124,29 +124,6 @@ export function sortChannelHistory<T extends ChannelHistoryLike>(messages: T[]):
   });
 }
 
-/**
- * A refresh that produced the identical window (same messages, edit and
- * recall markers, in the same order) must not re-render the timeline.
- */
-export function sameChannelHistoryWindow<
-  T extends ChannelHistoryLike & { editedAt?: string; recalledAt?: string },
->(
-  left: readonly T[],
-  right: readonly T[],
-): boolean {
-  if (left.length !== right.length) return false;
-  for (let index = 0; index < left.length; index += 1) {
-    const a = left[index]!;
-    const b = right[index]!;
-    if (
-      a.messageId !== b.messageId ||
-      a.editedAt !== b.editedAt ||
-      a.recalledAt !== b.recalledAt
-    ) return false;
-  }
-  return true;
-}
-
 export function mergeChannelHistory<T extends ChannelHistoryLike>(
   channelId: string,
   current: T[],

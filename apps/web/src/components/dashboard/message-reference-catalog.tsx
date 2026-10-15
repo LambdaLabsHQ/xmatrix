@@ -7,6 +7,7 @@
  */
 import { createContext, useContext, type ReactNode } from "react";
 import type { SerializedChannel } from "@xmatrix/protocol";
+import { shareByKey } from "../../lib/same-value";
 
 /** What a reference to a channel shows of it: what `#` completion and chips read. */
 export type ChannelReference = Pick<SerializedChannel, "id" | "spaceId" | "name" | "topic" | "summary">;
@@ -25,18 +26,8 @@ export function channelReferences(
   previous: readonly ChannelReference[],
   channels: readonly SerializedChannel[],
 ): readonly ChannelReference[] {
-  const held = new Map(previous.map((reference) => [reference.id, reference]));
-  let same = previous.length === channels.length;
-  const next = channels.map((channel, index) => {
-    const known = held.get(channel.id);
-    const reference = known && known.spaceId === channel.spaceId && known.name === channel.name &&
-      known.topic === channel.topic && known.summary === channel.summary
-      ? known
-      : { id: channel.id, spaceId: channel.spaceId, name: channel.name, topic: channel.topic, summary: channel.summary };
-    if (reference !== previous[index]) same = false;
-    return reference;
-  });
-  return same ? previous : next;
+  return shareByKey(previous, channels.map(({ id, spaceId, name, topic, summary }) => ({ id, spaceId, name, topic, summary })),
+    (reference) => reference.id);
 }
 
 const MessageReferenceCatalogContext = createContext<MessageReferenceCatalog | null>(null);

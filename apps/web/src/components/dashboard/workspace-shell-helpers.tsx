@@ -5,15 +5,10 @@ import { timelineLayoutMoved } from "./timeline-send-rise";
 
 import type {
   AgentTraceTarget,
-  ChannelNavItemProps,
   ComposerSendSnapshot,
   TimelineItem,
 } from "./workspace-shell-message-model";
 import type { MessageAttachmentMediaStore } from "./message-attachment-media-store";
-
-import {
-  timelineMessagesEqual,
-} from "./workspace-shell-message-model";
 
 export type {
   AgentTraceTarget,
@@ -23,11 +18,7 @@ export type {
   ThreadReplyParticipant,
 } from "./workspace-shell-message-model";
 
-export {
-  replyPreviewSequence,
-  replyPreviewsEqual,
-  timelineMessagesEqual,
-} from "./workspace-shell-message-model";
+export { replyPreviewSequence } from "./workspace-shell-message-model";
 
 import {
   AGENT_BUSY_TRACE_STALE_MS,
@@ -477,23 +468,6 @@ export function usePointerFirstSelect(select: () => void) {
   };
 }
 
-export function areChannelNavItemPropsEqual(previous: ChannelNavItemProps, next: ChannelNavItemProps): boolean {
-  return (
-    previous.channel === next.channel &&
-    previous.events === next.events &&
-    previous.active === next.active &&
-    previous.unreadCount === next.unreadCount &&
-    previous.readCount === next.readCount &&
-    previous.readCountsBaselineReady === next.readCountsBaselineReady &&
-    previous.hasUnreadMention === next.hasUnreadMention &&
-    previous.isPinnedRoot === next.isPinnedRoot &&
-    previous.onSelect === next.onSelect &&
-    previous.onTogglePinned === next.onTogglePinned &&
-    previous.onMarkDone === next.onMarkDone &&
-    previous.onOpenContextMenu === next.onOpenContextMenu
-  );
-}
-
 export const productMessageAttachmentMediaClient = new ProductMessageAttachmentMediaClient();
 
 /** Where each timeline stood right after it was last landed on its newest message. */
@@ -660,7 +634,7 @@ export function pointerMidpoint(first: { x: number; y: number }, second: { x: nu
 /** What a message row reads of its conversation: never the catalog's whole, ever-changing record. */
 export type MessageRowChannel = Pick<SerializedChannel, "id" | "spaceId">;
 
-export type MessageRowComparableProps = {
+export type MessageRowProps = {
   message: TimelineItem;
   contextOnly?: boolean;
   currentUserIdentityId: string;
@@ -682,34 +656,6 @@ export type MessageRowComparableProps = {
   onOpenInternalAppLink: (href: string) => boolean;
   onJumpToMessage: (messageId: string, sequence?: number) => void;
 };
-
-export function areMessageRowPropsEqual(
-  previous: MessageRowComparableProps,
-  next: MessageRowComparableProps
-): boolean {
-  return (
-    previous.contextOnly === next.contextOnly &&
-    previous.currentUserIdentityId === next.currentUserIdentityId &&
-    previous.channel === next.channel &&
-    previous.token === next.token &&
-    previous.mediaStore === next.mediaStore &&
-    previous.isJoined === next.isJoined &&
-    previous.onReact === next.onReact &&
-    previous.onEdit === next.onEdit &&
-    previous.onRecall === next.onRecall &&
-    previous.onUnsentAction === next.onUnsentAction &&
-    previous.onReply === next.onReply &&
-    previous.onOpenThread === next.onOpenThread &&
-    previous.onMentionSender === next.onMentionSender &&
-    previous.onRebornSender === next.onRebornSender &&
-    previous.reborningSender === next.reborningSender &&
-    previous.onQuestionnaireAnswer === next.onQuestionnaireAnswer &&
-    previous.onOpenAgentTrace === next.onOpenAgentTrace &&
-    previous.onOpenInternalAppLink === next.onOpenInternalAppLink &&
-    previous.onJumpToMessage === next.onJumpToMessage &&
-    timelineMessagesEqual(previous.message, next.message)
-  );
-}
 
 export function clearMessageLongPress(
   timerRef: MutableRefObject<number | null>,
