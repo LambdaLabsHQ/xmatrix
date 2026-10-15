@@ -210,25 +210,73 @@ that offers the chosen location. Each has a fit (Jev's score for its harness ÷ 
 - **CPU:** `1 − 1-minute load ÷ logical CPUs` or `1 − CPU usage`, whichever is
   smaller. Windows reports no load average. An overloaded machine goes below zero.
 - **Memory:** available ÷ total.
-- **Provider quota:** the remaining percentage. The provider's own verdict on
-  the account, read with the windows (Codex `rate_limit.allowed`), outranks
-  them: a refused account has none, and one still served past a used-up window
-  on credits keeps 1%, eligible but after every account with window headroom.
-  Whether to spend credits is the provider account's setting, not xMatrix's.
+- **Provider quota:** the account's spend pace, capped at 1 for headroom:
+  remaining share divided by the fraction of its window left before reset.
+  The tightest window counts (Cursor's Auto/API pools are alternatives until
+  the model is selected). Unknown periods/resets use remaining share; missing
+  observations retain the explicit policy default of pace 1. Provider refusal
+  still excludes an exhausted account, and a provider serving on credits
+  keeps the existing small positive allowance.
 
-A machine without a current sample has unknown headroom, counted as none.
-Environments another one beats on both fit and headroom drop out (the Pareto
-frontier). Of the rest, the one whose weaker side is strongest wins:
-`min(fit, headroom) + 0.001 × (fit + headroom)`, the "balanced" profile, where
-either side satisfies at 1. A weighted sum is not used: it cannot reach every
-point of a non-convex frontier. Ties go to the fewest outstanding Runs on the
-machine, whose load may not show yet, and then to candidate order. When the
-chosen model's quota is exhausted there (Cursor's per-model pools), the
-next-ranked environment of the same harness offering it runs the work.
+A machine without a current-connection sample has unknown headroom, counted as
+none. Fit, resource headroom, quota pace and measured relative throughput form
+the Pareto comparison. Ranking then compares `min(fit, headroom, relativeSpeed)`,
+relative speed, quota pace, `min(fit, headroom, relativeSpeed) + 0.001 × (fit + headroom)`,
+fewer outstanding Runs on the machine, and candidate order. Missing speed
+observations have the neutral factor 1, preserving the previous ranking when
+there is no comparable measured speed; they are never displayed as a measured
+rate. The profile remains "balanced".
+
+### Observed Agent throughput
+
+The runtime reports actual output tokens divided by inference time, including
+provider/network waits and prompt processing, and excluding tool execution.
+This measures effective inference throughput, not task quality, task completion
+rate, raw link bandwidth or streaming decode speed. There are no synthetic
+inference calls or public network probes.
+
+Claude uses successful main-agent result `usage.output_tokens` and
+`duration_api_ms`; mixed-model results are excluded. Codex uses the delta of its
+provider-reported cumulative output token counter, with `tokenUsage.last` as
+the first turn's baseline when needed, and monotonic turn time minus the union
+of command, file-change, MCP, dynamic, search, image and agent-tool intervals. Missing tool
+starts, incomplete counters, failed turns and a mid-turn model change produce
+no observation. Other harnesses and older wrappers remain unknown.
+
+Each wrapper retains at most eight completed samples for its current model and
+effort. A sample needs at least 32 output tokens and 100 ms of known inference
+time, with a ten-minute maximum; changing the observed model or effort clears
+its aggregate. Reports carry only model, effort, original observation time,
+output-token count, inference milliseconds and sample count in
+`usage.throughput`. Heartbeats never refresh its timestamp.
+
+The existing Instance presentation is the durable source. Candidate reads are
+bounded to eight recent Instance aggregates of the exact Space, owner, machine
+and harness registration; only observations whose latest sample is at most
+30 minutes old survive. The aggregate needs at least three samples before it
+participates. It must match the requested model (including its explicit alias)
+and effort, or the runtime's observed default model/effort. Different models,
+efforts and harness tokenizers are never compared as one speed cohort. Within
+each cohort, relative speed is its tokens/s divided by the fastest observed
+candidate's tokens/s. The values come from real work; cold environments retain
+the compatibility-neutral factor without a fabricated measurement.
+
+When Jev chooses a declared model/effort after the initial placement, machines
+are ranked again for that pair within the already selected harness. An
+exhausted model-specific quota still refuses that environment. Decision evidence
+puts the environment that actually runs the work first, including after quota
+fallback, and records its scoped counts, tokens/s and relative factor. The
+invocation details display measured tokens/s and sample count, or unknown.
+Jev never receives throughput or other machine telemetry.
+
+The wire additions are optional. Old Hub readers discard the added usage fact;
+new Hubs keep the previous selection behavior for old wrappers. Ship Hub, Web
+and CLI through the regular release train. Existing Agent processes need the
+new CLI and a reborn, then real completed turns, before they supply samples.
 
 Evidence from `registration-parameters-v10` records `fit` (each harness's score
 and level distribution) and `placement` (the eight best-ranked environments with
-fit, headroom, frontier membership and utility) instead of a harness choice.
+fit, headroom, quota pace, optional scoped throughput, frontier membership and utility) instead of a harness choice.
 From `registration-parameters-v6` to `v9`, Jev chose the harness first and
 headroom chose a machine of that harness only, so load could not move work to
 another harness; `harness` records that choice. The design and its research are
@@ -259,12 +307,14 @@ assumption, not a provider measurement: it does not refresh timestamps, write a
 synthetic provider observation, or replace a valid measured zero. The headroom
 ranking reads this default like any other quota reading.
 
-The daemon samples machine resources about every 30 seconds with its run
-snapshot: logical CPU count and usage, memory, swap, the 1/5/15-minute load
+The daemon samples machine resources about every ten seconds, reporting material
+changes or at least once per minute with its Run snapshot: logical CPU count and usage, memory, swap, the 1/5/15-minute load
 average (not on Windows, where none exists), and total/available space on the
 filesystem holding the daemon user's home directory. The Hub keeps the newest
 valid sample in the daemon's `metadata.machineResources`; the shared protocol
-parser drops samples older than 90 seconds, future samples and incoherent values.
+parser rejects future samples and incoherent values. The current authenticated
+connection, rather than a fixed age limit, binds CPU/memory sample validity;
+throughput has its separate bounded age.
 The Web Machines page shows the same parsed sample as the Machine's load and polls
 the owner's daemon list every 30 seconds while it is open, because relay push does
 not carry resource samples. An online Machine without a current sample is shown as

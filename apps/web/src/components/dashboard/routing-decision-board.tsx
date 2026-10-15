@@ -1,4 +1,5 @@
 import { formatZonedDateTime } from "./time-display";
+import { throughputText } from "./jev-decision-trace";
 import { parsePresentedRoutingDecision, routingChoiceIdentity, type LaunchParameterEvidence, routingDecisionCopy, routingExclusionText,
   routingQuotaText, routingHarnessLabel, visibleRoutingChoiceRows, type LaunchDecisionStage, type PresentedRoutingDecision,
   type RoutingChoiceRow } from "@xmatrix/protocol";
@@ -31,6 +32,7 @@ function JointPlacement({ parameters }: { parameters: LaunchParameterEvidence })
         {routingHarnessLabel(item.harness)} on {item.machineName || "Unnamed machine"} · fit {percent(item.fit)} ·
         headroom {item.headroom === undefined ? "unmeasured" : percent(item.headroom)}
         {item.quotaPace === undefined ? "" : ` · quota pace ${item.quotaPace.toFixed(2)}×`}
+        {` · ${throughputText(item.throughput)}`}
         {item.frontier ? "" : " · outweighed"}</li>)}
     </ol>}
   </div>;

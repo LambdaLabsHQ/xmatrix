@@ -702,6 +702,7 @@ export interface MessageSender {
 // --- Event Stream ---
 
 export interface LlmUsage {
+  throughput?: import("./agent-throughput.js").AgentThroughputObservation;
   inputTokens?: number;
   outputTokens?: number;
   totalTokens?: number;
