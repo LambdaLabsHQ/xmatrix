@@ -120,7 +120,7 @@ mod tests {
     #[test]
     fn the_context_names_who_wrote_the_summary_and_how_far_it_reads() {
         let source: ChannelSummarySource = serde_json::from_value(serde_json::json!({
-            "author": { "kind": "run", "runId": "run-1", "agentName": "claude" },
+            "author": { "kind": "task", "agentName": "claude" },
             "generatedAt": "2026-10-02T08:57:23.000Z",
             "throughSequence": 65,
         }))

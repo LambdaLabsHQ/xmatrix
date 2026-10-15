@@ -1151,7 +1151,11 @@ pub struct ChannelSummarySource {
 #[serde(rename_all = "camelCase")]
 pub struct ChannelSummaryAuthor {
     pub kind: String,
-    pub run_id: String,
+    /// Only `run` authors carry one. Since the Hub writes summaries as a text
+    /// task (`kind: "task"`), the author has no Run; requiring this field made
+    /// every channel-list read fail once any listed channel had such a summary.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub run_id: Option<String>,
     pub agent_name: String,
 }
 
