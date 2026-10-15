@@ -1167,11 +1167,12 @@ test("a reply to a cross-Channel link returns where to relay it, under the link 
 });
 
 test("an Agent's reply to a link names its exact Instance so the relay can skip it", async () => {
+  const registration = { ownerUserId: "owner-1", machineId: "server", harness: "claude" };
   const { result } = await appendReplyTo({ author_kind: "agent", author_id: "instance-1",
     origin_channel_id: "channel-origin", origin_owner_user_id: "owner-1" },
-  { kind: "agent", agentId: "agent-7", instanceId: "channel-origin:2", label: "claude:2", userId: "owner-1" });
+  { registration, kind: "agent", agentId: "agent-7", instanceId: "channel-origin:2", label: "claude:2", userId: "owner-1" });
   assert.deepEqual(result.replyOrigin.replier,
-    { kind: "agent", label: "claude:2", agentId: "agent-7", instanceId: "channel-origin:2" });
+    { registration, kind: "agent", label: "claude:2", agentId: "agent-7", instanceId: "channel-origin:2" });
 });
 
 test("a reply to an ordinary message, or to a link whose Run is gone, relays nothing", async () => {

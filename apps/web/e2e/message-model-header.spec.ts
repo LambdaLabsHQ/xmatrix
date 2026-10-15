@@ -470,7 +470,7 @@ test("hub system notices keep the xMatrix identity instead of the owning user's 
 });
 
 
-for (const legacy of [true, false]) test(`cross-Channel Machine badge resolves ${legacy ? "an old exact Instance" : "a stopped sender snapshot"}`, async ({ page }) => {
+for (const relay of [false, true]) for (const legacy of [true, false]) test(`cross-Channel ${relay ? "relayed reply" : "link"} Machine badge resolves ${legacy ? "an old exact Instance" : "a stopped sender snapshot"}`, async ({ page }) => {
   const key = { spaceId: E2E_SPACE.id, ownerUserId: "agent-owner", machineId: "machine:server", harness: "codex" };
   await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], channels: [{ ...messageChannel(),
     members: ["agent:codex"], memberPresence: { "agent:codex": { kind: "agent", label: "Codex",
@@ -489,12 +489,21 @@ for (const legacy of [true, false]) test(`cross-Channel Machine badge resolves $
           { instanceId: "local:1", channelId: "channel-general", channelInstanceId: "1" },
         ] } }],
   });
-  await fulfillChannelHistory(page, [agentMessage({ messageId: `cross-machine-${legacy}`, sequence: 1,
+  const registration = { ownerUserId: key.ownerUserId, machineId: key.machineId, harness: key.harness };
+  const message = agentMessage({ messageId: `cross-machine-${legacy}`, sequence: 1,
     body: "The sender works in another Channel.", instanceId: "origin:1", channelInstanceId: "1", instanceLabel: "codex:1",
     from: { originChannelId: "origin", ...(legacy ? {} : { registration: {
       ownerUserId: key.ownerUserId, machineId: key.machineId, harness: key.harness,
     } }) },
-  })]);
+  });
+  if (relay) {
+    message.from = { kind: "user", identityId: "user:link-owner", userId: "link-owner", email: "", label: "codex:1" };
+    message.metadata = { xmatrixProvenance: "cross_channel_reply", crossChannelReply: {
+      sourceChannelId: "origin", sourceMessageId: "reply-1", replierKind: "agent",
+      replierInstanceId: "origin:1", ...(legacy ? {} : { replierRegistration: registration }),
+    } };
+  }
+  await fulfillChannelHistory(page, [message]);
   await page.goto("/app/personal-sspaceperso/channels/general-cchannelgen");
   const row = page.locator(".app-message-row", { hasText: "The sender works in another Channel." });
   await expect(row.locator(".app-agent-identity-labels")).toContainText("fixture-node");

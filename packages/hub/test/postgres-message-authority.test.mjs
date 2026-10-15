@@ -505,13 +505,17 @@ test("a reply to a link is relayed into the link's Channel as work, once, under 
   assert.equal(crossChannelReplyOrigin({ channelId: "a", messageId: "m" }), undefined,
     "a relay without the owner whose authority it needs is not a relay");
   assert.deepEqual(crossChannelReplyOrigin({ channelId: "a", messageId: "m", ownerUserId: "o",
-    replier: { kind: "user", label: "Ada", agentId: "x", instanceId: "y" } }).replier,
+    replier: { kind: "user", label: "Ada", agentId: "x", instanceId: "y",
+      registration: { ownerUserId: "forged", machineId: "other", harness: "codex" } } }).replier,
     { kind: "user", label: "Ada" }, "only an Agent replier names an Instance");
+  const registration = { ownerUserId: "reply-owner", machineId: "server", harness: "claude" };
+  assert.deepEqual(crossChannelReplyOrigin({ channelId: "a", messageId: "m", ownerUserId: "o",
+    replier: { kind: "agent", label: "claude:2", registration } }).replier.registration, registration);
   const appended = [];
   await relayCrossChannelReply({
     env: {}, channelId: "channel-away", messageId: "reply-9", body: "yes, v84 is live",
     origin: { channelId: "channel-home", messageId: "link-1", ownerUserId: "owner-1",
-      replier: { kind: "agent", label: "claude:2", avatarUrl: "https://a/claude.png",
+      replier: { registration, kind: "agent", label: "claude:2", avatarUrl: "https://a/claude.png",
         agentId: "agent-7", instanceId: "channel-home:2" },
       requesterInstanceId: "channel-home:1" },
   }, {
@@ -530,7 +534,7 @@ test("a reply to a link is relayed into the link's Channel as work, once, under 
     "never a system fact, which an Agent would read as context instead of work");
   assert.deepEqual(command.residual.appMetadata.crossChannelReply,
     { sourceChannelId: "channel-away", sourceMessageId: "reply-9", linkMessageId: "link-1",
-      replierKind: "agent", replierAgentId: "agent-7", replierInstanceId: "channel-home:2",
+      replierKind: "agent", replierRegistration: registration, replierAgentId: "agent-7", replierInstanceId: "channel-home:2",
       requesterInstanceId: "channel-home:1" },
     "where it was written lives in metadata, resolved per reader; the replying Instance is skipped live");
   assert.equal(command.body, "yes, v84 is live", "the reply reads as itself, with no relay preamble");

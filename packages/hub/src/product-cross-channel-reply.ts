@@ -1,4 +1,4 @@
-import { crossChannelReplyMetadata } from "@xmatrix/protocol";
+import { crossChannelReplyMetadata, parseAgentRegistrationKey, type AgentRegistrationKey } from "@xmatrix/protocol";
 import { productAgentSystemNoticeSenderSnapshot } from "./product-agent-mention-authority-adapter";
 import { dispatchProductMessageAppend } from "./product-message-append";
 import type { Env } from "./types";
@@ -24,6 +24,7 @@ export interface CrossChannelReplier {
   /** The exact Agent Instance that replied; live delivery of the relay skips it. */
   agentId?: string;
   instanceId?: string;
+  registration?: AgentRegistrationKey;
 }
 
 function replier(value: unknown): CrossChannelReplier | undefined {
@@ -36,6 +37,7 @@ function replier(value: unknown): CrossChannelReplier | undefined {
   const instanceId = input.kind === "agent" ? id(input.instanceId) : undefined;
   return {
     kind: input.kind, label: input.label,
+    ...(input.kind === "agent" && input.registration ? { registration: parseAgentRegistrationKey(input.registration) } : {}),
     ...(typeof input.avatarUrl === "string" && input.avatarUrl ? { avatarUrl: input.avatarUrl } : {}),
     ...(agentId && instanceId ? { agentId, instanceId } : {}),
   };
@@ -102,6 +104,8 @@ export async function relayCrossChannelReply(input: {
     sourceMessageId: input.messageId,
     linkMessageId: input.origin.messageId,
     ...(input.origin.replier ? { replierKind: input.origin.replier.kind } : {}),
+    ...(input.origin.replier?.kind === "agent" && input.origin.replier.registration
+      ? { replierRegistration: input.origin.replier.registration } : {}),
     // Lets delivery skip the Instance that wrote the reply when it is bound to
     // the link's Channel, as it skips any author of its own message.
     ...(input.origin.replier?.agentId && input.origin.replier.instanceId

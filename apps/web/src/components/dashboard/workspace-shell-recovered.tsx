@@ -6,7 +6,7 @@ import { meterTone, type MachineGlanceReading } from "./machine-load";
 import { MachineLoadGlanceBars } from "./machine-load-panel";
 import { useOpenMachine } from "./machine-link";
 import type { PresentedChannelMemberPresence as ChannelMemberPresence } from "./workspace-shell-presence";
-import { channelVisibilityScope, digestCanonicalCloneCborV1, parseLlmQuotaAccount, parseQuotaObservedAt, isUnlistedParameterTag, statusTagIcon, type AgentInvocationSelections, type DraftSummonIntent, type StatusTagIcon } from "@xmatrix/protocol";
+import { crossChannelReplyRelay, channelVisibilityScope, digestCanonicalCloneCborV1, parseLlmQuotaAccount, parseQuotaObservedAt, isUnlistedParameterTag, statusTagIcon, type AgentInvocationSelections, type DraftSummonIntent, type StatusTagIcon } from "@xmatrix/protocol";
 import { formatLocalClock, formatZonedDateTime } from "./time-display";
 
 import { matchClaimableOutgoing } from "./outgoing-message-claim";
@@ -849,17 +849,19 @@ export function buildTimeline(
           presenceAvatarUrl: presenceAvatarUrl(kindMatchedPresence),
           ownAvatarUrl: own ? currentUser?.avatarUrl : undefined,
         });
-    const senderInstanceId = message.from.instanceId;
+    const replyRelay = relayedReply ? crossChannelReplyRelay(message.metadata) : undefined;
+    const senderInstanceId = relayedReply ? replyRelay?.replierInstanceId : message.from.instanceId;
     const senderChannelInstanceId = message.from.channelInstanceId;
     const senderHasInstanceIdentity = Boolean(senderInstanceId || senderChannelInstanceId);
     // `@name:N` here would reach a local namesake, not the sender elsewhere.
     const senderMention = linkedSender || relayedReply ? undefined : mentionForMessageSender(message.from);
     // The committed registration survives disconnect and cross-Channel writes.
     // Older senders may resolve only through their exact Instance, not a local namesake.
-    const senderRegistration = message.from.kind === "agent" && !reservedSystemAgent
-      ? message.from.registration ?? (exactSenderInstance && kindMatchedPresence?.kind === "agent"
-          ? kindMatchedPresence.registration : undefined)
-      : undefined;
+    const senderRegistration = relayedReply ? replyRelay?.replierRegistration
+      : message.from.kind === "agent" && !reservedSystemAgent
+        ? message.from.registration ?? (exactSenderInstance && kindMatchedPresence?.kind === "agent"
+            ? kindMatchedPresence.registration : undefined)
+        : undefined;
     const senderOwner = senderRegistration &&
       spaceMembers.find(member => member.userId === senderRegistration.ownerUserId);
     const matchedInstance = senderHasInstanceIdentity
