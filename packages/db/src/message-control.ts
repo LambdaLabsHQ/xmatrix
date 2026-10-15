@@ -521,10 +521,6 @@ async function effectiveAppendPrincipal(
       ? { presentation }
       : {}),
   };
-  // Retired Run kinds: a Run started as one before it was retired posts nothing.
-  if (metadata.routedAs === "management_assistant_mention" || metadata.routedAs === "management_channel_about") {
-    throw new MessageAuthorityError("agent_run_forbidden", 403, "This kind of Agent Run is retired");
-  }
   if (run.channel_id !== input.channelId) {
     await requireAgentChannelAccess(transaction, {
       spaceId: input.spaceId, channelId: input.channelId, agentId: input.principal.id,

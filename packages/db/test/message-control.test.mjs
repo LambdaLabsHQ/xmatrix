@@ -1070,24 +1070,6 @@ channel_instance_id: 7,
   }
 });
 
-test("a Run routed to the retired xMatrix management agent posts nothing", async () => {
-  const db = database(query => placement(query) ?? (
-    query.name === "message_append_run_proof_v3" ? [provenMessageRun({ channel_instance_id: 7,
-      metadata_json: { executionKey: "execution-1", routedAs: "management_assistant_mention",
-        managementSpaceId: "space-1", managementConfigGeneration: 3 } })]
-      : query.name?.startsWith("channel_capability_message_")
-        ? [{ channel_id: "channel-1", space_id: "space-1", mode: "open", metadata_json: {} }]
-        : agentPreparationRows(query)));
-  await assert.rejects(new PostgresMessageRepository(db).prepareAppend({ requestId: "retired-management",
-    spaceId: "space-1", channelId: "channel-1",
-    principal: { kind: "agent", id: "instance-1" }, senderPrincipal: { kind: "agent", id: "instance-1" },
-    runProof: { runId: "run-1", executionKey: "execution-1", instanceId: "instance-1" } }),
-  error => error instanceof MessageAuthorityError && error.code === "agent_run_forbidden" &&
-    error.status === 403 && /Agent Run is retired/u.test(error.message));
-  assert.equal(db.calls.some((call) => /space_management_configs/u.test(call.text ?? "")), false,
-    "no Space management configuration is consulted");
-});
-
 function crossChannelRunDatabase({ handling } = { handling: "source-1" }) {
   return database((query) => placement(query) ?? (
     query.name === "message_append_run_proof_v3"

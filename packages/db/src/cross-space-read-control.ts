@@ -120,7 +120,7 @@ export class PostgresCrossSpaceReadRepository {
 
   /**
    * Prove the exact live Run in its own Space, the way invocation diagnostics
-   * do, and return its owner. A retired Channel About Run holds no grant.
+   * do, and return its owner.
    */
   private async proveRun(requestId: string, proof: CrossSpaceRunProof): Promise<{
     ownerUserId: string; agentName: string | null; executionKeyDigest: string }> {
@@ -144,8 +144,7 @@ export class PostgresCrossSpaceReadRepository {
           run.channel_id !== proof.channelId || metadata.executionKey !== proof.executionKey ||
           !["starting", "running"].includes(String(run.status)) ||
           metadata.instanceDeletion !== undefined || metadata.instanceHandoff !== undefined ||
-          metadata.executionCancellation !== undefined ||
-          metadata.routedAs === "management_channel_about") {
+          metadata.executionCancellation !== undefined) {
         throw new CrossSpaceReadError("agent_run_forbidden", 403, "Credentials do not match a live Run");
       }
       await requireRunRegistrationAccess(tx, { runId, channelId: proof.channelId,

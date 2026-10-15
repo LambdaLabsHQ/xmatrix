@@ -39,14 +39,14 @@ function runtimeDatabase(queries) {
             channel_id: "channel-1", space_id: "space-1", mode: "open",
             metadata_json: {}, version: 1,
           }];
-          if (query.name === "runtime_kill_targets_v6") return [{
+          if (query.name === "runtime_kill_targets_v7") return [{
             instance_id: "instance-1", run_id: "run-1", channel_instance_id: 1,
             owner_user_id: "user-1",
             machine_owner_user_id: "user-1", agent_name: "codex",
             metadata_json: { machineId: "machine-1", hostId: "host-1",
               executionKey: "execution-1" },
           }];
-          if (query.name === "runtime_reborn_target_v4") return [{
+          if (query.name === "runtime_reborn_target_v5") return [{
             instance_id: "instance-1", instance_status: "online", channel_instance_id: 1,
             run_id: "run-1", owner_user_id: "user-1",
             workspace_machine_id: "machine-1", workspace_canonical_cwd: "/srv/repo",
@@ -94,7 +94,7 @@ test("Channel Agent control targets are registered Runs' Instances", async () =>
     agentName: "codex", harness: "codex", ownerUserId: "user-1",
     workspace: { machineId: "machine-1", canonicalCwd: "/srv/repo" }, metadata: {},
   });
-  const killTargetsQuery = queries.find((query) => query.name === "runtime_kill_targets_v6");
+  const killTargetsQuery = queries.find((query) => query.name === "runtime_kill_targets_v7");
   assert.match(killTargetsQuery?.text ?? "", /target\.run_status IN \('starting','running','stopping'\)/u);
   // A Run a `/kill all` append fenced stays a target until its host confirms.
   assert.match(killTargetsQuery?.text ?? "", /OR target\.metadata_json \? 'stopRequest'/u);
@@ -102,7 +102,7 @@ test("Channel Agent control targets are registered Runs' Instances", async () =>
   assert.match(killTargetsQuery?.text ?? "", /JOIN data\.run_agent_registrations b/u);
   assert.doesNotMatch(killTargetsQuery?.text ?? "", /agent_profile/u);
   // An Instance is found only through its registration.
-  const rebornTargetQuery = queries.find((query) => query.name === "runtime_reborn_target_v4");
+  const rebornTargetQuery = queries.find((query) => query.name === "runtime_reborn_target_v5");
   assert.match(rebornTargetQuery?.text ?? "", /JOIN data\.run_agent_registrations b/u);
   assert.doesNotMatch(rebornTargetQuery?.text ?? "", /agent_profiles/u);
 });

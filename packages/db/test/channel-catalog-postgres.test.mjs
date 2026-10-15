@@ -610,7 +610,7 @@ integration("startup resolve omits participants, full reads hydrate them, and AC
     assert.equal(Object.hasOwn(channel, "memberPresence"), false);
     assert.equal(Object.hasOwn(channel, "visibleHumanMemberIds"), false);
   }
-  assert.equal(observations.some(event => event.queryName === "channel_agent_presence_v9"), false);
+  assert.equal(observations.some(event => event.queryName === "channel_agent_presence_v10"), false);
   assert.equal(observations.some(event => event.queryName === "channel_catalog_open_space_members_v2"), false);
   const full = await catalog.resolve(input);
   assert.equal(catalogInstances(full.channels.find(channel => channel.id === "root-40")).length, 2);

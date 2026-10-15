@@ -1474,7 +1474,7 @@ export class PostgresRuntimeRepository {
       await runtimeChannelCapability(tx, channelId, actorUserId, "runtime_new_work");
       // An Instance is found by its Space registration's display name or
       // harness at its Channel slot.
-      const rows = await tx.query<QueryResultRow>({ name: "runtime_reborn_target_v4", text: `SELECT
+      const rows = await tx.query<QueryResultRow>({ name: "runtime_reborn_target_v5", text: `SELECT
           i.instance_id,i.status AS instance_status,i.channel_instance_id,
           r.run_id,r.owner_user_id,r.workspace_machine_id,
           r.workspace_canonical_cwd,r.metadata_json,r.status AS run_status,sr.display_name AS agent_name,
@@ -1486,7 +1486,6 @@ export class PostgresRuntimeRepository {
           AND sr.machine_id=b.machine_id AND sr.harness=b.harness
         WHERE i.channel_id=$1 AND i.channel_instance_id=$3
           AND (lower(sr.display_name)=$4 OR sr.harness=$4)
-          AND COALESCE(r.metadata_json->>'routedAs','')<>'management_channel_about'
         LIMIT 2`, values: [channelId, placement.spaceId,
         channelInstanceId, normalizedAgentName(agentName)], maxRows: 2 });
       if (rows.length > 1) throw new RuntimeControlError(
@@ -1529,7 +1528,7 @@ export class PostgresRuntimeRepository {
     return this.spaces.transaction(requestId, "runtime.kill-targets", placement, async (tx) => {
       await runtimeChannelCapability(tx, channelId, actorUserId, "runtime_terminalize");
       // A registered Run is identified by its Space registration and its Instance.
-      const rows = await tx.query<QueryResultRow>({ name: "runtime_kill_targets_v6", text: `SELECT * FROM (
+      const rows = await tx.query<QueryResultRow>({ name: "runtime_kill_targets_v7", text: `SELECT * FROM (
           SELECT i.instance_id,i.run_id,i.channel_instance_id,r.owner_user_id,
             r.metadata_json,b.owner_user_id AS machine_owner_user_id,sr.display_name AS agent_name,
             r.status AS run_status,i.status AS instance_status
@@ -1543,7 +1542,6 @@ export class PostgresRuntimeRepository {
           OR ($6::text IS NULL AND target.run_status IN (${ACTIVE_RUN_STATUS_SQL})
           AND (target.instance_status<>'offline' OR target.run_status IN ('starting','running')
             OR target.metadata_json ? 'stopRequest')))
-          AND COALESCE(target.metadata_json->>'routedAs','')<>'management_channel_about'
           AND ($3::bigint IS NULL OR (target.channel_instance_id,target.instance_id)>($3::bigint,$4::text))
         ORDER BY target.channel_instance_id,target.instance_id LIMIT $5`, values: [channelId, placement.spaceId,
         cursor?.[0] ?? null, cursor?.[1] ?? null, limit + 1, handoffInstanceId, handoffRunId], maxRows: limit + 1 });

@@ -178,29 +178,17 @@ function openAppendRows(channelId) {
   };
 }
 
-for (const scenario of [
-  { name: "ordinary Agent" },
-  // Retired Run kinds: a Run started as one before it was retired posts nothing.
-  { name: "retired management delegate", routedAs: "management_assistant_mention", error: "agent_run_forbidden",
-    message: /Agent Run is retired/u },
-  { name: "retired Channel About Run", routedAs: "management_channel_about", error: "agent_run_forbidden",
-    message: /Agent Run is retired/u },
-]) test(`PostgreSQL sender identity: ${scenario.name}`, async () => {
+/** The proven Run of `instance-1`, Codex:7 in channel-1, as the append reads it. */
+const provenRunRow = (extra = {}) => ({ owner_user_id: "owner-1", channel_id: "channel-1",
+  run_status: "running", instance_status: "busy", instance_channel_id: "channel-1",
+  channel_instance_id: "7", metadata_json: { executionKey: "execution-1" }, ...extra });
+
+test("PostgreSQL sender identity: ordinary Agent", async () => {
   const calls = [];
   const observations = [];
   const targetChannel = "channel-1";
   const database = agentAppendDatabase({ calls, sequenceChannelId: targetChannel, commitChannelId: "channel-1",
-    rows: (query) => {
-      if (query.name === "message_append_run_proof_v3") return [{
-        owner_user_id: "owner-1", channel_id: "channel-1",
-        run_status: "running", instance_status: "busy", instance_channel_id: "channel-1",
-        channel_instance_id: "7", metadata_json: { executionKey: "execution-1",
-          ...(scenario.routedAs ? { routedAs: scenario.routedAs, managementSpaceId: "space-1",
-            managementConfigGeneration: 2 } : {}),
-        },
-      }];
-      return agentChannelRows(query);
-    } });
+    rows: (query) => query.name === "message_append_run_proof_v3" ? [provenRunRow()] : agentChannelRows(query) });
   const append = postgresMessageAppend({
     RELAY_AUTHORITY_OBSERVABILITY_ENABLED: "true",
     POSTGRES_COORDINATION_OBSERVABILITY_SAMPLE_RATE: "1",
@@ -221,21 +209,11 @@ for (const scenario of [
     },
   }, {
     database, spaceId: "space-1",
-    ...(scenario.name === "ordinary Agent" ? { agentSendFingerprint: "2".repeat(64) } : {}),
+    agentSendFingerprint: "2".repeat(64),
     placement: { spaceId: "space-1", shardId: "shard-0", placementEpoch: 1 },
   });
-  if (scenario.error) {
-    await assert.rejects(append, (error) => error.code === scenario.error && scenario.message.test(error.message));
-    assert.equal(calls.some((query) => query.name === "message_append_commit_facts_v5"), false);
-    assert.equal(calls.some((query) => /space_management_configs/u.test(query.text ?? "")), false,
-      "no Space management configuration is consulted");
-    assert.equal(observations.length, 1);
-    assert.equal(observations[0].blobs[0], "message_append");
-    assert.equal(observations[0].blobs[1], "error");
-    return;
-  }
   const result = await append;
-  assert.equal(result.agentSendFingerprint, scenario.name === "ordinary Agent" ? "2".repeat(64) : undefined);
+  assert.equal(result.agentSendFingerprint, "2".repeat(64));
   assert.equal(observations.length, 1);
   assert.equal(observations[0].blobs[1], "ok");
   assert.equal(observations[0].doubles.length, 8);
@@ -264,19 +242,12 @@ test("a committed Agent message carries the Instance row's presentation", async 
      The row wins key by key, and the caller's overlay survives only where the
      row carries nothing -- an Instance whose first message outruns its first
      presentation write still stamps a header. */
-  const database = agentAppendDatabase({ sequenceChannelId: "channel-1", rows: (query) => {
-      if (query.name === "message_append_run_proof_v3") return [{
-        owner_user_id: "owner-1", channel_id: "channel-1",
-        run_status: "running", instance_status: "busy", instance_channel_id: "channel-1",
-        channel_instance_id: "7", metadata_json: { executionKey: "execution-1" },
-        presentation_json: {
-          model: "gpt-6-astra",
-          effort: "high",
-          statusChips: [{ id: "model", label: "Model", value: "gpt-6-astra" }],
-        },
-      }];
-      return agentChannelRows(query);
-    } });
+  const database = agentAppendDatabase({ sequenceChannelId: "channel-1", rows: (query) =>
+    query.name === "message_append_run_proof_v3" ? [provenRunRow({ presentation_json: {
+      model: "gpt-6-astra",
+      effort: "high",
+      statusChips: [{ id: "model", label: "Model", value: "gpt-6-astra" }],
+    } })] : agentChannelRows(query) });
   const result = await postgresMessageAppend({}, "channel-1", {
     commandId: "command-presentation-1", messageId: "message-presentation-1",
     channelId: "channel-1", body: "tagged", principal: { kind: "agent", id: "instance-1" },
