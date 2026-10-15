@@ -1493,8 +1493,11 @@ export class PostgresMachineControlRepository {
     const machineId = text(input.machineId, "machineId", 160);
     return this.database.transaction({ requestId: text(input.requestId, "requestId", 200),
       operation: "machine-control.get-daemon" }, async (tx) => {
-      const rows = await tx.query<QueryResultRow>({ name: "machine_control_get_daemon_v3", text: `SELECT *
-        FROM data.machine_daemons WHERE owner_user_id=$1 AND machine_id=$2 LIMIT 2`,
+      // The Machine's automatic assignment rides along: it decides what may start there unnamed.
+      const rows = await tx.query<QueryResultRow>({ name: "machine_control_get_daemon_v4", text: `SELECT
+        daemon.*,machine.auto_assign FROM data.machine_daemons daemon
+        LEFT JOIN data.machines machine ON machine.owner_user_id=daemon.owner_user_id AND machine.machine_id=daemon.machine_id
+        WHERE daemon.owner_user_id=$1 AND daemon.machine_id=$2 LIMIT 2`,
       values: [ownerUserId, machineId], maxRows: 2 });
       if (rows.length > 1) throw new MachineControlError("machine_identity_conflict", 409,
         "Machine has conflicting daemon records");
