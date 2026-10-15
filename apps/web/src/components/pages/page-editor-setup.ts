@@ -721,6 +721,40 @@ function cursorIdle(presenceOf: (clientId: number) => "active" | "idle" | null):
   });
 }
 
+/** What an Agent co-writing the page live is doing, said beside its name (page-co-writer.ts). */
+const CO_WRITER_ACTIVITY: Record<string, string> = { thinking: "thinking…", writing: "writing…", waiting: "waiting for you" };
+
+/**
+ * An Agent co-writing the page live says what it is doing beside its caret, and its note to the
+ * people below it, while it lasts. As with idleness, the caret's element is kept, so it is updated.
+ */
+function cursorStatus(awareness: Awareness): Plugin {
+  return new Plugin({
+    view: () => ({
+      update: (view) => {
+        for (const cursor of view.dom.querySelectorAll<HTMLElement>(".ProseMirror-yjs-cursor[data-client]")) {
+          const state = awareness.getStates().get(Number(cursor.dataset.client)) as
+            { user?: { name?: string; kind?: string }; activity?: unknown; say?: unknown } | undefined;
+          const live = state?.user?.kind === "agent" && typeof state.activity === "string"
+            ? CO_WRITER_ACTIVITY[state.activity] : undefined;
+          const label = cursor.querySelector<HTMLElement>(":scope > div");
+          if (label) label.textContent = live ? `${state?.user?.name ?? "Agent"} · ${live}` : state?.user?.name ?? "Someone";
+          cursor.toggleAttribute("data-live", Boolean(live));
+          const say = state?.user?.kind === "agent" && typeof state.say === "string" ? state.say : "";
+          let note = cursor.querySelector<HTMLElement>(":scope > .page-cursor-note");
+          if (!say) { note?.remove(); continue; }
+          if (!note) {
+            note = document.createElement("span");
+            note.className = "page-cursor-note";
+            cursor.append(note);
+          }
+          if (note.textContent !== say) note.textContent = say;
+        }
+      },
+    }),
+  });
+}
+
 /** Opens the conversation an Agent's caret label names. */
 function cursorConversations(openConversation: (conversationId: string) => void): Plugin {
   return new Plugin({
@@ -1055,6 +1089,7 @@ export function editorPlugins(input: {
     }),
     cursorActivity(input.awareness),
     cursorIdle(presenceOf),
+    cursorStatus(input.awareness),
     yUndoPlugin(),
     new Plugin({ props: { handleKeyDown: input.handleKeyDown } }),
     typoraKeymap(),

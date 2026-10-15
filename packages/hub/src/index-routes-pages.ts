@@ -17,6 +17,7 @@ import { createPostgresAuthorityDatabase } from "./postgres-authority-fleet";
 import { POSTGRES_MESSAGE_CONNECT_TIMEOUT_MS } from "./postgres-message-database-policy";
 import { requireMachineDaemonAuth } from "./index-shared";
 import { tellPageAutomationChannels } from "./page-automation-wake";
+import { tellPageCoWriter } from "./page-co-write-instruction";
 import { fireOwedAutomationTriggers } from "./automation-triggers";
 import { readGitHubFile, type GitHubFileContent } from "./app-connectors";
 import { findAppConnection } from "./apps";
@@ -324,16 +325,28 @@ export function registerPageRoutes(app: Hono<{ Bindings: Env }>): void {
   }));
 
   // Co-writing (docs/design/pages-live-document.md §4.2): a person starts it from the page for a
-  // conversation linked to it, and the Agent there suggests; its suggestions wait until reviewed.
+  // conversation linked to it. Live, the Agent there joins the page's session and writes into it as
+  // its words come; otherwise its edits wait as suggestions until reviewed.
   app.post(`${base}/:pageId/co-writing`, async (c) => run(c, async () => {
     const body = await json(c);
-    return repository(c.env).startCoWriting({ requestId: crypto.randomUUID(), spaceId: c.req.param("spaceId"),
-      pageId: c.req.param("pageId"), principal: await principal(c),
-      conversationId: typeof body.conversationId === "string" ? body.conversationId : "" });
+    const authUser = await requireAuth(c.req.raw, c.env);
+    const at = { spaceId: c.req.param("spaceId"), pageId: c.req.param("pageId"),
+      conversationId: typeof body.conversationId === "string" ? body.conversationId : "" };
+    const started = await repository(c.env).startCoWriting({ requestId: crypto.randomUUID(), ...at,
+      principal: runPrincipalOf(authUser) });
+    if (body.live === true) await tellPageCoWriter(c.env, { ...at, userId: authUser.id, active: true });
+    return started;
   }));
-  app.delete(`${base}/:pageId/co-writing/:conversationId`, async (c) => run(c, async () =>
-    repository(c.env).endCoWriting({ requestId: crypto.randomUUID(), spaceId: c.req.param("spaceId"),
-      pageId: c.req.param("pageId"), principal: await principal(c), conversationId: c.req.param("conversationId") })));
+  app.delete(`${base}/:pageId/co-writing/:conversationId`, async (c) => run(c, async () => {
+    const authUser = await requireAuth(c.req.raw, c.env);
+    const at = { spaceId: c.req.param("spaceId"), pageId: c.req.param("pageId"),
+      conversationId: c.req.param("conversationId") };
+    const ended = await repository(c.env).endCoWriting({ requestId: crypto.randomUUID(), ...at,
+      principal: runPrincipalOf(authUser) });
+    // A live co-writer leaves the page too; one that never joined has nothing to leave.
+    if (ended.ended) await tellPageCoWriter(c.env, { ...at, userId: authUser.id, active: false });
+    return ended;
+  }));
   app.get(`${base}/:pageId/suggestions`, async (c) => run(c, async () => repository(c.env).suggestions({
     requestId: crypto.randomUUID(), spaceId: c.req.param("spaceId"), pageId: c.req.param("pageId"),
     principal: await principal(c) })));
