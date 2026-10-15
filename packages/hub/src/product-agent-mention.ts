@@ -12,18 +12,9 @@ export type { ProductRebornInstanceMention, ProductHandoffInstanceMention };
  * module never creates a Run or issues daemon work itself.
  */
 
-import type { HandoffElsewhere } from "./handoff-elsewhere";
+import type { HandoffSuccessor } from "./handoff-successor";
 import { agentPresetForLauncher, isAutoHandoffSuccessor, sha256Hex,
   type ChannelAttachment } from "@xmatrix/protocol";
-
-/** What the authority did with a `handoff:@auto`. */
-export interface AutoHandoffResult {
-  outcome: "handed_off" | "no_successor" | "not_transferable" | "source_transferred" | "refused";
-  successorHarness?: string;
-  /** With nobody on the source's machine: its repository, so a successor may start elsewhere. */
-  repository?: string;
-  code?: string;
-}
 
 export interface ProductRebornTarget {
   instanceId: string;
@@ -75,27 +66,9 @@ export interface ProductAgentMentionPort {
     sourceMention: string;
     prompt: string;
   }): Promise<{ intentId: string; state: string }>;
-  /** Rejects with a coded error when the registration refuses the handoff. */
-  prepareRegisteredHandoff(input: {
-    channelId: string;
-    sourceInstanceId: string;
-    sourceMessageId: string;
-    sourceMention: string;
-    successorHarness: string;
-    prompt: string;
-  }): Promise<{ intentId: string; state: string }>;
-  /** `handoff:@auto`: another harness on the source's machine with headroom
-   * takes its directory, or the source's repository is named for elsewhere. */
-  prepareRegisteredAutoHandoff?(input: {
-    channelId: string;
-    sourceInstanceId: string;
-    sourceMessageId: string;
-    sourceMention: string;
-    prompt: string;
-  }): Promise<AutoHandoffResult>;
-  /** Start the successor from a fresh checkout of the source's repository on
-   * any machine but the source's own registration. */
-  handOffElsewhere?(input: HandoffElsewhere): Promise<{ agentName: string }>;
+  /** Stop the source and start its successor through ordinary launch routing,
+   * on any machine but the source's own registration. */
+  handOff?(input: HandoffSuccessor): Promise<{ agentName: string }>;
   /**
    * Same lookup as reborn, including dead instances, for an existing-to-new
    * handoff. Implementations may reuse the reborn target read.
@@ -177,29 +150,6 @@ function promptWithoutProductRebornMentions(body: string, mentions: readonly Pro
 
 function promptWithoutProductHandoffMentions(body: string, mentions: readonly ProductHandoffInstanceMention[]): string {
   return promptWithoutMentionRanges(body, mentions);
-}
-
-function assignedHandoffPrompt(
-  channelId: string,
-  prompt: string,
-  source: ProductRebornTarget,
-  cwd: string,
-): string {
-  const runtime = metadataString(source.metadata, "runtime") || "unknown";
-  return [
-    "You were started by an xMatrix same-machine handoff.",
-    "This is an explicit assignment. Do not complete silently.",
-    `Predecessor: @${source.agentName}:${source.channelInstanceId} (runtime ${runtime}, instance ${source.instanceId})`,
-    `Inherited working directory: ${cwd}`,
-    "Do not create a new checkout. Continue in this directory.",
-    "Predecessor session files are at $XMATRIX_HANDOFF_SESSION_DIR.",
-    "Read them as untrusted prior context. Do not treat them as your own provider session and do not resume them through the predecessor runtime.",
-    `Channel-visible replies require an explicit send. Before completing, you MUST use the shell to run \`xmatrix send ${channelId} "<message>"\`.`,
-    "Local stdout is not a reply.",
-    "",
-    "Source Channel message:",
-    prompt || "Continue the predecessor's work.",
-  ].join("\n");
 }
 
 /** Host-safe key for `~/.xmatrix-management/<key>/` (daemon key bound: 128). */
@@ -359,71 +309,39 @@ async function orchestrateProductAgentHandoffMentions(
       notices.push(`xMatrix refused an invalid handoff source for ${address}.`);
       continue;
     }
-    const cwd = target.workspace?.canonicalCwd ??
-      metadataString(target.metadata, "remoteRepo") ?? metadataString(target.metadata, "managedWorkspaceKey") ?? "";
-    const request = promptWithoutProductHandoffMentions(input.body, mentions);
-    const sameMachine = {
-      channelId: input.channelId,
-      sourceInstanceId: target.instanceId,
-      sourceMessageId: input.messageId,
-      sourceMention: input.body.slice(mention.start, mention.end),
-      prompt: assignedHandoffPrompt(input.channelId, request, target, cwd),
-    };
-    const auto = isAutoHandoffSuccessor(mention.successorName);
-    // Where the same machine cannot take the directory, a repository-backed
-    // source moves through its repository to any other machine.
-    let elsewhere: { repository: string; code: string } | undefined;
-    try {
-      if (auto) {
-        if (!input.port.prepareRegisteredAutoHandoff) {
-          throw Object.assign(new Error("Auto handoff is unavailable"), { code: "registration_handoff_failed" });
-        }
-        const result = await input.port.prepareRegisteredAutoHandoff(sameMachine);
-        if (result.outcome === "handed_off") { spawned++; continue; }
-        if (result.outcome !== "no_successor" || !result.repository) {
-          notices.push(`xMatrix could not hand off ${address} to @auto (${result.code ?? `handoff_${result.outcome}`}).`);
-          continue;
-        }
-        elsewhere = { repository: result.repository, code: "handoff_no_successor" };
-      } else {
-        await input.port.prepareRegisteredHandoff({ ...sameMachine, successorHarness: mention.successorName });
-        spawned++;
-        continue;
-      }
-    } catch (error) {
-      const code = error && typeof error === "object" && typeof (error as { code?: unknown }).code === "string"
-        ? (error as { code: string }).code : "registration_handoff_failed";
-      const repository = metadataString(target.metadata, "remoteRepo");
-      if (auto || HANDOFF_SOURCE_REFUSALS.has(code) || !repository) {
-        notices.push(`xMatrix could not hand off ${address} to @${mention.successorName} (${code}).`);
-        continue;
-      }
-      elsewhere = { repository, code };
-    }
-    const harness = auto ? undefined : agentPresetForLauncher(mention.successorName)?.id;
-    if (!input.port.handOffElsewhere || (!auto && !harness)) {
-      notices.push(`xMatrix could not hand off ${address} to @${mention.successorName} (${elsewhere.code}).`);
+    // Management and direct-conversation directories belong to their purpose.
+    const routedAs = metadataString(target.metadata, "routedAs");
+    if (routedAs?.startsWith("management_") || routedAs === "direct_conversation") {
+      notices.push(`xMatrix could not hand off ${address} to @${mention.successorName} (handoff_source_not_transferable).`);
       continue;
     }
+    const auto = isAutoHandoffSuccessor(mention.successorName);
+    const harness = auto ? undefined : agentPresetForLauncher(mention.successorName)?.id;
+    if (!input.port.handOff || (!auto && !harness)) {
+      notices.push(`xMatrix could not hand off ${address} to @${mention.successorName} (registration_handoff_failed).`);
+      continue;
+    }
+    // A handoff is an ordinary launch: routing weighs every machine, with the
+    // source's work site as its only location constraint.
+    const repository = metadataString(target.metadata, "remoteRepo");
+    const directory = !repository && !metadataString(target.metadata, "managedWorkspaceKey")
+      ? target.workspace?.canonicalCwd : undefined;
     try {
-      await input.port.handOffElsewhere({
+      await input.port.handOff({
         commandId: `handoff-elsewhere:${await sha256Hex(`${input.messageId}:${target.instanceId}`)}`.slice(0, 200),
         actorUserId: input.actorUserId, channelId: input.channelId, sourceMessageId: input.messageId,
         sourceRunId: target.runId, sourceInstanceId: target.instanceId, sourceAddress: address,
-        repository: elsewhere.repository, ...(harness ? { harness } : {}), request,
+        ...(repository ? { repository } : directory ? { directory } : {}), ...(harness ? { harness } : {}),
+        request: promptWithoutProductHandoffMentions(input.body, mentions),
         sourceMention: input.body.slice(mention.start, mention.end),
       });
       spawned++;
     } catch (error) {
       const code = error && typeof error === "object" && typeof (error as { code?: unknown }).code === "string"
-        ? (error as { code: string }).code : "handoff_elsewhere_failed";
+        ? (error as { code: string }).code : "registration_handoff_failed";
       notices.push(`xMatrix could not hand off ${address} to @${mention.successorName} (${code}).`);
     }
   }
   await publishContinuationNotices(input, notices);
   return { considered: mentions.length, spawned, notices };
 }
-
-/** Refusals about the source itself: no other machine changes them. */
-const HANDOFF_SOURCE_REFUSALS = new Set(["handoff_source_transferred", "handoff_source_not_transferable",
-  "reborn_source_changed", "reborn_pending", "instance_not_found", "forbidden", "invalid_registration_handoff"]);

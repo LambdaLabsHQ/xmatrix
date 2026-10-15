@@ -99,9 +99,9 @@ function basePort(overrides = {}) {
       reborns.push(input);
       return { intentId: `intent:${input.sourceInstanceId}`, state: "waiting" };
     },
-    async prepareRegisteredHandoff(input) {
+    async handOff(input) {
       handoffs.push(input);
-      return { intentId: `intent:handoff:${input.sourceInstanceId}`, state: "waiting" };
+      return { agentName: input.harness ?? "codex" };
     },
     async getChannel() {
       return { id: "ch-1", spaceId: "space-1", mode: "open" };
@@ -271,37 +271,6 @@ test("a refused registration reborn names its code in the Channel", async () => 
   assert.match(port.notices[0], /registration_reborn_unregistered.*No recovery was queued/);
 });
 
-test("a handoff hands the source's directory to the named harness through its registration", async () => {
-  const port = basePort({
-    async getRebornTarget(input) {
-      return handoffTarget(input, { workspace: { machineId: "machine-1", canonicalCwd: "/tmp/project" }, metadata: { runtime: "codex" } });
-    },
-  });
-  const result = await orchestrateProductAgentMentions({ channelId: "ch-1", messageId: "m-3",
-    body: "@codex:2:handoff:@claude finish the refactor", actorUserId: "user-1", port });
-  assert.equal(result.spawned, 1);
-  assert.equal(port.handoffs.length, 1);
-  const [handoff] = port.handoffs;
-  assert.equal(handoff.sourceInstanceId, "ch-1:2");
-  assert.equal(handoff.successorHarness, "claude");
-  assert.equal(handoff.sourceMention, "@codex:2:handoff:@claude");
-  assert.match(handoff.prompt, /Inherited working directory: \/tmp\/project/);
-  assert.match(handoff.prompt, /finish the refactor/);
-});
-
-test("a refused handoff names its code in the Channel", async () => {
-  const port = basePort({
-    getRebornTarget: handoffTarget,
-    async prepareRegisteredHandoff() {
-      throw Object.assign(new Error("refused"), { code: "registration_not_found" });
-    },
-  });
-  const result = await orchestrateProductAgentMentions({ channelId: "ch-1", messageId: "m-4",
-    body: "@codex:2:handoff:@grok", actorUserId: "user-1", port });
-  assert.equal(result.spawned, 0);
-  assert.match(port.notices[0], /could not hand off @codex:2 to @grok \(registration_not_found\)/);
-});
-
 function repoSource(overrides = {}) {
   return async ({ channelInstanceId }) => ({ instanceId: "ch-1:2", instanceStatus: "online", channelId: "ch-1",
     channelInstanceId, runId: "run-2", runStatus: "running", agentName: "claude", harness: "claude",
@@ -309,69 +278,59 @@ function repoSource(overrides = {}) {
     metadata: { runtime: "claude", remoteRepo: "acme/app" }, ...overrides });
 }
 
-test("a handoff to the source's own harness moves to another machine through the repository", async () => {
-  const elsewhere = [];
-  const port = basePort({
-    getRebornTarget: repoSource(),
-    async prepareRegisteredHandoff() { throw Object.assign(new Error("same"), { code: "handoff_same_agent" }); },
-    async handOffElsewhere(input) { elsewhere.push(input); return { agentName: "claude" }; },
-  });
-  const result = await orchestrateProductAgentMentions({ channelId: "ch-1", messageId: "m-5",
-    body: "@claude:2:handoff:@claude keep going", actorUserId: "user-1", port });
+test("a named handoff is an ordinary launch of that harness through the source's repository", async () => {
+  // The named harness may be the source's own: the same harness elsewhere is eligible.
+  for (const [body, harness] of [["@claude:2:handoff:@codex keep going", "codex"], ["@claude:2:handoff:@claude keep going", "claude"]]) {
+    const port = basePort({ getRebornTarget: repoSource() });
+    const result = await orchestrateProductAgentMentions({ channelId: "ch-1", messageId: "m-5", body,
+      actorUserId: "user-1", port });
+    assert.equal(result.spawned, 1);
+    assert.deepEqual(port.notices, []);
+    const [handoff] = port.handoffs;
+    assert.match(handoff.commandId, /^handoff-elsewhere:[0-9a-f]{64}$/u);
+    assert.deepEqual({ ...handoff, commandId: undefined }, { commandId: undefined, actorUserId: "user-1", channelId: "ch-1",
+      sourceMessageId: "m-5", sourceRunId: "run-2", sourceInstanceId: "ch-1:2", sourceAddress: "@claude:2",
+      repository: "acme/app", harness, request: "keep going", sourceMention: body.split(" ")[0] });
+  }
+});
+
+test("@auto leaves the harness to routing, with no same-machine preference", async () => {
+  const port = basePort({ getRebornTarget: repoSource() });
+  const result = await orchestrateProductAgentMentions({ channelId: "ch-1", messageId: "m-6",
+    body: "@claude:2:handoff:@auto", actorUserId: "user-1", port });
   assert.equal(result.spawned, 1);
-  assert.deepEqual(port.notices, []);
-  assert.equal(elsewhere.length, 1);
-  const [handoff] = elsewhere;
-  assert.match(handoff.commandId, /^handoff-elsewhere:[0-9a-f]{64}$/u);
-  assert.deepEqual({ ...handoff, commandId: undefined }, { commandId: undefined, actorUserId: "user-1", channelId: "ch-1",
-    sourceMessageId: "m-5", sourceRunId: "run-2", sourceInstanceId: "ch-1:2", sourceAddress: "@claude:2",
-    repository: "acme/app", harness: "claude", request: "keep going",
-    sourceMention: "@claude:2:handoff:@claude" });
+  assert.equal(port.handoffs[0].harness, undefined, "routing picks the harness");
+  assert.equal(port.handoffs[0].repository, "acme/app");
+  assert.equal(port.handoffs[0].sourceMention, "@claude:2:handoff:@auto");
 });
 
-test("@auto takes a same-machine successor when there is one, and any machine otherwise", async () => {
-  const autos = [], elsewhere = [];
-  const port = (outcome) => basePort({
-    getRebornTarget: repoSource(),
-    async prepareRegisteredAutoHandoff(input) { autos.push(input); return outcome; },
-    async handOffElsewhere(input) { elsewhere.push(input); return { agentName: "codex" }; },
-  });
-  const here = await orchestrateProductAgentMentions({ channelId: "ch-1", messageId: "m-6",
-    body: "@claude:2:handoff:@auto", actorUserId: "user-1",
-    port: port({ outcome: "handed_off", successorHarness: "codex" }) });
-  assert.equal(here.spawned, 1);
-  assert.equal(autos[0].sourceMention, "@claude:2:handoff:@auto");
-  assert.match(autos[0].prompt, /Inherited working directory: \/repo/);
-  assert.equal(elsewhere.length, 0);
-
-  const away = await orchestrateProductAgentMentions({ channelId: "ch-1", messageId: "m-7",
-    body: "@claude:2:handoff:@auto", actorUserId: "user-1",
-    port: port({ outcome: "no_successor", repository: "acme/app" }) });
-  assert.equal(away.spawned, 1);
-  assert.equal(elsewhere.length, 1);
-  assert.equal(elsewhere[0].harness, undefined, "routing picks the harness");
-  assert.equal(elsewhere[0].repository, "acme/app");
-  assert.equal(elsewhere[0].sourceMention, "@claude:2:handoff:@auto");
-});
-
-test("a handoff that cannot leave its machine says why, once", async () => {
-  for (const [body, overrides, code] of [
-    ["@claude:2:handoff:@codex", { getRebornTarget: repoSource({ metadata: { runtime: "claude" } }),
-      async prepareRegisteredHandoff() { throw Object.assign(new Error("none"), { code: "registration_not_found" }); } },
-    "registration_not_found"],
-    ["@claude:2:handoff:@codex", { getRebornTarget: repoSource(),
-      async prepareRegisteredHandoff() { throw Object.assign(new Error("pending"), { code: "reborn_pending" }); } },
-    "reborn_pending"],
-    ["@claude:2:handoff:@auto", { getRebornTarget: repoSource(),
-      async prepareRegisteredAutoHandoff() { return { outcome: "no_successor" }; } }, "handoff_no_successor"],
-    ["@claude:2:handoff:@codex", { getRebornTarget: repoSource(),
-      async prepareRegisteredHandoff() { throw Object.assign(new Error("same"), { code: "registration_not_found" }); },
-      async handOffElsewhere() { throw Object.assign(new Error("none"), { code: "registration_no_candidate" }); } },
-    "registration_no_candidate"],
+test("a source without a repository hands off its registered directory, or none for a managed one", async () => {
+  for (const [workspace, metadata, site] of [
+    [{ machineId: "machine-1", canonicalCwd: "/srv/notes" }, { runtime: "codex" }, { directory: "/srv/notes" }],
+    [{ machineId: "machine-1", canonicalCwd: "/home/u/.xmatrix-managed/k" }, { managedWorkspaceKey: "k" }, {}],
   ]) {
-    const elsewhere = [];
-    const port = basePort({ async handOffElsewhere(input) { elsewhere.push(input); return { agentName: "x" }; },
-      ...overrides });
+    const port = basePort({ getRebornTarget: input => handoffTarget(input, { workspace, metadata }) });
+    await orchestrateProductAgentMentions({ channelId: "ch-1", messageId: "m-3",
+      body: "@codex:2:handoff:@claude finish the refactor", actorUserId: "user-1", port });
+    const [handoff] = port.handoffs;
+    assert.equal(handoff.repository, site.repository);
+    assert.equal(handoff.directory, site.directory);
+    assert.equal(handoff.harness, "claude");
+    assert.equal(handoff.request, "finish the refactor");
+  }
+});
+
+test("a handoff that cannot start says why, once", async () => {
+  for (const [body, overrides, code] of [
+    ["@claude:2:handoff:@codex", { getRebornTarget: repoSource({ metadata: { routedAs: "management_space" } }) },
+      "handoff_source_not_transferable"],
+    ["@claude:2:handoff:@codex", { getRebornTarget: repoSource(),
+      async handOff() { throw Object.assign(new Error("none"), { code: "registration_quota_exhausted" }); } },
+    "registration_quota_exhausted"],
+    ["@claude:2:handoff:@codex", { getRebornTarget: repoSource(),
+      async handOff() { throw new Error("transport"); } }, "registration_handoff_failed"],
+  ]) {
+    const port = basePort(overrides);
     const result = await orchestrateProductAgentMentions({ channelId: "ch-1", messageId: "m-8", body,
       actorUserId: "user-1", port });
     assert.equal(result.spawned, 0, body);

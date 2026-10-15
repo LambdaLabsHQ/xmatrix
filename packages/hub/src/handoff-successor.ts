@@ -9,8 +9,9 @@ import type { Env } from "./types";
  * work after a response does not outlive ~30 seconds. */
 const HANDOFF_STOP_WAIT_MS = 15_000;
 
-/** A handoff whose successor starts from a fresh checkout, on any machine. */
-export interface HandoffElsewhere {
+/** A handoff: the source stops and a successor starts through the ordinary
+ * launch routing, on any machine, exactly as a summon would. */
+export interface HandoffSuccessor {
   /** Stable per handoff message, so a replay repeats the same steps and branch. */
   commandId: string;
   actorUserId: string;
@@ -22,12 +23,16 @@ export interface HandoffElsewhere {
   sourceAddress: string;
   /** The handoff mention as written, so the message can show what was picked. */
   sourceMention?: string;
-  /** The source's repository; the successor starts from a fresh checkout of it. */
-  repository: string;
   /** The successor's harness; absent for `@auto`, where routing picks any. */
   harness?: string;
   /** The rest of the handoff message, given to the successor as its request. */
   request: string;
+  /** Where the source worked; with neither, a private managed directory and
+   * the successor starts in a fresh one. A repository's whole checkout
+   * travels on a handoff branch. */
+  repository?: string;
+  /** A directory registered on a machine: routing can only place it there. */
+  directory?: string;
 }
 
 type Dependencies = {
@@ -40,18 +45,27 @@ export async function handoffBranch(commandId: string): Promise<string> {
   return HANDOFF_BRANCH_PREFIX + (await sha256Hex(commandId)).slice(0, 16);
 }
 
-/** The assignment of a successor started in a fresh checkout. */
-export function handoffElsewherePrompt(input: { channelId: string; sourceAddress: string; sourceInstanceId: string;
-  repository: string; branch: string; request: string }): string {
-  return [
-    `You were started by an xMatrix handoff: ${input.sourceAddress} handed its work to you.`,
-    "This is an explicit assignment. Do not complete silently.",
+/** The assignment of a handoff successor. */
+export function handoffSuccessorPrompt(input: { channelId: string; sourceAddress: string; sourceInstanceId: string;
+  request: string; repository?: string; branch?: string; directory?: string }): string {
+  const site = input.repository && input.branch ? [
     `Predecessor: ${input.sourceAddress} (instance ${input.sourceInstanceId}) in ${input.repository}`,
     "You run in a fresh checkout, possibly on another machine.",
     `Its machine was asked to push its whole checkout, including uncommitted and untracked work, to branch \`${input.branch}\` as it stops.`,
     `Fetch it with \`git fetch origin ${input.branch} && git checkout --detach FETCH_HEAD\`; if the branch is not there yet, retry for a few minutes.`,
     "If its last commit is \"xMatrix handoff: uncommitted work of …\", treat it as work in progress and reshape it into proper commits on your own branch.",
     "If the branch never appears, its directory remains on its machine. Continue from what it already pushed (its branch or pull request, named in the Channel or on the remote); do not redo finished work.",
+  ] : input.directory ? [
+    `Predecessor: ${input.sourceAddress} (instance ${input.sourceInstanceId}) in ${input.directory}`,
+    "You run in the same directory; its files are as the predecessor left them.",
+  ] : [
+    `Predecessor: ${input.sourceAddress} (instance ${input.sourceInstanceId}) in a private directory`,
+    "You run in a fresh directory, possibly on another machine; the predecessor's files stayed on its machine.",
+  ];
+  return [
+    `You were started by an xMatrix handoff: ${input.sourceAddress} handed its work to you.`,
+    "This is an explicit assignment. Do not complete silently.",
+    ...site,
     `Read the Channel with \`xmatrix channel history ${input.channelId}\` and continue the predecessor's unfinished work.`,
     `Channel-visible replies require an explicit send. Before completing, you MUST use the shell to run \`xmatrix send ${input.channelId} "<message>"\`.`,
     "Local stdout is not a reply.",
@@ -60,24 +74,27 @@ export function handoffElsewherePrompt(input: { channelId: string; sourceAddress
 }
 
 /**
- * Move a source's work to a successor that may run on any machine. Its daemon
- * stops it and pushes its whole checkout, uncommitted and untracked changes
- * included, to a handoff branch; then a new Instance starts through the
- * ordinary any-input launch, pinned to the repository (and the named harness),
- * so routing picks any registration with quota on any machine except the
- * source's own, and is told to continue from that branch.
+ * Move a source's work to a successor. Its daemon stops it (a repository
+ * checkout is pushed whole, uncommitted and untracked changes included, to a
+ * handoff branch); then a new Instance starts through the ordinary any-input
+ * launch, constrained only by the work site and a named harness, so routing
+ * weighs every registration with quota on every machine, as for any summon.
+ * Only the source's own registration is excluded.
  */
-export async function launchHandoffSuccessorElsewhere(env: Env, input: HandoffElsewhere,
+export async function launchHandoffSuccessor(env: Env, input: HandoffSuccessor,
   dependencies: Dependencies = {}): Promise<{ agentName: string }> {
-  const branch = await handoffBranch(input.commandId);
-  await saveSourceWork(env, input, branch, dependencies);
+  const { repository, directory } = input;
+  const branch = repository ? await handoffBranch(input.commandId) : undefined;
+  await stopSource(env, input, branch, dependencies);
+  const site = repository && branch ? { repository, branch } : directory ? { directory } : {};
   // Stop/export observations change as the source exits. Keep the launch
   // request identical so a retry recovers a staged successor after a lost wake.
   const launched = await (dependencies.dispatch ?? dispatchRegistrationInput)({
     env, commandId: input.commandId, actorUserId: input.actorUserId, channelId: input.channelId,
-    body: handoffElsewherePrompt({ channelId: input.channelId, sourceAddress: input.sourceAddress,
-      sourceInstanceId: input.sourceInstanceId, repository: input.repository, branch, request: input.request }),
-    tags: { repo: input.repository, ...(input.harness ? { harness: input.harness } : {}) },
+    body: handoffSuccessorPrompt({ channelId: input.channelId, sourceAddress: input.sourceAddress,
+      sourceInstanceId: input.sourceInstanceId, request: input.request, ...site }),
+    tags: { ...(repository ? { repo: repository } : directory ? { pwd: directory } : {}),
+      ...(input.harness ? { harness: input.harness } : {}) },
     excludeSourceInstanceId: input.sourceInstanceId,
     // The pick is a registration launch, not a continuation. Drawing it on the
     // handoff message is what lets `@auto` show the parameters Jev chose.
@@ -87,8 +104,9 @@ export async function launchHandoffSuccessorElsewhere(env: Env, input: HandoffEl
   return { agentName: launched.agentName };
 }
 
-/** Stop the source so its daemon pushes its checkout; the directory stays. */
-async function saveSourceWork(env: Env, input: HandoffElsewhere, branch: string,
+/** Stop the source; with a branch its daemon pushes its checkout. The
+ * directory stays. */
+async function stopSource(env: Env, input: HandoffSuccessor, branch: string | undefined,
   dependencies: Dependencies): Promise<void> {
   const port = (dependencies.intervention ?? createProductAgentInterventionAuthorityPort)({
     env, actorUserId: input.actorUserId, sourceMessageId: input.sourceMessageId });
@@ -101,5 +119,6 @@ async function saveSourceWork(env: Env, input: HandoffElsewhere, branch: string,
   // A timeout follows a durable stop request. An authority/issuance failure
   // must surface instead of starting a successor while the source can still act.
   await port.issueHandoffStop(target, `handoff-stop:${input.sourceRunId}`.slice(0, 200),
-    `${input.sourceAddress} handed off`, input.channelId, { branch, channelId: input.channelId }, HANDOFF_STOP_WAIT_MS);
+    `${input.sourceAddress} handed off`, input.channelId,
+    branch ? { branch, channelId: input.channelId } : undefined, HANDOFF_STOP_WAIT_MS);
 }

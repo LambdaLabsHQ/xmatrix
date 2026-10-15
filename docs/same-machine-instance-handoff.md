@@ -1,5 +1,11 @@
 # Same-machine instance handoff
 
+> **Superseded for new handoffs.** Every handoff, named or `@auto`, is now an
+> ordinary launch through routing on any machine (§2.2 is the only path; the
+> Hub no longer prepares same-machine handoff intents). The same-machine
+> machinery below remains only for handoffs already prepared, and is to be
+> removed together with the work-site transfer between machines.
+
 Status: shipped on main. Grammar and Hub orchestration landed in PR #1624.
 Daemon Transfer and session snapshot landed in PR #1628. CLI/daemon
 binaries that can Transfer require the `0.16.1` release train.

@@ -1,21 +1,21 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { handoffBranch, launchHandoffSuccessorElsewhere } from "../src/handoff-elsewhere.ts";
+import { handoffBranch, launchHandoffSuccessor } from "../src/handoff-successor.ts";
 
 /**
- * A handoff the source's machine cannot take: its daemon stops it and pushes
- * its whole checkout to a handoff branch, then a successor starts from that
- * branch on any machine but the source's own registration.
+ * Every handoff: the source's daemon stops it (pushing a repository checkout
+ * whole to a handoff branch), then a successor starts through ordinary launch
+ * routing on any machine but the source's own registration.
  */
 
 const commit = "a".repeat(40);
 
-function fixture({ targets, stop, dispatch, harness } = {}) {
+function fixture({ targets, stop, dispatch, harness, site = { repository: "acme/app" } } = {}) {
   const calls = [];
   const input = { commandId: "handoff-elsewhere:n1", actorUserId: "owner", channelId: "channel",
     sourceMessageId: "message-1", sourceRunId: "run-1", sourceInstanceId: "instance-1", sourceAddress: "@claude:3",
-    repository: "acme/app", request: "finish the review", ...(harness ? { harness } : {}) };
+    ...site, request: "finish the review", ...(harness ? { harness } : {}) };
   const dependencies = {
     dispatch: async request => {
       calls.push(["dispatch", request]);
@@ -31,8 +31,8 @@ function fixture({ targets, stop, dispatch, harness } = {}) {
         ]; },
         async issueHandoffStop(...args) {
           calls.push(["stop", ...args]);
-          return stop ? stop(...args) : { stopped: true, handoffExport: { branch: args[4].branch, state: "pushed",
-            commit, base: "b".repeat(40), dirty: true } };
+          return stop ? stop(...args) : { stopped: true, ...(args[4] ? { handoffExport: { branch: args[4].branch,
+            state: "pushed", commit, base: "b".repeat(40), dirty: true } } : {}) };
         },
       };
     },
@@ -44,7 +44,7 @@ test("the source stops and pushes its checkout, then a successor of the named ha
   const f = fixture({ harness: "claude" });
   const branch = await handoffBranch(f.input.commandId);
   assert.match(branch, /^xmatrix\/handoff\/[0-9a-f]{16}$/u);
-  const result = await launchHandoffSuccessorElsewhere({}, f.input, f.dependencies);
+  const result = await launchHandoffSuccessor({}, f.input, f.dependencies);
   assert.deepEqual(f.calls.map(call => call[0]), ["intervention", "list", "stop", "dispatch"]);
   const stop = f.calls.find(call => call[0] === "stop");
   assert.equal(stop[1].runId, "run-1");
@@ -73,7 +73,7 @@ test("the source stops and pushes its checkout, then a successor of the named ha
 test("@auto leaves the harness to routing and is drawn on the handoff message", async () => {
   const f = fixture();
   f.input.sourceMention = "@claude:3:handoff:@auto";
-  await launchHandoffSuccessorElsewhere({}, f.input, f.dependencies);
+  await launchHandoffSuccessor({}, f.input, f.dependencies);
   const dispatch = f.calls.find(call => call[0] === "dispatch")[1];
   assert.deepEqual(dispatch.tags, { repo: "acme/app" });
   assert.equal(dispatch.presentationMessageId, "message-1");
@@ -82,7 +82,7 @@ test("@auto leaves the harness to routing and is drawn on the handoff message", 
 
 test("an unconfirmed stop still starts the successor, told to wait for the branch", async () => {
   const f = fixture({ stop: async () => ({ stopped: false }) });
-  const result = await launchHandoffSuccessorElsewhere({}, f.input, f.dependencies);
+  const result = await launchHandoffSuccessor({}, f.input, f.dependencies);
   assert.equal(result.agentName, "claude");
   const body = f.calls.find(call => call[0] === "dispatch")[1].body;
   assert.match(body, /was asked to push its whole checkout/);
@@ -97,7 +97,7 @@ test("unsaved work still gets a successor, told the work stayed behind", async (
     [async () => ({ stopped: true, handoffExport: { branch: "main", state: "pushed", commit, dirty: true } })],
   ]) {
     const f = fixture({ stop, targets });
-    const result = await launchHandoffSuccessorElsewhere({}, f.input, f.dependencies);
+    const result = await launchHandoffSuccessor({}, f.input, f.dependencies);
     assert.equal(result.agentName, "claude");
     assert.match(f.calls.find(call => call[0] === "dispatch")[1].body, /its directory remains on its machine/);
   }
@@ -116,10 +116,10 @@ test("a lost wake replays the same launch after the source stops, without anothe
     throw new Error("wake response lost after staging");
   };
   const first = fixture({ dispatch });
-  await assert.rejects(launchHandoffSuccessorElsewhere({}, first.input, first.dependencies), /wake response lost/);
+  await assert.rejects(launchHandoffSuccessor({}, first.input, first.dependencies), /wake response lost/);
   // The stopped source is still durably addressable by its exact Run/Instance.
   const replay = fixture({ dispatch });
-  assert.equal((await launchHandoffSuccessorElsewhere({}, replay.input, replay.dependencies)).agentName, "codex");
+  assert.equal((await launchHandoffSuccessor({}, replay.input, replay.dependencies)).agentName, "codex");
   assert.equal(launches, 1);
   assert.equal(replay.calls.some(call => call[0] === "stop"), true);
 });
@@ -131,7 +131,7 @@ test("a failed source lookup or stop does not silently start a successor", async
     { stop: async () => { throw new Error("stop issuance failed"); } },
   ]) {
     const f = fixture(options);
-    await assert.rejects(launchHandoffSuccessorElsewhere({}, f.input, f.dependencies));
+    await assert.rejects(launchHandoffSuccessor({}, f.input, f.dependencies));
     assert.equal(f.calls.some(call => call[0] === "dispatch"), false);
   }
 });
@@ -150,12 +150,28 @@ test("pending, successful and failed exports keep the same launch request", asyn
       error: "push failed" } }),
   ]) {
     const f = fixture({ dispatch, stop });
-    await launchHandoffSuccessorElsewhere({}, f.input, f.dependencies);
+    await launchHandoffSuccessor({}, f.input, f.dependencies);
+  }
+});
+
+test("a directory without a repository stops without an export and routing places the successor by its location", async () => {
+  for (const [site, tags, wording] of [
+    [{ directory: "/srv/notes" }, { pwd: "/srv/notes", harness: "claude" }, /You run in the same directory/],
+    [{}, { harness: "claude" }, /fresh directory, possibly on another machine/],
+  ]) {
+    const f = fixture({ site, harness: "claude" });
+    await launchHandoffSuccessor({}, f.input, f.dependencies);
+    assert.equal(f.calls.find(call => call[0] === "stop")[5], undefined, "only a repository checkout is pushed");
+    const dispatch = f.calls.find(call => call[0] === "dispatch")[1];
+    assert.deepEqual(dispatch.tags, tags);
+    assert.equal(dispatch.excludeSourceInstanceId, "instance-1");
+    assert.match(dispatch.body, wording);
+    assert.doesNotMatch(dispatch.body, /git fetch/);
   }
 });
 
 test("a refused launch rejects with its code for the Channel notice", async () => {
   const f = fixture({ dispatch: async () => { throw Object.assign(new Error("none"), { code: "registration_no_candidate" }); } });
-  await assert.rejects(launchHandoffSuccessorElsewhere({}, f.input, f.dependencies),
+  await assert.rejects(launchHandoffSuccessor({}, f.input, f.dependencies),
     error => error.code === "registration_no_candidate");
 });
