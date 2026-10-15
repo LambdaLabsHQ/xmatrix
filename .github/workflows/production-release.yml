@@ -627,3 +627,31 @@ jobs:
           RELEASE_IMMUTABLE_VERSION: "true"
           RELEASE_TRANSACTION_ID: ${{ github.run_id }}:${{ github.run_attempt }}
         run: node scripts/publish-github-release.mjs
+
+  # Apple sends a sandbox TEST notification to the deployed Hub and reports its
+  # answer (docs/operations/ios-app-store-subscriptions.md). It runs after the
+  # receipts, which never wait on it: a failure here marks the run without
+  # withholding the receipt of a deployment that already happened.
+  app-store-notifications:
+    name: App Store notifications reach the Hub
+    needs: [preflight, receipt]
+    if: >-
+      always() && needs.receipt.result == 'success' &&
+      contains(format(',{0},', needs.preflight.outputs.scope), ',hub,')
+    environment: production
+    runs-on: *release_runner
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.preflight.outputs.deploy_sha }}
+          persist-credentials: false
+      - *restore_release_checkout9
+      - uses: ./.github/actions/setup-pnpm-node
+      - name: Build the packages the check imports
+        run: pnpm --filter @xmatrix/protocol build
+      - name: Send Apple's TEST notification and read the Hub's answer
+        env:
+          APPLE_SUBSCRIPTIONS_CONFIG: ${{ secrets.APPLE_SUBSCRIPTIONS_CONFIG }}
+          APPLE_SMOKE_TRANSACTION_ID: ${{ vars.APPLE_SANDBOX_SMOKE_TRANSACTION_ID }}
+        run: pnpm --dir packages/hub run apple:smoke
