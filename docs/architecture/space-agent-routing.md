@@ -244,7 +244,8 @@ to 1 MiB to 4 MiB and stop after a transfer lasts 250 ms. The maximum per cycle
 is 5.25 MiB in each direction, not a sustained line-saturation test. Bytes divided
 by full request duration give effective HTTPS Mbps; samples still below 250 ms
 at the byte limit are explicitly marked short and excluded from bandwidth
-ranking. Concurrent small requests measure median latency under transfer load.
+ranking. Concurrent small requests measure median latency under transfer load;
+loaded RTTs from short transfers also stay diagnostic rather than affect ranking.
 Each direction retains its original timestamp, including its loaded RTT.
 
 One hundred bounded OS `ping` probes to fixed target `1.1.1.1` report ICMP round-trip

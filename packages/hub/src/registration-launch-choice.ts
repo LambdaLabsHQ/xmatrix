@@ -150,7 +150,9 @@ export function jointRanking<T extends RegistrationLaunchCandidate>(candidates: 
   // never substituted for the HTTPS path (which may use an owner proxy).
   const cost = (network: MachineNetworkObservation | undefined) => network?.latencyP95Ms !== undefined &&
     network.attempts - network.failures >= 5
-    ? Math.max(1, network.latencyP95Ms, network.download?.loadedLatencyMs ?? 0, network.upload?.loadedLatencyMs ?? 0) : undefined;
+    ? Math.max(1, network.latencyP95Ms,
+      network.download && !network.download.shortSample ? network.download.loadedLatencyMs ?? 0 : 0,
+      network.upload && !network.upload.shortSample ? network.upload.loadedLatencyMs ?? 0 : 0) : undefined;
   const fastest = Math.min(...networks.map(cost).filter(value => value !== undefined));
   const bandwidth = (network: MachineNetworkObservation | undefined) => {
     const down = network?.download, up = network?.upload;
