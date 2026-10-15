@@ -101,7 +101,7 @@ export function ReferenceChip({ icon, label, title, badge, preview, ariaLabel, t
         delay={220}
         closeDelay={160}
         nativeButton={false}
-        render={<button type="button" />}
+        render={<span />}
         className={className}
         data-testid={`${testId}-chip`}
         {...data}

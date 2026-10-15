@@ -37,9 +37,12 @@ function referenceLabel(span: MessageReferenceSpan, targets: PageReferenceTarget
 }
 
 /** The message chip's markup (page-reference-chip.tsx), built for a place React does not draw. */
-function referenceChip(span: MessageReferenceSpan, label: string, targets: PageReferenceTargets): HTMLButtonElement {
-  const chip = document.createElement("button");
-  chip.type = "button";
+function referenceChip(span: MessageReferenceSpan, label: string, targets: PageReferenceTargets): HTMLSpanElement {
+  // A span, not a <button>: a button is always an atomic inline box, so a label that wraps
+  // (a narrow table column) became one tall pill instead of a capsule per line.
+  const chip = document.createElement("span");
+  chip.setAttribute("role", "button");
+  chip.tabIndex = 0;
   chip.className = "app-page-reference-chip";
   chip.contentEditable = "false";
   chip.dataset.testid = `${span.kind}-reference-chip`;
@@ -54,11 +57,15 @@ function referenceChip(span: MessageReferenceSpan, label: string, targets: PageR
   chip.append(text);
   // The click opens the target and leaves the editor's selection where it was.
   chip.addEventListener("mousedown", (event) => event.preventDefault());
-  chip.addEventListener("click", (event) => {
+  const open = (event: Event) => {
     event.preventDefault();
     event.stopPropagation();
     if (span.kind === "page") targets.openPage(span.pageId, span.blockId);
     else targets.openChannel(span.channelId);
+  };
+  chip.addEventListener("click", open);
+  chip.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" || event.key === " ") open(event);
   });
   return chip;
 }
