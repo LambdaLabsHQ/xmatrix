@@ -8,6 +8,10 @@ const compiled = ts.transpileModule(
   readDashboardSource("timeline-reading-anchor.ts"),
   { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } },
 ).outputText;
+const scrollRestCompiled = ts.transpileModule(
+  readDashboardSource("timeline-scroll-rest.ts"),
+  { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } },
+).outputText;
 
 const IPHONE = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148";
 
@@ -36,6 +40,11 @@ function timeline({ userAgent = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537
   vm.runInNewContext(compiled, {
     exports,
     require: (name) => {
+      if (name === "./timeline-scroll-rest") {
+        const scrollRest = {};
+        vm.runInNewContext(scrollRestCompiled, { exports: scrollRest, navigator: { userAgent } });
+        return scrollRest;
+      }
       assert.equal(name, "react");
       return {
         useCallback: (callback) => callback,

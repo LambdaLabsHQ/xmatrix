@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useRef } from "react";
 
+import { SCROLLING_MOVES_NO_ROWS } from "./timeline-scroll-rest";
+
 /* The message a reader is looking at while an older page is prepended above
    it, and where on screen its content sat before the prepend.
 
@@ -25,14 +27,6 @@ const READING_ANCHOR_SETTLE_MS = 750;
    scroll compensation. Keep that correction window open; the much shorter
    quiet-period timer still releases an ordinarily settled prepend. */
 const READING_ANCHOR_MAX_MS = 10_000;
-
-/* Where the virtualizer keeps rows in place without scrolling while the reader
-   scrolls (react-virtuoso's own iOS test). A scroll written during an iOS
-   momentum scroll interrupts it and shows the place it lands on before it is
-   painted: a blank band across the timeline (user 2026-10-14: "上滑的时候，消息会突然空白").
-   There the anchor holds only until someone else scrolls. */
-const SCROLLING_MOVES_NO_ROWS = typeof navigator !== "undefined" &&
-  /iP(ad|od|hone)/i.test(navigator.userAgent) && /WebKit/i.test(navigator.userAgent);
 
 /* The row wrapper carries the anchor id; its last child is the message row
    itself, below any day divider the wrapper also renders. */
@@ -151,6 +145,8 @@ export function useTimelineReadingAnchor(root: HTMLElement | null) {
        prepend introduced. */
     const onScroll = () => {
       // The anchor's own correction leaves the timeline where it was held.
+      // Where a scroll mid-flick blanks the screen, the anchor holds only
+      // until someone else scrolls (see timeline-scroll-rest).
       if (SCROLLING_MOVES_NO_ROWS && root.scrollTop !== heldScrollTop) {
         release();
         return;

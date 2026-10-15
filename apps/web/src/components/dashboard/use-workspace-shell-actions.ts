@@ -175,6 +175,7 @@ import type { WorkspaceShellState } from "./use-workspace-shell-state";
 import { useWorkspaceAutomationActions } from "./use-workspace-automation-actions";
 import { spaceMemberCanCreate } from "./space-member-permissions";
 import { questionnaireAnswerPayload, type QuestionnaireAnswer } from "./questionnaire-card";
+import { SCROLLING_MOVES_NO_ROWS, timelineScrollRest } from "./timeline-scroll-rest";
 
 const NO_TIMELINE_EVENTS: readonly ObservabilityEvent[] = [];
 
@@ -2119,6 +2120,13 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
         beforeSequence,
       });
       if (s.selectedChannelIdRef.current !== s.selectedChannel.id) return;
+      // On iPhone the page goes in once the reader's flick has stopped: the
+      // list keeps their place with a scroll, and one mid-flick blanks the screen.
+      const scrollRoot = s.timelineScrollRef.current;
+      if (SCROLLING_MOVES_NO_ROWS && scrollRoot) {
+        await timelineScrollRest(scrollRoot);
+        if (s.selectedChannelIdRef.current !== s.selectedChannel.id) return;
+      }
       mergeAndRememberChannelHistory(
         s.selectedChannel.id,
         olderPage.messages,
