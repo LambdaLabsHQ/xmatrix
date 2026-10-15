@@ -1355,12 +1355,12 @@ test("on a long page, who works out of view shows at its edges, and what an Agen
 
 test("everyday editing works as in Google Docs: rename the page, grow a table, links from typed URLs", async ({ page: browser }) => {
   await browser.setViewportSize({ width: 1280, height: 800 });
-  // The page name differs from the opening heading, so the header still carries it, as plain text.
+  // The document opens without a top-level heading to name it, so the header carries the name, as plain text.
   await stubPages(browser, [page("p-relay", null, "Service", "V")]);
   await fixtureJson(browser, "page-links", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\?.*$/u, { links: [] });
   await fixtureJson(browser, "page-rename", /\/api\/xmatrix\/spaces\/[^/]+\/pages\/p-relay$/u,
     { page: page("p-relay", null, "Relay service", "V") }, { method: "PATCH" });
-  const server = pageDocument("# Relay\n\n| Area | State |\n|---|---|\n| Search | Shipped |\n\nSee the notes.\n");
+  const server = pageDocument("## Relay\n\n| Area | State |\n|---|---|\n| Search | Shipped |\n\nSee the notes.\n");
   const editor = await openLivePage(browser, server);
 
   // The title is the page's name, drawn as text: click, type, Enter. No field well.

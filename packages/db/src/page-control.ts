@@ -84,6 +84,13 @@ export function pageTitle(value: unknown): string {
   return value.trim();
 }
 
+/** The top-level heading a page's document opens with. That heading is the page's name. */
+function openingHeading(body: string): string | null {
+  const line = body.trimStart().split("\n", 1)[0]?.trim() ?? "";
+  const heading = /^#\s+(\S.*)$/u.exec(line)?.[1]?.trim() ?? null;
+  return heading && [...heading].length <= 200 ? heading : null;
+}
+
 export function pageBody(value: unknown): string {
   if (typeof value !== "string") throw new PageControlError("invalid_page_body", 400, "A page body is text");
   if (utf8ByteLength(value) > MAX_BODY_BYTES) {
@@ -532,8 +539,9 @@ export class PostgresPageRepository {
     parentPageId?: string | null; title: string; body?: string; afterPageId?: string | null;
     accessMode?: "open" | "restricted" }): Promise<{ page: PageSummary }> {
     const spaceId = bounded(input.spaceId, "spaceId");
-    const newTitle = pageTitle(input.title);
-    const newBody = pageBody(input.body ?? `# ${newTitle}\n`);
+    const newBody = pageBody(input.body ?? `# ${pageTitle(input.title)}\n`);
+    // A body that opens with a top-level heading names the page there.
+    const newTitle = openingHeading(newBody) ?? pageTitle(input.title);
     const accessMode = input.accessMode ?? "open";
     if (accessMode !== "open" && accessMode !== "restricted") {
       throw new PageControlError("invalid_request", 400, "accessMode is open or restricted");
@@ -683,10 +691,10 @@ export class PostgresPageRepository {
       suggestion ? "suggestion" : input.kind, input.baseRevision, now);
     const anchoring = suggestion ? { channels: [], detached: [], attached: [] } : await (async () => {
       await tx.query({
-        name: "page_head_advance_v1",
-        text: `UPDATE data.pages SET head_revision=$3, version=version+1, updated_at=$4
+        name: "page_head_advance_v2",
+        text: `UPDATE data.pages SET head_revision=$3, title=COALESCE($5,title), version=version+1, updated_at=$4
           WHERE space_id=$1 AND page_id=$2`,
-        values: [spaceId, pageId, revision, now], maxRows: 0,
+        values: [spaceId, pageId, revision, now, openingHeading(text)], maxRows: 0,
       });
       await this.settleEditedClaims(tx, spaceId, pageId, head, text, conversationIds);
       return reconcilePageAutomations(tx, { spaceId, pageId, body: text, at: now, revision });
