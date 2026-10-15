@@ -417,10 +417,39 @@ test('a requested effort applies to the runtime default model without a model ch
   assert.equal(Object.hasOwn(chosen.parameterEvidence.selections, 'model'), false);
   const { parseLaunchParameterEvidence } = await import('@xmatrix/protocol');
   assert.deepEqual(parseLaunchParameterEvidence(chosen.parameterEvidence), chosen.parameterEvidence);
-  // The runtime's own report of its default model bounds the effort; without a report the runtime decides at launch.
+  // Effort requires positive evidence for the current default model.
   await assert.rejects(choose({ effort: 'medium' }), error => error.code === 'registration_effort_unavailable');
-  assert.equal((await choose({ effort: 'medium' }, { ...candidate, modelCatalog: undefined })).effort, 'medium');
+  await assert.rejects(choose({ effort: 'medium' }, { ...candidate, modelCatalog: undefined }),
+    error => error.code === 'registration_effort_unavailable');
   await assert.rejects(choose({ effort: 'high', model: 'gpt-5.4' }), error => error.code === 'registration_effort_unavailable');
+});
+
+test('effort routing excludes unproven controls before weighing fit or machine headroom', async () => {
+  const supported = { ...candidates[0], models: [], supportsRequestedEffort: true, supportsDefaultModelEffort: true,
+    parameterModel: 'reasoner', modelCatalog: [{ model: 'reasoner', description: '', efforts: [{ value: 'high', description: '' }] }] };
+  const unsupported = { ...supported, key: { ...supported.key, harness: 'cursor' },
+    observations: { machineResources: { cpuUsagePercent: 0 }, quota: { remainingPercent: 100, assumed: true } } };
+  for (const missing of [
+    { modelCatalog: [{ model: 'reasoner', description: '', efforts: [] }] },
+    { modelCatalog: undefined },
+    { parameterModel: undefined },
+    { parameterModel: 'other-model' },
+    { supportsDefaultModelEffort: false },
+  ]) {
+    const cursor = { ...unsupported, ...missing };
+    const chosen = await registrationLaunchChooser(async input => answer(input))({
+      message: '@auto effort:high', tags: { effort: 'high' }, candidates: [cursor, supported] });
+    assert.deepEqual(chosen.key, supported.key);
+    assert.equal(chosen.effort, 'high');
+    await assert.rejects(registrationLaunchChooser(async () => { throw new Error('must not evaluate'); })({
+      message: '@cursor effort:high', tags: { effort: 'high' }, candidates: [cursor] }),
+    error => error.code === 'registration_effort_unavailable');
+  }
+  // Declaring model names does not prove that the provider can set effort either.
+  await assert.rejects(registrationLaunchChooser(async () => { throw new Error('must not evaluate'); })({
+    message: '@auto model:reasoner effort:high', tags: { model: 'reasoner', effort: 'high' },
+    candidates: [{ ...unsupported, models: ['reasoner'], modelCatalog: undefined }] }),
+  error => error.code === 'registration_effort_unavailable');
 });
 
 test('default-only harnesses read intent, location and fit in one call, then weigh machine load', async () => {
