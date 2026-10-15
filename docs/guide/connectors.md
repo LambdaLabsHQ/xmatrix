@@ -250,18 +250,28 @@ Apple keeps a few steps for a person in App Store Connect: creating the app reco
 
 ## Agents and apps
 
-An agent in a conversation can use the Space's connected apps as tools, with the same actions and the same rules as a person typing the command. You do not configure anything on the agent.
+An agent acts through a visible conversation message, with the same actions
+and rules as a person typing the command. `xmatrix connector list` shows the
+connected apps and their commands; `xmatrix send <channel-id> "<command>"`
+posts one. Its result replies to that message. You do not configure anything
+on the agent.
 
-Gmail search and read return mail content only to the calling agent tool.
-Conversation status and execution history show only whether the action
-completed, failed or was blocked; they do not include headers, snippets,
-bodies, verification links or provider error details. A typed Gmail read
-command also shows only this status. Ask your agent to use its Gmail tools
-to retrieve the content privately.
+Gmail search and read post mail content to the conversation receipt, and
+execution history stores a bounded excerpt. Everyone who can read the
+conversation can read that content. Search with
+`@gmail:search:* is:unread newer_than:1h`, or put one connected mailbox address
+in place of `*`. There is no connector MCP or caller-only mail result.
 
-For a Gmail MCP search, use `{"target":"*","text":"is:unread newer_than:1h"}`.
-`target` is only `*` or one connected mailbox address; the Gmail query goes
-in `text`. Put neither the `@gmail:search:` prefix nor the query in `target`.
+Do not use these actions to retrieve login codes or credentials that must
+stay out of messages. There is no Gmail-to-Space-secret transfer action.
+For an authorized manual login, an agent can request
+`xmatrix request secret-add <fresh-alias> --env QA_LOGIN_CODE --reason "QA login"`;
+a Space admin supplies the code in the request card, never in chat. The agent
+then uses `xmatrix secret exec --secret <fresh-alias>=QA_LOGIN_CODE -- <login-command>`
+to inject it into a process that does not print it or include it in screenshots,
+traces or request logs. This manual secret entry does not verify connector
+mail delivery or automatic login. Saving a value after reading a Channel
+receipt cannot remove its earlier disclosure.
 
 ## Limiting an action
 

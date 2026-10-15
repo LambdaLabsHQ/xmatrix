@@ -281,13 +281,13 @@ export const EVENT_CONNECTOR_MANIFESTS: AppConnectorProviderManifest[] = [
   {
     ...actionConnector({
       id: "gmail", name: "Gmail", kind: "docs",
-      description: "Search and read mail privately through Agent tools, with every link a message contains, so an Agent can find a verification email and open its link. Signs in through Composio. Connect several mailboxes; each is used only by the member or Agent it belongs to. Sending and replying ask for a Space admin's approval of each email by default.",
+      description: "Search and read connected mail through visible Channel commands. Results are posted to the Channel and execution history; do not retrieve login codes or credentials that must stay out of messages. Signs in through Composio. Each connected mailbox is used only by the member or Agent it belongs to. Sending and replying ask for a Space admin's approval of each email by default.",
       oauth: { authorizeUrl: "https://backend.composio.dev/api/v3.1/connected_accounts/link",
         tokenUrl: "https://backend.composio.dev/api/v3.1/connected_accounts", scopes: [], tokenField: "mailboxes", flow: "composio" },
       credentials: [{ id: "mailboxes", label: "Mailboxes", managed: true, description: "Each Connect adds a mailbox; a Space admin assigns each one to a member or an Agent. Never typed by hand." }],
       actions: [
-        readAction("search", "Search mail", 'The 10 newest messages per mailbox matching a Gmail query, with id, sender, subject and snippet, returned only to the calling tool; Channel receipts contain no mail content. MCP: set target to * or one connected mailbox address and text to the query, e.g. {"target":"*","text":"is:unread newer_than:1h"}.', "*|<mailbox> [gmail search]"),
-        readAction("read", "Read message", "Headers, text body and every link of one message, returned only to the calling tool; Channel receipts contain no mail content. Open a link yourself when the task needs it.", "<message id>"),
+        readAction("search", "Search mail", "The 10 newest messages per mailbox matching a Gmail query, including sender, subject and snippet, posted to the Channel receipt and execution history. Put the query after * or a connected mailbox address, e.g. @gmail:search:* is:unread newer_than:1h. Do not search for login codes or credentials that must stay out of messages.", "*|<mailbox> [gmail search]"),
+        readAction("read", "Read message", "Headers, text body and links of one message, posted to the Channel receipt and execution history. Do not read login codes or credentials that must stay out of messages; there is no direct transfer to a Space secret.", "<message id>"),
         gatedWriteAction("send", "Send email", "Send a plain-text email from the connected account; the first line is the subject. Asks a Space admin to approve each request by default.", "<to address> [from:<mailbox>] <subject>\n<body>"),
         gatedWriteAction("reply", "Reply", "Reply in the thread of one message, to its sender. Asks a Space admin to approve each request by default.", "<message id> <body>"),
       ],
