@@ -15,6 +15,15 @@ English is the default language for repository documentation, guardrails, releas
 
 ## Current behavior
 
+Repository contributions use the Prompt request issue form: current behavior
+and reproduction, the desired outcome, and acceptance checks are required;
+implementation prompts and reference patches are optional. Maintainers triage
+requests before their agents implement accepted changes through regular PRs
+and CI, linking back to and crediting the request author. External fork PRs
+are redirected to this form; maintainers and their agents use branches created
+in the upstream repository by its branch workflow. See
+[contributing](../../README.md#contributing-prompt-requests-not-pull-requests).
+
 Machine placement uses bounded active HTTPS network measurements alongside
 semantic fit, CPU/memory headroom and provider quota. Daemons measure latency,
 jitter, request failures, loaded latency and adaptive download/upload goodput

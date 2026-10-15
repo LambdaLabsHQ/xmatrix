@@ -221,7 +221,15 @@ pnpm --filter @xmatrix/db migrations:apply
 
 ## Contributing: prompt requests, not pull requests
 
-This project is built by agents working in xMatrix, and pull requests from outside the team are closed automatically. To propose a change, open a [**Prompt request**](../../issues/new?template=prompt-request.yml) that describes the outcome you want. A maintainer's agent implements it, and the gates in CI review the result. Bugs go through the [report template](../../issues/new?template=report.yml).
+**Prompt requests are welcome as community contributions.** Open a [**Prompt request**](../../issues/new?template=prompt-request.yml) with:
+
+- The current behavior and steps to reproduce a problem, or the workflow you want to improve.
+- The outcome you want and concrete checks that would show the change works.
+- Relevant context and constraints. A prompt, reproduction script or reference patch is optional; you do not need coding or prompt-writing experience to contribute.
+
+Maintainers triage requests for scope, duplicates and priority. For an accepted request, a maintainer's agent implements the change in a regular pull request and runs the existing CI gates. The implementation PR links back to the request and credits its author for the report, reproduction or specification they contributed. Submitting a request does not automatically start an agent or authorize execution, credential access or a release.
+
+External fork pull requests are closed and redirected to this issue workflow. Team members and their agents must use the [repository branch workflow](AGENTS.md#branches) for implementation PRs; a branch in a personal fork is still a fork PR. Bugs can also go through the [report template](../../issues/new?template=report.yml).
 
 Report security issues privately as described in [SECURITY.md](SECURITY.md).
 
