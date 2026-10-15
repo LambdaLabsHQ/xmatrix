@@ -49,10 +49,6 @@ export async function authorizeMachineDaemonAgentRun(
     return Response.json({ error: "Agent run Instance does not match the Launch" }, { status: 403 });
   }
 
-  // Retired Run kinds: a Run started as one before it was retired never runs again.
-  if (metadata?.routedAs === "management_assistant_mention" || metadata?.routedAs === "management_channel_about") {
-    return Response.json({ error: "This kind of Agent Run is retired" }, { status: 403 });
-  }
   const targetMachineId = typeof metadata?.machineId === "string" ? metadata.machineId.trim() : "";
   const targetHostId = typeof metadata?.hostId === "string" ? metadata.hostId.trim() : "";
   const targetInstanceId = typeof run.instanceId === "string" && run.instanceId.trim() ? run.instanceId.trim() : "";

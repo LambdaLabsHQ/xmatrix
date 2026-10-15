@@ -284,8 +284,8 @@ export class PostgresMachineLifecycleRepository {
         input.repositoryBaseline?.relationship === "diverged" && input.repositoryBaseline.noticeKey !== undefined;
       if ((eventType === "machine_run_exited" || spawnFailure || stopNotice || baselineNotice) &&
           typeof payload.runId === "string" && (spawnFailure || stopNotice || changedRunIds.includes(payload.runId))) {
-        const contexts = await tx.query<QueryResultRow>({ name: "machine_lifecycle_notice_context_v5", text: `SELECT
-          r.run_id,r.channel_id,r.owner_user_id,r.status,r.metadata_json->>'routedAs' AS routed_as,r.metadata_json,
+        const contexts = await tx.query<QueryResultRow>({ name: "machine_lifecycle_notice_context_v6", text: `SELECT
+          r.run_id,r.channel_id,r.owner_user_id,r.status,r.metadata_json,
           (r.metadata_json->'spawnResult'->>'ok'='false' OR
             EXISTS (SELECT 1 FROM data.agent_launches launch WHERE launch.run_id=r.run_id
               AND launch.state='failed' AND launch.spawned_at IS NULL)) AS startup_failed,
@@ -304,7 +304,7 @@ export class PostgresMachineLifecycleRepository {
           ownerUserId: String(context.owner_user_id), agentName: String(context.agent_name), machineId, hostId,
           // The Channel names the Machine as its owner did; the hostname is only an observation.
           ...(context.machine_name ? { machineName: String(context.machine_name) } : {}) };
-        if (!notice || context!.routed_as === "management_channel_about" ||
+        if (!notice ||
             spawnFailure && (context!.status !== "failed" ||
               metadata(context!).executionCancellation !== undefined)) { /* no Channel notice */ }
         // A stop's Channel feedback is the daemon's actual termination result;

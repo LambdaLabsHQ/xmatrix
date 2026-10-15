@@ -150,7 +150,6 @@ const CLIENT_FAILURES = {
   agent_connection_superseded: ["Agent Instance connection was superseded; reconnect required", "relay.replace_connection"],
   agent_delivery_binding_stale: ["Agent Instance live delivery binding is stale; reconnect required", "relay.bind_delivery"],
   agent_channel_scope_mismatch: ["Agent Instance operation is outside its run-bound channel", "authority.access"],
-  management_agent_retired: ["This kind of Agent Run is retired", "relay.validate_binding"],
   invalid_agent_message_fields: ["Agent message contains unsupported fields", "request.validate"],
   invalid_channel_activity: ["Channel activity report is malformed", "request.validate"],
 } as const;

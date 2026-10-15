@@ -26,7 +26,6 @@ async function seed(sql, id) {
     ["live", channel, "running", "online", host],
     ["spawning", channel, "starting", "offline", host],
     ["done", channel, "stopped", "offline", host],
-    ["about", channel, "running", "online", { ...host, routedAs: "management_channel_about" }],
     ["elsewhere", other, "running", "online", host],
   ];
   const ids = {};
@@ -117,7 +116,6 @@ integration("a /kill all append fences every live Run in its Channel, including 
       assert.deepEqual(byName[name].stop, { sourceMessageId: `message-${id}`, actorUserId: `human-${id}`, requestedAt: at });
     }
     assert.equal(byName.done.status, "stopped");
-    assert.equal(byName.about.status, "running");
     assert.equal(byName.elsewhere.status, "running");
     const launch = (await sql(`SELECT state,retryable FROM data.agent_launches WHERE launch_id=$1`, [`launch-${id}`])).rows[0];
     assert.deepEqual(launch, { state: "cancelled", retryable: false });
@@ -170,7 +168,7 @@ integration("the fence waits for an in-flight Agent append's Run lock instead of
   }
 });
 
-integration("an exact stop fences only its Run; a Channel stop then takes the rest but never About", async () => {
+integration("an exact stop fences only its Run; a Channel stop then takes the rest", async () => {
   const setup = new Client({ connectionString: url }); await setup.connect();
   const sql = (text, values) => setup.query(text, values);
   const id = `exact-${process.pid}-${Date.now()}`;
@@ -193,7 +191,6 @@ integration("an exact stop fences only its Run; a Channel stop then takes the re
     assert.equal(await fence({ kind: "channel" }, `message-all-${id}`), 1);
     current = await status();
     assert.equal(current[ids.spawning.runId], "stopping");
-    assert.equal(current[ids.about.runId], "running", "About is never a stop target");
     assert.equal(current[ids.elsewhere.runId], "running");
   } finally {
     await setup.end();
