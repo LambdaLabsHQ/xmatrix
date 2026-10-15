@@ -58,10 +58,10 @@ import { applyMemberReadEvent } from "./mention-read-state";
 import {
   filterHistoryForChannel,
   mergeChannelHistory,
-  sameChannelHistoryWindow,
   sortChannelHistory,
   supersededHistoryMessage,
 } from "@/components/dashboard/channel-history";
+import { sameValue } from "../../lib/same-value";
 import {
   readChannelComposerDraft,
   writeChannelComposerDraft,
@@ -971,9 +971,10 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
       return channelMessages;
     }
     // A refresh that converges on the identical window must not visibly
-    // re-render the timeline.
+    // re-render the timeline. Identical means every message says the same: a
+    // reaction, an answered card or a thread's replies change no id or marker.
     if (
-      sameChannelHistoryWindow(historyRef.current, channelMessages) &&
+      sameValue(historyRef.current, channelMessages) &&
       hasOlderMessagesRef.current === nextHasOlderMessages
     ) {
       return channelMessages;

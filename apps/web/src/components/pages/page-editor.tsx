@@ -11,6 +11,7 @@ import { EditorView } from "prosemirror-view";
 import { yCursorPluginKey } from "y-prosemirror";
 import { gitHubFileReferenceFrom, gitHubFileReferenceHref, type SerializedAutomation } from "@xmatrix/protocol";
 import { isImeKeyDown } from "@/lib/ime-keydown";
+import { sameValue } from "@/lib/same-value";
 import type { PageLiveSession } from "@/lib/pages/page-client";
 import { automationsKey } from "./page-automation-chips";
 import type { ReadGitHubFile } from "./page-github-file-embeds";
@@ -71,12 +72,6 @@ interface Toolbar {
   /** The selection is in a table, which shows its row and column controls. */
   inTable: boolean;
   slash: SlashState | null;
-}
-
-function sameToolbar(a: Toolbar | null, b: Toolbar): boolean {
-  return a !== null && a.kind === b.kind && a.link === b.link && a.empty === b.empty && a.inTable === b.inTable
-    && a.focused === b.focused && a.slash?.query === b.slash?.query && a.slash?.from === b.slash?.from
-    && a.slash?.to === b.slash?.to;
 }
 
 function readToolbar(view: EditorView): Toolbar {
@@ -344,7 +339,7 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
         menu.current.slash = next.slash;
         // Metadata-only transactions do not move the selection menu. Document and selection changes
         // still render it, even when its controls match, to update its position.
-        if (tr.docChanged || tr.selectionSet || tr.storedMarksSet || !sameToolbar(shownToolbar.current, next)) showToolbar(next);
+        if (tr.docChanged || tr.selectionSet || tr.storedMarksSet || !sameValue(shownToolbar.current, next)) showToolbar(next);
         measure();
       },
       handleDOMEvents: {

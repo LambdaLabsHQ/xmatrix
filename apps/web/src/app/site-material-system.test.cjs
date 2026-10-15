@@ -40,7 +40,7 @@ test("Get started renders the product live instead of a screenshot", () => {
   assert.match(quickStartSource, /<AppWindow \/>/);
   assert.match(source("../components/landing/app-window-preview.tsx"), /MessageTimeline[\s\S]*ChannelSidebar|ChannelSidebar[\s\S]*MessageTimeline/);
   assert.doesNotMatch(quickStartSource, /next\/image|\.png|\.webp/);
-  assert.match(source("page.tsx"), /<Hero \/>\s*<QuickStart \/>/);
+  assert.match(source("page.tsx"), /<Hero \/>\s*<AgentStrip \/>\s*<LivePage \/>\s*<QuickStart \/>/);
 });
 
 test("public site labels carry no decorative eyebrow bar", () => {

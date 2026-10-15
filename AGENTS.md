@@ -11,3 +11,5 @@ Carry a change on this repository all the way: open its pull request, merge it o
 ## Branches
 
 Branches on this repository are created with `gh workflow run new-branch.yml -f name=<branch>`, which makes the branch at the current main; a push cannot create one. A branch then moves only by fast-forward, so bring in main with a merge, not a rebase and force push. This keeps a checkout that still holds the private history from publishing it.
+
+Maintainers and their Agents use those upstream branches for implementation pull requests. If branch creation or a push is refused, resolve that workflow or permission failure; do not fall back to a personal fork, whose pull requests are closed as external contributions.

@@ -427,6 +427,7 @@ function createSignalPort(
       return {
         ...(result.value ? { value: result.value } : {}),
         ...(result.error ? { error: result.error } : {}),
+        ...(result.interruptedTurn ? { interruptedTurn: true } : {}),
       };
     },
     connected(session, deliver) {

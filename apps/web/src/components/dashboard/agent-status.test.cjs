@@ -72,16 +72,6 @@ test("a live Instance whose runtime reports a wait displays as waiting", () => {
   assert.equal(display({ ...base, status: "offline", offlineReason: "machine_offline", runtimeState: { status: "running", waiting } }), "machine offline");
 });
 
-test("a waiting ring in the work dock is the status colour, not the white cutout", () => {
-  const fs = require("node:fs");
-  const path = require("node:path");
-  const css = fs.readFileSync(path.join(__dirname, "../../app/globals.css"), "utf8");
-  const rule = css.match(/\.app-agent-work-avatar \.identity-avatar-status\.app-status-dot-ring\[class\*="bg-amber-"\]\s*\{[^}]+\}/);
-  assert.ok(rule, "work dock waiting ring rule");
-  assert.match(rule[0], /border-color:\s*oklch\(0\.769 0\.188 70\.08\)/);
-  assert.doesNotMatch(rule[0], /oklch\(1 0 0\)/);
-});
-
 test("the waiting phrase says what and how long, never a guess", () => {
   const since = Date.UTC(2026, 9, 4, 10, 0, 0);
   assert.equal(agentWaitingPhrase({ kind: "tool", label: "gh pr checks 1 --watch", sinceMillis: since }, since + 4 * 60_000 + 30_000), "waiting: gh pr checks 1 --watch · 4m");

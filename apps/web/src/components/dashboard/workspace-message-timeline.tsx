@@ -13,12 +13,7 @@ import { sha256 } from "@noble/hashes/sha2.js";
 
 import { nonOperationalMentionRanges, lowercaseHex, messageExternalAppSource } from "@xmatrix/protocol";
 import { userErrorMessage } from "@/lib/user-facing-error";
-
-export {
-  replyPreviewsEqual,
-  timelineMessagesEqual,
-} from "./workspace-shell-message-model";
-
+import { sameValue, shareByKey } from "../../lib/same-value";
 
 import { MESSAGE_SURFACE_METRICS_EVENT, messageSurfaceOf } from "./message-surface-metrics";
 
@@ -62,7 +57,7 @@ import {
 } from "./workspace-shell-formatters";
 
 import {
-  areMessageRowPropsEqual, type MessageRowChannel, type MessageRowComparableProps,
+  type MessageRowChannel, type MessageRowProps,
   attachmentDownloadHref,
   attachmentDownloadName,
   attachmentFetchHref,
@@ -234,7 +229,7 @@ import { useAgentRegistrationCatalog } from "./agent-capability-select";
 import { InvocationAccessError, invocationSourceMessages, isInvocationSource, loadInvocationPages } from "./mention-invocation-query";
 import { invocationPollInterval } from "./mention-invocation-state";
 import {
-  buildMentionReadIndex, machineOfflineMentionSubjects, sameMentionReadIndex, withInvocationMentionTargets,
+  buildMentionReadIndex, machineOfflineMentionSubjects, withInvocationMentionTargets,
   type MentionReadIndex,
 } from "@/components/dashboard/mention-read-state";
 
@@ -543,7 +538,7 @@ export const MessageTimeline = memo(function MessageTimeline({
   highlightMessageId?: string;
   threadRootMessage?: TimelineItem;
   threadRootChannel?: SerializedChannel;
-} & Pick<MessageRowComparableProps,
+} & Pick<MessageRowProps,
   "onReact" | "onEdit" | "onRecall" | "onUnsentAction" | "onReply" | "onOpenThread" | "onMentionSender" |
   "onRebornSender" | "onQuestionnaireAnswer" | "onOpenInternalAppLink" | "onJumpToMessage"
 >) {
@@ -712,7 +707,11 @@ export const MessageTimeline = memo(function MessageTimeline({
   const hasTimelineContent = timeline.length > 0 || Boolean(threadRootMessage);
   // Talk stays whole; activity and superseded reports fold into one row per
   // run of the same Instance (docs/design/conversation-activity.md §4.1).
-  const rows = useMemo(() => buildConversationRows(timeline), [timeline]);
+  // Rows that say what they said stay the objects they were, so only a row
+  // that changed draws again: folds and headed rows are rebuilt each time.
+  const heldRowsRef = useRef<TimelineItem[]>([]);
+  const rows = useMemo(() => (heldRowsRef.current = shareByKey(heldRowsRef.current,
+    buildConversationRows(timeline), (row) => row.id)), [timeline]);
   const [expandedFolds, setExpandedFolds] = useState<{ channelId?: string; ids: ReadonlySet<string> }>(
     () => ({ ids: new Set() }),
   );
@@ -1014,15 +1013,14 @@ export const MessageTimeline = memo(function MessageTimeline({
       channelMentionCandidates(channel, localContext, [], space)
     ), launchedMentions ?? []);
     const held = mentionIndexRef.current;
-    return (mentionIndexRef.current = held && sameMentionReadIndex(held, next) ? held : next);
+    return (mentionIndexRef.current = held && sameValue(held, next) ? held : next);
   }, [channel, localContext, space, launchedMentions]);
   const machineOfflineRef = useRef<ReadonlySet<string> | null>(null);
   const memberPresence = channel?.memberPresence;
   const machineOfflineSubjectIds = useMemo(() => {
     const next = machineOfflineMentionSubjects({ memberPresence });
     const held = machineOfflineRef.current;
-    const same = held && held.size === next.size && [...next].every((subject) => held.has(subject));
-    return (machineOfflineRef.current = same ? held : next);
+    return (machineOfflineRef.current = held && sameValue(held, next) ? held : next);
   }, [memberPresence]);
   const memberReadSequences = channel?.memberReadSequences;
   const mentionReadScope = useMemo<MentionReadChannelScope>(() => ({
@@ -1727,7 +1725,7 @@ export const MessageRow = memo(function MessageRow({
   initiallyExpanded?: boolean;
   /** Opens the Profile view for a human sender. Slack: the avatar is a link. */
   onOpenHumanProfile: (userId: string) => void;
-} & MessageRowComparableProps) {
+} & MessageRowProps) {
   const [reactionPickerOpen, setReactionPickerOpen] = useState(false);
   const [expanded, setExpanded] = useState(initiallyExpanded);
   const [copied, setCopied] = useState(false);
@@ -3026,17 +3024,7 @@ export const MessageRow = memo(function MessageRow({
         )}
     </div>
   );
-}, (previous, next) => previous.agentLaunches === next.agentLaunches &&
-    previous.agentStops === next.agentStops &&
-    previous.stopReceiptsLoaded === next.stopReceiptsLoaded &&
-    previous.invocationRejections === next.invocationRejections &&
-    previous.continuationInvocations === next.continuationInvocations &&
-    previous.messageTargetEvidence === next.messageTargetEvidence &&
-    previous.launchStatusUnavailable === next.launchStatusUnavailable &&
-  previous.onRetryAgentLaunch === next.onRetryAgentLaunch && previous.onLaunchAnyway === next.onLaunchAnyway &&
-  previous.launchWindow === next.launchWindow && previous.launchChoiceOffered === next.launchChoiceOffered &&
-  previous.launchOptions === next.launchOptions && previous.onLaunchChoice === next.onLaunchChoice &&
-  areMessageRowPropsEqual(previous, next));
+});
 
 const NO_LAUNCH_OPTIONS: readonly InteractionLaunchOption[] = [];
 

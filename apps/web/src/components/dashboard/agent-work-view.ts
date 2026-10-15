@@ -2,6 +2,7 @@ import type { AgentRuntimeIssue, AgentRuntimeNotice, AgentRuntimeWaiting, Serial
 import { agentInstanceBranchLabel, type AgentWorkItem } from "./workspace-shell-message-model";
 import { agentInstanceDisplayStatus, presenceStatusLabel } from "./workspace-shell-presence";
 import type { UsageLimitSummary } from "./workspace-shell-domain-types";
+import { shareByKey } from "../../lib/same-value";
 
 /** Display data only. Actions must resolve the full current item by key. */
 export type AgentWorkView = Readonly<{
@@ -46,35 +47,23 @@ export function agentWorkCanReborn(item: AgentWorkItem): boolean {
 function project(item: AgentWorkItem): AgentWorkView {
   const displayStatus = agentWorkDisplayStatus(item);
   const waiting = displayStatus === "waiting" ? item.instance.runtimeState?.waiting : undefined;
+  // Only what the dock shows: a view is kept while it says the same, so a
+  // field nothing draws would redraw it each time the field moved.
+  const limit = item.usageLimit;
   return {
     key: item.key, agentId: item.agentId, instanceId: item.instance.id,
     label: item.label, instanceLabel: item.instance.label, agentLabel: item.agentLabel,
     avatarKind: item.avatarKind || "agent", avatarUrl: item.avatarUrl,
     displayStatus, intent: item.intent, waiting,
     issue: item.instance.runtimeState?.issue, notice: item.instance.runtimeState?.notice,
-    usageLimit: item.usageLimit, branchLabel: agentInstanceBranchLabel(item.instance),
+    usageLimit: limit && { label: limit.label, severity: limit.severity, title: limit.title },
+    branchLabel: agentInstanceBranchLabel(item.instance),
     statusLabel: waiting ? undefined : presenceStatusLabel({
       status: displayStatus, activity: displayStatus === "busy" ? undefined : item.activity,
     }),
     wakeFailureReason: item.instance.rest === "wake_failed" ? item.instance.restReason : undefined,
     canStop: item.canStop !== false, canReborn: agentWorkCanReborn(item),
   };
-}
-
-const scalarFields = ["key", "agentId", "instanceId", "label", "instanceLabel", "agentLabel", "avatarKind", "avatarUrl",
-  "displayStatus", "intent", "branchLabel", "statusLabel", "wakeFailureReason", "canStop", "canReborn"] as const;
-
-function sameView(left: AgentWorkView, right: AgentWorkView): boolean {
-  const a = left.waiting;
-  const b = right.waiting;
-  return scalarFields.every(key => left[key] === right[key]) &&
-    a?.kind === b?.kind && a?.label === b?.label && a?.sinceMillis === b?.sinceMillis &&
-    (a?.details === b?.details || Boolean(a?.details && b?.details &&
-      a.details.length === b.details.length && a.details.every((detail, index) => detail === b.details![index]))) &&
-    left.issue?.kind === right.issue?.kind && left.issue?.sinceMillis === right.issue?.sinceMillis &&
-    left.notice?.severity === right.notice?.severity && left.notice?.sinceMillis === right.notice?.sinceMillis &&
-    left.usageLimit?.label === right.usageLimit?.label && left.usageLimit?.severity === right.usageLimit?.severity &&
-    left.usageLimit?.title === right.usageLimit?.title;
 }
 
 /** A cache of presentation, never an authority for live interactions. Derive
@@ -85,14 +74,8 @@ export function createAgentWorkSelection(build: (channel: SerializedChannel | nu
   let views = initialViews;
   return (channel: SerializedChannel | null): readonly AgentWorkView[] => {
     if (source === channel) return views;
-    const previous = new Map(views.map(item => [item.key, item]));
-    const next = build(channel).map(item => {
-      const view = project(item);
-      const before = previous.get(view.key);
-      return before && sameView(before, view) ? before : view;
-    });
     source = channel;
-    if (views.length !== next.length || next.some((item, index) => views[index] !== item)) views = next;
+    views = shareByKey(views, build(channel).map(project), view => view.key);
     return views;
   };
 }

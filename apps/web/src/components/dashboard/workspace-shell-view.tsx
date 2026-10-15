@@ -21,7 +21,8 @@ import { realtimeCollectionAny } from "./realtime-collection";
 import { RealtimeChannelsContext, RealtimeEventsContext } from "./realtime-channels";
 import { PresentedChannelTailContext } from "./presented-channel-tail";
 import { channelReferences, MessageReferenceCatalogProvider, type ChannelReference, type MessageReferenceCatalog } from "./message-reference-catalog";
-import { MachineLinkProvider, sameMachineTargets, type MachineLinks } from "./machine-link";
+import { MachineLinkProvider, type MachineLinks } from "./machine-link";
+import { sameValue } from "../../lib/same-value";
 import { ManageSecretsProvider } from "./secret-request-card";
 import { machinesInSpace, spaceChannelIdSet } from "./space-scoped-tool-content";
 import { channelHasWorkInHand } from "./workspace-shell-chrome";
@@ -594,11 +595,12 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
   // a Machine tag only links where that view has the Machine's page.
   // One value while the Machines are the same: a message changes `channels`, not them.
   const machineTargetsRef = useRef<MachineLinks["machines"]>([]);
-  const machineTargets = useMemo(() => (machineTargetsRef.current = sameMachineTargets(machineTargetsRef.current,
-    machinesInSpace(machines, spaceChannelIdSet(channels, currentSpaceId), { ownerUserId: user?.id })
-      .flatMap((machine) => machine.machineId
-        ? [{ machineId: machine.machineId, ownerUserId: machine.daemon?.userId }] : []))),
-  [channels, currentSpaceId, machines, user?.id]);
+  const machineTargets = useMemo(() => {
+    const targets = machinesInSpace(machines, spaceChannelIdSet(channels, currentSpaceId), { ownerUserId: user?.id })
+      .flatMap((machine) => machine.machineId ? [{ machineId: machine.machineId, ownerUserId: machine.daemon?.userId }] : []);
+    if (!sameValue(machineTargetsRef.current, targets)) machineTargetsRef.current = targets;
+    return machineTargetsRef.current;
+  }, [channels, currentSpaceId, machines, user?.id]);
   const machineLinks = useMemo<MachineLinks>(() => ({
     machines: machineTargets,
     onOpenMachine: (machineId) => changeAppViewRef.current("machines", machineId),

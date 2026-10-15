@@ -282,6 +282,24 @@ score. CPU/memory pressure, authorization, provider quota and explicit machine
 constraints still apply. Decision evidence and Machine details show the
 measurements, target, sampling uncertainty and timestamps.
 
+Machine details add a compact quality glyph beside each reading: check for
+Good, minus for Fair, warning for Poor, and question mark for Unrated. The
+HTTPS availability dot is separate from these per-metric guides. Bands apply
+to the displayed, rounded value so a visible number agrees with its grade:
+
+| Displayed metric | Good | Fair | Poor |
+| --- | --- | --- | --- |
+| HTTPS median latency | <50 ms | 50–<100 ms | ≥100 ms |
+| ICMP probe loss | <1% | 1–<5% | ≥5% |
+| Download or upload | ≥10 Mbps | 1–<10 Mbps | <1 Mbps |
+
+These are presentation guides adapted from [Cloudflare AIM's metric
+breakpoints](https://github.com/cloudflare/speedtest/blob/40dd87a4cc144cedaf5f3d4ffe88077d5e092bae/src/config/internalConfig.ts),
+not an AIM experience score or a change to placement. Unknown/expired values
+and short transfer samples are Unrated. The info control reveals the guide,
+protocol targets, sample times and diagnostic evidence; the default view
+keeps only icons and readings.
+
 The methodology follows [Cloudflare Speedtest's](https://github.com/cloudflare/speedtest)
 adaptive HTTP/loaded-latency measurements and the [IPPM round-trip loss
 definitions](https://www.rfc-editor.org/rfc/rfc6673.html). A nearby Cloudflare

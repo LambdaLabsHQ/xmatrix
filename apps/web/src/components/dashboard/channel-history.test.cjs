@@ -10,7 +10,6 @@ const {
   formatMessageDateTime,
   formatMessageTimestamp,
   mergeChannelHistory,
-  sameChannelHistoryWindow,
   supersededHistoryMessage,
 } = history.exports;
 
@@ -139,39 +138,11 @@ test("a compacted cache advertises omitted history instead of claiming exact EOF
   assert.equal(compacted.hasOlderMessages, true);
 });
 
-const TWO_MESSAGES = [
-  { messageId: "m1", channelId: "a", sequence: 1, sentAt: "2026-07-20T00:00:01.000Z" },
-  { messageId: "m2", channelId: "a", sequence: 2, sentAt: "2026-07-20T00:00:02.000Z" },
-];
-
-test("identical refresh windows are detected so the timeline does not re-render", () => {
-  const window = TWO_MESSAGES;
-  assert.equal(sameChannelHistoryWindow(window, [...window]), true);
-  assert.equal(sameChannelHistoryWindow(window, [...window].reverse()), false);
-  assert.equal(sameChannelHistoryWindow(window, window.slice(0, 1)), false);
-  assert.equal(
-    sameChannelHistoryWindow(window, [window[0], { ...window[1], editedAt: "2026-07-20T01:00:00.000Z" }]),
-    false,
-    "an edit marker change must re-render",
-  );
-  assert.equal(
-    sameChannelHistoryWindow(window, [window[0], { ...window[1], recalledAt: "2026-07-20T01:00:00.000Z" }]),
-    false,
-    "a recall marker change must re-render",
-  );
-  assert.equal(
-    sameChannelHistoryWindow(window, [{ ...window[0], supersededBy: "m2" }, window[1]]),
-    false,
-    "a supersession folds the row, so it must re-render",
-  );
-  assert.equal(
-    sameChannelHistoryWindow(window, [window[0], { ...window[1], messageId: "m3" }]),
-    false,
-  );
-});
-
 test("a live supersession judgment folds the held message once", () => {
-  const window = TWO_MESSAGES;
+  const window = [
+    { messageId: "m1", channelId: "a", sequence: 1, sentAt: "2026-07-20T00:00:01.000Z" },
+    { messageId: "m2", channelId: "a", sequence: 2, sentAt: "2026-07-20T00:00:02.000Z" },
+  ];
   assert.deepEqual(supersededHistoryMessage(window, { messageId: "m1", supersededBy: "m2" }),
     { ...window[0], supersededBy: "m2" });
   // Already folded, not held, recalled meanwhile, or not a judgment: nothing to apply.

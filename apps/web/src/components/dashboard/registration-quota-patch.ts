@@ -5,6 +5,7 @@ import {
   type LlmUsage,
   type SerializedChannel,
 } from "@xmatrix/protocol";
+import { sameValue } from "../../lib/same-value";
 
 /**
  * A registration's new quota reading (the `registration_quota` frame), applied
@@ -20,7 +21,7 @@ export function patchChannelsRegistrationQuota(
 ): SerializedChannel[] {
   const project = (usage: LlmUsage | undefined) => {
     const next = withRegistrationQuota(usage, quota);
-    return JSON.stringify(next) === JSON.stringify(usage) ? usage : next;
+    return sameValue(next, usage) ? usage : next;
   };
   let changed = false;
   const next = channels.map((channel) => {
