@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { generateKeyPairSync } from "node:crypto";
 import test from "node:test";
+import { appleTestNotificationRoundTrip } from "../scripts/apple-notification-smoke.ts";
 import { appleSubscriptionConfig, AppleBillingError, subscriptionFact, appleBillingFact, appleOrganizationGroup, appleSeatGroupFact, retrieveAppleSubscription, verifyAppleNotification } from "../src/apple/subscriptions.ts";
 
 const privateKey = generateKeyPairSync("ec", { namedCurve: "prime256v1" }).privateKey.export({ type: "pkcs8", format: "pem" });
@@ -142,4 +143,27 @@ test("the organization group comes from Apple's customer groups, and Apple not n
   assert.equal(await appleOrganizationGroup(config, "Sandbox", "101", answer("not found", 404)), null);
   assert.equal(await appleOrganizationGroup(config, "Sandbox", "101", answer({ groups: [{ groupId: "../x", groupType: "ORGANIZATION" }] })), null);
   assert.equal(await appleOrganizationGroup(config, "Sandbox", "../101", async () => { throw new Error("must not fetch"); }), null);
+});
+
+test("a TEST notification round trip reports what our server answered Apple", async () => {
+  const calls = [];
+  let polls = 0;
+  const apple = (attempts) => async (url, init) => {
+    calls.push(`${init.method} ${url}`);
+    assert.match(init.headers.authorization, /^Bearer eyJ/);
+    if (init.method === "POST") return Response.json({ testNotificationToken: "token-1" });
+    polls += 1;
+    return Response.json({ signedPayload: "x", sendAttempts: polls < 2 ? [] : attempts });
+  };
+  assert.deepEqual(await appleTestNotificationRoundTrip(config, "Sandbox", { fetchImpl: apple([{ sendAttemptResult: "SUCCESS" }]), delayMs: 1 }), ["SUCCESS"]);
+  assert.deepEqual(calls, ["POST https://api.storekit-sandbox.apple.com/inApps/v1/notifications/test",
+    "GET https://api.storekit-sandbox.apple.com/inApps/v1/notifications/test/token-1",
+    "GET https://api.storekit-sandbox.apple.com/inApps/v1/notifications/test/token-1"]);
+  polls = 0;
+  assert.deepEqual(await appleTestNotificationRoundTrip(config, "Sandbox", { fetchImpl: apple([{ sendAttemptResult: "UNSUCCESSFUL_HTTP_RESPONSE_CODE" }]), delayMs: 1 }),
+    ["UNSUCCESSFUL_HTTP_RESPONSE_CODE"]);
+  await assert.rejects(appleTestNotificationRoundTrip(config, "Sandbox", { fetchImpl: async () => new Response("down", { status: 503 }) }),
+    (error) => error.code === "apple_request_failed" && error.retryable);
+  await assert.rejects(appleTestNotificationRoundTrip(config, "Sandbox", { fetchImpl: async () => Response.json({}) }),
+    { code: "apple_response_invalid" });
 });

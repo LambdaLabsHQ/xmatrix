@@ -53,6 +53,13 @@ Migration 0170 is expand-only; nullable provider columns default to Stripe and o
 
 An Apple outage fails closed for new grants. Existing access lasts through the verified expiry. Reconcile from the original owner's billing settings after recovery; do not manually move a transaction or rewrite provider ownership. Removing the configuration disables new Apple API operations but does not cancel a customer's subscription. Existing subscribers still need Apple's renewal controls.
 
+## Automated checks without a device
+
+Apple allows sandbox purchases only on a physical device; the Simulator can read products but not buy them, and Xcode's local StoreKit transactions are refused by the Hub by design. Each production Hub release therefore checks the App Store path without a device (`packages/hub/scripts/apple-notification-smoke.ts`):
+
+- Apple's Request a Test Notification sends a sandbox `TEST` notification to the URL configured in App Store Connect, and Get Test Notification Status reports what the Hub answered. Anything but `SUCCESS` fails the release run; Apple being unreachable is a warning.
+- When the production environment variable `APPLE_SANDBOX_SMOKE_TRANSACTION_ID` names the original transaction of an existing sandbox subscription, it is verified again through the App Store Server API and the Hub's own checks, including its seat count. A device is needed only for the first sandbox purchase that provides it.
+
 ## Local runtime verification
 
 The repository's Wrangler 4.79.0 simulator cannot extract the Apple Root G3 EC public key (`id-ecPublicKey`). A successful bundle or Node unit test does not exercise this boundary. The same certificate verifies its self-signature in the current official Wrangler 4.149.0 runtime with the unchanged compatibility date. Use a current official runtime for certificate-chain integration checks; do not work around the old simulator by skipping signature or chain validation. Root self-signature verification alone is not proof of a completed StoreKit purchase.
