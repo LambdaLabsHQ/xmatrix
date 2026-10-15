@@ -506,6 +506,12 @@ struct BindingRecord {
     run_id: String,
     execution_key: String,
     slot_id: String,
+    /// Shared handoff checkouts track each session independently. Absent on
+    /// legacy exclusive bindings, whose lifecycle still lives on the slot.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    state: Option<SlotState>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    spawn_claim_token: Option<String>,
 }
 
 impl BindingRecord {
@@ -526,6 +532,8 @@ impl BindingRecord {
             run_id: request.run_id.clone(),
             execution_key: request.execution_key.clone(),
             slot_id: slot_id.as_str().to_string(),
+            state: None,
+            spawn_claim_token: None,
         }
     }
 }
@@ -916,11 +924,10 @@ fn validate_manifest(manifest: &RepoPoolManifest) -> Result<(), PoolError> {
             || !seen_instances.insert(binding.instance_id.clone())
             || !seen_runs.insert(binding.run_id.clone())
             || !seen_execs.insert(binding.execution_key.clone())
-            || !bound_slots.insert(slot_id.as_str().to_string())
         {
             return Err(PoolError::new(
                 PoolErrorCode::InvalidBinding,
-                "binding fields must be unique across session/instance/run/execution/slot",
+                "binding fields must be unique across session/instance/run/execution",
             ));
         }
         let slot = manifest.slots.get(slot_id.as_str()).ok_or_else(|| {
@@ -929,6 +936,11 @@ fn validate_manifest(manifest: &RepoPoolManifest) -> Result<(), PoolError> {
                 "binding references missing slot",
             )
         })?;
+        if !bound_slots.insert(slot_id.as_str().to_string()) && manifest.bindings.iter().any(
+            |peer| peer.slot_id == binding.slot_id && peer.state.is_none()) {
+            return Err(PoolError::new(PoolErrorCode::InvalidBinding, "shared slot needs per-session lifecycle"));
+        }
+        validate_shared_binding(binding)?;
         // Starting, Leased, Retained, Returning, Preparing, Quarantined may carry binding.
         // Available must not.
         if matches!(slot.state, SlotState::Available) {
@@ -941,6 +953,7 @@ fn validate_manifest(manifest: &RepoPoolManifest) -> Result<(), PoolError> {
 
     for (id, slot) in &manifest.slots {
         validate_updated_at(&slot.updated_at)?;
+        validate_shared_slot(manifest, slot)?;
         if let Some(receipt) = slot.last_returned_binding.as_ref() {
             validate_binding_field("lastReturned.sessionKey", &receipt.session_key)?;
             validate_binding_field("lastReturned.instanceId", &receipt.instance_id)?;
@@ -1458,6 +1471,9 @@ fn retain_bound_slot(
     request: &LeaseRequest,
 ) -> Result<(), PoolError> {
     let slot_id = find_exact_binding(&manifest, request)?.slot_id.clone();
+    if update_shared_binding(&mut manifest, request, SlotState::Retained, None)? {
+        return save_manifest_at(layout.pool_root(), &manifest);
+    }
     let slot = manifest
         .slots
         .get_mut(&slot_id)
@@ -1515,7 +1531,9 @@ async fn retained_authority_for_session_at(
             "retained session is not unique",
         ));
     }
-    require_retained_slot(&manifest, &binding.slot_id)?;
+    if binding.state != Some(SlotState::Retained) {
+        require_retained_slot(&manifest, &binding.slot_id)?;
+    }
     SlotId::parse(&binding.slot_id)?;
     Ok(RetainedLease {
         authority: binding.authority(),
@@ -1613,8 +1631,8 @@ pub async fn claim_starting_lease_at(
         .slots
         .get(&binding.slot_id)
         .ok_or_else(|| PoolError::new(PoolErrorCode::InvalidSlotId, "binding slot missing"))?;
-    if slot.state != SlotState::Starting
-        || slot.spawn_claim_token.as_deref() != Some(spawn_claim_token)
+    if binding.state.unwrap_or(slot.state) != SlotState::Starting
+        || binding.spawn_claim_token.as_deref().or(slot.spawn_claim_token.as_deref()) != Some(spawn_claim_token)
     {
         return Err(PoolError::new(
             PoolErrorCode::InvalidBinding,
@@ -1642,6 +1660,9 @@ pub async fn claim_starting_lease_at(
     let identity = canonical_repo_identity(&manifest.canonical_repo_identity)?;
     verify_base_matches_identity(&base_repo, &identity).await?;
     verify_pool_worktree_ownership(layout, &base_repo, &expected_worktree, &slot_id).await?;
+    if update_shared_binding(&mut manifest, &LeaseRequest::from_authority(authority), SlotState::Leased, None)? {
+        return save_manifest_at(layout.pool_root(), &manifest);
+    }
     let slot = manifest
         .slots
         .get_mut(&binding.slot_id)
@@ -1713,18 +1734,16 @@ async fn transfer_retained_binding(
     replacement: &LeaseRequest,
     mode: RetainedTransferMode,
 ) -> Result<LeaseResult, PoolError> {
-    let (state_error, worktree_error, base_ref_error, session_key) = match mode {
+    let (state_error, worktree_error, base_ref_error) = match mode {
         RetainedTransferMode::Reborn => (
             "rebind only allowed from Retained",
             "reborn worktree missing",
             "reborn missing lastBaseRef",
-            expected.session_key.as_str(),
         ),
         RetainedTransferMode::Handoff => (
             "handoff transfer only allowed from Retained",
             "handoff worktree missing",
             "handoff missing lastBaseRef",
-            replacement.session_key.as_str(),
         ),
     };
     // Reject non-Retained writers before probing ownership or quarantining.
@@ -1739,7 +1758,7 @@ async fn transfer_retained_binding(
             .slots
             .get(slot_id.as_str())
             .ok_or_else(|| PoolError::new(PoolErrorCode::InvalidSlotId, "slot missing"))?;
-        if slot.state != SlotState::Retained {
+        if manifest.bindings[idx].state.unwrap_or(slot.state) != SlotState::Retained {
             return Err(PoolError::new(PoolErrorCode::InvalidBinding, state_error));
         }
     }
@@ -1764,23 +1783,32 @@ async fn transfer_retained_binding(
     )?;
     let slot = manifest
         .slots
-        .get_mut(slot_id.as_str())
+        .get(slot_id.as_str())
         .ok_or_else(|| PoolError::new(PoolErrorCode::InvalidSlotId, "slot missing"))?;
     let base_ref = slot
         .last_base_ref
         .clone()
         .ok_or_else(|| PoolError::new(PoolErrorCode::ManifestCorrupt, base_ref_error))?;
     let spawn_claim_token = fresh_spawn_claim_token();
-    slot.state = SlotState::Starting;
-    slot.spawn_claim_token = Some(spawn_claim_token.clone());
-    slot.updated_at = now_rfc3339();
-    manifest.bindings[idx] = BindingRecord {
-        session_key: session_key.to_string(),
-        instance_id: replacement.instance_id.clone(),
-        run_id: replacement.run_id.clone(),
-        execution_key: replacement.execution_key.clone(),
-        slot_id: slot_id.as_str().to_string(),
-    };
+    let shared = matches!(mode, RetainedTransferMode::Handoff) || manifest.bindings[idx].state.is_some();
+    if shared {
+        make_slot_shared(&mut manifest, slot_id.as_str())?;
+        let mut next = BindingRecord::for_lease(&slot_id, replacement);
+        next.state = Some(SlotState::Starting);
+        next.spawn_claim_token = Some(spawn_claim_token.clone());
+        if matches!(mode, RetainedTransferMode::Handoff) {
+            manifest.bindings.push(next);
+        } else {
+            manifest.bindings[idx] = next;
+        }
+        refresh_shared_slot(&mut manifest, slot_id.as_str())?;
+    } else {
+        manifest.bindings[idx] = BindingRecord::for_lease(&slot_id, replacement);
+        let slot = manifest.slots.get_mut(slot_id.as_str()).unwrap();
+        slot.state = SlotState::Starting;
+        slot.spawn_claim_token = Some(spawn_claim_token.clone());
+        slot.updated_at = now_rfc3339();
+    }
     save_manifest_at(layout.pool_root(), &manifest)?;
     Ok(LeaseResult {
         slot_id,
@@ -2161,6 +2189,10 @@ fn bind_new_starting_slot(
     manifest
         .bindings
         .push(BindingRecord::for_lease(slot_id, request));
+    if manifest.bindings.iter().filter(|binding| binding.slot_id == slot_id.as_str()).count() > 1 {
+        make_slot_shared(manifest, slot_id.as_str())?;
+        refresh_shared_slot(manifest, slot_id.as_str())?;
+    }
     if let Err(error) = save_manifest_at(pool_root, manifest) {
         // Keep the locked orphan; a secondary failure must not replace the
         // primary error or cause the uncertain tree to be unlocked or removed.
@@ -2267,6 +2299,8 @@ async fn finish_return_after_fetch(
     if let Some(error) = return_rejected_before_fetch_apply(layout, request, expected)? {
         return Err(error);
     }
+    // No checkout mutation or successful fetch is needed while peers remain.
+    if release_shared_binding(layout, request, require_retained)? { return Ok(()); }
     match fetched {
         Ok(fetched) => {
             return_under_lock(
@@ -2390,7 +2424,7 @@ async fn return_under_lock(
             .slots
             .get(slot_id.as_str())
             .ok_or_else(|| PoolError::new(PoolErrorCode::InvalidSlotId, "slot missing"))?;
-        if require_retained && slot.state != SlotState::Retained {
+        if require_retained && binding.state.unwrap_or(slot.state) != SlotState::Retained {
             return Err(PoolError::new(
                 PoolErrorCode::InvalidBinding,
                 "return without live registry requires retained stop evidence",

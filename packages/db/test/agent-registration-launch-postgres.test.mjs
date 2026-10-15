@@ -688,6 +688,8 @@ integration("launch survives a hostname change with stale Workspace metadata and
       sourceMessageId: "message", sourceInstanceId: handoffSource.instanceId, successorHarness: "grok", prompt: "continue" });
     assert.equal(handoff.state, "waiting");
     const handoffIntent = (await sql(`SELECT * FROM data.agent_reborn_intents WHERE intent_id=$1`, [handoff.intentId])).rows[0];
+    assert.equal(handoffIntent.stop_payload_json.preserveInstanceForReborn, true,
+      "handoff stops execution while preserving the original Instance for reborn");
     const handoffPredecessor = (await sql(`SELECT metadata_json FROM data.runs WHERE run_id=$1`, [handoffSource.runId])).rows[0].metadata_json;
     await sql(`UPDATE data.runs SET status='stopped',metadata_json=metadata_json||$2::jsonb WHERE run_id=$1`, [handoffSource.runId,
       { daemonStopEvidence: { schemaVersion: 1, kind: "stop_succeeded", runId: handoffSource.runId,
@@ -710,9 +712,30 @@ integration("launch survives a hostname change with stale Workspace metadata and
       { outcome: "handed_off", intentId: handoff.intentId, state: "prepared", refusals: [] });
     assert.equal((await reborn.prepareAutoHandoff({ ...replayed, sourceMessageId: "another" })).outcome,
       "source_transferred");
-
-
-
+    const retained = (await sql(`SELECT * FROM data.instances WHERE instance_id=$1`, [handoffSource.instanceId])).rows[0];
+    assert.equal(retained.rest_state, "stopped", "a successor's messages must not wake its predecessor");
+    const retainedTarget = await new PostgresRuntimeRepository(database).getChannelAgentRebornTarget({
+      requestId: "handoff-reborn-target", actorUserId: "caller", channelId: "channel",
+      agentName: "Codex", channelInstanceId: Number(retained.channel_instance_id) });
+    assert.equal(retainedTarget.target.instanceId, handoffSource.instanceId, "handoff does not erase the reborn target");
+    await sql(`UPDATE data.agent_reborn_intents SET state='spawned' WHERE intent_id=$1`, [handoff.intentId]);
+    await sql(`UPDATE data.runs SET status='running' WHERE run_id=$1`, [handedOff.runId]);
+    await sql(`UPDATE data.instances SET status='online' WHERE instance_id=$1`, [handedOff.instanceId]);
+    const returnInput = { commandId: "return-handoff", actorUserId: "caller", channelId: "channel",
+      sourceMessageId: "return-message", sourceInstanceId: handoffSource.instanceId, prompt: "resume my session" };
+    const returning = await reborn.prepare(returnInput);
+    assert.equal((await reborn.prepare(returnInput)).intentId, returning.intentId, "a return preparation replays exactly");
+    const returned = await reborn.advance({ intentId: returning.intentId, actorUserId: "caller", channelId: "channel" });
+    assert.equal(returned.instanceId, handoffSource.instanceId);
+    assert.equal(returned.spawnPayload.resumeSessionKey, handoffPredecessor.resumeSessionKey);
+    assert.equal(returned.spawnPayload.resume, true);
+    assert.equal(returned.spawnPayload.handoffTransfer, undefined, "a registered directory needs no pool binding change");
+    const restoredInstance = (await sql(`SELECT * FROM data.instances WHERE instance_id=$1`, [handoffSource.instanceId])).rows[0];
+    assert.equal(restoredInstance.channel_instance_id, retained.channel_instance_id);
+    assert.equal(restoredInstance.run_id, returned.runId);
+    const retiredHolder = (await sql(`SELECT metadata_json FROM data.runs WHERE run_id=$1`, [handedOff.runId])).rows[0];
+    assert.equal(retiredHolder.metadata_json.instanceHandoff, undefined, "reborn does not fence or stop the successor");
+    assert.equal((await sql(`SELECT status FROM data.runs WHERE run_id=$1`, [handedOff.runId])).rows[0].status, "running");
     // Connector repositories and machine directories are alternative locations.
     // No repo is copied into registration configuration, owner grant or policy.
     let catalogEnabled = true;
@@ -786,6 +809,44 @@ integration("launch survives a hostname change with stale Workspace metadata and
     assert.deepEqual({ repoIdentity: repoAdvanced.spawnPayload.repoIdentity, repoKeyId: repoAdvanced.spawnPayload.repoKeyId,
       slotId: repoAdvanced.spawnPayload.slotId }, repoPool, "the dispatched spawn leases back the exact retained slot");
     assert.deepEqual(repoAdvanced.spawnPayload.registration.resources.workspaces, ["repo:owner/project"]);
+
+    // A pooled source handed off by an older daemon can still resume beside
+    // its successor, using only the exact durable same-directory holder.
+    await sql(`UPDATE data.agent_reborn_intents SET state='spawned' WHERE intent_id=$1`, [repoPrepared.intentId]);
+    await sql(`UPDATE data.runs SET status='stopped',metadata_json=metadata_json||$2::jsonb WHERE run_id=$1`,
+      [repoAdvanced.runId, { repoPool }]);
+    const pooledHandoff = await reborn.prepareHandoff({ commandId: "pooled-handoff", actorUserId: "caller", channelId: "channel",
+      sourceMessageId: "pooled-handoff-message", sourceInstanceId: repoInstanceId, successorHarness: "grok", prompt: "continue" });
+    const pooledSuccessor = await reborn.advance({ intentId: pooledHandoff.intentId, actorUserId: "caller", channelId: "channel" });
+    await sql(`UPDATE data.agent_reborn_intents SET state='spawned' WHERE intent_id=$1`, [pooledHandoff.intentId]);
+    await sql(`UPDATE data.runs SET status='running',metadata_json=metadata_json||$2::jsonb WHERE run_id=$1`,
+      [pooledSuccessor.runId, { repoPool }]);
+    await sql(`UPDATE data.instances SET status='online' WHERE instance_id=$1`, [pooledSuccessor.instanceId]);
+    await sql(`INSERT INTO data.agent_registrations SELECT owner_user_id,'other-machine',harness,version,created_at,updated_at
+      FROM data.agent_registrations WHERE machine_id='machine' AND harness='grok';
+      INSERT INTO data.space_agent_registrations SELECT space_id,owner_user_id,'other-machine',harness,display_name,
+        configuration_json,version,created_at,updated_at FROM data.space_agent_registrations
+        WHERE machine_id='machine' AND harness='grok'`);
+    await sql(`UPDATE data.run_agent_registrations SET machine_id='other-machine' WHERE run_id=$1`, [pooledSuccessor.runId]);
+    const withoutLegacyEvidence = await reborn.prepare({ commandId: "unrelated-holder", actorUserId: "caller", channelId: "channel",
+      sourceMessageId: "unrelated-holder-message", sourceInstanceId: repoInstanceId, prompt: "resume original" });
+    const untrustedHolder = (await sql(`SELECT spawn_payload_json FROM data.agent_reborn_intents WHERE intent_id=$1`,
+      [withoutLegacyEvidence.intentId])).rows[0].spawn_payload_json;
+    assert.equal(untrustedHolder.handoffSourceInstanceId, undefined,
+      "matching metadata cannot replace the successor's durable machine registration");
+    await sql(`UPDATE data.agent_reborn_intents SET state='failed' WHERE intent_id=$1`, [withoutLegacyEvidence.intentId]);
+    await sql(`UPDATE data.run_agent_registrations SET machine_id='machine' WHERE run_id=$1`, [pooledSuccessor.runId]);
+    await sql(`DELETE FROM data.space_agent_registrations WHERE machine_id='other-machine';
+      DELETE FROM data.agent_registrations WHERE machine_id='other-machine'`);
+    const pooledResume = await reborn.prepare({ commandId: "pooled-handoff-resume", actorUserId: "caller", channelId: "channel",
+      sourceMessageId: "pooled-resume-message", sourceInstanceId: repoInstanceId, prompt: "resume original" });
+    const pooledRestored = await reborn.advance({ intentId: pooledResume.intentId, actorUserId: "caller", channelId: "channel" });
+    assert.equal(pooledRestored.instanceId, repoInstanceId);
+    assert.equal(pooledRestored.spawnPayload.resume, true);
+    assert.equal(pooledRestored.spawnPayload.handoffTransfer, true);
+    assert.equal(pooledRestored.spawnPayload.handoffSourceInstanceId, pooledSuccessor.instanceId);
+    assert.equal(pooledRestored.spawnPayload.resumeSessionKey, repoPredecessor.resumeSessionKey);
+    assert.equal(pooledRestored.spawnPayload.slotId, repoPool.slotId);
 
     // The connection changing or disconnecting does not touch a repo Run: no
     // authorization was pinned to it, and GitHub alone gates the clone.

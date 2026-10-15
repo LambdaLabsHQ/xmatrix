@@ -442,7 +442,14 @@ async fn handle_daemon_spawn_request(
                         baseline: None,
                     });
                 }
-                let mut lease = if intent.handoff_transfer {
+                let mut lease = if intent.handoff_transfer && intent.resume {
+                    repo_pool::resume_handoff_lease_at(
+                        &layout, &base_repo,
+                        intent.handoff_source_resume_session_key.as_deref().unwrap_or_default(),
+                        intent.handoff_source_instance_id.as_deref().unwrap_or_default(),
+                        intent.slot_id.as_deref().unwrap_or_default(), &request,
+                    ).await
+                } else if intent.handoff_transfer {
                     let source_session = intent
                         .handoff_source_resume_session_key
                         .as_deref()

@@ -112,7 +112,7 @@ export function createProductAgentInterventionAuthorityPort(input: {
           instanceId: target.instanceId,
           reason,
           worktreeDisposition: "retain",
-          ...(handoffExport ? { handoffExport, resumeSessionKey: target.resumeSessionKey,
+          ...(handoffExport ? { handoffExport, preserveInstanceForReborn: true, resumeSessionKey: target.resumeSessionKey,
             ...target.repoPool } : {}),
         },
         metadata: {},

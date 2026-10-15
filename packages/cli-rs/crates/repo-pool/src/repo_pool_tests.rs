@@ -626,6 +626,8 @@ mod tests {
         assert!(serde_json::from_value::<SlotRecord>(slot_value).is_err());
 
         let binding = BindingRecord {
+            state: None,
+            spawn_claim_token: None,
             session_key: "s".into(),
             instance_id: "i".into(),
             run_id: "r".into(),
@@ -1685,8 +1687,10 @@ mod tests {
             manifest.slots.get(lease.slot_id.as_str()).unwrap().state,
             SlotState::Starting
         );
-        assert_eq!(manifest.bindings[0].session_key, "ho-successor");
-        assert_eq!(manifest.bindings[0].instance_id, "inst-succ");
+        assert_eq!(manifest.bindings[0].session_key, "ho1");
+        assert_eq!(manifest.bindings[0].state, Some(SlotState::Retained));
+        assert_eq!(manifest.bindings[1].session_key, "ho-successor");
+        assert_eq!(manifest.bindings[1].instance_id, "inst-succ");
         assert_eq!(
             transfer_retained_lease_at(&layout, &base, &expected, &successor)
                 .await
@@ -1694,6 +1698,28 @@ mod tests {
                 .code,
             PoolErrorCode::InvalidBinding
         );
+        let successor_authority = authority_for(&successor, &lease.slot_id);
+        claim_starting_lease_at(&layout, &successor_authority, &transferred.spawn_claim_token, &lease.worktree_path)
+            .await.unwrap();
+        let reborn = LeaseRequest { run_id: "reborn-original".into(), execution_key: "reborn-exec".into(), ..req("ho1") };
+        // Older daemons removed this binding on transfer. Recovery must prove
+        // the exact successor, never attach by path or slot id alone.
+        let mut legacy = load_manifest_at(layout.pool_root()).unwrap().unwrap();
+        legacy.bindings.retain(|binding| binding.session_key != "ho1");
+        save_manifest_at(layout.pool_root(), &legacy).unwrap();
+        assert_eq!(resume_handoff_lease_at(&layout, &base, "unrelated-session", &successor.instance_id,
+            lease.slot_id.as_str(), &reborn).await.unwrap_err().code, PoolErrorCode::InvalidBinding);
+        let resumed = resume_handoff_lease_at(&layout, &base, &successor.session_key, &successor.instance_id, lease.slot_id.as_str(), &reborn).await.unwrap();
+        assert_eq!(resumed.worktree_path, lease.worktree_path);
+        claim_starting_lease_at(&layout, &authority_for(&reborn, &lease.slot_id),
+            &resumed.spawn_claim_token, &lease.worktree_path).await.unwrap();
+        mark_retained_at(&layout, &successor).await.unwrap();
+        assert_eq!(load_manifest_at(layout.pool_root()).unwrap().unwrap().slots[lease.slot_id.as_str()].state,
+            SlotState::Leased, "the reborn original still owns a live lease");
+        return_abandoned_slot_at(&layout, &base, &successor).await.unwrap();
+        assert_eq!(std::fs::read_to_string(lease.worktree_path.join("DIRTY.txt")).unwrap(), "keep-me");
+        mark_retained_at(&layout, &reborn).await.unwrap();
+        assert_eq!(retained_binding_for_session_at(&layout, "ho1").await.unwrap().authority.run_id, "reborn-original");
         let _ = remote;
         cleanup_test_dirs(&[&pools, &base, &remote]);
     }
@@ -2797,6 +2823,9 @@ mod tests {
         commit_unpushed_work(&tree, "feat/rest");
         std::fs::write(tree.join("draft.txt"), "uncommitted\n").unwrap();
         mark_retained_at(&layout, &req("rh1")).await.unwrap();
+        let peer = req("rh-peer");
+        transfer_retained_lease_at(&layout, &base, &authority_for(&req("rh1"), &lease.slot_id), &peer).await.unwrap();
+        mark_retained_at(&layout, &peer).await.unwrap();
 
         let outcome = reclaim_pool_slots_at(&pools, &PoolLiveness::default(), 8).await;
         assert_eq!(
@@ -2851,6 +2880,14 @@ mod tests {
             "the session wakes at the path its transcript names"
         );
         assert_eq!(state_of(&layout, &slot), SlotState::Starting);
+        claim_starting_lease_at(&layout, &authority_for(&successor, &lease.slot_id),
+            &woken.spawn_claim_token, &tree).await.unwrap();
+        let peer_binding = retained_binding_for_session_at(&layout, "rh-peer").await.unwrap();
+        let peer_reborn = LeaseRequest { run_id: "peer-reborn".into(), execution_key: "peer-reborn-exec".into(), ..peer };
+        let peer_lease = rebind_retained_lease_at(&layout, &base, &peer_binding.authority, &peer_reborn).await.unwrap();
+        claim_starting_lease_at(&layout, &authority_for(&peer_reborn, &lease.slot_id),
+            &peer_lease.spawn_claim_token, &tree).await.unwrap();
+        assert_eq!(peer_lease.worktree_path, tree, "all sessions recover the same shared directory");
         let branch = git_cmd()
             .args([
                 "-C",

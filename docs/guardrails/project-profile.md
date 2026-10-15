@@ -137,6 +137,13 @@ guard. This requires the updated CLI; stale retained authority is refused.
 Stop issuance failures refuse the handoff; a durable stop may still
 await its daemon report. See [instance handoff](../same-machine-instance-handoff.md#22-moving-to-another-machine).
 
+Handoff stops execution while retaining the source Instance and provider session.
+An explicit reborn may resume it while the successor runs in the same directory;
+the product imposes no stop-first constraint. Shared repository-pool references
+track each session's lifecycle and preserve every session through eviction and
+rehydration. Only the final explicit abandon can reset the shared checkout.
+See [handoff source reborn](../same-machine-instance-handoff.md#handoff-source-reborn-compatibility).
+
 Machine startup failures preserve bounded, credential-redacted originating causes in
 Channel notices and invocation details; Git retry classification does not replace stderr.
 Machine startup failures remain visible as idempotent Channel notices even if
