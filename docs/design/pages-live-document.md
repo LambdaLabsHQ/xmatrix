@@ -272,6 +272,11 @@ fact is about.
     `assistant_delta` traces (Claude with `--include-partial-messages`, in
     pieces as Codex's are), streams back with the turn's end; a new turn or the
     session's interrupt stops a turn still running.
+    Live write permission follows the connection's current edit access and the
+    page's current suggestion policy throughout its lifetime, including resumed
+    sockets. Losing either interrupts its turn and pauses new turns; late replies
+    cannot change the document. Restoring permission sends a fresh turn with the
+    changes it missed, under a new turn id.
   - **What reaches the page** is only what the Agent writes inside markers
     (`page-co-writing.ts`): `⟦after "words on the page"⟧` then markdown added
     after the block holding them, `⟦replace "words"⟧` then their new wording

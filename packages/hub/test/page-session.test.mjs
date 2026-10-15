@@ -648,16 +648,18 @@ test("summary: an Agent's edit starts one at once, and a second does not start b
  * An Agent's runtime co-writing the page (page-co-writer.ts): what the session asks it, and its
  * answers, streamed in as the harness writes them.
  */
-function joinCoWriter(h, id = "w-agent") {
+function joinCoWriter(h, id = "w-agent", { canEdit = true, resumed = false } = {}) {
   const asked = [];
   const send = h.ports.send;
   h.ports.send = (to, data) => {
     if (to !== id) return send(to, data);
     const decoder = decoding.createDecoder(data);
-    assert.equal(decoding.readVarUint(decoder), PAGE_MESSAGE_CO_WRITE);
+    const type = decoding.readVarUint(decoder);
+    if (type === PAGE_MESSAGE_NOTICE) return;
+    assert.equal(type, PAGE_MESSAGE_CO_WRITE);
     asked.push(JSON.parse(decoding.readVarString(decoder)));
   };
-  h.session.connect({ id, principal: agent, canEdit: true, coWriter: true });
+  h.session.connect({ id, principal: agent, canEdit, coWriter: true }, { resumed });
   const reply = (frame) => {
     const encoder = encoding.createEncoder();
     encoding.writeVarUint(encoder, PAGE_MESSAGE_CO_WRITE);
@@ -689,6 +691,64 @@ function placeCaret(h, client, id, words) {
 }
 
 const coWriterOf = (client) => [...client.awareness.getStates().values()].find((state) => state?.user?.kind === "agent");
+
+test("live co-writing follows current edit access and suggestion policy, including late replies", async (t) => {
+  for (const policy of ["access", "suggestions"]) await t.test(policy, async (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    const h = harness();
+    const ann = await annConnected(h);
+    const writer = joinCoWriter(h);
+    const writable = (allowed) => policy === "access"
+      ? h.session.setCanEdit("w-agent", allowed) : h.session.setAgentSuggestOnly(!allowed);
+    writer.write(1, '⟦after "none"⟧\nAlready written');
+    const before = ann.text.toString();
+    writable(false);
+    writer.write(1, '⟦after "none"⟧\nNot allowed');
+    writer.done(1);
+    assert.equal(ann.text.toString(), before, "accepted text stays; later text is refused");
+    assert.deepEqual(writer.asked.at(-1), { type: "interrupt", turn: 1 });
+    ann.text.insert(ann.text.length, "\nA person's edit\n");
+    t.mock.timers.tick(CO_WRITER_PAUSE_MS);
+    assert.equal(writer.turns().length, 1, "no new work while live writes are disallowed");
+    writable(true);
+    const next = writer.turns().at(-1);
+    assert.equal(next.turn, 2, "restoring permission starts a fresh turn");
+    assert.match(next.text, /A person's edit/u);
+    writer.write(1, '⟦after "none"⟧\nA late reply');
+    writer.write(next.turn, '⟦after "none"⟧\nAllowed now');
+    writer.done(next.turn);
+    assert.match(ann.text.toString(), /Allowed now/u);
+    assert.doesNotMatch(ann.text.toString(), /Not allowed|A late reply/u);
+    ann.text.insert(ann.text.length, "\nAnother edit\n");
+    writable(false);
+    t.mock.timers.tick(CO_WRITER_PAUSE_MS);
+    assert.equal(writer.turns().length, 2, "withdrawing permission also cancels a pending pause timer");
+  });
+});
+
+test("a page head reloaded as suggest-only also pauses a connected co-writer", async () => {
+  const h = harness();
+  const ann = await annConnected(h);
+  const writer = joinCoWriter(h);
+  h.ports.loadHead = async () => ({ revision: 1, body: HEAD, agentSuggestOnly: true });
+  await h.session.reload(human("ann"));
+  writer.write(1, '⟦after "none"⟧\nNot allowed');
+  writer.done(1);
+  assert.equal(ann.text.toString(), HEAD);
+  assert.deepEqual(writer.asked.at(-1), { type: "interrupt", turn: 1 });
+});
+
+test("new and resumed co-writers cannot write without current live write permission", async () => {
+  for (const resumed of [false, true]) for (const policy of ["access", "suggestions"]) {
+    const h = harness({ suggestOnly: policy === "suggestions" });
+    const ann = await annConnected(h);
+    const writer = joinCoWriter(h, "w-agent", { canEdit: policy !== "access", resumed });
+    assert.equal(writer.turns().length, 0);
+    writer.write(1, '⟦after "none"⟧\nNot allowed');
+    writer.done(1);
+    assert.equal(ann.text.toString(), HEAD);
+  }
+});
 
 test("a co-writing Agent reads the page as it joins, and its words stream into the page under its caret", async () => {
   const h = harness();
@@ -802,4 +862,3 @@ test("a co-writing Agent keeps out of the paragraph someone is typing in, and he
   assert.match(told, /ann is typing in the paragraph holding "In progress"; it was left alone\./u);
   assert.match(told, /Your ⟦after⟧ quoted "no such words", which is not on the page/u);
 });
-

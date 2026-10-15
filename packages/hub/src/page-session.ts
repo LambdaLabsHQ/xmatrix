@@ -255,6 +255,23 @@ export class PageSession {
     });
   }
 
+  /** One write policy for each live co-writer, derived from the current connection and page. */
+  private canCoWrite(connection: PageSessionConnection): boolean {
+    return connection.canEdit && this.base?.agentSuggestOnly === false;
+  }
+
+  private refreshCoWriters(): void {
+    for (const [id, writer] of this.coWriters) {
+      const connection = this.connections.get(id);
+      writer.setWritable(connection !== undefined && this.canCoWrite(connection));
+    }
+  }
+
+  private setHead(head: PageHead): void {
+    this.base = head;
+    this.refreshCoWriters();
+  }
+
   /** Runs session mutations one at a time. */
   private serial<T>(work: () => Promise<T>): Promise<T> {
     const next = this.queue.then(work, work);
@@ -299,7 +316,7 @@ export class PageSession {
       if (this.base) return;
       if (persisted) {
         Y.applyUpdate(this.doc, persisted.update, "load");
-        this.base = this.canonical(persisted.base);
+        this.setHead(this.canonical(persisted.base));
         this.editSeq = persisted.editSeq;
         for (const editor of persisted.editors) this.editors.set(principalKey(editor.principal), editor);
         for (const agent of persisted.agents ?? []) {
@@ -322,7 +339,7 @@ export class PageSession {
       }
       const head = this.canonical(await this.ports.loadHead(principal));
       setPageFragmentMarkdown(this.fragment, head.body, "load");
-      this.base = head;
+      this.setHead(head);
       this.settledVersion = this.version;
       // The document's CRDT identity is kept from its first load, so replicas
       // that reconnect after a restart merge instead of duplicating the text.
@@ -366,7 +383,7 @@ export class PageSession {
     if (connection.coWriter) {
       const writer = new PageCoWriter(this.coWriterHost(connection));
       this.coWriters.set(connection.id, writer);
-      writer.start(options.resumed === true);
+      writer.start(this.canCoWrite(connection), options.resumed === true);
       return;
     }
     const encoder = encoding.createEncoder();
@@ -412,6 +429,7 @@ export class PageSession {
     const connection = this.connections.get(connectionId);
     if (!connection || connection.canEdit === canEdit) return;
     connection.canEdit = canEdit;
+    this.refreshCoWriters();
     this.ports.send(connectionId, encodeNotice({ type: "access", canEdit }));
   }
 
@@ -494,11 +512,12 @@ export class PageSession {
       const head = this.canonical(await this.ports.loadHead(author));
       const merged = mergePageText(this.base.body, snapshot, head.body);
       committedBody = merged.ok ? canonicalPageMarkdown(merged.text) : snapshot;
-      this.base = head;
+      this.setHead(head);
       result = await this.ports.commit(author, input(head, committedBody));
       this.adopt(snapshot, committedBody, "server");
     }
-    this.base = { ...this.base, revision: result.headRevision, body: committedBody };
+    this.setHead({ ...this.base, revision: result.headRevision, body: committedBody,
+      agentSuggestOnly: result.agentSuggestOnly });
     for (const [key, editor] of this.editors) if (editor.seq <= snapshotSeq) this.editors.delete(key);
     this.settle();
     await this.persist();
@@ -645,7 +664,7 @@ export class PageSession {
         const live = this.markdown();
         const merged = mergePageText(this.base.body, live, head.body);
         this.adopt(live, merged.ok ? canonicalPageMarkdown(merged.text) : head.body, "server");
-        this.base = head;
+        this.setHead(head);
       }
       const current = this.markdown();
       const baseText = input.baseRevision === this.base.revision ? this.base.body
@@ -664,11 +683,12 @@ export class PageSession {
       // meanwhile, or the Agent co-writes it with a person) waits for a person and never reaches the
       // text. Only a suggest-only page sends later Agent edits straight to suggestions.
       if (result.kind === "suggestion") {
-        this.base = { ...this.base, agentSuggestOnly: result.agentSuggestOnly };
+        this.setHead({ ...this.base, agentSuggestOnly: result.agentSuggestOnly });
         this.ports.broadcast(encodeNotice({ type: "suggestion", revision: result.revision, author: principal.label }));
         return { ...result, removedSections: [] };
       }
-      this.base = { ...this.base, revision: result.headRevision, body: merged.text };
+      this.setHead({ ...this.base, revision: result.headRevision, body: merged.text,
+        agentSuggestOnly: result.agentSuggestOnly });
       // One transaction, so edits people make meanwhile can never shift its positions. It is
       // written under the editor's awareness id, so readers see whose text it is.
       const change = authoredAs(this.doc, agentClientId(key), () => this.adopt(current, merged.text, `agent:${key}`));
@@ -696,13 +716,13 @@ export class PageSession {
       if (redact?.needle) {
         const current = this.markdown();
         this.adopt(current, current.split(redact.needle).join(redact.replacement), "server");
-        this.base = { ...this.base, body: this.base.body.split(redact.needle).join(redact.replacement) };
+        this.setHead({ ...this.base, body: this.base.body.split(redact.needle).join(redact.replacement) });
       }
       await this.commitNow();
       const head = this.canonical(await this.ports.loadHead(principal));
       // The new head replaces what was committed; edits still pending stay on top of it.
       this.adopt(this.base.body, head.body, "server");
-      this.base = head;
+      this.setHead(head);
       this.settle();
       await this.persist();
       this.ports.broadcast(encodeNotice({ type: "committed", revision: head.revision, headRevision: head.revision }));
@@ -737,6 +757,6 @@ export class PageSession {
 
   /** Suggest-only may change while a session is live. */
   setAgentSuggestOnly(value: boolean): void {
-    if (this.base) this.base = { ...this.base, agentSuggestOnly: value };
+    if (this.base) this.setHead({ ...this.base, agentSuggestOnly: value });
   }
 }
