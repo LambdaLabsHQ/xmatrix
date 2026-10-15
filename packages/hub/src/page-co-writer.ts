@@ -151,18 +151,35 @@ export class PageCoWriter {
   /** Its last finished change, which a person may take back until it writes again. */
   private last: Written | null = null;
   private ended = false;
+  private writable = false;
 
   constructor(private readonly host: PageCoWriterHost) {}
 
   /** The Agent joins: it is shown on the page, and reads it unless it already had (a session that woke). */
-  start(resumed = false): void {
-    this.show({ activity: "watching" });
+  start(writable: boolean, resumed = false): void {
+    this.writable = writable;
+    this.show({ activity: writable ? "watching" : "waiting" });
+    if (!writable) return;
     if (resumed) {
       this.seen = this.host.markdown();
       this.readCount = 1;
       return;
     }
     this.ask();
+  }
+
+  /** The session's current write policy applies to the whole turn, including work already queued. */
+  setWritable(writable: boolean): void {
+    if (this.ended || this.writable === writable) return;
+    this.writable = writable;
+    if (writable) {
+      this.ask();
+    } else {
+      if (this.timer) clearTimeout(this.timer);
+      this.timer = null;
+      this.yieldTurn("live write permission was withdrawn");
+      this.show({ activity: "waiting" });
+    }
   }
 
   stop(): void {
@@ -174,7 +191,7 @@ export class PageCoWriter {
 
   /** Someone else changed the page. If it touched what the Agent is writing, the Agent stops there. */
   othersEdited(): void {
-    if (this.ended) return;
+    if (this.ended || !this.writable) return;
     this.changed = true;
     if (this.active?.action && !this.active.action.skipped && !this.intact(this.active.action)) {
       this.yieldTurn("someone edited what you were writing");
@@ -186,7 +203,7 @@ export class PageCoWriter {
   /** Someone's caret moved: into what the Agent is writing, and it stops there. */
   othersMoved(): void {
     const action = this.active?.action;
-    if (this.ended || !action || action.skipped || this.active?.stopped) return;
+    if (this.ended || !this.writable || !action || action.skipped || this.active?.stopped) return;
     const live = initProseMirrorDoc(this.host.fragment, pageSchema);
     const region = this.region(action, live.doc);
     if (!region) return;
@@ -202,7 +219,7 @@ export class PageCoWriter {
   /** The runtime answers a turn: the Agent's words as they come, then the end of its turn. */
   receive(reply: PageCoWriteReply): void {
     const turn = this.active;
-    if (this.ended || !turn || reply.turn !== turn.id) return;
+    if (this.ended || !this.writable || !turn || reply.turn !== turn.id) return;
     if (reply.type === "delta") {
       if (!turn.stopped) for (const event of turn.parser.push(reply.text)) this.apply(turn, event);
       return;

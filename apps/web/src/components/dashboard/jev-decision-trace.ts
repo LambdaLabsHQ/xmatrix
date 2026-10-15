@@ -182,10 +182,19 @@ export const fitLevel = (fit: number) => FIT_LEVELS[Math.max(0, Math.min(3, Math
 export const roomText = (headroom: number | undefined) => headroom === undefined ? "room unknown"
   : headroom <= 0 ? "overloaded" : `${Math.round(headroom * 100)}% room`;
 
+export const throughputText = (throughput: LaunchPlacementCandidate["throughput"]) => throughput
+  ? `${throughput.tokensPerSecond.toFixed(1)} tokens/s · ${throughput.samples} inference samples`
+  : "throughput unknown";
+
 /** One sentence on why the first-ranked environment won. */
 export function placementReason(ranking: readonly LaunchPlacementCandidate[], compared: boolean): string {
   const [chosen] = ranking;
   if (!chosen) return "";
+  if (chosen.throughput && ranking.some(item => item.throughput && item.harness === chosen.harness &&
+    item.throughput.model === chosen.throughput!.model && item.throughput.effort === chosen.throughput!.effort &&
+    item.throughput.tokensPerSecond < chosen.throughput!.tokensPerSecond)) {
+    return `Faster measured inference for ${chosen.harness} on ${chosen.throughput.model}: ${throughputText(chosen.throughput)}. Tool time is excluded`;
+  }
   const fitter = ranking.filter(item => item.fit > chosen.fit + 0.05).sort((left, right) => right.fit - left.fit)[0];
   if (!compared) return `Most room for ${chosen.harness}: ${roomText(chosen.headroom)}`;
   if (fitter) return `${fitter.harness} fits better, but ${fitter.machineName || "its machine"} is ${
@@ -198,4 +207,3 @@ export function placementReason(ranking: readonly LaunchPlacementCandidate[], co
   return `${reason}. ${chosen.described ? "Its description was read"
     : `${chosen.harness} has no description here, so it was judged by name`}`;
 }
-

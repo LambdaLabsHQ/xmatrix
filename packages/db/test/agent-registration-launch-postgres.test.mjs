@@ -296,8 +296,11 @@ integration("launch survives a hostname change with stale Workspace metadata and
     const coldPayload = (await sql(`SELECT spawn_payload_json FROM data.agent_launches WHERE launch_id=$1`,
       [coldLaunch.prepared[0].launchId])).rows[0].spawn_payload_json;
     assert.deepEqual(coldPayload.context.requestedParameters, { serviceTier: "future-priority" });
+    const throughput = { model: "provider/model", effort: "high", observedAt: new Date().toISOString(),
+      outputTokens: 2400, inferenceMs: 30_000, samples: 3 };
     await sql(`UPDATE data.instances SET presentation_json=$1 WHERE instance_id=$2`, [{
       model: "provider/model", parametersObservedAt: new Date().toISOString(),
+      effort: "high", usage: { throughput },
       parameters: [{ id: "serviceTier", label: "Service tier", options: ["future-priority"] }],
       modelsObservedAt: new Date().toISOString(), models: [{ model: "provider/model", description: "Observed model",
         supportedReasoningEfforts: [{ reasoningEffort: "high", description: "Thorough" }] }],
@@ -319,6 +322,8 @@ integration("launch survives a hostname change with stale Workspace metadata and
         const boundary = await sql("SELECT timeline_sequence FROM data.messages WHERE message_id=$1", ["dispatch-source"]);
         assert.equal(sourceSequence, Number(boundary.rows[0].timeline_sequence));
         assert.deepEqual(candidates[0].observations.quota, { remainingPercent: 100, assumed: true });
+        assert.deepEqual(candidates[0].observations.throughput, [throughput]);
+        assert.equal(candidates[0].parameterEffort, "high");
         assert.deepEqual(candidates[0].parameters, [{ id: "serviceTier", label: "Service tier", options: ["future-priority"] }]);
         return { key: candidates[0].key, model: "model", workspaceReference: "workspace" };
       });

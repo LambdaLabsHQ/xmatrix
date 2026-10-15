@@ -1,4 +1,5 @@
 import { hasControlCharacter } from "./field-validation.js";
+import { agentThroughputObservation, type AgentThroughputObservation } from "./agent-throughput.js";
 /** One Jev answer: the exact input it read and the distribution it returned. */
 export interface LaunchDecisionStage { inputDigest: string; selected: string; probabilities: Record<string, number> }
 
@@ -13,6 +14,7 @@ export interface LaunchHarnessFit { score: number; probabilities: Record<string,
 export interface LaunchPlacementCandidate {
   harness: string; machineId: string; machineName?: string;
   fit: number; headroom?: number; quotaPace?: number; frontier: boolean; utility: number;
+  throughput?: AgentThroughputObservation & { tokensPerSecond: number; relative: number };
   /** Whether the Space had described the harness when its fit was read; false
    * means it was judged without one. Absent from decisions made before it was recorded. */
   described?: boolean;
@@ -92,24 +94,30 @@ function parseFit(value: unknown): LaunchParameterEvidence["fit"] | undefined | 
   return { inputDigest: value.inputDigest, scores };
 }
 
-function parsePlacement(value: unknown): LaunchParameterEvidence["placement"] | undefined | null {
+function parsePlacement(value: unknown, evaluatedAt: number): LaunchParameterEvidence["placement"] | undefined | null {
   if (value === undefined) return undefined;
   if (!plainRecord(value) || value.profile !== "balanced" || !Array.isArray(value.ranking) ||
     !value.ranking.length || value.ranking.length > 8) return null;
   const ranking: LaunchPlacementCandidate[] = [];
   for (const item of value.ranking) {
+    const throughput = plainRecord(item) ? agentThroughputObservation(item.throughput, evaluatedAt) : undefined;
     if (!plainRecord(item) || typeof item.harness !== "string" || !HARNESS.test(item.harness) ||
       typeof item.machineId !== "string" || !item.machineId || item.machineId.length > 128 || hasControlCharacter(item.machineId) ||
       item.machineName !== undefined && (typeof item.machineName !== "string" || !item.machineName ||
         item.machineName.length > 200 || hasControlCharacter(item.machineName)) ||
       !unit(item.fit, 0, 1) || item.headroom !== undefined && !unit(item.headroom, -1_000, 1) ||
       item.quotaPace !== undefined && !unit(item.quotaPace, 0, 1e12) || typeof item.frontier !== "boolean" || !unit(item.utility, -1_000, 2) ||
-      item.described !== undefined && typeof item.described !== "boolean") return null;
+      item.described !== undefined && typeof item.described !== "boolean" ||
+      item.throughput !== undefined && (!throughput || throughput.samples < 3 || !plainRecord(item.throughput) ||
+        !unit(item.throughput.relative, 0, 1) || !unit(item.throughput.tokensPerSecond, 0, 1_000_000) ||
+        Math.abs(item.throughput.tokensPerSecond - throughput.outputTokens * 1000 / throughput.inferenceMs) > 0.001)) return null;
     ranking.push({ harness: item.harness, machineId: item.machineId,
       ...(item.machineName !== undefined ? { machineName: item.machineName as string } : {}),
       fit: item.fit, ...(item.headroom !== undefined ? { headroom: item.headroom as number } : {}),
       ...(item.quotaPace !== undefined ? { quotaPace: item.quotaPace as number } : {}), frontier: item.frontier, utility: item.utility,
       ...(item.described !== undefined ? { described: item.described as boolean } : {}) });
+    if (throughput && plainRecord(item.throughput)) ranking[ranking.length - 1]!.throughput = {
+      ...throughput, tokensPerSecond: item.throughput.tokensPerSecond as number, relative: item.throughput.relative as number };
   }
   return { profile: "balanced", ranking };
 }
@@ -145,7 +153,7 @@ export function parseLaunchParameterEvidence(value: unknown): LaunchParameterEvi
   const harness = stage(row.harness, HARNESS);
   const environment = stage(row.environment, /^candidate_\d{1,3}$/u);
   if (harness === null || environment === null) return undefined;
-  const fit = parseFit(row.fit), placement = parsePlacement(row.placement);
+  const fit = parseFit(row.fit), placement = parsePlacement(row.placement, Date.parse(row.evaluatedAt));
   if (fit === null || placement === null) return undefined;
   let intent: LaunchParameterEvidence["intent"];
   if (row.intent !== undefined) {

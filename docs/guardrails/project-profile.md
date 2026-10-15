@@ -15,6 +15,14 @@ English is the default language for repository documentation, guardrails, releas
 
 ## Current behavior
 
+Agent placement uses measured inference throughput alongside semantic fit,
+machine headroom and quota pace. Recent real output-token/inference-time
+observations remain scoped to the registration, model and effort; tool time,
+failed turns, stale readings and unsupported harnesses cannot become fabricated
+speed measurements. Native Claude/Codex wrappers supply the optional fact,
+existing Instance presentations persist it, and invocation details show it.
+See [Space agent routing](../architecture/space-agent-routing.md#observed-agent-throughput).
+
 Parameter-control notices distinguish an unconfirmed local selection from the
 provider's observed value. Codex turn-only Fast selections remain pending until
 the provider confirms them; see [harness parameters](../architecture/harness-parameters.md).
@@ -74,9 +82,10 @@ The Gmail connector preserves ordered inline mixed body segments, excludes
 attachment subtrees, and marks incomplete MIME previews. Native availability
 uses Composio's managed client with its approved full-mailbox grant; the Hub
 limits calls to an endpoint list. `send`/`reply` ask for a Space admin's
-approval of each email by default. Search/read post mail content to the Channel
-receipt and a bounded excerpt to execution history. All connector calls start
-as visible Channel messages; there is no connector MCP or caller-only result.
+approval of each email by default. Search/read post their results, including
+mail content, to the calling Channel, where its members can read them;
+execution history keeps a bounded excerpt. Every action starts as a visible
+Channel command; the former connector MCP and caller-only result path are retired.
 Gmail-to-Space-secret transfer is not implemented, so these reads cannot satisfy
 a QA rule that login codes stay out of messages. The supported manual secret
 card and process injection path is documented in

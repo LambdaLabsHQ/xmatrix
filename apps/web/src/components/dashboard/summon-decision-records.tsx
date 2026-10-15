@@ -7,7 +7,7 @@ import { useXMatrixQueryFetch } from "@/lib/query/use-query-fetch";
 import { WEB_PROXY_ROUTES, parameterFailureCodeFromDecisionRecord, preparationFailureSummary,
   type LaunchParameterEvidence } from "@xmatrix/protocol";
 import { formatZonedDateTime } from "./time-display";
-import { fitLevel, jevDecisions, jevReadings, placementReason, roomText, type JevReading } from "./jev-decision-trace";
+import { fitLevel, jevDecisions, jevReadings, placementReason, roomText, throughputText, type JevReading } from "./jev-decision-trace";
 import { errorFromResponse } from "@/lib/query/api-client";
 import { UserFacingProblem, userErrorMessage } from "@/lib/user-facing-error";
 
@@ -145,7 +145,7 @@ export function JevDecisionSection({ decisions, parameters }: { decisions: JevRe
         {placed && <RoutingChoice label="Agent" note={placementReason(placed, fits.length > 0)}
           options={placed.map((item, index) => ({ key: `${item.harness}:${item.machineId}`,
             title: `${item.harness} · ${item.machineName || "unnamed machine"}`, chosen: index === 0,
-            meta: `${fits.length > 0 ? `${fitLevel(item.fit)} · ` : ""}${roomText(item.headroom)}` }))} />}
+            meta: `${fits.length > 0 ? `${fitLevel(item.fit)} · ` : ""}${roomText(item.headroom)} · ${throughputText(item.throughput)}` }))} />}
         {decision.failure && <li className="grid grid-cols-[4.75rem_minmax(0,1fr)] gap-x-2 py-1.5"><span className="text-muted-foreground">Failed</span>
           <span className="truncate text-destructive">{decision.failure}</span></li>}
       </ol>
