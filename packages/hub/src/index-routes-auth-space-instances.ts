@@ -1,7 +1,7 @@
 import { Hono, type Context } from "hono";
 import {
   HUB_ROUTES, isAgentStatus, isTerminalRunStatus, sha256Hex, hasControlCharacter,
-  humanHandleShortCode, isUnusableHumanIdentitySource, neutralHumanIdentity,
+  isPlaceholderHumanName,
 } from "@xmatrix/protocol";
 import type { Env } from "./types";
 import type { AuthUser } from "./auth";
@@ -29,16 +29,10 @@ async function readDaemonControlStatus(
 const INSTANCE_ROUTE = "/api/spaces/:spaceId/channels/:channelId/agent-instances/:instanceId";
 
 /** The caller's own membership row carries their current profile, not the stored copy. */
-/**
- * "Ada Lovelace's Space" for a name the person chose. Without one — no name,
- * the email address Better Auth stores as one, or the generated "User 3f9a2c"
- * placeholder — it is "My Space", not a Space named after an id.
- */
+/** "Ada Lovelace's Space"; "My Space" while the account has no name its person chose. */
 export function personalSpaceName(user: Pick<AuthUser, "id" | "name">): string {
   const name = user.name?.trim() ?? "";
-  const shortCode = humanHandleShortCode(user.id);
-  const placeholder = shortCode !== undefined && name === neutralHumanIdentity(shortCode).displayName;
-  return isUnusableHumanIdentitySource(name) || placeholder ? "My Space" : `${name.slice(0, 60)}'s Space`;
+  return isPlaceholderHumanName(name, user.id) ? "My Space" : `${name.slice(0, 60)}'s Space`;
 }
 
 function withCallerMemberProfile(space: Record<string, unknown>, authUser: AuthUser): Record<string, unknown> {

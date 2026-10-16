@@ -117,7 +117,7 @@ export {
   canonicalHumanHandle, HUMAN_DISPLAY_NAME_MAX_LENGTH, HUMAN_HANDLE_MAX_LENGTH,
   HUMAN_HANDLE_MIN_LENGTH, HUMAN_TIME_ZONE_MAX_LENGTH, humanDisplayNameRefusal,
   humanHandleMintCandidates, humanHandleRefusal, humanHandleShortCode, humanTimeZoneRefusal,
-  isReservedHumanHandle, isUnusableHumanIdentitySource, isValidHumanHandle, neutralHumanIdentity,
+  isPlaceholderHumanName, isReservedHumanHandle, isUnusableHumanIdentitySource, isValidHumanHandle, neutralHumanIdentity,
   RESERVED_HUMAN_HANDLES, suggestHumanHandle,
 } from "./human-profile-identity.js";
 export type {
