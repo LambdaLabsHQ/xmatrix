@@ -127,11 +127,14 @@ test("a revision's change reads as lines kept, removed and added", async () => {
 });
 
 test("changed document blocks ignore a change of markdown style", async () => {
-  const { pageChangedDocBlocks } = await import("../dist/page-document.js");
+  const { pageChangedDocBlocks, pageChangedDocBlocksAsync } = await import("../dist/page-document.js");
   const before = "# Status\n* one\n* two\n\n# Notes\nkept\n";
-  assert.deepEqual(pageChangedDocBlocks(before, "# Status\n- one\n- two\n\n# Notes\nkept\n"), []);
-  assert.deepEqual(pageChangedDocBlocks(before, "# Status\n- one\n- three\n\n# Notes\nkept\n"), ["status"]);
-  assert.deepEqual(pageChangedDocBlocks(before, "# Status\n* one\n* two\n\n# Next\nnew\n"), ["next", "notes"]);
+  for (const changed of [pageChangedDocBlocks,
+    (before, after) => pageChangedDocBlocksAsync(before, after, async (section) => canonicalPageMarkdown(section))]) {
+    assert.deepEqual(await changed(before, "# Status\n- one\n- two\n\n# Notes\nkept\n"), []);
+    assert.deepEqual(await changed(before, "# Status\n- one\n- three\n\n# Notes\nkept\n"), ["status"]);
+    assert.deepEqual(await changed(before, "# Status\n* one\n* two\n\n# Next\nnew\n"), ["next", "notes"]);
+  }
 });
 
 test("changed document blocks parse only the sections whose text differs", async () => {
