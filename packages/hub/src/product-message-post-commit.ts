@@ -1,6 +1,6 @@
 import { captureServerErrorDiagnostic } from "./server-error-diagnostic";
 import type { ChannelAttachment, DraftSummonIntent } from "@xmatrix/protocol";
-import { parseMessageInteraction, createInstanceMentions, filterOperationalMentions, hasRetiredAgentLaunchMention, parseAutoLaunchMentions,
+import { parseMessageInteraction, parseConnectorActionCommand, createInstanceMentions, filterOperationalMentions, hasRetiredAgentLaunchMention, parseAutoLaunchMentions,
   isLaunchHintRejection, parseHarnessCapabilityMentions, PREPARATION_REJECTION_MESSAGES, RETIRED_AGENT_LAUNCH_NOTICE,
   REGISTRATION_PREPARATION_REJECTION_CODES } from "@xmatrix/protocol";
 import { startChannelAbout } from "./channel-about";
@@ -32,12 +32,13 @@ import { attachConversationToPage } from "./product-page-attachment";
 import { judgeMessageSupersession } from "./message-supersession";
 import { CHANNEL_ACTIVITY_MESSAGE_KIND } from "@xmatrix/protocol";
 
-/** Product control must finish before the HTTP response. A dropped or timed-out
- * waitUntil can leave a committed command with no daemon request or receipt. */
+/** Product control and bounded video transfer must finish before the HTTP response.
+ * waitUntil may end before a long transfer has produced its receipt. */
 export function productMessageControlFinishesBeforeResponse(body: string): boolean {
   const plan = parseMessageInteraction(body);
   return !!plan.stop || plan.controls.length > 0 || plan.launches.length > 0 ||
-    plan.reborn.length > 0 || plan.handoff.length > 0;
+    plan.reborn.length > 0 || plan.handoff.length > 0 ||
+    parseConnectorActionCommand("x", body)?.actionId === "upload_video";
 }
 
 export type ProductMessagePostCommitEnv = ProductAgentMentionAuthorityEnv & Env;

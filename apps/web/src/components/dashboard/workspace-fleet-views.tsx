@@ -137,6 +137,7 @@ import { type AppConnectorManifest } from "@/lib/app-connectors";
 import { ConnectorCredentials, connectorGeneratesCredentials, connectorTakesCredentials, connectorWritableCredentials } from "./connector-credentials";
 import { ConnectorPolicy, connectorWriteActions } from "./connector-policy";
 import { GmailMailboxes } from "./gmail-mailboxes";
+import { XAccounts } from "./x-accounts";
 
 import { useAuth } from "@/lib/auth-context";
 import { xmatrixApiRequest, unexpectedResponse } from "@/lib/query/api-client";
@@ -1189,8 +1190,12 @@ export function AppsView({
     if (!outcome || !providerId) return;
     const name = connectors.find((connector) => connector.id === providerId)?.name ?? providerId;
     setSetupNotice(outcome === "connected"
-      ? { tone: "success", message: `${name} is connected. Subscribe a channel or allow its actions below.` }
-      : { tone: "warning", message: `${name} did not finish connecting. Try again, or paste a token under Credentials.` });
+      ? { tone: "success", message: providerId === "x"
+        ? "X account connected. Confirm its handle below and use Add X account to authorize your other account."
+        : `${name} is connected. Subscribe a channel or allow its actions below.` }
+      : { tone: "warning", message: providerId === "x"
+        ? "X authorization did not finish. Use Add X account to try again."
+        : `${name} did not finish connecting. Try again, or paste a token under Credentials.` });
     url.searchParams.delete("oauth");
     url.searchParams.delete("connector");
     window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
@@ -1243,7 +1248,7 @@ export function AppsView({
 
   async function configureConnector(
     connector: AppConnectorManifest,
-    options?: { mode?: "add" | "manage" | "install" | "account"; installationId?: string }
+    options?: { mode?: "add" | "manage" | "install" | "account"; installationId?: string; xAccountId?: string }
   ) {
     if (!token || !currentSpace) return;
     const existingConnection = connectionsByProvider.get(connector.id);
@@ -1303,6 +1308,7 @@ export function AppsView({
         const started = await connectionMutation.mutateAsync({
           url: WEB_PROXY_ROUTES.space_app_connection_oauth_start(currentSpace.id, connector.id),
           method: "POST",
+          body: connector.id === "x" && options?.xAccountId ? { accountId: options.xAccountId } : undefined,
         });
         if (!started.url) throw unexpectedResponse("The sign-in link");
         window.location.assign(started.url);
@@ -1455,7 +1461,7 @@ export function AppsView({
       connection, available, configured, needsAttention,
       label: configured ? "Connected" : needsAttention ? "Needs attention" : connection ? "Disconnected"
         : available ? "Not connected" : "Coming soon",
-      summary: configured ? "Ready in every channel in this space"
+      summary: configured ? connector.id === "x" ? "Connected accounts are available to their owners and their Agents" : "Ready in every channel in this space"
         : needsAttention ? connection.error || "The connection needs to be authorized again"
           : connection ? "Reconnect to resume channel delivery"
             : available ? "Connect an account and choose what xMatrix can access" : "This connector is not available yet",
@@ -1593,6 +1599,15 @@ export function AppsView({
           <GmailMailboxes key={currentSpace.id} spaceId={currentSpace.id} token={token} userId={user.id}
             members={currentSpace.members} channels={channels} adding={updatingProviderId === connector.id}
             onAdd={() => void configureConnector(connector)} />
+        </ToolDetailSection>
+      ) : null}
+      {connector.id === "x" && token && currentSpace && user?.id ? (
+        <ToolDetailSection title="X accounts">
+          <XAccounts key={currentSpace.id} spaceId={currentSpace.id} token={token} userId={user.id}
+            members={currentSpace.members} adding={updatingProviderId === connector.id}
+            canAdd={oauthProviders.includes(connector.id)} onAdd={() => void configureConnector(connector)}
+            onReconnect={(accountId) => void configureConnector(connector, { xAccountId: accountId })}
+            onChanged={async () => { await connectionsQuery.refetch(); }} />
         </ToolDetailSection>
       ) : null}
       {configuring && selectedConnection && configurationDraft ? (
