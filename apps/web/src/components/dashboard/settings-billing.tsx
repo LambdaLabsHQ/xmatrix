@@ -287,12 +287,12 @@ function BillingWarnings({ billing, spaceName }: { billing: SpaceBilling; spaceN
       {billing.credits?.paused && (
         <p className={noticeClass("alert")}>
           {spaceName} has used this month&apos;s Agent credits. Agents and apps can write again on{" "}
-          {formatPlanDate(billing.credits.resetsOn)}, or sooner with a credit pack or more seats. People can still write.
+          {formatPlanDate(billing.credits.resetsOn)}, or sooner with a credit pack. People can still write.
         </p>
       )}
       {billing.seatAdjustmentRequired && (
         <p className={noticeClass("alert")}>
-          More members than purchased seats. Remove members or add seats in the billing portal before sending new messages.
+          More members than purchased seats. Remove extra billable members before sending new messages.
         </p>
       )}
     </>

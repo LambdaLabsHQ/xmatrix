@@ -167,7 +167,7 @@ function creditsExhausted(now: string): BillingRejection {
   return {
     code: "credits_exhausted", status: 402,
     message: `This Space has used this month's Agent credits; Agents and apps can write again on ${nextPeriod(now)}, ` +
-      "or sooner once the owner adds seats or buys a credit pack. People can still write",
+      "or sooner once the owner buys a credit pack. People can still write",
     details: { resumesOn: nextPeriod(now) },
   };
 }
@@ -188,12 +188,12 @@ function creditNotice(row: Record<string, unknown>): BillingNotice | null {
   const where = "Settings → Billing";
   const body = level >= 3
     ? `This Space has used this month's Agent credits and their grace. Agent and app ` +
-      `messages and page edits are paused until ${nextPeriod(`${period}T00:00:00Z`)} unless the owner buys a credit pack or adds seats ` +
+      `messages and page edits are paused until ${nextPeriod(`${period}T00:00:00Z`)} unless the owner buys a credit pack ` +
       `in ${where}. People can still write.`
     : level === 2
       ? `This Space has used all ${included} Agent credits included this month. Agents keep working on ` +
         `${packs > 0 ? `${packs.toLocaleString("en-US")} credit pack credits, then ` : ""}a grace of ${grace} ` +
-        `credits; buy a credit pack or add seats in ${where} to keep them running after that.`
+        `credits; buy a credit pack in ${where} to keep them running after that.`
       : `This Space has used ${used} of the ${included} Agent credits included this month. Each message or ` +
         `page revision by an Agent or app uses one credit; people write for free. See ${where}.`;
   return { key: `credits:${period}:${level}`, body };

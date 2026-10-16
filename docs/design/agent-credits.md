@@ -45,7 +45,7 @@ cost is still visible in per-Space cost metering.
   included allowance (2,500 per seat), so a busy month never stops work without
   warning.
 - After the grace, writes by Agents and apps are refused with
-  `402 credits_exhausted` until the next month, more seats, or a pack. People can
+  `402 credits_exhausted` until the next month or a pack. People can
   still write, and everything can still be read.
 
 Order of use for each charged write: included → pack → grace → refused.
@@ -121,3 +121,14 @@ API behavior follows [Stripe Checkout](https://docs.stripe.com/api/checkout/sess
   covered by the messages they produce; per-Space metering shows whether that
   stays true.
 - Selling packs in the iOS app. Packs are bought on the web.
+
+## Seat changes
+
+The official Stripe portal currently disables subscription updates. New Pro
+checkout can choose 1–99 seats, but existing subscriptions cannot self-serve a
+mid-cycle increase. Credit exhaustion therefore points to a pack or the next
+month, rather than promising an unavailable seat-upgrade action. Keep portal
+updates disabled until included credits follow a defined proration/settlement
+contract: granting a whole calendar month's extra credits for a small
+end-of-period seat supplement would break the cost bound. A provider-side seat
+change remains an operator billing operation, not a public quota shortcut.
