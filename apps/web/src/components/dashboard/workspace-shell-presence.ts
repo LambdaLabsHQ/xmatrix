@@ -1,7 +1,7 @@
 /**
  * Pure presence / trace-matching helpers (no workspace UI view module imports).
  */
-import { agentTraceInstanceIds } from "@/components/dashboard/agent-trace-target";
+import { agentTraceExactInstanceIds, agentTraceInstanceIds } from "@/components/dashboard/agent-trace-target";
 import { traceEventChannelInstanceId } from "@/components/dashboard/agent-trace-replica";
 import type { AgentTraceTarget } from "./workspace-shell-message-model";
 import { channelPresenceInstances, channelPresenceMember, isChannelResidentInstance, isLiveAgentStatus } from "@xmatrix/protocol";
@@ -115,6 +115,7 @@ export function isAgentTraceEvent(
     if (!target.instanceIds || target.instanceIds.length === 0) return false;
     const instanceId = traceEventChannelInstanceId(event);
     if (!instanceId || !target.instanceIds.includes(instanceId)) return false;
+    if (agentTraceExactInstanceIds(target).includes(instanceId)) return true;
   }
   const targetName = target.name.trim().toLowerCase();
   if (target.id && (event.agentId === target.id || event.targetAgentId === target.id)) return true;

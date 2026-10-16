@@ -30,8 +30,8 @@ export function patchChannelsRegistrationQuota(
     for (const instance of presence.instances.values()) {
       if (!instance.registration || !sameAgentRegistration(instance.registration, registration)) continue;
       const usage = project(instance.usage);
-      if (usage === instance.usage) continue;
-      presence = reduceChannelPresence(presence, { type: "patch_known", instanceId: instance.id, patch: { usage } });
+      if (!usage || usage === instance.usage) continue;
+      presence = reduceChannelPresence(presence, { type: "quota", instanceId: instance.id, usage });
     }
     if (presence === channel.presence) return channel;
     changed = true;

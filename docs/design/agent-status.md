@@ -33,8 +33,9 @@ and an explicit empty snapshot clears it. Live reports only update known IDs.
 Messages only patch known Instances, never establish residency, and cannot
 wake an offline Instance. Deletes require the exact ID. Reborn retains that
 ID and registration while changing Run; handoff allocates a new Instance and
-slot. Partial slot or registration conflicts request one authoritative read
-per Channel/Instance per connection, with a bounded request set. Invalid
+slot. Partial slot or registration conflicts request authoritative reads per
+Channel/Instance, at most three per five minutes and only on incoming reports;
+short coalescing and bounded eviction let a read racing ahead of commit recover. Invalid
 Authority snapshots are diagnosed and isolated rather than repeatedly fetched.
 
 Legacy grouped rows split into individual Instances without copying aggregate

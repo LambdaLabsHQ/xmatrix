@@ -1,7 +1,7 @@
 import { expect, test } from "./fixtures";
 import {
   E2E_CHANNEL, E2E_DESKTOP_CONTEXT, E2E_NOW, E2E_SPACE, E2E_USER_SENDER,
-  fixtureJson, installWorkspaceStubs, routeHumanSocket,
+  fixtureJson, fixtureRequests, installWorkspaceStubs, routeHumanSocket,
 } from "./workspace-fixtures";
 
 test.use(E2E_DESKTOP_CONTEXT);
@@ -80,12 +80,20 @@ test("two successive unknown Instance reports both obtain authoritative cards", 
   for (const slot of [1, 2]) {
     const instance = { id: `rapid-${slot}`, channelId: initial.id, channelInstanceId: String(slot),
       label: `Claude:${slot}`, connectedAt: E2E_NOW, lastSeenAt: E2E_NOW, status: "idle" };
+    const report = { type: "enhanced_presence", agent: { id: instance.id, instanceId: instance.id, name: "Claude",
+      userId: "owner", type: "claude", lifetime: "short", email: "", metadata: {},
+      status: "idle", connectedAt: E2E_NOW, lastSeenAt: E2E_NOW, instances: [instance] } };
+    if (slot === 1) {
+      // The first catalog read races ahead of the new Instance's commit.
+      await fixtureChannelCatalog(page, "rapid-before-commit", [initial]);
+      send!(report);
+      await expect.poll(async () => (await fixtureRequests(page, "rapid-before-commit")).length).toBeGreaterThan(0);
+      await page.clock.setFixedTime(Date.now() + 1_001);
+    }
     members[instance.id] = { kind: "agent", label: "Claude", instances: [instance],
       registration: { ownerUserId: "owner", machineId: "machine", harness: "claude" } };
     await fixtureChannelCatalog(page, `rapid-authority-${slot}`, [{ ...initial, memberPresence: { ...members } }]);
-    send!({ type: "enhanced_presence", agent: { id: instance.id, instanceId: instance.id, name: "Claude",
-      userId: "owner", type: "claude", lifetime: "short", email: "", metadata: {},
-      status: "idle", connectedAt: E2E_NOW, lastSeenAt: E2E_NOW, instances: [instance] } });
+    send!(report);
     await expect(page.locator(".app-agent-work-avatar")).toHaveCount(slot);
   }
   await expect(page.locator(".app-agent-work-avatar img")).toHaveCount(2);

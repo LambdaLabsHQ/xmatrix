@@ -1,4 +1,4 @@
-import { decodeChannelSnapshot, encodeChannelSnapshot, presenceInstanceId, plainRecord, repoSummonReference } from "@xmatrix/protocol";
+import { decodeChannelSnapshot, encodeChannelSnapshot, plainRecord, repoSummonReference } from "@xmatrix/protocol";
 import type {
   AgentInstanceOfflineReason,
   AgentStatus,
@@ -156,14 +156,9 @@ export function overlayChannelsWithLiveAgentPresence(
   return channels.map((channel) => {
     if (!channel || typeof channel !== "object" || Array.isArray(channel)) return channel;
     let overlaid = decodeChannelSnapshot(channel as SerializedChannel);
-    const computedPresence = overlaid.presence !== undefined;
     for (const session of sessions) {
       if (session.channelId !== overlaid.id) continue;
-      // A computed Authority snapshot already dropped offline Instances. Re-adding a
-      // lingering Runtime socket after /kill all is what keeps the work dock up.
-      if (computedPresence && !overlaid.presence?.instances.has(presenceInstanceId(session.instanceId))) {
-        continue;
-      }
+      // Runtime may only overlay rows already supplied by the DB directory.
       overlaid = overlayAgentPresenceSnapshot(overlaid, {
         reason: "update",
         session: livePresenceSession(session),

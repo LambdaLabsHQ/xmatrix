@@ -140,3 +140,13 @@ test("resolveAgentTraceTargetOwner preserves explicit ownership and fails closed
     unknown
   );
 });
+
+test("an exact global Instance matches its historical sender alias without accepting another Instance", () => {
+  const target = { id: "runtime-instance", instanceId: "runtime-instance", channelId: "channel",
+    instanceScoped: true, instanceIds: ["runtime-instance", "2"] };
+  const scope = { channelId: "channel", agentId: "agent:legacy-sender", instanceId: "runtime-instance" };
+  assert.equal(agentTraceScopeMatchesTarget(scope, target, "channel"), true);
+  assert.equal(agentTraceScopeMatchesTarget({ ...scope, instanceId: "other" }, target, "channel"), false);
+  assert.equal(agentTraceScopeMatchesTarget({ ...scope, instanceId: "2" }, target, "channel"), false);
+  assert.equal(agentTraceScopeMatchesTarget({ ...scope, channelId: "other" }, target, "channel"), false);
+});

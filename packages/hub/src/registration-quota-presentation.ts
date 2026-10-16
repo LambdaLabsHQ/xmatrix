@@ -23,8 +23,8 @@ export async function projectRegistrationQuota(database: AuthorityDatabase,
     if (!presence) continue;
     for (const instance of presence.instances.values()) {
       const quota = instance.registration ? quotas.get(registrationQuotaKey(instance.registration)) : undefined;
-      presence = reduceChannelPresence(presence, { type: "patch_known", instanceId: instance.id,
-        patch: { usage: withRegistrationQuota(instance.usage, quota) } });
+      presence = reduceChannelPresence(presence, { type: "quota", instanceId: instance.id,
+        usage: withRegistrationQuota(instance.usage, quota) });
     }
     Object.assign(raw, encodeChannelSnapshot({ ...channel, presence }));
   }

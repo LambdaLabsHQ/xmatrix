@@ -2,7 +2,7 @@ import { mergeAgentInstancePresence } from "./instance-presence-merge.js";
 import { sameValue } from "./same-value.js";
 import type { SerializedAgentInstance } from "./authority-foundation.js";
 import { parseAgentRegistrationKey, sameAgentRegistration, type AgentRegistrationKey } from "./agent-registration.js";
-import type { ChannelHumanMemberPresence, SerializedChannel } from "./authority-runtime.js";
+import type { ChannelHumanMemberPresence, LlmUsage, SerializedChannel } from "./authority-runtime.js";
 
 declare const instanceIdentity: unique symbol;
 export type PresenceInstanceId = string & { readonly [instanceIdentity]: true };
@@ -51,6 +51,7 @@ export type ChannelPresenceChange =
   | { type: "snapshot"; snapshot: ChannelPresence }
   | { type: "upsert"; source: "snapshot" | "live"; authoritative?: boolean; instance: AgentInstancePresence }
   | { type: "patch_known"; source?: "message"; instanceId: PresenceInstanceId; patch: InstancePatch }
+  | { type: "quota"; instanceId: PresenceInstanceId; usage: LlmUsage }
   | { type: "remove"; instanceId: PresenceInstanceId }
   | { type: "humans"; humans: ReadonlyMap<string, HumanPresence> };
 
@@ -83,8 +84,9 @@ export function reduceChannelPresence(state: ChannelPresence, change: ChannelPre
     instances.delete(id);
     return { ...state, instances };
   }
-  if (change.type === "patch_known" && !current) return state;
-  let next = change.type === "upsert" ? change.instance : { ...current!, ...change.patch };
+  if ((change.type === "patch_known" || change.type === "quota") && !current) return state;
+  let next = change.type === "upsert" ? change.instance : change.type === "quota"
+    ? { ...current!, usage: change.usage } : { ...current!, ...change.patch };
   parseAgentRegistrationKey(next.registration);
   if (current && !sameAgentRegistration(current.registration, next.registration)) throw new ChannelPresenceConflict(state.channelId, id);
   if ((current?.channelInstanceId && next.channelInstanceId !== current.channelInstanceId) ||
@@ -99,7 +101,7 @@ export function reduceChannelPresence(state: ChannelPresence, change: ChannelPre
     if (change.type === "patch_known" && change.source === "message" && current.status === "offline" && !current.rest) {
       next = { ...next, status: current.status, rest: current.rest, offlineReason: current.offlineReason };
     }
-    if (change.type !== "upsert" || !change.authoritative) {
+    if (change.type !== "quota" && (change.type !== "upsert" || !change.authoritative)) {
       next = mergeAgentInstancePresence(current, next);
     }
   }
