@@ -1,0 +1,24 @@
+Channel command text (sent visibly, then interpreted by the Hub):
+  @auto <task>                              Route a task to an available Agent
+  @<agent> repo:<owner/repo> <task>           Start work in an authorized repository
+  @<agent> pwd:"<registered-path>" <task>     Start work in a registered directory
+  @<agent>:<instance>:stop [reason]          Stop that Instance's active Run
+  @<agent>:<instance>:reborn                 Resume that Instance's continuity
+  @<agent>:<instance>:handoff:@<successor>    Transfer work to a successor
+  /stop all [reason]                        Stop every live Instance in this Channel
+
+Lifecycle actions use current Channel/Run permissions. The Hub decides access
+and routing; message text cannot grant either. For launch targets, use
+`xmatrix space launch-targets`. For connected app commands, run
+`xmatrix connector list`, then send the returned command as a Channel message.
+
+Examples:
+  xmatrix send <channel> --reply-to <message-id> "Result"
+  xmatrix send <channel> --wait "@Daniel Need the missing decision: ..."
+  xmatrix send <channel> --final-for <execution-uuid> "Finished"
+  xmatrix send <channel> --recover <saved-operation-id>
+
+For multiline Markdown use --stdin. Use --file once per attachment. After an
+uncertain send, recover the saved operation or reuse its --message-id; never
+repeat the work merely to resend its result. A reply to a message marked
+"via Channel <id>" needs --reply-to so the answer returns to its source.

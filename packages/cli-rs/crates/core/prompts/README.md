@@ -1,35 +1,49 @@
 # Agent prompts
 
-The text every daemon-launched Agent receives, compiled into the CLI with
-`include_str!` in `src/bootstrap.rs`. Edit these files to change what Agents are
-told; the change reaches users with the next CLI release.
+These repository Markdown documents are the single source of official Agent
+instructions. The Hub bundles them as Text modules and attaches
+`bootstrapPrompts` (schema version 1) when delivering each `machine_spawn_agent`
+command. Editing them reaches the next new Run after a Hub deployment, without
+a CLI release once the daemon supports this field.
 
-| File | What it is |
+| File | Content |
 | --- | --- |
-| `bootstrap.md` | The launch prompt: identity, commands, operating rules |
-| `channel-contract.md` | The channel contract, also sent with every channel turn |
-| `goal-command.md` | The `xmatrix goal` line, only for runtimes that drain goals |
-| `space-rules.md` | Names the Space's rules page, when the Space has one |
-| `connected-apps.md` | Names the Space's connected apps and how to act in them, when it has any |
-| `working-mode-autonomous.md` | Default working mode: carry work through to release |
-| `working-mode-cautious.md` | Working mode that asks before merging or releasing |
+| `bootstrap.md` | Identity, discovery through CLI help, principles and operating rules |
+| `channel-contract.md` | Complete Channel reporting contract, delivered at launch |
+| `channel-turn.md` | Compact native Codex developer reminder on later turns |
+| `goal-command.md` | Goal discovery, only for runtimes that drain goals |
+| `space-rules.md` | Space governance Page id; never copies its body |
+| `connected-apps.md` | Connected app names and `xmatrix connector list` discovery |
+| `working-mode-autonomous.md` | Default: finish through release |
+| `working-mode-cautious.md` | Cautious mode, selected by a Space owner/admin |
 
-`{name}` placeholders are filled once, at launch: `agent_name`, `launcher`,
-`hub_url`, `identity_context`, `goal_context`, `channel_collaboration_policy`,
-`space_rules`, `connected_apps` and `working_mode` in `bootstrap.md`, `page_id` in
-`space-rules.md`, `apps` in `connected-apps.md`, and `channel_id` in `channel-contract.md`. A placeholder alone on its line disappears with its line
-when empty. Other braces, such as the JSON example, are literal.
+The daemon validates the version, required nonempty text, NUL exclusion and
+32 KiB serialized envelope limit before starting the child. The wrapper renders
+known `{slot}` placeholders once; inserted data is never recursively expanded.
+Unknown placeholders remain literal. Standalone CLI and old-Hub launches use a
+compiled copy of these same files. Unsupported or malformed supplied bundles
+fail launch; they never silently fall back. Legacy daemons ignore the additive
+field and keep their compiled prompts until upgraded. Already-running sessions
+retain their launch text; ordinary Channel messages no longer repeat the full
+contract. No separate prompt version service or Page-based publisher exists.
 
-A Space owner or admin picks each Agent's working mode in its settings
-(`workingMode` in the Space Agent configuration). The Hub sends it with the
-spawn, the daemon sets `XMATRIX_AGENT_WORKING_MODE` (`autonomous` or
-`cautious`) for the Run, and a Run launched without one works autonomously.
+The daemon passes the validated bundle as `XMATRIX_HUB_BOOTSTRAP_PROMPTS`,
+clearing inherited bundle/custom/disable overrides. Other launch slots remain:
+`agent_name`, `launcher`, `hub_url`, `identity_context`, `goal_context`,
+`channel_collaboration_policy`, `space_rules`, `connected_apps`, `working_mode`;
+`page_id`, `apps` and `channel_id` fill their corresponding documents.
+Working mode, governance Page id and connected apps remain separate Hub fields
+(`workingMode`, `spaceRulesPageId`, `connectedApps`).
 
-The Space's rules page is its governance page (the Share dialog's "Space
-rules" toggle). The Hub sends its id with the spawn, the daemon sets
-`XMATRIX_SPACE_RULES_PAGE_ID`, and the Agent reads the page itself; the launch
-never carries the page's text.
+Task text, Channel history, attachments and display names stay in user input.
+Registration instructions keep their existing native trusted paths: Claude
+`--append-system-prompt`, Codex developer instructions, Grok ACP `_meta.rules`.
+Grok receives only registration instructions and the official Channel contract
+as trusted rules, never the composed bootstrap/history. Generic ACP, ZCode and
+PTY retain their existing refusal when registration instructions require a
+trusted channel they cannot provide. Official bootstrap text stays in the
+initial user input on those adapters; a transport change grants no permissions.
 
-The Space's connected apps work the same way: the Hub sends their names with
-the spawn (`connectedApps`), the daemon sets `XMATRIX_CONNECTED_APPS`, and the
-Agent runs `xmatrix connector list` for their commands when it needs one.
+Hub tests load these Text modules through their platform preload hook. CI treats
+changes in this prompt directory as both Hub and Rust CLI changes; Wrangler
+bundles the same documents in production and test configurations.

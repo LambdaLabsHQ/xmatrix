@@ -486,6 +486,9 @@ pub enum MachineDaemonCommand {
         /// ignored rather than rejected.
         #[serde(default)]
         role_initial_prompt: Option<String>,
+        /// Official Hub prompt documents; unknown fields are ignored by old daemons.
+        #[serde(default)]
+        bootstrap_prompts: Option<crate::bootstrap_prompts::BootstrapPrompts>,
         /// The registration's working mode, `autonomous` or `cautious`.
         /// Absent means autonomous, which is also what an older Hub gets.
         #[serde(default)]

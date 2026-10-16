@@ -582,3 +582,5 @@ export { connectorActionPolicy, type ConnectorActionPolicy } from "./app-connect
 
 export { parseGmailWatchConfig, GMAIL_WATCH_KEYS } from "./gmail-watch-config.js";
 export { machineNetworkObservation, type MachineNetworkObservation, type NetworkTransferObservation } from "./machine-network.js";
+
+export type { AgentBootstrapPrompts } from "./agent-bootstrap.js";

@@ -336,6 +336,7 @@ struct DaemonSpawnRequest {
     identity_id: Option<String>,
     /// The registration's instructions (see `MachineSpawnAgent`).
     role_initial_prompt: Option<String>,
+    bootstrap_prompts: Option<xmatrix_cli_core::bootstrap_prompts::BootstrapPrompts>,
     /// The registration's working mode (see `MachineSpawnAgent`).
     working_mode: Option<String>,
     /// The Space's rules page (see `MachineSpawnAgent`).
@@ -391,6 +392,7 @@ impl DaemonSpawnRequest {
             agent_name,
             identity_id,
             role_initial_prompt,
+            bootstrap_prompts,
             working_mode,
             space_rules_page_id,
             connected_apps,
@@ -439,6 +441,7 @@ impl DaemonSpawnRequest {
             agent_name,
             identity_id,
             role_initial_prompt,
+            bootstrap_prompts,
             working_mode,
             space_rules_page_id,
             connected_apps,

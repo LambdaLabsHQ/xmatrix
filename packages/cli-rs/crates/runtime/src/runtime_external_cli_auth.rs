@@ -2027,7 +2027,7 @@ async fn run_acp_app_external(config: AcpVendorConfig, run: ExternalRun<'_>) -> 
     // `_meta.rules`) consume trusted rules here; other vendors keep the
     // bootstrap and deliver it as a prefix on the first user prompt.
     let trusted_rules = if config.session_new_meta_rules && (!resume_requested || role_active) {
-        grok_acp_trusted_rules(bootstrap.as_deref())
+        grok_acp_trusted_rules(auto_join_channel_id.as_deref())
     } else {
         None
     };
@@ -2040,12 +2040,8 @@ async fn run_acp_app_external(config: AcpVendorConfig, run: ExternalRun<'_>) -> 
             trusted_rules.as_deref(),
         )
         .await?;
-    if trusted_rules.is_some() {
-        // The ACP agent accepted these as session/new `_meta.rules`, which the
-        // provider appends to its system prompt. Do not repeat them in user
-        // content on the first turn.
-        bootstrap = None;
-    }
+    // Keep bootstrap/history in ordinary user content even when the vendor
+    // accepted separate trusted rules. History must never become system text.
     latest_goal = app.loaded_goal.take().or(latest_goal);
     let skill_overlay = config.slash_overlay.map(|scan| scan()).unwrap_or_default();
     let available_models = initial_presentation.models.unwrap_or_default();

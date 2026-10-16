@@ -311,7 +311,7 @@ fn codex_app_turn_input_preserves_channel_image_attachment() {
     assert_eq!(input[0]["type"], "text");
     let prompt_text = input[0]["text"].as_str().unwrap();
     assert!(prompt_text.contains("xMatrix channel chan-1 from Yiming Hu [user]"));
-    assert!(prompt_text.ends_with(&super::bootstrap::channel_collaboration_policy("chan-1")));
+    assert!(!prompt_text.contains("xMatrix channel contract:"));
     assert!(prompt_text.contains("Attachments:"));
     assert!(prompt_text.contains("- image screen.png (68 bytes, image/png)"));
     assert!(!prompt_text.contains("data:image/png;base64"));
@@ -363,7 +363,7 @@ fn claude_inbound_message_embeds_local_image_paths() {
     assert!(payload.contains("Attachments:"));
     assert!(payload.contains("- image screen.png at /tmp/xmatrix-attachment-fake.png"));
     assert!(payload.contains("read this file to view the image"));
-    assert!(payload.ends_with(&super::bootstrap::channel_collaboration_policy("chan-1")));
+    assert!(!payload.contains("xMatrix channel contract:"));
     assert!(!payload.contains("data:image/png;base64"));
 }
 
