@@ -31,6 +31,8 @@ Human message sender snapshots read the current account name and avatar, as the
 Space catalog does, while Space membership still authorizes the append. This
 includes Automation occurrences, which have no client-supplied sender snapshot;
 renaming an account affects new messages and preserves historical authors.
+Session exchange creates credentials for the existing account without replacing
+its saved name or avatar with a retained token's older profile fields.
 
 Official Agent launch prompts are compact repository Markdown delivered by the
 Hub with each spawn. Supporting daemons validate and render the versioned text;
