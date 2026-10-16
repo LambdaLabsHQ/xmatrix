@@ -125,8 +125,9 @@ export class RelayPageSession extends DurableObject<Env> {
           try { socket.send(data); } catch { /* closed */ }
         }
       },
-      // An Agent's edit is written in over about two seconds at most (40 steps), as a person writes.
-      writePaceMs: 45,
+      // No pace: an Agent's edit lands in one step. Writing it in word by word reparses and reserializes the
+      // whole page for every step, which costs a 17 KB page about 24 s of CPU per edit; it returns when
+      // each step is a small document update (pages-live-document.md).
     };
     return new PageSession(ports);
   }
