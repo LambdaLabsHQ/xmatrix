@@ -2,6 +2,7 @@ import { spaceBilling } from "@xmatrix/billing";
 import { Hono, type Context } from "hono";
 import type { Env } from "./types";
 import { billingReadSubject, agentSpaceStatus } from "./billing-read-access";
+import { creditPackRepository, settleCreditPack } from "./billing-credit-packs";
 import {
   productCommandId,
   readBoundedRequestBody,
@@ -19,6 +20,7 @@ import {
   stripeBillingErrorStatus,
   stripeCheckoutReturnUrls,
   stripeCheckoutSessionFact,
+  stripeCreditPackProduct,
   stripeSubscriptionFact,
   stripeWebhookSubscriptionId,
   verifyStripeWebhookSignature,
@@ -216,6 +218,45 @@ export function registerIndexRoutesBilling(app: Hono<{ Bindings: Env }>): void {
     }
   });
 
+  app.post("/api/spaces/:spaceId/billing/credits/checkout", async (c) => {
+    try {
+      const user = requireHumanAuth(await requireAuth(c.req.raw, c.env));
+      const origin = billingAppOrigin(c.env);
+      if (!c.env.STRIPE_SECRET_KEY || !c.env.STRIPE_WEBHOOK_SECRET || !c.env.STRIPE_PRO_MONTHLY_PRICE_ID || !origin) return c.json(billingConfigurationError(), 503);
+      const spaceId = c.req.param("spaceId");
+      const repository = creditPackRepository(c.env);
+      const purchase = await repository.create({ requestId: crypto.randomUUID(),
+        commandId: productCommandId(c.req.raw, "credit-pack-checkout"), spaceId, actorUserId: user.id });
+      const urls = stripeCheckoutReturnUrls(origin, spaceId);
+      const session = await createStripeCheckoutSession({ secretKey: c.env.STRIPE_SECRET_KEY,
+        priceId: "credit-pack", seatQuantity: 1, spaceId, billingOwnerUserId: user.id,
+        checkoutIntentId: String(purchase.purchase_id), expiresAt: new Date(purchase.expires_at as string | Date).toISOString(),
+        successUrl: urls.successUrl.replace("checkout=success", "credit_pack_checkout=success")
+          .replace("checkout_session_id=", "credit_pack_session_id="),
+        cancelUrl: urls.cancelUrl.replace("checkout=cancelled", "credit_pack_checkout=cancelled"),
+        allowPromotionCodes: false, creditPack: { credits: Number(purchase.credits), amountCents: Number(purchase.amount_cents),
+          productId: await stripeCreditPackProduct(c.env.STRIPE_SECRET_KEY, c.env.STRIPE_PRO_MONTHLY_PRICE_ID) } });
+      await repository.record({ requestId: crypto.randomUUID(), spaceId,
+        purchaseId: String(purchase.purchase_id), sessionId: session.id });
+      return billingUrlResponse(c, "checkoutUrl", session.url);
+    } catch (error) { return billingRouteError(c, error); }
+  });
+
+  app.post("/api/spaces/:spaceId/billing/credits/reconcile", async (c) => {
+    try {
+      const user = requireHumanAuth(await requireAuth(c.req.raw, c.env));
+      if (!c.env.STRIPE_SECRET_KEY || !c.env.STRIPE_WEBHOOK_SECRET) return c.json(billingConfigurationError(), 503);
+      const spaceId = c.req.param("spaceId");
+      // Current membership/ownership is checked before contacting Stripe.
+      const status = await billingRepository(c.env).readSpaceBilling({ requestId: crypto.randomUUID(), spaceId, actorUserId: user.id });
+      if (!status.billing.canManage) return c.json({ error: "Space owner permission is required for billing" }, 403);
+      const body = await readBillingJson(c.req.raw);
+      if (typeof body.sessionId !== "string" || !/^cs_[A-Za-z0-9_]{1,240}$/.test(body.sessionId)) return c.json({ error: "Checkout session is invalid" }, 400);
+      await settleCreditPack(c.env, body.sessionId, { spaceId, userId: user.id });
+      return c.json(await billingRepository(c.env).readSpaceBilling({ requestId: crypto.randomUUID(), spaceId, actorUserId: user.id }));
+    } catch (error) { return billingRouteError(c, error); }
+  });
+
   app.post("/api/spaces/:spaceId/billing/reconcile", async (c) => {
     try {
       const authUser = requireHumanAuth(await requireAuth(c.req.raw, c.env));
@@ -272,6 +313,12 @@ export function registerIndexRoutesBilling(app: Hono<{ Bindings: Env }>): void {
       const body = new TextDecoder().decode(buffer);
       await verifyStripeWebhookSignature({ body, signature: c.req.header("stripe-signature") ?? null, secret: c.env.STRIPE_WEBHOOK_SECRET });
       const event = webhookEvent(JSON.parse(body));
+      if (event.type === "checkout.session.completed" && event.object.mode === "payment" &&
+        (event.object.metadata as Record<string, unknown> | undefined)?.xmatrix_purchase_kind === "credit_pack") {
+        if (typeof event.object.id !== "string") throw new StripeBillingError("Checkout session is invalid");
+        await settleCreditPack(c.env, event.object.id);
+        return c.json({ received: true });
+      }
       if (event.type !== "customer.subscription.created" && event.type !== "customer.subscription.updated" &&
           event.type !== "customer.subscription.deleted" && event.type !== "checkout.session.completed" &&
           event.type !== "invoice.paid" && event.type !== "invoice.payment_failed") {
