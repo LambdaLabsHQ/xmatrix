@@ -209,6 +209,11 @@ export class PageSession {
   private readonly connections = new Map<string, PageSessionConnection>();
   private readonly connectionClients = new Map<string, Set<number>>();
   private readonly editors = new Map<string, PendingEditor>();
+  /**
+   * Agent edits committed but still being written into the live text: what of each is in it so far,
+   * and all of it. Several Agents write at once, each outside the session's queue.
+   */
+  private readonly writing = new Set<{ shown: string; target: string }>();
   private editSeq = 0;
   private agentClocks = new Map<number, number>();
   private readonly resting = new Map<number, RestingAgent>();
@@ -300,7 +305,7 @@ export class PageSession {
 
   /** Marks the document settled when it reads as the committed base. */
   private settle(): void {
-    if (this.base && this.markdown() === this.base.body) this.settledVersion = this.version;
+    if (this.base && this.writing.size === 0 && this.markdown() === this.base.body) this.settledVersion = this.version;
   }
 
   /**
@@ -480,7 +485,8 @@ export class PageSession {
     if (!this.base) return null;
     // Commit a snapshot. Edits that arrive while the commit is in flight stay
     // pending, with their authors, for the next commit.
-    const snapshot = this.markdown();
+    // What Agents are still writing in is committed already; people's edits commit around it.
+    const snapshot = this.completed(this.markdown());
     const snapshotVersion = this.version;
     const snapshotSeq = this.editSeq;
     if (snapshot === this.base.body) {
@@ -530,6 +536,16 @@ export class PageSession {
     this.ports.broadcast(encodeNotice({ type: "committed", revision: result.revision,
       headRevision: result.headRevision, author: author.label, detachedAutomations: result.detachedAutomations }));
     return { revision: result.revision, kind: result.kind };
+  }
+
+  /** The live text as it reads once every Agent still writing has finished: what is committed, with people's edits. */
+  private completed(live: string): string {
+    let text = live;
+    for (const stream of this.writing) {
+      const merged = mergePageText(stream.shown, text, stream.target);
+      if (merged.ok) text = merged.text;
+    }
+    return text;
   }
 
   /**
@@ -659,7 +675,7 @@ export class PageSession {
         const result = await this.ports.commit(principal, { baseRevision: input.baseRevision, body: input.body,
           conversationIds: input.conversationIds, coAuthors: [], blockIds: [] });
         this.ports.broadcast(encodeNotice({ type: "suggestion", revision: result.revision, author: principal.label }));
-        return { ...result, removedSections: [] };
+        return { done: { ...result, removedSections: [] } as PageEditResult };
       }
       // Pending human edits commit under their own authors first.
       await this.commitNow();
@@ -672,7 +688,7 @@ export class PageSession {
         this.adopt(live, merged.ok ? canonicalPageMarkdown(merged.text) : head.body, "server");
         this.setHead(head);
       }
-      const current = this.markdown();
+      const current = this.completed(this.markdown());
       const baseText = input.baseRevision === this.base.revision ? this.base.body
         : canonicalPageMarkdown(await this.ports.loadRevision(principal, input.baseRevision));
       const merge = mergePageText(baseText, current, canonicalPageMarkdown(input.body));
@@ -691,35 +707,46 @@ export class PageSession {
       if (result.kind === "suggestion") {
         this.setHead({ ...this.base, agentSuggestOnly: result.agentSuggestOnly });
         this.ports.broadcast(encodeNotice({ type: "suggestion", revision: result.revision, author: principal.label }));
-        return { ...result, removedSections: [] };
+        return { done: { ...result, removedSections: [] } as PageEditResult };
       }
       this.setHead({ ...this.base, revision: result.headRevision, body: merged.text,
         agentSuggestOnly: result.agentSuggestOnly });
-      // One transaction, so edits people make meanwhile can never shift its positions. It is
-      // written under the editor's awareness id, so readers see whose text it is.
-      // The Agent writes it in as a person would, a few words at a time under its caret; edits people
-      // make meanwhile are kept, as each step merges into the live text.
+      const stream = { shown: current, target: merged.text };
+      this.writing.add(stream);
+      return { writing: { result, stream, current, target: merged.text, key, conversationId } };
+    }).then(async (edit): Promise<PageEditResult> => {
+      if (edit.done) return edit.done;
+      const { result, stream, current, target, key, conversationId } = edit.writing!;
+      // The Agent writes it in as a person would, a few words at a time under its caret and outside the
+      // session's queue, so other Agents write at the same time; edits people make meanwhile are kept,
+      // as each step merges into the live text. It is written under the Agent's awareness id, so readers
+      // see whose text it is.
       const user = { name: principal.label, color: pageAuthorColor(principal), kind: principal.kind, conversationId };
       const pace = this.ports.writePaceMs ?? 0;
-      const steps = pace > 0 ? pageWritingSteps(current, merged.text) : [merged.text];
-      let from = current;
+      const steps = pace > 0 ? pageWritingSteps(current, target) : [target];
       let change: ReturnType<PageSession["adopt"]> = { cursor: null, block: "" };
-      for (const [index, step] of steps.entries()) {
-        const written = authoredAs(this.doc, agentClientId(key), () => this.adopt(from, step, `agent:${key}`));
-        if (written.cursor) change = written;
-        from = step;
-        const at = change.cursor ? Y.relativePositionToJSON(change.cursor) : null;
-        const last = index === steps.length - 1;
-        // The cursor rests where the Agent's change ends.
-        this.agentAwareness(principal, { user, activity: last ? "editing" : "writing", block: change.block,
-          ...(at ? { cursor: { anchor: at, head: at } } : {}) });
-        if (!last) await new Promise((resolve) => setTimeout(resolve, pace));
+      try {
+        for (const [index, step] of steps.entries()) {
+          const written = authoredAs(this.doc, agentClientId(key), () => this.adopt(stream.shown, step, `agent:${key}`));
+          if (written.cursor) change = written;
+          stream.shown = step;
+          const at = change.cursor ? Y.relativePositionToJSON(change.cursor) : null;
+          const last = index === steps.length - 1;
+          // The cursor rests where the Agent's change ends.
+          this.agentAwareness(principal, { user, activity: last ? "editing" : "writing", block: change.block,
+            ...(at ? { cursor: { anchor: at, head: at } } : {}) });
+          if (!last) await new Promise((resolve) => setTimeout(resolve, pace));
+        }
+      } finally {
+        this.writing.delete(stream);
       }
-      this.settle();
-      await this.persist();
+      await this.serial(async () => {
+        this.settle();
+        await this.persist();
+      });
       this.ports.broadcast(encodeNotice({ type: "committed", revision: result.revision,
         headRevision: result.headRevision, author: principal.label, detachedAutomations: result.detachedAutomations }));
-      return { ...result, removedSections: pageRemovedSections(current, merged.text) };
+      return { ...result, removedSections: pageRemovedSections(current, target) };
     });
   }
 
