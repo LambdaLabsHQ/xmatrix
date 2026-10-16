@@ -890,13 +890,14 @@ test("pages written by hand and Agent edits in any markdown style merge as the s
 const summarySessionModule = await compileCommonJsSourceModule(new URL("../src/page-session-do.ts", import.meta.url));
 const summarySessionRequire = createRequire(new URL("../src/page-session-do.ts", import.meta.url));
 
-function summaryGateFixture({ sockets, stored } = {}) {
+function summaryGateFixture({ sockets, stored, beforeStart } = {}) {
   const data = new Map(stored ? [["summary", stored]] : []);
   const issued = [];
   const { RelayPageSession: SummarySession } = summarySessionModule(name => name === "./page-summary" ? {
     async startPageSummary(_env, input) {
       const requestId = `summary-${issued.length + 1}`;
       issued.push({ ...input, requestId });
+      await beforeStart?.();
       return { started: true, requestId, revision: 3 };
     },
   } : name === "cloudflare:workers" ? { DurableObject } : summarySessionRequire(name));
@@ -934,6 +935,41 @@ test("summary: an Agent's edit starts one at once, and a second does not start b
   await ended.object.summaryDue();
   assert.equal(ended.issued.length, 1, "that one ended: a new task can be issued");
   assert.equal(ended.issued[0].triedRevision, 3, "the next dispatch remembers the revision already tried");
+});
+
+test("summary: overlapping edit and completion callbacks share the pending start", async () => {
+  const f = summaryGateFixture();
+  await Promise.all([f.object.summaryDue(), f.object.summaryDue(), f.object.summaryDue()]);
+  assert.equal(f.issued.length, 1, "a task still preparing or retrying is already a pending summary");
+  assert.equal(f.data.get("summary").requestId, f.issued[0].requestId);
+});
+
+test("summary: overlapping departures still start when the final person leaves", async () => {
+  const f = summaryGateFixture({ sockets: ["user", "user"] });
+  const first = f.object.summaryDue(f.connected[0]);
+  f.connected.splice(0, 1);
+  const last = f.object.summaryDue(f.connected[0]);
+  await Promise.all([first, last]);
+  assert.equal(f.issued.length, 1, "the earlier departure must not discard the final departure's check");
+});
+
+test("summary: a fast completion waits for its pending dispatch to be recorded", async () => {
+  let release;
+  const dispatch = new Promise(resolve => { release = resolve; });
+  const f = summaryGateFixture({ beforeStart: () => dispatch });
+  const starting = f.object.summaryDue();
+  await new Promise(resolve => setImmediate(resolve));
+  let ended = false;
+  const ending = f.object.fetch(new Request("https://page-session/internal/summary-ended", { method: "POST",
+    body: JSON.stringify({ spaceId: "space", pageId: "page", requestId: f.issued[0].requestId }) }))
+    .then(response => { ended = true; return response; });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(ended, false, "the result must not race ahead of its dispatch record");
+  release();
+  await starting;
+  assert.equal((await ending).status, 200);
+  await f.object.summaryStarting;
+  assert.equal(f.issued[1].triedRevision, 3, "completion remembers the revision whose task just ended");
 });
 
 /**

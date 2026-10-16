@@ -2,7 +2,8 @@ import { PageControlError, PostgresPageRepository } from "@xmatrix/db";
 import { TEXT_TASK_INPUT_MAX_BYTES, utf8ByteLength, type PageDocument } from "@xmatrix/protocol";
 import { createPostgresAuthorityDatabase } from "./postgres-authority-fleet";
 import { POSTGRES_MESSAGE_CONNECT_TIMEOUT_MS } from "./postgres-message-database-policy";
-import { issueTextTask, textTaskMachines } from "./text-task-machines";
+import { issueTextTask, textTaskMachines, type TextTaskMachine } from "./text-task-machines";
+import { retryablePostgresFailure } from "./postgres-error-classification";
 import type { Env } from "./types";
 
 /**
@@ -56,6 +57,16 @@ export function summaryPages(env: Env): PostgresPageRepository {
 export type PageSummaryStart = { started: true; requestId: string; revision: number }
   | { started: false; reason: "current" | "tried" | "empty" | "no_machine" };
 
+/** Read preparation can be repeated; issuing must replay the same command, never a new task. */
+async function retrySummaryDatabase<T>(phase: "prepare" | "issue", work: () => Promise<T>): Promise<T> {
+  try { return await work(); }
+  catch (error) {
+    if (!retryablePostgresFailure(error)) throw error;
+    console.warn("Page summary database retry", { phase });
+    return work();
+  }
+}
+
 /**
  * Starts the summary of a page whose head has none yet, on the first of the
  * Space's enabled Agents whose Machine is online and can take a text task,
@@ -66,6 +77,20 @@ export type PageSummaryStart = { started: true; requestId: string; revision: num
  */
 export async function startPageSummary(env: Env, input: { spaceId: string; pageId: string; triedRevision?: number }):
   Promise<PageSummaryStart> {
+  const prepared = await retrySummaryDatabase("prepare", () => preparePageSummary(env, input));
+  if (!prepared.started) return prepared;
+  const { machine, requestId, revision, body } = prepared;
+  const task = { requestId, instruction: INSTRUCTION, input: pageSummaryInput(body) };
+  // issueTextTask derives both the command id and control id from requestId.
+  // A lost command receipt therefore replays its durable result, even if the
+  // first attempt committed and already woke the daemon.
+  await retrySummaryDatabase("issue", () => issueTextTask(env, machine, task));
+  return { started: true, requestId, revision };
+}
+
+async function preparePageSummary(env: Env, input: { spaceId: string; pageId: string; triedRevision?: number }):
+  Promise<Extract<PageSummaryStart, { started: false }> |
+    { started: true; machine: TextTaskMachine; requestId: string; revision: number; body: string }> {
   const pages = summaryPages(env);
   for await (const machine of textTaskMachines(env, input.spaceId, "page-summary")) {
     // A Machine is its owner's environment. Read through the ordinary page
@@ -82,8 +107,7 @@ export async function startPageSummary(env: Env, input: { spaceId: string; pageI
     if (input.triedRevision === source.headRevision) return { started: false, reason: "tried" };
     if (!source.body.trim()) return { started: false, reason: "empty" };
     const requestId = `page-summary:${input.spaceId}:${input.pageId}:${source.headRevision}:${crypto.randomUUID()}`;
-    await issueTextTask(env, machine, { requestId, instruction: INSTRUCTION, input: pageSummaryInput(source.body) });
-    return { started: true, requestId, revision: source.headRevision };
+    return { started: true, machine, requestId, revision: source.headRevision, body: source.body };
   }
   return { started: false, reason: "no_machine" };
 }
