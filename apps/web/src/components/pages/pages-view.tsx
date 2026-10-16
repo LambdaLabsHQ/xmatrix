@@ -148,7 +148,7 @@ function names(agents: readonly PageTreeAgent[]): string {
  */
 export function pageRowMeta(page: Pick<PageSummary, "updatedAt" | "summary" | "headRevision">, agents: readonly PageTreeAgent[],
   latest: PageTreeActivity["discussions"]["latest"] = null, now = Date.now()): ReactNode {
-  const editing = agents.filter((agent) => agent.activity === "editing" || agent.activity === "writing");
+  const editing = agents.filter((agent) => agent.activity === "editing");
   if (editing.length > 0) {
     const sections = [...new Set(editing.map((agent) => agent.section).filter(Boolean))];
     return `${names(editing)} editing${sections.length === 1 ? ` · ${sections[0]}` : ""}`;
