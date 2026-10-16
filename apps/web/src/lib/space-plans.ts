@@ -4,6 +4,7 @@ export const FREE_PLAN_FEATURES = [
   "Unlimited agents",
   "500 channel messages total",
   "Up to 3 people",
+  "Up to 2 Free Spaces per account",
   "Cross-machine shared channels",
 ] as const;
 

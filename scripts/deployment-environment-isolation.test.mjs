@@ -77,6 +77,17 @@ test("production configuration cannot enable mock auth or reference test resourc
   assert.equal(config.vars.HUB_URL, "https://xmatrix-hub.xmatrix.sh");
 });
 
+test("production refuses over-limit requests and bounds Jev spend, each limiter in its own namespace", () => {
+  const config = hub.production;
+  assert.equal(config.vars.RATE_LIMIT_ENFORCED, "true");
+  // A missing binding admits everything, so a dropped one silently lifts a spend bound.
+  for (const name of ["RATE_LIMIT_SUMMON_INTENT", "RATE_LIMIT_JEV_EVALUATE"]) {
+    assert.ok(binding(config, "ratelimits", name), name);
+  }
+  const namespaces = config.ratelimits.map((limiter) => limiter.namespace_id);
+  assert.equal(new Set(namespaces).size, namespaces.length, "limiters sharing a namespace share counters");
+});
+
 test("production and the cloud test deployment share no bucket", () => {
   const buckets = (config) => (config.r2_buckets ?? []).map((entry) => entry.bucket_name);
   assert.deepEqual(buckets(hub.production).filter((name) => buckets(hub.test).includes(name)), []);

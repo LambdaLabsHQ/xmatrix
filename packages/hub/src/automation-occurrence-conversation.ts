@@ -1,7 +1,8 @@
 import { PostgresPageRepository } from "@xmatrix/db";
 import { automationReferences, parseAutoLaunchMentions } from "@xmatrix/protocol";
 import { createPostgresAuthorityDatabase } from "./postgres-authority-fleet";
-import { deterministicConversationId, openConversation } from "./system-conversation";
+import { deterministicConversationId } from "./deterministic-id";
+import { openConversation } from "./system-conversation";
 import type { Env } from "./types";
 
 function pages(env: Env): PostgresPageRepository {

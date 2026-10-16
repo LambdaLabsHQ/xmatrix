@@ -17,8 +17,16 @@ export interface RequestRateLimiter {
  * - `anonymous`: everything else, counted per client IP.
  * - `human_connect`: a Human socket's sign-in, counted per verified user, so a
  *   client redialling in a loop is refused before it costs a presence fanout.
+ * - `summon_intent`: a composer draft preview, counted per signed-in Human.
+ * - `jev_evaluate`: an open Jev evaluation, counted per owning Human.
  */
-export type RateLimitClass = "credential" | "anonymous" | "human_connect";
+export type RateLimitClass = "credential" | "anonymous" | "human_connect" | "summon_intent" | "jev_evaluate";
+
+/**
+ * Allowances on work the operator pays a provider for. They bound spend, not
+ * traffic, so they are refused whatever `RATE_LIMIT_ENFORCED` says.
+ */
+const ALWAYS_ENFORCED: ReadonlySet<RateLimitClass> = new Set(["summon_intent", "jev_evaluate"]);
 
 /** Seconds a refused caller is told to wait: the limiters count per minute. */
 export const RATE_LIMIT_RETRY_AFTER_SECONDS = 60;
@@ -26,12 +34,14 @@ export const RATE_LIMIT_RETRY_AFTER_SECONDS = 60;
 /**
  * Whether one more request for `key` is admitted.
  *
- * Over the limit is always logged. It is refused only when
- * `RATE_LIMIT_ENFORCED` is "true", so limits can be measured against real
- * traffic before they turn anyone away. A missing binding admits everything.
+ * Over the limit is always logged. It is refused when `RATE_LIMIT_ENFORCED`
+ * is "true", or always for a provider allowance (`ALWAYS_ENFORCED`); any
+ * other value only measures the limit against real traffic. A missing
+ * binding admits everything.
  */
 export async function admitRequest(
-  env: Pick<Env, "RATE_LIMIT_CREDENTIAL" | "RATE_LIMIT_ANONYMOUS" | "RATE_LIMIT_HUMAN_CONNECT" | "RATE_LIMIT_ENFORCED">,
+  env: Pick<Env, "RATE_LIMIT_CREDENTIAL" | "RATE_LIMIT_ANONYMOUS" | "RATE_LIMIT_HUMAN_CONNECT"
+    | "RATE_LIMIT_SUMMON_INTENT" | "RATE_LIMIT_JEV_EVALUATE" | "RATE_LIMIT_ENFORCED">,
   rateClass: RateLimitClass,
   key: string,
   detail: Record<string, string> = {},
@@ -40,11 +50,13 @@ export async function admitRequest(
     credential: env.RATE_LIMIT_CREDENTIAL,
     anonymous: env.RATE_LIMIT_ANONYMOUS,
     human_connect: env.RATE_LIMIT_HUMAN_CONNECT,
+    summon_intent: env.RATE_LIMIT_SUMMON_INTENT,
+    jev_evaluate: env.RATE_LIMIT_JEV_EVALUATE,
   }[rateClass];
   if (!limiter) return true;
   const { success } = await limiter.limit({ key: `${rateClass}:${key}` });
   if (success) return true;
-  const enforced = env.RATE_LIMIT_ENFORCED === "true";
+  const enforced = ALWAYS_ENFORCED.has(rateClass) || env.RATE_LIMIT_ENFORCED === "true";
   console.warn("xMatrix rate limit exceeded", { rateClass, enforced, ...detail });
   return !enforced;
 }

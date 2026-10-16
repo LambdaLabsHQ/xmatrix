@@ -171,3 +171,46 @@ integration("two Agent writes racing for the last credit admit exactly one", asy
     await Promise.all([setup.end(), left.end(), right.end()]);
   }
 });
+
+integration("an account creates Spaces while it owns fewer than two Free ones", async () => {
+  const client = new Client({ connectionString });
+  await client.connect();
+  const owner = `official-owner-${crypto.randomUUID()}`;
+  const now = new Date().toISOString();
+  const personal = `${owner}-personal`;
+  const create = (spaceId) => client.query(`INSERT INTO data.spaces
+    (space_id,owner_user_id,name,search_rank_sequence,version,metadata_json,created_at,updated_at)
+    VALUES ($1,$2,'Free Space allowance test',$1,1,'{}',now(),now())`, [spaceId, owner]);
+  const admit = () => spaceBilling.spaceCreation(transaction(client),
+    { ownerUserId: owner, now, personalSpaceIds: [personal, `private:${owner}`] });
+  try {
+    await client.query("BEGIN");
+    await create(personal);
+    await create(`private:${owner}`);
+    await create(`${owner}-a`);
+    assert.equal(await admit(), null, "the Spaces the product made for the account are not counted");
+    await create(`${owner}-b`);
+    assert.deepEqual(await admit(), {
+      code: "free_space_limit", status: 402,
+      message: "Upgrade an existing Space to Pro or delete one to create another Free Space",
+      details: { freeSpaces: 2, freeSpaceLimit: 2 },
+    });
+
+    await client.query(`INSERT INTO data.space_billing_subscriptions
+      (space_id,billing_owner_user_id,billing_provider,provider_customer_id,provider_subscription_id,
+       provider_price_id,plan,status,seat_quantity,provider_event_created_at,version,created_at,updated_at)
+      VALUES ($1,$2,'stripe','customer',$1,'price','pro','active',1,now(),1,now(),now())`, [`${owner}-a`, owner]);
+    assert.equal(await admit(), null, "a Space on a paid plan is not Free");
+    await client.query(`UPDATE data.space_billing_subscriptions SET billing_provider='apple',
+      current_period_end=now()-interval '1 day' WHERE space_id=$1`, [`${owner}-a`]);
+    assert.equal((await admit())?.code, "free_space_limit", "a lapsed App Store subscription is Free again");
+
+    await client.query(`INSERT INTO data.space_deletions
+      (space_id,space_name,owner_user_id,requested_at,purge_after,state,members_json,automations_json,version,updated_at)
+      VALUES ($1,'deleted',$2,now(),now()+interval '7 days','scheduled','[]','[]',1,now())`, [`${owner}-b`, owner]);
+    assert.equal(await admit(), null, "a deleted Space is no longer owned");
+  } finally {
+    await client.query("ROLLBACK");
+    await client.end();
+  }
+});

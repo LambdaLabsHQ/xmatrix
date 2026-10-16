@@ -1,15 +1,7 @@
 import { dispatchRegistrationInput } from "./registration-launch-dispatch";
 import type { Env } from "./types";
-import { lowercaseHex } from "@xmatrix/protocol";
 import { ControlError } from "@xmatrix/db";
 import { createChannel } from "./spaces";
-
-/** A conversation id that is the same every time for the same purpose, so asking again reuses it. */
-export async function deterministicConversationId(...parts: string[]): Promise<string> {
-  const hash = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(parts.join("\n"))));
-  const hex = lowercaseHex(hash.slice(0, 16));
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-5${hex.slice(13, 16)}-8${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
-}
 
 /**
  * Opens a conversation the Hub starts on someone's behalf (an import, a pull

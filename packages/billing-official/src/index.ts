@@ -17,6 +17,7 @@ export const CREDITS_PER_SEAT = 5_000;
 export const GRACE_CREDITS_PER_SEAT = 2_500;
 /** Credits one credit pack adds. */
 export const CREDIT_PACK_CREDITS = 10_000;
+export const FREE_SPACES_PER_ACCOUNT = 2;
 
 interface SubscriptionRow extends Record<string, unknown> {
   status: string;
@@ -198,10 +199,46 @@ function creditNotice(row: Record<string, unknown>): BillingNotice | null {
   return { key: `credits:${period}:${level}`, body };
 }
 
+/**
+ * An account may create a Space while it owns fewer than two Free Spaces. A
+ * Space on an active or trialing subscription is not Free, a deleted one is
+ * not owned, and the Spaces the product made for the account on its own are
+ * not counted. Spaces it already owns are never touched.
+ */
+async function spaceCreation(
+  transaction: BillingTransaction,
+  { ownerUserId, now, personalSpaceIds }: { ownerUserId: string; now: string; personalSpaceIds: readonly string[] },
+): Promise<BillingRejection | null> {
+  // One owner's creations take turns, so two at once cannot both take the last Free Space.
+  await transaction.query({ name: "official_space_ownership_lock_v1",
+    text: "SELECT pg_advisory_xact_lock(hashtextextended('official-space-ownership:'||$1,0))",
+    values: [ownerUserId], maxRows: 1 });
+  const counts = await transaction.query<{ count: string | number }>({
+    name: "official_free_space_count_v1",
+    text: `SELECT COUNT(*) AS count FROM data.spaces space
+      WHERE space.owner_user_id=$1 AND space.space_id <> ALL($2::text[])
+        AND NOT EXISTS (SELECT 1 FROM data.space_deletions deletion WHERE deletion.space_id=space.space_id)
+        AND NOT EXISTS (SELECT 1 FROM data.space_billing_subscriptions subscription
+          WHERE subscription.space_id=space.space_id AND subscription.status IN ('active','trialing')
+            AND NOT (subscription.billing_provider='apple' AND (subscription.current_period_end IS NULL
+              OR subscription.current_period_end <= $3::timestamptz)))`,
+    values: [ownerUserId, [...personalSpaceIds], now], maxRows: 1,
+  });
+  const freeSpaces = Number(counts[0]?.count ?? 0);
+  if (freeSpaces < FREE_SPACES_PER_ACCOUNT) return null;
+  return {
+    code: "free_space_limit", status: 402,
+    message: "Upgrade an existing Space to Pro or delete one to create another Free Space",
+    details: { freeSpaces, freeSpaceLimit: FREE_SPACES_PER_ACCOUNT },
+  };
+}
+
 export const spaceBilling: SpaceBillingPolicy = {
   id: "official",
   metered: true,
   credits: { perSeat: CREDITS_PER_SEAT, gracePerSeat: GRACE_CREDITS_PER_SEAT, packCredits: CREDIT_PACK_CREDITS },
+
+  spaceCreation,
 
   async spaceCreated(transaction, { spaceId, now }) {
     await transaction.query({

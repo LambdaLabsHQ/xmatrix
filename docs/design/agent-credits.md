@@ -9,10 +9,8 @@ Pro is priced per human seat ($10 a month, $96 a year) and Agents never take a
 seat. The Hub's own costs, however, follow what Agents and apps write, not how
 many people there are: every message and page revision costs Durable Object and
 Worker requests, PostgreSQL work and storage, and most Agent messages also cost
-a Jev call. Measured in production in October 2026, one single-seat Space wrote
-about 67,000 messages and 2,700 page revisions in 28 days, roughly four times
-what its seat paid for. Without a bound, the customers the product is built for —
-a few people with many Agents — are the ones with a negative margin.
+a Jev call. Without a bound, a few people with many Agents can generate costs above their
+subscription revenue.
 
 Credits keep "people pay, Agents don't take seats" and bound what one seat can
 cost.
@@ -54,12 +52,12 @@ Order of use for each charged write: included → pack → grace → refused.
 
 ### Why these numbers
 
-At measured October 2026 costs (Cloudflare about $0.13 per 1,000 messages,
-PostgreSQL and storage about $0.2–0.35 per 1,000, Jev about $0.1 per 1,000), a
-credit costs the Hub roughly $0.0005. A fully used seat costs about $2.50, or
-$3.75 with the grace, against $9.26 net of card fees; a pack costs about $5 to
-serve. Revisit the numbers when per-Space metering
-(`docs/operations/usage-cost-metering.md`) shows different unit costs.
+The initial planning budget is $0.0005 per credit; this is a conservative
+working assumption, not a measured marginal cost or a margin guarantee. At
+that budget the included allowance costs $2.50 per seat, or $3.75 including
+grace. Revisit the allowance and pack price using per-Space metering
+(`docs/operations/usage-cost-metering.md`), provider invoices, storage growth
+and payment fees. Unpriced connector calls remain a separate exposure.
 
 ## Notices
 
