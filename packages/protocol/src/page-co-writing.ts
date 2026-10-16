@@ -17,6 +17,13 @@
 /** A frame on a page session's WebSocket carrying co-writing JSON (after sync 0, awareness 1, notice 2). */
 export const PAGE_MESSAGE_CO_WRITE = 3;
 
+/**
+ * What an Agent wrote stays marked in its colour this long, as a highlighter marks it: for whoever is on
+ * the page while it writes, and whoever opens the page meanwhile. A reader who looks away, or comes later,
+ * still sees which paragraphs each Agent wrote.
+ */
+export const PAGE_AGENT_INK_MS = 5 * 60_000;
+
 const PAGE_CO_WRITE_OPEN = "⟦";
 const PAGE_CO_WRITE_CLOSE = "⟧";
 
