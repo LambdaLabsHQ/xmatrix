@@ -15,6 +15,7 @@ import * as awarenessProtocol from "y-protocols/awareness";
 import * as syncProtocol from "y-protocols/sync";
 import * as Y from "yjs";
 import { PageCoWriter, type PageCoWriterHost, type PageCoWriterPerson } from "./page-co-writer";
+import { readingMs, type PageReaderPace } from "./page-reader-pace";
 import { PageTyping, type PageTypingState } from "./page-typing";
 
 /**
@@ -111,6 +112,11 @@ export interface PageSessionPorts {
    * written as a person would write it (absent: the edit lands at once).
    */
   writePaceMs?: number;
+  /**
+   * How fast an Agent's words reach the page while a person has it open (page-reader-pace.ts): what a
+   * co-writer sends and what an edit types in alike. Absent: as they come.
+   */
+  readerPace?: PageReaderPace;
 }
 
 /** A committed revision as the repository answers it, and whether the page takes Agent edits as suggestions. */
@@ -626,6 +632,16 @@ export class PageSession {
     return setPageFragmentMarkdown(this.fragment, merged.ok ? merged.text : live, origin);
   }
 
+  /**
+   * The pace an Agent's words reach the page at: a reader's, while a person has it open, so the words are
+   * seen being written; as they come when nobody does, so nothing waits on nobody.
+   */
+  private readerPace(): PageReaderPace | null {
+    const pace = this.ports.readerPace;
+    if (!pace) return null;
+    return [...this.connections.values()].some((connection) => !connection.coWriter) ? pace : null;
+  }
+
   /** People on the page and their carets, as their editors share them. */
   private people(): PageCoWriterPerson[] {
     const people: PageCoWriterPerson[] = [];
@@ -664,6 +680,7 @@ export class PageSession {
           at: change.at })) });
       },
       people: () => this.people(),
+      pace: () => this.readerPace(),
       send: (request) => this.ports.send(connection.id, encodeCoWrite(request)),
     };
   }
@@ -824,7 +841,13 @@ export class PageSession {
       const done = { ...result, removedSections: pageRemovedSections(current, target) } as PageEditResult;
       return { done, typing: typing ? { typing, clientId, user } : null };
     }).then(async (edit): Promise<PageEditResult> => {
-      if (edit.typing) await this.typeIn(principal, edit.typing);
+      if (!edit.typing) return edit.done;
+      // Typed in as a person reads it, a long edit takes minutes: it is committed, so its author goes on
+      // meanwhile. With nobody reading, it is typed in about two seconds, and its author hears after.
+      const read = this.readerPace() !== null;
+      const typed = this.typeIn(principal, edit.typing, read);
+      if (read) void typed.catch(() => undefined);
+      else await typed;
       return edit.done;
     });
   }
@@ -838,7 +861,7 @@ export class PageSession {
    */
   private async typeIn(principal: PageSessionPrincipal, { typing, clientId, user }: {
     typing: PageTyping; clientId: number; user: Record<string, unknown>;
-  }): Promise<void> {
+  }, read: boolean): Promise<void> {
     const pace = this.ports.writePaceMs ?? 0;
     // At most 40 steps, about two seconds: a long edit types more words a step.
     const perStep = Math.max(1, Math.ceil(typing.remaining / 40));
@@ -853,12 +876,18 @@ export class PageSession {
     };
     let last: { at: Y.RelativePosition; block: string } | null = typing.caret;
     show("writing", last);
+    // Begun while someone reads the page, it is typed in a word at a time, as they read it, until nobody
+    // does; begun unread, in at most 40 quick steps, as its author waits on it.
+    let wait = pace;
     try {
       while (this.typings.has(typing) && typing.remaining && !this.destroyed && !this.ended) {
-        await new Promise((resolve) => setTimeout(resolve, pace));
+        await new Promise((resolve) => setTimeout(resolve, wait));
         if (!this.typings.has(typing) || this.destroyed || this.ended) break;
-        last = authoredAs(this.doc, clientId, () => typing.type(this.doc, perStep, TYPING)) ?? last;
+        const reader = read ? this.readerPace() : null;
+        const step = authoredAs(this.doc, clientId, () => typing.type(this.doc, reader ? 1 : perStep, TYPING));
+        last = step ?? last;
         show(typing.remaining ? "writing" : "editing", last);
+        wait = reader && step ? Math.max(pace, readingMs(step.typed, step.next, reader)) : pace;
       }
     } finally {
       this.typings.delete(typing);

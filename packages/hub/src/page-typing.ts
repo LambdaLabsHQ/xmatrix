@@ -97,10 +97,12 @@ export class PageTyping {
    * run, with exactly its own marks, and never stops right after a space while its run goes on: a line
    * ending in a space does not read back from Markdown as itself, and a session that rewrites the page
    * from Markdown (another Agent's edit) would take the space out. A run whose place someone removed
-   * meanwhile is given up: its words have nowhere to go. Answers where the last word typed ends.
+   * meanwhile is given up: its words have nowhere to go. Answers where the last word typed ends, what was
+   * typed, and the word that follows it in its run ("" where the run ends).
    */
-  type(doc: Y.Doc, count: number, origin: unknown): { at: Y.RelativePosition; block: string } | null {
-    let end: { at: Y.RelativePosition; block: string } | null = null;
+  type(doc: Y.Doc, count: number, origin: unknown): { at: Y.RelativePosition; block: string; typed: string; next: string } | null {
+    let end: { at: Y.RelativePosition; block: string; typed: string; next: string } | null = null;
+    let typed = "";
     doc.transact(() => {
       let spaced = false;
       while ((count > 0 || spaced) && this.runs.length) {
@@ -118,7 +120,8 @@ export class PageTyping {
         place.text.insert(place.index, word.text, { ...word.attrs });
         // The next word sticks to this one, whatever anyone types right after it.
         run.at = Y.createRelativePositionFromTypeIndex(place.text, place.index + word.text.length, -1);
-        end = { at: run.at, block: run.block };
+        typed += word.text;
+        end = { at: run.at, block: run.block, typed, next: run.words[0]?.text ?? "" };
         count--;
         spaced = !word.text.trim() && run.words.length > 0;
         if (!run.words.length) this.runs.shift();

@@ -68,7 +68,9 @@ It is then typed into the live document as a person types it
   update: what it removes, restructures or re-marks. A new block stands with
   its first word.
 - **Then the words.** Its words are typed into the document's text, a few at a
-  time over about two seconds. Each step is a CRDT insertion anchored to the
+  time over about two seconds, or, while a person has the page open, a word at
+  a time at a reader's pace (§4.2), which its author does not wait on. Each
+  step is a CRDT insertion anchored to the
   word before it, so people typing anywhere meanwhile, even in the same line,
   and other Agents typing their own edits merge with it as keystrokes do. No
   step parses or rewrites the page.
@@ -336,8 +338,9 @@ fact is about.
     co-writer nothing, and ends each of its turns with an `outcome`: what did
     not reach the page and why (a quote that is not there, someone editing what
     it wrote), which the conversation hears as its next turn; nothing when all
-    of it did. The socket stays joined for a while after its last words, so the
-    next write goes straight in and a person can still take the last one back.
+    of it did. The socket stays joined until the page has all its words, and a
+    while after, so the next write goes straight in and a person can still take
+    the last one back.
     `page edit` remains for restructuring and for suggest-only pages; its
     committed edit is typed in as described in §2.
   - **What reaches the page** is only what the Agent writes inside markers
@@ -360,6 +363,17 @@ fact is about.
     after a streaming co-writer leaves, whose caret then rests at its last
     change as any Agent's does. Its edits commit with the
     session's idle commit, as its own, from its conversation.
+  - **At a reader's pace** (decided 2026-10-16). A harness writes far faster
+    than anyone reads, so while a person has the page open an Agent's words
+    reach it as fast as they read along (`page-reader-pace.ts`): a word at a
+    time (a Han character is one), each after the last had its reading time at
+    12 characters a second (a Han character reads as two), with a breath of
+    0.7 s after each sentence and line. This holds for what a co-writer streams
+    and for a committed edit typed in (§2). With nobody on the page, words land
+    as they come. A turn ends, with its `outcome`, once all of it is on the
+    page; a turn the runtime opens meanwhile follows it. A `⟦write⟧` in a
+    message (`xmatrix send`), whose sender waits on its outcome, goes in at
+    once (`atOnce`).
   - **Taking it back.** A person who may edit the page takes back the Agent's
     last change from its card (Undo; `POST …/co-writing/:conversationId/undo`):
     its blocks return to what they were, and what it is still writing counts as

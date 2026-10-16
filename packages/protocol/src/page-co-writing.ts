@@ -51,7 +51,8 @@ export type PageCoWriteRequest =
  * the turn itself, with `write`: nobody asked it.
  */
 export type PageCoWriteReply =
-  | { type: "write"; turn: number }
+  /** `atOnce`: written as it comes, whoever reads the page (a message's write, which its sender waits on). */
+  | { type: "write"; turn: number; atOnce?: boolean }
   | { type: "delta"; turn: number; text: string }
   | { type: "done"; turn: number }
   | { type: "failed"; turn: number; reason?: string };
@@ -159,7 +160,7 @@ export function parsePageCoWriteReply(value: unknown): PageCoWriteReply | null {
   if (!value || typeof value !== "object") return null;
   const reply = value as Record<string, unknown>;
   if (typeof reply.turn !== "number" || !Number.isSafeInteger(reply.turn)) return null;
-  if (reply.type === "write") return { type: "write", turn: reply.turn };
+  if (reply.type === "write") return { type: "write", turn: reply.turn, ...(reply.atOnce === true ? { atOnce: true } : {}) };
   if (reply.type === "delta" && typeof reply.text === "string") return { type: "delta", turn: reply.turn, text: reply.text };
   if (reply.type === "done") return { type: "done", turn: reply.turn };
   if (reply.type === "failed") {
