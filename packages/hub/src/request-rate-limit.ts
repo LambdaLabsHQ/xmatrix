@@ -102,6 +102,9 @@ export const AUTH_ROUTE_ATTEMPTS: Readonly<Record<string, number>> = {
   "/api/auth/sign-in/email": 5,
   "/api/auth/request-password-reset": 3,
   "/api/auth/email-otp/send-verification-otp": 3,
+  // The plugin also locks an account after 10 wrong codes; this bounds one client across accounts.
+  "/api/auth/two-factor/verify-totp": 10,
+  "/api/auth/two-factor/verify-backup-code": 5,
 };
 
 /**
