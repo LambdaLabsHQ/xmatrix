@@ -18,7 +18,7 @@ export interface RequestRateLimiter {
  * - `human_connect`: a Human socket's sign-in, counted per verified user, so a
  *   client redialling in a loop is refused before it costs a presence fanout.
  * - `summon_intent`: a composer draft preview, counted per signed-in Human.
- * - `jev_evaluate`: an open Jev evaluation, counted per owning Human.
+ * - `jev_evaluate`: an admitted evaluation, counted per owning Human and Space.
  */
 export type RateLimitClass = "credential" | "anonymous" | "human_connect" | "summon_intent" | "jev_evaluate";
 

@@ -2,6 +2,7 @@ import { createJevClient, MAX_INPUT_BYTES, type JevInput } from "@xmatrix/decisi
 import { admitRequest, rateLimitedResponse } from "./request-rate-limit";
 import type { Env } from "./types";
 import { meterJev, type UsageCostEnv } from "./usage-cost-metering";
+import type { JevEvaluationScope } from "./jev-evaluation-access";
 
 type JevEnv = Pick<Env, "JEV_AI_GATEWAY_API_KEY" | "RATE_LIMIT_JEV_EVALUATE"> & UsageCostEnv;
 const headers = { "cache-control": "private, no-store" };
@@ -9,18 +10,19 @@ const failure = (error: string, status: number) => Response.json({ error }, { st
 
 /**
  * Authorization is resolved by the existing Hub boundary, before parsing input.
- * Every account may evaluate, so each owner's evaluations are bounded instead:
- * an Agent Run spends its owner's allowance.
+ * Pro Human members and live Agent Runs evaluate within their verified Space.
+ * Each call spends both its owner's and its Space's request allowance.
  */
 export async function evaluateJevRequest(
   request: Request,
   env: JevEnv,
-  authorize: () => Promise<string>,
+  authorize: () => Promise<JevEvaluationScope | null>,
   readBody: (request: Request, limit: number) => Promise<ArrayBuffer | null>,
 ): Promise<Response> {
-  const userId = await authorize();
-  if (!userId) return failure("jev_access_denied", 403);
-  if (!await admitRequest(env, "jev_evaluate", userId)) return rateLimitedResponse();
+  const scope = await authorize();
+  if (!scope) return failure("jev_access_denied", 403);
+  if (!await admitRequest(env, "jev_evaluate", scope.ownerUserId) ||
+    !await admitRequest(env, "jev_evaluate", `space:${scope.spaceId}`)) return rateLimitedResponse();
   if (!env.JEV_AI_GATEWAY_API_KEY?.trim()) {
     return failure("jev_not_configured", 503);
   }
@@ -39,8 +41,7 @@ export async function evaluateJevRequest(
     }
   } catch { return failure("jev_invalid_input", 400); }
   try {
-    // An evaluation has no Space: its cost is the calling owner's.
-    const result = await meterJev(env, { feature: "evaluate", scope: { ownerUserId: userId } },
+    const result = await meterJev(env, { feature: "evaluate", scope: { spaceId: scope.spaceId } },
       createJevClient({ apiKey: env.JEV_AI_GATEWAY_API_KEY }).evaluate)(input);
     return Response.json(result, { headers });
   } catch (error) {
