@@ -16,7 +16,7 @@ export default function WorkspaceAppShell({ children }: { children?: ReactNode }
   const { user, session } = useAuth();
   const [named, setNamed] = useState(false);
   if (user && session && !named && isPlaceholderHumanName(user.name, user.id)) {
-    return <NameYourselfStep token={session.access_token} onNamed={() => setNamed(true)} />;
+    return <NameYourselfStep token={session.access_token} email={user.email} onNamed={() => setNamed(true)} />;
   }
   return <WorkspaceShell>{children}</WorkspaceShell>;
 }

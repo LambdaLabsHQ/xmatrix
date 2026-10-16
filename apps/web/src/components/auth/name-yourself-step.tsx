@@ -17,10 +17,15 @@ import { userErrorMessage } from "@/lib/user-facing-error";
 
 /* Asked once, before the app opens, of an account that still carries a
    placeholder name: agents address people by name and mention them by handle,
-   and the first Space is named after them. The handle follows the name until
-   the person types one of their own. */
-export function NameYourselfStep({ token, onNamed }: { token: string; onNamed: () => void }) {
-  const [name, setName] = useState("");
+   and the first Space is named after them. The name starts as a guess from
+   the email address for the person to confirm or correct; the handle follows
+   the name until the person types one of their own. */
+export function NameYourselfStep({ token, email, onNamed }: {
+  token: string;
+  email: string;
+  onNamed: () => void;
+}) {
+  const [name, setName] = useState(() => nameFromEmail(email));
   const [typedHandle, setTypedHandle] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -60,6 +65,7 @@ export function NameYourselfStep({ token, onNamed }: { token: string; onNamed: (
             placeholder="Ada Lovelace"
             required
             autoFocus
+            onFocus={(event) => event.target.select()}
             maxLength={HUMAN_DISPLAY_NAME_MAX_LENGTH}
             value={name}
             onChange={(event) => { setName(event.target.value); setError(""); }}
@@ -87,4 +93,15 @@ export function NameYourselfStep({ token, onNamed }: { token: string; onNamed: (
       </form>
     </AuthShell>
   );
+}
+
+/** `daniel.wang+xm@…` → "Daniel Wang"; trailing digits dropped, nothing for an all-digit address. */
+export function nameFromEmail(email: string): string {
+  const local = email.split("@")[0]?.split("+")[0] ?? "";
+  return local.split(/[._-]+/u)
+    .map((word) => word.replace(/\d+$/u, ""))
+    .filter((word) => /[a-z]/iu.test(word))
+    .map((word) => word[0]!.toUpperCase() + word.slice(1).toLowerCase())
+    .join(" ")
+    .slice(0, HUMAN_DISPLAY_NAME_MAX_LENGTH);
 }
