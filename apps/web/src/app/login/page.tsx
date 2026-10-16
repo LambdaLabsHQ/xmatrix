@@ -41,6 +41,7 @@ import {
 } from "@/lib/native-login-client";
 import { errorFromResponse, isTransientFailure, xmatrixRawResponse, XMatrixApiError, unexpectedResponse } from "@/lib/query/api-client";
 import { isAbort, userErrorMessage } from "@/lib/user-facing-error";
+import { isTransientAuthSessionError } from "@/lib/auth-client";
 
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
 const LOGIN_CODE_LENGTH = 6;
@@ -130,6 +131,8 @@ function LoginContent() {
   const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
+  /* The last code check got no answer: the code is unspent and can be sent again. */
+  const [codeUnanswered, setCodeUnanswered] = useState(false);
   const [resendAt, setResendAt] = useState(0);
   const [clock, setClock] = useState(0);
   const resendSeconds = Math.max(0, Math.ceil((resendAt - clock) / 1000));
@@ -528,6 +531,7 @@ function LoginContent() {
     setOtp("");
     setError("");
     setNotice("");
+    setCodeUnanswered(false);
   }
 
   async function handleResendCode() {
@@ -581,6 +585,7 @@ function LoginContent() {
 
     otpVerificationStartedRef.current = true;
     setError("");
+    setCodeUnanswered(false);
     setLoading(true);
 
     try {
@@ -589,7 +594,9 @@ function LoginContent() {
         router.push(nextPath || "/app");
       }
     } catch (nextError) {
-      setError(formatLoginError(nextError));
+      const unanswered = isTransientAuthSessionError(nextError);
+      setCodeUnanswered(unanswered);
+      setError(unanswered ? "Couldn't reach xMatrix. Your code still works, so try again." : formatLoginError(nextError));
       otpVerificationStartedRef.current = false;
     } finally {
       setLoading(false);
@@ -776,6 +783,7 @@ function LoginContent() {
                 setOtp(event.target.value.replace(/\D/g, "").slice(0, LOGIN_CODE_LENGTH));
                 setError("");
                 setNotice("");
+                setCodeUnanswered(false);
               }}
               minLength={LOGIN_CODE_LENGTH}
               maxLength={LOGIN_CODE_LENGTH}
@@ -792,7 +800,7 @@ function LoginContent() {
             {notice ? <p role="status" className="auth-hint">{notice}</p> : null}
             <AuthPrimaryButton type="submit" disabled={loading || otp.length !== LOGIN_CODE_LENGTH}>
               {loading ? <Spinner /> : null}
-              {loading ? "Signing in…" : "Sign in"}
+              {loading ? "Signing in…" : codeUnanswered ? "Try again" : "Sign in"}
               {loading ? null : <ArrowRight className="size-4" />}
             </AuthPrimaryButton>
           </form>
