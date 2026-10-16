@@ -239,8 +239,9 @@ const webBuildStep = {
 // dependency chain in one shard, so `performance` (ordered after the
 // functional projects only to keep host contention out of its wall-clock
 // budget) would pull every functional case into one shard; a sharded run
-// gives it a machine of its own instead. Every shard together is the full
-// browser run.
+// gives the short and sustained budgets separate machines instead. Each keeps
+// one worker so renderer CPU measurements stay isolated. Every shard together
+// is the full browser run.
 function browserTestStages() {
   const shard = process.env.XMATRIX_PLAYWRIGHT_SHARD;
   const stage = (label, extraArgs) => ({
@@ -259,8 +260,12 @@ function browserTestStages() {
     },
   });
   if (!shard) return [stage("Test browser projects", [])];
-  if (shard === "performance") {
-    return [stage("Test the browser performance budget", ["--project=performance", "--no-deps"])];
+  if (shard === "performance" || shard === "performance-sustained") {
+    const sustained = shard === "performance-sustained";
+    return [stage(`Test the ${sustained ? "sustained " : ""}browser performance budget`, [
+      "--project=performance", "--no-deps",
+      `${sustained ? "--grep" : "--grep-invert"}=@sustained`,
+    ])];
   }
   return [
     stage(`Test functional browser projects (shard ${shard})`, [

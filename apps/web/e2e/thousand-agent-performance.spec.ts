@@ -29,7 +29,7 @@ type Traffic = { counting: boolean; reports: number; snapshots: number; last: nu
  * the old injected transport available for diagnostic comparisons. CDP still
  * accounts for all product script, style, layout and native renderer work.
  */
-for (const { ticksPerSecond, seconds: SECONDS } of [{ ticksPerSecond: 10, seconds: 60 }, { ticksPerSecond: 100, seconds: 240 }]) test(`${AGENTS} Agents across ${CHANNELS} Channels stay below ten percent with ${ticksPerSecond === 100 ? "even" : "burst"} reports for ${SECONDS}s`, async ({ page }) => {
+for (const { ticksPerSecond, seconds: SECONDS } of [{ ticksPerSecond: 10, seconds: 60 }, { ticksPerSecond: 100, seconds: 240 }]) test(`${AGENTS} Agents across ${CHANNELS} Channels stay below ten percent with ${ticksPerSecond === 100 ? "even" : "burst"} reports for ${SECONDS}s`, { tag: SECONDS === 240 ? "@sustained" : [] }, async ({ page }) => {
   test.setTimeout((SECONDS + 90) * 1_000);
   const space = workingAgentsSpace(AGENTS, "k", { focusedInstances: FOCUSED_INSTANCES, intent: "Review channels and message performance" });
   await installRenderCounter(page);
