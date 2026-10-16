@@ -70,7 +70,9 @@ One `⟦write⟧` may write in several places, each starting with a marker:
 
 Quote a few words that appear once on the page, exactly as `xmatrix page read`
 shows them. If someone edits what you are writing, you stop there, and when
-part of it did not reach the page you hear why. Use `xmatrix page edit` to
+part of it did not reach the page you hear why. Write it in your reply, where it
+goes in as you write it; a `⟦write⟧` in a message you send with `xmatrix send`
+is written into the page at once, and the message keeps a note instead. Use `xmatrix page edit` to
 restructure a page (move, delete or rewrite sections), and on pages that take
 Agent edits as suggestions.
 
