@@ -13,6 +13,8 @@ import {
   signOutBetterAuth,
   verifyBetterAuthOtpWithRetry,
   verifyBetterAuthPassword,
+  verifyBetterAuthSecondFactor,
+  type SignInStep,
   type WebAuthSession,
 } from "./auth-client";
 import { sameValue } from "./same-value";
@@ -39,8 +41,10 @@ interface AuthState {
 
 interface AuthContextValue extends AuthState {
   signInWithOtp: (email: string) => Promise<void>;
-  verifyOtp: (email: string, token: string) => Promise<void>;
-  signInWithPassword: (email: string, password: string) => Promise<void>;
+  verifyOtp: (email: string, token: string) => Promise<SignInStep>;
+  signInWithPassword: (email: string, password: string) => Promise<SignInStep>;
+  /** Finishes a sign-in that waits on the authenticator app's code. */
+  verifySecondFactor: (code: string, options: { backup: boolean; trustDevice: boolean }) => Promise<void>;
   signInWithGoogle: (redirectTo?: string) => Promise<void>;
   setSessionFromAuthResponse: (payload: AuthResponse) => Promise<void>;
   logout: (options?: { redirectTo?: "/login" | "/account/delete" }) => Promise<void>;
@@ -268,13 +272,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const verifyOtp = async (email: string, token: string) => {
-    await verifyBetterAuthOtpWithRetry(email, token);
+    if (await verifyBetterAuthOtpWithRetry(email, token) === "two_factor") return "two_factor";
     const next = await loadBetterAuthSessionAfterSignIn();
     if (next.session && next.user) {
       setState({ ...next, loading: false });
     } else {
       setState((prev) => ({ ...prev, loading: false }));
     }
+    return "signed_in";
+  };
+
+  const verifySecondFactor = async (code: string, options: { backup: boolean; trustDevice: boolean }) => {
+    await verifyBetterAuthSecondFactor(code, options);
+    const next = await loadBetterAuthSessionAfterSignIn();
+    if (!next.session || !next.user) throw new Error("Couldn't confirm sign-in. Try again.");
+    setState({ ...next, loading: false });
   };
 
   const signInWithGoogle = async (redirectTo?: string) => {
@@ -285,10 +297,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const signInWithPassword = async (email: string, password: string) => {
-    await verifyBetterAuthPassword(email, password);
+    if (await verifyBetterAuthPassword(email, password) === "two_factor") return "two_factor";
     const next = await loadBetterAuthSessionAfterSignIn();
     if (!next.session || !next.user) throw new Error("Couldn't confirm sign-in. Try again.");
     setState({ ...next, loading: false });
+    return "signed_in";
   };
 
   const logout = async (options?: { redirectTo?: "/login" | "/account/delete" }) => {
@@ -316,6 +329,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         signInWithOtp,
         verifyOtp,
         signInWithPassword,
+        verifySecondFactor,
         signInWithGoogle,
         setSessionFromAuthResponse,
         logout,

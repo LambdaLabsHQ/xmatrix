@@ -39,11 +39,13 @@ function PasswordForm({ reset }: { reset: boolean }) {
         await requestAccountPassword(email.trim());
         setMessage("If this account exists, check its email for a password link.");
       } else {
-        await signInWithPassword(email.trim(), password);
+        const step = await signInWithPassword(email.trim(), password);
         setPassword("");
-        // The existing login screen owns native/device handoff and validates its return path.
-        const query = params.toString();
-        router.replace(`/login${query ? `?${query}` : ""}`);
+        // The existing login screen owns native/device handoff, the authenticator
+        // code step, and validates its return path.
+        const query = new URLSearchParams(params);
+        if (step === "two_factor") query.set("two_factor", "1");
+        router.replace(`/login${query.toString() ? `?${query}` : ""}`);
       }
     } catch (error) {
       setMessage(userErrorMessage(error, "That didn't work") ?? "");

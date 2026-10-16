@@ -24,6 +24,7 @@ import { passwordResetEmail, VERIFIED_PASSWORD_OPTIONS } from "./auth-password-p
 import { runBetterAuthHandlerWithObservedHookFailure } from "./better-auth-request-lifecycle";
 import { mintHandleForNewAccount } from "./human-handle-mint";
 import { mcpOAuthPlugins } from "./mcp-oauth";
+import { TWO_FACTOR_REQUIRED, twoFactorPlugins } from "./two-factor";
 import { appOrigin, hubAuthBaseUrl } from "./deployment-origins";
 import type { Env } from "./types";
 
@@ -37,6 +38,7 @@ type BetterAuthUser = {
 type BetterAuthSessionResponse = {
   user?: BetterAuthUser;
   token?: string;
+  twoFactorRedirect?: boolean;
 };
 
 type BetterAuthGetSessionResponse = {
@@ -325,6 +327,7 @@ function createAuthWithDatabase(
       }),
       jwtPlugin,
       bearer(),
+      ...twoFactorPlugins(env, postgres),
       // Outside AI apps sign in through the PostgreSQL authority only.
       ...(postgres ? mcpOAuthPlugins(env) : []),
     ],
@@ -403,6 +406,11 @@ export async function verifyBetterAuthEmailOtp(
     body: JSON.stringify({ email, otp }),
   });
   const payload = (await response.json().catch(() => ({}))) as BetterAuthSessionResponse;
+  // This route returns tokens and has no step for the code; the browser does.
+  if (payload.twoFactorRedirect) {
+    throw new BetterAuthRequestError(403,
+      "Two-step verification is on for this account. Sign in in your browser.", TWO_FACTOR_REQUIRED);
+  }
   if (!payload.token || !payload.user?.id || !payload.user.email) {
     throw new BetterAuthRequestError(
       503,
