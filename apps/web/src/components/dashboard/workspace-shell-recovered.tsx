@@ -20,6 +20,7 @@ import {
 import {
   channelMembersByPresence,
   isChannelResidentPresence,
+  isDaemonChannelMember,
   isOlderThan,
   isOnlinePresence,
   latestAgentWorkEvent,
@@ -1505,7 +1506,7 @@ export function buildAgentWorkItems(
 
   for (const { memberId: member, presence, instance } of channelAgentInstanceIndex(channel).values()) {
     const agentLabel = presence.label || member;
-    if (!isChannelResidentPresence(instance)) continue;
+    if (isDaemonChannelMember(channel, member) || !isChannelResidentPresence(instance)) continue;
     const avatarUrl = presence.avatarUrl;
     const target: AgentTraceTarget = {
       id: member,
@@ -1882,7 +1883,7 @@ export function channelOnlineAgentAvatarItems(channel: SerializedChannel | null)
 
   const items: ChannelAgentAvatarItem[] = [];
   for (const { memberId: member, instance } of channelAgentInstanceIndex(channel).values()) {
-    if (!isChannelResidentPresence(instance)) continue;
+    if (isDaemonChannelMember(channel, member) || !isChannelResidentPresence(instance)) continue;
     items.push({
       key: `${member}:${instance.id}`,
       member,
