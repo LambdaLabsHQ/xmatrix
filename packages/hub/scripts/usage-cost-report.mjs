@@ -15,7 +15,7 @@
 import process from "node:process";
 
 const LAYOUT = "usage_cost_v1";
-/** Third-party-reported Jev list price; unverified against an invoice. */
+/** Official TypeSafe public Jev list price; unverified against an invoice. */
 const DEFAULT_JEV_INPUT_USD_PER_MTOK = 0.042;
 const DEFAULT_JEV_OUTPUT_USD_PER_MTOK = 0;
 const ID = /^[A-Za-z0-9_.:@-]{1,96}$/u;
@@ -137,7 +137,7 @@ function print(spaces, options) {
   console.log(`Usage cost ${options.from.toISOString()} to ${options.to.toISOString()} ` +
     `(${options.dataset}, layout ${LAYOUT})`);
   console.log(`Jev estimate: $${options.inputPrice}/1M input tokens, $${options.outputPrice}/1M output tokens ` +
-    "(third-party-reported price, unverified against an invoice)");
+    "(official TypeSafe public price, unverified against an invoice)");
   if (!spaces.length) {
     console.log("No datapoints in this window.");
     return;
@@ -173,5 +173,5 @@ const spaces = summarize(await rows(options), options);
 if (options.json) {
   console.log(JSON.stringify({ from: options.from.toISOString(), to: options.to.toISOString(), dataset: options.dataset,
     layout: LAYOUT, jevPriceUsdPerMillionTokens: { input: options.inputPrice, output: options.outputPrice,
-      source: "third-party-reported, unverified" }, spaces }, null, 2));
+      source: "TypeSafe official public price (2026-10-16), unverified against an invoice" }, spaces }, null, 2));
 } else print(spaces, options);

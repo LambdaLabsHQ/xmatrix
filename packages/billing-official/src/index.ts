@@ -8,13 +8,12 @@
 import type {
   BillingNotice, BillingRejection, BillingTransaction, SpaceBillingPolicy,
 } from "@xmatrix/billing";
+import { CREDITS_PER_SEAT, GRACE_CREDITS_PER_SEAT } from "./credit-allowances.js";
+import { paidCalls } from "./paid-calls.js";
+export { CREDITS_PER_SEAT, GRACE_CREDITS_PER_SEAT } from "./credit-allowances.js";
 
 export const FREE_SPACE_HUMAN_SEAT_LIMIT = 3;
 export const FREE_SPACE_MESSAGE_LIMIT = 500;
-/** Credits each purchased seat includes per calendar month (UTC). */
-export const CREDITS_PER_SEAT = 5_000;
-/** Credits each seat may still use once included and pack credits are gone. */
-export const GRACE_CREDITS_PER_SEAT = 2_500;
 /** Credits one credit pack adds. */
 export const CREDIT_PACK_CREDITS = 10_000;
 export const FREE_SPACES_PER_ACCOUNT = 2;
@@ -239,6 +238,7 @@ export const spaceBilling: SpaceBillingPolicy = {
   id: "official",
   metered: true,
   credits: { perSeat: CREDITS_PER_SEAT, gracePerSeat: GRACE_CREDITS_PER_SEAT, packCredits: CREDIT_PACK_CREDITS },
+  paidCalls,
 
   spaceCreation,
 

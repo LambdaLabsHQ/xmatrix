@@ -79,6 +79,7 @@ try {
   // Through Turbo's shared cache: CI has already built these for the same
   // content, so this restores them instead of compiling them a second time.
   run("pnpm", ["exec", "turbo", "run", "build", "--filter=@xmatrix/protocol", "--filter=@xmatrix/db",
+    "--filter=@xmatrix/billing-official",
     "--output-logs=new-only", ...turboCacheArgs()]);
   if (!needsTcp) run("node", ["--test", "packages/db/test/agent-launch-postgres.test.mjs"], {
     XMATRIX_REQUIRE_POSTGRES_TEST: "true", XMATRIX_TEST_POSTGRES_URL: url.toString(),
@@ -119,6 +120,7 @@ try {
     // App Store ownership and organization seats bind for good under concurrent claims.
     "packages/db/test/apple-billing-postgres.test.mjs",
     "packages/db/test/credit-pack-postgres.test.mjs",
+    "packages/db/test/paid-call-postgres.test.mjs",
     "packages/db/test/outbox-retention-postgres.test.mjs",
     "packages/db/test/discord-lifecycle-postgres.test.mjs",
     "packages/db/test/sentry-event-postgres.test.mjs",

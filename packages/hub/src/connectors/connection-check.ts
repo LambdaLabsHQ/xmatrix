@@ -18,10 +18,11 @@ import { verifyXConnection } from "./x-api";
    stored, and the provider accepted them on one real call. */
 
 /** Throws, with what to fix, unless the stored credentials are complete and the provider accepts them. */
-export async function verifyConnectorConnection(env: Env, spaceId: string, providerId: string): Promise<void> {
+export async function verifyConnectorConnection(env: Env, spaceId: string, providerId: string,
+  commandId: string): Promise<string | void> {
   const manifest = getAppConnectorProvider(providerId);
   if (!manifest) throw new Error("Unknown app");
-  if (providerId === "x") return verifyXConnection(env, spaceId);
+  if (providerId === "x") return verifyXConnection(env, spaceId, commandId);
   if (providerId === "teams" && await verifyTeamsNativeConnection(env, spaceId)) return;
   if (providerId === "dingtalk" && await verifyDingTalkNativeConnection(env, spaceId)) return;
   if (providerId === "wecom" && await verifyWeComNativeConnection(env, spaceId)) return;

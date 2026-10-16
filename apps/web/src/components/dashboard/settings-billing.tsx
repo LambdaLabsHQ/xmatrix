@@ -370,6 +370,7 @@ function CreditUsage({ credits }: { credits: SpaceCredits }) {
     <div className="space-y-1">
       <PlanMeter label="Agent credits" used={credits.includedUsed} limit={credits.included} />
       <p className="text-xs text-muted-foreground">{extra}</p>
+      <p className="text-xs text-muted-foreground">Paid X actions use this balance too. <a className="underline" href="/#pricing" target="_blank" rel="noreferrer">See credit prices</a>.</p>
     </div>
   );
 }
