@@ -210,6 +210,8 @@ jobs:
           STRIPE_PRO_ANNUAL_PRICE_ID: ${{ secrets.STRIPE_PRO_ANNUAL_PRICE_ID }}
           CONNECTOR_NOTION_CLIENT_ID: ${{ secrets.CONNECTOR_NOTION_CLIENT_ID }}
           CONNECTOR_NOTION_CLIENT_SECRET: ${{ secrets.CONNECTOR_NOTION_CLIENT_SECRET }}
+          CONNECTOR_X_CLIENT_ID: ${{ secrets.CONNECTOR_X_CLIENT_ID }}
+          CONNECTOR_X_CLIENT_SECRET: ${{ secrets.CONNECTOR_X_CLIENT_SECRET }}
           CONNECTOR_SLACK_CLIENT_ID: ${{ secrets.CONNECTOR_SLACK_CLIENT_ID }}
           CONNECTOR_SLACK_CLIENT_SECRET: ${{ secrets.CONNECTOR_SLACK_CLIENT_SECRET }}
           CONNECTOR_LINEAR_CLIENT_ID: ${{ secrets.CONNECTOR_LINEAR_CLIENT_ID }}
@@ -330,7 +332,7 @@ jobs:
           }
           // Each optional registered application rotates as a complete pair.
           // Unregistered providers preserve their existing Worker settings.
-          const providers = ["NOTION", "SLACK", "LINEAR", "SENTRY", "GITLAB", "JIRA", "NETLIFY", "VERCEL", "GOOGLE", "BITBUCKET", "PAGERDUTY", "CLOUDFLARE"];
+          const providers = ["NOTION", "X", "SLACK", "LINEAR", "SENTRY", "GITLAB", "JIRA", "NETLIFY", "VERCEL", "GOOGLE", "BITBUCKET", "PAGERDUTY", "CLOUDFLARE"];
           const validConnectorSecret = (key) => {
             const value = process.env[key];
             if (!value?.trim()) throw new Error(`Missing production connector secret ${key}`);

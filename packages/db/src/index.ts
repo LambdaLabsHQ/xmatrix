@@ -319,5 +319,6 @@ export type { AccountMessageProfileRow, PrepareErasedMessageProfile } from "./ac
 export type { AccountDeletionBlocker, AccountDeletionState } from "./account-deletion.js";
 export type { AccountSpaceClosureAuthorization } from "./account-space-closure-authorization.js";
 
-export { PostgresAppActionRequestRepository, type AppActionRequestPayload } from "./app-action-request-control.js";
+export { PostgresAppActionRequestRepository, type AppActionRequestPayload,
+  type XUploadReference, type XExecutingUpload, type XUploadOutcome } from "./app-action-request-control.js";
 export { PostgresGmailRoutingRepository, type GmailRoutingJob, type GmailRoutingSelection } from "./gmail-routing-control.js";

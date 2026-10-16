@@ -217,11 +217,11 @@ export class PostgresAppCredentialRepository {
       }
       const grant = input.expectedGrant;
       if (grant && (Number(connections[0].version) !== grant.connectionVersion ||
-          Number(current?.version) !== grant.version || String(connections[0].search_rank_sequence) !== grant.connectionGeneration)) {
+          Number(current?.version ?? 0) !== grant.version || String(connections[0].search_rank_sequence) !== grant.connectionGeneration)) {
         throw new AppControlError("credential_changed", 409, "Connector grant changed during the provider request", true);
       }
-      if (input.asHub && (!Number.isSafeInteger(input.expectedVersion) ||
-          input.expectedVersion !== Number(current?.version))) {
+      if ((input.asHub || input.expectedVersion !== undefined) && (!Number.isSafeInteger(input.expectedVersion) ||
+          input.expectedVersion !== Number(current?.version ?? 0))) {
         throw new AppControlError("credential_changed", 409, "Connector credentials changed during refresh", true);
       }
       // Native installation is an explicit replacement, never a fallback to old manual credentials.
@@ -296,7 +296,7 @@ export class PostgresAppCredentialRepository {
   }
 
   /** Read only original versions after live admin authorization; no grant enters the browser. */
-  async installationSnapshot(input: { requestId: string; spaceId: string; actorUserId: string; providerId?: "discord" }) {
+  async installationSnapshot(input: { requestId: string; spaceId: string; actorUserId: string; providerId?: "discord" | "x" }) {
     const spaceId = text(input.spaceId, "spaceId");
     return this.database.transaction({ requestId: text(input.requestId, "requestId", 200),
       operation: "app.credentials.installation-snapshot" }, async tx => {

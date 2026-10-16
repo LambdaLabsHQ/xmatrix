@@ -1005,3 +1005,267 @@ integration("action approvals freeze encrypted input and consume exactly once un
     await assert.rejects(requests.authorize(revoked.requestId, create.connectionId, create.channelId), /Space admin/);
   });
 });
+
+// Existing installation tests fence provider-specific callbacks and Hub refreshes of populated
+// envelopes. They do not protect generic empty-envelope initialization or Human expectedVersion
+// writes; only real concurrent transactions can prove that one original X snapshot commits once.
+integration("X credential initialization and Human CAS fence concurrent grants and delayed refresh ABA", async () => {
+  const provider = { id: "x", name: "X", authMode: "oauth", scopes: [], secretRefs: [], capabilities: [], metadataFields: [] };
+  const xPolicy = { allowed: ["accounts"] };
+  const inXSpace = (run) => withDatabase(async ({ database, space }) => {
+    const apps = new PostgresAppRepository(database);
+    const credentials = new PostgresAppCredentialRepository(database, material);
+    const configure = (name, status) => apps.upsert({ commandId: `${space}:${name}`, spaceId: space,
+      actorUserId: "owner", provider, body: { status }, at });
+    await configure("create-x", "configured");
+    const input = { spaceId: space, providerId: "x", actorUserId: "owner", policy: xPolicy, at };
+    const read = () => credentials.resolveForAdmin({ ...input, requestId: crypto.randomUUID() });
+    await run({ apps, credentials, space, configure, input, read });
+  });
+
+  await inXSpace(async ({ credentials, input, read }) => {
+    const empty = await credentials.installationSnapshot({ ...input, requestId: "x-empty-snapshot" });
+    assert.equal(empty.credentialVersion, 0);
+    assert.equal(await read(), null);
+    const expectedGrant = { version: empty.credentialVersion, connectionVersion: empty.connectionVersion,
+      connectionGeneration: empty.connectionGeneration };
+    const contenders = ['["first-grant"]', '["second-grant"]'];
+    const results = await Promise.allSettled(contenders.map((accounts, index) => credentials.put({ ...input,
+      requestId: `x-first-${index}`, expectedGrant, fields: { accounts } })));
+    assert.equal(results.filter(result => result.status === "fulfilled").length, 1, "one empty-snapshot writer commits");
+    const rejected = results.find(result => result.status === "rejected");
+    assert.ok(rejected.reason instanceof AppControlError);
+    assert.equal(rejected.reason.code, "credential_changed");
+    assert.equal(rejected.reason.status, 409);
+    const winner = await read();
+    assert.equal(winner.version, 1);
+    assert.deepEqual(winner.values, { accounts: contenders[results.findIndex(result => result.status === "fulfilled")] });
+
+    await credentials.put({ ...input, requestId: "x-human-current", expectedVersion: winner.version,
+      fields: { accounts: '["human-replacement"]' } });
+    const replacement = await read();
+    await assert.rejects(credentials.put({ ...input, requestId: "x-human-stale", expectedVersion: winner.version,
+      fields: { accounts: '["stale-human-overwrite"]' } }),
+    error => error instanceof AppControlError && error.code === "credential_changed" && error.status === 409);
+    assert.deepEqual(await read(), replacement, "a stale Human version cannot replace the newer encrypted grant");
+  });
+
+  for (const lifecycle of ["disconnect", "delete-recreate"]) await inXSpace(async ({ apps, credentials, space, configure, input, read }) => {
+    await credentials.put({ ...input, requestId: "x-original", expectedVersion: 0, fields: { accounts: '["original-grant"]' } });
+    const original = await read();
+    if (lifecycle === "disconnect") await configure("disconnect-x", "disconnected");
+    else {
+      await apps.command({ commandId: `${space}:delete-x`, spaceId: space, providerId: "x",
+        principal: { kind: "user", id: "owner" } }, "delete");
+      await configure("recreate-x", "configured");
+      await credentials.put({ ...input, requestId: "x-recreated", expectedVersion: 0, fields: { accounts: '["recreated-grant"]' } });
+    }
+    const current = await read();
+    assert.equal(current.version, original.version, "credential version alone cannot distinguish the lifecycle change");
+    if (lifecycle === "delete-recreate") {
+      assert.equal(current.connectionVersion, original.connectionVersion, "recreation repeats both numeric revisions");
+      assert.notEqual(current.connectionGeneration, original.connectionGeneration);
+    } else assert.equal(current.status, "disconnected");
+    await assert.rejects(credentials.put({ ...input, requestId: "x-delayed-refresh", actorUserId: "hub:oauth-refresh",
+      asHub: true, expectedVersion: original.version, expectedGrant: original, fields: { accounts: '["stale-refresh"]' } }),
+    error => error instanceof AppControlError && error.code === "credential_changed" && error.status === 409);
+    assert.deepEqual(await read(), current, `${lifecycle} cannot be undone by a delayed refresh with a repeated credential version`);
+  });
+});
+
+// The generic approval test owns consume-once and admin authority. It cannot prove that X's
+// per-account approvals survive unrelated envelope writes while exact grant replacements fail.
+integration("X approvals survive token rotation and other accounts while fencing the selected grant", async () => {
+  await withDatabase(async ({ sql, database, space }) => {
+    const credentials = new PostgresAppCredentialRepository(database, material);
+    const requests = new PostgresAppActionRequestRepository(database, material);
+    const apps = new PostgresAppRepository(database);
+    const provider = { id: "x", name: "X", authMode: "oauth", scopes: [], secretRefs: [], capabilities: [], metadataFields: [] };
+    const configure = (suffix) => apps.upsert({ commandId: `${space}:${suffix}`, spaceId: space,
+      actorUserId: "owner", provider, body: { status: "configured" }, at });
+    await configure("create-x-approvals");
+    const channelId = `${space}:x-approval`;
+    await sql(`INSERT INTO data.channels (channel_id,space_id,name,name_key,mode,search_rank_sequence,version,
+      created_at,updated_at) VALUES ($2,$3,'x-approval','x-approval','open',$2||':rank',1,$1,$1)`, [at, channelId, space]);
+    const binding = { id: "101", generation: crypto.randomUUID(), ownerUserId: "owner", accessToken: "private-initial-access" };
+    const other = { id: "202", generation: crypto.randomUUID(), ownerUserId: "owner" };
+    const write = (accounts, extra = {}) => credentials.put({ requestId: crypto.randomUUID(), spaceId: space,
+      providerId: "x", actorUserId: "owner", fields: { accounts: JSON.stringify(accounts) }, policy: { allowed: ["accounts"] }, at, ...extra });
+    const read = () => credentials.resolve({ requestId: crypto.randomUUID(), spaceId: space, providerId: "x" });
+    const payload = (account) => ({ messageId: "x-post", senderKind: "user", statement: { target: account.id, text: '{"text":"Private update"}' },
+      prepared: { accountId: account.id, accountGeneration: account.generation, text: "Private update" },
+      preview: { accountId: account.id, text: "Private update" } });
+    const stage = async (name, account = binding, extra = {}) => {
+      const input = { requestId: `${space}:${name}`, connectionId: `${space}:x`, channelId,
+        providerId: "x", actionId: "post", requestedBy: "owner", payload: payload(account), ...extra };
+      await requests.create(input);
+      return input;
+    };
+    const decide = (request) => requests.decide({ requestId: request.requestId, channelId, spaceId: space, actorUserId: "owner", allow: true });
+    const authorize = (request) => requests.authorize(request.requestId, request.connectionId, channelId);
+    const changed = error => error instanceof AppControlError && error.code === "action_request_scope_changed" && error.status === 409;
+
+    await write([binding, other]);
+    const pending = await stage("survives-pending");
+    const approved = await stage("survives-approved");
+    assert.equal((await decide(approved)).claimed, true);
+    const before = await read();
+    const rotated = { ...binding, accessToken: "private-rotated-access" };
+    await write([rotated, other], { asHub: true, expectedVersion: before.version, expectedGrant: before, actorUserId: "hub:oauth-refresh" });
+    await authorize(approved);
+    await write([rotated, other, { id: "303", generation: crypto.randomUUID(), ownerUserId: "member" }]);
+    assert.equal((await decide(pending)).claimed, true, "a pending approval survives rotation and another account's addition");
+    await authorize(pending);
+    await authorize(approved);
+
+    for (const prepared of [{}, { accountId: binding.id, accountGeneration: "not-a-generation" }]) {
+      await assert.rejects(stage(`invalid-${crypto.randomUUID()}`, binding,
+        { payload: { ...payload(binding), prepared } }), changed);
+    }
+    await assert.rejects(stage("wrong-owner", binding, { requestedBy: "member" }), changed);
+    await assert.rejects(stage("wrong-provider", binding, { connectionId: `${space}:webhook` }), changed);
+
+    for (const mutation of ["reconnect", "remove", "owner", "connection-recreate"]) {
+      const current = { ...binding, generation: crypto.randomUUID() };
+      await write([current, other]);
+      const queued = await stage(`queued-${mutation}`, current);
+      const executing = await stage(`executing-${mutation}`, current);
+      await decide(executing);
+      if (mutation === "connection-recreate") {
+        // Retain staged rows to exercise the generation fence, even when the new connection
+        // has the same opaque account/grant fields and the credential revision repeats.
+        await sql("DELETE FROM data.app_connector_credentials WHERE connection_id=$1", [`${space}:x`]);
+        await sql("DELETE FROM data.app_connector_connections WHERE connection_id=$1", [`${space}:x`]);
+        await configure("recreate-x-approvals");
+        await write([current, other]);
+      } else await write(mutation === "remove" ? [other] : [{ ...current,
+        ...(mutation === "reconnect" ? { generation: crypto.randomUUID() } : { ownerUserId: "member" }) }, other]);
+      await assert.rejects(decide(queued), changed, `${mutation} invalidates the pending grant`);
+      await assert.rejects(authorize(executing), changed, `${mutation} invalidates the executing grant`);
+    }
+
+    // The X exception must not relax another provider's whole-credential approval fence.
+    const generic = { connectionId: `${space}:webhook`, providerId: "webhook", payload: payload(binding) };
+    const genericPending = await stage("generic-pending", binding, generic);
+    const genericApproved = await stage("generic-approved", binding, generic);
+    await decide(genericApproved);
+    await credentials.put({ requestId: "generic-rotate", spaceId: space, providerId: "webhook", actorUserId: "owner",
+      fields: { apiToken: "private-generic-rotation" }, policy, at });
+    await assert.rejects(decide(genericPending), changed);
+    await assert.rejects(authorize(genericApproved), changed);
+  });
+});
+
+// Durable upload execution needs an explicit-allow claim and an encrypted terminal receipt.
+// Generic approval tests cannot prove policy-only starts, concurrent settlement, or replay after
+// a failed Channel append; these transitions are owned by the real PostgreSQL request row.
+integration("durable X uploads claim explicit allow once and retain one scoped encrypted outcome until delivery", async () => {
+  await withDatabase(async ({ sql, database, space }) => {
+    await addConnection(sql, space, "x", "X");
+    const channelId = `${space}:durable-upload`;
+    await sql(`INSERT INTO data.channels (channel_id,space_id,name,name_key,mode,search_rank_sequence,version,
+      created_at,updated_at) VALUES ($2,$3,'upload','upload','open',$2||':rank',1,$1,$1)`, [at, channelId, space]);
+    const credentials = new PostgresAppCredentialRepository(database, material);
+    const requests = new PostgresAppActionRequestRepository(database, material);
+    const policies = new PostgresAppActionPolicyRepository(database);
+    const account = { id: "101", generation: crypto.randomUUID(), ownerUserId: "owner" };
+    const writeGrant = (value) => credentials.put({ requestId: crypto.randomUUID(), spaceId: space, providerId: "x",
+      actorUserId: "owner", fields: { accounts: JSON.stringify([value]) }, policy: { allowed: ["accounts"] }, at });
+    await writeGrant(account);
+    const payload = { messageId: "original-upload-command", senderKind: "agent", senderId: "original-agent-instance",
+      statement: { target: account.id, text: "source-message/private-attachment" },
+      prepared: { accountId: account.id, accountGeneration: account.generation, attachmentName: "private-video-name.mp4" },
+      preview: { accountId: account.id, attachmentName: "private-video-name.mp4" } };
+    const stage = async (name, extra = {}) => {
+      const input = { requestId: `${space}:${name}`, connectionId: `${space}:x`, channelId,
+        providerId: "x", actionId: "upload_video", requestedBy: "owner", payload, ...extra };
+      await requests.create(input);
+      return { requestId: input.requestId, spaceId: space, channelId };
+    };
+    const start = (reference, actorUserId = "owner") => requests.startAllowed({ ...reference, actorUserId });
+    const authorize = (reference) => requests.authorize(reference.requestId, `${space}:x`, channelId);
+    const policyMode = (mode) => policies.set({ requestId: crypto.randomUUID(), spaceId: space, providerId: "x",
+      channelId, actionId: "upload_video", actorUserId: "owner", mode, at });
+    const reference = await stage("allow-once");
+    const forbidden = error => error instanceof AppControlError && error.status === 403;
+    await assert.rejects(start(reference), forbidden, "the default policy is not an explicit allow");
+    await assert.rejects(start(reference, "member"), error => error.status === 404, "another member cannot claim the owner's upload");
+    await policyMode("ask");
+    await assert.rejects(start(reference), forbidden);
+    await policyMode("allow");
+    const notUpload = await stage("not-an-upload", { actionId: "post" });
+    await assert.rejects(start(notUpload), error => error.status === 404);
+    const otherProvider = await stage("not-x", { providerId: "webhook", connectionId: `${space}:webhook` });
+    await assert.rejects(start(otherProvider), error => error.status === 404);
+    for (const [wrongAction, connectionId] of [[notUpload, `${space}:x`], [otherProvider, `${space}:webhook`]]) {
+      await sql("UPDATE data.app_connector_action_requests SET status='executing',decided_by=NULL WHERE request_id=$1", [wrongAction.requestId]);
+      await assert.rejects(requests.authorize(wrongAction.requestId, connectionId, channelId),
+        error => error.code === "action_request_scope_changed", "a missing approver cannot authorize any other action or provider");
+    }
+
+    const claimed = await Promise.all([start(reference), start(reference)]);
+    assert.equal(claimed.filter(result => result.claimed).length, 1, "one durable job consumes the staged request");
+    assert.deepEqual(claimed.find(result => result.claimed).payload, payload);
+    const job = await requests.executingUpload(reference);
+    assert.equal(job.request.connectionId, `${space}:x`);
+    assert.equal(job.request.requestedBy, "owner");
+    assert.equal(job.request.status, "executing");
+    assert.deepEqual(job.payload, payload);
+    const approver = (await sql("SELECT decided_by FROM data.app_connector_action_requests WHERE request_id=$1", [reference.requestId])).rows[0];
+    assert.equal(approver.decided_by, null, "explicit allow never fabricates a Human approval");
+    await authorize(reference);
+    await policyMode("ask");
+    await assert.rejects(authorize(reference), forbidden, "each provider write rechecks current explicit allow");
+    const approved = await stage("human-approved");
+    await requests.decide({ ...approved, actorUserId: "owner", allow: true });
+    await authorize(approved);
+    await requests.settle(approved.requestId, "completed");
+    await policyMode("allow");
+    await sql("UPDATE data.space_members SET role='viewer' WHERE space_id=$1 AND user_id='owner'", [space]);
+    await assert.rejects(authorize(reference), error => error instanceof AppControlError);
+    await sql("UPDATE data.space_members SET role='owner' WHERE space_id=$1 AND user_id='owner'", [space]);
+    await authorize(reference);
+
+    const wrongChannel = { ...reference, channelId: `${space}:other-channel` };
+    assert.equal(await requests.executingUpload(wrongChannel), null);
+    assert.equal(await requests.uploadOutcome(wrongChannel), null);
+    assert.deepEqual(await requests.settleUpload({ ...wrongChannel, status: "failed", receipt: "wrong scope" }), { stored: false });
+    await assert.rejects(requests.settleUpload({ ...reference, status: "completed", receipt: "r".repeat(64 * 1024) }),
+      error => error instanceof AppControlError && error.status === 400, "combined outcome metadata stays within 64 KiB");
+    assert.ok(await requests.executingUpload(reference), "a rejected receipt does not consume execution");
+    const outcomes = [{ status: "completed", receipt: "private-success-upload-receipt" },
+      { status: "failed", receipt: "private-failure-upload-receipt" }];
+    const settled = await Promise.all(outcomes.map(outcome => requests.settleUpload({ ...reference, ...outcome })));
+    assert.equal(settled.filter(result => result.stored).length, 1);
+    const winning = outcomes[settled.findIndex(result => result.stored)];
+    const outcome = await requests.uploadOutcome(reference);
+    assert.equal(outcome.status, winning.status);
+    assert.equal(outcome.request.status, winning.status);
+    assert.equal(outcome.receipt, winning.receipt);
+    assert.deepEqual(outcome.payload, { messageId: payload.messageId, senderKind: payload.senderKind, senderId: payload.senderId });
+    assert.equal(await requests.executingUpload(reference), null, "terminal ciphertext is never exposed as execution input");
+    const stored = (await sql("SELECT encrypted_value_json FROM data.app_connector_action_requests WHERE request_id=$1", [reference.requestId])).rows[0];
+    assert.doesNotMatch(JSON.stringify(stored), /private-success-upload|private-failure-upload|private-video-name|original-agent-instance/u);
+    assert.deepEqual(await requests.settleUpload({ ...reference, status: "blocked", receipt: "cannot replace the first outcome" }), { stored: false });
+    assert.deepEqual(await requests.uploadOutcome(reference), outcome, "an append retry reads the original durable receipt");
+    await requests.clearUploadOutcome(wrongChannel);
+    assert.deepEqual(await requests.uploadOutcome(reference), outcome);
+    await requests.clearUploadOutcome(reference);
+    await requests.clearUploadOutcome(reference);
+    assert.equal(await requests.uploadOutcome(reference), null);
+    assert.deepEqual(await requests.settleUpload({ ...reference, status: "completed", receipt: "cannot revive delivered receipt" }), { stored: false });
+
+    const expiry = await stage("receipt-expiry");
+    await start(expiry);
+    await requests.settleUpload({ ...expiry, status: "completed", receipt: "expired-private-outcome" });
+    await sql(`UPDATE data.app_connector_action_requests SET created_at=now()-interval '2 days',expires_at=now()-interval '1 day'
+      WHERE request_id=$1`, [expiry.requestId]);
+    assert.equal(await requests.uploadOutcome(expiry), null);
+    await stage("expiry-cleanup-trigger");
+    const expired = (await sql("SELECT status,encrypted_value_json FROM data.app_connector_action_requests WHERE request_id=$1", [expiry.requestId])).rows[0];
+    assert.deepEqual(expired, { status: "completed", encrypted_value_json: null });
+    const stale = await stage("reconnected-before-start");
+    await writeGrant({ ...account, generation: crypto.randomUUID() });
+    await assert.rejects(start(stale), error => error.code === "action_request_scope_changed");
+  });
+});
