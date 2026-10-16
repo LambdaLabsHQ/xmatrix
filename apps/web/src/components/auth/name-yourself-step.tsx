@@ -9,9 +9,10 @@ import {
   suggestHumanHandle,
   type HumanProfileEdit,
 } from "@xmatrix/protocol";
-import { AuthError, AuthHeading, AuthPrimaryButton, AuthShell } from "@/components/auth/auth-shell";
+import { AuthError, AuthHeading, AuthLinks, AuthPrimaryButton, AuthShell } from "@/components/auth/auth-shell";
 import { humanProfileErrorMessage } from "@/components/dashboard/human-profile-editor";
 import { Input } from "@/components/ui/input";
+import { useAuth } from "@/lib/auth-context";
 import { XMatrixApiError, xmatrixApiRequest } from "@/lib/query/api-client";
 import { userErrorMessage } from "@/lib/user-facing-error";
 
@@ -19,7 +20,8 @@ import { userErrorMessage } from "@/lib/user-facing-error";
    placeholder name: agents address people by name and mention them by handle,
    and the first Space is named after them. The name starts as a guess from
    the email address for the person to confirm or correct; the handle follows
-   the name until the person types one of their own. */
+   the name until the person types one of their own. Someone who signed in with
+   the wrong account signs out here and picks another way in, such as Google. */
 export function NameYourselfStep({ token, email, onNamed }: {
   token: string;
   email: string;
@@ -29,6 +31,7 @@ export function NameYourselfStep({ token, email, onNamed }: {
   const [typedHandle, setTypedHandle] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const { logout } = useAuth();
   const handle = typedHandle ?? suggestHumanHandle(name) ?? "";
 
   async function save(event: FormEvent) {
@@ -55,7 +58,7 @@ export function NameYourselfStep({ token, email, onNamed }: {
   return (
     <AuthShell legal={false}>
       <AuthHeading title="What should agents call you?">
-        Agents address you by this name and mention you by your handle.
+        Agents address you by this name and mention you by your handle. You are signed in as {email}.
       </AuthHeading>
       <form onSubmit={save} className="auth-stack">
         <label className="auth-field">
@@ -91,6 +94,11 @@ export function NameYourselfStep({ token, email, onNamed }: {
           {saving ? "Saving…" : "Continue"}
         </AuthPrimaryButton>
       </form>
+      <AuthLinks>
+        <button type="button" className="auth-text-button" disabled={saving} onClick={() => void logout()}>
+          Use a different account
+        </button>
+      </AuthLinks>
     </AuthShell>
   );
 }
