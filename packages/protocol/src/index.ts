@@ -584,3 +584,17 @@ export { parseGmailWatchConfig, GMAIL_WATCH_KEYS } from "./gmail-watch-config.js
 export { machineNetworkObservation, type MachineNetworkObservation, type NetworkTransferObservation } from "./machine-network.js";
 
 export type { AgentBootstrapPrompts } from "./agent-bootstrap.js";
+
+export { ChannelPresenceConflict, channelPresenceInstances, emptyChannelPresence, presenceInstanceId,
+  reduceChannelPresence } from "./channel-presence.js";
+export type { AgentInstancePresence, ChannelPresence, ChannelPresenceChange, ChannelSnapshot,
+  HumanDevicePresence, HumanPresence, PresenceInstanceId } from "./channel-presence.js";
+export { decodeChannelSnapshot, encodeChannelPresence, encodeChannelSnapshot } from "./channel-presence-codec.js";
+
+export { agentInstanceMemberPresence, channelPresenceMember } from "./channel-presence-selectors.js";
+export type { ChannelSnapshotCatalogPage, ChannelSnapshotCatalogPageRow, ChannelSnapshotCatalogResolveResult } from "./channel-presence.js";
+export { decodeChannelCatalogPage, decodeChannelCatalogResolve } from "./channel-presence-codec.js";
+
+export { sameValue } from "./same-value.js";
+export { mergeAgentInstancePresence } from "./instance-presence-merge.js";
+export { usageWithoutQuota, mergeLlmUsagePreferringQuotas, accountQuotaUsageFromCandidates, mergeAccountLevelLlmUsage, mergeUsageAttributes } from "./presence-usage.js";

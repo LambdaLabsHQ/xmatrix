@@ -1,3 +1,4 @@
+const { FIXTURE_AGENT_REGISTRATION, decodeChannelSnapshot } = require("./channel-presence-test-fixture.cjs");
 const assert = require("node:assert/strict");
 
 const test = require("node:test");
@@ -39,21 +40,21 @@ test("a mention of an Agent whose machine is unreachable is marked as such", () 
   const instance = (id, status, extra = {}) => ({
     id, status, label: id, connectedAt: "2026-10-01T02:00:00Z", lastSeenAt: "2026-10-01T02:30:00Z", ...extra,
   });
-  const subjects = machineOfflineMentionSubjects({
-    memberPresence: {
-      "agent:claude": { kind: "agent", instances: [
+  const subjects = machineOfflineMentionSubjects(decodeChannelSnapshot({
+    id: "channel", memberPresence: {
+      "agent:claude": { registration: FIXTURE_AGENT_REGISTRATION, kind: "agent", instances: [
         instance("i-1", "offline", { offlineReason: "machine_offline" }),
       ] },
       // Another Instance still reads, so the Agent itself is reachable.
-      "agent:codex": { kind: "agent", instances: [
+      "agent:codex": { registration: FIXTURE_AGENT_REGISTRATION, kind: "agent", instances: [
         instance("i-2", "offline", { offlineReason: "machine_offline" }),
         instance("i-3", "idle"),
       ] },
-      "agent:grok": { kind: "agent", instances: [instance("i-4", "idle")] },
+      "agent:grok": { registration: FIXTURE_AGENT_REGISTRATION, kind: "agent", instances: [instance("i-4", "idle")] },
       "user:u-1": { kind: "user", status: "offline" },
     },
-  });
-  assert.deepEqual([...subjects].sort(), ["agent:claude", "agent:claude:i-1", "agent:codex:i-2"]);
+  }));
+  assert.deepEqual([...subjects].sort(), ["agent:i-1", "agent:i-1:i-1", "agent:i-2", "agent:i-2:i-2"]);
   assert.equal(machineOfflineMentionSubjects(undefined).size, 0);
 });
 

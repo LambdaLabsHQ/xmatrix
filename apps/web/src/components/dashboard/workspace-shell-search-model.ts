@@ -1,7 +1,7 @@
 /**
  * Pure search / channel-tree model (no workspace UI view module imports).
  */
-import type { SerializedChannel } from "@xmatrix/protocol";
+import type { ChannelSnapshot } from "@xmatrix/protocol";
 import { channelTitle } from "@/components/dashboard/channel-links";
 import { CHANNEL_READ_COUNTS_STORAGE_PREFIX } from "./workspace-shell-constants";
 import { metadataString } from "./workspace-shell-formatters";
@@ -35,7 +35,7 @@ export function searchResultRank(kind: WorkspaceSearchResult["kind"]): number {
 
 export type ChannelTreeNode = {
   subtreeActivityAt?: string;
-  channel: SerializedChannel;
+  channel: ChannelSnapshot;
   children: ChannelTreeNode[];
 };
 
@@ -48,7 +48,7 @@ export function channelReadCountsStorageKey(userId: string): string {
 }
 
 export function channelMatchesSearch(
-  channel: SerializedChannel,
+  channel: ChannelSnapshot,
   normalizedQuery: string
 ): boolean {
   // Include last-message preview text: on mobile that is the second line of

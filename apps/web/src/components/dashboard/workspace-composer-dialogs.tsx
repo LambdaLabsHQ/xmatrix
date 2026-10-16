@@ -256,7 +256,7 @@ import type {
   ObservabilityEvent,
   SerializedAgentInstance,
   SerializedAppConnectorConnection,
-  SerializedChannel,
+  ChannelSnapshot,
   SerializedAutomation,
   AutomationUpdateRequest,
   SerializedSpace,
@@ -340,7 +340,7 @@ export const Composer = memo(function Composer({
   afterSend,
 }: {
   compact?: boolean;
-  channel: SerializedChannel | null;
+  channel: ChannelSnapshot | null;
   attachmentsEnabled?: boolean;
   /** Identifies the draft when `channel` is not its own, e.g. a conversation that does not exist yet. */
   draftIdentity?: string;
@@ -1457,7 +1457,7 @@ export const ChannelDetails = memo(function ChannelDetails({
   mobileOverlayOpen = false,
   onCloseMobileOverlay,
 }: {
-  channel: SerializedChannel | null;
+  channel: ChannelSnapshot | null;
   space: SerializedSpace | null;
   /** Registered working directories, the only record that knows a repository. */
   workspaces: SerializedWorkspace[];
@@ -2252,7 +2252,7 @@ export function ToolSurface({
   user: { id: string; email: string; name?: string; avatarUrl?: string };
   /** Hub-reported operator capability; the admin route re-checks it. */
   platformAdmin?: boolean;
-  channels: SerializedChannel[];
+  channels: ChannelSnapshot[];
   machines: MachineSummary[];
   localWorkspaces: SerializedWorkspace[];
   localManagedAgents: LocalManagedAgent[];

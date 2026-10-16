@@ -70,7 +70,7 @@ function product(sockets) {
 function shown(runtime) {
   const sessions = runtime.liveAgentSessions();
   const [channel] = overlayChannelsWithLiveAgentPresence(
-    [{ id: sessions[0]?.channelId ?? "channel-1" }],
+    [catalogChannel(sessions)],
     sessions,
   );
   const instance = Object.values(channel.memberPresence ?? {})
@@ -147,8 +147,8 @@ test("a reconnected daemon brings its Instances back to their reported status", 
   const snapshot = () => liveAgentSessionSnapshots([session], undefined, (target) =>
     transport.isRouteReachable(target))[0];
 
-  assert.equal(overlayChannelsWithLiveAgentPresence([{ id: "channel-1" }], [snapshot()])[0]
-    .memberPresence["agent-1"].instances[0].status, "offline");
+  assert.equal(overlayChannelsWithLiveAgentPresence([catalogChannel([snapshot()])], [snapshot()])[0]
+    .memberPresence["instance-1"].instances[0].status, "offline");
 
   const socket = new AttachedSocket();
   transport.accept(socket);
@@ -158,8 +158,8 @@ test("a reconnected daemon brings its Instances back to their reported status", 
     capabilities: ["machine_liveness_ping_v1"],
   }));
 
-  assert.equal(overlayChannelsWithLiveAgentPresence([{ id: "channel-1" }], [snapshot()])[0]
-    .memberPresence["agent-1"].instances[0].status, "idle");
+  assert.equal(overlayChannelsWithLiveAgentPresence([catalogChannel([snapshot()])], [snapshot()])[0]
+    .memberPresence["instance-1"].instances[0].status, "idle");
   assert.equal(transport.isRouteReachable({ ...route, hostId: "other-host" }), true,
     "hostname is only an observation");
   assert.equal(transport.isRouteReachable({ ...route, machineId: "other-machine" }), false);
@@ -169,8 +169,8 @@ test("a reconnected daemon brings its Instances back to their reported status", 
 test("channel views project the same offline Instance, and keep it in the Channel", () => {
   const session = instanceAttachment().session;
   const [snapshot] = liveAgentSessionSnapshots([session], undefined, () => false);
-  const [channel] = overlayChannelsWithLiveAgentPresence([{ id: "channel-1" }], [snapshot]);
-  const [instance] = channel.memberPresence["agent-1"].instances;
+  const [channel] = overlayChannelsWithLiveAgentPresence([catalogChannel([snapshot])], [snapshot]);
+  const [instance] = channel.memberPresence["instance-1"].instances;
   assert.equal(instance.status, "offline");
   assert.equal(instance.offlineReason, "machine_offline");
 });
@@ -217,3 +217,11 @@ test("a failed command send evicts the route and publishes offline without a tim
   assert.deepEqual(edges, [false]);
   assert.deepEqual(disconnects, [machine.MACHINE_DAEMON_ROUTE_CLOSE.failedDeliver.code]);
 });
+
+function catalogChannel(sessions) {
+  return { id: sessions[0]?.channelId ?? "channel-1", memberPresence: Object.fromEntries(sessions.map(session => [session.instanceId, {
+    kind: "agent", label: "Claude", registration: { ownerUserId: route.ownerUserId, machineId: route.machineId, harness: "claude" },
+    instances: [{ id: session.instanceId, channelId: session.channelId, channelInstanceId: session.channelInstanceId,
+      connectedAt: session.connectedAt, lastSeenAt: session.lastSeenAt, status: "idle" }],
+  }])) };
+}

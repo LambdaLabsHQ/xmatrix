@@ -1,3 +1,4 @@
+import { FIXTURE_AGENT_REGISTRATION } from "./workspace-fixtures";
 import { expect, test } from "./fixtures";
 import { refreshCatalogChannel } from "./channel-catalog-refresh";
 import {
@@ -14,7 +15,7 @@ test("catalog refresh preserves live Agent tags and busy, then accepts idle", as
   };
   const channel = (instance: Record<string, unknown>, name = "general") => ({
     ...E2E_CHANNEL, name,
-    memberPresence: { "agent:codex": { kind: "agent", label: "Codex", instances: [instance] } },
+    memberPresence: { "agent:codex": { registration: FIXTURE_AGENT_REGISTRATION, kind: "agent", label: "Codex", instances: [instance] } },
   });
   const live = { ...initial, status: "busy", lastSeenAt: "2026-07-01T00:00:10.000Z",
     model: "gpt-live", effort: "high", gitBranch: "fix/presence-refresh",
@@ -65,7 +66,7 @@ for (const [device, context] of [["desktop", E2E_DESKTOP_CONTEXT], ["mobile", E2
         {...base,id:"i-stall",channelInstanceId:"2",label:"Codex:2",runtimeState:{status:"running",issue:{kind:"stalled",sinceMillis}}},
         {...base,id:"i-notice",channelInstanceId:"3",label:"Codex:3",runtimeState:{status:"running",notice:{severity:"error",sinceMillis}}},
       ];
-      const channel = (items: unknown[], name = "general") => ({...E2E_CHANNEL,name,memberPresence:{"agent:codex":{kind:"agent",label:"Codex",instances:items}}});
+      const channel = (items: unknown[], name = "general") => ({...E2E_CHANNEL,name,memberPresence:{"agent:codex":{ registration: FIXTURE_AGENT_REGISTRATION,kind:"agent",label:"Codex",instances:items}}});
       await installWorkspaceStubs(page,{spaces:[E2E_SPACE],channels:[channel(instances)]});
       await page.goto("/app/personal-sspaceperso/channels/channel-general");
       const dock = page.locator(".app-agent-work-dock");

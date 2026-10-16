@@ -17,7 +17,7 @@ import type {
   PageSearchHit,
   PageSummary,
   SerializedAgent,
-  SerializedChannel,
+  ChannelSnapshot,
   SerializedMachineDaemon,
   SerializedSpace,
   SerializedWorkspace,
@@ -153,7 +153,7 @@ export function Highlighted({ text, needle }: { text: string; needle: string }) 
   );
 }
 
-function hitChannelLabel(hit: MessageSearchHit, channelById: Map<string, SerializedChannel>): string {
+function hitChannelLabel(hit: MessageSearchHit, channelById: Map<string, ChannelSnapshot>): string {
   const channel = channelById.get(hit.channelId);
   return channel ? `#${channelTitle(channel)}` : "a conversation";
 }
@@ -197,7 +197,7 @@ function pendingFilter(text: string): { kind: "in" | "from"; needle: string; sta
 type DialogRow =
   | { key: string; kind: "all" }
   | { key: string; kind: "recent"; request: SearchRequest }
-  | { key: string; kind: "filter-in"; channel: SerializedChannel }
+  | { key: string; kind: "filter-in"; channel: ChannelSnapshot }
   | { key: string; kind: "filter-from"; author: SearchAuthor; detail: string }
   | { key: string; kind: "destination"; view: AppView; label: string }
   | { key: string; kind: "directory"; result: ReturnType<typeof buildWorkspaceSearchResults>[number] }
@@ -253,7 +253,7 @@ export const WorkspaceSearchDialog = memo(function WorkspaceSearchDialog({
   /** Where ⌘F was pressed: the conversation it is scoped to. */
   initialFilters: SearchFilters;
   spaceId: string | null;
-  channels: SerializedChannel[];
+  channels: ChannelSnapshot[];
   spaces: SerializedSpace[];
   agents: SerializedAgent[];
   realtimeAgents?: RealtimeCollection<SerializedAgent>;
@@ -499,7 +499,7 @@ export function WorkspaceSearchView({
 }: {
   request: SearchRequest;
   spaceName: string;
-  channels: SerializedChannel[];
+  channels: ChannelSnapshot[];
   pages?: readonly PageSummary[];
   searchMessages?: WorkspaceMessageSearch;
   searchPages?: (query: string) => Promise<{ results: PageSearchHit[] }>;

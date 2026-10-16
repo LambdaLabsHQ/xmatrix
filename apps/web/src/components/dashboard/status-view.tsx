@@ -8,7 +8,7 @@ import {
   type AgentRegistrationSummary,
   type ObservabilityEvent,
   type SerializedAutomation,
-  type SerializedChannel,
+  type ChannelSnapshot,
 } from "@xmatrix/protocol";
 
 import { cn } from "@/lib/utils";
@@ -76,7 +76,7 @@ export function StatusView({
   token: string | undefined;
   currentUserId: string;
   machines: MachineSummary[];
-  channels: readonly SerializedChannel[];
+  channels: readonly ChannelSnapshot[];
   events: ObservabilityEvent[];
   automations: SerializedAutomation[];
   executionEnabled: boolean | null;

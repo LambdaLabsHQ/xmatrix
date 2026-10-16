@@ -1,3 +1,4 @@
+import { FIXTURE_AGENT_REGISTRATION } from "./workspace-fixtures";
 import { type Locator, type Page } from "@playwright/test";
 import { expect, test } from "./fixtures";
 import { fixtureJson, fixtureRequestBodies } from "./in-page-api-fixtures";
@@ -15,7 +16,7 @@ test.use(DESKTOP_HOVER_CONTEXT);
 const ACTIVE_AGENT_CHANNEL = {
   ...E2E_CHANNEL,
   memberPresence: {
-    "agent:codex": {
+    "agent:codex": { registration: FIXTURE_AGENT_REGISTRATION,
       kind: "agent",
       status: "busy",
       label: "Codex",

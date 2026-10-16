@@ -1,11 +1,11 @@
 import type {
   ObservabilityEvent,
-  SerializedChannel,
+  ChannelSnapshot,
   SerializedWorkspace,
 } from "@xmatrix/protocol";
 
 export function spaceChannelIdSet(
-  channels: readonly SerializedChannel[],
+  channels: readonly ChannelSnapshot[],
   spaceId: string | null | undefined,
 ): Set<string> {
   const ids = new Set<string>();

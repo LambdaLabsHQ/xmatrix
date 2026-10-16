@@ -248,9 +248,15 @@ function evaluateExtractedSource(source, bindings = {}) {
  * @param {string[]} names
  * @param {string} [epilogue] statements appended after the functions
  */
-function loadShellFunctions(moduleMap, names, epilogue = "") {
-  const source = names.map((name) => extractFunctionFromShellModules(moduleMap, name).source).join("\n\n");
-  return evaluateExtractedSource(`${source}\n${epilogue}`);
+function loadShellFunctions(moduleMap, names, epilogue = "", bindings = {}) {
+  const protocol = require("@xmatrix/protocol");
+  const moved = new Set(["sameValue", "isPlainObject", "instanceLifecycleReportApplies", "mergeAgentInstancePresence", "mergeLlmUsagePreferringQuotas", "usageWithoutQuota", "mergeUsageAttributes", "accountQuotaUsageFromCandidates", "mergeAccountLevelLlmUsage"]);
+  const source = names.filter(name => !moved.has(name)).map((name) => extractFunctionFromShellModules(moduleMap, name).source).join("\n\n");
+  const { ChannelPresenceConflict, decodeChannelSnapshot, emptyChannelPresence, presenceInstanceId, reduceChannelPresence } = require("@xmatrix/protocol");
+  return { ...protocol, ...evaluateExtractedSource(`${source}\n${epilogue}`, {
+    ...protocol,
+    ChannelPresenceConflict, decodeChannelSnapshot, emptyChannelPresence, presenceInstanceId, reduceChannelPresence, ...bindings,
+  }) };
 }
 
 module.exports = {

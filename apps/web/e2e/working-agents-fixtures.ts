@@ -1,3 +1,4 @@
+import { FIXTURE_AGENT_REGISTRATION } from "./workspace-fixtures";
 import type { Page } from "@playwright/test";
 import { expect } from "./fixtures";
 import {
@@ -32,8 +33,8 @@ export function workingAgentsSpace(count: number, prefix: string, options: { foc
   const channelId = (index: number) => (index >= focused ? `channel-${prefix}-${index}` : E2E_CHANNEL.id);
   const instance = (index: number, activity: string) => ({
     id: `instance-${prefix}-${index}`,
-    channelInstanceId: "1",
-    label: `agent${index}:1`,
+    channelInstanceId: String(index < focused ? index + 1 : 1),
+    label: `agent${index}:${index < focused ? index + 1 : 1}`,
     channelId: channelId(index),
     connectedAt: E2E_NOW,
     lastSeenAt: E2E_NOW,
@@ -66,7 +67,7 @@ export function workingAgentsSpace(count: number, prefix: string, options: { foc
     memberPresence: Object.fromEntries((index < focused ? agents.slice(0, focused).map((_, slot) => slot) : [index])
       .map(slot => {
         const currentActivity = slot === index ? activity : activities.get(slot) ?? "Working";
-        return [agents[slot].id, {
+        return [agents[slot].id, { registration: FIXTURE_AGENT_REGISTRATION,
           kind: "agent", status: "busy", label: agents[slot].name, activity: currentActivity,
           instances: [instance(slot, currentActivity)],
         }];

@@ -1,3 +1,4 @@
+const { FIXTURE_AGENT_REGISTRATION, decodeChannelSnapshot, channelInstances, firstChannelInstance, legacyChannelMembers } = require("./channel-presence-test-fixture.cjs");
 const assert = require("node:assert/strict");
 const test = require("node:test");
 const { loadWorkspaceShellModuleMap, loadShellFunctions } = require("./workspace-shell-source-fixture.cjs");
@@ -16,8 +17,6 @@ const ORDERING_FUNCTIONS = [
   "mergeChannelMemberReadSequences",
   "mergeChannelListHydratedFields",
   "timestampMs",
-  "earliestTimestamp",
-  "latestTimestamp",
   "compareChannelAgentAvatarBirthOrder",
   "isPlainObject",
   "sameValue",
@@ -33,49 +32,46 @@ const ORDERING_FUNCTIONS = [
   "hasQuotaMeterUsage",
   "providerQuotaUsages",
   "patchChannelAgentPresenceFromAgent",
-  "patchChannelInstancesById",
-  "patchChannelAgentMemberFromAgent",
   "mergeLlmUsagePreferringQuotas",
-  "mergeChannelMemberPresencePreferringQuotas",
-  "replaceChannelMemberPresence",
+  "mergeChannelPresence",
   "removeChannelAgentInstancePresence",
   "channelsAfterAgentInstanceOffline",
   "historicalSenderAvatarUrl",
   "patchChannelAgentPresenceFromMessage",
-  "agentMessageInstanceIdentityIncomplete",
 ];
 
 
-const functions = loadShellFunctions(shellModules, ORDERING_FUNCTIONS, "exports.mergeChannels = mergeChannels; exports.commitCatalogChannels = commitCatalogChannels;");
+const functions = loadShellFunctions(shellModules, ORDERING_FUNCTIONS,
+  "exports.mergeChannels = mergeChannels; exports.commitCatalogChannels = commitCatalogChannels;",
+  {});
 const {
   mergeChannels,
   compareChannelAgentAvatarBirthOrder,
   mergeAgentInstancePresence,
   patchChannelAgentPresenceFromAgent,
-  mergeChannelMemberPresencePreferringQuotas,
+  mergeChannelPresence,
   removeChannelAgentInstancePresence,
   channelsAfterAgentInstanceOffline,
   historicalSenderAvatarUrl,
   patchChannelAgentPresenceFromMessage,
-  agentMessageInstanceIdentityIncomplete,
   commitCatalogChannels,
 } = functions;
 
 test("a cached catalog row replayed after a message never drops an Instance that connected since", () => {
   // Read at page load, before the summon: no Instance yet.
-  const cached = { id: "channel-1", memberPresence: { "agent-1": { kind: "agent", instances: [] } } };
+  const cached = decodeChannelSnapshot({ id: "channel-1", memberPresence: { "agent-1": { registration: FIXTURE_AGENT_REGISTRATION, kind: "agent", instances: [] } } });
   let channels = commitCatalogChannels([], [cached], new Set([cached]));
   // The summoned Instance connects and channel_updated shows it.
   const connected = { id: "instance-1", channelInstanceId: "1", status: "online",
     connectedAt: "2026-10-13T07:45:58Z", lastSeenAt: "2026-10-13T07:45:58Z" };
-  channels = mergeChannels(channels, [{ id: "channel-1",
-    memberPresence: { "agent-1": { kind: "agent", instances: [connected] } } }]);
+  channels = mergeChannels(channels, [decodeChannelSnapshot({ id: "channel-1",
+    memberPresence: { "agent-1": { registration: FIXTURE_AGENT_REGISTRATION, kind: "agent", instances: [connected] } } })]);
   // Its first message moves the cached row, the same Channel object, to the top.
   channels = commitCatalogChannels(channels, [cached], new Set());
-  assert.deepEqual(channels[0].memberPresence["agent-1"].instances.map((instance) => instance.id), ["instance-1"]);
+  assert.deepEqual(channelInstances(channels[0]).map((instance) => instance.id), ["instance-1"]);
   // A fresh read is applied, and a Channel the entity table lost comes back.
-  const fresh = { id: "channel-1", memberPresence: { "agent-1": { kind: "agent", instances: [] } } };
-  assert.deepEqual(commitCatalogChannels(channels, [fresh], new Set([fresh]))[0].memberPresence["agent-1"].instances, []);
+  const fresh = decodeChannelSnapshot({ id: "channel-1", memberPresence: { "agent-1": { registration: FIXTURE_AGENT_REGISTRATION, kind: "agent", instances: [] } } });
+  assert.deepEqual(channelInstances(commitCatalogChannels(channels, [fresh], new Set([fresh]))[0]), []);
   assert.deepEqual(commitCatalogChannels([], [cached], new Set()).map((channel) => channel.id), ["channel-1"]);
 });
 
@@ -94,7 +90,7 @@ test("a catalog read older than what the socket has said does not take the Chann
   // A read that is ahead is taken as it is, and one for a Channel not here yet too.
   const ahead = { ...read, messageCount: 44, historyHeadSequence: 44, updatedAt: "2026-10-13T08:00:44Z" };
   assert.equal(mergeChannels([live], [ahead])[0].messageCount, 44);
-  assert.equal(mergeChannels([], [read])[0], read);
+  assert.deepEqual(mergeChannels([], [read])[0], decodeChannelSnapshot(read));
   // The reader's own read of the Channel is told that it landed, with what it merged to.
   const settled = [];
   mergeChannels([live], [read], (channel) => { settled.push(channel.messageCount); return channel; });
@@ -201,12 +197,12 @@ test("paged catalog refresh retains live labels and busy state, then accepts idl
     statusChips: [{ id: "sandbox", label: "Sandbox", value: "workspace-write" }],
     gitBranch: "fix/presence", runtimeState: { status: "running" },
   });
-  const channel = (instance) => ({ id: "channel-1", memberPresence: {
-    "agent-1": { kind: "agent", instances: [instance] },
-  } });
-  const instance = (channels) => channels[0].memberPresence["agent-1"].instances[0];
+  const channel = (instance) => (decodeChannelSnapshot({ id: "channel-1", memberPresence: {
+    "agent-1": { registration: FIXTURE_AGENT_REGISTRATION, kind: "agent", instances: [instance] },
+  } }));
+  const instance = (channels) => firstChannelInstance(channels[0]);
   let channels = mergeChannels([channel(live)], [channel(initial)]);
-  assert.deepEqual(instance(channels), live, "a delayed page must not replace the live card");
+  assert.deepEqual(instance(channels), firstChannelInstance(channel(live)), "a delayed page must not replace the live card");
   channels = mergeChannels(channels, [channel({ ...initial, status: "busy",
     lastSeenAt: "2026-09-19T10:00:15Z" })]);
   assert.equal(instance(channels).model, "gpt-live");
@@ -216,22 +212,22 @@ test("paged catalog refresh retains live labels and busy state, then accepts idl
   assert.equal(instance(channels).status, "idle");
   assert.equal(instance(channels).activity, undefined, "idle cannot retain the old Working label");
   assert.equal(instance(channels).runtimeState, undefined);
-  channels = mergeChannels(channels, [{ id: "channel-1", memberPresence: {} }]);
-  assert.deepEqual(channels[0].memberPresence, {}, "authoritative removal must still clear the card");
+  channels = mergeChannels(channels, [decodeChannelSnapshot({ id: "channel-1", memberPresence: {} })]);
+  assert.deepEqual(legacyChannelMembers(channels[0]), {}, "authoritative removal must still clear the card");
 });
 
 {
   const merge = mergeAgentInstancePresence;
-  test("instance presence merge rejects stale idle and isolates reborn presentation", () => {
+  test("instance presence merge rejects stale idle and reborn retains its identity", () => {
     const current = { id: "old", channelInstanceId: "1", status: "busy", model: "gpt-live",
       connectedAt: "2026-09-19T10:00:00Z", lastSeenAt: "2026-09-19T10:00:10Z" };
     assert.equal(merge(current, { ...current, status: "idle", model: "gpt-old",
       lastSeenAt: "2026-09-19T10:00:05Z" }), current);
     assert.equal(merge(current, { ...current, status: "offline",
       lastSeenAt: "2026-09-19T10:00:05Z" }).status, "offline");
-    const reborn = merge(current, { id: "new", channelInstanceId: "1", status: "online",
+    const reborn = merge(current, { id: "old", channelInstanceId: "1", status: "online",
       connectedAt: "2026-09-19T10:00:20Z", lastSeenAt: "2026-09-19T10:00:20Z" });
-    assert.equal(reborn.model, undefined);
+    assert.equal(reborn.model, "gpt-live");
     assert.equal(reborn.status, "online");
     assert.equal(reborn.connectedAt, current.connectedAt);
   });
@@ -249,12 +245,11 @@ test("an Agent message without an ordinal never creates an unaddressable live ca
       label: "Codex",
     },
   };
-  const next = patchChannelAgentPresenceFromMessage({
+  const next = patchChannelAgentPresenceFromMessage(decodeChannelSnapshot({
     id: "channel-1",
     memberPresence: {},
-  }, entry);
-  assert.equal(agentMessageInstanceIdentityIncomplete(entry), true);
-  assert.deepEqual(next.memberPresence["agent:codex"].instances, undefined);
+  }), entry);
+  assert.deepEqual(Object.values(legacyChannelMembers(next)).flatMap(p => p.instances || []), []);
 });
 
 test("an incomplete Agent message may update only its already-known exact Instance", () => {
@@ -270,10 +265,10 @@ test("an incomplete Agent message may update only its already-known exact Instan
       goal: { status: "working", summary: "Test" },
     },
   };
-  const next = patchChannelAgentPresenceFromMessage({
+  const next = patchChannelAgentPresenceFromMessage(decodeChannelSnapshot({
     id: "channel-1",
     memberPresence: {
-      "agent:codex": {
+      "agent:codex": { registration: FIXTURE_AGENT_REGISTRATION,
         kind: "agent",
         label: "Codex",
         instances: [{
@@ -286,10 +281,42 @@ test("an incomplete Agent message may update only its already-known exact Instan
         }],
       },
     },
-  }, entry);
-  assert.equal(next.memberPresence["agent:codex"].instances.length, 1);
-  assert.equal(next.memberPresence["agent:codex"].instances[0].channelInstanceId, "7");
-  assert.equal(next.memberPresence["agent:codex"].instances[0].status, "busy");
+  }), entry);
+  assert.equal(channelInstances(next).length, 1);
+  assert.equal(firstChannelInstance(next).channelInstanceId, "7");
+  assert.equal(firstChannelInstance(next).status, "busy");
+});
+
+test("a message updates its exact catalog Instance under a different member key", () => {
+  const channel = decodeChannelSnapshot({ id: "channel-1", memberPresence: {
+    "instance-claude": { registration: { ownerUserId: "owner-1", machineId: "machine-1", harness: "claude" }, kind: "agent", label: "Claude", avatarUrl: "/agent-vendors/claude.svg",
+      instances: [{ id: "instance-claude", channelInstanceId: "1", status: "online",
+        connectedAt: "2026-10-16T07:00:00Z", lastSeenAt: "2026-10-16T07:00:00Z" }] },
+  } });
+  const entry = { channelId: channel.id, sentAt: "2026-10-16T07:01:00Z",
+    from: { kind: "agent", identityId: "agent:instance-claude", agentName: "Claude",
+      instanceId: "instance-claude", channelInstanceId: "1", instanceLabel: "Claude:1" } };
+  const next = patchChannelAgentPresenceFromMessage(channel, entry);
+  assert.deepEqual(Object.keys(legacyChannelMembers(next)), ["instance-claude"]);
+  const presence = firstChannelInstance(next);
+  assert.equal(channelInstances(next).length, 1);
+  assert.equal(presence.status, "busy");
+  assert.equal(legacyChannelMembers(next)[presence.id].avatarUrl, "/agent-vendors/claude.svg");
+
+  // A message from an unknown identity cannot create another Instance.
+  const other = patchChannelAgentPresenceFromMessage(next, { ...entry,
+    from: { ...entry.from, identityId: "agent:other-claude", instanceId: "instance-other" } });
+  assert.equal(other, next);
+});
+
+test("unknown or stopped Instance messages and cross-Channel links cannot create residents", () => {
+  const channel = decodeChannelSnapshot({ id: "channel-1", memberPresence: {} });
+  const entry = { channelId: channel.id, sentAt: "2026-10-16T07:01:00Z",
+    from: { kind: "agent", identityId: "agent:instance-claude", instanceId: "instance-claude", channelInstanceId: "1" } };
+  assert.equal(patchChannelAgentPresenceFromMessage(channel, entry), channel);
+  assert.equal(patchChannelAgentPresenceFromMessage(channel, { ...entry,
+    from: { ...entry.from, originChannelId: "other-channel" } }), channel);
+  assert.throws(() => removeChannelAgentInstancePresence(channel, { agentId: "unused", channelInstanceId: "1" }), TypeError);
 });
 
 test("an immutable message avatar wins over live presence", () => {
@@ -413,7 +440,7 @@ test("catalog merge keeps earlier birth when reborn carries a newer socket clock
       status: "offline",
     },
     {
-      id: "instance-new",
+      id: "instance-old",
       channelInstanceId: "2",
       connectedAt: "2026-08-01T14:00:00.000Z",
       lastSeenAt: "2026-08-01T14:00:00.000Z",
@@ -421,7 +448,7 @@ test("catalog merge keeps earlier birth when reborn carries a newer socket clock
     }
   );
   assert.equal(merged.connectedAt, birth);
-  assert.equal(merged.id, "instance-new");
+  assert.equal(merged.id, "instance-old");
   assert.equal(merged.status, "online");
 });
 
@@ -455,7 +482,7 @@ test("catalog presence snapshot cannot erase live runtime presentation tags", ()
 });
 
 function livePresence(instanceId) {
-  return {
+  return { registration: FIXTURE_AGENT_REGISTRATION,
     kind: "agent",
     label: "Codex",
     instances: [{
@@ -470,10 +497,10 @@ function livePresence(instanceId) {
 
 /** Channel 1 with two live Codex Instances: `instance-1` and a busy `instance-2`. */
 function channelWithTwoCodexInstances() {
-  return {
+  return decodeChannelSnapshot({
     id: "channel-1",
     memberPresence: {
-      "agent:codex": {
+      "agent:codex": { registration: FIXTURE_AGENT_REGISTRATION,
         kind: "agent",
         label: "Codex",
         instances: [
@@ -488,17 +515,18 @@ function channelWithTwoCodexInstances() {
         ],
       },
     },
-  };
+  });
 }
 
 test("empty memberPresence from a computed snapshot clears leftover Agent chips", () => {
-  const prior = { "agent:codex": livePresence("instance-1") };
-  assert.deepEqual(mergeChannelMemberPresencePreferringQuotas(prior, {}), {});
+  const prior = decodeChannelSnapshot({ id: "channel-1", memberPresence: { "agent:codex": livePresence("instance-1") } }).presence;
+  const empty = decodeChannelSnapshot({ id: "channel-1", memberPresence: {} }).presence;
+  assert.equal(mergeChannelPresence(prior, empty).instances.size, 0);
 });
 
 test("omitted memberPresence keeps the prior live snapshot", () => {
   const prior = { "agent:codex": livePresence("instance-1") };
-  assert.equal(mergeChannelMemberPresencePreferringQuotas(prior, undefined), prior);
+  assert.equal(mergeChannelPresence(prior, undefined), prior);
 });
 
 test("removing one stopped Instance leaves the remaining live chips", () => {
@@ -508,21 +536,21 @@ test("removing one stopped Instance leaves the remaining live chips", () => {
     instanceId: "instance-1",
   });
   assert.deepEqual(
-    next.memberPresence["agent:codex"].instances.map((instance) => instance.id),
+    channelInstances(next).map((instance) => instance.id),
     ["instance-2"],
   );
 });
 
 test("removing the last Instance drops the Agent presence row", () => {
-  const channel = {
+  const channel = decodeChannelSnapshot({
     id: "channel-1",
     memberPresence: { "agent:codex": livePresence("instance-1") },
-  };
+  });
   const next = removeChannelAgentInstancePresence(channel, {
     agentId: "agent:codex",
     instanceId: "instance-1",
   });
-  assert.deepEqual(next.memberPresence, {});
+  assert.deepEqual(legacyChannelMembers(next), {});
 });
 
 test("offline lifecycle updates decrement the channel chip list one Instance at a time", () => {
@@ -533,7 +561,7 @@ test("offline lifecycle updates decrement the channel chip list one Instance at 
     instanceId: "instance-1",
   });
   assert.deepEqual(
-    afterFirst[0].memberPresence["agent:codex"].instances.map((instance) => instance.id),
+    channelInstances(afterFirst[0]).map((instance) => instance.id),
     ["instance-2"],
   );
   const afterSecond = channelsAfterAgentInstanceOffline(afterFirst, {
@@ -541,16 +569,16 @@ test("offline lifecycle updates decrement the channel chip list one Instance at 
     agentId: "agent:codex",
     instanceId: "instance-2",
   });
-  assert.deepEqual(afterSecond[0].memberPresence, {});
+  assert.deepEqual(legacyChannelMembers(afterSecond[0]), {});
 });
 
 test("a woken Instance never takes back the moon from a catalog snapshot read before the wake", () => {
   const asleep = { id: "ch:1", channelInstanceId: "1", status: "offline", rest: "sleeping",
     connectedAt: "2026-10-02T07:00:00Z", lastSeenAt: "2026-10-02T07:50:00Z" };
-  const channel = (instance) => ({ id: "ch", memberPresence: {
-    "ch:1": { kind: "agent", label: "claude", instances: [instance] },
-  } });
-  const instance = (channels) => channels[0].memberPresence["ch:1"].instances[0];
+  const channel = (instance) => (decodeChannelSnapshot({ id: "ch", memberPresence: {
+    "ch:1": { registration: FIXTURE_AGENT_REGISTRATION, kind: "agent", label: "claude", instances: [instance] },
+  } }));
+  const instance = (channels) => firstChannelInstance(channels[0]);
   // The woken Instance replies: the message proves it is live.
   let channels = [patchChannelAgentPresenceFromMessage(channel(asleep), {
     channelId: "ch", sentAt: "2026-10-02T08:26:10Z",

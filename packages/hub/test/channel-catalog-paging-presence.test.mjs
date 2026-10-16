@@ -17,7 +17,10 @@ const OPEN_CHANNEL = {
   id: "channel-1", spaceId: "space-1", name: "General", mode: "open", version: 1,
   // Catalog authority only knows durable Agent presence; the live Human half of
   // this projection exists solely as a RelayRuntime session.
-  memberPresence: { "agent:writer": { kind: "agent", label: "writer", instances: [] } },
+  memberPresence: { "writer-instance": { kind: "agent", label: "writer",
+    registration: { ownerUserId: "owner", machineId: "machine", harness: "codex" },
+    instances: [{ id: "writer-instance", channelId: "channel-1", channelInstanceId: "1", label: "writer:1",
+      connectedAt: "2026-09-01T00:00:00Z", lastSeenAt: "2026-09-01T00:00:00Z", status: "idle" }] } },
   createdBy: "owner", createdAt: "2026-09-01T00:00:00.000Z", updatedAt: "2026-09-01T00:00:00.000Z",
 };
 const LIVE_SESSION = {
@@ -51,7 +54,7 @@ test("a catalog page completes Agent-only presence with live Humans", async () =
   assert.equal(presence["user:online"].focused, true);
   // Durable Agent presence survives the overlay, and an offline member stays
   // directory membership rather than becoming a presence row.
-  assert.equal(presence["agent:writer"].kind, "agent");
+  assert.equal(presence["writer-instance"].kind, "agent");
   assert.equal(presence["user:offline"], undefined);
   // The read hint is an internal Hub input, not part of the client contract.
   assert.equal(payload.openChannelHumanMemberIdsBySpace, undefined);
@@ -108,7 +111,7 @@ test("an unavailable Runtime leaves the catalog answer intact", async () => {
 
   const payload = await resolveChannelOne();
   assert.equal(payload.channels[0].memberPresence["user:online"], undefined);
-  assert.equal(payload.channels[0].memberPresence["agent:writer"].kind, "agent");
+  assert.equal(payload.channels[0].memberPresence["writer-instance"].kind, "agent");
 });
 
 test("metadata-only resolve preserves omitted participant fields and skips Runtime", async () => {
@@ -175,7 +178,7 @@ test("a successful empty snapshot is distinct from unavailable presence", async 
   state.runtimeSessions = [];
   const response = await app.request("https://hub.test/api/channels/page?spaceId=space-1");
   const payload = await response.json();
-  assert.equal(payload.rows[0].channel.memberPresence["agent:writer"].kind, "agent");
+  assert.equal(payload.rows[0].channel.memberPresence["writer-instance"].kind, "agent");
   assert.equal(payload.rows[0].channel.memberPresence["user:online"], undefined);
 });
 

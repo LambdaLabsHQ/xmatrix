@@ -1,3 +1,4 @@
+import { FIXTURE_AGENT_REGISTRATION } from "./workspace-fixtures";
 import { expect, test } from "./fixtures";
 import { E2E_CHANNEL, E2E_NOW, E2E_USER_SENDER, openGeneralChannelWithHistory } from "./workspace-fixtures";
 
@@ -103,7 +104,7 @@ test("mobile messages can scroll completely above the floating instance control"
     lastMessageSequence: 8,
     updatedAt: E2E_NOW,
     memberPresence: {
-      "agent:codex": {
+      "agent:codex": { registration: FIXTURE_AGENT_REGISTRATION,
         kind: "agent",
         status: "busy",
         label: "Codex",

@@ -1,6 +1,6 @@
-import type { SerializedChannel } from "@xmatrix/protocol";
+import type { ChannelSnapshot } from "@xmatrix/protocol";
 
-export type ChannelReadStateUpdate = Pick<SerializedChannel, "attention" | "readSequence">;
+export type ChannelReadStateUpdate = Pick<ChannelSnapshot, "attention" | "readSequence">;
 
 /**
  * Applies one read-state answer to one Channel. Read-state responses are
@@ -10,9 +10,9 @@ export type ChannelReadStateUpdate = Pick<SerializedChannel, "attention" | "read
  * a zero would claim "nothing read" over whatever baseline the reader holds.
  */
 export function withChannelReadState(
-  channel: SerializedChannel,
+  channel: ChannelSnapshot,
   update: ChannelReadStateUpdate,
-): SerializedChannel {
+): ChannelSnapshot {
   return {
     ...channel,
     attention: update.attention,

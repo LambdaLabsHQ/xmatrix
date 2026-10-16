@@ -2,7 +2,7 @@
 
 import { useCallback, useMemo, useRef, type MutableRefObject } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import type { ChannelMessage, SerializedChannel } from "@xmatrix/protocol";
+import type { ChannelMessage, ChannelSnapshot } from "@xmatrix/protocol";
 import { INITIAL_HISTORY_LIMIT } from "./workspace-shell-constants";
 import { fetchChannelHistory } from "./workspace-admin-views";
 import { useAuth } from "@/lib/auth-context";
@@ -12,7 +12,7 @@ type Input = {
   token: string | undefined;
   selectedChannelIdRef: MutableRefObject<string | null>;
   historyChannelIdRef: MutableRefObject<string | null>;
-  channelsRef: MutableRefObject<SerializedChannel[]>;
+  channelsRef: MutableRefObject<ChannelSnapshot[]>;
   applyHistory(channelId: string, messages: ChannelMessage[], hasOlderMessages: boolean): void;
   recordTailBase(channelId: string): void;
   authorizeOnlineHistory(channelId: string): void;

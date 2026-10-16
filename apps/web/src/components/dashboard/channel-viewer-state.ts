@@ -1,9 +1,9 @@
-import type { SerializedChannel } from "@xmatrix/protocol";
+import type { ChannelSnapshot } from "@xmatrix/protocol";
 
 export type ChannelViewerStateAuthority = "authoritative" | "partial";
 
 export type ChannelViewerState = Pick<
-  SerializedChannel,
+  ChannelSnapshot,
   "attention" | "readSequence"
 >;
 
@@ -14,8 +14,8 @@ export type ChannelViewerState = Pick<
  * projection instead.
  */
 export function mergeChannelViewerState(
-  prior: SerializedChannel | undefined,
-  incoming: SerializedChannel,
+  prior: ChannelSnapshot | undefined,
+  incoming: ChannelSnapshot,
   authority: ChannelViewerStateAuthority,
 ): ChannelViewerState {
   if (authority === "authoritative") {

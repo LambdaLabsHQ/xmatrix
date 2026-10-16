@@ -302,7 +302,7 @@ import type {
   SerializedAgentLaunch,
   SerializedAgentContinuation,
   SerializedAgentInstance,
-  SerializedChannel,
+  ChannelSnapshot,
   SerializedSpace,
 } from "@xmatrix/protocol";
 
@@ -358,7 +358,7 @@ function bodyHashOf(message: TimelineItem): string {
   return hash;
 }
 
-function useChannelAgentLaunches(channel: SerializedChannel | null, token: string | null,
+function useChannelAgentLaunches(channel: ChannelSnapshot | null, token: string | null,
   timeline: readonly TimelineItem[], visibleMessageIds?: readonly string[], viewerIdentity?: string | null) {
   const launchSourceMessages = useMemo(() => invocationSourceMessages(timeline, visibleMessageIds),
     [timeline, visibleMessageIds]);
@@ -432,7 +432,7 @@ function useChannelAgentLaunches(channel: SerializedChannel | null, token: strin
 
 /** The author's own first message of a new, unnamed conversation that
  * summons nobody: the Hub offers it a short launch choice. */
-function offersLaunchChoice(message: TimelineItem, channel: SerializedChannel | null): boolean {
+function offersLaunchChoice(message: TimelineItem, channel: ChannelSnapshot | null): boolean {
   return Boolean(message.own && message.senderKind === "user" && message.sequence === 1 &&
     channel?.metadata?.autoName === true && !message.recalledAt && !message.editedAt &&
     !hasOperationalAgentInvocation(message.body) && parseAutoLaunchMentions(message.body).length === 0 &&
@@ -505,7 +505,7 @@ export const MessageTimeline = memo(function MessageTimeline({
   threadRootMessage,
   threadRootChannel,
 }: {
-  channel: SerializedChannel | null;
+  channel: ChannelSnapshot | null;
   space: SerializedSpace | null;
   token: string | null;
   localContext?: MentionLocalContext | null;
@@ -537,7 +537,7 @@ export const MessageTimeline = memo(function MessageTimeline({
   onMessageExposed: (channelId: string, sequence: number) => void;
   highlightMessageId?: string;
   threadRootMessage?: TimelineItem;
-  threadRootChannel?: SerializedChannel;
+  threadRootChannel?: ChannelSnapshot;
 } & Pick<MessageRowProps,
   "onReact" | "onEdit" | "onRecall" | "onUnsentAction" | "onReply" | "onOpenThread" | "onMentionSender" |
   "onRebornSender" | "onQuestionnaireAnswer" | "onOpenInternalAppLink" | "onJumpToMessage"
@@ -1016,12 +1016,12 @@ export const MessageTimeline = memo(function MessageTimeline({
     return (mentionIndexRef.current = held && sameValue(held, next) ? held : next);
   }, [channel, localContext, space, launchedMentions]);
   const machineOfflineRef = useRef<ReadonlySet<string> | null>(null);
-  const memberPresence = channel?.memberPresence;
+  const channelPresence = channel?.presence;
   const machineOfflineSubjectIds = useMemo(() => {
-    const next = machineOfflineMentionSubjects({ memberPresence });
+    const next = machineOfflineMentionSubjects({ presence: channelPresence });
     const held = machineOfflineRef.current;
     return (machineOfflineRef.current = held && sameValue(held, next) ? held : next);
-  }, [memberPresence]);
+  }, [channelPresence]);
   const memberReadSequences = channel?.memberReadSequences;
   const mentionReadScope = useMemo<MentionReadChannelScope>(() => ({
     index: mentionIndex,
@@ -3373,7 +3373,7 @@ export const AgentWorkDetailsDock = memo(function AgentWorkDetailsDock({
   onOpenAgentTrace,
 }: {
   approvals?: ReactNode;
-  channel: SerializedChannel | null;
+  channel: ChannelSnapshot | null;
   token: string | null;
   timeline: TimelineItem[];
   events: ObservabilityEvent[];

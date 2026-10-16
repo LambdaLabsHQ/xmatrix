@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { WEB_PROXY_ROUTES, type SerializedChannel } from "@xmatrix/protocol";
+import { WEB_PROXY_ROUTES, type ChannelSnapshot } from "@xmatrix/protocol";
 import { Button } from "@/components/ui/button";
 import { GlassSelect } from "@/components/ui/glass-select";
 import { xmatrixApiRequest } from "@/lib/query/api-client";
@@ -10,7 +10,7 @@ import { xmatrixQueryKeys } from "@/lib/query/query-keys";
 
 interface Notification { id:string;address:string;channelId:string;enabled:boolean;lastSignalAt?:string;expiresAt?:string;error?:string }
 export function GmailNotifications({spaceId,token,userId,mailboxes,channels}:{
-  spaceId:string;token:string;userId:string;mailboxes:{address:string;owner:string}[];channels:SerializedChannel[];
+  spaceId:string;token:string;userId:string;mailboxes:{address:string;owner:string}[];channels:ChannelSnapshot[];
 }) {
   const queryClient=useQueryClient();
   const queryKey=xmatrixQueryKeys.domain({userId},"gmail-notifications",[spaceId]);

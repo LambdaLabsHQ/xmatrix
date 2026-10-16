@@ -1,11 +1,11 @@
-import type { ChannelMessage, SerializedChannel } from "@xmatrix/protocol";
+import type { ChannelMessage, ChannelSnapshot } from "@xmatrix/protocol";
 import { sameValue } from "../../lib/same-value";
 
 /** What one arrived message says about its Channel's line in the list. */
 export interface ChannelMessageArrival {
   entry: ChannelMessage;
   /** The preview the list shows for it. */
-  preview: SerializedChannel["lastMessage"];
+  preview: ChannelSnapshot["lastMessage"];
   /** The history already held this message: a replay or an echo, not one more. */
   known: boolean;
   /** How many messages the Channel's merged history says it has. */
@@ -27,7 +27,7 @@ function time(value: string | undefined): number {
  * changes nothing, in which case the Channel comes back itself. A message
  * without a sequence counts once, when the history did not hold it yet.
  */
-export function channelAfterMessage(channel: SerializedChannel, arrival: ChannelMessageArrival): SerializedChannel {
+export function channelAfterMessage(channel: ChannelSnapshot, arrival: ChannelMessageArrival): ChannelSnapshot {
   const { entry } = arrival;
   const held = channel.messageCount || 0;
   const counted = entry.sequence ? entry.sequence : held + (arrival.known ? 0 : 1);
@@ -61,10 +61,10 @@ export function channelAfterMessage(channel: SerializedChannel, arrival: Channel
    its answer came: one asked before the reader's acknowledgement can arrive
    after it and say what the acknowledgement has since cleared. */
 let viewerOrder = 0;
-const askedOrders = new WeakMap<SerializedChannel, number>();
+const askedOrders = new WeakMap<ChannelSnapshot, number>();
 
 /** Marks the Channels of a read with when it was asked; gives back the mark for those that follow. */
-export function readAskedNow(): (channel: SerializedChannel) => void {
+export function readAskedNow(): (channel: ChannelSnapshot) => void {
   const askedAt = (viewerOrder += 1);
   return (channel) => { askedOrders.set(channel, askedAt); };
 }
@@ -82,7 +82,7 @@ const UNPLACED_ARRIVALS = 32;
  * reader's read lands, which can be older than the message and is the first
  * to say what the reader had read.
  */
-export function createViewerReads(place: (channel: SerializedChannel, arrival: ChannelMessageArrival) => SerializedChannel = channelAfterMessage) {
+export function createViewerReads(place: (channel: ChannelSnapshot, arrival: ChannelMessageArrival) => ChannelSnapshot = channelAfterMessage) {
   const read = new Set<string>();
   const unplaced = new Map<string, ChannelMessageArrival[]>();
   const answeredAt = new Map<string, number>();
@@ -90,7 +90,7 @@ export function createViewerReads(place: (channel: SerializedChannel, arrival: C
     /** The Hub has just told this reader what they have read of the Channel, or what waits on them there. */
     answered(channelId: string) { answeredAt.set(channelId, (viewerOrder += 1)); },
     /** Whether this copy of the Channel comes from a read asked before the last such answer. */
-    outdated: (channel: SerializedChannel) => (askedOrders.get(channel) ?? Infinity) < (answeredAt.get(channel.id) ?? 0),
+    outdated: (channel: ChannelSnapshot) => (askedOrders.get(channel) ?? Infinity) < (answeredAt.get(channel.id) ?? 0),
     /** Whether a read made for this reader has brought the Channel. */
     has: (channelId: string) => read.has(channelId),
     /** A message for a Channel no read of theirs has brought yet. */
@@ -103,7 +103,7 @@ export function createViewerReads(place: (channel: SerializedChannel, arrival: C
       while (unplaced.size > UNPLACED_CHANNELS) unplaced.delete(unplaced.keys().next().value!);
     },
     /** The Channel as a read for this reader has it, brought up to the messages that got ahead of the read. */
-    settle(channel: SerializedChannel): SerializedChannel {
+    settle(channel: ChannelSnapshot): ChannelSnapshot {
       read.add(channel.id);
       const arrivals = unplaced.get(channel.id);
       if (!arrivals) return channel;
