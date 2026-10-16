@@ -22,6 +22,7 @@ import { fireOwedAutomationTriggers } from "./automation-triggers";
 import { readGitHubFile, type GitHubFileContent } from "./app-connectors";
 import { findAppConnection } from "./apps";
 import type { Env } from "./types";
+import { platformAdminSpaceId } from "./admin-platform-access";
 
 /**
  * Pages (docs/design/pages-and-conversations.md): the Space's markdown page
@@ -46,7 +47,7 @@ function database(env: Env) {
 }
 
 function repository(env: Env): PostgresPageRepository {
-  return new PostgresPageRepository(database(env));
+  return new PostgresPageRepository(database(env), { creditsWaivedSpaceId: platformAdminSpaceId(env) });
 }
 
 /**

@@ -128,6 +128,18 @@ integration("a paid Space's Agent credits run included, packs, grace, then refus
       Number(rolled.notice_level)], [1, 0, 7, 0]);
     assert.equal(await spaceBilling.agentWrite(transaction(client), { spaceId, now: next, kind: "page_revision" }), null);
     assert.equal(Number((await credits()).included_used), 2);
+
+    // A page revision has no Channel to tell: the crossing it makes is announced by the next message.
+    await state({ included: CREDITS_PER_SEAT * 0.8 - 1 });
+    assert.equal(await spaceBilling.agentWrite(transaction(client), { spaceId, now: next, kind: "page_revision" }), null);
+    assert.equal(Number((await credits()).notice_level), 0);
+    assert.equal(spaceBilling.message.notice(await publish(client, spaceId, true, "agent", next))?.key.endsWith(":1"), true);
+
+    // The operator's own Space is not charged for page revisions either.
+    await state({ included: CREDITS_PER_SEAT, grace: GRACE_CREDITS_PER_SEAT });
+    assert.equal(await spaceBilling.agentWrite(transaction(client),
+      { spaceId, now: next, kind: "page_revision", creditsWaived: true }), null);
+    assert.equal(Number((await credits()).grace_used), GRACE_CREDITS_PER_SEAT);
   } finally {
     await client.query("ROLLBACK");
     await client.end();

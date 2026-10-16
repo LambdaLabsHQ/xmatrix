@@ -11,6 +11,7 @@ import {
 import { tellPageAutomationChannels } from "./page-automation-wake";
 import { startPageSummary } from "./page-summary";
 import type { Env } from "./types";
+import { platformAdminSpaceId } from "./admin-platform-access";
 
 /**
  * One Durable Object per page hosts its live session (page-session.ts). It
@@ -61,7 +62,7 @@ function pages(env: Env): PostgresPageRepository {
     applicationName: "xmatrix-page-session", connectTimeoutMs: POSTGRES_MESSAGE_CONNECT_TIMEOUT_MS,
     statementTimeoutMs: 5_000,
     transactionTimeoutMs: 10_000, lockTimeoutMs: 2_000,
-  }));
+  }), { creditsWaivedSpaceId: platformAdminSpaceId(env) });
 }
 
 /** The summary being written for this page, so a second one does not start beside it. */
@@ -106,6 +107,10 @@ export class RelayPageSession extends DurableObject<Env> {
         } catch (error) {
           if (error instanceof PageControlError && error.code === "page_revision_conflict") {
             throw new PageSessionConflict(Number(error.detail?.headRevision ?? 0), String(error.detail?.body ?? ""));
+          }
+          // Pending text stays in the session; whoever edits next commits it.
+          if (error instanceof PageControlError && error.code === "credits_exhausted") {
+            ports.broadcast(encodeNotice({ type: "error", code: "credits_exhausted" }));
           }
           throw error;
         }
@@ -375,8 +380,22 @@ export class RelayPageSession extends DurableObject<Env> {
    */
   private async settle(): Promise<void> {
     if (this.ctx.getWebSockets().length) return;
-    await this.session.commit();
+    await this.commitPending();
     if (!this.session.hasPendingEdits) await this.ctx.storage.deleteAlarm();
+  }
+
+  /**
+   * A refused commit (no Agent credits left, a page over its size) keeps its
+   * edits pending for a later commit; it never stops the alarm that
+   * re-authorizes open connections.
+   */
+  private async commitPending(): Promise<void> {
+    try {
+      await this.session.commit();
+    } catch (error) {
+      console.error("Page session commit failed", { pageId: this.pageId,
+        error: error instanceof Error ? error.message : String(error) });
+    }
   }
 
   /**
@@ -416,7 +435,7 @@ export class RelayPageSession extends DurableObject<Env> {
       return;
     }
     await this.ready();
-    await this.session.commit();
+    await this.commitPending();
     // Access changes reach open connections: re-authorize each distinct principal.
     const repository = pages(this.env);
     const verdicts = new Map<string, { canRead: boolean; canEdit: boolean }>();

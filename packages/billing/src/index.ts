@@ -99,10 +99,14 @@ export interface SpaceBillingPolicy {
     input: { spaceId: string; now: string },
   ): Promise<BillingRejection | null>;
   readonly message: MessageAdmission;
-  /** Called in the transaction that commits an Agent's write; a rejection refuses it. */
+  /**
+   * Called in the transaction that commits an Agent's write; a rejection
+   * refuses it. `creditsWaived`, as for messages, is the deployment's own
+   * operator Space.
+   */
   agentWrite(
     transaction: BillingTransaction,
-    input: { spaceId: string; now: string; kind: AgentWriteKind },
+    input: { spaceId: string; now: string; kind: AgentWriteKind; creditsWaived?: boolean },
   ): Promise<BillingRejection | null>;
 }
 
