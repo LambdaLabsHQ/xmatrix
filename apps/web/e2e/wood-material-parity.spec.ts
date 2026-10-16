@@ -12,7 +12,7 @@ for (const mobile of [false, true]) {
       const style = getComputedStyle(element);
       return [style.backgroundColor, style.backgroundImage, style.backgroundSize, style.backgroundPosition, style.backgroundBlendMode];
     });
-    expect(paint[1]).toContain('/textures/wood.webp');
+    expect(paint[1]).toMatch(/\/textures\/wood\.[0-9a-f]{10}\.webp/);
     const selectors = mobile ? ['.app-topbar .app-mobile-back-sign', '.app-detail-plank'] : ['.app-rail', '.app-detail-plank'];
     for (const selector of selectors) {
       for (const element of await page.locator(selector).all()) {

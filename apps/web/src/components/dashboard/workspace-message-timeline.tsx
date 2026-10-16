@@ -18,11 +18,10 @@ import { sameValue, shareByKey } from "../../lib/same-value";
 import { MESSAGE_SURFACE_METRICS_EVENT, messageSurfaceOf } from "./message-surface-metrics";
 
 import {
-  activateMessageAttachmentMediaStore,
   commitMessageAttachmentMedia,
-  createMessageAttachmentMediaStore,
-  deactivateMessageAttachmentMediaStore,
-  releaseMessageAttachmentMediaStore,
+  holdMessageAttachmentMediaStore,
+  letGoMessageAttachmentMediaStore,
+  messageAttachmentMediaStoreFor,
 } from "./message-attachment-media-store";
 
 import {
@@ -644,36 +643,26 @@ export const MessageTimeline = memo(function MessageTimeline({
     if (!response.ok) throw await errorFromResponse(response);
     await refetchAgentLaunches();
   }, [channelId, refetchAgentLaunches, token]);
-  // One media store per channel view. A new one is built — and the previous
-  // one released — whenever the channel, the viewer, or the session changes. Ordinary message progress is excluded
-  // from the dependency list so it does not evict already-authorized media.
+  // The channel's media store, kept among the recent ones when the view moves
+  // on so reopening the channel shows its media at once. Ordinary message
+  // progress and token refresh are excluded from the dependency list so they
+  // do not replace already-loaded media.
+  const authenticated = token !== null;
   const mediaStore = useMemo(
-    () => createMessageAttachmentMediaStore({
+    () => messageAttachmentMediaStoreFor({
       channelId: channel?.id ?? null,
       viewerId: currentUserIdentityId,
-      authenticated: token !== null,
+      authenticated,
     }),
     [
       channel?.id,
       currentUserIdentityId,
-      token,
+      authenticated,
     ],
   );
   useLayoutEffect(() => {
-    // `released` is irreversible, but React development Strict Mode probes a
-    // layout effect with cleanup + setup while reusing this useMemo result.
-    // Re-activate that same store synchronously; a genuinely replaced store
-    // stays inactive through the microtask and is then released exactly once.
-    // This assumes cleanup and re-setup do not span a macrotask. If this tree
-    // later uses Activity/Offscreen-style pause and resume semantics, release
-    // must follow store identity instead of the transient `active` flag.
-    activateMessageAttachmentMediaStore(mediaStore);
-    return () => {
-      deactivateMessageAttachmentMediaStore(mediaStore);
-      queueMicrotask(() => {
-        if (!mediaStore.active) releaseMessageAttachmentMediaStore(mediaStore);
-      });
-    };
+    holdMessageAttachmentMediaStore(mediaStore);
+    return () => letGoMessageAttachmentMediaStore(mediaStore);
   }, [mediaStore]);
 
   // Stable, so it runs when a row mounts and not on every render: the row a
@@ -1869,7 +1858,7 @@ export const MessageRow = memo(function MessageRow({
           // Keep the body for clipboard copy: CSP blocks blob: object-URL requests.
           localMediaBlob: result.body,
         } as ChannelAttachment;
-        if (!commitMessageAttachmentMedia(mediaStore, identity, next, objectUrl)) {
+        if (!commitMessageAttachmentMedia(mediaStore, identity, next, objectUrl, result.body.size)) {
           throw new Error("Attachment view was closed");
         }
         mediaStore.failures.delete(identity);
@@ -1896,8 +1885,8 @@ export const MessageRow = memo(function MessageRow({
   useEffect(() => {
     attachmentMediaMountedRef.current = true;
     return () => {
-      // Only this row goes away. Its media belongs to the store, which the
-      // timeline releases when the channel or the viewer changes.
+      // Only this row goes away. Its media belongs to the store, which is
+      // released when it leaves the recent set or the viewer changes.
       attachmentMediaMountedRef.current = false;
     };
   }, []);

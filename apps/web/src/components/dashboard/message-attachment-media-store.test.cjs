@@ -94,3 +94,73 @@ test("a store records the scope its media was authorized for", async () => {
   assert.equal(store.scope.channelId, "channel-1");
   SCOPE.channelId = "channel-1";
 });
+
+test("reopening a recent channel gets its store back with the media it loaded", async () => {
+  const {
+    commitMessageAttachmentMedia,
+    holdMessageAttachmentMediaStore,
+    letGoMessageAttachmentMediaStore,
+    messageAttachmentMediaStoreFor,
+    releaseMessageAttachmentMediaStores,
+  } = await loadStore();
+  await withRevokedUrls(async revoked => {
+    const first = messageAttachmentMediaStoreFor(SCOPE);
+    holdMessageAttachmentMediaStore(first);
+    commitMessageAttachmentMedia(first, "identity-1", { id: "a" }, "blob:one", 10);
+    letGoMessageAttachmentMediaStore(first);
+
+    const other = messageAttachmentMediaStoreFor({ ...SCOPE, channelId: "channel-2" });
+    holdMessageAttachmentMediaStore(other);
+    letGoMessageAttachmentMediaStore(other);
+
+    const again = messageAttachmentMediaStoreFor(SCOPE);
+    assert.equal(again, first);
+    assert.equal(again.resolved.get("identity-1").id, "a");
+    assert.deepEqual(revoked, []);
+    releaseMessageAttachmentMediaStores();
+    assert.deepEqual(revoked, ["blob:one"]);
+    assert.equal(first.released, true);
+  });
+});
+
+test("only unused stores beyond the recent set are released, oldest first", async () => {
+  const {
+    holdMessageAttachmentMediaStore,
+    letGoMessageAttachmentMediaStore,
+    messageAttachmentMediaStoreFor,
+    releaseMessageAttachmentMediaStores,
+  } = await loadStore();
+  const open = messageAttachmentMediaStoreFor({ ...SCOPE, channelId: "open" });
+  holdMessageAttachmentMediaStore(open);
+  const visited = [];
+  for (let index = 0; index < 9; index += 1) {
+    const store = messageAttachmentMediaStoreFor({ ...SCOPE, channelId: `channel-${index}` });
+    holdMessageAttachmentMediaStore(store);
+    letGoMessageAttachmentMediaStore(store);
+    visited.push(store);
+  }
+  assert.equal(open.released, false, "a mounted view keeps its store");
+  // Eight recent stores, the open one among them.
+  assert.equal(visited[0].released, true);
+  assert.equal(visited[1].released, true);
+  assert.equal(visited[2].released, false);
+  assert.equal(visited.at(-1).released, false);
+  releaseMessageAttachmentMediaStores();
+});
+
+test("a new viewer releases the stores the previous one left behind", async () => {
+  const {
+    holdMessageAttachmentMediaStore,
+    letGoMessageAttachmentMediaStore,
+    messageAttachmentMediaStoreFor,
+    releaseMessageAttachmentMediaStores,
+  } = await loadStore();
+  const before = messageAttachmentMediaStoreFor(SCOPE);
+  holdMessageAttachmentMediaStore(before);
+  const after = messageAttachmentMediaStoreFor({ ...SCOPE, viewerId: "user-2" });
+  assert.notEqual(after, before);
+  assert.equal(before.released, false, "still on screen until its view goes");
+  letGoMessageAttachmentMediaStore(before);
+  assert.equal(before.released, true);
+  releaseMessageAttachmentMediaStores();
+});
