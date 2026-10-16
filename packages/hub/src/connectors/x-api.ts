@@ -1,11 +1,11 @@
-import { ControlError, type PostgresAppCredentialRepository, type ResolvedAppCredentials } from "@xmatrix/db";
+import type { PostgresAppCredentialRepository, ResolvedAppCredentials } from "@xmatrix/db";
 import type { Env } from "../types";
 import { getChannel } from "../spaces";
 import { record } from "./command-support";
 import { connectorCredentialRepository } from "./credentials";
 import { ProviderRequestError } from "./http";
 import { oauthClient, type OAuthClient } from "./oauth";
-import { parseXAccounts, xAccountFields, type XAccount, type XAccountView, type XActionCapability } from "./x-accounts";
+import { parseXAccounts, retryXCredentialWrite, xAccountFields, type XAccount, type XAccountView, type XActionCapability } from "./x-accounts";
 import { xProviderJson, xTokenGrant } from "./x-oauth";
 
 type Store = Pick<PostgresAppCredentialRepository, "resolve" | "put">;
@@ -19,21 +19,18 @@ function selected(stored: ResolvedAppCredentials | null, account: XAccountView):
 
 /** A bounded CAS merge preserves other accounts and fences disconnect/recreate and reauthorization. */
 async function updateAccount(store: Store, spaceId: string, account: XAccountView,
-  change: (account: XAccount) => XAccount): Promise<void> {
-  for (let attempt = 0; attempt < 3; attempt++) {
+  change: (account: XAccount) => XAccount): Promise<XAccount> {
+  return retryXCredentialWrite(async () => {
     const stored = await store.resolve({ requestId: crypto.randomUUID(), spaceId, providerId: "x" });
     const current = selected(stored, account);
     const next = change(current);
-    try {
-      await store.put({ requestId: crypto.randomUUID(), spaceId, providerId: "x", actorUserId: "hub:x-token-refresh",
-        fields: xAccountFields(parseXAccounts(stored!.values.accounts).map(a => a.id === current.id ? next : a)),
-        policy: { allowed: ["accounts"] }, at: new Date().toISOString(), asHub: true,
-        expectedVersion: stored!.version, expectedGrant: stored! });
-      return;
-    } catch (error) {
-      if (!(error instanceof ControlError) || error.code !== "credential_changed" || attempt === 2) throw error;
-    }
-  }
+    if (next === current) return current; // A lost COMMIT receipt can be confirmed by the saved grant.
+    await store.put({ requestId: crypto.randomUUID(), spaceId, providerId: "x", actorUserId: "hub:x-token-refresh",
+      fields: xAccountFields(parseXAccounts(stored!.values.accounts).map(a => a.id === current.id ? next : a)),
+      policy: { allowed: ["accounts"] }, at: new Date().toISOString(), asHub: true,
+      expectedVersion: stored!.version, expectedGrant: stored! });
+    return next;
+  });
 }
 
 /**
@@ -43,7 +40,7 @@ async function updateAccount(store: Store, spaceId: string, account: XAccountVie
  */
 export async function refreshXAccount(store: Store, spaceId: string, client: OAuthClient, account: XAccountView): Promise<XAccount> {
   const read = () => store.resolve({ requestId: crypto.randomUUID(), spaceId, providerId: "x" });
-  let current = selected(await read(), account);
+  const current = selected(await read(), account);
   if (current.needsReconnect) throw new ProviderRequestError(401, "Reconnect this X account before using it");
   if (current.clientId !== client.clientId || current.scopes !== client.manifest.oauth.scopes.join(" ")) {
     throw new ProviderRequestError(401, "The X company application changed; reconnect this account");
@@ -53,6 +50,7 @@ export async function refreshXAccount(store: Store, spaceId: string, client: OAu
   if (current.expiresAt > Date.now() + 30_000) return current;
   const lease = crypto.randomUUID();
   await updateAccount(store, spaceId, account, a => {
+    if (a.refreshing === lease && a.refreshToken === current.refreshToken) return a;
     if (a.refreshing || a.refreshToken !== current.refreshToken) throw new ProviderRequestError(409, "This X grant changed during refresh; try again");
     return { ...a, refreshing: lease, refreshStartedAt: Date.now() };
   });
@@ -62,13 +60,13 @@ export async function refreshXAccount(store: Store, spaceId: string, client: OAu
       "content-type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({ grant_type: "refresh_token", refresh_token: current.refreshToken }) });
   const tokens = xTokenGrant(client, payload, current);
-  await updateAccount(store, spaceId, account, a => {
+  return updateAccount(store, spaceId, account, a => {
+    if (!a.refreshing && a.accessToken === tokens.accessToken && a.refreshToken === tokens.refreshToken &&
+        a.expiresAt === tokens.expiresAt && a.scopes === tokens.scopes && a.clientId === tokens.clientId) return a;
     if (a.refreshing !== lease) throw new ProviderRequestError(409, "This X grant changed while saving its refresh; reconnect");
     const { refreshing: _lease, refreshStartedAt: _started, ...kept } = a;
     return { ...kept, ...tokens };
   });
-  current = selected(await read(), account);
-  return current;
 }
 
 function allowedPath(account: XAccountView, method: "GET" | "POST", path: string): boolean {

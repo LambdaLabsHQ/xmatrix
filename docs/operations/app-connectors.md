@@ -918,3 +918,23 @@ an automatically renewed watcher; no forwarding setup or periodic inbox query is
 required. It currently supports Human-owned mailboxes whose owner is a Space
 admin. Existing Composio content access and per-message send approval remain the
 same. Provisioning and acceptance are in [Native Gmail notifications](gmail-notifications.md).
+
+## X company application and durable video jobs
+
+Configure the complete `CONNECTOR_X_CLIENT_ID` / `CONNECTOR_X_CLIENT_SECRET`
+pair in the production release environment and deliver it through Production
+Release Intent. Follow [X setup and native acceptance](../connectors/x.md) for
+company/personal account consent, account ownership, API budget and the
+Enterprise-only quote parameter.
+
+`RELAY_X_UPLOAD_EXECUTOR` runs one scoped alarm executor per upload request.
+PostgreSQL action requests own encrypted frozen inputs, consumption and
+terminal outcomes; the executor retains references, phase and bounded retry
+state only. Both approved and explicit-allow uploads await durable admission
+before acknowledging the command, then return their result through a stable
+Channel message. A restarted `started` job never repeats provider mutations.
+An uncertain upload fails closed; unattached provider media is left to expire.
+Result delivery retries at most twelve times with backoff capped at sixty
+seconds. Re-admitting the same executing request resumes recovery/delivery,
+never a provider transfer. Encrypted outcomes are cleared after confirmed
+publication and expire with the request's twenty-four-hour retention window.

@@ -105,9 +105,14 @@ Source access, immutable metadata and current Channel policy are checked again
 while streaming the upload. Initialize, append and finalize use X's v2 media
 API with at most 64 one-MiB chunks and no automatic replay of an uncertain
 write. The transfer has a two-minute deadline, with each provider request
-separately bounded. Allow-mode upload commands keep their HTTP request alive
-until completion instead of depending on the post-response background budget;
-approval-mode transfers run inside the approval request.
+separately bounded. Both approved and allow-mode uploads first freeze their
+input in the encrypted PostgreSQL action-request authority, then hand only a
+request reference to a scoped Durable Object alarm executor. HTTP and CLI
+requests acknowledge admission without waiting for the transfer. The executor
+records a started marker before provider I/O and never repeats an uncertain
+transfer after a restart. Its encrypted outcome remains in PostgreSQL until a
+stable, idempotent Channel receipt is confirmed; delivery retries are bounded.
+The executor stores only scheduling references, never tokens or private media.
 
 The result includes an opaque media receipt scoped to the Space, Channel,
 calling member, account and authorization generation. It expires within one

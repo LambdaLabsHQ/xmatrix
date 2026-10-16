@@ -1,5 +1,7 @@
+import { ControlError } from "@xmatrix/db";
 import { utf8ByteLength } from "@xmatrix/protocol";
 import type { Env } from "../types";
+import { retryablePostgresFailure } from "../postgres-error-classification";
 import { connectorCredentialRepository } from "./credentials";
 import { ProviderRequestError } from "./http";
 
@@ -59,25 +61,59 @@ export function xAccountFields(accounts: readonly XAccount[]): { accounts: strin
   return { accounts: value };
 }
 
+/** Retry local grant persistence only; provider token rotation must stay outside this boundary. */
+export async function retryXCredentialWrite<T>(operation: () => Promise<T>): Promise<T> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await operation();
+    } catch (error) {
+      const retry = !(error instanceof ProviderRequestError) && (error instanceof ControlError
+        ? error.code === "credential_changed" : retryablePostgresFailure(error));
+      if (!retry || attempt === 7) throw error;
+      const delay = Math.min(50 * 2 ** attempt, 500) + Math.floor(Math.random() * 50);
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+  }
+}
+
 /** A callback may add an account; it cannot take another member's account over. */
 export async function connectXAccount(env: Env, input: { spaceId: string; actorUserId: string; fields: Record<string, string | null>;
   snapshot: { connectionVersion: number; credentialVersion: number; connectionGeneration: string } }): Promise<void> {
   const repository = connectorCredentialRepository(env);
   const grant = parseXAccounts(input.fields.accounts ?? undefined);
   if (grant.length !== 1 || grant[0]!.ownerUserId !== input.actorUserId) throw new ProviderRequestError(400, "Restart X Connect");
-  const stored = await repository.resolveForAdmin({ requestId: crypto.randomUUID(), spaceId: input.spaceId,
-    providerId: "x", actorUserId: input.actorUserId });
-  const current = parseXAccounts(stored?.values.accounts);
   const account = grant[0]!;
-  if (current.some(a => a.id === account.id && a.ownerUserId !== input.actorUserId)) {
-    throw new ProviderRequestError(403, "This X account belongs to another Space member");
-  }
-  const kept = current.filter(a => a.id !== account.id);
-  if (kept.length >= MAX_X_ACCOUNTS) throw new ProviderRequestError(409, `A Space connects at most ${MAX_X_ACCOUNTS} X accounts`);
-  await repository.put({ requestId: crypto.randomUUID(), spaceId: input.spaceId, providerId: "x", actorUserId: input.actorUserId,
-    fields: xAccountFields([...kept, account]), policy: { allowed: ["accounts"] }, at: new Date().toISOString(),
-    expectedGrant: { connectionVersion: input.snapshot.connectionVersion, version: input.snapshot.credentialVersion,
-      connectionGeneration: input.snapshot.connectionGeneration } });
+  await retryXCredentialWrite(async () => {
+    const stored = await repository.resolveForAdmin({ requestId: crypto.randomUUID(), spaceId: input.spaceId,
+      providerId: "x", actorUserId: input.actorUserId });
+    const latest = stored ? { connectionVersion: stored.connectionVersion, credentialVersion: stored.version,
+      connectionGeneration: stored.connectionGeneration } : await repository.installationSnapshot({ requestId: crypto.randomUUID(),
+      spaceId: input.spaceId, providerId: "x", actorUserId: input.actorUserId });
+    if (latest.connectionGeneration !== input.snapshot.connectionGeneration) {
+      throw new ProviderRequestError(409, "The X connection changed during authorization; restart Connect");
+    }
+    const current = parseXAccounts(stored?.values.accounts);
+    // A callback COMMIT can succeed before its acknowledgement is lost. Its
+    // exact newly minted grant confirms that success without another write.
+    if (current.some(a => a.id === account.id && a.generation === account.generation &&
+        a.ownerUserId === account.ownerUserId && a.clientId === account.clientId && a.username === account.username &&
+        a.accessToken === account.accessToken && a.refreshToken === account.refreshToken &&
+        a.scopes === account.scopes && a.expiresAt === account.expiresAt)) return;
+    // Hub refreshes change only the encrypted envelope. Human edits still
+    // invalidate the signed Connect start when this grant has not committed.
+    if (latest.connectionVersion !== input.snapshot.connectionVersion) {
+      throw new ProviderRequestError(409, "The X connection changed during authorization; restart Connect");
+    }
+    if (current.some(a => a.id === account.id && a.ownerUserId !== input.actorUserId)) {
+      throw new ProviderRequestError(403, "This X account belongs to another Space member");
+    }
+    const kept = current.filter(a => a.id !== account.id);
+    if (kept.length >= MAX_X_ACCOUNTS) throw new ProviderRequestError(409, `A Space connects at most ${MAX_X_ACCOUNTS} X accounts`);
+    await repository.put({ requestId: crypto.randomUUID(), spaceId: input.spaceId, providerId: "x", actorUserId: input.actorUserId,
+      fields: xAccountFields([...kept, account]), policy: { allowed: ["accounts"] }, at: new Date().toISOString(),
+      expectedGrant: { connectionVersion: input.snapshot.connectionVersion, version: latest.credentialVersion,
+        connectionGeneration: input.snapshot.connectionGeneration } });
+  });
 }
 
 export async function listXAccounts(env: Env, input: { spaceId: string; actorUserId: string }) {

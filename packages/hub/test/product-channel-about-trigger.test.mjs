@@ -216,9 +216,9 @@ test("a mention-less first message asks whether a new conversation starts an Age
   assert.equal(productMessageControlFinishesBeforeResponse("fix the flaky login test"), false);
 });
 
-// Video transfer can outlive waitUntil's post-response budget. Both Human and
-// Agent allow-mode commands must retain their request until a receipt exists.
-test("X video upload retains its HTTP lifetime while other connector reads remain asynchronous", () => {
+// Durable admission must complete before acknowledging a command; the transfer
+// is owned by the upload executor rather than the HTTP request.
+test("X video admission is acknowledged before response while reads remain asynchronous", () => {
   assert.equal(productMessageControlFinishesBeforeResponse("@x:upload_video:101 message/attachment"), true);
   assert.equal(productMessageControlFinishesBeforeResponse("@x:timeline:101"), false);
   assert.equal(productMessageControlFinishesBeforeResponse("`@x:upload_video:101 message/attachment`"), false);

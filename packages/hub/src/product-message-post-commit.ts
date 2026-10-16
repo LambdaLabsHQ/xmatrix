@@ -32,8 +32,8 @@ import { attachConversationToPage } from "./product-page-attachment";
 import { judgeMessageSupersession } from "./message-supersession";
 import { CHANNEL_ACTIVITY_MESSAGE_KIND } from "@xmatrix/protocol";
 
-/** Product control and bounded video transfer must finish before the HTTP response.
- * waitUntil may end before a long transfer has produced its receipt. */
+/** Product control and durable video admission finish before the HTTP response.
+ * The upload itself runs independently in its durable executor. */
 export function productMessageControlFinishesBeforeResponse(body: string): boolean {
   const plan = parseMessageInteraction(body);
   return !!plan.stop || plan.controls.length > 0 || plan.launches.length > 0 ||

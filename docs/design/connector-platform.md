@@ -13,6 +13,12 @@ not imply a passed native acceptance test.
 X uses one company OAuth application with up to four separately owned user
 grants per Space. Stable account ID and authorization generation bind every
 approved publication; account refresh uses durable credential-store leases.
+Video commands persist frozen input and encrypted outcomes in PostgreSQL; a
+scoped Durable Object alarm stores scheduling references only and performs the
+transfer independently of the submitting HTTP/CLI connection. Started jobs
+never replay uncertain provider writes; result delivery uses a stable Channel
+append identity. See the [alarm lifecycle](https://developers.cloudflare.com/durable-objects/api/alarms/)
+and [invocation limits](https://developers.cloudflare.com/durable-objects/platform/limits/).
 The consent, Channel visibility, ownership and native acceptance contract is in
 [X connector](../connectors/x.md). Quote posting requires X Enterprise API access.
 

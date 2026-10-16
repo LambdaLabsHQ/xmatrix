@@ -22,6 +22,9 @@ import { xActionCapability } from "./x-api";
 import { createXMediaCapability } from "./x-media";
 import { postgresMessageAttachmentAuthorityRequest } from "../postgres-message-attachment-authority";
 import { connectorSubscriptionStatements, isConnectorSubscriptionCommand } from "./subscription-parse";
+import { enqueueXUpload } from "./x-upload-executor-do";
+import { X_ACTIONS } from "./actions/x";
+import type { XExecutingUpload, XUploadOutcome } from "@xmatrix/db";
 
 /*
  * A provider's Channel commands (docs/design/connector-platform.md §3.3, §3.5):
@@ -124,6 +127,28 @@ export async function runConnectorAction(providerId: string, input: ConnectorCom
   return receipt;
 }
 
+/** Only the durable executor dispatches a consumed X video request. */
+export async function executeDurableXUpload(env: Env, job: XExecutingUpload): Promise<{
+  status: "completed" | "failed" | "blocked"; receipt: string;
+}> {
+  const { request, payload } = job;
+  const receipt = await runAction("x", { env, channelId: request.channelId,
+    actorUserId: request.requestedBy, messageId: `${payload.messageId}:upload-result`,
+    commandMessageId: payload.messageId, body: "", senderKind: payload.senderKind, senderId: payload.senderId },
+  "upload_video", X_ACTIONS.upload_video!, payload.statement,
+  { requestId: request.requestId, prepared: payload.prepared });
+  return { status: /: completed;/u.test(receipt) ? "completed" : /: blocked;/u.test(receipt) ? "blocked" : "failed", receipt };
+}
+
+/** The persisted outcome is retried with one canonical append identity. */
+export async function publishDurableXUploadReceipt(env: Env, outcome: XUploadOutcome): Promise<void> {
+  const { request, payload } = outcome;
+  await publishCommandStatus(getAppConnectorProvider("x")!, { env, channelId: request.channelId,
+    actorUserId: request.requestedBy, messageId: `${payload.messageId}:upload-result`,
+    commandMessageId: payload.messageId, body: "", senderKind: payload.senderKind, senderId: payload.senderId },
+  [outcome.receipt]);
+}
+
 async function runAction(providerId: string, input: ConnectorCommandInput, actionId: string,
   action: ConnectorAction, statement: Parameters<ConnectorAction["parse"]>[0],
   approved?: { requestId: string; prepared: Record<string, string> }): Promise<string> {
@@ -140,9 +165,16 @@ async function runAction(providerId: string, input: ConnectorCommandInput, actio
   const policyInput = { connectionId: scope.connectionId, channelId: input.channelId, actionId, defaultPolicy };
   const mode = await channelActionPolicy(input.env, policyInput);
   const requestId = `action-request:${await sha256Hex(JSON.stringify([scope.connectionId, input.channelId, input.messageId, actionId]))}`;
+  const durableUpload = providerId === "x" && actionId === "upload_video";
   if (!approved && action.effect === "write") {
     const staged = await connectorActionRequestRepository(input.env).find(requestId, scope.connectionId, input.channelId, input.actorUserId);
-    if (staged) return approvalReceipt(manifest.name, actionId, staged);
+    if (staged) {
+      if (durableUpload && staged.status === "executing") {
+        await enqueueXUpload(input.env, { requestId, spaceId: scope.spaceId, channelId: input.channelId });
+        return `${manifest.name} ${actionId}: queued; request ${requestId}; its result will reply in this Channel.`;
+      }
+      return approvalReceipt(manifest.name, actionId, staged);
+    }
   }
   const authorizeWrite = async () => {
     const liveScope = await commandScope(manifest, input);
@@ -155,7 +187,7 @@ async function runAction(providerId: string, input: ConnectorCommandInput, actio
       throw new ProviderRequestError(403, actionRefusal({ actionId, mode: changed })!);
     }
   };
-  if (mode === "ask" && !approved) {
+  if (!approved && (mode === "ask" || (durableUpload && mode === "allow"))) {
     try {
       const context = await actionContext(providerId, input, scope.spaceId, actionId, action, authorizeWrite);
       if (typeof context === "string") return result("blocked", context);
@@ -172,6 +204,12 @@ async function runAction(providerId: string, input: ConnectorCommandInput, actio
         connectionId: scope.connectionId, channelId: input.channelId, providerId, actionId, requestedBy: input.actorUserId,
         payload: { messageId: input.messageId, senderKind: input.senderKind ?? "user", senderId: input.senderId,
           statement, prepared, preview } });
+      if (durableUpload && mode === "allow") {
+        const ref = { requestId, spaceId: scope.spaceId, channelId: input.channelId };
+        await connectorActionRequestRepository(input.env).startAllowed({ ...ref, actorUserId: input.actorUserId });
+        await enqueueXUpload(input.env, ref);
+        return `${manifest.name} ${actionId}: queued; request ${requestId}; its result will reply in this Channel.`;
+      }
       await announceActionRequests(input.env, scope.spaceId, input.channelId);
       return approvalReceipt(manifest.name, actionId, request);
     } catch (error) {

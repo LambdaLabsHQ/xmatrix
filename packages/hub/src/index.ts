@@ -39,6 +39,7 @@ export { RelayPageSession } from "./page-session-do";
 export { RelayPostgresChannelCoordinator } from "./relay-postgres-channel-coordinator-do";
 export { RelayPostgresAgentLaunchChannel } from "./postgres-agent-launch-channel-do";
 export { GitHubSubscriptionIndex } from "./github-subscription-index";
+export { RelayXUploadExecutor } from "./connectors/x-upload-executor-do";
 export { RelayPostgresBackgroundAdmission } from "./postgres-background-admission-do";
 export {
   RelayAgentAppPolicyAuthority,

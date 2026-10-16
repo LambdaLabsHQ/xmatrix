@@ -9,7 +9,7 @@ const loadSupport = await compileCommonJsSourceModule(new URL("../src/connectors
 
 // PostgreSQL tests own admin/consume-once behavior. This HTTP boundary owns rejecting
 // Agent credentials and caller-supplied replacement content before reaching that authority.
-function fixture({ denied = false } = {}) {
+function fixture({ denied = false, providerId = "gmail", actionId = "send" } = {}) {
   let agent = false;
   const calls = [], receipts = [];
   const frozen = { messageId: "original", senderKind: "user", statement: { target: "approved@example.test", text: "Approved subject\nApproved body" },
@@ -17,7 +17,7 @@ function fixture({ denied = false } = {}) {
   const repository = {
     pending: async input => { calls.push(["pending", input]); return []; },
     decide: async input => { calls.push(["decide", input]); return { claimed: !denied, payload: denied ? undefined : frozen,
-      request: { requestId: "request", providerId: "gmail", actionId: "send", requestedBy: "original-owner",
+      request: { requestId: "request", providerId, actionId, requestedBy: "original-owner",
         status: denied ? "denied" : "executing" } }; },
     settle: async (...args) => { calls.push(["settle", ...args]); },
   };
@@ -44,6 +44,7 @@ function fixture({ denied = false } = {}) {
     "./connectors/action-catalog": { connectorActionCatalog: () => new Map([["send", { executor: {} }]]) },
     "./connectors/connector-commands": { runConnectorAction: async (...args) => { calls.push(["run", ...args]); return "Gmail send: completed; sent"; },
       announceActionRequests: async (_env, spaceId, channelId) => { calls.push(["announce", spaceId, channelId]); } },
+    "./connectors/x-upload-executor-do": { enqueueXUpload: async (_env, ref) => { calls.push(["queue", ref]); } },
   };
   const app = new Hono(); load(name => imports[name]).registerConnectorApprovalRoutes(app);
   return { calls, frozen, receipts, agent: () => { agent = true; }, request: (method, body) => app.request(
@@ -96,4 +97,16 @@ test("a decision cannot replace the recipient, text, or frozen provider input", 
   assert.deepEqual(run[5], f.frozen.statement);
   assert.deepEqual(run[6], { requestId: "request", prepared: f.frozen.prepared });
   assert.deepEqual(f.calls.at(-1), ["settle", "request", "completed"]);
+});
+
+test("approved X video returns after durable admission without running a provider in HTTP", async () => {
+  const f = fixture({ providerId: "x", actionId: "upload_video" });
+  const response = await f.request("POST", { decision: "allow" });
+  assert.equal(response.status, 200);
+  const result = await response.json();
+  assert.equal(result.request.status, "executing");
+  assert.match(result.receipt, /queued/);
+  assert.deepEqual(f.calls.find(call => call[0] === "queue"),
+    ["queue", { requestId: "request", spaceId: "space", channelId: "channel" }]);
+  assert.equal(f.calls.some(call => call[0] === "run" || call[0] === "settle"), false);
 });

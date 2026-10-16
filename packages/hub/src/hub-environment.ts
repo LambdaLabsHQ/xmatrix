@@ -56,6 +56,7 @@ export const HUB_ENVIRONMENT = {
   RELAY_POSTGRES_AGENT_LAUNCH_CHANNEL: product("binding", "Per-Channel Agent Launch coordinator."),
   GITHUB_SUBSCRIPTION_INDEX: product("binding",
     "Per-installation index of subscribed GitHub sources; a delivery nobody subscribed to reads no routes."),
+  RELAY_X_UPLOAD_EXECUTOR: product("binding", "Per-upload durable X video executor; stores only references and scheduling state."),
   RELAY_POSTGRES_BACKGROUND_ADMISSION: product("binding", "Per-shard permits for background passes."),
   RELAY_CHANNEL_CATALOG_AUTHORITY: test("binding", "Pre-PostgreSQL Channel catalog authority; bound only by test configs."),
   RELAY_SCHEDULER_AUTHORITY: test("binding", "Pre-PostgreSQL scheduler authority; bound only by test configs."),

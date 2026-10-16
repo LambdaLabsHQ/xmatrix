@@ -47,3 +47,60 @@ test("Gmail ask stages a request, allow executes, and disallow blocks before pro
   assert.equal(writes, 1);
   assert.deepEqual(announced, [announcement], "only a newly staged request changes what waits");
 });
+
+// Slow provider work must never run during command admission. The repository
+// tests own authorization; this dispatcher owns routing both policy modes to a job.
+test("X allow uploads freeze input and queue once; only the durable executor performs the transfer", async () => {
+  let mode = "allow", stage, writes = 0, authorizations = 0;
+  const queued = [], published = [], transferred = [];
+  const action = { effect: "write", requires: [], parse: () => ({ account: "@company" }),
+    prepare: async () => ({ accountId: "101", accountGeneration: "grant", accountUsername: "company", sourceHash: "frozen" }),
+    execute: async (context, prepared) => {
+      await context.authorizeWrite(); transferred.push(prepared); writes++;
+      return { summary: "uploaded with receipt" };
+    } };
+  const repository = {
+    find: async () => stage?.request ?? null,
+    create: async input => {
+      stage = { request: { ...input, spaceId: "space", status: "pending" }, payload: input.payload };
+      return stage.request;
+    },
+    startAllowed: async () => { stage.request.status = "executing"; return { request: stage.request, claimed: true }; },
+    authorize: async () => { authorizations++; },
+  };
+  const dependencies = {
+    "@xmatrix/protocol": protocol,
+    "../app-connectors": { getAppConnectorProvider: () => protocol.APP_CONNECTOR_PROVIDER_MANIFESTS.find(p => p.id === "x") },
+    "./command-support": { commandResult, commandScope: async () => ({ spaceId: "space", connectionId: "space:x" }),
+      withExecution: async (m, _i, _s, a, run) => commandResult(m.name, a.id, await run()),
+      publishCommandStatus: async (_manifest, input, lines) => { published.push({ input, lines }); } },
+    "./credentials": { connectorActionPolicyRepository: () => ({ mode: async () => mode }),
+      connectorActionRequestRepository: () => repository },
+    "./x-api": { xActionCapability: () => ({}) },
+    "./x-upload-executor-do": { enqueueXUpload: async (_env, ref) => { queued.push(ref); } },
+    "./actions/x": { X_ACTIONS: { upload_video: action } },
+    "./http": { ProviderRequestError },
+  };
+  const commands = await loadCommonJsSourceModule(new URL("../src/connectors/connector-commands.ts", import.meta.url),
+    name => dependencies[name] ?? {});
+  const input = { env: {}, channelId: "channel", messageId: "original", actorUserId: "owner", senderKind: "agent", senderId: "instance" };
+  const statement = { target: "@company", text: "message/attachment" };
+  assert.match(await commands.runConnectorAction("x", input, "upload_video", action, statement), /queued/);
+  assert.equal(writes, 0, "admission cannot await the slow provider");
+  assert.deepEqual(queued[0], { requestId: stage.request.requestId, spaceId: "space", channelId: "channel" });
+  await commands.runConnectorAction("x", input, "upload_video", action, statement);
+  assert.equal(writes, 0, "re-delivery can only re-admit the same durable reference");
+  assert.deepEqual(queued[1], queued[0]);
+  const result = await commands.executeDurableXUpload({}, stage);
+  assert.equal(result.status, "completed");
+  assert.equal(writes, 1);
+  assert.equal(transferred[0].sourceHash, "frozen");
+  assert.ok(authorizations > 0);
+  assert.equal(published.length, 2, "execution persists its outcome before publishing it");
+  await commands.publishDurableXUploadReceipt({}, { ...stage, ...result });
+  assert.equal(published[2].input.messageId, "original:upload-result");
+  assert.equal(published[2].input.commandMessageId, "original");
+  mode = "disallow";
+  assert.equal((await commands.executeDurableXUpload({}, stage)).status, "blocked");
+  assert.equal(writes, 1, "a current denial prevents provider I/O");
+});

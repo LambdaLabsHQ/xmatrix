@@ -128,7 +128,9 @@ The X connector holds independent company/personal OAuth grants in the
 encrypted connector credential store. Each grant belongs to its connecting
 member and their Agents; publishing requires an explicit stable account and
 binds approvals to its authorization generation and exact content. Results
-are visible in the calling Channel. Native acceptance still requires the
+are visible in the calling Channel. Video transfers use durable alarm jobs
+with PostgreSQL-owned encrypted inputs and outcomes, independent of HTTP/CLI
+lifetimes. Native acceptance still requires the
 company app configuration and separate tests with both real accounts; quote
 posting requires Enterprise API access. See [X connector](../connectors/x.md).
 
