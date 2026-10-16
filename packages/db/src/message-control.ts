@@ -1000,16 +1000,18 @@ export class PostgresMessageRepository {
       if (!input.runProof && senderPrincipal &&
           senderPrincipal.kind === principal.kind && senderPrincipal.id === principal.id) {
         const row = (await transaction.query<PreparedAppendContextRow>({
-          name: "message_prepare_context_v8",
+          name: "message_prepare_context_v9",
           text: `WITH message_input AS (
               SELECT $1::text AS space_id,$2::text AS channel_id,
                 $3::text AS principal_kind,$4::text AS principal_id
             ), ${channelCapabilityCte({ capability: "message_active_command_preflight",
               inputCte: "message_input" })}, sender_identity AS (
               SELECT jsonb_build_object('kind','user','id',member.user_id,
-                'email',member.email,'displayName',member.display_name,
-                'avatarUrl',member.avatar_url,'version',member.version) AS value
+                'email',member.email,'displayName',COALESCE(profile.name,member.display_name),
+                'avatarUrl',CASE WHEN profile.id IS NOT NULL THEN profile.image ELSE member.avatar_url END,
+                'version',member.version) AS value
               FROM data.space_members member
+              LEFT JOIN control.auth_users profile ON profile.id=member.user_id
               WHERE $3='user' AND member.space_id=$1 AND member.user_id=$4
               UNION ALL
               SELECT jsonb_build_object('kind','agent','id',instance.instance_id,
@@ -1190,9 +1192,13 @@ export class PostgresMessageRepository {
   ): Promise<PostgresMessageSenderIdentity> {
     if (principal.kind === "user") {
       const row = (await transaction.query<QueryResultRow>({
-        name: "message_sender_user_identity_v1",
-        text: `SELECT user_id,email,display_name,avatar_url,version FROM data.space_members
-          WHERE space_id=$1 AND user_id=$2 LIMIT 1`,
+        name: "message_sender_user_identity_v2",
+        text: `SELECT member.user_id,member.email,COALESCE(profile.name,member.display_name) AS display_name,
+            CASE WHEN profile.id IS NOT NULL THEN profile.image ELSE member.avatar_url END AS avatar_url,
+            member.version
+          FROM data.space_members member
+          LEFT JOIN control.auth_users profile ON profile.id=member.user_id
+          WHERE member.space_id=$1 AND member.user_id=$2 LIMIT 1`,
         values: [spaceId, principal.id], maxRows: 1,
       }))[0];
       if (!row) throw new MessageAuthorityError(
