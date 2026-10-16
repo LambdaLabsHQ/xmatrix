@@ -1,4 +1,4 @@
-import type { SerializedChannel, SerializedSpace, SpaceMember } from "@xmatrix/protocol";
+import type { ChannelSnapshot, SerializedSpace, SpaceMember } from "@xmatrix/protocol";
 
 type ChannelSpaceDirectory = Pick<SerializedSpace, "id" | "members"> | null | undefined;
 
@@ -9,7 +9,7 @@ type ChannelSpaceDirectory = Pick<SerializedSpace, "id" | "members"> | null | un
  * Channel-level visibility projection. Presence never defines membership.
  */
 export function visibleHumanChannelMemberIds(
-  channel: SerializedChannel,
+  channel: ChannelSnapshot,
   space: ChannelSpaceDirectory,
 ): string[] {
   if (channel.mode === "open") {

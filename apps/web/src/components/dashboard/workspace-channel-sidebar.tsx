@@ -36,7 +36,7 @@ import {
 import { channelEventViews } from "./workspace-shell-presence";
 
 const NO_EVENTS: readonly ObservabilityEvent[] = [];
-const NO_CHANNELS: readonly SerializedChannel[] = [];
+const NO_CHANNELS: readonly ChannelSnapshot[] = [];
 const NO_PINNED_CHANNEL_IDS: ReadonlySet<string> = new Set();
 
 /** Keeps the last painted rows for this Space across a refresh that has not
@@ -46,10 +46,10 @@ const NO_PINNED_CHANNEL_IDS: ReadonlySet<string> = new Set();
 function usePaintedChannelRows(
   spaceId: string | null,
   loaded: boolean,
-  live: readonly SerializedChannel[],
-  fallback: readonly SerializedChannel[],
+  live: readonly ChannelSnapshot[],
+  fallback: readonly ChannelSnapshot[],
 ) {
-  const heldRef = useRef<{ spaceId: string | null; rows: readonly SerializedChannel[] } | null>(null);
+  const heldRef = useRef<{ spaceId: string | null; rows: readonly ChannelSnapshot[] } | null>(null);
   const scopedFallback = useMemo(
     () => fallback.filter((channel) => !spaceId || channel.spaceId === spaceId),
     [fallback, spaceId],
@@ -144,7 +144,7 @@ import { cn } from "@/lib/utils";
 
 import type {
   ObservabilityEvent,
-  SerializedChannel,
+  ChannelSnapshot,
   SerializedSpace,
 } from "@xmatrix/protocol";
 
@@ -176,12 +176,12 @@ export type ChannelSidebarProps = {
   onTogglePinned: (channelId: string) => void;
   /** The reader is done with what waits on them in this conversation. */
   onMarkDone: (channelId: string) => void;
-  onCopyChannelLink: (channel: SerializedChannel) => Promise<void>;
+  onCopyChannelLink: (channel: ChannelSnapshot) => Promise<void>;
   onSelectSpace: (spaceId: string) => void;
   onSelect: (channelId: string, messageId?: string) => void;
   catalogPaging: SpaceChannelCatalog;
   /** Durable catalog rows, painted until this Space's live answer arrives. */
-  fallbackChannels?: readonly SerializedChannel[];
+  fallbackChannels?: readonly ChannelSnapshot[];
   /** The list's +, first under the Space: a new conversation. */
   create?: CreateAction | null;
 };
@@ -213,7 +213,7 @@ export const ChannelSidebar = memo(function ChannelSidebar({
   create = null,
 }: ChannelSidebarProps) {
   const [channelContextMenu, setChannelContextMenu] = useState<{
-    channel: SerializedChannel;
+    channel: ChannelSnapshot;
     x: number;
     y: number;
     state: "idle" | "copied" | "failed";
@@ -289,7 +289,7 @@ export const ChannelSidebar = memo(function ChannelSidebar({
   }, [selectedChannelId, view]);
 
   const openChannelContextMenu = useCallback((
-    channel: SerializedChannel,
+    channel: ChannelSnapshot,
     event: ReactMouseEvent<HTMLElement> | ReactKeyboardEvent<HTMLElement>
   ) => {
     event.preventDefault();
@@ -325,13 +325,13 @@ export const ChannelSidebar = memo(function ChannelSidebar({
   /* Rows are memoized: give them handlers that stay the same across renders
      and only their own Channel's events, so a busy Space's stream of events
      re-renders the rows it concerns instead of the whole list. */
-  const selectConversationRow = useStableCallback((channel: SerializedChannel) => {
+  const selectConversationRow = useStableCallback((channel: ChannelSnapshot) => {
     const unreadCount = channelUnreadCount(channel, readCounts, readCountsBaselineReady);
     onSelect(channel.id, channelUnreadMentionJumpId(channel, events, mentionClearedAt, unreadCount));
   });
-  const selectIntakeRow = useStableCallback((channel: SerializedChannel) => onSelect(channel.id));
-  const togglePinnedRow = useStableCallback((channel: SerializedChannel) => onTogglePinned(channel.id));
-  const markDoneRow = useStableCallback((channel: SerializedChannel) => onMarkDone(channel.id));
+  const selectIntakeRow = useStableCallback((channel: ChannelSnapshot) => onSelect(channel.id));
+  const togglePinnedRow = useStableCallback((channel: ChannelSnapshot) => onTogglePinned(channel.id));
+  const markDoneRow = useStableCallback((channel: ChannelSnapshot) => onMarkDone(channel.id));
   const channelEventsRef = useRef<ReadonlyMap<string, readonly ObservabilityEvent[]>>(new Map());
   const channelEvents = useMemo(() => {
     const views = channelEventViews(
@@ -785,7 +785,7 @@ export { SpaceAvatar, spaceAvatarStyle, spaceDisambiguatorId } from "./workspace
 import { SpaceAvatar, spaceDisambiguatorId } from "./workspace-shell-chrome";
 
 /** The conversation holds a mention, reply or broadcast its reader has not dealt with. */
-export function channelWaitsOnReader(channel: SerializedChannel): boolean {
+export function channelWaitsOnReader(channel: ChannelSnapshot): boolean {
   return (channel.attention?.unreadAttentionCount ?? 0) > 0;
 }
 
@@ -793,7 +793,7 @@ export function channelWaitsOnReader(channel: SerializedChannel): boolean {
  * A conversation that waits on the reader previews the message that waits,
  * who is waiting and on what, rather than whatever was said last.
  */
-function rowPreviewChannel(channel: SerializedChannel): SerializedChannel {
+function rowPreviewChannel(channel: ChannelSnapshot): ChannelSnapshot {
   const waiting = channel.attention?.lastMessage;
   return channelWaitsOnReader(channel) && waiting && waiting.messageId === channel.attention?.lastMessageId
     ? { ...channel, lastMessage: waiting } : channel;
@@ -806,18 +806,18 @@ function rowPreviewChannel(channel: SerializedChannel): SerializedChannel {
  * conversation once. A section with no conversations is not shown.
  */
 export function channelListSections(
-  channels: readonly SerializedChannel[],
+  channels: readonly ChannelSnapshot[],
   pinnedChannelIds: ReadonlySet<string>,
 ) {
-  const needsYou: SerializedChannel[] = [];
-  const pinned: SerializedChannel[] = [];
-  const recent: SerializedChannel[] = [];
+  const needsYou: ChannelSnapshot[] = [];
+  const pinned: ChannelSnapshot[] = [];
+  const recent: ChannelSnapshot[] = [];
   for (const channel of channels) {
     if (channelWaitsOnReader(channel)) needsYou.push(channel);
     else (pinnedChannelIds.has(channel.id) ? pinned : recent).push(channel);
   }
   const sections: Array<{
-    label: string; count?: number; channels: SerializedChannel[];
+    label: string; count?: number; channels: ChannelSnapshot[];
     mark: ListSectionMark;
   }> = [
     { label: "Needs you", count: needsYou.length, channels: needsYou, mark: { icon: Bell, tone: "attention" } },
@@ -829,8 +829,8 @@ export function channelListSections(
 
 /** A conversation list as its sections: each one's heading, then its rows. */
 function ChannelSectionRows({ channels, row }: {
-  channels: readonly SerializedChannel[];
-  row: (channel: SerializedChannel) => ReactNode;
+  channels: readonly ChannelSnapshot[];
+  row: (channel: ChannelSnapshot) => ReactNode;
 }) {
   // The cold-start paint has no pins yet; they arrive with the signed-in shell.
   return channelListSections(channels, NO_PINNED_CHANNEL_IDS).map((section) => (
@@ -843,7 +843,7 @@ function ChannelSectionRows({ channels, row }: {
 
 type ChannelSectionItem =
   | { kind: "heading"; label: string; count?: number; mark: ListSectionMark }
-  | { kind: "row"; channel: SerializedChannel };
+  | { kind: "row"; channel: ChannelSnapshot };
 
 /**
  * The same sections as ChannelSectionRows, as one virtualized list: headings
@@ -854,9 +854,9 @@ function VirtualChannelSections({ scrollRoot, scrollToChannelRef, channels, pinn
   scrollRoot: HTMLElement | null;
   /** Receives a function that brings a conversation's row into view. */
   scrollToChannelRef?: MutableRefObject<((channelId: string) => void) | null>;
-  channels: readonly SerializedChannel[];
+  channels: readonly ChannelSnapshot[];
   pinnedChannelIds: ReadonlySet<string>;
-  row: (channel: SerializedChannel) => ReactNode;
+  row: (channel: ChannelSnapshot) => ReactNode;
 }) {
   const items = useMemo<ChannelSectionItem[]>(() => channelListSections(channels, pinnedChannelIds).flatMap((section) => [
     { kind: "heading" as const, label: section.label, count: section.count, mark: section.mark },
@@ -889,7 +889,7 @@ function VirtualChannelSections({ scrollRoot, scrollToChannelRef, channels, pinn
 }
 
 /** When the row last moved: the time the list ranks it by, not only its last message's. */
-export function channelActivityAt(channel: SerializedChannel): string | undefined {
+export function channelActivityAt(channel: ChannelSnapshot): string | undefined {
   const sentAt = channel.lastMessage?.sentAt;
   if (!sentAt) return channel.updatedAt;
   return Date.parse(channel.updatedAt) > Date.parse(sentAt) ? channel.updatedAt : sentAt;
@@ -906,7 +906,7 @@ export function ColdStartChannelCatalog({
   desktopFrameClass,
   showMobileTabDock,
 }: {
-  channels: SerializedChannel[];
+  channels: ChannelSnapshot[];
   /** `xmatrix-desktop-macos` / `xmatrix-desktop-windows` under Electron. */
   desktopFrameClass?: string;
   /** False under the iOS shell, whose tab bar is native. */
@@ -1009,7 +1009,7 @@ function ChannelRowSecondLine({
   badgeTitle,
   trailing,
 }: {
-  channel: SerializedChannel;
+  channel: ChannelSnapshot;
   events: readonly ObservabilityEvent[];
   humanMembers: string[];
   avatarItems: ChannelAgentAvatarItem[];
@@ -1050,7 +1050,7 @@ export const MobileChannelChatRow = memo(function MobileChannelChatRow({
   onOpen,
   onOpenActions,
 }: {
-  displayChannel: SerializedChannel;
+  displayChannel: ChannelSnapshot;
   /** This Channel's events only (`channelEventViews`), so other Channels' events do not re-render the row. */
   events: readonly ObservabilityEvent[];
   active: boolean;
@@ -1060,8 +1060,8 @@ export const MobileChannelChatRow = memo(function MobileChannelChatRow({
   readCountsBaselineReady?: boolean;
   hasMention: boolean;
   /* The row passes its own Channel, so one stable handler serves every row. */
-  onOpen: (channel: SerializedChannel) => void;
-  onOpenActions: (channel: SerializedChannel) => void;
+  onOpen: (channel: ChannelSnapshot) => void;
+  onOpenActions: (channel: ChannelSnapshot) => void;
 }) {
   const displayChannel = useChannelAsTimelineShows(useRealtimeChannel(catalogChannel)!);
   const badgeCount = displayChannel === catalogChannel || readCountsBaselineReady === undefined
@@ -1276,7 +1276,7 @@ export function MobileChannelInlineActions({
   onMarkDone,
   onCopyChannelLink,
 }: {
-  channel: SerializedChannel;
+  channel: ChannelSnapshot;
   pinned: boolean;
   onClose: () => void;
   onTogglePinned: () => void;
@@ -1355,7 +1355,7 @@ export function MobileChannelChatList({
   currentSpaceId: string | null;
   catalogPaging: SpaceChannelCatalog;
   /** Durable catalog rows, painted until this Space's live answer arrives. */
-  fallbackChannels?: readonly SerializedChannel[];
+  fallbackChannels?: readonly ChannelSnapshot[];
   pinState: ChannelPinState;
   selectedChannelId: string | null;
   /** Tapped while the list was still the cold-start catalog; opens once the
@@ -1370,7 +1370,7 @@ export function MobileChannelChatList({
   onTogglePinned: (channelId: string) => void;
   /** The reader is done with what waits on them in this conversation. */
   onMarkDone: (channelId: string) => void;
-  onCopyChannelLink: (channel: SerializedChannel) => Promise<void>;
+  onCopyChannelLink: (channel: ChannelSnapshot) => Promise<void>;
   onSelect: (channelId: string, messageId?: string) => void;
 }) {
   const [actionChannelId, setActionChannelId] = useState<string | null>(null);
@@ -1391,11 +1391,11 @@ export function MobileChannelChatList({
     !paintedConversations.confirmed && conversations.length === 0 && page.loading,
   );
   const closeChannelActions = useCallback(() => setActionChannelId(null), []);
-  const openConversation = useStableCallback((channel: SerializedChannel) => {
+  const openConversation = useStableCallback((channel: ChannelSnapshot) => {
     const unreadCount = channelUnreadCount(channel, readCounts, readCountsBaselineReady);
     onSelect(channel.id, channelUnreadMentionJumpId(channel, events, mentionClearedAt, unreadCount));
   });
-  const openConversationActions = useCallback((channel: SerializedChannel) => setActionChannelId(channel.id), []);
+  const openConversationActions = useCallback((channel: ChannelSnapshot) => setActionChannelId(channel.id), []);
   const channelEventsRef = useRef<ReadonlyMap<string, readonly ObservabilityEvent[]>>(new Map());
   const channelEvents = useMemo(() => {
     const views = channelEventViews(events, conversations.map((channel) => channel.id), channelEventsRef.current);

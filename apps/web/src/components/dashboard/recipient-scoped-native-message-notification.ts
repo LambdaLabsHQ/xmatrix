@@ -1,7 +1,7 @@
 import type {
   ChannelMessage,
   ChannelMessageNotification,
-  SerializedChannel,
+  ChannelSnapshot,
   SerializedSpace,
 } from "@xmatrix/protocol";
 import type { DesktopBridge } from "@/lib/desktop/bridge";
@@ -30,7 +30,7 @@ export function maybePushRecipientScopedNativeMessageNotification({
   userId: string;
   notifiedMessageIds: Set<string>;
   bridge: Pick<DesktopBridge, "notify"> | null;
-  channels: SerializedChannel[];
+  channels: ChannelSnapshot[];
   spaces: SerializedSpace[];
   routeSpaceId: string | null;
   markNotified: (messageId: string) => void;

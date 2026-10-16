@@ -21,7 +21,7 @@ import type {
   ObservabilityEvent,
   QuestionnaireState,
   SerializedAgentInstance,
-  SerializedChannel,
+  ChannelSnapshot,
 } from "@xmatrix/protocol";
 import type {
   KeyboardEvent as ReactKeyboardEvent,
@@ -215,7 +215,7 @@ export type TimelineItem = {
   reactions?: ChannelReaction[];
   threadChannelId?: string;
   /** The child channel that owns replies to this message, when it exists. */
-  threadChannel?: SerializedChannel;
+  threadChannel?: ChannelSnapshot;
   threadReplyCount?: number;
   threadUpdatedAt?: string;
   threadReplyParticipants?: ThreadReplyParticipant[];
@@ -269,7 +269,7 @@ export type TimelineItem = {
 /** Personal presentation of a parent's direct child Channels. */
 
 export type ChannelNavItemProps = {
-  channel: SerializedChannel;
+  channel: ChannelSnapshot;
   /** This Channel's events only (`channelEventViews`), so other Channels' events do not re-render the row. */
   events: readonly ObservabilityEvent[];
   active: boolean;
@@ -282,12 +282,12 @@ export type ChannelNavItemProps = {
   hasUnreadMention?: boolean;
   isPinnedRoot: boolean;
   /* The row passes its own Channel, so one stable handler serves every row. */
-  onSelect: (channel: SerializedChannel) => void;
-  onTogglePinned: (channel: SerializedChannel) => void;
+  onSelect: (channel: ChannelSnapshot) => void;
+  onTogglePinned: (channel: ChannelSnapshot) => void;
   /** Present while the conversation waits on the reader: they are done with it. */
-  onMarkDone?: (channel: SerializedChannel) => void;
+  onMarkDone?: (channel: ChannelSnapshot) => void;
   onOpenContextMenu: (
-    channel: SerializedChannel,
+    channel: ChannelSnapshot,
     event: ReactMouseEvent<HTMLElement> | ReactKeyboardEvent<HTMLElement>,
   ) => void;
 };

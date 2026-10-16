@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import type { SerializedAutomation, SerializedChannel } from "@xmatrix/protocol";
+import type { SerializedAutomation, ChannelSnapshot } from "@xmatrix/protocol";
 
 import { usePageTree } from "@/components/pages/pages-view";
 import { formatAutomationCadence, formatAutomationNext } from "@/components/pages/page-automation-format";
@@ -22,7 +22,7 @@ export function nextRunPhrase(nextRunAt: string, now: number): string {
 }
 
 /** Where an Automation lives: the page it keeps a section of, or the conversation it posts to. */
-export function useScheduleWhere(spaceId: string | null, token: string, channels: readonly SerializedChannel[]) {
+export function useScheduleWhere(spaceId: string | null, token: string, channels: readonly ChannelSnapshot[]) {
   const pageTree = usePageTree(spaceId, token);
   const pageTitles = useMemo(() => new Map((pageTree.data ?? []).map((page) => [page.pageId, page.title])),
     [pageTree.data]);

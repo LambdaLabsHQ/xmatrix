@@ -127,7 +127,7 @@ import type {
   ChannelMessage,
   ObservabilityEvent,
   SerializedAgent,
-  SerializedChannel,
+  ChannelSnapshot,
   SerializedMachineDaemon,
   SerializedAutomation,
   SerializedSpace,
@@ -276,18 +276,6 @@ export function latestIso(left: string | undefined, right: string | undefined): 
   return Date.parse(right) > Date.parse(left) ? right : left;
 }
 
-export function latestTimestamp(values: Array<string | undefined>): string | undefined {
-  return values
-    .filter((value): value is string => Boolean(value && Number.isFinite(Date.parse(value))))
-    .sort((left, right) => Date.parse(right) - Date.parse(left))[0];
-}
-
-/** Earliest finite ISO timestamp. Used for stable agent birth order (connectedAt). */
-export function earliestTimestamp(values: Array<string | undefined>): string | undefined {
-  return values
-    .filter((value): value is string => Boolean(value && Number.isFinite(Date.parse(value))))
-    .sort((left, right) => Date.parse(left) - Date.parse(right))[0];
-}
 
 export function sortSpaces(spaces: SerializedSpace[]): SerializedSpace[] {
   return [...spaces].sort((a, b) => a.name.localeCompare(b.name));
@@ -309,16 +297,16 @@ export function sortAutomations(automations: SerializedAutomation[]): Serialized
   });
 }
 
-export function sortChannels(channels: SerializedChannel[]): SerializedChannel[] {
+export function sortChannels(channels: ChannelSnapshot[]): ChannelSnapshot[] {
   return [...channels].sort(compareChannelsForSidebar);
 }
 
 // Channel snapshots are immutable. Parse their ordering timestamps once even
 // when a catalog sort compares the same row many times; replaced snapshots get
 // fresh keys and discarded rows do not remain retained by this cache.
-const channelSortTimes = new WeakMap<SerializedChannel, { recent: number; pinned: number }>();
+const channelSortTimes = new WeakMap<ChannelSnapshot, { recent: number; pinned: number }>();
 
-function channelSortTimestamps(channel: SerializedChannel) {
+function channelSortTimestamps(channel: ChannelSnapshot) {
   let times = channelSortTimes.get(channel);
   if (!times) {
     const pinnedAt = channel.metadata?.pinnedAt ?? channel.metadata?.pinned_at;
@@ -331,7 +319,7 @@ function channelSortTimestamps(channel: SerializedChannel) {
   return times;
 }
 
-export function compareChannelsForSidebar(a: SerializedChannel, b: SerializedChannel): number {
+export function compareChannelsForSidebar(a: ChannelSnapshot, b: ChannelSnapshot): number {
   const leftPinned = channelIsPinned(a);
   const rightPinned = channelIsPinned(b);
   if (leftPinned !== rightPinned) return rightPinned ? 1 : -1;
@@ -351,8 +339,8 @@ export function compareChannelsForSidebar(a: SerializedChannel, b: SerializedCha
  * timestamp.
  */
 export function compareChannelsByRecentActivity(
-  a: SerializedChannel,
-  b: SerializedChannel
+  a: ChannelSnapshot,
+  b: ChannelSnapshot
 ): number {
   const byActivity = channelRecentActivityMs(b) - channelRecentActivityMs(a);
   if (byActivity !== 0) return byActivity;
@@ -368,20 +356,20 @@ export function compareChannelsByRecentActivity(
  * one until the next read. Pinned rows keep the lead the Hub gives them.
  */
 export function rankCatalogChannels(
-  channels: readonly SerializedChannel[],
+  channels: readonly ChannelSnapshot[],
   pinnedChannelIds: readonly string[]
-): SerializedChannel[] {
+): ChannelSnapshot[] {
   const pinRank = new Map(pinnedChannelIds.map((id, index) => [id, index]));
-  const rank = (channel: SerializedChannel) => pinRank.get(channel.id) ?? pinnedChannelIds.length;
+  const rank = (channel: ChannelSnapshot) => pinRank.get(channel.id) ?? pinnedChannelIds.length;
   return [...channels].sort((a, b) =>
     rank(a) - rank(b) || channelRecentActivityMs(b) - channelRecentActivityMs(a));
 }
 
-export function channelRecentActivityMs(channel: SerializedChannel): number {
+export function channelRecentActivityMs(channel: ChannelSnapshot): number {
   return channelSortTimestamps(channel).recent;
 }
 
-export function channelIsPinned(channel: SerializedChannel): boolean {
+export function channelIsPinned(channel: ChannelSnapshot): boolean {
   const metadata = channel.metadata;
   return (
     metadata?.pinned === true ||
@@ -390,7 +378,7 @@ export function channelIsPinned(channel: SerializedChannel): boolean {
   );
 }
 
-export function channelPinnedAtMs(channel: SerializedChannel): number {
+export function channelPinnedAtMs(channel: ChannelSnapshot): number {
   return channelSortTimestamps(channel).pinned;
 }
 
@@ -400,7 +388,7 @@ export function timestampMs(value: string | undefined): number {
   return Number.isFinite(timestamp) ? timestamp : 0;
 }
 
-export function isThreadChannel(channel: SerializedChannel): boolean {
+export function isThreadChannel(channel: ChannelSnapshot): boolean {
   return (
     channel.metadata?.kind === "thread" ||
     Boolean(metadataString(channel.metadata, "threadRootMessageId")) ||
@@ -411,9 +399,9 @@ export function isThreadChannel(channel: SerializedChannel): boolean {
 /* channelMatchesSearch owned by workspace-shell-search-model */
 
 export function quickOpenChannelSubtitle(
-  channel: SerializedChannel,
+  channel: ChannelSnapshot,
   spaces: SerializedSpace[],
-  channels: SerializedChannel[] = []
+  channels: ChannelSnapshot[] = []
 ): string {
   const space = spaces.find((item) => item.id === channel.spaceId);
   if (isThreadChannel(channel)) {
@@ -449,7 +437,7 @@ export function buildWorkspaceSearchResults({
   pages = [],
 }: {
   query: string;
-  channels: SerializedChannel[];
+  channels: ChannelSnapshot[];
   spaces: SerializedSpace[];
   agents: SerializedAgent[];
   projects: SerializedWorkspace[];
@@ -693,7 +681,7 @@ export function isOwnChannelMessage(message: ChannelMessage, userId: string): bo
 }
 
 export function channelUnreadCount(
-  channel: SerializedChannel,
+  channel: ChannelSnapshot,
   readCounts: Record<string, number>,
   readCountsBaselineReady: boolean
 ): number {
@@ -710,8 +698,8 @@ export function channelUnreadCount(
  * have reached only the row so far.
  */
 export function rowUnreadCount(
-  channel: SerializedChannel,
-  listed: SerializedChannel,
+  channel: ChannelSnapshot,
+  listed: ChannelSnapshot,
   listedCount: number,
   readCount: number | undefined,
   readCountsBaselineReady: boolean | undefined,
@@ -721,7 +709,7 @@ export function rowUnreadCount(
 }
 
 function unreadAttentionIsMention(
-  attention: SerializedChannel["attention"],
+  attention: ChannelSnapshot["attention"],
 ): boolean {
   if (!attention || attention.unreadAttentionCount <= 0) return false;
   if (attention.triggerKinds?.includes("mention")) return true;
@@ -731,7 +719,7 @@ function unreadAttentionIsMention(
 }
 
 export function channelHasUnreadMention(
-  channel: SerializedChannel,
+  channel: ChannelSnapshot,
   events: readonly ObservabilityEvent[],
   mentionClearedAt: Record<string, number>,
   unreadCount: number
@@ -742,7 +730,7 @@ export function channelHasUnreadMention(
 }
 
 export function channelUnreadMentionJumpId(
-  channel: SerializedChannel,
+  channel: ChannelSnapshot,
   events: readonly ObservabilityEvent[],
   mentionClearedAt: Record<string, number>,
   unreadCount: number,

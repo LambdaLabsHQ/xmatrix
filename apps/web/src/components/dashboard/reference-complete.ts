@@ -2,7 +2,7 @@ import {
   channelReferenceToken,
   pageReferenceToken,
   type PageSummary,
-  type SerializedChannel,
+  type ChannelSnapshot,
 } from "@xmatrix/protocol";
 
 /**
@@ -70,7 +70,7 @@ export type ReferenceCandidate =
   | { kind: "channel"; id: string; label: string; detail: string; channelId: string }
   | { kind: "page"; id: string; label: string; detail: string; pageId: string; blockId: string | null };
 
-export function channelReferenceCandidates(channels: readonly Pick<SerializedChannel, "id" | "spaceId" | "name" | "topic" | "summary">[], query: string,
+export function channelReferenceCandidates(channels: readonly Pick<ChannelSnapshot, "id" | "spaceId" | "name" | "topic" | "summary">[], query: string,
   spaceId: string | null, currentChannelId: string | null): ReferenceCandidate[] {
   const pool = channels.filter((channel) => (!spaceId || channel.spaceId === spaceId) && channel.name?.trim());
   // The conversation being written in is the least likely one to point at.
@@ -105,7 +105,7 @@ export function sectionReferenceCandidates(page: { pageId: string; title: string
   ];
 }
 
-export function channelLabel(channel: Pick<SerializedChannel, "name" | "id">): string {
+export function channelLabel(channel: Pick<ChannelSnapshot, "name" | "id">): string {
   return (channel.name || channel.id.slice(0, 10)).replace(/^#/u, "");
 }
 

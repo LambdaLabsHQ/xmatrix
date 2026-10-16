@@ -1,3 +1,4 @@
+import { FIXTURE_AGENT_REGISTRATION } from "./workspace-fixtures";
 import { expect, test } from "./fixtures";
 import { type Locator, type Page } from "@playwright/test";
 import {
@@ -91,7 +92,7 @@ function rowGlass(row: Locator) {
 test("nothing in a conversation row filters the paper behind it, on a phone as on the desktop", async ({ page }, testInfo) => {
   // Five working Agents and two unread messages: the row carries three faces, a +2, their status dots and a count.
   const crowded = { ...E2E_CHANNEL, id: "channel-crowded", name: "crowded", messageCount: 5, historyHeadSequence: 5, readSequence: 3,
-    memberPresence: { "agent:codex": { kind: "agent", label: "Codex", status: "busy", instances: [1, 2, 3, 4, 5].map((ordinal) => ({
+    memberPresence: { "agent:codex": { registration: FIXTURE_AGENT_REGISTRATION, kind: "agent", label: "Codex", status: "busy", instances: [1, 2, 3, 4, 5].map((ordinal) => ({
       id: `instance-codex-${ordinal}`, channelInstanceId: String(ordinal), label: `Codex:${ordinal}`, channelId: "channel-crowded",
       status: "busy", connectedAt: E2E_CHANNEL.updatedAt, lastSeenAt: E2E_CHANNEL.updatedAt, activity: "Working",
     })) } } };

@@ -1,4 +1,5 @@
 "use client";
+import { decodeChannelSnapshot } from "@xmatrix/protocol";
 import type { UnsentMessageAction } from "./message-unsent-notice";
 import { loadImage as loadImageForClipboard, canvasToBlob as canvasToBlobForClipboard } from "./image-canvas";
 import { timelineLayoutMoved } from "./timeline-send-rise";
@@ -83,7 +84,7 @@ import type {
   MessageSender,
   ObservabilityEvent,
   SerializedAgentInstance,
-  SerializedChannel,
+  ChannelSnapshot,
   SerializedMachineDaemon,
   SerializedSpace,
   SerializedWorkspace,
@@ -239,7 +240,7 @@ export type HistoryRenderAuthority = {
 };
 
 export type MobileListFixture = {
-  channels: SerializedChannel[];
+  channels: ChannelSnapshot[];
   spaces: SerializedSpace[];
   readCounts: Record<string, number>;
   history: Record<string, ChannelMessage[]>;
@@ -299,12 +300,12 @@ export function createMobileListFixture(pathname: string): MobileListFixture | n
     name: string,
     minutesAgo: number,
     preview: string,
-    options: Partial<SerializedChannel> & {
+    options: Partial<ChannelSnapshot> & {
       from?: string;
       unread?: number;
       members?: Record<string, ChannelMemberPresence>;
     } = {}
-  ): SerializedChannel => ({
+  ): ChannelSnapshot => decodeChannelSnapshot({
     id,
     spaceId: space.id,
     name,
@@ -327,7 +328,7 @@ export function createMobileListFixture(pathname: string): MobileListFixture | n
         }
       : undefined,
     memberPresence: options.members || {
-      "agent:codex": {
+      "agent:codex": { registration: { ownerUserId: "owner-1", machineId: "machine-1", harness: "codex" },
         kind: "agent",
         label: "Codex",
         activity: "Reviewing mobile UX",
@@ -344,15 +345,15 @@ export function createMobileListFixture(pathname: string): MobileListFixture | n
           },
         ],
       },
-      "agent:claude": {
+      "agent:claude": { registration: { ownerUserId: "owner-1", machineId: "machine-1", harness: "claude" },
         kind: "agent",
         label: "Claude",
         activity: "Watching review",
         instances: [
           {
-            id: `${id}:claude:1`,
-            channelInstanceId: "1",
-            label: "claude:1",
+            id: `${id}:claude:2`,
+            channelInstanceId: "2",
+            label: "claude:2",
             connectedAt: iso(minutesAgo + 12),
             lastSeenAt: iso(3),
             status: "online",
@@ -516,7 +517,7 @@ export function restoreTimelineScrollTop(scrollContainer: HTMLDivElement | null,
   scrollContainer.scrollTop = Math.min(scrollTop, scrollContainer.scrollHeight);
 }
 
-export function channelHasAgentMembers(channel: SerializedChannel | null): boolean {
+export function channelHasAgentMembers(channel: ChannelSnapshot | null): boolean {
   if (!channel) return false;
   return channelMembersByPresence(channel).some(
     (member) => memberPresence(channel, member).kind === "agent"
@@ -632,7 +633,7 @@ export function pointerMidpoint(first: { x: number; y: number }, second: { x: nu
 }
 
 /** What a message row reads of its conversation: never the catalog's whole, ever-changing record. */
-export type MessageRowChannel = Pick<SerializedChannel, "id" | "spaceId">;
+export type MessageRowChannel = Pick<ChannelSnapshot, "id" | "spaceId">;
 
 export type MessageRowProps = {
   message: TimelineItem;

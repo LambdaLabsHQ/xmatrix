@@ -1,3 +1,4 @@
+import { catalogWriterPresence } from "./support/catalog-writer-presence.mjs";
 import assert from "node:assert/strict";
 import test from "node:test";
 import * as boundary from "./support/channel-response-human-presence-dependencies.mjs";
@@ -13,7 +14,7 @@ import {
 } from "../src/channel-response-human-presence.ts";
 
 const REQUEST_URL = "https://hub.test/api/channels";
-const AGENT_PRESENCE = { "agent:writer": { kind: "agent", label: "writer", instances: [] } };
+const AGENT_PRESENCE = catalogWriterPresence();
 const OPEN_CHANNEL = {
   id: "channel-1", spaceId: "space-1", name: "General", mode: "open", version: 1,
   memberPresence: AGENT_PRESENCE,
@@ -47,7 +48,7 @@ test("a get-channel read of an open Channel comes back with its live Humans", as
   assert.equal(channel.memberPresence["user:online"].focused, true);
   // Durable Agent presence survives; an offline member stays directory
   // membership rather than becoming a presence row.
-  assert.equal(channel.memberPresence["agent:writer"].kind, "agent");
+  assert.equal(channel.memberPresence["writer-instance"].kind, "agent");
   assert.equal(channel.memberPresence["user:offline"], undefined);
   // The member hint is a Hub-internal input, never part of the response.
   assert.equal(channel.openChannelHumanMemberIdsBySpace, undefined);
@@ -71,7 +72,8 @@ test("a Runtime that cannot be reached degrades to the Agent-only projection", a
     { channel: OPEN_CHANNEL, openChannelHumanMemberIdsBySpace: HINT },
     beginLiveHumanPresenceRead({}, REQUEST_URL, boundary),
   );
-  assert.deepEqual(channel.memberPresence, AGENT_PRESENCE);
+  assert.deepEqual(Object.keys(channel.memberPresence), ["writer-instance"]);
+  assert.equal(channel.memberPresence["writer-instance"].instances[0].status, "idle");
 });
 
 test("a tree of reads shares one hint and one Runtime read", async () => {
@@ -93,7 +95,7 @@ test("a committed Channel is re-read as the actor so it carries live Humans", as
   state.reads.push({ channel: OPEN_CHANNEL, openChannelHumanMemberIdsBySpace: HINT });
   const channel = await committedChannelForCreator({ ...OPEN_CHANNEL, memberPresence: {} });
   assert.equal(channel.memberPresence["user:online"].status, "online");
-  assert.equal(channel.memberPresence["agent:writer"].kind, "agent");
+  assert.equal(channel.memberPresence["writer-instance"].kind, "agent");
   const read = state.requests.find((request) => request.kind === "get-channel");
   assert.deepEqual(read.input, { channelId: "channel-1", principal: { kind: "user", id: "creator" } });
 });
@@ -103,7 +105,11 @@ test("a committed Channel whose re-read fails still goes back, Agent-only", asyn
   state.readFails = true;
   const committed = { ...OPEN_CHANNEL, memberPresence: AGENT_PRESENCE };
   const channel = await committedChannelForCreator(committed);
-  assert.deepEqual(channel, committed);
+  const { memberPresence, ...metadata } = channel;
+  const { memberPresence: _presence, ...committedMetadata } = committed;
+  assert.deepEqual(metadata, committedMetadata);
+  assert.deepEqual(Object.keys(memberPresence), ["writer-instance"]);
+  assert.equal(memberPresence["writer-instance"].instances[0].status, "idle");
 });
 
 function committedChannelForCreator(committed) {

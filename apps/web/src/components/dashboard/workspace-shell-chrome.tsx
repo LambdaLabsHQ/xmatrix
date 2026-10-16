@@ -131,7 +131,7 @@ import type {
   ObservabilityEvent,
   SerializedAgentInstance,
   HumanProfile,
-  SerializedChannel,
+  ChannelSnapshot,
   SerializedSpace,
 } from "@xmatrix/protocol";
 
@@ -555,7 +555,7 @@ export function TopWorkspaceBar({
   /** A new conversation on a phone: a pushed screen with its own back bar. */
   composing?: boolean;
   onCloseComposing?: () => void;
-  channel: SerializedChannel | null;
+  channel: ChannelSnapshot | null;
   spaces: SerializedSpace[];
   currentSpaceId: string | null;
   view: AppView;
@@ -973,7 +973,7 @@ export function ChannelActionsMenu({
   onMove,
   onVisibilityChange,
 }: {
-  channel: SerializedChannel;
+  channel: ChannelSnapshot;
   shareUrl: string;
   moving: boolean;
   canManageVisibility: boolean;
@@ -1178,7 +1178,7 @@ export const ChannelMoveDialog = memo(function ChannelMoveDialog({
   onCancel,
 }: {
   open: boolean;
-  channel: SerializedChannel | null;
+  channel: ChannelSnapshot | null;
   spaces: SerializedSpace[];
   targetSpaceId: string;
   busy: boolean;
@@ -1273,7 +1273,7 @@ export const ChannelHeader = memo(function ChannelHeader({
   onOpenSearch,
   actions,
 }: {
-  channel: SerializedChannel | null;
+  channel: ChannelSnapshot | null;
   spaces: SerializedSpace[];
   currentUserId: string;
   onRename: (name: string) => void;
@@ -1293,7 +1293,7 @@ export const ChannelHeader = memo(function ChannelHeader({
   const channelSpace = channel
     ? spaces.find((space) => space.id === channel.spaceId) || null
     : null;
-  const humanPresenceLabel = useCallback((live: SerializedChannel | null) => {
+  const humanPresenceLabel = useCallback((live: ChannelSnapshot | null) => {
     if (!live) return null;
     const summary = memberPresenceSummary(live, channelSpace);
     return `${summary.online}/${summary.total}`;
@@ -1445,7 +1445,7 @@ export function ChannelPresenceAvatars({
   avatarItems,
   maxVisible,
 }: {
-  channel: SerializedChannel;
+  channel: ChannelSnapshot;
   events: readonly ObservabilityEvent[];
   humanMembers: string[];
   avatarItems: ChannelAgentAvatarItem[];
@@ -1520,7 +1520,7 @@ export function ChannelPresenceAvatars({
 }
 
 export function channelAgentAvatarStatus(
-  channel: SerializedChannel,
+  channel: ChannelSnapshot,
   member: string,
   presence: ChannelMemberPresence,
   events: readonly ObservabilityEvent[],
@@ -1538,7 +1538,7 @@ export function channelAgentAvatarStatus(
 }
 
 /** The conversation's Instances with work in hand, as its row's avatars show: busy, or waiting on something. */
-export function channelWorkInHand(channel: SerializedChannel, events: readonly ObservabilityEvent[]) {
+export function channelWorkInHand(channel: ChannelSnapshot, events: readonly ObservabilityEvent[]) {
   return channelOnlineAgentAvatarItems(channel).flatMap((item) => {
     const presence = memberPresence(channel, item.member);
     if (presence.kind !== "agent" || !item.instance) return [];
@@ -1548,11 +1548,11 @@ export function channelWorkInHand(channel: SerializedChannel, events: readonly O
   });
 }
 
-export function channelWorkInHandInstanceIds(channel: SerializedChannel, events: readonly ObservabilityEvent[]): string[] {
+export function channelWorkInHandInstanceIds(channel: ChannelSnapshot, events: readonly ObservabilityEvent[]): string[] {
   return channelWorkInHand(channel, events).map((item) => item.instance.id);
 }
 
-export function channelHasWorkInHand(channel: SerializedChannel, events: readonly ObservabilityEvent[]): boolean {
+export function channelHasWorkInHand(channel: ChannelSnapshot, events: readonly ObservabilityEvent[]): boolean {
   return channelWorkInHandInstanceIds(channel, events).length > 0;
 }
 

@@ -1,7 +1,7 @@
 "use client";
 
 import type { InfiniteData, QueryClient } from "@tanstack/react-query";
-import type { ChannelCatalogPage, SerializedChannel } from "@xmatrix/protocol";
+import type { ChannelSnapshotCatalogPage, ChannelSnapshot } from "@xmatrix/protocol";
 
 import { withChannelReadState, type ChannelReadStateUpdate } from "./channel-read-state";
 
@@ -22,7 +22,7 @@ export function applyChannelReadStateToCatalog(input: {
   for (const query of input.client.getQueryCache().findAll({ queryKey: input.prefix })) {
     const queryKey = query.queryKey;
     if (queryKey[3] !== "channels" || queryKey[5] !== "catalog") continue;
-    input.client.setQueryData<InfiniteData<ChannelCatalogPage, unknown>>(queryKey, (current) => (
+    input.client.setQueryData<InfiniteData<ChannelSnapshotCatalogPage, unknown>>(queryKey, (current) => (
       current
         ? { ...current, pages: current.pages.map((page) => (
             applyToPage(page, input.readStates)
@@ -33,9 +33,9 @@ export function applyChannelReadStateToCatalog(input: {
 }
 
 function applyToPage(
-  page: ChannelCatalogPage,
+  page: ChannelSnapshotCatalogPage,
   readStates: ReadonlyMap<string, ChannelReadStateUpdate>,
-): ChannelCatalogPage {
+): ChannelSnapshotCatalogPage {
   if (!page.rows.some((row) => readStates.has(row.channel.id))) return page;
   let unreadCleared = 0;
   let mentionsCleared = 0;
@@ -59,9 +59,9 @@ function applyToPage(
 }
 
 function readChannel(
-  channel: SerializedChannel,
+  channel: ChannelSnapshot,
   update: ChannelReadStateUpdate,
-): SerializedChannel {
+): ChannelSnapshot {
   // A cached row can be newer than the answer in hand, so the cursor takes the
   // later of the two rather than whichever write landed last.
   return withChannelReadState(channel, {
@@ -72,13 +72,13 @@ function readChannel(
   });
 }
 
-function rowIsUnread(channel: SerializedChannel): boolean {
+function rowIsUnread(channel: ChannelSnapshot): boolean {
   const unread = channel.messageCount === undefined
     ? 0
     : Math.max(0, channel.messageCount - (channel.readSequence ?? 0));
   return Math.max(unread, channel.attention?.unreadAttentionCount || 0) > 0;
 }
 
-function rowIsMentioned(channel: SerializedChannel): boolean {
+function rowIsMentioned(channel: ChannelSnapshot): boolean {
   return (channel.attention?.unreadAttentionCount || 0) > 0;
 }

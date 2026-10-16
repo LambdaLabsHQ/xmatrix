@@ -29,7 +29,6 @@ import {
   accountQuotaUsageFromCandidates,
   agentPresetOrCustom,
   formatVersion,
-  hasQuotaMeterUsage,
   isChannelAttentionSummary,
   mergeAccountLevelLlmUsage,
   releaseVersionStatus,
@@ -38,7 +37,6 @@ import {
 } from "./workspace-shell-formatters";
 
 import {
-  LlmUsage,
   SpaceInviteResult,
   SpaceInviteRole,
   SpaceMemberActionResult,
@@ -46,9 +44,7 @@ import {
 } from "./workspace-shell-helpers";
 
 import {
-  earliestTimestamp,
   compareChannelsForSidebar,
-  latestTimestamp,
   sortChannels,
   sortProjects,
   sortAutomations,
@@ -188,17 +184,15 @@ import { errorFromResponse, xmatrixApiRequest, requireResponseOk, xmatrixRawResp
 import { userErrorMessage } from "@/lib/user-facing-error";
 import { xmatrixQueryKeys } from "@/lib/query/query-keys";
 
-import { WEB_PROXY_ROUTES } from "@xmatrix/protocol";
+import { ChannelPresenceConflict, decodeChannelSnapshot, emptyChannelPresence, presenceInstanceId, reduceChannelPresence, WEB_PROXY_ROUTES, type AgentInstancePresence, type ChannelPresence, type SerializedChannel } from "@xmatrix/protocol";
 
 import type {
   ChannelAttentionSnapshot,
   ChannelCatalogSyncMetadata,
   ChannelMessage,
-  ChannelMemberPresence,
   ObservabilityEvent,
   SerializedAgent,
-  SerializedAgentInstance,
-  SerializedChannel,
+  ChannelSnapshot,
   SerializedMachineDaemon,
   SerializedAutomation,
   SerializedAutomationCatalog,
@@ -209,47 +203,6 @@ import type {
   SerializedWorkspace,
   HumanProfile,
 } from "@xmatrix/protocol";
-
-// Semantic module extracted from workspace-app-shell (AST-safe)
-
-export function mergeLlmUsagePreferringQuotas(
-  current?: LlmUsage,
-  update?: LlmUsage
-): LlmUsage | undefined {
-  if (!update) return current;
-  if (!current) return update;
-  if (update.quotaState || current.quotaState) {
-    return mergeAccountLevelLlmUsage(current, update);
-  }
-  if (hasQuotaMeterUsage(update)) {
-    const previousTime = Date.parse(current.quotaObservedAt ?? "");
-    const incomingTime = Date.parse(update.quotaObservedAt ?? "");
-    // Concurrent frames can arrive out of order. Token counters may advance
-    // without replacing a newer provider sample.
-    if (Number.isFinite(previousTime) && Number.isFinite(incomingTime) && incomingTime < previousTime) {
-      const {
-        quotaSource: _quotaSource,
-        quotaUsages: _quotaUsages,
-        quotaObservedAt: _quotaObservedAt,
-        quotaAccount: _quotaAccount,
-        ...localUsage
-      } = update;
-      return { ...current, ...localUsage };
-    }
-    return update;
-  }
-  if (hasQuotaMeterUsage(current)) {
-    return {
-      ...current,
-      ...update,
-      quotaSource: "provider_api",
-      quotaUsages: current.quotaUsages,
-      quotaAccount: current.quotaAccount,
-      ...(current.quotaObservedAt ? { quotaObservedAt: current.quotaObservedAt } : {}),
-    };
-  }
-  return update;
-}
 
 /* Access is told in ink on the chip material the call site already wears:
    `auto` is the resting state, `ask` asks a person each time. */
@@ -1566,7 +1519,7 @@ export function MachineVersionValue({ version, component, className }: {
 }
 
 export type FetchedChannelCatalog = {
-  channels: SerializedChannel[];
+  channels: ChannelSnapshot[];
   catalogSync?: ChannelCatalogSyncMetadata;
   attentionSnapshot?: ChannelAttentionSnapshot;
 };
@@ -1639,7 +1592,7 @@ export async function fetchChannelCatalog(
     throw new Error("Channel attention snapshot is invalid");
   }
   return {
-    channels: sortChannels(data.channels || []),
+    channels: sortChannels((data.channels || []).map(decodeChannelSnapshot)),
     ...(catalogSync ? { catalogSync } : {}),
     ...(attentionSnapshot ? { attentionSnapshot } : {}),
   };
@@ -1648,7 +1601,7 @@ export async function fetchChannelCatalog(
 export async function fetchChannels(
   token: string,
   options: { spaceId?: string } = {}
-): Promise<SerializedChannel[]> {
+): Promise<ChannelSnapshot[]> {
   return (await fetchChannelCatalog(token, options)).channels;
 }
 
@@ -2038,7 +1991,7 @@ export async function recallChannelMessage(
   return requireMessageResponse(res);
 }
 
-export function replaceChannel(channels: SerializedChannel[], channel: SerializedChannel): SerializedChannel[] {
+export function replaceChannel(channels: ChannelSnapshot[], channel: ChannelSnapshot | SerializedChannel): ChannelSnapshot[] {
   const index = channels.findIndex((current) => current.id === channel.id);
   const merged = mergeChannelListHydratedFields(index >= 0 ? channels[index] : undefined, channel);
   if (index < 0) return sortChannels([...channels, merged]);
@@ -2046,7 +1999,7 @@ export function replaceChannel(channels: SerializedChannel[], channel: Serialize
 }
 
 /** `channels` with the one at `index` replaced, and moved to where it now sorts when it left its place. */
-export function placeChannel(channels: SerializedChannel[], index: number, channel: SerializedChannel): SerializedChannel[] {
+export function placeChannel(channels: ChannelSnapshot[], index: number, channel: ChannelSnapshot): ChannelSnapshot[] {
   const next = channels.slice();
   next[index] = channel;
   // Most replacements (presence, read state, topic) leave a Channel where it
@@ -2076,9 +2029,9 @@ export function placeChannel(channels: SerializedChannel[], index: number, chann
 }
 
 export function mergeChannelListSnapshot(
-  current: SerializedChannel[],
-  incoming: SerializedChannel[],
-): SerializedChannel[] {
+  current: ChannelSnapshot[],
+  incoming: (ChannelSnapshot | SerializedChannel)[],
+): ChannelSnapshot[] {
   const currentById = new Map(current.map((channel) => [channel.id, channel]));
   return sortChannels(incoming.map((channel) =>
     mergeChannelListHydratedFields(
@@ -2090,10 +2043,11 @@ export function mergeChannelListSnapshot(
 }
 
 export function mergeChannelListHydratedFields(
-  prior: SerializedChannel | undefined,
-  channel: SerializedChannel,
+  prior: ChannelSnapshot | undefined,
+  incoming: ChannelSnapshot | SerializedChannel,
   viewerStateAuthority: ChannelViewerStateAuthority = "partial",
-): SerializedChannel {
+): ChannelSnapshot {
+  const channel = decodeChannelSnapshot(incoming);
   if (!prior) return channel;
   /* partial and realtime payloads omit list-hydrated fields — keep what we knew */
   return {
@@ -2117,20 +2071,17 @@ export function mergeChannelListHydratedFields(
     // channel_updated can briefly re-serialize token-only usage; keep
     // subscription quota meters from the previous snapshot until hub
     // reports a real quota update again.
-    memberPresence: mergeChannelMemberPresencePreferringQuotas(
-      prior.memberPresence,
-      channel.memberPresence
-    ),
+    presence: mergeChannelPresence(prior.presence, channel.presence),
   };
 }
 
 export function mergeChannelMemberReadSequences(
-  prior: SerializedChannel["memberReadSequences"] | undefined,
-  next: SerializedChannel["memberReadSequences"] | undefined
-): SerializedChannel["memberReadSequences"] | undefined {
+  prior: ChannelSnapshot["memberReadSequences"] | undefined,
+  next: ChannelSnapshot["memberReadSequences"] | undefined
+): ChannelSnapshot["memberReadSequences"] | undefined {
   if (!next) return prior;
   if (!prior) return next;
-  const merged: NonNullable<SerializedChannel["memberReadSequences"]> = { ...prior };
+  const merged: NonNullable<ChannelSnapshot["memberReadSequences"]> = { ...prior };
   for (const [subjectId, sequence] of Object.entries(next)) {
     const previous = merged[subjectId];
     if (previous === undefined || sequence > previous) merged[subjectId] = sequence;
@@ -2140,59 +2091,25 @@ export function mergeChannelMemberReadSequences(
 
 /** Presence-only snapshots do not change the conversation catalog, reference
  * names, history audience or trace access. Every other field still does. */
-export function sameChannelCatalogState(left: SerializedChannel, right: SerializedChannel): boolean {
-  const { memberPresence: _leftPresence, ...leftState } = left;
-  const { memberPresence: _rightPresence, ...rightState } = right;
+export function sameChannelCatalogState(left: ChannelSnapshot, right: ChannelSnapshot): boolean {
+  const { presence: _leftPresence, ...leftState } = left;
+  const { presence: _rightPresence, ...rightState } = right;
   if (!sameValue(leftState, rightState)) return false;
-  const ids = (channel: SerializedChannel) => new Set(Object.values(channel.memberPresence ?? {})
-    .flatMap(presence => presence.kind === "agent" ? (presence.instances ?? []).map(instance => instance.id) : []));
+  const ids = (channel: ChannelSnapshot) => new Set(channel.presence?.instances.keys() ?? []);
   const before = ids(left);
   const after = ids(right);
   return before.size === after.size && [...after].every(id => before.has(id));
 }
 
-export function mergeChannelMemberPresencePreferringQuotas(
-  prior: SerializedChannel["memberPresence"] | undefined,
-  next: SerializedChannel["memberPresence"] | undefined
-): SerializedChannel["memberPresence"] | undefined {
+export function mergeChannelPresence(prior: ChannelPresence | undefined,
+  next: ChannelPresence | undefined): ChannelPresence | undefined {
   if (!next) return prior;
   if (!prior) return next;
-  const merged: NonNullable<SerializedChannel["memberPresence"]> = { ...next };
-  for (const [memberId, nextPresence] of Object.entries(next)) {
-    const priorPresence = prior[memberId];
-    if (!priorPresence || nextPresence.kind !== "agent" || priorPresence.kind !== "agent") {
-      continue;
-    }
-    const priorInstances = priorPresence.instances || [];
-    const priorInstancesById = new Map(priorInstances.map((instance) => [instance.id, instance]));
-    // channelInstanceId is the stable per-channel birth slot. Reborns change
-    // global instance id but must keep the original birth connectedAt.
-    const priorInstancesByChannelId = new Map(
-      priorInstances
-        .filter((instance) => instance.channelInstanceId)
-        .map((instance) => [instance.channelInstanceId!, instance])
-    );
-    const nextInstances = (nextPresence.instances || []).map((instance) => {
-      const previous =
-        priorInstancesById.get(instance.id) ||
-        (instance.channelInstanceId
-          ? priorInstancesByChannelId.get(instance.channelInstanceId)
-          : undefined);
-      return previous
-        ? mergeAgentInstancePresence(previous, instance)
-        : instance;
-    });
-    merged[memberId] = {
-      ...nextPresence,
-      usage: mergeLlmUsagePreferringQuotas(priorPresence.usage, nextPresence.usage),
-      instances: nextInstances.length > 0 ? nextInstances : nextPresence.instances,
-    };
-  }
-  return merged;
+  const merged = reduceChannelPresence(prior, { type: "snapshot", snapshot: next });
+  return sameValue(prior, merged) ? prior : sameValue(next, merged) ? next : merged;
 }
 
 type ChannelPresenceRouting = {
-  byMember: Map<string, Set<string>>;
   byInstance: Map<string, Set<string>>;
   positions: Map<string, number>;
   ordered: boolean;
@@ -2201,8 +2118,8 @@ type ChannelPresenceRouting = {
 /** Apply ordered presence and partial snapshots in one state-frame run. The
  * Channel table and routing indices are built once, rather than once per
  * alternating Agent/Channel pair. Snapshots still merge in their socket order. */
-export function createChannelPresenceBatch(channels: SerializedChannel[], routing?: ChannelPresenceRouting) {
-  const positionsFor = (items: SerializedChannel[]) => {
+export function createChannelPresenceBatch(channels: ChannelSnapshot[], routing?: ChannelPresenceRouting) {
+  const positionsFor = (items: ChannelSnapshot[]) => {
     const positions = new Map<string, number>();
     items.forEach((channel, index) => positions.set(channel.id, index));
     return positions;
@@ -2211,7 +2128,7 @@ export function createChannelPresenceBatch(channels: SerializedChannel[], routin
   // to only one successor. Published arrays and commit indices never share it.
   // Ordinary reports stage only changed cards, without copying the catalog.
   const channelPositions = routing?.positions ?? positionsFor(channels);
-  const updates = new Map<string, SerializedChannel>();
+  const updates = new Map<string, ChannelSnapshot>();
   const get = (id: string) => {
     const updated = updates.get(id);
     if (updated) return updated;
@@ -2222,12 +2139,11 @@ export function createChannelPresenceBatch(channels: SerializedChannel[], routin
     for (const id of channelPositions.keys()) yield get(id)!;
     for (const [id, channel] of updates) if (!channelPositions.has(id)) yield channel;
   };
-  let committed: RealtimeCollectionCommit<SerializedChannel> | undefined;
-  let liveUpdates: SerializedChannel[] | undefined;
-  let published: SerializedChannel[] | undefined;
+  let committed: RealtimeCollectionCommit<ChannelSnapshot> | undefined;
+  let liveUpdates: ChannelSnapshot[] | undefined;
+  let published: ChannelSnapshot[] | undefined;
   let publishedFromBasis = true;
   let sealed = false;
-  const byMember = routing?.byMember ?? new Map<string, Set<string>>();
   const byInstance = routing?.byInstance ?? new Map<string, Set<string>>();
   let indexed = routing !== undefined;
   let routesTaken = false;
@@ -2235,23 +2151,7 @@ export function createChannelPresenceBatch(channels: SerializedChannel[], routin
   let outputOrdered = inputOrdered;
   const reordered = new Set<string>();
   let appendedOnly = false;
-  const routes = (channel: SerializedChannel) => {
-    const members: string[] = [];
-    const instances: string[] = [];
-    for (const [member, presence] of Object.entries(channel.memberPresence ?? {})) {
-      if (presence.kind !== "agent") continue;
-      members.push(member);
-      // Build every route before changing an index: a malformed snapshot must
-      // not remove the old Instance's route and poison the next good report.
-      const resident = presence.instances ?? [];
-      if (!Array.isArray(resident)) throw new Error("Invalid realtime Instance collection");
-      for (const instance of resident) {
-        if (typeof instance?.id !== "string" || !instance.id) throw new Error("Invalid realtime Instance id");
-        instances.push(instance.id);
-      }
-    }
-    return { members, instances };
-  };
+  const routes = (channel: ChannelSnapshot) => ({ instances: [...(channel.presence?.instances.keys() ?? [])] });
   const route = (id: string, keys: ReturnType<typeof routes>, add: boolean) => {
     const update = (index: Map<string, Set<string>>, key: string) => {
       if (add) {
@@ -2264,10 +2164,9 @@ export function createChannelPresenceBatch(channels: SerializedChannel[], routin
         if (!ids?.size) index.delete(key);
       }
     };
-    for (const member of keys.members) update(byMember, member);
     for (const instance of keys.instances) update(byInstance, instance);
   };
-  const put = (channel: SerializedChannel, rankMayChange = false) => {
+  const put = (channel: ChannelSnapshot, rankMayChange = false) => {
     const previous = get(channel.id);
     if (previous === channel) return;
     // Validate the sort inputs too, including a new Channel: a later sort may
@@ -2303,7 +2202,7 @@ export function createChannelPresenceBatch(channels: SerializedChannel[], routin
     const ordered = next.filter(channel => !reordered.has(channel.id));
     appendedOnly = [...reordered].every(id => !channelPositions.has(id));
     let positions: Map<string, number> | undefined;
-    const compare = (left: SerializedChannel, right: SerializedChannel) => {
+    const compare = (left: ChannelSnapshot, right: ChannelSnapshot) => {
       const rank = compareChannelsForSidebar(left, right);
       if (rank) return rank;
       positions ??= new Map(next.map((channel, index) => [channel.id, index]));
@@ -2327,8 +2226,8 @@ export function createChannelPresenceBatch(channels: SerializedChannel[], routin
     if (sealed) throw new Error("A published presence batch cannot be changed");
   };
   return {
-    applyChannel(channel: SerializedChannel,
-      beforeApply?: (previous: SerializedChannel | undefined, updated: SerializedChannel) => void) {
+    applyChannel(channel: ChannelSnapshot | SerializedChannel,
+      beforeApply?: (previous: ChannelSnapshot | undefined, updated: ChannelSnapshot) => void) {
       requireUnpublished();
       const previous = get(channel.id);
       const updated = mergeChannelListHydratedFields(previous, channel);
@@ -2353,46 +2252,29 @@ export function createChannelPresenceBatch(channels: SerializedChannel[], routin
         indexed = true;
       }
       const positions = new Map<string, Set<number>>();
-      const sharedQuotas = new Map<string, SerializedAgent>();
-      const target = (id: string, position?: number) => {
+      const target = (id: string, position: number) => {
         if (!get(id)) return;
         let reports = positions.get(id);
         if (!reports) positions.set(id, reports = new Set());
-        if (position !== undefined) reports.add(position);
+        reports.add(position);
       };
       agents.forEach((agent, position) => {
-        if (!agent.id) return;
-        if (!agent.instances?.length) {
-          for (const id of byMember.get(agent.id) ?? []) target(id, position);
-        } else {
-          const usage = accountQuotaUsageFromCandidates(sharedQuotas.get(agent.id)?.usage, agent.usage);
-          if (usage) sharedQuotas.set(agent.id, { ...agent, usage, instances: [] });
-          for (const instance of agent.instances) {
-            if (instance.channelId) target(instance.channelId, position);
-            for (const id of byInstance.get(instance.id) ?? []) target(id, position);
-          }
+        const instances = agent.instances ?? [];
+        for (const instance of instances) {
+          if (instance.channelId) target(instance.channelId, position);
+          for (const id of byInstance.get(instance.id) ?? []) target(id, position);
         }
+        if (!instances.length) for (const id of byInstance.get(agent.instanceId || agent.id) ?? []) target(id, position);
       });
-      for (const member of sharedQuotas.keys()) {
-        for (const id of byMember.get(member) ?? []) target(id);
-      }
       for (const [id, reports] of positions) {
-        const channel = get(id)!;
-        let patched = channel;
-        // Set insertion order is the report order, including reports routed
-        // through a legacy member key or through a globally unique Instance.
+        let patched = get(id)!;
         for (const position of reports) patched = patchChannelAgentPresenceFromAgent(patched, agents[position]);
-        // Account quota is shared once per member, without sharing Run state.
-        for (const member of Object.keys(channel.memberPresence ?? {})) {
-          const quota = sharedQuotas.get(member);
-          if (quota) patched = patchChannelAgentMemberFromAgent(patched, quota, true);
-        }
         put(patched);
       }
     },
     getSnapshot: snapshot,
     /** Seal a rank-preserving live run for the collection's keyed receive. */
-    getLiveUpdates(): readonly SerializedChannel[] | undefined {
+    getLiveUpdates(): readonly ChannelSnapshot[] | undefined {
       if (liveUpdates) return liveUpdates;
       requireUnpublished();
       if (reordered.size) return undefined;
@@ -2401,7 +2283,7 @@ export function createChannelPresenceBatch(channels: SerializedChannel[], routin
     },
     /** Called by receive before subscribers: reentrant writes cannot change
      * which immutable snapshot this run's routing belongs to. */
-    acceptLiveSnapshot(items: SerializedChannel[], previous: SerializedChannel[]) {
+    acceptLiveSnapshot(items: ChannelSnapshot[], previous: ChannelSnapshot[]) {
       if (!liveUpdates || published) throw new Error("A live presence snapshot must be accepted once after sealing");
       // Another collection can synchronously notify a writer before this run
       // reaches receive. Its result is valid, but the old routes/positions are
@@ -2422,7 +2304,7 @@ export function createChannelPresenceBatch(channels: SerializedChannel[], routin
     },
     /** Only the exact next live snapshot can inherit a completed run's routes.
      * Taking consumes them even on mismatch; other writers force a rebuild. */
-    takeRouting(basis: SerializedChannel[]) {
+    takeRouting(basis: ChannelSnapshot[]) {
       const reusable = !routesTaken && indexed && publishedFromBasis && published === basis;
       routesTaken = true;
       if (!reusable) return undefined;
@@ -2434,297 +2316,57 @@ export function createChannelPresenceBatch(channels: SerializedChannel[], routin
         positions = channelPositions;
         for (let index = channels.length; index < basis.length; index += 1) positions.set(basis[index].id, index);
       } else positions = positionsFor(basis);
-      return { byMember, byInstance, positions, ordered: outputOrdered };
+      return { byInstance, positions, ordered: outputOrdered };
     },
   };
 }
 
-export function patchChannelAgentPresenceFromAgent(
-  channel: SerializedChannel,
-  agent: SerializedAgent
-): SerializedChannel {
-  return patchChannelInstancesById(patchChannelAgentMemberFromAgent(channel, agent), agent);
-}
-
-/**
- * Catalog snapshots key each Instance by its own id, while live frames name
- * the socket's principal Agent, so one Instance can sit under a member the
- * frame does not name. An Instance id is globally unique: whichever member
- * holds it hears its report.
- */
-export function patchChannelInstancesById(
-  channel: SerializedChannel,
-  agent: SerializedAgent
-): SerializedChannel {
-  const updatesById = new Map((agent.instances || []).map((instance) => [instance.id, instance]));
-  if (updatesById.size === 0 || !channel.memberPresence) return channel;
-  let next = channel;
-  for (const [member, presence] of Object.entries(channel.memberPresence)) {
-    if (member === agent.id || presence.kind !== "agent" || !presence.instances?.length) continue;
-    let changed = false;
-    const instances = presence.instances.map((instance) => {
-      const update = updatesById.get(instance.id);
-      if (!update) return instance;
-      const merged = mergeAgentInstancePresence(instance, update);
-      if (merged !== instance) changed = true;
-      return merged;
-    });
-    if (changed) next = replaceChannelMemberPresence(next, member, { ...presence, instances });
+export function patchChannelAgentPresenceFromAgent(channel: ChannelSnapshot,
+  agent: SerializedAgent): ChannelSnapshot {
+  let presence = channel.presence ?? emptyChannelPresence(channel.id);
+  const knownActor = presence.instances.get(presenceInstanceId(agent.instanceId || agent.id));
+  const reports = agent.instances?.length ? agent.instances : knownActor ? [knownActor] : [];
+  const quota = accountQuotaUsageFromCandidates(agent.usage);
+  for (const report of reports) {
+    const id = presenceInstanceId(report.id);
+    const current = presence.instances.get(id);
+    if ((report.channelId && report.channelId !== channel.id) || (!current && report.channelId !== channel.id)) continue;
+    if (!current) throw new ChannelPresenceConflict(channel.id, id);
+    const next: AgentInstancePresence = { ...report, id, channelId: channel.id,
+      agentName: current?.agentName || agent.name, registration: current.registration,
+      email: current.email || agent.email,
+      usage: mergeAccountLevelLlmUsage(report.usage ?? current?.usage, quota) };
+    presence = reduceChannelPresence(presence, { type: "upsert", source: "live", instance: next });
   }
-  return next;
+  return sameValue(presence, channel.presence) ? channel : { ...channel, presence };
 }
 
-function patchChannelAgentMemberFromAgent(
-  channel: SerializedChannel,
-  agent: SerializedAgent,
-  quotaOnly = false,
-): SerializedChannel {
-  const presence = channel.memberPresence?.[agent.id];
-  if (!presence || presence.kind !== "agent") return channel;
-
-  const agentInstances = agent.instances || [];
-  const agentInstancesById = new Map(agentInstances.map((instance) => [instance.id, instance]));
-  // channelInstanceId is a per-channel slot ordinal (sibling threads all count
-  // from 1), so slot fallback may only match updates that declare this exact
-  // channel; unscoped updates merge by global instance id alone.
-  const agentInstancesByChannelId = new Map(
-    agentInstances
-      .filter((instance) => instance.channelInstanceId && instance.channelId === channel.id)
-      .map((instance) => [instance.channelInstanceId!, instance])
-  );
-  const priorInstances = presence.instances || [];
-  const hasChannelReport = !quotaOnly && (!agentInstances.length || agentInstances.some(instance =>
-    instance.channelId === channel.id || priorInstances.some(prior => prior.id === instance.id)));
-  const sharedUsage = accountQuotaUsageFromCandidates(agent.usage);
-  let instanceChanged = false;
-  // enhanced_presence often omits instances (workspace-wide broadcast). Still
-  // push agent-level usage onto every known channel instance so quota chips stay live.
-  const nextInstances = priorInstances.map((instance) => {
-    const update =
-      agentInstancesById.get(instance.id) ||
-      (instance.channelInstanceId ? agentInstancesByChannelId.get(instance.channelInstanceId) : undefined);
-    if (update) {
-      // Receiving a frame is not the same as being told something new. Marking
-      // the instance changed on arrival alone made the no-op short circuit
-      // below unreachable for every frame that carried instances.
-      const merged = mergeAgentInstancePresence(instance, update);
-      if (merged !== instance) instanceChanged = true;
-      return merged;
-    }
-    if (sharedUsage) {
-      const mergedUsage = mergeAccountLevelLlmUsage(instance.usage, sharedUsage);
-      if (!sameValue(mergedUsage, instance.usage)) {
-        instanceChanged = true;
-        return { ...instance, usage: mergedUsage };
-      }
-    }
-    return instance;
-  });
-
-  const mergedUsage = mergeAccountLevelLlmUsage(presence.usage, hasChannelReport ? agent.usage : sharedUsage);
-  const nextUsage = sameValue(mergedUsage, presence.usage) ? presence.usage : mergedUsage;
-  const usageChanged = nextUsage !== presence.usage;
-  // The card reports one Run. Its activity/intent/clock must not leak into
-  // sibling Channels of the same Agent; only account quota is shared there.
-  if (!hasChannelReport) {
-    return instanceChanged || usageChanged
-      ? replaceChannelMemberPresence(channel, agent.id, {
-        ...presence, usage: nextUsage, instances: instanceChanged ? nextInstances : presence.instances,
-      })
-      : channel;
-  }
-  if (!instanceChanged && !usageChanged && priorInstances.length > 0) {
-    const activity = agent.activity || presence.activity;
-    const lastSeenAt = latestTimestamp([presence.lastSeenAt, agent.lastSeenAt]);
-    if (
-      activity === presence.activity &&
-      lastSeenAt === presence.lastSeenAt
-    ) {
-      return channel;
-    }
-  }
-
-  const nextPresence: ChannelMemberPresence = {
-    ...presence,
-    label: presence.label || agent.name,
-    email: presence.email || agent.email,
-    avatarUrl: presence.avatarUrl || agent.avatarUrl,
-    lastSeenAt: latestTimestamp([presence.lastSeenAt, agent.lastSeenAt]),
-    activity: agent.activity || presence.activity,
-    files: instanceChanged ? presence.files : agent.files || presence.files,
-    intent: instanceChanged ? presence.intent : agent.intent || presence.intent,
-    runtimeState: instanceChanged ? presence.runtimeState : agent.runtimeState || presence.runtimeState,
-    usage: nextUsage,
-    instances: instanceChanged ? nextInstances : presence.instances,
-  };
-
-  return replaceChannelMemberPresence(channel, agent.id, nextPresence);
-}
-
-export function patchChannelAgentPresenceFromMessage(
-  channel: SerializedChannel,
-  entry: ChannelMessage
-): SerializedChannel {
-  if (entry.from.kind !== "agent" || !entry.from.identityId) return channel;
-
-  const member = entry.from.identityId;
-  const presence = channel.memberPresence?.[member];
-  const agentPresence = presence?.kind === "agent" ? presence : undefined;
-  const currentInstances = agentPresence?.instances || [];
-  const senderInstanceId = entry.from.instanceId;
-  const senderChannelInstanceId = entry.from.channelInstanceId;
-  const instanceIndex = currentInstances.findIndex(
-    (instance) =>
-      (senderInstanceId && instance.id === senderInstanceId) ||
-      (senderChannelInstanceId && instance.channelInstanceId === senderChannelInstanceId)
-  );
-  const nextInstances = [...currentInstances];
-  if (instanceIndex >= 0) {
-    nextInstances[instanceIndex] = mergeAgentInstancePresence(nextInstances[instanceIndex], {
-      id: nextInstances[instanceIndex].id,
-      channelInstanceId: senderChannelInstanceId || nextInstances[instanceIndex].channelInstanceId,
-      label: entry.from.instanceLabel || nextInstances[instanceIndex].label,
-      connectedAt: nextInstances[instanceIndex].connectedAt,
-      lastSeenAt: entry.sentAt,
-      status: "busy",
-      activity: nextInstances[instanceIndex].activity || "Processing",
-      goal: entry.from.goal || nextInstances[instanceIndex].goal,
-    });
-  } else if (senderInstanceId && senderChannelInstanceId) {
-    nextInstances.push({
-      id: senderInstanceId,
-      channelInstanceId: senderChannelInstanceId,
-      label: entry.from.instanceLabel || entry.from.label,
-      connectedAt: entry.sentAt,
-      lastSeenAt: entry.sentAt,
-      status: "busy",
-      activity: "Processing",
-      goal: entry.from.goal,
-    });
-  }
-
-  const nextPresence: ChannelMemberPresence = {
-    kind: "agent",
-    ...agentPresence,
-    label: agentPresence?.label || entry.from.agentName || entry.from.label,
-    email: agentPresence?.email || entry.from.email,
-    lastSeenAt: entry.sentAt,
-    activity: agentPresence?.activity,
-    goal: entry.from.goal || agentPresence?.goal,
-    instances: nextInstances.length > 0 ? nextInstances : agentPresence?.instances,
-  };
-
-  return replaceChannelMemberPresence(channel, member, nextPresence);
-}
-
-export function agentMessageInstanceIdentityIncomplete(entry: ChannelMessage): boolean {
-  return entry.from.kind === "agent" &&
-    Boolean(entry.from.instanceId) &&
-    !entry.from.channelInstanceId;
-}
-
-/**
- * Whether a report about an Instance is newer than what we hold, judged on
- * the Instance's lifecycle (status, rest and offlineReason) together with the
- * `lastSeenAt` it was observed at.
- *
- * Gone and machine-offline are only ever reported live, after everything the
- * Instance said before them, so they apply whatever their clock says. Every
- * other report, a resting snapshot included, applies only if it is not older
- * than the one we hold: a catalog page read before a wake must not put a
- * live Instance back to sleep, and a live report from before a sleep must not
- * wake it.
- */
-export function instanceLifecycleReportApplies(
-  current: SerializedAgentInstance,
-  update: SerializedAgentInstance
-): boolean {
-  if (update.status === "offline" && !update.rest) return true;
-  return timestampMs(update.lastSeenAt) >= timestampMs(current.lastSeenAt);
-}
-
-export function mergeAgentInstancePresence(
-  current: SerializedAgentInstance,
-  update: SerializedAgentInstance
-): SerializedAgentInstance {
-  // Catalog pages, resolve reads, realtime frames, messages and cached
-  // snapshots replayed from the query cache all arrive here, often behind
-  // newer state. One rule orders them all.
-  if (!instanceLifecycleReportApplies(current, update)) return current;
-  const connectedAt = earliestTimestamp([current.connectedAt, update.connectedAt]) ||
-    update.connectedAt || current.connectedAt;
-  // A reborn can retain its channel slot, but its runtime facts belong to the
-  // new global instance. Only the slot's birth order crosses that boundary.
-  if (current.id !== update.id) return { ...update, connectedAt };
-  const merged: SerializedAgentInstance = {
-    ...current,
-    ...update,
-    // The lifecycle is one fact: whether the Instance is live, resting or
-    // offline, and why. It is taken whole from the report that won above and
-    // never assembled field by field, so no report's rest can outlive the
-    // status it came with (a wake must not keep the sleep's moon).
-    status: update.status,
-    rest: update.rest,
-    offlineReason: update.offlineReason,
-    // Presence updates are patches. Runtime heartbeats deliberately omit the
-    // slower-changing presentation fields, so an omitted field must retain
-    // its last reported value instead of erasing every visible tag.
-    model: update.model ?? current.model,
-    models: update.models ?? current.models,
-    effort: update.effort ?? current.effort,
-    commands: update.commands ?? current.commands,
-    statusChips: update.statusChips ?? current.statusChips,
-    gitBranch: update.gitBranch ?? current.gitBranch,
-    channelInstanceId: update.channelInstanceId || current.channelInstanceId,
-    label: update.label || current.label,
-    // Keep the original birth clock so Agents detail order does not jump when
-    // a live presence frame carries a newer socket connectedAt.
-    connectedAt,
-    lastSeenAt: latestTimestamp([current.lastSeenAt, update.lastSeenAt]) || current.lastSeenAt,
-    activity: update.activity ?? (update.status === current.status ? current.activity : undefined),
-    files: update.files || current.files,
-    intent: update.intent || current.intent,
-    runtimeState: update.runtimeState ?? (update.status === "busy" ? current.runtimeState : undefined),
-    goal: update.goal || current.goal,
-    // Never let a token-only usage patch wipe subscription quota meters.
-    usage: mergeLlmUsagePreferringQuotas(current.usage, update.usage),
-  };
-  // A frame that restates what we already hold must hand back the object we
-  // already hold. The Channel tree re-renders on Channel identity, so a new
-  // instance object for an unchanged report moves the sidebar and the
-  // timeline under the reader for no reported reason.
-  return sameValue(current, merged) ? current : merged;
-}
-
-export function replaceChannelMemberPresence(
-  channel: SerializedChannel,
-  member: string,
-  presence: ChannelMemberPresence
-): SerializedChannel {
-  return {
-    ...channel,
-    memberPresence: {
-      ...channel.memberPresence,
-      [member]: presence,
-    },
-  };
+/** A message is evidence of activity, never evidence of Channel residency. */
+export function patchChannelAgentPresenceFromMessage(channel: ChannelSnapshot,
+  entry: ChannelMessage): ChannelSnapshot {
+  if (entry.from.kind !== "agent" || !entry.from.instanceId ||
+      (entry.from.originChannelId && entry.from.originChannelId !== channel.id)) return channel;
+  const id = presenceInstanceId(entry.from.instanceId);
+  const current = channel.presence?.instances.get(id);
+  if (!current) return channel;
+  const presence = reduceChannelPresence(channel.presence!, { type: "patch_known", source: "message", instanceId: id,
+    patch: { lastSeenAt: entry.sentAt, status: "busy", rest: undefined, offlineReason: undefined,
+      goal: entry.from.goal || current.goal } });
+  if (presence === channel.presence) return channel;
+  return { ...channel, presence };
 }
 
 export function channelsAfterAgentInstanceOffline(
-  channels: SerializedChannel[],
+  channels: ChannelSnapshot[],
   input: {
     channelId?: string;
     agentId?: string;
     instanceId?: string;
     channelInstanceId?: string;
   }
-): SerializedChannel[] {
-  if (!input.channelId || !input.agentId) return channels;
-  const target = {
-    agentId: input.agentId,
-    instanceId: input.instanceId,
-    channelInstanceId: input.channelInstanceId,
-  };
+): ChannelSnapshot[] {
+  if (!input.channelId || !input.instanceId) return channels;
+  const target = { instanceId: input.instanceId };
   let changed = false;
   const next = channels.map((channel) => {
     if (channel.id !== input.channelId) return channel;
@@ -2736,45 +2378,25 @@ export function channelsAfterAgentInstanceOffline(
 }
 
 export function removeChannelAgentInstancePresence(
-  channel: SerializedChannel,
+  channel: ChannelSnapshot,
   input: {
-    agentId: string;
-    instanceId?: string;
-    channelInstanceId?: string;
+    instanceId: string;
   }
-): SerializedChannel {
-  const presence = channel.memberPresence?.[input.agentId];
-  if (!presence || presence.kind !== "agent") return channel;
-  const prior = presence.instances || [];
-  const nextInstances = prior.filter((instance) => {
-    if (input.instanceId && instance.id === input.instanceId) return false;
-    if (
-      !input.instanceId &&
-      input.channelInstanceId &&
-      instance.channelInstanceId === input.channelInstanceId
-    ) {
-      return false;
-    }
-    return true;
-  });
-  if (nextInstances.length === prior.length) return channel;
-  if (nextInstances.length === 0) {
-    const { [input.agentId]: _removed, ...rest } = channel.memberPresence || {};
-    return { ...channel, memberPresence: rest };
-  }
-  return replaceChannelMemberPresence(channel, input.agentId, {
-    ...presence,
-    instances: nextInstances,
-  });
+): ChannelSnapshot {
+  if (!input.instanceId) throw new TypeError("An exact Instance identity is required for removal");
+  if (!channel.presence) return channel;
+  const presence = reduceChannelPresence(channel.presence,
+    { type: "remove", instanceId: presenceInstanceId(input.instanceId) });
+  return presence === channel.presence ? channel : { ...channel, presence };
 }
 
 export type { ChannelReadStateUpdate } from "./channel-read-state";
 
 export function updateChannelReadState(
-  channels: SerializedChannel[],
+  channels: ChannelSnapshot[],
   channelId: string,
   update: ChannelReadStateUpdate
-): SerializedChannel[] {
+): ChannelSnapshot[] {
   return channels.map((channel) => (
     channel.id === channelId ? withChannelReadState(channel, update) : channel
   ));

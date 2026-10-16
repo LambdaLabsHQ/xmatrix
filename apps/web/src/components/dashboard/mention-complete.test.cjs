@@ -1,3 +1,4 @@
+const { FIXTURE_AGENT_REGISTRATION, decodeChannelSnapshot, firstChannelInstance, legacyChannelMembers } = require("./channel-presence-test-fixture.cjs");
 const assert = require("node:assert/strict");
 const test = require("node:test");
 require("./typescript-require.cjs").installTypeScriptRequire();
@@ -21,7 +22,7 @@ const {
 
 /** An open Channel in `space-1`; `overrides` carry what the test is about. */
 function openChannel(overrides = {}) {
-  return {
+  return decodeChannelSnapshot({
     id: "channel-1",
     spaceId: "space-1",
     mode: "open",
@@ -30,18 +31,18 @@ function openChannel(overrides = {}) {
     createdAt: "2026-05-07T00:00:00Z",
     updatedAt: "2026-05-07T00:00:00Z",
     ...overrides,
-  };
+  });
 }
 
 /** A Channel where Agent `name` has one live instance, `name:1`, carrying `instance`. */
 function agentPresenceChannel(name, status, instances) {
-  return openChannel({ memberPresence: { [`agent:${name}`]: { kind: "agent", status, label: name, instances } } });
+  return openChannel({ memberPresence: { [`agent:${name}`]: { registration: FIXTURE_AGENT_REGISTRATION, kind: "agent", status, label: name, instances } } });
 }
 
 function liveInstanceChannel(name, status, instance = {}) {
   return openChannel({
     memberPresence: {
-      [`agent:${name}`]: {
+      [`agent:${name}`]: { registration: FIXTURE_AGENT_REGISTRATION,
         kind: "agent",
         status,
         label: name,
@@ -102,7 +103,7 @@ function resolveAtEnd(text, channel, agents) {
  */
 function members(channel, agents) {
   if (!channel) return channel;
-  const memberPresence = { ...channel.memberPresence };
+  const memberPresence = { ...legacyChannelMembers(channel) };
   for (const agent of agents || []) {
     const presence = memberPresence[agent.id];
     if (!presence || presence.kind !== "agent") continue;
@@ -118,18 +119,18 @@ function members(channel, agents) {
       },
     };
   }
-  return { ...channel, memberPresence };
+  return decodeChannelSnapshot({ ...channel, memberPresence });
 }
 
 test("same-name Agent members collapse without retired launch targets", () => {
   const live = (id, harness, machineId) => ({ kind: "agent", label: harness,
     registration: { ownerUserId: "owner", machineId, harness },
     instances: [{ id, channelInstanceId: id.slice(-1), label: `${harness}:${id.slice(-1)}`, status: "online" }] });
-  const channel = { id: "channel", spaceId: "space", mode: "open", memberPresence: {
+  const channel = decodeChannelSnapshot({ id: "channel", spaceId: "space", mode: "open", memberPresence: {
     "channel:1": live("channel:1", "codex", "macbook"),
     "channel:2": live("channel:2", "codex", "server"),
     "channel:3": live("channel:3", "grok", "workstation"),
-  } };
+  } });
   const choices = channelMentionCandidates(channel).filter(item => item.kind === "agent");
   assert.deepEqual(choices.map(item => item.mention), ["codex", "grok"]);
   const actions = resolveMentionCompletion("@codex:", 7, channel);
@@ -141,11 +142,11 @@ test("same-name Agent members collapse without retired launch targets", () => {
 });
 
 test("same-name Instances are addressed by their Channel slot for reply, reborn and commands", () => {
-  const channel = { id: "channel", spaceId: "space", mode: "open", memberPresence: Object.fromEntries(
+  const channel = decodeChannelSnapshot({ id: "channel", spaceId: "space", mode: "open", memberPresence: Object.fromEntries(
     [2, 3].map((slot) => [`channel:${slot}`, { kind: "agent", label: "codex",
       registration: { ownerUserId: "owner", machineId: `machine-${slot}`, harness: "codex" },
       instances: [{ id: `channel:${slot}`, channelInstanceId: String(slot), label: `codex:${slot}`,
-        status: "online", capabilities: ["goal"] }] }])) };
+        status: "online", capabilities: ["goal"] }] }])) });
   const references = resolveMentionCompletion("@codex:3", 8, channel);
   assert.ok(references.candidates.some(candidate => candidate.mention === "codex:3"));
   assert.ok(references.candidates.some(candidate => candidate.mention === "codex:3:reborn"));
@@ -191,8 +192,10 @@ test("channelMentionCandidates does not rank Agent identities by aggregate prese
         kind: "user",
         status: "online",
       },
-      "agent:offline": { kind: "agent", status: "offline", label: "codex-offline" },
-      "agent:online": {
+      "agent:offline": { kind: "agent", status: "offline", label: "codex-offline",
+        registration: { ownerUserId: "owner", machineId: "machine", harness: "codex" },
+        instances: [{ id: "instance-offline", channelInstanceId: "2", status: "offline", connectedAt: "2026-05-07T00:00:00Z", lastSeenAt: "2026-05-07T00:00:00Z" }] },
+      "agent:online": { registration: FIXTURE_AGENT_REGISTRATION,
         kind: "agent",
         status: "online",
         label: "codex-online",
@@ -243,7 +246,7 @@ test("segmented completion does not offer unparseable member names", () => {
 test("channelMentionCandidates ranks members on this machine first and labels them", () => {
   const member = (id, label, machineId) => ({ kind: "agent", label,
     registration: { ownerUserId: "owner", machineId, harness: "codex" },
-    instances: [{ id, channelInstanceId: "1", label: `${label}:1`, status: "online" }] });
+    instances: [{ id, channelInstanceId: id.slice(-1), label: `${label}:${id.slice(-1)}`, status: "online" }] });
   const channel = openChannel({
     memberPresence: {
       "user:1": { kind: "user", status: "online", label: "Yiming Hu", email: "yiming@example.com" },
@@ -589,7 +592,7 @@ test("typed and restored retired launch suffixes have no candidates", () => {
 });
 
 test("retired launch suffixes do not query another member's directories", () => {
-  const channel = {
+  const channel = decodeChannelSnapshot({
     id: "channel-1",
     spaceId: "space-1",
     mode: "open",
@@ -597,7 +600,7 @@ test("retired launch suffixes do not query another member's directories", () => 
     createdBy: "user-1",
     createdAt: "2026-08-03T00:00:00.000Z",
     updatedAt: "2026-08-03T00:00:00.000Z",
-  };
+  });
   const agents = [{
     id: "agent:remote-codex",
     userId: "user-2",
@@ -882,12 +885,12 @@ for (const { label, name, type } of [
 }
 
 test("segmented completion exposes the exact advertised ZCode goal controls", () => {
-  const channel = {
+  const channel = decodeChannelSnapshot({
     id: "channel-1",
     spaceId: "space-1",
     mode: "open",
     memberPresence: {
-      "agent:zcode": {
+      "agent:zcode": { registration: FIXTURE_AGENT_REGISTRATION,
         kind: "agent",
         status: "online",
         label: "zcode",
@@ -910,7 +913,7 @@ test("segmented completion exposes the exact advertised ZCode goal controls", ()
         ],
       },
     },
-  };
+  });
   const agents = [
     {
       id: "agent:zcode",
@@ -992,7 +995,7 @@ test("channelMentionCandidates carries member avatar URLs into mention suggestio
 });
 
 test("channelMentionCandidates joins visible Human ids with the Space member directory", () => {
-  const channel = {
+  const channel = decodeChannelSnapshot({
     id: "channel-1",
     spaceId: "space-1",
     mode: "closed",
@@ -1012,7 +1015,7 @@ test("channelMentionCandidates joins visible Human ids with the Space member dir
     createdBy: "user-online",
     createdAt: "2026-08-03T00:00:00Z",
     updatedAt: "2026-08-03T00:00:00Z",
-  };
+  });
   const space = {
     id: "space-1",
     members: [
@@ -1673,12 +1676,12 @@ test("a start action never inherits the locality of the Agent identity", () => {
    different Channel. An instance belongs to exactly one Channel: the thread can
    only ever start its own. */
 function threadDraftParentChannel() {
-  return {
+  return decodeChannelSnapshot({
     id: "channel-parent",
     spaceId: "space-1",
     mode: "open",
     memberPresence: {
-      "agent:codex": {
+      "agent:codex": { registration: FIXTURE_AGENT_REGISTRATION,
         kind: "agent",
         status: "online",
         label: "codex",
@@ -1698,7 +1701,7 @@ function threadDraftParentChannel() {
     createdBy: "user-1",
     createdAt: "2026-08-16T00:00:00Z",
     updatedAt: "2026-08-16T00:00:00Z",
-  };
+  });
 }
 
 const THREAD_DRAFT_AGENTS = [
@@ -1783,20 +1786,20 @@ test("Agent references describe channel instances without promising a legacy lau
 });
 
 test("live future controls complete from parameter snapshots and disappear on withdrawal", () => {
-  const channel = members({ id: "channel", memberPresence: { a: { kind: "agent", label: "kimi", instances: [{ id: "i", channelInstanceId: "1", status: "online",
-    parameters: [{ id: "future-speed", label: "Speed", options: ["turbo", "steady"] }] }] } } }, [{ id: "a", name: "kimi" }]);
+  const channel = members(decodeChannelSnapshot({ id: "channel", memberPresence: { a: { registration: FIXTURE_AGENT_REGISTRATION, kind: "agent", label: "kimi", instances: [{ id: "i", channelInstanceId: "1", status: "online",
+    parameters: [{ id: "future-speed", label: "Speed", options: ["turbo", "steady"] }] }] } } }), [{ id: "a", name: "kimi" }]);
   const resolve = query => { const draft = "@" + query; return resolveMentionCompletion(draft, draft.length, channel); };
   const options = resolve("kimi:1 /config future-speed ");
   assert.deepEqual(options.candidates.map(candidate => candidate.name), ["turbo", "steady"]);
   assert.equal(options.candidates[0].mention, "kimi:1 /config future-speed turbo");
-  channel.memberPresence.a.instances[0].parameters = [];
+  firstChannelInstance(channel).parameters = [];
   assert.deepEqual(resolve("kimi:1 /config future-speed ").candidates, []);
 });
 
 test("parameter completion shows provider labels and descriptions but inserts the value id", () => {
-  const channel = members({ id: "channel", memberPresence: { a: { kind: "agent", label: "codex", instances: [{ id: "i", channelInstanceId: "1", status: "online",
+  const channel = members(decodeChannelSnapshot({ id: "channel", memberPresence: { a: { registration: FIXTURE_AGENT_REGISTRATION, kind: "agent", label: "codex", instances: [{ id: "i", channelInstanceId: "1", status: "online",
     parameters: [{ id: "serviceTier", label: "Service tier", description: "Speed and price", options: ["priority", "default"],
-      choices: [{ value: "priority", label: "Fast", description: "1.5x speed" }, { value: "default" }], currentValue: "default", notice: "cooldown" }] }] } } },
+      choices: [{ value: "priority", label: "Fast", description: "1.5x speed" }, { value: "default" }], currentValue: "default", notice: "cooldown" }] }] } } }),
   [{ id: "a", name: "codex" }]);
   const resolve = query => { const draft = "@" + query; return resolveMentionCompletion(draft, draft.length, channel); };
   const list = resolve("codex:1 /config ");
@@ -1810,8 +1813,8 @@ test("parameter completion shows provider labels and descriptions but inserts th
 });
 
 test("composer targets and operations come from interaction descriptors the registry accepts", () => {
-  const channel = { id: "channel-1", spaceId: "space-1", mode: "open", memberPresence: {}, createdBy: "user-1",
-    createdAt: "2026-05-07T00:00:00Z", updatedAt: "2026-05-07T00:00:00Z" };
+  const channel = decodeChannelSnapshot({ id: "channel-1", spaceId: "space-1", mode: "open", memberPresence: {}, createdBy: "user-1",
+    createdAt: "2026-05-07T00:00:00Z", updatedAt: "2026-05-07T00:00:00Z" });
   const apps = [{ id: "github", name: "GitHub", status: "available", actions: [
     { id: "create_issue", label: "Create issue" }, { id: "Not An Operation", label: "Broken" }] }];
   const space = { id: "space-1", members: [] };
@@ -1834,8 +1837,8 @@ test("a conversation's targets are checked once while they stay the same, and an
   assert.equal(next.registry, first.registry);
   assert.deepEqual(next.candidates, first.candidates);
   // Someone new to address is checked and resolved.
-  const joined = openChannel({ memberPresence: { ...working("Writing").memberPresence,
-    "agent:claude": { kind: "agent", status: "busy", label: "claude", instances: [] } } });
+  const joined = openChannel({ memberPresence: { ...legacyChannelMembers(working("Writing")),
+    "agent:claude": { registration: FIXTURE_AGENT_REGISTRATION, kind: "agent", status: "busy", label: "claude", instances: [{ id: "instance-claude", channelInstanceId: "2", status: "busy" }] } } });
   const widened = channelInteractionTargets(joined);
   assert.notEqual(widened.registry, first.registry);
   assert.equal(widened.registry.resolve("claude", "launch").status, "resolved");

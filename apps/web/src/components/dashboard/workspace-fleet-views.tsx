@@ -155,7 +155,7 @@ import type {
   ObservabilityEvent,
   SerializedAppConnectorConnection,
   SerializedAppConnectorExecution,
-  SerializedChannel,
+  ChannelSnapshot,
   SerializedSpace,
   SerializedWorkspace,
 } from "@xmatrix/protocol";
@@ -1089,7 +1089,7 @@ export function AppsView({
   connectors: AppConnectorManifest[];
   currentSpace: SerializedSpace | null;
   token?: string;
-  channels: SerializedChannel[];
+  channels: ChannelSnapshot[];
 }) {
   const { user } = useAuth();
   const queryClient = useQueryClient();

@@ -25,7 +25,7 @@ import {
   type SpaceLaunchTargetsResponse,
   type AgentInvocationSelection,
   type AppConnectorCompletionResponse,
-  type SerializedChannel,
+  type ChannelSnapshot,
   type SerializedSpace,
   type SerializedWorkspace,
 } from "@xmatrix/protocol";
@@ -111,7 +111,7 @@ export type ComposerContextFields = {
   onInvocationSelect?: (value: string, selection: AgentInvocationSelection, label?: string) => void;
   /** Keeps a picked channel or page shown by name; without it the draft holds the id token itself. */
   onReferenceSelect?: (value: string, binding: ComposerReferenceBinding) => void;
-  channel: SerializedChannel | null;
+  channel: ChannelSnapshot | null;
   space: SerializedSpace | null;
   token: string | null;
   workspaces: SerializedWorkspace[];

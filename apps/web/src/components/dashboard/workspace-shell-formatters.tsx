@@ -1,4 +1,6 @@
 "use client";
+import { usageWithoutQuota, accountQuotaUsageFromCandidates, mergeUsageAttributes } from "@xmatrix/protocol";
+export { accountQuotaUsageFromCandidates, mergeAccountLevelLlmUsage, mergeUsageAttributes } from "@xmatrix/protocol";
 export { exchangeDesktopCliSession } from "@/lib/desktop/session-exchange";
 import { attachmentMediaType, directMediaLink } from "./attachment-media-type";
 import { MediaLink } from "./media-player";
@@ -70,7 +72,7 @@ import type {
   ChannelMemberPresence,
   ObservabilityEvent,
   SerializedAgentInstance,
-  SerializedChannel,
+  ChannelSnapshot,
   SerializedSpace,
 } from "@xmatrix/protocol";
 
@@ -689,67 +691,12 @@ export function providerQuotaUsages(usage?: LlmUsage): LlmQuotaUsage[] {
     : [];
 }
 
-function usageWithoutQuota(usage?: LlmUsage): LlmUsage | undefined {
-  if (!usage) return undefined;
-  const {
-    quotaSource: _quotaSource,
-    quotaState: _quotaState,
-    quotaUsages: _quotaUsages,
-    quotaObservedAt: _quotaObservedAt,
-    quotaAccount: _quotaAccount,
-    ...localUsage
-  } = usage;
-  return Object.keys(localUsage).length > 0 ? localUsage : undefined;
-}
-
-/**
- * Take each usage attribute from the first candidate that reports it. Quota,
- * context, and token counts are independent facts: a source that lacks one of
- * them must not hide the others.
- */
-export function mergeUsageAttributes(...candidates: Array<LlmUsage | undefined>): LlmUsage | undefined {
-  const merged: Record<string, unknown> = {};
-  for (const usage of candidates) {
-    if (!usage) continue;
-    for (const [key, value] of Object.entries(usage)) {
-      if (value === undefined || value === null) continue;
-      if (Array.isArray(value) && value.length === 0) continue;
-      if (merged[key] === undefined) merged[key] = value;
-    }
-  }
-  return Object.keys(merged).length > 0 ? (merged as LlmUsage) : undefined;
-}
-
 /** Prefer any usage that still has displayable 5h/1w/2h/1mo meters. */
 function preferredQuotaUsage(...candidates: Array<LlmUsage | undefined>): LlmUsage | undefined {
   for (const usage of candidates) {
     if (hasQuotaMeterUsage(usage)) return usage;
   }
   return candidates.find((usage) => Boolean(usage));
-}
-
-/** The server supplies whole pool readings; select by observation time, never by usage magnitude. */
-export function accountQuotaUsageFromCandidates(...candidates: Array<LlmUsage | undefined>): LlmUsage | undefined {
-  let latest: LlmUsage | undefined;
-  for (const usage of candidates) {
-    if (usage?.quotaState !== "unknown" && (usage?.quotaSource !== "provider_api" || !usage.quotaUsages?.length)) continue;
-    const time = Date.parse(usage.quotaObservedAt ?? "");
-    if (usage.quotaState !== "unknown" && !Number.isFinite(time)) continue;
-    const previous = Date.parse(latest?.quotaObservedAt ?? "");
-    if (!latest || time > previous || (!Number.isFinite(previous) && Number.isFinite(time)) ||
-        (time === previous && usage.quotaState === "unknown")) latest = usage;
-  }
-  if (!latest) return undefined;
-  return { quotaState: latest.quotaState ?? "observed", quotaObservedAt: latest.quotaObservedAt,
-    ...(latest.quotaState !== "unknown" ? { quotaSource: "provider_api", quotaUsages: latest.quotaUsages,
-      ...(latest.quotaAccount ? { quotaAccount: latest.quotaAccount } : {}) } : {}) };
-}
-
-/** Apply a canonical snapshot. Delayed frames cannot regress the pool observation. */
-export function mergeAccountLevelLlmUsage(current?: LlmUsage, update?: LlmUsage): LlmUsage | undefined {
-  if (!update) return current;
-  const quota = accountQuotaUsageFromCandidates(update, current);
-  return mergeUsageAttributes(usageWithoutQuota(update), usageWithoutQuota(current), quota);
 }
 
 export function agentMemberUsage(presence: ChannelMemberPresence): LlmUsage | undefined {
@@ -920,7 +867,7 @@ export function optimisticDesktopUpdateInstallStatus(status: DesktopUpdateStatus
 /* mirror of the hub's channelReplyPreview, for live local updates */
 export function channelLastMessagePreviewFromEntry(
   entry: ChannelMessage
-): SerializedChannel["lastMessage"] {
+): ChannelSnapshot["lastMessage"] {
   const body = entry.recalledAt
     ? "Message recalled"
     : (entry.body || "").trim().replace(/\s+/g, " ");
@@ -977,7 +924,7 @@ export function metadataString(metadata: Record<string, unknown> | undefined, ke
   return typeof value === "string" ? value : "";
 }
 
-export function attentionSummaryFromEvent(event: ObservabilityEvent): SerializedChannel["attention"] | undefined {
+export function attentionSummaryFromEvent(event: ObservabilityEvent): ChannelSnapshot["attention"] | undefined {
   const value = event.metadata?.attention;
   return isChannelAttentionSummary(value) ? value : undefined;
 }
@@ -988,7 +935,7 @@ export function validChannelReadSequence(value: unknown): number | undefined {
     : undefined;
 }
 
-export function isChannelAttentionSummary(value: unknown): value is NonNullable<SerializedChannel["attention"]> {
+export function isChannelAttentionSummary(value: unknown): value is NonNullable<ChannelSnapshot["attention"]> {
   if (!value || typeof value !== "object") return false;
   const record = value as Record<string, unknown>;
   return (

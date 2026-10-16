@@ -30,14 +30,7 @@ test("a provider read time is a short parseable timestamp", () => {
 });
 
 test("an older quota sample does not replace a newer one", () => {
-  const shell = loadWorkspaceShellModuleMap(__dirname);
-  const merge = extractFunctionFromShellModules(shell, "mergeLlmUsagePreferringQuotas").source;
-  const { mergeLlmUsagePreferringQuotas } = evaluateExtractedSource(`
-    function hasQuotaMeterUsage(usage) {
-      return usage?.quotaSource === "provider_api" && Array.isArray(usage.quotaUsages) && usage.quotaUsages.length > 0;
-    }
-    ${merge}
-  `);
+  const { mergeLlmUsagePreferringQuotas } = require("@xmatrix/protocol");
   const current = {
     inputTokens: 10,
     quotaSource: "provider_api",
@@ -62,9 +55,7 @@ test("an older quota sample does not replace a newer one", () => {
 });
 
 test("token usage does not keep a quota observation time", () => {
-  const shell = loadWorkspaceShellModuleMap(__dirname);
-  const source = extractFunctionFromShellModules(shell, "usageWithoutQuota").source;
-  const { usageWithoutQuota } = evaluateExtractedSource(`${source}\nexports.usageWithoutQuota = usageWithoutQuota;`);
+  const { usageWithoutQuota } = require("@xmatrix/protocol");
   assert.deepEqual(usageWithoutQuota({
     inputTokens: 3,
     quotaSource: "provider_api",
