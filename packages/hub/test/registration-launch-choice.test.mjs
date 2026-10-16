@@ -55,7 +55,7 @@ test('one harness has no fit to score; the location and its one list of models a
   assert.deepEqual(result.parameterEvidence.choices.map(choice => choice.key), ['modelEffort', 'workspace']);
   const { digestCanonicalCloneCborV1 } = await import('@xmatrix/protocol');
   assert.equal(result.parameterEvidence.inputDigest, await digestCanonicalCloneCborV1(calls), "the evidence is what Jev read");
-  assert.equal(result.parameterEvidence.rubricVersion, 'registration-parameters-v10');
+  assert.equal(result.parameterEvidence.rubricVersion, 'registration-parameters-v11');
   assert.equal(result.parameterEvidence.harness, undefined);
   assert.equal(result.parameterEvidence.fit, undefined);
   assert.deepEqual(result.parameterEvidence.placement.ranking.map(item => item.machineId), ['first', 'last']);
@@ -352,13 +352,15 @@ test('authorized channel context reaches both decisions while explicit current c
   const selected = await registrationLaunchChooser(async request => { calls.push(request); return answer(request); },
     async sequence => { assert.equal(sequence, 10); return context; })({
       message, sourceSequence: 10, tags: { pwd: '/projects/a', model: 'small' }, candidates: twoHarnesses });
-  assert.equal(calls.length, 2);
+  // The model the message names is the only one left, so only the harness's fit is asked.
+  assert.equal(calls.length, 1);
   for (const call of calls) {
     assert.equal(call.state.message, message);
     assert.deepEqual(call.state.channelContext, context);
   }
   assert.equal(selected.workspaceReference, 'workspace-a');
   assert.equal(selected.model, 'small');
+  assert.equal(selected.parameterEvidence.choices.find(choice => choice.key === 'modelEffort').only, true);
 });
 
 test('registration failures identify the actual phase without retaining provider or context text', async () => {
@@ -429,6 +431,29 @@ test('a conversation co-writing a page is offered only the private managed direc
   const named = await registrationLaunchChooser(async input => { calls.push(input); return answer(input); })({
     message: '@codex repo:owner/project', tags: { repo: 'owner/project' }, candidates: [withRepo], managedOnly: true });
   assert.equal(named.workspaceReference, 'repo:owner/project');
+});
+
+test('with nothing left to choose Jev is not called, and each choice is recorded as the only option it was', async () => {
+  let calls = 0;
+  const onlyOne = { ...candidates[0], models: [] };
+  const result = await registrationLaunchChooser(async input => { calls++; return answer(input); })({
+    message: '@codex launch:force co-write this page', tags: { launch: 'force' }, candidates: [onlyOne],
+    managedWorkspace: true, managedOnly: true });
+  assert.equal(calls, 0, "one harness, one directory, the runtime's own model: no question is left");
+  assert.equal(result.workspaceReference, undefined);
+  assert.equal(result.useRuntimeDefaultModel, true);
+  assert.deepEqual(result.parameterEvidence.choices,
+    [{ key: 'workspace', selected: 'workspace_0', probabilities: { workspace_0: 1 }, only: true }]);
+  assert.equal(result.parameterEvidence.rubricVersion, 'registration-parameters-v11');
+  const { parseLaunchParameterEvidence } = await import('@xmatrix/protocol');
+  assert.deepEqual(parseLaunchParameterEvidence(result.parameterEvidence), result.parameterEvidence);
+  // A choice beside it is still Jev's to make, and the one-option question goes with it as before.
+  const asked = [];
+  const withModels = await registrationLaunchChooser(async input => { asked.push(input); return answer(input); })({
+    message: '@codex launch:force co-write this page', tags: { launch: 'force' }, candidates: [candidates[0]],
+    managedWorkspace: true, managedOnly: true });
+  assert.deepEqual(asked.map(call => Object.keys(call.questions)), [['workspace', 'modelEffort']]);
+  assert.equal(withModels.parameterEvidence.choices.some(choice => choice.only), false);
 });
 
 const modelOptions = call => Object.values(call.questions.modelEffort.criteria).map(value => JSON.parse(value));

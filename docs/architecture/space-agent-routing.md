@@ -192,7 +192,23 @@ field is additive; existing consumers may omit it.
 Jev never sees machine load, provider quota or allocation counts. Explicit
 machine, workspace and parameter constraints still narrow the candidates first,
 and a measured exhausted quota still excludes an environment. When the chosen
-environment declares models, a second call chooses its model and effort.
+environment declares models, Jev chooses its model and effort. If one harness
+remains and all its environments offer the same models, it chooses them in the
+first call, because the location changes nothing about the options. Otherwise a
+second call chooses them for the environment that runs the work.
+
+A question with one option is answered by that option. A call in which every
+question has one option is not made, so it costs no model round trip and stores
+no decision evidence. Typical cases are a `launch:force` summon of one harness
+into a single location, using the runtime's own model or a model the message
+names. From `registration-parameters-v11`, such a choice is recorded `only`: its
+answer, with certainty 1, as a fact rather than a reading. A launch for which
+Jev read nothing records its decision as `deterministic`.
+
+A launch from a conversation that co-writes a page (an active
+`data.page_co_writing` row) is offered only the private managed directory. No
+repository list is read and nothing is checked out, so the Agent starts at
+once. A `repo:` or `pwd:` in the message still gets what it names.
 
 An owner can keep a Machine out of automatic assignment (`data.machines.auto_assign`
 false; the Machine page switch or `xmatrix machine auto-assign off`). Its

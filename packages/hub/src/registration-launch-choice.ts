@@ -320,8 +320,20 @@ export function registrationLaunchChooser(evaluate: RoutingEvaluator, readContex
     const inputs = [{ state, questions: { ...leading, ...Object.fromEntries(fitQuestions.slice(0, room)) } },
       ...Array.from({ length: Math.ceil(Math.max(0, fitQuestions.length - room) / 8) }, (_, index) =>
         ({ state, questions: Object.fromEntries(fitQuestions.slice(room + index * 8, room + (index + 1) * 8)) }))];
+    // A question with one option is answered by it. A call whose every question is one is not made:
+    // there is nothing for Jev to read, and its answers are recorded as the only options they were.
+    const unasked = new Set<string>();
+    const settle = async (input: Parameters<typeof evaluateRoutingChoices>[0]): Promise<Record<string, RoutingAnswer>> => {
+      const options = Object.entries(input.questions).map(([key, question]) =>
+        [key, question.type === "choice" ? Object.keys(question.criteria) : []] as const);
+      if (!options.every(([, choices]) => choices.length === 1)) return evaluateRoutingChoices(input, evaluate);
+      return Object.fromEntries(options.map(([key, [choice]]) => {
+        unasked.add(key);
+        return [key, { choice: choice!, probabilities: { [choice!]: 1 } }];
+      }));
+    };
     let identity: Record<string, RoutingAnswer>;
-    try { identity = Object.assign({}, ...await Promise.all(inputs.map(input => evaluateRoutingChoices(input, evaluate)))); }
+    try { identity = Object.assign({}, ...await Promise.all(inputs.map(settle))); }
     catch (error) { throw selectionFailure("environment", error); }
     const intent = judgeIntent || judgeStart ? choiceAnswer(identity.intent) : undefined;
     const refused = judgeIntent ? summonIntentRejection(intent!.choice) : undefined;
@@ -350,7 +362,7 @@ export function registrationLaunchChooser(evaluate: RoutingEvaluator, readContex
     const request = models.length && !modelsUpFront ? { state, questions: { modelEffort: modelQuestion(models) } } : undefined;
     let modelAnswer: RoutingChoice | undefined = modelsUpFront ? choiceAnswer(identity.modelEffort) : undefined;
     if (request) {
-      try { modelAnswer = choiceAnswer((await evaluateRoutingChoices(request, evaluate)).modelEffort); }
+      try { modelAnswer = choiceAnswer((await settle(request)).modelEffort); }
       catch (error) { throw selectionFailure("parameter", error); }
     }
     const model = modelAnswer ? models[Number(modelAnswer.choice.slice("model_".length))]! : undefined;
@@ -370,7 +382,7 @@ export function registrationLaunchChooser(evaluate: RoutingEvaluator, readContex
       ...(tags.parameters ? { parameters: launchHarnessParameters(tags) } : {}),
       ...(!model ? { useRuntimeDefaultModel: true } : {}), ...(effort ? { effort } : {}),
       ...(workspaceReference !== undefined ? { workspaceReference } : {}), parameterEvidence: {
-      rubricVersion: "registration-parameters-v10", evaluatedAt: new Date().toISOString(),
+      rubricVersion: "registration-parameters-v11", evaluatedAt: new Date().toISOString(),
       // The calls share one state; a digest reads each as the copy Jev received.
       inputDigest: await digestCanonicalCloneCborV1(JSON.parse(JSON.stringify(request ? [...inputs, request] : inputs))),
       ...(Object.keys(scores).length ? { fit: { inputDigest: await digestCanonicalCloneCborV1(JSON.parse(JSON.stringify(inputs))), scores } } : {}),
@@ -387,8 +399,10 @@ export function registrationLaunchChooser(evaluate: RoutingEvaluator, readContex
       selections: { ...(model ? { model: model.model } : {}), ...(effort ? { effort } : {}),
         workspaceKind: workspace.repo ? "repo" : workspace.reference === undefined ? "managed" : "local-path",
         ...(workspace.repo ? { repo: workspace.repo } : {}) },
-      choices: [...(modelAnswer ? [{ key: "modelEffort" as const, selected: modelAnswer.choice, probabilities: modelAnswer.probabilities }] : []),
-        { key: "workspace" as const, selected: workspaceAnswer.choice, probabilities: workspaceAnswer.probabilities }],
+      choices: [...(modelAnswer ? [{ key: "modelEffort" as const, selected: modelAnswer.choice, probabilities: modelAnswer.probabilities,
+        ...(unasked.has("modelEffort") ? { only: true as const } : {}) }] : []),
+        { key: "workspace" as const, selected: workspaceAnswer.choice, probabilities: workspaceAnswer.probabilities,
+          ...(unasked.has("workspace") ? { only: true as const } : {}) }],
     } };
   };
 }

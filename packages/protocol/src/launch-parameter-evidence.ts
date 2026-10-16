@@ -48,9 +48,12 @@ export interface LaunchParameterEvidence {
    * reported form, not a Jev option. Older records may still carry the choice.
    * `registration-parameters-v9` omits modelEffort and selections.model when
    * no models are declared, leaving the runtime's default model untouched;
-   * selections.effort is then the effort the author asked for on that model. */
+   * selections.effort is then the effort the author asked for on that model.
+   * From `registration-parameters-v11`, a choice with one option is `only`: that
+   * option is its answer, and Jev is not asked it; when every choice is, Jev
+   * is not called at all. */
   choices: Array<{ key: "modelEffort" | "workspace" | "placement";
-    selected: string; probabilities: Record<string, number> }>;
+    selected: string; probabilities: Record<string, number>; only?: true }>;
 }
 
 /** The model's probabilities as recorded, over handles matching `handle`.
@@ -131,8 +134,8 @@ export function parseLaunchParameterEvidence(value: unknown): LaunchParameterEvi
       !row.selections || typeof row.selections !== "object" || Array.isArray(row.selections) ||
       !Array.isArray(row.choices) || row.choices.length < 1 || row.choices.length > 3) return undefined;
   const selected = row.selections as Record<string, unknown>;
-  const skipsModel = ["registration-parameters-v9", "registration-parameters-v10"].includes(row.rubricVersion) &&
-    selected.model === undefined;
+  const skipsModel = ["registration-parameters-v9", "registration-parameters-v10", "registration-parameters-v11"]
+    .includes(row.rubricVersion) && selected.model === undefined;
   if ((!skipsModel && !text(selected.model, 160)) ||
       selected.effort !== undefined && !text(selected.effort, 80) ||
       !["repo", "local-path", "managed"].includes(String(selected.workspaceKind)) ||
@@ -140,12 +143,16 @@ export function parseLaunchParameterEvidence(value: unknown): LaunchParameterEvi
   const choices: LaunchParameterEvidence["choices"] = [];
   for (const raw of row.choices) {
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
-    const { key, selected: choice, probabilities } = raw as Record<string, unknown>;
+    const { key, selected: choice, probabilities, only } = raw as Record<string, unknown>;
     if (!["modelEffort", "workspace", "placement"].includes(String(key)) || choices.some(item => item.key === key)) return undefined;
     const parsed = distribution(probabilities, key === "modelEffort" ? /^model_\d{1,3}$/u
       : key === "workspace" ? /^workspace_\d{1,3}$/u : /^placement_(?:any|stationary)$/u, choice);
     if (!parsed) return undefined;
-    choices.push({ key: key as LaunchParameterEvidence["choices"][number]["key"], selected: choice as string, probabilities: parsed });
+    // The only option is certain by itself, not by anyone's reading.
+    if (only !== undefined && (only !== true || row.rubricVersion !== "registration-parameters-v11" ||
+        Object.keys(parsed).length !== 1 || parsed[choice as string] !== 1)) return undefined;
+    choices.push({ key: key as LaunchParameterEvidence["choices"][number]["key"], selected: choice as string, probabilities: parsed,
+      ...(only ? { only: true as const } : {}) });
   }
   if (choices.some(item => item.key === "modelEffort") === skipsModel || !choices.some(item => item.key === "workspace")) return undefined;
   const harness = stage(row.harness, HARNESS);

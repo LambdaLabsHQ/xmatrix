@@ -129,7 +129,8 @@ export function RoutingDecisionBoard({ decision, compact = false, evidenceOnly =
       {!evidenceOnly && (decision.parameters.fit || decision.parameters.placement) && <JointPlacement parameters={decision.parameters} />}
       {decision.parameters.environment && <DecisionStage label="Environment" stage={decision.parameters.environment} />}
       {decision.parameters.choices.map(choice => <p key={choice.key}>{choice.key}: {choice.selected}
-        {Object.entries(choice.probabilities).map(([option, probability]) => <span key={option}> · {option}: {(probability * 100).toFixed(1)}%</span>)}
+        {choice.only ? <span> · the only option; Jev was not asked</span>
+          : Object.entries(choice.probabilities).map(([option, probability]) => <span key={option}> · {option}: {(probability * 100).toFixed(1)}%</span>)}
       </p>)}
       <code>Input digest: {decision.parameters.inputDigest}</code>
     </details>}
