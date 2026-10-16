@@ -12,16 +12,17 @@ export async function wakeAgentLaunchCoordinator(env: Pick<Env, "RELAY_POSTGRES_
   // A thrown wake (the coordinator reset by a deploy) is the same handover
   // failure as a refused one: the committed work waits for the retry.
   const response = await wakeAgentLaunchChannel(env.RELAY_POSTGRES_AGENT_LAUNCH_CHANNEL, { channelId, work })
-    .catch(() => { throw new AgentLaunchHandoverUnavailable(); });
+    .catch((cause: unknown) => { throw new AgentLaunchHandoverUnavailable(undefined, cause); });
   if (!response.ok) throw new AgentLaunchHandoverUnavailable(response.status);
 }
 
 /** The Channel coordinator could not be told about committed work. The
  *  request that committed it must fail so its idempotent retry tells it. */
 export class AgentLaunchHandoverUnavailable extends ServiceUnavailable {
-  constructor(status?: number) {
+  constructor(status?: number, cause?: unknown) {
     super("agent_launch_handover_unavailable",
       `Agent Launch Channel coordinator is unavailable${status ? ` (${status})` : ""}`);
+    if (cause !== undefined) this.cause = cause;
   }
 }
 

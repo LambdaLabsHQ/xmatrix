@@ -52,6 +52,12 @@ a startup-failure phase).
 When an Instance sleeps is the Hub's decision; the daemon reports facts and
 carries the decision out after its own check.
 
+The resting write and the Channel coordinator handoff are separate commits.
+If the handoff fails, the next presence retries it for the retained sleep
+deadline, even when the database write was already committed. It does not
+restart the idle window. A successful handoff deduplicates repeated presence;
+failures retain their original cause for diagnosis.
+
 **Facts.** Every presence update the Run sends carries its live status and
 `runtimeState` (whether a turn runs, and the open waits it reports). The Hub
 treats the Run as resting when its status is not `busy`, no turn runs and
