@@ -6,7 +6,8 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { requestAccountPassword, resetAccountPassword } from "@/lib/auth-client";
 import { userErrorMessage } from "@/lib/user-facing-error";
-import { Button } from "@/components/ui/button";
+import { ShieldCheck } from "lucide-react";
+import { AuthHeading, AuthLinks, AuthPrimaryButton, AuthRequest, AuthShell } from "@/components/auth/auth-shell";
 import { Input } from "@/components/ui/input";
 
 function PasswordForm({ reset }: { reset: boolean }) {
@@ -49,40 +50,42 @@ function PasswordForm({ reset }: { reset: boolean }) {
     } finally { setBusy(false); }
   }
 
-  return <main className="site-page site-login flex min-h-screen items-center justify-center px-4 py-12">
-    <section className="w-full max-w-md rounded-2xl border border-border bg-card p-6 shadow-xl">
-      <h1 className="text-2xl font-bold">{reset ? "Choose a password" : "Sign in with password"}</h1>
-      <p className="mt-2 text-sm text-muted-foreground">{reset
-        ? "Use the email of an existing account. Your email must be verified before password sign-in."
-        : "For existing accounts with a verified email and a password."}</p>
-      {!complete && <form onSubmit={submit} className="mt-6 space-y-4">
-        {handoff && <div className="rounded-lg border border-border bg-muted/40 p-3 text-sm">
-          <p>Signing in will connect the requesting device. Continue only if you started this sign-in on your device.</p>
-          {params.get("user_code") && <p className="my-2 font-mono font-bold">{params.get("user_code")}</p>}
-          <label className="mt-2 flex items-start gap-2"><input type="checkbox" checked={handoffConfirmed}
-            onChange={event => setHandoffConfirmed(event.target.checked)} />I checked the request and code on my device.</label>
-        </div>}
-        {!token && <label className="block space-y-2"><span>Email address</span>
-          <Input type="email" autoComplete="username" required value={email} onChange={e => setEmail(e.target.value)} /></label>}
-        {(!reset || token) && <label className="block space-y-2"><span>{reset ? "New password" : "Password"}</span>
-          <Input type="password" autoComplete={reset ? "new-password" : "current-password"} minLength={reset ? 16 : undefined}
-            maxLength={128} required value={password} onChange={e => setPassword(e.target.value)} /></label>}
-        {token && <label className="block space-y-2"><span>Confirm password</span>
-          <Input type="password" autoComplete="new-password" minLength={16} maxLength={128} required
-            value={confirmation} onChange={e => setConfirmation(e.target.value)} /></label>}
-        <Button className="w-full" disabled={busy || (handoff && !handoffConfirmed)} type="submit">{busy ? "Please wait…"
-          : token ? "Save password" : reset ? "Send password link" : "Sign in"}</Button>
-      </form>}
-      {message && <p role="status" className="mt-4 text-sm">{message}</p>}
-      <div className="mt-5 flex flex-wrap gap-4 text-sm">
-        <Link href={loginHref} className="underline">Use a login code or Google</Link>
-        {(!reset || complete) && <Link href={complete ? "/login/password" : "/reset-password"} className="underline">
-          {complete ? "Sign in with password" : "Choose or reset password"}</Link>}
-      </div>
-    </section>
-  </main>;
+  return <AuthShell>
+    <AuthHeading title={token ? "Choose a new password" : reset ? "Set or reset your password" : "Sign in with password"}>
+      {token
+        ? "Use at least 16 characters."
+        : reset
+          ? "Enter the email of your account. Your email must be verified before you can sign in with a password."
+          : "For accounts that already have a password and a verified email."}
+    </AuthHeading>
+    {!complete && <form onSubmit={submit} className="auth-stack">
+      {handoff && <AuthRequest icon={<ShieldCheck className="size-4" />} title="Signing in connects the device that asked"
+        code={params.get("user_code")}>
+        <label className="auth-check"><input type="checkbox" checked={handoffConfirmed}
+          onChange={event => setHandoffConfirmed(event.target.checked)} />I checked the request and code on my device.</label>
+      </AuthRequest>}
+      {!token && <label className="auth-field"><span className="auth-label">Email address</span>
+        <Input className="auth-input" type="email" autoComplete="username" required autoFocus value={email}
+          onChange={e => setEmail(e.target.value)} /></label>}
+      {(!reset || token) && <label className="auth-field"><span className="auth-label">{reset ? "New password" : "Password"}</span>
+        <Input className="auth-input" type="password" autoComplete={reset ? "new-password" : "current-password"}
+          minLength={reset ? 16 : undefined} maxLength={128} required value={password}
+          onChange={e => setPassword(e.target.value)} /></label>}
+      {token && <label className="auth-field"><span className="auth-label">Confirm password</span>
+        <Input className="auth-input" type="password" autoComplete="new-password" minLength={16} maxLength={128} required
+          value={confirmation} onChange={e => setConfirmation(e.target.value)} /></label>}
+      <AuthPrimaryButton disabled={busy || (handoff && !handoffConfirmed)} type="submit">{busy ? "Please wait…"
+        : token ? "Save password" : reset ? "Send password link" : "Sign in"}</AuthPrimaryButton>
+    </form>}
+    {message && <p role="status" className="auth-hint">{message}</p>}
+    <AuthLinks>
+      <Link href={loginHref}>Use a login code or Google</Link>
+      {(!reset || complete) && <Link href={complete ? "/login/password" : "/reset-password"}>
+        {complete ? "Sign in with password" : "Forgot or never set a password?"}</Link>}
+    </AuthLinks>
+  </AuthShell>;
 }
 
 export function PasswordAccess({ reset = false }: { reset?: boolean }) {
-  return <Suspense fallback={<p>Loading…</p>}><PasswordForm reset={reset} /></Suspense>;
+  return <Suspense fallback={null}><PasswordForm reset={reset} /></Suspense>;
 }
