@@ -133,6 +133,11 @@ export interface PageSessionConnection {
    * document; it hears turns and answers with the Agent's words.
    */
   coWriter?: boolean;
+  /**
+   * A co-writer that streams what its Agent writes from a conversation (`⟦write page:<id>⟧`): it opens
+   * its turns itself and is asked nothing.
+   */
+  streams?: boolean;
 }
 
 const MAX_BODY_BYTES = 256 * 1024;
@@ -429,7 +434,7 @@ export class PageSession {
   connect(connection: PageSessionConnection, options: { resumed?: boolean } = {}): void {
     this.connections.set(connection.id, connection);
     if (connection.coWriter) {
-      const writer = new PageCoWriter(this.coWriterHost(connection));
+      const writer = new PageCoWriter(this.coWriterHost(connection), { streams: connection.streams === true });
       this.coWriters.set(connection.id, writer);
       writer.start(this.canCoWrite(connection), options.resumed === true);
       return;

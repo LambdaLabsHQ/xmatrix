@@ -47,6 +47,33 @@ and reapply:
 xmatrix page edit <page-id> --base <revision> -f ./page.md [--block <section-slug>]
 ```
 
+### Writing into a page as you reply
+
+In a Run, words you put between these markers in your reply go into the page
+as you write them, under your caret, while people on the page watch:
+
+```text
+⟦write page:<page-id>⟧
+⟦after "words on the page"⟧
+Markdown to add right after the paragraph, heading, list or table holding
+those words.
+⟦/write⟧
+```
+
+One `⟦write⟧` may write in several places, each starting with a marker:
+
+- `⟦after "words on the page"⟧`, then markdown to add after the block holding
+  those words.
+- `⟦replace "words on the page"⟧`, then the new wording of exactly those words,
+  within one paragraph.
+- `⟦note "words on the page"⟧`, then a short remark to the people about them.
+
+Quote a few words that appear once on the page, exactly as `xmatrix page read`
+shows them. If someone edits what you are writing, you stop there, and when
+part of it did not reach the page you hear why. Use `xmatrix page edit` to
+restructure a page (move, delete or rewrite sections), and on pages that take
+Agent edits as suggestions.
+
 When your work changed nothing on the pages, say so before you finish:
 
 ```sh

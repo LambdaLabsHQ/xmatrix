@@ -26,6 +26,11 @@ import * as Y from "yjs";
 /** People pause this long before the Agent hears what changed. */
 export const CO_WRITER_PAUSE_MS = 1_500;
 /**
+ * What the Agent writes reaches the page at most this often while it streams: every write rebuilds the
+ * blocks it writes and brings the document to them, and a harness sends its words many times a second.
+ */
+export const CO_WRITER_WRITE_EVERY_MS = 80;
+/**
  * A turn that has said nothing for this long is given up: the Agent is asked afresh at the next pause
  * instead of the page waiting on an answer that will not come. While a turn is open this timer also
  * keeps the session awake, so an answer is never lost to hibernation between its words.
@@ -141,6 +146,14 @@ const INSTRUCTIONS = [
   "You may use your tools to check facts first. A message like this one comes whenever people change the page and pause.",
 ].join("\n");
 
+export interface PageCoWriterOptions {
+  /**
+   * The Agent writes from a conversation (`⟦write page:<id>⟧ … ⟦/write⟧` in its reply): its runtime opens
+   * each turn itself, as it writes, and the session never asks it, on joining or when people pause.
+   */
+  streams?: boolean;
+}
+
 export class PageCoWriter {
   /** Turn numbers start from the clock, so one asked after the session woke is never taken for one before. */
   private turns = Date.now();
@@ -154,20 +167,25 @@ export class PageCoWriter {
   private timer: ReturnType<typeof setTimeout> | null = null;
   /** What became of its last answer, said in its next turn. */
   private outcome: string[] = [];
+  /** What of the turn it opened itself did not reach the page, and why: its outcome, when it ends. */
+  private problems: string[] = [];
   /** Its last note, shown beside its caret until it writes or notes again. */
   private note: string | null = null;
   /** Its last finished change, which a person may take back until it writes again. */
   private last: Written | null = null;
   private ended = false;
   private writable = false;
+  /** When the Agent's words last reached the page, and the write that waits to bring the rest. */
+  private lastWrite = 0;
+  private writeTimer: ReturnType<typeof setTimeout> | null = null;
 
-  constructor(private readonly host: PageCoWriterHost) {}
+  constructor(private readonly host: PageCoWriterHost, private readonly options: PageCoWriterOptions = {}) {}
 
   /** The Agent joins: it is shown on the page, and reads it unless it already had (a session that woke). */
   start(writable: boolean, resumed = false): void {
     this.writable = writable;
     this.show({ activity: writable ? "watching" : "waiting" });
-    if (!writable) return;
+    if (!writable || this.options.streams) return;
     if (resumed) {
       this.seen = this.host.markdown();
       this.readCount = 1;
@@ -181,7 +199,7 @@ export class PageCoWriter {
     if (this.ended || this.writable === writable) return;
     this.writable = writable;
     if (writable) {
-      this.ask();
+      if (!this.options.streams) this.ask();
     } else {
       if (this.timer) clearTimeout(this.timer);
       this.timer = null;
@@ -201,7 +219,14 @@ export class PageCoWriter {
   private close(): void {
     if (this.turnTimer) clearTimeout(this.turnTimer);
     this.turnTimer = null;
+    if (this.writeTimer) clearTimeout(this.writeTimer);
+    this.writeTimer = null;
     this.active = null;
+  }
+
+  /** People's changes are heard when they pause, unless the Agent only writes what it opens itself. */
+  private askLater(): void {
+    if (!this.options.streams && this.changed && !this.timer) this.ask();
   }
 
   /** Waits on the open turn's next words, for so long. */
@@ -210,11 +235,13 @@ export class PageCoWriter {
     this.turnTimer = setTimeout(() => {
       this.turnTimer = null;
       if (this.active !== turn || this.ended) return;
-      this.outcome.push("Your last answer went quiet and was given up.");
+      this.told(this.options.streams ? "Nothing more came for two minutes, so what you were writing ended there."
+        : "Your last answer went quiet and was given up.", true);
       this.host.send({ type: "interrupt", turn: turn.id });
+      this.finished(turn);
       this.close();
       this.show({ activity: "watching" });
-      if (this.changed && !this.timer) this.ask();
+      this.askLater();
     }, CO_WRITER_TURN_MS);
     // In Node (tests, local runs) a waiting turn does not keep the process alive; Workers have no unref.
     (this.turnTimer as { unref?: () => void }).unref?.();
@@ -227,6 +254,7 @@ export class PageCoWriter {
     if (this.active?.action && !this.active.action.skipped && !this.intact(this.active.action)) {
       this.yieldTurn("someone edited what you were writing");
     }
+    if (this.options.streams) return;
     if (this.timer) clearTimeout(this.timer);
     this.timer = setTimeout(() => this.paused(), CO_WRITER_PAUSE_MS);
   }
@@ -249,6 +277,10 @@ export class PageCoWriter {
 
   /** The runtime answers a turn: the Agent's words as they come, then the end of its turn. */
   receive(reply: PageCoWriteReply): void {
+    if (reply.type === "write") {
+      this.own(reply.turn);
+      return;
+    }
     const turn = this.active;
     if (this.ended || !this.writable || !turn || reply.turn !== turn.id) return;
     if (reply.type === "delta") {
@@ -257,11 +289,48 @@ export class PageCoWriter {
       return;
     }
     if (!turn.stopped) for (const event of turn.parser.finish()) this.apply(turn, event);
-    if (reply.type === "failed") this.outcome.push(`Your last answer failed${reply.reason ? `: ${reply.reason}` : ""}.`);
+    if (reply.type === "failed") this.told(`Your last answer failed${reply.reason ? `: ${reply.reason}` : ""}.`);
+    this.finished(turn);
     this.close();
     this.show({ activity: "watching" });
     // People who changed the page while it answered, and have paused since, are answered now.
-    if (this.changed && !this.timer) this.ask();
+    this.askLater();
+  }
+
+  /**
+   * The Agent opens a turn itself: it is writing into the page from its conversation, as its words come.
+   * Nobody asked it, so a co-writer that waits on the session's turns, or that may not write, is told no.
+   */
+  private own(id: number): void {
+    if (this.ended || !this.options.streams || !this.writable || (this.active && this.active.id !== id)) {
+      this.host.send({ type: "interrupt", turn: id });
+      if (this.options.streams && !this.ended) this.host.send({ type: "outcome", turn: id, problems: [this.writable
+        ? "You were still writing into the page; write one ⟦write⟧ at a time."
+        : "The page does not take your words live now (its Agent edits are suggestions, or you may not edit it); use `xmatrix page edit`."] });
+      return;
+    }
+    if (this.active) return;
+    const turn: Turn = { id, parser: new PageCoWriteParser(), action: null, stopped: false };
+    this.active = turn;
+    this.problems = [];
+    this.awaitTurn(turn);
+    this.show({ activity: "thinking" });
+  }
+
+  /**
+   * What became of the Agent's words: said in its next turn, or, for a co-writer that streams from a
+   * conversation and is never asked, in the outcome of the turn it opened when what went wrong is a problem.
+   */
+  private told(text: string, problem = false): void {
+    if (!this.options.streams) this.outcome.push(text);
+    else if (problem) this.problems.push(text);
+  }
+
+  /** A turn the runtime opened itself ends: it hears what did not reach the page. */
+  private finished(turn: Turn): void {
+    if (!this.options.streams) return;
+    this.host.send({ type: "outcome", turn: turn.id, problems: this.problems });
+    this.problems = [];
   }
 
   private paused(): void {
@@ -338,7 +407,7 @@ export class PageCoWriter {
     if (!action) return;
     if (event.type === "text") {
       action.text += event.text;
-      if (!action.skipped && action.kind !== "note") this.write(turn, action, false);
+      if (!action.skipped && action.kind !== "note") this.writeSoon(turn, action);
       return;
     }
     // The action ends.
@@ -349,7 +418,7 @@ export class PageCoWriter {
       if (note) {
         this.note = note;
         this.show({ activity: "writing" });
-        this.outcome.push(`Your note on "${shortened(action.quote)}" was shown to the people.`);
+        this.told(`Your note on "${shortened(action.quote)}" was shown to the people.`);
       }
       return;
     }
@@ -357,7 +426,7 @@ export class PageCoWriter {
     if (turn.stopped) return;
     this.last = action.written.length || action.replaced.length ? action : null;
     this.show({ activity: "writing" });
-    this.outcome.push(action.kind === "after"
+    this.told(action.kind === "after"
       ? `You added ${action.written.length ? `${action.written.length} block(s)` : "nothing"} after "${shortened(action.quote)}".`
       : `You replaced "${shortened(action.quote)}".`);
   }
@@ -373,11 +442,11 @@ export class PageCoWriter {
       if (found) { matches.push(index); count += found; }
     });
     if (count === 0) {
-      this.outcome.push(`Your ⟦${kind}⟧ quoted "${shortened(quote)}", which is not on the page; nothing was written there.`);
+      this.told(`Your ⟦${kind}⟧ quoted "${shortened(quote)}", which is not on the page; nothing was written there.`, true);
       return action;
     }
     if (count > 1) {
-      this.outcome.push(`Your ⟦${kind}⟧ quoted "${shortened(quote)}", which appears more than once; quote more words.`);
+      this.told(`Your ⟦${kind}⟧ quoted "${shortened(quote)}", which appears more than once; quote more words.`, true);
       return action;
     }
     const at = matches[0]!;
@@ -385,7 +454,7 @@ export class PageCoWriter {
     if (kind === "replace") {
       const typing = this.host.people().find((person) => person.caret && this.blockIndexOf(person.caret, live) === at);
       if (typing) {
-        this.outcome.push(`${typing.name} is typing in the paragraph holding "${shortened(quote)}"; it was left alone.`);
+        this.told(`${typing.name} is typing in the paragraph holding "${shortened(quote)}"; it was left alone.`, true);
         return action;
       }
     }
@@ -395,8 +464,9 @@ export class PageCoWriter {
     const original = kind === "replace" ? blockMarkdown(live.doc.child(at)) : "";
     const started: Action = { ...action, skipped: false, before: (before ?? null) as Action["before"], written, original,
       replaced: written };
-    // A new change is the one a person can take back.
+    // A new change is the one a person can take back, and its first words show at once where it goes.
     this.last = null;
+    this.lastWrite = 0;
     // Its caret goes to where it will write, then the words follow it.
     this.note = null;
     this.show({ activity: "writing", cursor: this.caretAfter(live, at) });
@@ -444,14 +514,35 @@ export class PageCoWriter {
     if (!children.length) children.push(pageSchema.nodes.paragraph!.create());
     const restored = pageSchema.topNodeType.create(live.doc.attrs, Fragment.fromArray(children));
     this.host.write(() => updateYFragment(this.host.doc, this.host.fragment, restored, live.meta));
-    this.outcome.push(`${by} took back your last change; leave it out unless they ask again.`);
+    this.told(`${by} took back your last change; leave it out unless they ask again.`);
     this.show({ activity: this.active ? "thinking" : target === writing ? "waiting" : "watching" });
     return "undone";
   }
 
+  /**
+   * Brings the action's blocks to what the Agent has written so far, now or as soon as the last write is
+   * far enough behind: the words keep coming many times a second, and the page shows them a few times.
+   */
+  private writeSoon(turn: Turn, action: Action): void {
+    const wait = this.lastWrite + CO_WRITER_WRITE_EVERY_MS - Date.now();
+    if (wait <= 0) {
+      this.write(turn, action, false);
+      return;
+    }
+    if (this.writeTimer) return;
+    this.writeTimer = setTimeout(() => {
+      this.writeTimer = null;
+      if (this.active === turn && turn.action === action && !action.skipped) this.write(turn, action, false);
+    }, wait);
+    (this.writeTimer as { unref?: () => void }).unref?.();
+  }
+
   /** Brings the action's blocks to what the Agent has written so far, as one change under its caret. */
   private write(turn: Turn, action: Action, final: boolean): void {
+    if (this.writeTimer) clearTimeout(this.writeTimer);
+    this.writeTimer = null;
     if (turn.stopped) return;
+    this.lastWrite = Date.now();
     const live = initProseMirrorDoc(this.host.fragment, pageSchema);
     const region = this.region(action, live.doc);
     if (!region || !action.written.every((node, offset) =>
@@ -505,8 +596,9 @@ export class PageCoWriter {
     turn.action = null;
     // Its turn ends here: what it still sends for it is not written, and the next pause asks again.
     this.close();
-    this.outcome.push(`You were stopped: ${why}.`);
+    this.told(`You were stopped: ${why}.`, true);
     this.host.send({ type: "interrupt", turn: turn.id });
+    this.finished(turn);
     this.show({ activity: "waiting" });
   }
 }

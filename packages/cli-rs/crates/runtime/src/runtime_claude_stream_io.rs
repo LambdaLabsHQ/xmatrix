@@ -1249,6 +1249,8 @@ pub(crate) fn claude_result_answer(value: &Value, visible_assistant_text: &str) 
 /// Partial text waits for this much, or this long, before it is reported.
 const CLAUDE_PARTIAL_FLUSH_BYTES: usize = 160;
 const CLAUDE_PARTIAL_FLUSH_MS: u64 = 400;
+/// As often as a page writes what comes (`CO_WRITER_WRITE_EVERY_MS` in the Hub's page-co-writer.ts).
+const CLAUDE_PAGE_WRITE_FLUSH_MS: u64 = 80;
 
 #[derive(Default)]
 pub(crate) struct ClaudeStreamTraceState {
@@ -1393,10 +1395,16 @@ pub(crate) async fn publish_claude_stream_trace(
         let delta = claude_partial_assistant_delta(state, value);
         state.partial_buffer.push_str(&delta);
     }
+    // A reply writing into a page goes out as it comes, for the page to show it so.
+    let flush_ms = if crate::runtime_page_stream_write::writing(channel_id) {
+        CLAUDE_PAGE_WRITE_FLUSH_MS
+    } else {
+        CLAUDE_PARTIAL_FLUSH_MS
+    };
     let due = state.partial_buffer.len() >= CLAUDE_PARTIAL_FLUSH_BYTES
         || state
             .partial_reported
-            .is_none_or(|at| at.elapsed() >= std::time::Duration::from_millis(CLAUDE_PARTIAL_FLUSH_MS));
+            .is_none_or(|at| at.elapsed() >= std::time::Duration::from_millis(flush_ms));
     if !state.partial_buffer.is_empty() && (!partial || due) {
         let delta = std::mem::take(&mut state.partial_buffer);
         state.partial_reported = Some(Instant::now());
