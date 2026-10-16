@@ -14,7 +14,7 @@ function fixture(options = {}) {
     mimeType: "video/mp4", hash: "a".repeat(64), r2Hash: "a".repeat(64), version: 1,
     processing: { state: "pending", check_after_secs: 2 }, providerId: "303", expires: 3600,
     errorAt: undefined, revokeAt: undefined, ...options };
-  const calls = [], authorityCalls = [], writes = [];
+  const calls = [], authorityCalls = [], writes = [], billing = [];
   const dependencies = { spaceId: "space-1", channelId: "channel-1", actorUserId: "user-1", receiptSecret: secret,
     authorizeWrite: async () => {
       writes.push("write");
@@ -22,6 +22,10 @@ function fixture(options = {}) {
     },
     x: {
       accounts: async () => state.connected,
+      reserveMedia: async maximum => {
+        billing.push({ maximum, beforeCalls: calls.length });
+        return async () => { billing.push({ settledAfter: calls.length }); };
+      },
       async request(selected, method, path, body) {
         calls.push({ account: selected, method, path, body });
         if (path === state.errorAt) throw new TypeError("response lost after sending");
@@ -45,7 +49,7 @@ function fixture(options = {}) {
     } },
   };
   const media = createXMediaCapability(dependencies);
-  return { media, dependencies, state, calls, authorityCalls, writes, bytes };
+  return { media, dependencies, state, calls, authorityCalls, writes, bytes, billing };
 }
 
 // These tests own the outbound media boundary: the provider must see only an
@@ -58,7 +62,10 @@ test("X video upload streams exact ordered chunks using the official v2 JSON pro
   assert.deepEqual(prepared, { ...sourceRef, sourceName: "video.mp4", sourceSize: String(f.bytes.length),
     sourceHash: "a".repeat(64), sourceVersion: "1" });
   assert.equal(f.calls.length, 0, "preparing approval cannot create provider media");
+  assert.equal(f.billing.length, 0, "asking for approval never reserves credits");
   const result = await f.media.upload(account, prepared);
+  assert.deepEqual(f.billing, [{ maximum: 5, beforeCalls: 0 }, { settledAfter: 5 }],
+    "the entire immutable chunk bound is reserved before initialize and settled after finalize");
   assert.equal(result.mediaId, "303");
   assert.equal(result.state, "pending");
   assert.equal(result.checkAfterSeconds, 2);

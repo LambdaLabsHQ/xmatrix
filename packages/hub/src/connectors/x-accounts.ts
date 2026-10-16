@@ -22,6 +22,8 @@ export interface XActionCapability {
   accounts(): Promise<XAccountView[]>;
   request(account: XAccountView, method: "GET" | "POST", path: string,
     body?: Record<string, unknown>): Promise<Record<string, unknown>>;
+  reserveMedia?(maximumRequests: number): Promise<() => Promise<void>>;
+  billingSummary?(): string;
 }
 
 const ID = /^[1-9][0-9]{0,19}$/u;

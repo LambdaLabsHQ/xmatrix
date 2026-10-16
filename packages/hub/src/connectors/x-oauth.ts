@@ -3,6 +3,8 @@ import { record } from "./command-support";
 import { providerJson, ProviderRequestError } from "./http";
 import type { OAuthClient } from "./oauth";
 import { xAccountFields, type XAccount } from "./x-accounts";
+import twitterText from "twitter-text";
+import type { UpstreamCallPrice } from "../usage-cost-metering";
 
 /** The X API operations the Hub calls, by method and path; ids never become labels. */
 const X_OPERATIONS: ReadonlyArray<readonly [string, RegExp, string]> = [
@@ -21,13 +23,31 @@ function xOperation(method: string, path: string): string {
   return X_OPERATIONS.find(([verb, pattern]) => verb === method && pattern.test(path))?.[2] ?? "other";
 }
 
+/** Only public metadata enters pricing: no text, tokens or resource ids. */
+export function xCallPrice(operation: string, json?: unknown): UpstreamCallPrice | undefined {
+  const body = record(json);
+  const text = typeof body.text === "string" ? body.text : "";
+  // Follow X's URL extraction instead of treating every extension as a TLD.
+  const linked = twitterText.extractUrls(text).length > 0 || /https?:\/\/\S+/iu.test(text);
+  if (operation === "oauth_token") return undefined;
+  if (operation === "posts_create") return { kind: body.quote_tweet_id !== undefined || body.media !== undefined ||
+    linked ? "x_post_url" : "x_post", maximumUnits: 1 };
+  if (operation === "posts_read") return { kind: "x_post_read", maximumUnits: 1 };
+  if (operation === "user_posts_read") return { kind: "x_post_read", maximumUnits: 10 };
+  if (operation === "users_me") return { kind: "x_profile_read", maximumUnits: 1 };
+  if (operation.startsWith("media_")) return { kind: "x_media", maximumUnits: 1 };
+  throw new ProviderRequestError(503, "This X operation has no configured credit price");
+}
+
 /**
  * Fixed diagnostics: token endpoint bodies must never enter Channel receipts or logs.
  * Every call goes to the company X app's account, so a caller's meter records it.
  */
 export function xProviderJson(path: string, init: Parameters<typeof providerJson>[1] = {}, meter?: UpstreamMeter) {
-  return metered(meter, "x", xOperation(init.method ?? "GET", path), () => providerJson(`https://api.x.com${path}`, { ...init,
-    describeError: () => "X rejected the request; check authorization, API balance and endpoint access" }));
+  const operation = xOperation(init.method ?? "GET", path);
+  return metered(meter, "x", operation, () => providerJson(`https://api.x.com${path}`, { ...init,
+    describeError: () => "X rejected the request; check authorization, API balance and endpoint access" }),
+  xCallPrice(operation, init.json));
 }
 
 export function xTokenGrant(client: OAuthClient, payload: Record<string, unknown>, previous?: XAccount):

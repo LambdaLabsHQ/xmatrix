@@ -189,12 +189,14 @@ export function createXMediaCapability(input: {
         throw new ProviderRequestError(409, "The approved video attachment changed; request a new approval");
       }
       const startedAt = Date.now();
+      let settleCredits: (() => Promise<void>) | undefined;
       function withinDeadline() {
         if (Date.now() - startedAt >= MAX_UPLOAD_MS) throw new ProviderRequestError(504,
           "The bounded X video upload timed out; its uncertain writes are not retried");
       }
       try {
         await input.authorizeWrite();
+        settleCredits = await input.x.reserveMedia?.(Math.ceil(source.size / CHUNK_BYTES) + 2);
         const initialized = providerData(await input.x.request(account, "POST", "/2/media/upload/initialize", {
           media_type: "video/mp4", media_category: "tweet_video", total_bytes: source.size,
         }));
@@ -252,6 +254,7 @@ export function createXMediaCapability(input: {
       } finally {
         await reader.cancel().catch(() => undefined);
         reader.releaseLock();
+        await settleCredits?.();
       }
     },
     status,

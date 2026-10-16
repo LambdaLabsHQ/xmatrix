@@ -233,11 +233,17 @@ export function TermsOfServiceContent() {
           <strong className="text-foreground">Agent credits.</strong> Each purchased Pro seat includes
           5,000 Agent credits per calendar month (UTC), pooled across the Space. Each Channel message or
           page revision written by an Agent or an app uses one credit; messages and edits by people and
-          system notices use none. Unused included credits do not carry over. After the included credits,
-          an Agent or app may use a grace of 2,500 credits per seat in the same month; after that, new
-          messages and page revisions by Agents and apps are refused until the next month or until seats
-          are added, while people can still write and all content stays readable. We tell the Space when
-          it has used 80% and all of its included credits and when the grace is used.
+          system notices use none. Paid X API actions, including those run or approved by people,
+          use the same balance at the rates on our pricing page and require Pro. Credits are reserved
+          before a paid call; unused requests and definite rejections are refunded, while uncertain
+          outcomes retain the reservation. Media rates are provisional pending verification of upstream
+          charges. Unused included credits do not carry over. After included credits, purchased pack
+          credits are used, then a grace of 2,500 credits per seat in the same month. Packs cost $10
+          for 10,000 credits plus applicable tax on the web, do not renew automatically and do not
+          expire while the Space exists. When the total balance is insufficient, paid X actions and
+          new Agent/app writes are refused until the next month or a credit pack; people can still
+          write in xMatrix and all content stays readable. We notify the Space as included credits
+          reach 80% and 100%, and when the grace is used.
         </p>
         <p>
           <strong className="text-foreground">Automatic renewal.</strong> A self-service subscription,

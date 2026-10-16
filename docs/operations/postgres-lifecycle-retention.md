@@ -19,6 +19,12 @@ expiry rules. Readers already refuse expired receipts. Their cleanup was
 implemented before the credit rollout; it must be verified through execution
 receipts rather than assumed absent from a large table size.
 
+Financial receipts (`data.space_credit_purchases` and
+`data.paid_call_receipts`) are not TTL replays. Preserve them for the lifetime
+of their Space; they move with the Space and are removed only by its existing
+explicit purge. Removing them through maintenance would allow a payment or
+paid upstream request to be counted twice.
+
 ## Outbox
 
 `data.outbox` currently retains transaction publication envelopes. No production

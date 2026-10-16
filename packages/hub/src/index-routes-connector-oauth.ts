@@ -6,7 +6,7 @@ import { sentryInstallationClient } from "./connectors/sentry-installation";
 import { feishuNativeApp } from "./connectors/feishu-native";
 import { googleChatNativeApp } from "./connectors/googlechat-native";
 import type { Hono } from "hono";
-import { HUB_ROUTES } from "@xmatrix/protocol";
+import { HUB_ROUTES, sha256Hex } from "@xmatrix/protocol";
 import { checkAppConnection } from "./app-connection-check";
 import { getAppConnectorProvider } from "./app-connectors";
 import { connectorCredentialRepository, INGRESS_KEY_FIELD, mintConnectorSecret } from "./connectors/credentials";
@@ -21,6 +21,8 @@ import type { Env } from "./types";
 import { addConnectedMailbox } from "./connectors/gmail-mailboxes";
 import { connectXAccount } from "./connectors/x-accounts";
 import { upstreamMeter } from "./usage-cost-metering";
+import { paidCallRepository, paidXCalls } from "./billing-paid-calls";
+import { platformAdminSpaceId } from "./admin-platform-access";
 
 /*
  * One-click OAuth routes (docs/design/connector-platform.md §3.2): which
@@ -56,8 +58,10 @@ async function completeOAuthConnect(env: Env, request: Request, verified: Verifi
       if (!original || current.connectionVersion !== original.connectionVersion || current.credentialVersion !== original.credentialVersion ||
           current.connectionGeneration !== original.connectionGeneration) throw new Error("Discord connection changed before installation");
     }
-    const grant = await exchangeOAuthGrant(verified.client, input.code ?? "", oauthRedirectUri(connectorHubOrigin(env, request)), state,
-      upstreamMeter(env, { spaceId: verified.spaceId, connector: providerId, action: "connect" }));
+    const meter = providerId === "x" ? paidXCalls(env, { spaceId: verified.spaceId, actorUserId: verified.userId,
+      billingKey: `oauth:${await sha256Hex(state)}`, action: "connect" }).meter
+      : upstreamMeter(env, { spaceId: verified.spaceId, connector: providerId, action: "connect" });
+    const grant = await exchangeOAuthGrant(verified.client, input.code ?? "", oauthRedirectUri(connectorHubOrigin(env, request)), state, meter);
     if (providerId === "x") {
       if (!verified.connectionSnapshot) throw new Error("Restart X Connect");
       await connectXAccount(env, { spaceId: verified.spaceId, actorUserId: verified.userId,
@@ -129,6 +133,8 @@ export function registerConnectorOAuthRoutes(app: Hono<{ Bindings: Env }>): void
         }
         accountId = body.accountId;
       }
+      await paidCallRepository(c.env).authorize({ spaceId: c.req.param("spaceId"), actorUserId: user.id,
+        creditsWaived: c.req.param("spaceId") === platformAdminSpaceId(c.env) });
     }
     const spaceId = c.req.param("spaceId");
     let connectionSnapshot;
