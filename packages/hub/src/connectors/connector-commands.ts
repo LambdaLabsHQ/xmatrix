@@ -221,11 +221,21 @@ async function runAction(providerId: string, input: ConnectorCommandInput, actio
   return withExecution(manifest, input, scope, { id: actionId, label, key: "" }, async () => {
     if (mode === "disallow") return { status: "blocked", summary: actionRefusal({ actionId, mode })! };
     try {
-      const context = await actionContext(providerId, input, scope.spaceId, actionId, action, authorizeWrite);
+      const context = await actionContext(providerId, input, scope.spaceId, actionId, action, authorizeWrite,
+        approved?.requestId ?? input.commandMessageId ?? input.messageId);
       if (typeof context === "string") return { status: "blocked", summary: context };
       await authorizeWrite();
-      const result = await action.execute(context, parsed);
-      return { status: "completed", summary: result.url ? `${result.summary} — ${result.url}` : result.summary };
+      try {
+        const result = await action.execute(context, parsed);
+        const summary = result.url ? `${result.summary} — ${result.url}` : result.summary;
+        return { status: "completed", summary: `${summary}${context.x?.billingSummary?.() ? `\n${context.x.billingSummary()}` : ""}` };
+      } catch (error) {
+        const reason = error instanceof ProviderRequestError ? error.message
+          : error instanceof DOMException && error.name === "TimeoutError"
+            ? "the provider did not answer in time" : "the provider call failed";
+        return { status: "failed", summary: reason +
+          (context.x?.billingSummary?.() ? `\n${context.x.billingSummary()}` : "") };
+      }
     } catch (error) {
       if (error instanceof ProviderRequestError) return { status: "failed", summary: error.message };
       return { status: "failed", summary: error instanceof DOMException && error.name === "TimeoutError"
@@ -246,7 +256,8 @@ function approvalReceipt(name: string, actionId: string, request: { requestId: s
 }
 
 async function actionContext(providerId: string, input: ConnectorCommandInput, spaceId: string,
-  actionId: string, action: ConnectorAction, authorizeWrite: () => Promise<void>): Promise<ConnectorActionContext | string> {
+  actionId: string, action: ConnectorAction, authorizeWrite: () => Promise<void>,
+  billingKey = `prepare:${input.messageId}`): Promise<ConnectorActionContext | string> {
   const googleChat = providerId === "googlechat" && actionId === "post"
     ? await googleChatActionCapability(input.env, spaceId, authorizeWrite) : undefined;
   const discord = providerId === "discord" && actionId === "post"
@@ -262,7 +273,7 @@ async function actionContext(providerId: string, input: ConnectorCommandInput, s
   const dingtalk = providerId === "dingtalk" && ["read", "send"].includes(actionId)
     ? await dingtalkActionCapability(input.env, spaceId, authorizeWrite) : undefined;
   const x = providerId === "x" ? xActionCapability(input.env, { spaceId, channelId: input.channelId,
-    actorUserId: input.actorUserId, action: actionId, authorizeWrite }) : undefined;
+    actorUserId: input.actorUserId, action: actionId, billingKey, authorizeWrite }) : undefined;
   const xMedia = x && input.env.RELAY_PAYLOAD_BUCKET ? createXMediaCapability({ spaceId, channelId: input.channelId,
     actorUserId: input.actorUserId, x, authorizeWrite, bucket: input.env.RELAY_PAYLOAD_BUCKET,
     receiptSecret: input.env.RELAY_R2_CAPABILITY_HMAC_SECRET,

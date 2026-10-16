@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { createAuthorityDatabase, PostgresAccountDeletionRepository, PostgresSpaceControlRepository } from "../dist/index.js";
-import { spaceBilling } from "../../billing-official/src/index.ts";
+import { spaceBilling } from "../../billing-official/dist/index.js";
 import { integration, isolatedPostgres } from "./postgres-database.fixture.mjs";
 
 async function fixture() {

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { Client } from "pg";
 import { connectionString, integration } from "./postgres-database.fixture.mjs";
-import { spaceBilling } from "../../billing-official/src/index.ts";
+import { spaceBilling } from "../../billing-official/dist/index.js";
 import { createAuthorityDatabase, PostgresCreditPackRepository } from "../dist/index.js";
 
 // Protect the money boundary: current ownership, exact settlement, concurrent

@@ -66,6 +66,31 @@ export interface CreditAllowance {
   packCredits: number;
 }
 
+/** A provider call's public tariff, selected by the server, never a client. */
+export type PaidCallKind = "x_post" | "x_post_url" | "x_post_read" | "x_profile_read" | "x_media";
+
+/** Which balances funded a reservation, so settlement can refund them once. */
+export interface CreditAllocation {
+  periodStart: string;
+  included: number;
+  pack: number;
+  grace: number;
+  remaining: number;
+}
+
+export interface PaidCallPolicy {
+  /** Null means no configured retail tariff: do not call the provider. */
+  quote(kind: PaidCallKind, units: number): number | null;
+  reserve(transaction: BillingTransaction, input: {
+    spaceId: string; now: string; credits: number; creditsWaived: boolean;
+  }): Promise<CreditAllocation | BillingRejection>;
+  /** Refunds only the supplied allocation; its durable receipt owns idempotency. */
+  refund(transaction: BillingTransaction, input: {
+    spaceId: string; now: string; allocation: CreditAllocation; credits: number;
+  }): Promise<number>;
+  notice?(transaction: BillingTransaction, input: { spaceId: string; now: string }): Promise<BillingNotice | null>;
+}
+
 /** A durable write by an Agent other than a Channel message. */
 export type AgentWriteKind = "page_revision";
 
@@ -76,6 +101,7 @@ export interface SpaceBillingPolicy {
   readonly metered: boolean;
   /** A paid Space's monthly Agent credits, when the policy charges them. */
   readonly credits?: CreditAllowance;
+  readonly paidCalls?: PaidCallPolicy;
   /**
    * Called in the transaction that creates a Space, before anything is
    * written; a rejection refuses it. `personalSpaceIds` are the Spaces the

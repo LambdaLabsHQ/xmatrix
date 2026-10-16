@@ -9,6 +9,7 @@
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",
+    "pretest": "pnpm --filter @xmatrix/billing-official build",
     "test": "pnpm run build && node --test test/*.test.mjs",
     "check": "pnpm run typecheck && pnpm run test && pnpm run migrations:check",
     "migrations:check": "node scripts/migrate.mjs check",

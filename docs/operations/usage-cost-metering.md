@@ -88,10 +88,15 @@ CLOUDFLARE_ACCOUNT_ID=<production account id> \
 `--from`/`--to` (ISO 8601) set an exact window, `--space <id>` one Space,
 `--json` machine-readable output. The Jev estimate uses
 `--jev-input-usd-per-mtok` (default 0.042) and `--jev-output-usd-per-mtok`
-(default 0). Those defaults are a third-party-reported price, not verified
-against a Vercel invoice; reconcile them with the AI Gateway bill before
-treating the estimate as cost. Composio and X calls are reported as counts;
-price them with the current contract.
+(default 0). Those defaults match [TypeSafe's official Jev announcement](https://typesafe.ai/blog/introducing-system-one-models-and-jev)
+($0.042/M input, free output), verified 2026-10-16. Reconcile them with the
+AI Gateway invoice before treating the estimate as actual spend. Composio and X calls are reported as counts;
+price them with the current contract. A call count is not a bill: X OAuth
+requests are free, resource reads have per-resource rates, and media upload
+rates still need Developer Console verification. X retail credit reservation
+uses the separate [Agent credit policy](../design/agent-credits.md#paid-x-calls),
+not a hidden monthly operator budget. Composio public prices are not evidence
+of the operator's actual contract.
 
 An example query, Jev tokens by Space and feature over the last day:
 
@@ -111,3 +116,25 @@ FORMAT JSON
 Send it as the request body of
 `POST https://api.cloudflare.com/client/v4/accounts/<account id>/analytics_engine/sql`
 with `Authorization: Bearer <token>`.
+
+## Unconfirmed X reservations
+
+A missing settlement receipt never authorizes a provider retry. Inspect old
+reservations on the owning Space shard using the normal read-only database
+access, then reconcile against X's Developer Console before deciding a refund:
+
+```sql
+SELECT space_id, call_id, kind, reserved_units, reserved_credits, created_at
+FROM data.paid_call_receipts
+WHERE status = 'reserved' AND created_at < now() - interval '1 hour'
+ORDER BY created_at
+LIMIT 100;
+```
+
+Keep command ids/provider evidence in the authorized conversation; the ledger
+stores no post text or credentials. Do not reset or delete a receipt to retry.
+An admission COMMIT acknowledgement lost before the caller receives permission
+triggers a zero-unit settlement only if its per-invocation token owns the row.
+An ambiguous COMMIT while replaying someone else's request cannot refund that
+request. If the database also prevents this bounded refund, preserve its reserve
+and include it in this manual reconciliation.

@@ -1,4 +1,5 @@
 import type { Env } from "./types";
+import type { PaidCallKind } from "@xmatrix/billing";
 
 /**
  * Operator-paid variable cost (docs/operations/usage-cost-metering.md): one
@@ -45,7 +46,9 @@ export type UpstreamSource = "composio" | "x";
  * Runs one upstream call the operator pays for and records it, bound to one
  * Space, connector and action. The call's result or error is unchanged.
  */
-export type UpstreamMeter = <T>(source: UpstreamSource, operation: string, call: () => Promise<T>) => Promise<T>;
+export interface UpstreamCallPrice { kind: PaidCallKind; maximumUnits: number }
+export type UpstreamMeter = <T>(source: UpstreamSource, operation: string, call: () => Promise<T>,
+  price?: UpstreamCallPrice) => Promise<T>;
 
 type Outcome = "ok" | "error" | "timeout";
 
@@ -130,6 +133,6 @@ export function upstreamMeter(env: UsageCostEnv | undefined,
 
 /** Runs `call` through `meter` when the caller has one. */
 export function metered<T>(meter: UpstreamMeter | undefined, source: UpstreamSource, operation: string,
-  call: () => Promise<T>): Promise<T> {
-  return meter ? meter(source, operation, call) : call();
+  call: () => Promise<T>, price?: UpstreamCallPrice): Promise<T> {
+  return meter ? meter(source, operation, call, price) : call();
 }
