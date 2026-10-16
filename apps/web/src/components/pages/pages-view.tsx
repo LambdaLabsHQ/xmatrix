@@ -702,6 +702,9 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
           (current) => ({ competitiveBlocks: current?.competitiveBlocks ?? [], claims: event.claims }));
       }
       if (event.type === "error" && event.code === "page_body_too_large") setNotice("This page is over 256 KiB.");
+      if (event.type === "error" && event.code === "credits_exhausted") {
+        setNotice("This Space has used this month's Agent credits; an Agent's edit is saved once someone edits the page or credits return.");
+      }
       if (event.type === "error" && event.code === "page_server_outdated") {
         setNotice(PAGE_SERVER_OUTDATED_NOTICE);
       }

@@ -112,8 +112,10 @@ function creditMeterCte(now: string, charged: string): string {
  * One upsert on the Space's row decides and records it, so concurrent writes
  * serialize on that row and never overspend. A write in a later month starts
  * the counters again. Returns no row when nothing is left to charge.
+ * Only a write that can tell a Channel (`announces`) raises the notice level;
+ * any other leaves the crossing for the next Channel message to announce.
  */
-function creditChargeCte(space: string, now: string): string {
+function creditChargeCte(space: string, now: string, announces: boolean): string {
   const rolled = "s.period_start<EXCLUDED.period_start";
   const current = (column: string) => `(CASE WHEN ${rolled} THEN 0 ELSE s.${column} END)`;
   const included = "(SELECT included FROM credit_meter)";
@@ -136,9 +138,9 @@ function creditChargeCte(space: string, now: string): string {
           pack_used=${current("pack_used")}+CASE WHEN ${toPack} THEN 1 ELSE 0 END,
           pack_balance=s.pack_balance-CASE WHEN ${toPack} THEN 1 ELSE 0 END,
           grace_used=${current("grace_used")}+CASE WHEN ${toGrace} THEN 1 ELSE 0 END,
-          notice_level=GREATEST(${current("notice_level")},${level}),
-          notice_version=CASE WHEN ${level}>${current("notice_level")} THEN s.version+1
-            ELSE s.notice_version END,
+          notice_level=${announces ? `GREATEST(${current("notice_level")},${level})` : current("notice_level")},
+          notice_version=${announces ? `CASE WHEN ${level}>${current("notice_level")} THEN s.version+1
+            ELSE s.notice_version END` : "s.notice_version"},
           version=s.version+1,updated_at=GREATEST(${now},s.created_at)
         WHERE ${toIncluded} OR ${toPack} OR ${toGrace}
         RETURNING included_used,pack_used,grace_used,pack_balance,notice_level,
@@ -290,7 +292,7 @@ export const spaceBilling: SpaceBillingPolicy = {
     // another round trip.
     ctes: `${subscriptionCte("$2", "$6::timestamptz")}, ${paidSeatsCte("$2")},
       ${creditMeterCte("$6::timestamptz", "$10 AND $13 IN ('agent','app') AND NOT $14")},
-      ${creditChargeCte("$2", "$6::timestamptz")}, prior_usage AS MATERIALIZED (
+      ${creditChargeCte("$2", "$6::timestamptz", true)}, prior_usage AS MATERIALIZED (
         SELECT free_message_count FROM data.space_billing_usage WHERE space_id=$2 LIMIT 1
       ), usage AS (
         UPDATE data.space_billing_usage SET
@@ -342,13 +344,14 @@ export const spaceBilling: SpaceBillingPolicy = {
     notice: creditNotice,
   },
 
-  async agentWrite(transaction, { spaceId, now }) {
+  async agentWrite(transaction, { spaceId, now, creditsWaived }) {
+    // A page revision has no Channel to tell, so it never raises the notice level.
     const row = (await transaction.query({
-      name: "official_space_agent_write_credit_v1",
+      name: "official_space_agent_write_credit_v2",
       text: `WITH ${subscriptionCte("$1", "$2::timestamptz")}, ${paidSeatsCte("$1")},
-        ${creditMeterCte("$2::timestamptz", "TRUE")}, ${creditChargeCte("$1", "$2::timestamptz")}
+        ${creditMeterCte("$2::timestamptz", "NOT $3")}, ${creditChargeCte("$1", "$2::timestamptz", false)}
         SELECT ${CREDIT_COLUMNS}`,
-      values: [spaceId, now], maxRows: 1,
+      values: [spaceId, now, creditsWaived === true], maxRows: 1,
     }))[0];
     return row && creditRefused(row) ? creditsExhausted(now) : null;
   },

@@ -45,11 +45,6 @@ export class PageControlError extends MessageAuthorityError {
 
 const MAX_PAGES = 5_000;
 
-/** An Agent's page revision is a billable write (docs/design/agent-credits.md). */
-async function chargeAgentRevision(tx: DatabaseTransaction, spaceId: string, now: string): Promise<void> {
-  const rejection = await spaceBilling.agentWrite(tx, { spaceId, now, kind: "page_revision" });
-  if (rejection) throw new PageControlError(rejection.code, rejection.status, rejection.message, rejection.details);
-}
 /** Ctrl+F lists at most this many page hits; the dialog has the same ceiling. */
 const PAGE_SEARCH_RESULT_LIMIT = 80;
 const PAGE_SEARCH_SNIPPET_CHARS = 160;
@@ -405,9 +400,21 @@ export async function pageAccess(tx: DatabaseTransaction, spaceId: string, princ
     actor };
 }
 
+export interface PageRepositoryOptions {
+  /** The deployment's own operator Space, which is not charged Agent credits. */
+  creditsWaivedSpaceId?: string;
+}
+
 export class PostgresPageRepository {
-  constructor(private readonly database: AuthorityDatabase) {
+  constructor(private readonly database: AuthorityDatabase, private readonly options: PageRepositoryOptions = {}) {
     if (database.cacheMode !== "disabled") throw new PageControlError("cached_authority_forbidden", 500);
+  }
+
+  /** An Agent's page revision is a billable write (docs/design/agent-credits.md). */
+  private async chargeAgentRevision(tx: DatabaseTransaction, spaceId: string, now: string): Promise<void> {
+    const rejection = await spaceBilling.agentWrite(tx, { spaceId, now, kind: "page_revision",
+      creditsWaived: spaceId === this.options.creditsWaivedSpaceId });
+    if (rejection) throw new PageControlError(rejection.code, rejection.status, rejection.message, rejection.details);
   }
 
   private inSpace<T>(requestId: string, operation: string, spaceId: string,
@@ -609,7 +616,7 @@ export class PostgresPageRepository {
           values: [spaceId, pageId, actor.userId, now], maxRows: 0,
         });
       }
-      if (actor.isAgent) await chargeAgentRevision(tx, spaceId, now);
+      if (actor.isAgent) await this.chargeAgentRevision(tx, spaceId, now);
       await this.insertRevision(tx, spaceId, pageId, 1, newBody, [actor.author], [], "edit", null, now);
       const row = await this.page(tx, spaceId, actor, pageId, "read");
       return { page: this.summary(row) };
@@ -717,7 +724,7 @@ export class PostgresPageRepository {
         "The page changed since you read it; merge your edit into the current revision and retry",
         { headRevision: head, body: current?.body ?? "" });
     }
-    if (actor.isAgent) await chargeAgentRevision(tx, spaceId, now);
+    if (actor.isAgent) await this.chargeAgentRevision(tx, spaceId, now);
     await this.insertRevision(tx, spaceId, pageId, revision, text, authors, conversationIds,
       suggestion ? "suggestion" : input.kind, input.baseRevision, now);
     const anchoring = suggestion ? { channels: [], detached: [], attached: [] } : await (async () => {

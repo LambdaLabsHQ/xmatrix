@@ -32,8 +32,8 @@ again.
 
 Free Spaces keep their existing allowance (three people, 500 lifetime messages
 from anyone); credits apply to Pro. The deployment's platform admin Space
-(`PLATFORM_ADMIN_SPACE_ID`, the operator's own) is not charged for messages; its
-cost is still visible in per-Space cost metering.
+(`PLATFORM_ADMIN_SPACE_ID`, the operator's own) is not charged for messages or
+page revisions; its cost is still visible in per-Space cost metering.
 
 ## Allowance
 
@@ -67,6 +67,16 @@ per month, as an `xmatrix.system.credits` notice from xMatrix:
 1. 80% of the included credits used.
 2. Included credits used up; packs, then the grace, are now in use.
 3. Grace used up; Agent and app writes are paused.
+
+A page revision has no Channel to tell, so it never raises the notice level:
+the next charged Channel message announces a level a revision crossed. When
+the grace runs out on a page revision, the refusal of the next Agent message
+says it instead.
+
+In a live page session a refused Agent commit keeps its text pending in the
+session and tells everyone on the page; the next person's edit commits it, as
+people write for free. A refused commit never stops the session from
+re-authorizing open connections.
 
 Settings → Billing shows the month's usage, the pack balance and the grace.
 
