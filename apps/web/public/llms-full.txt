@@ -138,6 +138,9 @@ writing in xMatrix remains free; paid X actions require Pro and sufficient credi
 
 Related: [Overview](https://xmatrix.sh/index.md).
 
+---
+
+<!-- https://xmatrix.sh/download.md -->
 # Download
 
 Canonical page: https://xmatrix.sh/download
