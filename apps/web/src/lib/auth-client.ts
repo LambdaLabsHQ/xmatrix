@@ -189,7 +189,7 @@ async function postAuthRequest(
   );
 }
 
-export async function verifyBetterAuthOtp(email: string, otp: string): Promise<void> {
+async function verifyBetterAuthOtp(email: string, otp: string): Promise<void> {
   const response = await authClient.signIn.emailOtp({
     email,
     otp,
@@ -200,6 +200,36 @@ export async function verifyBetterAuthOtp(email: string, otp: string): Promise<v
   if (response.error) {
     throwAuthClientError(response.error, "Invalid verification code", response.error.status);
   }
+}
+
+/**
+ * Verify a login code through a connection that may drop. A request that got
+ * no answer is sent again; the code stays valid until one is answered. When a
+ * retry is refused, an earlier attempt may have signed in and lost only its
+ * reply, so the code is spent: the session decides.
+ */
+export async function verifyBetterAuthOtpWithRetry(email: string, otp: string): Promise<void> {
+  let unanswered: unknown;
+  for (const waitMs of [0, 700, 1500]) {
+    if (waitMs) await new Promise((resolve) => setTimeout(resolve, waitMs));
+    try {
+      await verifyBetterAuthOtp(email, otp);
+      return;
+    } catch (error) {
+      if (!isTransientAuthSessionError(error)) {
+        if (unanswered && await hasBetterAuthSession()) return;
+        throw error;
+      }
+      unanswered = error;
+    }
+  }
+  if (await hasBetterAuthSession()) return;
+  throw unanswered;
+}
+
+async function hasBetterAuthSession(): Promise<boolean> {
+  const current = await loadBetterAuthSession().catch(() => null);
+  return Boolean(current?.session);
 }
 
 export async function signInWithBetterAuthGoogle(callbackURL: string): Promise<void> {

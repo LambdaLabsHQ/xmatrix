@@ -11,7 +11,7 @@ import {
   sendBetterAuthOtp,
   signInWithBetterAuthGoogle,
   signOutBetterAuth,
-  verifyBetterAuthOtp,
+  verifyBetterAuthOtpWithRetry,
   verifyBetterAuthPassword,
   type WebAuthSession,
 } from "./auth-client";
@@ -268,7 +268,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const verifyOtp = async (email: string, token: string) => {
-    await verifyBetterAuthOtp(email, token);
+    await verifyBetterAuthOtpWithRetry(email, token);
     const next = await loadBetterAuthSessionAfterSignIn();
     if (next.session && next.user) {
       setState({ ...next, loading: false });
