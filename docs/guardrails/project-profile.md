@@ -15,10 +15,11 @@ English is the default language for repository documentation, guardrails, releas
 
 ## Current behavior
 
-Channel presence joins catalog, live session and message presentation by exact
-global Instance ID through one shared protocol index. Sender prefixes and
-legacy member keys cannot add a second avatar, and cross-Channel messages do
-not create destination residents. See [Agent status](../design/agent-status.md#instance-identity-in-presence).
+Channel presence uses the protocol's read-only Instance-ID map, separate from
+Human devices. One reducer owns identity checks, lifecycle merges and removal;
+messages and live reports cannot create residents. Required registrations
+supply harness avatars. Legacy wire shapes are normalized at the boundary.
+See [Agent status](../design/agent-status.md#instance-identity-in-presence).
 
 Official Agent launch prompts are compact repository Markdown delivered by the
 Hub with each spawn. Supporting daemons validate and render the versioned text;

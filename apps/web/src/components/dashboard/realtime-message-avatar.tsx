@@ -1,12 +1,11 @@
 "use client";
 
 import { useCallback, useContext, useSyncExternalStore, type ComponentProps } from "react";
-import { channelAgentInstanceIndex, type SerializedChannel } from "@xmatrix/protocol";
+import { presenceInstanceId } from "@xmatrix/protocol";
 import { IdentityAvatar } from "./identity-avatar";
 import { RealtimeChannelsContext, RealtimeEventsContext } from "./realtime-channels";
 import { agentInstanceDisplayStatus } from "./workspace-shell-presence";
 
-const instances = new WeakMap<SerializedChannel, ReturnType<typeof channelAgentInstanceIndex>>();
 const noEvents = [] as const;
 
 /** Only the avatar's visible status subscribes to live state. Activity is
@@ -28,15 +27,10 @@ export function RealtimeMessageAvatar({ channelId, instanceId, senderId, ...prop
     const channel = channelId ? store?.get(channelId) : undefined;
     if (!channel) return props.status;
     if (!instanceId) {
-      const presence = senderId ? channel.memberPresence?.[senderId] : undefined;
-      return presence?.kind === "user" ? presence.status ?? props.status : props.status;
+      const presence = senderId ? channel.presence?.humans.get(senderId) : undefined;
+      return presence?.status ?? props.status;
     }
-    let index = instances.get(channel);
-    if (!index) {
-      index = channelAgentInstanceIndex(channel);
-      instances.set(channel, index);
-    }
-    const instance = index.get(instanceId)?.instance;
+    const instance = channel.presence?.instances.get(presenceInstanceId(instanceId));
     return instance
       ? agentInstanceDisplayStatus({ instance, agentId: senderId,
         events: events?.get(channelId ?? "")?.events ?? events?.get("")?.events ?? noEvents, name: props.label })

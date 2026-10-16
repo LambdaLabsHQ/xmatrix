@@ -4,7 +4,7 @@
 import { agentTraceInstanceIds } from "@/components/dashboard/agent-trace-target";
 import { traceEventChannelInstanceId } from "@/components/dashboard/agent-trace-replica";
 import type { AgentTraceTarget } from "./workspace-shell-message-model";
-import { isChannelResidentInstance, isLiveAgentStatus } from "@xmatrix/protocol";
+import { channelPresenceInstances, channelPresenceMember, isChannelResidentInstance, isLiveAgentStatus } from "@xmatrix/protocol";
 import { formatRelativeAge } from "./time-display";
 import { sameValue } from "../../lib/same-value";
 import type {
@@ -13,7 +13,7 @@ import type {
   ObservabilityEvent,
   SerializedAgent,
   SerializedAgentInstance,
-  SerializedChannel,
+  ChannelSnapshot,
 } from "@xmatrix/protocol";
 
 export type PresentedChannelMemberPresence = ChannelMemberPresence |
@@ -76,13 +76,13 @@ export function agentInstancePresenceLabel(
 }
 
 export function memberPresence(
-  channel: SerializedChannel,
+  channel: ChannelSnapshot,
   member: string,
   agentsById?: Map<string, SerializedAgent>
 ): PresentedChannelMemberPresence {
-  const presence = channel.memberPresence?.[member];
+  const presence = channelPresenceMember(channel, member);
   if (presence) return presence;
-  if (member.startsWith("user:") && channel.memberPresence === undefined) {
+  if (member.startsWith("user:") && channel.presence === undefined) {
     return { kind: "user", activity: "Status unknown" };
   }
   const agent = agentsById?.get(member);
@@ -100,17 +100,9 @@ export function memberPresence(
       : { kind: "agent" as const });
 }
 
-export function isDaemonChannelMember(channel: SerializedChannel, member: string): boolean {
-  if (!member.startsWith("agent:")) return false;
-  const presence = channel.memberPresence?.[member];
-  const label = (presence?.label || member).trim().toLowerCase();
-  return label === "xmatrix-daemon" || label.startsWith("xmatrix-daemon-");
-}
-
-export function channelMembersByPresence(channel: SerializedChannel): string[] {
-  return Object.keys(channel.memberPresence || {}).filter(
-    (member) => !isDaemonChannelMember(channel, member)
-  );
+export function channelMembersByPresence(channel: ChannelSnapshot): string[] {
+  return [...(channel.presence?.humans.keys() ?? []),
+    ...channelPresenceInstances(channel.presence).map(instance => instance.id)];
 }
 
 export function isAgentTraceEvent(

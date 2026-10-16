@@ -20,21 +20,29 @@ for how long) are words in the work dock, never more colours.
 
 ## Instance identity in presence
 
-Channel catalog presence is keyed by the global Instance ID. Message sender
-identities retain their existing `agent:` presentation prefix; live sessions
-and legacy member groups can use another member key. These are not additional
-Instances. The shared `channelAgentInstanceIndex` protocol helper joins their
-presentation by exact global Instance ID and prefers the catalog member when a
-retained legacy projection duplicates it. Names and Channel ordinals never
-identify an Instance across member entries.
+The shared protocol model stores Human presence and devices separately from a
+read-only map of Agent Instances keyed by branded global Instance ID. Each
+Instance has one required registration; selectors derive the harness avatar,
+ordering and daemon filtering. Member aliases and aggregate `instances[]` are
+legacy wire shapes, decoded before Hub overlays or Web stores and encoded
+only at the boundary. No wire migration or coordinated CLI update is needed.
 
-The Hub overlay and quota readers, Web message updates and offline cleanup,
-timeline avatars, Channel avatars and work dock use this index. A stale launch
-placeholder is suppressed once its exact Instance is resident. Messages first
-seen before presence use the Instance ID as their member key; cross-Channel
-links never create a resident in the destination. The index is a derived
-presentation lookup and grants no membership or execution authority. Existing
-wire fields and legacy member keys remain readable without a data migration.
+The reducer is the sole map writer and lifecycle merger. Full authoritative
+snapshots replace residency; omitted presence preserves the prior projection,
+and an explicit empty snapshot clears it. Live reports only update known IDs.
+Messages only patch known Instances, never establish residency, and cannot
+wake an offline Instance. Deletes require the exact ID. Reborn retains that
+ID and registration while changing Run; handoff allocates a new Instance and
+slot. Partial slot or registration conflicts request one authoritative read
+per Channel/Instance per connection, with a bounded request set. Invalid
+Authority snapshots are diagnosed and isolated rather than repeatedly fetched.
+
+Legacy grouped rows split into individual Instances without copying aggregate
+Run activity, intent or clocks to siblings; only registration-level quota is
+shared. Canonical entries win over duplicate aliases, which are diagnosed.
+Hub overlays isolate conflicting sessions. A stale launch placeholder is
+suppressed by the same exact Instance ID. These projections grant no membership,
+execution or access authority; immutable message avatars remain historical.
 
 ## 2. Vocabulary
 

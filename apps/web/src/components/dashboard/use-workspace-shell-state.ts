@@ -1,4 +1,6 @@
 "use client";
+import { createChannelPresenceRepair } from "./channel-presence-repair";
+import { decodeChannelFrame, type ChannelSnapshotFrame } from "./channel-frame-codec";
 import { channelEventViews } from "./workspace-shell-presence";
 import type { ChannelEventView } from "./realtime-channels";
 import { channelAfterMessage, createViewerReads, type ChannelMessageArrival, type ViewerReads } from "./channel-message-summary";
@@ -97,7 +99,7 @@ import type {
   ChannelMessage,
   ObservabilityEvent,
   SerializedAgent,
-  SerializedChannel,
+  ChannelSnapshot,
   SerializedMachineDaemon,
   SerializedAutomation,
   SerializedSpace,
@@ -131,7 +133,6 @@ import {
   TimelineItem,
   WorkspaceMessageSearch,
   appRouteInfo,
-  agentMessageInstanceIdentityIncomplete,
   appViewPath,
   conversationViewOpen,
   pagesViewPath,
@@ -291,7 +292,7 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
   const accessTokenRef = useRef<string | undefined>(token);
   const channelReadStateUserIdRef = useRef<string | null>(null);
   const desktopBridgeRef = useRef<DesktopBridge | null>(desktopBridge);
-  const channelsRef = useRef<SerializedChannel[]>([]);
+  const channelsRef = useRef<ChannelSnapshot[]>([]);
   // An Instance that went offline may be resting rather than gone; its rest is
   // recorded once its daemon reports the exit, a few seconds after the socket
   // closes. Read the channel's presence again after that so its avatar stays,
@@ -431,7 +432,7 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
     settleMessageJump,
   } = useMessageJump({ timelineScrollRef, setBrowserHash });
 
-  const [realtimeChannels] = useState(() => createRealtimeCollection<SerializedChannel>(mobileListFixture?.channels ?? []));
+  const [realtimeChannels] = useState(() => createRealtimeCollection<ChannelSnapshot>(mobileListFixture?.channels ?? []));
   const channels = useSyncExternalStore(
     view === "messages" || view === "pages" ? realtimeChannels.subscribeCatalog : realtimeChannels.subscribe,
     view === "messages" || view === "pages" ? realtimeChannels.getCatalogSnapshot : realtimeChannels.getSnapshot,
@@ -677,7 +678,7 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
   }, []);
 
   const reconcileAgentTraceChannelAccess = useCallback((
-    nextChannels: SerializedChannel[],
+    nextChannels: ChannelSnapshot[],
     options: { revalidateAll?: boolean } = {}
   ) => {
     const allowedChannelIds = new Set(nextChannels.map((channel) => channel.id));
@@ -1510,10 +1511,18 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
       connection.backOff();
     }
 
+    const repairPresenceConflict = createChannelPresenceRepair(channelId => {
+      const channel = realtimeChannels.get(channelId);
+      if (!channel) return;
+      window.dispatchEvent(new CustomEvent("xmatrix:channel-catalog-change", {
+        detail: { kind: "presence", spaceId: channel.spaceId, channelId: channel.id },
+      }));
+    });
+
     // Presence and activity from many working Agents land as one commit per
     // flush window instead of one per frame (realtime-frame-batcher.ts).
     let routedBatch: ReturnType<typeof createChannelPresenceBatch> | undefined;
-    const relayFrames = createRealtimeFrameBatcher<HumanServerMessage>({
+    const relayFrames = createRealtimeFrameBatcher<ChannelSnapshotFrame>({
       batchKey: humanFrameBatchKey,
       apply: (frames) => {
         let channelBatch: ReturnType<typeof createChannelPresenceBatch> | null = null;
@@ -1530,7 +1539,10 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
         const flushPresence = () => {
           const incoming = presence;
           presence = [];
-          if (incoming.length) channels().applyPresence(incoming);
+          for (const agent of incoming) {
+            try { channels().applyPresence([agent]); }
+            catch (error) { repairPresenceConflict(error); }
+          }
         };
         const flushState = (kind: "live" | "catalog" = "live") => {
           flushPresence();
@@ -1582,7 +1594,8 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
               if (frame.type === "observable_event" && !isLlmTraceEvent(frame.event)) events.push(frame.event);
               handleRelayMessage(frame);
             }
-          } catch {
+          } catch (error) {
+            repairPresenceConflict(error);
             // One bad frame must not drop the rest of its batch.
           }
         }
@@ -1591,7 +1604,7 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
       },
     });
 
-    function handleRelayMessage(message: HumanServerMessage) {
+    function handleRelayMessage(message: ChannelSnapshotFrame) {
       switch (message.type) {
         case "error":
           if (message.requestId === "web-subscribe" && !relayPushConnectedRef.current &&
@@ -1899,18 +1912,6 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
           if (!isValidChannelMessage(entry)) {
             break;
           }
-          if (agentMessageInstanceIdentityIncomplete(entry)) {
-            // Do not synthesize an unaddressable live card. The catalog event below
-            // refreshes Authority Presence; this event is a narrow observability hook.
-            window.dispatchEvent(new CustomEvent("xmatrix:agent-message-identity-incomplete", {
-              detail: {
-                channelId: entry.channelId,
-                messageId: entry.messageId,
-                agentId: entry.from.identityId,
-                instanceId: entry.from.instanceId,
-              },
-            }));
-          }
           if (message.clientMessageId && isOwnChannelMessage(entry, userId)) {
             // The realtime event normally arrives before the POST response.
             // Reconcile here so the pending row is updated in place instead of
@@ -2051,8 +2052,9 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
               ? (decoded as { type?: unknown }).type : undefined;
             if ((claimedType === "space_channel_catalog_changed" && !catalogChanged) ||
                 (claimedType === "workspace_resource_changed" && !workspaceChanged)) continue;
-            relayFrames.push(workspaceChanged ?? catalogChanged ?? decoded as HumanServerMessage);
-          } catch {
+            relayFrames.push(decodeChannelFrame(workspaceChanged ?? catalogChanged ?? decoded as HumanServerMessage));
+          } catch (error) {
+            repairPresenceConflict(error);
             // A malformed frame cannot discard good neighbors in its packet.
           }
         }

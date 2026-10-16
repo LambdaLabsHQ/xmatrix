@@ -1,10 +1,10 @@
 "use client";
 
 import { createContext, useCallback, useContext, useMemo, useSyncExternalStore } from "react";
-import type { SerializedChannel } from "@xmatrix/protocol";
+import type { ChannelSnapshot } from "@xmatrix/protocol";
 import { sameValue } from "../../lib/same-value";
 
-type Preview = NonNullable<SerializedChannel["lastMessage"]>;
+type Preview = NonNullable<ChannelSnapshot["lastMessage"]>;
 
 /** The newest message the open conversation's timeline shows, as its list row previews it. */
 export type PresentedChannelTail = { channelId: string; sequence: number; preview: Preview };
@@ -17,9 +17,9 @@ export type PresentedChannelTail = { channelId: string; sequence: number; previe
  * report or a catalog read can name a newer one before its message arrives).
  */
 export function channelAsTimelineShows(
-  channel: SerializedChannel,
+  channel: ChannelSnapshot,
   tail: PresentedChannelTail | null | undefined,
-): SerializedChannel {
+): ChannelSnapshot {
   if (!tail || tail.channelId !== channel.id) return channel;
   const messageCount = tail.sequence > 0 ? tail.sequence : channel.messageCount;
   if (sameValue(channel.lastMessage, tail.preview) && messageCount === channel.messageCount) return channel;
@@ -70,7 +70,7 @@ export function usePresentedChannelTail(channelId: string): PresentedChannelTail
 }
 
 /** `channel` as its row shows it (channelAsTimelineShows); the same object while the two agree. */
-export function useChannelAsTimelineShows(channel: SerializedChannel): SerializedChannel {
+export function useChannelAsTimelineShows(channel: ChannelSnapshot): ChannelSnapshot {
   const tail = usePresentedChannelTail(channel.id);
   return useMemo(() => channelAsTimelineShows(channel, tail), [channel, tail]);
 }

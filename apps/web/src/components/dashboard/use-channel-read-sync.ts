@@ -1,5 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
-import type { SerializedChannel } from "@xmatrix/protocol";
+import type { ChannelSnapshot } from "@xmatrix/protocol";
 import {
   useCallback,
   useEffect,
@@ -25,11 +25,11 @@ type ReadCountsUpdater = (
 type UseChannelReadSyncOptions = {
   accessTokenRef: MutableRefObject<string | undefined>;
   userId: string | undefined;
-  channelsRef: MutableRefObject<SerializedChannel[]>;
+  channelsRef: MutableRefObject<ChannelSnapshot[]>;
   selectedChannelIdRef: MutableRefObject<string | null>;
   timelineActiveRef: MutableRefObject<boolean>;
   viewRef: MutableRefObject<AppView>;
-  setChannels: Dispatch<SetStateAction<SerializedChannel[]>>;
+  setChannels: Dispatch<SetStateAction<ChannelSnapshot[]>>;
   updateChannelReadCounts: ReadCountsUpdater;
   /** Told as the Hub's answer for a Channel is applied: a read asked before it is older than it. */
   onReadStateAnswered?: (channelId: string) => void;

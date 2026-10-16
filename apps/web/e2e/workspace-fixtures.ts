@@ -453,3 +453,6 @@ export async function openGeneralChannelWithPagedHistory(
     waitUntil: "domcontentloaded",
   });
 }
+
+/** Registration identity shared by Codex presence fixtures. */
+export const FIXTURE_AGENT_REGISTRATION = { ownerUserId: "owner-1", machineId: "machine-1", harness: "codex" };

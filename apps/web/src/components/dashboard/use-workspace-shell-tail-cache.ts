@@ -24,13 +24,13 @@ import {
   type ChannelHistoryCacheEntry,
   type HistoryRenderAuthority,
 } from "./workspace-shell-modules";
-import type { ChannelMessage, SerializedChannel } from "@xmatrix/protocol";
+import type { ChannelMessage, ChannelSnapshot } from "@xmatrix/protocol";
 
 export function useWorkspaceShellTailCache(deps: {
   user: { id: string } | null;
   mobileListFixture: unknown;
-  channels: SerializedChannel[];
-  channelsRef: React.MutableRefObject<SerializedChannel[]>;
+  channels: ChannelSnapshot[];
+  channelsRef: React.MutableRefObject<ChannelSnapshot[]>;
   historyCacheRef: React.MutableRefObject<Map<string, ChannelHistoryCacheEntry>>;
   historyRenderAuthoritiesRef: React.MutableRefObject<Map<string, HistoryRenderAuthority>>;
   historyRevisionRef: React.MutableRefObject<number>;
@@ -98,7 +98,7 @@ export function useWorkspaceShellTailCache(deps: {
   const productTailCacheGapRef = useRef<Map<string, number>>(new Map());
   const productTailCachePersistTimersRef = useRef<Map<string, number>>(new Map());
   // Presentation-only cold-start catalog (disk rows shown before auth resolves).
-  const [cachedCatalogChannels, setCachedCatalogChannels] = useState<SerializedChannel[]>([]);
+  const [cachedCatalogChannels, setCachedCatalogChannels] = useState<ChannelSnapshot[]>([]);
 
   // Read the last same-device catalog in parallel with native-session auth.
   // Only the inert list is rendered from this path; no token or authority is

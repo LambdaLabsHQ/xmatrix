@@ -6,11 +6,11 @@
  * list: a channel missing from it renders as one they cannot open.
  */
 import { createContext, useContext, type ReactNode } from "react";
-import type { SerializedChannel } from "@xmatrix/protocol";
+import type { ChannelSnapshot } from "@xmatrix/protocol";
 import { shareByKey } from "../../lib/same-value";
 
 /** What a reference to a channel shows of it: what `#` completion and chips read. */
-export type ChannelReference = Pick<SerializedChannel, "id" | "spaceId" | "name" | "topic" | "summary">;
+export type ChannelReference = Pick<ChannelSnapshot, "id" | "spaceId" | "name" | "topic" | "summary">;
 
 export type MessageReferenceCatalog = {
   channels: readonly ChannelReference[];
@@ -24,7 +24,7 @@ export type MessageReferenceCatalog = {
  */
 export function channelReferences(
   previous: readonly ChannelReference[],
-  channels: readonly SerializedChannel[],
+  channels: readonly ChannelSnapshot[],
 ): readonly ChannelReference[] {
   return shareByKey(previous, channels.map(({ id, spaceId, name, topic, summary }) => ({ id, spaceId, name, topic, summary })),
     (reference) => reference.id);

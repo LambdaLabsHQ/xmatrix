@@ -15,7 +15,7 @@ for (const { memberId, retainedAlias } of [
     const instance = { id: "instance-claude", channelId: E2E_CHANNEL.id, channelInstanceId: "1",
       label: "Claude:1", connectedAt: E2E_NOW, lastSeenAt: E2E_NOW, status: "idle" };
     const avatarUrl = "/agent-vendors/claude.svg";
-    const presence = { kind: "agent", label: "Claude", avatarUrl, instances: [instance] };
+    const presence = { registration: { ownerUserId: "owner-1", machineId: "machine-1", harness: "claude" }, kind: "agent", label: "Claude", avatarUrl, instances: [instance] };
     const channel = { ...E2E_CHANNEL, messageCount: 1, historyHeadSequence: 1,
       memberPresence: { [memberId]: presence,
         ...(retainedAlias ? { "agent:instance-claude": { ...presence, avatarUrl: undefined } } : {}) } };
@@ -62,3 +62,31 @@ for (const { memberId, retainedAlias } of [
     await expect(avatars.locator("img")).toHaveCount(2);
   });
 }
+
+test("two successive unknown Instance reports both obtain authoritative cards", async ({ page }) => {
+  const { fixtureChannelCatalog } = await import("./workspace-fixtures");
+  const initial = { ...E2E_CHANNEL, memberPresence: {} };
+  let send: ((frame: unknown) => void) | undefined;
+  await routeHumanSocket(page, (frame, reply) => {
+    if (frame.type === "human_connect") send = reply;
+    if (frame.type === "ping") reply({ type: "pong", requestId: frame.requestId });
+    if (frame.type === "user_focus_channel") reply({ type: "channel_history",
+      requestId: frame.requestId, channelId: initial.id, messages: [], hasMore: false });
+  });
+  await installWorkspaceStubs(page, { spaces: [E2E_SPACE], channels: [initial] });
+  await page.goto("/app/personal-sspaceperso/channels/general-cchannelgen", { waitUntil: "domcontentloaded" });
+  await expect.poll(() => Boolean(send)).toBe(true);
+  const members: Record<string, unknown> = {};
+  for (const slot of [1, 2]) {
+    const instance = { id: `rapid-${slot}`, channelId: initial.id, channelInstanceId: String(slot),
+      label: `Claude:${slot}`, connectedAt: E2E_NOW, lastSeenAt: E2E_NOW, status: "idle" };
+    members[instance.id] = { kind: "agent", label: "Claude", instances: [instance],
+      registration: { ownerUserId: "owner", machineId: "machine", harness: "claude" } };
+    await fixtureChannelCatalog(page, `rapid-authority-${slot}`, [{ ...initial, memberPresence: { ...members } }]);
+    send!({ type: "enhanced_presence", agent: { id: instance.id, instanceId: instance.id, name: "Claude",
+      userId: "owner", type: "claude", lifetime: "short", email: "", metadata: {},
+      status: "idle", connectedAt: E2E_NOW, lastSeenAt: E2E_NOW, instances: [instance] } });
+    await expect(page.locator(".app-agent-work-avatar")).toHaveCount(slot);
+  }
+  await expect(page.locator(".app-agent-work-avatar img")).toHaveCount(2);
+});

@@ -1,4 +1,4 @@
-import { WEB_PROXY_ROUTES, type SerializedChannel, type SerializedSpace } from "@xmatrix/protocol";
+import { WEB_PROXY_ROUTES, type ChannelSnapshot, type SerializedSpace } from "@xmatrix/protocol";
 import type { Dispatch, SetStateAction } from "react";
 import { replaceChannel } from "@/components/dashboard/workspace-admin-views";
 import {
@@ -26,7 +26,7 @@ export function pageShellActions(input: {
   setView: (view: AppView) => void;
   setSelectedPageId: (pageId: string | null) => void;
   setSelectedChannelId: (channelId: string | null) => void;
-  setChannels: Dispatch<SetStateAction<SerializedChannel[]>>;
+  setChannels: Dispatch<SetStateAction<ChannelSnapshot[]>>;
   setBrowserPath: (path: string) => void;
   /** Puts the cursor in the conversation's composer. */
   focusComposer: () => void;

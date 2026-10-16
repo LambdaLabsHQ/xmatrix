@@ -1,3 +1,4 @@
+import { FIXTURE_AGENT_REGISTRATION } from "./workspace-fixtures";
 import type { Locator, Page } from "@playwright/test";
 import { expect, test } from "./fixtures";
 import { channelHistory, openWorkingAgentsSpace, workingAgentsSpace } from "./working-agents-fixtures";
@@ -70,7 +71,7 @@ test("activity folds per run, anyone else's entry breaks the run, and talk stays
     lastMessageSequence: messages.length,
     updatedAt: at(36),
     memberPresence: {
-      "agent:claude": { kind: "agent", status: "busy", label: "claude", instances: [{
+      "agent:claude": { registration: FIXTURE_AGENT_REGISTRATION, kind: "agent", status: "busy", label: "claude", instances: [{
         id: "instance-claude-1", channelInstanceId: "1", label: "claude:1", connectedAt: at(0),
         lastSeenAt: at(36), status: "busy", intent: "Writing the Web part" }] },
     },
@@ -110,7 +111,7 @@ async function openWaitingChannel(page: Page, waiting: Record<string, unknown>, 
     lastMessageSequence: 1,
     updatedAt: seen,
     memberPresence: {
-      "agent:claude": { kind: "agent", status: "busy", label: "claude", instances: [{
+      "agent:claude": { registration: FIXTURE_AGENT_REGISTRATION, kind: "agent", status: "busy", label: "claude", instances: [{
         id: "instance-claude-1", channelInstanceId: "1", label: "claude:1", connectedAt: seen,
         lastSeenAt: seen, status: "busy", runtimeState: { status: "running", waiting },
         ...(usage ? { usage } : {}) }] },
@@ -175,7 +176,7 @@ test("avatar status stays still while live work and rest states change", async (
     const instance = { ...agent.instances[0]!, status, ...extra, lastSeenAt: new Date().toISOString() };
     send({ type: "enhanced_presence", agent: { ...agent, status, instances: [instance] } });
     send({ type: "channel_updated", channel: { ...space.channels[0], memberPresence: {
-      [agent.id]: { kind: "agent", label: agent.name, status, instances: [instance] },
+      [agent.id]: { registration: FIXTURE_AGENT_REGISTRATION, kind: "agent", label: agent.name, status, instances: [instance] },
     } } });
   };
 
@@ -401,7 +402,7 @@ test("three limited Instances keep the limit word under the face and the status 
     lastMessageSequence: 1,
     updatedAt: seen,
     memberPresence: {
-      "agent:claude": {
+      "agent:claude": { registration: { ownerUserId: "owner-1", machineId: "machine-1", harness: "claude" },
         kind: "agent", status: "online", label: "claude", avatarUrl: "/agent-vendors/claude.svg",
         instances: [1, 2, 3].map((number) => ({
           id: `instance-claude-${number}`, channelInstanceId: String(number), label: `claude:${number}`,

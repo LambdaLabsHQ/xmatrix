@@ -1,3 +1,4 @@
+import { FIXTURE_AGENT_REGISTRATION } from "./workspace-fixtures";
 import { expect, test } from "./fixtures";
 import { type Page } from "@playwright/test";
 import {
@@ -131,7 +132,7 @@ test("details rail shows live instance header labels instead of message snapshot
   await openGeneralChannel(page, {
     ...messageChannel(),
     memberPresence: {
-      "agent:codex": {
+      "agent:codex": { registration: FIXTURE_AGENT_REGISTRATION,
         kind: "agent",
         status: "busy",
         label: "Codex",
@@ -283,7 +284,7 @@ test("agent usage alerts stop at the provider-reported reset time", async ({ pag
   const channel = {
     ...E2E_CHANNEL,
     memberPresence: {
-      "agent:codex": {
+      "agent:codex": { registration: FIXTURE_AGENT_REGISTRATION,
         kind: "agent",
         status: "online",
         label: "Codex",
@@ -300,7 +301,7 @@ test("agent usage alerts stop at the provider-reported reset time", async ({ pag
           },
         ],
       },
-      "agent:codex-current": {
+      "agent:codex-current": { registration: FIXTURE_AGENT_REGISTRATION,
         kind: "agent",
         status: "online",
         label: "Current Codex",
@@ -375,7 +376,7 @@ test("agent message header does not derive historical context from live instance
     lastMessageSequence: 1,
     updatedAt: E2E_NOW,
     memberPresence: {
-      "agent:codex": {
+      "agent:codex": { registration: FIXTURE_AGENT_REGISTRATION,
         kind: "agent",
         status: "offline",
         label: "Codex",

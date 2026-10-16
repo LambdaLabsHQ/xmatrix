@@ -1,4 +1,4 @@
-import { channelAgentInstanceIndex, plainRecord, repoSummonReference } from "@xmatrix/protocol";
+import { decodeChannelSnapshot, encodeChannelSnapshot, presenceInstanceId, plainRecord, repoSummonReference } from "@xmatrix/protocol";
 import type {
   AgentInstanceOfflineReason,
   AgentStatus,
@@ -13,7 +13,7 @@ import {
   type AgentInstancePresentation,
 } from "./agent-instance-presentation";
 import {
-  overlayAgentPresenceOnChannel,
+  overlayAgentPresenceSnapshot,
   type AgentInstanceLivePresenceSession,
 } from "./agent-instance-live-presentation";
 import { loadRuntimePresenceSnapshotEntries } from "./runtime-presence-snapshot";
@@ -155,22 +155,22 @@ export function overlayChannelsWithLiveAgentPresence(
 ): unknown[] {
   return channels.map((channel) => {
     if (!channel || typeof channel !== "object" || Array.isArray(channel)) return channel;
-    let overlaid = channel as SerializedChannel;
-    const computedPresence = Object.prototype.hasOwnProperty.call(overlaid, "memberPresence");
+    let overlaid = decodeChannelSnapshot(channel as SerializedChannel);
+    const computedPresence = overlaid.presence !== undefined;
     for (const session of sessions) {
       if (session.channelId !== overlaid.id) continue;
       // A computed Authority snapshot already dropped offline Instances. Re-adding a
       // lingering Runtime socket after /kill all is what keeps the work dock up.
-      if (computedPresence && !channelAgentInstanceIndex(overlaid).has(session.instanceId)) {
+      if (computedPresence && !overlaid.presence?.instances.has(presenceInstanceId(session.instanceId))) {
         continue;
       }
-      overlaid = overlayAgentPresenceOnChannel(overlaid, {
+      overlaid = overlayAgentPresenceSnapshot(overlaid, {
         reason: "update",
         session: livePresenceSession(session),
         ...projectedLiveAgentStatus(session),
       });
     }
-    return overlaid;
+    return encodeChannelSnapshot(overlaid);
   });
 }
 

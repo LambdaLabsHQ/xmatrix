@@ -1,7 +1,5 @@
-import { channelAgentInstanceIndex, withRegistrationQuota } from "@xmatrix/protocol";
-import { channelInstanceQuota } from "../registration-quota-presentation";
+import { ChannelPresenceConflict, decodeChannelSnapshot, encodeChannelSnapshot, emptyChannelPresence, presenceInstanceId, reduceChannelPresence, withRegistrationQuota, type AgentInstancePresence, type ChannelSnapshot } from "@xmatrix/protocol";
 import type {
-  ChannelAgentMemberPresence,
   SerializedAgent,
   SerializedAgentInstance,
   SerializedChannel,
@@ -47,109 +45,55 @@ export function overlayAgentPresenceOnChannel(
 
   },
 ): SerializedChannel {
-  const { reason, session } = input;
-  const memberPresence = { ...channel.memberPresence };
-  const agentId = channelAgentInstanceIndex(channel).get(session.run.instanceId)?.memberId
-    || session.principal.agentId;
-  const current = memberPresence[agentId];
-  const stablePresence: ChannelAgentMemberPresence = current?.kind === "agent"
-    ? current
-    : {
-        kind: "agent",
-        label: session.principal.agentName || agentId,
-        instances: [],
-      };
-  let instances = [...(stablePresence.instances || [])];
-  if (reason === "disconnect") {
-    instances = instances.filter((instance) => instance.id !== session.run.instanceId);
-  } else {
-    const byId = instances.find((instance) => instance.id === session.run.instanceId);
-    // Only reuse a channel slot when the session names it. Defaulting to "1"
-    // would collapse unrelated multi-instance cards onto the first birth slot.
-    const bySlot = session.run.channelInstanceId
-      ? instances.find((instance) =>
-        Boolean(instance.channelInstanceId)
-        && instance.channelInstanceId === session.run.channelInstanceId
-      )
-      : undefined;
-    const existing = byId || bySlot;
-    const channelInstanceId = existing?.channelInstanceId
-      || session.run.channelInstanceId
-      || "1";
-    const now = new Date().toISOString();
-    const reported = sanitizeAgentInstancePresentation(session.presentation) || {};
-    const presentation = { ...reported, usage: withRegistrationQuota(reported.usage, channelInstanceQuota(channel, session.run.instanceId) ?? stablePresence.usage) };
-    const birthConnectedAt = earliestIsoTimestamp(
-      existing?.connectedAt,
-      session.connectedAt,
-      now,
-    );
-    const status = input.status || session.run.instanceStatus || "online";
-    const nextInstance: SerializedAgentInstance = {
-      ...presentation,
-      id: session.run.instanceId,
-      channelInstanceId,
-      channelId: session.run.channelId,
-      label: existing?.label
-        || `${session.principal.agentName || "agent"}:${channelInstanceId}`,
-      connectedAt: birthConnectedAt,
-      lastSeenAt: session.lastSeenAt || now,
-      status,
-      ...(status === "offline" && input.offlineReason ? { offlineReason: input.offlineReason } : {}),
-      ...(session.run.machineId ? { machineId: session.run.machineId } : {}),
-      ...(session.run.hostId ? { hostId: session.run.hostId } : {}),
-      ...(session.run.cwd ? { cwd: session.run.cwd } : {}),
-      ...(session.run.repository || existing?.repository
-        ? { repository: session.run.repository || existing?.repository } : {}),
-    };
-    instances = [
-      ...instances.filter((instance) => {
-        if (instance.id === session.run.instanceId) return false;
-        if (
-          bySlot
-          && instance.channelInstanceId
-          && instance.channelInstanceId === session.run.channelInstanceId
-        ) {
-          return false;
-        }
-        return true;
-      }),
-      nextInstance,
-    ].sort(compareAgentInstanceBirthOrder);
-  }
-  if (instances.length === 0) {
-    delete memberPresence[agentId];
-    return { ...channel, memberPresence };
-  }
-  const preferred = preferredAgentPresenceInstance(instances);
-  const usage = preferred.usage;
-  memberPresence[agentId] = {
-    kind: "agent",
-    ...(stablePresence.label ? { label: stablePresence.label } : {}),
-    ...(stablePresence.registration ? { registration: stablePresence.registration } : {}),
-    ...(stablePresence.email ? { email: stablePresence.email } : {}),
-    ...(stablePresence.avatarUrl ? { avatarUrl: stablePresence.avatarUrl } : {}),
-    lastSeenAt: preferred.lastSeenAt,
-    ...(preferred.activity ? { activity: preferred.activity } : {}),
-    ...(preferred.files ? { files: preferred.files } : {}),
-    ...(preferred.intent ? { intent: preferred.intent } : {}),
-    ...(preferred.runtimeState ? { runtimeState: preferred.runtimeState } : {}),
-    ...(preferred.goal ? { goal: preferred.goal } : {}),
-    ...(usage ? { usage } : {}),
-    instances,
-  };
-  return { ...channel, memberPresence };
+  return encodeChannelSnapshot(overlayAgentPresenceSnapshot(decodeChannelSnapshot(channel), input));
 }
 
-function preferredAgentPresenceInstance(
-  instances: readonly SerializedAgentInstance[],
-): SerializedAgentInstance {
-  const rank = (status: SerializedAgentInstance["status"]) =>
-    status === "busy" ? 0 : status === "online" ? 1 : status === "idle" ? 2 : 3;
-  return [...instances].sort((left, right) => {
-    const statusRank = rank(left.status) - rank(right.status);
-    return statusRank || Date.parse(right.lastSeenAt) - Date.parse(left.lastSeenAt);
-  })[0]!;
+export function overlayAgentPresenceSnapshot(channel: ChannelSnapshot,
+  input: { reason: "connect" | "update" | "disconnect"; session: Readonly<AgentInstanceLivePresenceSession>;
+    status?: SerializedAgentInstance["status"]; offlineReason?: SerializedAgentInstance["offlineReason"] }): ChannelSnapshot {
+  try { return overlayBoundInstance(channel, input); }
+  catch (error) {
+    if (!(error instanceof ChannelPresenceConflict) && !(error instanceof TypeError)) throw error;
+    console.error("[presence] rejected_live_session", channel.id, input.session.run.instanceId);
+    return channel;
+  }
+}
+
+function overlayBoundInstance(channel: ChannelSnapshot,
+  input: { reason: "connect" | "update" | "disconnect"; session: Readonly<AgentInstanceLivePresenceSession>;
+    status?: SerializedAgentInstance["status"]; offlineReason?: SerializedAgentInstance["offlineReason"] }): ChannelSnapshot {
+  const { reason, session } = input;
+  const id = presenceInstanceId(session.run.instanceId);
+  let presence = channel.presence ?? emptyChannelPresence(channel.id);
+  if (reason === "disconnect") {
+    presence = reduceChannelPresence(presence, { type: "remove", instanceId: id });
+    return { ...channel, presence };
+  }
+  const existing = presence.instances.get(id);
+  if (!existing) {
+    console.warn("[presence] unbound_live_instance", channel.id, id);
+    return channel;
+  }
+  const channelInstanceId = session.run.channelInstanceId || existing.channelInstanceId;
+  if (!channelInstanceId) throw new ChannelPresenceConflict(channel.id);
+  const now = new Date().toISOString();
+  const reported = sanitizeAgentInstancePresentation(session.presentation) || {};
+  const status = input.status || session.run.instanceStatus || "online";
+  const next: AgentInstancePresence = {
+    ...existing, ...reported, id, channelId: channel.id, channelInstanceId,
+    agentName: existing?.agentName || session.principal.agentName || "Agent",
+    label: existing?.label || `${session.principal.agentName || "agent"}:${channelInstanceId}`,
+    connectedAt: earliestIsoTimestamp(existing?.connectedAt, session.connectedAt, now),
+    lastSeenAt: session.lastSeenAt || now, status, rest: undefined,
+    offlineReason: status === "offline" ? input.offlineReason : undefined,
+    usage: withRegistrationQuota(reported.usage, existing?.usage),
+    ...(session.run.machineId ? { machineId: session.run.machineId } : {}),
+    ...(session.run.hostId ? { hostId: session.run.hostId } : {}),
+    ...(session.run.cwd ? { cwd: session.run.cwd } : {}),
+    ...(session.run.repository ? { repository: session.run.repository } : {}),
+  };
+  presence = reduceChannelPresence(presence, { type: "upsert", source: "live", authoritative: true, instance: next });
+  return { ...channel, presence };
 }
 
 function earliestIsoTimestamp(...values: Array<string | undefined>): string {
@@ -163,23 +107,6 @@ function earliestIsoTimestamp(...values: Array<string | undefined>): string {
     earliest = value;
   }
   return earliest || values.find((value): value is string => Boolean(value)) || new Date().toISOString();
-}
-
-/** Stable Agents-panel order: earliest birth first, then channel slot, then id. */
-function compareAgentInstanceBirthOrder(
-  left: SerializedAgentInstance,
-  right: SerializedAgentInstance,
-): number {
-  const leftTime = Date.parse(left.connectedAt || "");
-  const rightTime = Date.parse(right.connectedAt || "");
-  const hasLeft = Number.isFinite(leftTime);
-  const hasRight = Number.isFinite(rightTime);
-  if (hasLeft && hasRight && leftTime !== rightTime) return leftTime - rightTime;
-  if (hasLeft !== hasRight) return hasLeft ? -1 : 1;
-  const leftSlot = Number(left.channelInstanceId || 0);
-  const rightSlot = Number(right.channelInstanceId || 0);
-  if (leftSlot !== rightSlot) return leftSlot - rightSlot;
-  return left.id.localeCompare(right.id);
 }
 
 export function serializeAgentFromSession(

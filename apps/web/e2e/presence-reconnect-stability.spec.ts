@@ -1,3 +1,4 @@
+import { FIXTURE_AGENT_REGISTRATION } from "./workspace-fixtures";
 import { expect, test } from "./fixtures";
 import {
   E2E_CHANNEL,
@@ -20,7 +21,7 @@ const agentId = "agent:codex";
 const instanceId = "instance-codex-reconnect";
 const messageBody = "Presence survives the Human socket reconnect.";
 
-const agentPresence = {
+const agentPresence = { registration: FIXTURE_AGENT_REGISTRATION,
   kind: "agent" as const,
   label: "Codex",
   avatarUrl,

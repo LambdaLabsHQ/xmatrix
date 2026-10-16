@@ -1,4 +1,5 @@
 "use client";
+import { presenceInstanceId } from "@xmatrix/protocol";
 
 import type { ObservabilityEvent } from "@xmatrix/protocol";
 import { pageShellActions } from "./page-shell-actions";
@@ -74,7 +75,7 @@ import { AGENT_PRESETS, WEB_PROXY_ROUTES, agentLaunchExecutable, canonicalRegist
 import type {
   ChannelMessage,
   SerializedAgentInstance,
-  SerializedChannel,
+  ChannelSnapshot,
   SerializedSpace,
   SpaceMemberPermissions,
   SerializedWorkspace,
@@ -757,14 +758,10 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
 
   const liveTraceActivity = useStableCallback((target: AgentTraceTarget) => {
     const channel = target.channelId ? s.realtimeChannels.get(target.channelId) : undefined;
-    for (const presence of Object.values(channel?.memberPresence ?? {})) {
-      if (presence.kind !== "agent") continue;
-      const instance = presence.instances?.find(instance => instance.id === target.instanceId);
-      if (!instance) continue;
-      return agentBusyTraceStaleActivity({ agentId: target.id, channelId: target.channelId,
-        events: s.agentStatusEvents, instance, name: target.name }) ||
-        instance.activity || presence.activity || (instance.status === "busy" ? "Processing" : undefined);
-    }
+    const instance = target.instanceId ? channel?.presence?.instances.get(presenceInstanceId(target.instanceId)) : undefined;
+    if (instance) return agentBusyTraceStaleActivity({ agentId: target.id, channelId: target.channelId,
+      events: s.agentStatusEvents, instance, name: target.name }) ||
+      instance.activity || (instance.status === "busy" ? "Processing" : undefined);
     return target.instanceId ? "Instance is no longer live" : undefined;
   });
 
@@ -1464,7 +1461,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     }
   }
 
-  const copyChannelLink = useCallback(async (channel: SerializedChannel): Promise<void> => {
+  const copyChannelLink = useCallback(async (channel: ChannelSnapshot): Promise<void> => {
     await copyTextToClipboard(absoluteChannelUrl(channel, s.spacesRef.current));
   }, [s.spacesRef]);
 
@@ -1754,7 +1751,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
      there as pending, as any send does; the shell's own send reads the
      selected conversation from React state, which has not settled in the tick
      after a create, so the message is delivered to the created channel. */
-  async function sendNewConversationMessage(channel: SerializedChannel, snapshot: ComposerSendSnapshot) {
+  async function sendNewConversationMessage(channel: ChannelSnapshot, snapshot: ComposerSendSnapshot) {
     if (!s.token) throw new UserFacingProblem("Sign in again to send");
     setChannels((current) => replaceChannel(current, channel));
     setComposingConversation(false);
@@ -1776,7 +1773,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
 
 
   async function updateChannelVisibility(
-    channel: SerializedChannel,
+    channel: ChannelSnapshot,
     mode: ChannelCreateMode
   ) {
     if (!s.token || s.updatingChannelVisibilityId || channel.mode === mode) return;
@@ -1801,7 +1798,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
         cache: "no-store",
       });
       const payload = (await res.json().catch(() => ({}))) as {
-        channel?: SerializedChannel;
+        channel?: ChannelSnapshot;
         message?: unknown;
       };
       if (!res.ok) {
@@ -1827,13 +1824,13 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     }
   }
 
-  function openChannelMove(channel: SerializedChannel) {
+  function openChannelMove(channel: ChannelSnapshot) {
     setChannelMoveTargetSpaceId(channel.spaceId || s.currentSpaceId || "");
     setChannelMoveError(null);
     setChannelMoveOpen(true);
   }
 
-  async function moveChannel(channel: SerializedChannel) {
+  async function moveChannel(channel: ChannelSnapshot) {
     if (!s.token || s.movingChannelId) return;
     const targetSpaceId = s.channelMoveTargetSpaceId.trim();
     if (!targetSpaceId) {
@@ -2309,11 +2306,11 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     setRenamingChannelId(channelId);
     setHistoryError(null);
     try {
-      const { channel } = await requestHub<{ channel?: SerializedChannel }>(
+      const { channel } = await requestHub<{ channel?: ChannelSnapshot }>(
         WEB_PROXY_ROUTES.channel(channelId),
         { method: "PATCH", body: { name: nextName } },
         (payload) => Boolean(payload.channel),
-      ) as { channel: SerializedChannel };
+      ) as { channel: ChannelSnapshot };
       setChannels((current) => replaceChannel(current, channel));
       if (s.selectedChannelIdRef.current === channel.id) {
         const nextPath = channelAppPath(channel, s.spaces);
@@ -2477,7 +2474,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
 
   /** Shows the message as pending in its channel at once, then appends it. */
   async function deliverOutgoingMessage(
-    channel: SerializedChannel,
+    channel: ChannelSnapshot,
     { body, invocationSelections, summonIntents, attachments, replyToMessageId, replyTo, appMentions }:
       Pick<OutgoingMessage, "body" | "invocationSelections" | "summonIntents" | "attachments" | "replyToMessageId" | "replyTo" | "appMentions">,
   ) {
@@ -2513,7 +2510,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
   }
 
   /** One attempt at appending a pending row. Sending again runs it under the same clientMessageId. */
-  async function attemptOutgoingSend(token: string, channel: SerializedChannel, outgoing: OutgoingMessage) {
+  async function attemptOutgoingSend(token: string, channel: ChannelSnapshot, outgoing: OutgoingMessage) {
     const { clientMessageId, body, invocationSelections, summonIntents, attachments, replyToMessageId, appMentions, sentAt } = outgoing;
     const channelId = channel.id;
     try {
@@ -2643,7 +2640,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
         cache: "no-store",
       });
       await requireResponseOk(res);
-      const payload = (await res.json()) as { message?: unknown; channel?: SerializedChannel };
+      const payload = (await res.json()) as { message?: unknown; channel?: ChannelSnapshot };
       if (isValidChannelMessage(payload.message)) {
         mergeAndRememberChannelHistory(message.channelId, [payload.message]);
         if (s.selectedChannelIdRef.current === message.channelId) {
@@ -2673,7 +2670,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     // Catalog authority rather than the legacy single-Channel route, while
     // keeping the lookup inside the thread-open deadline.
     signal?: AbortSignal,
-  ): Promise<SerializedChannel | null> {
+  ): Promise<ChannelSnapshot | null> {
     if (!s.token) return null;
     const result = await fetchChannelCatalogResolve({
       token: s.token,
@@ -2686,9 +2683,9 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
 
   /** The thread a message already has; conversations are no longer started from a message. */
   async function findMessageThreadChannel(
-    parentChannel: SerializedChannel | null,
+    parentChannel: ChannelSnapshot | null,
     message: TimelineItem
-  ): Promise<SerializedChannel | null> {
+  ): Promise<ChannelSnapshot | null> {
     if (!s.token || !parentChannel || !message.messageId) return null;
     const known = message.threadChannel ??
       threadChannelForMessage(s.channels, parentChannel.id, message.messageId);
@@ -2698,7 +2695,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     return resolved;
   }
 
-  async function openMessageThreadInChannel(parentChannel: SerializedChannel | null, message: TimelineItem) {
+  async function openMessageThreadInChannel(parentChannel: ChannelSnapshot | null, message: TimelineItem) {
     try {
       const threadChannel = await findMessageThreadChannel(parentChannel, message);
       if (!threadChannel) return;
@@ -2718,7 +2715,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
    * that channel is still selected.
    */
   async function changeMessageInChannel(
-    channel: SerializedChannel | null,
+    channel: ChannelSnapshot | null,
     message: TimelineItem,
     change: (accessToken: string, channelId: string, messageId: string) => Promise<ChannelMessage>,
     onMergedMessages?: (messages: ChannelMessage[]) => void
@@ -2738,7 +2735,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
   }
 
   async function toggleMessageReactionInChannel(
-    channel: SerializedChannel | null,
+    channel: ChannelSnapshot | null,
     message: TimelineItem,
     emoji: string,
     onMergedMessages?: (messages: ChannelMessage[]) => void
@@ -2760,7 +2757,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
   }
 
   async function editMessageInChannel(
-    channel: SerializedChannel | null,
+    channel: ChannelSnapshot | null,
     message: TimelineItem,
     body: string,
     onMergedMessages?: (messages: ChannelMessage[]) => void
@@ -2778,7 +2775,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
   }
 
   async function recallMessageInChannel(
-    channel: SerializedChannel | null,
+    channel: ChannelSnapshot | null,
     message: TimelineItem,
     onMergedMessages?: (messages: ChannelMessage[]) => void
   ) {

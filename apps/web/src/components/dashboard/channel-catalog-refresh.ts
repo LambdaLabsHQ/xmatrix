@@ -1,21 +1,21 @@
 import type { InfiniteData, QueryClient, QueryKey } from "@tanstack/react-query";
 import type {
-  ChannelCatalogPage, ChannelCatalogPageRow, ChannelCatalogResolveResult, SerializedChannel,
+  ChannelSnapshotCatalogPage, ChannelSnapshotCatalogPageRow, ChannelSnapshotCatalogResolveResult, ChannelSnapshot,
 } from "@xmatrix/protocol";
 import { sameValue } from "../../lib/same-value";
 
 /** Flatten an infinite catalog query's pages into one row per channel, last write winning. */
 export function rowsFromData(
-  data: InfiniteData<ChannelCatalogPage, unknown> | undefined,
-): ChannelCatalogPageRow[] {
-  const rows = new Map<string, ChannelCatalogPageRow>();
+  data: InfiniteData<ChannelSnapshotCatalogPage, unknown> | undefined,
+): ChannelSnapshotCatalogPageRow[] {
+  const rows = new Map<string, ChannelSnapshotCatalogPageRow>();
   for (const page of data?.pages ?? []) {
     for (const row of page.rows) rows.set(row.channel.id, row);
   }
   return [...rows.values()];
 }
 
-const NO_ROWS: ChannelCatalogPageRow[] = [];
+const NO_ROWS: ChannelSnapshotCatalogPageRow[] = [];
 
 /**
  * What a catalog query holds after `next` is written to it: `next`, with each
@@ -28,12 +28,12 @@ const NO_ROWS: ChannelCatalogPageRow[] = [];
  * entity table then takes for a new read and applies over what live reports
  * have said since, and which re-renders every row of the list.
  */
-export function shareCatalogRows<Data extends InfiniteData<ChannelCatalogPage, unknown>>(
+export function shareCatalogRows<Data extends InfiniteData<ChannelSnapshotCatalogPage, unknown>>(
   held: Data | undefined,
   next: Data,
 ): Data {
   if (!held || held === next) return next;
-  const heldRows = new Map<string, ChannelCatalogPageRow>();
+  const heldRows = new Map<string, ChannelSnapshotCatalogPageRow>();
   for (const page of held.pages) for (const row of page.rows) heldRows.set(row.channel.id, row);
   const pages = next.pages.map((page) => {
     const rows = page.rows.map((row) => {
@@ -43,7 +43,7 @@ export function shareCatalogRows<Data extends InfiniteData<ChannelCatalogPage, u
     return rows.every((row, index) => row === page.rows[index]) ? page : { ...page, rows };
   });
   // An answer that says what the query held is the held data: its readers are not told again.
-  const samePage = (before: ChannelCatalogPage | undefined, after: ChannelCatalogPage) => before !== undefined && (
+  const samePage = (before: ChannelSnapshotCatalogPage | undefined, after: ChannelSnapshotCatalogPage) => before !== undefined && (
     before === after || (before.rows.length === after.rows.length &&
       after.rows.every((row, index) => row === before.rows[index]) &&
       sameValue({ ...before, rows: NO_ROWS }, { ...after, rows: NO_ROWS })));
@@ -97,9 +97,9 @@ export function leasedResolveQuery(input: {
   queryKey: QueryKey;
   lease: CatalogLease | undefined;
   fresh?: boolean;
-  read: (signal: AbortSignal) => Promise<ChannelCatalogResolveResult>;
+  read: (signal: AbortSignal) => Promise<ChannelSnapshotCatalogResolveResult>;
   /** Takes the order of a read asked now and gives back the mark for its Channels (`readAskedNow`). */
-  asked: () => (channel: SerializedChannel) => void;
+  asked: () => (channel: ChannelSnapshot) => void;
 }) {
   return {
     queryKey: [...input.queryKey, input.lease?.id ?? 0] as QueryKey,
@@ -136,7 +136,7 @@ function watermarkMap(client: QueryClient): Map<string, number> {
 }
 
 function queryCatalogRevision(data: unknown): number {
-  const pages = (data as InfiniteData<ChannelCatalogPage, unknown> | undefined)?.pages;
+  const pages = (data as InfiniteData<ChannelSnapshotCatalogPage, unknown> | undefined)?.pages;
   if (!Array.isArray(pages) || pages.length === 0) return 0;
   const revisions = pages.map((page) => Number.isSafeInteger(page.catalogRevision)
     ? page.catalogRevision : 0);
@@ -209,7 +209,7 @@ export function refreshSpaceCatalogForEvent(input: {
   /** Whether the entity table holds this channel as a read for this reader brought it. */
   hasChannel: (channelId: string) => boolean;
   /** The entity table's Channel, as live as it has it. */
-  channel?: (channelId: string) => SerializedChannel | undefined;
+  channel?: (channelId: string) => ChannelSnapshot | undefined;
   /** The reader, whose own intake conversations are among their conversations. */
   viewerId?: string;
   /** Pull a channel into the entity table; `fresh` bypasses the cached read. */
@@ -240,7 +240,7 @@ export function refreshSpaceCatalogForEvent(input: {
     const affected = client.getQueryCache().findAll({ queryKey: prefix }).filter((query) => {
       if (query.queryKey[5] !== "catalog") return false;
       if (query.queryKey[6] === "flat") return true;
-      const data = query.state.data as InfiniteData<ChannelCatalogPage, string | null> | undefined;
+      const data = query.state.data as InfiniteData<ChannelSnapshotCatalogPage, string | null> | undefined;
       return rowsFromData(data).some((row) => row.channel.id === channelId);
     });
     for (const query of affected) {
@@ -299,7 +299,7 @@ export function coalesceCatalogChanges(
   ];
 }
 
-type CatalogData = InfiniteData<ChannelCatalogPage, unknown>;
+type CatalogData = InfiniteData<ChannelSnapshotCatalogPage, unknown>;
 
 /**
  * `data` with the Channel's row first and no later than `at`; `data` itself
@@ -307,7 +307,7 @@ type CatalogData = InfiniteData<ChannelCatalogPage, unknown>;
  * Pages keep their cursors and are not refilled.
  */
 function withChannelPromoted(data: CatalogData, channelId: string, at: string | undefined): CatalogData | undefined {
-  let found: ChannelCatalogPageRow | undefined;
+  let found: ChannelSnapshotCatalogPageRow | undefined;
   for (const page of data.pages) {
     const row = page.rows.find((item) => item.channel.id === channelId);
     if (row) found = row;
@@ -319,7 +319,7 @@ function withChannelPromoted(data: CatalogData, channelId: string, at: string | 
   return withRowFirst(data, nextRow);
 }
 
-function withRowFirst(data: CatalogData, row: ChannelCatalogPageRow): CatalogData {
+function withRowFirst(data: CatalogData, row: ChannelSnapshotCatalogPageRow): CatalogData {
   const pages = data.pages.map((page) => ({
     ...page,
     rows: page.rows.filter((item) => item.channel.id !== row.channel.id),
@@ -340,7 +340,7 @@ function isConversationList(queryKey: QueryKey): boolean {
  * except an intake conversation somebody else started. The entity table holds
  * only Channels the Hub has shown this reader.
  */
-function inConversationList(channel: SerializedChannel, spaceId: string, viewerId: string | undefined): boolean {
+function inConversationList(channel: ChannelSnapshot, spaceId: string, viewerId: string | undefined): boolean {
   if (channel.spaceId !== spaceId) return false;
   const intakeOf = channel.metadata?.intakeOf;
   if (intakeOf === undefined || intakeOf === null) return true;
@@ -366,7 +366,7 @@ export function refreshSpaceCatalogForMessages(input: {
   countsKey: QueryKey;
   details: readonly ChannelCatalogChangeDetail[];
   hasChannel: (channelId: string) => boolean;
-  channel?: (channelId: string) => SerializedChannel | undefined;
+  channel?: (channelId: string) => ChannelSnapshot | undefined;
   viewerId?: string;
   resolveChannel: (spaceId: string, channelId: string, fresh?: boolean) => void;
   resolveMessageChannels?: (spaceId: string, details: ChannelCatalogChangeDetail[]) => void;
@@ -427,9 +427,9 @@ export function refreshSpaceCatalogForMessages(input: {
  */
 export async function readChannelsIntoStore(input: {
   authorized: () => boolean;
-  read: () => Promise<ChannelCatalogResolveResult>;
-  commit: (channels: SerializedChannel[]) => void;
-}): Promise<ChannelCatalogResolveResult> {
+  read: () => Promise<ChannelSnapshotCatalogResolveResult>;
+  commit: (channels: ChannelSnapshot[]) => void;
+}): Promise<ChannelSnapshotCatalogResolveResult> {
   const result = await input.read();
   if (!input.authorized()) return { protocolVersion: 1, channels: [], pathsByChannelId: {} };
   input.commit(result.channels);
@@ -447,7 +447,7 @@ export function resolveWindowChannels(input: Omit<Parameters<typeof refreshSpace
   limit: number;
   authorized: () => boolean;
   /** Reads these Channels into the entity table and gives back those the Hub showed this reader. */
-  resolve: (channelIds: string[]) => Promise<readonly SerializedChannel[]>;
+  resolve: (channelIds: string[]) => Promise<readonly ChannelSnapshot[]>;
 }): Promise<void> {
   const { unknown, limit, authorized, resolve, ...lists } = input;
   const ids = [...new Set(unknown.map((detail) => detail.channelId!))];

@@ -21,7 +21,7 @@ import {
   type AgentRegistrationDetails,
   type AgentRegistrationSummary,
   type AgentWorkingMode,
-  type SerializedChannel,
+  type ChannelSnapshot,
 } from "@xmatrix/protocol";
 
 import { harnessSpaceSwitch } from "./harness-space-switch";
@@ -102,7 +102,7 @@ export function MyAgentsView({
   token: string | undefined;
   currentUserId: string;
   /** The Space's conversations the reader has, to name where an agent runs. */
-  channels: readonly SerializedChannel[];
+  channels: readonly ChannelSnapshot[];
   error: string | null;
   /** The desktop app reports this machine's harnesses itself; a browser cannot. */
   addsOnThisMachine: boolean;

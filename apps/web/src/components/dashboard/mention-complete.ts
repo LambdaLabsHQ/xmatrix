@@ -10,11 +10,11 @@ import type {
   MessageInteractionRegistry,
   SerializedAgent,
   SerializedAgentInstance,
-  SerializedChannel,
+  ChannelSnapshot,
   SerializedMachineDaemon,
   SerializedSpace,
 } from "@xmatrix/protocol";
-import { harnessParameterValueLabel, isLiveAgentStatus } from "@xmatrix/protocol";
+import { agentPresetAvatarUrl, channelPresenceInstances, presenceInstanceId, harnessParameterValueLabel, isLiveAgentStatus } from "@xmatrix/protocol";
 import {
   agentInteractionTarget,
   connectorInteractionTarget,
@@ -225,30 +225,14 @@ export function connectorCompletionRecovery(message: string): ConnectorCompletio
  * identity: owner, machine and harness come from there, never from a separate
  * Agent record.
  */
-export function channelAgents(channel: SerializedChannel): SerializedAgent[] {
+export function channelAgents(channel: ChannelSnapshot): SerializedAgent[] {
   const agents: SerializedAgent[] = [];
-  for (const [memberId, presence] of Object.entries(channel.memberPresence || {})) {
-    if (presence.kind !== "agent") continue;
-    const name = presence.label?.trim();
-    const instances = presence.instances || [];
-    if (!name) continue;
-    const lead = [...instances].sort(
-      (left, right) => mentionStatusRank(left.status) - mentionStatusRank(right.status)
-    )[0];
-    agents.push({
-      id: memberId,
-      userId: presence.registration?.ownerUserId || "",
-      name,
-      type: presence.registration?.harness || "",
-      lifetime: "short",
-      email: presence.email || "",
-      metadata: presence.registration ? { machineId: presence.registration.machineId } : {},
-      connectedAt: lead?.connectedAt || "",
-      lastSeenAt: presence.lastSeenAt || lead?.lastSeenAt || "",
-      status: lead?.status || "offline",
-      ...(presence.avatarUrl ? { avatarUrl: presence.avatarUrl } : {}),
-      instances,
-    });
+  for (const instance of channelPresenceInstances(channel.presence)) {
+    agents.push({ id: instance.id, instanceId: instance.id, userId: instance.registration.ownerUserId,
+      name: instance.agentName, type: instance.registration.harness, lifetime: "short",
+      email: instance.email || "", metadata: { machineId: instance.registration.machineId },
+      connectedAt: instance.connectedAt, lastSeenAt: instance.lastSeenAt, status: instance.status,
+      avatarUrl: agentPresetAvatarUrl(instance.registration.harness), instances: [instance] });
   }
   return agents;
 }
@@ -317,7 +301,7 @@ export type MentionInstanceTargetScope = "channel" | "none";
  * offered are the ones the grammar knows.
  */
 export function channelInteractionTargets(
-  channel: SerializedChannel | null,
+  channel: ChannelSnapshot | null,
   localContext?: MentionLocalContext | null,
   appConnectors: MentionAppConnector[] = [],
   space?: MentionSpace | null,
@@ -351,7 +335,7 @@ function registryOf(descriptors: readonly InteractionTargetDescriptor[]) {
 }
 
 export function channelMentionCandidates(
-  channel: SerializedChannel | null,
+  channel: ChannelSnapshot | null,
   localContext?: MentionLocalContext | null,
   appConnectors: MentionAppConnector[] = [],
   space?: MentionSpace | null,
@@ -363,7 +347,7 @@ export function channelMentionCandidates(
 type TargetEntry = { descriptor: InteractionTargetDescriptor; candidate: MentionCandidate };
 
 function channelTargetEntries(
-  channel: SerializedChannel,
+  channel: ChannelSnapshot,
   localContext: MentionLocalContext | null | undefined,
   appConnectors: MentionAppConnector[],
   space: MentionSpace | null | undefined,
@@ -394,8 +378,7 @@ function channelTargetEntries(
   for (const memberId of visibleHumanChannelMemberIds(channel, space)) {
     const directoryMember = spaceMemberForChannelIdentity(space, memberId);
     if (!directoryMember) continue;
-    const memberPresence = channel.memberPresence?.[memberId];
-    const humanPresence = memberPresence?.kind === "user" ? memberPresence : undefined;
+    const humanPresence = channel.presence?.humans.get(memberId);
     const handle = directoryMember.handle?.trim();
     const name = directoryMember.name?.trim() || handle;
     if (!name) continue;
@@ -471,7 +454,7 @@ function channelTargetEntries(
 export function resolveMentionCompletion(
   draft: string,
   cursor: number,
-  channel: SerializedChannel | null,
+  channel: ChannelSnapshot | null,
   localContext?: MentionLocalContext | null,
   appConnectors: MentionAppConnector[] = [],
   space?: MentionSpace | null,
@@ -626,7 +609,7 @@ function handoffSuccessorQuery(
 function resolveHandoffSuccessorCompletion(
   active: ActiveMention,
   sourceAgent: SerializedAgent,
-  channel: SerializedChannel,
+  channel: ChannelSnapshot,
   successorHarnesses: readonly string[],
   channelInstanceId: string,
   successorQuery: string,
@@ -856,7 +839,7 @@ function resolveAgentCommandCompletion(
   active: ActiveMention,
   targetToken: string,
   commandTail: string,
-  channel: SerializedChannel,
+  channel: ChannelSnapshot,
   agents: SerializedAgent[],
   localContext?: MentionLocalContext | null,
   instanceTargetScope: MentionInstanceTargetScope = "channel"
@@ -1101,7 +1084,7 @@ export function instanceEffortOptions(
 }
 
 function agentReferenceCandidates(
-  channel: SerializedChannel,
+  channel: ChannelSnapshot,
   agent: SerializedAgent,
   agents: SerializedAgent[],
   localContext?: MentionLocalContext | null,
@@ -1183,16 +1166,17 @@ function findMentionAgent(
 }
 
 export function channelAgentInstances(
-  channel: SerializedChannel,
+  channel: ChannelSnapshot,
   agent: SerializedAgent,
   instanceTargetScope: MentionInstanceTargetScope = "channel"
 ): SerializedAgentInstance[] {
   if (instanceTargetScope === "none") return [];
-  return channel.memberPresence?.[agent.id]?.instances || [];
+  const instance = channel.presence?.instances.get(presenceInstanceId(agent.instanceId || agent.id));
+  return instance ? [instance] : [];
 }
 
 function findAgentInstanceTarget(
-  channel: SerializedChannel,
+  channel: ChannelSnapshot,
   agents: SerializedAgent[],
   targetToken: string,
   instanceTargetScope: MentionInstanceTargetScope = "channel"
