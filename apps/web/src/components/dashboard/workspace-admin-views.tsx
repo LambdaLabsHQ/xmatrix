@@ -188,7 +188,7 @@ import { errorFromResponse, xmatrixApiRequest, requireResponseOk, xmatrixRawResp
 import { userErrorMessage } from "@/lib/user-facing-error";
 import { xmatrixQueryKeys } from "@/lib/query/query-keys";
 
-import { WEB_PROXY_ROUTES } from "@xmatrix/protocol";
+import { channelAgentInstanceIndex, WEB_PROXY_ROUTES } from "@xmatrix/protocol";
 
 import type {
   ChannelAttentionSnapshot,
@@ -2567,21 +2567,25 @@ export function patchChannelAgentPresenceFromMessage(
 ): SerializedChannel {
   if (entry.from.kind !== "agent" || !entry.from.identityId) return channel;
 
-  const member = entry.from.identityId;
+  if (entry.from.originChannelId && entry.from.originChannelId !== channel.id) return channel;
+  const senderInstanceId = entry.from.instanceId;
+  const senderChannelInstanceId = entry.from.channelInstanceId;
+  const known = senderInstanceId ? channelAgentInstanceIndex(channel).get(senderInstanceId) : undefined;
+  if (senderInstanceId && !known && !senderChannelInstanceId) return channel;
+  const member = known?.memberId || senderInstanceId || entry.from.identityId;
   const presence = channel.memberPresence?.[member];
   const agentPresence = presence?.kind === "agent" ? presence : undefined;
   const currentInstances = agentPresence?.instances || [];
-  const senderInstanceId = entry.from.instanceId;
-  const senderChannelInstanceId = entry.from.channelInstanceId;
   const instanceIndex = currentInstances.findIndex(
     (instance) =>
       (senderInstanceId && instance.id === senderInstanceId) ||
-      (senderChannelInstanceId && instance.channelInstanceId === senderChannelInstanceId)
+      (!senderInstanceId && senderChannelInstanceId && instance.channelInstanceId === senderChannelInstanceId)
   );
   const nextInstances = [...currentInstances];
   if (instanceIndex >= 0) {
     nextInstances[instanceIndex] = mergeAgentInstancePresence(nextInstances[instanceIndex], {
       id: nextInstances[instanceIndex].id,
+      channelId: channel.id,
       channelInstanceId: senderChannelInstanceId || nextInstances[instanceIndex].channelInstanceId,
       label: entry.from.instanceLabel || nextInstances[instanceIndex].label,
       connectedAt: nextInstances[instanceIndex].connectedAt,
@@ -2593,6 +2597,7 @@ export function patchChannelAgentPresenceFromMessage(
   } else if (senderInstanceId && senderChannelInstanceId) {
     nextInstances.push({
       id: senderInstanceId,
+      channelId: channel.id,
       channelInstanceId: senderChannelInstanceId,
       label: entry.from.instanceLabel || entry.from.label,
       connectedAt: entry.sentAt,
@@ -2608,6 +2613,7 @@ export function patchChannelAgentPresenceFromMessage(
     ...agentPresence,
     label: agentPresence?.label || entry.from.agentName || entry.from.label,
     email: agentPresence?.email || entry.from.email,
+    avatarUrl: agentPresence?.avatarUrl || entry.from.avatarUrl,
     lastSeenAt: entry.sentAt,
     activity: agentPresence?.activity,
     goal: entry.from.goal || agentPresence?.goal,
@@ -2743,29 +2749,26 @@ export function removeChannelAgentInstancePresence(
     channelInstanceId?: string;
   }
 ): SerializedChannel {
-  const presence = channel.memberPresence?.[input.agentId];
-  if (!presence || presence.kind !== "agent") return channel;
-  const prior = presence.instances || [];
-  const nextInstances = prior.filter((instance) => {
-    if (input.instanceId && instance.id === input.instanceId) return false;
-    if (
-      !input.instanceId &&
-      input.channelInstanceId &&
-      instance.channelInstanceId === input.channelInstanceId
-    ) {
-      return false;
+  // Exact-ID cleanup also removes retained aliases from an older client. A
+  // legacy ordinal without a global ID remains scoped to its named member.
+  const members = input.instanceId ? Object.keys(channel.memberPresence ?? {}) : [input.agentId];
+  let next = channel;
+  for (const member of members) {
+    const presence = next.memberPresence?.[member];
+    if (!presence || presence.kind !== "agent") continue;
+    const prior = presence.instances || [];
+    const instances = prior.filter(instance => input.instanceId
+      ? instance.id !== input.instanceId
+      : !input.channelInstanceId || instance.channelInstanceId !== input.channelInstanceId);
+    if (instances.length === prior.length) continue;
+    if (instances.length === 0) {
+      const { [member]: _removed, ...rest } = next.memberPresence || {};
+      next = { ...next, memberPresence: rest };
+    } else {
+      next = replaceChannelMemberPresence(next, member, { ...presence, instances });
     }
-    return true;
-  });
-  if (nextInstances.length === prior.length) return channel;
-  if (nextInstances.length === 0) {
-    const { [input.agentId]: _removed, ...rest } = channel.memberPresence || {};
-    return { ...channel, memberPresence: rest };
   }
-  return replaceChannelMemberPresence(channel, input.agentId, {
-    ...presence,
-    instances: nextInstances,
-  });
+  return next;
 }
 
 export type { ChannelReadStateUpdate } from "./channel-read-state";

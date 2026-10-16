@@ -1,6 +1,6 @@
 import { readOwnerRegistrationQuotaState, readRegistrationQuotaState, registrationQuotaKey,
   type RegistrationQuotaReading } from "@xmatrix/db";
-import { withRegistrationQuota } from "@xmatrix/protocol";
+import { channelAgentInstanceIndex, withRegistrationQuota } from "@xmatrix/protocol";
 import type {
   AgentInstanceOfflineReason,
   AgentRegistrationKey,
@@ -34,7 +34,6 @@ import {
   overlayAgentPresenceOnChannel,
   serializeAgentFromSession,
 } from "./agent-instance-live-presentation";
-import { channelHasComputedAgentInstance } from "./agent-presence-snapshot";
 import { AgentChannelHistory, type ReadAgentChannelHistory } from "./agent-channel-history";
 import { PostgresHumanPort } from "./postgres-human-port";
 import type { AgentInstanceRuntime } from "./agent-instance-run-query";
@@ -237,15 +236,14 @@ export function createProductionRelayRuntimeProductPortFactory(
       const accountQuota = payload ? channelInstanceQuota(payload.channel, session.run.instanceId) : undefined;
       const overlayLiveChannel = (channel: SerializedChannel, channelId: string) => {
         for (const liveSession of live) {
-          if (liveSession.run.channelId !== channelId || !channelHasComputedAgentInstance(channel, liveSession.run.instanceId)) continue;
+          if (liveSession.run.channelId !== channelId || !channelAgentInstanceIndex(channel).has(liveSession.run.instanceId)) continue;
           channel = overlayAgentPresenceOnChannel(channel, { reason: "update", session: liveSession,
             ...shown(liveSession, liveSession.run.instanceStatus) });
         }
         return channel;
       };
-      const registration = payload && Object.values(payload.channel.memberPresence ?? {}).flatMap(presence =>
-        presence.kind === "agent" && presence.instances?.some(instance => instance.id === session.run.instanceId)
-          ? [presence.registration] : [])[0];
+      const registration = payload && channelAgentInstanceIndex(payload.channel)
+        .get(session.run.instanceId)?.presence.registration;
       // This read is the registration's current reading; the owner's other Agents under it take it too.
       if (registration) {
         await audiences.rememberQuota(registration, accountQuota);

@@ -1,4 +1,4 @@
-import { withRegistrationQuota } from "@xmatrix/protocol";
+import { channelAgentInstanceIndex, withRegistrationQuota } from "@xmatrix/protocol";
 import { channelInstanceQuota } from "../registration-quota-presentation";
 import type {
   ChannelAgentMemberPresence,
@@ -48,8 +48,9 @@ export function overlayAgentPresenceOnChannel(
   },
 ): SerializedChannel {
   const { reason, session } = input;
-  const agentId = session.principal.agentId;
   const memberPresence = { ...channel.memberPresence };
+  const agentId = channelAgentInstanceIndex(channel).get(session.run.instanceId)?.memberId
+    || session.principal.agentId;
   const current = memberPresence[agentId];
   const stablePresence: ChannelAgentMemberPresence = current?.kind === "agent"
     ? current

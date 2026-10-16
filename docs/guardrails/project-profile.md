@@ -15,6 +15,11 @@ English is the default language for repository documentation, guardrails, releas
 
 ## Current behavior
 
+Channel presence joins catalog, live session and message presentation by exact
+global Instance ID through one shared protocol index. Sender prefixes and
+legacy member keys cannot add a second avatar, and cross-Channel messages do
+not create destination residents. See [Agent status](../design/agent-status.md#instance-identity-in-presence).
+
 Official Agent launch prompts are compact repository Markdown delivered by the
 Hub with each spawn. Supporting daemons validate and render the versioned text;
 legacy daemons keep their compiled copy. Command details come from CLI help,

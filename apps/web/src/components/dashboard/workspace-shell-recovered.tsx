@@ -6,7 +6,7 @@ import { meterTone, type MachineGlanceReading } from "./machine-load";
 import { MachineLoadGlanceBars } from "./machine-load-panel";
 import { useOpenMachine } from "./machine-link";
 import type { PresentedChannelMemberPresence as ChannelMemberPresence } from "./workspace-shell-presence";
-import { crossChannelReplyRelay, channelVisibilityScope, digestCanonicalCloneCborV1, parseLlmQuotaAccount, parseQuotaObservedAt, isUnlistedParameterTag, statusTagIcon, type AgentInvocationSelections, type DraftSummonIntent, type StatusTagIcon } from "@xmatrix/protocol";
+import { channelAgentInstanceIndex, crossChannelReplyRelay, channelVisibilityScope, digestCanonicalCloneCborV1, parseLlmQuotaAccount, parseQuotaObservedAt, isUnlistedParameterTag, statusTagIcon, type AgentInvocationSelections, type DraftSummonIntent, type StatusTagIcon } from "@xmatrix/protocol";
 import { formatLocalClock, formatZonedDateTime } from "./time-display";
 
 import { matchClaimableOutgoing } from "./outgoing-message-claim";
@@ -779,7 +779,7 @@ export function buildTimeline(
   // An agent sender's identity need not match the member entry its live Instance
   // sits under; the instance id is the one key both sides share, so an agent
   // sender resolves through it before any name lookup.
-  const presenceByInstanceId = new Map<string, ChannelMemberPresence>();
+  const presenceByInstanceId = channelAgentInstanceIndex(channel ?? {});
 
   if (channel) {
     for (const member of channelMembersByPresence(channel)) {
@@ -789,11 +789,6 @@ export function buildTimeline(
       if (email && !presenceByEmail.has(email)) presenceByEmail.set(email, presence);
       const label = (presence.label || member).trim().toLowerCase();
       if (label && !presenceByLabel.has(label)) presenceByLabel.set(label, presence);
-      for (const instance of presence.instances || []) {
-        if (instance.id && !presenceByInstanceId.has(instance.id)) {
-          presenceByInstanceId.set(instance.id, presence);
-        }
-      }
     }
   }
 
@@ -805,7 +800,7 @@ export function buildTimeline(
     const senderIdentityId = message.from.identityId;
     // A Channel Agent member is keyed by its Instance, not the sender's `agent:` identity.
     const exactSenderInstance = message.from.kind === "agent" && message.from.instanceId
-      ? presenceByInstanceId.get(message.from.instanceId)?.instances?.find(instance => instance.id === message.from.instanceId)
+      ? presenceByInstanceId.get(message.from.instanceId)?.instance
       : undefined;
     const senderInstanceLabel = message.from.instanceLabel;
     const authorLabel =
@@ -831,7 +826,7 @@ export function buildTimeline(
     const matchedPresence = systemNotice || relayedReply
       ? undefined
       : (message.from.kind === "agent" && message.from.instanceId
-          ? presenceByInstanceId.get(message.from.instanceId)
+          ? presenceByInstanceId.get(message.from.instanceId)?.presence
           : undefined) ||
         (senderIdentityId ? presenceByMember.get(senderIdentityId) : undefined) ||
         (message.from.userId ? presenceByMember.get(`user:${message.from.userId}`) : undefined) ||
@@ -1508,64 +1503,60 @@ export function buildAgentWorkItems(
 
   const items: AgentWorkItem[] = [];
 
-  for (const member of channelMembersByPresence(channel)) {
-    const presence = memberPresence(channel, member);
-    if (presence.kind !== "agent") continue;
-
+  for (const { memberId: member, presence, instance } of channelAgentInstanceIndex(channel).values()) {
     const agentLabel = presence.label || member;
-    for (const instance of presence.instances || []) {
-      if (!isChannelResidentPresence(instance)) continue;
-      const avatarUrl = presence.avatarUrl;
-      const target: AgentTraceTarget = {
-        id: member,
-        instanceId: instance.id,
-        instanceIds: agentTraceInstanceIds(instance),
-        exactInstanceIds: [instance.id],
-        instanceScoped: true,
-        channelId: channel.id,
-        connectedAt: instance.connectedAt,
-        name: agentInstanceDisplayName(instance),
-        status: instance.status,
-        avatarUrl,
-        activity: presenceStatusLabel(instance),
-        gitBranch: instance.gitBranch,
-        runtimeState: instance.runtimeState || presence.runtimeState,
-        usage: instance.usage || presence.usage,
-      };
-      const latestEvent = latestAgentWorkEvent(events, target, channel.id);
+    if (!isChannelResidentPresence(instance)) continue;
+    const avatarUrl = presence.avatarUrl;
+    const target: AgentTraceTarget = {
+      id: member,
+      instanceId: instance.id,
+      instanceIds: agentTraceInstanceIds(instance),
+      exactInstanceIds: [instance.id],
+      instanceScoped: true,
+      channelId: channel.id,
+      connectedAt: instance.connectedAt,
+      name: agentInstanceDisplayName(instance),
+      status: instance.status,
+      avatarUrl,
+      activity: presenceStatusLabel(instance),
+      gitBranch: instance.gitBranch,
+      runtimeState: instance.runtimeState || presence.runtimeState,
+      usage: instance.usage || presence.usage,
+    };
+    const latestEvent = latestAgentWorkEvent(events, target, channel.id);
 
-      items.push({
-        key: `${member}:${instance.id}`,
-        agentId: member,
-        instance,
-        sortIndex: items.length,
-        label: instance.label || instance.id,
-        agentLabel,
-        status: instance.status,
-        avatarUrl,
-        avatarKind: "agent",
-        activity: instance.activity || presence.activity,
-        intent: instance.intent || presence.intent,
-        files: instance.files?.length ? instance.files : presence.files,
-        usage: instance.usage || presence.usage,
-        // Same verdict, same inputs as the detail row: the avatar badge shows
-        // what this resolves to instead of deriving a limit of its own.
-        usageLimit: agentInstanceUsageLimit(presence, instance),
-        lastSeenAt: instance.lastSeenAt,
-        latestEvent,
-        target,
-        canStop: true,
-      });
-    }
+    items.push({
+      key: `${member}:${instance.id}`,
+      agentId: member,
+      instance,
+      sortIndex: items.length,
+      label: instance.label || instance.id,
+      agentLabel,
+      status: instance.status,
+      avatarUrl,
+      avatarKind: "agent",
+      activity: instance.activity || presence.activity,
+      intent: instance.intent || presence.intent,
+      files: instance.files?.length ? instance.files : presence.files,
+      usage: instance.usage || presence.usage,
+      // Same verdict, same inputs as the detail row: the avatar badge shows
+      // what this resolves to instead of deriving a limit of its own.
+      usageLimit: agentInstanceUsageLimit(presence, instance),
+      lastSeenAt: instance.lastSeenAt,
+      latestEvent,
+      target,
+      canStop: true,
+    });
   }
 
   const membersWithInstances = new Set(items.map((item) => item.agentId));
+  const representedInstanceIds = new Set(items.map((item) => item.instance.id));
   const visibleMembers = new Set(channelMembersByPresence(channel));
   const launchedInstanceIds = new Set(launches.map((launch) => launch.instanceId));
   for (const launch of launches) {
     const actorId = launch.instanceId;
     if (launch.state === "connected" || launch.state === "cancelled" ||
-        membersWithInstances.has(actorId)) continue;
+        representedInstanceIds.has(launch.instanceId)) continue;
     const failed = launch.state === "failed";
     const label = launch.targetName || actorId;
     const status: SerializedAgentInstance["status"] = failed ? "offline" : "busy";
@@ -1890,24 +1881,16 @@ export function channelOnlineAgentAvatarItems(channel: SerializedChannel | null)
   if (!channel) return [];
 
   const items: ChannelAgentAvatarItem[] = [];
-  channelMembersByPresence(channel).forEach((member) => {
-    const presence = memberPresence(channel, member);
-    if (presence.kind !== "agent") return;
-
-    const instances = presence.instances || [];
-    const onlineInstances = instances.filter((instance) =>
-      isChannelResidentPresence(instance)
-    );
-    onlineInstances.forEach((instance, instanceIndex) => {
-      items.push({
-        key: `${member}:${instance.id}`,
-        member,
-        instance,
-        connectedAt: instance.connectedAt,
-        instanceIndex,
-      });
+  for (const { memberId: member, instance } of channelAgentInstanceIndex(channel).values()) {
+    if (!isChannelResidentPresence(instance)) continue;
+    items.push({
+      key: `${member}:${instance.id}`,
+      member,
+      instance,
+      connectedAt: instance.connectedAt,
+      instanceIndex: items.length,
     });
-  });
+  }
 
   return items.sort(compareChannelAgentAvatarBirthOrder);
 }

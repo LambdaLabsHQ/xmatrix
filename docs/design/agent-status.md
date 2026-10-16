@@ -18,6 +18,24 @@ for how long) are words in the work dock, never more colours.
 - A Run between turns with background tasks still running showed as idle,
   so it looked finished while its work was still open.
 
+## Instance identity in presence
+
+Channel catalog presence is keyed by the global Instance ID. Message sender
+identities retain their existing `agent:` presentation prefix; live sessions
+and legacy member groups can use another member key. These are not additional
+Instances. The shared `channelAgentInstanceIndex` protocol helper joins their
+presentation by exact global Instance ID and prefers the catalog member when a
+retained legacy projection duplicates it. Names and Channel ordinals never
+identify an Instance across member entries.
+
+The Hub overlay and quota readers, Web message updates and offline cleanup,
+timeline avatars, Channel avatars and work dock use this index. A stale launch
+placeholder is suppressed once its exact Instance is resident. Messages first
+seen before presence use the Instance ID as their member key; cross-Channel
+links never create a resident in the destination. The index is a derived
+presentation lookup and grants no membership or execution authority. Existing
+wire fields and legacy member keys remain readable without a data migration.
+
 ## 2. Vocabulary
 
 | Display status | When | Dot |

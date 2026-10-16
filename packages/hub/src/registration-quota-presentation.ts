@@ -1,4 +1,4 @@
-import { withRegistrationQuota } from "@xmatrix/protocol";
+import { channelAgentInstanceIndex, withRegistrationQuota } from "@xmatrix/protocol";
 import { readRegistrationQuotaState, registrationQuotaKey, type AuthorityDatabase,
   type RegistrationQuotaKey } from "@xmatrix/db";
 import type { LlmUsage, SerializedChannel } from "@xmatrix/protocol";
@@ -30,6 +30,5 @@ export async function projectRegistrationQuota(database: AuthorityDatabase,
 }
 
 export function channelInstanceQuota(channel: SerializedChannel, instanceId: string): LlmUsage | undefined {
-  return Object.values(channel.memberPresence ?? {}).find(presence =>
-    presence.kind === "agent" && presence.instances?.some(instance => instance.id === instanceId))?.usage;
+  return channelAgentInstanceIndex(channel).get(instanceId)?.presence.usage;
 }
