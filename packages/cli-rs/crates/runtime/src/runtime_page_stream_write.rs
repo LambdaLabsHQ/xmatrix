@@ -22,12 +22,11 @@ use xmatrix_cli_core::agent_instance_connection::{
     AgentInstanceConnectionClient, AgentInstanceConnectionEvent,
 };
 use xmatrix_cli_core::page_co_write::{
-    PAGE_SESSION_HEARTBEAT_PING, PageCoWriteConnector, PageCoWriteEvent, PageCoWriteRequest,
-    decode_request, delta_frame, done_frame, write_frame,
+    PAGE_SESSION_HEARTBEAT_PING, PAGE_WRITE_CLOSE as CLOSE, PAGE_WRITE_OPEN as OPEN,
+    PageCoWriteConnector, PageCoWriteEvent, PageCoWriteRequest, decode_request, delta_frame,
+    done_frame, page_write_target, write_frame,
 };
 
-const OPEN: &str = "⟦write page:";
-const CLOSE: &str = "⟦/write⟧";
 const MARK_END: char = '⟧';
 /// Longer than any page id between `⟦write page:` and `⟧`, quoted and spaced.
 const MAX_OPEN_REST: usize = 48;
@@ -90,7 +89,7 @@ impl Scanner {
             let after = &rest[at + OPEN.len()..];
             match after.find(MARK_END) {
                 Some(end) => {
-                    if let Some(page) = page_id(&after[..end]) {
+                    if let Some(page) = page_write_target(&after[..end]) {
                         said.push(Said::Open(page.clone()));
                         self.page = Some(page);
                     }
@@ -131,20 +130,6 @@ fn marker_start(text: &str, marker: &str) -> usize {
         .filter(|&index| index >= earliest)
         .find(|&index| marker.starts_with(&text[index..]))
         .unwrap_or(text.len())
-}
-
-/// A page id as the Hub names pages (a UUID), quoted or not.
-fn page_id(raw: &str) -> Option<String> {
-    let id = raw.trim().trim_matches(['"', '\'', '`']).trim();
-    let groups: Vec<&str> = id.split('-').collect();
-    let shaped = groups.len() == 5
-        && groups
-            .iter()
-            .zip([8usize, 4, 4, 4, 12])
-            .all(|(group, length)| {
-                group.len() == length && group.chars().all(|c| c.is_ascii_hexdigit())
-            });
-    shaped.then(|| id.to_ascii_lowercase())
 }
 
 /// What goes to a page's session for the conversation writing into it.
@@ -674,6 +659,22 @@ mod tests {
                 .unwrap()
                 .unwrap()
         }
+
+        /// The session receives these, in order.
+        async fn expect(&mut self, frames: &[serde_json::Value]) {
+            for frame in frames {
+                assert_eq!(&self.next().await, frame);
+            }
+        }
+    }
+
+    /// The way to the fake Hub's page sessions, as a Run's runtime has it.
+    fn connector_for(hub: &FakePageHub) -> PageCoWriteConnector {
+        crate::ensure_reqwest_crypto_provider();
+        PageCoWriteConnector::new(
+            hub.url.clone(),
+            std::sync::Arc::new(std::sync::RwLock::new("run-token".into())),
+        )
     }
 
     fn start_writing(
@@ -683,11 +684,7 @@ mod tests {
         mpsc::UnboundedSender<Piece>,
         mpsc::UnboundedReceiver<AgentInstanceConnectionEvent>,
     ) {
-        crate::ensure_reqwest_crypto_provider();
-        let connector = PageCoWriteConnector::new(
-            hub.url.clone(),
-            std::sync::Arc::new(std::sync::RwLock::new("run-token".into())),
-        );
+        let connector = connector_for(hub);
         let (events, heard) = mpsc::unbounded_channel();
         let (to, pieces) = mpsc::unbounded_channel();
         tokio::spawn(write_into(
@@ -708,18 +705,12 @@ mod tests {
         to.send(Piece::Text("⟦after \"x\"⟧ one".into())).unwrap();
         to.send(Piece::Text(" two".into())).unwrap();
         to.send(Piece::End { failed: false }).unwrap();
-        assert_eq!(
-            hub.next().await,
-            serde_json::json!({ "type": "write", "turn": 1 })
-        );
-        assert_eq!(
-            hub.next().await,
-            serde_json::json!({ "type": "delta", "turn": 1, "text": "⟦after \"x\"⟧ one" })
-        );
-        assert_eq!(
-            hub.next().await,
-            serde_json::json!({ "type": "delta", "turn": 1, "text": " two" })
-        );
+        hub.expect(&[
+            serde_json::json!({ "type": "write", "turn": 1 }),
+            serde_json::json!({ "type": "delta", "turn": 1, "text": "⟦after \"x\"⟧ one" }),
+            serde_json::json!({ "type": "delta", "turn": 1, "text": " two" }),
+        ])
+        .await;
         assert_eq!(
             hub.next().await,
             serde_json::json!({ "type": "done", "turn": 1 })
@@ -786,6 +777,28 @@ mod tests {
             serde_json::json!({ "type": "write", "turn": 2 }),
             "nothing more of the stopped turn is sent"
         );
+    }
+
+    #[tokio::test]
+    async fn a_message_writes_into_a_page_in_one_turn_and_hears_what_did_not_land() {
+        let mut hub = FakePageHub::start().await;
+        let connector = connector_for(&hub);
+        let writing = tokio::spawn(async move {
+            connector
+                .write_once("c-message-write", PAGE, "⟦after \"x\"⟧ one")
+                .await
+        });
+        hub.expect(&[
+            serde_json::json!({ "type": "write", "turn": 1 }),
+            serde_json::json!({ "type": "delta", "turn": 1, "text": "⟦after \"x\"⟧ one" }),
+            serde_json::json!({ "type": "done", "turn": 1 }),
+        ])
+        .await;
+        hub.send
+            .send(serde_json::json!({ "type": "outcome", "turn": 1, "problems": ["The quote is not on the page."] }))
+            .unwrap();
+        let problems = writing.await.unwrap().unwrap();
+        assert_eq!(problems, vec!["The quote is not on the page.".to_string()]);
     }
 
     #[test]
