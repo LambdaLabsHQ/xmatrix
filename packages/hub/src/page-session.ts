@@ -339,6 +339,12 @@ export class PageSession {
             legacy.delete(0, legacy.length);
           }, "load");
           await this.persist();
+        } else if (this.editors.size === 0 && this.markdown() !== this.base!.body) {
+          // Text that differs from the committed page with nobody's edit pending is no person's: every
+          // person's change notes its author until a commit takes it in. It is what an Agent's edit left
+          // when it could not be written in whole (#605), so the page reads as committed again.
+          setPageFragmentMarkdown(this.fragment, this.base!.body, "server");
+          await this.persist();
         }
         this.settle();
         return;

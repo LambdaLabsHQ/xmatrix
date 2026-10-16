@@ -197,6 +197,25 @@ test("readers watch an Agent's edit written in a few words at a time, and people
   assert.equal(agentState.activity, "editing", "it is done writing");
 });
 
+test("a session restored with text nobody typed reads as the committed page again; a person's pending text stays", async () => {
+  for (const personTyped of [false, true]) {
+    const h = harness();
+    const ann = await annConnected(h);
+    if (personTyped) ann.text.insert(HEAD.indexOf("none"), "ann's draft, ");
+    // What an Agent's edit could leave when it was not written in whole: text no person typed.
+    setPageFragmentMarkdown(h.session.fragment, `${h.session.markdown()}\n\`\`\`\n`, "agent:left-over");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const restored = new PageSession(h.ports);
+    cleanups.push(() => restored.destroy());
+    await restored.ensureLoaded(human("ann"), h.persisted.at(-1));
+    if (personTyped) {
+      assert.match(restored.markdown(), /ann's draft, none/u, "a person's pending edit is never dropped");
+    } else {
+      assert.equal(restored.markdown(), HEAD, "nobody typed it, so the page reads as committed");
+    }
+  }
+});
+
 test("an Agent edit answers which sections it removed and which Automations it detached", async () => {
   const h = harness();
   const ann = await annConnected(h);
