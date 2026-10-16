@@ -210,6 +210,18 @@ export function neutralHumanIdentity(shortCode: string): { displayName: string; 
   return { displayName: `User ${code}`, handle: `user-${code}`.slice(0, HUMAN_HANDLE_MAX_LENGTH) };
 }
 
+/**
+ * Whether an account still has no name its person chose: nothing usable (an
+ * email address Better Auth stored as the name, digits, blank) or the
+ * generated `User 3f9a2c` placeholder minted for it. Agents cannot address
+ * such a person, so a client asks for a name before anything is named after it.
+ */
+export function isPlaceholderHumanName(displayName: unknown, userId: string): boolean {
+  if (isUnusableHumanIdentitySource(displayName)) return true;
+  const shortCode = humanHandleShortCode(userId);
+  return shortCode !== undefined && (displayName as string).trim() === neutralHumanIdentity(shortCode).displayName;
+}
+
 /** The short code a generated handle is disambiguated with, taken from an id. */
 export function humanHandleShortCode(userId: string): string | undefined {
   const code = userId.trim().toLowerCase().replace(/[^a-z0-9]/gu, "").slice(-6);
