@@ -97,6 +97,7 @@ const hubDeployPolicyPaths = [
   "scripts/hub-postdeploy-smoke.test.mjs"];
 
 const rustToolchainPaths = [
+  "scripts/ci-cargo-fetch.mjs",
   ".github/actions/configure-windows-runner",
   ".github/actions/setup-rust-kache",
   ".github/actions/setup-windows-rust-cli",

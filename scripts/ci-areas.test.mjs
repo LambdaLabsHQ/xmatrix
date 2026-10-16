@@ -60,6 +60,7 @@ test("Rust runner setup changes cannot bypass both platform test partitions", ()
     );
   }
   for (const file of [
+    "scripts/ci-cargo-fetch.mjs",
     ".github/scripts/kache-cache.ps1",
     ".github/scripts/reclaim-windows-rust-disk.ps1",
     ".github/scripts/rust-compile-jobs.sh",
