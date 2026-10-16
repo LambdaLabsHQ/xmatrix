@@ -76,6 +76,7 @@ Leave unset to keep the feature off.
 | `STRIPE_PRO_MONTHLY_PRICE_ID` | var | Stripe price for the monthly Pro seat. |
 | `STRIPE_SECRET_KEY` | secret | Stripe API key for paid plans. Unset with the webhook secret: checkout and the billing portal answer 503. |
 | `STRIPE_WEBHOOK_SECRET` | secret | Stripe webhook signing secret. |
+| `XMATRIX_USAGE_COST_AE` | binding | Analytics Engine dataset metering operator-paid Jev, Composio and X calls per Space. Unset: metering is off. |
 
 ## Tuning
 

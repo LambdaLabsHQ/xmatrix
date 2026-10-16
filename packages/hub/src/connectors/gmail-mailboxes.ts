@@ -1,4 +1,5 @@
 import type { Env } from "../types";
+import { upstreamMeter, type UpstreamMeter } from "../usage-cost-metering";
 import type { AgentRegistrationIdentity } from "./agent-caller";
 import { composioGet, deleteComposioAccount } from "./composio";
 import { connectorCredentialRepository } from "./credentials";
@@ -64,8 +65,8 @@ export function mailboxCredentials(credentials: Readonly<Record<string, string>>
   return { composioApiKey: credentials.composioApiKey ?? "", composioAccountId: mailbox.account };
 }
 
-async function mailboxAddress(apiKey: string, account: string): Promise<string> {
-  const profile = await composioGet({ composioApiKey: apiKey, composioAccountId: account }, PROFILE);
+async function mailboxAddress(apiKey: string, account: string, meter: UpstreamMeter): Promise<string> {
+  const profile = await composioGet({ composioApiKey: apiKey, composioAccountId: account }, PROFILE, {}, meter);
   const address = typeof profile.emailAddress === "string" ? profile.emailAddress.toLowerCase() : "";
   if (!ADDRESS.test(address)) throw new ProviderRequestError(502, "Google did not confirm the Gmail address");
   return address;
@@ -87,17 +88,18 @@ export async function addConnectedMailbox(env: Env, input: { spaceId: string; ac
   Promise<Record<string, string>> {
   const key = apiKey(env);
   if (!ACCOUNT_ID.test(input.account)) throw new ProviderRequestError(400, "Composio did not confirm the Gmail sign-in; restart Connect");
-  const address = await mailboxAddress(key, input.account);
+  const meter = upstreamMeter(env, { spaceId: input.spaceId, connector: "gmail", action: "connect" });
+  const address = await mailboxAddress(key, input.account, meter);
   const stored = await connectorCredentialRepository(env).resolveForAdmin({ requestId: crypto.randomUUID(),
     spaceId: input.spaceId, providerId: "gmail", actorUserId: input.actorUserId });
   const current = stored?.values.mailboxes ? parseMailboxes(stored.values.mailboxes) : [];
   const replaced = current.filter((mailbox) => mailbox.address === address);
   const kept = current.filter((mailbox) => mailbox.address !== address);
   if (kept.length >= MAX_MAILBOXES) {
-    await deleteComposioAccount(key, input.account);
+    await deleteComposioAccount(key, input.account, meter);
     throw new ProviderRequestError(409, `a Space connects at most ${MAX_MAILBOXES} Gmail mailboxes; remove one first`);
   }
-  for (const old of replaced) if (old.account !== input.account) await deleteComposioAccount(key, old.account);
+  for (const old of replaced) if (old.account !== input.account) await deleteComposioAccount(key, old.account, meter);
   const owner = replaced[0]?.owner ?? `user:${input.actorUserId}`;
   return { mailboxes: serializeMailboxes([...kept, { account: input.account, address, owner }]) };
 }
@@ -125,7 +127,10 @@ export async function updateMailbox(env: Env, input: { spaceId: string; actorUse
   if (!stored || !target) throw new ProviderRequestError(404, `${address || "that mailbox"} is not connected`);
   const next = input.owner === null ? current.filter((mailbox) => mailbox !== target)
     : current.map((mailbox) => mailbox === target ? { ...mailbox, owner: input.owner! } : mailbox);
-  if (input.owner === null) await deleteComposioAccount(apiKey(env), target.account);
+  if (input.owner === null) {
+    await deleteComposioAccount(apiKey(env), target.account,
+      upstreamMeter(env, { spaceId: input.spaceId, connector: "gmail", action: "mailbox_remove" }));
+  }
   await repository.put({ requestId: crypto.randomUUID(), spaceId: input.spaceId, providerId: "gmail",
     actorUserId: input.actorUserId, fields: { mailboxes: next.length ? serializeMailboxes(next) : null },
     expectedGrant: stored, policy: { allowed: ["mailboxes"] }, at: new Date().toISOString() });

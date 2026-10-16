@@ -111,6 +111,7 @@ export const HUB_ENVIRONMENT = {
   ATTACHMENT_BUCKET: product("binding", "R2 bucket for attachments and avatars."),
   DIAGNOSTICS_AE: { kind: "binding", scope: "feature", summary: "Analytics Engine dataset for client diagnostics. Unset: diagnostics are dropped." },
   RELAY_AUTHORITY_OBSERVABILITY_AE: { kind: "binding", scope: "feature", summary: "Analytics Engine dataset for authority and PostgreSQL timing. Unset: observation is off." },
+  XMATRIX_USAGE_COST_AE: { kind: "binding", scope: "feature", summary: "Analytics Engine dataset metering operator-paid Jev, Composio and X calls per Space. Unset: metering is off." },
   RATE_LIMIT_CREDENTIAL: { kind: "binding", scope: "feature", summary: "Workers Rate Limiting allowance per bearer credential. Unset: credentialed requests are not counted." },
   RATE_LIMIT_ANONYMOUS: { kind: "binding", scope: "feature", summary: "Workers Rate Limiting allowance per client IP for requests without a credential. Unset: they are not counted." },
   RATE_LIMIT_HUMAN_CONNECT: { kind: "binding", scope: "feature", summary: "Workers Rate Limiting allowance of Human socket sign-ins per user. Unset: sign-ins are not counted." },

@@ -83,6 +83,13 @@ dataset = "xmatrix_diagnostics"
 binding = "RELAY_AUTHORITY_OBSERVABILITY_AE"
 dataset = "xmatrix_relay_authority_observability"
 
+# Operator-paid usage (Jev, Composio, X calls) per Space; layout and queries in
+# docs/operations/usage-cost-metering.md. Its own dataset because it indexes
+# on the Space id, and each dataset above owns a different index.
+[[analytics_engine_datasets]]
+binding = "XMATRIX_USAGE_COST_AE"
+dataset = "xmatrix_usage_cost"
+
 # Request allowances (Workers Rate Limiting: per-key counters kept at the edge,
 # no storage). Over-limit requests are logged as "xMatrix rate limit exceeded";
 # they are refused with 429 only while RATE_LIMIT_ENFORCED is "true".

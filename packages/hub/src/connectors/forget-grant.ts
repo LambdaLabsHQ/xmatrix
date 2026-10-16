@@ -1,5 +1,6 @@
 import { getAppConnectorProvider } from "../app-connectors";
 import type { Env } from "../types";
+import { upstreamMeter } from "../usage-cost-metering";
 import { deleteComposioAccount } from "./composio";
 import { parseMailboxes } from "./gmail-mailboxes";
 import { connectorCredentialRepository } from "./credentials";
@@ -18,7 +19,8 @@ export async function forgetConnectionGrant(env: Env, input: { spaceId: string; 
   if (!stored) return;
   if (getAppConnectorProvider(input.providerId)?.oauth?.flow === "composio") {
     const accounts = stored.values.mailboxes ? parseMailboxes(stored.values.mailboxes).map((mailbox) => mailbox.account) : [];
-    for (const account of accounts) await deleteComposioAccount(oauthClient(env, input.providerId)?.clientSecret ?? "", account);
+    const meter = upstreamMeter(env, { spaceId: input.spaceId, connector: input.providerId, action: "disconnect" });
+    for (const account of accounts) await deleteComposioAccount(oauthClient(env, input.providerId)?.clientSecret ?? "", account, meter);
   }
   await repository.put({ requestId: crypto.randomUUID(), ...input, fields,
     expectedGrant: stored, policy: { allowed: Object.keys(fields) }, at: new Date().toISOString() });
