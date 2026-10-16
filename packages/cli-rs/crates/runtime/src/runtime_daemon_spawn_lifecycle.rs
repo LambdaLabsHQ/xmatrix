@@ -747,6 +747,7 @@ async fn handle_daemon_spawn_request(
             agent_name: &intent.agent_name,
             identity_id: intent.identity_id.as_deref(),
             role_initial_prompt: intent.role_initial_prompt.as_deref(),
+            bootstrap_prompts: intent.bootstrap_prompts.as_ref(),
             working_mode: intent.working_mode.as_deref(),
             space_rules_page_id: intent.space_rules_page_id.as_deref(),
             connected_apps: &intent.connected_apps,
@@ -2004,6 +2005,7 @@ struct HeadlessAgentSpawn<'a> {
     agent_name: &'a str,
     identity_id: Option<&'a str>,
     role_initial_prompt: Option<&'a str>,
+    bootstrap_prompts: Option<&'a xmatrix_cli_core::bootstrap_prompts::BootstrapPrompts>,
     working_mode: Option<&'a str>,
     space_rules_page_id: Option<&'a str>,
     connected_apps: &'a [String],
@@ -2051,6 +2053,7 @@ async fn spawn_headless_agent(
         agent_name,
         identity_id,
         role_initial_prompt,
+        bootstrap_prompts,
         working_mode,
         space_rules_page_id,
         connected_apps,
@@ -2101,6 +2104,7 @@ async fn spawn_headless_agent(
         agent_preset_id,
         &auto_update.acp_args,
     )?;
+    local_env = apply_spawn_bootstrap_prompts(local_env, bootstrap_prompts)?;
     local_env.extend(auto_update.env);
     local_env.insert(
         "XMATRIX_AGENT_REGISTRATION".into(),
@@ -2182,6 +2186,9 @@ async fn spawn_headless_agent(
         "CODEX_HOME",
         "GROK_HOME",
         "XMATRIX_GROK_MODEL",
+        xmatrix_cli_core::bootstrap_prompts::ENV,
+        "XMATRIX_BOOTSTRAP_PROMPT",
+        "XMATRIX_DISABLE_BOOTSTRAP_PROMPT",
         "XMATRIX_AGENT_IDENTITY_ID_OVERRIDE",
         "XMATRIX_AGENT_BACKEND",
         "XMATRIX_AGENT_NAME_OVERRIDE",

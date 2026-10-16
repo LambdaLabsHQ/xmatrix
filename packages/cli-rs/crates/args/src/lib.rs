@@ -2776,6 +2776,7 @@ mod registration_argument_tests {
 
 /// Arguments shared by `send` and `channel send`.
 #[derive(clap::Args)]
+#[command(after_long_help = include_str!("../help/send.txt"))]
 pub struct SendArgs {
     /// Channel ID or xmatrix.sh channel URL
     pub channel_id: String,

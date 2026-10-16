@@ -85,11 +85,19 @@ pub(crate) fn trusted_role_is_active() -> bool {
     trusted_initial_prompt_from_env().is_some()
 }
 
-pub(crate) fn grok_acp_trusted_rules(bootstrap_prompt: Option<&str>) -> Option<String> {
-    bootstrap_prompt
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
+/// Only trusted registration instructions and the official Channel contract
+/// enter Grok's native system channel. Never accept a composed user bootstrap:
+/// it may already contain Channel history, names, task text and attachments.
+pub(crate) fn grok_acp_trusted_rules(channel_id: Option<&str>) -> Option<String> {
+    let mut rules = trusted_role_system_prompt_from_env()
+        .into_iter()
+        .collect::<Vec<_>>();
+    if let Some(channel) = channel_id.map(str::trim).filter(|id| !id.is_empty()) {
+        rules.push(xmatrix_cli_core::bootstrap::channel_collaboration_policy(
+            channel,
+        ));
+    }
+    (!rules.is_empty()).then(|| rules.join("\n\n"))
 }
 
 pub(crate) fn ensure_runtime_supports_trusted_role(

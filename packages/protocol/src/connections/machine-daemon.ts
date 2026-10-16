@@ -179,6 +179,8 @@ export interface MachineDaemonSpawnCommand {
       initial prompt. The wire name predates the retired Agent Role feature;
       daemons of every version read it, so it keeps this spelling. */
   roleInitialPrompt?: string;
+  /** Official Hub text. Legacy daemons ignore this additive versioned field. */
+  bootstrapPrompts?: import("../agent-bootstrap.js").AgentBootstrapPrompts;
   /** The registration's working mode; absent means autonomous. */
   workingMode?: AgentWorkingMode;
   /** The Space's rules page (its governance page). The Agent reads it on
