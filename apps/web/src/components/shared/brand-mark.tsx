@@ -16,7 +16,7 @@ export function BrandMark({
   showWordmark = true,
   className,
   iconClassName,
-  iconSrc = "/brand/xmatrix-icon.png",
+  iconSrc = "/brand/xmatrix-icon-128.png",
   wordmarkClassName,
 }: BrandMarkProps) {
   const content = (
@@ -30,9 +30,8 @@ export function BrandMark({
         <Image
           src={iconSrc}
           alt=""
-          width={96}
-          height={96}
-          sizes="40px"
+          width={128}
+          height={128}
           className="size-full object-cover"
           priority
         />

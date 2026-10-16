@@ -24,7 +24,7 @@ export function AuthShell({ children, legal = true }: { children: ReactNode; leg
       <div className="auth-column">
         <BrandMark
           href="/"
-          iconSrc="/brand/xmatrix-icon-transparent.png"
+          iconSrc="/brand/xmatrix-icon-transparent-128.png"
           iconClassName="size-8"
           wordmarkClassName="site-display text-lg"
         />

@@ -93,6 +93,7 @@ import { useHumanFocusHistoryHttpFallback } from "./use-human-focus-history-http
 import { invalidateWorkspaceResources, refetchUnlessHumanPush, setHumanPushConnected, type WorkspaceResourceChange } from "./workspace-resource-push";
 import { useSelectedChannelHeadCatchUp } from "./use-selected-channel-head-catch-up";
 import { clearProductMessageAttachmentMediaCache } from "@/lib/relay-v2/product-message-attachment-media";
+import { releaseMessageAttachmentMediaStores } from "./message-attachment-media-store";
 import { channelActivityOf, DEFAULT_HUB_URL, HUMAN_AUTH_INVALID_FAILURE_CODE, HUMAN_AUTH_REQUIRED_CLOSE_CODE, HUMAN_CLIENT_PRESENCE_DIGEST, normalizeHubUrl, parseHumanChannelCatalogChangedMessage, parseHumanWorkspaceResourceChangedMessage } from "@xmatrix/protocol";
 import type {
   ChannelAttachment,
@@ -2841,6 +2842,7 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
     setCachedCatalogChannels([]);
     await productTailCacheStoreRef.current?.clearAll();
     await clearProductMessageAttachmentMediaCache();
+    releaseMessageAttachmentMediaStores();
     clearChannelHistory();
     await logout();
     router.push("/login");

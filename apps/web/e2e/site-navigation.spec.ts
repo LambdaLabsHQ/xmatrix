@@ -127,7 +127,7 @@ for (const width of [393, 820, 1440]) {
       // WoodPanel must keep its baked grain tile on every public page.
       for (const panel of await page.locator('[data-material="wood-panel"]').all()) {
         const background = await panel.evaluate((element) => getComputedStyle(element).backgroundImage);
-        expect(background).toContain("/textures/wood.webp");
+        expect(background).toMatch(/\/textures\/wood\.[0-9a-f]{10}\.webp/);
       }
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 
