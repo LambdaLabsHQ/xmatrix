@@ -195,6 +195,11 @@ it belongs in the repository.**
    executions read through the ordinary page authority as the selected
    Machine's owner, so restricted pages and inherited restrictions apply
    before any text is sent to that Machine.
+   Summary startup retries a transient PostgreSQL failure once per preparation
+   or command issue. Preparation rechecks page access; command replay keeps the
+   same request and payload so an uncertain commit cannot start a second task.
+   Concurrent startup callbacks share their pending dispatch. Exhausted retries
+   still report an error; failed harness executions wait for a new page revision.
    Conversation page bookmarks and page-reference hover previews share these
    inline marks. Extracting a status line removes block markers while keeping
    leading emphasis delimiters intact.
