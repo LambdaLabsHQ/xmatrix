@@ -131,6 +131,8 @@ export class RelayPageSession extends DurableObject<Env> {
       // An Agent's edit is typed in over about two seconds at most (40 steps), as a person types. Each step
       // is a small insertion into the document (page-typing.ts), so a long page costs no more than one.
       writePaceMs: 45,
+      // Read as it is written: about as fast as a quick writer types, with a breath after each sentence.
+      readerPace: { charsPerSecond: 12, sentencePauseMs: 700 },
     };
     return new PageSession(ports);
   }

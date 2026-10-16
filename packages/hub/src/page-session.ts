@@ -14,7 +14,7 @@ import { absolutePositionToRelativePosition, updateYFragment, yXmlFragmentToPros
 import * as awarenessProtocol from "y-protocols/awareness";
 import * as syncProtocol from "y-protocols/sync";
 import * as Y from "yjs";
-import { PageCoWriter, type PageCoWriterHost, type PageCoWriterPerson } from "./page-co-writer";
+import { PageCoWriter, type PageCoWriterHost, type PageCoWriterPerson, type PageReaderPace } from "./page-co-writer";
 import { PageTyping, type PageTypingState } from "./page-typing";
 
 /**
@@ -111,6 +111,11 @@ export interface PageSessionPorts {
    * written as a person would write it (absent: the edit lands at once).
    */
   writePaceMs?: number;
+  /**
+   * How fast an Agent's words reach the page while a person reads it (pages-live-document.md §4.2): what a
+   * co-writer sends and what an edit types in alike. Absent: as they come.
+   */
+  readerPace?: PageReaderPace;
 }
 
 /** A committed revision as the repository answers it, and whether the page takes Agent edits as suggestions. */
@@ -626,6 +631,16 @@ export class PageSession {
     return setPageFragmentMarkdown(this.fragment, merged.ok ? merged.text : live, origin);
   }
 
+  /**
+   * The pace an Agent's words reach the page at: a reader's, while a person has it open, so the words are
+   * seen being written; as they come when nobody does, so nothing waits on nobody.
+   */
+  private readerPace(): PageReaderPace | null {
+    const pace = this.ports.readerPace;
+    if (!pace) return null;
+    return [...this.connections.values()].some((connection) => !connection.coWriter) ? pace : null;
+  }
+
   /** People on the page and their carets, as their editors share them. */
   private people(): PageCoWriterPerson[] {
     const people: PageCoWriterPerson[] = [];
@@ -664,6 +679,7 @@ export class PageSession {
           at: change.at })) });
       },
       people: () => this.people(),
+      pace: () => this.readerPace(),
       send: (request) => this.ports.send(connection.id, encodeCoWrite(request)),
     };
   }
@@ -851,14 +867,22 @@ export class PageSession {
       this.agentAwareness(principal, { user, activity, block: place?.block ?? "",
         ...(at ? { cursor: { anchor: at, head: at } } : {}), ...(wrote.length ? { wrote } : {}) });
     };
-    let last: { at: Y.RelativePosition; block: string } | null = typing.caret;
+    let last: { at: Y.RelativePosition; block: string; typed?: string } | null = typing.caret;
     show("writing", last);
+    // While someone reads the page it is typed in at a reader's pace, a word at a time and a breath after
+    // each sentence; otherwise in at most 40 quick steps.
+    let wait = pace;
     try {
       while (this.typings.has(typing) && typing.remaining && !this.destroyed && !this.ended) {
-        await new Promise((resolve) => setTimeout(resolve, pace));
+        await new Promise((resolve) => setTimeout(resolve, wait));
         if (!this.typings.has(typing) || this.destroyed || this.ended) break;
-        last = authoredAs(this.doc, clientId, () => typing.type(this.doc, perStep, TYPING)) ?? last;
+        const reader = this.readerPace();
+        const step = authoredAs(this.doc, clientId, () => typing.type(this.doc, reader ? 1 : perStep, TYPING));
+        last = step ?? last;
         show(typing.remaining ? "writing" : "editing", last);
+        const typed = step?.typed ?? "";
+        wait = reader ? Math.max(pace, Math.round(Array.from(typed).length * 1000 / reader.charsPerSecond)
+          + (/[.!?。！？；;]\s*$/u.test(typed) ? reader.sentencePauseMs : 0)) : pace;
       }
     } finally {
       this.typings.delete(typing);
