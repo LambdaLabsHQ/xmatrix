@@ -227,6 +227,13 @@ Search Console clicks. There are no inbound events and no writes. Enable the
 Google Analytics Admin and Data APIs on the company Google project and add the
 scope to its consent screen; it is a sensitive scope like `webmasters`.
 
+Google AdSense is a separate `googleadsense` connection on the same company
+Google client, holding only `https://www.googleapis.com/auth/adsense.readonly`.
+It reads accounts, sites, ad units, reports, payments, alerts and policy issues
+through the AdSense Management API v2 and has no writes or inbound events. The
+contract, including what the API cannot read, is in
+[the AdSense connector document](../connectors/google-adsense.md).
+
 Bing Webmaster Tools (`bingwebmaster`) saves the account's API key (Settings →
 API access); Bing accepts it only as the `apikey` query parameter of its JSON
 API, so the Hub never echoes a request URL into a summary or error. A site is
