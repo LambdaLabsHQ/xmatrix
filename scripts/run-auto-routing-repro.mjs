@@ -119,6 +119,7 @@ try {
     // App Store ownership and organization seats bind for good under concurrent claims.
     "packages/db/test/apple-billing-postgres.test.mjs",
     "packages/db/test/credit-pack-postgres.test.mjs",
+    "packages/db/test/outbox-retention-postgres.test.mjs",
     "packages/db/test/discord-lifecycle-postgres.test.mjs",
     "packages/db/test/sentry-event-postgres.test.mjs",
     "packages/db/test/gmail-routing-postgres.test.mjs",
