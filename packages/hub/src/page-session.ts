@@ -28,7 +28,7 @@ import { PageTyping, type PageTypingState } from "./page-typing";
  */
 
 export { PAGE_DOCUMENT_FRAGMENT };
-/** The origin of a word typed into the page (page-typing.ts). */
+/** The origin of an Agent's typing into the page (page-typing.ts): its state is stored with the typing, not per update. */
 const TYPING = "typing";
 /** Where sessions before the document kept plain markdown; read once to convert them. */
 const LEGACY_MARKDOWN_TEXT = "markdown";
@@ -731,9 +731,9 @@ export class PageSession {
       // Pending human edits commit under their own authors first.
       await this.commitNow();
       // A head written outside the session (a restore, a migration) is taken
-      // in first, so the edit merges against what the page is now. What Agents
-      // are still writing in is shown whole before it.
-      // Only a head that moved is read as a document: reading the page costs as much as writing it.
+      // in first, so the edit merges against what the page is now; what Agents
+      // are still typing in goes in whole before it. Only a head that moved is
+      // read as a document: reading the page costs as much as writing it.
       const loaded = await this.ports.loadHead(principal);
       if (loaded.revision !== this.base.revision) {
         const head = this.canonical(loaded);
@@ -781,7 +781,8 @@ export class PageSession {
       if ((this.ports.writePaceMs ?? 0) > 0) {
         // Its structure goes in at once and its words are typed after, as a person types them.
         const plan = pageWritingPlan(markdownToPageDoc(live), markdownToPageDoc(into));
-        typing = authoredAs(this.doc, clientId, () => PageTyping.begin(this.fragment, plan.start, plan.runs, origin));
+        // Stored right after with the words still to type, not on its own.
+        typing = authoredAs(this.doc, clientId, () => PageTyping.begin(this.fragment, plan.start, plan.runs, TYPING));
         if (typing.remaining) this.typings.set(typing, clientId);
         else typing = null;
       } else {
