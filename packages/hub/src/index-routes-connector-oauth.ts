@@ -20,6 +20,7 @@ import { getAppConnection, upsertAppConnection } from "./apps";
 import type { Env } from "./types";
 import { addConnectedMailbox } from "./connectors/gmail-mailboxes";
 import { connectXAccount } from "./connectors/x-accounts";
+import { upstreamMeter } from "./usage-cost-metering";
 
 /*
  * One-click OAuth routes (docs/design/connector-platform.md §3.2): which
@@ -55,7 +56,8 @@ async function completeOAuthConnect(env: Env, request: Request, verified: Verifi
       if (!original || current.connectionVersion !== original.connectionVersion || current.credentialVersion !== original.credentialVersion ||
           current.connectionGeneration !== original.connectionGeneration) throw new Error("Discord connection changed before installation");
     }
-    const grant = await exchangeOAuthGrant(verified.client, input.code ?? "", oauthRedirectUri(connectorHubOrigin(env, request)), state);
+    const grant = await exchangeOAuthGrant(verified.client, input.code ?? "", oauthRedirectUri(connectorHubOrigin(env, request)), state,
+      upstreamMeter(env, { spaceId: verified.spaceId, connector: providerId, action: "connect" }));
     if (providerId === "x") {
       if (!verified.connectionSnapshot) throw new Error("Restart X Connect");
       await connectXAccount(env, { spaceId: verified.spaceId, actorUserId: verified.userId,
@@ -128,9 +130,10 @@ export function registerConnectorOAuthRoutes(app: Hono<{ Bindings: Env }>): void
         accountId = body.accountId;
       }
     }
+    const spaceId = c.req.param("spaceId");
     let connectionSnapshot;
     if (["discord", "x"].includes(client.manifest.id)) {
-      const spaceId = c.req.param("spaceId"), repository = connectorCredentialRepository(c.env);
+      const repository = connectorCredentialRepository(c.env);
       const providerId = client.manifest.id as "discord" | "x";
       await repository.readGenerated({ requestId: crypto.randomUUID(), spaceId, providerId, actorUserId: user.id, generated: [] });
       const existing = await getAppConnection(c.env, { connectionId: `${spaceId}:${providerId}`, actorUserId: user.id })
@@ -142,8 +145,10 @@ export function registerConnectorOAuthRoutes(app: Hono<{ Bindings: Env }>): void
       connectionSnapshot = await repository.installationSnapshot({ requestId: crypto.randomUUID(), spaceId,
         providerId, actorUserId: user.id });
     }
-    return c.json({ url: await oauthAuthorizeUrl(client, { spaceId: c.req.param("spaceId"), userId: user.id, connectionSnapshot, accountId,
-      redirectUri: oauthRedirectUri(connectorHubOrigin(c.env, c.req.raw)) }) }, 200, { "cache-control": "private, no-store" });
+    return c.json({ url: await oauthAuthorizeUrl(client, { spaceId, userId: user.id, connectionSnapshot, accountId,
+      redirectUri: oauthRedirectUri(connectorHubOrigin(c.env, c.req.raw)),
+      meter: upstreamMeter(c.env, { spaceId, connector: client.manifest.id, action: "connect" }) }) },
+    200, { "cache-control": "private, no-store" });
   }));
 
   // The provider's redirect carries no xMatrix session (the app signs in with

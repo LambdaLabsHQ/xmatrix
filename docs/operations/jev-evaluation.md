@@ -78,6 +78,17 @@ this change through the canonical immutable release train, then record live
 evaluation evidence separately from mocked provider tests. The successful live
 result below was a local CLI call, not a deployed Hub call.
 
+## Usage metering
+
+Every Jev call the Hub makes on its key is one datapoint in the
+`xmatrix_usage_cost` Analytics Engine dataset: the Space (the caller's owner
+for `/api/ai/jev/evaluate`), the feature (`summon_intent`, `launch_choice`,
+`input_launch`, `start_intent`, `supersession`, `page_attachment`, `evaluate`),
+the outcome and its allowlisted code, input and output tokens as the AI
+Gateway reports them, and latency. Nothing from the evaluation input or answer
+is written. `packages/hub/scripts/usage-cost-report.mjs` sums it per Space; see
+[usage cost metering](usage-cost-metering.md).
+
 ## Local command
 
 Use Node.js 22 or later and install workspace dependencies with `pnpm install`. Provide `AI_GATEWAY_API_KEY`

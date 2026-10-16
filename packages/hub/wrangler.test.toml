@@ -63,6 +63,10 @@ dataset = "xmatrix_hub_test_diagnostics"
 binding = "RELAY_AUTHORITY_OBSERVABILITY_AE"
 dataset = "xmatrix_hub_test_relay_authority_observability"
 
+[[analytics_engine_datasets]]
+binding = "XMATRIX_USAGE_COST_AE"
+dataset = "xmatrix_hub_test_usage_cost"
+
 [[migrations]]
 tag = "current"
 new_sqlite_classes = ["RelayScopedControlAuthority", "RelayChannelFamilyData", "RelayChannelFamilyDirectory", "RelayPostgresChannelCoordinator", "RelayPostgresAgentLaunchCoordinator", "RelayChannelCatalogAuthority", "RelaySchedulerAuthority", "RelayProjectionAuthorizationAuthority", "RelaySpaceMembershipAuthority", "RelayUserPreferenceAuthority", "RelayTraceAccessAuthority", "RelayTraceAccessLocator", "RelayTraceAccessUserIndex", "RelayControlPlaneDirectory", "RelayRankAuthorityDirectory", "RelayGlobalDirectoryAuthority", "RelayAgentAppPolicyAuthority", "RelayAgentAppPolicyLocator", "RelaySpaceProjection", "RelaySpaceCapacityAuthority", "RelaySpaceRootAuthority", "RelayRuntimeLive", "RelayRuntimeRouteDirectory", "RelaySecretAuthority", "DeviceAuthBroker"]

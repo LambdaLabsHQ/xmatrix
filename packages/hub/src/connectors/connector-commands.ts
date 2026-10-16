@@ -19,6 +19,7 @@ import type { Env } from "../types";
 import type { ConnectorAction, ConnectorActionContext, ConnectorCommandHandler, ConnectorCommandInput, ConnectorSubscriptionSync } from "./provider";
 import { runSubscriptionStatement } from "./subscription-command";
 import { xActionCapability } from "./x-api";
+import { upstreamMeter } from "../usage-cost-metering";
 import { createXMediaCapability } from "./x-media";
 import { postgresMessageAttachmentAuthorityRequest } from "../postgres-message-attachment-authority";
 import { connectorSubscriptionStatements, isConnectorSubscriptionCommand } from "./subscription-parse";
@@ -261,7 +262,7 @@ async function actionContext(providerId: string, input: ConnectorCommandInput, s
   const dingtalk = providerId === "dingtalk" && ["read", "send"].includes(actionId)
     ? await dingtalkActionCapability(input.env, spaceId, authorizeWrite) : undefined;
   const x = providerId === "x" ? xActionCapability(input.env, { spaceId, channelId: input.channelId,
-    actorUserId: input.actorUserId, authorizeWrite }) : undefined;
+    actorUserId: input.actorUserId, action: actionId, authorizeWrite }) : undefined;
   const xMedia = x && input.env.RELAY_PAYLOAD_BUCKET ? createXMediaCapability({ spaceId, channelId: input.channelId,
     actorUserId: input.actorUserId, x, authorizeWrite, bucket: input.env.RELAY_PAYLOAD_BUCKET,
     receiptSecret: input.env.RELAY_R2_CAPABILITY_HMAC_SECRET,
@@ -279,7 +280,8 @@ async function actionContext(providerId: string, input: ConnectorCommandInput, s
     await connectorCredentialRepository(input.env).put({ requestId: crypto.randomUUID(), spaceId, providerId, actorUserId: "hub:provider-renewal",
       fields: { ...fields }, policy: { allowed: declared }, at: new Date().toISOString(), asHub: true });
   };
-  return { credentials, caller, authorizeWrite, ...(native ? {} : { saveCredentials }), ...(teams ? { teams } : {}), ...(googleChat ? { googleChat } : {}),
+  const usage = upstreamMeter(input.env, { spaceId, connector: providerId, action: actionId });
+  return { credentials, caller, authorizeWrite, usage, ...(native ? {} : { saveCredentials }), ...(teams ? { teams } : {}), ...(googleChat ? { googleChat } : {}),
     ...(discord ? { discord } : {}), ...(feishu ? { feishu } : {}), ...(telegram ? { telegram } : {}),
     ...(wecom ? { wecom } : {}), ...(dingtalk ? { dingtalk } : {}), ...(x ? { x } : {}), ...(xMedia ? { xMedia } : {}) };
 }
