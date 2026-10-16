@@ -15,6 +15,12 @@ English is the default language for repository documentation, guardrails, releas
 
 ## Current behavior
 
+Pages reveal committed Agent edits through canonical document states, with
+complete structural delimiters. A persisted presentation transition lets a
+restarted session finish the committed edit while preserving human typing.
+See [live documents](../design/pages-live-document.md).
+
+
 Channel presence uses the protocol's read-only Instance-ID map, separate from
 Human devices. One reducer owns identity checks, lifecycle merges and removal;
 messages and live reports cannot create residents. Required registrations

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import { test } from "node:test";
 import { pageBlocks } from "../dist/index.js";
-import { canonicalPageMarkdown, markdownToPageDoc, pageDocToMarkdown } from "../dist/page-document.js";
+import { canonicalPageMarkdown, markdownToPageDoc, pageDocToMarkdown, pageWritingSteps } from "../dist/page-document.js";
 
 const CANONICAL = `# Relay
 
@@ -155,4 +155,24 @@ test("changed document blocks parse only the sections whose text differs", async
   assert.deepEqual(pageChangedDocBlocks(before, after.replace("## Part 7\n", "## Part 7\nmore\n"), canonical,
     new Set(["part-7"])), ["part-7"]);
   assert.equal(parsed.length, 2);
+});
+
+test("a writer's steps take out at once, add a few words at a time in reading order, and end on the new text", () => {
+  const before = "# Launch\n\n- Web · Claude · in progress\n- Mobile · Codex · in progress\n";
+  const after = "# Launch\n\n- Web · Claude · merged, live in v1.0.464\n- Mobile · Codex · in review, PR #566\n";
+  const steps = pageWritingSteps(before, after, 4);
+  assert.equal(steps.at(-1), after);
+  assert.ok(steps.length > 1 && steps.length <= 4);
+  assert.ok(steps.every((text) => !/in progress/u.test(text)), "what it replaces goes first");
+  assert.ok(steps[0].includes("merged") && !steps[0].includes("PR #566"), "the first change is written first");
+  assert.deepEqual(pageWritingSteps(after, after), []);
+  assert.deepEqual(pageWritingSteps(after, "# Launch\n"), ["# Launch\n"], "a pure removal is one step");
+});
+
+// The plain-prose step test cannot catch Markdown syntax swallowing another block.
+test("every writing step is a canonical document with complete structural delimiters", () => {
+  const steps = pageWritingSteps("# Old\n\nold\n", CANONICAL);
+  assert.equal(steps.at(-1), CANONICAL);
+  assert.ok(steps.length > 1 && steps.length <= 40);
+  for (const step of steps) assert.equal(canonicalPageMarkdown(step), step);
 });

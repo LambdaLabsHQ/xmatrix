@@ -1122,6 +1122,9 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
       anchor: anchorTops.has(`client:${clientId}`) ? `client:${clientId}` : sectionAnchor(state.block ?? ""),
       editing: state.activity === "editing" || state.activity === "writing" || state.activity === "thinking",
       conversationId: state.user!.conversationId ?? null,
+      // While it writes, its face says which conversation the words come from.
+      ...(state.user!.kind === "agent" && state.activity === "writing" && state.user!.conversationId
+        && conversationName(state.user!.conversationId) ? { from: conversationName(state.user!.conversationId)! } : {}),
       ...(state.user!.kind === "agent" && CO_WRITER_DOING[state.activity ?? ""]
         ? { doing: CO_WRITER_DOING[state.activity ?? ""]! } : {}),
       undoable: state.user!.kind === "agent" && state.undo === true,

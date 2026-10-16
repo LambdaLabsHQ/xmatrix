@@ -178,6 +178,105 @@ test("an Agent edit merges with human edits, streams in under its cursor and com
   assert.notEqual(h.session.doc.clientID, agentClient, "the session writes as itself again afterwards");
 });
 
+test("readers watch an Agent's edit written in a few words at a time, and people's typing meanwhile is kept", async () => {
+  const h = harness();
+  h.ports.writePaceMs = 1;
+  const ann = await annConnected(h);
+  const seen = [];
+  ann.doc.on("update", () => seen.push(ann.text.toString()));
+  const agentBody = HEAD.replace("In progress", "Shipped to every Space on Friday, behind one switch, with docs and a video");
+  const editing = h.session.submitEdit(agent, { baseRevision: 1, body: agentBody, conversationIds: ["conv-1"] });
+  await new Promise((resolve) => setTimeout(resolve, 3));
+  ann.text.insert(ann.text.toString().indexOf("none"), "human note, ");
+  await editing;
+  const partial = seen.filter((text) => /Shipped/u.test(text) && !/a video/u.test(text));
+  assert.ok(partial.length >= 2, "the text arrives in several steps, not at once");
+  assert.match(ann.text.toString(), /with docs and a video/u);
+  assert.match(ann.text.toString(), /human note, none/u, "what a person typed while it wrote stays");
+  const agentState = [...ann.awareness.getStates().values()].find((state) => state?.user?.kind === "agent");
+  assert.equal(agentState.activity, "editing", "it is done writing");
+});
+
+// Text-only streaming coverage cannot catch document normalization changing the merge
+// baseline, or a restart treating a partially presented committed edit as pending human text.
+test("paced structural edits converge to their committed document and keep concurrent typing", async () => {
+  for (const replacement of [
+    "| Name | Status |\n| --- | --- |\n| Web | shipped today |",
+    "- first item\n- second item with more words",
+    "```ts\nconst shipped = true;\n```",
+  ]) {
+    const h = harness();
+    h.ports.writePaceMs = 1;
+    const ann = await annConnected(h);
+    const body = HEAD.replace("In progress", replacement);
+    const started = new Promise((resolve) => ann.doc.once("update", resolve));
+    const editing = h.session.submitEdit(agent, { baseRevision: 1, body, conversationIds: ["conv-1"] });
+    await started;
+    ann.text.insert(ann.text.toString().indexOf("none"), "human note, ");
+    await editing;
+    assert.equal(ann.text.toString(), body.replace("none", "human note, none"));
+    await h.session.commit();
+    assert.equal(h.commits.at(-1).principal, "ann");
+    assert.equal(h.commits.at(-1).body, ann.text.toString());
+  }
+});
+
+test("a restart finishes the committed paced edit and keeps typing persisted during it", async () => {
+  const h = harness();
+  h.ports.writePaceMs = 1;
+  const ann = await annConnected(h);
+  const body = HEAD.replace("In progress", "Shipped to every Space with docs and a video");
+  const started = new Promise((resolve) => ann.doc.once("update", resolve));
+  const editing = h.session.submitEdit(agent, { baseRevision: 1, body, conversationIds: ["conv-1"] });
+  await started;
+  ann.text.insert(ann.text.toString().indexOf("none"), "human note, ");
+  const interrupted = h.persisted.at(-1);
+  await editing;
+  const resumed = new PageSession(h.ports);
+  cleanups.push(() => resumed.destroy());
+  await resumed.ensureLoaded(human("ann"), interrupted);
+  assert.equal(resumed.markdown(), body.replace("none", "human note, none"));
+  assert.equal(h.commits.length, 1, "recovering presentation does not repeat the Agent's commit");
+  await resumed.commit();
+  assert.equal(h.commits.at(-1).principal, "ann");
+  assert.equal(h.commits.at(-1).body, resumed.markdown());
+});
+
+test("two Agents write the page at the same time, and a person's commit meanwhile keeps what they are still writing", async () => {
+  const h = harness();
+  h.ports.writePaceMs = 2;
+  const ann = await annConnected(h);
+  const codex = { ...agent, id: "agent-2", label: "codex:1", conversationId: "conv-2" };
+  const seen = [];
+  ann.doc.on("update", () => seen.push(ann.text.toString()));
+  const long = "written by one of two Agents at the same time, word after word after word";
+  const first = h.session.submitEdit(agent, { baseRevision: 1, body: HEAD.replace("In progress", `Status ${long}`),
+    conversationIds: ["conv-1"] });
+  const second = h.session.submitEdit(codex, { baseRevision: 1, body: HEAD.replace("none", `Notes ${long}`),
+    conversationIds: ["conv-2"] });
+  await new Promise((resolve) => setTimeout(resolve, 12));
+  ann.text.insert(0, "Hi ");
+  await h.session.commit();
+  const interrupted = h.persisted.at(-1);
+  await Promise.all([first, second]);
+  assert.ok(seen.some((text) => /Status written/u.test(text) && /Notes written/u.test(text)
+    && !/Status [^\n]*word after word after word/u.test(text)), "both write before the first is done");
+  const final = ann.text.toString();
+  assert.match(final, /Status written[^\n]*after word\n/u);
+  assert.match(final, /Notes written[^\n]*after word\n/u);
+  assert.match(final, /Hi /u, "and the person's word is there");
+  const human = h.commits.find((c) => c.principal === "ann");
+  assert.ok(human, "the person's edit committed");
+  assert.match(human.body, /Status written[^\n]*after word/u, "it keeps the Agent's words still being written");
+  const resumed = new PageSession(h.ports);
+  cleanups.push(() => resumed.destroy());
+  await resumed.ensureLoaded(agent, interrupted);
+  assert.match(resumed.markdown(), /Status written[^\n]*after word\n/u);
+  assert.match(resumed.markdown(), /Notes written[^\n]*after word\n/u);
+  assert.match(resumed.markdown(), /Hi /u);
+  assert.equal(await resumed.commit(), null, "recovering both presentations repeats no commit");
+});
+
 test("an Agent edit answers which sections it removed and which Automations it detached", async () => {
   const h = harness();
   const ann = await annConnected(h);
