@@ -163,6 +163,7 @@ async function handleProductAuthRequestWithDatabase(
     (error) => {
       emailOtpFailure = error;
     },
+    /^\/api\/auth\/callback\/(google|github)$/u.test(new URL(request.url).pathname),
   );
   // Better Auth 1.6 catches failures raised by runInBackgroundOrAwait and
   // otherwise returns 200. Re-raise the request-local failure after its
@@ -187,6 +188,7 @@ function createAuthWithDatabase(
   postgres: boolean,
   behavior: AuthBehaviorHooks,
   observeEmailOtpFailure?: (error: unknown) => void,
+  socialCallback = false,
 ): BetterAuthInstance {
   if (!env.BETTER_AUTH_SECRET) {
     throw new Error("BETTER_AUTH_SECRET is not configured");
@@ -219,6 +221,9 @@ function createAuthWithDatabase(
     database,
     trustedOrigins: Array.from(new Set([appOrigin(env), hubAuthBaseUrl(env)])),
     socialProviders,
+    // A missing/consumed state cannot supply the flow's errorCallbackURL.
+    // Keep that refusal recoverable through the deployment-owned login page.
+    ...(socialCallback ? { onAPIError: { errorURL: `${appOrigin(env)}/login` } } : {}),
     emailAndPassword: {
       ...VERIFIED_PASSWORD_OPTIONS,
       async sendResetPassword({ user, url }) {

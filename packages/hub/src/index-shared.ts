@@ -37,7 +37,7 @@ import {
   type AgentRunPrincipal,
   type AuthUser,
 } from "./auth";
-import { logAuthMetric } from "./auth-observability";
+export { betterAuthRouteGroup, logBetterAuthHandlerMetrics } from "./auth-observability";
 import {
   machineDaemonCommandPrincipal,
   verifyMachineDaemonCredential,
@@ -152,58 +152,6 @@ export function hubOrigin(request: Request): string {
 /** Connector URLs retain the request origin fallback for deployments without an explicit Hub URL. */
 export function connectorHubOrigin(env: Pick<Env, "HUB_URL">, request: Request): string {
   return env.HUB_URL?.trim().replace(/\/+$/u, "") || new URL(request.url).origin;
-}
-export function betterAuthRouteGroup(path: string, status?: number): string {
-  if (path.endsWith("/token")) {
-    return status === 401 || status === 403 || status === 429
-      ? `auth_token_${status}`
-      : "auth_token";
-  }
-  if (path.includes("/sign-in/social")) return "google_sign_in";
-  if (path.includes("/callback/google")) return "google_callback";
-  if (path.includes("/email-otp/")) return "better_auth_email_otp";
-  if (path.includes("/sign-in/email-otp")) return "better_auth_email_otp";
-  if (path.endsWith("/sign-in/email")) return "better_auth_password";
-  if (path.includes("/request-password-reset") || path.includes("/reset-password")) return "better_auth_password_reset";
-  if (path.includes("/get-session")) return "better_auth_get_session";
-  if (path.includes("/jwks")) return "better_auth_jwks";
-  return "better_auth";
-}
-export async function logBetterAuthHandlerMetrics(path: string, response: Response) {
-  const routeGroup = betterAuthRouteGroup(path, response.status);
-  await logAuthMetric({
-    routeGroup,
-    status: response.status,
-    outcome: response.ok || response.status < 400 ? "ok" : "error",
-    authProvider: "better-auth",
-  });
-
-  if (path.includes("/callback/google") && response.status >= 200 && response.status < 400) {
-    await logAuthMetric({
-      routeGroup: "session_created",
-      status: response.status,
-      outcome: "google_callback",
-      authProvider: "better-auth",
-    });
-  }
-
-  if ((path.includes("/sign-in/email-otp") || path.endsWith("/sign-in/email")) && response.ok) {
-    await logAuthMetric({
-      routeGroup: "session_created",
-      status: response.status,
-      outcome: path.endsWith("/sign-in/email") ? "better_auth_password" : "better_auth_email_otp",
-      authProvider: "better-auth",
-    });
-  }
-
-  if (path.endsWith("/token") && response.ok) {
-    await logAuthMetric({
-      routeGroup: "session_reused",
-      status: response.status,
-      outcome: "auth_token",
-      authProvider: "better-auth",
-    });
-  }
 }
 export function normalizeOrigin(value: string): string | null {
   try {

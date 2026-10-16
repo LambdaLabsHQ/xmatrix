@@ -15,6 +15,11 @@ English is the default language for repository documentation, guardrails, releas
 
 ## Current behavior
 
+OAuth callbacks whose state cannot recover a per-flow error URL return to the
+deployment's login page. Error redirects are failed callback metrics, and Google
+session creation requires an issued session cookie. See
+[OAuth callback recovery](../operations/oauth-callback-recovery.md).
+
 Repository contributions use the Prompt request issue form: current behavior
 and reproduction, the desired outcome, and acceptance checks are required;
 implementation prompts and reference patches are optional. Maintainers triage
