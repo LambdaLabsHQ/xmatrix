@@ -118,6 +118,9 @@ export type RegistrationLaunchChooser = (input: {
   blocked?: readonly LaunchMachineBlock[];
   /** The input needs no repository, so a private managed directory is a valid choice. */
   managedWorkspace?: boolean;
+  /** The conversation co-writes a page: only the private managed directory is offered, ready at once,
+   * with no repository to check out first. */
+  managedOnly?: true;
   /** The mention being decided, when a message launches: Jev first reads
    * whether its author is asking an Agent to start, unless `launch:force`. */
   summon?: { text: string; start: number; end: number; authorKind: "user" | "agent";
@@ -587,10 +590,15 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
   }, choose?: RegistrationLaunchChooser) {
     const actorUserId = text(input.actorUserId), channelId = text(input.channelId),
       sourceMessageId = text(input.sourceMessageId), commandId = text(input.commandId, 200);
-    const source = await this.database.transaction({ requestId: commandId,
+    const { source, coWrites } = await this.database.transaction({ requestId: commandId,
       operation: "registration.launch.read-source", placement: this.placement }, async tx => {
-      return readMessageInvocationSelections(tx, { deriveFromText: true, spaceId: this.placement.spaceId, channelId,
-        messageId: sourceMessageId, actorUserId, body: input.body });
+      const source = await readMessageInvocationSelections(tx, { deriveFromText: true, spaceId: this.placement.spaceId,
+        channelId, messageId: sourceMessageId, actorUserId, body: input.body });
+      // A conversation that co-writes a page has its Agent write the page (pages-live-document.md §4.2).
+      const coWrites = source?.selections.length ? (await tx.query({ name: "registration_launch_co_writes_v1",
+        text: "SELECT 1 FROM data.page_co_writing WHERE space_id=$1 AND conversation_id=$2 AND ended_at IS NULL LIMIT 1",
+        values: [this.placement.spaceId, channelId], maxRows: 1 })).length > 0 : false;
+      return { source, coWrites };
     });
     if (!source?.selections.length) {
       return { selectionCount: 0, prepared: [], rejected: [] };
@@ -615,11 +623,14 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
           rejected.push({ selectionIndex, code: `summon_intent_${draftRead}`, sourceMention: summonText(selection) });
           continue;
         }
-        // Read alongside the candidates: the repository list comes from GitHub.
-        const repositoryCatalog = summonRepositoryCatalog(this.repositoryReader, actorUserId, options.tags.repo);
         // A conversation without a requested repository/directory can start in
         // a daemon-owned cwd, even before the owner registers any workspaces.
         const managedWorkspace = !options.tags.repo && !options.tags.pwd;
+        // Writing a page needs no checkout: its Agent starts at once in that cwd, and no repository is read.
+        const managedOnly = coWrites && managedWorkspace;
+        // Read alongside the candidates: the repository list comes from GitHub.
+        const repositoryCatalog = managedOnly ? undefined
+          : summonRepositoryCatalog(this.repositoryReader, actorUserId, options.tags.repo);
         const target = selection.target.kind === "registration"
           ? parseSpaceAgentRegistrationKey(selection.target.key)
           : selection.target.kind === "capability" ? { harness: selection.target.harness }
@@ -640,7 +651,7 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
         let selected: Awaited<ReturnType<RegistrationLaunchChooser>>;
         try {
           selected = await choose({ message: input.body, sourceSequence: source.sourceSequence, candidates, managedWorkspace,
-            blocked: listed.blocked,
+            ...(managedOnly ? { managedOnly } : {}), blocked: listed.blocked,
             tags: input.forceMention !== undefined ? { ...options.tags, launch: "force" } : options.tags,
             summon: { text: summonText(selection), start: selection.start, end: options.end, authorKind: source.authorKind,
               ...(draftRead === "summon" ? { readInDraft: true as const } : {}) } });

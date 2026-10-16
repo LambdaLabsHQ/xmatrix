@@ -293,6 +293,10 @@ fact is about.
   leave: its face in the header, its caret in its colour with what it is doing
   (watching, thinking, writing, waiting), and its words arriving as its harness
   writes them.
+  - **At once.** The Agent a co-writing conversation calls starts in a private
+    managed directory, ready the moment its process does: a launch in a
+    conversation that co-writes a page reads no repository and checks none out,
+    unless its message names one (`repo:`, `pwd:`).
   - **Any Agent.** The co-writer is the Agent's own Run, whatever its harness:
     the runtime already drives every harness through a structured session
     (Claude stream-json, Codex app-server, ACP and the others), each able to
