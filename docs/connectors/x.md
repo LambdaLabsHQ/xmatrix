@@ -104,7 +104,10 @@ the source message, attachment ID, name, size, content hash and version.
 Source access, immutable metadata and current Channel policy are checked again
 while streaming the upload. Initialize, append and finalize use X's v2 media
 API with at most 64 one-MiB chunks and no automatic replay of an uncertain
-write.
+write. The transfer has a two-minute deadline, with each provider request
+separately bounded. Allow-mode upload commands keep their HTTP request alive
+until completion instead of depending on the post-response background budget;
+approval-mode transfers run inside the approval request.
 
 The result includes an opaque media receipt scoped to the Space, Channel,
 calling member, account and authorization generation. It expires within one

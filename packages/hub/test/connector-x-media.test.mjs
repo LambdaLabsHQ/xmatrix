@@ -185,6 +185,24 @@ test("X video upload never retries an uncertain mutation, stops after mid-upload
   }
 });
 
+test("X video deadline stops after the first slow segment without sending another segment or finalizing", async t => {
+  let now = Date.now();
+  const clock = t.mock.method(Date, "now", () => now);
+  try {
+    const f = fixture();
+    const request = f.dependencies.x.request;
+    f.dependencies.x.request = async (...args) => {
+      const response = await request(...args);
+      if (args[2].endsWith("/append")) now += 120_001;
+      return response;
+    };
+    const prepared = await f.media.prepareUpload(account, sourceRef);
+    await assert.rejects(f.media.upload(account, prepared), error => error.status === 504 && /upload timed out/u.test(error.message));
+    assert.deepEqual(f.calls.map(call => call.path), ["/2/media/upload/initialize", "/2/media/upload/303/append"],
+      "the upload deadline is shorter than the still-valid one-hour media receipt");
+  } finally { clock.mock.restore(); }
+});
+
 test("X media command parsers reject unscoped sources and raw media IDs", () => {
   const actions = createXMediaActions({});
   for (const target of ["*", "company", "@company/path"]) {

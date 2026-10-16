@@ -155,6 +155,7 @@ test("the callback writes credentials only after verified state, provider scope 
     },
     "./connectors/vercel-api": { vercelCompletionUrl },
     "./connectors/gmail-mailboxes": { addConnectedMailbox: async () => assert.fail("only a Gmail Connect adds a mailbox") },
+    "./connectors/x-accounts": { connectXAccount: async () => assert.fail("only an X Connect adds an X account") },
     "./deployment-origins": { appOrigin: () => "https://xmatrix.test" },
     "./index-shared": { connectorHubOrigin: () => "https://hub.test", requireAuth: async () => ({}),
       requireHumanAuth: () => ({ id: signedIn }), jsonErrors: async (_context, run) => run() },

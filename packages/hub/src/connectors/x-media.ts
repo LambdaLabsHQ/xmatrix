@@ -7,6 +7,7 @@ import type { XAccountView, XActionCapability } from "./x-accounts";
 const MAX_BYTES = 64 * 1024 * 1024;
 const CHUNK_BYTES = 1024 * 1024;
 const MAX_RECEIPT_MS = 60 * 60 * 1000;
+const MAX_UPLOAD_MS = 120_000;
 const ID = /^[0-9]{1,19}$/u;
 const REF = /^[A-Za-z0-9_.:-]{1,200}$/u;
 const HASH = /^[a-f0-9]{64}$/u;
@@ -188,6 +189,10 @@ export function createXMediaCapability(input: {
         throw new ProviderRequestError(409, "The approved video attachment changed; request a new approval");
       }
       const startedAt = Date.now();
+      function withinDeadline() {
+        if (Date.now() - startedAt >= MAX_UPLOAD_MS) throw new ProviderRequestError(504,
+          "The bounded X video upload timed out; its uncertain writes are not retried");
+      }
       try {
         await input.authorizeWrite();
         const initialized = providerData(await input.x.request(account, "POST", "/2/media/upload/initialize", {
@@ -198,6 +203,7 @@ export function createXMediaCapability(input: {
         let received = 0, segment = 0, filled = 0;
         const buffer = new Uint8Array(Math.min(CHUNK_BYTES, source.size));
         async function append() {
+          withinDeadline();
           if (segment >= 64 || Date.now() >= expiresAt) throw new ProviderRequestError(409, "The bounded video upload expired; upload again");
           await validateSource(approved);
           await input.authorizeWrite();
@@ -211,6 +217,7 @@ export function createXMediaCapability(input: {
           filled = 0;
         }
         while (true) {
+          withinDeadline();
           const timeout = AbortSignal.timeout(10_000);
           const read = await new Promise<ReadableStreamReadResult<Uint8Array>>((resolve, reject) => {
             const aborted = () => reject(new ProviderRequestError(504, "Reading the Channel video timed out"));
@@ -231,6 +238,7 @@ export function createXMediaCapability(input: {
         if (received !== source.size) throw new ProviderRequestError(502, "The Channel video size failed immutable storage verification");
         if (filled) await append();
         await validateSource(approved);
+        withinDeadline();
         await input.authorizeWrite();
         const finalizedAt = Date.now();
         const data = providerData(await input.x.request(account, "POST", `/2/media/upload/${id}/finalize`));
