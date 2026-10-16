@@ -351,8 +351,14 @@ fact is about.
     transaction under its own client id at most every 80 ms (each write rebuilds
     those blocks; a harness sends its words many times a second, and Claude's
     are sent on that cadence while a reply writes into a page), so its text is
-    marked as its own, and its caret follows. Its words fade in as they arrive,
-    tinted in its colour like anyone's fresh change. Its edits commit with the
+    marked as its own, and its caret follows. Its words fade in as they arrive.
+    The paragraph it writes is highlighted whole in its colour: steady while it
+    writes there, then held for five minutes after its last word
+    (`PAGE_AGENT_INK_MS`) before it fades. Its presence names what it wrote
+    (`wrote`: the changes of the last five minutes, as positions), so the
+    highlight also shows for whoever opens the page meanwhile. It also stays
+    after a streaming co-writer leaves, whose caret then rests at its last
+    change as any Agent's does. Its edits commit with the
     session's idle commit, as its own, from its conversation.
   - **Taking it back.** A person who may edit the page takes back the Agent's
     last change from its card (Undo; `POST …/co-writing/:conversationId/undo`):

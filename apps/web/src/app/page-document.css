@@ -529,8 +529,8 @@ html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-com
 }
 .page-document .page-remote-change[data-agent] { animation-name: page-agent-words-in; animation-duration: 0.6s; }
 /* The paragraph an Agent is writing, or just wrote, marked whole in its colour as a highlighter marks
-   lines (as its suggestions are): steady while it writes there, held for AGENT_CHANGE_MS after its last
-   word, then fading. */
+   lines (as its suggestions are): steady while it writes there, held for PAGE_AGENT_INK_MS (5 minutes) after
+   its last word, then fading; marked from the words that arrived (is-brief), AGENT_CHANGE_MS. */
 @keyframes page-agent-ink {
   0%, 80% { background-color: color-mix(in oklab, var(--page-change-color) 28%, transparent); }
   100% { background-color: transparent; }
@@ -540,13 +540,15 @@ html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-com
   border-radius: 0;
   -webkit-box-decoration-break: clone;
   box-decoration-break: clone;
-  animation: page-agent-ink 20s linear forwards;
+  animation: page-agent-ink 300s linear forwards;
   animation-delay: var(--page-ink-delay, 0ms);
 }
+.page-document .page-agent-ink.is-brief { animation-duration: 20s; }
 .page-document .page-agent-ink.page-remote-change[data-agent] {
-  animation: page-agent-ink 20s linear forwards, page-agent-words-in 0.6s ease-out both;
+  animation: page-agent-ink 300s linear forwards, page-agent-words-in 0.6s ease-out both;
   animation-delay: var(--page-ink-delay, 0ms), var(--page-words-delay, 0ms);
 }
+.page-document .page-agent-ink.is-brief.page-remote-change[data-agent] { animation-duration: 20s, 0.6s; }
 .page-document .page-agent-ink.is-writing {
   animation: none;
   background-color: color-mix(in oklab, var(--page-change-color) 28%, transparent);
@@ -571,9 +573,10 @@ html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-com
   border-radius: 3px;
   background: var(--page-change-color);
   pointer-events: none;
-  animation: page-agent-bar 20s linear forwards;
+  animation: page-agent-bar 300s linear forwards;
   animation-delay: var(--page-ink-delay, 0ms);
 }
+.page-document .page-agent-block.is-brief::before { animation-duration: 20s; }
 .page-document .page-agent-block.is-writing::before { animation: none; }
 /* A list item has its marker there; its ink alone says whose it is. */
 .page-document li .page-agent-block::before { content: none; }
@@ -581,7 +584,8 @@ html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-com
   .page-document :is(.page-remote-change, .page-agent-ink) { animation-timing-function: steps(1, end); }
   .page-document .page-agent-block::before { animation-timing-function: steps(1, end); }
   .page-document .page-remote-change[data-agent] { animation: none; }
-  .page-document .page-agent-ink.page-remote-change[data-agent] { animation: page-agent-ink 20s steps(1, end) forwards; }
+  .page-document .page-agent-ink.page-remote-change[data-agent] { animation: page-agent-ink 300s steps(1, end) forwards; }
+  .page-document .page-agent-ink.is-brief.page-remote-change[data-agent] { animation-duration: 20s; }
 }
 
 /*

@@ -29,7 +29,7 @@ export {
   TEXT_TASK_INPUT_MAX_BYTES, TEXT_TASK_INSTRUCTION_MAX_BYTES, TEXT_TASK_OUTPUT_MAX_BYTES, TEXT_TASK_STATUSES,
 } from "./text-task.js";
 export type { TextTaskRequest, TextTaskResult, TextTaskStatus } from "./text-task.js";
-export { PAGE_MESSAGE_CO_WRITE, PageCoWriteParser, parsePageCoWriteReply } from "./page-co-writing.js";
+export { PAGE_AGENT_INK_MS, PAGE_MESSAGE_CO_WRITE, PageCoWriteParser, parsePageCoWriteReply } from "./page-co-writing.js";
 export type {
   PageCoWriteAction, PageCoWriteEvent, PageCoWriteReply, PageCoWriteRequest,
 } from "./page-co-writing.js";

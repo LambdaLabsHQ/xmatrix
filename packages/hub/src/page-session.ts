@@ -1,5 +1,6 @@
 import {
-  PAGE_DOCUMENT_FRAGMENT, PAGE_MESSAGE_CO_WRITE, mergePageText, mergePageWords, pageAuthorColor, pageChangedBlocks,
+  PAGE_AGENT_INK_MS, PAGE_DOCUMENT_FRAGMENT, PAGE_MESSAGE_CO_WRITE, mergePageText, mergePageWords, pageAuthorColor,
+  pageChangedBlocks,
   pageRemovedSections,
   parsePageCoWriteReply, type PageCoWriteRequest, type PageEditResult,
 } from "@xmatrix/protocol";
@@ -462,7 +463,15 @@ export class PageSession {
       writer.stop();
       this.coWriters.delete(connectionId);
       const principal = this.connections.get(connectionId)?.principal;
-      if (principal) this.agentAwareness(principal, null);
+      // It leaves as any Agent leaves its edits: its caret rests at its last change and what it just wrote
+      // stays marked while fresh, but nothing it wrote can be taken back from it, and its note goes with it.
+      const resting = principal ? this.resting.get(agentClientId(principalKey(principal)))?.state : undefined;
+      const fresh = Array.isArray(resting?.wrote) && (resting.wrote as Array<{ at?: unknown }>)
+        .some((change) => typeof change.at === "number" && Date.now() - change.at < PAGE_AGENT_INK_MS);
+      if (principal && resting && fresh) {
+        const { undo: _undo, say: _say, ...left } = resting;
+        this.agentAwareness(principal, { ...left, activity: "watching" });
+      } else if (principal) this.agentAwareness(principal, null);
     }
     const owned = this.connectionClients.get(connectionId);
     this.connections.delete(connectionId);
@@ -646,11 +655,13 @@ export class PageSession {
         // Its edits commit as its own, from the conversation it co-writes from.
         this.noteEditor(principal);
       },
-      present: ({ activity, cursor, say, undoable }) => {
+      present: ({ activity, cursor, say, undoable, wrote }) => {
         const at = cursor ? Y.relativePositionToJSON(cursor) : null;
         this.agentAwareness(principal, { user: { name: principal.label, color: pageAuthorColor(principal),
           kind: principal.kind, conversationId: principal.conversationId ?? null }, activity,
-        ...(at ? { cursor: { anchor: at, head: at } } : {}), ...(say ? { say } : {}), ...(undoable ? { undo: true } : {}) });
+        ...(at ? { cursor: { anchor: at, head: at } } : {}), ...(say ? { say } : {}), ...(undoable ? { undo: true } : {}),
+        wrote: wrote.map((change) => ({ from: Y.relativePositionToJSON(change.from), to: Y.relativePositionToJSON(change.to),
+          at: change.at })) });
       },
       people: () => this.people(),
       send: (request) => this.ports.send(connection.id, encodeCoWrite(request)),
@@ -660,9 +671,11 @@ export class PageSession {
   private agentAwareness(principal: PageSessionPrincipal, state: Record<string, unknown> | null): void {
     const clientId = agentClientId(principalKey(principal));
     if (state) {
-      // Reading elsewhere moves its section, not the caret it left at its last edit.
-      const cursor = state.cursor ?? this.resting.get(clientId)?.state.cursor;
-      const next = cursor ? { ...state, cursor } : state;
+      // Reading elsewhere moves its section, not the caret it left at its last edit, nor what it wrote.
+      const resting = this.resting.get(clientId)?.state;
+      const cursor = state.cursor ?? resting?.cursor;
+      const wrote = state.wrote ?? resting?.wrote;
+      const next = { ...state, ...(cursor ? { cursor } : {}), ...(wrote ? { wrote } : {}) };
       this.resting.set(clientId, { clientId, state: next, at: Date.now() });
       this.applyAgentState(clientId, next);
     } else {
@@ -706,8 +719,12 @@ export class PageSession {
       // Agent counts here only around the moment it read or edited, as before carets rested.
       const rest = this.resting.get(clientId);
       if (rest && Date.now() - rest.at > AGENT_PRESENT_MS) continue;
-      if (seen.has(`${kind}:${user.name}`)) continue;
-      seen.add(`${kind}:${user.name}`);
+      // A person's tabs are one person. Agents share their harness's name, so each is told apart by the
+      // conversation it works from: two Claudes writing from two conversations are two writers.
+      const who = kind === "agent" && typeof user.conversationId === "string"
+        ? `agent:${user.name}:${user.conversationId}` : `${kind}:${user.name}`;
+      if (seen.has(who)) continue;
+      seen.add(who);
       const { activity, block } = state as { activity?: unknown; block?: unknown };
       out.push({ name: user.name, color: user.color, kind, activity: typeof activity === "string" ? activity : null,
         blockId: typeof block === "string" ? block : null,
@@ -827,8 +844,12 @@ export class PageSession {
     const perStep = Math.max(1, Math.ceil(typing.remaining / 40));
     const show = (activity: "writing" | "editing", place: { at: Y.RelativePosition; block: string } | null) => {
       const at = place ? Y.relativePositionToJSON(place.at) : null;
+      const now = Date.now();
+      // What it typed, marked in its colour for whoever is on the page or opens it while it is fresh.
+      const wrote = typing.wrote().map((run) => ({ from: Y.relativePositionToJSON(run.from), to: Y.relativePositionToJSON(run.to),
+        at: now }));
       this.agentAwareness(principal, { user, activity, block: place?.block ?? "",
-        ...(at ? { cursor: { anchor: at, head: at } } : {}) });
+        ...(at ? { cursor: { anchor: at, head: at } } : {}), ...(wrote.length ? { wrote } : {}) });
     };
     let last: { at: Y.RelativePosition; block: string } | null = typing.caret;
     show("writing", last);
