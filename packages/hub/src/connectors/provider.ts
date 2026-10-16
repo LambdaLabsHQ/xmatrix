@@ -92,8 +92,8 @@ export interface ConnectorCommandInput {
   env: Env;
   channelId: string;
   messageId: string;
-  /** The command's message when `messageId` names a later attempt at it: an approved request. */
-  commandMessageId?: string;
+  /** The original command for a later attempt; null publishes an unthreaded decision with no retained message reference. */
+  commandMessageId?: string | null;
   body: string;
   actorUserId: string;
   /** Who wrote the message; an Agent runs write actions only where the Channel allows it. */

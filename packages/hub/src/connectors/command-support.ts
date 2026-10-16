@@ -106,7 +106,7 @@ export async function publishCommandStatus(manifest: AppConnectorProviderManifes
     principal: { kind: "user", id: input.actorUserId },
     appAuthorId: manifest.id,
     residual: { appMetadata: { xmatrixProvenance: "system_fact" },
-      replyToMessageId: input.commandMessageId ?? input.messageId },
+      ...(input.commandMessageId === null ? {} : { replyToMessageId: input.commandMessageId ?? input.messageId }) },
   });
   if (!response.ok) throw await failure(`${manifest.name} connector status`, response);
 }

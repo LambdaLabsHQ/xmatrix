@@ -953,6 +953,9 @@ GitHub triggers may use either spelling.
     for every Instance, never a turn, so it cannot interrupt the sender's turn.
 - Staging ask writes one request and a Channel receipt. The approved dispatch
   writes the normal `app_connector_executions` row and a separate terminal receipt.
+  Denial clears the encrypted input and its original command reference. Its
+  terminal system notice therefore names the request without a reply target;
+  repeated decisions reuse the same notice identity and never dispatch.
 
 ## 4. Providers
 
