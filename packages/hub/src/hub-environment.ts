@@ -116,7 +116,7 @@ export const HUB_ENVIRONMENT = {
   RATE_LIMIT_ANONYMOUS: { kind: "binding", scope: "feature", summary: "Workers Rate Limiting allowance per client IP for requests without a credential. Unset: they are not counted." },
   RATE_LIMIT_HUMAN_CONNECT: { kind: "binding", scope: "feature", summary: "Workers Rate Limiting allowance of Human socket sign-ins per user. Unset: sign-ins are not counted." },
   RATE_LIMIT_SUMMON_INTENT: { kind: "binding", scope: "feature", summary: "Workers Rate Limiting allowance of composer draft previews (Jev) per signed-in Human, refused with 429 whatever RATE_LIMIT_ENFORCED says. Unset: previews are not counted." },
-  RATE_LIMIT_JEV_EVALUATE: { kind: "binding", scope: "feature", summary: "Workers Rate Limiting allowance of `POST /api/ai/jev/evaluate` per owning Human (an Agent Run counts as its owner), refused with 429 whatever RATE_LIMIT_ENFORCED says. Unset: evaluations are not counted." },
+  RATE_LIMIT_JEV_EVALUATE: { kind: "binding", scope: "feature", summary: "Workers Rate Limiting allowance of `POST /api/ai/jev/evaluate` per owning Human and verified Space (an Agent Run counts as its owner), refused with 429 whatever RATE_LIMIT_ENFORCED says. Unset: evaluations are not counted." },
   RATE_LIMIT_ENFORCED: product("var", "Refuses over-limit request allowances (credential, anonymous, Human sign-in) with 429 and Retry-After only when \"true\"; otherwise they are only logged. Production pins true."),
   RELAY_AUTHORITY_OBSERVABILITY_ENABLED: product("var", "Writes authority observation only when \"true\"."),
   RELAY_AUTHORITY_OBSERVABILITY_SLOW_MS: tuning("Requests at or above this wall time are never sampled away."),

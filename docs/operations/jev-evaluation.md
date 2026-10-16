@@ -62,17 +62,20 @@ with `node packages/hub/scripts/summon-intent-eval.mjs --live`.
 
 ## Worker endpoint and handoff
 
-This branch also adds `POST /api/ai/jev/evaluate` to the Hub. Send the same JSON
-with an ordinary xMatrix bearer token. The Hub verifies authentication; Agent
-callers additionally require a live Run. Every authenticated Human or live Agent Run can evaluate;
-there is no separate account allowlist. Caller-supplied owner ids, keys, model
-names and endpoints are rejected. The provider key remains deployment-owned;
-unconfigured deployments return 503. Routing still rechecks current Channel
-permissions and the unchanged source publication before creating work.
+`POST /api/ai/jev/evaluate` accepts the same JSON with an ordinary xMatrix
+bearer token. Human callers supply `x-xmatrix-space-id`; the billing authority
+checks current membership and Pro entitlement in metered deployments. A header
+never grants access. Agent callers require a current live Run and use its birth
+Space and owner; a conflicting Space header is rejected. Valid Agent Runs may
+also evaluate within their Free Space. Unmetered deployments still verify
+Human Space membership, without imposing a Pro plan. There is no account-name
+allowlist. Caller-supplied owner ids, keys, model names and endpoints remain
+rejected. The provider key stays deployment-owned.
 
-Because any account can call it, volume is bounded per owner instead of by an
-allowlist: each Human may make 10 evaluations a minute
-(`RATE_LIMIT_JEV_EVALUATE`), and an Agent Run spends its owner's allowance.
+Each admitted call spends both its owner's and its Space's allowance of 10
+evaluations a minute (`RATE_LIMIT_JEV_EVALUATE`). Multiple owners or Runs cannot
+multiply one Space's allowance. Both counters are checked before the body is
+read or a provider is called. Usage is attributed to the verified Space.
 The 11th answers `429` with `{ "code": "rate_limited", "retryable": true }`
 and `Retry-After: 60`, before the body is read or the provider is called. Both
 Jev allowances are Workers Rate Limiting bindings refused whatever
@@ -177,3 +180,8 @@ The API key stays in the ignored local environment file, outside this record.
 
 References: [Vercel evaluation API](https://vercel.com/docs/ai-gateway/modalities/evaluation)
 and [Jev model page](https://vercel.com/ai-gateway/models/jev).
+
+The 2026-10-16 cost-protection decision adds current plan/Space admission and
+per-Space limits to standalone evaluation; the historical removal of an
+account-name allowlist does not waive these product budgets. It does not add
+plan checks to ordinary routing or startup reconciliation.

@@ -33,8 +33,9 @@ Attribution:
 - A Channel's calls go to the Space the Channel is placed in. Launch calls
   take it from the placement the launch already resolved; supersession from
   its history read; nothing is looked up only to meter.
-- `evaluate` has no Space: its points carry the caller's owner user id with
-  scope kind `user` (an Agent Run's owner for Agent callers).
+- `evaluate` uses the verified Space membership for a Human caller, or the
+  live Agent Run's birth Space; its scope kind is `space`. Earlier deployment
+  points used the owner user id with scope kind `user` and remain readable.
 - Connect start is metered to the Space named in its URL. The callback,
   not the start, checks that the caller administers it.
 
