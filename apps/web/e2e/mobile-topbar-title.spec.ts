@@ -116,7 +116,7 @@ test("channel detail keeps the list bar's height, safe area and shadowless edge"
   const sign = bar.locator(".app-mobile-back-sign");
   await expect(sign.locator(".app-mobile-topbar-back")).toBeVisible();
   await expect(sign.locator(".app-mobile-bar-title")).toBeVisible();
-  expect(await sign.evaluate((node) => getComputedStyle(node).backgroundImage)).toContain("wood.webp");
+  expect(await sign.evaluate((node) => getComputedStyle(node).backgroundImage)).toContain("/textures/wood.");
   expect(await bar.boundingBox()).toEqual(listBox);
   await expect(bar).toHaveCSS("box-shadow", "none");
   const summary = page.locator(".app-mobile-channel-about");
