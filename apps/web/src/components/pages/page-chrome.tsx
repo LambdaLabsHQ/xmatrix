@@ -52,6 +52,8 @@ export interface PresentPerson {
   undoable?: boolean;
   /** What an Agent co-writing live is doing now, in a word or two. */
   doing?: string;
+  /** The conversation an Agent's words come from while it writes, by name. */
+  from?: string;
 }
 
 /** Everyone on the page, as in Google Docs: hover says who and where, a click goes there. */
@@ -181,6 +183,7 @@ export function PagePens({ pens, room = 0, onJump, onOpen }: {
                   {person.doing && person.doing !== "writing" && (
                     <span className={cn("page-pen-doing", person.doing === "thinking" && "is-thinking")}> {person.doing}</span>
                   )}
+                  {person.from && <span className="page-pen-doing"> · {person.from}</span>}
                 </span>
               )}
               {/* While it writes, its dots run, as a chat shows someone typing. */}

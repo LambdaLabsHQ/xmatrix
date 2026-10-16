@@ -125,6 +125,8 @@ export class RelayPageSession extends DurableObject<Env> {
           try { socket.send(data); } catch { /* closed */ }
         }
       },
+      // An Agent's edit is written in over about two seconds at most (40 steps), as a person writes.
+      writePaceMs: 45,
     };
     return new PageSession(ports);
   }
