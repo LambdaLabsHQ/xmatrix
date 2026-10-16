@@ -1,5 +1,7 @@
 import type { AgentRegistrationIdentity } from "./agent-caller";
 import type { Env } from "../types";
+import type { XActionCapability } from "./x-accounts";
+import type { XMediaCapability } from "./x-media";
 
 /**
  * One provider's Hub-side behavior (docs/design/connector-platform.md §3.1).
@@ -40,6 +42,10 @@ export interface ConnectorActionStatement {
 }
 
 export interface ConnectorActionContext {
+  /** X accounts scoped to this caller; grants remain inside the Hub. */
+  x?: XActionCapability;
+  /** Channel attachment access and account-bound X video upload receipts. */
+  xMedia?: XMediaCapability;
   /** Revalidates current Channel policy immediately before an outbound write. */
   authorizeWrite?: () => Promise<void>;
   /** The connection's decrypted credential values. */

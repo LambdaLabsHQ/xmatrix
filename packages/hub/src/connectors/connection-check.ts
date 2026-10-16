@@ -10,6 +10,7 @@ import { connectorProvider } from "./registry";
 import { verifyDiscordNativeConnection } from "./discord-native";
 import { verifyFeishuNativeConnection } from "./feishu-native";
 import { verifyGoogleChatNativeConnection } from "./googlechat-native";
+import { verifyXConnection } from "./x-api";
 
 /* What a connection's credentials are and whether they work. A connection is
    Connected only after this passes: the fields its manifest requires are
@@ -19,6 +20,7 @@ import { verifyGoogleChatNativeConnection } from "./googlechat-native";
 export async function verifyConnectorConnection(env: Env, spaceId: string, providerId: string): Promise<void> {
   const manifest = getAppConnectorProvider(providerId);
   if (!manifest) throw new Error("Unknown app");
+  if (providerId === "x") return verifyXConnection(env, spaceId);
   if (providerId === "teams" && await verifyTeamsNativeConnection(env, spaceId)) return;
   if (providerId === "dingtalk" && await verifyDingTalkNativeConnection(env, spaceId)) return;
   if (providerId === "wecom" && await verifyWeComNativeConnection(env, spaceId)) return;

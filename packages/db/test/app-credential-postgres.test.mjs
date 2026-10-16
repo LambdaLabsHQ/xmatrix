@@ -1005,3 +1005,70 @@ integration("action approvals freeze encrypted input and consume exactly once un
     await assert.rejects(requests.authorize(revoked.requestId, create.connectionId, create.channelId), /Space admin/);
   });
 });
+
+// Existing installation tests fence provider-specific callbacks and Hub refreshes of populated
+// envelopes. They do not protect generic empty-envelope initialization or Human expectedVersion
+// writes; only real concurrent transactions can prove that one original X snapshot commits once.
+integration("X credential initialization and Human CAS fence concurrent grants and delayed refresh ABA", async () => {
+  const provider = { id: "x", name: "X", authMode: "oauth", scopes: [], secretRefs: [], capabilities: [], metadataFields: [] };
+  const xPolicy = { allowed: ["accounts"] };
+  const inXSpace = (run) => withDatabase(async ({ database, space }) => {
+    const apps = new PostgresAppRepository(database);
+    const credentials = new PostgresAppCredentialRepository(database, material);
+    const configure = (name, status) => apps.upsert({ commandId: `${space}:${name}`, spaceId: space,
+      actorUserId: "owner", provider, body: { status }, at });
+    await configure("create-x", "configured");
+    const input = { spaceId: space, providerId: "x", actorUserId: "owner", policy: xPolicy, at };
+    const read = () => credentials.resolveForAdmin({ ...input, requestId: crypto.randomUUID() });
+    await run({ apps, credentials, space, configure, input, read });
+  });
+
+  await inXSpace(async ({ credentials, input, read }) => {
+    const empty = await credentials.installationSnapshot({ ...input, requestId: "x-empty-snapshot" });
+    assert.equal(empty.credentialVersion, 0);
+    assert.equal(await read(), null);
+    const expectedGrant = { version: empty.credentialVersion, connectionVersion: empty.connectionVersion,
+      connectionGeneration: empty.connectionGeneration };
+    const contenders = ['["first-grant"]', '["second-grant"]'];
+    const results = await Promise.allSettled(contenders.map((accounts, index) => credentials.put({ ...input,
+      requestId: `x-first-${index}`, expectedGrant, fields: { accounts } })));
+    assert.equal(results.filter(result => result.status === "fulfilled").length, 1, "one empty-snapshot writer commits");
+    const rejected = results.find(result => result.status === "rejected");
+    assert.ok(rejected.reason instanceof AppControlError);
+    assert.equal(rejected.reason.code, "credential_changed");
+    assert.equal(rejected.reason.status, 409);
+    const winner = await read();
+    assert.equal(winner.version, 1);
+    assert.deepEqual(winner.values, { accounts: contenders[results.findIndex(result => result.status === "fulfilled")] });
+
+    await credentials.put({ ...input, requestId: "x-human-current", expectedVersion: winner.version,
+      fields: { accounts: '["human-replacement"]' } });
+    const replacement = await read();
+    await assert.rejects(credentials.put({ ...input, requestId: "x-human-stale", expectedVersion: winner.version,
+      fields: { accounts: '["stale-human-overwrite"]' } }),
+    error => error instanceof AppControlError && error.code === "credential_changed" && error.status === 409);
+    assert.deepEqual(await read(), replacement, "a stale Human version cannot replace the newer encrypted grant");
+  });
+
+  for (const lifecycle of ["disconnect", "delete-recreate"]) await inXSpace(async ({ apps, credentials, space, configure, input, read }) => {
+    await credentials.put({ ...input, requestId: "x-original", expectedVersion: 0, fields: { accounts: '["original-grant"]' } });
+    const original = await read();
+    if (lifecycle === "disconnect") await configure("disconnect-x", "disconnected");
+    else {
+      await apps.command({ commandId: `${space}:delete-x`, spaceId: space, providerId: "x",
+        principal: { kind: "user", id: "owner" } }, "delete");
+      await configure("recreate-x", "configured");
+      await credentials.put({ ...input, requestId: "x-recreated", expectedVersion: 0, fields: { accounts: '["recreated-grant"]' } });
+    }
+    const current = await read();
+    assert.equal(current.version, original.version, "credential version alone cannot distinguish the lifecycle change");
+    if (lifecycle === "delete-recreate") {
+      assert.equal(current.connectionVersion, original.connectionVersion, "recreation repeats both numeric revisions");
+      assert.notEqual(current.connectionGeneration, original.connectionGeneration);
+    } else assert.equal(current.status, "disconnected");
+    await assert.rejects(credentials.put({ ...input, requestId: "x-delayed-refresh", actorUserId: "hub:oauth-refresh",
+      asHub: true, expectedVersion: original.version, expectedGrant: original, fields: { accounts: '["stale-refresh"]' } }),
+    error => error instanceof AppControlError && error.code === "credential_changed" && error.status === 409);
+    assert.deepEqual(await read(), current, `${lifecycle} cannot be undone by a delayed refresh with a repeated credential version`);
+  });
+});

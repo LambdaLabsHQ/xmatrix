@@ -10,6 +10,12 @@ Status: implemented platform. Each provider's registration, production release
 and native acceptance are tracked separately; availability in the registry does
 not imply a passed native acceptance test.
 
+X uses one company OAuth application with up to four separately owned user
+grants per Space. Stable account ID and authorization generation bind every
+approved publication; account refresh uses durable credential-store leases.
+The consent, Channel visibility, ownership and native acceptance contract is in
+[X connector](../connectors/x.md). Quote posting requires X Enterprise API access.
+
 ## 1. Goal
 
 The Google Cloud operations provider is documented in

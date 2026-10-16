@@ -18,6 +18,9 @@ import { notifyWorkspaceResource } from "../workspace-resource-notification";
 import type { Env } from "../types";
 import type { ConnectorAction, ConnectorActionContext, ConnectorCommandHandler, ConnectorCommandInput, ConnectorSubscriptionSync } from "./provider";
 import { runSubscriptionStatement } from "./subscription-command";
+import { xActionCapability } from "./x-api";
+import { createXMediaCapability } from "./x-media";
+import { postgresMessageAttachmentAuthorityRequest } from "../postgres-message-attachment-authority";
 import { connectorSubscriptionStatements, isConnectorSubscriptionCommand } from "./subscription-parse";
 
 /*
@@ -159,6 +162,11 @@ async function runAction(providerId: string, input: ConnectorCommandInput, actio
       const prepared = action.prepare ? await action.prepare(context, parsed) : parsed;
       const preview = providerId === "gmail"
         ? Object.fromEntries(["from", "to", "subject", "body"].map(key => [key, prepared[key] ?? ""]))
+        : providerId === "x" ? { account: `@${prepared.accountUsername} (X account ${prepared.accountId})`,
+          text: prepared.text ?? "", ...(prepared.postId ? { quotedPost: prepared.postId } : {}),
+          ...(prepared.mediaReceipt ? { video: "Video from this account and Channel's approved upload receipt" } : {}),
+          ...(prepared.sourceName ? { filename: prepared.sourceName, bytes: prepared.sourceSize!,
+            sha256: prepared.sourceHash!, attachment: `${prepared.messageId}/${prepared.attachmentId}` } : {}) }
         : { target: statement.target, text: statement.text };
       const request = await connectorActionRequestRepository(input.env).create({ requestId,
         connectionId: scope.connectionId, channelId: input.channelId, providerId, actionId, requestedBy: input.actorUserId,
@@ -213,7 +221,13 @@ async function actionContext(providerId: string, input: ConnectorCommandInput, s
     ? await teamsActionCapability(input.env, spaceId, authorizeWrite) : undefined;
   const dingtalk = providerId === "dingtalk" && ["read", "send"].includes(actionId)
     ? await dingtalkActionCapability(input.env, spaceId, authorizeWrite) : undefined;
-  const native = teams || googleChat || discord || feishu || telegram || wecom || dingtalk;
+  const x = providerId === "x" ? xActionCapability(input.env, { spaceId, channelId: input.channelId,
+    actorUserId: input.actorUserId, authorizeWrite }) : undefined;
+  const xMedia = x && input.env.RELAY_PAYLOAD_BUCKET ? createXMediaCapability({ spaceId, channelId: input.channelId,
+    actorUserId: input.actorUserId, x, authorizeWrite, bucket: input.env.RELAY_PAYLOAD_BUCKET,
+    receiptSecret: input.env.RELAY_R2_CAPABILITY_HMAC_SECRET,
+    attachmentAuthority: request => postgresMessageAttachmentAuthorityRequest(input.env, request) }) : undefined;
+  const native = teams || googleChat || discord || feishu || telegram || wecom || dingtalk || x;
   const credentials = native ? {} : await connectionCredentials(input.env, spaceId, providerId);
   /* `a|b` requires either field: a pasted token or the one OAuth issued. */
   const missing = native ? [] : action.requires.filter((field) => !field.split("|").some((name) => credentials[name]));
@@ -228,5 +242,5 @@ async function actionContext(providerId: string, input: ConnectorCommandInput, s
   };
   return { credentials, caller, authorizeWrite, ...(native ? {} : { saveCredentials }), ...(teams ? { teams } : {}), ...(googleChat ? { googleChat } : {}),
     ...(discord ? { discord } : {}), ...(feishu ? { feishu } : {}), ...(telegram ? { telegram } : {}),
-    ...(wecom ? { wecom } : {}), ...(dingtalk ? { dingtalk } : {}) };
+    ...(wecom ? { wecom } : {}), ...(dingtalk ? { dingtalk } : {}), ...(x ? { x } : {}), ...(xMedia ? { xMedia } : {}) };
 }

@@ -19,6 +19,7 @@ import { ControlError } from "@xmatrix/db";
 import { getAppConnection, upsertAppConnection } from "./apps";
 import type { Env } from "./types";
 import { addConnectedMailbox } from "./connectors/gmail-mailboxes";
+import { connectXAccount } from "./connectors/x-accounts";
 
 /*
  * One-click OAuth routes (docs/design/connector-platform.md §3.2): which
@@ -55,6 +56,14 @@ async function completeOAuthConnect(env: Env, request: Request, verified: Verifi
           current.connectionGeneration !== original.connectionGeneration) throw new Error("Discord connection changed before installation");
     }
     const grant = await exchangeOAuthGrant(verified.client, input.code ?? "", oauthRedirectUri(connectorHubOrigin(env, request)), state);
+    if (providerId === "x") {
+      if (!verified.connectionSnapshot) throw new Error("Restart X Connect");
+      await connectXAccount(env, { spaceId: verified.spaceId, actorUserId: verified.userId,
+        fields: grant.fields, snapshot: verified.connectionSnapshot });
+      const checked = await checkAppConnection(env, { spaceId: verified.spaceId, providerId,
+        userId: verified.userId, commandId: `connector-x-check:${crypto.randomUUID()}` });
+      return appsRedirect(env, verified.spaceId, providerId, (checked as { ok?: unknown }).ok === true ? "connected" : "failed");
+    }
     /* A Gmail Connect adds one mailbox to the connection's list. */
     if (providerId === "gmail") grant.fields = await addConnectedMailbox(env, { spaceId: verified.spaceId,
       actorUserId: verified.userId, account: String(grant.fields.mailboxes ?? "") });
@@ -82,7 +91,7 @@ async function completeOAuthConnect(env: Env, request: Request, verified: Verifi
     if ((checked as { ok?: unknown }).ok !== true) return appsRedirect(env, verified.spaceId, providerId, "failed");
     return completion ?? appsRedirect(env, verified.spaceId, providerId, "connected");
   } catch (error) {
-    console.error("Connector OAuth callback failed", providerId, providerId === "discord" ? "installation rejected" : error instanceof Error ? error.message : "unknown");
+    console.error("Connector OAuth callback failed", providerId, ["discord", "x"].includes(providerId) ? "installation rejected" : error instanceof Error ? error.message : "unknown");
     return appsRedirect(env, verified.spaceId, providerId, "failed");
   }
 }
@@ -109,20 +118,31 @@ export function registerConnectorOAuthRoutes(app: Hono<{ Bindings: Env }>): void
     }
     const client = oauthClient(c.env, c.req.param("providerId"));
     if (!client) return c.json({ error: "One-click connect is not configured for this app" }, 404);
+    let accountId: string | undefined;
+    if (client.manifest.id === "x") {
+      const body = await c.req.json().catch(() => null) as Record<string, unknown> | null;
+      if (body?.accountId !== undefined) {
+        if (typeof body.accountId !== "string" || !/^[1-9][0-9]{0,19}$/u.test(body.accountId)) {
+          return c.json({ error: "Invalid X account" }, 400);
+        }
+        accountId = body.accountId;
+      }
+    }
     let connectionSnapshot;
-    if (client.manifest.id === "discord") {
+    if (["discord", "x"].includes(client.manifest.id)) {
       const spaceId = c.req.param("spaceId"), repository = connectorCredentialRepository(c.env);
-      await repository.readGenerated({ requestId: crypto.randomUUID(), spaceId, providerId: "discord", actorUserId: user.id, generated: [] });
-      const existing = await getAppConnection(c.env, { connectionId: `${spaceId}:discord`, actorUserId: user.id })
+      const providerId = client.manifest.id as "discord" | "x";
+      await repository.readGenerated({ requestId: crypto.randomUUID(), spaceId, providerId, actorUserId: user.id, generated: [] });
+      const existing = await getAppConnection(c.env, { connectionId: `${spaceId}:${providerId}`, actorUserId: user.id })
         .catch((error: unknown) => { if (error instanceof ControlError && error.status === 404) return null; throw error; });
       if (!existing) {
         await upsertAppConnection(c.env, { commandId: `connector-discord-start:${crypto.randomUUID()}`, spaceId,
-          providerId: "discord", actorUserId: user.id, body: { status: "disconnected" } });
+          providerId, actorUserId: user.id, body: { status: "disconnected" } });
       }
       connectionSnapshot = await repository.installationSnapshot({ requestId: crypto.randomUUID(), spaceId,
-        providerId: "discord", actorUserId: user.id });
+        providerId, actorUserId: user.id });
     }
-    return c.json({ url: await oauthAuthorizeUrl(client, { spaceId: c.req.param("spaceId"), userId: user.id, connectionSnapshot,
+    return c.json({ url: await oauthAuthorizeUrl(client, { spaceId: c.req.param("spaceId"), userId: user.id, connectionSnapshot, accountId,
       redirectUri: oauthRedirectUri(connectorHubOrigin(c.env, c.req.raw)) }) }, 200, { "cache-control": "private, no-store" });
   }));
 

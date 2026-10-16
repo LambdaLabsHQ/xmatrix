@@ -4,6 +4,15 @@ App connectors route app context into xMatrix channels through typed provider ma
 
 ## Current Providers
 
+- X connects company and personal accounts through independent OAuth 2.0
+  authorizations to one company application. Apps lists the connected handles;
+  each grant is usable only by its connecting member and their Agents.
+  Publishing selects an account explicitly and defaults to per-request
+  approval; read results are visible to the calling Channel. Company app setup,
+  bounded refresh recovery and separate native acceptance of both accounts are
+  documented in [X connector](../connectors/x.md). Quote posting requires an
+  Enterprise API plan; self-serve access is insufficient.
+
 - Google Ads provides selected-account performance queries, dry-run validation,
   atomic advertising configuration and policy-controlled campaign activation/
   pausing. Cloud-project API access, separate OAuth, integer budgets and actual
