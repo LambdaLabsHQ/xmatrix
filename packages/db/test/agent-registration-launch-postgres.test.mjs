@@ -42,6 +42,8 @@ integration("launch survives a hostname change with stale Workspace metadata and
       CREATE TABLE data.space_members (space_id text,user_id text,role text);
       CREATE TABLE data.spaces (space_id text PRIMARY KEY,metadata_json jsonb);
       CREATE TABLE data.pages (space_id text,page_id text);
+      CREATE TABLE data.page_co_writing (space_id text,page_id text,conversation_id text,started_by_user_id text,
+        started_at timestamptz,ended_at timestamptz);
       CREATE TABLE data.channels (channel_id text,space_id text,mode text,metadata_json jsonb,version bigint,archived_at timestamptz);
       CREATE TABLE data.channel_access (channel_id text,space_id text,subject_kind text,subject_id text);
       CREATE TABLE data.messages (space_id text,channel_id text,message_id text,author_kind text,author_id text,
