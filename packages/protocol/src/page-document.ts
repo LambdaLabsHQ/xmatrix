@@ -730,50 +730,104 @@ export function pageDocHunks(doc: DocNode, suggested: DocNode): PageDocHunk[] {
   return hunks.slice(0, MAX_DOC_HUNKS);
 }
 
+/** A word an Agent writes into the page, with the marks it carries. */
+export interface PageWrittenWord { text: string; marks: readonly Mark[] }
+
+/** Words an Agent writes in at one place of the document it starts from, in reading order. */
+export interface PageWritingRun { pos: number; words: PageWrittenWord[] }
+
 /**
- * A committed document revealed word by word, with complete delimiters from
- * its parsed structure and marks: raw Markdown prefixes are not documents.
- * Removed words go at once; unchanged words remain. Opaque source stays whole.
+ * How an Agent writes `after` into a page that reads as `before`, as a person
+ * types it: `start` is `after` with the words it adds left out (what it
+ * removes, restructures or re-marks is done, and a new block stands with its
+ * first word), and `runs` are the words it then types, each run at one
+ * position of `start`, in reading order. Opaque source stays whole. Typing
+ * the runs into `start` in order gives `after`; at every moment in between,
+ * the page reads back from Markdown as itself, so no block ever stands empty.
  */
-export function pageWritingSteps(before: string, after: string, steps = 40): string[] {
-  if (before === after) return [];
-  const source = markdownToPageDoc(before);
-  const target = markdownToPageDoc(after);
-  const tokens = (text: string) => text.match(WORD) ?? [];
-  const opaque = (node: DocNode) => node.type.name === "markdown";
-  // Reuse the bounded document diff that already owns revision highlighting.
-  const additions = pageDocChanges(source, target).filter((change) => change.kind === "added");
-  const added: boolean[] = [];
-  target.descendants((node, pos) => {
-    if (opaque(node)) return false;
-    if (node.isText) {
-      for (const word of node.text!.matchAll(WORD)) {
-        const from = pos + word.index!;
-        const to = from + word[0].length;
-        added.push(additions.some((change) => change.from < to && change.to > from));
+export function pageWritingPlan(before: DocNode, after: DocNode): { start: DocNode; runs: PageWritingRun[] } {
+  const additions = pageDocChanges(before, after).filter((change) => change.kind === "added");
+  const runs: PageWritingRun[] = [];
+  // How much added text, earlier in reading order, `start` leaves out: positions in `after` past it sit
+  // that much earlier in `start`.
+  let left = 0;
+  let open: { at: number; run: PageWritingRun } | null = null;
+  const added = (from: number, to: number) => additions.some((change) => change.from < to && change.to > from);
+  const textblock = (node: DocNode, content: number): DocNode => {
+    const words: Array<{ child: number; from: number; text: string; marks: readonly Mark[]; added: boolean }> = [];
+    let shown = false;
+    const breaks: number[] = [];
+    node.forEach((child, offset, index) => {
+      if (!child.isText) {
+        if (child.type.name === "hard_break") breaks.push(words.length);
+        else shown = true;
+        return;
+      }
+      for (const word of child.text!.matchAll(WORD)) {
+        const from = content + offset + word.index!;
+        const isAdded = added(from, from + word[0].length);
+        if (!isAdded && word[0].trim()) shown = true;
+        words.push({ child: index, from, text: word[0], marks: child.marks, added: isAdded });
+      }
+    });
+    const keepFirst = (from: number) => {
+      const first = words.slice(from).find((word) => word.text.trim());
+      if (first) first.added = false;
+    };
+    // A block's first word, and the first after each line break, stays: a block or line with nothing of
+    // its own at its start would read as no block, no break, or, when inline source opens it, as another
+    // kind of block.
+    if (!shown || node.type.name !== "code_block") keepFirst(0);
+    for (const at of breaks) keepFirst(at);
+    // A space beside new words is typed with them, so no line ever starts or ends in one, nor holds two
+    // where the words between are still to come. Code keeps its spaces as they are.
+    if (node.type.name !== "code_block") {
+      const space = (word: (typeof words)[number] | undefined) => word !== undefined && !word.added && !word.text.trim();
+      for (let at = 0; at < words.length; at++) {
+        if (!words[at]!.added || words[at - 1]?.added) continue;
+        let end = at;
+        while (words[end + 1]?.added) end++;
+        if (space(words[at - 1])) words[at - 1]!.added = true;
+        else if (!words.slice(0, at).some((word) => !word.added && word.text.trim()) && space(words[end + 1])) {
+          words[end + 1]!.added = true;
+        }
+        at = end;
       }
     }
-    return undefined;
-  });
-  const total = added.filter(Boolean).length;
-  if (!total) return [pageDocToMarkdown(target)];
-  const per = Math.max(1, Math.ceil(total / Math.max(1, steps)));
-  const out: string[] = [];
-  for (let shown = per; ; shown += per) {
-    let index = 0;
-    let left = shown;
-    const reveal = (node: DocNode): DocNode | null => {
-      if (opaque(node)) return node;
-      if (node.isText) {
-        const text = tokens(node.text!).filter(() => !added[index++] || left-- > 0).join("");
-        return text ? pageSchema.text(text, node.marks) : null;
+    const children: DocNode[] = [];
+    let at = 0;
+    node.forEach((child, _offset, index) => {
+      if (!child.isText) {
+        children.push(child);
+        return;
       }
-      const children: DocNode[] = [];
-      node.forEach((child) => { const next = reveal(child); if (next) children.push(next); });
-      return node.copy(Fragment.from(children));
-    };
-    out.push(canonicalPageMarkdown(pageDocToMarkdown(reveal(target)!)));
-    if (shown >= total) break;
-  }
-  return out;
+      let kept = "";
+      for (; at < words.length && words[at]!.child === index; at++) {
+        const word = words[at]!;
+        if (!word.added) {
+          kept += word.text;
+          continue;
+        }
+        const pos = word.from - left;
+        if (open && open.at === pos) open.run.words.push({ text: word.text, marks: word.marks });
+        else {
+          const run = { pos, words: [{ text: word.text, marks: word.marks }] };
+          runs.push(run);
+          open = { at: pos, run };
+        }
+        left += word.text.length;
+      }
+      if (kept) children.push(pageSchema.text(kept, child.marks));
+    });
+    return node.copy(Fragment.from(children));
+  };
+  const reveal = (node: DocNode, pos: number): DocNode => {
+    if (node.type.name === "markdown") return node;
+    const content = node.type === pageSchema.topNodeType ? pos : pos + 1;
+    if (node.isTextblock) return textblock(node, content);
+    const children: DocNode[] = [];
+    node.forEach((child, offset) => children.push(reveal(child, content + offset)));
+    return node.copy(Fragment.from(children));
+  };
+  return { start: reveal(after, 0), runs };
 }

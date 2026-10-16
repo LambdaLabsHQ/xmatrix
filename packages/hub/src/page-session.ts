@@ -1,9 +1,10 @@
 import {
-  PAGE_DOCUMENT_FRAGMENT, PAGE_MESSAGE_CO_WRITE, mergePageText, pageAuthorColor, pageChangedBlocks, pageRemovedSections,
+  PAGE_DOCUMENT_FRAGMENT, PAGE_MESSAGE_CO_WRITE, mergePageText, mergePageWords, pageAuthorColor, pageChangedBlocks,
+  pageRemovedSections,
   parsePageCoWriteReply, type PageCoWriteRequest, type PageEditResult,
 } from "@xmatrix/protocol";
 import {
-  canonicalPageMarkdown, markdownToPageDoc, pageDocBlockAt, pageDocToMarkdown, pageSchema, pageWritingSteps,
+  canonicalPageMarkdown, markdownToPageDoc, pageDocBlockAt, pageDocToMarkdown, pageSchema, pageWritingPlan,
 } from "@xmatrix/protocol/page-document";
 import * as decoding from "lib0/decoding";
 import * as encoding from "lib0/encoding";
@@ -13,6 +14,7 @@ import * as awarenessProtocol from "y-protocols/awareness";
 import * as syncProtocol from "y-protocols/sync";
 import * as Y from "yjs";
 import { PageCoWriter, type PageCoWriterHost, type PageCoWriterPerson } from "./page-co-writer";
+import { PageTyping, type PageTypingState } from "./page-typing";
 
 /**
  * A page's live co-editing session (docs/design/pages-and-conversations.md
@@ -26,6 +28,8 @@ import { PageCoWriter, type PageCoWriterHost, type PageCoWriterPerson } from "./
  */
 
 export { PAGE_DOCUMENT_FRAGMENT };
+/** The origin of an Agent's typing into the page (page-typing.ts): its state is stored with the typing, not per update. */
+const TYPING = "typing";
 /** Where sessions before the document kept plain markdown; read once to convert them. */
 const LEGACY_MARKDOWN_TEXT = "markdown";
 
@@ -74,7 +78,12 @@ export interface PageSessionState {
   update: Uint8Array;
   editors: PendingEditor[];
   editSeq: number;
-  /** Committed edits still being presented; recovery completes them without another commit. */
+  /**
+   * Committed Agent edits still being typed in (page-typing.ts), each with the Agent's awareness id.
+   * Recovery types the rest of them in at once, without another commit.
+   */
+  typing?: Array<{ clientId: number; state: PageTypingState }>;
+  /** What a session kept before `typing`: each Agent's writing as page texts. Read once to recover it. */
   writing?: Array<{ shown: string; target: string }>;
   /** Where each Agent's caret rests, by awareness client id (absent before carets rested). */
   agents?: RestingAgent[];
@@ -211,10 +220,11 @@ export class PageSession {
   private readonly connectionClients = new Map<string, Set<number>>();
   private readonly editors = new Map<string, PendingEditor>();
   /**
-   * Agent edits committed but still being written into the live text: what of each is in it so far,
-   * and all of it. Several Agents write at once, each outside the session's queue.
+   * Agents typing committed edits into the live text now (page-typing.ts), each with its awareness id. Each
+   * types outside the session's queue, so several type at once; the head already holds what they type.
    */
-  private readonly writing = new Set<{ shown: string; target: string }>();
+  private readonly typings = new Map<PageTyping, number>();
+  private destroyed = false;
   private editSeq = 0;
   private agentClocks = new Map<number, number>();
   private readonly resting = new Map<number, RestingAgent>();
@@ -247,7 +257,8 @@ export class PageSession {
         if (connection) this.noteEditor(connection.principal);
       }
       for (const [id, writer] of this.coWriters) if (origin !== coWriteOrigin(id)) writer.othersEdited();
-      void this.persist();
+      // A typed word is not stored on its own: the stored typing still holds it, and a restart types it in.
+      if (origin !== TYPING) void this.persist();
     });
     this.awareness.on("update", ({ added, updated, removed }: {
       added: number[]; updated: number[]; removed: number[];
@@ -306,7 +317,7 @@ export class PageSession {
 
   /** Marks the document settled when it reads as the committed base. */
   private settle(): void {
-    if (this.base && this.writing.size === 0 && this.markdown() === this.base.body) this.settledVersion = this.version;
+    if (this.base && this.typings.size === 0 && this.markdown() === this.base.body) this.settledVersion = this.version;
   }
 
   /**
@@ -346,13 +357,27 @@ export class PageSession {
           }, "load");
           await this.persist();
         }
-        // Use the same completion model as a human save during concurrent writing.
-        // Partial presentation must not become the next human editor's deletion.
-        if (persisted.writing?.length) {
-          for (const stream of persisted.writing) this.writing.add({ ...stream });
-          const completed = this.completed(this.markdown());
-          this.writing.clear();
-          setPageFragmentMarkdown(this.fragment, completed, "load");
+        if (!legacy.length && persisted.typing?.length) {
+          // Edits committed but still being typed in when the session stopped are typed in whole now, around
+          // people's uncommitted edits: what was not typed yet is no person's deletion.
+          for (const { clientId, state } of persisted.typing) {
+            authoredAs(this.doc, clientId, () => PageTyping.restore(state).type(this.doc, Infinity, "load"));
+          }
+          await this.persist();
+        } else if (!legacy.length && persisted.writing?.length) {
+          // A session kept by an earlier version tracked each Agent's writing apart.
+          let text = this.markdown();
+          for (const stream of persisted.writing) {
+            const merged = mergePageText(stream.shown, text, stream.target);
+            if (merged.ok) text = merged.text;
+          }
+          setPageFragmentMarkdown(this.fragment, text, "load");
+          await this.persist();
+        } else if (!legacy.length && this.editors.size === 0 && this.markdown() !== this.base!.body) {
+          // Text that differs from the committed page with no edit pending is no person's: every person's
+          // change notes its author until a commit takes it in. It is what an Agent's edit left when it
+          // could not be written in whole, so the page reads as committed again.
+          setPageFragmentMarkdown(this.fragment, this.base!.body, "load");
           await this.persist();
         }
         this.settle();
@@ -372,7 +397,8 @@ export class PageSession {
     if (!this.base || this.ended) return;
     await this.ports.persist({ base: this.base, update: Y.encodeStateAsUpdate(this.doc),
       editors: [...this.editors.values()], editSeq: this.editSeq, agents: [...this.resting.values()],
-      ...(this.writing.size ? { writing: [...this.writing].map((stream) => ({ ...stream })) } : {}) });
+      ...(this.typings.size ? { typing: [...this.typings].map(([typing, clientId]) => ({ clientId, state: typing.toJSON() })) }
+        : {}) });
   }
 
   /**
@@ -496,8 +522,8 @@ export class PageSession {
     if (!this.base) return null;
     // Commit a snapshot. Edits that arrive while the commit is in flight stay
     // pending, with their authors, for the next commit.
-    // What Agents are still writing in is committed already; people's edits commit around it.
-    const snapshot = this.completed(this.markdown());
+    // What Agents are still typing in is committed already; people's edits commit around it.
+    const snapshot = this.settledText();
     const snapshotVersion = this.version;
     const snapshotSeq = this.editSeq;
     if (snapshot === this.base.body) {
@@ -532,6 +558,8 @@ export class PageSession {
       if (!(error instanceof PageSessionConflict)) throw error;
       // The head moved outside the session: merge into it; if the changes
       // overlap, the session's text becomes the new head and history keeps the other.
+      // What Agents are still typing in goes in whole first, so the live text is what merges.
+      this.finishTyping();
       const head = this.canonical(await this.ports.loadHead(author));
       const merged = mergePageText(this.base.body, snapshot, head.body);
       committedBody = merged.ok ? canonicalPageMarkdown(merged.text) : snapshot;
@@ -549,14 +577,26 @@ export class PageSession {
     return { revision: result.revision, kind: result.kind };
   }
 
-  /** The live text as it reads once every Agent still writing has finished: what is committed, with people's edits. */
-  private completed(live: string): string {
-    let text = live;
-    for (const stream of this.writing) {
-      const merged = mergePageText(stream.shown, text, stream.target);
-      if (merged.ok) text = merged.text;
+  /**
+   * What the page reads as once every Agent has typed its committed edit in: the head, with people's
+   * uncommitted edits. The rest of each typing goes into a copy of the document, so nothing changes here.
+   */
+  private settledText(): string {
+    if (this.typings.size === 0) return this.markdown();
+    const copy = new Y.Doc();
+    try {
+      Y.applyUpdate(copy, Y.encodeStateAsUpdate(this.doc));
+      for (const typing of this.typings.keys()) typing.copy().type(copy, Infinity, "copy");
+      return pageFragmentMarkdown(copy.getXmlFragment(PAGE_DOCUMENT_FRAGMENT));
+    } finally {
+      copy.destroy();
     }
-    return text;
+  }
+
+  /** Types the rest of every committed edit in at once, each under its Agent's id; no Agent types on. */
+  private finishTyping(): void {
+    for (const [typing, clientId] of this.typings) authoredAs(this.doc, clientId, () => typing.type(this.doc, Infinity, "server"));
+    this.typings.clear();
   }
 
   /**
@@ -686,80 +726,127 @@ export class PageSession {
         const result = await this.ports.commit(principal, { baseRevision: input.baseRevision, body: input.body,
           conversationIds: input.conversationIds, coAuthors: [], blockIds: [] });
         this.ports.broadcast(encodeNotice({ type: "suggestion", revision: result.revision, author: principal.label }));
-        return { done: { ...result, removedSections: [] } as PageEditResult };
+        return { done: { ...result, removedSections: [] } as PageEditResult, typing: null };
       }
       // Pending human edits commit under their own authors first.
       await this.commitNow();
       // A head written outside the session (a restore, a migration) is taken
-      // in first, so the edit merges against what the page is now.
-      const head = this.canonical(await this.ports.loadHead(principal));
-      if (head.revision !== this.base.revision) {
+      // in first, so the edit merges against what the page is now; what Agents
+      // are still typing in goes in whole before it. Only a head that moved is
+      // read as a document: reading the page costs as much as writing it.
+      const loaded = await this.ports.loadHead(principal);
+      if (loaded.revision !== this.base.revision) {
+        const head = this.canonical(loaded);
+        this.finishTyping();
         const live = this.markdown();
         const merged = mergePageText(this.base.body, live, head.body);
         this.adopt(live, merged.ok ? canonicalPageMarkdown(merged.text) : head.body, "server");
         this.setHead(head);
       }
-      const current = this.completed(this.markdown());
+      const current = this.settledText();
       const baseText = input.baseRevision === this.base.revision ? this.base.body
         : canonicalPageMarkdown(await this.ports.loadRevision(principal, input.baseRevision));
-      const merge = mergePageText(baseText, current, canonicalPageMarkdown(input.body));
+      const body = canonicalPageMarkdown(input.body);
+      // Agents that read one revision and edit neighbouring lines, as several working on one list at once
+      // do, both get their edit: whole lines merge first, and the words of lines that touch after.
+      const lineMerge = mergePageText(baseText, current, body);
+      const merge = lineMerge.ok ? lineMerge : mergePageWords(baseText, current, body);
       if (!merge.ok) throw new PageSessionConflict(this.base.revision, current);
-      const merged = { text: canonicalPageMarkdown(merge.text) };
+      const target = merge.text === body ? body : canonicalPageMarkdown(merge.text);
       const key = principalKey(principal);
       const conversationId = principal.conversationId ?? input.conversationIds[0] ?? null;
       // The repository commits the edit first; that is where it is authorized.
       // Only a committed edit reaches the live text.
-      const result = await this.ports.commit(principal, { baseRevision: this.base.revision, body: merged.text,
+      const result = await this.ports.commit(principal, { baseRevision: this.base.revision, body: target,
         conversationIds: input.conversationIds, coAuthors: [],
-        blockIds: pageChangedBlocks(current, merged.text).filter((id) => id) });
+        blockIds: pageChangedBlocks(current, target).filter((id) => id) });
       // The repository decides what the edit became. A suggestion (the page turned suggest-only
       // meanwhile, or the Agent co-writes it with a person) waits for a person and never reaches the
       // text. Only a suggest-only page sends later Agent edits straight to suggestions.
       if (result.kind === "suggestion") {
         this.setHead({ ...this.base, agentSuggestOnly: result.agentSuggestOnly });
         this.ports.broadcast(encodeNotice({ type: "suggestion", revision: result.revision, author: principal.label }));
-        return { done: { ...result, removedSections: [] } as PageEditResult };
+        return { done: { ...result, removedSections: [] } as PageEditResult, typing: null };
       }
-      this.setHead({ ...this.base, revision: result.headRevision, body: merged.text,
+      this.setHead({ ...this.base, revision: result.headRevision, body: target,
         agentSuggestOnly: result.agentSuggestOnly });
-      const stream = { shown: current, target: merged.text };
-      this.writing.add(stream);
-      return { writing: { result, stream, current, target: merged.text, key, conversationId } };
-    }).then(async (edit): Promise<PageEditResult> => {
-      if (edit.done) return edit.done;
-      const { result, stream, current, target, key, conversationId } = edit.writing!;
-      // The Agent writes it in as a person would, a few words at a time under its caret and outside the
-      // session's queue, so other Agents write at the same time; edits people make meanwhile are kept,
-      // as each step merges into the live text. It is written under the Agent's awareness id, so readers
-      // see whose text it is.
+      // The edit goes into the live text as it is now: what people typed since `current` and what other
+      // Agents are still typing in stay around it.
+      const live = this.markdown();
+      const into = live === current ? target : canonicalPageMarkdown(mergePageWords(current, live, target, "ours").text);
+      const clientId = agentClientId(key);
+      const origin = `agent:${key}`;
       const user = { name: principal.label, color: pageAuthorColor(principal), kind: principal.kind, conversationId };
-      const pace = this.ports.writePaceMs ?? 0;
-      const steps = pace > 0 ? pageWritingSteps(current, target) : [target];
-      let change: ReturnType<PageSession["adopt"]> = { cursor: null, block: "" };
-      try {
-        for (const [index, step] of steps.entries()) {
-          const from = stream.shown;
-          // The doc update captures the baseline it presents in its persisted state.
-          stream.shown = step;
-          const written = authoredAs(this.doc, agentClientId(key), () => this.adopt(from, step, `agent:${key}`));
-          if (written.cursor) change = written;
-          const at = change.cursor ? Y.relativePositionToJSON(change.cursor) : null;
-          const last = index === steps.length - 1;
-          // The cursor rests where the Agent's change ends.
-          this.agentAwareness(principal, { user, activity: last ? "editing" : "writing", block: change.block,
-            ...(at ? { cursor: { anchor: at, head: at } } : {}) });
-          if (!last) await new Promise((resolve) => setTimeout(resolve, pace));
-        }
-      } finally {
-        this.writing.delete(stream);
+      let typing: PageTyping | null = null;
+      if ((this.ports.writePaceMs ?? 0) > 0) {
+        // Its structure goes in at once and its words are typed after, as a person types them.
+        const plan = pageWritingPlan(markdownToPageDoc(live), markdownToPageDoc(into));
+        // Stored right after with the words still to type, not on its own.
+        typing = authoredAs(this.doc, clientId, () => PageTyping.begin(this.fragment, plan.start, plan.runs, TYPING));
+        if (typing.remaining) this.typings.set(typing, clientId);
+        else typing = null;
+      } else {
+        // One transaction, so edits people make meanwhile can never shift its positions. It is
+        // written under the editor's awareness id, so readers see whose text it is.
+        const change = authoredAs(this.doc, clientId, () => setPageFragmentMarkdown(this.fragment, into, origin));
+        // The cursor rests where the Agent's change ends.
+        const at = change.cursor ? Y.relativePositionToJSON(change.cursor) : null;
+        this.agentAwareness(principal, { user, activity: "editing", block: change.block,
+          ...(at ? { cursor: { anchor: at, head: at } } : {}) });
       }
-      await this.serial(async () => {
-        this.settle();
-        await this.persist();
-      });
+      if (!typing) this.settle();
+      await this.persist();
+      // Announced in commit order, before it is typed in: readers' head revision never steps back.
       this.ports.broadcast(encodeNotice({ type: "committed", revision: result.revision,
         headRevision: result.headRevision, author: principal.label, detachedAutomations: result.detachedAutomations }));
-      return { ...result, removedSections: pageRemovedSections(current, target) };
+      const done = { ...result, removedSections: pageRemovedSections(current, target) } as PageEditResult;
+      return { done, typing: typing ? { typing, clientId, user } : null };
+    }).then(async (edit): Promise<PageEditResult> => {
+      if (edit.typing) await this.typeIn(principal, edit.typing);
+      return edit.done;
+    });
+  }
+
+  /**
+   * Types a committed edit's words in as a person would, a few at a time under the Agent's caret and
+   * outside the session's queue, so several Agents type at once. Each step is a small insertion anchored
+   * to the words around it: people's typing anywhere, even in the same line, merges with it as two
+   * people's keystrokes do. When the last Agent finishes and nobody has edits pending, the page is the
+   * head exactly, whatever overlapping edits left.
+   */
+  private async typeIn(principal: PageSessionPrincipal, { typing, clientId, user }: {
+    typing: PageTyping; clientId: number; user: Record<string, unknown>;
+  }): Promise<void> {
+    const pace = this.ports.writePaceMs ?? 0;
+    // At most 40 steps, about two seconds: a long edit types more words a step.
+    const perStep = Math.max(1, Math.ceil(typing.remaining / 40));
+    const show = (activity: "writing" | "editing", place: { at: Y.RelativePosition; block: string } | null) => {
+      const at = place ? Y.relativePositionToJSON(place.at) : null;
+      this.agentAwareness(principal, { user, activity, block: place?.block ?? "",
+        ...(at ? { cursor: { anchor: at, head: at } } : {}) });
+    };
+    let last: { at: Y.RelativePosition; block: string } | null = typing.caret;
+    show("writing", last);
+    try {
+      while (this.typings.has(typing) && typing.remaining && !this.destroyed && !this.ended) {
+        await new Promise((resolve) => setTimeout(resolve, pace));
+        if (!this.typings.has(typing) || this.destroyed || this.ended) break;
+        last = authoredAs(this.doc, clientId, () => typing.type(this.doc, perStep, TYPING)) ?? last;
+        show(typing.remaining ? "writing" : "editing", last);
+      }
+    } finally {
+      this.typings.delete(typing);
+    }
+    if (this.destroyed) return;
+    show("editing", last);
+    await this.serial(async () => {
+      // Overlapping edits typed into each other can leave text the head does not hold; with nobody's edit
+      // pending, the page is the head again.
+      if (this.typings.size === 0 && this.editors.size === 0 && this.base && this.markdown() !== this.base.body) {
+        setPageFragmentMarkdown(this.fragment, this.base.body, "server");
+      }
+      this.settle();
+      await this.persist();
     });
   }
 
@@ -771,6 +858,8 @@ export class PageSession {
   reload(principal: PageSessionPrincipal, redact?: { needle: string; replacement: string }): Promise<void> {
     return this.serial(async () => {
       if (!this.base) return;
+      // What Agents are still typing in goes in whole: the new head replaces what was committed.
+      this.finishTyping();
       if (redact?.needle) {
         const current = this.markdown();
         this.adopt(current, current.split(redact.needle).join(redact.replacement), "server");
@@ -807,6 +896,8 @@ export class PageSession {
 
   /** Releases the awareness and the document. */
   destroy(): void {
+    this.destroyed = true;
+    this.typings.clear();
     for (const writer of this.coWriters.values()) writer.stop();
     this.coWriters.clear();
     this.awareness.destroy();

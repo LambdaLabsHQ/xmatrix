@@ -15,10 +15,11 @@ English is the default language for repository documentation, guardrails, releas
 
 ## Current behavior
 
-Pages reveal committed Agent edits through canonical document states, with
-complete structural delimiters. A persisted presentation transition lets a
-restarted session finish the committed edit while preserving human typing.
-See [live documents](../design/pages-live-document.md).
+Pages type committed Agent edits in as people type: the structure goes in
+first, then the words as small CRDT insertions, a few at a time. Several Agents
+and people type at once, and every moment of the page reads back from Markdown
+as itself. Stored typing lets a restarted session finish a committed edit while
+keeping human typing. See [live documents](../design/pages-live-document.md).
 
 
 Channel presence uses the protocol's read-only Instance-ID map, separate from

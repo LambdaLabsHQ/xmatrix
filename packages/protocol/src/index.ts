@@ -462,7 +462,7 @@ export {
 export {
   AUTOMATION_REFERENCE_SCHEME, automationReferenceMarkdown,
   automationReferences, GITHUB_FILE_REFERENCE_SCHEME, gitHubFileReferenceFrom, gitHubFileReferenceHref,
-  gitHubFileReferences, gitHubFileUrl, insertAutomationReference, mergePageText,
+  gitHubFileReferences, gitHubFileUrl, insertAutomationReference, mergePageText, mergePageWords,
   pageBlockAt, pageBlocks, pageChangedBlocks, pageChangeGist, pageHeadingSlug, pageLineDiff,
   pageReferencesIn, pageReferenceSpans, pageReferenceToken, pageRemovedSections, parseGitHubFileReference,
   removeAutomationReference, replaceAutomationReference,

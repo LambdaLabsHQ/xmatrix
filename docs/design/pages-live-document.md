@@ -61,13 +61,34 @@ designed for both.
    git and Agent edits remain markdown; the editor is a view over it.
 
 A whole-document Agent edit is authorized and committed before it is shown.
-Its writing animation reveals words within the final parsed document with
-complete Markdown delimiters; raw Markdown prefixes are never live document
-states. While presentation is in progress, session storage keeps the active
-canonical presentation transitions beside the committed base and CRDT. Human
-saves and recovery share one completion model, merging remaining presentation
-into persisted human edits without repeating the
-commit or attributing a truncated animation to the next human editor.
+It is then typed into the live document as a person types it
+(`page-typing.ts`):
+
+- **Structure first.** The edit's structure goes in at once, in one small
+  update: what it removes, restructures or re-marks. A new block stands with
+  its first word.
+- **Then the words.** Its words are typed into the document's text, a few at a
+  time over about two seconds. Each step is a CRDT insertion anchored to the
+  word before it, so people typing anywhere meanwhile, even in the same line,
+  and other Agents typing their own edits merge with it as keystrokes do. No
+  step parses or rewrites the page.
+- **Every moment reads back as itself.** The page at each moment of the typing
+  reads back from Markdown as itself: no block stands empty, no line ends in a
+  space, and no structure is ever half there. This matters because another
+  Agent's edit merges through the Markdown.
+
+Agents that read one revision and change neighbouring lines both get their
+edit: whole lines merge first, then the words of lines that touch. Commits are
+announced in commit order, before their typing.
+
+Session storage keeps the words still to type beside the committed base and
+the CRDT. A person's save and a restart finish the typing first: the save
+commits the head with the person's edits, and the restart types the rest in at
+once. Neither repeats the commit or attributes an unfinished typing to the next
+person who edits. When the last Agent finishes and nobody has edits pending,
+the page is the head exactly, whatever overlapping edits left. Text that differs
+from the committed page while no person's edit is pending is no person's, so a
+restored session reads as its committed page.
 
 ## 3. Awareness
 

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { automationReferences, gitHubFileReferenceFrom, gitHubFileReferenceHref, gitHubFileReferences, gitHubFileUrl, insertAutomationReference, mergePageText, pageBlockAt, pageBlocks, pageChangeGist, pageChangedBlocks, pageHeadingSlug, pageRemovedSections, parseGitHubFileReference, removeAutomationReference, replaceAutomationReference } from "../dist/index.js";
+import { automationReferences, gitHubFileReferenceFrom, gitHubFileReferenceHref, gitHubFileReferences, gitHubFileUrl, insertAutomationReference, mergePageText, mergePageWords, pageBlockAt, pageBlocks, pageChangeGist, pageChangedBlocks, pageHeadingSlug, pageRemovedSections, parseGitHubFileReference, removeAutomationReference, replaceAutomationReference } from "../dist/index.js";
 
 const page = `Intro line
 # Relay Storage
@@ -153,4 +153,30 @@ test("a page's GitHub file embeds are read from its prose, each once, in canonic
     "xmatrix:github-file/o/r/docs/bootstrap.md",
     "xmatrix:github-file/o/r/a.b.md?ref=v1",
   ]);
+});
+
+test("a word merge combines changes to neighbouring lines and to different words of one line", () => {
+  const base = "# Launch\n\n- Web · Claude · in progress\n- Mobile · Codex · in progress\n";
+  const claude = base.replace("Web · Claude · in progress", "Web · Claude · merged, live in v1.0.464");
+  const codex = base.replace("Mobile · Codex · in progress", "Mobile · Codex · merged, TestFlight 2.4");
+  assert.equal(mergePageText(base, claude, codex).ok, false, "whole lines collide when they touch");
+  assert.deepEqual(mergePageWords(base, claude, codex),
+    { ok: true, text: "# Launch\n\n- Web · Claude · merged, live in v1.0.464\n- Mobile · Codex · merged, TestFlight 2.4\n" });
+  const line = "In progress on Friday\n";
+  assert.deepEqual(mergePageWords(line, "Now: In progress on Friday\n", "In progress on Friday behind one switch\n"),
+    { ok: true, text: "Now: In progress on Friday behind one switch\n" });
+});
+
+test("a word merge keeps what one side only added beside the other side's change of the same words", () => {
+  const base = "Status: in progress\n";
+  const person = "Status: in progresses\n";
+  const agent = "Status: in progress and shipped\n";
+  assert.equal(mergePageWords(base, person, agent).ok, false, "without a preference, the same words conflict");
+  assert.deepEqual(mergePageWords(base, person, agent, "ours"), { ok: true, text: "Status: in progresses and shipped\n" });
+  assert.deepEqual(mergePageWords("a c\n", "a b c\n", "a x c\n", "ours"), { ok: true, text: "a b x c\n" },
+    "both inserting at one place keep both, the preferred side first");
+  assert.deepEqual(mergePageWords("a b c\n", "a B c\n", "a X c\n", "theirs"), { ok: true, text: "a X c\n" },
+    "a true collision takes the preferred side");
+  assert.deepEqual(mergePageWords("会议 开始\n", "会议马上开始\n", "会议 开始了\n"), { ok: true, text: "会议马上开始了\n" },
+    "CJK merges character by character");
 });
