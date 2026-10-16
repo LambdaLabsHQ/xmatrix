@@ -1,8 +1,9 @@
 import { createJevClient, MAX_INPUT_BYTES, type JevInput } from "@xmatrix/decision-model";
 import { admitRequest, rateLimitedResponse } from "./request-rate-limit";
 import type { Env } from "./types";
+import { meterJev, type UsageCostEnv } from "./usage-cost-metering";
 
-type JevEnv = Pick<Env, "JEV_AI_GATEWAY_API_KEY" | "RATE_LIMIT_JEV_EVALUATE">;
+type JevEnv = Pick<Env, "JEV_AI_GATEWAY_API_KEY" | "RATE_LIMIT_JEV_EVALUATE"> & UsageCostEnv;
 const headers = { "cache-control": "private, no-store" };
 const failure = (error: string, status: number) => Response.json({ error }, { status, headers });
 
@@ -38,7 +39,9 @@ export async function evaluateJevRequest(
     }
   } catch { return failure("jev_invalid_input", 400); }
   try {
-    const result = await createJevClient({ apiKey: env.JEV_AI_GATEWAY_API_KEY }).evaluate(input);
+    // An evaluation has no Space: its cost is the calling owner's.
+    const result = await meterJev(env, { feature: "evaluate", scope: { ownerUserId: userId } },
+      createJevClient({ apiKey: env.JEV_AI_GATEWAY_API_KEY }).evaluate)(input);
     return Response.json(result, { headers });
   } catch (error) {
     const code = error instanceof Error && "code" in error ? error.code : undefined;

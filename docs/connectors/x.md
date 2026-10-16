@@ -65,6 +65,11 @@ old refresh token or overwrite a newer authorization. An unrecoverable grant
 requires fresh consent. No timer polls the accounts or provider timelines.
 One account's failure must not grant access to another or prevent its removal.
 
+Every X API call goes through the company app's account, which the operator
+pays for. The Hub meters each one (token exchange and refresh included) to the
+Space it serves, by API operation and Hub action, never by post, user or
+account id; see [usage cost metering](../operations/usage-cost-metering.md).
+
 ## Actions and publishing approval
 
 `xmatrix connector list` is the runtime command reference. Actions start from

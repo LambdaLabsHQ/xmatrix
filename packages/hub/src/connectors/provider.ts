@@ -2,6 +2,7 @@ import type { AgentRegistrationIdentity } from "./agent-caller";
 import type { Env } from "../types";
 import type { XActionCapability } from "./x-accounts";
 import type { XMediaCapability } from "./x-media";
+import type { UpstreamMeter } from "../usage-cost-metering";
 
 /**
  * One provider's Hub-side behavior (docs/design/connector-platform.md §3.1).
@@ -21,7 +22,7 @@ export interface ConnectorProvider {
   /** Provider-side configuration that follows the Space's subscriptions, if the provider keeps any. */
   subscriptions?: ConnectorSubscriptionSync;
   /** One cheap authenticated provider call proving the stored credentials work; throws when they do not. */
-  verify?: (credentials: Readonly<Record<string, string>>) => Promise<void>;
+  verify?: (credentials: Readonly<Record<string, string>>, meter?: UpstreamMeter) => Promise<void>;
 }
 
 /**
@@ -50,6 +51,8 @@ export interface ConnectorActionContext {
   authorizeWrite?: () => Promise<void>;
   /** The connection's decrypted credential values. */
   credentials: Readonly<Record<string, string>>;
+  /** Meters the operator-paid upstream calls (Composio) this action makes, to its Space. */
+  usage?: UpstreamMeter;
   /**
    * Stores values the provider itself renewed during the call (a web session's rotated cookies) in the same
    * encrypted connection credentials, as the Hub's own write. Only fields the manifest declares are accepted.

@@ -4,6 +4,7 @@ import { exchangeOAuthGrant, oauthAuthorizeUrl, oauthClient, verifyOAuthState } 
 import { vercelApiUrl, vercelCompletionUrl, verifyVercel } from "../src/connectors/vercel-api.ts";
 import { connectorProvider } from "../src/connectors/registry.ts";
 import { sentryInstallationClient } from "../src/connectors/sentry-installation.ts";
+import * as metering from "../src/usage-cost-metering.ts";
 
 const exchangeOAuthCode = async (...args) => (await exchangeOAuthGrant(...args)).fields;
 
@@ -162,6 +163,7 @@ test("the callback writes credentials only after verified state, provider scope 
     "@xmatrix/protocol": { HUB_ROUTES: { connector_oauth_complete: "/api/connectors/oauth/complete" } },
     "@xmatrix/db": { ControlError: class ControlError extends Error {} },
     "./apps": { upsertAppConnection: async () => { effects.push("connection"); return {}; } },
+    "./usage-cost-metering": metering,
   };
   runInNewContext(code, { exports, require: name => { assert.ok(dependencies[name], name); return dependencies[name]; }, crypto, URL, console });
   let complete;

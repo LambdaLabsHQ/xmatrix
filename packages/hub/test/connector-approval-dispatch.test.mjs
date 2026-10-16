@@ -4,6 +4,7 @@ import * as protocol from "@xmatrix/protocol";
 import { loadCommonJsSourceModule } from "./support/commonjs-source-module.mjs";
 import { ProviderRequestError } from "../src/connectors/http.ts";
 import { commandResult } from "../src/connectors/command-support.ts";
+import * as metering from "../src/usage-cost-metering.ts";
 
 async function dispatcher({ providerId, spaceId, mode, repository, publish = async () => {}, imports = {} }) {
   const dependencies = {
@@ -14,6 +15,7 @@ async function dispatcher({ providerId, spaceId, mode, repository, publish = asy
       publishCommandStatus: publish },
     "./credentials": { connectorActionPolicyRepository: () => ({ mode }), connectorActionRequestRepository: () => repository },
     "./http": { ProviderRequestError },
+    "../usage-cost-metering": metering,
     ...imports,
   };
   return loadCommonJsSourceModule(new URL("../src/connectors/connector-commands.ts", import.meta.url), name => dependencies[name] ?? {});

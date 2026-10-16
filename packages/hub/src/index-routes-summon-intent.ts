@@ -9,6 +9,7 @@ import { evaluateRoutingChoices, type RoutingEvaluator } from "./agent-routing-e
 import { registrationLaunchContextReader } from "./registration-launch-context";
 import { SUMMON_INTENT_QUESTION } from "./registration-launch-choice";
 import { runtimePlacement } from "./runtime";
+import { meterJev } from "./usage-cost-metering";
 import { admitRequest, rateLimitedResponse } from "./request-rate-limit";
 
 const NO_STORE = { "cache-control": "private, no-store" };
@@ -64,7 +65,8 @@ export function registerSummonIntentRoutes(app: Hono<{ Bindings: Env }>,
       sourceMessageId: "draft", actorUserId: actorUserId(authUser) })(Number.MAX_SAFE_INTEGER);
     const readings = await readDraftSummonIntents({ body, channelContext,
       summons: summons.map(item => ({ start: Number(item.start), end: Number(item.end) })),
-      evaluate: createJevClient({ apiKey, timeoutMs: 5_000 }).evaluate });
+      evaluate: meterJev(c.env, { feature: "summon_intent", scope: { spaceId: route.spaceId } },
+        createJevClient({ apiKey, timeoutMs: 5_000 }).evaluate) });
     return c.json({ readings }, 200, NO_STORE);
   }));
 }

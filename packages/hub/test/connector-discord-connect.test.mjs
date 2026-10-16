@@ -5,6 +5,7 @@ import { ControlError } from '@xmatrix/db';
 import { compileCommonJsSourceModule } from './support/commonjs-source-module.mjs';
 import { APP_CONNECTOR_PROVIDER_MANIFESTS } from '../../protocol/src/app-connector-manifests.ts';
 import * as oauth from '../src/connectors/oauth.ts';
+import * as metering from '../src/usage-cost-metering.ts';
 import { HUB_ROUTES } from '../../protocol/src/authority-foundation.ts';
 import { stubFetchResponses } from './support/fetch-responses.mjs';
 
@@ -22,6 +23,7 @@ function fixture() {
     './connectors/sentry-installation': { sentryInstallationClient: () => undefined },
     './connectors/googlechat-native': { googleChatNativeApp: () => undefined },
     './connectors/oauth': oauth,
+    './usage-cost-metering': metering,
     './app-connectors': { getAppConnectorProvider: id => APP_CONNECTOR_PROVIDER_MANIFESTS.find(m => m.id === id) },
     './app-connection-check': { checkAppConnection: async () => { calls.push('check'); return { ok: !state.failedCheck }; } },
     './deployment-origins': { appOrigin: () => 'https://xmatrix.test' },

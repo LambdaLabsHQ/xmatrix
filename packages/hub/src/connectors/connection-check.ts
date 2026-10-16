@@ -4,6 +4,7 @@ import { verifyTelegramNativeConnection } from "./telegram-native";
 import { verifyWeComNativeConnection } from "./wecom-native";
 import { getAppConnectorProvider } from "../app-connectors";
 import type { Env } from "../types";
+import { upstreamMeter } from "../usage-cost-metering";
 import { connectionCredentials } from "./connection-credentials";
 import { ProviderRequestError } from "./http";
 import { connectorProvider } from "./registry";
@@ -35,7 +36,8 @@ export async function verifyConnectorConnection(env: Env, spaceId: string, provi
     throw new Error(`Save ${missing.map((field) => field.label).join(", ")} under Credentials`);
   }
   try {
-    await connectorProvider(providerId)?.verify?.(credentials);
+    await connectorProvider(providerId)?.verify?.(credentials,
+      upstreamMeter(env, { spaceId, connector: providerId, action: "verify" }));
   } catch (error) {
     if (error instanceof ProviderRequestError) throw new Error(`${manifest.name} refused the credentials: ${error.message}`);
     throw new Error(error instanceof DOMException && error.name === "TimeoutError"
