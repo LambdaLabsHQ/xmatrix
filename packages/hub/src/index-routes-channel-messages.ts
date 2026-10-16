@@ -319,15 +319,9 @@ export function registerChannelMessageRoutes(app: Hono<{ Bindings: Env }>): void
                   email: authUser.email,
                   instanceId: attributedAgent.instanceId,
                 }
-              : {
-                  identityId: `user:${authUser.id}`,
-                  kind: "user",
-                  userId: authUser.id,
-                  label: authUser.name || authUser.email || authUser.id,
-                  name: authUser.name || authUser.email || authUser.id,
-                  email: authUser.email,
-                  avatarUrl: authUser.avatarUrl,
-                },
+              // A CLI's retained login can carry the name from before the
+              // person named themselves. The append reads their current profile.
+              : undefined,
           ...(principal ? {
             agentRunProof: {
               runId: principal.runId,
