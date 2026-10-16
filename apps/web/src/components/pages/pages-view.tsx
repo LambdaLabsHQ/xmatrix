@@ -148,7 +148,7 @@ function names(agents: readonly PageTreeAgent[]): string {
  */
 export function pageRowMeta(page: Pick<PageSummary, "updatedAt" | "summary" | "headRevision">, agents: readonly PageTreeAgent[],
   latest: PageTreeActivity["discussions"]["latest"] = null, now = Date.now()): ReactNode {
-  const editing = agents.filter((agent) => agent.activity === "editing");
+  const editing = agents.filter((agent) => agent.activity === "editing" || agent.activity === "writing");
   if (editing.length > 0) {
     const sections = [...new Set(editing.map((agent) => agent.section).filter(Boolean))];
     return `${names(editing)} editing${sections.length === 1 ? ` · ${sections[0]}` : ""}`;
@@ -1122,6 +1122,9 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
       anchor: anchorTops.has(`client:${clientId}`) ? `client:${clientId}` : sectionAnchor(state.block ?? ""),
       editing: state.activity === "editing" || state.activity === "writing" || state.activity === "thinking",
       conversationId: state.user!.conversationId ?? null,
+      // While it writes, its face says which conversation the words come from.
+      ...(state.user!.kind === "agent" && state.activity === "writing" && state.user!.conversationId
+        && conversationName(state.user!.conversationId) ? { from: conversationName(state.user!.conversationId)! } : {}),
       ...(state.user!.kind === "agent" && CO_WRITER_DOING[state.activity ?? ""]
         ? { doing: CO_WRITER_DOING[state.activity ?? ""]! } : {}),
       undoable: state.user!.kind === "agent" && state.undo === true,
