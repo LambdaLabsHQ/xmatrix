@@ -99,6 +99,10 @@ function appConnectionRoutes<Api extends "/api" | "/api/xmatrix">(api: Api) {
       `${api}/spaces/${encodeURIComponent(spaceId)}/app-connections/gmail/notifications`,
     space_app_connection_gmail_mailboxes: (spaceId: string) =>
       `${api}/spaces/${encodeURIComponent(spaceId)}/app-connections/gmail/mailboxes`,
+    space_app_connection_x_accounts: (spaceId: string) =>
+      `${api}/spaces/${encodeURIComponent(spaceId)}/app-connections/x/accounts`,
+    space_app_connection_x_account: (spaceId: string, accountId: string) =>
+      `${api}/spaces/${encodeURIComponent(spaceId)}/app-connections/x/accounts/${encodeURIComponent(accountId)}`,
     space_app_connection_google_picker: (spaceId: string) =>
       `${api}/spaces/${encodeURIComponent(spaceId)}/app-connections/google/picker`,
     space_app_connection_teams_link: (spaceId: string) =>

@@ -130,6 +130,7 @@ Declared by the committed `packages/hub/wrangler.toml`. Deployments do not chang
 | `RELAY_SPACE_DELETION_CLOCK` | binding | Per-Space clock for Space deletion purges. |
 | `RELAY_SPACE_PROJECTION` | binding | Retired Durable Object namespace, kept bound as a 410 shell over its historical rows. |
 | `RELAY_SUMMON_DECISION_CLOCK` | binding | Per-Space clock for decision retention. |
+| `RELAY_X_UPLOAD_EXECUTOR` | binding | Per-upload durable X video executor; stores only references and scheduling state. |
 | `XMATRIX_RUNTIME_CELL_MODE` | var | Runtime cell routing; "dual" activates candidate cells. |
 
 ## Official deployment operations

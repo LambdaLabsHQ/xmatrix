@@ -461,8 +461,8 @@ function exchangedSessionUser(user: AuthUser, existingUser?: BetterAuthUserRow):
     ? {
         id: existingUser.id,
         email: existingUser.email,
-        name: user.name || existingUser.name || undefined,
-        avatarUrl: user.avatarUrl || existingUser.image || undefined,
+        name: existingUser.name || undefined,
+        avatarUrl: existingUser.image || undefined,
       }
     : user;
 }
@@ -501,23 +501,12 @@ export async function createBetterAuthSessionForUser(
   }
 
   await authDatabase.batch([
-    existingUser
-      ? authDatabase.prepare(
-          [
-            'UPDATE "user" SET',
-            '"name" = ?,',
-            '"image" = ?,',
-            '"updatedAt" = ?',
-            'WHERE "id" = ?',
-          ].join(" ")
-        ).bind(name, user.avatarUrl || existingUser.image || null, now.toISOString(), existingUser.id)
-      : authDatabase.prepare(
-          [
-            'INSERT INTO "user"',
-            '("id", "name", "email", "emailVerified", "image", "createdAt", "updatedAt")',
-            "VALUES (?, ?, ?, 1, ?, ?, ?)",
-          ].join(" ")
-        ).bind(user.id, name, user.email, user.avatarUrl || null, now.toISOString(), now.toISOString()),
+    ...(!existingUser ? [authDatabase.prepare([
+      'INSERT INTO "user"',
+      '("id", "name", "email", "emailVerified", "image", "createdAt", "updatedAt")',
+      "VALUES (?, ?, ?, 1, ?, ?, ?)",
+    ].join(" ")).bind(user.id, name, user.email, user.avatarUrl || null,
+      now.toISOString(), now.toISOString())] : []),
     authDatabase.prepare(
       [
         'INSERT INTO "session"',
@@ -556,15 +545,9 @@ async function createPostgresSessionForUser(env: Env, user: AuthUser): Promise<A
   if (sessionUser.id !== user.id) throw new Error(SESSION_EXCHANGE_USER_MISMATCH);
 
   await authPostgresTransaction(env, "auth.session_exchange.write", async (transaction) => {
-    if (existingUser) {
-      await transaction.query({
-        name: "auth_session_exchange_update_user_v1",
-        text: `UPDATE control.auth_users SET name = $1, image = $2, updated_at = $3
-          WHERE id = $4`,
-        values: [name, user.avatarUrl || existingUser.image || null, now, existingUser.id],
-        maxRows: 0,
-      });
-    } else {
+    // A retained token proves identity; its old profile fields must not
+    // overwrite the name or avatar the person has since chosen.
+    if (!existingUser) {
       await transaction.query({
         name: "auth_session_exchange_insert_user_v1",
         text: `INSERT INTO control.auth_users

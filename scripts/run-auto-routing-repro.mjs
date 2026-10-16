@@ -127,6 +127,7 @@ try {
     // A history page is one fenced statement, and a placed single read must
     // serialize with a Space move on the placement row lock.
     "packages/db/test/message-history-postgres.test.mjs",
+    "packages/db/test/message-human-profile-postgres.test.mjs",
     "packages/db/test/placement-fence-postgres.test.mjs"], {
     XMATRIX_REQUIRE_POSTGRES_TEST: "true", XMATRIX_TEST_POSTGRES_URL: url.toString(),
   });

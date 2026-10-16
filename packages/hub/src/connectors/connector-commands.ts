@@ -18,7 +18,13 @@ import { notifyWorkspaceResource } from "../workspace-resource-notification";
 import type { Env } from "../types";
 import type { ConnectorAction, ConnectorActionContext, ConnectorCommandHandler, ConnectorCommandInput, ConnectorSubscriptionSync } from "./provider";
 import { runSubscriptionStatement } from "./subscription-command";
+import { xActionCapability } from "./x-api";
+import { createXMediaCapability } from "./x-media";
+import { postgresMessageAttachmentAuthorityRequest } from "../postgres-message-attachment-authority";
 import { connectorSubscriptionStatements, isConnectorSubscriptionCommand } from "./subscription-parse";
+import { enqueueXUpload } from "./x-upload-executor-do";
+import { X_ACTIONS } from "./actions/x";
+import type { XExecutingUpload, XUploadOutcome } from "@xmatrix/db";
 
 /*
  * A provider's Channel commands (docs/design/connector-platform.md §3.3, §3.5):
@@ -121,6 +127,28 @@ export async function runConnectorAction(providerId: string, input: ConnectorCom
   return receipt;
 }
 
+/** Only the durable executor dispatches a consumed X video request. */
+export async function executeDurableXUpload(env: Env, job: XExecutingUpload): Promise<{
+  status: "completed" | "failed" | "blocked"; receipt: string;
+}> {
+  const { request, payload } = job;
+  const receipt = await runAction("x", { env, channelId: request.channelId,
+    actorUserId: request.requestedBy, messageId: `${payload.messageId}:upload-result`,
+    commandMessageId: payload.messageId, body: "", senderKind: payload.senderKind, senderId: payload.senderId },
+  "upload_video", X_ACTIONS.upload_video!, payload.statement,
+  { requestId: request.requestId, prepared: payload.prepared });
+  return { status: /: completed;/u.test(receipt) ? "completed" : /: blocked;/u.test(receipt) ? "blocked" : "failed", receipt };
+}
+
+/** The persisted outcome is retried with one canonical append identity. */
+export async function publishDurableXUploadReceipt(env: Env, outcome: XUploadOutcome): Promise<void> {
+  const { request, payload } = outcome;
+  await publishCommandStatus(getAppConnectorProvider("x")!, { env, channelId: request.channelId,
+    actorUserId: request.requestedBy, messageId: `${payload.messageId}:upload-result`,
+    commandMessageId: payload.messageId, body: "", senderKind: payload.senderKind, senderId: payload.senderId },
+  [outcome.receipt]);
+}
+
 async function runAction(providerId: string, input: ConnectorCommandInput, actionId: string,
   action: ConnectorAction, statement: Parameters<ConnectorAction["parse"]>[0],
   approved?: { requestId: string; prepared: Record<string, string> }): Promise<string> {
@@ -137,9 +165,16 @@ async function runAction(providerId: string, input: ConnectorCommandInput, actio
   const policyInput = { connectionId: scope.connectionId, channelId: input.channelId, actionId, defaultPolicy };
   const mode = await channelActionPolicy(input.env, policyInput);
   const requestId = `action-request:${await sha256Hex(JSON.stringify([scope.connectionId, input.channelId, input.messageId, actionId]))}`;
+  const durableUpload = providerId === "x" && actionId === "upload_video";
   if (!approved && action.effect === "write") {
     const staged = await connectorActionRequestRepository(input.env).find(requestId, scope.connectionId, input.channelId, input.actorUserId);
-    if (staged) return approvalReceipt(manifest.name, actionId, staged);
+    if (staged) {
+      if (durableUpload && staged.status === "executing") {
+        await enqueueXUpload(input.env, { requestId, spaceId: scope.spaceId, channelId: input.channelId });
+        return `${manifest.name} ${actionId}: queued; request ${requestId}; its result will reply in this Channel.`;
+      }
+      return approvalReceipt(manifest.name, actionId, staged);
+    }
   }
   const authorizeWrite = async () => {
     const liveScope = await commandScope(manifest, input);
@@ -152,18 +187,30 @@ async function runAction(providerId: string, input: ConnectorCommandInput, actio
       throw new ProviderRequestError(403, actionRefusal({ actionId, mode: changed })!);
     }
   };
-  if (mode === "ask" && !approved) {
+  if (!approved && (mode === "ask" || (durableUpload && mode === "allow"))) {
     try {
       const context = await actionContext(providerId, input, scope.spaceId, actionId, action, authorizeWrite);
       if (typeof context === "string") return result("blocked", context);
       const prepared = action.prepare ? await action.prepare(context, parsed) : parsed;
       const preview = providerId === "gmail"
         ? Object.fromEntries(["from", "to", "subject", "body"].map(key => [key, prepared[key] ?? ""]))
+        : providerId === "x" && actionId === "accounts" ? { account: "Connected X accounts owned by the requesting member", text: "List handles and account IDs" }
+        : providerId === "x" ? { account: `@${prepared.accountUsername} (X account ${prepared.accountId})`,
+          text: prepared.text ?? "", ...(prepared.postId ? { quotedPost: prepared.postId } : {}),
+          ...(prepared.mediaReceipt ? { video: "Video from this account and Channel's approved upload receipt" } : {}),
+          ...(prepared.sourceName ? { filename: prepared.sourceName, bytes: prepared.sourceSize!,
+            sha256: prepared.sourceHash!, attachment: `${prepared.messageId}/${prepared.attachmentId}` } : {}) }
         : { target: statement.target, text: statement.text };
       const request = await connectorActionRequestRepository(input.env).create({ requestId,
         connectionId: scope.connectionId, channelId: input.channelId, providerId, actionId, requestedBy: input.actorUserId,
         payload: { messageId: input.messageId, senderKind: input.senderKind ?? "user", senderId: input.senderId,
           statement, prepared, preview } });
+      if (durableUpload && mode === "allow") {
+        const ref = { requestId, spaceId: scope.spaceId, channelId: input.channelId };
+        await connectorActionRequestRepository(input.env).startAllowed({ ...ref, actorUserId: input.actorUserId });
+        await enqueueXUpload(input.env, ref);
+        return `${manifest.name} ${actionId}: queued; request ${requestId}; its result will reply in this Channel.`;
+      }
       await announceActionRequests(input.env, scope.spaceId, input.channelId);
       return approvalReceipt(manifest.name, actionId, request);
     } catch (error) {
@@ -213,7 +260,13 @@ async function actionContext(providerId: string, input: ConnectorCommandInput, s
     ? await teamsActionCapability(input.env, spaceId, authorizeWrite) : undefined;
   const dingtalk = providerId === "dingtalk" && ["read", "send"].includes(actionId)
     ? await dingtalkActionCapability(input.env, spaceId, authorizeWrite) : undefined;
-  const native = teams || googleChat || discord || feishu || telegram || wecom || dingtalk;
+  const x = providerId === "x" ? xActionCapability(input.env, { spaceId, channelId: input.channelId,
+    actorUserId: input.actorUserId, authorizeWrite }) : undefined;
+  const xMedia = x && input.env.RELAY_PAYLOAD_BUCKET ? createXMediaCapability({ spaceId, channelId: input.channelId,
+    actorUserId: input.actorUserId, x, authorizeWrite, bucket: input.env.RELAY_PAYLOAD_BUCKET,
+    receiptSecret: input.env.RELAY_R2_CAPABILITY_HMAC_SECRET,
+    attachmentAuthority: request => postgresMessageAttachmentAuthorityRequest(input.env, request) }) : undefined;
+  const native = teams || googleChat || discord || feishu || telegram || wecom || dingtalk || x;
   const credentials = native ? {} : await connectionCredentials(input.env, spaceId, providerId);
   /* `a|b` requires either field: a pasted token or the one OAuth issued. */
   const missing = native ? [] : action.requires.filter((field) => !field.split("|").some((name) => credentials[name]));
@@ -228,5 +281,5 @@ async function actionContext(providerId: string, input: ConnectorCommandInput, s
   };
   return { credentials, caller, authorizeWrite, ...(native ? {} : { saveCredentials }), ...(teams ? { teams } : {}), ...(googleChat ? { googleChat } : {}),
     ...(discord ? { discord } : {}), ...(feishu ? { feishu } : {}), ...(telegram ? { telegram } : {}),
-    ...(wecom ? { wecom } : {}), ...(dingtalk ? { dingtalk } : {}) };
+    ...(wecom ? { wecom } : {}), ...(dingtalk ? { dingtalk } : {}), ...(x ? { x } : {}), ...(xMedia ? { xMedia } : {}) };
 }

@@ -27,6 +27,13 @@ messages and live reports cannot create residents. Required registrations
 supply harness avatars. Legacy wire shapes are normalized at the boundary.
 See [Agent status](../design/agent-status.md#instance-identity-in-presence).
 
+Human message sender snapshots read the current account name and avatar, as the
+Space catalog does, while Space membership still authorizes the append. This
+includes Automation occurrences, which have no client-supplied sender snapshot;
+renaming an account affects new messages and preserves historical authors.
+Session exchange creates credentials for the existing account without replacing
+its saved name or avatar with a retained token's older profile fields.
+
 Official Agent launch prompts are compact repository Markdown delivered by the
 Hub with each spawn. Supporting daemons validate and render the versioned text;
 legacy daemons keep their compiled copy. Command details come from CLI help,
@@ -129,6 +136,16 @@ card and process injection path is documented in
 [connector operations](../operations/app-connectors.md#qa-login-codes).
 Its Composio path is independent of runtime-provided Gmail plugins; see
 [connector platform](../design/connector-platform.md).
+
+The X connector holds independent company/personal OAuth grants in the
+encrypted connector credential store. Each grant belongs to its connecting
+member and their Agents; publishing requires an explicit stable account and
+binds approvals to its authorization generation and exact content. Results
+are visible in the calling Channel. Video transfers use durable alarm jobs
+with PostgreSQL-owned encrypted inputs and outcomes, independent of HTTP/CLI
+lifetimes. Native acceptance still requires the
+company app configuration and separate tests with both real accounts; quote
+posting requires Enterprise API access. See [X connector](../connectors/x.md).
 
 The Google Cloud operations connector uses a separate GCP OAuth grant and
 provides bounded resource, Cloud Run status, log, metric and alert-policy reads,
