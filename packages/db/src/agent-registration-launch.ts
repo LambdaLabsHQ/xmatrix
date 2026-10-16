@@ -134,6 +134,12 @@ export type RegistrationLaunchChooser = (input: {
 }) => Promise<{ key: SpaceAgentRegistrationKey; model: string; modelResource?: string; effort?: string; parameters?: Record<string, string>; useRuntimeDefaultModel?: true;
   workspaceReference?: string; parameterEvidence?: LaunchParameterEvidence }>;
 
+/** Whether Jev read anything for this launch: an intent, a harness's fit, or a choice with more than one
+ * option. Otherwise every choice was the only option there was, and the constraints alone decided it. */
+function jevDecided(evidence: LaunchParameterEvidence): boolean {
+  return evidence.intent?.source === "jev" || evidence.fit !== undefined || evidence.choices.some(choice => !choice.only);
+}
+
 /** The Machine routing bound, recorded so the summon can show `machine:` the way it shows Jev's choices. */
 function boundMachine(machineId: string, machineName: string | undefined): { id: string; name?: string } {
   const presented = machineName ? machineMentionValue(machineId, machineName) : undefined;
@@ -512,8 +518,8 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
         requestedRuntimeModel: allocation.runtimeModel ?? null, modelResource: resources.models[0] ?? null,
         agentName: row.display_name, useRuntimeDefaultModel: input.useRuntimeDefaultModel === true,
         ...(workspace.remote_repo ? { remoteRepo: workspace.remote_repo, runWorktree: true } : {}),
-        ...(input.parameterEvidence ? { routingDecision: { source: "jev", parameters: input.parameterEvidence, rows: [],
-          machine: boundMachine(input.key.machineId, input.machineName) } } : {}) };
+        ...(input.parameterEvidence ? { routingDecision: { source: jevDecided(input.parameterEvidence) ? "jev" : "deterministic",
+          parameters: input.parameterEvidence, rows: [], machine: boundMachine(input.key.machineId, input.machineName) } } : {}) };
       await tx.query({ name: "registration_launch_run_v1", text: `INSERT INTO data.runs
         (run_id,owner_user_id,channel_id,workspace_machine_id,workspace_canonical_cwd,
          status,version,metadata_json,created_at,updated_at) VALUES ($1,$2,$3,$4,$5,'starting',1,$6::jsonb,$7,$7)`,

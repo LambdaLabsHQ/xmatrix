@@ -123,3 +123,18 @@ test('v10 keeps per-harness fit and the joint placement, and rejects malformed o
     assert.equal(parseLaunchParameterEvidence(malformed), undefined);
   }
 });
+
+test('v11 records a choice that had one option as such, never as a reading', () => {
+  const input = evidence();
+  input.rubricVersion = 'registration-parameters-v11';
+  input.selections = { workspaceKind: 'managed' };
+  input.choices = [{ key: 'workspace', selected: 'workspace_0', probabilities: { workspace_0: 1 }, only: true }];
+  assert.deepEqual(parseLaunchParameterEvidence(input).choices, input.choices);
+  assert.deepEqual(parsePresentedRoutingDecision({ source: 'deterministic', rows: [], parameters: input }).parameters.choices,
+    input.choices);
+  for (const change of [e => e.rubricVersion = 'registration-parameters-v10', e => e.choices[0].only = 'yes',
+    e => e.choices[0].probabilities = { workspace_0: .9 }, e => e.choices[0].probabilities = { workspace_0: 1, workspace_1: 0 }]) {
+    const malformed = structuredClone(input); change(malformed);
+    assert.equal(parseLaunchParameterEvidence(malformed), undefined);
+  }
+});
