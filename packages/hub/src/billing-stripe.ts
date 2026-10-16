@@ -137,6 +137,7 @@ export async function createStripeCheckoutSession(input: {
   checkoutIntentId: string;
   expiresAt: string;
   allowPromotionCodes: boolean;
+  creditPack?: { credits: number; amountCents: number; productId: string };
 }): Promise<{ id: string; url: string }> {
   const expiresAtSeconds = Math.floor(Date.parse(input.expiresAt) / 1_000);
   if (!Number.isSafeInteger(expiresAtSeconds) || expiresAtSeconds <= Math.floor(Date.now() / 1_000)) {
@@ -165,6 +166,23 @@ export async function createStripeCheckoutSession(input: {
     "automatic_tax[enabled]": "true",
     allow_promotion_codes: input.allowPromotionCodes ? "true" : "false",
   });
+  if (input.creditPack) {
+    if (input.seatQuantity !== 1 || !Number.isSafeInteger(input.creditPack.credits) || input.creditPack.credits < 1 ||
+      !Number.isSafeInteger(input.creditPack.amountCents) || input.creditPack.amountCents < 1) {
+      throw new StripeBillingError("Credit pack is invalid");
+    }
+    form.set("mode", "payment");
+    form.delete("line_items[0][price]");
+    for (const field of ["xmatrix_space_id", "xmatrix_billing_owner_user_id", "xmatrix_checkout_intent_id"]) {
+      form.delete(`subscription_data[metadata][${field}]`);
+    }
+    form.set("line_items[0][price_data][currency]", "usd");
+    form.set("line_items[0][price_data][unit_amount]", String(input.creditPack.amountCents));
+    form.set("line_items[0][price_data][product]", text(input.creditPack.productId, "Credit pack product"));
+    form.set("metadata[xmatrix_purchase_kind]", "credit_pack");
+    form.set("payment_method_types[0]", "card");
+    form.set("allow_promotion_codes", "false");
+  }
   // The Authority-owned intent id survives browser retries and unknown network
   // outcomes. It is the only Stripe idempotency key for this Session.
   const payload = await stripeRequest(input.secretKey, "/checkout/sessions", {
@@ -196,6 +214,12 @@ export async function retrieveStripeSubscription(secretKey: string, subscription
 
 export async function retrieveStripeCheckoutSession(secretKey: string, sessionId: string): Promise<Record<string, unknown>> {
   return stripeRequest(secretKey, `/checkout/sessions/${encodeURIComponent(sessionId)}`);
+}
+
+/** Use the existing xMatrix product and tax category for one-time pack prices. */
+export async function stripeCreditPackProduct(secretKey: string, monthlyPriceId: string): Promise<string> {
+  const price = await stripeRequest(secretKey, `/prices/${encodeURIComponent(monthlyPriceId)}`);
+  return text(price.product, "Credit pack product");
 }
 
 function objectOrTextId(value: unknown, label: string): string {

@@ -22,7 +22,8 @@ import { replaceBrowserPath } from "./workspace-shell-navigation";
 export const SPACE_BILLING_SECTION = "billing";
 
 /** The return parameters `/billing` forwards; removed once they have been acted on. */
-const CHECKOUT_RETURN_PARAMS = ["checkout", "checkout_session_id", "ai_checkout", "ai_checkout_session_id"] as const;
+const CHECKOUT_RETURN_PARAMS = ["checkout", "checkout_session_id", "ai_checkout", "ai_checkout_session_id", "credit_pack_checkout", "credit_pack_session_id"] as const;
+type BillingCommand = "checkout" | "portal" | "reconcile" | "apple-reconcile" | "credits/checkout" | "credits/reconcile";
 
 export type SpaceBilling = SpacePlanBilling & {
   plan: "free" | "pro";
@@ -118,10 +119,12 @@ function StripeSpaceBillingSection({ userId, space }: {
   const [interval, setInterval] = useState<"month" | "year">("month");
   const [seats, setSeats] = useState(1);
   const returned = useCheckoutReturn();
+  const [packSession] = useState(() => typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("credit_pack_session_id"));
+  const [packConfirmed, setPackConfirmed] = useState(false);
   const reconciled = useRef<string | null>(null);
   const command = useMutation({
     mutationKey: [...spaceBillingKey(userId, spaceId ?? ""), "command"],
-    mutationFn: (input: { kind: "checkout" | "portal" | "reconcile" | "apple-reconcile"; body?: unknown }) =>
+    mutationFn: (input: { kind: BillingCommand; body?: unknown }) =>
       xmatrixApiRequest<{ checkoutUrl?: string; portalUrl?: string; billing?: SpaceBilling }>({
         url: `/api/xmatrix/spaces/${encodeURIComponent(spaceId!)}/billing/${input.kind === "apple-reconcile" ? "apple/reconcile" : input.kind}`,
         method: "POST",
@@ -138,13 +141,24 @@ function StripeSpaceBillingSection({ userId, space }: {
     if (billing) setSeats(Math.max(1, billing.seats.used));
   }, [billing]);
 
-  const run = useCallback(async (kind: "checkout" | "portal" | "reconcile" | "apple-reconcile", body?: unknown) => {
+  const run = useCallback(async (kind: BillingCommand, body?: unknown) => {
     try {
       const payload = await command.mutateAsync({ kind, body });
       const destination = payload.checkoutUrl ?? payload.portalUrl;
       if (destination) window.location.assign(destination);
+      return payload;
     } catch {}
   }, [command]);
+
+  useEffect(() => {
+    if (!spaceId || !billing?.canManage || !packSession) return;
+    const key = `${spaceId}:pack:${packSession}`;
+    if (reconciled.current === key) return;
+    reconciled.current = key;
+    void run("credits/reconcile", { sessionId: packSession }).then(payload => {
+      if (payload?.billing) { setPackConfirmed(true); returned.clear(); }
+    });
+  }, [spaceId, billing?.canManage, packSession, run, returned]);
 
   // A return from Checkout is confirmed by asking the Hub to reconcile that
   // session with Stripe; the webhook may not have arrived yet.
@@ -167,6 +181,7 @@ function StripeSpaceBillingSection({ userId, space }: {
   const price = PRO_SEAT_PRICE_USD[interval];
   return (
     <div className="app-settings-section min-w-0 space-y-4" data-testid="space-billing">
+      {packConfirmed && <p role="status" className={noticeClass("settled")}>Credit pack payment confirmed. 10,000 credits added to the Space.</p>}
       {returned.spaceNotice === "success" && (
         <p className={noticeClass("settled")}>
           {billing?.plan === "pro" ? `Payment received. ${space.name} is on Pro.` : "Payment received. Confirming the checkout with Stripe…"}
@@ -201,6 +216,11 @@ function StripeSpaceBillingSection({ userId, space }: {
                 <AnimatedIcon icon={RefreshCw} className={cn("size-4", busy === "reconcile" && "animate-spin")} />
                 Refresh from {subscription?.billingProvider === "apple" ? "App Store" : "Stripe"}
               </button>
+              {billing.credits && <button type="button" className={actionClass({ variant: "secondary", size: "md" })}
+                disabled={busy !== null || subscription?.access === "read_only"} onClick={() => void run("credits/checkout")}>
+                {busy === "credits/checkout" && <AnimatedIcon icon={Loader2} className="size-4 animate-spin" />}
+                Buy 10,000 credits · $10
+              </button>}
             </div>
           )}
         </>
@@ -267,7 +287,7 @@ function BillingWarnings({ billing, spaceName }: { billing: SpaceBilling; spaceN
       {billing.credits?.paused && (
         <p className={noticeClass("alert")}>
           {spaceName} has used this month&apos;s Agent credits. Agents and apps can write again on{" "}
-          {formatPlanDate(billing.credits.resetsOn)}, or sooner with more seats. People can still write.
+          {formatPlanDate(billing.credits.resetsOn)}, or sooner with a credit pack or more seats. People can still write.
         </p>
       )}
       {billing.seatAdjustmentRequired && (
