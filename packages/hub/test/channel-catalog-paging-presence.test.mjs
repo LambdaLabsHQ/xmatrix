@@ -1,3 +1,4 @@
+import { catalogWriterPresence } from "./support/catalog-writer-presence.mjs";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { Hono } from "hono";
@@ -17,10 +18,7 @@ const OPEN_CHANNEL = {
   id: "channel-1", spaceId: "space-1", name: "General", mode: "open", version: 1,
   // Catalog authority only knows durable Agent presence; the live Human half of
   // this projection exists solely as a RelayRuntime session.
-  memberPresence: { "writer-instance": { kind: "agent", label: "writer",
-    registration: { ownerUserId: "owner", machineId: "machine", harness: "codex" },
-    instances: [{ id: "writer-instance", channelId: "channel-1", channelInstanceId: "1", label: "writer:1",
-      connectedAt: "2026-09-01T00:00:00Z", lastSeenAt: "2026-09-01T00:00:00Z", status: "idle" }] } },
+  memberPresence: catalogWriterPresence(),
   createdBy: "owner", createdAt: "2026-09-01T00:00:00.000Z", updatedAt: "2026-09-01T00:00:00.000Z",
 };
 const LIVE_SESSION = {
