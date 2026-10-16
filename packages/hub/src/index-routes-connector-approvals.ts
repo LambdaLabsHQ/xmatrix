@@ -48,8 +48,10 @@ export function registerConnectorApprovalRoutes(app: Hono<{ Bindings: Env }>) {
       if (!result.claimed || !result.payload) {
         const manifest = getAppConnectorProvider(result.request.providerId);
         if (manifest && result.request.status === "denied") {
+          // Denial erases the encrypted input, including its command message id.
+          // The request reference identifies the notice, but is not a reply target.
           await publishCommandStatus(manifest, { env: c.env, channelId: scope.channelId,
-            actorUserId: scope.actorUserId, messageId: `${result.request.requestId}:denied`, body: "" },
+            actorUserId: scope.actorUserId, messageId: `${result.request.requestId}:denied`, commandMessageId: null, body: "" },
           [`${manifest.name} ${result.request.actionId}: denied; request ${result.request.requestId} was disallowed; nothing was sent.`]);
         }
         return c.json({ request: result.request }, 200, { "cache-control": "private, no-store" });
