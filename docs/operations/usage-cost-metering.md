@@ -79,7 +79,7 @@ Composio and X calls. The token needs Account Analytics: Read; the
 `cloudflare-prod-analysis` Space secret provides it as `CLOUDFLARE_API_TOKEN`.
 
 ```sh
-CLOUDFLARE_ACCOUNT_ID=62f1e0f519808138b6af98701de57753 \
+CLOUDFLARE_ACCOUNT_ID=<production account id> \
   xmatrix secret exec --secret cloudflare-prod-analysis -- \
   node packages/hub/scripts/usage-cost-report.mjs --since 24h
 ```
