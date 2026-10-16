@@ -12,6 +12,7 @@ import { runtimeCellsForChannel } from "./runtime-transport/runtime-route-direct
 import { requireAgentRunChannelDelegation } from "./agent-run-channel-delegation";
 import { dispatchProductMessagePostCommit, productMessageControlFinishesBeforeResponse } from "./product-message-post-commit";
 import { productMessageSenderPresentation } from "./message-sender-presentation";
+import { readStoredProfile } from "./human-profile-store";
 import { crossChannelReplyOrigin } from "./product-cross-channel-reply";
 import { messageMutationActor } from "./agent-run-channel-delegation";
 import { questionnaireAnswerTarget, settledQuestionnaireRefusal } from "./questionnaire-answer";
@@ -296,6 +297,11 @@ export function registerChannelMessageRoutes(app: Hono<{ Bindings: Env }>): void
           ...(body.replyToMessageId ? { replyToMessageId: body.replyToMessageId } : {}),
           ...(Object.keys(appMetadata).length > 0 ? { appMetadata } : {}),
         };
+        // A retained CLI JWT can still carry the name from before onboarding.
+        // Keep its authenticated identity/email fallback for historical accounts.
+        const senderProfile = !principal && !attributedAgent
+          ? await readStoredProfile(c.env, authUser.id) : null;
+        const senderName = senderProfile?.name || authUser.name || authUser.email || authUser.id;
         const appendCommand = {
           commandId: productCommandId(c.req.raw, "append-message", messageId),
           messageId,
@@ -323,10 +329,10 @@ export function registerChannelMessageRoutes(app: Hono<{ Bindings: Env }>): void
                   identityId: `user:${authUser.id}`,
                   kind: "user",
                   userId: authUser.id,
-                  label: authUser.name || authUser.email || authUser.id,
-                  name: authUser.name || authUser.email || authUser.id,
+                  label: senderName,
+                  name: senderName,
                   email: authUser.email,
-                  avatarUrl: authUser.avatarUrl,
+                  avatarUrl: senderProfile ? senderProfile.image ?? undefined : authUser.avatarUrl,
                 },
           ...(principal ? {
             agentRunProof: {

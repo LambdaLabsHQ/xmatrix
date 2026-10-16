@@ -429,7 +429,7 @@ test("Message sender identity resolves from the exact PostgreSQL Space", async (
   const db = database((query) => placement(query) ?? (
     query.name?.startsWith("channel_capability_message_")
       ? [{ channel_id: "channel-1", space_id: "space-1", mode: "open", metadata_json: {} }]
-      : query.name === "message_sender_user_identity_v1"
+      : query.name === "message_sender_user_identity_v2"
         ? [{ user_id: "user-1", email: "user@example.com", display_name: "User One",
             avatar_url: "https://example.com/avatar.png", version: 7 }]
         : []
@@ -443,13 +443,13 @@ test("Message sender identity resolves from the exact PostgreSQL Space", async (
     kind: "user", id: "user-1", email: "user@example.com", displayName: "User One",
     avatarUrl: "https://example.com/avatar.png", version: 7,
   });
-  const query = db.calls.find((call) => call.name === "message_sender_user_identity_v1");
+  const query = db.calls.find((call) => call.name === "message_sender_user_identity_v2");
   assert.deepEqual(query.values, ["space-1", "user-1"]);
 });
 
 test("Message append preparation combines authorization, sender identity, and observed head", async () => {
   const db = database((query) => placement(query) ?? (
-    query.name === "message_prepare_context_v8"
+    query.name === "message_prepare_context_v9"
       ? [{ sequence: 41, sender_identity: { kind: "user", id: "user-1", email: null,
           displayName: "User", avatarUrl: null, version: 2 },
           channel_authorized: true }]
@@ -472,7 +472,7 @@ test("Message append preparation combines authorization, sender identity, and ob
     (call) => call.context?.operation === "message.prepare-append",
   );
   assert.equal(prepareTransactions.length, 1, "the request route is reused by one placed prepare transaction");
-  assert.equal(db.calls.some((call) => call.name === "message_prepare_context_v8"), true);
+  assert.equal(db.calls.some((call) => call.name === "message_prepare_context_v9"), true);
   assert.equal(db.calls.filter((call) => call.name?.startsWith("message_prepare_")).length, 1);
 });
 

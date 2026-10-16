@@ -27,6 +27,11 @@ messages and live reports cannot create residents. Required registrations
 supply harness avatars. Legacy wire shapes are normalized at the boundary.
 See [Agent status](../design/agent-status.md#instance-identity-in-presence).
 
+Human message sender snapshots read the current account name and avatar, as the
+Space catalog does, while Space membership still authorizes the append. This
+includes Automation occurrences, which have no client-supplied sender snapshot;
+renaming an account affects new messages and preserves historical authors.
+
 Official Agent launch prompts are compact repository Markdown delivered by the
 Hub with each spawn. Supporting daemons validate and render the versioned text;
 legacy daemons keep their compiled copy. Command details come from CLI help,
