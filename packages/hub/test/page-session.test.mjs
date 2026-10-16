@@ -242,6 +242,41 @@ test("a restart finishes the committed paced edit and keeps typing persisted dur
   assert.equal(h.commits.at(-1).body, resumed.markdown());
 });
 
+test("two Agents write the page at the same time, and a person's commit meanwhile keeps what they are still writing", async () => {
+  const h = harness();
+  h.ports.writePaceMs = 2;
+  const ann = await annConnected(h);
+  const codex = { ...agent, id: "agent-2", label: "codex:1", conversationId: "conv-2" };
+  const seen = [];
+  ann.doc.on("update", () => seen.push(ann.text.toString()));
+  const long = "written by one of two Agents at the same time, word after word after word";
+  const first = h.session.submitEdit(agent, { baseRevision: 1, body: HEAD.replace("In progress", `Status ${long}`),
+    conversationIds: ["conv-1"] });
+  const second = h.session.submitEdit(codex, { baseRevision: 1, body: HEAD.replace("none", `Notes ${long}`),
+    conversationIds: ["conv-2"] });
+  await new Promise((resolve) => setTimeout(resolve, 12));
+  ann.text.insert(0, "Hi ");
+  await h.session.commit();
+  const interrupted = h.persisted.at(-1);
+  await Promise.all([first, second]);
+  assert.ok(seen.some((text) => /Status written/u.test(text) && /Notes written/u.test(text)
+    && !/Status [^\n]*word after word after word/u.test(text)), "both write before the first is done");
+  const final = ann.text.toString();
+  assert.match(final, /Status written[^\n]*after word\n/u);
+  assert.match(final, /Notes written[^\n]*after word\n/u);
+  assert.match(final, /Hi /u, "and the person's word is there");
+  const human = h.commits.find((c) => c.principal === "ann");
+  assert.ok(human, "the person's edit committed");
+  assert.match(human.body, /Status written[^\n]*after word/u, "it keeps the Agent's words still being written");
+  const resumed = new PageSession(h.ports);
+  cleanups.push(() => resumed.destroy());
+  await resumed.ensureLoaded(agent, interrupted);
+  assert.match(resumed.markdown(), /Status written[^\n]*after word\n/u);
+  assert.match(resumed.markdown(), /Notes written[^\n]*after word\n/u);
+  assert.match(resumed.markdown(), /Hi /u);
+  assert.equal(await resumed.commit(), null, "recovering both presentations repeats no commit");
+});
+
 test("an Agent edit answers which sections it removed and which Automations it detached", async () => {
   const h = harness();
   const ann = await annConnected(h);

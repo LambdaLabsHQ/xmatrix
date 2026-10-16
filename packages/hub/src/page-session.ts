@@ -74,8 +74,8 @@ export interface PageSessionState {
   update: Uint8Array;
   editors: PendingEditor[];
   editSeq: number;
-  /** Last planned presentation of the committed base; recovery finishes it without another commit. */
-  writingFrom?: string;
+  /** Committed edits still being presented; recovery completes them without another commit. */
+  writing?: Array<{ shown: string; target: string }>;
   /** Where each Agent's caret rests, by awareness client id (absent before carets rested). */
   agents?: RestingAgent[];
 }
@@ -210,8 +210,12 @@ export class PageSession {
   private readonly connections = new Map<string, PageSessionConnection>();
   private readonly connectionClients = new Map<string, Set<number>>();
   private readonly editors = new Map<string, PendingEditor>();
+  /**
+   * Agent edits committed but still being written into the live text: what of each is in it so far,
+   * and all of it. Several Agents write at once, each outside the session's queue.
+   */
+  private readonly writing = new Set<{ shown: string; target: string }>();
   private editSeq = 0;
-  private writingFrom: string | undefined;
   private agentClocks = new Map<number, number>();
   private readonly resting = new Map<number, RestingAgent>();
   /** Agents co-writing the page live, by their runtime's connection. */
@@ -302,7 +306,7 @@ export class PageSession {
 
   /** Marks the document settled when it reads as the committed base. */
   private settle(): void {
-    if (this.base && this.markdown() === this.base.body) this.settledVersion = this.version;
+    if (this.base && this.writing.size === 0 && this.markdown() === this.base.body) this.settledVersion = this.version;
   }
 
   /**
@@ -324,8 +328,7 @@ export class PageSession {
       if (this.base) return;
       if (persisted) {
         Y.applyUpdate(this.doc, persisted.update, "load");
-        const base = this.canonical(persisted.base);
-        this.setHead(base);
+        this.setHead(this.canonical(persisted.base));
         this.editSeq = persisted.editSeq;
         for (const editor of persisted.editors) this.editors.set(principalKey(editor.principal), editor);
         for (const agent of persisted.agents ?? []) {
@@ -343,10 +346,13 @@ export class PageSession {
           }, "load");
           await this.persist();
         }
-        // Persisted human edits stay on top of the last presented document state.
-        // The rest of an already committed edit must not become their next deletion.
-        if (persisted.writingFrom !== undefined) {
-          this.adopt(persisted.writingFrom, base.body, "load");
+        // Use the same completion model as a human save during concurrent writing.
+        // Partial presentation must not become the next human editor's deletion.
+        if (persisted.writing?.length) {
+          for (const stream of persisted.writing) this.writing.add({ ...stream });
+          const completed = this.completed(this.markdown());
+          this.writing.clear();
+          setPageFragmentMarkdown(this.fragment, completed, "load");
           await this.persist();
         }
         this.settle();
@@ -366,7 +372,7 @@ export class PageSession {
     if (!this.base || this.ended) return;
     await this.ports.persist({ base: this.base, update: Y.encodeStateAsUpdate(this.doc),
       editors: [...this.editors.values()], editSeq: this.editSeq, agents: [...this.resting.values()],
-      ...(this.writingFrom !== undefined ? { writingFrom: this.writingFrom } : {}) });
+      ...(this.writing.size ? { writing: [...this.writing].map((stream) => ({ ...stream })) } : {}) });
   }
 
   /**
@@ -490,7 +496,8 @@ export class PageSession {
     if (!this.base) return null;
     // Commit a snapshot. Edits that arrive while the commit is in flight stay
     // pending, with their authors, for the next commit.
-    const snapshot = this.markdown();
+    // What Agents are still writing in is committed already; people's edits commit around it.
+    const snapshot = this.completed(this.markdown());
     const snapshotVersion = this.version;
     const snapshotSeq = this.editSeq;
     if (snapshot === this.base.body) {
@@ -540,6 +547,16 @@ export class PageSession {
     this.ports.broadcast(encodeNotice({ type: "committed", revision: result.revision,
       headRevision: result.headRevision, author: author.label, detachedAutomations: result.detachedAutomations }));
     return { revision: result.revision, kind: result.kind };
+  }
+
+  /** The live text as it reads once every Agent still writing has finished: what is committed, with people's edits. */
+  private completed(live: string): string {
+    let text = live;
+    for (const stream of this.writing) {
+      const merged = mergePageText(stream.shown, text, stream.target);
+      if (merged.ok) text = merged.text;
+    }
+    return text;
   }
 
   /**
@@ -669,7 +686,7 @@ export class PageSession {
         const result = await this.ports.commit(principal, { baseRevision: input.baseRevision, body: input.body,
           conversationIds: input.conversationIds, coAuthors: [], blockIds: [] });
         this.ports.broadcast(encodeNotice({ type: "suggestion", revision: result.revision, author: principal.label }));
-        return { ...result, removedSections: [] };
+        return { done: { ...result, removedSections: [] } as PageEditResult };
       }
       // Pending human edits commit under their own authors first.
       await this.commitNow();
@@ -682,7 +699,7 @@ export class PageSession {
         this.adopt(live, merged.ok ? canonicalPageMarkdown(merged.text) : head.body, "server");
         this.setHead(head);
       }
-      const current = this.markdown();
+      const current = this.completed(this.markdown());
       const baseText = input.baseRevision === this.base.revision ? this.base.body
         : canonicalPageMarkdown(await this.ports.loadRevision(principal, input.baseRevision));
       const merge = mergePageText(baseText, current, canonicalPageMarkdown(input.body));
@@ -701,37 +718,48 @@ export class PageSession {
       if (result.kind === "suggestion") {
         this.setHead({ ...this.base, agentSuggestOnly: result.agentSuggestOnly });
         this.ports.broadcast(encodeNotice({ type: "suggestion", revision: result.revision, author: principal.label }));
-        return { ...result, removedSections: [] };
+        return { done: { ...result, removedSections: [] } as PageEditResult };
       }
       this.setHead({ ...this.base, revision: result.headRevision, body: merged.text,
         agentSuggestOnly: result.agentSuggestOnly });
-      // The Agent writes it in as a person would, a few words at a time under its caret; edits people
-      // make meanwhile are kept, as each step merges into the live text.
+      const stream = { shown: current, target: merged.text };
+      this.writing.add(stream);
+      return { writing: { result, stream, current, target: merged.text, key, conversationId } };
+    }).then(async (edit): Promise<PageEditResult> => {
+      if (edit.done) return edit.done;
+      const { result, stream, current, target, key, conversationId } = edit.writing!;
+      // The Agent writes it in as a person would, a few words at a time under its caret and outside the
+      // session's queue, so other Agents write at the same time; edits people make meanwhile are kept,
+      // as each step merges into the live text. It is written under the Agent's awareness id, so readers
+      // see whose text it is.
       const user = { name: principal.label, color: pageAuthorColor(principal), kind: principal.kind, conversationId };
       const pace = this.ports.writePaceMs ?? 0;
-      const steps = pace > 0 ? pageWritingSteps(current, merged.text) : [merged.text];
-      let from = current;
+      const steps = pace > 0 ? pageWritingSteps(current, target) : [target];
       let change: ReturnType<PageSession["adopt"]> = { cursor: null, block: "" };
-      for (const [index, step] of steps.entries()) {
-        // The doc update captures this planned baseline in its persisted state. Live
-        // human edits remain separate, and recovery merges the committed remainder.
-        this.writingFrom = step;
-        const written = authoredAs(this.doc, agentClientId(key), () => this.adopt(from, step, `agent:${key}`));
-        if (written.cursor) change = written;
-        from = step;
-        const at = change.cursor ? Y.relativePositionToJSON(change.cursor) : null;
-        const last = index === steps.length - 1;
-        // The cursor rests where the Agent's change ends.
-        this.agentAwareness(principal, { user, activity: last ? "editing" : "writing", block: change.block,
-          ...(at ? { cursor: { anchor: at, head: at } } : {}) });
-        if (!last) await new Promise((resolve) => setTimeout(resolve, pace));
+      try {
+        for (const [index, step] of steps.entries()) {
+          const from = stream.shown;
+          // The doc update captures the baseline it presents in its persisted state.
+          stream.shown = step;
+          const written = authoredAs(this.doc, agentClientId(key), () => this.adopt(from, step, `agent:${key}`));
+          if (written.cursor) change = written;
+          const at = change.cursor ? Y.relativePositionToJSON(change.cursor) : null;
+          const last = index === steps.length - 1;
+          // The cursor rests where the Agent's change ends.
+          this.agentAwareness(principal, { user, activity: last ? "editing" : "writing", block: change.block,
+            ...(at ? { cursor: { anchor: at, head: at } } : {}) });
+          if (!last) await new Promise((resolve) => setTimeout(resolve, pace));
+        }
+      } finally {
+        this.writing.delete(stream);
       }
-      this.writingFrom = undefined;
-      this.settle();
-      await this.persist();
+      await this.serial(async () => {
+        this.settle();
+        await this.persist();
+      });
       this.ports.broadcast(encodeNotice({ type: "committed", revision: result.revision,
         headRevision: result.headRevision, author: principal.label, detachedAutomations: result.detachedAutomations }));
-      return { ...result, removedSections: pageRemovedSections(current, merged.text) };
+      return { ...result, removedSections: pageRemovedSections(current, target) };
     });
   }
 
