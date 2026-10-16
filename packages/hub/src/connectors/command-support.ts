@@ -103,6 +103,9 @@ export async function publishCommandStatus(manifest: AppConnectorProviderManifes
     messageId: `system:${input.messageId}:${manifest.id}`.slice(0, 200),
     channelId: input.channelId,
     body: `App connector command status:\n${lines.map((line) => `- ${line}`).join("\n")}`,
+    // Paid X work is already charged before I/O. Its receipt must remain
+    // publishable when that call used the final credit or was refused.
+    ...(manifest.id === "x" ? { messageKind: "xmatrix.system.x_receipt" } : {}),
     principal: { kind: "user", id: input.actorUserId },
     appAuthorId: manifest.id,
     residual: { appMetadata: { xmatrixProvenance: "system_fact" },

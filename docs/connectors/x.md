@@ -70,6 +70,26 @@ pays for. The Hub meters each one (token exchange and refresh included) to the
 Space it serves, by API operation and Hub action, never by post, user or
 account id; see [usage cost metering](../operations/usage-cost-metering.md).
 
+## Credits
+
+Paid X operations require Pro and use the Space's existing credit balance before
+provider I/O, including actions approved or initiated by a Human. The company
+application remains responsible for X's bill; users only connect their account.
+Plain posts cost 30 credits; URL, quote and attached-media posts use the
+conservative 400-credit tier. Post reads cost 10 per returned post (a timeline
+reserves ten first), and profile lookups cost 20 each, including Connect and
+Check. Media upload and status requests provisionally cost 30 each; this is
+an explicit retail rate pending verification of X's actual media charges.
+A video reserves its whole bounded chunk count before initialize and refunds
+unused requests. OAuth token exchange/refresh and local account listing are free.
+
+Rejected admission makes no paid request. Replays cannot repeat the charge or
+public write. Pre-request failures and definite provider rejections are refunded;
+uncertain outcomes retain the reservation. Results show credits charged/reserved
+and remaining. The operator's configured platform admin Space is waived but
+still metered. See [Agent credits](../design/agent-credits.md#paid-x-calls) for
+the rates, permanent receipt authority, refund and reconciliation contract.
+
 ## Actions and publishing approval
 
 `xmatrix connector list` is the runtime command reference. Actions start from

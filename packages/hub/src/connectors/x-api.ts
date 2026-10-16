@@ -1,6 +1,7 @@
 import type { PostgresAppCredentialRepository, ResolvedAppCredentials } from "@xmatrix/db";
 import type { Env } from "../types";
-import { upstreamMeter, type UpstreamMeter } from "../usage-cost-metering";
+import type { UpstreamMeter } from "../usage-cost-metering";
+import { paidXCalls } from "../billing-paid-calls";
 import { getChannel } from "../spaces";
 import { record } from "./command-support";
 import { connectorCredentialRepository } from "./credentials";
@@ -80,9 +81,8 @@ function allowedPath(account: XAccountView, method: "GET" | "POST", path: string
 }
 
 export function xActionCapability(env: Env, input: { spaceId: string; channelId: string; actorUserId: string;
-  action: string; authorizeWrite: () => Promise<void> }): XActionCapability {
+  action: string; billingKey: string; authorizeWrite: () => Promise<void> }): XActionCapability {
   const store = connectorCredentialRepository(env);
-  const meter = upstreamMeter(env, { spaceId: input.spaceId, connector: "x", action: input.action });
   const live = async () => {
     const { channel } = await getChannel(env, { channelId: input.channelId, principal: { kind: "user", id: input.actorUserId } });
     if (record(channel).spaceId !== input.spaceId) throw new ProviderRequestError(403, "The X Channel access changed");
@@ -90,7 +90,16 @@ export function xActionCapability(env: Env, input: { spaceId: string; channelId:
     if (stored?.status !== "configured") throw new ProviderRequestError(409, "Connect X to this Space first");
     return stored;
   };
+  const paid = paidXCalls(env, { ...input, beforeCall: async operation => {
+    await live();
+    if (operation === "posts_create" || ["media_initialize", "media_append", "media_finalize"].includes(operation)) {
+      await input.authorizeWrite();
+    }
+  } });
+  const meter = paid.meter;
   return {
+    reserveMedia: maximum => paid.reserveMedia(maximum),
+    billingSummary: () => paid.summary(),
     accounts: async () => parseXAccounts((await live()).values.accounts).filter(a => a.ownerUserId === input.actorUserId).map(view),
     request: async (account, method, path, body) => {
       if (!allowedPath(account, method, path)) throw new ProviderRequestError(403, "This X API endpoint is unavailable");
@@ -118,16 +127,19 @@ export function xActionCapability(env: Env, input: { spaceId: string; channelId:
 }
 
 /** Check uses each account's own grant, refreshing it through the same durable fence. */
-export async function verifyXConnection(env: Env, spaceId: string): Promise<void> {
+export async function verifyXConnection(env: Env, spaceId: string, commandId: string): Promise<string> {
   const store = connectorCredentialRepository(env), client = oauthClient(env, "x");
   if (!client) throw new ProviderRequestError(503, "The X company app is not configured");
   const stored = await store.resolve({ requestId: crypto.randomUUID(), spaceId, providerId: "x" });
   const accounts = parseXAccounts(stored?.values.accounts);
   if (!accounts.length) throw new ProviderRequestError(401, "Connect an X account first");
-  const meter = upstreamMeter(env, { spaceId, connector: "x", action: "verify" });
   let working = 0, failure: unknown;
+  const summaries: string[] = [];
   for (const account of accounts) {
+    const paid = paidXCalls(env, { spaceId, actorUserId: account.ownerUserId,
+      billingKey: `verify:${commandId}:${account.id}`, action: "verify" });
     try {
+      const meter = paid.meter;
       const current = await refreshXAccount(store, spaceId, client, account, meter);
       const result = record((await xProviderJson("/2/users/me", { headers: { authorization: `Bearer ${current.accessToken}` } }, meter)).data);
       if (result.id !== account.id) throw new ProviderRequestError(401, "X did not confirm the selected account");
@@ -137,7 +149,11 @@ export async function verifyXConnection(env: Env, spaceId: string): Promise<void
       if (error instanceof ProviderRequestError && error.status === 401) {
         await updateAccount(store, spaceId, account, a => ({ ...a, needsReconnect: true }));
       }
+    } finally {
+      if (paid.summary()) summaries.push(paid.summary());
     }
   }
-  if (!working) throw failure;
+  if (!working) throw new ProviderRequestError(failure instanceof ProviderRequestError ? failure.status : 502,
+    `${failure instanceof Error ? failure.message : "X check failed"}${summaries.length ? `; ${summaries.join("; ")}` : ""}`);
+  return summaries.join("; ");
 }

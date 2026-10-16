@@ -88,10 +88,15 @@ CLOUDFLARE_ACCOUNT_ID=<production account id> \
 `--from`/`--to` (ISO 8601) set an exact window, `--space <id>` one Space,
 `--json` machine-readable output. The Jev estimate uses
 `--jev-input-usd-per-mtok` (default 0.042) and `--jev-output-usd-per-mtok`
-(default 0). Those defaults are a third-party-reported price, not verified
-against a Vercel invoice; reconcile them with the AI Gateway bill before
-treating the estimate as cost. Composio and X calls are reported as counts;
-price them with the current contract.
+(default 0). Those defaults match [TypeSafe's official Jev announcement](https://typesafe.ai/blog/introducing-system-one-models-and-jev)
+($0.042/M input, free output), verified 2026-10-16. Reconcile them with the
+AI Gateway invoice before treating the estimate as actual spend. Composio and X calls are reported as counts;
+price them with the current contract. A call count is not a bill: X OAuth
+requests are free, resource reads have per-resource rates, and media upload
+rates still need Developer Console verification. X retail credit reservation
+uses the separate [Agent credit policy](../design/agent-credits.md#paid-x-calls),
+not a hidden monthly operator budget. Composio public prices are not evidence
+of the operator's actual contract.
 
 An example query, Jev tokens by Space and feature over the last day:
 

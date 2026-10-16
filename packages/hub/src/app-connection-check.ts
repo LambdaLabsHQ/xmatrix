@@ -22,7 +22,8 @@ export async function checkAppConnection(env: Env, input: {
   let message = `${String(connection.providerName)} connection check passed`;
   try {
     await checkAppConnectorProviderConnection(env, connection);
-    await verifyConnectorConnection(env, input.spaceId, String(connection.providerId));
+    const billing = await verifyConnectorConnection(env, input.spaceId, String(connection.providerId), input.commandId);
+    if (billing) message += `; ${billing}`;
   } catch (error) {
     ok = false;
     message = error instanceof Error ? error.message.slice(0, 240) : "Connector provider check failed";
