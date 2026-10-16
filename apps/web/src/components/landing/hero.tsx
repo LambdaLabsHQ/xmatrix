@@ -26,7 +26,7 @@ export function Hero() {
           <h1 className="site-display max-w-full text-5xl font-semibold leading-[0.96] text-[#171714] sm:text-6xl lg:text-7xl">
             xMatrix
             <span className="mt-3 block text-3xl leading-[1.02] text-[#6d6c67] sm:text-4xl lg:text-5xl">
-              Just talk. Your agents keep the pages current.
+              Attention is all you need.
             </span>
           </h1>
 
