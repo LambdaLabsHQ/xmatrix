@@ -127,6 +127,7 @@ async fn handle_daemon_spawn_request(
     failure_repo_pool_binding: &mut Option<DaemonRepoPoolBinding>,
 ) -> error::Result<SpawnedHeadlessAgent> {
     *failure_repo_pool_binding = None;
+    let admitted_at = std::time::Instant::now();
     let registered_intent = resolve_registration_spawn(intent, machine_id)?;
     let intent = &registered_intent;
     let registration = intent
@@ -302,18 +303,6 @@ async fn handle_daemon_spawn_request(
     let mut repo_pool_layout: Option<repo_pool::RepoPoolLayout> = None;
     let mut repo_pool_request: Option<repo_pool::LeaseRequest> = None;
     let mut repo_pool_spawn_claim: Option<DaemonRepoPoolSpawnClaim> = None;
-    let remote_repo_checkout_candidates = if intent.remote_repo.is_some() {
-        daemon_local_workspace_cwds(
-            hub_url,
-            &machine_credential,
-            machine_id,
-            host_id,
-            &workspace,
-        )
-        .await
-    } else {
-        Vec::new()
-    };
     let adopted_intent = adopt_retained_repo_pool_authority(intent).await?;
     let intent = adopted_intent.as_ref().unwrap_or(intent);
     let has_resume_pool_authority = daemon_repo_pool_authority(intent)?;
@@ -352,9 +341,14 @@ async fn handle_daemon_spawn_request(
                 "reborn repo pool authority does not match repo identity".into(),
             ));
         }
-        reclaim_worktree_storage_for_registry(run_registry).await;
         let pools_root = repo_pool::default_repo_pools_root()
             .map_err(|error| CliError::Launch(format!("repo pool root unavailable ({error})")))?;
+        // Reclaiming disk serves the launches after this one: it waits for this
+        // lease unless this launch needs the room itself.
+        let reclaim_first = worktree_storage_needs_room(&pools_root);
+        if reclaim_first {
+            reclaim_worktree_storage_for_registry(run_registry).await;
+        }
         let layout = repo_pool::RepoPoolLayout::create(&pools_root, repo_key.clone())
             .map_err(|error| CliError::Launch(format!("repo pool layout unavailable ({error})")))?;
         // The child later receives a Space-scoped GitHub token. Issue that
@@ -574,7 +568,7 @@ async fn handle_daemon_spawn_request(
             execution_key: execution_key.to_string(),
         };
         eprintln!(
-            "{} repo pool slot {} ({} from {})",
+            "{} repo pool slot {} ({} from {}, {} ms after admission)",
             "✓".green().bold(),
             lease.worktree_path.display(),
             if intent.handoff_transfer {
@@ -588,8 +582,15 @@ async fn handle_daemon_spawn_request(
             } else {
                 "created"
             },
-            lease.base_ref
+            lease.base_ref,
+            admitted_at.elapsed().as_millis()
         );
+        if !reclaim_first {
+            let run_registry = run_registry.clone();
+            tokio::spawn(async move {
+                reclaim_worktree_storage_for_registry(&run_registry).await;
+            });
+        }
         if !intent.resume && !intent.handoff_transfer {
             // This lease may have taken the pool's spare; check out the next
             // one now so the next new session skips the full checkout. Its
@@ -675,6 +676,15 @@ async fn handle_daemon_spawn_request(
                     "{} preparing remote repo worktree for {remote_repo} (streaming git fetch progress; stall only if download stops)",
                     "↓".cyan()
                 );
+                // Only this path checks out from the machine's other registered checkouts.
+                let remote_repo_checkout_candidates = daemon_local_workspace_cwds(
+                    hub_url,
+                    &machine_credential,
+                    machine_id,
+                    host_id,
+                    &workspace,
+                )
+                .await;
                 run_worktree::materialize_run_worktree_for_remote_with_candidates(
                     base_cwd,
                     &remote_repo_checkout_candidates,
@@ -2609,6 +2619,15 @@ async fn spawn_headless_agent(
         _auth_grant: auth_grant,
         _request_grant: request_grant,
     })
+}
+
+/// Whether a new checkout may not find the disk it needs until worktree
+/// storage is reclaimed: the run worktree volume is under its warning mark, or
+/// the pool's own would refuse a new tree.
+fn worktree_storage_needs_room(pools_root: &Path) -> bool {
+    let root = run_worktree::run_worktrees_root();
+    matches!(run_worktree::volume_available_bytes(&root), Some(bytes) if bytes < run_worktree::disk_warn_bytes())
+        || run_worktree::new_worktree_storage_denied_reason(pools_root).is_some()
 }
 
 async fn reclaim_worktree_storage_for_registry(run_registry: &DaemonRunRegistry) {
