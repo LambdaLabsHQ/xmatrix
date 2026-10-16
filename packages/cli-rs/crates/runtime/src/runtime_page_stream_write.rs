@@ -659,6 +659,22 @@ mod tests {
                 .unwrap()
                 .unwrap()
         }
+
+        /// The session receives these, in order.
+        async fn expect(&mut self, frames: &[serde_json::Value]) {
+            for frame in frames {
+                assert_eq!(&self.next().await, frame);
+            }
+        }
+    }
+
+    /// The way to the fake Hub's page sessions, as a Run's runtime has it.
+    fn connector_for(hub: &FakePageHub) -> PageCoWriteConnector {
+        crate::ensure_reqwest_crypto_provider();
+        PageCoWriteConnector::new(
+            hub.url.clone(),
+            std::sync::Arc::new(std::sync::RwLock::new("run-token".into())),
+        )
     }
 
     fn start_writing(
@@ -668,11 +684,7 @@ mod tests {
         mpsc::UnboundedSender<Piece>,
         mpsc::UnboundedReceiver<AgentInstanceConnectionEvent>,
     ) {
-        crate::ensure_reqwest_crypto_provider();
-        let connector = PageCoWriteConnector::new(
-            hub.url.clone(),
-            std::sync::Arc::new(std::sync::RwLock::new("run-token".into())),
-        );
+        let connector = connector_for(hub);
         let (events, heard) = mpsc::unbounded_channel();
         let (to, pieces) = mpsc::unbounded_channel();
         tokio::spawn(write_into(
@@ -693,18 +705,12 @@ mod tests {
         to.send(Piece::Text("⟦after \"x\"⟧ one".into())).unwrap();
         to.send(Piece::Text(" two".into())).unwrap();
         to.send(Piece::End { failed: false }).unwrap();
-        assert_eq!(
-            hub.next().await,
-            serde_json::json!({ "type": "write", "turn": 1 })
-        );
-        assert_eq!(
-            hub.next().await,
-            serde_json::json!({ "type": "delta", "turn": 1, "text": "⟦after \"x\"⟧ one" })
-        );
-        assert_eq!(
-            hub.next().await,
-            serde_json::json!({ "type": "delta", "turn": 1, "text": " two" })
-        );
+        hub.expect(&[
+            serde_json::json!({ "type": "write", "turn": 1 }),
+            serde_json::json!({ "type": "delta", "turn": 1, "text": "⟦after \"x\"⟧ one" }),
+            serde_json::json!({ "type": "delta", "turn": 1, "text": " two" }),
+        ])
+        .await;
         assert_eq!(
             hub.next().await,
             serde_json::json!({ "type": "done", "turn": 1 })
@@ -775,23 +781,19 @@ mod tests {
 
     #[tokio::test]
     async fn a_message_writes_into_a_page_in_one_turn_and_hears_what_did_not_land() {
-        crate::ensure_reqwest_crypto_provider();
         let mut hub = FakePageHub::start().await;
-        let connector = PageCoWriteConnector::new(
-            hub.url.clone(),
-            std::sync::Arc::new(std::sync::RwLock::new("run-token".into())),
-        );
+        let connector = connector_for(&hub);
         let writing = tokio::spawn(async move {
             connector
                 .write_once("c-message-write", PAGE, "⟦after \"x\"⟧ one")
                 .await
         });
-        assert_eq!(hub.next().await, serde_json::json!({ "type": "write", "turn": 1 }));
-        assert_eq!(
-            hub.next().await,
-            serde_json::json!({ "type": "delta", "turn": 1, "text": "⟦after \"x\"⟧ one" })
-        );
-        assert_eq!(hub.next().await, serde_json::json!({ "type": "done", "turn": 1 }));
+        hub.expect(&[
+            serde_json::json!({ "type": "write", "turn": 1 }),
+            serde_json::json!({ "type": "delta", "turn": 1, "text": "⟦after \"x\"⟧ one" }),
+            serde_json::json!({ "type": "done", "turn": 1 }),
+        ])
+        .await;
         hub.send
             .send(serde_json::json!({ "type": "outcome", "turn": 1, "problems": ["The quote is not on the page."] }))
             .unwrap();
