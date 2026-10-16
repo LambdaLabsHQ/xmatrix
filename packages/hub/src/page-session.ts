@@ -675,7 +675,7 @@ export class PageSession {
         const result = await this.ports.commit(principal, { baseRevision: input.baseRevision, body: input.body,
           conversationIds: input.conversationIds, coAuthors: [], blockIds: [] });
         this.ports.broadcast(encodeNotice({ type: "suggestion", revision: result.revision, author: principal.label }));
-        return { ...result, removedSections: [] };
+        return { done: { ...result, removedSections: [] } as PageEditResult };
       }
       // Pending human edits commit under their own authors first.
       await this.commitNow();
@@ -707,23 +707,23 @@ export class PageSession {
       if (result.kind === "suggestion") {
         this.setHead({ ...this.base, agentSuggestOnly: result.agentSuggestOnly });
         this.ports.broadcast(encodeNotice({ type: "suggestion", revision: result.revision, author: principal.label }));
-        return { ...result, removedSections: [] };
+        return { done: { ...result, removedSections: [] } as PageEditResult };
       }
       this.setHead({ ...this.base, revision: result.headRevision, body: merged.text,
         agentSuggestOnly: result.agentSuggestOnly });
       const stream = { shown: current, target: merged.text };
       this.writing.add(stream);
-      return { result, stream, current, merged, key, conversationId };
-    }).then(async (edit) => {
-      if (!("stream" in edit)) return edit;
-      const { result, stream, current, merged, key, conversationId } = edit;
+      return { writing: { result, stream, current, target: merged.text, key, conversationId } };
+    }).then(async (edit): Promise<PageEditResult> => {
+      if (edit.done) return edit.done;
+      const { result, stream, current, target, key, conversationId } = edit.writing!;
       // The Agent writes it in as a person would, a few words at a time under its caret and outside the
       // session's queue, so other Agents write at the same time; edits people make meanwhile are kept,
       // as each step merges into the live text. It is written under the Agent's awareness id, so readers
       // see whose text it is.
       const user = { name: principal.label, color: pageAuthorColor(principal), kind: principal.kind, conversationId };
       const pace = this.ports.writePaceMs ?? 0;
-      const steps = pace > 0 ? pageWritingSteps(current, merged.text) : [merged.text];
+      const steps = pace > 0 ? pageWritingSteps(current, target) : [target];
       let change: ReturnType<PageSession["adopt"]> = { cursor: null, block: "" };
       try {
         for (const [index, step] of steps.entries()) {
@@ -746,7 +746,7 @@ export class PageSession {
       });
       this.ports.broadcast(encodeNotice({ type: "committed", revision: result.revision,
         headRevision: result.headRevision, author: principal.label, detachedAutomations: result.detachedAutomations }));
-      return { ...result, removedSections: pageRemovedSections(current, merged.text) };
+      return { ...result, removedSections: pageRemovedSections(current, target) };
     });
   }
 
