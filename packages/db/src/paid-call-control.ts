@@ -5,6 +5,7 @@ import { BillingControlError, commitBillingMutation } from "./billing-control.js
 import { commandDigest } from "./command-digest.js";
 import { commandFields } from "./command-fields.js";
 import { WritableSpacePlacements } from "./placement.js";
+import { DatabaseCommitUnknownError } from "./errors.js";
 
 const { text } = commandFields(field => new BillingControlError("invalid_paid_call", 400, `${field} is invalid`));
 
@@ -57,7 +58,8 @@ export class PostgresPaidCallRepository {
     if (quoted === null || !Number.isSafeInteger(input.units) || input.units < 1) throw new BillingControlError(
       "paid_call_tariff_unavailable", 503, "This X API operation has no configured credit price; no request was sent");
     const digest = await commandDigest({ spaceId, callId, actor: input.actorUserId, kind: input.kind, units: input.units });
-    return this.spaces.transaction(crypto.randomUUID(), "billing.paid-call.reserve", spaceId, async tx => {
+    const attemptToken = crypto.randomUUID();
+    try { return await this.spaces.transaction(crypto.randomUUID(), "billing.paid-call.reserve", spaceId, async tx => {
       await this.member(tx, spaceId, input.actorUserId);
       // One attempt id is claimed before touching the balance. This serializes
       // duplicate requests even when no receipt or credit-state row exists yet.
@@ -78,17 +80,31 @@ export class PostgresPaidCallRepository {
       const reservedCredits = allocation.included + allocation.pack + allocation.grace;
       await tx.query({ name: "paid_call_receipt_create_v1", text: `INSERT INTO data.paid_call_receipts
         (space_id,call_id,actor_user_id,request_digest,kind,reserved_units,reserved_credits,allocation_json,
-         status,created_at,updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,'reserved',$9,$9)`,
-      values: [spaceId, callId, input.actorUserId, digest, input.kind, input.units, reservedCredits, JSON.stringify(allocation), now], maxRows: 0 });
+         status,created_at,updated_at,attempt_token) VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,'reserved',$9,$9,$10)`,
+      values: [spaceId, callId, input.actorUserId, digest, input.kind, input.units, reservedCredits,
+        JSON.stringify(allocation), now, attemptToken], maxRows: 0 });
       const result = { callId, reservedCredits, chargedCredits: reservedCredits, remainingCredits: allocation.remaining, replayed: false };
       await commitBillingMutation(tx, { spaceId, commandId: `paid-call-reserve:${callId}`, kind: "paid-call-reserve",
         requestDigest: digest, result, aggregateId: callId, now });
       return result;
-    });
+    }); } catch (error) {
+      if (!(error instanceof DatabaseCommitUnknownError)) throw error;
+      // The caller has not received admission, so this invocation cannot have
+      // sent X. A fresh attempt token prevents an uncertain COMMIT on a replay
+      // from refunding the original invocation that may already be calling X.
+      let refunded = false;
+      try {
+        await this.settle({ spaceId, callId, actualUnits: 0, outcome: "rejected", announce: false, attemptToken });
+        refunded = true;
+      } catch { /* Missing receipt, another invocation, or unconfirmed refund: never call X. */ }
+      throw new BillingControlError("paid_call_admission_unconfirmed", 503, refunded
+        ? "Credit admission confirmation was lost; its reservation was refunded. No X request was sent"
+        : "Credit admission could not be confirmed. No X request was sent by this attempt; any reservation needs reconciliation");
+    }
   }
 
   async settle(input: { spaceId: string; callId: string; actualUnits: number;
-    outcome: "ok" | "rejected" | "uncertain"; announce: boolean }): Promise<PaidCallReceipt> {
+    outcome: "ok" | "rejected" | "uncertain"; announce: boolean; attemptToken?: string }): Promise<PaidCallReceipt> {
     const spaceId = text(input.spaceId, "spaceId"), callId = text(input.callId, "callId", 200);
     const policy = this.billing.paidCalls;
     if (!policy) return { callId, reservedCredits: 0, chargedCredits: 0, remainingCredits: 0, replayed: false };
@@ -96,6 +112,8 @@ export class PostgresPaidCallRepository {
       const row = (await tx.query({ name: "paid_call_settlement_lock_v1", text: `SELECT * FROM data.paid_call_receipts
         WHERE space_id=$1 AND call_id=$2 FOR UPDATE`, values: [spaceId, callId], maxRows: 1 }))[0];
       if (!row) throw new BillingControlError("paid_call_not_found", 404, "Paid call receipt is unavailable");
+      if (input.attemptToken !== undefined && row.attempt_token !== input.attemptToken) throw new BillingControlError(
+        "paid_call_attempt_conflict", 409, "This invocation does not own the paid call reservation");
       if (!Number.isSafeInteger(input.actualUnits) || input.actualUnits < 0 || input.actualUnits > Number(row.reserved_units)) {
         throw new BillingControlError("invalid_paid_call_settlement", 400, "Paid call settlement exceeds its reservation");
       }

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { Client } from "pg";
 import { connectionString, integration, postgresDatabase } from "./postgres-database.fixture.mjs";
 import { spaceBilling } from "../../billing-official/dist/index.js";
-import { createAuthorityDatabase, PostgresPaidCallRepository } from "../dist/index.js";
+import { createAuthorityDatabase, DatabaseCommitUnknownError, PostgresPaidCallRepository } from "../dist/index.js";
 
 // Own the financial contract on real concurrent PostgreSQL connections:
 // complete admission, allocation/refund across buckets, and permanent receipts.
@@ -33,7 +33,7 @@ async function fixture(run) {
       (space_id,billing_owner_user_id,billing_provider,provider_customer_id,provider_subscription_id,provider_price_id,
        plan,status,seat_quantity,provider_event_created_at,version,created_at,updated_at)
       VALUES ($1,$1,'stripe',$1,$1,'price','pro','active',1,now(),1,now(),now())`, [id]);
-    await run({ id, client, repository, base, reserve, settle, counters, pro });
+    await run({ id, client, db, repository, base, reserve, settle, counters, pro });
   } finally {
     for (const table of ["paid_call_receipts", "space_credit_state", "space_billing_subscriptions", "space_control_heads",
       "idempotency_keys", "outbox", "space_members", "spaces"]) await client.query(`DELETE FROM data.${table} WHERE space_id=$1`, [id]);
@@ -69,6 +69,24 @@ integration("paid X admits Pro members, splits a complete charge and refunds it 
   assert.equal(waived.reservedCredits, 0);
   await f.settle("operator");
   assert.deepEqual(await f.counters(), [4990,0,0,20]);
+}));
+
+integration("a lost admission COMMIT refunds only its invocation, never an in-flight original on replay", () => fixture(async f => {
+  await f.pro();
+  const uncertain = new PostgresPaidCallRepository({ ...f.db, async transaction(context, callback) {
+    const result = await f.db.transaction(context, callback);
+    if (context.placement && context.operation === "billing.paid-call.reserve") throw new DatabaseCommitUnknownError("08006");
+    return result;
+  } }, spaceBilling);
+  const request = callId => uncertain.reserve({ ...f.base, callId, kind: "x_post_url", units: 1 });
+  await assert.rejects(request("unsent"), error => error.code === "paid_call_admission_unconfirmed" && /refunded/u.test(error.message));
+  assert.deepEqual(await f.counters(), [0,0,0,0], "an unsent reserve is released after the lost acknowledgement");
+  assert.equal((await f.reserve("unsent", "x_post_url")).replayed, true);
+  await f.reserve("original-running", "x_post_url");
+  await assert.rejects(request("original-running"), error => error.code === "paid_call_admission_unconfirmed");
+  assert.deepEqual(await f.counters(), [400,0,0,0], "the replay's uncertain COMMIT cannot refund another invocation");
+  await f.settle("original-running");
+  assert.deepEqual(await f.counters(), [400,0,0,0]);
 }));
 
 integration("racing paid calls cannot overspend or claim the same attempt twice", () => fixture(async f => {

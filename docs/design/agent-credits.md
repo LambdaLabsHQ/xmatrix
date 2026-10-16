@@ -108,7 +108,7 @@ messages so they can report success, failure or refusal even at zero balance.
 | X operation | Credits | Unit |
 | --- | ---: | --- |
 | Create a plain text post | 30 | Request |
-| Create a post with a URL, quote or attached media | 400 | Request (conservative URL tier) |
+| Create a post with a URL, quote or attached media | 400 | Request (URL tier; quote/media provisional) |
 | Read posts | 10 | Returned post; timeline reserves ten posts first |
 | Read an account profile (including Connect/Check) | 20 | Returned profile |
 | Media initialize, append, finalize or status | 30 | Attempted request; **provisional retail rate** |
@@ -116,7 +116,8 @@ messages so they can report success, failure or refusal even at zero balance.
 Post/read rates use [X's official pricing](https://docs.x.com/x-api/getting-started/pricing),
 checked 2026-10-16: $0.015/plain post, $0.200/URL post, $0.005/post read,
 $0.010/user read. Divide by the $0.0005 planning budget and round up. Quote
-and attached-media posts conservatively use the URL tier. These are xMatrix
+and attached-media posts temporarily use the URL tier; their upstream fee
+classification still needs Developer Console verification. These are xMatrix
 retail credit prices; provider rate changes require policy and documentation
 updates. Media upload/status prices are **not verified upstream costs**: X's
 public table does not list these endpoints. Keep the existing video feature,

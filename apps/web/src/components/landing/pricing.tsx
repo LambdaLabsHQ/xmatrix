@@ -114,13 +114,13 @@ export function Pricing() {
             <thead><tr className="border-b"><th className="py-2 font-medium">Action</th><th className="py-2 font-medium">Credits</th></tr></thead>
             <tbody>
               <tr className="border-b"><td className="py-2">Plain text post</td><td>30 / request</td></tr>
-              <tr className="border-b"><td className="py-2">Post with a URL, quote or attached media</td><td>400 / request</td></tr>
+              <tr className="border-b"><td className="py-2">Post with a URL, quote or attached media</td><td>400 / request*</td></tr>
               <tr className="border-b"><td className="py-2">Read posts or a timeline</td><td>10 / returned post</td></tr>
               <tr className="border-b"><td className="py-2">Profile lookup, including Connect and Check</td><td>20 / profile</td></tr>
               <tr><td className="py-2">Media upload requests and status</td><td>30 / request, provisional</td></tr>
             </tbody>
           </table>
-          <p className="mt-3 text-xs leading-5 text-muted-foreground">A timeline reserves up to 100 credits and a video reserves its maximum upload request count; unused requests are released. Media pricing is temporary pending verification of upstream charges. Approval requests, local account lists and token refresh are free. Pre-request failures and definite X rejections are refunded; uncertain outcomes retain their reservation. Results show credits charged or reserved and remaining.</p>
+          <p className="mt-3 text-xs leading-5 text-muted-foreground">A timeline reserves up to 100 credits and a video reserves its maximum upload request count; unused requests are released. *Quote/attached-media and media upload/status pricing is provisional pending verification of upstream charges. Approval requests, local account lists and token refresh are free. Pre-request failures and definite X rejections are refunded; uncertain outcomes retain their reservation. Results show credits charged or reserved and remaining.</p>
         </div>
       </div>
     </section>

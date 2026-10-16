@@ -32,8 +32,8 @@ These calls use the same balance, including actions a person approves or runs:
 
 A timeline reserves up to 100 credits, then releases credits for posts not returned.
 A video reserves its maximum upload request count first, then releases unused
-requests. Media's rate is a temporary xMatrix price pending verification of X's
-upstream charges. Approval requests, local account lists and OAuth token refresh
+requests. Media upload/status and the quote/attached-media tier are temporary xMatrix
+prices pending verification of X's upstream charges. Approval requests, local account lists and OAuth token refresh
 cost no credits. Pre-request failures and definite X rejections are refunded;
 uncertain outcomes retain the reservation. Results show charged or reserved
 credits and remaining balance. A refused request makes no paid X call. Human

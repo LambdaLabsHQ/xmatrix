@@ -76,7 +76,7 @@ Paid X operations require Pro and use the Space's existing credit balance before
 provider I/O, including actions approved or initiated by a Human. The company
 application remains responsible for X's bill; users only connect their account.
 Plain posts cost 30 credits; URL, quote and attached-media posts use the
-conservative 400-credit tier. Post reads cost 10 per returned post (a timeline
+400-credit tier (provisional for quotes and attached media). Post reads cost 10 per returned post (a timeline
 reserves ten first), and profile lookups cost 20 each, including Connect and
 Check. Media upload and status requests provisionally cost 30 each; this is
 an explicit retail rate pending verification of X's actual media charges.

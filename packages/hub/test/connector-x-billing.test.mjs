@@ -30,8 +30,11 @@ function fixture(overrides = {}) {
 
 test("X tariff metadata recognizes bare links and quote links without exporting text", () => {
   assert.deepEqual(xCallPrice("posts_create", { text: "No link in this post" }), { kind: "x_post", maximumUnits: 1 });
-  for (const text of ["Read https://example.com/report", "Read example.com/report", "Read 例子.中国"]) {
+  for (const text of ["Read https://example.com/report", "Read example.com/report", "Read https://例子.中国", "README.md"]) {
     assert.deepEqual(xCallPrice("posts_create", { text }), { kind: "x_post_url", maximumUnits: 1 });
+  }
+  for (const text of ["Node.js and Next.js", "file.ts"]) {
+    assert.deepEqual(xCallPrice("posts_create", { text }), { kind: "x_post", maximumUnits: 1 });
   }
   assert.deepEqual(xCallPrice("posts_create", { text: "A quote", quote_tweet_id: "123" }), { kind: "x_post_url", maximumUnits: 1 });
   assert.deepEqual(xCallPrice("user_posts_read"), { kind: "x_post_read", maximumUnits: 10 });

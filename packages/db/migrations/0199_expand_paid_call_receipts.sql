@@ -5,6 +5,7 @@ CREATE TABLE data.paid_call_receipts (
   call_id TEXT NOT NULL CHECK (length(call_id) BETWEEN 1 AND 200),
   actor_user_id TEXT NOT NULL,
   request_digest TEXT NOT NULL,
+  attempt_token TEXT NOT NULL,
   kind TEXT NOT NULL,
   reserved_units INTEGER NOT NULL CHECK (reserved_units BETWEEN 1 AND 10000),
   reserved_credits BIGINT NOT NULL CHECK (reserved_credits >= 0),

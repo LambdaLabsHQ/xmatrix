@@ -27,10 +27,8 @@ function xOperation(method: string, path: string): string {
 export function xCallPrice(operation: string, json?: unknown): UpstreamCallPrice | undefined {
   const body = record(json);
   const text = typeof body.text === "string" ? body.text : "";
-  // twitter-text's bundled TLD list can lag X. Recognize explicit URLs and
-  // Unicode/new bare domains conservatively rather than underprice a link.
-  const linked = twitterText.extractUrls(text).length > 0 || /https?:\/\/\S+/iu.test(text) ||
-    /(?<![\p{L}\p{N}_@.-])(?:[\p{L}\p{N}][\p{L}\p{N}-]*\.)+[\p{L}]{2,}(?=$|[\s/?!.,;:)#])/u.test(text);
+  // Follow X's URL extraction instead of treating every extension as a TLD.
+  const linked = twitterText.extractUrls(text).length > 0 || /https?:\/\/\S+/iu.test(text);
   if (operation === "oauth_token") return undefined;
   if (operation === "posts_create") return { kind: body.quote_tweet_id !== undefined || body.media !== undefined ||
     linked ? "x_post_url" : "x_post", maximumUnits: 1 };

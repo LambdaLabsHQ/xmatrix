@@ -116,3 +116,25 @@ FORMAT JSON
 Send it as the request body of
 `POST https://api.cloudflare.com/client/v4/accounts/<account id>/analytics_engine/sql`
 with `Authorization: Bearer <token>`.
+
+## Unconfirmed X reservations
+
+A missing settlement receipt never authorizes a provider retry. Inspect old
+reservations on the owning Space shard using the normal read-only database
+access, then reconcile against X's Developer Console before deciding a refund:
+
+```sql
+SELECT space_id, call_id, kind, reserved_units, reserved_credits, created_at
+FROM data.paid_call_receipts
+WHERE status = 'reserved' AND created_at < now() - interval '1 hour'
+ORDER BY created_at
+LIMIT 100;
+```
+
+Keep command ids/provider evidence in the authorized conversation; the ledger
+stores no post text or credentials. Do not reset or delete a receipt to retry.
+An admission COMMIT acknowledgement lost before the caller receives permission
+triggers a zero-unit settlement only if its per-invocation token owns the row.
+An ambiguous COMMIT while replaying someone else's request cannot refund that
+request. If the database also prevents this bounded refund, preserve its reserve
+and include it in this manual reconciliation.
