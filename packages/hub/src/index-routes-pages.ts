@@ -478,6 +478,8 @@ export function registerPageRoutes(app: Hono<{ Bindings: Env }>): void {
       // An Agent's runtime joins to co-write the page live (page-co-writer.ts): its Run writes, so it must
       // be able to edit, and a page that takes Agent edits only as suggestions is not written live.
       const coWriter = request.coWrite === true;
+      // A runtime streaming what its Agent writes from a conversation opens its turns itself.
+      const streams = coWriter && request.stream === true;
       if (authUser.agentRun && !coWriter) {
         throw new PageControlError("page_co_writing_required", 403, "An Agent joins only as a page co-writer");
       }
@@ -491,6 +493,7 @@ export function registerPageRoutes(app: Hono<{ Bindings: Env }>): void {
       const ticket = `${crypto.randomUUID()}${crypto.randomUUID()}`.replaceAll("-", "");
       const registered = await sessionCall(c.env, spaceId, pageId, "/internal/ticket", {
         ticket, principal: sessionPrincipal(authUser), canEdit: page.canEdit, ...(coWriter ? { coWriter: true } : {}),
+        ...(streams ? { streams: true } : {}),
       });
       if (!registered.ok) throw new ServiceUnavailable("page_session_unavailable", "Page session is unavailable");
       return c.json({ protocol: `${PAGE_SESSION_SUBPROTOCOL_PREFIX}${ticket}`,

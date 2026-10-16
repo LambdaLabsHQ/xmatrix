@@ -77,8 +77,10 @@ pub(crate) async fn send_llm_trace_with_source(
     model: Option<String>,
     payload: serde_json::Value,
 ) {
-    // A conversation co-writing a page streams the harness's text to it as well.
+    // A conversation co-writing a page streams the harness's text to it as well,
+    // and a reply may write into a page as it comes.
     crate::runtime_page_co_write::observe_trace(channel_id, phase, &payload);
+    crate::runtime_page_stream_write::observe(relay, channel_id, phase, &payload);
     let trace_payload = protocol::LlmTracePayload {
         schema_version: 1,
         phase: phase.to_string(),

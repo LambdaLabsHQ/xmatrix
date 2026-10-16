@@ -36,13 +36,18 @@ pub enum PageCoWriteEvent {
     },
     /// Someone edited what the Agent was writing: its turn stops there.
     Interrupt { channel_id: String, turn: u64 },
+    /// What the Agent wrote into a page from its conversation did not all
+    /// reach it: the harness hears why once its turn is over. It stops no turn.
+    Outcome { channel_id: String, prompt: String },
 }
 
 impl PageCoWriteEvent {
     /// The co-writing conversation the request is for.
     pub fn channel_id(&self) -> &str {
         match self {
-            Self::Turn { channel_id, .. } | Self::Interrupt { channel_id, .. } => channel_id,
+            Self::Turn { channel_id, .. }
+            | Self::Interrupt { channel_id, .. }
+            | Self::Outcome { channel_id, .. } => channel_id,
         }
     }
 }
@@ -51,8 +56,19 @@ impl PageCoWriteEvent {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum PageCoWriteRequest {
-    Turn { turn: u64, text: String },
-    Interrupt { turn: u64 },
+    Turn {
+        turn: u64,
+        text: String,
+    },
+    Interrupt {
+        turn: u64,
+    },
+    /// The end of a turn the runtime opened itself (`write_frame`): what of it
+    /// did not reach the page, and why; empty when all of it did.
+    Outcome {
+        turn: u64,
+        problems: Vec<String>,
+    },
 }
 
 /// The session's request in a frame, or `None` for any other frame.
@@ -64,6 +80,13 @@ pub fn decode_request(frame: &[u8]) -> Option<PageCoWriteRequest> {
     let (length, rest) = read_var_uint(rest)?;
     let body = rest.get(..usize::try_from(length).ok()?)?;
     serde_json::from_slice(body).ok()
+}
+
+/// Opens `turn` from this side: the Agent writes into the page from its
+/// conversation, and the session, which asks a streaming co-writer nothing,
+/// takes what follows as that turn's words.
+pub fn write_frame(turn: u64) -> Vec<u8> {
+    frame(&serde_json::json!({ "type": "write", "turn": turn }))
 }
 
 /// Some of the harness's text for `turn`, as it came.
@@ -119,32 +142,60 @@ struct LiveTicket {
     socket_path: String,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PageSpace {
+    space_id: String,
+}
+
 impl PageCoWriteConnector {
     pub fn new(relay_url: String, token: Arc<RwLock<String>>) -> Self {
         Self { relay_url, token }
     }
 
-    /// Joins the page's live session as its co-writer. The Hub refuses a Run
-    /// that may not edit the page, and a page that takes Agent edits only as
-    /// suggestions.
-    pub async fn connect(&self, space_id: &str, page_id: &str) -> Result<ClientWebSocket> {
-        let (secure, host) = connection_host(&self.relay_url);
-        let token = self
+    fn token(&self) -> Result<String> {
+        Ok(self
             .token
             .read()
             .map_err(|_| CliError::Relay("Auth token state poisoned".into()))?
-            .clone();
+            .clone())
+    }
+
+    /// The Space whose pages a conversation writes in.
+    pub async fn page_space(&self, channel_id: &str) -> Result<String> {
+        let (secure, host) = connection_host(&self.relay_url);
         let url = format!(
-            "{}://{host}/api/spaces/{space_id}/pages/{page_id}/live",
-            if secure { "https" } else { "http" }
+            "{}://{host}/api/channels/{}/page-space",
+            if secure { "https" } else { "http" },
+            urlencoding::encode(channel_id)
         );
-        let ticket: LiveTicket = http::request_json(
-            &url,
-            "POST",
-            Some(&token),
-            Some(serde_json::json!({ "document": PAGE_DOCUMENT_FRAGMENT, "coWrite": true })),
-        )
-        .await?;
+        let space: PageSpace = http::request_json(&url, "GET", Some(&self.token()?), None).await?;
+        Ok(space.space_id)
+    }
+
+    /// Joins the page's live session as its co-writer. The Hub refuses a Run
+    /// that may not edit the page, and a page that takes Agent edits only as
+    /// suggestions. One that `streams` writes from its conversation: it opens
+    /// its own turns and is asked nothing.
+    pub async fn connect(
+        &self,
+        space_id: &str,
+        page_id: &str,
+        streams: bool,
+    ) -> Result<ClientWebSocket> {
+        let (secure, host) = connection_host(&self.relay_url);
+        let token = self.token()?;
+        let url = format!(
+            "{}://{host}/api/spaces/{}/pages/{}/live",
+            if secure { "https" } else { "http" },
+            urlencoding::encode(space_id),
+            urlencoding::encode(page_id)
+        );
+        let mut body = serde_json::json!({ "document": PAGE_DOCUMENT_FRAGMENT, "coWrite": true });
+        if streams {
+            body["stream"] = true.into();
+        }
+        let ticket: LiveTicket = http::request_json(&url, "POST", Some(&token), Some(body)).await?;
         if !ticket.socket_path.starts_with("/ws/pages/") {
             return Err(CliError::Relay(
                 "The page session named an unexpected socket".into(),
@@ -192,11 +243,17 @@ mod tests {
             decode_request(&session_frame(r#"{"type":"interrupt","turn":2}"#)),
             Some(PageCoWriteRequest::Interrupt { turn: 2 })
         );
-        assert_eq!(decode_request(&[0, 1, 2]), None, "a sync frame");
         assert_eq!(
-            decode_request(&session_frame(r#"{"type":"other"}"#)),
-            None
+            decode_request(&session_frame(
+                r#"{"type":"outcome","turn":3,"problems":["Your ⟦after⟧ quoted \"x\", which is not on the page."]}"#
+            )),
+            Some(PageCoWriteRequest::Outcome {
+                turn: 3,
+                problems: vec!["Your ⟦after⟧ quoted \"x\", which is not on the page.".into()]
+            })
         );
+        assert_eq!(decode_request(&[0, 1, 2]), None, "a sync frame");
+        assert_eq!(decode_request(&session_frame(r#"{"type":"other"}"#)), None);
         let mut cut = session_frame(r#"{"type":"interrupt","turn":2}"#);
         cut.truncate(cut.len() - 3);
         assert_eq!(decode_request(&cut), None, "a cut frame");
@@ -216,5 +273,7 @@ mod tests {
         );
         let done: serde_json::Value = serde_json::from_slice(&done_frame(7, true)[2..]).unwrap();
         assert_eq!(done, serde_json::json!({ "type": "failed", "turn": 7 }));
+        let write: serde_json::Value = serde_json::from_slice(&write_frame(8)[2..]).unwrap();
+        assert_eq!(write, serde_json::json!({ "type": "write", "turn": 8 }));
     }
 }

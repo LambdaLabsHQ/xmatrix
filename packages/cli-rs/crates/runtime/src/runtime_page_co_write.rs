@@ -103,6 +103,14 @@ pub(crate) fn follow(
     ));
 }
 
+/// Whether the harness in `channel_id` is answering the page's turn now: all
+/// its text goes to that page.
+pub(crate) fn answering(channel_id: &str) -> bool {
+    bridges()
+        .get(channel_id)
+        .is_some_and(|bridge| bridge.answering.is_some())
+}
+
 /// The run loop took the session's `turn` as its next input in `channel_id`.
 pub(crate) fn turn_queued(channel_id: &str, turn: u64) {
     if let Some(bridge) = bridges().get_mut(channel_id) {
@@ -155,7 +163,7 @@ async fn run_bridge(
 ) {
     let mut attempt = 0usize;
     while !*stopped.borrow() {
-        match connector.connect(&space_id, &page_id).await {
+        match connector.connect(&space_id, &page_id, false).await {
             Ok(socket) => {
                 attempt = 0;
                 let (mut sink, mut stream) = socket.split();
@@ -189,6 +197,8 @@ async fn run_bridge(
                                         PageCoWriteRequest::Interrupt { turn } => PageCoWriteEvent::Interrupt {
                                             channel_id: channel_id.clone(), turn,
                                         },
+                                        // Only a turn this side opened has an outcome, and the bridge opens none.
+                                        PageCoWriteRequest::Outcome { .. } => continue,
                                     };
                                     if events.send(AgentInstanceConnectionEvent::PageCoWrite(event)).is_err() {
                                         return;

@@ -40,6 +40,8 @@ interface Attachment {
   canEdit: boolean;
   /** An Agent's runtime co-writing the page live, not a replica of the document. */
   coWriter?: boolean;
+  /** A co-writer streaming what its Agent writes from a conversation; the session asks it nothing. */
+  streams?: boolean;
 }
 
 interface Ticket extends Omit<Attachment, "connectionId"> { expiresAt: number }
@@ -162,7 +164,8 @@ export class RelayPageSession extends DurableObject<Env> {
         for (const socket of sockets) {
           const attachment = socket.deserializeAttachment() as Attachment | null;
           if (attachment) this.session.connect({ id: attachment.connectionId, principal: attachment.principal,
-            canEdit: attachment.canEdit, coWriter: attachment.coWriter === true }, { resumed: true });
+            canEdit: attachment.canEdit, coWriter: attachment.coWriter === true, streams: attachment.streams === true },
+          { resumed: true });
         }
       })();
       this.rehydrated.catch(() => { this.rehydrated = null; });
@@ -186,7 +189,8 @@ export class RelayPageSession extends DurableObject<Env> {
         await this.ctx.storage.put("identity", { spaceId: body.spaceId, pageId: body.pageId });
         for (const [key, ticket] of this.tickets) if (ticket.expiresAt < Date.now()) this.tickets.delete(key);
         this.tickets.set(body.ticket, { spaceId: body.spaceId, pageId: body.pageId, principal: body.principal,
-          canEdit: body.canEdit, ...(body.coWriter === true ? { coWriter: true } : {}), expiresAt: Date.now() + TICKET_TTL_MS });
+          canEdit: body.canEdit, ...(body.coWriter === true ? { coWriter: true } : {}),
+          ...(body.coWriter === true && body.streams === true ? { streams: true } : {}), expiresAt: Date.now() + TICKET_TTL_MS });
         return Response.json({ ok: true });
       }
       if (url.pathname === "/ws") return await this.accept(request);
@@ -289,11 +293,11 @@ export class RelayPageSession extends DurableObject<Env> {
     const [client, server] = [pair[0], pair[1]];
     const attachment: Attachment = { connectionId: crypto.randomUUID(), spaceId: ticket.spaceId,
       pageId: ticket.pageId, principal: ticket.principal, canEdit: ticket.canEdit,
-      ...(ticket.coWriter ? { coWriter: true } : {}) };
+      ...(ticket.coWriter ? { coWriter: true } : {}), ...(ticket.streams ? { streams: true } : {}) };
     server.serializeAttachment(attachment);
     this.ctx.acceptWebSocket(server);
     this.session.connect({ id: attachment.connectionId, principal: attachment.principal, canEdit: attachment.canEdit,
-      coWriter: attachment.coWriter === true });
+      coWriter: attachment.coWriter === true, streams: attachment.streams === true });
     await this.scheduleAlarm(REVALIDATE_MS);
     const protocol = request.headers.get("sec-websocket-protocol")?.split(",")[0]?.trim();
     return new Response(null, { status: 101, webSocket: client,

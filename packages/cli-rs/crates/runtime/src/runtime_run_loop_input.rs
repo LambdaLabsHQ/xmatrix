@@ -267,6 +267,11 @@ impl<'a> RunLoopEvents<'a> {
                     return Some(RunLoopInput::Resume { channel_id, prompt });
                 }
                 ConnectionEvent::PageCoWrite(PageCoWriteEvent::Interrupt { .. }) => continue,
+                // What the Agent wrote into a page from this conversation did not all reach it:
+                // it hears why, as the conversation's next turn.
+                ConnectionEvent::PageCoWrite(PageCoWriteEvent::Outcome { channel_id, prompt }) => {
+                    return Some(RunLoopInput::Resume { channel_id, prompt });
+                }
                 event => event,
             };
             if self.page_co_write(&event) {

@@ -110,6 +110,7 @@ mod runtime_harness_questions;
 mod runtime_headless_runs;
 mod runtime_presence_updates;
 mod runtime_page_co_write;
+mod runtime_page_stream_write;
 mod runtime_trusted_role_prompt;
 mod runtime_usage_limit;
 mod runtime_wake_metrics;
