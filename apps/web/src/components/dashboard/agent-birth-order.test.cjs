@@ -46,7 +46,9 @@ const ORDERING_FUNCTIONS = [
 ];
 
 
-const functions = loadShellFunctions(shellModules, ORDERING_FUNCTIONS, "exports.mergeChannels = mergeChannels; exports.commitCatalogChannels = commitCatalogChannels;");
+const functions = loadShellFunctions(shellModules, ORDERING_FUNCTIONS,
+  "exports.mergeChannels = mergeChannels; exports.commitCatalogChannels = commitCatalogChannels;",
+  { channelAgentInstanceIndex: require("@xmatrix/protocol").channelAgentInstanceIndex });
 const {
   mergeChannels,
   compareChannelAgentAvatarBirthOrder,
@@ -254,7 +256,7 @@ test("an Agent message without an ordinal never creates an unaddressable live ca
     memberPresence: {},
   }, entry);
   assert.equal(agentMessageInstanceIdentityIncomplete(entry), true);
-  assert.deepEqual(next.memberPresence["agent:codex"].instances, undefined);
+  assert.deepEqual(Object.values(next.memberPresence).flatMap(p => p.instances || []), []);
 });
 
 test("an incomplete Agent message may update only its already-known exact Instance", () => {
@@ -290,6 +292,46 @@ test("an incomplete Agent message may update only its already-known exact Instan
   assert.equal(next.memberPresence["agent:codex"].instances.length, 1);
   assert.equal(next.memberPresence["agent:codex"].instances[0].channelInstanceId, "7");
   assert.equal(next.memberPresence["agent:codex"].instances[0].status, "busy");
+});
+
+test("a message updates its exact catalog Instance under a different member key", () => {
+  const channel = { id: "channel-1", memberPresence: {
+    "instance-claude": { kind: "agent", label: "Claude", avatarUrl: "/agent-vendors/claude.svg",
+      instances: [{ id: "instance-claude", channelInstanceId: "1", status: "online",
+        connectedAt: "2026-10-16T07:00:00Z", lastSeenAt: "2026-10-16T07:00:00Z" }] },
+  } };
+  const entry = { channelId: channel.id, sentAt: "2026-10-16T07:01:00Z",
+    from: { kind: "agent", identityId: "agent:instance-claude", agentName: "Claude",
+      instanceId: "instance-claude", channelInstanceId: "1", instanceLabel: "Claude:1" } };
+  const next = patchChannelAgentPresenceFromMessage(channel, entry);
+  assert.deepEqual(Object.keys(next.memberPresence), ["instance-claude"]);
+  const presence = next.memberPresence["instance-claude"];
+  assert.equal(presence.instances.length, 1);
+  assert.equal(presence.instances[0].status, "busy");
+  assert.equal(presence.avatarUrl, "/agent-vendors/claude.svg");
+
+  // A matching ordinal/name with a different global identity is a second Instance.
+  const other = patchChannelAgentPresenceFromMessage(next, { ...entry,
+    from: { ...entry.from, identityId: "agent:other-claude", instanceId: "instance-other" } });
+  assert.equal(Object.values(other.memberPresence).flatMap(p => p.instances).length, 2);
+});
+
+test("an Instance first seen in a message uses its global ID, and links do not create residents", () => {
+  const channel = { id: "channel-1", memberPresence: {} };
+  const entry = { channelId: channel.id, sentAt: "2026-10-16T07:01:00Z",
+    from: { kind: "agent", identityId: "agent:instance-claude", agentName: "Claude",
+      instanceId: "instance-claude", channelInstanceId: "1", instanceLabel: "Claude:1" } };
+  assert.equal(patchChannelAgentPresenceFromMessage(channel, {
+    ...entry, from: { ...entry.from, originChannelId: "other-channel" },
+  }), channel);
+  const next = patchChannelAgentPresenceFromMessage(channel, entry);
+  assert.deepEqual(Object.keys(next.memberPresence), ["instance-claude"]);
+  const withRetainedAlias = { ...next, memberPresence: { ...next.memberPresence,
+    "agent:instance-claude": { ...next.memberPresence["instance-claude"], avatarUrl: undefined },
+  } };
+  const stopped = channelsAfterAgentInstanceOffline([withRetainedAlias], { channelId: channel.id,
+    agentId: "agent:instance-claude", instanceId: "instance-claude" });
+  assert.deepEqual(stopped[0].memberPresence, {});
 });
 
 test("an immutable message avatar wins over live presence", () => {

@@ -838,7 +838,7 @@ test("registration catalog and live presence retain one card per Instance throug
   } }, "space-1", ["channel-1"]);
   let channel = { id: "channel-1", memberPresence: catalog.get("channel-1") };
   const sessions = rows.map(row => ({
-    ownerUserId: "owner-1", agentId: row.instance_id, agentName: "Claude",
+    ownerUserId: "owner-1", agentId: "principal-claude", agentName: "Claude",
     runId: `run-${row.channel_instance_id}`, instanceId: row.instance_id,
     channelId: "channel-1", channelInstanceId: String(row.channel_instance_id),
     machineId: "machine-1", hostId: "host-1", cwd: "/workspace", status: "idle",
@@ -856,7 +856,7 @@ test("registration catalog and live presence retain one card per Instance throug
   }
   channel = overlayAgentPresenceOnChannel(channel, {
     reason: "disconnect",
-    session: { principal: { agentId: "instance-3" }, run: { instanceId: "instance-3" } },
+    session: { principal: { agentId: "principal-claude" }, run: { instanceId: "instance-3" } },
   });
   assert.deepEqual(Object.keys(channel.memberPresence), ["instance-4"]);
 });

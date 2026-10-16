@@ -248,9 +248,9 @@ function evaluateExtractedSource(source, bindings = {}) {
  * @param {string[]} names
  * @param {string} [epilogue] statements appended after the functions
  */
-function loadShellFunctions(moduleMap, names, epilogue = "") {
+function loadShellFunctions(moduleMap, names, epilogue = "", bindings = {}) {
   const source = names.map((name) => extractFunctionFromShellModules(moduleMap, name).source).join("\n\n");
-  return evaluateExtractedSource(`${source}\n${epilogue}`);
+  return evaluateExtractedSource(`${source}\n${epilogue}`, bindings);
 }
 
 module.exports = {
