@@ -439,7 +439,9 @@ html:has(.site-page) {
   margin-top: 0;
 }
 
+/* Labels start where the pill field's text does. */
 .auth-label {
+  padding-inline: 1.25rem;
   color: var(--site-ink);
   font-size: 13px;
   font-weight: 600;
@@ -451,9 +453,11 @@ html:has(.site-page) {
   gap: 0.4rem;
 }
 
+/* Fields are pills, the same shape as the buttons under them. */
 .site-page .auth-input.auth-input {
   height: 3rem;
-  padding-inline: 1rem;
+  border-radius: 999px;
+  padding-inline: 1.25rem;
   font-size: 16px;
 }
 
