@@ -303,6 +303,7 @@ export const SPACE_PURGE_STEPS: readonly { table: string; predicate: string }[] 
     "data.space_agent_registration_access", "data.space_agent_registrations",
     "data.space_billing_checkout_intents", "data.space_harness_profiles",
     "data.space_billing_subscriptions", "data.space_billing_usage", "data.space_billing_webhook_events",
+    "data.space_credit_state",
     "data.space_invites", "data.space_join_requests",
     "data.space_member_creation_policies", "data.space_members",
     "data.space_secrets", "data.run_secret_approvals",

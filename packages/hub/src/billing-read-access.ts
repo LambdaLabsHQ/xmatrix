@@ -42,6 +42,8 @@ export function agentSpaceStatus(value: unknown): Record<string, unknown> {
       ["status", "seatQuantity", "currentPeriodEnd", "cancelAtPeriodEnd", "graceUntil", "access"]),
     seats: pick(billing.seats, ["used", "limit"]),
     freeUsage: pick(billing.freeUsage, ["acceptedMessages", "limit", "remaining"]),
+    ...(billing.credits ? { credits: pick(billing.credits, ["periodStart", "resetsOn", "included", "includedUsed",
+      "packBalance", "packUsed", "grace", "graceUsed", "paused"]) } : {}),
     canManage: false,
   } };
 }
