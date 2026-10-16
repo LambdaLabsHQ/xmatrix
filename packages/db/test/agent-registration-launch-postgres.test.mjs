@@ -586,6 +586,26 @@ integration("launch survives a hostname change with stale Workspace metadata and
       await sql(restore);
     }
 
+    // A conversation that co-writes a page starts its Agent in the private managed directory at once:
+    // no repository is read or checked out for it, unless the message names one.
+    await sql(`INSERT INTO data.page_co_writing (space_id,page_id,conversation_id,started_by_user_id,started_at)
+      VALUES ('space','page','channel','caller',now())`);
+    const coWriteBody = "@codex write the page with me", coWriteHash = await digestCanonicalCloneCborV1(coWriteBody);
+    await sql(`INSERT INTO data.messages VALUES ('space','channel','co-write','user','caller',$1,1,1,1,$2,NULL,NULL,NULL)`,
+      [coWriteHash, { selections: { schemaVersion: 1, sourceRevision: 1, sourceBodyHash: coWriteHash,
+        selections: [{ start: 0, end: 6, text: "@codex", target: { kind: "capability", harness: "codex" } }] } }]);
+    const coWrite = await launches.dispatchFromMessage({ commandId: "co-write", actorUserId: "caller",
+      channelId: "channel", sourceMessageId: "co-write", body: coWriteBody }, async ({ candidates, managedWorkspace, managedOnly }) => {
+        assert.deepEqual([managedWorkspace, managedOnly], [true, true]);
+        return { key: candidates[0].key, model: "model" };
+      });
+    assert.equal(coWrite.prepared.length, 1);
+    const coWritePayload = (await sql(`SELECT spawn_payload_json FROM data.agent_launches WHERE launch_id=$1`,
+      [coWrite.prepared[0].launchId])).rows[0].spawn_payload_json;
+    assert.equal(coWritePayload.remoteRepo, undefined, "nothing to check out");
+    assert.match(coWritePayload.workspace.managedKey, /^registration-[a-f0-9]{48}$/);
+    await sql(`UPDATE data.page_co_writing SET ended_at=now()`);
+
     // Reborn keeps the Instance id, ordinal and harness session; its successor
     // is a registration Run of the same tuple, created only after the
     // predecessor's confirmed stop.
