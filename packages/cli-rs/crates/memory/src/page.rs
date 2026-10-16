@@ -603,6 +603,13 @@ pub fn render_page_document_with(page: &PageDocument, awareness: Option<&PageAwa
     format!("{header}{}", page.body)
 }
 
+/// How a Run writes into the page as it replies, said where it reads the page.
+fn live_write_hint(page_id: &str) -> String {
+    format!(
+        "writeLive: in your reply, ⟦write page:{page_id}⟧ ⟦after \"words on the page\"⟧ markdown ⟦/write⟧ goes into the page as you write it\n"
+    )
+}
+
 /// Page markdown and Automation instructions can be resent with -f or --stdin.
 pub(crate) const PAGE_TEXT_ROUTES: TextRoutes<'static> = TextRoutes {
     stdin: true,
@@ -697,7 +704,15 @@ pub async fn cmd_page(hub_url: &str, token: &str, command: PageCommand) -> error
             };
             let document = render_page_document_with(&response.page, awareness.as_ref());
             // A page's Automations are live references: the header says what each one is now.
-            let header = crate::page_automation::render_page_automations_header(&automations);
+            let mut header = crate::page_automation::render_page_automations_header(&automations);
+            // A Run's reply goes into a page as it is written (runtime_page_stream_write).
+            if run_conversation().is_some()
+                && response.page.summary.can_edit
+                && !response.page.summary.agent_suggest_only
+                && revision.is_none()
+            {
+                header.push_str(&live_write_hint(&response.page.summary.page_id));
+            }
             print!(
                 "{}",
                 match document.split_once("\n---\n") {

@@ -325,6 +325,21 @@ fact is about.
     sockets. Losing either interrupts its turn and pauses new turns; late replies
     cannot change the document. Restoring permission sends a fresh turn with the
     changes it missed, under a new turn id.
+  - **Writing from a conversation** (decided 2026-10-16). Any Agent in a
+    conversation writes into a page the same way, as its model writes, without
+    being asked: in its reply, `⟦write page:<id>⟧`, the markers below, then
+    `⟦/write⟧` (`runtime_page_stream_write.rs`). The runtime reads its
+    `assistant_delta` traces; once the opening marker is whole it joins the
+    page's session as a co-writer that streams (`POST …/live` with `coWrite` and
+    `stream`), opens a turn itself (`write`), and sends the words until
+    `⟦/write⟧` or the harness's turn ends. The session asks a streaming
+    co-writer nothing, and ends each of its turns with an `outcome`: what did
+    not reach the page and why (a quote that is not there, someone editing what
+    it wrote), which the conversation hears as its next turn; nothing when all
+    of it did. The socket stays joined for a while after its last words, so the
+    next write goes straight in and a person can still take the last one back.
+    `page edit` remains for restructuring and for suggest-only pages; its
+    committed edit is typed in as described in §2.
   - **What reaches the page** is only what the Agent writes inside markers
     (`page-co-writing.ts`): `⟦after "words on the page"⟧` then markdown added
     after the block holding them, `⟦replace "words"⟧` then their new wording
@@ -332,8 +347,10 @@ fact is about.
     `⟦pass⟧`. Plain text works in every harness, and streams; a tool call does
     neither. Everything else it says is seen by nobody.
   - **The session writes it** (`page-co-writer.ts`) through the same CRDT as
-    everyone's typing: each piece of its answer brings its blocks to what it has
-    written so far in one transaction under its own client id, so its text is
+    everyone's typing: what it has written so far reaches its blocks in one
+    transaction under its own client id at most every 80 ms (each write rebuilds
+    those blocks; a harness sends its words many times a second, and Claude's
+    are sent on that cadence while a reply writes into a page), so its text is
     marked as its own, and its caret follows. Its words fade in as they arrive,
     tinted in its colour like anyone's fresh change. Its edits commit with the
     session's idle commit, as its own, from its conversation.

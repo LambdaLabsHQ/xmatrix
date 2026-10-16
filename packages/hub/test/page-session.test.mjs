@@ -13,7 +13,7 @@ import {
   PAGE_DOCUMENT_FRAGMENT, PAGE_MESSAGE_AWARENESS, PAGE_MESSAGE_NOTICE, PAGE_MESSAGE_SYNC, PageSession,
   PageSessionConflict, pageFragmentMarkdown, setPageFragmentMarkdown,
 } from "../src/page-session.ts";
-import { CO_WRITER_PAUSE_MS, CO_WRITER_TURN_MS } from "../src/page-co-writer.ts";
+import { CO_WRITER_PAUSE_MS, CO_WRITER_TURN_MS, CO_WRITER_WRITE_EVERY_MS } from "../src/page-co-writer.ts";
 import { PAGE_MESSAGE_CO_WRITE } from "@xmatrix/protocol";
 import { canonicalPageMarkdown as canonical, markdownToPageDoc, pageDocToMarkdown, pageSchema } from "@xmatrix/protocol/page-document";
 import { absolutePositionToRelativePosition, initProseMirrorDoc, yXmlFragmentToProseMirrorRootNode } from "y-prosemirror";
@@ -976,7 +976,7 @@ test("summary: a fast completion waits for its pending dispatch to be recorded",
  * An Agent's runtime co-writing the page (page-co-writer.ts): what the session asks it, and its
  * answers, streamed in as the harness writes them.
  */
-function joinCoWriter(h, id = "w-agent", { canEdit = true, resumed = false } = {}) {
+function joinCoWriter(h, id = "w-agent", { canEdit = true, resumed = false, streams = false } = {}) {
   const asked = [];
   const send = h.ports.send;
   h.ports.send = (to, data) => {
@@ -987,7 +987,7 @@ function joinCoWriter(h, id = "w-agent", { canEdit = true, resumed = false } = {
     assert.equal(type, PAGE_MESSAGE_CO_WRITE);
     asked.push(JSON.parse(decoding.readVarString(decoder)));
   };
-  h.session.connect({ id, principal: agent, canEdit, coWriter: true }, { resumed });
+  h.session.connect({ id, principal: agent, canEdit, coWriter: true, ...(streams ? { streams } : {}) }, { resumed });
   const reply = (frame) => {
     const encoder = encoding.createEncoder();
     encoding.writeVarUint(encoder, PAGE_MESSAGE_CO_WRITE);
@@ -1003,6 +1003,9 @@ function joinCoWriter(h, id = "w-agent", { canEdit = true, resumed = false } = {
     turnId,
     write: (n, text) => reply({ type: "delta", turn: turnId(n), text }),
     done: (n) => reply({ type: "done", turn: turnId(n) }),
+    /** A runtime streaming from a conversation opens turn `n` itself. */
+    open: (n) => reply({ type: "write", turn: n }),
+    outcomes: () => asked.filter((frame) => frame.type === "outcome"),
   };
 }
 
@@ -1211,4 +1214,97 @@ test("a co-writing Agent keeps out of the paragraph someone is typing in, and he
   const told = writer.turns()[1].text;
   assert.match(told, /ann is typing in the paragraph holding "In progress"; it was left alone\./u);
   assert.match(told, /Your ⟦after⟧ quoted "no such words", which is not on the page/u);
+});
+
+test("an Agent writing from its conversation streams into the page in turns it opens itself, and is asked nothing", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const h = harness();
+  const ann = await annConnected(h);
+  const writer = joinCoWriter(h, "w-agent", { streams: true });
+  assert.equal(writer.asked.length, 0, "joining asks it nothing");
+  assert.equal(coWriterOf(ann).activity, "watching", "it is on the page");
+
+  writer.open(1);
+  assert.equal(coWriterOf(ann).activity, "thinking");
+  writer.write(1, "⟦after \"none\"⟧\n- first ");
+  assert.match(ann.text.toString(), /none\n\n- first\n$/u, "its words show as they come");
+  assert.equal(coWriterOf(ann).activity, "writing");
+  writer.write(1, "point\n- second point\n");
+  writer.done(1);
+  assert.equal(ann.text.toString(), HEAD.replace("none\n", "none\n\n- first point\n- second point\n"));
+  assert.deepEqual(writer.outcomes(), [{ type: "outcome", turn: 1, problems: [] }], "all of it reached the page");
+  assert.equal(coWriterOf(ann).undo, true, "a person can take it back");
+  await h.session.commit();
+  assert.equal(h.commits.at(-1).principal, agent.id, "its words are its own edit");
+  assert.deepEqual(h.commits.at(-1).conversationIds, ["conv-1"], "from the conversation it writes from");
+
+  // People typing and pausing is no question for it.
+  ann.text.insert(HEAD.indexOf("In progress") + "In progress".length, ", blocked");
+  t.mock.timers.tick(CO_WRITER_PAUSE_MS * 2);
+  assert.equal(writer.turns().length, 0);
+});
+
+/** Ann on the page, and an Agent writing into it from its conversation, in the turn it has just opened. */
+async function annWithStreamingWriter() {
+  const h = harness();
+  const ann = await annConnected(h);
+  const writer = joinCoWriter(h, "w-agent", { streams: true });
+  writer.open(1);
+  return { ann, writer };
+}
+
+test("an Agent writing from its conversation hears what did not reach the page, and why", async () => {
+  const { ann, writer } = await annWithStreamingWriter();
+  writer.write(1, "⟦after \"no such words\"⟧\nlost⟦end⟧⟦after \"In progress\"⟧\nNext: review\n");
+  writer.done(1);
+  assert.match(ann.text.toString(), /In progress\n\nNext: review\n/u, "what it quoted right is written");
+  assert.deepEqual(writer.outcomes().at(-1), { type: "outcome", turn: 1,
+    problems: ["Your ⟦after⟧ quoted \"no such words\", which is not on the page; nothing was written there."] });
+
+  writer.open(2);
+  writer.write(2, "⟦after \"none\"⟧\nA paragraph the Agent ");
+  ann.text.insert(ann.text.toString().indexOf("A paragraph"), "Ann: ");
+  assert.deepEqual(writer.asked.at(-2), { type: "interrupt", turn: 2 }, "it stops where someone edits");
+  assert.deepEqual(writer.asked.at(-1), { type: "outcome", turn: 2,
+    problems: ["You were stopped: someone edited what you were writing."] });
+  writer.write(2, "keeps writing after being stopped.");
+  writer.done(2);
+  assert.doesNotMatch(ann.text.toString(), /after being stopped/u);
+  assert.equal(writer.outcomes().length, 2, "a turn has one outcome");
+});
+
+test("only a co-writer that streams opens turns, one at a time, and only while it may write", async () => {
+  const h = harness();
+  await annConnected(h);
+  const asked = joinCoWriter(h, "w-asked");
+  asked.open(99);
+  assert.deepEqual(asked.asked.at(-1), { type: "interrupt", turn: 99 }, "a co-writer the session asks opens none");
+  const writer = joinCoWriter(h, "w-agent", { streams: true });
+  writer.open(1);
+  writer.open(2);
+  assert.deepEqual(writer.asked.at(-2), { type: "interrupt", turn: 2 }, "a second turn while one is open is refused");
+  writer.done(1);
+  const suggesting = harness({ suggestOnly: true });
+  await annConnected(suggesting);
+  const refused = joinCoWriter(suggesting, "w-agent", { streams: true });
+  refused.open(1);
+  assert.deepEqual(refused.asked.map((frame) => frame.type), ["interrupt", "outcome"], "a page that takes suggestions only refuses it");
+  assert.match(refused.outcomes()[0].problems[0], /does not take your words live now/u, "and says why");
+});
+
+test("a co-writer's words reach the page at most every so often while they stream, and all of them at the end", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: 1_000_000 });
+  const { ann, writer } = await annWithStreamingWriter();
+  writer.write(1, "⟦after \"none\"⟧\nOne");
+  assert.match(ann.text.toString(), /\nOne\n$/u);
+  t.mock.timers.tick(10);
+  writer.write(1, " two");
+  writer.write(1, " three");
+  assert.match(ann.text.toString(), /\nOne\n$/u, "words that come right after wait a moment");
+  t.mock.timers.tick(CO_WRITER_WRITE_EVERY_MS);
+  assert.match(ann.text.toString(), /\nOne two three\n$/u, "then go in together");
+  t.mock.timers.tick(10);
+  writer.write(1, " four");
+  writer.done(1);
+  assert.match(ann.text.toString(), /\nOne two three four\n$/u, "the end writes what is left at once");
 });

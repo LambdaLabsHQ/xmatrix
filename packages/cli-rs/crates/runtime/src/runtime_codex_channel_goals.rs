@@ -172,9 +172,11 @@ fn event_requests_active_turn_interrupt_with_replay(
             | protocol::AgentInstanceServerMessage::AgentEffortSwitchRequested { .. },
         ) => return true,
         // The page this conversation co-writes asks again, or someone edited what the Agent was
-        // writing: the turn still running stops there.
+        // writing: the turn still running stops there. What became of words it wrote into a page
+        // from the conversation waits for the turn to end.
         agent_instance_connection::AgentInstanceConnectionEvent::PageCoWrite(request) => {
-            return bound_channel_id.is_none_or(|bound| bound == request.channel_id());
+            return !matches!(request, xmatrix_cli_core::page_co_write::PageCoWriteEvent::Outcome { .. })
+                && bound_channel_id.is_none_or(|bound| bound == request.channel_id());
         }
         agent_instance_connection::AgentInstanceConnectionEvent::Server(
             protocol::AgentInstanceServerMessage::ChannelMessageReceived {

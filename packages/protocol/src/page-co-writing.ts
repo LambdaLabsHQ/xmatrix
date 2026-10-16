@@ -28,13 +28,23 @@ export type PageCoWriteEvent =
   | { type: "end" }
   | { type: "pass" };
 
-/** The live session asks; the runtime hands it to the Agent's harness as its next input. */
+/**
+ * The live session asks; the runtime hands it to the Agent's harness as its next input. A turn the
+ * runtime opened itself (`write`) is answered with its `outcome` when it ends: what did not reach the
+ * page and why, so the Agent hears it; nothing when all of it did.
+ */
 export type PageCoWriteRequest =
   | { type: "turn"; turn: number; text: string }
-  | { type: "interrupt"; turn: number };
+  | { type: "interrupt"; turn: number }
+  | { type: "outcome"; turn: number; problems: string[] };
 
-/** The runtime answers with the harness's text as it comes, and when the harness's turn ends. */
+/**
+ * The runtime answers with the harness's text as it comes, and when the harness's turn ends. A runtime
+ * streaming what its Agent writes from a conversation (`⟦write page:<id>⟧ … ⟦/write⟧` in its reply) opens
+ * the turn itself, with `write`: nobody asked it.
+ */
 export type PageCoWriteReply =
+  | { type: "write"; turn: number }
   | { type: "delta"; turn: number; text: string }
   | { type: "done"; turn: number }
   | { type: "failed"; turn: number; reason?: string };
@@ -142,6 +152,7 @@ export function parsePageCoWriteReply(value: unknown): PageCoWriteReply | null {
   if (!value || typeof value !== "object") return null;
   const reply = value as Record<string, unknown>;
   if (typeof reply.turn !== "number" || !Number.isSafeInteger(reply.turn)) return null;
+  if (reply.type === "write") return { type: "write", turn: reply.turn };
   if (reply.type === "delta" && typeof reply.text === "string") return { type: "delta", turn: reply.turn, text: reply.text };
   if (reply.type === "done") return { type: "done", turn: reply.turn };
   if (reply.type === "failed") {
