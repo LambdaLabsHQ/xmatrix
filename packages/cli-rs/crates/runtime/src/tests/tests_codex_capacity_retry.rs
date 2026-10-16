@@ -128,7 +128,6 @@ async fn codex_capacity_executes_channel_message_body_and_retains_selected_setti
             trace_channel_id: Some("channel-1"),
             model: Some("codex-fixture"),
             effort: Some("high"),
-            developer_instructions: Some("preserve this"),
             ..CodexTurnRequest::new("original request", &agent)
         }),
     )

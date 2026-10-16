@@ -965,49 +965,11 @@ fn codex_turn_start_uses_selected_model_override() {
         vec![serde_json::json!({ "type": "text", "text": "continue" })],
         Some(" gpt-5.5 "),
         Some(" high "),
-        None,
     );
     assert_eq!(params["effort"], "high");
     assert_eq!(params["threadId"], "thread-1");
     assert_eq!(params["model"], "gpt-5.5");
     assert_eq!(params["input"][0]["text"], "continue");
-}
-
-#[test]
-fn codex_turn_start_injects_trusted_developer_instructions() {
-    let params = codex_turn_start_params(
-        "thread-1",
-        vec![serde_json::json!({ "type": "text", "text": "continue" })],
-        None,
-        None,
-        Some("follow the trusted channel contract"),
-    );
-    assert!(
-        params["developerInstructions"]
-            .as_str()
-            .is_some_and(|value| value.contains("follow the trusted channel contract"))
-    );
-    assert_eq!(params["input"][0]["text"], "continue");
-}
-
-#[test]
-fn codex_channel_turn_injects_channel_send_contract_as_developer_instruction() {
-    let instructions =
-        super::codex_channel_developer_instructions(Some("channel-123")).expect("channel contract");
-    let params = codex_turn_start_params(
-        "thread-1",
-        vec![serde_json::json!({ "type": "text", "text": "reply READY" })],
-        None,
-        None,
-        Some(&instructions),
-    );
-    let developer = params["developerInstructions"]
-        .as_str()
-        .expect("developer instructions");
-    assert!(developer.contains("runtime output is local"));
-    assert!(developer.len() < 500);
-    assert!(!developer.contains("xMatrix channel contract:"));
-    assert!(developer.contains("xmatrix send channel-123"));
 }
 
 #[test]

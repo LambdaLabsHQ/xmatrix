@@ -10,7 +10,7 @@ a CLI release once the daemon supports this field.
 | --- | --- |
 | `bootstrap.md` | Identity, discovery through CLI help, principles and operating rules |
 | `channel-contract.md` | Complete Channel reporting contract, delivered at launch |
-| `channel-turn.md` | Compact native Codex developer reminder on later turns |
+| `channel-turn.md` | Compact native Codex developer reminder retained for every turn |
 | `goal-command.md` | Goal discovery, only for runtimes that drain goals |
 | `space-rules.md` | Space governance Page id; never copies its body |
 | `connected-apps.md` | Connected app names and `xmatrix connector list` discovery |
@@ -36,8 +36,11 @@ Working mode, governance Page id and connected apps remain separate Hub fields
 (`workingMode`, `spaceRulesPageId`, `connectedApps`).
 
 Task text, Channel history, attachments and display names stay in user input.
-Registration instructions keep their existing native trusted paths: Claude
+Registration instructions use native trusted paths: Claude
 `--append-system-prompt`, Codex developer instructions, Grok ACP `_meta.rules`.
+Codex installs registration instructions and the compact reminder through
+`thread/start` and `thread/resume` developer instructions; `turn/start` and
+`turn/steer` carry user input and never accept trusted instructions.
 Grok receives only registration instructions and the official Channel contract
 as trusted rules, never the composed bootstrap/history. Generic ACP, ZCode and
 PTY retain their existing refusal when registration instructions require a

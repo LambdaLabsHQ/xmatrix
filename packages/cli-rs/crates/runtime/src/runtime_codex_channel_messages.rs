@@ -242,13 +242,6 @@ fn linked_sender_context(from: &protocol::MessageSender) -> String {
         .unwrap_or_default()
 }
 
-fn codex_channel_developer_instructions(channel_id: Option<&str>) -> Option<String> {
-    channel_id
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(bootstrap::channel_turn_policy)
-}
-
 /// xMatrix's own local slash commands, which must never be forwarded to the
 /// underlying agent.
 const XMATRIX_LOCAL_SLASH_COMMANDS: &[&str] = &["agent", "channel", "channels"];
