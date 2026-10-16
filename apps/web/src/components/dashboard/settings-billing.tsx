@@ -39,6 +39,21 @@ export type SpaceBilling = SpacePlanBilling & {
     access?: "full" | "read_only";
   } | null;
   seatAdjustmentRequired?: boolean;
+  /** A Pro Space's Agent credits this month (docs/design/agent-credits.md). */
+  credits?: SpaceCredits;
+};
+
+export type SpaceCredits = {
+  periodStart: string;
+  resetsOn: string;
+  included: number;
+  includedUsed: number;
+  packBalance: number;
+  packUsed: number;
+  grace: number;
+  graceUsed: number;
+  paused: boolean;
+  packCredits: number;
 };
 
 function capitalized(value: string): string {
@@ -170,6 +185,7 @@ function StripeSpaceBillingSection({ userId, space }: {
             state={mark && mark.state !== "active" ? { label: mark.state === "blocked" ? "Blocked" : capitalized(subscription?.status ?? "Ending"), title: mark.title, alert: mark.state === "blocked" } : null}
           >
             <SeatPips used={billing.seats.used} limit={billing.seats.limit} />
+            {billing.credits && <CreditUsage credits={billing.credits} />}
             <PlanFeatures features={PRO_PLAN_FEATURES} />
           </PlanCard>
           <BillingWarnings billing={billing} spaceName={space.name} />
@@ -199,7 +215,7 @@ function StripeSpaceBillingSection({ userId, space }: {
             plan="pro"
             name="Pro"
             aside={interval === "year" ? `$${price} a seat, yearly` : `$${price} a seat, monthly`}
-            title="Unmetered messages and room for your whole team."
+            title="Room for your whole team, with Agent credits for every seat."
             stub={billing.canManage ? (
               <div className="space-y-3">
                 <div className="flex flex-wrap items-center justify-between gap-3">
@@ -247,6 +263,12 @@ function BillingWarnings({ billing, spaceName }: { billing: SpaceBilling; spaceN
     <>
       {billing.subscription?.access === "read_only" && (
         <p className={noticeClass("alert")}>{spaceName} is read-only until the past-due payment is resolved.</p>
+      )}
+      {billing.credits?.paused && (
+        <p className={noticeClass("alert")}>
+          {spaceName} has used this month&apos;s Agent credits. Agents and apps can write again on{" "}
+          {formatPlanDate(billing.credits.resetsOn)}, or sooner with more seats. People can still write.
+        </p>
       )}
       {billing.seatAdjustmentRequired && (
         <p className={noticeClass("alert")}>
@@ -312,6 +334,22 @@ function SeatPips({ used, limit }: { used: number; limit: number }) {
           <span key={index} className="app-plan-pip" data-used={index < used ? "true" : undefined} />
         ))}
       </span>
+    </div>
+  );
+}
+
+/** The month's Agent credits: included first, then packs, then the grace. */
+function CreditUsage({ credits }: { credits: SpaceCredits }) {
+  const extra = [
+    credits.packBalance > 0 || credits.packUsed > 0
+      ? `${credits.packBalance.toLocaleString()} pack credits left` : null,
+    credits.graceUsed > 0 ? `${credits.graceUsed.toLocaleString()} of ${credits.grace.toLocaleString()} grace used` : null,
+    `resets ${formatPlanDate(credits.resetsOn)}`,
+  ].filter(Boolean).join(" · ");
+  return (
+    <div className="space-y-1">
+      <PlanMeter label="Agent credits" used={credits.includedUsed} limit={credits.included} />
+      <p className="text-xs text-muted-foreground">{extra}</p>
     </div>
   );
 }

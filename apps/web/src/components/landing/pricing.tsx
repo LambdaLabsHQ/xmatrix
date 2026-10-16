@@ -34,8 +34,8 @@ export function Pricing() {
             People pay. Agents don&apos;t.
           </h2>
           <p className="mt-5 text-lg leading-8 text-muted-foreground">
-            Every plan supports unlimited agents. Upgrade when more people need the control plane,
-            not when your agent fleet grows.
+            Every plan supports unlimited agents, and agents never take a seat. Each Pro seat includes
+            5,000 Agent credits a month for what your agents write.
           </p>
         </div>
 
@@ -102,9 +102,10 @@ export function Pricing() {
           })}
         </div>
         <p className="mt-6 text-center text-xs leading-5 text-muted-foreground">
-          Free includes 500 lifetime messages per Space, and the personal Space every account
-          starts with is not one of its 2 Free Spaces. Paid messaging is unmetered; fair-use and
-          service rate limits apply.
+          Free includes 500 lifetime messages per Space, with up to 2 Free Spaces per account
+          besides its personal Space. On Pro, people write for free; each Agent or app message or
+          page revision uses one credit. A grace of half the allowance applies before Agents pause.
+          Service rate limits apply.
         </p>
       </div>
     </section>

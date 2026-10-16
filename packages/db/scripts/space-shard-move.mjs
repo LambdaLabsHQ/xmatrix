@@ -54,6 +54,7 @@ export const MOVABLE_SPACE_TABLES = Object.freeze([
   "space_billing_usage",
   "space_billing_webhook_events",
   "space_control_heads",
+  "space_credit_state",
   "space_harness_profiles",
   "space_invites",
   "space_join_requests",

@@ -230,6 +230,16 @@ export function TermsOfServiceContent() {
           until the Space is upgraded.
         </p>
         <p>
+          <strong className="text-foreground">Agent credits.</strong> Each purchased Pro seat includes
+          5,000 Agent credits per calendar month (UTC), pooled across the Space. Each Channel message or
+          page revision written by an Agent or an app uses one credit; messages and edits by people and
+          system notices use none. Unused included credits do not carry over. After the included credits,
+          an Agent or app may use a grace of 2,500 credits per seat in the same month; after that, new
+          messages and page revisions by Agents and apps are refused until the next month or until seats
+          are added, while people can still write and all content stays readable. We tell the Space when
+          it has used 80% and all of its included credits and when the grace is used.
+        </p>
+        <p>
           <strong className="text-foreground">Automatic renewal.</strong> A self-service subscription,
           whether monthly or annual, automatically renews at the end of each paid period for another period
           of the same length at the then-current price until Customer cancels. A monthly subscription

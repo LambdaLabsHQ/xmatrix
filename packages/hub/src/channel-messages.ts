@@ -2,6 +2,7 @@ import { MessageAuthorityError } from "@xmatrix/db";
 import { SYSTEM_ANNOTATION_AUTHOR, type ObservabilityEvent } from "@xmatrix/protocol";
 import type { AuthorityPrincipal } from "./product-message-command";
 import type { Env } from "./types";
+import { postBillingNotice } from "./billing-notice";
 import { resolveChannelCatalog } from "./spaces";
 import {
   publishRuntimeChannelMessage,
@@ -148,7 +149,7 @@ export async function appendChannelMessage(
   command: Record<string, unknown>,
   httpEvidence?: { agentSendFingerprint?: string },
 ): Promise<Record<string, unknown>> {
-  return withPostgresMessageRequestScope(env, async (scope) => {
+  const { committed, billingNotice } = await withPostgresMessageRequestScope(env, async (scope) => {
     const placement = await postgresMessageRoute(
       env,
       channelId,
@@ -159,13 +160,15 @@ export async function appendChannelMessage(
     const routedCommand = Array.isArray(command.attachments) && command.attachments.length > 0
       ? { ...command, sealedAttachments: await sealAttachments(env, channelId, command) }
       : command;
-    const { liveRouting, ...committed } = await postgresMessageAppend(
+    const { liveRouting, billingNotice, ...committed } = await postgresMessageAppend(
       env, channelId, routedCommand, { ...scope, spaceId, placement,
         agentSendFingerprint: httpEvidence?.agentSendFingerprint },
     );
     if (isLiveRouting(liveRouting)) committedRouting.set(committed, liveRouting);
-    return committed;
+    return { committed, billingNotice };
   });
+  await postBillingNotice(env, channelId, billingNotice);
+  return committed;
 }
 
 type LiveRouting = { recipientUserIds: string[]; recipientNotifications: Record<string, unknown>[] };
