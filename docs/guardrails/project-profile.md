@@ -130,6 +130,16 @@ card and process injection path is documented in
 Its Composio path is independent of runtime-provided Gmail plugins; see
 [connector platform](../design/connector-platform.md).
 
+The X connector holds independent company/personal OAuth grants in the
+encrypted connector credential store. Each grant belongs to its connecting
+member and their Agents; publishing requires an explicit stable account and
+binds approvals to its authorization generation and exact content. Results
+are visible in the calling Channel. Video transfers use durable alarm jobs
+with PostgreSQL-owned encrypted inputs and outcomes, independent of HTTP/CLI
+lifetimes. Native acceptance still requires the
+company app configuration and separate tests with both real accounts; quote
+posting requires Enterprise API access. See [X connector](../connectors/x.md).
+
 The Google Cloud operations connector uses a separate GCP OAuth grant and
 provides bounded resource, Cloud Run status, log, metric and alert-policy reads,
 plus direct App Optimize gross-cost reports, billing/export discovery and

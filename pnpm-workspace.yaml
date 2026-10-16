@@ -36,6 +36,7 @@ allowBuilds:
   '@embedded-postgres/linux-x64': true
   '@embedded-postgres/windows-x64': true
   '@sentry/cli': false
+  core-js: false
   electron: true
   electron-winstaller: true
   esbuild: true

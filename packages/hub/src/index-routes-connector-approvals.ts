@@ -9,6 +9,7 @@ import { connectorProvider } from "./connectors/registry";
 import { connectorActionCatalog } from "./connectors/action-catalog";
 import { announceActionRequests, runConnectorAction } from "./connectors/connector-commands";
 import type { Env } from "./types";
+import { enqueueXUpload } from "./connectors/x-upload-executor-do";
 
 /** Decisions accept only a request reference; provider input always comes from the frozen encrypted request. */
 export function registerConnectorApprovalRoutes(app: Hono<{ Bindings: Env }>) {
@@ -46,6 +47,9 @@ export function registerConnectorApprovalRoutes(app: Hono<{ Bindings: Env }>) {
       // Answered either way, it no longer waits: every admin's dock drops it.
       await announceActionRequests(c.env, scope.spaceId, scope.channelId);
       if (!result.claimed || !result.payload) {
+        if (result.request.providerId === "x" && result.request.actionId === "upload_video" && result.request.status === "executing") {
+          await enqueueXUpload(c.env, { requestId: result.request.requestId, spaceId: scope.spaceId, channelId: scope.channelId });
+        }
         const manifest = getAppConnectorProvider(result.request.providerId);
         if (manifest && result.request.status === "denied") {
           // Denial erases the encrypted input, including its command message id.
@@ -57,6 +61,11 @@ export function registerConnectorApprovalRoutes(app: Hono<{ Bindings: Env }>) {
         return c.json({ request: result.request }, 200, { "cache-control": "private, no-store" });
       }
       const { request, payload } = result;
+      if (request.providerId === "x" && request.actionId === "upload_video") {
+        await enqueueXUpload(c.env, { requestId: request.requestId, spaceId: scope.spaceId, channelId: scope.channelId });
+        return c.json({ request, receipt: "X upload_video: queued; the result will reply in this Channel." },
+          200, { "cache-control": "private, no-store" });
+      }
       const provider = connectorProvider(request.providerId);
       const action = provider ? connectorActionCatalog(provider.id, provider.actions).get(request.actionId)?.executor : undefined;
       let status: "completed" | "blocked" | "failed" = "blocked";
