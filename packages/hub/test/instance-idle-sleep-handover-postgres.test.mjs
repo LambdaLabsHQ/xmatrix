@@ -51,7 +51,10 @@ for (const failure of ["transport", "refused"]) {
       assert.equal(logged.mock.calls.length, 1, "a failed handoff is still reported");
       await presence("idle", 1);
       assert.equal(calls.length, 2, "the unchanged presence must retry the handoff");
-      if (failure === "transport") assert.equal(logged.mock.calls[0].arguments[2].cause, transportError);
+      if (failure === "transport") {
+        const reported = logged.mock.calls.flatMap(call => call.arguments).find(value => value instanceof Error);
+        assert.equal(reported?.cause, transportError);
+      }
       assert.deepEqual(calls[1], calls[0], "the retry targets the same Channel and work");
       assert.equal(calls[1].id, "channel");
       assert.deepEqual(calls[1].body.work, ["idleSleep"]);
