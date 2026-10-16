@@ -2,13 +2,14 @@ import assert from "node:assert/strict";
 import { Client } from "pg";
 import * as db from "@xmatrix/db";
 import * as protocol from "@xmatrix/protocol";
+import { retryablePostgresFailure } from "../src/postgres-error-classification.ts";
 
 import { connectionString, integration, savepointDatabase } from "../../db/test/postgres-database.fixture.mjs";
 import { loadCommonJsSourceModule } from "./support/commonjs-source-module.mjs";
 
 /** text-task-machines.ts's imports over one test database: the Space's Agents are `targets()`, in
  *  selection order, and every task it issues lands in `commands`. */
-function textTaskImports(database, { targets, commands, xmatrixDb = db }) {
+function textTaskImports(database, { targets, commands, issue = () => {}, xmatrixDb = db }) {
   return name => {
     if (name === "@xmatrix/protocol") return protocol;
     if (name === "@xmatrix/db") return xmatrixDb;
@@ -18,7 +19,8 @@ function textTaskImports(database, { targets, commands, xmatrixDb = db }) {
     };
     if (name === "./agent-routing-quota-refresh") return { registrationQuotaProbeTargetReader: () => async () => targets() };
     if (name === "./machines") return { machineDatabase: () => database,
-      machineDaemonCommand: async (_env, command) => { commands.push(command); } };
+      machineDaemonCommand: async (_env, command) => { commands.push(command); await issue(command); } };
+    if (name === "./postgres-error-classification") return { retryablePostgresFailure };
     if (name === "./postgres-authority-http") return { POSTGRES_AUTHORITY_TIMEOUTS: {} };
     if (name === "./postgres-message-database-policy") return { POSTGRES_MESSAGE_CONNECT_TIMEOUT_MS: 1000 };
     assert.fail(`unexpected import: ${name}`);
@@ -47,8 +49,13 @@ integration("a page summary sends text only to a Machine whose owner currently r
       VALUES ($1,$2,'Summary test',$1,1,'{}',now(),now())`, [spaceId, owner.id]);
     await client.query(`INSERT INTO data.space_members (space_id,user_id,role,version,created_at,updated_at)
       VALUES ($1,$2,'owner',1,now(),now()),($1,$3,'member',1,now(),now())`, [spaceId, owner.id, member.id]);
-    let unavailable = false;
+    let unavailable = false, readAttempts = 0;
+    let readFailures = [];
     const database = savepointDatabase(client, text => text, context => {
+      if (context.operation === "page.read") {
+        readAttempts++;
+        if (readFailures.length) throw readFailures.shift();
+      }
       if (unavailable && context.operation === "page.read") throw new db.PageControlError("database_unavailable", 503);
     });
     const pages = new db.PostgresPageRepository(database);
@@ -57,11 +64,18 @@ integration("a page summary sends text only to a Machine whose owner currently r
     const parent = await create({ title: "Private", accessMode: "restricted", body: "Private ledger\n" });
     const child = await create({ title: "Child", parentPageId: parent.pageId, body: "Inherited private ledger\n" });
     const open = await create({ title: "Open", body: "Public plan\n" });
+    const recovering = await create({ title: "Recovery", body: "Recoverable plan\n" });
     let candidates = [member];
     const commands = [];
+    let issueFailure;
+    let targetFailure;
     const resolve = textTaskImports(database, { commands,
-      targets: () => candidates.map(candidate => ({ ownerUserId: candidate.id, machineId: candidate.id, hostId: "host",
-        harness: "claude" })),
+      issue: () => { if (issueFailure) { const error = issueFailure; issueFailure = undefined; throw error; } },
+      targets: () => {
+        if (targetFailure) { const error = targetFailure; targetFailure = undefined; throw error; }
+        return candidates.map(candidate => ({ ownerUserId: candidate.id, machineId: candidate.id, hostId: "host",
+          harness: "claude" }));
+      },
       xmatrixDb: { ...db, PostgresMachineControlRepository: class {
         async getDaemon() { return { daemon: { id: "daemon", email: "machine@example.test", status: "online",
           capabilities: [protocol.MACHINE_TEXT_TASK_CAPABILITY] } }; }
@@ -99,6 +113,38 @@ integration("a page summary sends text only to a Machine whose owner currently r
     candidates = [member, owner];
     await assert.rejects(start(child), { code: "database_unavailable", status: 503 });
     assert.equal(commands.length, sent, "authority outages never turn into another disclosure attempt");
+    unavailable = false;
+
+    // HUB-85: an interrupted preparation used to abandon this revision's summary.
+    candidates = [member];
+    targetFailure = new Error("Connection terminated due to connection timeout");
+    const beforeRecovery = readAttempts;
+    const recovered = await start(recovering);
+    assert.equal(recovered.started, true);
+    assert.ok(readAttempts - beforeRecovery > 1, "retry performs a fresh authorized page read");
+    assert.equal(commands.length, sent + 1, "only the successful preparation issues a task");
+
+    readFailures = [new Error("Connection terminated due to connection timeout")];
+    assert.equal((await start(child)).started, false, "retry still observes the ancestor's revoked read grant");
+    assert.equal(commands.length, sent + 1, "a retried preparation cannot bypass page access");
+
+    const unavailableReads = readAttempts;
+    readFailures = Array.from({ length: 2 }, () => new Error("Connection terminated due to connection timeout"));
+    await assert.rejects(start(recovering), /connection timeout/u);
+    assert.equal(readAttempts - unavailableReads, 2, "a continuing outage exhausts the bounded retry");
+    assert.equal(commands.length, sent + 1, "failed preparation never discloses page text");
+
+    const invalidReads = readAttempts;
+    readFailures = [Object.assign(new Error("missing relation"), { code: "42P01" })];
+    await assert.rejects(start(recovering), { code: "42P01" });
+    assert.equal(readAttempts - invalidReads, 1, "schema defects are surfaced without retry");
+
+    issueFailure = Object.assign(new Error("commit receipt lost"), { code: "DATABASE_COMMIT_UNKNOWN" });
+    const replayed = await start(recovering);
+    assert.equal(replayed.started, true);
+    assert.deepEqual(commands.at(-1), commands.at(-2), "an uncertain commit replays the exact command and payload");
+    assert.equal(commands.at(-1).controlId, replayed.requestId);
+    assert.equal(commands.length, sent + 3, "one command attempt and its one bounded replay");
   } finally {
     await client.query("ROLLBACK");
     await client.end();

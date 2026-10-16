@@ -73,6 +73,7 @@ export class RelayPageSession extends DurableObject<Env> {
   private spaceId: string | null = null;
   private pageId: string | null = null;
   private rehydrated: Promise<void> | null = null;
+  private summaryStarting: Promise<void> | null = null;
 
   constructor(state: DurableObjectState, env: Env) {
     super(state, env);
@@ -211,6 +212,7 @@ export class RelayPageSession extends DurableObject<Env> {
       if (request.method === "POST" && url.pathname === "/internal/summary-ended") {
         const body = await request.json() as { spaceId: string; pageId: string; requestId: string };
         this.bind(body.spaceId, body.pageId);
+        await this.summaryStarting;
         const running = await this.ctx.storage.get<SummaryExecution>("summary");
         if (running?.requestId === body.requestId) await this.ctx.storage.put("summary", { ...running, ended: true });
         // The page may have moved on while that one ran: the next one reads the new head.
@@ -332,7 +334,13 @@ export class RelayPageSession extends DurableObject<Env> {
     try { this.ctx.waitUntil(task); } catch { void task; }
   }
 
-  private async summaryDue(leaving?: WebSocket): Promise<void> {
+  private summaryDue(leaving?: WebSocket): Promise<void> {
+    if (this.summaryStarting) return this.summaryStarting.then(() => this.summaryDue(leaving));
+    this.summaryStarting = this.startSummaryDue(leaving).finally(() => { this.summaryStarting = null; });
+    return this.summaryStarting;
+  }
+
+  private async startSummaryDue(leaving?: WebSocket): Promise<void> {
     try {
       if (!this.spaceId || !this.pageId) return;
       const people = this.ctx.getWebSockets().some((socket) => socket !== leaving &&
