@@ -1,6 +1,6 @@
 import type { QueryResultRow } from "pg";
 import { LIVE_AGENT_STATUS_SQL, isLiveAgentStatus, pageBlockAt, pageBlocks, pageChangeGist, utf8ByteLength } from "@xmatrix/protocol";
-import { canonicalPageMarkdown, pageChangedDocBlocks } from "@xmatrix/protocol/page-document";
+import { canonicalPageMarkdown, pageChangedDocBlocks, pageChangedDocBlocksAsync } from "@xmatrix/protocol/page-document";
 import { readsOnly } from "./space-roles.js";
 import { MessageAuthorityError } from "./message-authority-error.js";
 import { ControlError } from "./control-error.js";
@@ -921,7 +921,7 @@ export class PostgresPageRepository {
       owed: Map<string, PageOwedUpdate> }> {
     const spaceId = bounded(input.spaceId, "spaceId");
     const pageId = bounded(input.pageId, "pageId");
-    return this.inSpace(bounded(input.requestId, "requestId"), "page.block-updates", spaceId, async (tx) => {
+    const { rows, ended, headRevision } = await this.inSpace(bounded(input.requestId, "requestId"), "page.block-updates", spaceId, async (tx) => {
       const actor = await pageActor(tx, spaceId, input.principal, false);
       const row = await this.page(tx, spaceId, actor, pageId, "read");
       const headRevision = Number(row.head_revision);
@@ -933,32 +933,6 @@ export class PostgresPageRepository {
           ORDER BY revision DESC LIMIT ${BLOCK_UPDATE_REVISIONS}`,
         values: [spaceId, pageId, headRevision], maxRows: BLOCK_UPDATE_REVISIONS,
       });
-      const updates = new Map<string, PageBlockAwareness["updated"]>();
-      // Compared as documents, so a change of markdown style is no change. Only
-      // sections whose text differs are put in canonical form: the whole of a
-      // long page's recent revisions is seconds of CPU, which stalls every
-      // request sharing the isolate (XMATRIX-HUB-68, XMATRIX-HUB-69).
-      const bodies = rows.map((revision) => revision.body ?? "");
-      const canonicalSections = new Map<string, string>();
-      const canonical = (section: string) => {
-        let form = canonicalSections.get(section);
-        if (form === undefined) canonicalSections.set(section, form = canonicalPageMarkdown(section));
-        return form;
-      };
-      const order = pageBlocks(bodies[0] ?? "").map((block) => block.id);
-      const open = new Set(order);
-      for (let index = 0; index < rows.length && open.size; index++) {
-        const newer = rows[index]!;
-        const older = rows[index + 1];
-        // The first revision in reach wrote whatever is left, if it is the page's first.
-        const changed = older ? pageChangedDocBlocks(bodies[index + 1]!, bodies[index]!, canonical, open)
-          : Number(newer.revision) === 1 ? [...open] : [];
-        for (const blockId of changed) {
-          if (!open.delete(blockId)) continue;
-          const { revision, authors, conversationIds, createdAt } = revisionOf(newer);
-          updates.set(blockId, { revision, authors, conversationIds, createdAt });
-        }
-      }
       // Claimed work that ended and was not written back (§5.2). An edit to the
       // section records its write-back on the claim, so this reads the claims
       // alone, however long ago the section changed.
@@ -973,17 +947,50 @@ export class PostgresPageRepository {
           ORDER BY ended_at DESC LIMIT ${MAX_LINKS}`,
         values: [spaceId, pageId], maxRows: MAX_LINKS,
       });
-      const owed = new Map<string, PageOwedUpdate>();
-      const sections = new Set(order);
-      for (const row of ended) {
-        // A section taken off the page has nothing left to update.
-        if (owed.has(row.block_id) || (row.block_id !== "" && !sections.has(row.block_id))) continue;
-        owed.set(row.block_id, { reason: row.state === "completed" ? "merged" : row.state === "released" ? "released"
-          : "lapsed", at: iso(row.ended_at), holder: row.holder_label, conversationId: row.conversation_id,
-          pullRequestUrl: row.pull_request_url });
-      }
-      return { headRevision, order, updates, owed };
+      return { headRevision, rows, ended };
     });
+    // Document parsing must not hold a checkout or exhaust the transaction
+    // before the small owed-claim read (XMATRIX-HUB-82).
+    const updates = new Map<string, PageBlockAwareness["updated"]>();
+    // Compared as documents, so a change of markdown style is no change. Only
+    // sections whose text differs are put in canonical form: the whole of a
+    // long page's recent revisions is seconds of CPU, which stalls every
+    // request sharing the isolate (XMATRIX-HUB-68, XMATRIX-HUB-69).
+    const bodies = rows.map((revision) => revision.body ?? "");
+    const canonicalSections = new Map<string, string>();
+    const canonical = async (section: string) => {
+      let form = canonicalSections.get(section);
+      if (form === undefined) {
+        // Let other requests and their pending database responses progress.
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
+        canonicalSections.set(section, form = canonicalPageMarkdown(section));
+      }
+      return form;
+    };
+    const order = pageBlocks(bodies[0] ?? "").map((block) => block.id);
+    const open = new Set(order);
+    for (let index = 0; index < rows.length && open.size; index++) {
+      const newer = rows[index]!;
+      const older = rows[index + 1];
+      // The first revision in reach wrote whatever is left, if it is the page's first.
+      const changed = older ? await pageChangedDocBlocksAsync(bodies[index + 1]!, bodies[index]!, canonical, open)
+        : Number(newer.revision) === 1 ? [...open] : [];
+      for (const blockId of changed) {
+        if (!open.delete(blockId)) continue;
+        const { revision, authors, conversationIds, createdAt } = revisionOf(newer);
+        updates.set(blockId, { revision, authors, conversationIds, createdAt });
+      }
+    }
+    const owed = new Map<string, PageOwedUpdate>();
+    const sections = new Set(order);
+    for (const row of ended) {
+      // A section taken off the page has nothing left to update.
+      if (owed.has(row.block_id) || (row.block_id !== "" && !sections.has(row.block_id))) continue;
+      owed.set(row.block_id, { reason: row.state === "completed" ? "merged" : row.state === "released" ? "released"
+        : "lapsed", at: iso(row.ended_at), holder: row.holder_label, conversationId: row.conversation_id,
+        pullRequestUrl: row.pull_request_url });
+    }
+    return { headRevision, order, updates, owed };
   }
 
   /**

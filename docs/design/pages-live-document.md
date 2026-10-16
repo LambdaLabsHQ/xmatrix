@@ -71,6 +71,12 @@ Each block's awareness has four layers.
 | Change | What changed since I looked? | Revisions after the reader's last read (people: last visit; Agents: last `page read` in this Run) |
 | Intent | Who has taken this? | Claims, with their conversation and pull request |
 
+Revision attribution reads the authorized head, bounded revision history and
+owed claims before releasing its database transaction. It then compares the
+immutable documents, yielding between uncached section parses so large pages
+do not hold a PostgreSQL connection or block other requests for the whole
+comparison. Markdown style alone remains no document change.
+
 - **Intent line.** An Agent on a block publishes one line of what it is
   doing: the note on its claim, or else the title of the conversation its Run
   is in plus its invocation state. For example `claude:3 · Working · adding

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { Client } from "pg";
+import { createAuthorityDatabase } from "../dist/index.js";
 
 import { PostgresPageRepository, pageNameFrom, pagePositionBetween } from "../dist/page-control.js";
 import { readPageConversations } from "../dist/page-conversations.js";
@@ -590,6 +591,33 @@ integration("pages: a page's name is the top-level heading its document opens wi
       const [row] = (await client.query("SELECT data.page_name($1) AS name", [body])).rows;
       assert.equal(row.name, pageNameFrom(body), JSON.stringify(body));
     }
+  } finally {
+    await cleanup(client, ids);
+    await client.end();
+  }
+});
+
+// A large history used to parse synchronously while holding the transaction,
+// expiring it before the small owed-claim read. Existing awareness checks use
+// small documents and cannot catch that production failure (XMATRIX-HUB-82).
+integration("page awareness finishes its database snapshot before comparing a large document", async () => {
+  const { client, ids, pages, owner } = await pageTest("awareness-deadline");
+  const database = createAuthorityDatabase({ connectionString, shardId: "shard-0",
+    statementTimeoutMs: 250, transactionTimeoutMs: 250 });
+  try {
+    const body = `# Status\n\n## Inventory\n\n| Item | State |\n| --- | --- |\n${
+      Array.from({ length: 800 }, (_, index) => `| item ${index} | waiting for delivery |\n`).join("")}`;
+    const { page } = await pages.create({ requestId: crypto.randomUUID(), spaceId: ids.space, principal: owner,
+      title: "Status", body });
+    await pages.edit({ requestId: crypto.randomUUID(), spaceId: ids.space, pageId: page.pageId,
+      principal: owner, baseRevision: 1, body: body.replace("item 0", "arrived 0") });
+    const result = await new PostgresPageRepository(database).blockUpdates({ requestId: crypto.randomUUID(),
+      spaceId: ids.space, pageId: page.pageId, principal: owner });
+    assert.equal(result.headRevision, 2);
+    assert.deepEqual(result.order, ["status", "inventory"]);
+    assert.equal(result.updates.get("inventory").revision, 2);
+    assert.equal(result.updates.get("status").revision, 1);
+    assert.deepEqual([...result.owed], []);
   } finally {
     await cleanup(client, ids);
     await client.end();
