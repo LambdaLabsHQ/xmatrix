@@ -1355,7 +1355,7 @@ test("on a long page, who works out of view shows at its edges, and what an Agen
   await expect(tinted).toHaveCount(0, { timeout: 10_000 });
   await expect.poll(async () => (await inked.allTextContents()).join("")).toBe("none yet, shipping Friday");
 
-  // Its caret rests where its edit ended while its Run lives; its name is at the edge, not in the text.
+  // Its caret rests where its edit ended while its Run lives; at rest its name is at the edge, not in the text.
   const caret = editor.locator(`.ProseMirror-yjs-cursor[data-client="${AGENT_CLIENT}"]`);
   await expect(caret).toHaveCount(1);
   await expect(caret.locator("div")).toBeHidden();

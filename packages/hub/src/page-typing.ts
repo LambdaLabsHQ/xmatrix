@@ -15,10 +15,11 @@ import * as Y from "yjs";
 const TEXT_BLOCKS = new Set(["paragraph", "heading", "code_block", "table_cell", "table_header"]);
 
 interface TypedWord { text: string; attrs: Record<string, unknown> }
-interface TypedRun { at: Y.RelativePosition; words: TypedWord[]; block: string }
+/** `from` is where the run's first word went: with `at`, the stretch it has typed so far. */
+interface TypedRun { from: Y.RelativePosition; at: Y.RelativePosition; words: TypedWord[]; block: string; typed: boolean }
 
 /** A typing as a session persists it, so a restart finishes it instead of leaving it half there. */
-export interface PageTypingState { runs: Array<{ at: unknown; words: TypedWord[]; block: string }> }
+export interface PageTypingState { runs: Array<{ from?: unknown; at: unknown; words: TypedWord[]; block: string; typed?: boolean }> }
 
 /** A mark as y-prosemirror keeps it on text: the page's marks each exclude themselves, so the name is the key. */
 function markAttributes(marks: readonly Mark[]): Record<string, unknown> {
@@ -34,7 +35,12 @@ function inDocument(type: Y.AbstractType<unknown>): boolean {
 }
 
 export class PageTyping {
-  private constructor(private readonly runs: TypedRun[]) {}
+  /** Every run, kept after it is typed out, for where the words went. */
+  private readonly all: TypedRun[];
+
+  private constructor(private readonly runs: TypedRun[]) {
+    this.all = [...runs];
+  }
 
   /**
    * Brings the live fragment to `start` with the smallest structural update, under `origin`, and
@@ -44,27 +50,35 @@ export class PageTyping {
     const doc = fragment.doc!;
     const meta = { mapping: new Map(), isOMark: new Map() };
     doc.transact(() => updateYFragment(doc, fragment, start, meta), origin);
-    return new PageTyping(runs.map((run) => ({
-      at: absolutePositionToRelativePosition(run.pos, fragment, meta.mapping),
-      words: run.words.map((word) => ({ text: word.text, attrs: markAttributes(word.marks) })),
-      block: pageDocBlockAt(start, run.pos),
-    })));
+    return new PageTyping(runs.map((run) => {
+      const at = absolutePositionToRelativePosition(run.pos, fragment, meta.mapping);
+      return { from: at, at, words: run.words.map((word) => ({ text: word.text, attrs: markAttributes(word.marks) })),
+        block: pageDocBlockAt(start, run.pos), typed: false };
+    }));
   }
 
   static restore(state: PageTypingState): PageTyping {
-    return new PageTyping(state.runs.map((run) => ({ at: Y.createRelativePositionFromJSON(run.at),
-      words: run.words.map((word) => ({ ...word })), block: run.block })));
+    return new PageTyping(state.runs.map((run) => {
+      const at = Y.createRelativePositionFromJSON(run.at);
+      return { from: run.from ? Y.createRelativePositionFromJSON(run.from) : at, at,
+        words: run.words.map((word) => ({ ...word })), block: run.block, typed: run.typed === true };
+    }));
   }
 
   toJSON(): PageTypingState {
     // A copy of the words: the state is kept while this typing goes on taking them.
-    return { runs: this.runs.map((run) => ({ at: Y.relativePositionToJSON(run.at), words: run.words.map((word) => ({ ...word })),
-      block: run.block })) };
+    return { runs: this.runs.map((run) => ({ from: Y.relativePositionToJSON(run.from), at: Y.relativePositionToJSON(run.at),
+      words: run.words.map((word) => ({ ...word })), block: run.block, typed: run.typed })) };
   }
 
   /** The same words still to type, apart from this one's, as a commit types them into a copy of the page. */
   copy(): PageTyping {
-    return new PageTyping(this.runs.map((run) => ({ at: run.at, words: [...run.words], block: run.block })));
+    return new PageTyping(this.runs.map((run) => ({ ...run, words: [...run.words] })));
+  }
+
+  /** Where it has typed so far, run by run: what the page marks as this Agent's while it is fresh. */
+  wrote(): Array<{ from: Y.RelativePosition; to: Y.RelativePosition }> {
+    return this.all.filter((run) => run.typed).map((run) => ({ from: run.from, to: run.at }));
   }
 
   /** How many words are still to type. */
@@ -99,6 +113,7 @@ export class PageTyping {
           continue;
         }
         run.words.shift();
+        run.typed = true;
         // A fresh attribute object every time: Yjs completes it with the marks to clear, so none is inherited.
         place.text.insert(place.index, word.text, { ...word.attrs });
         // The next word sticks to this one, whatever anyone types right after it.

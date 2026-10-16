@@ -1,5 +1,5 @@
 import {
-  PageCoWriteParser, pageBlocks, pageChangedBlocks, type PageCoWriteAction, type PageCoWriteEvent,
+  PAGE_AGENT_INK_MS, PageCoWriteParser, pageBlocks, pageChangedBlocks, type PageCoWriteAction, type PageCoWriteEvent,
   type PageCoWriteReply, type PageCoWriteRequest,
 } from "@xmatrix/protocol";
 import { markdownToPageDoc, pageDocToMarkdown, pageSchema } from "@xmatrix/protocol/page-document";
@@ -41,8 +41,13 @@ const FULL_PAGE_EVERY = 8;
 /** More changed sections than this, and the Agent reads the whole page. */
 const FULL_PAGE_CHANGES = 3;
 const QUOTE_CONTEXT = 80;
+/** The most changes an Agent's presence names as just written. */
+const WROTE_KEPT = 8;
 
 export type PageCoWriterActivity = "watching" | "thinking" | "writing" | "waiting";
+
+/** Where the Agent wrote, and when: its presence names these, so the page marks them in its colour. */
+export interface PageCoWriterWrote { from: Y.RelativePosition; to: Y.RelativePosition; at: number }
 
 export interface PageCoWriterPerson {
   name: string;
@@ -59,7 +64,7 @@ export interface PageCoWriterHost {
   write(change: () => void): void;
   /** The Agent's presence on the page: what it is doing, its caret, and whether its last change can be taken back. */
   present(state: { activity: PageCoWriterActivity; cursor?: Y.RelativePosition | null; say?: string | null;
-    undoable: boolean }): void;
+    undoable: boolean; wrote: PageCoWriterWrote[] }): void;
   /** The people on the page now. */
   people(): PageCoWriterPerson[];
   /** To the Agent's runtime. */
@@ -175,6 +180,8 @@ export class PageCoWriter {
   private last: Written | null = null;
   private ended = false;
   private writable = false;
+  /** What it wrote lately, change by change, for the page to mark in its colour while it is fresh. */
+  private wrote: Array<PageCoWriterWrote & { change: Written }> = [];
   /** When the Agent's words last reached the page, and the write that waits to bring the rest. */
   private lastWrite = 0;
   private writeTimer: ReturnType<typeof setTimeout> | null = null;
@@ -514,6 +521,8 @@ export class PageCoWriter {
     if (!children.length) children.push(pageSchema.nodes.paragraph!.create());
     const restored = pageSchema.topNodeType.create(live.doc.attrs, Fragment.fromArray(children));
     this.host.write(() => updateYFragment(this.host.doc, this.host.fragment, restored, live.meta));
+    // What was taken back is not its writing any more.
+    this.wrote = this.wrote.filter((entry) => entry.change !== target);
     this.told(`${by} took back your last change; leave it out unless they ask again.`);
     this.show({ activity: this.active ? "thinking" : target === writing ? "waiting" : "watching" });
     return "undone";
@@ -566,7 +575,21 @@ export class PageCoWriter {
     this.host.write(() => updateYFragment(this.host.doc, this.host.fragment, intended, live.meta));
     action.written = nodes;
     const end = region.from + nodes.length;
+    this.remember(action, intended, region.from, end, live.meta.mapping);
     this.show({ activity: "writing", cursor: this.caretAt(intended, end, live.meta.mapping) });
+  }
+
+  /** Its change now covers blocks `from` to `to` of `doc`: kept as positions that survive others' edits. */
+  private remember(change: Written, doc: DocNode, from: number, to: number, mapping: Live["mapping"]): void {
+    const now = Date.now();
+    this.wrote = this.wrote.filter((entry) => entry.change !== change && now - entry.at < PAGE_AGENT_INK_MS);
+    if (to <= from) return;
+    let start = 0;
+    for (let child = 0; child < from; child++) start += doc.child(child).nodeSize;
+    let finish = start;
+    for (let child = from; child < to; child++) finish += doc.child(child).nodeSize;
+    const at = (pos: number) => absolutePositionToRelativePosition(pos, this.host.fragment, mapping) as Y.RelativePosition;
+    this.wrote = [...this.wrote, { change, from: at(start + 1), to: at(finish - 1), at: now }].slice(-WROTE_KEPT);
   }
 
   /** The caret at the end of the block before `index`, as a position that survives others' edits. */
@@ -584,8 +607,10 @@ export class PageCoWriter {
 
   private show(state: { activity: PageCoWriterActivity; cursor?: Y.RelativePosition | null }): void {
     const writing = this.active?.action;
+    const now = Date.now();
     this.host.present({ ...state, say: this.note,
-      undoable: this.last !== null || Boolean(writing && !writing.skipped && writing.kind !== "note" && writing.written.length) });
+      undoable: this.last !== null || Boolean(writing && !writing.skipped && writing.kind !== "note" && writing.written.length),
+      wrote: this.wrote.filter((entry) => now - entry.at < PAGE_AGENT_INK_MS).map(({ from, to, at }) => ({ from, to, at })) });
   }
 
   /** Someone edited where the Agent writes: it stops there, as a person would, and hears why when they pause. */
