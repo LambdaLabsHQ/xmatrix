@@ -1,3 +1,4 @@
+import { FIXTURE_AGENT_REGISTRATION } from "./workspace-fixtures";
 import { expect, test } from "./fixtures";
 import { E2E_CHANNEL, E2E_NOW, E2E_SPACE, fixtureJson, openWorkspaceWithStubs } from "./workspace-fixtures";
 
@@ -46,7 +47,7 @@ const registrations = [
 // Who works is what the conversation shows: its busy Instances, as on the conversation list.
 const channel = {
   ...E2E_CHANNEL,
-  memberPresence: Object.fromEntries(registrations.map((item, index) => [`agent:${index}`, {
+  memberPresence: Object.fromEntries(registrations.map((item, index) => [`agent:${index}`, { registration: FIXTURE_AGENT_REGISTRATION,
     kind: "agent", status: "online", label: `${item.key.harness}-${index}`,
     instances: item.live.running.map((instance, slot) => ({ id: instance.instanceId,
       channelInstanceId: instance.channelInstanceId, label: `${item.key.harness}-${index}:${slot + 1}`,

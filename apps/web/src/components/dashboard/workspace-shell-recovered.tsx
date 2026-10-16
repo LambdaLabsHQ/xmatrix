@@ -6,7 +6,7 @@ import { meterTone, type MachineGlanceReading } from "./machine-load";
 import { MachineLoadGlanceBars } from "./machine-load-panel";
 import { useOpenMachine } from "./machine-link";
 import type { PresentedChannelMemberPresence as ChannelMemberPresence } from "./workspace-shell-presence";
-import { crossChannelReplyRelay, channelVisibilityScope, digestCanonicalCloneCborV1, parseLlmQuotaAccount, parseQuotaObservedAt, isUnlistedParameterTag, statusTagIcon, type AgentInvocationSelections, type DraftSummonIntent, type StatusTagIcon } from "@xmatrix/protocol";
+import { agentInstanceMemberPresence, channelPresenceInstances, presenceInstanceId, crossChannelReplyRelay, channelVisibilityScope, digestCanonicalCloneCborV1, parseLlmQuotaAccount, parseQuotaObservedAt, isUnlistedParameterTag, statusTagIcon, type AgentInvocationSelections, type DraftSummonIntent, type StatusTagIcon } from "@xmatrix/protocol";
 import { formatLocalClock, formatZonedDateTime } from "./time-display";
 
 import { matchClaimableOutgoing } from "./outgoing-message-claim";
@@ -38,7 +38,6 @@ export {
   isAgentLlmTraceEvent,
   isAgentSpawnEvent,
   isAgentTraceEvent,
-  isDaemonChannelMember,
   isLlmTraceEvent,
   isOlderThan,
   isOnlinePresence,
@@ -192,7 +191,7 @@ import type {
   SerializedAgent,
   SerializedAgentLaunch,
   SerializedAgentInstance,
-  SerializedChannel,
+  ChannelSnapshot,
   SerializedSpace,
 } from "@xmatrix/protocol";
 import { xmatrixRawResponse, XMatrixApiError } from "@/lib/query/api-client";
@@ -341,7 +340,7 @@ export /**
  */
 async function appendChannelMessageWithAttachments(input: {
   token: string;
-  channel: Pick<SerializedChannel, "id" | "mode" | "spaceId">;
+  channel: Pick<ChannelSnapshot, "id" | "mode" | "spaceId">;
   clientMessageId: string;
   body: string;
   attachments: readonly ChannelAttachment[];
@@ -353,8 +352,8 @@ async function appendChannelMessageWithAttachments(input: {
   deadlineMs?: number;
 }): Promise<{
   message?: unknown;
-  channel?: SerializedChannel;
-  appConnectorResultChannels?: SerializedChannel[];
+  channel?: ChannelSnapshot;
+  appConnectorResultChannels?: ChannelSnapshot[];
 }> {
   if (input.invocationSelections && input.invocationSelections.sourceBodyHash !== await digestCanonicalCloneCborV1(input.body)) {
     throw new Error("Agent selection does not match the message body");
@@ -400,8 +399,8 @@ async function appendChannelMessageWithAttachments(input: {
   if (outcome.kind === "failed") throw new XMatrixApiError(outcome);
   return outcome.payload as {
     message?: unknown;
-    channel?: SerializedChannel;
-    appConnectorResultChannels?: SerializedChannel[];
+    channel?: ChannelSnapshot;
+    appConnectorResultChannels?: ChannelSnapshot[];
   };
 }
 
@@ -747,8 +746,8 @@ export function appendOutgoingTimelineItems(
 
 export function buildTimeline(
   history: ChannelMessage[],
-  channel: SerializedChannel | null,
-  channels: SerializedChannel[],
+  channel: ChannelSnapshot | null,
+  channels: ChannelSnapshot[],
   events: readonly ObservabilityEvent[],
   currentUser?: { id: string; email: string; name?: string; avatarUrl?: string } | null,
   channelReadCounts: Record<string, number> = {},
@@ -758,7 +757,7 @@ export function buildTimeline(
   spaceMembers: SerializedSpace["members"] = [],
 ): TimelineItem[] {
   const channelsById = new Map(channels.map(channel => [channel.id, channel]));
-  const threadsByRoot = new Map<string, SerializedChannel>();
+  const threadsByRoot = new Map<string, ChannelSnapshot>();
   for (const candidate of channels) {
     if (candidate.metadata?.kind !== "thread") continue;
     const parent = metadataString(candidate.metadata, "threadRootChannelId");
@@ -779,7 +778,7 @@ export function buildTimeline(
   // An agent sender's identity need not match the member entry its live Instance
   // sits under; the instance id is the one key both sides share, so an agent
   // sender resolves through it before any name lookup.
-  const presenceByInstanceId = new Map<string, ChannelMemberPresence>();
+  const presenceByInstanceId = channel?.presence?.instances;
 
   if (channel) {
     for (const member of channelMembersByPresence(channel)) {
@@ -789,11 +788,6 @@ export function buildTimeline(
       if (email && !presenceByEmail.has(email)) presenceByEmail.set(email, presence);
       const label = (presence.label || member).trim().toLowerCase();
       if (label && !presenceByLabel.has(label)) presenceByLabel.set(label, presence);
-      for (const instance of presence.instances || []) {
-        if (instance.id && !presenceByInstanceId.has(instance.id)) {
-          presenceByInstanceId.set(instance.id, presence);
-        }
-      }
     }
   }
 
@@ -805,7 +799,7 @@ export function buildTimeline(
     const senderIdentityId = message.from.identityId;
     // A Channel Agent member is keyed by its Instance, not the sender's `agent:` identity.
     const exactSenderInstance = message.from.kind === "agent" && message.from.instanceId
-      ? presenceByInstanceId.get(message.from.instanceId)?.instances?.find(instance => instance.id === message.from.instanceId)
+      ? presenceByInstanceId?.get(presenceInstanceId(message.from.instanceId))
       : undefined;
     const senderInstanceLabel = message.from.instanceLabel;
     const authorLabel =
@@ -831,7 +825,7 @@ export function buildTimeline(
     const matchedPresence = systemNotice || relayedReply
       ? undefined
       : (message.from.kind === "agent" && message.from.instanceId
-          ? presenceByInstanceId.get(message.from.instanceId)
+          ? (channel && presenceByInstanceId?.has(presenceInstanceId(message.from.instanceId)) ? memberPresence(channel, message.from.instanceId) : undefined)
           : undefined) ||
         (senderIdentityId ? presenceByMember.get(senderIdentityId) : undefined) ||
         (message.from.userId ? presenceByMember.get(`user:${message.from.userId}`) : undefined) ||
@@ -1306,7 +1300,7 @@ export function selectedChannelIdAfterRouteChange({
   routeNamesChannel,
   routeSelectionChanged,
 }: {
-  channels: SerializedChannel[];
+  channels: ChannelSnapshot[];
   current: string | null;
   routeChannelId: string | null;
   routeNamesChannel: boolean;
@@ -1330,7 +1324,7 @@ export function resolveSelectedChannelIdAfterChannelListChange({
   current,
   requestedChannelId,
 }: {
-  channels: SerializedChannel[];
+  channels: ChannelSnapshot[];
   current: string | null;
   requestedChannelId: string | null;
 }): string | null {
@@ -1341,10 +1335,10 @@ export function resolveSelectedChannelIdAfterChannelListChange({
 }
 
 export function threadChannelForMessage(
-  channels: SerializedChannel[],
+  channels: ChannelSnapshot[],
   parentChannelId: string,
   messageId: string
-): SerializedChannel | undefined {
+): ChannelSnapshot | undefined {
   return channels.find(
     (channel) =>
       metadataString(channel.metadata, "threadRootChannelId") === parentChannelId &&
@@ -1354,7 +1348,7 @@ export function threadChannelForMessage(
 }
 
 export function threadReplyCountForChannel(
-  channel?: SerializedChannel,
+  channel?: ChannelSnapshot,
   loadedMessages?: ChannelMessage[]
 ): number | undefined {
   const loadedReplyCount = loadedThreadReplyCountForChannel(channel, loadedMessages);
@@ -1365,7 +1359,7 @@ export function threadReplyCountForChannel(
 }
 
 function loadedThreadReplyMessages(
-  channel?: SerializedChannel,
+  channel?: ChannelSnapshot,
   loadedMessages?: ChannelMessage[],
 ): ChannelMessage[] | undefined {
   if (!channel || !loadedMessages || loadedMessages.length === 0) return undefined;
@@ -1380,14 +1374,14 @@ function loadedThreadReplyMessages(
 }
 
 export function loadedThreadReplyCountForChannel(
-  channel?: SerializedChannel,
+  channel?: ChannelSnapshot,
   loadedMessages?: ChannelMessage[]
 ): number | undefined {
   return loadedThreadReplyMessages(channel, loadedMessages)?.length;
 }
 
 export function threadReplyParticipantsForChannel(
-  channel?: SerializedChannel,
+  channel?: ChannelSnapshot,
   loadedMessages?: ChannelMessage[]
 ): ThreadReplyParticipant[] | undefined {
   const replies = loadedThreadReplyMessages(channel, loadedMessages)
@@ -1477,11 +1471,11 @@ export function nativePlatformLabel(platform: DesktopContext["platform"]): strin
 }
 
 export function formatMember(
-  channel: SerializedChannel,
+  channel: ChannelSnapshot,
   member: string,
   agentsById?: Map<string, SerializedAgent>
 ): string {
-  const namedMember = channel.memberPresence?.[member]?.label;
+  const namedMember = memberPresence(channel, member).label;
   if (namedMember) return namedMember;
   const agent = agentsById?.get(member);
   if (agent) return agent.name;
@@ -1500,7 +1494,7 @@ export function presenceAvatarUrl(
 }
 
 export function buildAgentWorkItems(
-  channel: SerializedChannel | null,
+  channel: ChannelSnapshot | null,
   events: ObservabilityEvent[],
   launches: readonly SerializedAgentLaunch[] = [],
 ): AgentWorkItem[] {
@@ -1508,64 +1502,62 @@ export function buildAgentWorkItems(
 
   const items: AgentWorkItem[] = [];
 
-  for (const member of channelMembersByPresence(channel)) {
-    const presence = memberPresence(channel, member);
-    if (presence.kind !== "agent") continue;
-
+  for (const instance of channelPresenceInstances(channel.presence)) {
+    const member = instance.id;
+    const presence = agentInstanceMemberPresence(instance);
     const agentLabel = presence.label || member;
-    for (const instance of presence.instances || []) {
-      if (!isChannelResidentPresence(instance)) continue;
-      const avatarUrl = presence.avatarUrl;
-      const target: AgentTraceTarget = {
-        id: member,
-        instanceId: instance.id,
-        instanceIds: agentTraceInstanceIds(instance),
-        exactInstanceIds: [instance.id],
-        instanceScoped: true,
-        channelId: channel.id,
-        connectedAt: instance.connectedAt,
-        name: agentInstanceDisplayName(instance),
-        status: instance.status,
-        avatarUrl,
-        activity: presenceStatusLabel(instance),
-        gitBranch: instance.gitBranch,
-        runtimeState: instance.runtimeState || presence.runtimeState,
-        usage: instance.usage || presence.usage,
-      };
-      const latestEvent = latestAgentWorkEvent(events, target, channel.id);
+    if (!isChannelResidentPresence(instance)) continue;
+    const avatarUrl = presence.avatarUrl;
+    const target: AgentTraceTarget = {
+      id: member,
+      instanceId: instance.id,
+      instanceIds: agentTraceInstanceIds(instance),
+      exactInstanceIds: [instance.id],
+      instanceScoped: true,
+      channelId: channel.id,
+      connectedAt: instance.connectedAt,
+      name: agentInstanceDisplayName(instance),
+      status: instance.status,
+      avatarUrl,
+      activity: presenceStatusLabel(instance),
+      gitBranch: instance.gitBranch,
+      runtimeState: instance.runtimeState || presence.runtimeState,
+      usage: instance.usage || presence.usage,
+    };
+    const latestEvent = latestAgentWorkEvent(events, target, channel.id);
 
-      items.push({
-        key: `${member}:${instance.id}`,
-        agentId: member,
-        instance,
-        sortIndex: items.length,
-        label: instance.label || instance.id,
-        agentLabel,
-        status: instance.status,
-        avatarUrl,
-        avatarKind: "agent",
-        activity: instance.activity || presence.activity,
-        intent: instance.intent || presence.intent,
-        files: instance.files?.length ? instance.files : presence.files,
-        usage: instance.usage || presence.usage,
-        // Same verdict, same inputs as the detail row: the avatar badge shows
-        // what this resolves to instead of deriving a limit of its own.
-        usageLimit: agentInstanceUsageLimit(presence, instance),
-        lastSeenAt: instance.lastSeenAt,
-        latestEvent,
-        target,
-        canStop: true,
-      });
-    }
+    items.push({
+      key: `${member}:${instance.id}`,
+      agentId: member,
+      instance,
+      sortIndex: items.length,
+      label: instance.label || instance.id,
+      agentLabel,
+      status: instance.status,
+      avatarUrl,
+      avatarKind: "agent",
+      activity: instance.activity || presence.activity,
+      intent: instance.intent || presence.intent,
+      files: instance.files?.length ? instance.files : presence.files,
+      usage: instance.usage || presence.usage,
+      // Same verdict, same inputs as the detail row: the avatar badge shows
+      // what this resolves to instead of deriving a limit of its own.
+      usageLimit: agentInstanceUsageLimit(presence, instance),
+      lastSeenAt: instance.lastSeenAt,
+      latestEvent,
+      target,
+      canStop: true,
+    });
   }
 
   const membersWithInstances = new Set(items.map((item) => item.agentId));
+  const representedInstanceIds = new Set(items.map((item) => item.instance.id));
   const visibleMembers = new Set(channelMembersByPresence(channel));
   const launchedInstanceIds = new Set(launches.map((launch) => launch.instanceId));
   for (const launch of launches) {
     const actorId = launch.instanceId;
     if (launch.state === "connected" || launch.state === "cancelled" ||
-        membersWithInstances.has(actorId)) continue;
+        representedInstanceIds.has(launch.instanceId)) continue;
     const failed = launch.state === "failed";
     const label = launch.targetName || actorId;
     const status: SerializedAgentInstance["status"] = failed ? "offline" : "busy";
@@ -1591,8 +1583,8 @@ export function buildAgentWorkItems(
     if (!agentId || membersWithInstances.has(agentId) || launchedInstanceIds.has(agentId)) continue;
     if (!visibleMembers.has(agentId)) continue;
 
-    const agentLabel = event.agentName || channel.memberPresence?.[agentId]?.label || agentId;
-    const avatarUrl = channel.memberPresence?.[agentId]?.avatarUrl;
+    const agentLabel = event.agentName || memberPresence(channel, agentId).label || agentId;
+    const avatarUrl = (memberPresence(channel, agentId) as ChannelMemberPresence & { avatarUrl?: string }).avatarUrl;
     const runLabel = eventMetadataString(event, "runLabel");
     const launchInstanceId = eventMetadataString(event, "runId") || event.id;
     const timestamp = event.timestamp;
@@ -1673,7 +1665,7 @@ export function traceEventChannelInstanceLabel(event: ObservabilityEvent): strin
 
 export function latestSpawnEventsByAgent(
   events: ObservabilityEvent[],
-  channel: SerializedChannel
+  channel: ChannelSnapshot
 ): ObservabilityEvent[] {
   const byAgent = new Map<string, ObservabilityEvent>();
   const visibleMembers = new Set(channelMembersByPresence(channel));
@@ -1853,7 +1845,7 @@ export function traceInnerPayload(payload: Record<string, unknown> | null): Reco
 
 /* moved to workspace-shell-presence (10) */
 
-export function humanChannelMembersByPresence(channel: SerializedChannel): string[] {
+export function humanChannelMembersByPresence(channel: ChannelSnapshot): string[] {
   return channelMembersByPresence(channel).filter((member) => {
     const presence = memberPresence(channel, member);
     return presence.kind === "user";
@@ -1861,7 +1853,7 @@ export function humanChannelMembersByPresence(channel: SerializedChannel): strin
 }
 
 export function visibleHumanChannelMembers(
-  channel: SerializedChannel,
+  channel: ChannelSnapshot,
   space: SerializedSpace | null
 ): string[] {
   if (channel.visibleHumanMemberIds) {
@@ -1877,7 +1869,7 @@ export function visibleHumanChannelMembers(
   return humanChannelMembersByPresence(channel);
 }
 
-export function channelFocusedHumanMembers(channel: SerializedChannel): string[] {
+export function channelFocusedHumanMembers(channel: ChannelSnapshot): string[] {
   return humanChannelMembersByPresence(channel)
     .filter((member) => {
       const presence = memberPresence(channel, member);
@@ -1886,28 +1878,21 @@ export function channelFocusedHumanMembers(channel: SerializedChannel): string[]
     .sort((left, right) => formatMember(channel, left).localeCompare(formatMember(channel, right)));
 }
 
-export function channelOnlineAgentAvatarItems(channel: SerializedChannel | null): ChannelAgentAvatarItem[] {
+export function channelOnlineAgentAvatarItems(channel: ChannelSnapshot | null): ChannelAgentAvatarItem[] {
   if (!channel) return [];
 
   const items: ChannelAgentAvatarItem[] = [];
-  channelMembersByPresence(channel).forEach((member) => {
-    const presence = memberPresence(channel, member);
-    if (presence.kind !== "agent") return;
-
-    const instances = presence.instances || [];
-    const onlineInstances = instances.filter((instance) =>
-      isChannelResidentPresence(instance)
-    );
-    onlineInstances.forEach((instance, instanceIndex) => {
-      items.push({
-        key: `${member}:${instance.id}`,
-        member,
-        instance,
-        connectedAt: instance.connectedAt,
-        instanceIndex,
-      });
+  for (const instance of channelPresenceInstances(channel.presence)) {
+    const member = instance.id;
+    if (!isChannelResidentPresence(instance)) continue;
+    items.push({
+      key: `${member}:${instance.id}`,
+      member,
+      instance,
+      connectedAt: instance.connectedAt,
+      instanceIndex: items.length,
     });
-  });
+  }
 
   return items.sort(compareChannelAgentAvatarBirthOrder);
 }
@@ -1939,7 +1924,7 @@ export function compareChannelAgentAvatarBirthOrder(
   return left.key.localeCompare(right.key);
 }
 
-export function memberPresenceSummary(channel: SerializedChannel, space: SerializedSpace | null) {
+export function memberPresenceSummary(channel: ChannelSnapshot, space: SerializedSpace | null) {
   return visibleHumanChannelMembers(channel, space).reduce(
     (summary, member) => {
       const presence = memberPresence(channel, member);

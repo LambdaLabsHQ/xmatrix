@@ -87,7 +87,7 @@ import {
 
 import type {
   ObservabilityEvent,
-  SerializedChannel,
+  ChannelSnapshot,
   SerializedSpace,
 } from "@xmatrix/protocol";
 
@@ -114,8 +114,8 @@ export const PENDING_CHANNEL_NAVIGATION_TTL_MS = 15_000;
    channel arrives. The pending id is returned so the row can stay highlighted
    while it waits. */
 export function usePendingChannelNavigation(
-  channels: SerializedChannel[],
-  channelsRef: MutableRefObject<SerializedChannel[]>,
+  channels: ChannelSnapshot[],
+  channelsRef: MutableRefObject<ChannelSnapshot[]>,
   navigateToChannel: (channelId: string, messageId?: string) => void
 ): {
   requestChannelNavigation: (channelId: string, messageId?: string) => void;
@@ -374,7 +374,7 @@ export function pagesViewSelection(location: string): { pageId: string | null; c
 
 
 export function appViewPath(
-  channel: SerializedChannel | null,
+  channel: ChannelSnapshot | null,
   view: AppView,
   routeSpaceId: string | null,
   spaces: SerializedSpace[]
@@ -471,7 +471,7 @@ export function parseAppLocation(location: string): URL {
 
 export function notificationPathForEvent(
   event: ObservabilityEvent,
-  channels: SerializedChannel[],
+  channels: ChannelSnapshot[],
   spaces: SerializedSpace[],
   routeSpaceId: string | null
 ): string {

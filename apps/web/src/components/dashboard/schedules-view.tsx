@@ -10,7 +10,7 @@ import {
   pageBlocks,
   type AutomationUpdateRequest,
   type SerializedAutomation,
-  type SerializedChannel,
+  type ChannelSnapshot,
   type SerializedSpace,
 } from "@xmatrix/protocol";
 import { AlertTriangle, ChevronRight, Clock, FileText, Loader2, MessageSquare, Pause, Pencil, Play,
@@ -84,7 +84,7 @@ export function SchedulesView({
   executionEnabled: boolean | null;
   spaces: SerializedSpace[];
   currentUserId: string;
-  channels: SerializedChannel[];
+  channels: ChannelSnapshot[];
   busy: string | null;
   error: string | null;
   loadError: string | null;

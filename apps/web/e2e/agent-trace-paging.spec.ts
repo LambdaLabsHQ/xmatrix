@@ -1,3 +1,4 @@
+import { FIXTURE_AGENT_REGISTRATION } from "./workspace-fixtures";
 import { type Page } from "@playwright/test";
 import { expect, test } from "./fixtures";
 import { fixtureJson, fixtureRequests, fixtureRule } from "./in-page-api-fixtures";
@@ -12,7 +13,7 @@ const OLDER_CURSOR = "2026-07-01T00:00:10.000Z|trace-10";
 const TRACE_CHANNEL = {
   ...E2E_CHANNEL,
   memberPresence: {
-    "agent:codex": {
+    "agent:codex": { registration: FIXTURE_AGENT_REGISTRATION,
       kind: "agent",
       status: "busy",
       label: "Codex",

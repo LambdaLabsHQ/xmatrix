@@ -1,4 +1,4 @@
-import type { SerializedChannel } from "@xmatrix/protocol";
+import type { ChannelSnapshot } from "@xmatrix/protocol";
 import { useEffect, useRef, type RefObject } from "react";
 import { sortChannelHistory } from "./channel-history";
 import {
@@ -28,7 +28,7 @@ export function useChannelHistoryWarmup(input: {
   /** Signed in and past the startup critical path. */
   ready: boolean;
   spaceId: string | null;
-  channels: readonly SerializedChannel[];
+  channels: readonly ChannelSnapshot[];
   selectedChannelId: string | null;
   selectedChannelIdRef: RefObject<string | null>;
   historyCacheRef: RefObject<Map<string, ChannelHistoryCacheEntry>>;

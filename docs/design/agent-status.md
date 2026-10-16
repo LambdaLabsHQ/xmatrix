@@ -18,6 +18,32 @@ for how long) are words in the work dock, never more colours.
 - A Run between turns with background tasks still running showed as idle,
   so it looked finished while its work was still open.
 
+## Instance identity in presence
+
+The shared protocol model stores Human presence and devices separately from a
+read-only map of Agent Instances keyed by branded global Instance ID. Each
+Instance has one required registration; selectors derive the harness avatar,
+ordering and daemon filtering. Member aliases and aggregate `instances[]` are
+legacy wire shapes, decoded before Hub overlays or Web stores and encoded
+only at the boundary. No wire migration or coordinated CLI update is needed.
+
+The reducer is the sole map writer and lifecycle merger. Full authoritative
+snapshots replace residency; omitted presence preserves the prior projection,
+and an explicit empty snapshot clears it. Live reports only update known IDs.
+Messages only patch known Instances, never establish residency, and cannot
+wake an offline Instance. Deletes require the exact ID. Reborn retains that
+ID and registration while changing Run; handoff allocates a new Instance and
+slot. Partial slot or registration conflicts request one authoritative read
+per Channel/Instance per connection, with a bounded request set. Invalid
+Authority snapshots are diagnosed and isolated rather than repeatedly fetched.
+
+Legacy grouped rows split into individual Instances without copying aggregate
+Run activity, intent or clocks to siblings; only registration-level quota is
+shared. Canonical entries win over duplicate aliases, which are diagnosed.
+Hub overlays isolate conflicting sessions. A stale launch placeholder is
+suppressed by the same exact Instance ID. These projections grant no membership,
+execution or access authority; immutable message avatars remain historical.
+
 ## 2. Vocabulary
 
 | Display status | When | Dot |

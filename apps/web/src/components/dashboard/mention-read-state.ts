@@ -1,7 +1,8 @@
+import { channelPresenceInstances } from "@xmatrix/protocol";
 /**
  * Mention read state, resolved where the `@` is written.
  *
- * A Channel member's read cursor (`SerializedChannel.memberReadSequences`) is
+ * A Channel member's read cursor (`ChannelSnapshot.memberReadSequences`) is
  * the same durable fact the caller sees as `readSequence`, projected for every
  * member. A mention is read exactly when the mentioned member's cursor has
  * reached the message's sequence, so this module holds the two pure pieces the
@@ -15,7 +16,7 @@ import type {
   ChannelMentionReadState,
   ChannelMentionReadStatus,
   SerializedAgentLaunch,
-  SerializedChannel,
+  ChannelSnapshot,
 } from "@xmatrix/protocol";
 import { MENTION_BROADCAST_NAMES, isChannelResidentInstance, isOperationalMentionStart, mentionAddressTokens, nonOperationalMentionRanges, parseAutoLaunchMentions,
   parseHarnessCapabilityMentions, scanMentionAddresses } from "@xmatrix/protocol";
@@ -186,17 +187,15 @@ export function mentionReadResolution(input: {
  * Agent off this set. Presence only: it says why a mention stays unread.
  */
 export function machineOfflineMentionSubjects(
-  channel: Pick<SerializedChannel, "memberPresence"> | null | undefined,
+  channel: Pick<ChannelSnapshot, "presence"> | null | undefined,
 ): ReadonlySet<string> {
   const subjects = new Set<string>();
-  for (const [memberId, presence] of Object.entries(channel?.memberPresence || {})) {
-    if (presence.kind !== "agent") continue;
-    const subject = memberId.startsWith("agent:") ? memberId : `agent:${memberId}`;
-    const resident = (presence.instances || []).filter(isChannelResidentInstance);
-    const unreachable = resident.filter((instance) =>
-      instance.status === "offline" && instance.offlineReason === "machine_offline");
-    for (const instance of unreachable) subjects.add(`${subject}:${instance.id}`);
-    if (unreachable.length > 0 && unreachable.length === resident.length) subjects.add(subject);
+  for (const instance of channelPresenceInstances(channel?.presence)) {
+    if (isChannelResidentInstance(instance) && instance.status === "offline" && instance.offlineReason === "machine_offline") {
+      const subject = instance.id.startsWith("agent:") ? instance.id : `agent:${instance.id}`;
+      subjects.add(`${subject}:${instance.id}`);
+      subjects.add(subject);
+    }
   }
   return subjects;
 }
@@ -212,10 +211,10 @@ function mentionStatusSubjectId(status: ChannelMentionReadStatus): string {
  * member's read state back.
  */
 export function withMemberReadSequence(
-  channel: SerializedChannel,
+  channel: ChannelSnapshot,
   subjectId: string,
   readSequence: number,
-): SerializedChannel {
+): ChannelSnapshot {
   if (!subjectId || !Number.isSafeInteger(readSequence) || readSequence <= 0) return channel;
   const current = channel.memberReadSequences?.[subjectId];
   if (current !== undefined && current >= readSequence) return channel;
@@ -231,9 +230,9 @@ export function withMemberReadSequence(
  * caller can apply it unconditionally.
  */
 export function applyMemberReadEvent(
-  channels: SerializedChannel[],
+  channels: ChannelSnapshot[],
   event: { channelId?: string; metadata?: Record<string, unknown> },
-): SerializedChannel[] {
+): ChannelSnapshot[] {
   const channelId = typeof event.channelId === "string" ? event.channelId : "";
   const subjectId = typeof event.metadata?.subjectId === "string" ? event.metadata.subjectId : "";
   const readSequence = Number(event.metadata?.readSequence);

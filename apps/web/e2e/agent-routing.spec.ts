@@ -1,3 +1,4 @@
+import { FIXTURE_AGENT_REGISTRATION } from "./workspace-fixtures";
 import { expect, test } from "./fixtures";
 import { E2E_CHANNEL, E2E_SPACE, fixtureJson, fixtureRequestBodies, harnessRegistrations,
   installWorkspaceStubs } from "./workspace-fixtures";
@@ -39,7 +40,7 @@ for (const mobile of [false, true]) {
   const harnesses = ["claude", "codex", "cursor", "grok", "opencode", "windsurf"];
   const locations = harnessRegistrations(harnesses);
   await installWorkspaceStubs(page, { spaces: [E2E_SPACE], channels: [{ ...E2E_CHANNEL,
-    memberPresence: { "agent:codex": { kind: "agent", status: "busy", label: "codex",
+    memberPresence: { "agent:codex": { registration: FIXTURE_AGENT_REGISTRATION, kind: "agent", status: "busy", label: "codex",
       instances: [{ id: "instance-codex", channelInstanceId: "1", label: "codex:1", status: "busy",
         connectedAt: E2E_CHANNEL.createdAt, lastSeenAt: E2E_CHANNEL.updatedAt }] } },
   }] });

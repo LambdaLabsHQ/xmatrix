@@ -15,12 +15,12 @@ import {
   type Dispatch, type ReactNode, type SetStateAction,
 } from "react";
 import type {
-  ChannelCatalogPage,
+  ChannelSnapshotCatalogPage,
   ChannelCatalogPageFilter,
-  ChannelCatalogPageRow,
+  ChannelSnapshotCatalogPageRow,
   ChannelCatalogPageView,
-  ChannelCatalogResolveResult,
-  SerializedChannel,
+  ChannelSnapshotCatalogResolveResult,
+  ChannelSnapshot,
 } from "@xmatrix/protocol";
 
 import { useAuth } from "@/lib/auth-context";
@@ -60,9 +60,9 @@ export interface ChannelCatalogQuery {
 }
 
 export interface ChannelCatalogClientPage {
-  rows: ChannelCatalogPageRow[];
+  rows: ChannelSnapshotCatalogPageRow[];
   nextCursor: string | null;
-  counts: ChannelCatalogPage["counts"] | null;
+  counts: ChannelSnapshotCatalogPage["counts"] | null;
   loading: boolean;
   loaded: boolean;
   error: string | null;
@@ -77,7 +77,7 @@ export interface SpaceChannelCatalog {
   spaceId: string | null;
   page(query: ChannelCatalogQuery): ChannelCatalogClientPage;
   load(query: ChannelCatalogQuery, options?: { append?: boolean; force?: boolean }): Promise<void>;
-  resolve(channelIds: string[], routeToken?: string): Promise<ChannelCatalogResolveResult>;
+  resolve(channelIds: string[], routeToken?: string): Promise<ChannelSnapshotCatalogResolveResult>;
 }
 
 export interface ChannelCatalogPagingModel {
@@ -123,16 +123,16 @@ const INERT_SPACE_CATALOG: SpaceChannelCatalog = Object.freeze({
 });
 
 /** What a read for this reader does to a Channel once merged (`ViewerReads.settle`). */
-type SettleViewerRead = (channel: SerializedChannel) => SerializedChannel;
+type SettleViewerRead = (channel: ChannelSnapshot) => ChannelSnapshot;
 /** Whether a copy of a Channel was read before the Hub last answered the reader's read state (`ViewerReads.outdated`). */
-type OutdatedViewerRead = (channel: SerializedChannel) => boolean;
+type OutdatedViewerRead = (channel: ChannelSnapshot) => boolean;
 
 /**
  * A catalog read answers as of when the Hub made it. What the socket has said
  * of the Channel since stays: its count, its head and its activity time only
  * move forward.
  */
-function aheadOfRead(live: SerializedChannel, read: SerializedChannel, outdated = false): SerializedChannel {
+function aheadOfRead(live: ChannelSnapshot, read: ChannelSnapshot, outdated = false): ChannelSnapshot {
   const messageCount = (live.messageCount ?? 0) > (read.messageCount ?? 0) ? live.messageCount : read.messageCount;
   const historyHeadSequence = (live.historyHeadSequence ?? 0) > (read.historyHeadSequence ?? 0)
     ? live.historyHeadSequence : read.historyHeadSequence;
@@ -162,8 +162,8 @@ function aheadOfRead(live: SerializedChannel, read: SerializedChannel, outdated 
 }
 
 function mergeChannels(
-  current: SerializedChannel[],
-  incoming: readonly SerializedChannel[],
+  current: ChannelSnapshot[],
+  incoming: readonly ChannelSnapshot[],
   settle: SettleViewerRead = (channel) => channel,
   outdated: OutdatedViewerRead = () => false,
 ) {
@@ -183,12 +183,12 @@ function mergeChannels(
 
 /** Merges catalog Channels not applied before, and any the entity table lost since. */
 function commitCatalogChannels(
-  current: SerializedChannel[],
-  incoming: readonly SerializedChannel[],
-  unapplied: ReadonlySet<SerializedChannel>,
+  current: ChannelSnapshot[],
+  incoming: readonly ChannelSnapshot[],
+  unapplied: ReadonlySet<ChannelSnapshot>,
   settle?: SettleViewerRead,
   outdated?: OutdatedViewerRead,
-): SerializedChannel[] {
+): ChannelSnapshot[] {
   const present = new Set(current.map((channel) => channel.id));
   // A row made from the entity table's own Channel (a conversation a message
   // brought into the list) says nothing the table does not hold already.
@@ -223,14 +223,14 @@ function catalogOptions(input: {
     staleTime: 15_000,
     // A row is the same row wherever it stands in the list (shareCatalogRows).
     structuralSharing: (held, next) => shareCatalogRows(
-      held as InfiniteData<ChannelCatalogPage, string | null> | undefined,
-      next as InfiniteData<ChannelCatalogPage, string | null>,
+      held as InfiniteData<ChannelSnapshotCatalogPage, string | null> | undefined,
+      next as InfiniteData<ChannelSnapshotCatalogPage, string | null>,
     ),
   });
 }
 
 function pageFromCache(client: QueryClient, queryKey: QueryKey): ChannelCatalogClientPage {
-  const state = client.getQueryState<InfiniteData<ChannelCatalogPage, string | null>>(queryKey);
+  const state = client.getQueryState<InfiniteData<ChannelSnapshotCatalogPage, string | null>>(queryKey);
   const data = state?.data;
   const last = data?.pages.at(-1);
   return {
@@ -261,7 +261,7 @@ function SpaceCatalogRoot({ token, userId, spaceId, onRows, enabled }: {
   token: string;
   userId: string;
   spaceId: string;
-  onRows: (rows: readonly ChannelCatalogPageRow[]) => void;
+  onRows: (rows: readonly ChannelSnapshotCatalogPageRow[]) => void;
 }): null {
   const rootQuery = useMemo(() => normalizeChannelCatalogQuery(CONVERSATION_QUERY), []);
   const rootCatalog = useInfiniteQuery({
@@ -294,10 +294,10 @@ export function useChannelCatalogPaging(input: {
   routeSpaceId?: string | null;
   routeChannelId?: string | null;
   routeChannelKey?: string | null;
-  channels: SerializedChannel[];
-  setChannels: Dispatch<SetStateAction<SerializedChannel[]>>;
+  channels: ChannelSnapshot[];
+  setChannels: Dispatch<SetStateAction<ChannelSnapshot[]>>;
   /** The entity table's Channel as live reports have it, ahead of `channels`. */
-  liveChannel?: (channelId: string) => SerializedChannel | undefined;
+  liveChannel?: (channelId: string) => ChannelSnapshot | undefined;
   /** Tells `channels`' readers what live reports changed since they last heard. */
   promoteCatalog?: () => void;
   /** What reads made for a reader have brought them (channel-message-summary.ts). */
@@ -358,8 +358,8 @@ export function useChannelCatalogPaging(input: {
   // only moves its row, keeping the Channel it was read with. Applying such a
   // row again would roll its presence back to that read, dropping an Instance
   // that connected since. A row is applied once, unless it is the only copy.
-  const appliedChannelsRef = useRef(new WeakSet<SerializedChannel>());
-  const commitRows = useCallback((rows: readonly ChannelCatalogPageRow[]) => {
+  const appliedChannelsRef = useRef(new WeakSet<ChannelSnapshot>());
+  const commitRows = useCallback((rows: readonly ChannelSnapshotCatalogPageRow[]) => {
     const incoming = rows.map((row) => row.channel);
     const applied = appliedChannelsRef.current;
     const unapplied = new Set(incoming.filter((channel) => !applied.has(channel)));
@@ -386,7 +386,7 @@ export function useChannelCatalogPaging(input: {
     // resolve answers its caller, and a speculative page is read by nobody
     // here: neither is a reason to render the shell again.
     if (key[5] !== "catalog" && key[5] !== "catalog-counts") return;
-    const data = event.query.state.data as InfiniteData<ChannelCatalogPage, string | null> | undefined;
+    const data = event.query.state.data as InfiniteData<ChannelSnapshotCatalogPage, string | null> | undefined;
     if (key[5] === "catalog" && data) {
       commitRows(rowsFromData(data));
       for (const page of data.pages) {
@@ -419,7 +419,7 @@ export function useChannelCatalogPaging(input: {
     if (!token || !spaceId || !userId) return;
     const query = normalizeChannelCatalogQuery(rawQuery);
     const options = catalogOptions({ token, userId, spaceId, query });
-    const current = client.getQueryData<InfiniteData<ChannelCatalogPage, string | null>>(options.queryKey);
+    const current = client.getQueryData<InfiniteData<ChannelSnapshotCatalogPage, string | null>>(options.queryKey);
     if (request.force) await client.cancelQueries({ queryKey: options.queryKey, exact: true });
     if (!request.append) {
       if (current && !request.force) return;
@@ -573,12 +573,12 @@ export function useChannelCatalogPaging(input: {
     // Live entities, shared by every Space: catalog snapshots select the rows,
     // but may predate realtime message activity on those channels.
     const byId = new Map(channels.map((channel) => [channel.id, channel]));
-    const liveRow = (row: ChannelCatalogPageRow): ChannelCatalogPageRow => ({
+    const liveRow = (row: ChannelSnapshotCatalogPageRow): ChannelSnapshotCatalogPageRow => ({
       ...row, channel: byId.get(row.channel.id) ?? row.channel,
     });
 
     const catalogFor = (spaceId: string): SpaceChannelCatalog => {
-      const counts = client.getQueryData<ChannelCatalogPage["counts"]>(
+      const counts = client.getQueryData<ChannelSnapshotCatalogPage["counts"]>(
         xmatrixQueryKeys.channelCatalogCounts({ userId, spaceId }),
       );
       return {

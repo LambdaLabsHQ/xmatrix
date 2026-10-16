@@ -4,7 +4,7 @@ import { AnimatedIcon } from "@/components/ui/animated-icon";
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2, Plus, Trash2 } from "lucide-react";
-import { WEB_PROXY_ROUTES, type ConnectorActionPolicy, type SerializedChannel } from "@xmatrix/protocol";
+import { WEB_PROXY_ROUTES, type ConnectorActionPolicy, type ChannelSnapshot } from "@xmatrix/protocol";
 import { Button } from "@/components/ui/button";
 import { GlassSelect } from "@/components/ui/glass-select";
 import { type AppConnectorManifest } from "@/lib/app-connectors";
@@ -24,7 +24,7 @@ export function connectorWriteActions(connector: AppConnectorManifest) {
 
 export function ConnectorPolicy({ connector, channels, spaceId, token, userId }: {
   connector: AppConnectorManifest;
-  channels: SerializedChannel[];
+  channels: ChannelSnapshot[];
   spaceId: string;
   token: string;
   userId: string;

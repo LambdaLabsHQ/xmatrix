@@ -1,4 +1,5 @@
 "use client";
+import { channelPresenceInstances } from "@xmatrix/protocol";
 
 import { startTransition, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import dynamic from "next/dynamic";
@@ -6,7 +7,7 @@ import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-quer
 import type { PageDocBlock } from "@xmatrix/protocol/page-document";
 import {
   agentPresetAvatarUrl, isLiveAgentStatus, normalizeAgentPresetRuntime, pageAuthorColor, pageAuthorLabel,
-  type SerializedAutomation, type SerializedChannel,
+  type SerializedAutomation, type ChannelSnapshot,
 } from "@xmatrix/protocol";
 import {
   Check, Clock, Files, FileText, History, Lock, MessageSquare, Plus, Share2, Trash2, X,
@@ -439,18 +440,10 @@ function pageClaimsKey(userId: string | null, spaceId: string | null | undefined
 }
 
 /** The Agents live in a conversation this client holds, from its member presence. */
-function liveAgents(channel: SerializedChannel): LiveConversation["agents"] {
-  if (!channel.memberPresence) return undefined;
-  return Object.values(channel.memberPresence).flatMap((member) => {
-    if (member.kind !== "agent") return [];
-    return (member.instances ?? []).flatMap((instance) => {
-      if (!isLiveAgentStatus(instance.status)) return [];
-      return [{
-        instanceId: instance.id, name: instance.label || member.label || "Agent",
-        status: instance.status,
-      }];
-    });
-  });
+function liveAgents(channel: ChannelSnapshot): LiveConversation["agents"] {
+  if (!channel.presence) return undefined;
+  return channelPresenceInstances(channel.presence).flatMap(instance => isLiveAgentStatus(instance.status)
+    ? [{ instanceId: instance.id, name: instance.label || instance.agentName, status: instance.status }] : []);
 }
 
 /** What an Agent co-writing live is doing, as its face at the edge says it (page-co-writer.ts). */
@@ -485,7 +478,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   onOpenSection: (pageId: string, blockId?: string | null) => void;
   onPageDeleted: () => void;
   /** What this client knows live about a conversation: the channel it holds, when it holds it. */
-  conversation: (conversationId: string) => SerializedChannel | null;
+  conversation: (conversationId: string) => ChannelSnapshot | null;
   /** The conversation open beside the page: in the margin at what it is about, or docked when there is no room. */
   activeConversationId?: string | null;
   /** The open conversation itself, the product's one conversation surface, for where the page shows it. */

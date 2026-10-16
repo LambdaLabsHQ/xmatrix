@@ -1,4 +1,4 @@
-import { WEB_PROXY_ROUTES, type SerializedChannel } from "@xmatrix/protocol";
+import { WEB_PROXY_ROUTES, type ChannelSnapshot } from "@xmatrix/protocol";
 import { errorFromResponse, xmatrixRawResponse, requireField } from "../../lib/query/api-client";
 import { UserFacingProblem } from "../../lib/user-facing-error";
 
@@ -30,7 +30,7 @@ export async function createConversation(input: {
   spaceId: string;
   memberName: string;
   mode: "open" | "closed";
-} & ({ body: string } | { name: string; metadata: Record<string, string> })): Promise<SerializedChannel> {
+} & ({ body: string } | { name: string; metadata: Record<string, string> })): Promise<ChannelSnapshot> {
   const response = await xmatrixRawResponse(WEB_PROXY_ROUTES.channels, {
     method: "POST",
     headers: {
@@ -46,7 +46,7 @@ export async function createConversation(input: {
     }),
     cache: "no-store",
   });
-  return requireField<SerializedChannel>(response, "channel", "The conversation");
+  return requireField<ChannelSnapshot>(response, "channel", "The conversation");
 }
 
 /** Starts a conversation with a plain first message, for flows that compose it themselves. */
@@ -55,7 +55,7 @@ export async function startConversation(input: {
   spaceId: string;
   memberName: string;
   body: string;
-}): Promise<SerializedChannel> {
+}): Promise<ChannelSnapshot> {
   const channel = await createConversation({ ...input, mode: "open" });
   const response = await xmatrixRawResponse(WEB_PROXY_ROUTES.channel_messages(channel.id), {
     method: "POST",

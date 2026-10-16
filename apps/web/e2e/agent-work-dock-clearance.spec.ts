@@ -1,3 +1,4 @@
+import { FIXTURE_AGENT_REGISTRATION } from "./workspace-fixtures";
 import { expect, test } from "./fixtures";
 import { type Page } from "@playwright/test";
 import {
@@ -22,7 +23,7 @@ const MESSAGE_COUNT = 30;
 function agentPresence(agentCount: number) {
   const presence: Record<string, unknown> = {};
   for (let index = 0; index < agentCount; index += 1) {
-    presence[`agent:codex-${index}`] = {
+    presence[`agent:codex-${index}`] = { registration: FIXTURE_AGENT_REGISTRATION,
       kind: "agent",
       status: "busy",
       label: `Codex ${index}`,
