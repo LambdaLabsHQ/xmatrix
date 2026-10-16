@@ -82,7 +82,8 @@ const AGENT_USE_CASES: Record<AppConnectorProviderManifest["id"], string[]> = {
     "Submit changed URLs or a sitemap to Bing, or push them to every IndexNow engine at once.",
   ],
   googleadsense: [
-    "Read daily AdSense earnings, page views and RPM by site, country or page.",
+    "Read daily AdSense earnings, page views, RPM and viewability by site, ad format, ad unit, country or page.",
+    "Check ad units, payments, alerts and policy issues without opening AdSense.",
     "Let a scheduled Automation track each site's revenue next to its search traffic.",
   ],
   googleanalytics: [

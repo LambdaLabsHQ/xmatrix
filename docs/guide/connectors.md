@@ -87,7 +87,7 @@ Each app's actions are listed in its panel under **Apps** and in the composer. T
 | Google Analytics | `googleanalytics` | | `list_properties`, `report` |
 | Google Ads | `googleads` | | `list_accounts`, `read_account`, `query`, `validate_mutations`; `mutate`, `set_campaign_status` (ask by default) |
 | Google Business Profile | `googlebusinessprofile` | | `list_accounts`, `list_locations`, `performance`, `reviews`, `reply_review` |
-| Google AdSense | `googleadsense` | | `list_accounts`, `list_sites`, `report` |
+| Google AdSense | `googleadsense` | | `list_accounts`, `list_sites`, `list_adunits`, `report`, `list_payments`, `list_alerts`, `list_policy_issues` |
 | PageSpeed Insights | `pagespeed` | | `audit`, `field` |
 | Bing Webmaster Tools | `bingwebmaster` | | `list_sites`, `traffic`, `queries`, `pages`, `crawl_stats`, `submit_urls`, `submit_sitemap`, `indexnow` |
 | Yandex Webmaster | `yandexwebmaster` | | `list_hosts`, `summary`, `queries`, `recrawl` |
