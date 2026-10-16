@@ -536,6 +536,51 @@ pub async fn cmd_recover_send(
     Ok(())
 }
 
+/// What an Agent's message writes into pages (`⟦write page:<id>⟧ … ⟦/write⟧`) goes into those pages now,
+/// as its reply's words would, and the message keeps a note of where each went instead of the words.
+async fn write_message_into_pages(hub_url: &str, token: &str, channel_id: &str, message: &str) -> String {
+    use xmatrix_cli_core::page_co_write::{PageCoWriteConnector, PageWritePart, page_write_parts};
+    let parts = page_write_parts(message);
+    if !parts.iter().any(|part| matches!(part, PageWritePart::Write { .. })) {
+        return message.to_string();
+    }
+    let connector = PageCoWriteConnector::new(
+        hub_url.to_string(),
+        std::sync::Arc::new(std::sync::RwLock::new(token.to_string())),
+    );
+    let mut sent = String::new();
+    for part in parts {
+        match part {
+            PageWritePart::Text(text) => sent.push_str(&text),
+            PageWritePart::Write { page, body } => {
+                match connector.write_once(channel_id, &page, &body).await {
+                    Ok(problems) if problems.is_empty() => {
+                        eprintln!("{} Wrote into page {page}", "✓".green().bold());
+                        sent.push_str(&format!("(written into page:{page})"));
+                    }
+                    Ok(problems) => {
+                        for problem in &problems {
+                            eprintln!("{} page {page}: {problem}", "⚠".yellow().bold());
+                        }
+                        sent.push_str(&format!(
+                            "(not all written into page:{page}: {})",
+                            problems.join(" ")
+                        ));
+                    }
+                    Err(error) => {
+                        eprintln!(
+                            "{} Could not write into page {page}: {error}; `xmatrix page edit` writes into a page that takes no live words",
+                            "⚠".yellow().bold()
+                        );
+                        sent.push_str(&format!("(could not write into page:{page})"));
+                    }
+                }
+            }
+        }
+    }
+    sent
+}
+
 pub struct SendOptions<'a> {
     pub message_parts: &'a [String],
     pub attachment_paths: &'a [PathBuf],
@@ -636,6 +681,12 @@ pub async fn cmd_send(
             "--final-for requires the authenticated Agent Run session".into(),
         ));
     }
+    // An Agent's message writes into pages as its reply does; a retry of the same send writes nothing again.
+    let message = if has_agent_sender_identity && message_id.is_none() {
+        write_message_into_pages(hub_url, token, channel_id, &message).await
+    } else {
+        message
+    };
     eprintln!("Sending message {client_message_id}");
     let uploaded = upload_channel_file_attachments(
         hub_url,

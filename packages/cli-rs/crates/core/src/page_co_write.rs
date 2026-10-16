@@ -6,8 +6,11 @@
 //! varint-prefixed UTF-8 JSON body (lib0 encoding).
 
 use std::sync::{Arc, RwLock};
+use std::time::Duration;
 
+use futures_util::{SinkExt, StreamExt};
 use serde::Deserialize;
+use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::http::HeaderValue;
 
 use crate::error::{CliError, Result};
@@ -23,6 +26,67 @@ pub const PAGE_SESSION_HEARTBEAT_PING: &str = "ping";
 /// The document fragment the session edits; a client naming another is told
 /// it is out of date.
 const PAGE_DOCUMENT_FRAGMENT: &str = "prosemirror";
+
+/// Where an Agent's words go into a page: `⟦write page:<id>⟧`, then the page's
+/// markers, then `⟦/write⟧`.
+pub const PAGE_WRITE_OPEN: &str = "⟦write page:";
+pub const PAGE_WRITE_CLOSE: &str = "⟦/write⟧";
+/// How long a page's session is waited on to say what became of a write.
+const WRITE_OUTCOME_WAIT: Duration = Duration::from_secs(15);
+
+/// The page `⟦write page:<id>⟧` names: a page id as the Hub names pages (a
+/// UUID), quoted or not; anything else names no page.
+pub fn page_write_target(raw: &str) -> Option<String> {
+    let id = raw.trim().trim_matches(['"', '\'', '`']).trim();
+    let groups: Vec<&str> = id.split('-').collect();
+    let shaped = groups.len() == 5
+        && groups.iter().zip([8usize, 4, 4, 4, 12]).all(|(group, length)| {
+            group.len() == length && group.chars().all(|c| c.is_ascii_hexdigit())
+        });
+    shaped.then(|| id.to_ascii_lowercase())
+}
+
+/// A whole text, such as a message, as what it says and what it writes into pages.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PageWritePart {
+    Text(String),
+    /// What stood between `⟦write page:<page>⟧` and `⟦/write⟧`, or the text's end.
+    Write { page: String, body: String },
+}
+
+/// Splits `text` at each `⟦write page:<id>⟧ … ⟦/write⟧`. A marker that names no
+/// page is text like any other.
+pub fn page_write_parts(text: &str) -> Vec<PageWritePart> {
+    let mut parts = Vec::new();
+    let mut plain = String::new();
+    let mut rest = text;
+    while let Some(at) = rest.find(PAGE_WRITE_OPEN) {
+        let after = &rest[at + PAGE_WRITE_OPEN.len()..];
+        let Some((page, body)) = after
+            .find('⟧')
+            .and_then(|end| page_write_target(&after[..end]).map(|page| (page, &after[end + '⟧'.len_utf8()..])))
+        else {
+            plain.push_str(&rest[..at + PAGE_WRITE_OPEN.len()]);
+            rest = after;
+            continue;
+        };
+        plain.push_str(&rest[..at]);
+        if !plain.is_empty() {
+            parts.push(PageWritePart::Text(std::mem::take(&mut plain)));
+        }
+        let (inner, next) = match body.find(PAGE_WRITE_CLOSE) {
+            Some(close) => (&body[..close], &body[close + PAGE_WRITE_CLOSE.len()..]),
+            None => (body, ""),
+        };
+        parts.push(PageWritePart::Write { page, body: inner.to_string() });
+        rest = next;
+    }
+    plain.push_str(rest);
+    if !plain.is_empty() {
+        parts.push(PageWritePart::Text(plain));
+    }
+    parts
+}
 
 /// What a page's live session asks of the Agent co-writing it, as it reaches
 /// the Agent's run loop.
@@ -214,6 +278,33 @@ impl PageCoWriteConnector {
         );
         websocket::connect(request).await
     }
+
+    /// Writes `body`, the page's markers and their words, into `page` from the
+    /// conversation `channel_id` in one turn, as a streamed write would, and
+    /// says what of it did not reach the page; nothing when all of it did.
+    pub async fn write_once(&self, channel_id: &str, page: &str, body: &str) -> Result<Vec<String>> {
+        let space = self.page_space(channel_id).await?;
+        let socket = self.connect(&space, page, true).await?;
+        let (mut sink, mut stream) = socket.split();
+        for frame in [write_frame(1), delta_frame(1, body), done_frame(1, false)] {
+            sink.send(Message::Binary(frame.into()))
+                .await
+                .map_err(|error| CliError::Relay(format!("The page session closed: {error}")))?;
+        }
+        let outcome = tokio::time::timeout(WRITE_OUTCOME_WAIT, async {
+            while let Some(frame) = stream.next().await {
+                if let Ok(Message::Binary(data)) = frame
+                    && let Some(PageCoWriteRequest::Outcome { turn: 1, problems }) = decode_request(&data)
+                {
+                    return Ok(problems);
+                }
+            }
+            Err(CliError::Relay("The page session closed before saying what was written".into()))
+        })
+        .await;
+        let _ = sink.close().await;
+        outcome.map_err(|_| CliError::Relay("The page session did not say what was written".into()))?
+    }
 }
 
 #[cfg(test)]
@@ -257,6 +348,31 @@ mod tests {
         let mut cut = session_frame(r#"{"type":"interrupt","turn":2}"#);
         cut.truncate(cut.len() - 3);
         assert_eq!(decode_request(&cut), None, "a cut frame");
+    }
+
+    #[test]
+    fn splits_a_text_into_what_it_says_and_what_it_writes_into_pages() {
+        let page = "3f2a9c1e-5b7d-4e8f-9a0b-1c2d3e4f5a6b";
+        assert_eq!(
+            page_write_parts(&format!("Done.\n⟦write page:\"{page}\"⟧\n⟦after \"x\"⟧\nhi\n⟦/write⟧\nThanks")),
+            vec![
+                PageWritePart::Text("Done.\n".into()),
+                PageWritePart::Write { page: page.into(), body: "\n⟦after \"x\"⟧\nhi\n".into() },
+                PageWritePart::Text("\nThanks".into()),
+            ]
+        );
+        assert_eq!(
+            page_write_parts(&format!("⟦write page:{page}⟧ to the end")),
+            vec![PageWritePart::Write { page: page.into(), body: " to the end".into() }],
+            "an unclosed write runs to the text's end"
+        );
+        assert_eq!(
+            page_write_parts("Use ⟦write page:<id>⟧ … ⟦/write⟧ in a reply."),
+            vec![PageWritePart::Text("Use ⟦write page:<id>⟧ … ⟦/write⟧ in a reply.".into())],
+            "a marker naming no page is text"
+        );
+        assert_eq!(page_write_target(" 3F2A9C1E-5B7D-4E8F-9A0B-1C2D3E4F5A6B "), Some(page.into()));
+        assert_eq!(page_write_target("page-1"), None);
     }
 
     #[test]
