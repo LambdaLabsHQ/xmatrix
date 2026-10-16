@@ -28,6 +28,8 @@ import { PageTyping, type PageTypingState } from "./page-typing";
  */
 
 export { PAGE_DOCUMENT_FRAGMENT };
+/** The origin of a word typed into the page (page-typing.ts). */
+const TYPING = "typing";
 /** Where sessions before the document kept plain markdown; read once to convert them. */
 const LEGACY_MARKDOWN_TEXT = "markdown";
 
@@ -255,7 +257,8 @@ export class PageSession {
         if (connection) this.noteEditor(connection.principal);
       }
       for (const [id, writer] of this.coWriters) if (origin !== coWriteOrigin(id)) writer.othersEdited();
-      void this.persist();
+      // A typed word is not stored on its own: the stored typing still holds it, and a restart types it in.
+      if (origin !== TYPING) void this.persist();
     });
     this.awareness.on("update", ({ added, updated, removed }: {
       added: number[]; updated: number[]; removed: number[];
@@ -730,8 +733,10 @@ export class PageSession {
       // A head written outside the session (a restore, a migration) is taken
       // in first, so the edit merges against what the page is now. What Agents
       // are still writing in is shown whole before it.
-      const head = this.canonical(await this.ports.loadHead(principal));
-      if (head.revision !== this.base.revision) {
+      // Only a head that moved is read as a document: reading the page costs as much as writing it.
+      const loaded = await this.ports.loadHead(principal);
+      if (loaded.revision !== this.base.revision) {
+        const head = this.canonical(loaded);
         this.finishTyping();
         const live = this.markdown();
         const merged = mergePageText(this.base.body, live, head.body);
@@ -747,7 +752,7 @@ export class PageSession {
       const lineMerge = mergePageText(baseText, current, body);
       const merge = lineMerge.ok ? lineMerge : mergePageWords(baseText, current, body);
       if (!merge.ok) throw new PageSessionConflict(this.base.revision, current);
-      const target = canonicalPageMarkdown(merge.text);
+      const target = merge.text === body ? body : canonicalPageMarkdown(merge.text);
       const key = principalKey(principal);
       const conversationId = principal.conversationId ?? input.conversationIds[0] ?? null;
       // The repository commits the edit first; that is where it is authorized.
@@ -794,7 +799,7 @@ export class PageSession {
       this.ports.broadcast(encodeNotice({ type: "committed", revision: result.revision,
         headRevision: result.headRevision, author: principal.label, detachedAutomations: result.detachedAutomations }));
       const done = { ...result, removedSections: pageRemovedSections(current, target) } as PageEditResult;
-      return { done, typing: typing ? { typing, clientId, origin, user } : null };
+      return { done, typing: typing ? { typing, clientId, user } : null };
     }).then(async (edit): Promise<PageEditResult> => {
       if (edit.typing) await this.typeIn(principal, edit.typing);
       return edit.done;
@@ -808,8 +813,8 @@ export class PageSession {
    * people's keystrokes do. When the last Agent finishes and nobody has edits pending, the page is the
    * head exactly, whatever overlapping edits left.
    */
-  private async typeIn(principal: PageSessionPrincipal, { typing, clientId, origin, user }: {
-    typing: PageTyping; clientId: number; origin: string; user: Record<string, unknown>;
+  private async typeIn(principal: PageSessionPrincipal, { typing, clientId, user }: {
+    typing: PageTyping; clientId: number; user: Record<string, unknown>;
   }): Promise<void> {
     const pace = this.ports.writePaceMs ?? 0;
     // At most 40 steps, about two seconds: a long edit types more words a step.
@@ -825,7 +830,7 @@ export class PageSession {
       while (this.typings.has(typing) && typing.remaining && !this.destroyed && !this.ended) {
         await new Promise((resolve) => setTimeout(resolve, pace));
         if (!this.typings.has(typing) || this.destroyed || this.ended) break;
-        last = authoredAs(this.doc, clientId, () => typing.type(this.doc, perStep, origin)) ?? last;
+        last = authoredAs(this.doc, clientId, () => typing.type(this.doc, perStep, TYPING)) ?? last;
         show(typing.remaining ? "writing" : "editing", last);
       }
     } finally {

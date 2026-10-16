@@ -4,7 +4,7 @@ import { absolutePositionToRelativePosition, updateYFragment } from "y-prosemirr
 import * as Y from "yjs";
 
 /**
- * An Agent typing its committed edit into the live page (pages-live-document.md §4.3), as a person
+ * An Agent typing its committed edit into the live page (pages-live-document.md §2), as a person
  * types: the edit's structure goes in first, whole (`pageWritingPlan`), and its words are then typed
  * into the document's text where they belong, a few at a time. Each step is a small CRDT insertion
  * anchored to the text around it, so people typing anywhere meanwhile, and other Agents typing their

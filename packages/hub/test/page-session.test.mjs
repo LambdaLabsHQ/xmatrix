@@ -15,8 +15,8 @@ import {
 } from "../src/page-session.ts";
 import { CO_WRITER_PAUSE_MS, CO_WRITER_TURN_MS } from "../src/page-co-writer.ts";
 import { PAGE_MESSAGE_CO_WRITE } from "@xmatrix/protocol";
-import { pageSchema } from "@xmatrix/protocol/page-document";
-import { absolutePositionToRelativePosition, initProseMirrorDoc } from "y-prosemirror";
+import { canonicalPageMarkdown as canonical, markdownToPageDoc, pageDocToMarkdown, pageSchema } from "@xmatrix/protocol/page-document";
+import { absolutePositionToRelativePosition, initProseMirrorDoc, yXmlFragmentToProseMirrorRootNode } from "y-prosemirror";
 import { RelayPageSession } from "../src/page-session-do.ts";
 import { PageControlError, PostgresPageRepository } from "@xmatrix/db";
 import { compileCommonJsSourceModule } from "./support/commonjs-source-module.mjs";
@@ -275,6 +275,199 @@ test("two Agents write the page at the same time, and a person's commit meanwhil
   assert.match(resumed.markdown(), /Notes written[^\n]*after word\n/u);
   assert.match(resumed.markdown(), /Hi /u);
   assert.equal(await resumed.commit(), null, "recovering both presentations repeats no commit");
+});
+
+const LIST = "# Launch\n\n## Workstreams\n\n- Web · Claude · in progress\n- Mobile · Codex · in progress\n- Video · Cursor · not started\n";
+const tick = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const as = (n, label) => ({ ...agent, id: `agent-${n}`, label, conversationId: `conv-${n}` });
+const head = (h) => h.revisions.get(Math.max(...h.revisions.keys()));
+/** Every document a reader holds while Agents type, as it reads. */
+function frames(client) {
+  const seen = [];
+  client.doc.on("update", () => seen.push(yXmlFragmentToProseMirrorRootNode(client.doc.getXmlFragment(PAGE_DOCUMENT_FRAGMENT), pageSchema)));
+  return seen;
+}
+
+// Typing words into a structure that already stands must leave no moment a Markdown parser reads otherwise:
+// a half-written fence or table swallows what follows, and another Agent's edit rewrites the page from Markdown.
+test("an Agent's edit is typed in word by word, and every moment reads back from Markdown as itself", async () => {
+  for (const [replacement, steps] of [
+    ["Shipped **behind one switch** with [the launch docs](https://xmatrix.sh/docs) and `xmatrix page edit` *today*", 10],
+    ["In progress\n\n```ts\nconst a = 1;\nconst b = 2;\n```\n\nAfter the code.", 5],
+    // A table's cells each stand with their first word; the rest of each cell is typed.
+    ["| Area | Owner | State |\n| --- | --- | --- |\n| Web | Claude | merged |\n| Mobile | Codex | in review |", 1],
+    [`Shipped.\n\n## Plan\n\n${Array.from({ length: 120 }, (_, i) => `word${i}`).join(" ")}\n\n- one\n- two with more\n  - nested`, 30],
+    ["会议马上开始，请大家准备好材料。\n\n- 第一项：Web 已上线", 10],
+  ]) {
+    const h = harness();
+    h.ports.writePaceMs = 1;
+    const ann = await annConnected(h);
+    const seen = frames(ann);
+    const body = canonical(HEAD.replace("In progress", replacement));
+    await h.session.submitEdit(agent, { baseRevision: 1, body, conversationIds: ["conv-1"] });
+    assert.equal(ann.text.toString(), body, replacement);
+    assert.equal(h.session.markdown(), head(h));
+    assert.ok(seen.length > steps, `${replacement}: typed in ${seen.length} steps`);
+    for (const doc of seen) assert.ok(markdownToPageDoc(pageDocToMarkdown(doc)).eq(doc), pageDocToMarkdown(doc));
+  }
+});
+
+test("typing an Agent's edit reads the page a few times in all, not once a word", async () => {
+  const h = harness();
+  h.ports.writePaceMs = 1;
+  const ann = await annConnected(h);
+  const reads = { count: 0 };
+  const markdown = h.session.markdown.bind(h.session);
+  h.session.markdown = () => { reads.count++; return markdown(); };
+  const seen = frames(ann);
+  const words = Array.from({ length: 200 }, (_, i) => `word${i}`).join(" ");
+  await h.session.submitEdit(agent, { baseRevision: 1, body: HEAD.replace("In progress", words), conversationIds: [] });
+  assert.ok(seen.length >= 30, "typed over many steps");
+  assert.ok(reads.count <= 8, `the page was read ${reads.count} times`);
+  assert.equal(h.persisted.filter((state) => state.typing).length <= 2, true, "typed words are not stored one by one");
+});
+
+test("three Agents type neighbouring lines of one list at once, each from the same revision", async () => {
+  const h = harness({ head: LIST });
+  h.ports.writePaceMs = 2;
+  const ann = await annConnected(h);
+  const seen = [];
+  ann.doc.on("update", () => seen.push(ann.text.toString()));
+  const edits = [
+    [as(1, "claude:1"), "Web · Claude · in progress", "Web · Claude · merged, live in v1.0.464 with presence and carets"],
+    [as(2, "codex:1"), "Mobile · Codex · in progress", "Mobile · Codex · merged, TestFlight 2.4 with faces beside lines"],
+    [as(3, "cursor:1"), "Video · Cursor · not started", "Video · Cursor · done, on the launch page with a 1080p cut"],
+  ];
+  await Promise.all(edits.map(([who, from, to]) =>
+    h.session.submitEdit(who, { baseRevision: 1, body: LIST.replace(from, to), conversationIds: [] })));
+  const final = ann.text.toString();
+  for (const [, , to] of edits) assert.match(final, new RegExp(to.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"));
+  assert.equal(final, head(h));
+  const moving = (text) => edits.filter(([, , to]) => text.includes(to.split(" · ")[2].split(" ")[0])
+    && !text.includes(to)).length;
+  assert.ok(seen.some((text) => moving(text) >= 2), "at least two lines are being typed at the same moment");
+});
+
+test("a person typing in the paragraph an Agent is typing into keeps both their words", async () => {
+  const h = harness();
+  h.ports.writePaceMs = 2;
+  const ann = await annConnected(h);
+  const body = HEAD.replace("In progress", "In progress and then shipped to every Space on Friday behind one switch");
+  const editing = h.session.submitEdit(agent, { baseRevision: 1, body, conversationIds: [] });
+  await tick(8);
+  ann.text.insert(ann.text.toString().indexOf("In progress"), "Now: ");
+  await editing;
+  assert.equal(ann.text.toString(), body.replace("In progress", "Now: In progress"));
+  await h.session.commit();
+  assert.equal(h.commits.at(-1).principal, "ann");
+  assert.equal(head(h), ann.text.toString(), "the person's commit holds the Agent's words too");
+});
+
+test("an Agent's edit that rewrites another's line while that one is typed in ends as the head", async () => {
+  const h = harness({ head: LIST });
+  h.ports.writePaceMs = 2;
+  const ann = await annConnected(h);
+  const claude = LIST.replace("Web · Claude · in progress", "Web · Claude · merged, live in v1.0.464 with presence and carets");
+  const first = h.session.submitEdit(as(1, "claude:1"), { baseRevision: 1, body: claude, conversationIds: [] });
+  await tick(6);
+  ann.text.insert(0, "Hi ");
+  await h.session.commit();
+  const second = h.session.submitEdit(as(2, "codex:1"), { baseRevision: 2,
+    body: claude.replace("merged, live in v1.0.464 with presence and carets", "reverted by Codex")
+      .replace("Mobile · Codex · in progress", "Mobile · Codex · merged"), conversationIds: [] });
+  await Promise.all([first, second]);
+  assert.match(head(h), /Web · Claude · reverted by Codex\n- Mobile · Codex · merged\n/u);
+  assert.equal(ann.text.toString(), head(h));
+  assert.equal(h.session.markdown(), head(h));
+});
+
+test("two Agents changing the same words of one revision still conflict", async () => {
+  const h = harness();
+  await annConnected(h);
+  await h.session.submitEdit(as(1, "claude:1"), { baseRevision: 1, body: HEAD.replace("In progress", "Shipped"), conversationIds: [] });
+  await assert.rejects(h.session.submitEdit(as(2, "codex:1"), { baseRevision: 1, body: HEAD.replace("In progress", "Blocked"),
+    conversationIds: [] }), PageSessionConflict);
+});
+
+test("committed notices arrive in revision order while Agents type", async () => {
+  const h = harness({ head: LIST });
+  h.ports.writePaceMs = 2;
+  await annConnected(h);
+  const long = `Web · Claude · ${Array.from({ length: 60 }, (_, i) => `w${i}`).join(" ")}`;
+  await Promise.all([
+    h.session.submitEdit(as(1, "claude:1"), { baseRevision: 1, body: LIST.replace("Web · Claude · in progress", long), conversationIds: [] }),
+    h.session.submitEdit(as(2, "codex:1"), { baseRevision: 1, body: LIST.replace("Mobile · Codex · in progress", "Mobile · Codex · merged"),
+      conversationIds: [] }),
+  ]);
+  const heads = h.notices.filter((notice) => notice.type === "committed" && notice.to === "c-ann").map((notice) => notice.headRevision);
+  assert.deepEqual(heads, [...heads].sort((a, b) => a - b));
+  assert.equal(heads.length, 2);
+});
+
+test("a session restored with text nobody typed reads as its committed page; a person's pending text stays", async () => {
+  for (const personTyped of [false, true]) {
+    const h = harness();
+    const ann = await annConnected(h);
+    if (personTyped) ann.text.insert(HEAD.indexOf("none"), "ann's draft, ");
+    // What an Agent's edit could leave when it was not written in whole: text no person typed.
+    setPageFragmentMarkdown(h.session.fragment, `${h.session.markdown()}\n\`\`\`\n`, "agent:left-over");
+    await tick(0);
+    const restored = new PageSession(h.ports);
+    cleanups.push(() => restored.destroy());
+    await restored.ensureLoaded(human("ann"), h.persisted.at(-1));
+    if (personTyped) assert.match(restored.markdown(), /ann's draft, none/u, "a person's pending edit is never dropped");
+    else assert.equal(restored.markdown(), HEAD, "nobody typed it, so the page reads as committed");
+  }
+});
+
+// Hand-written interleavings cannot cover how Agents typing, people typing and commits fall together: many
+// random ones must all end with every reader, the session and the head reading the same well-formed page.
+test("random Agents' edits, people's typing and commits always end on one page everywhere", async () => {
+  let seed = 61016;
+  const random = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648);
+  const pick = (list) => list[Math.floor(random() * list.length)];
+  const PAGE = "# Launch\n\n## Where it stands\n\nKick-off done.\n\n## Workstreams\n\n- Web · Claude · in progress\n" +
+    "- Mobile · Codex · in progress\n- Video · Cursor · not started\n\n## Notes\n\nNothing yet.\n";
+  const additions = ["shipped behind one switch", "**merged** with [docs](https://xmatrix.sh/d)", "`v1.0.464` is live",
+    "会议马上开始", "in review, PR #566", "with faces beside every line"];
+  const editOf = (text) => {
+    const lines = text.split("\n");
+    const at = 2 + Math.floor(random() * (lines.length - 3));
+    const r = random();
+    if (!lines[at].trim()) lines.splice(at, 0, "", `A new paragraph ${pick(additions)}.`);
+    else if (r < 0.5) lines[at] = `${lines[at]} ${pick(additions)}`;
+    else if (r < 0.8 && lines[at].startsWith("- ")) lines.splice(at + 1, 0, `- New item ${pick(additions)}`);
+    else lines[at] = lines[at].replace(/\S+$/u, pick(additions));
+    return lines.join("\n");
+  };
+  for (let round = 0; round < 25; round++) {
+    const h = harness({ head: PAGE });
+    h.ports.writePaceMs = 1;
+    const ann = await annConnected(h);
+    const work = [];
+    for (let n = 0; n < 3 + Math.floor(random() * 3); n++) {
+      const who = as(1 + Math.floor(random() * 3), pick(["claude:1", "codex:1", "cursor:1"]));
+      await tick(Math.floor(random() * 6));
+      const revision = random() < 0.7 ? Math.max(...h.revisions.keys()) : 1;
+      const base = h.revisions.get(revision);
+      work.push(h.session.submitEdit(who, { baseRevision: revision, body: editOf(base), conversationIds: [] })
+        .catch((error) => { if (!(error instanceof PageSessionConflict)) throw error; }));
+      if (random() < 0.5) {
+        const text = ann.text.toString();
+        const words = [...text.matchAll(/[A-Za-z]+/gu)];
+        const word = pick(words);
+        ann.text.insert(word.index, "ann ");
+      }
+      if (random() < 0.3) work.push(h.session.commit());
+    }
+    await Promise.all(work);
+    await h.session.commit();
+    const final = h.session.markdown();
+    assert.equal(final, head(h), `round ${round}: the session reads as the head`);
+    assert.equal(ann.text.toString(), final, `round ${round}: the reader reads as the session`);
+    assert.equal(canonical(final), final);
+    assert.doesNotMatch(final, /^```$|^\|$/mu, `round ${round}: no stray fence or table edge`);
+  }
 });
 
 test("an Agent edit answers which sections it removed and which Automations it detached", async () => {
