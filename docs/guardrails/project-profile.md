@@ -19,7 +19,8 @@ Official Agent launch prompts are compact repository Markdown delivered by the
 Hub with each spawn. Supporting daemons validate and render the versioned text;
 legacy daemons keep their compiled copy. Command details come from CLI help,
 with connected app names retained at launch and usage read on demand. Full
-Channel contracts are launch-only; Codex retains a short native reply reminder.
+Channel contracts are launch-only; Codex installs its compact native reply
+reminder and trusted registration instructions at thread start and resume.
 Grok's trusted rules exclude Channel history and task bodies. See
 [Agent prompts](../../packages/cli-rs/crates/core/prompts/README.md).
 

@@ -1,4 +1,5 @@
 import readline from "node:readline";
+import { appendFileSync } from "node:fs";
 import { execFile } from "node:child_process";
 
 const provider = process.argv[2];
@@ -44,14 +45,6 @@ function handleCodexSessionRequest(message) {
     return true;
   }
   if (message.method === "thread/start" || message.method === "thread/resume") {
-    if (Object.hasOwn(message.params ?? {}, "developerInstructions")) {
-      send({
-        jsonrpc: "2.0",
-        id: message.id,
-        error: { code: -32602, message: "xMatrix bootstrap must not use developerInstructions" },
-      });
-      return true;
-    }
     response(message, {
       thread: { id: "codex-fixture-thread", model: "gpt-fixture" },
     });
@@ -206,7 +199,7 @@ function handleCodexCapacity(message) {
   response(message, { turn: { id: turnId } });
   sendCodexTurnStarted(threadId, turnId);
   if (capacityStarts > 1 && provider !== "codex-capacity-exhausted") {
-    const preserved = ["threadId", "model", "effort", "developerInstructions"]
+    const preserved = ["threadId", "model", "effort"]
       .every((key) => message.params[key] === capacityInitialParams[key]);
     const continuation = message.params.input.length === 1 &&
       (provider === "codex-capacity-hub-recover"
@@ -735,5 +728,9 @@ if (!handlers[provider]) {
 
 readline.createInterface({ input: process.stdin }).on("line", (line) => {
   if (!line.trim()) return;
-  handlers[provider](JSON.parse(line));
+  const message = JSON.parse(line);
+  if (provider === "codex-turn-order" && process.argv[3]?.startsWith("--capture-requests=")) {
+    appendFileSync(process.argv[3].slice("--capture-requests=".length), `${JSON.stringify(message)}\n`);
+  }
+  handlers[provider](message);
 });

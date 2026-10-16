@@ -538,14 +538,7 @@ impl CodexRun<'_> {
         interrupt_history_replay: bool,
         status_message_id: Option<&str>,
     ) -> InterruptibleCodexTurn {
-        // Codex treats the final assistant response as visible to its caller. In a
-        // channel-backed wrapper that output is intentionally local, so the
-        // explicit `xmatrix send` contract must be a developer instruction rather
-        // than ordinary turn text. Otherwise Codex can complete successfully while
-        // the human sees only a busy/idle transition and no reply.
-        let developer_instructions = codex_channel_developer_instructions(channel_id);
         let request = CodexTurnRequest {
-            developer_instructions: developer_instructions.as_deref(),
             model: self.latest_model.as_deref(),
             effort: self.latest_effort.as_deref(),
             models: &self.available_models,

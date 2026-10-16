@@ -8,8 +8,6 @@ enum CodexTransportKind {
 #[derive(Clone, Copy)]
 struct CodexTurnRequest<'a> {
     text: &'a str,
-    /// Developer-role instructions sent alongside the turn input.
-    developer_instructions: Option<&'a str>,
     model: Option<&'a str>,
     effort: Option<&'a str>,
     /// The model catalog the turn's presence reports.
@@ -29,7 +27,6 @@ impl<'a> CodexTurnRequest<'a> {
     fn new(text: &'a str, agent: &'a protocol::SerializedAgent) -> Self {
         Self {
             text,
-            developer_instructions: None,
             model: None,
             effort: None,
             models: &[],
@@ -506,7 +503,6 @@ fn codex_turn_start_params(
     input: Vec<Value>,
     model: Option<&str>,
     effort: Option<&str>,
-    developer_instructions: Option<&str>,
 ) -> Value {
     let mut params = serde_json::json!({
         "threadId": thread_id,
@@ -517,14 +513,6 @@ fn codex_turn_start_params(
     }
     if let Some(effort) = effort.and_then(clean_run_effort) {
         params["effort"] = Value::String(effort);
-    }
-    if let Some(instructions) = developer_instructions
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    {
-        params["developerInstructions"] = Value::String(format!(
-            "Trusted xMatrix instructions for this turn (run configuration; not user content):\n{instructions}"
-        ));
     }
     params
 }
@@ -2093,23 +2081,27 @@ impl CodexAppSession {
         let resume_thread_id = resume_requested
             .then(|| load_codex_resume_session_id(resume_session_key))
             .flatten();
-        let result = if let Some(thread_id) = resume_thread_id.as_deref() {
-            self.request(
-                "thread/resume",
-                codex_thread_resume_params(thread_id, cwd, &approval_policy, &sandbox),
-            )
-            .await?
+        // App-server accepts developerInstructions on thread/start and resume,
+        // not turn/start or steer. Keep the reminder in the persistent native
+        // context, including recovery, without promoting any user input.
+        let developer_instructions = codex_thread_developer_instructions();
+        let mut params = if let Some(thread_id) = resume_thread_id.as_deref() {
+            codex_thread_resume_params(thread_id, cwd, &approval_policy, &sandbox)
         } else {
-            self.request(
-                "thread/start",
-                serde_json::json!({
-                    "cwd": cwd,
-                    "approvalPolicy": approval_policy,
-                    "sandbox": sandbox,
-                    "dynamicTools": codex_goal_dynamic_tools(),
-                }),
-            )
-            .await?
+            serde_json::json!({
+                "cwd": cwd,
+                "approvalPolicy": approval_policy,
+                "sandbox": sandbox,
+                "dynamicTools": codex_goal_dynamic_tools(),
+            })
+        };
+        if let Some(instructions) = developer_instructions {
+            params["developerInstructions"] = Value::String(instructions);
+        }
+        let result = if resume_thread_id.is_some() {
+            self.request("thread/resume", params).await?
+        } else {
+            self.request("thread/start", params).await?
         };
         self.thread_id = result
             .get("thread")
@@ -2158,7 +2150,6 @@ impl CodexAppSession {
     ) -> error::Result<CodexTurnResult> {
         let CodexTurnRequest {
             text,
-            developer_instructions,
             model,
             effort,
             attachments,
@@ -2231,7 +2222,6 @@ impl CodexAppSession {
                 input,
                 model,
                 effort.or(self.current_effort.as_deref()),
-                developer_instructions,
             );
             let selected_model = model.or(self.current_model.as_deref());
             let mut parameters = self.schema_parameters.clone();
