@@ -125,8 +125,9 @@ export class RelayPageSession extends DurableObject<Env> {
           try { socket.send(data); } catch { /* closed */ }
         }
       },
-      // An Agent's edit is written in over about two seconds at most (40 steps), as a person writes.
-      writePaceMs: 45,
+      // No pace: an Agent's edit lands whole. Writing it in word by word left partial markdown (an open
+      // code fence, half a table, list items without text) that the page does not hold as written, so the
+      // following steps could not merge and the live text was cut short or garbled.
     };
     return new PageSession(ports);
   }
