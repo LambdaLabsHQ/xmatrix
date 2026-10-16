@@ -1,10 +1,9 @@
 import {
   PAGE_DOCUMENT_FRAGMENT, PAGE_MESSAGE_CO_WRITE, mergePageText, pageAuthorColor, pageChangedBlocks, pageRemovedSections,
-  pageWritingSteps,
   parsePageCoWriteReply, type PageCoWriteRequest, type PageEditResult,
 } from "@xmatrix/protocol";
 import {
-  canonicalPageMarkdown, markdownToPageDoc, pageDocBlockAt, pageDocToMarkdown, pageSchema,
+  canonicalPageMarkdown, markdownToPageDoc, pageDocBlockAt, pageDocToMarkdown, pageSchema, pageWritingSteps,
 } from "@xmatrix/protocol/page-document";
 import * as decoding from "lib0/decoding";
 import * as encoding from "lib0/encoding";
@@ -75,6 +74,8 @@ export interface PageSessionState {
   update: Uint8Array;
   editors: PendingEditor[];
   editSeq: number;
+  /** Committed edits still being presented; recovery completes them without another commit. */
+  writing?: Array<{ shown: string; target: string }>;
   /** Where each Agent's caret rests, by awareness client id (absent before carets rested). */
   agents?: RestingAgent[];
 }
@@ -345,6 +346,15 @@ export class PageSession {
           }, "load");
           await this.persist();
         }
+        // Use the same completion model as a human save during concurrent writing.
+        // Partial presentation must not become the next human editor's deletion.
+        if (persisted.writing?.length) {
+          for (const stream of persisted.writing) this.writing.add({ ...stream });
+          const completed = this.completed(this.markdown());
+          this.writing.clear();
+          setPageFragmentMarkdown(this.fragment, completed, "load");
+          await this.persist();
+        }
         this.settle();
         return;
       }
@@ -361,7 +371,8 @@ export class PageSession {
   private async persist(): Promise<void> {
     if (!this.base || this.ended) return;
     await this.ports.persist({ base: this.base, update: Y.encodeStateAsUpdate(this.doc),
-      editors: [...this.editors.values()], editSeq: this.editSeq, agents: [...this.resting.values()] });
+      editors: [...this.editors.values()], editSeq: this.editSeq, agents: [...this.resting.values()],
+      ...(this.writing.size ? { writing: [...this.writing].map((stream) => ({ ...stream })) } : {}) });
   }
 
   /**
@@ -727,9 +738,11 @@ export class PageSession {
       let change: ReturnType<PageSession["adopt"]> = { cursor: null, block: "" };
       try {
         for (const [index, step] of steps.entries()) {
-          const written = authoredAs(this.doc, agentClientId(key), () => this.adopt(stream.shown, step, `agent:${key}`));
-          if (written.cursor) change = written;
+          const from = stream.shown;
+          // The doc update captures the baseline it presents in its persisted state.
           stream.shown = step;
+          const written = authoredAs(this.doc, agentClientId(key), () => this.adopt(from, step, `agent:${key}`));
+          if (written.cursor) change = written;
           const at = change.cursor ? Y.relativePositionToJSON(change.cursor) : null;
           const last = index === steps.length - 1;
           // The cursor rests where the Agent's change ends.
