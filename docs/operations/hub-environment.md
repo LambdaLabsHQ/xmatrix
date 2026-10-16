@@ -61,6 +61,8 @@ Leave unset to keep the feature off.
 | `RATE_LIMIT_ANONYMOUS` | binding | Workers Rate Limiting allowance per client IP for requests without a credential. Unset: they are not counted. |
 | `RATE_LIMIT_CREDENTIAL` | binding | Workers Rate Limiting allowance per bearer credential. Unset: credentialed requests are not counted. |
 | `RATE_LIMIT_HUMAN_CONNECT` | binding | Workers Rate Limiting allowance of Human socket sign-ins per user. Unset: sign-ins are not counted. |
+| `RATE_LIMIT_JEV_EVALUATE` | binding | Workers Rate Limiting allowance of `POST /api/ai/jev/evaluate` per owning Human (an Agent Run counts as its owner), refused with 429 whatever RATE_LIMIT_ENFORCED says. Unset: evaluations are not counted. |
+| `RATE_LIMIT_SUMMON_INTENT` | binding | Workers Rate Limiting allowance of composer draft previews (Jev) per signed-in Human, refused with 429 whatever RATE_LIMIT_ENFORCED says. Unset: previews are not counted. |
 | `RELAY_AUTHORITY_OBSERVABILITY_AE` | binding | Analytics Engine dataset for authority and PostgreSQL timing. Unset: observation is off. |
 | `RELAY_POSTGRES_SHARD_1` | binding | Hyperdrive binding to a second database shard. Unset: every Space is placed on the primary shard. |
 | `RELAY_POSTGRES_SHARD_1_ID` | var | Shard id served by RELAY_POSTGRES_SHARD_1; set with it in the deployment profile. |
@@ -107,7 +109,7 @@ Declared by the committed `packages/hub/wrangler.toml`. Deployments do not chang
 | `GITHUB_REPOSITORY_TOKEN_LEGACY_UNBOUND_ENABLED` | var | Mints repository tokens for daemons that name no Run (pre-binding CLI); refused unless "true". |
 | `GITHUB_SUBSCRIPTION_INDEX` | binding | Per-installation index of subscribed GitHub sources; a delivery nobody subscribed to reads no routes. |
 | `MACHINE_NAME_REQUIRED` | var | Require a recorded owner-chosen Machine name before enrollment, connect or recovery; production pins true. |
-| `RATE_LIMIT_ENFORCED` | var | Refuses over-limit requests with 429 and Retry-After only when "true"; otherwise they are only logged. |
+| `RATE_LIMIT_ENFORCED` | var | Refuses over-limit request allowances (credential, anonymous, Human sign-in) with 429 and Retry-After only when "true"; otherwise they are only logged. Production pins true. |
 | `RELAY_AGENT_APP_POLICY_LOCATOR` | binding | Retired Durable Object namespace, kept bound as a 410 shell over its historical rows. |
 | `RELAY_AUTHORITY_OBSERVABILITY_ENABLED` | var | Writes authority observation only when "true". |
 | `RELAY_AUTOMATION_EXECUTION_ENABLED` | var | Runs Automation occurrences; off when unset. |
