@@ -2,7 +2,7 @@
 
 import { createAuthClient } from "better-auth/client";
 import { emailOTPClient, twoFactorClient } from "better-auth/client/plugins";
-import { WEB_PROXY_ROUTES } from "@xmatrix/protocol";
+import { trimEnd, WEB_PROXY_ROUTES } from "@xmatrix/protocol";
 
 import type { AuthUser } from "@/lib/auth-context";
 import { classifyAuthClientFailure } from "@/lib/auth-error-policy";
@@ -64,8 +64,8 @@ function signInStep(data: unknown): SignInStep {
 
 function getAuthBaseUrl(): string {
   return (
-    process.env.NEXT_PUBLIC_AUTH_BASE_URL?.trim().replace(/\/+$/, "") ||
-    process.env.NEXT_PUBLIC_XMATRIX_HUB_URL?.trim().replace(/\/+$/, "") ||
+    trimEnd(process.env.NEXT_PUBLIC_AUTH_BASE_URL?.trim() ?? "", "/") ||
+    trimEnd(process.env.NEXT_PUBLIC_XMATRIX_HUB_URL?.trim() ?? "", "/") ||
     "https://xmatrix-hub.xmatrix.sh"
   );
 }

@@ -1,4 +1,6 @@
 import { diff3Merge, diffComm, diffIndices } from "node-diff3";
+import { trimEnd } from "./field-validation.js";
+import { stripHtmlTags } from "./html-text.js";
 
 /**
  * Markdown helpers shared by the page live session, the Web editor and the
@@ -17,14 +19,16 @@ export interface PageBlock {
 }
 
 const FENCE = /^\s{0,3}(`{3,}|~{3,})/u;
-const HEADING = /^\s{0,3}(#{1,6})\s+(.*?)\s*#*\s*$/u;
+const HEADING = /^\s{0,3}(#{1,6})\s(.*)$/u;
+
+/** A heading line's text: no surrounding blanks or closing `#` run. */
+function headingText(raw: string): string {
+  return trimEnd(raw.trim(), "#").trimEnd();
+}
 
 /** GitHub-style heading slug. */
 export function pageHeadingSlug(text: string): string {
-  return text
-    .trim()
-    .toLowerCase()
-    .replace(/<[^>]*>/gu, "")
+  return stripHtmlTags(text.trim().toLowerCase())
     .replace(/[^\p{L}\p{N}\s_-]/gu, "")
     .replace(/\s/gu, "-")
     .slice(0, 180);
@@ -58,10 +62,11 @@ export function pageBlocks(markdown: string): PageBlock[] {
     const heading = prose ? HEADING.exec(line) : null;
     if (heading) {
       if (current) current.end = offset;
-      const base = pageHeadingSlug(heading[2]!) || "section";
+      const title = headingText(heading[2]!);
+      const base = pageHeadingSlug(title) || "section";
       const count = seen.get(base) ?? 0;
       seen.set(base, count + 1);
-      current = { id: count ? `${base}-${count}` : base, title: heading[2]!, depth: heading[1]!.length,
+      current = { id: count ? `${base}-${count}` : base, title, depth: heading[1]!.length,
         start: offset, end: lineEnd };
       blocks.push(current);
     } else if (!current && line.trim()) {
@@ -215,12 +220,10 @@ function plainPageLine(line: string): string {
   if (text.startsWith("|")) {
     text = text.replace(/^\||\|$/gu, "").split("|").map((cell) => cell.trim()).filter(Boolean).join(" · ");
   }
-  return text
+  return stripHtmlTags(text
     .replace(/^(?:>\s*)+/u, "")
     .replace(/^(?:[-*+]|\d+[.)])\s+(?:\[[ xX]\]\s+)?/u, "")
-    .replace(/<!--.*?-->/gu, "")
-    .replace(/!?\[([^\]]*)\]\([^)]*\)/gu, "$1")
-    .replace(/<[^>]+>/gu, "")
+    .replace(/!?\[([^\]]*)\]\([^)]*\)/gu, "$1"))
     .replace(/\*\*|__|~~|`|\*/gu, "")
     .replace(/\s+/gu, " ")
     .trim();
@@ -344,7 +347,7 @@ export function removeAutomationReference(markdown: string, automationId: string
       rest = `${rest.slice(0, Math.max(0, start))}${rest.slice(end + target.length)}`;
     }
     if (rest === line) lines.push(line);
-    else if (/[\p{L}\p{N}]/u.test(rest.replace(/^\s*\d+[.)]/u, ""))) lines.push(rest.replace(/[ \t]+$/u, ""));
+    else if (/[\p{L}\p{N}]/u.test(rest.replace(/^\s*\d+[.)]/u, ""))) lines.push(trimEnd(rest, " \t"));
   }
   return lines.join("\n").replace(/\n{3,}/gu, "\n\n");
 }

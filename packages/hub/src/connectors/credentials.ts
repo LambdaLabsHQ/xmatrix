@@ -1,3 +1,4 @@
+import { trimEnd } from "@xmatrix/protocol";
 import { PostgresGmailRoutingRepository } from "@xmatrix/db";
 import { PostgresDingTalkTokenRepository, PostgresDingTalkInstallRepository, PostgresDingTalkCompanyRepository, PostgresDingTalkVisibilityRepository, PostgresDiscordLifecycleRepository, createAuthorityDatabase, PostgresDingTalkSuiteRepository, PostgresWeComCompanyRepository, PostgresWeComInstallRepository, PostgresAppActionPolicyRepository, PostgresAppActionRequestRepository, PostgresAppCredentialRepository,
   PostgresAppRepository, PostgresWeComSuiteRepository, PostgresTelegramRoomRepository, PostgresFeishuAppRepository, PostgresFeishuRoomRepository, PostgresSentryEventRepository, PostgresGoogleChatRoomRepository, PostgresTeamsRoomRepository, type AuthorityDatabase } from "@xmatrix/db";
@@ -58,7 +59,7 @@ export function mintConnectorSecret(): string {
 export const INGRESS_KEY_FIELD = "ingressKey";
 
 export function connectorIngressUrl(origin: string, providerId: string, spaceId: string, ingressKey: string): string {
-  return `${origin.replace(/\/+$/u, "")}/api/connectors/${encodeURIComponent(providerId)}/events/` +
+  return `${trimEnd(origin, "/")}/api/connectors/${encodeURIComponent(providerId)}/events/` +
     `${encodeURIComponent(spaceId)}/${encodeURIComponent(ingressKey)}`;
 }
 

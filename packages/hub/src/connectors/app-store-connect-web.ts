@@ -1,3 +1,4 @@
+import { stripHtmlTags } from "@xmatrix/protocol";
 import { appStoreConnect, appleApp, appleResource, BUNDLE_ID, relatedId, type AppleResource } from "./app-store-connect-api";
 import { quoteRetrievedText } from "./actions/common";
 import { cell } from "./actions/google-report";
@@ -150,7 +151,7 @@ const resources = (value: unknown) => (Array.isArray(value) ? value : []).flatMa
 
 /** The plain text of a message Apple stores as HTML. */
 export function plainText(html: string): string {
-  return html.replace(/<(br|\/p|\/div|\/li)\b[^>]*>/giu, "\n").replace(/<[^>]*>/gu, " ")
+  return stripHtmlTags(html.replace(/<(br|\/p|\/div|\/li)\b[^>]*>/giu, "\n"), " ")
     .replace(/&nbsp;/gu, " ").replace(/&lt;/gu, "<").replace(/&gt;/gu, ">").replace(/&quot;/gu, "\"").replace(/&#39;|&apos;/gu, "'").replace(/&amp;/gu, "&")
     .split("\n").map(line => line.replace(/\s+/gu, " ").trim()).filter(Boolean).join("\n");
 }

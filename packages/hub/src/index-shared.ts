@@ -14,6 +14,7 @@ import {
   timingSafeEqual,
   type AgentRunPermission,
   spaceVisibilityScope,
+  trimEnd,
   utf8ByteLength,
 } from "@xmatrix/protocol";
 import type {
@@ -151,7 +152,7 @@ export function hubOrigin(request: Request): string {
 }
 /** Connector URLs retain the request origin fallback for deployments without an explicit Hub URL. */
 export function connectorHubOrigin(env: Pick<Env, "HUB_URL">, request: Request): string {
-  return env.HUB_URL?.trim().replace(/\/+$/u, "") || new URL(request.url).origin;
+  return trimEnd(env.HUB_URL?.trim() ?? "", "/") || new URL(request.url).origin;
 }
 export function normalizeOrigin(value: string): string | null {
   try {

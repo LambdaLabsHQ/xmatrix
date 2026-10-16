@@ -1,3 +1,4 @@
+import { dropHtmlElements, stripHtmlTags } from "@xmatrix/protocol";
 import type { ConnectorAction } from "../provider";
 import type { UpstreamMeter } from "../../usage-cost-metering";
 import { record } from "../command-support";
@@ -109,10 +110,8 @@ export function gmailBodies(payload: Record<string, unknown>): { plain?: string;
 
 /** Readable text of an HTML body: no styles, scripts or tags, block ends as line breaks. */
 export function htmlText(html: string): string {
-  return decodeEntities(html
-    .replace(/<(style|script|head)\b[\s\S]*?<\/\1\s*>/giu, "")
-    .replace(/<br\s*\/?>|<\/(p|div|tr|li|h[1-6]|table)\s*>/giu, "\n")
-    .replace(/<[^>]*>/gu, ""))
+  return decodeEntities(stripHtmlTags(dropHtmlElements(html, ["style", "script", "head"])
+    .replace(/<br\s*\/?>|<\/(p|div|tr|li|h[1-6]|table)\s*>/giu, "\n")))
     .replace(/[ \t ]+/gu, " ")
     .replace(/ *\n[\s]*\n\s*/gu, "\n\n")
     .trim();

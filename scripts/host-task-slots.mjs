@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process";
 import {
   closeSync,
+  constants,
   ftruncateSync,
   mkdirSync,
   openSync,
@@ -92,8 +93,7 @@ export function tryAcquireHostSlot({
   for (let offset = 0; offset < count; offset += 1) {
     const index = (start + offset) % count;
     const file = path.join(directory, `slot-${index}.lock`);
-    closeSync(openSync(file, "a"));
-    const fd = openSync(file, "r+");
+    const fd = openSync(file, constants.O_RDWR | constants.O_CREAT);
     let admitted = false;
     try {
       if (!lock(fd)) continue;

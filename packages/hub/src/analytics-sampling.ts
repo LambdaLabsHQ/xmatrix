@@ -1,9 +1,7 @@
 import type { Env } from "./types";
 
 export function sampledAnalyticsPoint(rate: number): boolean {
-  if (rate === 1) return true;
-  const value = crypto.getRandomValues(new Uint32Array(1))[0] ?? 0;
-  return value % rate === 0;
+  return rate === 1 || Math.random() * rate < 1;
 }
 
 export function analyticsWorkerVersion(env: Pick<Env, "CF_VERSION_METADATA">): string {

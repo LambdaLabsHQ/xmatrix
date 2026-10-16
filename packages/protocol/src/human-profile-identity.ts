@@ -1,4 +1,4 @@
-import { hasControlCharacter } from "./field-validation.js";
+import { hasControlCharacter, trimEdges, trimEnd } from "./field-validation.js";
 /**
  * The two names a Human carries, and the one place their rules live.
  *
@@ -175,13 +175,8 @@ export function suggestHumanHandle(displayName: unknown): string | undefined {
   const source = displayName.trim();
   if (isUnusableHumanIdentitySource(source)) return undefined;
 
-  const candidate = source
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/gu, "-")
-    .replace(/-{2,}/gu, "-")
-    .replace(/^-+|-+$/gu, "")
-    .slice(0, HUMAN_HANDLE_MAX_LENGTH)
-    .replace(/-+$/gu, "");
+  const slug = source.toLowerCase().replace(/[^a-z0-9]+/gu, "-");
+  const candidate = trimEnd(trimEdges(slug, "-").slice(0, HUMAN_HANDLE_MAX_LENGTH), "-");
 
   // Dropping the non-ASCII part of a mixed name can leave nothing but digits —
   // `王力2024` reduces to `2024`, which slips past the all-digit check on the

@@ -10,6 +10,7 @@ import {
   type ChannelAppMention,
   type LaunchTargetRepo,
   type PageGitHubFile,
+  trimEnd,
 } from "@xmatrix/protocol";
 import { githubRepositoryIsPublic } from "./github-subscription-domain";
 import type { Env } from "./types";
@@ -2245,7 +2246,7 @@ async function fetchGitHubJson(
   init?: { method?: "GET" | "POST" | "PATCH" | "PUT" }
     & { body?: BodyInit }
 ): Promise<unknown> {
-  const base = (env.GITHUB_API_BASE_URL || "https://api.github.com").replace(/\/+$/, "");
+  const base = trimEnd(env.GITHUB_API_BASE_URL || "https://api.github.com", "/");
   const url = path.startsWith("http") ? path : `${base}${path.startsWith("/") ? path : `/${path}`}`;
   const headers = new Headers({
     accept: "application/vnd.github+json",

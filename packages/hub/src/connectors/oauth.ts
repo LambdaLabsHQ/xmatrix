@@ -1,4 +1,4 @@
-import { APP_CONNECTOR_PROVIDER_MANIFESTS, type AppConnectorProviderManifest } from "@xmatrix/protocol";
+import { APP_CONNECTOR_PROVIDER_MANIFESTS, trimEnd, type AppConnectorProviderManifest } from "@xmatrix/protocol";
 import { base64UrlDecode, signGitHubAppState, verifyGitHubAppState } from "../index-shared";
 import type { Env } from "../types";
 import { metered, type UpstreamMeter } from "../usage-cost-metering";
@@ -110,7 +110,7 @@ export function oauthProviderIds(env: Env): string[] {
 }
 
 export function oauthRedirectUri(hubOrigin: string): string {
-  return `${hubOrigin.replace(/\/+$/u, "")}/api/connectors/oauth/callback`;
+  return `${trimEnd(hubOrigin, "/")}/api/connectors/oauth/callback`;
 }
 
 export async function oauthAuthorizeUrl(client: OAuthClient, input: { spaceId: string; userId: string;

@@ -179,6 +179,10 @@ public final class MainActivity extends ComponentActivity {
     settings.setSupportZoom(false);
     settings.setBuiltInZoomControls(false);
     settings.setDisplayZoomControls(false);
+    // Packaged assets arrive through WebViewAssetLoader over https, so pages
+    // never need file:// or content:// URLs.
+    settings.setAllowFileAccess(false);
+    settings.setAllowContentAccess(false);
     return TrustedWebBridge.install(view, bridge);
   }
 

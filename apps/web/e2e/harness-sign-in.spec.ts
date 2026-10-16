@@ -54,7 +54,7 @@ test("a device-code sign-in shows its link and code, then waits for the browser 
     controlId: FINISH, presetId: "codex", action: "login_finish", status: "running" });
   await section.getByRole("button", { name: "Sign in", exact: true }).click();
   await expect(section.getByTestId("harness-sign-in-code")).toHaveText("I3YY-8QZ91");
-  await expect(section.getByRole("link", { name: /auth\.openai\.com\/codex\/device/ }))
+  await expect(section.getByRole("link", { name: "https://auth.openai.com/codex/device", exact: true }))
     .toHaveAttribute("href", "https://auth.openai.com/codex/device");
   await expect(section).toContainText("Waiting for you to finish in the browser");
   await expect(section.getByRole("textbox")).toHaveCount(0);

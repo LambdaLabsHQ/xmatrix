@@ -56,6 +56,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ (github.event_name == 'push' && (contains(github.event.head_commit.modified, 'version.json') || contains(github.event.head_commit.added, 'version.json'))) && github.sha || github.head_ref || github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 # A pull request from a fork always runs on GitHub-hosted runners: its code
 # must never execute on a persistent self-hosted machine, whatever the fleet.
 jobs:
