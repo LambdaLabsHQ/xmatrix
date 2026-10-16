@@ -57,6 +57,13 @@ applying migrations.
 
 ## Windows compile cache
 
+Windows CI and CLI release first fetch the locked dependencies for
+`x86_64-pc-windows-msvc`. Recognized transient curl and HTTP transfer failures
+receive at most three attempts, each bounded to two minutes, with five seconds
+between attempts. Lockfile, authorization, checksum and process failures stop
+immediately. Subsequent Cargo metadata, compilation and tests use the fetched
+registry offline; compiler, build-script and test failures are never retried.
+
 Native Windows CI archives kache's artifact store and SQLite index after
 trimming the store to 640 MiB, stopping its job-local writer, and waiting up to
 45 seconds for that process to exit. Cargo finishing alone does not stop the

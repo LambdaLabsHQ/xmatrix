@@ -53,3 +53,13 @@ runs:
         if ($LASTEXITCODE -ne 0) { throw 'rustc --version failed' }
         cargo --version
         if ($LASTEXITCODE -ne 0) { throw 'cargo --version failed' }
+
+    - name: Fetch locked Windows dependencies before validation or compilation
+      shell: powershell
+      run: |
+        node scripts/ci-cargo-fetch.mjs
+        if ($LASTEXITCODE -ne 0) { throw 'Cargo dependency fetch failed' }
+        # CI and release consume the fetched lockfile without more registry
+        # requests. Compiler, build-script and test failures are not retried.
+        $utf8 = [System.Text.UTF8Encoding]::new($false)
+        [System.IO.File]::AppendAllText($env:GITHUB_ENV, "CARGO_NET_OFFLINE=true`n", $utf8)
