@@ -21,7 +21,7 @@ test("public routes share one warm material layer", () => {
   for (const route of [
     "page.tsx",
     "download/page.tsx",
-    "login/page.tsx",
+    "../components/auth/auth-shell.tsx",
     "billing/page.tsx",
     "console/page.tsx",
   ]) {

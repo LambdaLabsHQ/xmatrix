@@ -7,25 +7,30 @@ import Link from "next/link";
 import {
   ArrowRight,
   Loader2,
-  Mail,
   ShieldCheck,
   AlertTriangle,
   ExternalLink,
 } from "lucide-react";
-import { BrandMark } from "@/components/shared/brand-mark";
+import {
+  AuthDivider,
+  AuthError,
+  AuthHeading,
+  AuthLinks,
+  AuthPrimaryButton,
+  AuthRequest,
+  AuthSecondaryButton,
+  AuthShell,
+} from "@/components/auth/auth-shell";
+import { WoodPanel } from "@/components/ui/material-surfaces";
 import { useAuth } from "@/lib/auth-context";
 import {
   getDesktopBridge,
   type DesktopBridge,
 } from "@/lib/desktop/bridge";
 import { exchangeDesktopCliSession, requestCliSessionExchange } from "@/lib/desktop/session-exchange";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { cn } from "@/lib/utils";
 import { WEB_PROXY_ROUTES, type AuthResponse } from "@xmatrix/protocol";
 import {
-  authorizationLabel,
   deviceClientLabel as getDeviceClientLabel,
   deviceProductName,
   nativeAppLabel as getNativeAppLabel,
@@ -39,6 +44,7 @@ import { isAbort, userErrorMessage } from "@/lib/user-facing-error";
 
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
 const LOGIN_CODE_LENGTH = 6;
+const RESEND_COOLDOWN_SECONDS = 30;
 const PENDING_DESKTOP_DEVICE_LOGIN_KEY = "xmatrix.pendingDesktopDeviceLogin";
 
 type DesktopLoginState = {
@@ -121,7 +127,13 @@ function LoginContent() {
   const [otp, setOtp] = useState("");
   const [step, setStep] = useState<"email" | "otp">("email");
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
+  const [resendAt, setResendAt] = useState(0);
+  const [clock, setClock] = useState(0);
+  const resendSeconds = Math.max(0, Math.ceil((resendAt - clock) / 1000));
+  const otpFormRef = useRef<HTMLFormElement>(null);
   const [cliComplete, setCliComplete] = useState(false);
   /* A device sign-in hands this account's session to whoever started it, so
      it is approved only by an explicit click after the person compares the
@@ -161,7 +173,6 @@ function LoginContent() {
   const awaitingDeviceConfirmation = Boolean(
     session?.access_token && deviceCode && userCode && !deviceApprovalConfirmed && !cliComplete,
   );
-  const cliModeActive = cliMode && !cliError;
   const desktopMode = Boolean(desktopBridge) && !cliMode;
   const desktopModeActive = desktopMode && !user;
   const deviceClientLabel = getDeviceClientLabel(deviceClient);
@@ -488,16 +499,61 @@ function LoginContent() {
     user,
   ]);
 
+  // Counts down the resend wait; stops once the wait is over.
+  useEffect(() => {
+    if (!resendAt) return;
+    const timer = window.setInterval(() => {
+      const now = Date.now();
+      setClock(now);
+      if (now >= resendAt) window.clearInterval(timer);
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [resendAt]);
+
+  // A full code (typed, pasted or filled from the mail app) signs in at once.
+  useEffect(() => {
+    if (step === "otp" && otp.length === LOGIN_CODE_LENGTH) {
+      otpFormRef.current?.requestSubmit();
+    }
+  }, [otp, step]);
+
+  function startResendWait() {
+    const now = Date.now();
+    setClock(now);
+    setResendAt(now + RESEND_COOLDOWN_SECONDS * 1000);
+  }
+
+  function changeEmail() {
+    setStep("email");
+    setOtp("");
+    setError("");
+    setNotice("");
+  }
+
+  async function handleResendCode() {
+    if (loading || resendSeconds > 0) return;
+    setError("");
+    setNotice("");
+    setOtp("");
+    startResendWait();
+    try {
+      await signInWithOtp(email.trim());
+      setNotice("We sent a new code. Use the one in the newest email.");
+    } catch (nextError) {
+      setError(formatLoginError(nextError));
+    }
+  }
+
   async function handleGoogleLogin() {
     setError("");
-    setLoading(true);
+    setGoogleLoading(true);
     try {
       await signInWithGoogle(
         cliMode ? window.location.href : nextPath ? `${window.location.origin}${nextPath}` : undefined,
       );
     } catch (nextError) {
       setError(formatLoginError(nextError));
-      setLoading(false);
+      setGoogleLoading(false);
     }
   }
 
@@ -509,6 +565,7 @@ function LoginContent() {
     try {
       await signInWithOtp(email.trim());
       setStep("otp");
+      startResendWait();
     } catch (nextError) {
       setError(formatLoginError(nextError));
     } finally {
@@ -539,378 +596,220 @@ function LoginContent() {
     }
   }
 
+  const productName = deviceProductName(deviceClient);
+  const signingInAs = user?.email ? <>Signing in as <strong>{user.email}</strong></> : null;
+
   return (
-    <div className="site-page site-login flex min-h-screen flex-col items-center justify-center px-4 py-12">
-      <div
-        className="pointer-events-none fixed inset-0"
-        style={{
-          backgroundImage:
-            "radial-gradient(circle at 1px 1px, oklch(1 0 0 / 4%) 1px, transparent 0)",
-          backgroundSize: "40px 40px",
-        }}
-      />
-
-      <div className="relative z-10 w-full max-w-sm">
-        <BrandMark href="/" className="mb-10 justify-center" iconClassName="size-10" wordmarkClassName="text-xl" />
-
-        <div
-          className={cn(
-            "site-login-panel rounded-xl border bg-card p-6 shadow-lg shadow-black/5",
-            cliError
-              ? "border-destructive/40"
-              : cliModeActive
-                ? "border-primary/30 shadow-primary/5"
-                : "border-border"
-          )}
-        >
-          <div className="space-y-3">
-            {cliModeActive ? (
-              <Badge className="gap-1.5">
-                <ShieldCheck className="size-3.5" />
-                {authorizationLabel(deviceClient)}
-              </Badge>
-            ) : null}
-            {desktopModeActive ? (
-              <Badge className="gap-1.5">
-                <ExternalLink className="size-3.5" />
-                {nativeClient === "ios"
-                  ? "iOS Sign-in"
-                  : nativeClient === "android"
-                    ? "Android Sign-in"
-                    : "Browser Sign-in"}
-              </Badge>
-            ) : null}
-            {cliError ? (
-              <Badge variant="destructive" className="gap-1.5">
-                <AlertTriangle className="size-3.5" />
-                Invalid Callback
-              </Badge>
-            ) : null}
-
-            <div>
-              <h1 className="text-lg font-semibold tracking-tight">
-                {cliComplete
-                  ? deviceClient === "desktop"
-                    ? "Desktop login complete"
-                    : deviceClient === "ios"
-                      ? "iOS login complete"
-                      : deviceClient === "android"
-                        ? "Android login complete"
-                    : "CLI login complete"
-                  : cliError
-                    ? "This CLI sign-in link is not trusted"
-                    : cliMode
-                      ? deviceClient === "desktop"
-                        ? "Authorize xMatrix Desktop"
-                        : deviceClient === "ios"
-                          ? "Authorize xMatrix iOS"
-                          : deviceClient === "android"
-                            ? "Authorize xMatrix Android"
-                        : "Authorize xMatrix CLI"
-                      : desktopModeActive
-                        ? desktopLogin.status === "error"
-                          ? "Browser sign-in failed"
-                          : desktopLogin.status === "idle"
-                            ? "Sign in to xMatrix"
-                          : "Sign in in your browser"
-                      : step === "email"
-                        ? "Sign in to xMatrix"
-                        : "Check your email"}
-              </h1>
-              <p className="mt-1 text-sm text-muted-foreground">
-                {cliComplete
-                  ? deviceClient === "desktop"
-                    ? "You can return to xMatrix. The desktop session is ready."
-                    : deviceClient === "ios"
-                      ? "You can return to xMatrix. The iOS session is ready."
-                      : deviceClient === "android"
-                        ? "You can return to xMatrix. The Android session is ready."
-                    : "You can return to your terminal. The CLI session is ready."
-                  : cliError
-                    ? "xMatrix only returns CLI sessions to loopback addresses on this device. Start a fresh login from your terminal."
-                    : cliMode
-                      ? deviceCode
-                        ? awaitingDeviceConfirmation
-                          ? `Approve only if your ${deviceClientLabel} shows this code. Approving signs it in as you.`
-                          : `Finish sign-in on xmatrix.sh to approve code ${userCode || "shown in your client"} for your ${deviceClientLabel}.`
-                        : `Finish sign-in to send your session back to the terminal on this device${cliCallbackContext?.hubHost ? ` for ${cliCallbackContext.hubHost}` : ""}.`
-                      : desktopModeActive
-                        ? desktopLogin.status === "error"
-                          ? desktopLogin.error || "Start a fresh browser sign-in."
-                          : desktopLogin.status === "idle"
-                            ? "Open your system browser when you're ready to sign in."
-                            : `Complete authentication in your system browser. The ${nativeAppLabel} will continue automatically when sign-in finishes.`
-                      : step === "email"
-                        ? "We'll send you a secure verification code."
-                        : `We sent a ${LOGIN_CODE_LENGTH}-digit verification code to ${email}.`}
-              </p>
-            </div>
+    <AuthShell legal={!cliComplete && !cliError}>
+      {cliComplete ? (
+        <>
+          <AuthHeading title="You're signed in">
+            {deviceClient === "desktop"
+              ? "You can return to xMatrix. The desktop session is ready."
+              : deviceClient === "ios"
+                ? "You can return to xMatrix. The iOS session is ready."
+                : deviceClient === "android"
+                  ? "You can return to xMatrix. The Android session is ready."
+                  : "You can return to your terminal. The CLI session is ready."}
+          </AuthHeading>
+          <div className="auth-stack">
+            {nativeReturnUrl ? (
+              <WoodPanel as="a" href={nativeReturnUrl} className="site-wood-pill auth-button">
+                Return to xMatrix
+              </WoodPanel>
+            ) : (
+              <AuthPrimaryButton onClick={() => window.close()}>
+                {deviceClient === "desktop" || deviceClient === "ios" || deviceClient === "android"
+                  ? "Return to xMatrix"
+                  : "Close this tab"}
+              </AuthPrimaryButton>
+            )}
+            <AuthSecondaryButton onClick={() => router.push("/app")}>Open xMatrix here</AuthSecondaryButton>
           </div>
-
-          {cliComplete ? (
-            <div className="mt-6 space-y-4">
-              {nativeReturnUrl ? (
-                <Button nativeButton={false} className="w-full" render={<a href={nativeReturnUrl} />}>
-                  Return to xMatrix
-                </Button>
-              ) : (
-                <Button type="button" className="w-full" onClick={() => window.close()}>
-                  {deviceClient === "desktop" || deviceClient === "ios" || deviceClient === "android"
-                    ? "Return to xMatrix"
-                    : "Return to terminal"}
-                </Button>
-              )}
-              <Button
-                type="button"
-                variant="ghost"
-                className="w-full text-xs text-muted-foreground"
-                onClick={() => router.push("/app")}
-              >
-                Open xMatrix
-              </Button>
-            </div>
-          ) : cliError ? (
-            <div className="mt-6 space-y-4">
-              <div className="rounded-lg border border-destructive/20 bg-destructive/5 p-4 text-sm text-muted-foreground">
-                <p className="font-medium text-foreground">Run this again from your terminal:</p>
-                <p className="mt-2 rounded bg-background px-2 py-1 font-mono text-xs text-foreground">
-                  xmatrix login
-                </p>
-              </div>
-              <Button nativeButton={false} className="w-full" render={<Link href="/docs" />}>
-                Open Docs
-              </Button>
-              <Button nativeButton={false} variant="ghost" className="w-full" render={<Link href="/" />}>
-                Back to Home
-              </Button>
-            </div>
-          ) : awaitingDeviceConfirmation ? (
-            <div className="mt-6 space-y-4">
-              <div className="rounded-lg border border-border bg-muted/40 p-4 text-center">
-                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                  Verification code
-                </p>
-                <p className="mt-2 font-mono text-2xl font-semibold tracking-[0.2em] text-foreground"
-                  data-testid="device-approval-code">
-                  {userCode}
-                </p>
-                {user?.email ? (
-                  <p className="mt-2 text-xs text-muted-foreground">Signing in as {user.email}</p>
-                ) : null}
-              </div>
-              <Button type="button" className="w-full" onClick={() => setDeviceApprovalConfirmed(true)}>
-                Approve
-              </Button>
-              <Button type="button" variant="ghost" className="w-full text-xs text-muted-foreground"
-                onClick={() => router.replace("/app")}>
-                This is not my code
-              </Button>
-            </div>
-          ) : desktopModeActive ? (
-            <div className="mt-6 space-y-4">
-              <div className="rounded-lg border border-border bg-muted/40 p-4 text-sm text-muted-foreground">
-                <div className="flex items-center gap-2 text-foreground">
-                  {desktopLogin.status === "idle" ? (
-                    <ExternalLink className="size-4 text-primary" />
-                  ) : desktopLogin.status === "error" ? (
-                    <AlertTriangle className="size-4 text-destructive" />
-                  ) : (
-                    <AnimatedIcon icon={Loader2} className="size-4 animate-spin text-primary" />
-                  )}
-                  <span className="font-medium">
-                    {desktopLogin.status === "idle"
-                      ? "Browser sign-in is ready"
-                      : desktopLogin.status === "error"
-                      ? "Could not finish browser sign-in"
-                      : desktopLogin.status === "opening"
-                        ? "Opening your browser"
-                        : "Waiting for browser approval"}
-                  </span>
-                </div>
-                <p className="mt-2">
-                  {desktopLogin.status === "idle"
-                    ? "xMatrix will start sign-in only after you choose to continue."
-                    : `Keep this window open while you finish signing in. The ${nativeAppLabel} will update as soon as the browser session is approved.`}
-                </p>
-              </div>
-
-              {desktopLogin.error ? (
-                <p className="text-sm text-destructive">{desktopLogin.error}</p>
-              ) : null}
-
-              {desktopLogin.verificationUrl ? (
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="w-full"
-                  onClick={() => desktopBridge?.openExternal(desktopLogin.verificationUrl!)}
-                >
-                  <ExternalLink className="mr-2 size-4" />
-                  Open browser again
-                </Button>
-              ) : null}
-
-              {desktopLogin.status === "idle" || desktopLogin.status === "error" ? (
-                <Button
-                  type="button"
-                  className="w-full"
-                  onClick={handleDesktopBrowserLogin}
-                  disabled={authLoading}
-                >
-                  <ExternalLink className="mr-2 size-4" />
-                  {desktopLogin.status === "error" ? "Start a fresh sign-in" : "Sign in with browser"}
-                </Button>
-              ) : null}
-            </div>
-          ) : step === "email" ? (
-            <form onSubmit={handleSendEmail} className="mt-6 space-y-4">
-              <Link href={`/login/password${searchParams.toString() ? `?${searchParams}` : ""}`} className="block text-center text-sm underline">Sign in with password</Link>
-              {cliMode ? (
-                <div className="rounded-lg border border-border bg-muted/40 p-3 text-sm text-muted-foreground">
-                  This browser session was opened by{" "}
-                  <code className="rounded bg-background px-1 py-0.5 text-xs">
-                    {deviceProductName(deviceClient)}
-                  </code>
-                  . After you sign in, xMatrix will authorize your {deviceClientLabel} session
-                  {deviceCode ? ` with verification code ${userCode || "shown in your client"}` : " on this device"}.
-                </div>
-              ) : null}
-
-              <div className="space-y-1.5">
-                <label htmlFor="login-email" className="text-sm font-medium">
-                  Email address
-                </label>
-                <Input
-                  id="login-email"
-                  type="email"
-                  placeholder="you@example.com"
-                  required
-                  autoFocus
-                  value={email}
-                  onChange={(event) => {
-                    setEmail(event.target.value);
-                    setError("");
-                  }}
-                />
-              </div>
-
-              {formError ? <p className="text-sm text-destructive">{formError}</p> : null}
-
-              <Button type="submit" className="w-full" disabled={loading || Boolean(cliError)}>
-                {loading ? (
-                  <>
-                    <AnimatedIcon icon={Loader2} className="mr-2 size-4 animate-spin" />
-                    Sending code…
-                  </>
-                ) : (
-                  <>
-                    <Mail className="mr-2 size-4" />
-                    Send login code
-                  </>
-                )}
-              </Button>
-
-              <div className="relative my-4">
-                <div className="absolute inset-0 flex items-center">
-                  <div className="w-full border-t border-border" />
-                </div>
-                <div className="relative flex justify-center text-xs uppercase text-muted-foreground">
-                  <span className="bg-card px-2">Or continue with</span>
-                </div>
-              </div>
-
-              <Button
-                type="button"
-                variant="outline"
-                className="w-full"
-                onClick={handleGoogleLogin}
-                disabled={loading || Boolean(cliError)}
-              >
-                <GoogleIcon className="mr-2 size-4" />
-                Sign in with Google
-              </Button>
+        </>
+      ) : cliError ? (
+        <>
+          <AuthHeading title="This sign-in link isn't trusted">
+            xMatrix only returns CLI sessions to loopback addresses on this device. Start a fresh
+            login from your terminal.
+          </AuthHeading>
+          <AuthRequest icon={<AlertTriangle className="size-4" />} title="Run this again in your terminal">
+            <code className="auth-command">xmatrix login</code>
+          </AuthRequest>
+          <AuthLinks>
+            <Link href="/docs">Open Docs</Link>
+            <Link href="/">Back to Home</Link>
+          </AuthLinks>
+        </>
+      ) : awaitingDeviceConfirmation ? (
+        <>
+          <AuthHeading title={`Approve ${productName}?`}>
+            Approve only if your {deviceClientLabel} shows this code. Approving signs it in as you.
+          </AuthHeading>
+          <AuthRequest
+            icon={<ShieldCheck className="size-4" />}
+            title={`${productName} is asking to sign in`}
+            code={userCode}
+          >
+            {signingInAs}
+          </AuthRequest>
+          <AuthError>{formError}</AuthError>
+          <div className="auth-stack">
+            <AuthPrimaryButton onClick={() => setDeviceApprovalConfirmed(true)} disabled={loading}>
+              {loading ? <Spinner /> : null}
+              Approve
+            </AuthPrimaryButton>
+            <AuthSecondaryButton onClick={() => router.replace("/app")} disabled={loading}>
+              This is not my code
+            </AuthSecondaryButton>
+          </div>
+        </>
+      ) : desktopModeActive ? (
+        <>
+          <AuthHeading
+            title={
+              desktopLogin.status === "error"
+                ? "Browser sign-in didn't finish"
+                : desktopLogin.status === "idle"
+                  ? "Welcome to xMatrix"
+                  : "Continue in your browser"
+            }
+          >
+            {desktopLogin.status === "error"
+              ? "Start a fresh sign-in to try again."
+              : desktopLogin.status === "idle"
+                ? `Sign in or create your account in your browser. The ${nativeAppLabel} continues on its own when you're done.`
+                : `Keep this window open. The ${nativeAppLabel} continues as soon as the browser approves the sign-in.`}
+          </AuthHeading>
+          {desktopLogin.status === "opening" || desktopLogin.status === "waiting" ? (
+            <AuthRequest
+              icon={<Spinner />}
+              title={desktopLogin.status === "opening" ? "Opening your browser…" : "Waiting for your browser…"}
+            />
+          ) : null}
+          <AuthError>{desktopLogin.error}</AuthError>
+          <div className="auth-stack">
+            {desktopLogin.status === "idle" || desktopLogin.status === "error" ? (
+              <AuthPrimaryButton onClick={handleDesktopBrowserLogin} disabled={authLoading}>
+                <ExternalLink className="size-4" />
+                {desktopLogin.status === "error" ? "Start a fresh sign-in" : "Sign in with browser"}
+              </AuthPrimaryButton>
+            ) : null}
+            {desktopLogin.verificationUrl ? (
+              <AuthSecondaryButton onClick={() => desktopBridge?.openExternal(desktopLogin.verificationUrl!)}>
+                Open browser again
+              </AuthSecondaryButton>
+            ) : null}
+          </div>
+        </>
+      ) : step === "email" ? (
+        <>
+          <AuthHeading title={cliMode ? `Sign in to approve ${productName}` : "Welcome to xMatrix"}>
+            {cliMode
+              ? `Your ${deviceClientLabel} is waiting. After you sign in, you'll confirm its code before anything is shared.`
+              : "Sign in or create your account. New accounts start free."}
+          </AuthHeading>
+          {cliMode && deviceCode ? (
+            <AuthRequest icon={<ShieldCheck className="size-4" />} title={`${productName} is asking to sign in`}>
+              Code <span className="auth-inline-code">{userCode || "shown in your client"}</span>
+            </AuthRequest>
+          ) : null}
+          <div className="auth-stack">
+            <AuthSecondaryButton onClick={handleGoogleLogin} disabled={loading || googleLoading}>
+              {googleLoading ? <Spinner /> : <GoogleIcon className="size-[18px]" />}
+              Continue with Google
+            </AuthSecondaryButton>
+            <AuthDivider />
+            <form onSubmit={handleSendEmail} className="auth-stack">
+              <label htmlFor="login-email" className="auth-label">
+                Email address
+              </label>
+              <Input
+                id="login-email"
+                type="email"
+                autoComplete="email"
+                placeholder="you@company.com"
+                required
+                autoFocus
+                value={email}
+                onChange={(event) => {
+                  setEmail(event.target.value);
+                  setError("");
+                }}
+                className="auth-input"
+              />
+              <AuthError>{formError}</AuthError>
+              <AuthPrimaryButton type="submit" disabled={loading || googleLoading}>
+                {loading ? <Spinner /> : null}
+                {loading ? "Sending code…" : "Continue with email"}
+              </AuthPrimaryButton>
             </form>
-          ) : (
-            <form onSubmit={handleVerifyOtp} className="mt-6 space-y-4">
-              {cliMode ? (
-                <div className="rounded-lg border border-border bg-muted/40 p-3 text-sm text-muted-foreground">
-                  Enter the verification code to finish browser sign-in, then xMatrix will authorize the waiting {deviceClientLabel} session.
-                </div>
-              ) : null}
-
-              <div className="space-y-1.5">
-                <label htmlFor="login-otp" className="text-sm font-medium">
-                  Verification Code
-                </label>
-                <p id="login-otp-hint" className="text-xs text-muted-foreground">
-                  Enter the {LOGIN_CODE_LENGTH}-digit code from your email.
-                </p>
-                <Input
-                  id="login-otp"
-                  type="text"
-                  inputMode="numeric"
-                  autoComplete="one-time-code"
-                  pattern={`[0-9]{${LOGIN_CODE_LENGTH}}`}
-                  required
-                  autoFocus
-                  value={otp}
-                  onChange={(event) =>
-                    setOtp(event.target.value.replace(/\D/g, "").slice(0, LOGIN_CODE_LENGTH))
-                  }
-                  minLength={LOGIN_CODE_LENGTH}
-                  maxLength={LOGIN_CODE_LENGTH}
-                  aria-describedby="login-otp-hint"
-                  className="text-center tracking-[0.35em]"
-                />
-              </div>
-
-              {formError ? <p className="text-sm text-destructive">{formError}</p> : null}
-
-              <Button
-                type="submit"
-                className="w-full"
-                disabled={loading || otp.length !== LOGIN_CODE_LENGTH || Boolean(cliError)}
-              >
-                {loading ? (
-                  <>
-                    <AnimatedIcon icon={Loader2} className="mr-2 size-4 animate-spin" />
-                    Completing sign-in…
-                  </>
-                ) : (
-                  <>
-                    Sign in
-                    <ArrowRight className="ml-2 size-4" />
-                  </>
-                )}
-              </Button>
-
-              <Button
-                type="button"
-                variant="ghost"
-                className="w-full text-xs text-muted-foreground"
-                onClick={() => setStep("email")}
-                disabled={loading}
-              >
-                Back to email
-              </Button>
-            </form>
-          )}
-        </div>
-
-        <p className="mt-5 px-3 text-center text-xs leading-5 text-muted-foreground">
-          By continuing, you agree to the xMatrix{" "}
-          <Link className="font-medium text-foreground underline underline-offset-4" href="/terms">
-            Terms of Service
-          </Link>{" "}
-          and acknowledge the{" "}
-          <Link className="font-medium text-foreground underline underline-offset-4" href="/privacy">
-            Privacy Policy
-          </Link>
-          .
-        </p>
-      </div>
-    </div>
+          </div>
+          <AuthLinks>
+            <Link href={`/login/password${searchParams.toString() ? `?${searchParams}` : ""}`}>
+              Sign in with password
+            </Link>
+          </AuthLinks>
+        </>
+      ) : (
+        <>
+          <AuthHeading title="Check your email">
+            Enter the {LOGIN_CODE_LENGTH}-digit code we sent to <strong>{email}</strong>.{" "}
+            <button type="button" className="auth-text-button" onClick={changeEmail} disabled={loading}>
+              Change
+            </button>
+          </AuthHeading>
+          <form ref={otpFormRef} onSubmit={handleVerifyOtp} className="auth-stack">
+            <label htmlFor="login-otp" className="auth-label">
+              Login code
+            </label>
+            <Input
+              id="login-otp"
+              type="text"
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              pattern={`[0-9]{${LOGIN_CODE_LENGTH}}`}
+              required
+              autoFocus
+              value={otp}
+              onChange={(event) => {
+                setOtp(event.target.value.replace(/\D/g, "").slice(0, LOGIN_CODE_LENGTH));
+                setError("");
+                setNotice("");
+              }}
+              minLength={LOGIN_CODE_LENGTH}
+              maxLength={LOGIN_CODE_LENGTH}
+              aria-describedby="login-otp-hint"
+              placeholder={"0".repeat(LOGIN_CODE_LENGTH)}
+              className="auth-input auth-code-input"
+            />
+            <p id="login-otp-hint" className="auth-hint">
+              {cliMode
+                ? `After this, you'll confirm the ${deviceClientLabel} sign-in.`
+                : "The code works for 5 minutes. Not there? Check spam."}
+            </p>
+            <AuthError>{formError}</AuthError>
+            {notice ? <p role="status" className="auth-hint">{notice}</p> : null}
+            <AuthPrimaryButton type="submit" disabled={loading || otp.length !== LOGIN_CODE_LENGTH}>
+              {loading ? <Spinner /> : null}
+              {loading ? "Signing in…" : "Sign in"}
+              {loading ? null : <ArrowRight className="size-4" />}
+            </AuthPrimaryButton>
+          </form>
+          <AuthLinks>
+            <button type="button" className="auth-text-button" onClick={handleResendCode}
+              disabled={loading || resendSeconds > 0}>
+              {resendSeconds > 0 ? `Resend code in ${resendSeconds}s` : "Resend code"}
+            </button>
+          </AuthLinks>
+        </>
+      )}
+    </AuthShell>
   );
+}
+
+function Spinner() {
+  return <AnimatedIcon icon={Loader2} className="size-4 animate-spin" />;
 }
 
 function normalizeNextPath(next: string | null): string {
@@ -928,6 +827,18 @@ function formatLoginError(error: unknown): string {
 
   if (code === "over_email_send_rate_limit" || /email rate limit/i.test(message)) {
     return "Too many login emails were requested. Use Google sign-in or wait a minute before requesting another code.";
+  }
+
+  if (code === "INVALID_OTP") {
+    return "That code didn't match. Check the newest email, or resend a code.";
+  }
+
+  if (code === "OTP_EXPIRED") {
+    return "That code has expired. Resend a new one.";
+  }
+
+  if (code === "TOO_MANY_ATTEMPTS") {
+    return "Too many tries with this code. Resend a new one.";
   }
 
   if (code === "email_delivery_configuration_error") {

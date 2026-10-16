@@ -337,6 +337,335 @@ html:has(.site-page) {
   box-shadow: var(--site-paper-shadow) !important;
 }
 
+/* Sign-in screens (AuthShell): the homepage art on one side, a sheet of
+   paper with one column of controls on the other. The main action is the
+   homepage's wood "Start Free" plank; everything else is white paper. */
+.auth-page {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  background: var(--site-paper);
+}
+
+.auth-art {
+  position: relative;
+  height: 7.5rem;
+  margin: 0.75rem 0.75rem 0;
+  overflow: hidden;
+  border-radius: var(--site-surface-radius, 1.25rem);
+  background: #f0ecec;
+}
+
+/* The blocks sit in the right of the art; keep all of them in frame. */
+.auth-art img {
+  object-position: 88% 50%;
+}
+
+.auth-column {
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+  width: 100%;
+  max-width: 26rem;
+  margin: 0 auto;
+  padding: 1.5rem 1.5rem 2rem;
+}
+
+.auth-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+}
+
+@media (min-width: 1024px) {
+  .auth-page {
+    grid-template-columns: minmax(0, 1.15fr) minmax(30rem, 1fr);
+    grid-template-rows: 1fr;
+  }
+
+  .auth-art {
+    position: sticky;
+    top: 1rem;
+    height: calc(100dvh - 2rem);
+    margin: 1rem 0 1rem 1rem;
+  }
+
+  .auth-column {
+    padding: 2.5rem 2rem;
+  }
+
+  .auth-heading h1 {
+    font-size: 2rem;
+  }
+
+  .auth-body {
+    justify-content: center;
+  }
+}
+
+.auth-heading h1 {
+  color: var(--site-ink);
+  font-size: 1.75rem;
+  font-weight: 650;
+  line-height: 1.1;
+}
+
+.auth-heading p {
+  margin-top: 0.75rem;
+  color: var(--site-ink-muted);
+  font-size: 15px;
+  line-height: 1.55;
+}
+
+.auth-heading strong,
+.auth-request strong {
+  color: var(--site-ink);
+  font-weight: 600;
+}
+
+.auth-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.auth-heading + .auth-stack,
+.auth-heading + form.auth-stack,
+.auth-request + .auth-stack,
+.auth-error + .auth-stack {
+  margin-top: 1.75rem;
+}
+
+.auth-stack .auth-stack {
+  margin-top: 0;
+}
+
+/* Labels start where the pill field's text does. */
+.auth-label {
+  padding-inline: 1.25rem;
+  color: var(--site-ink);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.auth-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+/* Fields are pills, the same shape as the buttons under them. */
+.site-page .auth-input.auth-input {
+  height: 3rem;
+  border-radius: 999px;
+  padding-inline: 1.25rem;
+  font-size: 16px;
+}
+
+.site-page .auth-code-input.auth-code-input {
+  height: 3.5rem;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 1.5rem;
+  font-weight: 600;
+  letter-spacing: 0.45em;
+  text-align: center;
+  text-indent: 0.45em;
+}
+
+.auth-code-input::placeholder {
+  color: oklch(0.49 0.03 62 / 0.28);
+}
+
+.auth-button {
+  display: inline-flex;
+  width: 100%;
+  height: 3rem;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  border-radius: 999px;
+  font-size: 15px;
+  font-weight: 650;
+  cursor: pointer;
+  transition: transform 120ms ease, background-color 120ms ease, border-color 120ms ease, opacity 120ms ease;
+}
+
+.auth-button:active:not(:disabled) {
+  transform: scale(0.985);
+}
+
+.auth-button:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.auth-button:focus-visible,
+.auth-text-button:focus-visible,
+.auth-links a:focus-visible {
+  outline: 2px solid var(--site-wood-deep);
+  outline-offset: 2px;
+}
+
+.auth-button-secondary {
+  border: 1px solid oklch(0.46 0.05 60 / 18%);
+  background: #fff;
+  color: var(--site-ink);
+  box-shadow: 0 1px 2px oklch(0.2 0.03 55 / 0.06);
+}
+
+@media (hover: hover) {
+  .auth-button-secondary:hover:not(:disabled) {
+    border-color: oklch(0.46 0.05 60 / 30%);
+    background: oklch(0.995 0.004 86);
+  }
+}
+
+.auth-divider {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-block: 0.5rem;
+  color: var(--site-ink-muted);
+  font-size: 13px;
+}
+
+.auth-divider::before,
+.auth-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--site-wood-line);
+}
+
+.auth-request {
+  margin-top: 1.5rem;
+  padding: 1rem 1.125rem;
+  border-radius: 1rem;
+  background: var(--site-paper-soft);
+}
+
+.auth-request-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--site-ink);
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.auth-request-title > svg,
+.auth-request-title > [data-slot="animated-icon"] {
+  flex-shrink: 0;
+  color: var(--site-wood-deep);
+}
+
+.auth-request-code {
+  margin-top: 0.75rem;
+  color: var(--site-ink);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 1.75rem;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+}
+
+.auth-request-body {
+  margin-top: 0.4rem;
+  color: var(--site-ink-muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.auth-inline-code,
+.auth-command {
+  color: var(--site-ink);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-weight: 650;
+}
+
+.auth-command {
+  display: block;
+  margin-top: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.5rem;
+  background: #fff;
+  font-size: 13px;
+}
+
+.auth-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+  color: var(--site-ink);
+}
+
+.auth-check input {
+  margin-top: 0.2rem;
+  accent-color: var(--site-wood-deep);
+}
+
+.auth-error {
+  color: var(--destructive);
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.auth-heading + .auth-error,
+.auth-request + .auth-error {
+  margin-top: 1.25rem;
+}
+
+.auth-hint {
+  color: var(--site-ink-muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.auth-body > .auth-hint {
+  margin-top: 1rem;
+}
+
+.auth-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.25rem;
+  margin-top: 1.5rem;
+}
+
+.auth-links a,
+.auth-text-button,
+.auth-legal a {
+  color: var(--site-ink);
+  font-weight: 600;
+  text-decoration: underline;
+  text-decoration-color: oklch(0.43 0.065 58 / 35%);
+  text-underline-offset: 4px;
+}
+
+.auth-links a,
+.auth-text-button {
+  font-size: 14px;
+}
+
+.auth-text-button {
+  border: 0;
+  padding: 0;
+  background: none;
+  cursor: pointer;
+}
+
+.auth-text-button:disabled {
+  color: var(--site-ink-muted);
+  font-weight: 500;
+  text-decoration: none;
+  cursor: default;
+}
+
+.auth-legal {
+  color: var(--site-ink-muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
 /* The user guide (/docs): the app's paper, a page's own typography
    (`page-document`), and two quiet text columns beside it. No wood, glass,
    cards or rules; the current page is a flat tint. */

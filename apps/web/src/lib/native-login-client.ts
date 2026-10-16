@@ -32,13 +32,6 @@ export function nativeAppLabel(client: NativeLoginClient): string {
   return "desktop app";
 }
 
-export function authorizationLabel(client: string | null): string {
-  if (client === "desktop") return "Desktop Authorization";
-  if (client === "ios") return "iOS Authorization";
-  if (client === "android") return "Android Authorization";
-  return "CLI Authorization";
-}
-
 export function deviceProductName(client: string | null): string {
   if (client === "desktop") return "xMatrix Desktop";
   if (client === "ios") return "xMatrix iOS";
