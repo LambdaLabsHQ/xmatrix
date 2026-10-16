@@ -216,6 +216,14 @@ test("a mention-less first message asks whether a new conversation starts an Age
   assert.equal(productMessageControlFinishesBeforeResponse("fix the flaky login test"), false);
 });
 
+// Durable admission must complete before acknowledging a command; the transfer
+// is owned by the upload executor rather than the HTTP request.
+test("X video admission is acknowledged before response while reads remain asynchronous", () => {
+  assert.equal(productMessageControlFinishesBeforeResponse("@x:upload_video:101 message/attachment"), true);
+  assert.equal(productMessageControlFinishesBeforeResponse("@x:timeline:101"), false);
+  assert.equal(productMessageControlFinishesBeforeResponse("`@x:upload_video:101 message/attachment`"), false);
+});
+
 
 test("explicit controls and a nested handoff successor cannot allocate a second first-message Run", async () => {
   for (const body of ["@codex /model test-model", "@helper:1 /effort high", "/stop all", "@codex:3:handoff:@auto", "@codex:3:reborn"]) {

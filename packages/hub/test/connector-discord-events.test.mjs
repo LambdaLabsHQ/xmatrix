@@ -115,6 +115,7 @@ test('the actual shared Hono dispatch reaches signed Discord PING before generic
     './index-routes-telegram': { registerTelegramRoutes: noop },
     './index-routes-wecom': { registerWeComRoutes: noop },
     './index-routes-dingtalk': { registerDingTalkRoutes: noop },
+    './index-routes-x-accounts': { registerXAccountRoutes: noop },
   };
   const app = new Hono(); route(name => imports[name] ?? {}).registerConnectorRoutes(app);
   const ping = { version: 1, application_id: appId, type: 0 };

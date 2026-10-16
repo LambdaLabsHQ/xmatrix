@@ -10,6 +10,7 @@ import type { AppOAuthInstallation } from "@xmatrix/db";
 import { isSentryInstallationGrant, refreshSentryInstallation } from "./sentry-installation";
 import { cloudflareGrantContext } from "./cloudflare-api";
 import { composioConnectedAccount, composioConnectUrl, composioUserId } from "./composio";
+import { xOAuthFields } from "./x-oauth";
 
 /*
  * One-click OAuth for connectors (docs/design/connector-platform.md §3.2).
@@ -39,7 +40,7 @@ const GOOGLE_GRANTS: Record<string, { scope: string; name: string }> = {
  */
 export function grantFieldsForgottenOnDisconnect(providerId: string): Record<string, null> | undefined {
   const manifest = APP_CONNECTOR_PROVIDER_MANIFESTS.find((candidate) => candidate.id === providerId);
-  if (!GOOGLE_GRANTS[providerId] && manifest?.oauth?.flow !== "composio") return undefined;
+  if (!GOOGLE_GRANTS[providerId] && manifest?.oauth?.flow !== "composio" && providerId !== "x") return undefined;
   return Object.fromEntries((manifest?.credentials ?? []).filter((field) => field.managed).map((field) => [field.id, null]));
 }
 
@@ -112,12 +113,15 @@ export function oauthRedirectUri(hubOrigin: string): string {
 }
 
 export async function oauthAuthorizeUrl(client: OAuthClient, input: { spaceId: string; userId: string;
-  redirectUri: string; now?: number; connectionSnapshot?: { connectionVersion: number; credentialVersion: number; connectionGeneration: string } }): Promise<string> {
+  redirectUri: string; now?: number; accountId?: string;
+  connectionSnapshot?: { connectionVersion: number; credentialVersion: number; connectionGeneration: string } }): Promise<string> {
   const { oauth } = client.manifest;
   const claims = { providerId: client.manifest.id, spaceId: input.spaceId, userId: input.userId,
     nonce: crypto.randomUUID(), expiresAt: (input.now ?? Date.now()) + STATE_TTL_MS,
     ...(oauth.pkce || client.manifest.id === "discord" ? { clientId: client.clientId, redirectUri: input.redirectUri } : {}),
-    ...(client.manifest.id === "discord" ? { connectionSnapshot: input.connectionSnapshot, authorizationStartedAt: input.now ?? Date.now() } : {}) };
+    ...(["discord", "x"].includes(client.manifest.id) ? { connectionSnapshot: input.connectionSnapshot } : {}),
+    ...(client.manifest.id === "x" && input.accountId ? { accountId: input.accountId } : {}),
+    ...(client.manifest.id === "discord" ? { authorizationStartedAt: input.now ?? Date.now() } : {}) };
   const state = await signGitHubAppState(claims, client.clientSecret);
   if (oauth.flow === "composio") {
     const callback = new URL(input.redirectUri);
@@ -158,10 +162,12 @@ export async function verifyOAuthState(env: Env, state: string):
   if (!claims || claims.providerId !== client.manifest.id || typeof claims.spaceId !== "string" ||
       typeof claims.userId !== "string" || ((client.manifest.oauth.pkce || client.manifest.id === "discord") && !validPkceClaims(client, claims))) return undefined;
   const snapshot = claims.connectionSnapshot as { connectionVersion: number; credentialVersion: number; connectionGeneration: string } | undefined;
-  if (client.manifest.id === "discord" && (!snapshot || !Number.isSafeInteger(snapshot.connectionVersion) || snapshot.connectionVersion < 1 ||
+  if (["discord", "x"].includes(client.manifest.id) && (!snapshot || !Number.isSafeInteger(snapshot.connectionVersion) || snapshot.connectionVersion < 1 ||
       !Number.isSafeInteger(snapshot.credentialVersion) || snapshot.credentialVersion < 0 ||
       typeof snapshot.connectionGeneration !== "string" || !snapshot.connectionGeneration || snapshot.connectionGeneration.length > 1024)) return undefined;
-  return { client, spaceId: claims.spaceId, userId: claims.userId, ...(client.manifest.id === "discord" ? { connectionSnapshot: snapshot } : {}) };
+  if (client.manifest.id === "x" && claims.accountId !== undefined &&
+      (typeof claims.accountId !== "string" || !/^[1-9][0-9]{0,19}$/u.test(claims.accountId))) return undefined;
+  return { client, spaceId: claims.spaceId, userId: claims.userId, ...(["discord", "x"].includes(client.manifest.id) ? { connectionSnapshot: snapshot } : {}) };
 }
 
 async function tokenRequest(client: OAuthClient, grant: Record<string, string>): Promise<Record<string, unknown>> {
@@ -178,13 +184,13 @@ async function tokenRequest(client: OAuthClient, grant: Record<string, string>):
     ? providerJson(oauth.tokenUrl, { method: "POST", headers, json: body })
     : providerJson(oauth.tokenUrl, { method: "POST",
       headers: { ...headers, "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams(body) })).catch(error => {
-      if (["pagerduty", "discord"].includes(client.manifest.id) && error instanceof ProviderRequestError) {
+      if (["pagerduty", "discord", "x"].includes(client.manifest.id) && error instanceof ProviderRequestError) {
         throw new ProviderRequestError(error.status, `${client.manifest.name} token exchange failed (${error.status})`);
       }
       throw error;
     });
   if (payload.ok === false || typeof payload.access_token !== "string" || !payload.access_token) {
-    throw new ProviderRequestError(400, `${client.manifest.name} did not issue a token${["pagerduty", "discord"].includes(client.manifest.id) ? "" : `: ${String(payload.error ?? "unknown")}`}`);
+    throw new ProviderRequestError(400, `${client.manifest.name} did not issue a token${["pagerduty", "discord", "x"].includes(client.manifest.id) ? "" : `: ${String(payload.error ?? "unknown")}`}`);
   }
   return payload;
 }
@@ -251,6 +257,10 @@ export async function exchangeOAuthGrant(client: OAuthClient, code: string, redi
   const proof = client.manifest.oauth.pkce ? await pkceGrantProof(client, state, redirectUri) : undefined;
   const payload = await tokenRequest(client, { grant_type: "authorization_code", code, redirect_uri: redirectUri,
     ...(proof ? { code_verifier: proof } : {}) });
+  if (client.manifest.id === "x") {
+    const claims = await oauthGrantState(client, state, redirectUri);
+    return { fields: await xOAuthFields(client, payload, String(claims.userId), typeof claims.accountId === "string" ? claims.accountId : undefined) };
+  }
   if (GOOGLE_GRANTS[client.manifest.id]) validateGoogleGrant(client.manifest.id, payload, true);
   if (client.manifest.id === "bitbucket") validateBitbucketGrant(payload, true);
   const fields = oauthTokenFields(client, payload);

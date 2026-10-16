@@ -77,8 +77,9 @@ test("action commands take one statement whose text spans the following lines", 
 });
 
 test("policy: actions follow their defaults and the Channel's explicit approval or denial", () => {
-  /* Gmail sends and advertising changes need approval until a Space admin allows them. */
-  const gated = new Set(["gmail:send", "gmail:reply", "googleads:mutate", "googleads:set_campaign_status"]);
+  /* Public publishing, mail and advertising changes ask until a Space admin allows them. */
+  const gated = new Set(["gmail:send", "gmail:reply", "googleads:mutate", "googleads:set_campaign_status",
+    "x:post", "x:quote", "x:upload_video"]);
   for (const provider of APP_CONNECTOR_PROVIDER_MANIFESTS) {
     for (const action of provider.actions.filter((candidate) => candidate.effect)) {
       const id = `${provider.id}:${action.id}`;

@@ -98,6 +98,24 @@ const OAUTH_TOKEN_CREDENTIALS: Credential[] = [
 ];
 
 export const EVENT_CONNECTOR_MANIFESTS: AppConnectorProviderManifest[] = [
+  actionConnector({
+    id: "x", name: "X", kind: "chat",
+    description: "Connect company and personal X accounts separately. Every command names its account; publishing asks for approval by default. Only the connecting member and their Agents use that account. Results are visible in the calling Channel. API usage is billed by X; quote-posting requires Enterprise API access.",
+    oauth: { authorizeUrl: "https://x.com/i/oauth2/authorize", tokenUrl: "https://api.x.com/2/oauth2/token",
+      scopes: ["tweet.read", "users.read", "tweet.write", "media.write", "offline.access"],
+      tokenField: "accounts", clientAuth: "basic", pkce: "S256" },
+    credentials: [{ id: "accounts", label: "X accounts", managed: true,
+      description: "Connect adds an independent encrypted grant for each account. Never entered by hand." }],
+    actions: [
+      readAction("accounts", "List connected accounts", "List only the X accounts this caller owns; no tokens are returned.", "*"),
+      readAction("read_post", "Read post", "Read one post as an explicitly selected connected account.", "<account>/<post id>"),
+      readAction("timeline", "Read account posts", "Read at most 10 recent posts of the selected connected account.", "<account>"),
+      gatedWriteAction("post", "Publish post", "Publish as the explicitly selected account. Optional mediaReceipt must come from this account and Channel's video upload. Asks for approval of the exact account and content by default.", '<account> {"text":"…","mediaReceipt":"optional upload_video receipt"}'),
+      gatedWriteAction("quote", "Quote post (Enterprise)", "Publish a quote as the selected account. X requires Enterprise API access; unavailable on self-serve pay-per-use.", "<account>/<post id> <text>"),
+      gatedWriteAction("upload_video", "Upload video", "Upload one MP4 attachment from this Channel to the selected account. At most 64 MiB; separate approval is needed to publish the uploaded video.", "<account> <message id>/<attachment id>"),
+      readAction("media_status", "Read video processing status", "Check one uploaded video's processing state for its account-bound receipt.", "<account> <upload_video receipt>"),
+    ],
+  }),
   {
     ...actionConnector({
       id: "google", name: "Google Docs, Drive & Sheets", kind: "docs",
