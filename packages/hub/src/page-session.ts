@@ -1,5 +1,6 @@
 import {
   PAGE_DOCUMENT_FRAGMENT, PAGE_MESSAGE_CO_WRITE, mergePageText, pageAuthorColor, pageChangedBlocks, pageRemovedSections,
+  pageWritingSteps,
   parsePageCoWriteReply, type PageCoWriteRequest, type PageEditResult,
 } from "@xmatrix/protocol";
 import {
@@ -94,6 +95,11 @@ export interface PageSessionPorts {
   persist(state: PageSessionState): Promise<void>;
   send(connectionId: string, data: Uint8Array): void;
   broadcast(data: Uint8Array, exceptConnectionId?: string): void;
+  /**
+   * How long an Agent's edit waits between the few words it writes at a time, so readers watch it
+   * written as a person would write it (absent: the edit lands at once).
+   */
+  writePaceMs?: number;
 }
 
 /** A committed revision as the repository answers it, and whether the page takes Agent edits as suggestions. */
@@ -640,7 +646,7 @@ export class PageSession {
 
   /**
    * An edit made against `baseRevision`: three-way merged with the session's
-   * current text, streamed in block by block under the Agent's cursor, and
+   * current text, written in a few words at a time under the Agent's cursor, and
    * committed. On a suggest-only page an Agent's edit becomes a suggestion and
    * never touches the live text.
    */
@@ -691,12 +697,24 @@ export class PageSession {
         agentSuggestOnly: result.agentSuggestOnly });
       // One transaction, so edits people make meanwhile can never shift its positions. It is
       // written under the editor's awareness id, so readers see whose text it is.
-      const change = authoredAs(this.doc, agentClientId(key), () => this.adopt(current, merged.text, `agent:${key}`));
-      // The cursor rests where the Agent's change ends.
-      const cursor = change.cursor ? Y.relativePositionToJSON(change.cursor) : null;
-      this.agentAwareness(principal, { user: { name: principal.label, color: pageAuthorColor(principal), kind: principal.kind,
-        conversationId }, activity: "editing", block: change.block,
-        ...(cursor ? { cursor: { anchor: cursor, head: cursor } } : {}) });
+      // The Agent writes it in as a person would, a few words at a time under its caret; edits people
+      // make meanwhile are kept, as each step merges into the live text.
+      const user = { name: principal.label, color: pageAuthorColor(principal), kind: principal.kind, conversationId };
+      const pace = this.ports.writePaceMs ?? 0;
+      const steps = pace > 0 ? pageWritingSteps(current, merged.text) : [merged.text];
+      let from = current;
+      let change: ReturnType<PageSession["adopt"]> = { cursor: null, block: "" };
+      for (const [index, step] of steps.entries()) {
+        const written = authoredAs(this.doc, agentClientId(key), () => this.adopt(from, step, `agent:${key}`));
+        if (written.cursor) change = written;
+        from = step;
+        const at = change.cursor ? Y.relativePositionToJSON(change.cursor) : null;
+        const last = index === steps.length - 1;
+        // The cursor rests where the Agent's change ends.
+        this.agentAwareness(principal, { user, activity: last ? "editing" : "writing", block: change.block,
+          ...(at ? { cursor: { anchor: at, head: at } } : {}) });
+        if (!last) await new Promise((resolve) => setTimeout(resolve, pace));
+      }
       this.settle();
       await this.persist();
       this.ports.broadcast(encodeNotice({ type: "committed", revision: result.revision,
