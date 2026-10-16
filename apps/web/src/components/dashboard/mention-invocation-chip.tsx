@@ -373,6 +373,7 @@ function InvocationChip({ label, labelContent, announcement, name, instanceOrdin
               src={imageSrc}
               alt=""
               announce={false}
+              retain
               referrerPolicy="no-referrer"
               draggable={false}
               className="size-full object-cover"

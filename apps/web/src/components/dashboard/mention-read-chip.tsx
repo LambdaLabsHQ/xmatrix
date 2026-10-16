@@ -363,6 +363,7 @@ export function MentionReadChip({
               src={imageSrc}
               alt=""
               announce={false}
+              retain
               referrerPolicy="no-referrer"
               draggable={false}
               className="size-full object-cover"

@@ -24,6 +24,14 @@ export default {
           response.headers.set("cache-control", "public, max-age=31536000, immutable");
           return response;
         }
+        // Avatars and App marks are drawn on every message row. Revalidating
+        // each one on every launch keeps faces blank for a round trip; a
+        // changed icon reaching readers within a day is fine.
+        if ((asset.status === 200 || asset.status === 304) && /^\/(?:agent-vendors|app-connectors|brand|role-avatars)\//.test(url.pathname)) {
+          const response = new Response(asset.body, asset);
+          response.headers.set("cache-control", "public, max-age=86400, stale-while-revalidate=604800");
+          return response;
+        }
         return asset;
       }
       await asset.body?.cancel();

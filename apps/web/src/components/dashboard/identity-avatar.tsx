@@ -127,6 +127,7 @@ export const IdentityAvatar = memo(function IdentityAvatar({
             src={imageSrc}
             alt=""
             announce={false}
+            retain
             referrerPolicy="no-referrer"
             draggable={false}
             className={cn(
