@@ -20,6 +20,7 @@ const CLIENT_DEFECT_ACTIONS = [
   "Couldn't change notifications",
   "Couldn't change the GitHub account",
   "Couldn't change these secrets",
+  "Couldn't change two-step verification",
   "Couldn't change who can join",
   "Couldn't change who can read this page",
   "Couldn't change who edits this page",

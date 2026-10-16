@@ -117,6 +117,7 @@ function LoginContent() {
   const {
     signInWithOtp,
     verifyOtp,
+    verifySecondFactor,
     signInWithGoogle,
     setSessionFromAuthResponse,
     user,
@@ -126,7 +127,12 @@ function LoginContent() {
 
   const [email, setEmail] = useState("");
   const [otp, setOtp] = useState("");
-  const [step, setStep] = useState<"email" | "otp">("email");
+  /* A password or Google sign-in that waits on the authenticator code arrives with `two_factor`. */
+  const [step, setStep] = useState<"email" | "otp" | "two_factor">(
+    () => searchParams.get("two_factor") ? "two_factor" : "email");
+  const [secondCode, setSecondCode] = useState("");
+  const [useBackupCode, setUseBackupCode] = useState(false);
+  const [trustDevice, setTrustDevice] = useState(true);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState(false);
@@ -137,6 +143,7 @@ function LoginContent() {
   const [clock, setClock] = useState(0);
   const resendSeconds = Math.max(0, Math.ceil((resendAt - clock) / 1000));
   const otpFormRef = useRef<HTMLFormElement>(null);
+  const secondFactorFormRef = useRef<HTMLFormElement>(null);
   const [cliComplete, setCliComplete] = useState(false);
   /* A device sign-in hands this account's session to whoever started it, so
      it is approved only by an explicit click after the person compares the
@@ -520,6 +527,12 @@ function LoginContent() {
     }
   }, [otp, step]);
 
+  useEffect(() => {
+    if (step === "two_factor" && !useBackupCode && secondCode.length === LOGIN_CODE_LENGTH) {
+      secondFactorFormRef.current?.requestSubmit();
+    }
+  }, [secondCode, step, useBackupCode]);
+
   function startResendWait() {
     const now = Date.now();
     setClock(now);
@@ -589,7 +602,10 @@ function LoginContent() {
     setLoading(true);
 
     try {
-      await verifyOtp(email.trim(), otp.trim());
+      if (await verifyOtp(email.trim(), otp.trim()) === "two_factor") {
+        setStep("two_factor");
+        return;
+      }
       if (!cliMode) {
         router.push(nextPath || "/app");
       }
@@ -598,6 +614,23 @@ function LoginContent() {
       setCodeUnanswered(unanswered);
       setError(unanswered ? "Couldn't reach xMatrix. Your code still works, so try again." : formatLoginError(nextError));
       otpVerificationStartedRef.current = false;
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleVerifySecondFactor(event: FormEvent) {
+    event.preventDefault();
+    const code = secondCode.trim();
+    if (loading || !code) return;
+    setError("");
+    setLoading(true);
+    try {
+      await verifySecondFactor(code, { backup: useBackupCode, trustDevice });
+      if (!cliMode) router.push(nextPath || "/app");
+    } catch (nextError) {
+      setSecondCode("");
+      setError(formatLoginError(nextError));
     } finally {
       setLoading(false);
     }
@@ -758,6 +791,66 @@ function LoginContent() {
             </Link>
           </AuthLinks>
         </>
+      ) : step === "two_factor" ? (
+        <>
+          <AuthHeading title="Two-step verification">
+            {useBackupCode
+              ? "Enter one of the backup codes you saved. Each works once."
+              : "Enter the 6-digit code from your authenticator app."}
+          </AuthHeading>
+          <form ref={secondFactorFormRef} onSubmit={handleVerifySecondFactor} className="auth-stack">
+            <label htmlFor="login-second-factor" className="auth-label">
+              {useBackupCode ? "Backup code" : "Authentication code"}
+            </label>
+            <Input
+              id="login-second-factor"
+              type="text"
+              inputMode={useBackupCode ? "text" : "numeric"}
+              autoComplete="one-time-code"
+              required
+              autoFocus
+              value={secondCode}
+              onChange={(event) => {
+                setSecondCode(useBackupCode
+                  ? event.target.value.trim().slice(0, 32)
+                  : event.target.value.replace(/\D/g, "").slice(0, LOGIN_CODE_LENGTH));
+                setError("");
+              }}
+              placeholder={useBackupCode ? "" : "0".repeat(LOGIN_CODE_LENGTH)}
+              className={useBackupCode ? "auth-input" : "auth-input auth-code-input"}
+            />
+            <label className="auth-check">
+              <input type="checkbox" checked={trustDevice} onChange={(event) => setTrustDevice(event.target.checked)} />
+              Don&apos;t ask again on this device for 30 days
+            </label>
+            <AuthError>{formError}</AuthError>
+            <AuthPrimaryButton type="submit" disabled={loading || !secondCode}>
+              {loading ? <Spinner /> : null}
+              {loading ? "Signing in…" : "Verify"}
+              {loading ? null : <ArrowRight className="size-4" />}
+            </AuthPrimaryButton>
+          </form>
+          <AuthLinks>
+            <button type="button" className="auth-text-button" disabled={loading} onClick={() => {
+              setUseBackupCode((current) => !current);
+              setSecondCode("");
+              setError("");
+            }}>
+              {useBackupCode ? "Use your authenticator app" : "Use a backup code"}
+            </button>
+            <button type="button" className="auth-text-button" disabled={loading} onClick={() => {
+              changeEmail();
+              setSecondCode("");
+              if (searchParams.get("two_factor")) {
+                const query = new URLSearchParams(searchParams);
+                query.delete("two_factor");
+                router.replace(`/login${query.toString() ? `?${query}` : ""}`);
+              }
+            }}>
+              Start over
+            </button>
+          </AuthLinks>
+        </>
       ) : (
         <>
           <AuthHeading title="Check your email">
@@ -847,6 +940,18 @@ function formatLoginError(error: unknown): string {
 
   if (code === "TOO_MANY_ATTEMPTS") {
     return "Too many tries with this code. Resend a new one.";
+  }
+
+  if (code === "INVALID_CODE" || code === "INVALID_BACKUP_CODE") {
+    return "That code didn't match. Try the newest code from your app.";
+  }
+
+  if (code === "INVALID_TWO_FACTOR_COOKIE" || code === "TOO_MANY_ATTEMPTS_REQUEST_NEW_CODE") {
+    return "This sign-in timed out. Start over and sign in again.";
+  }
+
+  if (code === "ACCOUNT_TEMPORARILY_LOCKED") {
+    return "Too many wrong codes. Wait 15 minutes, then try again.";
   }
 
   if (code === "email_delivery_configuration_error") {
