@@ -406,14 +406,16 @@ html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-com
   background: currentColor;
   pointer-events: none;
 }
-/* An Agent's caret: its face at the right edge says who it is and what it is doing (.page-pen), so the
-   text carries no name tag in the middle of the page, only the caret, a little bolder than a person's,
-   blinking while it thinks or writes. Its note to the people opens from its face. */
+/* An Agent's caret, a little bolder than a person's: while it thinks or writes it carries its name, steady,
+   and its line blinks, so the page says who is writing where; at rest it is the caret alone, its name on
+   hover. Its face at the right edge says what it is doing, and its note to the people opens from there. */
 .ProseMirror-yjs-cursor[data-agent] > div { display: none; }
+.ProseMirror-yjs-cursor[data-agent][data-live] > div { display: block; opacity: 1; animation: none; }
+.ProseMirror-yjs-cursor[data-agent]:hover > div { display: block; }
 .ProseMirror-yjs-cursor[data-agent] { border-left-width: 2px; margin-left: -1px; }
 @keyframes page-agent-caret {
-  0%, 50% { opacity: 1; }
-  51%, 100% { opacity: 0.2; }
+  0%, 50% { border-left-color: currentColor; }
+  51%, 100% { border-left-color: transparent; }
 }
 .ProseMirror-yjs-cursor[data-agent][data-live] { animation: page-agent-caret 1s steps(1, end) infinite; }
 @media (prefers-reduced-motion: reduce) {
@@ -705,7 +707,7 @@ html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-com
   height: 28px;
   box-shadow: 0 4px 12px -4px oklch(0 0 0 / 0.35);
 }
-.page-pen.is-idle .page-pen-face { opacity: 0.5; }
+/* An idle Agent's face is drawn whole: it says nothing is happening by saying no "writing", not by fading. */
 /* While it writes, its dots run under its face in its colour. */
 .page-pen .page-pen-dots {
   position: absolute;
@@ -769,8 +771,6 @@ html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-com
   background: none;
   color: #fff;
 }
-.page-pens.is-named .page-pen.is-idle { background: color-mix(in oklab, var(--page-pen-color) 45%, var(--background)); }
-.page-pens.is-named .page-pen.is-idle .page-pen-face { opacity: 1; }
 .page-pens.is-named .page-pen-way { left: 15px; }
 .page-pen-way {
   position: absolute;
