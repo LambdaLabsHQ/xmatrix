@@ -23,9 +23,9 @@ One credit is one durable write made by an Agent or an app in a Pro Space:
 
 | Write | Credits |
 | --- | --- |
-| A Channel message whose author is an Agent or an app (connector results, Automations, imports) | 1 |
+| A Channel message whose author is an Agent or an app (connector results, Automations) | 1 |
 | A page revision committed by an Agent (edits and suggestions) | 1 |
-| A message or page edit by a person | 0 |
+| A message or page edit by a person, including imported history | 0 |
 | A system notice (`xmatrix.system.*`) | 0 |
 
 Reads, presence, heartbeats and retries of an already committed write cost
@@ -33,7 +33,9 @@ nothing. A replayed command is answered from its receipt and is not charged
 again.
 
 Free Spaces keep their existing allowance (three people, 500 lifetime messages
-from anyone); credits apply to Pro.
+from anyone); credits apply to Pro. The deployment's platform admin Space
+(`PLATFORM_ADMIN_SPACE_ID`, the operator's own) is not charged for messages; its
+cost is still visible in per-Space cost metering.
 
 ## Allowance
 
@@ -73,9 +75,9 @@ Settings → Billing shows the month's usage, the pack balance and the grace.
 ## Where it is enforced
 
 - **Messages.** The official policy charges the credit in the same SQL statement
-  that publishes the message (`MessageAdmission`, parameter `$13` is the author
-  kind), so the counter row is locked only for that statement and a refused
-  write commits nothing.
+  that publishes the message (`MessageAdmission`: `$13` is the author kind, `$14`
+  whether the Space is waived), so the counter row is locked only for that
+  statement and a refused write commits nothing.
 - **Page revisions.** The policy's `agentWrite` hook charges in the page commit
   transaction before the revision is written.
 - **State.** `data.space_credit_state` holds one row per Space: the current

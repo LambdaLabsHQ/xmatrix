@@ -48,6 +48,7 @@ import {
 } from "./postgres-coordination-observability";
 import { POSTGRES_MESSAGE_CONNECT_TIMEOUT_MS } from "./postgres-message-database-policy";
 import type { Env } from "./types";
+import { platformAdminSpaceId } from "./admin-platform-access";
 
 import { postgresPrincipalKind } from "./postgres-authority-http";
 
@@ -541,6 +542,8 @@ export async function postgresMessageAppend(
         : undefined,
       replyToMessageId: typeof command.residual?.replyToMessageId === "string"
         ? command.residual.replyToMessageId : undefined,
+      // The operator's own admin Space is not charged Agent credits.
+      creditsWaived: spaceId === platformAdminSpaceId(env),
       ...(dependencies.placement ? { placement: dependencies.placement } : {}),
     };
     let result: Record<string, unknown>;

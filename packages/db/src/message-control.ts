@@ -113,6 +113,8 @@ export interface AppendPostgresMessage {
   sentAt: string;
   requestDigest: string;
   prepared: PreparedPostgresMessageRecord;
+  /** The deployment does not charge this Space Agent credits (docs/design/agent-credits.md). */
+  creditsWaived?: boolean;
   /** Computed from raw HTTP content by the trusted Agent send boundary. */
   agentSendFingerprint?: string;
   /** Explicit final intent, bound to the authenticated sender's Run below. */
@@ -1729,10 +1731,11 @@ export class PostgresMessageRepository {
               (SELECT channel_id FROM activity_row) AS channel_id,
               EXISTS (SELECT 1 FROM accepted) AS accepted,
               EXISTS (SELECT 1 FROM sequence_confirm) AS sequence_confirmed,
-              $13::text AS author_kind FROM admission`,
+              $13::text AS author_kind,$14::boolean AS credits_waived FROM admission`,
         values: [`message:${spaceId}:${messageId}:1`, spaceId, messageId, sequence,
           JSON.stringify(result), sentAt, commandId, requestDigest, expiresAt,
-          !messageKind.startsWith("xmatrix.system."), channelId, recordDigest, senderKind],
+          !messageKind.startsWith("xmatrix.system."), channelId, recordDigest, senderKind,
+          input.creditsWaived === true],
         maxRows: 1,
       }))[0];
       if (admission?.accepted && !admission.channel_id) throw new MessageAuthorityError(

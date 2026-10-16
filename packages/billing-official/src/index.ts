@@ -247,7 +247,7 @@ export const spaceBilling: SpaceBillingPolicy = {
     // publishing statement itself, so their row locks are not held across
     // another round trip.
     ctes: `${subscriptionCte("$2", "$6::timestamptz")}, ${paidSeatsCte("$2")},
-      ${creditMeterCte("$6::timestamptz", "$10 AND $13 IN ('agent','app')")},
+      ${creditMeterCte("$6::timestamptz", "$10 AND $13 IN ('agent','app') AND NOT $14")},
       ${creditChargeCte("$2", "$6::timestamptz")}, prior_usage AS MATERIALIZED (
         SELECT free_message_count FROM data.space_billing_usage WHERE space_id=$2 LIMIT 1
       ), usage AS (

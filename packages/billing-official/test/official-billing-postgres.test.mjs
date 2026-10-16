@@ -11,14 +11,16 @@ const integration = connectionString || process.env.XMATRIX_REQUIRE_POSTGRES_TES
   ? test : test.skip;
 
 // The publishing statement's parameter shape: $2 Space id, $6 commit time,
-// $10 billable, $13 author kind. The others carry the message itself and are
-// typed here only.
-const publish = (client, spaceId, billable, author = "user", at = new Date().toISOString()) => client.query({
-  text: `WITH ${spaceBilling.message.ctes}
-    SELECT admission.*, COALESCE(NOT $10 OR (${spaceBilling.message.accepts}), FALSE) AS accepted,
-      $1::text, $3::text, $4::text, $5::text, $7::text, $8::text, $9::text, $11::text, $12::text FROM admission`,
-  values: ["", spaceId, "", "", "", at, "", "", "", billable, "", "", author],
-}).then((result) => result.rows[0]);
+// $10 billable, $13 author kind, $14 credits waived. The others carry the
+// message itself and are typed here only.
+const publish = (client, spaceId, billable, author = "user", at = new Date().toISOString(), waived = false) =>
+  client.query({
+    text: `WITH ${spaceBilling.message.ctes}
+      SELECT admission.*, COALESCE(NOT $10 OR (${spaceBilling.message.accepts}), FALSE) AS accepted,
+        $1::text, $3::text, $4::text, $5::text, $7::text, $8::text, $9::text, $11::text, $12::text,
+        $13::text, $14::boolean FROM admission`,
+    values: ["", spaceId, "", "", "", at, "", "", "", billable, "", "", author, waived],
+  }).then((result) => result.rows[0]);
 
 const transaction = (client) => ({
   query: (query) => client.query({ text: query.text, values: query.values }).then((result) => result.rows),
@@ -112,6 +114,8 @@ integration("a paid Space's Agent credits run included, packs, grace, then refus
     assert.equal(refused.accepted, false);
     assert.equal(spaceBilling.message.rejection(refused, { now })?.code, "credits_exhausted");
     assert.equal((await publish(client, spaceId, true, "user")).accepted, true, "people still write");
+    const waived = await publish(client, spaceId, true, "agent", now, true);
+    assert.deepEqual([waived.accepted, waived.credit_metered], [true, false], "an operator Space is not charged");
     assert.equal((await spaceBilling.agentWrite(transaction(client),
       { spaceId, now, kind: "page_revision" }))?.code, "credits_exhausted");
 

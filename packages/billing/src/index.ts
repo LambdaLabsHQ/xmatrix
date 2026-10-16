@@ -34,7 +34,8 @@ export interface BillingRejection {
  * another round trip. `ctes` defines a CTE named `admission` (and any it
  * needs) from the statement's parameters: `$2` Space id, `$6` commit time
  * (timestamptz), `$10` whether the message is billable, `$13` the author kind
- * (`user`, `agent`, `app` or `system`). `accepts` is a predicate over
+ * (`user`, `agent`, `app` or `system`), `$14` whether the deployment waives the
+ * Space's Agent credits (its own operator Space). `accepts` is a predicate over
  * `admission` columns. The core publishes when the message is not billable or
  * `accepts` holds, and returns the `admission` row to `rejection` otherwise.
  * A published billable message's row goes to `notice`, which may ask the core
