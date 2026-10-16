@@ -1106,12 +1106,18 @@ integration("X approvals survive token rotation and other accounts while fencing
     const changed = error => error instanceof AppControlError && error.code === "action_request_scope_changed" && error.status === 409;
 
     await write([binding, other]);
+    const list = await stage("account-list", binding, { actionId: "accounts", payload: {
+      messageId: "list-accounts", senderKind: "user", statement: { target: "*", text: "" }, prepared: {}, preview: {},
+    } });
+    assert.equal((await decide(list)).claimed, true, "listing accounts has no single selected account");
+    await authorize(list);
     const pending = await stage("survives-pending");
     const approved = await stage("survives-approved");
     assert.equal((await decide(approved)).claimed, true);
     const before = await read();
     const rotated = { ...binding, accessToken: "private-rotated-access" };
     await write([rotated, other], { asHub: true, expectedVersion: before.version, expectedGrant: before, actorUserId: "hub:oauth-refresh" });
+    await assert.rejects(authorize(list), changed, "list-wide approval retains the whole-envelope fence");
     await authorize(approved);
     await write([rotated, other, { id: "303", generation: crypto.randomUUID(), ownerUserId: "member" }]);
     assert.equal((await decide(pending)).claimed, true, "a pending approval survives rotation and another account's addition");

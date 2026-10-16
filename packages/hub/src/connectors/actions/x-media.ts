@@ -9,7 +9,6 @@ const SOURCE = /^([A-Za-z0-9_.:-]{1,200})\/([A-Za-z0-9_.:-]{1,200})$/u;
 
 type AccountInput = (context: ConnectorActionContext, input: Record<string, string>) => Promise<XAccountView>;
 interface AccountHelpers {
-  resolveAccount: AccountInput;
   prepareAccount(context: ConnectorActionContext, input: Record<string, string>): Promise<Record<string, string>>;
   frozenAccount: AccountInput;
 }
@@ -48,6 +47,7 @@ export function createXMediaActions(helpers: AccountHelpers): Record<string, Con
     },
     media_status: {
       effect: "read", requires: [],
+      prepare: helpers.prepareAccount,
       parse(statement) {
         const receipt = statement.text.trim();
         return ACCOUNT.test(statement.target) && receipt.length <= 4096 && /^xm1\.[A-Za-z0-9_-]+\.[a-f0-9]{64}$/u.test(receipt)
@@ -55,7 +55,7 @@ export function createXMediaActions(helpers: AccountHelpers): Record<string, Con
           : "select an explicit account and its upload_video receipt: @x:media_status:<account ID or @handle> <receipt>";
       },
       async execute(context, input) {
-        const account = await helpers.resolveAccount(context, input);
+        const account = await helpers.frozenAccount(context, input);
         const result = await media(context).status(account, input.receipt!);
         return { summary: `X video ${result.mediaId} for @${account.username} (X account ${account.id}): ${result.state}.` +
           `${result.checkAfterSeconds ? ` Check again after ${result.checkAfterSeconds} seconds.` : ""}` };

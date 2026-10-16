@@ -121,11 +121,12 @@ export class PostgresAppActionRequestRepository {
   }
 
   private async requireApprovedGrant(scope: QueryResultRow, row: QueryResultRow, payload?: AppActionRequestPayload) {
+    const perAccount = row.provider_id === "x" && row.action_id !== "accounts";
     if (scope.generation !== row.connection_generation || scope.provider_id !== row.provider_id ||
-        (row.provider_id !== "x" && Number(scope.credential_version) !== Number(row.credential_version))) {
+        (!perAccount && Number(scope.credential_version) !== Number(row.credential_version))) {
       throw new AppControlError("action_request_scope_changed", 409, "Connected account changed; ask again");
     }
-    if (row.provider_id === "x") {
+    if (perAccount) {
       await this.requireXAccount(scope, String(row.connection_id), String(row.requested_by), payload ?? await this.decrypt(row));
     }
   }
@@ -165,7 +166,9 @@ export class PostgresAppActionRequestRepository {
       if (scope.provider_id !== input.providerId) {
         throw new AppControlError("action_request_scope_changed", 409, "Action approval provider changed");
       }
-      if (input.providerId === "x") await this.requireXAccount(scope, input.connectionId, input.requestedBy, input.payload);
+      if (input.providerId === "x" && input.actionId !== "accounts") {
+        await this.requireXAccount(scope, input.connectionId, input.requestedBy, input.payload);
+      }
       // Bounded expiry maintenance piggybacks on new requests, preserving outcome evidence.
       await tx.query({ name: "app_action_request_expire_v1", text: `UPDATE data.app_connector_action_requests
         SET encrypted_value_json=NULL,status=CASE WHEN status='pending' THEN 'expired' ELSE status END,updated_at=now()

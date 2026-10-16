@@ -145,9 +145,10 @@ export const X_ACTIONS: Record<string, ConnectorAction> = {
   read_post: {
     effect: "read", requires: [],
     parse: statement => statement.text.trim() ? "read_post does not take extra text" : selector(statement, true),
+    prepare: prepareAccount,
     async execute(context, input) {
       if (!ID.test(input.postId ?? "")) throw new ProviderRequestError(400, "Name a valid X post ID");
-      const account = await resolveAccount(context, input);
+      const account = await frozenAccount(context, input);
       const payload = await capability(context).request(account, "GET", `/2/tweets/${input.postId}?tweet.fields=author_id,created_at`);
       const post = responsePost(payload.data);
       if (post.id !== input.postId) throw new ProviderRequestError(502, "X returned a different post");
@@ -158,8 +159,9 @@ export const X_ACTIONS: Record<string, ConnectorAction> = {
   timeline: {
     effect: "read", requires: [],
     parse: statement => statement.text.trim() ? "timeline does not take extra text" : selector(statement),
+    prepare: prepareAccount,
     async execute(context, input) {
-      const account = await resolveAccount(context, input);
+      const account = await frozenAccount(context, input);
       const payload = await capability(context).request(account, "GET", `/2/users/${account.id}/tweets?max_results=10&tweet.fields=author_id,created_at`);
       const rows = payload.data === undefined && !payload.errors ? [] : payload.data;
       if (!Array.isArray(rows)) throw new ProviderRequestError(502, "X did not return a valid timeline");
@@ -170,5 +172,5 @@ export const X_ACTIONS: Record<string, ConnectorAction> = {
   },
   post: writeAction(false),
   quote: writeAction(true),
-  ...createXMediaActions({ resolveAccount, prepareAccount, frozenAccount }),
+  ...createXMediaActions({ prepareAccount, frozenAccount }),
 };

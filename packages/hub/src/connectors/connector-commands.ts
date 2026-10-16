@@ -194,6 +194,7 @@ async function runAction(providerId: string, input: ConnectorCommandInput, actio
       const prepared = action.prepare ? await action.prepare(context, parsed) : parsed;
       const preview = providerId === "gmail"
         ? Object.fromEntries(["from", "to", "subject", "body"].map(key => [key, prepared[key] ?? ""]))
+        : providerId === "x" && actionId === "accounts" ? { account: "Connected X accounts owned by the requesting member", text: "List handles and account IDs" }
         : providerId === "x" ? { account: `@${prepared.accountUsername} (X account ${prepared.accountId})`,
           text: prepared.text ?? "", ...(prepared.postId ? { quotedPost: prepared.postId } : {}),
           ...(prepared.mediaReceipt ? { video: "Video from this account and Channel's approved upload receipt" } : {}),

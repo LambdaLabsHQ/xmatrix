@@ -181,3 +181,18 @@ test("X reads stay on fixed account-scoped paths and fence bounded provider text
   const mismatch = fixture({ data: { id: "999", text: "wrong post" } });
   await assert.rejects(X_ACTIONS.read_post.execute(mismatch.context, parse("read_post", "101/303")), /different post/u);
 });
+
+test("X read approvals freeze the selected grant and reject a reconnected account before provider I/O", async () => {
+  for (const [actionId, target, text] of [["read_post", "@company/303", ""], ["timeline", "@company", ""],
+    ["media_status", "@company", `xm1.encoded.${"a".repeat(64)}`]]) {
+    const f = fixture();
+    f.context.xMedia = { status: async () => { throw new Error("stale media approval reached the provider"); } };
+    const action = X_ACTIONS[actionId];
+    const prepared = await action.prepare(f.context, parse(actionId, target, text));
+    assert.equal(prepared.accountId, company.id);
+    assert.equal(prepared.accountGeneration, company.generation);
+    f.connect([{ ...company, generation: "replacement-grant" }, personal]);
+    await assert.rejects(action.execute(f.context, prepared), /approved X account changed/u);
+    assert.equal(f.calls.length, 0);
+  }
+});
