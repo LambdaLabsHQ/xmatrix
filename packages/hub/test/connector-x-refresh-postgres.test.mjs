@@ -28,6 +28,10 @@ async function withDatabase(run, { empty = false } = {}) {
   const snapshot = () => store.installationSnapshot({ requestId: crypto.randomUUID(), spaceId: space,
     actorUserId: "owner", providerId: "x" });
   const env = { RELAY_POSTGRES: { connectionString }, RELAY_POSTGRES_SHARD_ID: "shard-0", XMATRIX_SECRET_CATALOG_KEY: material };
+  const connect = (account, original) => connectXAccount(env, { spaceId: space, actorUserId: "owner",
+    fields: xAccountFields([account]), snapshot: original });
+  const newGrant = () => ({ ...accounts[0], id: "303", username: "another", generation: crypto.randomUUID(),
+    accessToken: "oauth-new-access", refreshToken: "oauth-new-refresh", expiresAt: Date.now() + 7_200_000 });
   try {
     await sql(`INSERT INTO data.space_members(space_id,user_id,role,version,created_at,updated_at)
       VALUES ($1,'owner','owner',1,now(),now())`, [space]);
@@ -37,7 +41,7 @@ async function withDatabase(run, { empty = false } = {}) {
       VALUES ($1,$1||':x',1,'x','X','configured','oauth','[]','[]','[]','[]','owner',$1||':rank',
         now()-interval '1 second',now()-interval '1 second')`, [space]);
     if (!empty) await write(accounts);
-    await run({ space, store, sql, accounts, read, write, snapshot, env });
+    await run({ space, store, sql, accounts, read, write, snapshot, connect, newGrant });
   } finally {
     for (const table of ["app_connector_credentials", "app_connector_connections", "space_members"]) {
       await sql(`DELETE FROM data.${table} WHERE space_id=$1`, [space]);
@@ -72,6 +76,48 @@ async function providerEntered(provider, operations, entered = provider.entered)
     assert.equal(call.body.grant_type, "refresh_token");
     assert.equal(call.headers.get("authorization"), `Basic ${btoa("company-app:test-client-secret")}`);
   }
+}
+
+/** Inject persistence faults only after X has returned its new token pair; all successful I/O uses PostgreSQL. */
+async function withConfirmedRefresh(f, faults, run) {
+  let confirmed = false;
+  const attempts = { reads: 0, saves: 0 };
+  const provider = stubFetchResponses([{ body: remoteTokens("101") }], {
+    reply(response) { confirmed = true; return Response.json(response.body); },
+  });
+  const store = {
+    resolve: async input => {
+      if (confirmed) await faults.beforeRead?.(++attempts.reads);
+      return f.store.resolve(input);
+    },
+    put: async input => {
+      const attempt = confirmed ? ++attempts.saves : 0;
+      if (attempt) await faults.beforeSave?.(attempt);
+      const result = await f.store.put(input);
+      if (attempt) await faults.afterSave?.(attempt);
+      return result;
+    },
+  };
+  try { await run({ attempts, provider, refresh: () => refreshXAccount(store, f.space, client, view(f.accounts[0])) }); }
+  finally { provider.restore(); }
+}
+
+async function assertSavedCompanyRefresh(f, refreshed, provider) {
+  assert.equal(refreshed.accessToken, "rotated-access-101");
+  assert.equal(refreshed.refreshToken, "rotated-refresh-101");
+  assert.equal(Object.hasOwn(refreshed, "refreshing"), false);
+  assert.deepEqual(await f.read(), [refreshed, f.accounts[1]]);
+  assert.equal(provider.calls.length, 1, "the provider rotates once while the confirmed grant is durably saved");
+}
+
+async function assertCompanyRefreshFenced(f, provider) {
+  const saved = await f.read();
+  assert.equal(saved[0].refreshToken, "initial-refresh-101");
+  assert.match(saved[0].refreshing, /^[a-f0-9-]{36}$/u);
+  assert.ok(Number.isSafeInteger(saved[0].refreshStartedAt));
+  await assert.rejects(refreshXAccount(f.store, f.space, client, view(f.accounts[0])), /refreshing/u);
+  assert.equal(provider.calls.length, 1);
+  assert.deepEqual(saved[1], f.accounts[1]);
 }
 
 // This combines the real encrypted PostgreSQL CAS writer with remote rotation.
@@ -111,95 +157,57 @@ integration("X concurrent refresh claims one durable lease before exactly one re
 
 integration("X confirmed remote token pairs survive repeated transient database failures without another rotation", { timeout: 30_000 }, async () => {
   await withDatabase(async f => {
-    let confirmed = false, readFailures = 0, saveAttempts = 0;
-    const provider = stubFetchResponses([{ body: remoteTokens("101") }], {
-      reply(response) { confirmed = true; return Response.json(response.body); },
+    await withConfirmedRefresh(f, {
+      beforeRead(attempt) {
+        if (attempt === 1) throw Object.assign(new Error("test read connection reset"), { code: "ECONNRESET" });
+      },
+      beforeSave(attempt) {
+        const code = ["08006", "ECONNRESET", "40001", "40P01"][attempt - 1];
+        if (code) throw Object.assign(new Error("test transient save failure"), { code });
+      },
+    }, async ({ attempts, provider, refresh }) => {
+      const refreshed = await refresh();
+      assert.equal(attempts.saves, 5, "the confirmed pair stays in memory across more than three failed saves");
+      await assertSavedCompanyRefresh(f, refreshed, provider);
     });
-    const store = {
-      resolve: async input => {
-        if (confirmed && readFailures++ === 0) throw Object.assign(new Error("test read connection reset"), { code: "ECONNRESET" });
-        return f.store.resolve(input);
-      },
-      put: async input => {
-        if (confirmed) {
-          const code = ["08006", "ECONNRESET", "40001", "40P01"][saveAttempts++];
-          if (code) throw Object.assign(new Error("test transient save failure"), { code });
-        }
-        return f.store.put(input);
-      },
-    };
-    try {
-      const refreshed = await refreshXAccount(store, f.space, client, view(f.accounts[0]));
-      assert.equal(saveAttempts, 5, "the confirmed pair stays in memory across more than three failed saves");
-      assert.equal(provider.calls.length, 1);
-      assert.equal(refreshed.refreshToken, "rotated-refresh-101");
-      assert.equal(Object.hasOwn(refreshed, "refreshing"), false);
-      assert.deepEqual(await f.read(), [refreshed, f.accounts[1]]);
-    } finally { provider.restore(); }
   });
 });
 
 integration("X reconciles a lost database commit receipt for a confirmed pair without restoring the refresh lease", { timeout: 30_000 }, async () => {
   await withDatabase(async f => {
-    let confirmed = false, saves = 0;
-    const provider = stubFetchResponses([{ body: remoteTokens("101") }], {
-      reply(response) { confirmed = true; return Response.json(response.body); },
+    await withConfirmedRefresh(f, { afterSave(attempt) {
+      if (attempt === 1) throw new DatabaseCommitUnknownError("08006");
+    } }, async ({ attempts, provider, refresh }) => {
+      const refreshed = await refresh();
+      assert.equal(attempts.saves, 1, "rereading the saved pair confirms the uncertain commit without another write");
+      await assertSavedCompanyRefresh(f, refreshed, provider);
     });
-    const store = { resolve: input => f.store.resolve(input), put: async input => {
-      const result = await f.store.put(input);
-      if (confirmed && saves++ === 0) throw new DatabaseCommitUnknownError("08006");
-      return result;
-    } };
-    try {
-      const refreshed = await refreshXAccount(store, f.space, client, view(f.accounts[0]));
-      assert.equal(provider.calls.length, 1);
-      assert.equal(saves, 1, "rereading the saved pair confirms the uncertain commit without another write");
-      assert.equal(refreshed.refreshToken, "rotated-refresh-101");
-      assert.equal(Object.hasOwn(refreshed, "refreshing"), false);
-      assert.deepEqual(await f.read(), [refreshed, f.accounts[1]]);
-    } finally { provider.restore(); }
   });
 });
 
 integration("X stops after eight local save failures and keeps an unconfirmed grant fenced without rotating again", { timeout: 30_000 }, async () => {
   await withDatabase(async f => {
-    let confirmed = false, saveAttempts = 0;
-    const provider = stubFetchResponses([{ body: remoteTokens("101") }], {
-      reply(response) { confirmed = true; return Response.json(response.body); },
+    await withConfirmedRefresh(f, { beforeSave() {
+      throw Object.assign(new Error("test persistent connection failure"), { code: "08006" });
+    } }, async ({ attempts, provider, refresh }) => {
+      await assert.rejects(refresh(), error => error.code === "08006");
+      assert.equal(attempts.saves, 8);
+      await assertCompanyRefreshFenced(f, provider);
     });
-    const store = { resolve: input => f.store.resolve(input), put: async input => {
-      if (confirmed) {
-        saveAttempts++;
-        throw Object.assign(new Error("test persistent connection failure"), { code: "08006" });
-      }
-      return f.store.put(input);
-    } };
-    try {
-      await assert.rejects(refreshXAccount(store, f.space, client, view(f.accounts[0])), error => error.code === "08006");
-      assert.equal(saveAttempts, 8);
-      assert.equal(provider.calls.length, 1);
-      const saved = await f.read();
-      assert.equal(saved[0].refreshToken, "initial-refresh-101");
-      assert.match(saved[0].refreshing, /^[a-f0-9-]{36}$/u);
-      await assert.rejects(refreshXAccount(f.store, f.space, client, view(f.accounts[0])), /refreshing/u);
-      assert.equal(provider.calls.length, 1);
-      assert.deepEqual(saved[1], f.accounts[1]);
-    } finally { provider.restore(); }
   });
 });
 
 integration("X callback merges against the latest grant after another account refreshed during OAuth", { timeout: 30_000 }, async () => {
   await withDatabase(async f => {
     const snapshot = await f.snapshot();
-    const incoming = { ...f.accounts[0], id: "303", username: "another", generation: crypto.randomUUID(),
-      accessToken: "oauth-new-access", refreshToken: "oauth-new-refresh", expiresAt: Date.now() + 7_200_000 };
+    const incoming = f.newGrant();
     const provider = stubFetchResponses([{ body: remoteTokens("202") }]);
     try {
       const refreshed = await refreshXAccount(f.store, f.space, client, view(f.accounts[1]));
       const latest = await f.snapshot();
       assert.equal(latest.connectionVersion, snapshot.connectionVersion);
       assert.ok(latest.credentialVersion > snapshot.credentialVersion);
-      await connectXAccount(f.env, { spaceId: f.space, actorUserId: "owner", fields: xAccountFields([incoming]), snapshot });
+      await f.connect(incoming, snapshot);
       assert.deepEqual(await f.read(), [f.accounts[0], refreshed, incoming]);
       assert.equal(provider.calls.length, 1);
     } finally { provider.restore(); }
@@ -209,7 +217,7 @@ integration("X callback merges against the latest grant after another account re
 integration("X callback retries a real credential CAS conflict while preserving another account's concurrent token update", { timeout: 30_000 }, async () => {
   await withDatabase(async f => {
     const snapshot = await f.snapshot();
-    const incoming = { ...f.accounts[0], id: "303", username: "another", generation: crypto.randomUUID() };
+    const incoming = f.newGrant();
     const other = { ...f.accounts[1], accessToken: "concurrent-access-202", refreshToken: "concurrent-refresh-202" };
     const originalPut = PostgresAppCredentialRepository.prototype.put;
     let callbackWrites = 0;
@@ -223,7 +231,7 @@ integration("X callback retries a real credential CAS conflict while preserving 
       return originalPut.call(this, input);
     };
     try {
-      await connectXAccount(f.env, { spaceId: f.space, actorUserId: "owner", fields: xAccountFields([incoming]), snapshot });
+      await f.connect(incoming, snapshot);
       assert.equal(callbackWrites, 2, "the competing real PostgreSQL writer makes the first CAS stale");
       assert.deepEqual(await f.read(), [f.accounts[0], other, incoming]);
     } finally { PostgresAppCredentialRepository.prototype.put = originalPut; }
@@ -233,8 +241,7 @@ integration("X callback retries a real credential CAS conflict while preserving 
 integration("X callback confirms its exact committed grant after a lost COMMIT acknowledgement", { timeout: 30_000 }, async () => {
   await withDatabase(async f => {
     const snapshot = await f.snapshot();
-    const incoming = { ...f.accounts[0], id: "303", username: "another", generation: crypto.randomUUID(),
-      accessToken: "oauth-new-access", refreshToken: "oauth-new-refresh" };
+    const incoming = f.newGrant();
     const originalPut = PostgresAppCredentialRepository.prototype.put;
     let callbackWrites = 0;
     PostgresAppCredentialRepository.prototype.put = async function (input) {
@@ -243,7 +250,7 @@ integration("X callback confirms its exact committed grant after a lost COMMIT a
       return result;
     };
     try {
-      await connectXAccount(f.env, { spaceId: f.space, actorUserId: "owner", fields: xAccountFields([incoming]), snapshot });
+      await f.connect(incoming, snapshot);
       assert.equal(callbackWrites, 1, "the stored account generation and exact token pair prove the first commit succeeded");
       assert.equal((await f.snapshot()).connectionVersion, snapshot.connectionVersion + 1);
       assert.deepEqual(await f.read(), [...f.accounts, incoming]);
@@ -256,12 +263,10 @@ integration("X callback still rejects Human edits or a recreated connection duri
     const snapshot = await f.snapshot();
     const incoming = { ...f.accounts[0], generation: crypto.randomUUID() };
     await f.write(f.accounts);
-    await assert.rejects(connectXAccount(f.env, { spaceId: f.space, actorUserId: "owner", fields: xAccountFields([incoming]), snapshot }),
-      error => error.status === 409);
+    await assert.rejects(f.connect(incoming, snapshot), error => error.status === 409);
     const currentSnapshot = await f.snapshot();
     await f.sql("UPDATE data.app_connector_connections SET search_rank_sequence=$2 WHERE space_id=$1", [f.space, crypto.randomUUID()]);
-    await assert.rejects(connectXAccount(f.env, { spaceId: f.space, actorUserId: "owner", fields: xAccountFields([incoming]), snapshot: currentSnapshot }),
-      error => error.status === 409);
+    await assert.rejects(f.connect(incoming, currentSnapshot), error => error.status === 409);
     assert.deepEqual(await f.read(), f.accounts);
   });
 });
@@ -270,7 +275,7 @@ integration("X first callback uses an installation snapshot when no credential e
   await withDatabase(async f => {
     const snapshot = await f.snapshot();
     assert.equal(snapshot.credentialVersion, 0);
-    await connectXAccount(f.env, { spaceId: f.space, actorUserId: "owner", fields: xAccountFields([f.accounts[0]]), snapshot });
+    await f.connect(f.accounts[0], snapshot);
     assert.deepEqual(await f.read(), [f.accounts[0]]);
   }, { empty: true });
 });
@@ -282,13 +287,7 @@ integration("X uncertain refresh response preserves its durable lease and never 
     });
     try {
       await assert.rejects(refreshXAccount(f.store, f.space, client, view(f.accounts[0])), /timed out after rotation/u);
-      const saved = await f.read();
-      assert.equal(saved[0].refreshToken, "initial-refresh-101");
-      assert.match(saved[0].refreshing, /^[a-f0-9-]{36}$/u);
-      assert.ok(Number.isSafeInteger(saved[0].refreshStartedAt));
-      await assert.rejects(refreshXAccount(f.store, f.space, client, view(f.accounts[0])), /refreshing/u);
-      assert.equal(provider.calls.length, 1);
-      assert.deepEqual(saved[1], f.accounts[1]);
+      await assertCompanyRefreshFenced(f, provider);
     } finally { provider.restore(); }
   });
 });

@@ -5,28 +5,33 @@ import { loadCommonJsSourceModule } from "./support/commonjs-source-module.mjs";
 import { ProviderRequestError } from "../src/connectors/http.ts";
 import { commandResult } from "../src/connectors/command-support.ts";
 
+async function dispatcher({ providerId, spaceId, mode, repository, publish = async () => {}, imports = {} }) {
+  const dependencies = {
+    "@xmatrix/protocol": protocol,
+    "../app-connectors": { getAppConnectorProvider: () => protocol.APP_CONNECTOR_PROVIDER_MANIFESTS.find(p => p.id === providerId) },
+    "./command-support": { commandResult, commandScope: async () => ({ spaceId, connectionId: `${spaceId}:${providerId}` }),
+      withExecution: async (manifest, _input, _scope, action, run) => commandResult(manifest.name, action.id, await run()),
+      publishCommandStatus: publish },
+    "./credentials": { connectorActionPolicyRepository: () => ({ mode }), connectorActionRequestRepository: () => repository },
+    "./http": { ProviderRequestError },
+    ...imports,
+  };
+  return loadCommonJsSourceModule(new URL("../src/connectors/connector-commands.ts", import.meta.url), name => dependencies[name] ?? {});
+}
+
 // The execution boundary must stage ask without calling the provider, and recheck policy
 // at dispatch. PostgreSQL's consume-once test cannot detect a dispatcher bypass.
 test("Gmail ask stages a request, allow executes, and disallow blocks before provider I/O", async () => {
   let mode = null, writes = 0, prepared = 0, requests = 0, staged = null;
   const announced = [];
-  const dependencies = {
-    "../workspace-resource-notification": { notifyWorkspaceResource: async (_env, change) => { announced.push(change); } },
-    "@xmatrix/protocol": protocol,
-    "../app-connectors": { getAppConnectorProvider: () => protocol.APP_CONNECTOR_PROVIDER_MANIFESTS.find(p => p.id === "gmail") },
-    "./command-support": { commandResult, commandScope: async () => ({ spaceId: "s", connectionId: "s:gmail" }),
-      withExecution: async (m, _i, _s, a, run) => commandResult(m.name, a, await run()),
-      publishCommandStatus: async () => {} },
-    "./connection-credentials": { connectionCredentials: async () => ({ mailboxes: "[]" }) },
-    "./credentials": { connectorActionPolicyRepository: () => ({ mode: async () => mode }),
-      connectorActionRequestRepository: () => ({ find: async requestId => staged?.requestId === requestId ? staged : null, create: async input => {
+  const commands = await dispatcher({ providerId: "gmail", spaceId: "s", mode: async () => mode,
+    repository: { find: async requestId => staged?.requestId === requestId ? staged : null, create: async input => {
         requests++; assert.deepEqual(input.payload.preview, { from: "from@example.test", to: "to@example.test", subject: "Subject", body: "Body" });
         staged = { requestId: input.requestId, status: "pending" }; return staged;
-      } }) },
-    "./http": { ProviderRequestError },
-  };
-  const commands = await loadCommonJsSourceModule(new URL("../src/connectors/connector-commands.ts", import.meta.url),
-    name => dependencies[name] ?? {});
+    } }, imports: {
+      "../workspace-resource-notification": { notifyWorkspaceResource: async (_env, change) => { announced.push(change); } },
+      "./connection-credentials": { connectionCredentials: async () => ({ mailboxes: "[]" }) },
+    } });
   const action = { effect: "write", requires: [], parse: () => ({}), prepare: async () => {
     prepared++; return { from: "from@example.test", to: "to@example.test", subject: "Subject", body: "Body", raw: "private" };
   }, execute: async context => { await context.authorizeWrite(); writes++; return { summary: "sent" }; } };
@@ -68,21 +73,12 @@ test("X allow uploads freeze input and queue once; only the durable executor per
     startAllowed: async () => { stage.request.status = "executing"; return { request: stage.request, claimed: true }; },
     authorize: async () => { authorizations++; },
   };
-  const dependencies = {
-    "@xmatrix/protocol": protocol,
-    "../app-connectors": { getAppConnectorProvider: () => protocol.APP_CONNECTOR_PROVIDER_MANIFESTS.find(p => p.id === "x") },
-    "./command-support": { commandResult, commandScope: async () => ({ spaceId: "space", connectionId: "space:x" }),
-      withExecution: async (m, _i, _s, a, run) => commandResult(m.name, a.id, await run()),
-      publishCommandStatus: async (_manifest, input, lines) => { published.push({ input, lines }); } },
-    "./credentials": { connectorActionPolicyRepository: () => ({ mode: async () => mode }),
-      connectorActionRequestRepository: () => repository },
+  const commands = await dispatcher({ providerId: "x", spaceId: "space", mode: async () => mode, repository,
+    publish: async (_manifest, input, lines) => { published.push({ input, lines }); }, imports: {
     "./x-api": { xActionCapability: () => ({}) },
     "./x-upload-executor-do": { enqueueXUpload: async (_env, ref) => { queued.push(ref); } },
     "./actions/x": { X_ACTIONS: { upload_video: action } },
-    "./http": { ProviderRequestError },
-  };
-  const commands = await loadCommonJsSourceModule(new URL("../src/connectors/connector-commands.ts", import.meta.url),
-    name => dependencies[name] ?? {});
+  } });
   const input = { env: {}, channelId: "channel", messageId: "original", actorUserId: "owner", senderKind: "agent", senderId: "instance" };
   const statement = { target: "@company", text: "message/attachment" };
   assert.match(await commands.runConnectorAction("x", input, "upload_video", action, statement), /queued/);

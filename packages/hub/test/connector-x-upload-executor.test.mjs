@@ -50,6 +50,13 @@ function fixture() {
     setOutcome: value => { outcome = value; } };
 }
 
+/** Admit and run the initial alarm, proving it attempts the provider exactly once. */
+async function runFirstUpload(f) {
+  await f.create().enqueue(ref);
+  await f.create().alarm();
+  assert.equal(f.calls.execution.length, 1);
+}
+
 test("X upload admission durably stores only a scoped reference and alarm before returning", async () => {
   const f = fixture(), executor = f.create();
   await executor.enqueue({ ...ref, accessToken: "must-never-be-stored", payload: canonical.payload });
@@ -75,9 +82,7 @@ test("X upload persists started and a recovery alarm before its single provider 
     f.calls.execution.push(job);
     return result;
   };
-  await f.create().enqueue(ref);
-  await f.create().alarm();
-  assert.equal(f.calls.execution.length, 1);
+  await runFirstUpload(f);
   assert.equal(f.calls.publication.length, 1);
   assert.deepEqual(f.calls.settlement, [{ ...ref, ...result }]);
   assert.equal(f.calls.clear.length, 1);
@@ -105,8 +110,7 @@ test("X upload restart with started and no outcome publishes uncertainty without
 test("X upload exceptions produce one uncertain result and no provider retry", async () => {
   const f = fixture();
   f.operations.execute = async input => { f.calls.execution.push(input); throw new Error("private-provider-secret"); };
-  await f.create().enqueue(ref);
-  await f.create().alarm();
+  await runFirstUpload(f);
   await f.create().alarm();
   assert.equal(f.calls.execution.length, 1);
   assert.equal(f.calls.publication.length, 1);
@@ -116,14 +120,13 @@ test("X upload exceptions produce one uncertain result and no provider retry", a
 
 test("X upload retries a persisted result after restart and clears it only after confirmed publication", async () => {
   const f = fixture();
-  await f.create().enqueue(ref);
   const publish = f.operations.publish;
   let attempts = 0;
   f.operations.publish = async outcome => {
     await publish(outcome);
     if (++attempts === 1) throw new Error("append response lost");
   };
-  await f.create().alarm();
+  await runFirstUpload(f);
   assert.equal(f.job().phase, "started");
   assert.equal(f.job().attempts, 1);
   assert.equal(f.alarm(), 3000);
@@ -145,9 +148,7 @@ test("X upload settlement failure cannot cause a second provider mutation on rec
     if (++attempts === 1) throw new Error("database unavailable after provider completion");
     return settle(input);
   };
-  await f.create().enqueue(ref);
-  await f.create().alarm();
-  assert.equal(f.calls.execution.length, 1);
+  await runFirstUpload(f);
   assert.equal(f.job().phase, "started");
   await f.create().alarm();
   assert.equal(f.calls.execution.length, 1);
