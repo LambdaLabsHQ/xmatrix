@@ -1,6 +1,8 @@
 // Bakes the wood material into one seamless raster tile:
 //   node scripts/bake-wood-texture.mjs
-// writes public/textures/wood.webp, a 400px CSS tile at 3x.
+// writes public/textures/wood.<sha256 prefix>.webp, a 400px CSS tile at 3x.
+// The name is the content hash so the file can be cached for good
+// (worker.mjs); point --app-wood-texture in tokens.css at the new name.
 //
 // The wood used to be two SVG feTurbulence maps painted at runtime. Chrome on
 // a P3 Mac drew such an image without colour management whenever it was drawn
@@ -11,7 +13,8 @@
 // recipe the Summary plank used), and each pixel is converted from Display P3
 // to sRGB so the managed result is the walnut that plank showed. The maps
 // below are the originals, kept as the source of the texture.
-import { writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { readdir, rm, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { chromium } from "@playwright/test";
 
@@ -20,7 +23,7 @@ const RINGS = `<svg xmlns='http://www.w3.org/2000/svg' width='1440' height='1440
 
 const SIZE = 1200;
 const QUALITY = 0.86;
-const output = fileURLToPath(new URL("../public/textures/wood.webp", import.meta.url));
+const textures = fileURLToPath(new URL("../public/textures/", import.meta.url));
 
 const browser = await chromium.launch();
 try {
@@ -62,8 +65,13 @@ try {
     context.putImageData(pixels, 0, 0);
     return canvas.toDataURL("image/webp", quality);
   }, { plank: PLANK, rings: RINGS, size: SIZE, quality: QUALITY });
-  await writeFile(output, Buffer.from(dataUrl.slice(dataUrl.indexOf(",") + 1), "base64"));
-  console.log(`wrote ${output}`);
+  const bytes = Buffer.from(dataUrl.slice(dataUrl.indexOf(",") + 1), "base64");
+  const name = `wood.${createHash("sha256").update(bytes).digest("hex").slice(0, 10)}.webp`;
+  for (const old of await readdir(textures)) {
+    if (/^wood\.[0-9a-f]{10}\.webp$/.test(old) && old !== name) await rm(textures + old);
+  }
+  await writeFile(textures + name, bytes);
+  console.log(`wrote ${textures}${name}; set --app-wood-texture in src/app/tokens.css to /textures/${name}`);
 } finally {
   await browser.close();
 }

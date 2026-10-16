@@ -64,7 +64,7 @@ export function Navbar() {
           </span>
           <BrandMark
             href="/"
-            iconSrc="/brand/xmatrix-icon-transparent.png"
+            iconSrc="/brand/xmatrix-icon-transparent-128.png"
             className="relative z-10"
             iconClassName="overflow-visible"
           />

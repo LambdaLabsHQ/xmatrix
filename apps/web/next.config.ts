@@ -29,6 +29,11 @@ const nextConfig: NextConfig = {
     ? { eslint: { ignoreDuringBuilds: true }, typescript: { ignoreBuildErrors: true } }
     : {}),
   transpilePackages: ["@xmatrix/protocol"],
+  // The Worker has no image optimizer binding: /_next/image answered every
+  // width with the original file and no cache lifetime, so each view
+  // downloaded it again. Images are shipped at the size they are drawn and
+  // served directly, under worker.mjs's cache rules.
+  images: { unoptimized: true },
   // A page rendered per request streams its title, description and canonical
   // into <body> for clients Next believes run scripts, Googlebot among them.
   // Search engines read those from <head>, so every client gets them there.
