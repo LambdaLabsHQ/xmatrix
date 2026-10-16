@@ -305,8 +305,10 @@ mod tests {
         env.set(CONNECTED_APPS_ENV, "Gmail\nSentry");
         env.set(SPACE_RULES_PAGE_ENV, "page-1");
         env.set(WorkingMode::ENV, "cautious");
-        let mut templates = BootstrapPrompts::default();
-        templates.bootstrap = "Hub alpha {agent_name}\n{connected_apps}\n{space_rules}\n{working_mode}\n{channel_collaboration_policy}\n".into();
+        let mut templates = BootstrapPrompts {
+            bootstrap: "Hub alpha {agent_name}\n{connected_apps}\n{space_rules}\n{working_mode}\n{channel_collaboration_policy}\n".into(),
+            ..BootstrapPrompts::default()
+        };
         env.set(
             crate::bootstrap_prompts::ENV,
             &serde_json::to_string(&templates).unwrap(),

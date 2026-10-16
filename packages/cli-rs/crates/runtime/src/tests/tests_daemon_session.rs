@@ -2287,8 +2287,10 @@ fn spawn_bootstrap_templates_replace_inherited_overrides_and_fail_closed() {
     ]);
     let cleared = super::apply_spawn_bootstrap_prompts(env.clone(), None).unwrap();
     assert!(cleared.is_empty());
-    let mut prompts = BootstrapPrompts::default();
-    prompts.bootstrap = "fresh Hub body {agent_name}".into();
+    let mut prompts = BootstrapPrompts {
+        bootstrap: "fresh Hub body {agent_name}".into(),
+        ..BootstrapPrompts::default()
+    };
     let applied = super::apply_spawn_bootstrap_prompts(env, Some(&prompts)).unwrap();
     assert_eq!(applied.len(), 1);
     assert_eq!(
