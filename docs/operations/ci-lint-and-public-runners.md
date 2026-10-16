@@ -19,9 +19,14 @@ remain available through its package's lint command.
 
 `ci.yml` defaults to GitHub-hosted `ubuntu-24.04` and `windows-2025`.
 The public repository has no self-hosted runners. Hosted Hub validation uses
-one static job and three test-file shards; Web uses one primary job and four
-functional browser shards. Together with Node, desktop, Android, both Rust
-jobs, the selector and aggregate, the full matrix has 16 jobs.
+one static job and three test-file shards; Web uses one primary job, four
+functional browser shards, and one sustained performance job. The primary job
+runs the unit tests, checked production build, and short performance budgets;
+the sustained job runs the four-minute `@sustained` budget on its own VM. Both
+performance jobs retain one worker, the same sampling windows and assertions.
+Unsharded local runs still execute every performance case. Together with Node,
+desktop, Android, both Rust jobs, the selector and aggregate, the full matrix
+has 17 jobs.
 Reusable callers can set `linux_runner`, `offload_runner`, and `windows_runner`
 to a JSON runner label or array, for example `'"ubuntu-24.04"'`. These inputs
 select compute only; they do not change the tests or release authorization.
