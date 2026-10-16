@@ -563,6 +563,13 @@ export async function postgresMessageAppend(
       },dependencies.dingtalkEffect);
     }
     durations.appendMs = performance.now() - phaseStartedAt;
+    if (result.billingNotice && typeof result.billingNotice === "object") {
+      // Posted by the person this write answers to: the sender, or the Agent Run's owner.
+      const noticeUserId = actor.kind === "user" ? actor.id
+        : preparedContext.agentRunIdentity?.registration.ownerUserId;
+      result = { ...result, billingNotice: noticeUserId
+        ? { ...result.billingNotice as Record<string, unknown>, userId: noticeUserId } : undefined };
+    }
     durations.confirmMs = 0;
     durations.totalMs = performance.now() - startedAt;
     recordMessageCoordination({ env, outcome: "ok", durations });

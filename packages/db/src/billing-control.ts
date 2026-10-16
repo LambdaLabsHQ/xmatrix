@@ -1,5 +1,6 @@
 import { DetailedControlError } from "./control-error.js";
 import type { QueryResultRow } from "pg";
+import { spaceBilling, type CreditAllowance } from "@xmatrix/billing";
 import { commandDigest as hash } from "./command-digest.js";
 
 import type { AuthorityDatabase, DatabaseTransaction } from "./contracts.js";
@@ -110,7 +111,7 @@ function subscriptionEntitled(row: QueryResultRow | undefined, now: number): boo
 async function summary(
   tx: DatabaseTransaction, spaceId: string, actorUserId: string,
 ): Promise<Record<string, unknown>> {
-  const [members, subscriptions, usage, seats] = await Promise.all([
+  const [members, subscriptions, usage, seats, credits] = await Promise.all([
     tx.query<QueryResultRow & { role: string }>({
       name: "billing_summary_member_v1",
       text: "SELECT role FROM data.space_members WHERE space_id = $1 AND user_id = $2 LIMIT 1",
@@ -132,6 +133,12 @@ async function summary(
         WHERE space_id = $1 AND role IN ('owner','admin','member')`,
       values: [spaceId], maxRows: 1,
     }),
+    spaceBilling.credits ? tx.query<QueryResultRow>({
+      name: "billing_summary_credits_v1",
+      text: `SELECT period_start::text AS period_start,included_used,pack_used,grace_used,pack_balance
+        FROM data.space_credit_state WHERE space_id = $1 LIMIT 1`,
+      values: [spaceId], maxRows: 1,
+    }) : Promise.resolve([]),
   ]);
   const member = members[0];
   if (!member) throw new BillingControlError("forbidden", 403, "Space membership is required");
@@ -156,7 +163,29 @@ async function summary(
     seats: { used, limit },
     ...(used > limit ? { seatAdjustmentRequired: true } : {}),
     freeUsage: { acceptedMessages, limit: 500, remaining: Math.max(0, 500 - acceptedMessages) },
+    ...(entitled && spaceBilling.credits
+      ? { credits: creditSummary(spaceBilling.credits, Number(subscription!.seat_quantity), credits[0], now) } : {}),
     canManage: member.role === "owner",
+  };
+}
+
+/** This month's Agent credits (docs/design/agent-credits.md). A row from an
+ * earlier month has nothing used yet this month; its pack balance carries over. */
+function creditSummary(allowance: CreditAllowance, seatQuantity: number, row: QueryResultRow | undefined,
+  now: number): Record<string, unknown> {
+  const today = new Date(now);
+  const periodStart = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1)).toISOString().slice(0, 10);
+  const resetsOn = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() + 1, 1)).toISOString().slice(0, 10);
+  const current = row?.period_start === periodStart;
+  const used = (column: string) => current ? Number(row?.[column] ?? 0) : 0;
+  const included = seatQuantity * allowance.perSeat;
+  const grace = seatQuantity * allowance.gracePerSeat;
+  const packBalance = Number(row?.pack_balance ?? 0);
+  return {
+    periodStart, resetsOn, included, includedUsed: used("included_used"),
+    packBalance, packUsed: used("pack_used"), grace, graceUsed: used("grace_used"),
+    paused: used("included_used") >= included && packBalance === 0 && used("grace_used") >= grace,
+    packCredits: allowance.packCredits,
   };
 }
 

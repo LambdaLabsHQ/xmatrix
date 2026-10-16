@@ -784,7 +784,10 @@ function publishedResult(
   if (!admission.result_json) throw new MessageAuthorityError(
     "message_receipt_unavailable", 500, "Message receipt is unavailable",
   );
-  return admission.result_json;
+  const notice = input.billable ? billing.message.notice?.(admission) : null;
+  // The notice is this commit's alone: it is not part of the stored receipt,
+  // so a replay of the same command never repeats it.
+  return notice ? { ...admission.result_json, billingNotice: notice } : admission.result_json;
 }
 
 function serializeMessage(row: MessageRow): Record<string, unknown> {
@@ -1685,7 +1688,7 @@ export class PostgresMessageRepository {
       // statement, so a metered counter is never locked across another round trip.
       const billing = this.billing.message;
       const admission = (await transaction.query<MessagePublishRow>({
-        name: `message_append_publish_${this.billing.id}_v1`,
+        name: `message_append_publish_${this.billing.id}_v2`,
         text: `WITH ${billing.ctes}, accepted AS MATERIALIZED (
             SELECT admission.*,$5::jsonb AS result_json FROM admission
             WHERE NOT $10 OR (${billing.accepts})
@@ -1725,10 +1728,11 @@ export class PostgresMessageRepository {
           ) SELECT admission.*,(SELECT result_json FROM receipt) AS result_json,
               (SELECT channel_id FROM activity_row) AS channel_id,
               EXISTS (SELECT 1 FROM accepted) AS accepted,
-              EXISTS (SELECT 1 FROM sequence_confirm) AS sequence_confirmed FROM admission`,
+              EXISTS (SELECT 1 FROM sequence_confirm) AS sequence_confirmed,
+              $13::text AS author_kind FROM admission`,
         values: [`message:${spaceId}:${messageId}:1`, spaceId, messageId, sequence,
           JSON.stringify(result), sentAt, commandId, requestDigest, expiresAt,
-          !messageKind.startsWith("xmatrix.system."), channelId, recordDigest],
+          !messageKind.startsWith("xmatrix.system."), channelId, recordDigest, senderKind],
         maxRows: 1,
       }))[0];
       if (admission?.accepted && !admission.channel_id) throw new MessageAuthorityError(
