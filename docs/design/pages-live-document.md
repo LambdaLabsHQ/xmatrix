@@ -60,6 +60,14 @@ designed for both.
 5. **Markdown stays the Agent's medium and the durable format.** Revisions,
    git and Agent edits remain markdown; the editor is a view over it.
 
+A whole-document Agent edit is authorized and committed before it is shown.
+Its writing animation reveals words within the final parsed document with
+complete Markdown delimiters; raw Markdown prefixes are never live document
+states. While presentation is in progress, session storage keeps the planned
+canonical baseline beside the committed base and CRDT. Recovery merges the
+remaining presentation into persisted human edits without repeating the
+commit or attributing a truncated animation to the next human editor.
+
 ## 3. Awareness
 
 Each block's awareness has four layers.

@@ -729,3 +729,51 @@ export function pageDocHunks(doc: DocNode, suggested: DocNode): PageDocHunk[] {
   }
   return hunks.slice(0, MAX_DOC_HUNKS);
 }
+
+/**
+ * A committed document revealed word by word, with complete delimiters from
+ * its parsed structure and marks: raw Markdown prefixes are not documents.
+ * Removed words go at once; unchanged words remain. Opaque source stays whole.
+ */
+export function pageWritingSteps(before: string, after: string, steps = 40): string[] {
+  if (before === after) return [];
+  const source = markdownToPageDoc(before);
+  const target = markdownToPageDoc(after);
+  const tokens = (text: string) => text.match(WORD) ?? [];
+  const opaque = (node: DocNode) => node.type.name === "markdown";
+  // Reuse the bounded document diff that already owns revision highlighting.
+  const additions = pageDocChanges(source, target).filter((change) => change.kind === "added");
+  const added: boolean[] = [];
+  target.descendants((node, pos) => {
+    if (opaque(node)) return false;
+    if (node.isText) {
+      for (const word of node.text!.matchAll(WORD)) {
+        const from = pos + word.index!;
+        const to = from + word[0].length;
+        added.push(additions.some((change) => change.from < to && change.to > from));
+      }
+    }
+    return undefined;
+  });
+  const total = added.filter(Boolean).length;
+  if (!total) return [pageDocToMarkdown(target)];
+  const per = Math.max(1, Math.ceil(total / Math.max(1, steps)));
+  const out: string[] = [];
+  for (let shown = per; ; shown += per) {
+    let index = 0;
+    let left = shown;
+    const reveal = (node: DocNode): DocNode | null => {
+      if (opaque(node)) return node;
+      if (node.isText) {
+        const text = tokens(node.text!).filter(() => !added[index++] || left-- > 0).join("");
+        return text ? pageSchema.text(text, node.marks) : null;
+      }
+      const children: DocNode[] = [];
+      node.forEach((child) => { const next = reveal(child); if (next) children.push(next); });
+      return node.copy(Fragment.from(children));
+    };
+    out.push(canonicalPageMarkdown(pageDocToMarkdown(reveal(target)!)));
+    if (shown >= total) break;
+  }
+  return out;
+}

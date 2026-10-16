@@ -1,10 +1,9 @@
 import {
   PAGE_DOCUMENT_FRAGMENT, PAGE_MESSAGE_CO_WRITE, mergePageText, pageAuthorColor, pageChangedBlocks, pageRemovedSections,
-  pageWritingSteps,
   parsePageCoWriteReply, type PageCoWriteRequest, type PageEditResult,
 } from "@xmatrix/protocol";
 import {
-  canonicalPageMarkdown, markdownToPageDoc, pageDocBlockAt, pageDocToMarkdown, pageSchema,
+  canonicalPageMarkdown, markdownToPageDoc, pageDocBlockAt, pageDocToMarkdown, pageSchema, pageWritingSteps,
 } from "@xmatrix/protocol/page-document";
 import * as decoding from "lib0/decoding";
 import * as encoding from "lib0/encoding";
@@ -75,6 +74,8 @@ export interface PageSessionState {
   update: Uint8Array;
   editors: PendingEditor[];
   editSeq: number;
+  /** Last planned presentation of the committed base; recovery finishes it without another commit. */
+  writingFrom?: string;
   /** Where each Agent's caret rests, by awareness client id (absent before carets rested). */
   agents?: RestingAgent[];
 }
@@ -210,6 +211,7 @@ export class PageSession {
   private readonly connectionClients = new Map<string, Set<number>>();
   private readonly editors = new Map<string, PendingEditor>();
   private editSeq = 0;
+  private writingFrom: string | undefined;
   private agentClocks = new Map<number, number>();
   private readonly resting = new Map<number, RestingAgent>();
   /** Agents co-writing the page live, by their runtime's connection. */
@@ -322,7 +324,8 @@ export class PageSession {
       if (this.base) return;
       if (persisted) {
         Y.applyUpdate(this.doc, persisted.update, "load");
-        this.setHead(this.canonical(persisted.base));
+        const base = this.canonical(persisted.base);
+        this.setHead(base);
         this.editSeq = persisted.editSeq;
         for (const editor of persisted.editors) this.editors.set(principalKey(editor.principal), editor);
         for (const agent of persisted.agents ?? []) {
@@ -338,6 +341,12 @@ export class PageSession {
             if (this.fragment.length === 0) setPageFragmentMarkdown(this.fragment, text, "load");
             legacy.delete(0, legacy.length);
           }, "load");
+          await this.persist();
+        }
+        // Persisted human edits stay on top of the last presented document state.
+        // The rest of an already committed edit must not become their next deletion.
+        if (persisted.writingFrom !== undefined) {
+          this.adopt(persisted.writingFrom, base.body, "load");
           await this.persist();
         }
         this.settle();
@@ -356,7 +365,8 @@ export class PageSession {
   private async persist(): Promise<void> {
     if (!this.base || this.ended) return;
     await this.ports.persist({ base: this.base, update: Y.encodeStateAsUpdate(this.doc),
-      editors: [...this.editors.values()], editSeq: this.editSeq, agents: [...this.resting.values()] });
+      editors: [...this.editors.values()], editSeq: this.editSeq, agents: [...this.resting.values()],
+      ...(this.writingFrom !== undefined ? { writingFrom: this.writingFrom } : {}) });
   }
 
   /**
@@ -695,8 +705,6 @@ export class PageSession {
       }
       this.setHead({ ...this.base, revision: result.headRevision, body: merged.text,
         agentSuggestOnly: result.agentSuggestOnly });
-      // One transaction, so edits people make meanwhile can never shift its positions. It is
-      // written under the editor's awareness id, so readers see whose text it is.
       // The Agent writes it in as a person would, a few words at a time under its caret; edits people
       // make meanwhile are kept, as each step merges into the live text.
       const user = { name: principal.label, color: pageAuthorColor(principal), kind: principal.kind, conversationId };
@@ -705,6 +713,9 @@ export class PageSession {
       let from = current;
       let change: ReturnType<PageSession["adopt"]> = { cursor: null, block: "" };
       for (const [index, step] of steps.entries()) {
+        // The doc update captures this planned baseline in its persisted state. Live
+        // human edits remain separate, and recovery merges the committed remainder.
+        this.writingFrom = step;
         const written = authoredAs(this.doc, agentClientId(key), () => this.adopt(from, step, `agent:${key}`));
         if (written.cursor) change = written;
         from = step;
@@ -715,6 +726,7 @@ export class PageSession {
           ...(at ? { cursor: { anchor: at, head: at } } : {}) });
         if (!last) await new Promise((resolve) => setTimeout(resolve, pace));
       }
+      this.writingFrom = undefined;
       this.settle();
       await this.persist();
       this.ports.broadcast(encodeNotice({ type: "committed", revision: result.revision,
