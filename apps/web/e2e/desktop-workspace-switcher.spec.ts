@@ -1,6 +1,7 @@
-import type { Locator } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
 
 import { expect, test } from "./fixtures";
+import { fixtureJson } from "./in-page-api-fixtures";
 import { E2E_CHANNEL, E2E_DESKTOP_CONTEXT, E2E_SPACE, openWorkspaceWithStubs } from "./workspace-fixtures";
 
 test.use(E2E_DESKTOP_CONTEXT);
@@ -126,15 +127,19 @@ test("expanded desktop workspace switcher is one glass panel floating over the l
   await expect(page.getByRole("textbox", { name: "Workspace name" })).toHaveValue("Lambda Labs");
 });
 
-test("Team lists every workspace and tags the one you are in", async ({ page }) => {
+/** Team, opened from the switcher while you are in "Lambda Labs" and also belong to another workspace. */
+async function openTeam(page: Page) {
   const otherSpace = { ...E2E_SPACE, id: "space-team", name: "Lambda Labs" };
   await openWorkspaceWithStubs(page, {
     spaces: [otherSpace, E2E_SPACE],
     channels: [{ ...E2E_CHANNEL, spaceId: otherSpace.id }],
   });
-
   await page.locator(".app-space-switcher-trigger").click();
   await page.getByRole("button", { name: "Manage", exact: true }).click();
+}
+
+test("Team lists every workspace and tags the one you are in", async ({ page }) => {
+  await openTeam(page);
 
   await expect(page).toHaveURL(/\/team$/);
   const rows = page.locator('[data-testid="tool-section-row"]');
@@ -167,4 +172,19 @@ test("Team lists every workspace and tags the one you are in", async ({ page }) 
   await expect(rows.filter({ hasText: "New workspace" })).toBeHidden();
   await page.locator(".app-tool-list .app-list-create", { hasText: "New workspace" }).click();
   await expect(view.getByRole("textbox", { name: "New workspace name" })).toBeVisible();
+});
+
+test("a workspace the plan refuses says why beside the name that was typed", async ({ page }) => {
+  await openTeam(page);
+  const message = "Upgrade an existing Space to Pro or delete one to create another Free Space";
+  await fixtureJson(page, "space-create-refused", /\/api\/xmatrix\/spaces$/u,
+    { error: message, code: "free_space_limit", retryable: false }, { status: 402, method: "POST" });
+
+  await page.locator(".app-tool-list .app-list-create", { hasText: "New workspace" }).click();
+  const view = page.locator(".app-tool-detail");
+  const name = view.getByRole("textbox", { name: "New workspace name" });
+  await name.fill("Third team");
+  await view.getByRole("button", { name: "Create", exact: true }).click();
+  await expect(view.getByText(`Couldn't create the Space. ${message}.`)).toBeVisible();
+  await expect(name).toHaveValue("Third team");
 });

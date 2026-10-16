@@ -1,8 +1,9 @@
 /**
  * Space billing: what a deployment charges for, seen from the product core.
  *
- * The core asks one policy whether a Space may take another billable member
- * or message, inside the transaction that commits it. This package is the
+ * The core asks one policy whether an account may create another Space, and
+ * whether a Space may take another billable member or message, inside the
+ * transaction that commits it. This package is the
  * policy every deployment gets by default: nothing is metered. A deployment
  * that charges supplies its own policy under this module name at build time
  * (see deploy/README.md), so its checkout, prices and allowances never ship
@@ -49,7 +50,17 @@ export interface SpaceBillingPolicy {
   readonly id: string;
   /** Whether Spaces have plans; without them the Hub serves no billing routes. */
   readonly metered: boolean;
-  /** Called in the transaction that creates a Space. */
+  /**
+   * Called in the transaction that creates a Space, before anything is
+   * written; a rejection refuses it. `personalSpaceIds` are the Spaces the
+   * product makes for the owner on its own (whether or not they exist), which
+   * an allowance of Spaces per account may leave out.
+   */
+  spaceCreation(
+    transaction: BillingTransaction,
+    input: { ownerUserId: string; now: string; personalSpaceIds: readonly string[] },
+  ): Promise<BillingRejection | null>;
+  /** Called in the transaction that creates a Space, once it is written. */
   spaceCreated(transaction: BillingTransaction, input: { spaceId: string; now: string }): Promise<void>;
   /** Called before a Space is marked deleted; a rejection blocks deletion. */
   spaceDeletion(
@@ -64,10 +75,11 @@ export interface SpaceBillingPolicy {
   readonly message: MessageAdmission;
 }
 
-/** Nothing is metered: every member and message is admitted. */
+/** Nothing is metered: every Space, member and message is admitted. */
 export const spaceBilling: SpaceBillingPolicy = {
   id: "unmetered",
   metered: false,
+  async spaceCreation() { return null; },
   async spaceCreated() {},
   async spaceDeletion() { return null; },
   async seatAdmission() { return null; },
