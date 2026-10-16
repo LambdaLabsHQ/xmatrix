@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
 
+import { loadProfile, renderComponent, resolveProfile } from "./deploy-config.mjs";
 import {
   PRODUCTION_POSTGRES_AUTHORITY_SELECTORS,
   readProductionHyperdriveProvider,
@@ -42,6 +43,7 @@ bindings = [
   { name = "RELAY_RUNTIME_ROUTE_DIRECTORY", class_name = "A" },
   { name = "RELAY_RUNTIME_CHANNEL_FANOUT", class_name = "A" },
   { name = "GITHUB_SUBSCRIPTION_INDEX", class_name = "A" },
+  { name = "RELAY_X_UPLOAD_EXECUTOR", class_name = "A" },
   { name = "DEVICE_AUTH", class_name = "A" }
 ]
 [[hyperdrive]]
@@ -76,6 +78,21 @@ function readback(binding) {
 test("production config selects PostgreSQL for every fact domain", () => {
   assert.deepEqual(verifyProductionPostgresConfig(config()).hyperdrives, ids);
   assert.throws(() => verifyProductionPostgresConfig(`${config()}\n[[hyperdrive]]\nbinding = "RELAY_POSTGRES_CACHED"\nid = "${"2".repeat(32)}"`), /exactly two uncached Hyperdrive bindings/u);
+});
+
+test("rendered production config passes the release authority policy", async () => {
+  // Exercise the committed profile and product bindings together: a copied
+  // fixture cannot catch a newly added executor missing from the retained set.
+  const profile = resolveProfile(await loadProfile("production"), {
+    CLOUDFLARE_ACCOUNT_ID: "a".repeat(32),
+    XMATRIX_HYPERDRIVE_ID: ids.RELAY_POSTGRES,
+    XMATRIX_HYPERDRIVE_SHARD_1_ID: ids.RELAY_POSTGRES_SHARD_1,
+    XMATRIX_PLATFORM_ADMIN_EMAILS: "admin@example.test",
+    XMATRIX_PLATFORM_ADMIN_SPACE_ID: "00000000-0000-4000-8000-000000000001",
+    XMATRIX_RUNTIME_LOCATION_HINT: "apac",
+  });
+  const source = await renderComponent("hub", profile);
+  assert.deepEqual(verifyProductionPostgresConfig(source).hyperdrives, ids);
 });
 
 test("production config rejects unterminated comments without hanging the release", () => {

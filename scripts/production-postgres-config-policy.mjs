@@ -39,6 +39,8 @@ const RETAINED_DO_BINDINGS = Object.freeze([
   "RELAY_RUNTIME_ROUTE_DIRECTORY", "RELAY_RUNTIME_CHANNEL_FANOUT", "DEVICE_AUTH",
   // A per-installation cache of subscribed GitHub sources, rebuilt from PostgreSQL; never an authority.
   "GITHUB_SUBSCRIPTION_INDEX",
+  // Scoped upload scheduling and recovery; frozen actions and outcomes stay in PostgreSQL.
+  "RELAY_X_UPLOAD_EXECUTOR",
 ]);
 
 function parseConfig(source) {
