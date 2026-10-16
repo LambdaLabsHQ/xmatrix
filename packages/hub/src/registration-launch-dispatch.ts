@@ -32,15 +32,18 @@ async function channelLaunchRepository(input: { database: AuthorityDatabase; dir
     input.env ? registrationRepositoryCatalog(input.env, input.database, placement.spaceId) : undefined) };
 }
 
+/** Jev for one launch decision, in the Space its Channel is placed in. */
+type LaunchEvaluator = (spaceId: string) => RoutingEvaluator;
+
 export async function executeRegistrationLaunchDispatch(input: {
-  env?: AppConnectorEnv; database: AuthorityDatabase; directory: AuthorityDatabase; evaluate?: RoutingEvaluator;
+  env?: AppConnectorEnv; database: AuthorityDatabase; directory: AuthorityDatabase; evaluatorFor?: LaunchEvaluator;
   commandId: string; actorUserId: string; channelId: string; sourceMessageId: string; body: string;
   /** The author's "launch anyway" for one summon Jev read as a non-request. */
   forceMention?: string;
   draftIntents?: DraftSummonIntent[];
 }) {
   const { placement, repository } = await channelLaunchRepository(input);
-  const result = await repository.dispatchFromMessage(input, input.evaluate ? registrationLaunchChooser(input.evaluate, registrationLaunchContextReader({
+  const result = await repository.dispatchFromMessage(input, input.evaluatorFor ? registrationLaunchChooser(input.evaluatorFor(placement.spaceId), registrationLaunchContextReader({
     ...input, spaceId: placement.spaceId,
   })) : undefined);
   if (result.rejected.length) {
@@ -74,10 +77,10 @@ interface RegistrationInputRequest {
 /** Launch from any input. Jev chooses among every authorized registration in
  * the Channel's Space; no source message is required. */
 export async function executeRegistrationInputDispatch(input: RegistrationInputRequest & {
-  env?: AppConnectorEnv; database: AuthorityDatabase; directory: AuthorityDatabase; evaluate: RoutingEvaluator;
+  env?: AppConnectorEnv; database: AuthorityDatabase; directory: AuthorityDatabase; evaluatorFor: LaunchEvaluator;
 }) {
   const { placement, repository } = await channelLaunchRepository(input);
-  const prepared = await repository.dispatchInput(input, registrationLaunchChooser(input.evaluate));
+  const prepared = await repository.dispatchInput(input, registrationLaunchChooser(input.evaluatorFor(placement.spaceId)));
   return { ...prepared, shardId: placement.shardId, channelId: input.channelId };
 }
 
@@ -113,13 +116,13 @@ export interface FirstMessageDecision { claimed: boolean; harness?: string }
  * decided harness is summoned by an ordinary `@<harness>` message.
  */
 export async function executeFirstMessageDecision(input: {
-  env?: AppConnectorEnv; database: AuthorityDatabase; directory: AuthorityDatabase; evaluate: RoutingEvaluator;
+  env?: AppConnectorEnv; database: AuthorityDatabase; directory: AuthorityDatabase; evaluatorFor: LaunchEvaluator;
   commandId: string; actorUserId: string; channelId: string; messageId: string; body: string;
   /** The author is a Human, who may choose first. */
   window: boolean;
 }): Promise<FirstMessageDecision> {
   const { placement, repository } = await channelLaunchRepository(input);
-  const choose = registrationLaunchChooser(input.evaluate);
+  const choose = registrationLaunchChooser(input.evaluatorFor(placement.spaceId));
   const read = (onHarness?: (harness: string) => Promise<void>) => repository.readHarnessToStart({
     actorUserId: input.actorUserId, body: input.body, ...(onHarness ? { onHarness } : {}) }, choose);
   // Both authors persist the same decision before the system summon can be
@@ -207,10 +210,10 @@ export function prepareRegistrationReborn(env: Env, input: {
 export function decideNewConversationLaunch(env: Env, input: {
   commandId: string; actorUserId: string; channelId: string; messageId: string; body: string; window: boolean;
 }) {
-  const evaluate = jevEvaluator(env, { actorUserId: input.actorUserId, channelId: input.channelId,
-    sourceMessageId: input.commandId, invocationId: input.commandId });
-  if (!evaluate) throw new RegistrationAccessError("registration_selection_unconfigured", 503);
-  return executeFirstMessageDecision({ ...runtimePlacement(env), evaluate, ...input });
+  const evaluatorFor = jevEvaluator(env, { feature: "start_intent", actorUserId: input.actorUserId,
+    channelId: input.channelId, sourceMessageId: input.commandId, invocationId: input.commandId });
+  if (!evaluatorFor) throw new RegistrationAccessError("registration_selection_unconfigured", 503);
+  return executeFirstMessageDecision({ ...runtimePlacement(env), evaluatorFor, ...input });
 }
 
 /** Hub-side caller for any-input launches; wakes the daemon after the durable prepare. */
@@ -218,10 +221,10 @@ export async function dispatchRegistrationInput(input: RegistrationInputRequest 
   env: Env;
 }): Promise<RegistrationInputLaunch> {
   const { env, ...request } = input;
-  const evaluate = jevEvaluator(env, { actorUserId: request.actorUserId, channelId: request.channelId,
-    sourceMessageId: request.commandId, invocationId: request.commandId });
-  if (!evaluate) throw new RegistrationAccessError("registration_selection_unconfigured", 503);
-  const result = await executeRegistrationInputDispatch({ ...runtimePlacement(env), evaluate, ...request }) as
+  const evaluatorFor = jevEvaluator(env, { feature: "input_launch", actorUserId: request.actorUserId,
+    channelId: request.channelId, sourceMessageId: request.commandId, invocationId: request.commandId });
+  if (!evaluatorFor) throw new RegistrationAccessError("registration_selection_unconfigured", 503);
+  const result = await executeRegistrationInputDispatch({ ...runtimePlacement(env), evaluatorFor, ...request }) as
     RegistrationInputLaunch & { shardId?: string };
   // The launch is answered only once its Channel's coordinator owns it; the
   // caller's retry of the same command recovers the prepare and wakes again.
@@ -296,8 +299,8 @@ type MessageLaunchDependencies = {
 function launchFromMessage(input: MessageLaunch): Promise<MessageLaunchResult> {
   const { env, messageId, ...launch } = input;
   return executeRegistrationLaunchDispatch({ ...runtimePlacement(env), ...launch, sourceMessageId: messageId,
-    evaluate: jevEvaluator(env, { actorUserId: input.actorUserId, channelId: input.channelId,
-      sourceMessageId: messageId, invocationId: input.commandId }) });
+    evaluatorFor: jevEvaluator(env, { feature: "launch_choice", actorUserId: input.actorUserId,
+      channelId: input.channelId, sourceMessageId: messageId, invocationId: input.commandId }) });
 }
 
 /** One registration dispatch from a stored message, then the daemon wake for

@@ -44,6 +44,12 @@ reminder and trusted registration instructions at thread start and resume.
 Grok's trusted rules exclude Channel history and task bodies. See
 [Agent prompts](../../packages/cli-rs/crates/core/prompts/README.md).
 
+Operator-paid calls are metered per Space: each Jev call (by feature, with its
+reported tokens) and each Composio and X call (by connector, action and
+operation) is one Analytics Engine datapoint of ids, enums and numbers, written
+without awaiting and off when the binding is absent. See
+[usage cost metering](../operations/usage-cost-metering.md).
+
 OAuth callbacks whose state cannot recover a per-flow error URL return to the
 deployment's login page. Error redirects are failed callback metrics, and Google
 session creation requires an issued session cookie. See

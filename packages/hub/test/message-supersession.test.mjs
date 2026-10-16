@@ -70,7 +70,7 @@ function harness(window, probability, recorded = (request) => request) {
     input: (latest) => ({
       env: {}, channelId: "ch-1", messageId: latest.messageId, sequence: latest.sequence,
       principal: { kind: "agent", id: "agent:claude" },
-      history: async () => ({ messages: window }),
+      history: async () => ({ spaceId: "space-1", messages: window }),
       evaluate: async (request) => {
         calls.evaluate.push(request);
         return { answers: { superseded: { type: "boolean", probability } } };

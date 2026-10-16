@@ -622,18 +622,29 @@ export async function postgresMessageReceipt(
     runProof: input.runProof, expectedBodyHash: input.expectedBodyHash });
 }
 
+type PostgresMessageHistoryInput = {
+  channelId: string;
+  before?: string;
+  beforeSequence?: number;
+  afterSequence?: number;
+  limit?: number;
+  principal: AuthorityPrincipal;
+};
+
 export async function postgresMessageHistory(
   env: Env,
-  input: {
-    channelId: string;
-    before?: string;
-    beforeSequence?: number;
-    afterSequence?: number;
-    limit?: number;
-    principal: AuthorityPrincipal;
-  },
+  input: PostgresMessageHistoryInput,
   dependencies: PostgresMessageDependencies = {},
 ): Promise<Record<string, unknown>> {
+  return (await postgresMessageHistoryInSpace(env, input, dependencies)).history;
+}
+
+/** A history page and the Space its Channel is placed in, which the read resolves anyway. */
+export async function postgresMessageHistoryInSpace(
+  env: Env,
+  input: PostgresMessageHistoryInput,
+  dependencies: PostgresMessageDependencies = {},
+): Promise<{ spaceId: string; history: Record<string, unknown> }> {
   // The Channel's route and its Space placement arrive in one directory read;
   // the page read still takes that placement's fence and checks the reader.
   const actor = principal(input.principal);
@@ -670,7 +681,7 @@ export async function postgresMessageHistory(
     pageBytes += bytes;
   }
   const messages = forward ? selected : selected.slice().reverse();
-  return {
+  return { spaceId, history: {
     channelId,
     messages,
     hasMore: result.hasMore || selected.length < candidates.length,
@@ -683,7 +694,7 @@ export async function postgresMessageHistory(
       admissibleForSteadyState: true,
       canCompleteWithoutLongLivedProjection: true,
     },
-  };
+  } };
 }
 
 function postgresProductThreadSummary(value: unknown): Record<string, unknown> | undefined {

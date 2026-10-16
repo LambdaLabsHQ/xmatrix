@@ -70,6 +70,10 @@ dataset = "xmatrix_diagnostics_test"
 binding = "RELAY_AUTHORITY_OBSERVABILITY_AE"
 dataset = "xmatrix_relay_authority_observability_test"
 
+[[analytics_engine_datasets]]
+binding = "XMATRIX_USAGE_COST_AE"
+dataset = "xmatrix_usage_cost_test"
+
 [version_metadata]
 binding = "CF_VERSION_METADATA"
 

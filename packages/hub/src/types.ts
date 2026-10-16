@@ -118,6 +118,12 @@ export interface Env {
    * profile and its query contract. Absent binding means observation is off.
    */
   RELAY_AUTHORITY_OBSERVABILITY_AE?: AnalyticsEngineDataset;
+  /**
+   * Operator-paid usage per Space: one point per Jev, Composio or X call
+   * (usage-cost-metering.ts). Its own dataset because it indexes on the Space
+   * id. Absent binding means metering is off.
+   */
+  XMATRIX_USAGE_COST_AE?: AnalyticsEngineDataset;
   /** Per-credential request allowance (Workers Rate Limiting). Absent: unlimited. */
   RATE_LIMIT_CREDENTIAL?: RequestRateLimiter;
   /** Per-client-IP allowance for requests without a credential. */

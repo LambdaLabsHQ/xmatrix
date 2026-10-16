@@ -303,6 +303,11 @@ like every other action, so everyone who can read the Channel reads the mail.
 Read mail in a Channel only the people who may see it are in. Search is
 `@gmail:search:* <Gmail query>` or `@gmail:search:<connected mailbox> <Gmail query>`.
 
+Gmail calls go through Composio on the shared project key, which the operator
+pays for. Each Composio call (proxied Gmail reads and sends, Connect links,
+account lookups and deletions) is metered to its Space and Hub action, without
+mail, addresses or account ids; see [usage cost metering](usage-cost-metering.md).
+
 ### QA login codes
 
 Do not search for or read login codes with Gmail actions when the QA contract
