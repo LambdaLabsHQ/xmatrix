@@ -52,7 +52,7 @@ function replay(
     () => new BillingControlError("idempotency_conflict", 409, "command id was reused"));
 }
 
-async function commit(
+export async function commitBillingMutation(
   tx: DatabaseTransaction,
   input: { spaceId: string; commandId: string; kind: string; requestDigest: string;
     result: Record<string, unknown>; aggregateId: string; now: string },
@@ -375,7 +375,7 @@ export class PostgresBillingRepository {
         result = { intent: { id: intentId, spaceId, interval: input.interval,
           seatQuantity: input.seatQuantity, expiresAt } };
       }
-      await commit(tx, { spaceId, commandId, kind: "billing-create-checkout-intent",
+      await commitBillingMutation(tx, { spaceId, commandId, kind: "billing-create-checkout-intent",
         requestDigest, result, aggregateId: intentId, now });
       return result;
     });
@@ -441,7 +441,7 @@ export class PostgresBillingRepository {
         });
         result = { recorded: true };
       }
-      await commit(tx, { spaceId, commandId, kind: "billing-record-checkout-session",
+      await commitBillingMutation(tx, { spaceId, commandId, kind: "billing-record-checkout-session",
         requestDigest, result, aggregateId: intentId, now });
       return result;
     });
@@ -480,7 +480,7 @@ export class PostgresBillingRepository {
         values: [intentId, now], maxRows: 0,
       });
       const result = active ? { abandoned: true } : { abandoned: false, replayed: true };
-      await commit(tx, { spaceId, commandId, kind: "billing-abandon-checkout-intent",
+      await commitBillingMutation(tx, { spaceId, commandId, kind: "billing-abandon-checkout-intent",
         requestDigest, result, aggregateId: intentId, now });
       return result;
     });
@@ -551,7 +551,7 @@ export class PostgresBillingRepository {
           "Billing event id was replayed with different contents",
         );
         const result = { replayed: true, ...(await summary(tx, spaceId, ownerUserId)) };
-        await commit(tx, { spaceId, commandId, kind: "billing-apply-provider-event",
+        await commitBillingMutation(tx, { spaceId, commandId, kind: "billing-apply-provider-event",
           requestDigest, result, aggregateId: providerEventId, now });
         return result;
       }
@@ -631,7 +631,7 @@ export class PostgresBillingRepository {
         });
         result = { applied: true, ...(await summary(tx, spaceId, ownerUserId)) };
       }
-      await commit(tx, { spaceId, commandId, kind: "billing-apply-provider-event",
+      await commitBillingMutation(tx, { spaceId, commandId, kind: "billing-apply-provider-event",
         requestDigest, result, aggregateId: providerEventId, now });
       return result;
     });

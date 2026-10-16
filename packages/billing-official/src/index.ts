@@ -167,7 +167,7 @@ function creditsExhausted(now: string): BillingRejection {
   return {
     code: "credits_exhausted", status: 402,
     message: `This Space has used this month's Agent credits; Agents and apps can write again on ${nextPeriod(now)}, ` +
-      "or sooner once the owner adds seats. People can still write",
+      "or sooner once the owner adds seats or buys a credit pack. People can still write",
     details: { resumesOn: nextPeriod(now) },
   };
 }
@@ -188,12 +188,12 @@ function creditNotice(row: Record<string, unknown>): BillingNotice | null {
   const where = "Settings → Billing";
   const body = level >= 3
     ? `This Space has used this month's Agent credits and their grace. Agent and app ` +
-      `messages and page edits are paused until ${nextPeriod(`${period}T00:00:00Z`)} unless the owner adds seats ` +
+      `messages and page edits are paused until ${nextPeriod(`${period}T00:00:00Z`)} unless the owner buys a credit pack or adds seats ` +
       `in ${where}. People can still write.`
     : level === 2
       ? `This Space has used all ${included} Agent credits included this month. Agents keep working on ` +
         `${packs > 0 ? `${packs.toLocaleString("en-US")} credit pack credits, then ` : ""}a grace of ${grace} ` +
-        `credits; add seats in ${where} to keep them running after that.`
+        `credits; buy a credit pack or add seats in ${where} to keep them running after that.`
       : `This Space has used ${used} of the ${included} Agent credits included this month. Each message or ` +
         `page revision by an Agent or app uses one credit; people write for free. See ${where}.`;
   return { key: `credits:${period}:${level}`, body };
@@ -274,6 +274,11 @@ export const spaceBilling: SpaceBillingPolicy = {
         message: "Complete or let the active billing checkout expire before deletion",
       };
     }
+    const pendingPacks = await transaction.query({ name: "official_space_delete_credit_pack_v1",
+      text: `SELECT purchase_id FROM data.space_credit_purchases WHERE space_id=$1
+        AND status IN ('pending','created') AND expires_at>$2 LIMIT 1`, values: [spaceId, now], maxRows: 1 });
+    if (pendingPacks[0]) return { code: "conflict", status: 409,
+      message: "Complete or let the active credit pack checkout expire before deletion" };
     return null;
   },
 

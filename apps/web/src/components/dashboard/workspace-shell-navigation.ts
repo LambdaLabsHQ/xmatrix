@@ -349,8 +349,9 @@ export function toolItemPath(viewPath: string, item: string | null): string {
 }
 
 /**
- * Platform admin's address also names its open user and each table's search,
- * sort, and page, so a filtered view can be shared: it keeps its whole query.
+ * Admin/search filters and Settings' provider return parameters live in the
+ * query. Canonicalizing their Space path must preserve those parameters until
+ * the owning view consumes them.
  */
 export function adminViewPath(viewPath: string, location: string): string {
   const query = parseAppLocation(location).searchParams.toString();
