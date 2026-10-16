@@ -679,6 +679,17 @@ test("a resting Agent caret is not reported as present once its moment has passe
   }
 });
 
+test("Agents of one harness writing from different conversations are each on the page", async () => {
+  const h = harness();
+  await annConnected(h);
+  const other = { ...agent, id: "agent-2", conversationId: "conv-2", runProof: { ...agent.runProof, runId: "r2" } };
+  h.session.agentViewing(agent, "status");
+  h.session.agentViewing(other, "notes");
+  assert.deepEqual(h.session.present().filter((person) => person.kind === "agent")
+    .map(({ name, conversationId, blockId }) => [name, conversationId, blockId]),
+  [[agent.label, "conv-1", "status"], [agent.label, "conv-2", "notes"]]);
+});
+
 test("reading another section moves an Agent's section, not the caret it left at its edit", async () => {
   const h = harness();
   const ann = await annConnected(h);
@@ -1250,7 +1261,7 @@ async function annWithStreamingWriter() {
   const ann = await annConnected(h);
   const writer = joinCoWriter(h, "w-agent", { streams: true });
   writer.open(1);
-  return { ann, writer };
+  return { h, ann, writer };
 }
 
 test("an Agent writing from its conversation hears what did not reach the page, and why", async () => {
@@ -1307,4 +1318,21 @@ test("a co-writer's words reach the page at most every so often while they strea
   writer.write(1, " four");
   writer.done(1);
   assert.match(ann.text.toString(), /\nOne two three four\n$/u, "the end writes what is left at once");
+});
+
+test("what a co-writing Agent wrote is named with its presence, and stays marked after it leaves", async () => {
+  const { h, ann, writer } = await annWithStreamingWriter();
+  writer.write(1, "⟦after \"none\"⟧\nA line the Agent wrote\n");
+  writer.done(1);
+  const written = (state) => (state.wrote ?? []).map((change) => {
+    const from = Y.createAbsolutePositionFromRelativePosition(Y.createRelativePositionFromJSON(change.from), ann.doc);
+    return from?.type.toString();
+  });
+  assert.deepEqual(written(coWriterOf(ann)), ["A line the Agent wrote"], "its presence names the paragraph it wrote");
+  assert.equal(coWriterOf(ann).undo, true);
+  h.session.disconnect("w-agent");
+  const left = coWriterOf(ann);
+  assert.equal(left?.activity, "watching", "its caret rests at its change");
+  assert.deepEqual(written(left), ["A line the Agent wrote"], "and what it wrote stays marked");
+  assert.equal(left.undo, undefined, "nothing can be taken back from a writer that has left");
 });

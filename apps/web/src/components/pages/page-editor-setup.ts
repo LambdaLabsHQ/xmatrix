@@ -1,3 +1,4 @@
+import { PAGE_AGENT_INK_MS } from "@xmatrix/protocol";
 import {
   markdownToPageDoc, pageDocBlockAt, pageDocBlocks, pageDocChanges, pageSchema,
 } from "@xmatrix/protocol/page-document";
@@ -766,7 +767,9 @@ interface RemoteChange { client: number; from: Y.RelativePosition; to: Y.Relativ
 export const REMOTE_CHANGE_MS = 4000;
 /**
  * An Agent's change stays marked far longer, over its whole paragraph, as a highlighter marks it: whoever
- * looks up from their own typing still sees what it wrote and where.
+ * looks up from their own typing still sees what it wrote and where. Its presence names what it wrote, so
+ * the mark lasts PAGE_AGENT_INK_MS, also for whoever opens the page meanwhile; an Agent whose presence does
+ * not is marked from the words that arrived, this long.
  */
 export const AGENT_CHANGE_MS = 20_000;
 const remoteChangesKey = new PluginKey<DecorationSet>("page-remote-changes");
@@ -806,20 +809,39 @@ function remoteChangeDecorations(state: EditorState, fragment: Y.XmlFragment, aw
   if (!mapping || !fragment.doc) return DecorationSet.empty;
   const decorations: Decoration[] = [];
   // Each paragraph an Agent is writing or just wrote, highlighted whole in its colour: steady while its
-  // caret is there writing, then held for AGENT_CHANGE_MS after its last word before it fades.
-  const inked = new Map<number, { to: number; color: string; client: number; at: number | null }>();
-  const ink = (range: { from: number; to: number } | null, client: number, color: string, at: number | null) => {
+  // caret is there writing, then held for PAGE_AGENT_INK_MS after its last word before it fades.
+  const inked = new Map<number, { to: number; color: string; client: number; at: number | null; brief: boolean }>();
+  const ink = (range: { from: number; to: number } | null, client: number, color: string, at: number | null,
+    brief = false) => {
     if (!range) return;
     const had = inked.get(range.from);
     if (had && (had.at === null || (at !== null && had.at >= at))) return;
-    inked.set(range.from, { to: range.to, color, client, at });
+    inked.set(range.from, { to: range.to, color, client, at, brief });
   };
+  // Agents whose presence names what they wrote: their marks come from it, for whoever opens the page too.
+  const naming = new Set<number>();
   for (const [clientId, raw] of awareness.getStates()) {
-    const present = raw as { user?: RemoteUser; activity?: unknown; cursor?: { head?: unknown } | null };
+    const present = raw as { user?: RemoteUser; activity?: unknown; cursor?: { head?: unknown } | null; wrote?: unknown };
     if (clientId === awareness.clientID || present.user?.kind !== "agent" || !present.user.color) continue;
+    const color = present.user.color;
+    if (Array.isArray(present.wrote)) {
+      naming.add(clientId);
+      for (const change of present.wrote as Array<{ from?: unknown; to?: unknown; at?: unknown }>) {
+        if (typeof change.at !== "number" || now - change.at >= PAGE_AGENT_INK_MS) continue;
+        const from = anchorPosition(state, fragment, change.from);
+        const to = anchorPosition(state, fragment, change.to);
+        if (from === null || to === null || to < from) continue;
+        const at = change.at;
+        state.doc.nodesBetween(from, Math.min(to + 1, state.doc.content.size), (node, pos) => {
+          if (!node.isTextblock) return true;
+          if (node.content.size) ink({ from: pos + 1, to: pos + node.nodeSize - 1 }, clientId, color, at);
+          return false;
+        });
+      }
+    }
     if (present.activity !== "writing" || !present.cursor?.head) continue;
     const at = anchorPosition(state, fragment, present.cursor.head);
-    if (at !== null) ink(textblockAt(state, at), clientId, present.user.color, null);
+    if (at !== null) ink(textblockAt(state, at), clientId, color, null);
   }
   for (const change of changes) {
     const user = remoteUser(awareness, change.client);
@@ -834,7 +856,9 @@ function remoteChangeDecorations(state: EditorState, fragment: Y.XmlFragment, aw
     };
     const from = resolve(change.from);
     if (from === null || from >= state.doc.content.size) continue;
-    if (user.kind === "agent") ink(textblockAt(state, change.node ? from + 1 : from), change.client, user.color, change.at);
+    if (user.kind === "agent" && !naming.has(change.client)) {
+      ink(textblockAt(state, change.node ? from + 1 : from), change.client, user.color, change.at, true);
+    }
     // An Agent's new block is marked by the ink over its paragraph, not tinted whole as well.
     if (now - change.at >= REMOTE_CHANGE_MS || (change.node && user.kind === "agent")) continue;
     const attrs: Record<string, string> = { class: "page-remote-change", "data-client": String(change.client),
@@ -851,9 +875,9 @@ function remoteChangeDecorations(state: EditorState, fragment: Y.XmlFragment, aw
     const to = resolve(change.to);
     if (to !== null && to > from && to <= state.doc.content.size) decorations.push(Decoration.inline(from, to, attrs));
   }
-  for (const [from, { to, color, client, at }] of inked) {
+  for (const [from, { to, color, client, at, brief }] of inked) {
     const style = `--page-change-color: ${color}${at === null ? "" : `; --page-ink-delay: -${Math.max(0, now - at)}ms`}`;
-    const state = at === null ? " is-writing" : "";
+    const state = at === null ? " is-writing" : brief ? " is-brief" : "";
     decorations.push(Decoration.inline(from, to, { class: `page-agent-ink${state}`, "data-client": String(client), style }));
     // Barred in the margin in its colour too, as a change waiting on the reader is.
     decorations.push(Decoration.node(from - 1, to + 1, { class: `page-agent-block${state}`, style }));
