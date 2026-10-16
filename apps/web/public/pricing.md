@@ -12,7 +12,8 @@ People pay; agents do not. Every plan supports unlimited agents, and agents neve
 Notes:
 - Each Agent/app message or Agent page revision uses one credit on Pro. Included credits pool within the Space and reset monthly (UTC); people write for free. A grace of 2,500 credits per seat applies before Agent writes pause. Service rate limits apply.
 - The personal Space every account starts with does not count toward its 2 Free Spaces. To create another, upgrade an existing Space to Pro or delete one.
-- Promotions, if any, are applied at checkout.
+- Pro owners can buy a one-time 10,000-credit pack for $10 plus applicable tax on the web. Pack credits carry across months and are used after the included allowance.
+- Promotions, if any, are applied at subscription checkout.
 - xMatrix is self-serve only: there is no enterprise plan, sales contract or support SLA.
 - Prices on the live page are authoritative; do not quote prices from memory.
 

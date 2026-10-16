@@ -45,7 +45,7 @@ cost is still visible in per-Space cost metering.
   included allowance (2,500 per seat), so a busy month never stops work without
   warning.
 - After the grace, writes by Agents and apps are refused with
-  `402 credits_exhausted` until the next month, more seats, or a pack. People can
+  `402 credits_exhausted` until the next month or a pack. People can
   still write, and everything can still be read.
 
 Order of use for each charged write: included → pack → grace → refused.
@@ -83,9 +83,52 @@ Settings → Billing shows the month's usage, the pack balance and the grace.
   A write in a new month resets the counters in the same upsert. Seats come from
   `data.space_billing_subscriptions.seat_quantity`.
 
+## Pack purchases
+
+The Space owner buys one 10,000-credit pack for $10 (plus applicable tax) in
+Settings → Billing on the web. A current active/trialing Pro subscription is
+required. Prices and credit quantities come only from the server policy and
+its purchase row, never request parameters. Packs are a one-time card payment;
+they do not change or renew the subscription. They never expire while the
+Space exists and can be used again if a lapsed subscription returns to Pro.
+
+`data.space_credit_purchases` moves and purges with the Space. It stores the
+checkout intent, fixed USD price, owner, provider session and permanent
+settlement status. One pending checkout per Space is reused across retries;
+the purchase id is Stripe's idempotency key. An active checkout blocks Space
+deletion until it completes or expires.
+
+Both the signed webhook and the owner's browser return re-read Checkout from
+Stripe. Only a complete paid payment-mode session with the expected currency,
+subtotal, Space, owner and purchase identity may settle. The purchase row lock,
+pack balance increment and permanent completed receipt commit together. A
+webhook racing the checkout endpoint, concurrent browser reconciliation and
+replays after normal idempotency records expire cannot add the pack twice.
+Refunds and disputes retain the existing manual reconciliation process; do
+not remove already spent credits automatically.
+
+The existing restricted Stripe key needs Checkout Session read/write and
+Price read and permission for inline prices on the existing xMatrix product;
+there is no new stored secret
+or recurring charge to the operator. Missing permissions fail checkout and
+never add credits. Verify the deployed checkout without completing a real
+payment, then use Stripe's payment evidence for any customer settlement.
+API behavior follows [Stripe Checkout](https://docs.stripe.com/api/checkout/sessions/create).
+
 ## Not in scope
 
 - Charging for Jev calls, connector calls or launches separately. They are
   covered by the messages they produce; per-Space metering shows whether that
   stays true.
 - Selling packs in the iOS app. Packs are bought on the web.
+
+## Seat changes
+
+The official Stripe portal currently disables subscription updates. New Pro
+checkout can choose 1–99 seats, but existing subscriptions cannot self-serve a
+mid-cycle increase. Credit exhaustion therefore points to a pack or the next
+month, rather than promising an unavailable seat-upgrade action. Keep portal
+updates disabled until included credits follow a defined proration/settlement
+contract: granting a whole calendar month's extra credits for a small
+end-of-period seat supplement would break the cost bound. A provider-side seat
+change remains an operator billing operation, not a public quota shortcut.
