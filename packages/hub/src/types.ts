@@ -28,6 +28,8 @@ export interface Env {
   /** One Agent Launch coordinator per Channel, addressed by Channel id. */
   RELAY_POSTGRES_AGENT_LAUNCH_CHANNEL?: DurableObjectNamespace;
   GITHUB_SUBSCRIPTION_INDEX?: DurableObjectNamespace<import("./github-subscription-index").GitHubSubscriptionIndex>;
+  /** One reference-only durable executor per approved X video upload. */
+  RELAY_X_UPLOAD_EXECUTOR?: DurableObjectNamespace<import("./connectors/x-upload-executor-do").RelayXUploadExecutor>;
   /** Per-shard permits bounding concurrent background passes; holds no work. */
   RELAY_POSTGRES_BACKGROUND_ADMISSION?: DurableObjectNamespace;
   /** Concurrent Channel coordinator passes admitted per PostgreSQL shard (default 8). */

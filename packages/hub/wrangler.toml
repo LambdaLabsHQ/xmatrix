@@ -49,7 +49,8 @@ bindings = [
   { name = "RELAY_RUNTIME_ROUTE_DIRECTORY", class_name = "RelayRuntimeRouteDirectory" },
   { name = "RELAY_RUNTIME_CHANNEL_FANOUT", class_name = "RelayRuntimeChannelFanout" },
   { name = "DEVICE_AUTH", class_name = "DeviceAuthBroker" },
-  { name = "GITHUB_SUBSCRIPTION_INDEX", class_name = "GitHubSubscriptionIndex" }
+  { name = "GITHUB_SUBSCRIPTION_INDEX", class_name = "GitHubSubscriptionIndex" },
+  { name = "RELAY_X_UPLOAD_EXECUTOR", class_name = "RelayXUploadExecutor" }
 ]
 
 [[send_email]]
@@ -337,6 +338,11 @@ new_sqlite_classes = ["RelayRuntimeChannelFanout"]
 [[migrations]]
 tag = "v43"
 new_sqlite_classes = ["GitHubSubscriptionIndex"]
+
+# Per-upload durable execution; approved input and encrypted receipts stay in PostgreSQL.
+[[migrations]]
+tag = "v44"
+new_sqlite_classes = ["RelayXUploadExecutor"]
 
 # Official Agent prompt documents are bundled with the Hub deployment.
 [[rules]]
