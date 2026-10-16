@@ -22,7 +22,7 @@ type Latest = NonNullable<NonNullable<AgentPreset["management"]>["latest"]>;
 export function latestVersionUrl(latest: Latest): string | undefined {
   if (!PACKAGE.test(latest.package)) return undefined;
   return latest.kind === "npm"
-    ? `https://registry.npmjs.org/${latest.package.replace("/", "%2f")}/latest`
+    ? `https://registry.npmjs.org/${latest.package.replaceAll("/", "%2f")}/latest`
     : `https://pypi.org/pypi/${latest.package}/json`;
 }
 

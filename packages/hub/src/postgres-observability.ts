@@ -1,4 +1,4 @@
-import { analyticsPointDuration as safeDuration } from "./analytics-sampling";
+import { analyticsPointDuration as safeDuration, sampledAnalyticsPoint } from "./analytics-sampling";
 import type {
   DatabaseObservation,
   DatabaseObserver,
@@ -163,8 +163,7 @@ function retention(rate: number, outcome: string, slow: boolean): { reason: stri
   if (outcome !== "ok") return { reason: "error", weight: 1 };
   if (slow) return { reason: "slow", weight: 1 };
   if (rate === 1) return { reason: "all", weight: 1 };
-  const value = crypto.getRandomValues(new Uint32Array(1))[0] ?? 0;
-  return value % rate === 0 ? { reason: "sampled", weight: rate } : null;
+  return sampledAnalyticsPoint(rate) ? { reason: "sampled", weight: rate } : null;
 }
 
 function operationName(value: string): string {

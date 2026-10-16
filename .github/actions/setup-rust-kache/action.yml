@@ -16,7 +16,7 @@ runs:
         # installation inside rustup's documented low-memory floor.
         RUSTUP_CONCURRENT_DOWNLOADS: "1"
         RUSTUP_UNPACK_RAM: "220200960"
-      uses: dtolnay/rust-toolchain@1.96.0
+      uses: dtolnay/rust-toolchain@d86e0fa8f147d6539442c26a61ebba8becc19489 # 1.96.0
       with:
         components: clippy
 

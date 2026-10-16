@@ -30,3 +30,21 @@ export function replaceControlCharacters(value: string, replacement = "", keep =
   }
   return result;
 }
+
+/**
+ * `value` without the trailing run of any of `characters`. A loop, not
+ * `/[…]+$/`: that regex rescans every inner run and turns quadratic on
+ * hostile input.
+ */
+export function trimEnd(value: string, characters: string): string {
+  let end = value.length;
+  while (end > 0 && characters.includes(value[end - 1]!)) end -= 1;
+  return value.slice(0, end);
+}
+
+/** `value` without the leading or trailing run of any of `characters`. */
+export function trimEdges(value: string, characters: string): string {
+  let start = 0;
+  while (start < value.length && characters.includes(value[start]!)) start += 1;
+  return trimEnd(value.slice(start), characters);
+}

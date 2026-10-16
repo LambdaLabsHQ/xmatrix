@@ -1,4 +1,4 @@
-import type { SerializedWorkspace } from "@xmatrix/protocol";
+import { trimEnd, type SerializedWorkspace } from "@xmatrix/protocol";
 
 /** Stable UI key derived from the authoritative natural workspace identity. */
 export function workspaceKey(workspace: Pick<SerializedWorkspace, "machineId" | "canonicalCwd">): string {
@@ -34,6 +34,6 @@ function comparableWorkspacePath(value: string): string {
   const windowsLike = /^[a-zA-Z]:[\\/]/.test(trimmed) || /^\\\\\?\\[a-zA-Z]:\\/.test(trimmed);
   const withoutNamespace = trimmed.replace(/^\\\\\?\\/, "");
   return windowsLike
-    ? withoutNamespace.replace(/\//g, "\\").replace(/\\+$/g, "").toLowerCase()
-    : withoutNamespace.replace(/\/+$/g, "");
+    ? trimEnd(withoutNamespace.replace(/\//g, "\\"), "\\").toLowerCase()
+    : trimEnd(withoutNamespace, "/");
 }

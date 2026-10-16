@@ -552,9 +552,10 @@ export type {
 export { plainRecord, isPlainRecord } from "./plain-record.js";
 export { validRunTransition } from "./run-lifecycle.js";
 export { compareBytes, concatenateBytes } from "./bytes.js";
+export { dropHtmlElements, stripHtmlTags } from "./html-text.js";
 export { legacyCanonicalJson } from "./legacy-canonical-json.js";
 export {
-  hasControlCharacter, replaceControlCharacters, requireLowercaseSha256, requireSafeIntegerRange,
+  hasControlCharacter, replaceControlCharacters, requireLowercaseSha256, requireSafeIntegerRange, trimEdges, trimEnd,
 } from "./field-validation.js";
 export type {
   DesktopAgentPresetDiscoveryShape, DesktopAgentPresetInput, DesktopBadgeState,

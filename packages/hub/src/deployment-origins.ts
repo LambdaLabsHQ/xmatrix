@@ -1,3 +1,4 @@
+import { trimEnd } from "@xmatrix/protocol";
 import type { Env } from "./types";
 
 /**
@@ -6,7 +7,7 @@ import type { Env } from "./types";
  * sending people to another deployment's origins.
  */
 export function deploymentOrigin(value: string | undefined, label: string): URL {
-  const raw = value?.trim().replace(/\/+$/u, "") ?? "";
+  const raw = trimEnd(value?.trim() ?? "", "/");
   if (!raw) throw new Error(`${label} is not configured`);
   let parsed: URL;
   try {

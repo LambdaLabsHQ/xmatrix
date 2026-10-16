@@ -1196,10 +1196,10 @@ function flushPendingNotificationReplies() {
  * a missed message.
  */
 function askToNotifyOnce() {
-  const asked = path.join(app.getPath("userData"), "notifications-asked");
-  if (fs.existsSync(asked) || !Notification.isSupported()) return;
+  if (!Notification.isSupported()) return;
   try {
-    fs.writeFileSync(asked, new Date().toISOString());
+    // "wx" fails when the marker exists, so the question is asked only once.
+    fs.writeFileSync(path.join(app.getPath("userData"), "notifications-asked"), new Date().toISOString(), { flag: "wx" });
     new Notification({
       title: "xMatrix notifications are on",
       body: "You will be told here when something is addressed to you.",
@@ -2504,10 +2504,22 @@ function collectWorkspacePathsFromJson(value: unknown, output: Set<string>): voi
   }
 }
 
+/** The file's text, or "" when it is missing, unreadable or over `maxBytes`. */
+async function readSmallFile(filePath: string, maxBytes: number): Promise<string> {
+  const handle = await fs.promises.open(filePath, "r").catch(() => null);
+  if (!handle) return "";
+  try {
+    const { size } = await handle.stat();
+    return size > maxBytes ? "" : await handle.readFile("utf8");
+  } catch {
+    return "";
+  } finally {
+    await handle.close();
+  }
+}
+
 async function scanJsonWorkspaceFile(filePath: string, output: Set<string>): Promise<void> {
-  const stat = await fs.promises.stat(filePath).catch(() => null);
-  if (!stat || stat.size > 2_000_000) return;
-  const raw = await fs.promises.readFile(filePath, "utf8").catch(() => "");
+  const raw = await readSmallFile(filePath, 2_000_000);
   if (!raw) return;
   const isJsonl = filePath.endsWith(".jsonl");
   for (const line of raw.split(/\r?\n/).slice(0, 2_000)) {

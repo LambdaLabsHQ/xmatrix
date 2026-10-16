@@ -1,3 +1,4 @@
+import { trimEnd } from "./field-validation.js";
 import type { AgentTraceOrder } from "./trace-order.js";
 import type { AgentStatusChip } from "./agent-status-tags.js";
 import type { AgentRegistrationKey } from "./agent-registration.js";
@@ -796,7 +797,7 @@ export function parseLlmQuotaAccount(value: unknown): LlmQuotaAccount | undefine
 export type AgentSkill = "spec" | "plan" | "build" | "test" | "review" | "ship";
 
 export function normalizeHubUrl(input?: string | null): string {
-  const value = (input || DEFAULT_HUB_URL).trim().replace(/\/+$/, "");
+  const value = trimEnd((input || DEFAULT_HUB_URL).trim(), "/");
   if (value.startsWith("ws://")) {
     return `http://${value.slice("ws://".length)}`.replace(/\/ws$/, "");
   }

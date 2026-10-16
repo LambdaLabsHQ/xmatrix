@@ -632,10 +632,8 @@ export class DeviceAuthBroker extends DurableObject<Env> {
   }
 
   private generateUserCode(): string {
-    const chars = Array.from({ length: 8 }, () => {
-      const index = crypto.getRandomValues(new Uint32Array(1))[0] % USER_CODE_ALPHABET.length;
-      return USER_CODE_ALPHABET[index];
-    }).join("");
+    // The alphabet has exactly 32 symbols, so the low five bits pick one uniformly.
+    const chars = Array.from(crypto.getRandomValues(new Uint8Array(8)), (byte) => USER_CODE_ALPHABET[byte & 31]).join("");
 
     return `${chars.slice(0, 4)}-${chars.slice(4)}`;
   }

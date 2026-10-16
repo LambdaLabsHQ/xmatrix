@@ -11,6 +11,7 @@
 
 import { interactionMentionScanner } from "./message-interaction-grammar.js";
 import { agentPresetForLauncher } from "./agent-presets.js";
+import { trimEnd } from "./field-validation.js";
 /** Raw fragment so surfaces that embed the name in a larger pattern share this definition. */
 export const AGENT_NAME_SOURCE = "[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}";
 export const AGENT_NAME_PATTERN = new RegExp(`^${AGENT_NAME_SOURCE}$`, "u");
@@ -44,6 +45,31 @@ export function agentInvocationTailLength(tail: string): number | undefined {
     if (match) return match[0].length;
   }
   return undefined;
+}
+
+/**
+ * `<source>:<n>:handoff:@<successor>` split at its last `:handoff:` that
+ * reads so, as a greedy `/^(.*):([1-9]\d*):handoff:[@＠](.+)$/iu` would, but
+ * scanning back once instead of backtracking through every repetition.
+ */
+function splitHandoffTarget(target: string):
+  { sourceAgentName: string; channelInstanceId: number; successorName: string } | null {
+  if (/[\n\r\u2028\u2029]/u.test(target)) return null;
+  const marker = ":handoff:";
+  for (let at = target.length - marker.length; at >= 0; at -= 1) {
+    if (target.slice(at, at + marker.length).toLowerCase() !== marker) continue;
+    const successorStart = at + marker.length;
+    if (!"@＠".includes(target[successorStart] ?? "") || successorStart + 1 >= target.length) continue;
+    let digits = at;
+    while (digits > 0 && /\d/u.test(target[digits - 1]!)) digits -= 1;
+    if (digits === at || target[digits] === "0" || digits === 0 || target[digits - 1] !== ":") continue;
+    return {
+      sourceAgentName: target.slice(0, digits - 1).trim(),
+      channelInstanceId: Number(target.slice(digits, at)),
+      successorName: target.slice(successorStart + 1).trim(),
+    };
+  }
+  return null;
 }
 
 /**
@@ -138,7 +164,7 @@ export function repoSummonReference(value: string): string | undefined {
   if (scp) {
     const user = scp[1] || "";
     const host = scp[2]!;
-    const pathPart = scp[3]!.replace(/\.git$/iu, "").replace(/\/+$/u, "");
+    const pathPart = trimEnd(scp[3]!.replace(/\.git$/iu, ""), "/");
     if (!pathPart || /[@?#]/u.test(pathPart)) return undefined;
     // A remote reads as scp only with an owner/repo path and a recognisable
     // host. Without this, opaque `word:word` text such as `workspace:8ee40ca9`
@@ -169,7 +195,7 @@ export function repoSummonReference(value: string): string | undefined {
       const host = parsed.hostname.toLowerCase();
       if (!host) return undefined;
       const port = parsed.port ? `:${parsed.port}` : "";
-      const pathPart = parsed.pathname.replace(/\/+$/u, "").replace(/\.git$/iu, "");
+      const pathPart = trimEnd(parsed.pathname, "/").replace(/\.git$/iu, "");
       const segments = pathPart.split("/").filter(Boolean);
       if (segments.length < 2) return undefined;
 
@@ -187,8 +213,7 @@ export function repoSummonReference(value: string): string | undefined {
   }
 
   // Bare `owner/repo` shorthand.
-  const segments = trimmed
-    .replace(/\/+$/u, "")
+  const segments = trimEnd(trimmed, "/")
     .replace(/\.git$/iu, "")
     .split("/")
     .filter(Boolean);
@@ -253,11 +278,9 @@ export function isAutoHandoffSuccessor(value: string): boolean {
  */
 export function parseHandoffInstanceTarget(raw: string): ParsedHandoffInstanceMention | null {
   const normalized = raw.trim();
-  const parsed = /^(.*):([1-9]\d*):handoff:([@＠])(.+)$/iu.exec(normalized);
+  const parsed = splitHandoffTarget(normalized);
   if (!parsed) return null;
-  const sourceAgentName = parsed[1]!.trim();
-  const channelInstanceId = Number(parsed[2]);
-  const successorName = parsed[4]!.trim();
+  const { sourceAgentName, channelInstanceId, successorName } = parsed;
   if (!AGENT_NAME_PATTERN.test(sourceAgentName) || sourceAgentName.toLowerCase() === "xmatrix") {
     return null;
   }
