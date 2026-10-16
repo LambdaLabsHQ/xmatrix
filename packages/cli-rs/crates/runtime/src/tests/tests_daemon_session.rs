@@ -2268,3 +2268,35 @@ fn assert_rejected_registration_spawn(value: serde_json::Value) {
         super::DaemonSpawnRequest::from_command(serde_json::from_value(value).unwrap()).unwrap();
     assert!(super::resolve_registration_spawn(&intent, "machine").is_err());
 }
+
+// Protect the spawn authority boundary: inherited/local text must never replace
+// official Hub documents, and unsupported Hub payloads must fail before spawn.
+#[test]
+fn spawn_bootstrap_templates_replace_inherited_overrides_and_fail_closed() {
+    use xmatrix_cli_core::bootstrap_prompts::{BootstrapPrompts, ENV};
+    let env = std::collections::BTreeMap::from([
+        (ENV.to_string(), "stale Hub body".to_string()),
+        (
+            "XMATRIX_BOOTSTRAP_PROMPT".to_string(),
+            "local override".to_string(),
+        ),
+        (
+            "XMATRIX_DISABLE_BOOTSTRAP_PROMPT".to_string(),
+            "1".to_string(),
+        ),
+    ]);
+    let cleared = super::apply_spawn_bootstrap_prompts(env.clone(), None).unwrap();
+    assert!(cleared.is_empty());
+    let mut prompts = BootstrapPrompts::default();
+    prompts.bootstrap = "fresh Hub body {agent_name}".into();
+    let applied = super::apply_spawn_bootstrap_prompts(env, Some(&prompts)).unwrap();
+    assert_eq!(applied.len(), 1);
+    assert_eq!(
+        BootstrapPrompts::from_json(&applied[ENV])
+            .unwrap()
+            .bootstrap,
+        "fresh Hub body {agent_name}"
+    );
+    prompts.schema_version = 42;
+    assert!(super::apply_spawn_bootstrap_prompts(applied, Some(&prompts)).is_err());
+}

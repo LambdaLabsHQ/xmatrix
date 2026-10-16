@@ -1,3 +1,4 @@
+import { AGENT_BOOTSTRAP_PROMPTS } from "../agent-bootstrap";
 import { plainRecord } from "@xmatrix/protocol";
 import { machineHostnameObservation } from "../machine-hostname-observation";
 import type {
@@ -948,7 +949,8 @@ function claimedCommand(value: unknown): MachineDaemonLeasedCommand {
     throw new Error(`PostgreSQL returned unsupported Machine Daemon command ${type}`);
   }
   if (type === "machine_spawn_agent") {
-    return withMachineSpawnHarness({ ...payload, type, requestId }) as MachineDaemonSpawnCommand;
+    return withMachineSpawnHarness({ ...payload, type, requestId,
+      bootstrapPrompts: AGENT_BOOTSTRAP_PROMPTS }) as MachineDaemonSpawnCommand;
   }
   if (type === "machine_stop_agent") {
     return { ...payload, type, requestId } as MachineDaemonStopCommand;

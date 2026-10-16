@@ -337,3 +337,9 @@ new_sqlite_classes = ["RelayRuntimeChannelFanout"]
 [[migrations]]
 tag = "v43"
 new_sqlite_classes = ["GitHubSubscriptionIndex"]
+
+# Official Agent prompt documents are bundled with the Hub deployment.
+[[rules]]
+type = "Text"
+globs = ["**/prompts/*.md"]
+fallthrough = true

@@ -1004,7 +1004,9 @@ fn codex_channel_turn_injects_channel_send_contract_as_developer_instruction() {
     let developer = params["developerInstructions"]
         .as_str()
         .expect("developer instructions");
-    assert!(developer.contains("Channel-visible replies are explicit"));
+    assert!(developer.contains("runtime output is local"));
+    assert!(developer.len() < 500);
+    assert!(!developer.contains("xMatrix channel contract:"));
     assert!(developer.contains("xmatrix send channel-123"));
 }
 
@@ -1549,6 +1551,7 @@ fn daemon_test_spawn_request() -> super::DaemonSpawnRequest {
         agent_name: "codex-a".to_string(),
         identity_id: None,
         role_initial_prompt: None,
+        bootstrap_prompts: None,
         working_mode: None,
         space_rules_page_id: None,
         connected_apps: Vec::new(),

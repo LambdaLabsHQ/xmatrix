@@ -9,6 +9,7 @@ pub mod attachment_cache;
 pub mod auth;
 pub mod backoff;
 pub mod bootstrap;
+pub mod bootstrap_prompts;
 pub mod channel_read_context;
 pub mod config;
 mod connection_error;

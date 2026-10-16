@@ -62,6 +62,27 @@ const RETIRED_ROLE_ENV: [&str; 5] = [
     "XMATRIX_AGENT_AVATAR_URL",
 ];
 
+/// Only the Hub's separate spawn field supplies official prompt text. Never
+/// inherit an override from the daemon environment or use the task body.
+fn apply_spawn_bootstrap_prompts(
+    mut local_env: BTreeMap<String, String>,
+    prompts: Option<&xmatrix_cli_core::bootstrap_prompts::BootstrapPrompts>,
+) -> error::Result<BTreeMap<String, String>> {
+    use xmatrix_cli_core::bootstrap_prompts::ENV;
+    for key in [
+        ENV,
+        "XMATRIX_BOOTSTRAP_PROMPT",
+        "XMATRIX_DISABLE_BOOTSTRAP_PROMPT",
+    ] {
+        local_env.remove(key);
+    }
+    if let Some(prompts) = prompts {
+        prompts.validate().map_err(CliError::Launch)?;
+        local_env.insert(ENV.into(), serde_json::to_string(prompts)?);
+    }
+    Ok(local_env)
+}
+
 /// Applies the registration's own instructions as the trusted initial prompt.
 /// The env name predates the retired Role feature and is kept for
 /// compatibility between daemon and wrapper builds.
