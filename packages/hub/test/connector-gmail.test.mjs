@@ -10,6 +10,7 @@ import { grantFieldsForgottenOnDisconnect } from "../src/connectors/oauth.ts";
 import { compileCommonJsSourceModule } from "./support/commonjs-source-module.mjs";
 import { getAppConnectorProvider } from "../src/app-connectors.ts";
 import { verifyGitHubAppState } from "../src/index-shared.ts";
+import * as metering from "../src/usage-cost-metering.ts";
 
 const composio = { CONNECTOR_GMAIL_CLIENT_ID: "ac_gmailreadonly", CONNECTOR_COMPOSIO_API_KEY: "composio-project-key" };
 const mailbox = { account: "ca_mailbox1", address: "me@example.com", owner: "user:user-1" };
@@ -203,6 +204,7 @@ test("forgetting a Gmail grant deletes the Composio account before clearing the 
     "./gmail-mailboxes": { parseMailboxes },
     "./credentials": { connectorCredentialRepository: () => repository },
     "./oauth": { grantFieldsForgottenOnDisconnect, oauthClient },
+    "../usage-cost-metering": metering,
   };
   const { forgetConnectionGrant } = load(name => { assert.ok(dependencies[name], name); return dependencies[name]; }, { crypto, Date, Object });
   const input = { spaceId: "space-1", actorUserId: "admin" };
@@ -316,6 +318,7 @@ test("Connect adds a mailbox: a repeat replaces its account and keeps its owner,
       resolveForAdmin: async () => ({ values: { mailboxes: JSON.stringify(stored) } }) }) },
     "./http": http,
     "./oauth": { oauthClient: () => ({ clientSecret: "composio-project-key" }) },
+    "../usage-cost-metering": metering,
   };
   const { addConnectedMailbox } = load(name => { assert.ok(dependencies[name], name); return dependencies[name]; },
     { crypto, Date, Object, JSON, encodeURIComponent });

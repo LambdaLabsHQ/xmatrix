@@ -2,6 +2,7 @@ import { PostgresPageRepository, type PagePrincipal, type PageSummary } from "@x
 import { createJevClient } from "@xmatrix/decision-model";
 import { createPostgresAuthorityDatabase } from "./postgres-authority-fleet";
 import type { Env } from "./types";
+import { meterJev } from "./usage-cost-metering";
 
 /**
  * Jev attaches a new conversation to the page it is about
@@ -57,7 +58,8 @@ export async function attachConversationToPage(input: {
   };
   candidates.forEach((page, index) => { criteria[`p${index}`] = pagePath(page, byId); });
   const evaluate = input.evaluate ?? (input.env.JEV_AI_GATEWAY_API_KEY
-    ? createJevClient({ apiKey: input.env.JEV_AI_GATEWAY_API_KEY, timeoutMs: 5_000 }).evaluate as PageAttachmentEvaluate
+    ? meterJev(input.env, { feature: "page_attachment", scope: { spaceId } },
+      createJevClient({ apiKey: input.env.JEV_AI_GATEWAY_API_KEY, timeoutMs: 5_000 }).evaluate) as PageAttachmentEvaluate
     : undefined);
   if (!evaluate) return { attachedPageId: null, reason: "jev_unavailable" };
   const result = await evaluate({

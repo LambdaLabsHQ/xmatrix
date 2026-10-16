@@ -51,6 +51,9 @@ test("cloud test deployment has a complete isolated resource inventory", () => {
     binding(config, "analytics_engine_datasets", "RELAY_AUTHORITY_OBSERVABILITY_AE").dataset,
     "xmatrix_relay_authority_observability_test",
   );
+  // Test traffic must never count toward production's per-Space usage cost.
+  assert.equal(binding(config, "analytics_engine_datasets", "XMATRIX_USAGE_COST_AE").dataset, "xmatrix_usage_cost_test");
+  assert.equal(binding(hub.production, "analytics_engine_datasets", "XMATRIX_USAGE_COST_AE").dataset, "xmatrix_usage_cost");
   assert.equal(config.version_metadata.binding, "CF_VERSION_METADATA");
   assert.equal(config.vars.RELAY_AUTHORITY_OBSERVABILITY_ENABLED, "true");
   assert.equal(config.vars.AUTH_COOKIE_DOMAIN, ".test.xmatrix.sh");
@@ -75,6 +78,17 @@ test("production configuration cannot enable mock auth or reference test resourc
   assert.deepEqual(config.routes.map((route) => ({ ...route })), [{ pattern: "xmatrix-hub.xmatrix.sh", custom_domain: true }]);
   assert.equal(config.vars.APP_URL, "https://xmatrix.sh");
   assert.equal(config.vars.HUB_URL, "https://xmatrix-hub.xmatrix.sh");
+});
+
+test("production refuses over-limit requests and bounds Jev spend, each limiter in its own namespace", () => {
+  const config = hub.production;
+  assert.equal(config.vars.RATE_LIMIT_ENFORCED, "true");
+  // A missing binding admits everything, so a dropped one silently lifts a spend bound.
+  for (const name of ["RATE_LIMIT_SUMMON_INTENT", "RATE_LIMIT_JEV_EVALUATE"]) {
+    assert.ok(binding(config, "ratelimits", name), name);
+  }
+  const namespaces = config.ratelimits.map((limiter) => limiter.namespace_id);
+  assert.equal(new Set(namespaces).size, namespaces.length, "limiters sharing a namespace share counters");
 });
 
 test("production and the cloud test deployment share no bucket", () => {

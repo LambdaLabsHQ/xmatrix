@@ -9,12 +9,11 @@ import { awaitAuthorityProbeBackoff } from "./authority-probe-backoff";
 import { RELAY_RUNTIME_AGENT_TRACE_TERMINATE_PATH } from "./runtime-transport/relay-runtime-product-adapter";
 import { INSTANCE_ABANDON_RESULT_TIMEOUT_MS, requireAuth, requireHumanAuth, productCommandId, jsonErrors, spaceResponse } from "./index-shared";
 import { relayRuntimeCellsForOwners } from "./relay-authority-locator";
-import { deterministicConversationId } from "./system-conversation";
 import { listOwnerWorkspaces, workspaceRepository } from "./postgres-workspace-authority";
 import { machineCommandStatus, machineDaemonCommand, machineRepository } from "./machines";
 import { runtimeRepository } from "./runtime";
 import { ControlError } from "@xmatrix/db";
-import { createSpace, getSpace, listSpaces, updateSpace, updateSpaceMemberCreationPolicy } from "./spaces";
+import { createSpace, getSpace, listSpaces, personalSpaceId, updateSpace, updateSpaceMemberCreationPolicy } from "./spaces";
 
 /** One status read of a daemon control; a status the authority leaves out counts as failed. */
 async function readDaemonControlStatus(
@@ -610,7 +609,7 @@ export function registerIndexRoutesAuthSpaceInstances(app: Hono<{ Bindings: Env 
     const authUser = await requireAuth(c.req.raw, c.env);
     const principal = { kind: "user" as const, id: authUser.id };
     if ((await listSpaces(c.env, principal)).length > 0) return c.json({ space: null });
-    const spaceId = await deterministicConversationId("personal-space", authUser.id);
+    const spaceId = await personalSpaceId(authUser.id);
     try {
       await createSpace(c.env, {
         commandId: `personal-space:${authUser.id}`,

@@ -1,4 +1,5 @@
 import type { ConnectorAction } from "../provider";
+import type { UpstreamMeter } from "../../usage-cost-metering";
 import { record } from "../command-support";
 import { ProviderRequestError } from "../http";
 import { composioGet, composioPost } from "../composio";
@@ -41,8 +42,8 @@ function gmailPath(method: "GET" | "POST", path: string): string {
 }
 
 function gmailGet(credentials: Readonly<Record<string, string>>, path: string,
-  query: Record<string, string> = {}): Promise<Record<string, unknown>> {
-  return composioGet(credentials, gmailPath("GET", path), query);
+  query: Record<string, string> = {}, meter?: UpstreamMeter): Promise<Record<string, unknown>> {
+  return composioGet(credentials, gmailPath("GET", path), query, meter);
 }
 const ENTITIES: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: "\"", apos: "'", nbsp: " " };
 
@@ -165,8 +166,9 @@ function address(value: string): string | undefined {
   return bare.length <= MAX_ADDRESS && ADDRESS.test(bare) ? bare : undefined;
 }
 
-async function sendRaw(credentials: Readonly<Record<string, string>>, raw: string, threadId?: string): Promise<string> {
-  const sent = await composioPost(credentials, gmailPath("POST", "/messages/send"), { raw, ...(threadId ? { threadId } : {}) });
+async function sendRaw(credentials: Readonly<Record<string, string>>, raw: string, threadId: string | undefined,
+  meter: UpstreamMeter | undefined): Promise<string> {
+  const sent = await composioPost(credentials, gmailPath("POST", "/messages/send"), { raw, ...(threadId ? { threadId } : {}) }, meter);
   if (typeof sent.id !== "string") throw new ProviderRequestError(502, "Google did not confirm the sent message");
   return line(sent.id, 32);
 }
@@ -189,10 +191,10 @@ async function usableMailboxes({ credentials, caller }: Context, only?: string):
 }
 
 /** The mailbox among `mailboxes` that holds the message; Gmail answers 404 (or 400) for another mailbox's id. */
-async function findMessage(credentials: Readonly<Record<string, string>>, mailboxes: GmailMailbox[], id: string, format: "full" | "metadata") {
+async function findMessage({ credentials, usage }: Context, mailboxes: GmailMailbox[], id: string, format: "full" | "metadata") {
   for (const mailbox of mailboxes) {
     try {
-      return { mailbox, message: await gmailGet(mailboxCredentials(credentials, mailbox), `/messages/${id}`, { format }) };
+      return { mailbox, message: await gmailGet(mailboxCredentials(credentials, mailbox), `/messages/${id}`, { format }, usage) };
     } catch (error) {
       if (!(error instanceof ProviderRequestError) || (error.status !== 404 && error.status !== 400)) throw error;
     }
@@ -209,7 +211,7 @@ async function prepareSend(context: Context, input: Record<string, string>): Pro
 }
 
 async function prepareReply(context: Context, input: Record<string, string>): Promise<Record<string, string>> {
-  const { mailbox, message: original } = await findMessage(context.credentials, await usableMailboxes(context), input.id!, "metadata");
+  const { mailbox, message: original } = await findMessage(context, await usableMailboxes(context), input.id!, "metadata");
   const payload = record(original.payload);
   const to = address(header(payload, "reply-to")) ?? address(header(payload, "from"));
   if (!to) throw new ProviderRequestError(422, "the message has no address to reply to");
@@ -229,7 +231,7 @@ async function sendPrepared(context: Context, input: Record<string, string>): Pr
     throw new ProviderRequestError(409, "the sending mailbox changed; ask again");
   }
   await context.authorizeWrite?.();
-  return sendRaw(mailboxCredentials(context.credentials, mailbox), input.raw!, input.threadId || undefined);
+  return sendRaw(mailboxCredentials(context.credentials, mailbox), input.raw!, input.threadId || undefined, context.usage);
 }
 
 export const GMAIL_ACTIONS: Record<string, ConnectorAction> = {
@@ -248,13 +250,13 @@ export const GMAIL_ACTIONS: Record<string, ConnectorAction> = {
       const lines = await Promise.all(mailboxes.map(async (mailbox) => {
         const credentials = mailboxCredentials(context.credentials, mailbox);
         const result = await gmailGet(credentials, "/messages",
-          { maxResults: String(SEARCH_LIMIT), ...(input.query ? { q: input.query } : {}) });
+          { maxResults: String(SEARCH_LIMIT), ...(input.query ? { q: input.query } : {}) }, context.usage);
         if (result.messages !== undefined && !Array.isArray(result.messages)) {
           throw new ProviderRequestError(502, "Google did not return a Gmail message list");
         }
         const ids = ((result.messages as unknown[] | undefined) ?? []).slice(0, SEARCH_LIMIT)
           .map(value => String(record(value).id)).filter(id => MESSAGE_ID.test(id));
-        const messages = await Promise.all(ids.map(id => gmailGet(credentials, `/messages/${id}`, { format: "metadata" })));
+        const messages = await Promise.all(ids.map(id => gmailGet(credentials, `/messages/${id}`, { format: "metadata" }, context.usage)));
         return messages.map(message => mailboxes.length > 1 ? `${mailbox.address}\t${messageLine(message)}` : messageLine(message));
       }));
       const columns = `${mailboxes.length > 1 ? "mailbox, " : ""}id, received UTC, from, subject, snippet`;
@@ -270,7 +272,7 @@ export const GMAIL_ACTIONS: Record<string, ConnectorAction> = {
     },
     async execute(context, input) {
       const mailboxes = await usableMailboxes(context);
-      const { mailbox, message } = await findMessage(context.credentials, mailboxes, input.id, "full");
+      const { mailbox, message } = await findMessage(context, mailboxes, input.id, "full");
       const payload = record(message.payload);
       if (!payload.mimeType) throw new ProviderRequestError(502, "Google did not return a Gmail message");
       const bodies = gmailBodies(payload);
@@ -324,9 +326,9 @@ export const GMAIL_ACTIONS: Record<string, ConnectorAction> = {
 };
 
 /** Confirm every mailbox's grant with a real read; profiles are not stored. */
-export async function verifyGmail(credentials: Readonly<Record<string, string>>): Promise<void> {
+export async function verifyGmail(credentials: Readonly<Record<string, string>>, meter?: UpstreamMeter): Promise<void> {
   for (const mailbox of parseMailboxes(credentials.mailboxes)) {
-    const profile = await gmailGet(mailboxCredentials(credentials, mailbox), "/profile");
+    const profile = await gmailGet(mailboxCredentials(credentials, mailbox), "/profile", {}, meter);
     if (typeof profile.emailAddress !== "string") throw new ProviderRequestError(502, `Google did not confirm Gmail access for ${mailbox.address}`);
   }
 }

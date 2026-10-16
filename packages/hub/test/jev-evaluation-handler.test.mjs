@@ -56,3 +56,24 @@ test("provider errors never expose credentials or response bodies", async (t) =>
   assert.equal(response.status, 429);
   assert.deepEqual(await response.json(), { error: "jev_rate_limited" });
 });
+
+test("each owner's evaluations are bounded before the body is read, whatever RATE_LIMIT_ENFORCED says", async (t) => {
+  let calls = 0;
+  t.mock.method(globalThis, "fetch", async () => {
+    calls++;
+    return Response.json({ answers: { passed: { type: "boolean", probability: 0.9 } }, usage: { inputTokens: 1, outputTokens: 1 } });
+  });
+  const counts = new Map();
+  const limited = { ...env, RATE_LIMIT_ENFORCED: "false", RATE_LIMIT_JEV_EVALUATE: { async limit({ key }) {
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+    return { success: counts.get(key) <= 1 };
+  } } };
+  assert.equal((await evaluateJevRequest(request(), limited, async () => "owner", readBody)).status, 200);
+  const refused = await evaluateJevRequest(request(), limited, async () => "owner",
+    async () => assert.fail("must not read a refused caller's body"));
+  assert.equal(refused.status, 429);
+  assert.equal(refused.headers.get("Retry-After"), "60");
+  assert.deepEqual(await refused.json(), { error: "Too many requests. Try again shortly.", code: "rate_limited", retryable: true });
+  assert.equal(calls, 1, "a refused evaluation never reaches the provider");
+  assert.equal((await evaluateJevRequest(request(), limited, async () => "other-owner", readBody)).status, 200);
+});

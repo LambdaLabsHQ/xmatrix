@@ -102,8 +102,9 @@ export function Pricing() {
           })}
         </div>
         <p className="mt-6 text-center text-xs leading-5 text-muted-foreground">
-          Free includes 500 lifetime messages. Paid messaging is unmetered; fair-use and service
-          rate limits apply.
+          Free includes 500 lifetime messages per Space, and the personal Space every account
+          starts with is not one of its 2 Free Spaces. Paid messaging is unmetered; fair-use and
+          service rate limits apply.
         </p>
       </div>
     </section>

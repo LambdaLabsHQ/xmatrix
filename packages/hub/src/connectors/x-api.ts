@@ -1,5 +1,6 @@
 import type { PostgresAppCredentialRepository, ResolvedAppCredentials } from "@xmatrix/db";
 import type { Env } from "../types";
+import { upstreamMeter, type UpstreamMeter } from "../usage-cost-metering";
 import { getChannel } from "../spaces";
 import { record } from "./command-support";
 import { connectorCredentialRepository } from "./credentials";
@@ -38,7 +39,8 @@ async function updateAccount(store: Store, spaceId: string, account: XAccountVie
  * refresh. A lost/uncertain response leaves the lease closed until reconnect;
  * a confirmed pair is merged without repeating the provider request.
  */
-export async function refreshXAccount(store: Store, spaceId: string, client: OAuthClient, account: XAccountView): Promise<XAccount> {
+export async function refreshXAccount(store: Store, spaceId: string, client: OAuthClient, account: XAccountView,
+  meter?: UpstreamMeter): Promise<XAccount> {
   const read = () => store.resolve({ requestId: crypto.randomUUID(), spaceId, providerId: "x" });
   const current = selected(await read(), account);
   if (current.needsReconnect) throw new ProviderRequestError(401, "Reconnect this X account before using it");
@@ -58,7 +60,7 @@ export async function refreshXAccount(store: Store, spaceId: string, client: OAu
   const payload = await xProviderJson("/2/oauth2/token", { method: "POST",
     headers: { authorization: `Basic ${btoa(`${client.clientId}:${client.clientSecret}`)}`,
       "content-type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({ grant_type: "refresh_token", refresh_token: current.refreshToken }) });
+    body: new URLSearchParams({ grant_type: "refresh_token", refresh_token: current.refreshToken }) }, meter);
   const tokens = xTokenGrant(client, payload, current);
   return updateAccount(store, spaceId, account, a => {
     if (!a.refreshing && a.accessToken === tokens.accessToken && a.refreshToken === tokens.refreshToken &&
@@ -78,8 +80,9 @@ function allowedPath(account: XAccountView, method: "GET" | "POST", path: string
 }
 
 export function xActionCapability(env: Env, input: { spaceId: string; channelId: string; actorUserId: string;
-  authorizeWrite: () => Promise<void> }): XActionCapability {
+  action: string; authorizeWrite: () => Promise<void> }): XActionCapability {
   const store = connectorCredentialRepository(env);
+  const meter = upstreamMeter(env, { spaceId: input.spaceId, connector: "x", action: input.action });
   const live = async () => {
     const { channel } = await getChannel(env, { channelId: input.channelId, principal: { kind: "user", id: input.actorUserId } });
     if (record(channel).spaceId !== input.spaceId) throw new ProviderRequestError(403, "The X Channel access changed");
@@ -95,7 +98,7 @@ export function xActionCapability(env: Env, input: { spaceId: string; channelId:
       if (current.ownerUserId !== input.actorUserId) throw new ProviderRequestError(403, "This X account belongs to another member");
       const client = oauthClient(env, "x");
       if (!client) throw new ProviderRequestError(503, "The X company app is not configured");
-      await refreshXAccount(store, input.spaceId, client, account);
+      await refreshXAccount(store, input.spaceId, client, account, meter);
       if (method === "POST") await input.authorizeWrite();
       current = selected(await live(), account);
       if (current.ownerUserId !== input.actorUserId || current.refreshing || current.expiresAt <= Date.now()) {
@@ -103,7 +106,7 @@ export function xActionCapability(env: Env, input: { spaceId: string; channelId:
       }
       try {
         return await xProviderJson(path, { method, headers: { authorization: `Bearer ${current.accessToken}` },
-          ...(body ? { json: body } : {}) });
+          ...(body ? { json: body } : {}) }, meter);
       } catch (error) {
         if (error instanceof ProviderRequestError && error.status === 401) {
           await updateAccount(store, input.spaceId, account, a => ({ ...a, needsReconnect: true }));
@@ -121,11 +124,12 @@ export async function verifyXConnection(env: Env, spaceId: string): Promise<void
   const stored = await store.resolve({ requestId: crypto.randomUUID(), spaceId, providerId: "x" });
   const accounts = parseXAccounts(stored?.values.accounts);
   if (!accounts.length) throw new ProviderRequestError(401, "Connect an X account first");
+  const meter = upstreamMeter(env, { spaceId, connector: "x", action: "verify" });
   let working = 0, failure: unknown;
   for (const account of accounts) {
     try {
-      const current = await refreshXAccount(store, spaceId, client, account);
-      const result = record((await xProviderJson("/2/users/me", { headers: { authorization: `Bearer ${current.accessToken}` } })).data);
+      const current = await refreshXAccount(store, spaceId, client, account, meter);
+      const result = record((await xProviderJson("/2/users/me", { headers: { authorization: `Bearer ${current.accessToken}` } }, meter)).data);
       if (result.id !== account.id) throw new ProviderRequestError(401, "X did not confirm the selected account");
       working++;
     } catch (error) {

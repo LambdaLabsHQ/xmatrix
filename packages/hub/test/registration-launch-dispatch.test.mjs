@@ -136,7 +136,7 @@ test("an Agent's first-message decision is persisted before its harness can be s
     throw new Error(`unexpected ${query.name}`);
   } }) };
   const result = await executeFirstMessageDecision({ ...firstMessageInput, database, directory: database,
-    evaluate: async () => { throw new Error('unused'); }, body: 'start an agent', window: false });
+    evaluatorFor: () => async () => { throw new Error('unused'); }, body: 'start an agent', window: false });
   assert.deepEqual(result, { claimed: true, harness: 'codex' });
   assert.deepEqual(calls, [['open', 'm1'], ['recommend', 'codex'], ['claim', 'jev', 'codex']]);
 });

@@ -118,12 +118,22 @@ export interface Env {
    * profile and its query contract. Absent binding means observation is off.
    */
   RELAY_AUTHORITY_OBSERVABILITY_AE?: AnalyticsEngineDataset;
+  /**
+   * Operator-paid usage per Space: one point per Jev, Composio or X call
+   * (usage-cost-metering.ts). Its own dataset because it indexes on the Space
+   * id. Absent binding means metering is off.
+   */
+  XMATRIX_USAGE_COST_AE?: AnalyticsEngineDataset;
   /** Per-credential request allowance (Workers Rate Limiting). Absent: unlimited. */
   RATE_LIMIT_CREDENTIAL?: RequestRateLimiter;
   /** Per-client-IP allowance for requests without a credential. */
   RATE_LIMIT_ANONYMOUS?: RequestRateLimiter;
   /** Per-user allowance of Human socket sign-ins. */
   RATE_LIMIT_HUMAN_CONNECT?: RequestRateLimiter;
+  /** Per-Human allowance of composer draft previews (Jev). Always enforced. */
+  RATE_LIMIT_SUMMON_INTENT?: RequestRateLimiter;
+  /** Per-owner allowance of open Jev evaluations. Always enforced. */
+  RATE_LIMIT_JEV_EVALUATE?: RequestRateLimiter;
   /** Over-limit requests are refused only when this is exactly "true"; otherwise only logged. */
   RATE_LIMIT_ENFORCED?: string;
   /** Observation writes only when this is exactly "true". */

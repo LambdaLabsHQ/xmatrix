@@ -7,6 +7,7 @@ import { connectorActionCatalog } from "../src/connectors/action-catalog.ts";
 import { loadCommonJsSourceModule } from "./support/commonjs-source-module.mjs";
 import { withProviderResponses } from "./support/fetch-responses.mjs";
 import { ProviderRequestError } from "../src/connectors/http.ts";
+import * as metering from "../src/usage-cost-metering.ts";
 
 const mailbox = { address: "mailbox@example.test", account: "ca_mailbox", owner: "user:owner" };
 const id = "18f2a9c0d1e2b3a4";
@@ -39,6 +40,7 @@ async function harness(credentials = { mailboxes: JSON.stringify([mailbox]), com
     "./credentials": { connectorActionPolicyRepository: () => ({ mode: async () => "allow" }) },
     "./agent-caller": { agentRegistrationOf: async () => ({ ownerUserId: "owner", machineId: "machine", harnessId: "codex" }) },
     "./http": { ProviderRequestError },
+    "../usage-cost-metering": metering,
   };
   const commands = await loadCommonJsSourceModule(new URL("../src/connectors/connector-commands.ts", import.meta.url), name => dependencies[name] ?? {});
   return { persisted, receipts, commands };

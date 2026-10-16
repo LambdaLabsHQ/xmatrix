@@ -37,6 +37,14 @@ evaluation entry point through Vercel AI Gateway. It accepts one shared `state`
 and named Boolean, Choice or Score `questions`. Routing is one possible caller;
 this package does not launch Agents, choose Machines or alter production routing.
 
+While a Human types a summon, the composer previews Jev's reading through
+`POST /api/channels/:id/summon-intent`. One preview reads up to four summons,
+and each may be retried once, so it can cost eight Jev calls. Each signed-in
+Human may request 60 previews a minute (`RATE_LIMIT_SUMMON_INTENT`); over that
+the Hub answers `429 rate_limited` before reading the draft or the Channel,
+the composer shows no reading, and sending still asks Jev once after the
+message is committed. `launch:force` and sending are not limited by it.
+
 A `summon_intent_reference`, `summon_intent_explanation` or
 `summon_intent_example` rejection means Jev read the mention as naming,
 explaining or quoting an Agent rather than asking one to start; its decision
@@ -62,6 +70,19 @@ names and endpoints are rejected. The provider key remains deployment-owned;
 unconfigured deployments return 503. Routing still rechecks current Channel
 permissions and the unchanged source publication before creating work.
 
+Because any account can call it, volume is bounded per owner instead of by an
+allowlist: each Human may make 10 evaluations a minute
+(`RATE_LIMIT_JEV_EVALUATE`), and an Agent Run spends its owner's allowance.
+The 11th answers `429` with `{ "code": "rate_limited", "retryable": true }`
+and `Retry-After: 60`, before the body is read or the provider is called. Both
+Jev allowances are Workers Rate Limiting bindings refused whatever
+`RATE_LIMIT_ENFORCED` says, because they bound the operator's provider spend;
+like every such binding they count per Cloudflare location, not exactly.
+There is no daily cap. The Hub's one exact counter (`auth-attempt-limit.ts`)
+keeps one-minute windows in the single sign-in broker object and prunes any
+counter idle for a minute, so a day's count cannot live there, and routing
+every evaluation through the sign-in broker would tie sign-in to Jev traffic.
+
 On 2026-09-19, the owner explicitly requested local Wrangler secret setup.
 `wrangler secret bulk --name xmatrix-hub` successfully set
 the provider key and a temporary account gate on the existing production
@@ -77,6 +98,17 @@ access remains required, and a missing provider key still fails closed. Publish
 this change through the canonical immutable release train, then record live
 evaluation evidence separately from mocked provider tests. The successful live
 result below was a local CLI call, not a deployed Hub call.
+
+## Usage metering
+
+Every Jev call the Hub makes on its key is one datapoint in the
+`xmatrix_usage_cost` Analytics Engine dataset: the Space (the caller's owner
+for `/api/ai/jev/evaluate`), the feature (`summon_intent`, `launch_choice`,
+`input_launch`, `start_intent`, `supersession`, `page_attachment`, `evaluate`),
+the outcome and its allowlisted code, input and output tokens as the AI
+Gateway reports them, and latency. Nothing from the evaluation input or answer
+is written. `packages/hub/scripts/usage-cost-report.mjs` sums it per Space; see
+[usage cost metering](usage-cost-metering.md).
 
 ## Local command
 

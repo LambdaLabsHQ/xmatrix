@@ -5,7 +5,8 @@ import {
 } from "./app-connectors";
 import { appOrigin } from "./deployment-origins";
 import { createPostgresAuthorityDatabase } from "./postgres-authority-fleet";
-import { deterministicConversationId, launchConversationAgent, openConversation } from "./system-conversation";
+import { deterministicConversationId } from "./deterministic-id";
+import { launchConversationAgent, openConversation } from "./system-conversation";
 import type { Env } from "./types";
 import { findAppConnection } from "./apps";
 import { runtimeRepository } from "./runtime";

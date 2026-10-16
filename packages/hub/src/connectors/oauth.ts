@@ -1,6 +1,7 @@
 import { APP_CONNECTOR_PROVIDER_MANIFESTS, type AppConnectorProviderManifest } from "@xmatrix/protocol";
 import { base64UrlDecode, signGitHubAppState, verifyGitHubAppState } from "../index-shared";
 import type { Env } from "../types";
+import { metered, type UpstreamMeter } from "../usage-cost-metering";
 import { providerJson, ProviderRequestError } from "./http";
 import { vercelEventScopeId, vercelOAuthFields } from "./vercel-api";
 import { pkceChallenge, pkceGrantProof, validPkceClaims, oauthGrantState } from "./oauth-pkce";
@@ -113,7 +114,7 @@ export function oauthRedirectUri(hubOrigin: string): string {
 }
 
 export async function oauthAuthorizeUrl(client: OAuthClient, input: { spaceId: string; userId: string;
-  redirectUri: string; now?: number; accountId?: string;
+  redirectUri: string; now?: number; accountId?: string; meter?: UpstreamMeter;
   connectionSnapshot?: { connectionVersion: number; credentialVersion: number; connectionGeneration: string } }): Promise<string> {
   const { oauth } = client.manifest;
   const claims = { providerId: client.manifest.id, spaceId: input.spaceId, userId: input.userId,
@@ -126,7 +127,7 @@ export async function oauthAuthorizeUrl(client: OAuthClient, input: { spaceId: s
   if (oauth.flow === "composio") {
     const callback = new URL(input.redirectUri);
     callback.searchParams.set("state", state);
-    return composioConnectUrl(client, composioUserId(input.spaceId, claims.nonce), callback.toString());
+    return composioConnectUrl(client, composioUserId(input.spaceId, claims.nonce), callback.toString(), input.meter);
   }
   const url = new URL(oauth.authorizeUrl);
   if (oauth.flow === "vercel-integration") {
@@ -170,7 +171,7 @@ export async function verifyOAuthState(env: Env, state: string):
   return { client, spaceId: claims.spaceId, userId: claims.userId, ...(["discord", "x"].includes(client.manifest.id) ? { connectionSnapshot: snapshot } : {}) };
 }
 
-async function tokenRequest(client: OAuthClient, grant: Record<string, string>): Promise<Record<string, unknown>> {
+async function tokenRequest(client: OAuthClient, grant: Record<string, string>, meter?: UpstreamMeter): Promise<Record<string, unknown>> {
   const { oauth } = client.manifest;
   if (oauth.flow === "vercel-integration") {
     const { grant_type: _grantType, ...integrationGrant } = grant;
@@ -180,10 +181,12 @@ async function tokenRequest(client: OAuthClient, grant: Record<string, string>):
     ...(oauth.clientAuth === "basic" ? {} : { client_id: client.clientId, client_secret: client.clientSecret }) };
   const headers: Record<string, string> = oauth.clientAuth === "basic"
     ? { authorization: `Basic ${btoa(`${client.clientId}:${client.clientSecret}`)}` } : {};
-  const payload = await (oauth.tokenRequest === "json"
+  const exchange = () => oauth.tokenRequest === "json"
     ? providerJson(oauth.tokenUrl, { method: "POST", headers, json: body })
     : providerJson(oauth.tokenUrl, { method: "POST",
-      headers: { ...headers, "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams(body) })).catch(error => {
+      headers: { ...headers, "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams(body) });
+  // Only the company X app's token endpoint is an operator-paid upstream.
+  const payload = await (client.manifest.id === "x" ? metered(meter, "x", "oauth_token", exchange) : exchange()).catch(error => {
       if (["pagerduty", "discord", "x"].includes(client.manifest.id) && error instanceof ProviderRequestError) {
         throw new ProviderRequestError(error.status, `${client.manifest.name} token exchange failed (${error.status})`);
       }
@@ -236,15 +239,19 @@ async function providerContext(client: OAuthClient, token: string): Promise<Reco
   return {};
 }
 
-/** Provider-authenticated workspace evidence stays separate from user-editable metadata. */
-export async function exchangeOAuthGrant(client: OAuthClient, code: string, redirectUri: string, state?: string):
-  Promise<{ fields: Record<string, string | null>; installation?: AppOAuthInstallation }> {
+/**
+ * Provider-authenticated workspace evidence stays separate from user-editable
+ * metadata. `meter` records the operator-paid calls (Composio, X) of this connect.
+ */
+export async function exchangeOAuthGrant(client: OAuthClient, code: string, redirectUri: string, state?: string,
+  meter?: UpstreamMeter): Promise<{ fields: Record<string, string | null>; installation?: AppOAuthInstallation }> {
   if (client.manifest.oauth.flow === "composio") {
     const claims = state && state.length <= 4_096 ? await verifyGitHubAppState(state, client.clientSecret).catch(() => undefined) : undefined;
     if (!claims || claims.providerId !== client.manifest.id || typeof claims.spaceId !== "string" || typeof claims.nonce !== "string") {
       throw new ProviderRequestError(400, "Invalid or expired connect request; restart Connect");
     }
-    return { fields: { [client.manifest.oauth.tokenField]: await composioConnectedAccount(client, composioUserId(claims.spaceId, claims.nonce)) } };
+    return { fields: { [client.manifest.oauth.tokenField]: await composioConnectedAccount(client,
+      composioUserId(claims.spaceId, claims.nonce), meter) } };
   }
   let discordStartedAt: string | undefined;
   if (client.manifest.id === "discord") {
@@ -256,10 +263,11 @@ export async function exchangeOAuthGrant(client: OAuthClient, code: string, redi
   }
   const proof = client.manifest.oauth.pkce ? await pkceGrantProof(client, state, redirectUri) : undefined;
   const payload = await tokenRequest(client, { grant_type: "authorization_code", code, redirect_uri: redirectUri,
-    ...(proof ? { code_verifier: proof } : {}) });
+    ...(proof ? { code_verifier: proof } : {}) }, meter);
   if (client.manifest.id === "x") {
     const claims = await oauthGrantState(client, state, redirectUri);
-    return { fields: await xOAuthFields(client, payload, String(claims.userId), typeof claims.accountId === "string" ? claims.accountId : undefined) };
+    return { fields: await xOAuthFields(client, payload, String(claims.userId),
+      typeof claims.accountId === "string" ? claims.accountId : undefined, meter) };
   }
   if (GOOGLE_GRANTS[client.manifest.id]) validateGoogleGrant(client.manifest.id, payload, true);
   if (client.manifest.id === "bitbucket") validateBitbucketGrant(payload, true);

@@ -1,6 +1,7 @@
 import { ControlError } from "@xmatrix/db";
 import { readGitHubRepositoryForImport, type GitHubRepositoryForImport } from "./app-connectors";
-import { deterministicConversationId, launchConversationAgent, openConversation } from "./system-conversation";
+import { deterministicConversationId } from "./deterministic-id";
+import { launchConversationAgent, openConversation } from "./system-conversation";
 import type { Env } from "./types";
 import { findAppConnection } from "./apps";
 

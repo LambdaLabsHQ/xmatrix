@@ -5,11 +5,12 @@ import {
   supersededByOf,
 } from "@xmatrix/protocol";
 import {
-  postgresMessageHistory,
+  postgresMessageHistoryInSpace,
   postgresMessageSystemAnnotation,
 } from "./postgres-message-authority";
 import { publishChannelMessageSuperseded } from "./channel-messages";
 import type { Env } from "./types";
+import { meterJev } from "./usage-cost-metering";
 
 /**
  * Supersession (docs/design/conversation-activity.md §3.3): when someone posts,
@@ -99,17 +100,23 @@ export async function judgeMessageSupersession(input: {
   sequence: number;
   principal: { kind: "user" | "agent"; id: string };
   evaluate?: SupersessionEvaluate;
+  /** The window before the message, and the Space its Channel is placed in. */
   history?: (request: { channelId: string; beforeSequence: number; limit: number;
-    principal: { kind: "user" | "agent"; id: string } }) => Promise<{ messages: unknown[] }>;
+    principal: { kind: "user" | "agent"; id: string } }) => Promise<{ spaceId: string; messages: unknown[] }>;
   annotate?: typeof postgresMessageSystemAnnotation;
   publish?: typeof publishChannelMessageSuperseded;
 }): Promise<{ supersededMessageId: string | null; reason: string }> {
-  const evaluate = input.evaluate ?? (input.env.JEV_AI_GATEWAY_API_KEY?.trim()
-    ? createJevClient({ apiKey: input.env.JEV_AI_GATEWAY_API_KEY, timeoutMs: 5_000 }).evaluate as SupersessionEvaluate
-    : undefined);
-  if (!evaluate) return { supersededMessageId: null, reason: "jev_unavailable" };
-  const history = input.history ?? ((request) => postgresMessageHistory(input.env, request) as
-    Promise<{ messages: unknown[] }>);
+  const { evaluate } = input, apiKey = input.env.JEV_AI_GATEWAY_API_KEY?.trim();
+  // Jev's calls are metered to the Space the history read finds the Channel in.
+  const evaluateIn = evaluate ? () => evaluate : apiKey
+    ? (spaceId: string) => meterJev(input.env, { feature: "supersession", scope: { spaceId } },
+      createJevClient({ apiKey, timeoutMs: 5_000 }).evaluate) as SupersessionEvaluate
+    : undefined;
+  if (!evaluateIn) return { supersededMessageId: null, reason: "jev_unavailable" };
+  const history = input.history ?? (async (request) => {
+    const { spaceId, history: page } = await postgresMessageHistoryInSpace(input.env, request);
+    return { spaceId, messages: Array.isArray(page.messages) ? page.messages : [] };
+  });
   const read = await history({
     channelId: input.channelId, beforeSequence: input.sequence + 1, limit: WINDOW,
     principal: input.principal,
@@ -123,7 +130,7 @@ export async function judgeMessageSupersession(input: {
   if (!latest) return { supersededMessageId: null, reason: "latest_unavailable" };
   const earlier = supersessionCandidate(window, latest);
   if (!earlier) return { supersededMessageId: null, reason: "not_eligible" };
-  const result = await evaluate({
+  const result = await evaluateIn(read.spaceId)({
     state: {
       earlier: earlier.body.slice(0, MAX_BODY_CHARS),
       later: latest.body.slice(0, MAX_BODY_CHARS),
