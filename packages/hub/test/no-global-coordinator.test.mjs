@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readdir, readFile } from "node:fs/promises";
 import test from "node:test";
+import ts from "typescript";
 
 /**
  * Work belongs to the entity it concerns (docs/architecture/entity-coordinators.md).
@@ -23,13 +24,37 @@ async function sources(dir) {
   return files.flat();
 }
 
+/** Inspect the complete argument: JSON.stringify(entity) is a call, not the constant JSON. */
+function constantNames(text) {
+  const source = ts.createSourceFile("coordinator.ts", text, ts.ScriptTarget.Latest, true);
+  const names = [];
+  const visit = node => {
+    if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression) && node.expression.name.text === "idFromName") {
+      let argument = node.arguments[0];
+      while (argument && ts.isParenthesizedExpression(argument)) argument = argument.expression;
+      if (argument && (ts.isStringLiteral(argument) || ts.isNoSubstitutionTemplateLiteral(argument))) names.push(JSON.stringify(argument.text));
+      else if (argument && ts.isIdentifier(argument) && /^[A-Z][A-Z0-9_]{2,}$/u.test(argument.text)) names.push(argument.text);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  return names;
+}
+
+test("constant coordinator detection distinguishes an entity expression from an uppercase namespace", () => {
+  assert.deepEqual(constantNames('namespace.idFromName(JSON.stringify([ref.spaceId, ref.requestId]))'), []);
+  assert.deepEqual(constantNames('namespace.idFromName("upload:" + requestId)'), []);
+  assert.deepEqual(constantNames('namespace.idFromName("global"); namespace.idFromName((GLOBAL_OBJECT_NAME))'),
+    ['"global"', "GLOBAL_OBJECT_NAME"]);
+});
+
 test("no Durable Object is addressed by a new constant name", async () => {
   const root = new URL("../src", import.meta.url).pathname;
   const found = [];
   for (const file of await sources(root)) {
     const text = await readFile(file, "utf8");
-    for (const match of text.matchAll(/\.idFromName\(\s*("[^"]*"|'[^']*'|`[^`$]*`|[A-Z][A-Z0-9_]{2,})/gu)) {
-      if (!REVIEWED.has(match[1])) found.push(`${file.slice(root.length + 1)}: ${match[1]}`);
+    for (const name of constantNames(text)) {
+      if (!REVIEWED.has(name)) found.push(`${file.slice(root.length + 1)}: ${name}`);
     }
   }
   assert.deepEqual(found, [], "A constant-named Durable Object is a global coordinator; own the work per entity instead");
