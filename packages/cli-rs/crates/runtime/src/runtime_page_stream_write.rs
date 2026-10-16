@@ -11,7 +11,7 @@
 //! when some of it did not reach the page (a quote that is not there, someone
 //! editing where it writes), the conversation hears why as its next turn.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::sync::{LazyLock, Mutex};
 use std::time::Duration;
 
@@ -32,10 +32,18 @@ const MARK_END: char = '⟧';
 const MAX_OPEN_REST: usize = 48;
 /// Kept below the idle limits between here and the session.
 const HEARTBEAT: Duration = Duration::from_secs(25);
-/// The page's session stays joined this long after the Agent last wrote: it
-/// often writes again soon, and until it leaves, a person can take back its
-/// last change.
+/// The page's session stays joined this long after the Agent's words last
+/// reached it: it often writes again soon, and until it leaves, a person can
+/// take back its last change.
+#[cfg(not(test))]
 const IDLE: Duration = Duration::from_secs(90);
+#[cfg(test)]
+const IDLE: Duration = Duration::from_millis(300);
+/// Its words reach a page someone reads at the reader's pace, long after the
+/// model wrote them, and the session says when a turn has all reached it (its
+/// outcome). The session stays joined until then, though not longer than this
+/// after the Agent last wrote.
+const WRITTEN_WITHIN: Duration = Duration::from_secs(30 * 60);
 
 /// What a reply says to a page, as the reply comes.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -330,6 +338,9 @@ async fn write_into(
     let mut turn = 0u64;
     // The turn being written, and whether the session stopped it.
     let mut open: Option<(u64, bool)> = None;
+    // Turns the page has not said the outcome of: it is still taking their words.
+    let mut unanswered = BTreeSet::new();
+    let mut wrote = tokio::time::Instant::now();
     let mut heartbeat = tokio::time::interval(HEARTBEAT);
     heartbeat.tick().await;
     let idle = tokio::time::sleep(IDLE);
@@ -337,7 +348,8 @@ async fn write_into(
     loop {
         let frame = tokio::select! {
             piece = pieces.recv() => {
-                idle.as_mut().reset(tokio::time::Instant::now() + IDLE);
+                wrote = tokio::time::Instant::now();
+                idle.as_mut().reset(wrote + IDLE);
                 match piece {
                     Some(Piece::Open) => {
                         if let Some((previous, stopped)) = open.take()
@@ -347,7 +359,8 @@ async fn write_into(
                         }
                         turn += 1;
                         open = Some((turn, false));
-                        Some(write_frame(turn))
+                        unanswered.insert(turn);
+                        Some(write_frame(turn, false))
                     }
                     Some(Piece::Text(text)) => match open {
                         Some((id, false)) => Some(delta_frame(id, &text)),
@@ -370,8 +383,12 @@ async fn write_into(
                                 *halted = true;
                             }
                         }
-                        Some(PageCoWriteRequest::Outcome { problems, .. }) if !problems.is_empty() => {
-                            tell(&events, &channel_id, problems_prompt(&page, &problems));
+                        Some(PageCoWriteRequest::Outcome { turn: answered, problems }) => {
+                            unanswered.remove(&answered);
+                            idle.as_mut().reset(tokio::time::Instant::now() + IDLE);
+                            if !problems.is_empty() {
+                                tell(&events, &channel_id, problems_prompt(&page, &problems));
+                            }
                         }
                         _ => {}
                     },
@@ -398,10 +415,12 @@ async fn write_into(
                 None
             }
             () = &mut idle, if open.is_none() => {
-                if leave(&mut pieces) {
+                let taking = !unanswered.is_empty() && wrote.elapsed() < WRITTEN_WITHIN;
+                if !taking && leave(&mut pieces) {
                     break;
                 }
-                // Something was written meanwhile: the session stays open for it.
+                // The page is still taking its words, or something was written
+                // meanwhile: the session stays open for it.
                 idle.as_mut().reset(tokio::time::Instant::now() + IDLE);
                 None
             }
@@ -540,7 +559,8 @@ mod tests {
     /// ticket, and plays the page's session on the socket the ticket opens.
     struct FakePageHub {
         url: String,
-        /// The co-writing JSON the session received, in order.
+        /// The co-writing JSON the session received, in order, and `{"closed": true}`
+        /// when the socket closes.
         received: mpsc::UnboundedReceiver<serde_json::Value>,
         /// Frames for the session to send.
         send: mpsc::UnboundedSender<serde_json::Value>,
@@ -604,8 +624,11 @@ mod tests {
                             tokio::select! {
                                 frame = socket.next() => match frame {
                                     Some(Ok(Message::Binary(data))) => { let _ = received_tx.send(co_write_body(&data)); }
+                                    Some(Ok(Message::Close(_))) | Some(Err(_)) | None => {
+                                        let _ = received_tx.send(serde_json::json!({ "closed": true }));
+                                        return;
+                                    }
                                     Some(Ok(_)) => {}
-                                    _ => return,
                                 },
                                 Some(value) = outgoing.recv() => {
                                     socket.send(Message::Binary(co_write_frame(&value).into())).await.unwrap();
@@ -780,6 +803,33 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn stays_on_the_page_until_it_has_taken_all_the_agent_wrote() {
+        let mut hub = FakePageHub::start().await;
+        let (to, _heard) = start_writing(&hub, "c-stream-write-paced");
+        to.send(Piece::Open).unwrap();
+        to.send(Piece::Text("⟦after \"x\"⟧ read slowly".into()))
+            .unwrap();
+        to.send(Piece::End { failed: false }).unwrap();
+        for kind in ["write", "delta", "done"] {
+            assert_eq!(hub.next().await["type"], kind);
+        }
+        // A reader is on the page: its words are still reaching it, well after it stopped writing.
+        tokio::time::sleep(IDLE * 3).await;
+        assert!(
+            hub.received.try_recv().is_err(),
+            "it stays while the page takes its words"
+        );
+        hub.send
+            .send(serde_json::json!({ "type": "outcome", "turn": 1, "problems": [] }))
+            .unwrap();
+        assert_eq!(
+            hub.next().await,
+            serde_json::json!({ "closed": true }),
+            "and leaves once the page has them all, after a while"
+        );
+    }
+
+    #[tokio::test]
     async fn a_message_writes_into_a_page_in_one_turn_and_hears_what_did_not_land() {
         let mut hub = FakePageHub::start().await;
         let connector = connector_for(&hub);
@@ -789,7 +839,7 @@ mod tests {
                 .await
         });
         hub.expect(&[
-            serde_json::json!({ "type": "write", "turn": 1 }),
+            serde_json::json!({ "type": "write", "turn": 1, "atOnce": true }),
             serde_json::json!({ "type": "delta", "turn": 1, "text": "⟦after \"x\"⟧ one" }),
             serde_json::json!({ "type": "done", "turn": 1 }),
         ])

@@ -148,9 +148,14 @@ pub fn decode_request(frame: &[u8]) -> Option<PageCoWriteRequest> {
 
 /// Opens `turn` from this side: the Agent writes into the page from its
 /// conversation, and the session, which asks a streaming co-writer nothing,
-/// takes what follows as that turn's words.
-pub fn write_frame(turn: u64) -> Vec<u8> {
-    frame(&serde_json::json!({ "type": "write", "turn": turn }))
+/// takes what follows as that turn's words. They reach a page someone reads
+/// at the reader's pace, unless `at_once`: for a sender that waits on them.
+pub fn write_frame(turn: u64, at_once: bool) -> Vec<u8> {
+    if at_once {
+        frame(&serde_json::json!({ "type": "write", "turn": turn, "atOnce": true }))
+    } else {
+        frame(&serde_json::json!({ "type": "write", "turn": turn }))
+    }
 }
 
 /// Some of the harness's text for `turn`, as it came.
@@ -280,13 +285,18 @@ impl PageCoWriteConnector {
     }
 
     /// Writes `body`, the page's markers and their words, into `page` from the
-    /// conversation `channel_id` in one turn, as a streamed write would, and
-    /// says what of it did not reach the page; nothing when all of it did.
+    /// conversation `channel_id` in one turn, as a streamed write would but all
+    /// at once, and says what of it did not reach the page; nothing when all of
+    /// it did.
     pub async fn write_once(&self, channel_id: &str, page: &str, body: &str) -> Result<Vec<String>> {
         let space = self.page_space(channel_id).await?;
         let socket = self.connect(&space, page, true).await?;
         let (mut sink, mut stream) = socket.split();
-        for frame in [write_frame(1), delta_frame(1, body), done_frame(1, false)] {
+        for frame in [
+            write_frame(1, true),
+            delta_frame(1, body),
+            done_frame(1, false),
+        ] {
             sink.send(Message::Binary(frame.into()))
                 .await
                 .map_err(|error| CliError::Relay(format!("The page session closed: {error}")))?;
@@ -389,7 +399,13 @@ mod tests {
         );
         let done: serde_json::Value = serde_json::from_slice(&done_frame(7, true)[2..]).unwrap();
         assert_eq!(done, serde_json::json!({ "type": "failed", "turn": 7 }));
-        let write: serde_json::Value = serde_json::from_slice(&write_frame(8)[2..]).unwrap();
+        let write: serde_json::Value = serde_json::from_slice(&write_frame(8, false)[2..]).unwrap();
         assert_eq!(write, serde_json::json!({ "type": "write", "turn": 8 }));
+        let at_once: serde_json::Value =
+            serde_json::from_slice(&write_frame(9, true)[2..]).unwrap();
+        assert_eq!(
+            at_once,
+            serde_json::json!({ "type": "write", "turn": 9, "atOnce": true })
+        );
     }
 }

@@ -64,6 +64,8 @@ test("markers it does not know are dropped, and a bracket that opens nothing is 
 test("a reply from the runtime is read strictly", () => {
   assert.deepEqual(parsePageCoWriteReply({ type: "delta", turn: 3, text: "hi" }), { type: "delta", turn: 3, text: "hi" });
   assert.deepEqual(parsePageCoWriteReply({ type: "done", turn: 3 }), { type: "done", turn: 3 });
+  assert.deepEqual(parsePageCoWriteReply({ type: "write", turn: 4, atOnce: true }), { type: "write", turn: 4, atOnce: true });
+  assert.deepEqual(parsePageCoWriteReply({ type: "write", turn: 4, atOnce: "yes" }), { type: "write", turn: 4 });
   assert.equal(parsePageCoWriteReply({ type: "delta", turn: "3", text: "hi" }), null);
   assert.equal(parsePageCoWriteReply({ type: "other", turn: 1 }), null);
 });

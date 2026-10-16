@@ -9,6 +9,7 @@ import {
   absolutePositionToRelativePosition, initProseMirrorDoc, relativePositionToAbsolutePosition, updateYFragment,
 } from "y-prosemirror";
 import * as Y from "yjs";
+import { readingMs, readingStep, type PageReaderPace } from "./page-reader-pace";
 
 /**
  * An Agent co-writing a page live (docs/design/pages-live-document.md §4.2),
@@ -67,7 +68,7 @@ export interface PageCoWriterHost {
     undoable: boolean; wrote: PageCoWriterWrote[] }): void;
   /** The people on the page now. */
   people(): PageCoWriterPerson[];
-  /** The pace its words reach the page at, while someone reads it; null: as they come. */
+  /** The pace its words reach the page at: a reader's while someone reads it, null when they land as they come. */
   pace(): PageReaderPace | null;
   /** To the Agent's runtime. */
   send(request: PageCoWriteRequest): void;
@@ -114,10 +115,14 @@ function newTurn(id: number, atOnce = false): Turn {
   return { id, parser: new PageCoWriteParser(), action: null, stopped: false, queue: [], sent: null, atOnce };
 }
 
-/** How fast an Agent's words reach a page someone is reading: about as a quick writer types, a breath after each sentence. */
-export interface PageReaderPace { charsPerSecond: number; sentencePauseMs: number }
-
-const SENTENCE_END = /[.!?。！？；;]\s*$/u;
+/** Queues what the parser made of the Agent's words, text that follows text as one. */
+function enqueue(turn: Turn, events: PageCoWriteEvent[]): void {
+  for (const event of events) {
+    const last = turn.queue.at(-1);
+    if (event.type === "text" && last?.type === "text") turn.queue[turn.queue.length - 1] = { type: "text", text: last.text + event.text };
+    else turn.queue.push(event);
+  }
+}
 
 /** A block of the page as markdown, as the Agent reads it. */
 function blockMarkdown(node: DocNode): string {
@@ -273,7 +278,7 @@ export class PageCoWriter {
       this.finished(turn);
       this.close();
       this.show({ activity: "watching" });
-      this.askLater();
+      if (!this.next()) this.askLater();
     }, CO_WRITER_TURN_MS);
     // In Node (tests, local runs) a waiting turn does not keep the process alive; Workers have no unref.
     (this.turnTimer as { unref?: () => void }).unref?.();
@@ -317,11 +322,11 @@ export class PageCoWriter {
     if (this.ended || !this.writable || !turn || turn.stopped || turn.sent) return;
     if (reply.type === "delta") {
       if (turn === this.active) this.awaitTurn(turn);
-      turn.queue.push(...turn.parser.push(reply.text));
+      enqueue(turn, turn.parser.push(reply.text));
     } else {
-      turn.queue.push(...turn.parser.finish());
+      enqueue(turn, turn.parser.finish());
       turn.sent = { failed: reply.type === "failed", ...(reply.type === "failed" && reply.reason ? { reason: reply.reason } : {}) };
-      // No more of it is waited on; what it sent goes on reaching the page.
+      // Nothing more of it is waited on; what it sent goes on reaching the page.
       if (turn === this.active && this.turnTimer) {
         clearTimeout(this.turnTimer);
         this.turnTimer = null;
@@ -331,34 +336,30 @@ export class PageCoWriter {
   }
 
   /**
-   * Gives what the Agent sent to the page: all of it at once when nobody reads the page, otherwise a few
-   * characters a step, a breath after each sentence, so a reader sees it written as a quick writer writes.
+   * Gives what the Agent sent to the page: all of it as it comes when nobody reads the page, otherwise a
+   * word a step, the next after as long as reading it takes (page-reader-pace.ts).
    */
   private step(turn: Turn): void {
     this.releaseTimer = null;
-    if (this.active !== turn || turn.stopped) return;
     const pace = turn.atOnce ? null : this.host.pace();
-    let budget = pace ? Math.max(1, Math.round(pace.charsPerSecond * CO_WRITER_WRITE_EVERY_MS / 1000)) : Infinity;
-    let rest = 0;
-    while (turn.queue.length && budget > 0 && this.active === turn && !turn.stopped) {
+    let wait = 0;
+    while (turn.queue.length && !wait && this.active === turn && !turn.stopped) {
       const event = turn.queue.shift()!;
       if (event.type !== "text" || !pace) {
         this.apply(turn, event);
         continue;
       }
-      const chars = Array.from(event.text);
-      const given = chars.slice(0, budget).join("");
-      if (chars.length > budget) turn.queue.unshift({ type: "text", text: chars.slice(budget).join("") });
-      budget -= Math.min(budget, chars.length);
-      this.apply(turn, { type: "text", text: given });
-      if (SENTENCE_END.test(given)) {
-        rest = pace.sentencePauseMs;
-        break;
-      }
+      const word = readingStep(event.text);
+      if (word.length < event.text.length) turn.queue.unshift({ type: "text", text: event.text.slice(word.length) });
+      this.apply(turn, { type: "text", text: word });
+      const after = turn.queue[0];
+      const next = after ? (after.type === "text" ? after.text : "") : turn.sent ? "" : null;
+      wait = Math.max(CO_WRITER_WRITE_EVERY_MS, readingMs(word, next, pace));
     }
     if (this.active !== turn || turn.stopped) return;
-    if (turn.queue.length) {
-      this.releaseTimer = setTimeout(() => this.step(turn), rest || CO_WRITER_WRITE_EVERY_MS);
+    if (wait) {
+      // The next word waits its time, even one that has not come yet.
+      this.releaseTimer = setTimeout(() => this.step(turn), wait);
       (this.releaseTimer as { unref?: () => void }).unref?.();
     } else if (turn.sent) {
       this.complete(turn);
@@ -603,7 +604,7 @@ export class PageCoWriter {
       this.show({ activity: this.active ? "thinking" : "watching" });
       return "changed";
     }
-    if (target === writing) this.yieldTurn(`${by} took back what you were writing`);
+    const halted = target === writing && this.halt(`${by} took back what you were writing`);
     const from = this.region(target, live.doc)!.from;
     const children: DocNode[] = [];
     live.doc.forEach((node, _offset, index) => {
@@ -618,6 +619,8 @@ export class PageCoWriter {
     this.wrote = this.wrote.filter((entry) => entry.change !== target);
     this.told(`${by} took back your last change; leave it out unless they ask again.`);
     this.show({ activity: this.active ? "thinking" : target === writing ? "waiting" : "watching" });
+    // A turn it opened after the one taken back goes on once the page is as it was.
+    if (halted) this.next();
     return "undone";
   }
 
@@ -708,8 +711,14 @@ export class PageCoWriter {
 
   /** Someone edited where the Agent writes: it stops there, as a person would, and hears why when they pause. */
   private yieldTurn(why: string): void {
+    // What it opened after the stopped turn is its own write: it goes on.
+    if (this.halt(why)) this.next();
+  }
+
+  /** Stops the open turn, and says why. Whether there was one. */
+  private halt(why: string): boolean {
     const turn = this.active;
-    if (!turn || turn.stopped) return;
+    if (!turn || turn.stopped) return false;
     turn.stopped = true;
     turn.action = null;
     // Its turn ends here: what it still sends for it is not written, and the next pause asks again.
@@ -718,7 +727,6 @@ export class PageCoWriter {
     this.host.send({ type: "interrupt", turn: turn.id });
     this.finished(turn);
     this.show({ activity: "waiting" });
-    // What it opened after the stopped turn is its own write: it goes on.
-    this.next();
+    return true;
   }
 }
