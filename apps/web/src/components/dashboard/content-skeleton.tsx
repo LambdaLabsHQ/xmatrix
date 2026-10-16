@@ -177,6 +177,14 @@ export function MediaSkeleton({
  * The element stays invisible while loading so the browser's broken-image
  * glyph never flashes in its place.
  */
+/* Faces this document has already shown, held so the browser keeps them
+   decoded. An unmounted <img> lets its image be collected, and the next mount
+   (opening another Channel) must fetch it again — a network round trip for
+   revalidated static icons — behind a skeleton. A held image stays in the
+   memory cache, so a remount is complete before its first paint. Faces are
+   few and small; attachments do not ask to be retained. */
+const retainedImages = new Map<string, HTMLImageElement>();
+
 export function LoadingImage({
   src,
   alt,
@@ -184,6 +192,7 @@ export function LoadingImage({
   skeletonClassName,
   fallback,
   announce = true,
+  retain = false,
   draggable,
   referrerPolicy,
   onContextMenu,
@@ -194,12 +203,20 @@ export function LoadingImage({
   skeletonClassName?: string;
   fallback?: ReactNode;
   announce?: boolean;
+  /** Keep the loaded image decoded for the rest of the session (avatars). */
+  retain?: boolean;
   draggable?: boolean;
   referrerPolicy?: "no-referrer" | "origin";
   onContextMenu?: (event: MouseEvent<HTMLImageElement>) => void;
 }) {
   const imageRef = useRef<HTMLImageElement | null>(null);
-  const [phase, setPhase] = useState<"loading" | "ready" | "failed">("loading");
+  const [phase, setPhase] = useState<"loading" | "ready" | "failed">(
+    () => retainedImages.has(src) ? "ready" : "loading"
+  );
+  const loaded = (image: HTMLImageElement) => {
+    setPhase("ready");
+    if (retain && !retainedImages.has(src)) retainedImages.set(src, image);
+  };
 
   useEffect(() => {
     const image = imageRef.current;
@@ -207,7 +224,7 @@ export function LoadingImage({
       setPhase("ready");
       return;
     }
-    setPhase("loading");
+    setPhase(retainedImages.has(src) ? "ready" : "loading");
   }, [src]);
 
   if (!src) {
@@ -238,7 +255,7 @@ export function LoadingImage({
         <img
           ref={(node) => {
             imageRef.current = node;
-            if (node?.complete && node.naturalWidth > 0) setPhase("ready");
+            if (node?.complete && node.naturalWidth > 0) loaded(node);
           }}
           src={src}
           alt={phase === "ready" ? alt : ""}
@@ -246,7 +263,7 @@ export function LoadingImage({
           referrerPolicy={referrerPolicy}
           onContextMenu={onContextMenu}
           className={cn(className, phase !== "ready" && "app-loading-image-pending")}
-          onLoad={() => setPhase("ready")}
+          onLoad={(event) => loaded(event.currentTarget)}
           onError={() => setPhase("failed")}
         />
       )}
