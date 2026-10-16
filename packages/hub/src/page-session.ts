@@ -1,5 +1,6 @@
 import {
-  PAGE_DOCUMENT_FRAGMENT, PAGE_MESSAGE_CO_WRITE, mergePageText, pageAuthorColor, pageChangedBlocks, pageRemovedSections,
+  PAGE_DOCUMENT_FRAGMENT, PAGE_MESSAGE_CO_WRITE, mergePageText, mergePageWords, pageAuthorColor, pageChangedBlocks,
+  pageRemovedSections,
   parsePageCoWriteReply, type PageCoWriteRequest, type PageEditResult,
 } from "@xmatrix/protocol";
 import {
@@ -64,6 +65,9 @@ export class PageSessionConflict extends Error {
 /** An editor whose edits are not committed yet, with the sequence of their latest edit. */
 export interface PendingEditor { principal: PageSessionPrincipal; seq: number }
 
+/** An Agent writing its committed edit in: the step it last wrote, in its own edit's terms, and whether to stop. */
+interface PageWriter { shown: string; done: boolean }
+
 /**
  * What a session persists, as one unit: the committed base, the CRDT state
  * (so the document keeps its identity across restarts and reconnects), and
@@ -74,7 +78,12 @@ export interface PageSessionState {
   update: Uint8Array;
   editors: PendingEditor[];
   editSeq: number;
-  /** Committed edits still being presented; recovery completes them without another commit. */
+  /**
+   * The committed page as people saw it while Agents were still writing committed edits in (absent:
+   * people saw the head). Recovery shows those edits whole, without another commit.
+   */
+  presented?: string;
+  /** What a session kept before `presented`: each Agent's writing apart. Read once to recover it. */
   writing?: Array<{ shown: string; target: string }>;
   /** Where each Agent's caret rests, by awareness client id (absent before carets rested). */
   agents?: RestingAgent[];
@@ -211,10 +220,14 @@ export class PageSession {
   private readonly connectionClients = new Map<string, Set<number>>();
   private readonly editors = new Map<string, PendingEditor>();
   /**
-   * Agent edits committed but still being written into the live text: what of each is in it so far,
-   * and all of it. Several Agents write at once, each outside the session's queue.
+   * The committed page as people see it now, without their own uncommitted edits. It trails the head
+   * only while Agents write committed edits in, a few words at a time (null: it is the head). People's
+   * uncommitted edits are how the live text differs from it.
    */
-  private readonly writing = new Set<{ shown: string; target: string }>();
+  private presented: string | null = null;
+  /** Agents writing committed edits in now, each outside the session's queue, so several write at once. */
+  private readonly writers = new Set<PageWriter>();
+  private destroyed = false;
   private editSeq = 0;
   private agentClocks = new Map<number, number>();
   private readonly resting = new Map<number, RestingAgent>();
@@ -306,7 +319,7 @@ export class PageSession {
 
   /** Marks the document settled when it reads as the committed base. */
   private settle(): void {
-    if (this.base && this.writing.size === 0 && this.markdown() === this.base.body) this.settledVersion = this.version;
+    if (this.base && this.presented === null && this.markdown() === this.base.body) this.settledVersion = this.version;
   }
 
   /**
@@ -346,13 +359,26 @@ export class PageSession {
           }, "load");
           await this.persist();
         }
-        // Use the same completion model as a human save during concurrent writing.
-        // Partial presentation must not become the next human editor's deletion.
-        if (persisted.writing?.length) {
-          for (const stream of persisted.writing) this.writing.add({ ...stream });
-          const completed = this.completed(this.markdown());
-          this.writing.clear();
-          setPageFragmentMarkdown(this.fragment, completed, "load");
+        if (!legacy.length && persisted.presented !== undefined) {
+          // Edits committed but not yet written in whole when the session stopped are shown whole now,
+          // with people's uncommitted edits on top: what was not shown yet is no person's deletion.
+          this.presented = canonicalPageMarkdown(persisted.presented);
+          this.finishWriting("load");
+          await this.persist();
+        } else if (!legacy.length && persisted.writing?.length) {
+          // A session kept by an earlier version tracked each Agent's writing apart.
+          let text = this.markdown();
+          for (const stream of persisted.writing) {
+            const merged = mergePageText(stream.shown, text, stream.target);
+            if (merged.ok) text = merged.text;
+          }
+          setPageFragmentMarkdown(this.fragment, text, "load");
+          await this.persist();
+        } else if (!legacy.length && this.editors.size === 0 && this.markdown() !== this.base!.body) {
+          // Text that differs from the committed page with no edit pending is no person's: every person's
+          // change notes its author until a commit takes it in. It is what an Agent's edit left when it
+          // could not be written in whole, so the page reads as committed again.
+          setPageFragmentMarkdown(this.fragment, this.base!.body, "load");
           await this.persist();
         }
         this.settle();
@@ -372,7 +398,7 @@ export class PageSession {
     if (!this.base || this.ended) return;
     await this.ports.persist({ base: this.base, update: Y.encodeStateAsUpdate(this.doc),
       editors: [...this.editors.values()], editSeq: this.editSeq, agents: [...this.resting.values()],
-      ...(this.writing.size ? { writing: [...this.writing].map((stream) => ({ ...stream })) } : {}) });
+      ...(this.presented !== null ? { presented: this.presented } : {}) });
   }
 
   /**
@@ -497,7 +523,8 @@ export class PageSession {
     // Commit a snapshot. Edits that arrive while the commit is in flight stay
     // pending, with their authors, for the next commit.
     // What Agents are still writing in is committed already; people's edits commit around it.
-    const snapshot = this.completed(this.markdown());
+    const snapshotLive = this.markdown();
+    const snapshot = this.settledText();
     const snapshotVersion = this.version;
     const snapshotSeq = this.editSeq;
     if (snapshot === this.base.body) {
@@ -532,6 +559,8 @@ export class PageSession {
       if (!(error instanceof PageSessionConflict)) throw error;
       // The head moved outside the session: merge into it; if the changes
       // overlap, the session's text becomes the new head and history keeps the other.
+      // What Agents are still writing in is shown whole first, so the live text is what merges.
+      this.finishWriting("server");
       const head = this.canonical(await this.ports.loadHead(author));
       const merged = mergePageText(this.base.body, snapshot, head.body);
       committedBody = merged.ok ? canonicalPageMarkdown(merged.text) : snapshot;
@@ -541,6 +570,8 @@ export class PageSession {
     }
     this.setHead({ ...this.base, revision: result.headRevision, body: committedBody,
       agentSuggestOnly: result.agentSuggestOnly });
+    // The edits this commit took in are part of what people see as committed now.
+    if (this.presented !== null) this.presented = snapshotLive;
     for (const [key, editor] of this.editors) if (editor.seq <= snapshotSeq) this.editors.delete(key);
     this.settle();
     await this.persist();
@@ -549,14 +580,27 @@ export class PageSession {
     return { revision: result.revision, kind: result.kind };
   }
 
-  /** The live text as it reads once every Agent still writing has finished: what is committed, with people's edits. */
-  private completed(live: string): string {
-    let text = live;
-    for (const stream of this.writing) {
-      const merged = mergePageText(stream.shown, text, stream.target);
-      if (merged.ok) text = merged.text;
-    }
-    return text;
+  /**
+   * What the page reads as once every committed edit is written in: the head, with people's
+   * uncommitted edits on top. Where those changed the very words an Agent still had to write, the
+   * person's words stay, and what the Agent only added beside them too.
+   */
+  private settledText(): string {
+    const live = this.markdown();
+    if (this.presented === null || !this.base) return live;
+    if (live === this.presented) return this.base.body;
+    return canonicalPageMarkdown(mergePageWords(this.presented, live, this.base.body, "ours").text);
+  }
+
+  /** Shows every committed edit whole at once, people's uncommitted edits on top; no Agent writes on. */
+  private finishWriting(origin: string): void {
+    for (const writer of this.writers) writer.done = true;
+    this.writers.clear();
+    if (this.presented === null) return;
+    const live = this.markdown();
+    const settled = this.settledText();
+    this.presented = null;
+    if (settled !== live) setPageFragmentMarkdown(this.fragment, settled, origin);
   }
 
   /**
@@ -691,27 +735,33 @@ export class PageSession {
       // Pending human edits commit under their own authors first.
       await this.commitNow();
       // A head written outside the session (a restore, a migration) is taken
-      // in first, so the edit merges against what the page is now.
+      // in first, so the edit merges against what the page is now. What Agents
+      // are still writing in is shown whole before it.
       const head = this.canonical(await this.ports.loadHead(principal));
       if (head.revision !== this.base.revision) {
+        this.finishWriting("server");
         const live = this.markdown();
         const merged = mergePageText(this.base.body, live, head.body);
         this.adopt(live, merged.ok ? canonicalPageMarkdown(merged.text) : head.body, "server");
         this.setHead(head);
       }
-      const current = this.completed(this.markdown());
+      const current = this.settledText();
       const baseText = input.baseRevision === this.base.revision ? this.base.body
         : canonicalPageMarkdown(await this.ports.loadRevision(principal, input.baseRevision));
-      const merge = mergePageText(baseText, current, canonicalPageMarkdown(input.body));
+      const body = canonicalPageMarkdown(input.body);
+      // Agents that read one revision and edit neighbouring lines, as several working on one list at once
+      // do, both get their edit: whole lines merge first, and the words of lines that touch after.
+      const lineMerge = mergePageText(baseText, current, body);
+      const merge = lineMerge.ok ? lineMerge : mergePageWords(baseText, current, body);
       if (!merge.ok) throw new PageSessionConflict(this.base.revision, current);
-      const merged = { text: canonicalPageMarkdown(merge.text) };
+      const target = canonicalPageMarkdown(merge.text);
       const key = principalKey(principal);
       const conversationId = principal.conversationId ?? input.conversationIds[0] ?? null;
       // The repository commits the edit first; that is where it is authorized.
       // Only a committed edit reaches the live text.
-      const result = await this.ports.commit(principal, { baseRevision: this.base.revision, body: merged.text,
+      const result = await this.ports.commit(principal, { baseRevision: this.base.revision, body: target,
         conversationIds: input.conversationIds, coAuthors: [],
-        blockIds: pageChangedBlocks(current, merged.text).filter((id) => id) });
+        blockIds: pageChangedBlocks(current, target).filter((id) => id) });
       // The repository decides what the edit became. A suggestion (the page turned suggest-only
       // meanwhile, or the Agent co-writes it with a person) waits for a person and never reaches the
       // text. Only a suggest-only page sends later Agent edits straight to suggestions.
@@ -720,46 +770,73 @@ export class PageSession {
         this.ports.broadcast(encodeNotice({ type: "suggestion", revision: result.revision, author: principal.label }));
         return { done: { ...result, removedSections: [] } as PageEditResult };
       }
-      this.setHead({ ...this.base, revision: result.headRevision, body: merged.text,
+      // People see the page as committed before this edit until it is written in.
+      if (this.presented === null) this.presented = this.base.body;
+      this.setHead({ ...this.base, revision: result.headRevision, body: target,
         agentSuggestOnly: result.agentSuggestOnly });
-      const stream = { shown: current, target: merged.text };
-      this.writing.add(stream);
-      return { writing: { result, stream, current, target: merged.text, key, conversationId } };
-    }).then(async (edit): Promise<PageEditResult> => {
-      if (edit.done) return edit.done;
-      const { result, stream, current, target, key, conversationId } = edit.writing!;
-      // The Agent writes it in as a person would, a few words at a time under its caret and outside the
-      // session's queue, so other Agents write at the same time; edits people make meanwhile are kept,
-      // as each step merges into the live text. It is written under the Agent's awareness id, so readers
-      // see whose text it is.
-      const user = { name: principal.label, color: pageAuthorColor(principal), kind: principal.kind, conversationId };
-      const pace = this.ports.writePaceMs ?? 0;
-      const steps = pace > 0 ? pageWritingSteps(current, target) : [target];
-      let change: ReturnType<PageSession["adopt"]> = { cursor: null, block: "" };
-      try {
-        for (const [index, step] of steps.entries()) {
-          const from = stream.shown;
-          // The doc update captures the baseline it presents in its persisted state.
-          stream.shown = step;
-          const written = authoredAs(this.doc, agentClientId(key), () => this.adopt(from, step, `agent:${key}`));
-          if (written.cursor) change = written;
-          const at = change.cursor ? Y.relativePositionToJSON(change.cursor) : null;
-          const last = index === steps.length - 1;
-          // The cursor rests where the Agent's change ends.
-          this.agentAwareness(principal, { user, activity: last ? "editing" : "writing", block: change.block,
-            ...(at ? { cursor: { anchor: at, head: at } } : {}) });
-          if (!last) await new Promise((resolve) => setTimeout(resolve, pace));
-        }
-      } finally {
-        this.writing.delete(stream);
-      }
-      await this.serial(async () => {
-        this.settle();
-        await this.persist();
-      });
+      const writer: PageWriter = { shown: current, done: false };
+      this.writers.add(writer);
+      await this.persist();
+      // Announced in commit order, before it is written in: readers' head revision never steps back.
       this.ports.broadcast(encodeNotice({ type: "committed", revision: result.revision,
         headRevision: result.headRevision, author: principal.label, detachedAutomations: result.detachedAutomations }));
+      return { writing: { result, writer, current, target, key, conversationId } };
+    }).then(async (edit): Promise<PageEditResult> => {
+      if (edit.done) return edit.done;
+      const { result, writer, current, target, key, conversationId } = edit.writing!;
+      const pace = this.ports.writePaceMs ?? 0;
+      await this.writeIn(principal, writer, pace > 0 ? pageWritingSteps(current, target) : [target], key, conversationId);
       return { ...result, removedSections: pageRemovedSections(current, target) };
+    });
+  }
+
+  /**
+   * Writes a committed edit in as a person would, a few words at a time under the Agent's caret and
+   * outside the session's queue, so several Agents write at once. Each step adds the Agent's next words
+   * to what people see; people's uncommitted edits merge around them and, where they changed the very
+   * words, stay, with what the Agent only added beside them. When the last Agent finishes, the page
+   * shows the head whole with people's edits on top, whatever overlapping steps left.
+   */
+  private async writeIn(principal: PageSessionPrincipal, writer: PageWriter, steps: string[], key: string,
+    conversationId: string | null): Promise<void> {
+    const user = { name: principal.label, color: pageAuthorColor(principal), kind: principal.kind, conversationId };
+    const pace = this.ports.writePaceMs ?? 0;
+    let change: ReturnType<typeof setPageFragmentMarkdown> = { cursor: null, block: "" };
+    const show = (activity: "writing" | "editing") => {
+      const at = change.cursor ? Y.relativePositionToJSON(change.cursor) : null;
+      // The cursor rests where the Agent's change ends.
+      this.agentAwareness(principal, { user, activity, block: change.block, ...(at ? { cursor: { anchor: at, head: at } } : {}) });
+    };
+    try {
+      for (const [index, step] of steps.entries()) {
+        if (writer.done || this.destroyed || this.ended || this.presented === null) break;
+        const before = this.presented;
+        // The Agent's next words, into what people see as committed; where another edit still being
+        // written in changed the same words, that one stays until the head is shown whole.
+        const next = canonicalPageMarkdown(mergePageWords(writer.shown, before, step, "ours").text);
+        writer.shown = step;
+        const live = this.markdown();
+        const text = live === before ? next : mergePageWords(before, live, next, "ours").text;
+        // What is presented moves first, so the state this update persists records it.
+        this.presented = next;
+        const written = authoredAs(this.doc, agentClientId(key),
+          () => setPageFragmentMarkdown(this.fragment, text, `agent:${key}`));
+        if (written.cursor) change = written;
+        const last = index === steps.length - 1;
+        show(last ? "editing" : "writing");
+        if (!last) await new Promise((resolve) => setTimeout(resolve, pace));
+      }
+    } finally {
+      this.writers.delete(writer);
+      if (!this.destroyed) {
+        if (this.writers.size === 0 && !this.ended) this.finishWriting("server");
+        show("editing");
+      }
+    }
+    if (this.destroyed) return;
+    await this.serial(async () => {
+      this.settle();
+      await this.persist();
     });
   }
 
@@ -771,6 +848,8 @@ export class PageSession {
   reload(principal: PageSessionPrincipal, redact?: { needle: string; replacement: string }): Promise<void> {
     return this.serial(async () => {
       if (!this.base) return;
+      // What Agents are still writing in is shown whole: the new head replaces what was committed.
+      this.finishWriting("server");
       if (redact?.needle) {
         const current = this.markdown();
         this.adopt(current, current.split(redact.needle).join(redact.replacement), "server");
@@ -807,6 +886,9 @@ export class PageSession {
 
   /** Releases the awareness and the document. */
   destroy(): void {
+    this.destroyed = true;
+    for (const writer of this.writers) writer.done = true;
+    this.writers.clear();
     for (const writer of this.coWriters.values()) writer.stop();
     this.coWriters.clear();
     this.awareness.destroy();

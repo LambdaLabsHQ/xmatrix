@@ -132,6 +132,62 @@ export function mergePageText(base: string, ours: string, theirs: string): PageM
   return conflicts ? { ok: false, conflicts } : { ok: true, text };
 }
 
+/** Words for merging: line breaks, runs of other space, a CJK character each, runs of letters and digits, or one other character. */
+const MERGE_WORD = /\n|[^\S\n]+|[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]|[\p{L}\p{N}\p{M}_]+|\S/gu;
+
+function mergeWords(text: string): string[] {
+  return text.match(MERGE_WORD) ?? [];
+}
+
+function startsWithWords(words: readonly string[], prefix: readonly string[]): boolean {
+  return prefix.length <= words.length && prefix.every((word, index) => words[index] === word);
+}
+
+function endsWithWords(words: readonly string[], suffix: readonly string[]): boolean {
+  const offset = words.length - suffix.length;
+  return offset >= 0 && suffix.every((word, index) => words[offset + index] === word);
+}
+
+/**
+ * Three-way merge by line, and by word inside the lines both sides changed, so changes to
+ * different words of one paragraph, or to neighbouring lines, combine (`mergePageText` keeps whole
+ * lines apart). Where both changed the same words, `prefer` names the side that stays, and what the
+ * other side only added at an edge of those words stays beside it, as two people typing at one place
+ * both keep their words; without `prefer` such a merge fails.
+ */
+export function mergePageWords(base: string, ours: string, theirs: string, prefer: "ours" | "theirs"): { ok: true; text: string };
+export function mergePageWords(base: string, ours: string, theirs: string): PageMergeResult;
+export function mergePageWords(base: string, ours: string, theirs: string, prefer?: "ours" | "theirs"): PageMergeResult {
+  if (ours === theirs || theirs === base) return { ok: true, text: ours };
+  if (ours === base) return { ok: true, text: theirs };
+  let conflicts = 0;
+  let text = "";
+  for (const region of diff3Merge(lines(ours), lines(base), lines(theirs), { excludeFalseConflicts: true })) {
+    if (region.ok) {
+      text += region.ok.join("");
+      continue;
+    }
+    const { a, o, b } = region.conflict!;
+    for (const words of diff3Merge(mergeWords(a.join("")), mergeWords(o.join("")), mergeWords(b.join("")),
+      { excludeFalseConflicts: true })) {
+      if (words.ok) {
+        text += words.ok.join("");
+        continue;
+      }
+      if (!prefer) {
+        conflicts++;
+        continue;
+      }
+      const { a: mine, o: was, b: other } = words.conflict!;
+      const [kept, added] = prefer === "ours" ? [mine, other] : [other, mine];
+      if (startsWithWords(added, was)) text += [...kept, ...added.slice(was.length)].join("");
+      else if (endsWithWords(added, was)) text += [...added.slice(0, added.length - was.length), ...kept].join("");
+      else text += kept.join("");
+    }
+  }
+  return conflicts ? { ok: false, conflicts } : { ok: true, text };
+}
+
 /** A revision's change as lines kept, removed and added, for showing it as a diff. */
 export type PageLineDiff = Array<{ kind: "same" | "removed" | "added"; lines: string[] }>;
 
