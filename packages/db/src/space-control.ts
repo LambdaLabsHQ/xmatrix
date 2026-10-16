@@ -90,6 +90,8 @@ export interface CreatePostgresSpace {
   ownerUserId: string;
   name: string;
   metadata?: Record<string, unknown>;
+  /** The Spaces the product makes for the owner on its own, for the billing policy. */
+  personalSpaceIds?: readonly string[];
 }
 
 export interface CreatePostgresChannel {
@@ -1018,6 +1020,10 @@ export class PostgresSpaceControlRepository {
         values: [spaceId], maxRows: 1,
       });
       if (existing[0]) throw new SpaceControlError("space_exists", 409, "space id already exists");
+      const now = new Date().toISOString();
+      rejectBilling(await this.billing.spaceCreation(transaction, {
+        ownerUserId, now, personalSpaceIds: input.personalSpaceIds ?? [],
+      }));
       const admission = await transaction.query<QueryResultRow & { state: string }>({
         name: "space_shard_admission_v1",
         text: `SELECT state FROM control.postgres_shards
@@ -1039,7 +1045,6 @@ export class PostgresSpaceControlRepository {
         maxRows: 1,
       });
       const searchRankSeq = ranks[0]!.value;
-      const now = new Date().toISOString();
       await transaction.query({
         name: "space_placement_create_v1",
         text: `INSERT INTO control.space_placement

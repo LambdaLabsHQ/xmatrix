@@ -124,6 +124,10 @@ export interface Env {
   RATE_LIMIT_ANONYMOUS?: RequestRateLimiter;
   /** Per-user allowance of Human socket sign-ins. */
   RATE_LIMIT_HUMAN_CONNECT?: RequestRateLimiter;
+  /** Per-Human allowance of composer draft previews (Jev). Always enforced. */
+  RATE_LIMIT_SUMMON_INTENT?: RequestRateLimiter;
+  /** Per-owner allowance of open Jev evaluations. Always enforced. */
+  RATE_LIMIT_JEV_EVALUATE?: RequestRateLimiter;
   /** Over-limit requests are refused only when this is exactly "true"; otherwise only logged. */
   RATE_LIMIT_ENFORCED?: string;
   /** Observation writes only when this is exactly "true". */

@@ -10,6 +10,7 @@ import {
   SpaceControlError,
 } from "../dist/space-control.js";
 import { activePlacementRow, recordingDatabase as database } from "./recording-database.fixture.mjs";
+import { spaceBilling } from "@xmatrix/billing";
 
 function spaceMutationRow(version) {
   return { space_id: "space-1", owner_user_id: "owner-1", name: "One", metadata_json: {},
@@ -60,6 +61,26 @@ test("Space authority closes only new-Space admission while the shard drains", a
     error.retryable === true && error.details?.state === "draining");
   assert.equal(db.calls.some((call) => call.name === "space_placement_create_v1"), false);
   assert.equal(db.calls.some((call) => call.name === "space_search_rank_allocate_v1"), false);
+});
+
+test("a Space the billing policy refuses is not created, and the policy is told whose it would be", async () => {
+  const db = database((query) => query.name === "space_shard_admission_v1" ? [{ state: "active" }] : []);
+  const asked = [];
+  const repository = new PostgresSpaceControlRepository(db, "shard-0", { ...spaceBilling,
+    async spaceCreation(_transaction, input) {
+      asked.push(input);
+      return { code: "free_space_limit", status: 402, message: "Upgrade an existing Space to Pro or delete one to create another Free Space" };
+    } });
+  await assert.rejects(repository.createSpace({
+    requestId: "request-refused", commandId: "command-refused", spaceId: "space-new",
+    ownerUserId: "user-1", name: "New", personalSpaceIds: ["personal-1"],
+  }), (error) => error instanceof SpaceControlError && error.code === "free_space_limit" && error.status === 402 &&
+    error.message === "Upgrade an existing Space to Pro or delete one to create another Free Space");
+  assert.deepEqual(asked.map(({ ownerUserId, personalSpaceIds }) => ({ ownerUserId, personalSpaceIds })),
+    [{ ownerUserId: "user-1", personalSpaceIds: ["personal-1"] }]);
+  for (const name of ["space_search_rank_allocate_v1", "space_placement_create_v1", "space_create_v2"]) {
+    assert.equal(db.calls.some((call) => call.name === name), false, name);
+  }
 });
 
 test("Space authority rejects a reused command id with another digest", async () => {

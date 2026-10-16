@@ -17,3 +17,8 @@ which nothing can be done and nothing says how to start.
   call conflicts on the id and returns `{ "space": null }`.
 - It is an ordinary Space with the caller as its owner. It can be renamed,
   shared and deleted like any other.
+- A plan's allowance of Spaces per account may leave it out: the Hub passes
+  its id (and `private:<user id>`, which held a person's Channels before
+  Spaces existed) to the billing policy's `spaceCreation` check. The official
+  policy refuses a new Space (`402 free_space_limit`) while the account owns
+  two Free Spaces besides these; paid and deleted Spaces do not count.

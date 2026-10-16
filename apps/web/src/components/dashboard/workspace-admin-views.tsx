@@ -1397,6 +1397,7 @@ export function TeamView({
             token={token}
             userId={user.id}
             creatingSpace={creatingSpace}
+            error={error}
             onCreateSpace={onCreateSpace}
             onRestoreSpace={onRestoreSpace}
           />

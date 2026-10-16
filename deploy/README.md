@@ -18,7 +18,7 @@ environment at render time and rendering fails if it is unset.
 | Field | Meaning |
 | --- | --- |
 | `cloudflare.accountId` | Account the Workers deploy to. |
-| `billing` | Optional path (from the repository root) to a billing package. Its `src/index.ts` replaces `@xmatrix/billing` in the Hub bundle. Without it nothing is metered: every Space admits any number of members and messages. The official deployments name their own plan policy here. |
+| `billing` | Optional path (from the repository root) to a billing package. Its `src/index.ts` replaces `@xmatrix/billing` in the Hub bundle. Without it nothing is metered: an account may create any number of Spaces, and every Space admits any number of members and messages. The official deployments name their own plan policy here. |
 | `hub.config` | Committed Hub config to render (default `packages/hub/wrangler.toml`). |
 | `hub.workerName`, `web.workerName` | Worker script names. |
 | `hub.origin`, `web.origin` | Bare `https://` origins. They become the custom-domain routes and the Hub's `HUB_URL` / `APP_URL`, and the Web build's `NEXT_PUBLIC_*` URLs. |

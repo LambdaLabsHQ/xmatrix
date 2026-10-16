@@ -52,17 +52,19 @@ export function TeamOtherSpace({
   );
 }
 
-/** Create a team Space, or restore one this viewer deleted. */
+/** Create a team Space, or restore one this viewer deleted. `error` says why the last attempt failed. */
 export function TeamNewSpace({
   token,
   userId,
   creatingSpace,
+  error,
   onCreateSpace,
   onRestoreSpace,
 }: {
   token?: string;
   userId: string;
   creatingSpace: boolean;
+  error: string | null;
   onCreateSpace: (name: string) => Promise<SerializedSpace | undefined>;
   onRestoreSpace: (spaceId: string) => Promise<void>;
 }) {
@@ -100,6 +102,7 @@ export function TeamNewSpace({
           Create
         </button>
       </form>
+      {error && <p className="text-sm font-medium text-destructive">{error}</p>}
       <DeletedSpacesList token={token} userId={userId} onRestoreSpace={onRestoreSpace} />
     </div>
   );

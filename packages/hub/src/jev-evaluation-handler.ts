@@ -1,11 +1,16 @@
 import { createJevClient, MAX_INPUT_BYTES, type JevInput } from "@xmatrix/decision-model";
+import { admitRequest, rateLimitedResponse } from "./request-rate-limit";
 import type { Env } from "./types";
 
-type JevEnv = Pick<Env, "JEV_AI_GATEWAY_API_KEY">;
+type JevEnv = Pick<Env, "JEV_AI_GATEWAY_API_KEY" | "RATE_LIMIT_JEV_EVALUATE">;
 const headers = { "cache-control": "private, no-store" };
 const failure = (error: string, status: number) => Response.json({ error }, { status, headers });
 
-/** Authorization is resolved by the existing Hub boundary, before parsing input. */
+/**
+ * Authorization is resolved by the existing Hub boundary, before parsing input.
+ * Every account may evaluate, so each owner's evaluations are bounded instead:
+ * an Agent Run spends its owner's allowance.
+ */
 export async function evaluateJevRequest(
   request: Request,
   env: JevEnv,
@@ -14,6 +19,7 @@ export async function evaluateJevRequest(
 ): Promise<Response> {
   const userId = await authorize();
   if (!userId) return failure("jev_access_denied", 403);
+  if (!await admitRequest(env, "jev_evaluate", userId)) return rateLimitedResponse();
   if (!env.JEV_AI_GATEWAY_API_KEY?.trim()) {
     return failure("jev_not_configured", 503);
   }

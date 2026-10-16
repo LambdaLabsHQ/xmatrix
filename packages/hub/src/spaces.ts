@@ -10,6 +10,7 @@ import {
 } from "@xmatrix/db";
 
 import { withChannelHeadPreview } from "./channel-head-preview";
+import { deterministicConversationId } from "./deterministic-id";
 import {
   createPostgresAuthorityDatabase,
   createPostgresAuthorityFleet,
@@ -97,11 +98,20 @@ async function projectQuota(env: SpacesEnv, dependencies: SpacesDependencies, re
 
 // Spaces
 
-export function createSpace(env: SpacesEnv, input: {
+/** The Space xMatrix makes for an account that has none (docs/architecture/first-space.md). */
+export function personalSpaceId(userId: string): Promise<string> {
+  return deterministicConversationId("personal-space", userId);
+}
+
+export async function createSpace(env: SpacesEnv, input: {
   commandId: string; spaceId: string; ownerUserId: string; name: string; metadata?: Record<string, unknown>;
 }) {
   const { repository, requestId } = spaces(env, {}, input.commandId);
-  return repository.createSpace({ requestId, ...input });
+  // The Spaces xMatrix made for the owner on its own, which a plan's Space
+  // allowance may leave out: the personal Space, and `private:<user id>`,
+  // which held a person's Channels before Spaces existed.
+  const personalSpaceIds = [await personalSpaceId(input.ownerUserId), `private:${input.ownerUserId}`];
+  return repository.createSpace({ requestId, ...input, personalSpaceIds });
 }
 
 interface DomainCommand { commandId: string; actorUserId: string; at: string; expectedVersion?: number }
