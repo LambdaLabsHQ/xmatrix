@@ -1,0 +1,102 @@
+import { utf8ByteLength } from "@xmatrix/protocol";
+import type { Env } from "../types";
+import { connectorCredentialRepository } from "./credentials";
+import { ProviderRequestError } from "./http";
+
+/** Each account is a separate grant, inside the connection's existing encrypted envelope. */
+export interface XAccountView { id: string; username: string; generation: string }
+export interface XAccount extends XAccountView {
+  ownerUserId: string;
+  clientId: string;
+  accessToken: string;
+  refreshToken: string;
+  expiresAt: number;
+  scopes: string;
+  refreshing?: string;
+  refreshStartedAt?: number;
+  needsReconnect?: boolean;
+}
+export interface XActionCapability {
+  accounts(): Promise<XAccountView[]>;
+  request(account: XAccountView, method: "GET" | "POST", path: string,
+    body?: Record<string, unknown>): Promise<Record<string, unknown>>;
+}
+
+const ID = /^[1-9][0-9]{0,19}$/u;
+const UUID = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/u;
+export const MAX_X_ACCOUNTS = 4;
+
+export function parseXAccounts(value: string | undefined): XAccount[] {
+  if (!value) return [];
+  let parsed: unknown;
+  try { parsed = JSON.parse(value); } catch { parsed = undefined; }
+  if (!Array.isArray(parsed) || parsed.length > MAX_X_ACCOUNTS || utf8ByteLength(value) > 8192) {
+    throw new ProviderRequestError(409, "The X account list is invalid; reconnect X");
+  }
+  const seen = new Set<string>();
+  return parsed.map((item: unknown) => {
+    const a = item as Partial<XAccount> | null;
+    const token = (v: unknown) => typeof v === "string" && /^[\x21-\x7e]{1,2048}$/u.test(v);
+    if (!a || typeof a !== "object" || typeof a.id !== "string" || !ID.test(a.id) || seen.has(a.id) ||
+        typeof a.username !== "string" || !/^[A-Za-z0-9_]{1,15}$/u.test(a.username) ||
+        typeof a.generation !== "string" || !UUID.test(a.generation) ||
+        typeof a.ownerUserId !== "string" || !/^[A-Za-z0-9_.:-]{1,128}$/u.test(a.ownerUserId) ||
+        !token(a.clientId) || !token(a.accessToken) || !token(a.refreshToken) ||
+        !Number.isSafeInteger(a.expiresAt) || a.expiresAt! <= 0 || typeof a.scopes !== "string" || a.scopes.length > 500 ||
+        (a.needsReconnect !== undefined && typeof a.needsReconnect !== "boolean") ||
+        (a.refreshing !== undefined && (!UUID.test(a.refreshing) || !Number.isSafeInteger(a.refreshStartedAt)))) {
+      throw new ProviderRequestError(409, "The X account list is invalid; reconnect X");
+    }
+    seen.add(a.id);
+    return a as XAccount;
+  });
+}
+
+export function xAccountFields(accounts: readonly XAccount[]): { accounts: string | null } {
+  if (!accounts.length) return { accounts: null };
+  const value = JSON.stringify(accounts);
+  parseXAccounts(value);
+  return { accounts: value };
+}
+
+/** A callback may add an account; it cannot take another member's account over. */
+export async function connectXAccount(env: Env, input: { spaceId: string; actorUserId: string; fields: Record<string, string | null>;
+  snapshot: { connectionVersion: number; credentialVersion: number; connectionGeneration: string } }): Promise<void> {
+  const repository = connectorCredentialRepository(env);
+  const grant = parseXAccounts(input.fields.accounts ?? undefined);
+  if (grant.length !== 1 || grant[0]!.ownerUserId !== input.actorUserId) throw new ProviderRequestError(400, "Restart X Connect");
+  const stored = await repository.resolveForAdmin({ requestId: crypto.randomUUID(), spaceId: input.spaceId,
+    providerId: "x", actorUserId: input.actorUserId });
+  const current = parseXAccounts(stored?.values.accounts);
+  const account = grant[0]!;
+  if (current.some(a => a.id === account.id && a.ownerUserId !== input.actorUserId)) {
+    throw new ProviderRequestError(403, "This X account belongs to another Space member");
+  }
+  const kept = current.filter(a => a.id !== account.id);
+  if (kept.length >= MAX_X_ACCOUNTS) throw new ProviderRequestError(409, `A Space connects at most ${MAX_X_ACCOUNTS} X accounts`);
+  await repository.put({ requestId: crypto.randomUUID(), spaceId: input.spaceId, providerId: "x", actorUserId: input.actorUserId,
+    fields: xAccountFields([...kept, account]), policy: { allowed: ["accounts"] }, at: new Date().toISOString(),
+    expectedGrant: { connectionVersion: input.snapshot.connectionVersion, version: input.snapshot.credentialVersion,
+      connectionGeneration: input.snapshot.connectionGeneration } });
+}
+
+export async function listXAccounts(env: Env, input: { spaceId: string; actorUserId: string }) {
+  const stored = await connectorCredentialRepository(env).resolveForAdmin({ requestId: crypto.randomUUID(),
+    ...input, providerId: "x" });
+  return parseXAccounts(stored?.values.accounts).map(a => ({ id: a.id, username: a.username, generation: a.generation,
+    ownerUserId: a.ownerUserId, expiresAt: new Date(a.expiresAt).toISOString(),
+    needsReconnect: a.needsReconnect === true || !!a.refreshing && Date.now() - (a.refreshStartedAt ?? 0) > 30_000 }));
+}
+
+/** Forget exactly the inspected account generation; a late click cannot remove a new grant. */
+export async function removeXAccount(env: Env, input: { spaceId: string; actorUserId: string; id: string; generation: string }) {
+  const repository = connectorCredentialRepository(env);
+  const stored = await repository.resolveForAdmin({ requestId: crypto.randomUUID(), ...input, providerId: "x" });
+  const accounts = parseXAccounts(stored?.values.accounts);
+  const account = accounts.find(a => a.id === input.id && a.generation === input.generation);
+  if (!stored || !account) throw new ProviderRequestError(409, "The X account changed; reload its account list");
+  await repository.put({ requestId: crypto.randomUUID(), spaceId: input.spaceId, providerId: "x", actorUserId: input.actorUserId,
+    fields: xAccountFields(accounts.filter(a => a !== account)), expectedGrant: stored,
+    policy: { allowed: ["accounts"] }, at: new Date().toISOString() });
+  return listXAccounts(env, input);
+}

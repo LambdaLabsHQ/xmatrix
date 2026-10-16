@@ -8,6 +8,11 @@ export type AppConnectorManifest = AppConnectorProviderManifest & {
 };
 
 const AGENT_USE_CASES: Record<AppConnectorProviderManifest["id"], string[]> = {
+  x: [
+    "Connect company and personal accounts through separate authorizations.",
+    "Read posts and timelines with results visible in the calling Channel.",
+    "Publish from an explicitly selected account under Channel approval policy; quote posts require X Enterprise API access.",
+  ],
   github: [
     "Dispatch issue triage to a channel-local agent instance.",
     "Keep PR review comments and CI failures attached to the same work session.",
