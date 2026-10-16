@@ -185,8 +185,9 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
         markResting: async ({ runId, channelId, ownerUserId, resting }) => {
           const marked = await runtimeRepository(input.env).markRunResting({ requestId: crypto.randomUUID(),
             actorUserId: ownerUserId, runId, channelId, resting, windowMs: INSTANCE_IDLE_SLEEP_MS });
-          // The Channel coordinator keeps its alarm at the earliest due sleep.
-          if (marked.started) await wakeAgentLaunchCoordinator(input.env, channelId, ["idleSleep"]);
+          // A previous mark may have committed before its wake failed. Re-hand
+          // the retained deadline to the coordinator on retry, without moving it.
+          if (marked.idleSleepAt) await wakeAgentLaunchCoordinator(input.env, channelId, ["idleSleep"]);
           return marked;
         },
       },
@@ -229,7 +230,7 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
     } catch (error) {
       this.restingByInstance.delete(key);
       console.error("Run rest state could not be recorded", {
-        runId: session.run.runId, error: error instanceof Error ? error.message : String(error) });
+        runId: session.run.runId, error: error instanceof Error ? error.message : String(error) }, error);
     }
   }
 
