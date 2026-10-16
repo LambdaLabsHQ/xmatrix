@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { automationReferences, gitHubFileReferenceFrom, gitHubFileReferenceHref, gitHubFileReferences, gitHubFileUrl, insertAutomationReference, mergePageText, pageBlockAt, pageBlocks, pageChangeGist, pageChangedBlocks, pageHeadingSlug, pageRemovedSections, parseGitHubFileReference, removeAutomationReference, replaceAutomationReference } from "../dist/index.js";
+import { automationReferences, gitHubFileReferenceFrom, gitHubFileReferenceHref, gitHubFileReferences, gitHubFileUrl, insertAutomationReference, mergePageText, pageBlockAt, pageBlocks, pageChangeGist, pageChangedBlocks, pageHeadingSlug, pageRemovedSections, pageWritingSteps, parseGitHubFileReference, removeAutomationReference, replaceAutomationReference } from "../dist/index.js";
 
 const page = `Intro line
 # Relay Storage
@@ -153,4 +153,16 @@ test("a page's GitHub file embeds are read from its prose, each once, in canonic
     "xmatrix:github-file/o/r/docs/bootstrap.md",
     "xmatrix:github-file/o/r/a.b.md?ref=v1",
   ]);
+});
+
+test("a writer's steps take out at once, add a few words at a time in reading order, and end on the new text", () => {
+  const before = "# Launch\n\n- Web · Claude · in progress\n- Mobile · Codex · in progress\n";
+  const after = "# Launch\n\n- Web · Claude · merged, live in v1.0.464\n- Mobile · Codex · in review, PR #566\n";
+  const steps = pageWritingSteps(before, after, 4);
+  assert.equal(steps.at(-1), after);
+  assert.ok(steps.length > 1 && steps.length <= 4);
+  assert.ok(steps.every((text) => !/in progress/u.test(text)), "what it replaces goes first");
+  assert.ok(steps[0].includes("merged") && !steps[0].includes("PR #566"), "the first change is written first");
+  assert.deepEqual(pageWritingSteps(after, after), []);
+  assert.deepEqual(pageWritingSteps(after, "# Launch\n"), ["# Launch\n"], "a pure removal is one step");
 });

@@ -178,6 +178,25 @@ test("an Agent edit merges with human edits, streams in under its cursor and com
   assert.notEqual(h.session.doc.clientID, agentClient, "the session writes as itself again afterwards");
 });
 
+test("readers watch an Agent's edit written in a few words at a time, and people's typing meanwhile is kept", async () => {
+  const h = harness();
+  h.ports.writePaceMs = 1;
+  const ann = await annConnected(h);
+  const seen = [];
+  ann.doc.on("update", () => seen.push(ann.text.toString()));
+  const agentBody = HEAD.replace("In progress", "Shipped to every Space on Friday, behind one switch, with docs and a video");
+  const editing = h.session.submitEdit(agent, { baseRevision: 1, body: agentBody, conversationIds: ["conv-1"] });
+  await new Promise((resolve) => setTimeout(resolve, 3));
+  ann.text.insert(ann.text.toString().indexOf("none"), "human note, ");
+  await editing;
+  const partial = seen.filter((text) => /Shipped/u.test(text) && !/a video/u.test(text));
+  assert.ok(partial.length >= 2, "the text arrives in several steps, not at once");
+  assert.match(ann.text.toString(), /with docs and a video/u);
+  assert.match(ann.text.toString(), /human note, none/u, "what a person typed while it wrote stays");
+  const agentState = [...ann.awareness.getStates().values()].find((state) => state?.user?.kind === "agent");
+  assert.equal(agentState.activity, "editing", "it is done writing");
+});
+
 test("an Agent edit answers which sections it removed and which Automations it detached", async () => {
   const h = harness();
   const ann = await annConnected(h);

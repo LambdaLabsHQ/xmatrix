@@ -407,3 +407,40 @@ export function gitHubFileReferences(markdown: string): string[] {
   }
   return [...references];
 }
+
+/**
+ * How a writer gets from `before` to `after` word by word: the texts the page
+ * passes through, ending with `after`. What it takes out goes at once; what it
+ * adds appears a few words at a time, in reading order, in at most `steps` steps.
+ */
+export function pageWritingSteps(before: string, after: string, steps = 40): string[] {
+  if (before === after) return [];
+  // Line breaks are their own tokens and are written at once, so the page keeps its shape (a
+  // heading never runs into the paragraph above it) while the words on each line come in.
+  const tokens = (text: string) => text.match(/[^\s]+[ \t]*|\n|[ \t]+/gu) ?? [];
+  const isBreak = (token: string) => token === "\n";
+  const parts = diffComm(tokens(before), tokens(after));
+  const added = parts.reduce((n, part) => n + (part.common ? 0 : (part.buffer2 ?? []).filter((t) => !isBreak(t)).length), 0);
+  if (added === 0) return [after];
+  const per = Math.max(1, Math.ceil(added / Math.max(1, steps)));
+  const out: string[] = [];
+  for (let shown = per; ; shown += per) {
+    let left = Math.min(shown, added);
+    let text = "";
+    for (const part of parts) {
+      if (part.common) {
+        text += part.common.join("");
+        continue;
+      }
+      for (const token of part.buffer2 ?? []) {
+        if (isBreak(token)) text += token;
+        else if (left > 0) { text += token; left--; }
+      }
+    }
+    // A line cut after a word ends in no space, as the page itself would hold it.
+    out.push(text.replace(/[ \t]+(?=\n|$)/gu, ""));
+    if (shown >= added) break;
+  }
+  out[out.length - 1] = after;
+  return out;
+}

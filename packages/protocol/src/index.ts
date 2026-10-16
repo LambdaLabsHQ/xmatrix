@@ -464,7 +464,7 @@ export {
   automationReferences, GITHUB_FILE_REFERENCE_SCHEME, gitHubFileReferenceFrom, gitHubFileReferenceHref,
   gitHubFileReferences, gitHubFileUrl, insertAutomationReference, mergePageText,
   pageBlockAt, pageBlocks, pageChangedBlocks, pageChangeGist, pageHeadingSlug, pageLineDiff,
-  pageReferencesIn, pageReferenceSpans, pageReferenceToken, pageRemovedSections, parseGitHubFileReference,
+  pageReferencesIn, pageReferenceSpans, pageReferenceToken, pageRemovedSections, pageWritingSteps, parseGitHubFileReference,
   removeAutomationReference, replaceAutomationReference,
 } from "./page-markdown.js";
 export type {
