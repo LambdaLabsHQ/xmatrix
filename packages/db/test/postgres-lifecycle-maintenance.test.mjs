@@ -96,7 +96,7 @@ test("maintenance deletes expired PostgreSQL sequence reservations with the same
   ]));
   assert.equal(result.deletedExpiredIdempotencyRows, 0);
   assert.equal(result.deletedExpiredSequenceReservationRows, 1_250);
-  assert.deepEqual(result.batchesByRelation, { idempotency: 1, sequenceReservation: 2, messageExecution: 1, wecomInstallAttempt: 1, dingtalkCompanyAttempt: 1, scopedCommandReplay: 1 });
+  assert.deepEqual(result.batchesByRelation, { idempotency: 1, sequenceReservation: 2, messageExecution: 1, wecomInstallAttempt: 1, dingtalkCompanyAttempt: 1, retainedOutbox: 1, scopedCommandReplay: 1 });
   const deletes = fake.calls.filter(
     ({ text }) => text.includes("DELETE FROM data.message_sequence_reservations"),
   );
@@ -171,8 +171,8 @@ test("the snapshot reads one statement at a time under its own read-only timeout
   const begin = texts.indexOf("BEGIN");
   assert.deepEqual(texts.slice(begin, begin + 3),
     ["BEGIN", "SET TRANSACTION READ ONLY", "SET LOCAL statement_timeout = '30s'"]);
-  assert.equal(texts.filter((text) => /FROM data\.outbox/u.test(text)).length, 2,
-    "one outbox scan per snapshot");
+  assert.equal(texts.filter((text) => /FROM data\.outbox/u.test(text)).length, 4,
+    "one status scan and one bounded eligibility read per snapshot");
   assert.ok(texts.indexOf("SET statement_timeout = '5s'") < begin);
   assert.deepEqual(Object.keys(result.before.oldest), [
     "idempotency_oldest_at", "sequence_reservation_oldest_at", "outbox_oldest_at",
