@@ -46,23 +46,21 @@ export type SpaceFirstTaskAgent = {
 
 export type SpaceFirstTaskState =
   | { kind: "hidden" }
-  /* Bound agent, no directory chosen for this Space yet. */
-  | { kind: "needs-workspace"; agent: SpaceFirstTaskAgent };
+  /* Bound agent, no conversation yet: the first task starts the first one. */
+  | { kind: "first-task"; agent: SpaceFirstTaskAgent };
 
+/* Every device gets the first task. Without a folder the agent works in the
+   folder xMatrix keeps for it on its machine, so the browser and the phone,
+   which have no folder picker, need no directory to start. */
 export function spaceFirstTaskState(input: {
   channelsLoaded: boolean;
   agentsLoaded: boolean;
   spaceAgents: SpaceFirstTaskAgent[];
   spaceChannelCount: number;
   spaceId: string | null | undefined;
-  /* Choosing a directory needs the desktop file picker. In the browser and on
-     mobile there is no way to complete this step, and this card replaces the
-     timeline — so without a picker it must step aside rather than present an
-     action the human cannot take. */
-  folderPickerAvailable: boolean;
 }): SpaceFirstTaskState {
   if (!input.channelsLoaded || !input.agentsLoaded) return { kind: "hidden" };
-  if (!input.spaceId || !input.folderPickerAvailable) return { kind: "hidden" };
+  if (!input.spaceId) return { kind: "hidden" };
   /* One channel is enough to stop guiding: from then on the shell's own empty
      states are about a conversation, not about having none. */
   if (input.spaceChannelCount > 0) return { kind: "hidden" };
@@ -72,7 +70,7 @@ export function spaceFirstTaskState(input: {
       !candidate.spaceId || candidate.spaceId === input.spaceId
   );
   if (!agent) return { kind: "hidden" };
-  return { kind: "needs-workspace", agent };
+  return { kind: "first-task", agent };
 }
 
 /** A folder suggestion the human can accept in the picker, named for the Space. */
@@ -86,14 +84,17 @@ export type FirstTaskComposition =
   | { ok: true; body: string }
   | { ok: false; reason: string };
 
-/* The chosen folder constrains the Auto mention; all subsequent text remains
-   ordinary message content and follows the shared mention grammar. */
+/* A chosen folder constrains the Auto mention; without one the agent works in
+   its xMatrix-kept folder. All subsequent text remains ordinary message
+   content and follows the shared mention grammar. */
 export function composeFirstTaskMessage(input: {
-  workspacePath: string;
+  workspacePath?: string | null;
   message: string;
 }): FirstTaskComposition {
-  const workspacePath = input.workspacePath.trim();
-  if (!workspacePath) return { ok: false, reason: "Choose a folder for this space" };
+  const workspacePath = input.workspacePath?.trim();
+  const message = input.message.trim();
+  if (!message) return { ok: false, reason: "Write what you want done" };
+  if (!workspacePath) return { ok: true, body: `${formatAutoLaunchMention({})} ${message}` };
   if (isXmatrixManagedWorkspacePath(workspacePath)) {
     return {
       ok: false,
@@ -101,7 +102,5 @@ export function composeFirstTaskMessage(input: {
     };
   }
 
-  const address = formatAutoLaunchMention({ pwd: workspacePath });
-  const message = input.message.trim();
-  return { ok: true, body: message ? `${address} ${message}` : address };
+  return { ok: true, body: `${formatAutoLaunchMention({ pwd: workspacePath })} ${message}` };
 }
