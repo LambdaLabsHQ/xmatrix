@@ -444,6 +444,10 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       spaceAgentsUnreachable,
     ]
   );
+  const spaceChannelCount = currentSpaceId
+    ? Math.max(onboardingCatalog.rows.length,
+      channels.filter((channel) => channel.spaceId === currentSpaceId).length)
+    : channels.length;
   // Once an agent is bound the shell would fall back to "No conversations yet",
   // which can only point at New conversation. Sending the first task is what
   // creates the first one.
@@ -452,15 +456,11 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       channelsLoaded,
       agentsLoaded,
       spaceAgents,
-      spaceChannelCount: currentSpaceId
-        ? Math.max(onboardingCatalog.rows.length,
-          channels.filter((channel) => channel.spaceId === currentSpaceId).length)
-        : channels.length,
+      spaceChannelCount,
       spaceId: currentSpaceId,
       folderPickerAvailable: Boolean(desktopBridge?.chooseWorkspaceDirectory),
     }),
-    [spaceAgents, channels, currentSpaceId, desktopBridge, channelsLoaded, agentsLoaded,
-      onboardingCatalog.rows.length]
+    [spaceAgents, spaceChannelCount, currentSpaceId, desktopBridge, channelsLoaded, agentsLoaded]
   );
   // Only on the empty first screen: an open conversation is never covered.
   const showSpaceAgentSetup = (spaceAgentSetup.kind !== "hidden" || keepHarnessSetup) && !selectedChannel;
@@ -917,11 +917,16 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     );
   }
 
-  const showMobileHarnessSetup = isMobileViewport && showSpaceAgentSetup && installedFleet.ready &&
-    installedFleet.candidates.length > 0;
-  const spaceAgentSetupSurface = (
+  // A phone has no room beside its list, so the setup takes the list's place
+  // when a machine reports agents to turn on, or when a Space with no agent has
+  // no conversation either and the list would only say "No conversations yet".
+  const showMobileAgentSetup = isMobileViewport && showSpaceAgentSetup && (
+    (installedFleet.ready && installedFleet.candidates.length > 0) ||
+    (spaceAgentSetup.kind === "no-local-machine" && spaceChannelCount === 0));
+  const renderSpaceAgentSetup = (phone: boolean) => (
         <div className="app-tool-paper app-tool-detail min-h-0 flex-1 overflow-y-auto">
           <SpaceAgentSetupCard
+            phone={phone}
             state={spaceAgentSetup}
             spaceId={currentSpaceId ?? null}
             token={token ?? undefined}
@@ -952,7 +957,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
        is — otherwise "the channel list" and "Follow-ups" are the same
        selector now that both stay mounted. */
     <div className="app-mobile-chat-pane app-mobile-channel-list-pane relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden md:hidden">
-      {showMobileHarnessSetup ? spaceAgentSetupSurface : <MobileChannelChatList
+      {showMobileAgentSetup ? renderSpaceAgentSetup(true) : <MobileChannelChatList
             currentSpaceId={currentSpaceId}
             catalogPaging={currentSpaceCatalog}
             fallbackChannels={cachedCatalogChannels}
@@ -1044,7 +1049,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
         <ConversationPageCards spaceId={selectedChannel.spaceId} conversationId={selectedChannel.id} token={token}
           onOpenPage={openPage} excludePageId={placement === "beside-page" ? selectedPageId : null} />
       )}
-      {showSpaceAgentSetup && !showMobileHarnessSetup && spaceAgentSetupSurface}
+      {showSpaceAgentSetup && !showMobileAgentSetup && renderSpaceAgentSetup(false)}
       {showSpaceFirstTask && (
         <div className="app-tool-paper app-tool-detail min-h-0 flex-1 overflow-y-auto">
           <SpaceFirstTaskCard

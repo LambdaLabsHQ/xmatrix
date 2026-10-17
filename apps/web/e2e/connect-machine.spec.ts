@@ -91,3 +91,17 @@ test("a failed connection read hides stale approval and can recover without appr
   expect(await fixtureRequests(page, "intent-approve")).toHaveLength(0);
   expect(await fixtureRequests(page, "intent-create")).toEqual(preparations);
 });
+
+test("a connected machine with no agent offers the installer of whichever agent is chosen", async ({ page }) => {
+  const connect = await openWithIntent(page, {
+    ...base, phase: "connected", terminal: { ...terminal, platform: "windows-x86_64" },
+    machine: { machineId: "machine-1", name: "daniel-laptop", online: true, harnesses: [{ id: "claude", installed: false }] },
+  });
+  await expect(connect).toContainText("daniel-laptop is connected, but no agent is installed there yet.");
+  const picker = connect.getByTestId("agent-install-picker");
+  // The terminal said it is Windows, so it is shown Windows installers.
+  await expect(picker).toContainText("irm 'https://claude.ai/install.ps1' | iex");
+  await picker.getByRole("combobox", { name: "Agent to install" }).click();
+  await picker.getByRole("option", { name: "Qwen Code" }).click();
+  await expect(picker).toContainText("npm install -g @qwen-code/qwen-code@latest");
+});

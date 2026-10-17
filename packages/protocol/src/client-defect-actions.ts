@@ -106,6 +106,7 @@ const CLIENT_DEFECT_ACTIONS = [
   "Couldn't save the secret",
   "Couldn't send that to the machine",
   "Couldn't send the invite",
+  "Couldn't send the link",
   "Couldn't send the message",
   "Couldn't send the question",
   "Couldn't send the request to the Agent",

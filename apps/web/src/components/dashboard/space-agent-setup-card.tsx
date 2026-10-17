@@ -3,21 +3,24 @@
 import { AnimatedIcon } from "@/components/ui/animated-icon";
 import { useState } from "react";
 import { actionClass } from "@/components/ui/action-tone";
-import { agentPresetAvatarUrl } from "@xmatrix/protocol";
-import { Check, CloudOff, Copy, Download, HardDrive, Loader2, PlayCircle, RefreshCw, Terminal } from "lucide-react";
+import { WEB_PROXY_ROUTES, agentPresetAvatarUrl } from "@xmatrix/protocol";
+import { Check, CloudOff, Copy, Download, HardDrive, Loader2, Mail, PlayCircle, RefreshCw, Terminal } from "lucide-react";
 import { noticeClass } from "@/components/ui/status-tone";
+import { xmatrixApiRequest } from "@/lib/query/api-client";
 import { quickStartRunbookUrl, quickStartSeedPrompt } from "@/lib/quick-start";
+import { userErrorMessage } from "@/lib/user-facing-error";
 import { useCopyToClipboard } from "@/lib/use-copy-to-clipboard";
 import { cn } from "@/lib/utils";
 import { SetupCardHeader, SetupCardShell } from "./space-setup-card-chrome";
 import { IdentityAvatar } from "./identity-avatar";
 import { useNow } from "./agent-work-intent";
 import {
-  connectStep, defaultInstallPlatform, listNames, setupInstallCommand,
+  connectStep, defaultInstallPlatform, listNames, setupInstallCommand, terminalInstallPlatform,
   type ConnectStep, type InstallPlatform,
 } from "./connect-machine";
 import { useSetupIntent } from "./use-setup-intent";
 import { InstalledHarnessSwitchList } from "./installed-harness-switch-list";
+import { AgentInstallPicker, SupportedAgents } from "./supported-agents";
 import type { useInstalledHarnesses } from "./use-installed-harnesses";
 import type {
   SpaceAgentSetupCandidate,
@@ -28,11 +31,6 @@ import type {
    "No conversations yet" empty state: instead of asking the human to understand
    channels and directories first, it reports what is already on this machine
    and offers one action that ends in a working agent. */
-
-const RUNTIME_INSTALL_COMMANDS: Array<{ command: string; description: string }> = [
-  { command: "curl -fsSL https://claude.ai/install.sh | bash", description: "Claude Code" },
-  { command: "npm i -g @openai/codex", description: "Codex" },
-];
 
 /* What runs `xmatrix agent add` for this Space on another machine. The
    Space id is filled in: a placeholder would send the reader looking for an
@@ -56,6 +54,7 @@ export function SpaceAgentSetupCard({
   fleet,
   onBringAll,
   onManageMachines,
+  phone = false,
 }: {
   state: SpaceAgentSetupState;
   spaceId: string | null;
@@ -71,6 +70,8 @@ export function SpaceAgentSetupCard({
   fleet?: ReturnType<typeof useInstalledHarnesses>;
   onBringAll: () => void;
   onManageMachines: () => void;
+  /** On a phone, where no agent runs and no command can be pasted. */
+  phone?: boolean;
 }) {
   if (fleet && ((fleet.ready && fleet.candidates.length > 0) || fleet.enablingAll)) return <SetupCardShell>
     <SetupCardHeader title="Your installed agents" body="Turn them on to summon them. Choose a working folder when you send the first task." />
@@ -87,7 +88,9 @@ export function SpaceAgentSetupCard({
   return (
     <SetupCardShell>
         {state.kind === "unreachable" && <UnreachablePanel onRetry={onRetryAgents} />}
-        {state.kind === "no-local-machine" && <BringAgentsInPanel spaceId={spaceId} token={token} userId={userId} />}
+        {state.kind === "no-local-machine" && (phone
+          ? <ContinueOnComputerPanel token={token} />
+          : <BringAgentsInPanel spaceId={spaceId} token={token} userId={userId} />)}
         {state.kind === "discovering" && (
           <SetupCardHeader
             icon={Loader2}
@@ -215,19 +218,7 @@ function NoRuntimePanel({
         title={`No agent runtime found on ${hostLabel}`}
         body="xMatrix launches an agent CLI that already lives on a machine — it does not ship one. Install one here, or point xMatrix at the machine you actually code on."
       />
-      <div className="mt-4 rounded-md border border-border bg-background p-4">
-        {RUNTIME_INSTALL_COMMANDS.map((entry) => (
-          <div
-            key={entry.command}
-            className="flex min-w-0 flex-col gap-1 border-t border-border/70 py-3 first:border-t-0 first:pt-0 last:pb-0 sm:flex-row sm:items-center sm:justify-between sm:gap-4"
-          >
-            <code className="min-w-0 rounded bg-muted px-2 py-1 font-mono text-xs [overflow-wrap:anywhere]">
-              {entry.command}
-            </code>
-            <span className="min-w-0 text-sm text-muted-foreground sm:text-right">{entry.description}</span>
-          </div>
-        ))}
-      </div>
+      <AgentInstallPicker className="mt-4" platform={localInstallPlatform()} />
       <button
         type="button"
         onClick={onRefresh}
@@ -264,9 +255,10 @@ function UnreachablePanel({ onRetry }: { onRetry: () => void }) {
   );
 }
 
-/* Web and mobile: agents are not in this tab, so the one thing to learn here
-   is where they are. The desktop app finds the ones already installed; any
-   other machine connects with one command approved on this page. */
+/* A browser on a computer: agents are not in this tab, so the one thing to
+   learn here is where they are. Whoever uses an agent CLI already has a
+   terminal open, so one pasted command approved on this page comes first;
+   the desktop app, which finds installed agents without one, is the other way. */
 function BringAgentsInPanel({ spaceId, token, userId }: {
   spaceId: string | null; token: string | undefined; userId: string | undefined;
 }) {
@@ -275,16 +267,75 @@ function BringAgentsInPanel({ spaceId, token, userId }: {
       <SetupCardHeader
         icon={HardDrive}
         title="Bring your agents into xMatrix"
-        body="Your agents run on your own computer, and xMatrix connects them with the people they work with. Open the desktop app on that computer and it finds the agents already installed there."
+        body="Your agents run on your own computer, and xMatrix connects them with the people they work with. Bring in whichever of these you use."
       />
-      <a href="/download" className={actionClass({ variant: "primary", size: "md" }, "mt-4")}>
-        <Download className="size-4" />
-        Download xMatrix
-      </a>
+      <SupportedAgents className="mt-4" />
       <ConnectMachine spaceId={spaceId} token={token} userId={userId} />
+      <DesktopAppAlternative />
       <RemoteMachineHint />
     </>
   );
+}
+
+/** The way in without a terminal, beside the command. */
+export function DesktopAppAlternative({ centered = false }: { centered?: boolean }) {
+  return (
+    <div className={cn("mt-4", centered && "text-center")}>
+      <p className="text-sm text-muted-foreground">Prefer an app? It finds the agents installed on that computer without a terminal.</p>
+      <a href="/download" className={actionClass({ variant: "secondary", size: "md" }, "mt-2")}>
+        <Download className="size-4" />
+        Download xMatrix
+      </a>
+    </div>
+  );
+}
+
+/* A phone runs no agent and pastes no command, so the next step is named for
+   the computer the agents use, and the link is mailed there. Once that
+   computer reports its agents, the installed-agent switches show here too. */
+function ContinueOnComputerPanel({ token }: { token: string | undefined }) {
+  const [sentTo, setSentTo] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const send = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const sent = await xmatrixApiRequest<{ sentTo: string }>({
+        url: WEB_PROXY_ROUTES.setup_link_email, token, method: "POST", body: {},
+      });
+      setSentTo(sent.sentTo);
+    } catch (reason) {
+      setError(userErrorMessage(reason, "Couldn't send the link"));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div data-testid="continue-on-computer">
+      <SetupCardHeader
+        icon={HardDrive}
+        title="Bring your agents into xMatrix"
+        body="Your agents run on your computer. Open xmatrix.sh there and sign in: one command brings them in, and then you can talk to them from this phone."
+      />
+      <SupportedAgents className="mt-4" />
+      {sentTo
+        ? <p role="status" className="mt-4 flex items-center gap-2 text-sm">
+          <Check className="size-4 shrink-0 text-primary" />
+          <span>Sent to <strong>{sentTo}</strong>. Open it on your computer.</span>
+        </p>
+        : <button type="button" disabled={busy || !token} onClick={() => void send()}
+          className={actionClass({ variant: "primary", size: "md" }, "mt-4")}>
+          {busy ? <AnimatedIcon icon={Loader2} className="size-4 animate-spin" /> : <Mail className="size-4" />}
+          Email me the link
+        </button>}
+      {error && <p role="alert" className="mt-2 text-sm text-destructive">{error}</p>}
+    </div>
+  );
+}
+
+function localInstallPlatform(): InstallPlatform {
+  return typeof navigator === "undefined" ? "unix" : defaultInstallPlatform(navigator.userAgent);
 }
 
 /* One command for the machine, then what happened to it, as it happens: the
@@ -302,7 +353,7 @@ export function ConnectMachine({ spaceId, token, userId, centered = false }: {
   const step = intent.status ? connectStep(intent.status, now - intent.shownAt) : null;
   return (
     <div className="mt-4" data-testid="connect-machine">
-      <p className="text-sm text-muted-foreground">Or run this on the computer your agents use:</p>
+      <p className="text-sm text-muted-foreground">Run this on the computer your agents use:</p>
       <div className={cn("mt-2 flex min-w-0 flex-wrap items-center gap-2", centered && "justify-center")}>
         <code className="min-w-0 rounded bg-muted px-2 py-1 font-mono text-xs [overflow-wrap:anywhere]">
           {command ?? "Preparing a command…"}
@@ -318,6 +369,7 @@ export function ConnectMachine({ spaceId, token, userId, centered = false }: {
         {platform === "windows" ? "On macOS or Linux?" : "On Windows?"}
       </button>
       {step && <ConnectStepLine step={step} busy={intent.busy} centered={centered}
+        installPlatform={terminalInstallPlatform(intent.status?.terminal?.platform) ?? platform}
         onApprove={(code) => void intent.approve(code)} onDecline={() => void intent.decline()} />}
       {intent.error && <div className="mt-2">
         <p role="alert" className="text-sm text-destructive">{intent.error}</p>
@@ -330,8 +382,8 @@ export function ConnectMachine({ spaceId, token, userId, centered = false }: {
   );
 }
 
-function ConnectStepLine({ step, busy, centered, onApprove, onDecline }: {
-  step: ConnectStep; busy: boolean; centered: boolean;
+function ConnectStepLine({ step, busy, centered, installPlatform, onApprove, onDecline }: {
+  step: ConnectStep; busy: boolean; centered: boolean; installPlatform: InstallPlatform;
   onApprove: (userCode: string) => void; onDecline: () => void;
 }) {
   const row = cn("flex min-w-0 flex-wrap items-center gap-2 text-sm", centered && "justify-center");
@@ -372,9 +424,8 @@ function ConnectStepLine({ step, busy, centered, onApprove, onDecline }: {
       return (
         <div role="status" className="mt-3 text-sm">
           <p className={row}>{done} {step.machineName} is connected, but no agent is installed there yet.</p>
-          <p className="mt-1 text-muted-foreground">
-            Install one there, for example <code className="font-mono text-xs">{RUNTIME_INSTALL_COMMANDS[0]!.command}</code>
-          </p>
+          <p className="mt-1 text-muted-foreground">Install one there and it shows up here.</p>
+          <AgentInstallPicker className="mt-3" platform={installPlatform} />
         </div>
       );
   }

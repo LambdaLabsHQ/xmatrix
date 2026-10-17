@@ -5,7 +5,6 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   Bot,
-  Download,
   HardDrive,
   Loader2,
   Plus,
@@ -53,7 +52,8 @@ import {
   registrationSwitch,
   type MyAgentAction,
 } from "./my-agents-registrations";
-import { ConnectMachine } from "./space-agent-setup-card";
+import { ConnectMachine, DesktopAppAlternative } from "./space-agent-setup-card";
+import { SupportedAgents } from "./supported-agents";
 import { formatRelativeAge } from "./time-display";
 import { registrationTupleId, useRegistrationCommand } from "./use-registration-command";
 import {
@@ -311,12 +311,11 @@ export function MyAgentsView({
       <ToolDetailEmpty icon={<HardDrive />} title="Bring your agents into xMatrix">
         <p>
           Your agents run on your own computer, and xMatrix connects them with the people they work
-          with. Open the desktop app on that computer and it finds the agents already installed there.
+          with. Bring in whichever of these you use.
         </p>
-        <a href="/download" className={actionClass({ variant: "primary", size: "sm" })}>
-          <Download className="size-4" /> Download xMatrix
-        </a>
+        <SupportedAgents className="justify-center" />
         <ConnectMachine spaceId={spaceId} token={token} userId={currentUserId} centered />
+        <DesktopAppAlternative centered />
       </ToolDetailEmpty>
     );
   } else if (catalog.data && rows.length === 0) {

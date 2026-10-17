@@ -40,8 +40,9 @@ for (const [name, viewport] of [
         await expect(setupCards).toHaveCount(0);
         await releaseFixture(page, `pending-${first === "channels" ? "agents" : "channels"}`);
         await expect(setup).toHaveCount(1);
-        if (name === "desktop") await expect(setup).toBeVisible();
-        else await expect(page.getByText("Tap + to start one.", { exact: true })).toBeVisible();
+        // A phone's empty list gives way to the setup too, never to "No conversations yet".
+        await expect(setup).toBeVisible();
+        await expect(page.getByText("Tap + to start one.", { exact: true })).not.toBeVisible();
       });
     }
 
