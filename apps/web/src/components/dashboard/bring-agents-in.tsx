@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, type ReactNode } from "react";
-import type { OnboardingSurface } from "@xmatrix/protocol";
+import { harnessTooOldSentence, type OnboardingSurface } from "@xmatrix/protocol";
 import { Check, Loader2 } from "lucide-react";
 import { AnimatedIcon } from "@/components/ui/animated-icon";
 import { actionClass } from "@/components/ui/action-tone";
@@ -16,6 +16,7 @@ import {
   type ConnectStep, type InstallPlatform,
 } from "./connect-machine";
 import { AgentInstallPicker, AgentsLine } from "./supported-agents";
+import { CandidateUpdateButton } from "./harness-update-button";
 import { useInstalledHarnesses } from "./use-installed-harnesses";
 import { useSetupIntent } from "./use-setup-intent";
 
@@ -107,6 +108,14 @@ export function BringAgentsIn({ spaceId, token, userId, surface, phone = false }
                 {fleet.enablingAll ? <AnimatedIcon icon={Loader2} className="size-4 animate-spin" /> : null}
                 Bring them in
               </button>
+              {fleet.candidates.map((candidate) => candidate.tooOld && (
+                <div key={candidate.id} className="mt-3 text-[13px] leading-5 text-muted-foreground">
+                  <p>{harnessTooOldSentence(candidate.tooOld)} Nothing is sent to it until it is updated.</p>
+                  {candidate.daemon.status === "online" && (
+                    <div className="mt-1.5"><CandidateUpdateButton fleet={fleet} candidate={candidate} tooOld={candidate.tooOld} /></div>
+                  )}
+                </div>
+              ))}
             </div>
           )}
           {stage === 3 && !found && step?.kind === "found" && (

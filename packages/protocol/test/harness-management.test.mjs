@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { AGENT_PRESETS, harnessActionAvailable, harnessOutputTail, parseHarnessActionRequest, parseHarnessActionResult,
-  parseHarnessInventory } from "../dist/index.js";
+import { AGENT_PRESETS, compareHarnessVersions, harnessActionAvailable, harnessCommandLabel, harnessCommandLine, harnessOutputTail,
+  harnessTooOld, harnessTooOldSentence, parseHarnessActionRequest, parseHarnessActionResult, parseHarnessInventory } from "../dist/index.js";
 
 const inventory = { schemaVersion: 1, capturedAt: "2026-09-30T12:00:00Z",
   items: [{ id: "codex", installed: true, path: "C:\\bin\\codex.cmd", version: "1.2.3", probeStatus: "ok" }] };
@@ -145,4 +145,41 @@ test("sign-in is offered exactly for presets with an official headless sign-in",
       if (pattern) assert.doesNotThrow(() => new RegExp(pattern.replace(/^\(\?[a-z]+\)/u, "")), `${preset.id}: ${pattern}`);
     }
   }
+});
+
+test("a Cursor CLI from before its ACP mode is too old, and is named as the program it is", () => {
+  const cursor = AGENT_PRESETS.find((preset) => preset.id === "cursor").management;
+  // The release a new user's first task failed on: `agent acp` did not answer in JSON.
+  const tooOld = harnessTooOld(cursor, "2025.09.12-4852336");
+  assert.deepEqual(tooOld, { program: "Cursor CLI", version: "2025.09.12-4852336", minimumVersion: "2026.01.01" });
+  assert.equal(harnessTooOldSentence({ ...tooOld, machineName: "Laptop" }),
+    "Cursor CLI on Laptop is 2025.09.12, too old for xMatrix, which needs 2026.01.01 or later.");
+  assert.equal(harnessTooOldSentence(tooOld), "Cursor CLI is 2025.09.12, too old for xMatrix, which needs 2026.01.01 or later.");
+  assert.equal(harnessTooOld(cursor, "2026.09.26-dd393fe"), undefined);
+  assert.equal(harnessTooOld(cursor, undefined), undefined, "an unknown version is not judged");
+  assert.equal(harnessTooOld(AGENT_PRESETS.find((preset) => preset.id === "codex").management, "0.1.0"), undefined,
+    "no minimum, no judgement");
+  // Dated builds compare by date, not by their hash.
+  assert.equal(compareHarnessVersions("2026.01.01-abc", "2026.01.01"), 0);
+  assert.equal(compareHarnessVersions("2.1.302", "2.1.4"), 1);
+});
+
+test("every minimum version names the program it is a version of", () => {
+  for (const preset of AGENT_PRESETS.filter((item) => item.management?.minimumVersion)) {
+    const { program, version } = preset.management.minimumVersion;
+    assert.match(program, /\S/u, preset.id);
+    assert.ok(compareHarnessVersions(version, version) === 0, `${preset.id}: ${version}`);
+    assert.ok(preset.management.version, `${preset.id} reports no version to compare`);
+  }
+});
+
+test("a recipe reads as typed in a terminal, and as argv where it is documentation", () => {
+  assert.equal(harnessCommandLabel({ command: "npm", args: ["install", "package name"] }), 'npm install "package name"');
+  assert.equal(harnessCommandLabel(null), undefined);
+  assert.equal(harnessCommandLine({ command: "cursor-agent", args: ["update"] }), "cursor-agent update");
+  assert.equal(harnessCommandLine({ command: "bash", args: ["-c", "curl -fsSL https://cursor.com/install | bash"] }),
+    "curl -fsSL https://cursor.com/install | bash");
+  assert.equal(harnessCommandLine({ command: "powershell", args: ["-NoProfile", "-Command", "irm 'https://cursor.com/install?win32=true' | iex"] }),
+    "irm 'https://cursor.com/install?win32=true' | iex");
+  assert.equal(harnessCommandLine({ command: "powershell", args: ["-File", "update.ps1"] }), "powershell -File update.ps1");
 });

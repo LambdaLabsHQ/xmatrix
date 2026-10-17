@@ -11,7 +11,7 @@ import { readInvocationProgress } from "./runtime-invocation-progress.js";
 import { readContinuationSource } from "./runtime-continuation-source.js";
 import { queryMessageAgentTargets } from "./message-agent-targets.js";
 import { queryMessageExecutions, selectRunExecutionSources } from "./runtime-message-executions.js";
-import { ACTIVE_RUN_STATUS_SQL, isActiveRunStatus, isRunStatus, isTerminalRunStatus, validRunTransition, type RunStatus, PREPARATION_REJECTION_MESSAGES, REGISTRATION_PREPARATION_REJECTION_CODES, preparationRejectionMessage, parseDecisionAnswerFailure,
+import { ACTIVE_RUN_STATUS_SQL, isActiveRunStatus, isRunStatus, isTerminalRunStatus, validRunTransition, type RunStatus, PREPARATION_REJECTION_MESSAGES, REGISTRATION_PREPARATION_REJECTION_CODES, preparationRejectionMessage, parseDecisionAnswerFailure, parseHarnessTooOld,
   parsePresentedRoutingDecision, rebornFailureReason, agentAvatarUrlFromMetadata, isAgentStatus,
   isLiveAgentStatus, LIVE_AGENT_STATUS_SQL, normalizeAgentPresetRuntime, type AgentStatus, type AgentLaunchState,
   type RuntimeOperationFailure, type SerializedAgentContinuation, type SerializedAgentLaunch, type SerializedAgentInvocationRejection, type SerializedAgentStop, type AgentStopPhase, type AgentInvocationQueryPage, type AgentLaunchActivity, type InvocationDiagnosticsReport } from "@xmatrix/protocol";
@@ -371,7 +371,7 @@ function serializeInvocationRejections(row: QueryResultRow): SerializedAgentInvo
       sourceMessageId: String(result.sourceMessageId), sourceMention: value.sourceMention,
       targetRef: value.targetRef.slice(0, 300), code,
       ...(routingDecisionView(value.routingDecision) ? { routingDecision: routingDecisionView(value.routingDecision) } : {}),
-      message: known ? preparationRejectionMessage(code, value.answerFailure)!
+      message: known ? preparationRejectionMessage(code, code === "registration_harness_outdated" ? value.tooOld : value.answerFailure)!
         : "This invocation could not be prepared. Review its address and Agent configuration.",
       rejectedAt: iso(row.created_at)!, evidenceExpiresAt: iso(row.expires_at)! }];
   });
@@ -518,7 +518,7 @@ export class PostgresRuntimeRepository {
   /** Bounded historical outcomes only. They neither reserve capacity nor authorize a launch. */
   async recordRoutingRejections(input: { channelId: string; sourceMessageId: string; actorUserId: string;
     rejected: Array<{ sourceMention: string; code: string; routingDecision?: unknown;
-      answerFailure?: unknown }> }) {
+      answerFailure?: unknown; tooOld?: unknown }> }) {
     const channelId = text(input.channelId, "channelId", 300);
     const sourceMessageId = text(input.sourceMessageId, "sourceMessageId", 160);
     const commandId = `routing-preflight:${sourceMessageId}`;
@@ -533,8 +533,9 @@ export class PostgresRuntimeRepository {
         throw new RuntimeControlError("invalid_runtime_request", 400, "Invalid source mention");
       const answerFailure = item.code === "routing_parameter_invalid_answer"
         ? parseDecisionAnswerFailure(item.answerFailure) : undefined;
+      const tooOld = item.code === "registration_harness_outdated" ? parseHarnessTooOld(item.tooOld) : undefined;
       return { sourceMention, targetRef: "auto", code: item.code,
-        ...(answerFailure ? { answerFailure } : {}),
+        ...(answerFailure ? { answerFailure } : {}), ...(tooOld ? { tooOld } : {}),
         ...(item.routingDecision ? { routingDecision: routingDecisionView(item.routingDecision) } : {}) };
     });
     const placement = await this.channelPlacement(commandId, channelId,
