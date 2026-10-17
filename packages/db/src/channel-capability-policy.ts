@@ -140,13 +140,20 @@ export function channelCapabilityPredicate(input: {
       WHERE channel_grant.space_id=${c}.space_id AND channel_grant.channel_id=${c}.channel_id
         AND channel_grant.subject_kind='agent' AND channel_grant.subject_id=${id})`;
   const openChannel = `${c}.mode<>'closed'`;
+  // An Agent acting with what only members use (the Space's connected apps)
+  // needs its Run's owner to be one now, as a Human caller would.
+  const ownerContributes = capability.humanRoles === "contributor" ? ` AND EXISTS (
+      SELECT 1 FROM data.runs channel_run JOIN data.space_members channel_owner
+        ON channel_owner.space_id=${c}.space_id AND channel_owner.user_id=channel_run.owner_user_id
+      WHERE channel_run.run_id=channel_instance.run_id
+        AND ${humanRoleClause(capability, "channel_owner", c, "channel_run.owner_user_id")})` : "";
   // An Agent is the Instance of a registered Run in this Space; it may always
   // use the Channel it was started in, open Channels, and Channels granted to it.
   const agent = capability.principals.includes("agent") ? `(${kind}='agent' AND EXISTS (
     SELECT 1 FROM data.instances channel_instance
     JOIN data.run_agent_registrations channel_registration ON channel_registration.run_id=channel_instance.run_id
     WHERE channel_instance.instance_id=${id} AND channel_registration.space_id=${c}.space_id
-      AND (${openChannel} OR channel_instance.channel_id=${c}.channel_id OR ${agentGrant})))` : "FALSE";
+      AND (${openChannel} OR channel_instance.channel_id=${c}.channel_id OR ${agentGrant})${ownerContributes}))` : "FALSE";
   return `((${user}) OR (${agent}))`;
 }
 
