@@ -210,15 +210,21 @@ export type PendingAttachment = {
   error?: string;
   /** A local object URL for an image, so it can be seen before it is uploaded. */
   previewUrl?: string;
+  /** Keep the existing draft in its slot until a quality change succeeds. */
+  replacesId?: string;
+  original?: boolean;
+  sourceFile?: File;
 };
 
 export function PendingAttachmentCard({
   attachment,
   onOpen,
+  onOriginalChange,
   onRemove,
 }: {
   attachment: PendingAttachment;
   onOpen?: () => void;
+  onOriginalChange?: (original: boolean) => void;
   onRemove: () => void;
 }) {
   const Icon =
@@ -240,26 +246,31 @@ export function PendingAttachmentCard({
         : "Preparing";
   return (
     <div className="group relative flex h-20 w-44 shrink-0 overflow-hidden rounded-md border border-border bg-muted">
-      {attachment.previewUrl && onOpen ? (
-        <button
-          type="button"
-          aria-label={`Open ${attachment.name}`}
-          className="block size-20 shrink-0 cursor-zoom-in bg-background"
-          onClick={onOpen}
-        >
-          <LoadingImage
-            src={attachment.previewUrl}
-            alt={attachment.name}
-            className="block h-full w-full object-cover"
-          />
-        </button>
-      ) : attachment.kind === "image" ? (
-        <MediaSkeleton label="Loading image" className="app-media-skeleton-thumb" />
-      ) : (
-        <div className={cn("flex size-20 shrink-0 items-center justify-center", attachment.kind === "video" ? "bg-black text-white" : "bg-background text-muted-foreground")}>
-          <Icon className="size-6" />
-        </div>
-      )}
+      <div className="relative size-20 shrink-0">
+        {attachment.previewUrl && onOpen ? (
+          <button
+            type="button"
+            aria-label={`Open ${attachment.name}`}
+            className="block size-20 shrink-0 cursor-zoom-in bg-background"
+            onClick={onOpen}
+          >
+            <LoadingImage
+              src={attachment.previewUrl}
+              alt={attachment.name}
+              className="block h-full w-full object-cover"
+            />
+          </button>
+        ) : attachment.kind === "image" ? (
+          <MediaSkeleton label="Loading image" className="app-media-skeleton-thumb" />
+        ) : (
+          <div className={cn("flex size-20 shrink-0 items-center justify-center", attachment.kind === "video" ? "bg-black text-white" : "bg-background text-muted-foreground")}>
+            <Icon className="size-6" />
+          </div>
+        )}
+        {(attachment.kind === "image" || attachment.kind === "video") && (
+          <AttachmentOriginalOption name={attachment.name} checked={attachment.original ?? false} onChange={onOriginalChange} />
+        )}
+      </div>
       <div className="flex min-w-0 flex-1 flex-col justify-center gap-1 px-2 py-2">
         <div className="truncate text-xs font-bold text-foreground" title={attachment.name}>
           {attachment.name}
@@ -290,6 +301,20 @@ export function PendingAttachmentCard({
         <X className="size-3.5" />
       </button>
     </div>
+  );
+}
+
+export function AttachmentOriginalOption({ name, checked, onChange }: {
+  name: string;
+  checked: boolean;
+  onChange?: (original: boolean) => void;
+}) {
+  return (
+    <label className="absolute bottom-0 left-0 z-10 flex h-7 cursor-pointer items-center gap-1 rounded-bl-md rounded-tr-md bg-background/95 px-1.5 text-[10px] text-foreground">
+      <input type="checkbox" checked={checked} disabled={!onChange}
+        aria-label={`Upload original ${name}`} onChange={(event) => onChange?.(event.target.checked)} />
+      Original
+    </label>
   );
 }
 

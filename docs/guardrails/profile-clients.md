@@ -85,15 +85,23 @@ website embeds. Coverage is in `multimedia-attachments.spec.ts` and
 The shared Web composer compresses videos above 1 MB before upload using native
 WebCodecs through a lazily loaded Mediabunny converter. It fits the longest edge
 within 1280 pixels and targets 2.5 Mbps, preferring H.264 MP4 with a WebM fallback.
-Audio tracks must survive conversion; unsupported codecs, failures, a two-minute
+Audio and video track counts and packet presence are checked in the result;
+unsupported codecs, missing/empty result tracks, failures, a two-minute
 deadline, or a result that is no smaller retain the original. Removing a pending
 attachment cancels conversion. Metadata describes the uploaded result.
-Cancelled uploads release their local preview URLs, including while awaiting
+Removed draft attachments and cancelled uploads release their local preview URLs,
+including while awaiting
 video metadata or an earlier file in the same batch.
-The composer's **Original** checkbox applies to newly added images and videos
-from every intake source and skips compression; originals retain their bytes,
-filename and MIME type, subject to the existing 64 MiB attachment limit. With
-Original unchecked, images retain the existing 1 MB compression target.
+Each image and video preview has its own **Original** checkbox once preparation
+finishes. Checking it prepares the retained local source without compression;
+unchecking it restores automatic compression. Choices are independent and stay
+with the in-memory Channel draft. Originals retain their bytes, filename and
+MIME type, subject to the existing 64 MiB attachment limit. Images otherwise keep
+the 1 MB compression target. A quality change blocks sending until it finishes,
+preserves attachment order and restores the previous file on failure or cancel.
+Local source files remain browser-only and are excluded from send snapshots and
+message bindings. Failed image compression still permits choosing Original on
+that preview.
 
 ### Registration-backed Channel presence
 
