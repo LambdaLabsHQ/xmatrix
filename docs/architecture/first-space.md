@@ -43,8 +43,18 @@ is how to connect one.
   a concurrent append conflict is accepted only after the exact step is read
   back as written:
   - `bring-agents`, at once;
-  - `agents-in`, once the Space has an enabled agent; the Web asks again when
-    it sees one, and the Hub checks the fact before writing.
+  - `agents-in`, once the Space has an enabled agent that can answer; the Web
+    asks again when it sees one, and the Hub checks the fact before writing.
+    An agent of the person's own whose machine reports its program signed out
+    (`login: "signed_out"`) answers nothing, so it does not count: the step
+    names the program and the machine ("Claude Code on mac-mini is not signed
+    in") and offers the harness sign-in in place, and no starter is shown
+    while no agent can answer.
+- On a phone (the shell's phone width) the first step shows no command, and no
+  setup command is prepared: a command is no use there. It says to open
+  xmatrix.sh on the computer and sign in with the same email, where the
+  computer shows its own command; the phone then sees that computer's agents
+  arrive.
 - The messages are `xmatrix.onboarding.v1` system notices (`xmatrixSystemNotice`,
   `system_fact` provenance), written under the owner's principal with the
   xMatrix label, so no Agent takes them as the owner's request. A message names

@@ -20,6 +20,7 @@ const en = {
   worksWith: (names: string, all: boolean) => all ? `Works with ${names}` : `Works with ${names} and `,
   more: (count: number) => `${count} more`,
   runCommand: "Run this on your computer",
+  signInOnComputer: "On your computer, open xmatrix.sh and sign in with this same email",
   otherPlatform: (windows: boolean): string => windows ? "macOS or Linux?" : "Windows?",
   waitingForComputer: "Waiting for your computer…",
   checkTerminal: "Nothing yet? The terminal says what went wrong.",
@@ -37,6 +38,8 @@ const en = {
   bringThemIn: "Bring them in",
   tooOld: (tooOld: HarnessTooOld) => harnessTooOldSentence(tooOld),
   nothingUntilUpdated: "Nothing is sent to it until it is updated.",
+  signedOut: (program: string, machine: string) =>
+    `${program} on ${machine} is not signed in, so it cannot take work yet. Sign it in here:`,
   noAgentYet: (machine: string) => `${machine} has no agent yet. Install one there and it shows up here:`,
   tryAgain: "Try again",
   noTerminal: "No terminal?",
@@ -120,6 +123,7 @@ const zh: OnboardingCopy = {
   worksWith: (names, all) => all ? `支持 ${names}` : `支持 ${names}，还有`,
   more: (count) => `另外 ${count} 个`,
   runCommand: "在你的电脑上运行这条命令",
+  signInOnComputer: "在电脑上打开 xmatrix.sh，用同一个邮箱登录",
   otherPlatform: (windows) => windows ? "用 macOS 或 Linux？" : "用 Windows？",
   waitingForComputer: "正在等你的电脑连上…",
   checkTerminal: "还没反应？终端里会写哪里出了错。",
@@ -137,6 +141,7 @@ const zh: OnboardingCopy = {
   tooOld: (tooOld) => `${tooOld.machineName ? `${tooOld.machineName} 上的 ` : ""}${tooOld.program} 是 ` +
     `${harnessDisplayVersion(tooOld.version)}，版本太旧，xMatrix 需要 ${tooOld.minimumVersion} 或更新。`,
   nothingUntilUpdated: "更新之前不会给它派活。",
+  signedOut: (program, machine) => `${machine} 上的 ${program} 还没登录，登录之前接不了活。在这里登录：`,
   noAgentYet: (machine) => `${machine} 上还没有 Agent。在那台电脑上装一个，它就会出现在这里：`,
   tryAgain: "重试",
   noTerminal: "没有终端？",

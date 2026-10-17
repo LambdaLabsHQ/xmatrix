@@ -10,6 +10,8 @@ import { recordOnboardingStep } from "@/lib/onboarding-funnel";
 import { useOnboardingCopy, useOnboardingLocale } from "@/lib/onboarding-locale";
 import { xmatrixApiRequest } from "@/lib/query/api-client";
 import { BringAgentsIn } from "./bring-agents-in";
+import { signedOutRegistrations } from "./harness-sign-in";
+import { SignedOutAgents } from "./signed-out-agents";
 import { useInstalledHarnesses } from "./use-installed-harnesses";
 
 /* What xMatrix says to a new person in their welcome conversation. A message
@@ -69,11 +71,15 @@ export function OnboardingMessage({ stage, spaceId, token, userId, starting, onS
     : <AgentsInMessage spaceId={spaceId} token={token} userId={userId} starting={starting} onSendStarter={onSendStarter} />;
 }
 
-/* Once an agent is in, xMatrix says so in the next message. The Hub checks
-   the fact and writes that message once, so asking again only replays it. */
+/* Once an agent is in and can answer, xMatrix says so in the next message.
+   One whose program is signed out answers nothing, so it does not count. The
+   Hub checks the fact and writes that message once, so asking again only
+   replays it. */
 function BringAgentsMessage({ spaceId, token, userId }: { spaceId: string | null; token: string | null; userId: string }) {
   const fleet = useInstalledHarnesses(spaceId, token, userId);
-  const agentsIn = (fleet.catalog.data?.registrations ?? []).some((registration) => registration.state === "enabled");
+  const enabled = (fleet.catalog.data?.registrations ?? []).filter((registration) => registration.state === "enabled");
+  const signedOut = signedOutRegistrations(enabled, userId, fleet.daemons.data);
+  const agentsIn = fleet.daemons.isSuccess && enabled.length > signedOut.length;
   const locale = useOnboardingLocale(spaceId, token, userId);
   const asked = useRef(false);
   useEffect(() => {
@@ -91,13 +97,16 @@ function AgentsInMessage({ spaceId, token, userId, starting, onSendStarter }: {
 }) {
   const fleet = useInstalledHarnesses(spaceId, token, userId);
   const copy = useOnboardingCopy(spaceId, token, userId);
-  const handles = [...new Set((fleet.catalog.data?.registrations ?? [])
-    .filter((registration) => registration.state === "enabled")
+  const enabled = (fleet.catalog.data?.registrations ?? []).filter((registration) => registration.state === "enabled");
+  const signedOut = signedOutRegistrations(enabled, userId, fleet.daemons.data);
+  const handles = [...new Set(enabled.filter((registration) => !signedOut.includes(registration))
     .map((registration) => `@${registration.displayName}`))];
-  if (handles.length === 0) return null;
+  if (handles.length === 0 && signedOut.length === 0) return null;
   return (
     <div className="max-w-[34rem] text-[15px] leading-6" data-onboarding-stage="agents-in">
-      <p>{copy.agentsIn(copy.listNames(handles), handles.length === 1)}</p>
+      <SignedOutAgents registrations={signedOut} token={token} userId={userId} copy={copy} />
+      {handles.length > 0 && <>
+      <p className={signedOut.length > 0 ? "mt-3" : undefined}>{copy.agentsIn(copy.listNames(handles), handles.length === 1)}</p>
       <ul className="m-0 mt-3 list-none border-t-[1px] border-border p-0">
         {copy.starters.map((starter) => (
           <li key={starter.id} className="m-0 border-b-[1px] border-border p-0">
@@ -115,6 +124,7 @@ function AgentsInMessage({ spaceId, token, userId, starting, onSendStarter }: {
           </li>
         ))}
       </ul>
+      </>}
       {starting && <p className="mt-2 text-[13px] leading-5 text-muted-foreground" role="status">{copy.starting(starting.name)}</p>}
     </div>
   );

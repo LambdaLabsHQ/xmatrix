@@ -33,8 +33,18 @@ async function welcomeOnFirstOpen(page: import("@playwright/test").Page) {
    (with the message `sent`, when given, as the Hub stores it), and the
    conversation open. Returns the agents-in step. */
 async function welcomeWithAgentIn(page: import("@playwright/test").Page,
-  { harness = "codex", channel = {}, funnel = false, sent }: { harness?: string; channel?: object; funnel?: boolean; sent?: string } = {}) {
-  await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], registrations: harnessRegistrations([harness]),
+  { harness = "codex", channel = {}, funnel = false, sent, login }:
+  { harness?: string; channel?: object; funnel?: boolean; sent?: string; login?: string } = {}) {
+  // With `login`, the agent is the person's own and its machine reports that sign-in state.
+  const registrations = harnessRegistrations([harness]).map((registration) => login
+    ? { ...registration, key: { ...registration.key, ownerUserId: "e2e-user" } } : registration);
+  const machineDaemons = login ? [{ id: "daemon-1", userId: "e2e-user", email: "e2e@xmatrix.test", name: "Workstation",
+    machineId: "machine", machineName: "Workstation", hostId: "host-1", hostName: "Workstation", status: "online",
+    connectedAt: E2E_NOW, lastSeenAt: new Date().toISOString(), daemonVersion: "1.0.546",
+    metadata: { platform: "macos", capabilities: ["machine_harness_action_v1", "machine_harness_login_v1"],
+      harnesses: { schemaVersion: 1, capturedAt: E2E_NOW, items: [
+        { id: harness, installed: true, probeStatus: "ok", version: "2.1.170", login }] } } }] : undefined;
+  await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], registrations, machineDaemons,
     channels: [{ ...WELCOME, messageCount: 2, lastMessageSequence: 2, ...channel }] });
   await fixtureJson(page, "history", `**/api/xmatrix/channels/${WELCOME.id}/history**`, { messages: [BRING, IN], hasMore: false });
   await fixtureJson(page, "send", `**/api/xmatrix/channels/${WELCOME.id}/messages`, { message: sent === undefined ? { id: "sent" }
@@ -70,6 +80,21 @@ test.describe("desktop", () => {
     // Until that agent is here there is nothing to address, and another starter would start a second one.
     await expect(agentsIn.getByRole("status")).toHaveText("Starting an agent…");
     await expect(agentsIn.getByRole("button", { name: /Write a page about my project/u })).toBeDisabled();
+  });
+
+  test("an agent whose program is signed out is named with its machine and signed in here, with no starters", async ({ page }) => {
+    const agentsIn = await welcomeWithAgentIn(page, { harness: "claude", login: "signed_out" });
+    await expect(agentsIn).toContainText("Claude Code on Workstation is not signed in, so it cannot take work yet.",
+      { timeout: 20_000 });
+    await expect(agentsIn.getByRole("button", { name: "Sign in", exact: true })).toBeVisible();
+    await expect(agentsIn).not.toContainText("is in. Mention it here");
+    await expect(agentsIn.getByRole("button", { name: /Plan something with me/u })).toHaveCount(0);
+  });
+
+  test("a signed-in agent of the person's own is in, with its starters", async ({ page }) => {
+    const agentsIn = await welcomeWithAgentIn(page, { harness: "claude", login: "signed_in" });
+    await expect(agentsIn).toContainText("@claude is in. Mention it here to give it work", { timeout: 20_000 });
+    await expect(page.getByTestId("signed-out-agent")).toHaveCount(0);
   });
 
   test("a starter goes to the agent already in the conversation instead of starting another", async ({ page }) => {
@@ -153,6 +178,15 @@ test.describe("mobile", () => {
     await welcomeOnFirstOpen(page);
     await expect(page.locator(".app-mobile-channel-list-pane").getByText("Welcome to xMatrix", { exact: true }))
       .toBeVisible({ timeout: 20_000 });
+  });
+
+  test("on a phone, the welcome sends the person to their computer with the same email, not a command", async ({ page }) => {
+    await welcomeOnFirstOpen(page);
+    await page.locator(".app-mobile-channel-list-pane").getByText("Welcome to xMatrix", { exact: true }).click({ timeout: 20_000 });
+    const welcome = page.getByTestId("connect-machine");
+    await expect(welcome).toContainText("On your computer, open xmatrix.sh and sign in with this same email", { timeout: 20_000 });
+    await expect(welcome).not.toContainText("--connect");
+    await expect(welcome).not.toContainText("Approve it here");
   });
 });
 

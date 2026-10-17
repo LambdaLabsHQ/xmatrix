@@ -53,8 +53,18 @@ export function harnessSignInView(input: {
   };
 }
 
-export function HarnessSignInSection({ registration, token, userId }: {
+/** The person's own enabled agents whose harness their machine reports as
+ * signed out: nothing sent to one gets an answer until it is signed in. */
+export function signedOutRegistrations(registrations: readonly AgentRegistrationSummary[], userId: string | undefined,
+  daemons: Parameters<typeof harnessSignInView>[0]["daemons"]): AgentRegistrationSummary[] {
+  return registrations.filter((registration) => registration.state === "enabled" &&
+    harnessSignInView({ registration, userId, daemons }).state === "signed_out");
+}
+
+export function HarnessSignInSection({ registration, token, userId, bare = false }: {
   registration: AgentRegistrationSummary; token: string; userId: string;
+  /** Only the sign-in itself, under a sentence the caller already wrote. */
+  bare?: boolean;
 }) {
   const queryClient = useQueryClient();
   const daemonKey = useMemo(() => xmatrixQueryKeys.domain({ userId }, "machine-daemons", []), [userId]);
@@ -139,14 +149,13 @@ export function HarnessSignInSection({ registration, token, userId }: {
   const starting = busy && !prompt && !status.isError && waitState === "normal";
   const waitingForDevice = Boolean(prompt && prompt.flow === "device_code");
 
-  return (
-    <ToolDetailSection title="Sign-in">
+  const body = (
       <div className="space-y-3 text-sm" data-testid="harness-sign-in">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <p>
+          {!bare && <p>
             {view.state ? LOGIN_STATE_LABEL[view.state] : "Not checked yet"}
             <span className="text-muted-foreground"> · the harness&apos;s own account on {registration.machineName}</span>
-          </p>
+          </p>}
           {!prompt && (
             <Button size="sm" variant="outline" disabled={busy || Boolean(view.blocker)}
               onClick={() => queue.mutate({ step: "start" })}>
@@ -220,6 +229,6 @@ export function HarnessSignInSection({ registration, token, userId }: {
             onClick={() => { void status.refetch(); }}>Check status again</Button>}
         </div>}
       </div>
-    </ToolDetailSection>
   );
+  return bare ? body : <ToolDetailSection title="Sign-in">{body}</ToolDetailSection>;
 }
