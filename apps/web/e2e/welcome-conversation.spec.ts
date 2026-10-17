@@ -29,6 +29,14 @@ async function welcomeOnFirstOpen(page: import("@playwright/test").Page) {
   await releaseFixture(page, "welcome");
 }
 
+/* The welcome once @codex is in: both steps written, a send to answer. */
+async function welcomeWithAgentIn(page: import("@playwright/test").Page) {
+    await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], channels: [{ ...WELCOME, messageCount: 2, lastMessageSequence: 2 }],
+      registrations: harnessRegistrations(["codex"]) });
+    await fixtureJson(page, "history", `**/api/xmatrix/channels/${WELCOME.id}/history**`, { messages: [BRING, IN], hasMore: false });
+    await fixtureJson(page, "send", `**/api/xmatrix/channels/${WELCOME.id}/messages`, { message: { id: "sent" } }, { method: "POST" });
+}
+
 test.describe("desktop", () => {
   test.use(E2E_DESKTOP_CONTEXT);
 
@@ -41,10 +49,7 @@ test.describe("desktop", () => {
   });
 
   test("once an agent is in, a starter is sent as the person's own message to Auto", async ({ page }) => {
-    await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], channels: [{ ...WELCOME, messageCount: 2, lastMessageSequence: 2 }],
-      registrations: harnessRegistrations(["codex"]) });
-    await fixtureJson(page, "history", `**/api/xmatrix/channels/${WELCOME.id}/history**`, { messages: [BRING, IN], hasMore: false });
-    await fixtureJson(page, "send", `**/api/xmatrix/channels/${WELCOME.id}/messages`, { message: { id: "sent" } }, { method: "POST" });
+    await welcomeWithAgentIn(page);
     await fixtureRule(page, { id: "funnel", pattern: "**/api/xmatrix/observable/onboarding-step", method: "POST",
       responder: { kind: "static", status: 202, json: {} } });
     await page.goto("/app/personal-sspaceperso/channels/welcome-to-xmatrix-cchannelwel");
@@ -139,10 +144,7 @@ test.describe("a Chinese browser", () => {
   });
 
   test("starters are sent in Chinese", async ({ page }) => {
-    await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], channels: [{ ...WELCOME, messageCount: 2, lastMessageSequence: 2 }],
-      registrations: harnessRegistrations(["codex"]) });
-    await fixtureJson(page, "history", `**/api/xmatrix/channels/${WELCOME.id}/history**`, { messages: [BRING, IN], hasMore: false });
-    await fixtureJson(page, "send", `**/api/xmatrix/channels/${WELCOME.id}/messages`, { message: { id: "sent" } }, { method: "POST" });
+    await welcomeWithAgentIn(page);
     await page.goto("/app/personal-sspaceperso/channels/welcome-to-xmatrix-cchannelwel");
     const agentsIn = page.locator('[data-onboarding-stage="agents-in"]');
     await expect(agentsIn).toContainText("@codex 已接入。在这里 @ 它就能派活", { timeout: 20_000 });
