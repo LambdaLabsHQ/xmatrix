@@ -85,6 +85,10 @@ test("a failing seed surfaces its stderr and a silent one is not mistaken for su
   const failed = await installLinuxSeed((_file, _args, _options, callback) => callback(new Error("exit 1"), "", "Error: seed binary did not report a version\n"));
   assert.deepEqual(failed, { ok: false, reason: "install-failed", message: "Error: seed binary did not report a version" });
 
+  const exited = await installLinuxSeed((_file, _args, _options, callback) =>
+    callback(Object.assign(new Error("Command failed"), { code: 3 }), "", "Error: cannot write ~/.local/bin\n"));
+  assert.deepEqual(exited, { ok: false, reason: "install-failed", message: "Error: cannot write ~/.local/bin", exitCode: 3 });
+
   const silent = await installLinuxSeed((_file, _args, _options, callback) => callback(null, "installed, but no report\n", ""));
   assert.deepEqual(silent, { ok: false, reason: "install-failed", message: "The xMatrix CLI seed did not report an install result." });
 });

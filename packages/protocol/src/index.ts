@@ -563,6 +563,10 @@ export type {
   DesktopCliInstallResult, DesktopClipboardImage, DesktopCliSessionPayload, DesktopDaemonState,
   DesktopDaemonStatus, DesktopNotification, DesktopNotificationReply, DesktopSetupStatus,
   DesktopUpdateState, DesktopUpdateStatus, DesktopWorkspaceCandidateFields,
+  DesktopDaemonFailure, DesktopDaemonFailureReport, DesktopDaemonFailureStage,
+} from "./desktop-bridge.js";
+export {
+  DESKTOP_DAEMON_FAILURE_DETAIL_MAX, DESKTOP_DAEMON_FAILURE_STAGES, parseDesktopDaemonFailureReport,
 } from "./desktop-bridge.js";
 export {
   readBoundedStream,

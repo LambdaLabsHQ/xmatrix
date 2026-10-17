@@ -34,3 +34,31 @@ export function daemonFailureNeedsLogin(message: string): boolean {
     "waiting for browser login"].some((phrase) => normalized.includes(phrase));
   return refusedOutright || !TRANSIENT_REFRESH_FAILURE.some((phrase) => normalized.includes(phrase));
 }
+
+const DETAIL_LINES = 8;
+const DETAIL_MAX = 600;
+
+/**
+ * The CLI's last lines, as they may leave this machine: the home directory,
+ * email addresses, URL queries and anything shaped like a token or key are
+ * replaced, and only the last few lines, bounded, are kept.
+ */
+export function redactDaemonDetail(output: string, homeDir: string): string {
+  const home = homeDir.replace(/[\\/]+$/, "");
+  const lines = output
+    .split(/\r?\n/)
+    .map((line) => {
+      let redacted = home ? line.split(home).join("~") : line;
+      redacted = redacted
+        .replace(/(\/Users\/|\/home\/|[A-Za-z]:\\Users\\)[^/\\\s]+/g, "$1…")
+        .replace(/[\w.+-]+@[\w-]+(\.[\w-]+)+/g, "<email>")
+        .replace(/(https?:\/\/[^\s?#]+)[?#]\S*/g, "$1?…")
+        .replace(/\b(bearer|token|secret|password|key)(["']?\s*[:=]\s*["']?|\s+)[^\s"',;]+/gi, "$1$2…")
+        .replace(/[A-Za-z0-9_\-+/=]{32,}/g, "…");
+      return redacted.trim();
+    })
+    .filter(Boolean)
+    .slice(-DETAIL_LINES)
+    .join("\n");
+  return lines.length > DETAIL_MAX ? lines.slice(-DETAIL_MAX) : lines;
+}

@@ -54,10 +54,12 @@ export function installCliFromSeed(options: {
       { timeout: 120_000, env: options.env, windowsHide: true },
       (error, stdout, stderr) => {
         if (error) {
+          const exitCode: unknown = (error as { code?: unknown }).code;
           resolve({
             ok: false,
             reason: "install-failed",
             message: (stderr || error.message || "").trim() || "xMatrix CLI install failed.",
+            ...(typeof exitCode === "number" ? { exitCode } : {}),
           });
           return;
         }
