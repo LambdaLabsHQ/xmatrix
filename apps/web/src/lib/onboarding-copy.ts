@@ -56,6 +56,9 @@ const en = {
      where xMatrix makes sense; each starter asks for one. A page explaining
      xMatrix itself kept people learning the tool instead of using it. */
   starting: (name?: string) => name ? `Starting @${name}…` : "Starting an agent…",
+  /* The live document people came for: a page they write in, with an agent writing beside them. */
+  coWrite: { title: "Write a page with an agent", detail: (agent: string) => `You write, and @${agent} writes beside you.`,
+    pageTitle: "What I'm working on" },
   bringWorkConnect: "Bring your work in. Connect GitHub, and your agents draft pages from your repositories.",
   bringWorkRepos: "Bring your work in. Pick a repository, and an agent drafts its pages for you to review:",
   connectGitHub: "Connect GitHub",
@@ -159,6 +162,8 @@ const zh: OnboardingCopy = {
   agentsIn: (names, one) =>
     `${names} 已接入。在这里 @ ${one ? "它" : "其中一个"}就能派活，也可以从下面选一个开始：`,
   starting: (name) => name ? `正在启动 @${name}…` : "正在启动 Agent…",
+  coWrite: { title: "和 Agent 一起写一页", detail: (agent) => `你在页面里写，@${agent} 在旁边一起写。`,
+    pageTitle: "我手上的事" },
   bringWorkConnect: "把你的工作带进来。连上 GitHub，Agent 会根据你的仓库写出页面。",
   bringWorkRepos: "把你的工作带进来。选一个仓库，Agent 会写出它的页面，审阅后生效：",
   connectGitHub: "连接 GitHub",

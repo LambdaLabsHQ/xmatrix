@@ -98,6 +98,19 @@ test.describe("desktop", () => {
     await expect(page.getByTestId("signed-out-agent")).toHaveCount(0);
   });
 
+  test("the first starter makes a page and opens it to be co-written with the agent", async ({ page }) => {
+    const agentsIn = await welcomeWithAgentIn(page, { harness: "claude", login: "signed_in" });
+    await fixtureJson(page, "page-create", /\/api\/xmatrix\/spaces\/[^/]+\/pages$/u, { page: { pageId: "p-first",
+      title: "What I'm working on", parentPageId: null, position: "a", accessMode: "open", headRevision: 1,
+      createdAt: E2E_NOW, updatedAt: E2E_NOW } }, { method: "POST" });
+    const first = agentsIn.getByRole("button", { name: /Write a page with an agent/u });
+    await expect(first).toContainText("You write, and @claude writes beside you.", { timeout: 20_000 });
+    await first.click();
+    await expect.poll(() => fixtureRequestBodies(page, "page-create")).toEqual([{ title: "What I'm working on" }]);
+    await expect.poll(() => page.evaluate(() => window.sessionStorage.getItem("xmatrix:co-write:p-first"))).toBe("claude");
+    await expect(page).toHaveURL(/p-first|pfirst/u);
+  });
+
   test("bring your work in: a Space without GitHub is offered the connect", async ({ page }) => {
     const agentsIn = await welcomeWithAgentIn(page, { repositories: { repos: [], repoStatus: "not-connected" } });
     await expect(agentsIn.getByTestId("bring-work-in")).toContainText("Bring your work in. Connect GitHub", { timeout: 20_000 });
