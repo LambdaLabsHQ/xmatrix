@@ -119,7 +119,15 @@ export interface RegistrationLaunchCandidate {
   /** The latest Run of this environment in the Space that failed to start
    * within the last STARTUP_FAILURE_WINDOW_MINUTES; routing ranks it last. */
   startupFailedAt?: string;
+  /** The harness's median time from a connected Run to its first reply,
+   * across every launch in the last RESPONSE_LATENCY_WINDOW_DAYS; absent with
+   * fewer than RESPONSE_LATENCY_MIN_SAMPLES. Routing prefers the faster. */
+  responseLatencyMs?: number;
 }
+
+/** The window and the least sample a harness's measured reply latency needs. */
+export const RESPONSE_LATENCY_WINDOW_DAYS = 30;
+export const RESPONSE_LATENCY_MIN_SAMPLES = 20;
 
 /** How long a failed start keeps an environment behind every other (the breaker). */
 export const STARTUP_FAILURE_WINDOW_MINUTES = 30;
@@ -915,8 +923,8 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
         description: typeof row.profile_description === "string" ? row.profile_description : "",
         models, workspaceReferences }];
     });
-    const observed = await this.database.transaction({ requestId: `registration-models:${target.harness ?? "auto"}`,
-      operation: "registration.launch.model-catalog", placement: this.placement }, tx => tx.query({
+    const [observed, latencies] = await this.database.transaction({ requestId: `registration-models:${target.harness ?? "auto"}`,
+      operation: "registration.launch.model-catalog", placement: this.placement }, async tx => [await tx.query({
       name: "registration_launch_model_catalog_v3", text: `SELECT requested.owner,requested.machine,requested.harness,catalog.models,catalog.observed_at,parameter_catalog.parameters,parameter_catalog.parameter_model,parameter_catalog.parameters_observed_at,startup.startup_failed_at
         FROM jsonb_to_recordset($1::jsonb) AS requested(owner text,machine text,harness text)
         LEFT JOIN LATERAL (SELECT i.presentation_json->'models' AS models,
@@ -946,7 +954,18 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
               OR run.metadata_json->'invocationProgress'->>'phase'=ANY($3::text[]))) startup ON TRUE`,
       values: [JSON.stringify(candidates.map(candidate => ({ owner: candidate.key.ownerUserId,
         machine: candidate.key.machineId, harness: candidate.key.harness }))),this.placement.spaceId,
-        [...STARTUP_FAILURE_PHASES]], maxRows: 100 }));
+        [...STARTUP_FAILURE_PHASES]], maxRows: 100 }),
+      // How long each harness takes to answer is the harness's own, measured
+      // over every launch: a new Space has none of its own to go on.
+      await tx.query({ name: "registration_launch_response_latency_v1", text: `SELECT
+          spawn_payload_json->'registration'->'key'->>'harness' AS harness,
+          percentile_cont(0.5) WITHIN GROUP (ORDER BY extract(epoch FROM first_reply_at-connected_at)*1000) AS p50_ms
+        FROM data.agent_launches
+        WHERE created_at>=statement_timestamp()-interval '${RESPONSE_LATENCY_WINDOW_DAYS} days' AND first_reply_at>=connected_at
+          AND spawn_payload_json->'registration'->'key'->>'harness'=ANY($1::text[])
+        GROUP BY 1 HAVING count(*)>=${RESPONSE_LATENCY_MIN_SAMPLES}`,
+        values: [[...new Set(candidates.map(candidate => candidate.key.harness))]], maxRows: 100 })] as const);
+    const responseLatency = new Map(latencies.map(row => [String(row.harness), Math.round(Number(row.p50_ms))]));
     // Resolve only references explicitly granted to this registration. Directory
     // metadata is factual context, never a source of new launch permissions.
     return this.directory.transaction({ requestId: `registration-workspaces:${target.harness ?? "auto"}`,
@@ -1028,6 +1047,7 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
         const startupFailedAt = observation?.startup_failed_at ? new Date(observation.startup_failed_at).toISOString() : undefined;
         offered.push({ ...candidate, workspaceReferences, models, modelCatalog, ...parameterObservation,
           ...(startupFailedAt ? { startupFailedAt } : {}),
+          ...(responseLatency.has(candidate.key.harness) ? { responseLatencyMs: responseLatency.get(candidate.key.harness)! } : {}),
           modelAliases: environment.modelAliases,
           // A machine tag selects by the owner's name or id, never a hostname.
           machineName: String(daemon.machine_name || ""),

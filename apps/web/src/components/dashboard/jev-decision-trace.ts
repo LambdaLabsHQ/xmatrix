@@ -189,6 +189,11 @@ export function placementReason(ranking: readonly LaunchPlacementCandidate[], co
   // The breaker: an environment that just failed to start is tried after every other.
   const failed = !chosen.startupFailedAt && ranking.find(item => item.startupFailedAt && item.fit >= chosen.fit);
   if (failed) return `${failed.harness}${failed.machineName ? ` on ${failed.machineName}` : ""} failed to start in the last 30 minutes, so it goes last`;
+  // Measured reply time: a harness that fits as well but answers slower lost on it.
+  const slower = chosen.responseLatencyMs !== undefined && ranking.find(item => item.harness !== chosen.harness &&
+    item.fit >= chosen.fit && item.responseLatencyMs !== undefined && item.responseLatencyMs > chosen.responseLatencyMs! * 1.5);
+  if (slower) return `${slower.harness} fits as well but usually takes ${Math.round(slower.responseLatencyMs! / 1000)}s to reply; ${
+    chosen.harness} takes ${Math.round(chosen.responseLatencyMs! / 1000)}s`;
   if (chosen.network && ranking.some(item => item.networkQuality !== undefined &&
     item.networkQuality < (chosen.networkQuality ?? 0))) {
     return `Fit, available resources and measured HTTPS reliability/tail latency favour this machine`;

@@ -127,16 +127,20 @@ const FIT_INSTRUCTIONS = "Rate how well the one harness below suits the work thi
 
 /** One environment weighed by the joint choice: fit (Jev's reading of its
  * harness, 0..1), headroom (measured; unmeasured counts as none) and its
- * account's quota pace, with fresh typed network measurements when available. */
+ * account's quota pace, with fresh typed network measurements when available,
+ * and how fast its harness answers against the fastest one offered. */
 export type PlacedEnvironment<T> = { candidate: T; fit: number; headroom: number | undefined; quotaPace: number;
-  network?: MachineNetworkObservation; networkQuality?: number;
+  network?: MachineNetworkObservation; networkQuality?: number; responseQuality?: number;
   frontier: boolean; utility: number };
 
 /**
  * Harness and machine are chosen together. Environments another one beats on
- * fit, headroom, quota pace and network quality alike drop out (the Pareto
- * frontier); of the rest, the strongest weakest side of fit, headroom and
- * network wins. Level there, network quality and then quota pace win:
+ * fit, headroom, quota pace, network and response quality alike drop out (the
+ * Pareto frontier); of the rest, the strongest weakest side of fit, headroom,
+ * network and response wins. Response quality is the fastest offered
+ * harness's measured median first reply over this one's: a person waits for
+ * that reply, so a harness taking three times as long weighs a third, and of
+ * environments level on that weakest side the faster harness wins first. Level there, network quality and then quota pace win:
  * quota left close to its reset
  * is lost unless it is spent, so it is the cheaper to use. Then a sliver of
  * complete bandwidth and the utility sum break ties, then the fewest outstanding
@@ -161,6 +165,7 @@ export function jointRanking<T extends RegistrationLaunchCandidate>(candidates: 
     return down && up && !down.shortSample && !up.shortSample ? Math.min(down.mbps, up.mbps) : undefined;
   };
   const highestBandwidth = Math.max(...networks.map(bandwidth).filter(value => value !== undefined));
+  const quickest = Math.min(...candidates.map(candidate => candidate.responseLatencyMs).filter(value => value !== undefined));
   const weighed = candidates.map((candidate, index) => {
     const fit = fitOf(candidate), headroom = environmentHeadroom(candidate, now);
     const room = headroom ?? 0, quotaPace = environmentQuotaPace(candidate, now);
@@ -168,24 +173,29 @@ export function jointRanking<T extends RegistrationLaunchCandidate>(candidates: 
     const networkQuality = network ? (1 - network.failures / network.attempts) *
       (latency !== undefined ? fastest / latency : 1) : 1;
     const transferQuality = rate !== undefined && highestBandwidth > 0 ? rate / highestBandwidth : 1;
-    const balance = Math.min(Math.min(1, fit), Math.min(1, room), networkQuality);
-    return { candidate, index, fit, headroom, room, quotaPace, network, networkQuality, transferQuality,
+    const replyLatency = candidate.responseLatencyMs;
+    const responseQuality = replyLatency !== undefined ? Math.min(1, Math.max(1, quickest) / Math.max(1, replyLatency)) : 1;
+    const balance = Math.min(Math.min(1, fit), Math.min(1, room), networkQuality, responseQuality);
+    return { candidate, index, fit, headroom, room, quotaPace, network, networkQuality, responseQuality, transferQuality,
       balance, utility: balance + 0.001 * (fit + room) };
   });
   const tripped = (candidate: T) => candidate.startupFailedAt !== undefined;
   const dominated = (item: typeof weighed[number]) => weighed.some(other =>
     tripped(other.candidate) === tripped(item.candidate) && other.fit >= item.fit &&
     other.room >= item.room && other.quotaPace >= item.quotaPace && other.networkQuality >= item.networkQuality &&
-    (other.fit > item.fit || other.room > item.room || other.quotaPace > item.quotaPace || other.networkQuality > item.networkQuality));
+    other.responseQuality >= item.responseQuality &&
+    (other.fit > item.fit || other.room > item.room || other.quotaPace > item.quotaPace ||
+      other.networkQuality > item.networkQuality || other.responseQuality > item.responseQuality));
   const outstanding = (candidate: T) => candidate.observations?.outstandingMachineAllocations ?? 0;
   return weighed.map(item => ({ ...item, frontier: !dominated(item) }))
     .sort((left, right) => Number(tripped(left.candidate)) - Number(tripped(right.candidate)) ||
       Number(right.frontier) - Number(left.frontier) || right.balance - left.balance ||
-      right.networkQuality - left.networkQuality || right.quotaPace - left.quotaPace ||
+      right.responseQuality - left.responseQuality || right.networkQuality - left.networkQuality || right.quotaPace - left.quotaPace ||
       right.transferQuality - left.transferQuality || right.utility - left.utility ||
       outstanding(left.candidate) - outstanding(right.candidate) || left.index - right.index)
-    .map(({ candidate, fit, headroom, quotaPace, network, networkQuality, frontier, utility }) => ({ candidate, fit, headroom, quotaPace,
-      ...(network ? { network, networkQuality } : {}), frontier, utility }));
+    .map(({ candidate, fit, headroom, quotaPace, network, networkQuality, responseQuality, frontier, utility }) => ({ candidate, fit,
+      headroom, quotaPace, ...(network ? { network, networkQuality } : {}),
+      ...(candidate.responseLatencyMs !== undefined ? { responseQuality } : {}), frontier, utility }));
 }
 
 /** A choice question's answer; the evaluator has already checked each against its question. */
@@ -400,6 +410,8 @@ export function registrationLaunchChooser(evaluate: RoutingEvaluator, readContex
         fit: round(item.fit), ...(item.headroom !== undefined ? { headroom: round(item.headroom) } : {}),
         quotaPace: round(item.quotaPace), frontier: item.frontier, utility: round(item.utility),
         ...(item.network ? { network: item.network, networkQuality: round(item.networkQuality!) } : {}),
+        ...(item.candidate.responseLatencyMs !== undefined ? { responseLatencyMs: item.candidate.responseLatencyMs,
+          responseQuality: round(item.responseQuality!) } : {}),
         described: Boolean(item.candidate.description),
         ...(item.candidate.startupFailedAt ? { startupFailedAt: item.candidate.startupFailedAt } : {}) })) },
       ...(intent ? { intent: { source: "jev" as const, selected: "summon" as const, probabilities: intent.probabilities } }

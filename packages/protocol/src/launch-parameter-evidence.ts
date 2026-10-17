@@ -16,6 +16,10 @@ export interface LaunchPlacementCandidate {
   fit: number; headroom?: number; quotaPace?: number; frontier: boolean; utility: number;
   network?: MachineNetworkObservation;
   networkQuality?: number;
+  /** The harness's measured median time to its first reply, and the fastest
+   * offered harness's median over it (0..1). Absent without enough launches. */
+  responseLatencyMs?: number;
+  responseQuality?: number;
   /** Whether the Space had described the harness when its fit was read; false
    * means it was judged without one. Absent from decisions made before it was recorded. */
   described?: boolean;
@@ -117,14 +121,18 @@ function parsePlacement(value: unknown, evaluatedAt: number): LaunchParameterEvi
       item.described !== undefined && typeof item.described !== "boolean" ||
       item.startupFailedAt !== undefined && (typeof item.startupFailedAt !== "string" ||
         item.startupFailedAt.length > 40 || !Number.isFinite(Date.parse(item.startupFailedAt))) ||
-      item.network !== undefined && (!network || !unit(item.networkQuality, 0, 1))) return null;
+      item.network !== undefined && (!network || !unit(item.networkQuality, 0, 1)) ||
+      (item.responseLatencyMs !== undefined || item.responseQuality !== undefined) &&
+        (!unit(item.responseLatencyMs, 0, 86_400_000) || !unit(item.responseQuality, 0, 1))) return null;
     ranking.push({ harness: item.harness, machineId: item.machineId,
       ...(item.machineName !== undefined ? { machineName: item.machineName as string } : {}),
       fit: item.fit, ...(item.headroom !== undefined ? { headroom: item.headroom as number } : {}),
       ...(item.quotaPace !== undefined ? { quotaPace: item.quotaPace as number } : {}), frontier: item.frontier, utility: item.utility,
       ...(item.described !== undefined ? { described: item.described as boolean } : {}),
       ...(item.startupFailedAt !== undefined ? { startupFailedAt: item.startupFailedAt as string } : {}),
-      ...(network ? { network, networkQuality: item.networkQuality as number } : {}) });
+      ...(network ? { network, networkQuality: item.networkQuality as number } : {}),
+      ...(item.responseLatencyMs !== undefined ? { responseLatencyMs: item.responseLatencyMs as number,
+        responseQuality: item.responseQuality as number } : {}) });
   }
   return { profile: "balanced", ranking };
 }
