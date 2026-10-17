@@ -55,7 +55,7 @@ integration("launch survives a hostname change with stale Workspace metadata and
         updated_at timestamptz,PRIMARY KEY (space_id,subject_id,channel_id));
       CREATE TABLE data.first_message_launch_choices (space_id text,channel_id text,message_id text,author_user_id text,choice text);
       CREATE TABLE data.machine_daemons (daemon_id text,owner_user_id text,machine_id text,hostname text,status text,
-        capabilities_json jsonb,connection_epoch bigint);
+        capabilities_json jsonb,connection_epoch bigint,updated_at timestamptz NOT NULL DEFAULT now());
       CREATE TABLE data.machine_run_routes (run_id text,owner_user_id text,machine_id text,terminal_at timestamptz);
       CREATE TABLE data.space_control_heads (space_id text PRIMARY KEY,commit_sequence bigint,updated_at timestamptz);
       CREATE TABLE data.outbox (outbox_id text PRIMARY KEY,space_id text,topic text,aggregate_kind text,aggregate_id text,
