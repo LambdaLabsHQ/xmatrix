@@ -157,6 +157,28 @@ integration("a participant cannot use the Space's connected apps, even in their 
   });
 });
 
+// A subscription made while its creator could subscribe stays, but delivers
+// only while they still can: one a member made in what became their intake
+// stops when they become a participant, and nothing is deleted.
+integration("a subscription delivers only while its creator may still use the Space's connected apps", async () => {
+  await withDatabase(async ({ sql, database, space }) => {
+    await sql(`INSERT INTO data.channels (channel_id,space_id,name,name_key,mode,search_rank_sequence,version,
+      metadata_json,created_at,updated_at) VALUES ($2||':mine',$2,'mine','mine','open',$2||':rank-mine',1,
+      '{"intakeOf":"member"}'::jsonb,$1,$1)`, [at, space]);
+    await sql(`INSERT INTO data.app_source_relations (relation_id,connection_id,space_id,channel_id,source_kind,
+      source_ref,features_json,version,created_by,created_at,updated_at) VALUES
+      ($2||':r',$2||':webhook',$2,$2||':mine','repository','webhook:deploys','["delivery"]',1,'member',$1,$1)`,
+    [at, space]);
+    const routes = () => new PostgresAppRepository(database).connectorEventRoutes({ requestId: crypto.randomUUID(),
+      connectionId: `${space}:webhook`, sourceRef: "webhook:deploys", limit: 10 });
+    assert.equal((await routes()).length, 1);
+    await sql("UPDATE data.space_members SET role='participant' WHERE space_id=$1 AND user_id='member'", [space]);
+    assert.deepEqual(await routes(), []);
+    assert.equal((await sql("SELECT count(*)::int AS n FROM data.app_source_relations WHERE space_id=$1", [space]))
+      .rows[0].n, 1, "the subscription itself is kept");
+  });
+});
+
 // The same holds for the Agents a participant brings: an Agent principal acts
 // with the Space's connected apps only while its Run's owner is a member.
 integration("a participant's own Agent cannot use the Space's connected apps either", async () => {
