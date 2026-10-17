@@ -1,6 +1,6 @@
 "use client";
 
-import { HUB_ROUTES, WEB_PROXY_ROUTES, type AuthResponse } from "@xmatrix/protocol";
+import { HUB_ROUTES, sha256Hex, WEB_PROXY_ROUTES, type AuthResponse } from "@xmatrix/protocol";
 import type { DesktopBridge } from "@/lib/desktop/bridge";
 import { authBaseUrl, type SocialSignInProvider } from "@/lib/auth-client";
 import { errorFromResponse, xmatrixRawResponse } from "@/lib/query/api-client";
@@ -65,8 +65,7 @@ export class AppSignInRefused extends Error {
  */
 export async function appleSignInNonce(): Promise<{ nonce: string; hashed: string }> {
   const nonce = randomBase64Url(32);
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(nonce));
-  return { nonce, hashed: Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("") };
+  return { nonce, hashed: await sha256Hex(nonce) };
 }
 
 function randomBase64Url(bytes: number): string {
