@@ -125,6 +125,7 @@ jobs:
     needs: plan
     if: contains(format(',{0},', needs.plan.outputs.scope), ',ios,')
     runs-on: ${{ vars.XMATRIX_RUNNER_FLEET == 'self-hosted' && fromJSON('["self-hosted","xmatrix-macos-release"]') || 'macos-26' }}
+    timeout-minutes: 30
     permissions:
       contents: read
     steps:
@@ -132,9 +133,7 @@ jobs:
         with:
           ref: ${{ needs.plan.outputs.deploy_sha }}
       - name: Build and test iOS on the exact release revision
-        run: >-
-          xcodebuild -project apps/ios/xMatrix.xcodeproj -scheme xMatrix
-          -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=latest' test
+        uses: ./.github/actions/ios-simulator-test
 
   # One job whose success means every gate this train's scope selects passed.
   # ci.yml fails its own aggregate unless each selected partition passed, so

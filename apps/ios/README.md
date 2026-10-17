@@ -74,4 +74,8 @@ On iPhone the bottom tab dock is rendered by a native UIKit tab bar instead of t
 
 Run `xcodebuild -project apps/ios/xMatrix.xcodeproj -scheme xMatrix -destination 'platform=iOS Simulator,name=iPhone 17 Pro' test` from the repository root (or select another available iOS 26 simulator).
 
+PR CI and the production release gate share `.github/actions/ios-simulator-test`:
+they select Xcode and an installed iOS 26 iPhone by UDID. The release gate tests
+the exact stamped release revision and fails if no suitable simulator is available.
+
 The `xMatrixTests` target exercises the production coordinator with real `WKWebView` instances whose top-level `load` calls are recorded instead of sent to the network. It verifies single-page startup, tab taps that switch panes without loading, deep links in the same page, foreground resume, and bridge state decoding. These are lifecycle tests, not end-to-end network latency benchmarks.
