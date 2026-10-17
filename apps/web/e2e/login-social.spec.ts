@@ -5,7 +5,10 @@ import { expect, test } from "./fixtures";
 for (const provider of ["GitHub", "Google"]) {
   for (const context of [
     { query: "?next=%2Fapp%3Fview%3Dpages", returnPath: "/app?view=pages" },
-    { query: "?device_code=device-fixture&user_code=ABCD-EFGH&client=cli", returnPath: "/login?device_code=device-fixture&user_code=ABCD-EFGH&client=cli" },
+    { query: `?next=${encodeURIComponent("/oauth/authorize?client_id=external-ai&state=external-state&scope=xmatrix%3Aread")}`,
+      returnPath: "/oauth/authorize?client_id=external-ai&state=external-state&scope=xmatrix%3Aread" },
+    { query: "?next=https%3A%2F%2Funtrusted.example%2Fcallback", returnPath: "/app" },
+    { query: "?device_code=device-fixture&user_code=ABCD-EFGH&client=cli&state=stale-provider-state&code=stale-code", returnPath: "/login?device_code=device-fixture&user_code=ABCD-EFGH&client=cli" },
   ]) {
     test(`${provider} sign-in preserves ${context.returnPath}`, async ({ page }) => {
       await page.addInitScript(() => { (window as unknown as Record<string, unknown>).__xmatrixDisableMockAuth = true; });

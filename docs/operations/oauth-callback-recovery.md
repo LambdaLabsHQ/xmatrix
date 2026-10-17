@@ -47,7 +47,11 @@ and expired state. It does not perform a live provider login.
 
 The login page offers GitHub alongside Google and email. Both social providers
 use the same validated return path, including the CLI/native device context;
-a successful browser sign-in still requires explicit device approval. Provider
+a successful browser sign-in still requires explicit device approval. Cleanup
+removes provider callback parameters only from login return pages. A return to
+`/oauth/authorize` retains the outside app's own `state` and authorization query;
+otherwise the resumed consent flow loses its browser binding. Return origins
+still must match the app origin. Provider
 refusals return to `/login` with a provider-neutral error and email recovery.
 GitHub uses the existing `GITHUB_APP_CLIENT_ID` / `GITHUB_APP_CLIENT_SECRET`
 and `/api/auth/callback/github`; the App needs Email addresses: read permission.

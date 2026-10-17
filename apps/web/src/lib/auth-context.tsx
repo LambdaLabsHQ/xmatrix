@@ -487,8 +487,12 @@ function normalizeOAuthReturnPath(returnTo?: string): string {
       return "/app";
     }
 
-    for (const param of OAUTH_CALLBACK_PARAMS) {
-      url.searchParams.delete(param);
+    // Only login pages carry this provider's callback artifacts. An outside
+    // app's authorization return has its own state, which must survive.
+    if (url.pathname === "/login" || url.pathname === "/login/password") {
+      for (const param of OAUTH_CALLBACK_PARAMS) {
+        url.searchParams.delete(param);
+      }
     }
 
     const path = `${url.pathname}${url.search}${url.hash}`;
