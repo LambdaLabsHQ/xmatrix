@@ -10,6 +10,7 @@ import { discordCompanyApp, discordGrantContext, isDiscordInstallationGrant, val
 import type { AppOAuthInstallation } from "@xmatrix/db";
 import { isSentryInstallationGrant, refreshSentryInstallation } from "./sentry-installation";
 import { cloudflareGrantContext } from "./cloudflare-api";
+import { parseCloudflareLogins, serializeCloudflareLogins } from "./cloudflare-logins";
 import { composioConnectedAccount, composioConnectUrl, composioUserId } from "./composio";
 import { xOAuthFields } from "./x-oauth";
 
@@ -306,6 +307,33 @@ export async function exchangeOAuthGrant(client: OAuthClient, code: string, redi
 }
 
 /**
+ * A Cloudflare connection's logins with every grant about to expire renewed,
+ * or `undefined` when none needed it. Each login rotates on its own: one that
+ * Cloudflare refuses keeps its old grant, and the call that uses it reports the
+ * refusal, so one revoked login never stops the others.
+ */
+async function refreshCloudflareLogins(env: Env, stored: string, now: number): Promise<Record<string, string | null> | undefined> {
+  const logins = parseCloudflareLogins(stored);
+  const due = logins.filter((login) => login.expiresAt - now <= REFRESH_MARGIN_MS);
+  const client = oauthClient(env, "cloudflare");
+  if (!due.length || !client) return undefined;
+  let changed = false;
+  const next = [];
+  for (const login of logins) {
+    if (!due.includes(login)) { next.push(login); continue; }
+    const payload = await tokenRequest(client, { grant_type: "refresh_token", refresh_token: login.refreshToken })
+      .catch(() => undefined);
+    if (!payload) { next.push(login); continue; }
+    const seconds = Number(payload.expires_in);
+    next.push({ ...login, accessToken: String(payload.access_token),
+      refreshToken: typeof payload.refresh_token === "string" && payload.refresh_token ? payload.refresh_token : login.refreshToken,
+      expiresAt: Number.isFinite(seconds) && seconds > 0 ? now + seconds * 1_000 : now + 3_600_000 });
+    changed = true;
+  }
+  return changed ? { logins: serializeCloudflareLogins(next) } : undefined;
+}
+
+/**
  * Credentials whose OAuth token is about to expire, refreshed; `undefined`
  * when nothing needs refreshing. The caller stores the returned fields.
  */
@@ -314,6 +342,7 @@ export async function refreshOAuthFields(env: Env, providerId: string, values: R
   if (providerId === "sentry" && isSentryInstallationGrant(values)) {
     return refreshSentryInstallation(env, values, now, options.unauthorized === true);
   }
+  if (providerId === "cloudflare" && values.logins) return refreshCloudflareLogins(env, values.logins, now);
   const expiresAt = Number(values.oauthExpiresAt);
   if (providerId === "discord" && isDiscordInstallationGrant(values)) {
     const configured = discordCompanyApp(env);
