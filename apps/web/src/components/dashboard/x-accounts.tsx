@@ -59,7 +59,7 @@ export function XAccounts({ spaceId, token, userId, members, adding, canAdd, onA
     <div className="space-y-3" data-testid="x-accounts">
       <p className="text-xs leading-5 text-muted-foreground">
         Authorize your company and personal accounts separately. Each account can be used only by
-        the member who connected it and their Agents. Up to four accounts can be connected.
+        the member who connected it and their Agents.
       </p>
       <p className="text-xs leading-5 text-muted-foreground">
         Choose an account for every action. Publishing asks for approval of each request by default.
@@ -99,7 +99,7 @@ export function XAccounts({ spaceId, token, userId, members, adding, canAdd, onA
         {accounts.data?.length === 0 ? <li className="py-2 text-muted-foreground">No X account is connected.</li> : null}
       </ul>
       {!canAdd ? <p className="text-xs text-muted-foreground">The company X application must be configured before accounts can connect.</p> : null}
-      <Button size="sm" type="button" disabled={busy || !canAdd || (accounts.data?.length ?? 0) >= 4} onClick={onAdd}>
+      <Button size="sm" type="button" disabled={busy || !canAdd} onClick={onAdd}>
         {adding ? <AnimatedIcon icon={Loader2} className="animate-spin" /> : <Plus />} Add X account
       </Button>
     </div>

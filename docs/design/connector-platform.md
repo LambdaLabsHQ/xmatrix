@@ -435,7 +435,7 @@ messages/send, belongs to `send` and `reply`, whose manifest
 `defaultPolicy: "ask"` stages an immutable email for a Space admin to approve
 once in that Channel (§3.5). A read-only grant would need the company's own
 Google app verified for `gmail.readonly` (OAuth verification and CASA).
-One Gmail connection holds up to ten mailboxes. Its only credential,
+One Gmail connection holds any number of mailboxes. Its only credential,
 `mailboxes`, lists each mailbox's Composio account, address and owner: a
 Space member (`user:<id>`) or an Agent registration
 (`agent:<owner>/<machine>/<harness>`, each part URI-encoded). A member's
@@ -446,7 +446,11 @@ owned by the connecting admin; connecting an address again replaces its
 Composio account (the old one is deleted) and keeps its owner. Space admins
 reassign or remove mailboxes in Apps → Gmail
 (`/api/spaces/:spaceId/app-connections/gmail/mailboxes`); removing one deletes
-its Composio account, and Disconnect deletes every one. Actions see only the
+its Composio account, and Disconnect deletes every one. Like X accounts and
+Cloudflare logins, the list is one encrypted field that moves under the
+connection's version check (`packages/hub/src/connectors/account-list.ts`):
+entries are not counted, the field is stored up to 256 KiB, and a Connect that
+would not fit is refused and its new Composio account deleted. Actions see only the
 caller's mailboxes: `search:*` searches each (labelled by mailbox when there
 are several) and `search:<address>` one; `read` and `reply` find the message
 among them; `send` takes `from:<address>` when the caller has more than one.
@@ -992,7 +996,7 @@ or generates a webhook secret in the Apps view.
 | Jira Cloud | email + API token, webhook secret | issue created/updated/commented | create/transition/comment issue |
 | Notion | internal integration token | — (polling deferred) | read page, append block, create page |
 | Vercel | access token + webhook secret | deployment created/succeeded/error | redeploy |
-| Cloudflare | Any number of OAuth logins in one encrypted `logins` credential (each Connect adds one; the field is stored up to 256 KiB), or an API token; Hub-registered destination secret | notifications fired/resolved by alert type, `<account id>/<alert type>` for accounts other than the default; subscriptions own each account's `xMatrix ·` policies | list accounts, query logs, list deployments, list D1 databases, read-only D1 query (read); rollback — each may name its account |
+| Cloudflare | Any number of OAuth logins in one encrypted `logins` credential (each Connect adds one), or an API token; Hub-registered destination secret | notifications fired/resolved by alert type, `<account id>/<alert type>` for accounts other than the default; subscriptions own each account's `xMatrix ·` policies | list accounts, query logs, list deployments, list D1 databases, read-only D1 query (read); rollback — each may name its account |
 | App Store Connect | API key (Key ID, Issuer ID, `.p8`); Hub-registered webhook secret | version state, build upload, TestFlight review and feedback; subscriptions own the app's `xMatrix ·` webhook | status, builds, version, app record and reviews (read); create version, set listing, attach build, submit, cancel, release, reply to review; set app info, age rating, price, availability and review contact; upload builds and screenshots; signing certificates and profiles; TestFlight groups, beta review and tester feedback |
 | Discord | bot token | — | post message |
 | Feishu/Lark | custom app id/secret + verification token | message in linked chat | send message |
