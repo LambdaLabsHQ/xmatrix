@@ -262,6 +262,7 @@ export function AppWindowPreview() {
                 onRebornSender={noop}
                 reborningSenderKey={null}
                 onQuestionnaireAnswer={async () => false}
+                onSendMessage={() => undefined}
                 onOpenInternalAppLink={() => false}
                 onOpenPage={noop}
                 onJumpToMessage={noop}
