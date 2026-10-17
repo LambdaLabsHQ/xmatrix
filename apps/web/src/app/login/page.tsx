@@ -31,6 +31,7 @@ import {
 } from "@/lib/desktop/bridge";
 import { requestCliSessionExchange } from "@/lib/desktop/session-exchange";
 import { AppSignInRefused, appleSignInNonce, signInAppWithProvider } from "@/lib/app-sign-in";
+import { NEW_ACCOUNT_FLAG } from "@/components/auth/new-account-step";
 import { Input } from "@/components/ui/input";
 import { APP_SIGN_IN_FINISH_PATH, WEB_PROXY_ROUTES, type AuthResponse } from "@xmatrix/protocol";
 import {
@@ -682,9 +683,9 @@ function LoginContent() {
     try {
       const signedIn = await signInAppWithProvider(desktopBridge, provider);
       if (attempt !== appSignInAttemptRef.current) return;
-      await setSessionFromAuthResponse(signedIn);
+      await setSessionFromAuthResponse(signedIn.session);
       rememberSignInMethod(provider);
-      router.replace(nextPath || "/app");
+      router.replace(signedIn.newAccount && !nextPath ? `/app?${NEW_ACCOUNT_FLAG}=1` : nextPath || "/app");
     } catch (nextError) {
       if (attempt !== appSignInAttemptRef.current) return;
       if (!isAbort(nextError)) {

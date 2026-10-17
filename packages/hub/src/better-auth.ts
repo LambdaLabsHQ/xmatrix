@@ -636,12 +636,16 @@ export async function startBetterAuthSocialRedirect(env: Env, provider: "google"
   return { url: payload.url, cookies: response.headers.getSetCookie() };
 }
 
-/** The person a browser request's own session cookie signs in, or null without one. */
-export async function betterAuthUserFromCookies(env: Env, cookieHeader: string | null): Promise<AuthUser | null> {
+/** The person a browser request's own session cookie signs in, and when their account was made; null without one. */
+export async function betterAuthUserFromCookies(env: Env, cookieHeader: string | null):
+  Promise<{ user: AuthUser; createdAt: number | null } | null> {
   if (!cookieHeader) return null;
   const response = await callBetterAuth(env, "/get-session", { headers: { cookie: cookieHeader } });
-  const payload = (await response.json().catch(() => null)) as BetterAuthGetSessionResponse | null;
-  return payload?.user?.id && payload.user.email ? authUserFromBetterAuthUser(payload.user) : null;
+  const payload = (await response.json().catch(() => null)) as
+    (BetterAuthGetSessionResponse & { user?: { createdAt?: string } }) | null;
+  if (!payload?.user?.id || !payload.user.email) return null;
+  const createdAt = payload.user.createdAt ? Date.parse(payload.user.createdAt) : Number.NaN;
+  return { user: authUserFromBetterAuthUser(payload.user), createdAt: Number.isNaN(createdAt) ? null : createdAt };
 }
 
 /**

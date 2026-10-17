@@ -17,7 +17,7 @@ export async function signInAppWithProvider(
   bridge: DesktopBridge,
   provider: SocialSignInProvider,
   options: { ephemeral?: boolean } = {},
-): Promise<AuthResponse> {
+): Promise<{ session: AuthResponse; newAccount: boolean }> {
   if (!bridge.authorizeInBrowser) throw new Error("This app signs in through the browser.");
   const verifier = randomBase64Url(32);
   const state = randomBase64Url(16);
@@ -48,7 +48,7 @@ export async function signInAppWithProvider(
     body: JSON.stringify({ code, codeVerifier: verifier }),
   });
   if (!response.ok) throw await errorFromResponse(response);
-  return (await response.json()) as AuthResponse;
+  return { session: (await response.json()) as AuthResponse, newAccount: callback.searchParams.has("new_account") };
 }
 
 /** The provider, or the person, turned the sign-in down; `code` is the provider's or the Hub's reason. */
