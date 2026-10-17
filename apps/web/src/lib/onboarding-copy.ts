@@ -1,12 +1,11 @@
-import { harnessDisplayVersion, harnessTooOldSentence, type HarnessTooOld, type OnboardingLocale, type OnboardingStarter } from "@xmatrix/protocol";
+import { harnessDisplayVersion, harnessTooOldSentence, type HarnessTooOld, type OnboardingLocale } from "@xmatrix/protocol";
 
 /* The words of a new person's first ten minutes, in English and Chinese
    (onboarding-locale.ts picks one): the welcome conversation, the three
-   setup steps, the starters, Bring them in, the empty Space and Agents
+   setup steps, the cards, Bring them in, the empty Space and Agents
    screens, and the download card. Only the first of the two sentences
    xMatrix teaches appears here; everything else is plain instructions. */
 
-type Starter = { id: OnboardingStarter; title: string; detail: string; message: string };
 
 const en = {
   listNames: (names: string[]) => names.length <= 1 ? names[0] ?? ""
@@ -55,7 +54,6 @@ const en = {
   /* The first task should end in a page about the person's own work, which is
      where xMatrix makes sense; each starter asks for one. A page explaining
      xMatrix itself kept people learning the tool instead of using it. */
-  starting: (name?: string) => name ? `Starting @${name}…` : "Starting an agent…",
   /* What xMatrix is for, one card each: talking, several agents at once, the
      live page, every computer. One click shows it. */
   talk: { title: "Start a new conversation", detail: "Say what you want done. No need to @ anyone: xMatrix picks an AI to take it." },
@@ -72,12 +70,6 @@ const en = {
   connectGitHub: "Connect GitHub",
   draftFrom: (repo: string) => repo,
   draftingFrom: (repo: string) => `Turning ${repo} into pages. They wait in Pages for your review.`,
-  starters: [
-    { id: "project", title: "Write up your project", detail: "What it is. Where it stands. What's left.",
-      message: "Write a page about a project I'm working on: what it is, where it stands and what is still open. Ask me which project first." },
-    { id: "plan", title: "Plan something together", detail: "Talk it through. It lands on the page.",
-      message: "Help me plan something I'm working on, and keep the plan in a page as we go." },
-  ] as Starter[],
   installedTitle: "Your installed agents",
   installedBody: "Turn them on to summon them. Choose a working folder when you send the first task.",
   enabling: "Enabling…",
@@ -169,7 +161,6 @@ const zh: OnboardingCopy = {
   copy: (copied) => copied ? "已复制" : "复制",
   agentsIn: (names, one) =>
     `${names} 已接入。在这里 @ ${one ? "它" : "其中一个"}就能派活，也可以从下面选一个开始：`,
-  starting: (name) => name ? `正在启动 @${name}…` : "正在启动 Agent…",
   talk: { title: "开一个新对话", detail: "说一件你想做的事。不用 @ 谁，xMatrix 会挑一个 AI 来接。" },
   together: { title: "让多个 AI 一起协作", detail: (a, b) => `@${a} 和 @${b} 分工干活、互相接力，你看着事情做成。`,
     needsTwo: "再接一个 AI，就能让它们一起协作。", draft: (a, b) => `@${a} @${b} 你们分工合作，一起把这件事做完：` },
@@ -181,12 +172,6 @@ const zh: OnboardingCopy = {
   connectGitHub: "连接 GitHub",
   draftFrom: (repo) => repo,
   draftingFrom: (repo) => `正在把 ${repo} 写成页面，写好会在 Pages 里等你过目。`,
-  starters: [
-    { id: "project", title: "写下你的项目", detail: "它是什么，走到哪了，还差什么。",
-      message: "给我正在做的一个项目写一个页面：它是什么、做到哪了、还有什么没做完。先问我是哪个项目。" },
-    { id: "plan", title: "一起做个计划", detail: "边聊，边写进页面。",
-      message: "帮我规划一件正在做的事，边聊边把计划写进一个页面。" },
-  ],
   installedTitle: "你已安装的 Agent",
   installedBody: "开启后就能召唤它们。发第一个任务时再选工作目录。",
   enabling: "正在开启…",

@@ -34,16 +34,17 @@ async function welcomeOnFirstOpen(page: import("@playwright/test").Page) {
    conversation open. Returns the agents-in step. */
 async function welcomeWithAgentIn(page: import("@playwright/test").Page,
   { harness = "codex", channel = {}, funnel = false, sent, login, repositories }:
-  { harness?: string; channel?: object; funnel?: boolean; sent?: string; login?: string; repositories?: object } = {}) {
+  { harness?: string | string[]; channel?: object; funnel?: boolean; sent?: string; login?: string; repositories?: object } = {}) {
+  const harnesses = Array.isArray(harness) ? harness : [harness];
   // With `login`, the agent is the person's own and its machine reports that sign-in state.
-  const registrations = harnessRegistrations([harness]).map((registration) => login
+  const registrations = harnessRegistrations(harnesses).map((registration) => login
     ? { ...registration, key: { ...registration.key, ownerUserId: "e2e-user" } } : registration);
   const machineDaemons = login ? [{ id: "daemon-1", userId: "e2e-user", email: "e2e@xmatrix.test", name: "Workstation",
     machineId: "machine", machineName: "Workstation", hostId: "host-1", hostName: "Workstation", status: "online",
     connectedAt: E2E_NOW, lastSeenAt: new Date().toISOString(), daemonVersion: "1.0.546",
     metadata: { platform: "macos", capabilities: ["machine_harness_action_v1", "machine_harness_login_v1"],
       harnesses: { schemaVersion: 1, capturedAt: E2E_NOW, items: [
-        { id: harness, installed: true, probeStatus: "ok", version: "2.1.170", login }] } } }] : undefined;
+        ...harnesses.map((id) => ({ id, installed: true, probeStatus: "ok", version: "2.1.170", login }))] } } }] : undefined;
   await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], registrations, machineDaemons,
     channels: [{ ...WELCOME, messageCount: 2, lastMessageSequence: 2, ...channel }] });
   await fixtureJson(page, "history", `**/api/xmatrix/channels/${WELCOME.id}/history**`, { messages: [BRING, IN], hasMore: false });
@@ -68,19 +69,14 @@ test.describe("desktop", () => {
     await expect(page.getByText("Welcome to xMatrix").first()).toBeVisible();
   });
 
-  test("once an agent is in, a starter is sent as the person's own message to Auto", async ({ page }) => {
-    const agentsIn = await welcomeWithAgentIn(page, { funnel: true,
-      sent: "@auto Help me plan something I'm working on, and keep the plan in a page as we go." });
+  test("once an agent is in, a card starts a new conversation for the person to say what they want", async ({ page }) => {
+    const agentsIn = await welcomeWithAgentIn(page, { funnel: true });
     await expect(agentsIn).toContainText("@codex is in. Mention it here to give it work", { timeout: 20_000 });
-    await agentsIn.getByRole("button", { name: /Plan something together/u }).click();
-    await expect.poll(async () => (await fixtureRequestBodies(page, "send")).map((sent) => (sent as { body?: string }).body))
-      .toEqual(["@auto Help me plan something I'm working on, and keep the plan in a page as we go."]);
-    // Which first task people choose is counted too.
+    await agentsIn.getByRole("button", { name: /Start a new conversation/u }).click();
+    await expect(page.getByRole("textbox", { name: "What should happen" })).toBeVisible();
+    // Which card people choose is counted.
     await expect.poll(() => fixtureRequestBodies(page, "funnel"))
-      .toEqual([{ step: "starter_chosen", surface: "welcome", device: "desktop_web", starter: "plan" }]);
-    // Until that agent is here there is nothing to address, and another starter would start a second one.
-    await expect(agentsIn.getByRole("status")).toHaveText("Starting an agent…");
-    await expect(agentsIn.getByRole("button", { name: /Write up your project/u })).toBeDisabled();
+      .toEqual([{ step: "starter_chosen", surface: "welcome", device: "desktop_web", starter: "talk" }]);
   });
 
   test("an agent whose program is signed out is named with its machine and signed in here, with no starters", async ({ page }) => {
@@ -89,7 +85,7 @@ test.describe("desktop", () => {
       { timeout: 20_000 });
     await expect(agentsIn.getByRole("button", { name: "Sign in", exact: true })).toBeVisible();
     await expect(agentsIn).not.toContainText("is in. Mention it here");
-    await expect(agentsIn.getByRole("button", { name: /Plan something together/u })).toHaveCount(0);
+    await expect(agentsIn.getByRole("button", { name: /Start a new conversation/u })).toHaveCount(0);
   });
 
   test("a signed-in agent of the person's own is in, with its starters", async ({ page }) => {
@@ -126,21 +122,13 @@ test.describe("desktop", () => {
     await expect(agentsIn.getByTestId("bring-work-in")).toContainText("Turning acme/api into pages.");
   });
 
-  test("a starter goes to the agent already in the conversation instead of starting another", async ({ page }) => {
-    const instance = (id: string, slot: string, status: string, lastSeenAt: string, extra: object = {}) =>
-      ({ id, channelInstanceId: slot, label: `claude:${slot}`, connectedAt: E2E_NOW, lastSeenAt, status, ...extra });
-    const memberPresence = {
-      "agent:claude": { registration: { ownerUserId: "e2e-user", machineId: "machine-1", harness: "claude" }, kind: "agent",
-        status: "idle", label: "claude", instances: [
-          instance("instance-claude-1", "1", "offline", "2026-01-01T00:00:03.000Z", { rest: "wake_failed", restReason: "spawn_failed" }),
-          instance("instance-claude-2", "2", "offline", "2026-01-01T00:00:02.000Z", { rest: "sleeping" }),
-          instance("instance-claude-3", "3", "idle", "2026-01-01T00:00:01.000Z")] },
-    };
-    const agentsIn = await welcomeWithAgentIn(page, { harness: "claude", channel: { memberPresence } });
-    await agentsIn.getByRole("button", { name: /Plan something together/u }).click({ timeout: 20_000 });
-    // The working one first; one whose wake failed would not act on it.
-    await expect.poll(async () => (await fixtureRequestBodies(page, "send")).map((sent) => (sent as { body?: string }).body))
-      .toEqual(["@claude:3 Help me plan something I'm working on, and keep the plan in a page as we go."]);
+  test("with two agents in, a card opens a new conversation that calls both to work together", async ({ page }) => {
+    const agentsIn = await welcomeWithAgentIn(page, { harness: ["claude", "codex"] });
+    const together = agentsIn.getByRole("button", { name: /Get several AIs working together/u });
+    await expect(together).toContainText("@claude and @codex split the work", { timeout: 20_000 });
+    await together.click();
+    await expect(page.getByRole("textbox", { name: "What should happen" }))
+      .toContainText("@claude @codex Work on this together and split it between you:");
   });
 });
 
@@ -232,11 +220,12 @@ test.describe("a Chinese browser", () => {
     await expect(welcome).toContainText("下载桌面 App");
   });
 
-  test("starters are sent in Chinese", async ({ page }) => {
+  test("its cards are in Chinese, and working together waits for a second agent", async ({ page }) => {
     const agentsIn = await welcomeWithAgentIn(page);
     await expect(agentsIn).toContainText("@codex 已接入。在这里 @ 它就能派活", { timeout: 20_000 });
-    await agentsIn.getByRole("button", { name: /一起做个计划/u }).click();
-    await expect.poll(async () => (await fixtureRequestBodies(page, "send")).map((sent) => (sent as { body?: string }).body))
-      .toEqual(["@auto 帮我规划一件正在做的事，边聊边把计划写进一个页面。"]);
+    await expect(agentsIn.getByRole("button", { name: /开一个新对话/u })).toBeEnabled();
+    const together = agentsIn.getByRole("button", { name: /让多个 AI 一起协作/u });
+    await expect(together).toContainText("再接一个 AI，就能让它们一起协作。");
+    await expect(together).toBeDisabled();
   });
 });
