@@ -75,7 +75,7 @@ test("declining a waiting terminal frees the command; a foreign Space cannot be 
 test("a setup link is emailed only for the owner's own command, three a day", () =>
   withOwnerWorker("Phone owner", async ({ call }) => {
     const intent = await intentInPersonalSpace(call);
-    const email = (intentId) => call(`/api/setup-intents/${intentId}/email`, { method: "POST" });
+    const email = (intentId, body) => call(`/api/setup-intents/${intentId}/email`, { method: "POST", body });
     // Someone else's or an expired command is not found, and costs nothing.
     assert.equal((await email("0".repeat(32))).status, 404);
     // This worker has no mail binding, so each admitted send reports delivery
@@ -84,7 +84,9 @@ test("a setup link is emailed only for the owner's own command, three a day", ()
       const answer = await email(intent.intentId);
       assert.equal(answer.status, 503, JSON.stringify(answer.body));
     }
-    const fourth = await email(intent.intentId);
+    // Written in the language the page asked for.
+    const fourth = await email(intent.intentId, { locale: "zh-CN" });
     assert.equal(fourth.status, 429);
     assert.equal(fourth.body.code, "setup_link_email_limited");
+    assert.equal(fourth.body.error, "今天已经发了 3 次，明天再试。");
   }));

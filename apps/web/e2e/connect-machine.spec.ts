@@ -143,6 +143,10 @@ test.describe("on a phone", () => {
       responder: { kind: "static", json: {} } });
     await send.click();
     await expect(connect).toContainText("Sent to your email. Open it on your computer to continue there.");
+    // The email is written in the page's language; nothing else rides along.
+    const bodies = await fixtureRequestBodies(page, "intent-email");
+    expect(bodies.length).toBeGreaterThan(0);
+    for (const body of bodies) expect(body).toEqual({ locale: "en" });
     await expect.poll(async () => (await counted(page)).filter((event) => event.step === "link_emailed"))
       .toEqual([{ step: "link_emailed", surface: "space", device: "phone" }]);
   });

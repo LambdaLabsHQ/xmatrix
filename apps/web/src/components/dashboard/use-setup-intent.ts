@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { WEB_PROXY_ROUTES, type SetupIntentStatus } from "@xmatrix/protocol";
+import { WEB_PROXY_ROUTES, type OnboardingLocale, type SetupIntentStatus } from "@xmatrix/protocol";
 import { XMatrixApiError, xmatrixApiRequest } from "@/lib/query/api-client";
 import { xmatrixQueryKeys } from "@/lib/query/query-keys";
 import { userErrorMessage } from "@/lib/user-facing-error";
@@ -110,10 +110,10 @@ export function useSetupIntent(spaceId: string | null, token: string | undefined
   const decline = () => act(() => xmatrixApiRequest({
     url: WEB_PROXY_ROUTES.setup_intent_decline(intentId!), token, method: "POST",
   }));
-  /** Emails the command's link to the person's own address; the reason it failed, or null. */
-  const emailLink = async (): Promise<string | null> => {
+  /** Emails the command's link to the person's own address, in `locale`; the reason it failed, or null. */
+  const emailLink = async (locale: OnboardingLocale): Promise<string | null> => {
     try {
-      await xmatrixApiRequest({ url: WEB_PROXY_ROUTES.setup_intent_email(intentId!), token, method: "POST" });
+      await xmatrixApiRequest({ url: WEB_PROXY_ROUTES.setup_intent_email(intentId!), token, method: "POST", body: { locale } });
       return null;
     } catch (reason) {
       // The day's three are spent: the Hub's own sentence, not "busy, try again".

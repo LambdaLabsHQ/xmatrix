@@ -167,7 +167,7 @@ function EmailToComputer({ intent, copy, onSent }: {
   const send = async () => {
     setState("sending");
     setError(null);
-    const failure = await intent.emailLink();
+    const failure = await intent.emailLink(copy.locale);
     setState(failure ? "idle" : "sent");
     setError(failure);
     if (!failure) onSent();
