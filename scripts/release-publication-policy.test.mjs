@@ -195,11 +195,17 @@ test("shared client publication refuses unknown components and tags that are not
     ["web", "web-v1.2.3"], ["", ""], ["cli", ""], ["cli", "cli-dev"], ["cli", "xmatrix-v1.2.3"],
     ["android", ""], ["desktop", "cli-v1.2.3"],
   ]) {
-    assert.throws(() => validate({ env: { RELEASE_COMPONENT: component, RELEASE_TAG: tag } }));
+    assert.throws(() => validate({ env: { RELEASE_COMPONENT: component, RELEASE_TAG: tag, RELEASE_CHANNELS: "dev" } }));
   }
   for (const [component, tag] of [["cli", "cli-v1.2.3"], ["android", "android-v1.2.3"], ["desktop", "desktop-v1.2.3"]]) {
-    assert.doesNotThrow(() => validate({ env: { RELEASE_COMPONENT: component, RELEASE_TAG: tag } }));
+    assert.doesNotThrow(() => validate({ env: { RELEASE_COMPONENT: component, RELEASE_TAG: tag, RELEASE_CHANNELS: "dev" } }));
   }
+  // Every daemon updates from stable, so the CLI reaches it only through Release Promote.
+  for (const channels of ["stable", "stable,dev", "", "dev,stable,beta"]) {
+    assert.throws(() => validate({ env: { RELEASE_COMPONENT: "desktop", RELEASE_TAG: "desktop-v1.2.3", RELEASE_CHANNELS: channels } }));
+  }
+  assert.throws(() => validate({ env: { RELEASE_COMPONENT: "cli", RELEASE_TAG: "cli-v1.2.3", RELEASE_CHANNELS: "dev,stable" } }));
+  assert.doesNotThrow(() => validate({ env: { RELEASE_COMPONENT: "desktop", RELEASE_TAG: "desktop-v1.2.3", RELEASE_CHANNELS: "dev,stable" } }));
 });
 
 test("archival proves old or nested Android publication and rejects ambiguous or unrelated evidence", async () => {

@@ -123,4 +123,6 @@ jobs:
       component: android
       tag: ${{ needs.build.outputs.tag }}
       parts: assets
+      # The download page serves stable: the train moves it, as it moves dev.
+      channels: dev,stable
     secrets: inherit
