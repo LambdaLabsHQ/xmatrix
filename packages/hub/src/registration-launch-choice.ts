@@ -139,8 +139,10 @@ export type PlacedEnvironment<T> = { candidate: T; fit: number; headroom: number
  * Pareto frontier); of the rest, the strongest weakest side of fit, headroom,
  * network and response wins. Response quality is the fastest offered
  * harness's measured median first reply over this one's: a person waits for
- * that reply, so a harness taking three times as long weighs a third, and of
- * environments level on that weakest side the faster harness wins first. Level there, network quality and then quota pace win:
+ * that reply, so a harness taking three times as long weighs a third. Level on
+ * the weakest side, the next-weakest decides, and so on (leximin): a slow
+ * network that holds every environment of a machine level leaves fit and
+ * reply time to choose among them. Level there, network quality and then quota pace win:
  * quota left close to its reset
  * is lost unless it is spent, so it is the cheaper to use. Then a sliver of
  * complete bandwidth and the utility sum break ties, then the fewest outstanding
@@ -175,9 +177,11 @@ export function jointRanking<T extends RegistrationLaunchCandidate>(candidates: 
     const transferQuality = rate !== undefined && highestBandwidth > 0 ? rate / highestBandwidth : 1;
     const replyLatency = candidate.responseLatencyMs;
     const responseQuality = replyLatency !== undefined ? Math.min(1, Math.max(1, quickest) / Math.max(1, replyLatency)) : 1;
-    const balance = Math.min(Math.min(1, fit), Math.min(1, room), networkQuality, responseQuality);
+    // Weakest side first: level on it, the next-weakest decides (leximin).
+    const sides = [Math.min(1, fit), Math.min(1, room), networkQuality, responseQuality].sort((left, right) => left - right);
+    const balance = sides[0]!;
     return { candidate, index, fit, headroom, room, quotaPace, network, networkQuality, responseQuality, transferQuality,
-      balance, utility: balance + 0.001 * (fit + room) };
+      sides, balance, utility: balance + 0.001 * (fit + room) };
   });
   const tripped = (candidate: T) => candidate.startupFailedAt !== undefined;
   const dominated = (item: typeof weighed[number]) => weighed.some(other =>
@@ -189,8 +193,10 @@ export function jointRanking<T extends RegistrationLaunchCandidate>(candidates: 
   const outstanding = (candidate: T) => candidate.observations?.outstandingMachineAllocations ?? 0;
   return weighed.map(item => ({ ...item, frontier: !dominated(item) }))
     .sort((left, right) => Number(tripped(left.candidate)) - Number(tripped(right.candidate)) ||
-      Number(right.frontier) - Number(left.frontier) || right.balance - left.balance ||
-      right.responseQuality - left.responseQuality || right.networkQuality - left.networkQuality || right.quotaPace - left.quotaPace ||
+      Number(right.frontier) - Number(left.frontier) ||
+      (right.sides.find((side, at) => side !== left.sides[at]) ?? 0) -
+        (left.sides.find((side, at) => side !== right.sides[at]) ?? 0) ||
+      right.networkQuality - left.networkQuality || right.quotaPace - left.quotaPace ||
       right.transferQuality - left.transferQuality || right.utility - left.utility ||
       outstanding(left.candidate) - outstanding(right.candidate) || left.index - right.index)
     .map(({ candidate, fit, headroom, quotaPace, network, networkQuality, responseQuality, frontier, utility }) => ({ candidate, fit,
