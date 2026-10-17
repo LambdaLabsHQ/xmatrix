@@ -1,5 +1,7 @@
+import Photos
 import SwiftUI
 import UIKit
+import UniformTypeIdentifiers
 import UserNotifications
 import WebKit
 
@@ -246,8 +248,10 @@ struct WebContainerView: UIViewRepresentable {
         }
     }
 
-    final class PageCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, UIScrollViewDelegate {
+    final class PageCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKDownloadDelegate, UIScrollViewDelegate {
         weak var owner: Coordinator?
+        /// Where each in-flight download is being written, keyed by download.
+        private var downloadFiles: [ObjectIdentifier: URL] = [:]
 
         init(owner: Coordinator) {
             self.owner = owner
@@ -264,6 +268,12 @@ struct WebContainerView: UIViewRepresentable {
             _ webView: WKWebView,
             decidePolicyFor navigationAction: WKNavigationAction
         ) async -> WKNavigationActionPolicy {
+            // An attachment's Download control is an `<a download>`, usually
+            // over a blob: URL. Handing that to the system opened nothing.
+            if navigationAction.shouldPerformDownload {
+                return .download
+            }
+
             guard let url = navigationAction.request.url else {
                 return .allow
             }
@@ -298,6 +308,129 @@ struct WebContainerView: UIViewRepresentable {
             }
 
             return nil
+        }
+
+        func webView(
+            _ webView: WKWebView,
+            decidePolicyFor navigationResponse: WKNavigationResponse
+        ) async -> WKNavigationResponsePolicy {
+            Self.isAttachmentResponse(navigationResponse.response, canShow: navigationResponse.canShowMIMEType)
+                ? .download
+                : .allow
+        }
+
+        static func isAttachmentResponse(_ response: URLResponse, canShow: Bool) -> Bool {
+            let disposition = (response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Content-Disposition") ?? ""
+            return !canShow || disposition.lowercased().hasPrefix("attachment")
+        }
+
+        func webView(_ webView: WKWebView, navigationAction: WKNavigationAction, didBecome download: WKDownload) {
+            download.delegate = self
+        }
+
+        func webView(_ webView: WKWebView, navigationResponse: WKNavigationResponse, didBecome download: WKDownload) {
+            download.delegate = self
+        }
+
+        func download(
+            _ download: WKDownload,
+            decideDestinationUsing response: URLResponse,
+            suggestedFilename: String
+        ) async -> URL? {
+            let directory = FileManager.default.temporaryDirectory
+                .appendingPathComponent("downloads", isDirectory: true)
+                .appendingPathComponent(UUID().uuidString, isDirectory: true)
+            do {
+                try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            } catch {
+                return nil
+            }
+            let name = (suggestedFilename as NSString).lastPathComponent
+            let file = directory.appendingPathComponent(name.isEmpty ? "attachment" : name)
+            downloadFiles[ObjectIdentifier(download)] = file
+            return file
+        }
+
+        func downloadDidFinish(_ download: WKDownload) {
+            guard let file = downloadFiles.removeValue(forKey: ObjectIdentifier(download)) else { return }
+            let webView = download.webView
+            Task { @MainActor [weak self] in
+                await self?.deliver(file, from: webView)
+            }
+        }
+
+        func download(_ download: WKDownload, didFailWithError error: Error, resumeData: Data?) {
+            if let file = downloadFiles.removeValue(forKey: ObjectIdentifier(download)) {
+                try? FileManager.default.removeItem(at: file.deletingLastPathComponent())
+            }
+            Self.present(Self.alert(title: "Download failed", message: error.localizedDescription), from: download.webView)
+        }
+
+        enum DownloadDestination: Equatable {
+            case photos(PHAssetResourceType)
+            case files
+        }
+
+        /// Videos and images go straight to Photos, which is where an iPhone
+        /// keeps them; anything else, including video Photos cannot hold such
+        /// as WebM, is exported to Files.
+        static func destination(for file: URL) -> DownloadDestination {
+            guard let type = UTType(filenameExtension: file.pathExtension) else { return .files }
+            if type.conforms(to: .mpeg4Movie) || type.conforms(to: .quickTimeMovie) {
+                return .photos(.video)
+            }
+            if type.conforms(to: .image) {
+                return .photos(.photo)
+            }
+            return .files
+        }
+
+        @MainActor
+        private func deliver(_ file: URL, from webView: WKWebView?) async {
+            switch Self.destination(for: file) {
+            case .files:
+                let picker = UIDocumentPickerViewController(forExporting: [file], asCopy: true)
+                Self.present(picker, from: webView)
+            case let .photos(resource):
+                defer { try? FileManager.default.removeItem(at: file.deletingLastPathComponent()) }
+                let status = await PHPhotoLibrary.requestAuthorization(for: .addOnly)
+                guard status == .authorized || status == .limited else {
+                    Self.present(
+                        Self.alert(
+                            title: "Allow xMatrix to add to Photos",
+                            message: "Turn on Photos access for xMatrix in Settings to save attachments."
+                        ),
+                        from: webView
+                    )
+                    return
+                }
+                do {
+                    try await PHPhotoLibrary.shared().performChanges {
+                        PHAssetCreationRequest.forAsset().addResource(with: resource, fileURL: file, options: nil)
+                    }
+                    UINotificationFeedbackGenerator().notificationOccurred(.success)
+                    Self.present(
+                        Self.alert(title: resource == .video ? "Video saved to Photos" : "Image saved to Photos", message: nil),
+                        from: webView
+                    )
+                } catch {
+                    Self.present(Self.alert(title: "Could not save to Photos", message: error.localizedDescription), from: webView)
+                }
+            }
+        }
+
+        private static func alert(title: String, message: String?) -> UIAlertController {
+            let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
+            alert.addAction(UIAlertAction(title: "OK", style: .default))
+            return alert
+        }
+
+        private static func present(_ controller: UIViewController, from webView: WKWebView?) {
+            guard var presenter = webView?.window?.rootViewController else { return }
+            while let presented = presenter.presentedViewController {
+                presenter = presented
+            }
+            presenter.present(controller, animated: true)
         }
 
         func viewForZooming(in scrollView: UIScrollView) -> UIView? {

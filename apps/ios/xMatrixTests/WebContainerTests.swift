@@ -13,6 +13,16 @@ final class WebContainerTests: XCTestCase {
         }
     }
 
+    final class DownloadLinkAction: WKNavigationAction {
+        let link: URLRequest
+        init(_ url: URL) {
+            link = URLRequest(url: url)
+            super.init()
+        }
+        override var request: URLRequest { link }
+        override var shouldPerformDownload: Bool { true }
+    }
+
     private func makeCoordinator(
         runScript: @escaping (WKWebView, String) -> Void = { _, _ in }
     ) -> (WebContainerView.Coordinator, UIView) {
@@ -264,4 +274,25 @@ final class WebContainerTests: XCTestCase {
         return platters.max { $0.bounds.width < $1.bounds.width } ?? bar
     }
 
+
+    func testAttachmentDownloadLinkBecomesANativeDownload() async {
+        let (coordinator, _) = makeCoordinator()
+        coordinator.load(AppConfiguration.mobileTabURL(.messages))
+        let webView = page(coordinator)
+        let delegate = webView.navigationDelegate as! WebContainerView.PageCoordinator
+        let action = DownloadLinkAction(URL(string: "blob:https://xmatrix.sh/5f0c1d2e")!)
+        let policy = await delegate.webView(webView, decidePolicyFor: action)
+        XCTAssertEqual(policy, .download)
+    }
+
+    func testDownloadedMediaGoesToPhotosAndEverythingElseToFiles() {
+        func destination(_ name: String) -> WebContainerView.PageCoordinator.DownloadDestination {
+            WebContainerView.PageCoordinator.destination(for: URL(fileURLWithPath: "/tmp/\(name)"))
+        }
+        XCTAssertEqual(destination("clip.mp4"), .photos(.video))
+        XCTAssertEqual(destination("clip.MOV"), .photos(.video))
+        XCTAssertEqual(destination("shot.png"), .photos(.photo))
+        XCTAssertEqual(destination("clip.webm"), .files)
+        XCTAssertEqual(destination("notes.pdf"), .files)
+    }
 }
