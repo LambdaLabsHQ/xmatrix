@@ -4,7 +4,7 @@ import { useEffect, useRef } from "react";
 import { useMutation } from "@tanstack/react-query";
 import {
   channelPresenceInstances, isChannelResidentInstance, isLiveAgentStatus, WEB_PROXY_ROUTES,
-  type ChannelPresence, type OnboardingStage, type SerializedAgentLaunch,
+  type ChannelPresence, type OnboardingStage, type OnboardingStarter, type SerializedAgentLaunch,
 } from "@xmatrix/protocol";
 import { recordOnboardingStep } from "@/lib/onboarding-funnel";
 import { useOnboardingCopy, useOnboardingLocale } from "@/lib/onboarding-locale";
@@ -15,6 +15,7 @@ import { userErrorMessage } from "@/lib/user-facing-error";
 import { BringAgentsIn } from "./bring-agents-in";
 import { BringWorkIn } from "./bring-work-in";
 import { usePageReferenceScope } from "./page-reference-chip";
+import { useOnboardingActions } from "./onboarding-actions";
 import { signedOutRegistrations } from "./harness-sign-in";
 import { SignedOutAgents } from "./signed-out-agents";
 import { useInstalledHarnesses } from "./use-installed-harnesses";
@@ -107,7 +108,13 @@ function AgentsInMessage({ spaceId, token, userId, starting, onSendStarter }: {
   const signedOut = signedOutRegistrations(enabled, userId, fleet.daemons.data);
   const handles = [...new Set(enabled.filter((registration) => !signedOut.includes(registration))
     .map((registration) => `@${registration.displayName}`))];
-  const writer = enabled.find((registration) => !signedOut.includes(registration))?.key.harness;
+  const actions = useOnboardingActions();
+  const ready = enabled.filter((registration) => !signedOut.includes(registration));
+  const writer = ready[0]?.key.harness;
+  // Two different agents, for the card that has them talk it over.
+  const names = [...new Set(ready.map((registration) => registration.displayName))];
+  const pair = names.length >= 2 ? [names[0], names[1]] as const : null;
+  const count = (starter: OnboardingStarter) => recordOnboardingStep(token, { step: "starter_chosen", surface: "welcome", starter });
   const coWrite = useMutation({
     mutationFn: async (harness: string) => {
       const { page } = await pageApi.create(spaceId!, token!, { title: copy.coWrite.pageTitle });
@@ -124,30 +131,17 @@ function AgentsInMessage({ spaceId, token, userId, starting, onSendStarter }: {
       <SignedOutAgents registrations={signedOut} token={token} userId={userId} copy={copy} />
       {handles.length > 0 && <>
       <p className={signedOut.length > 0 ? "mt-3" : undefined}>{copy.agentsIn(copy.listNames(handles), handles.length === 1)}</p>
-      <ul className="m-0 mt-3 grid list-none gap-2 p-0 sm:grid-cols-3">
-        {writer && spaceId && token && pages && (
-          <li className="m-0 p-0">
-            <button type="button" disabled={Boolean(starting) || coWrite.isPending} onClick={() => {
-              recordOnboardingStep(token, { step: "starter_chosen", surface: "welcome", starter: "cowrite" });
-              coWrite.mutate(writer);
-            }} className="app-paper-tile flex h-full w-full flex-col items-start gap-1 px-3.5 py-3 text-left disabled:opacity-50">
-              <span className="block font-semibold">{copy.coWrite.title}</span>
-              <span className="block text-[13px] leading-5 text-muted-foreground">{copy.coWrite.detail(writer)}</span>
-            </button>
-          </li>
-        )}
-        {copy.starters.map((starter) => (
-          <li key={starter.id} className="m-0 p-0">
-            <button type="button" disabled={Boolean(starting)} onClick={() => {
-              recordOnboardingStep(token, { step: "starter_chosen", surface: "welcome", starter: starter.id });
-              onSendStarter(starter.message);
-            }}
-              className="app-paper-tile flex h-full w-full flex-col items-start gap-1 px-3.5 py-3 text-left disabled:opacity-50">
-              <span className="block font-semibold">{starter.title}</span>
-              <span className="block text-[13px] leading-5 text-muted-foreground">{starter.detail}</span>
-            </button>
-          </li>
-        ))}
+      <ul className="m-0 mt-3 grid list-none gap-2 p-0 sm:grid-cols-2">
+        {actions && <Card title={copy.talk.title} detail={copy.talk.detail} disabled={Boolean(starting)}
+          onClick={() => { count("talk"); actions.startConversation(""); }} />}
+        {actions && <Card title={copy.together.title}
+          detail={pair ? copy.together.detail(pair[0], pair[1]) : copy.together.needsTwo}
+          disabled={!pair || Boolean(starting)}
+          onClick={() => { if (!pair) return; count("together"); actions.startConversation(copy.together.draft(pair[0], pair[1])); }} />}
+        {writer && spaceId && token && pages && <Card title={copy.coWrite.title} detail={copy.coWrite.detail(writer)}
+          disabled={Boolean(starting) || coWrite.isPending} onClick={() => { count("cowrite"); coWrite.mutate(writer); }} />}
+        {actions && <Card title={copy.machines.title} detail={copy.machines.detail}
+          onClick={() => { count("machines"); actions.connectAnotherComputer(); }} />}
       </ul>
       {coWrite.error && <p role="alert" className="mt-2 text-[13px] leading-5 text-destructive">
         {userErrorMessage(coWrite.error, "Couldn't create the page")}</p>}
@@ -155,5 +149,18 @@ function AgentsInMessage({ spaceId, token, userId, starting, onSendStarter }: {
       </>}
       {starting && <p className="mt-2 text-[13px] leading-5 text-muted-foreground" role="status">{copy.starting(starting.name)}</p>}
     </div>
+  );
+}
+
+/* One thing xMatrix does, on a piece of tinted paper: a title and a line. */
+function Card({ title, detail, disabled, onClick }: { title: string; detail: string; disabled?: boolean; onClick: () => void }) {
+  return (
+    <li className="m-0 p-0">
+      <button type="button" disabled={disabled} onClick={onClick}
+        className="app-paper-tile flex h-full w-full flex-col items-start gap-1 px-3.5 py-3 text-left disabled:opacity-50">
+        <span className="block font-semibold">{title}</span>
+        <span className="block text-[13px] leading-5 text-muted-foreground">{detail}</span>
+      </button>
+    </li>
   );
 }

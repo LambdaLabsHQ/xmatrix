@@ -15,8 +15,10 @@ import { useAndroidBackDismiss } from "./use-android-back";
  * names and summarises the conversation from what it is about.
  */
 export function NewConversation({
-  space, token, workspaces, localContext, autoFocus, onCreate, onSend, onCancel, onOpenAppsForSpace,
+  space, token, workspaces, localContext, autoFocus, onCreate, onSend, onCancel, onOpenAppsForSpace, initialDraft = "",
 }: {
+  /** What the composer opens holding, for the person to send (a welcome card's). */
+  initialDraft?: string;
   space: SerializedSpace | null;
   token: string | null;
   workspaces: SerializedWorkspace[];
@@ -28,7 +30,7 @@ export function NewConversation({
   onCancel: () => void;
   onOpenAppsForSpace: (spaceId: string) => void;
 }) {
-  const draftRef = useRef("");
+  const draftRef = useRef(initialDraft);
   const [attachments, setAttachments] = useState<ChannelAttachment[]>([]);
   const [workspaceTarget, setWorkspaceTarget] = useState<string | null>(null);
   const [mode, setMode] = useState<"open" | "closed">("open");
@@ -71,7 +73,7 @@ export function NewConversation({
         workspaces={workspaces}
         localContext={localContext}
         isJoined
-        draft=""
+        draft={initialDraft}
         draftSeedRevision={0}
         selectedWorkspaceId={workspaceTarget}
         replyTarget={null}
