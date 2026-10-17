@@ -1,10 +1,8 @@
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { ALL_FORMATS, BufferSource, Input } from "mediabunny";
 import { expect, test, type Page } from "./fixtures";
 import { fixtureJson, fixtureRequestBodies, fixtureRule, releaseFixture } from "./in-page-api-fixtures";
-import { recordedVideo } from "./recorded-video";
+import { videoFixture } from "./recorded-video";
 import { E2E_CHANNEL, E2E_DESKTOP_CONTEXT, openGeneralChannelWithHistory } from "./workspace-fixtures";
 
 test.use(E2E_DESKTOP_CONTEXT);
@@ -50,7 +48,7 @@ for (const portrait of [false, true]) {
     const width = portrait ? 720 : 1280;
     const height = portrait ? 1280 : 720;
     await openComposer(page);
-    const source = await recordedVideo(page, portrait ? 1080 : 1920, portrait ? 1920 : 1080, !portrait, true);
+    const source = videoFixture({ width: portrait ? 1080 : 1920, height: portrait ? 1920 : 1080, audio: !portrait, padded: true });
     await observeFiles(page);
     await page.locator('input[type="file"]').setInputFiles({ name: "capture.webm", mimeType: "application/octet-stream", buffer: source });
     await expect(page.getByText(/Ready ·/)).toBeVisible();
@@ -85,7 +83,7 @@ for (const portrait of [false, true]) {
 
 test("Original preserves image and video bytes above the automatic compression threshold", async ({ page }) => {
   await openComposer(page);
-  const video = await recordedVideo(page, 1920, 1080, true, true);
+  const video = videoFixture({ width: 1920, height: 1080, audio: true, padded: true });
   const image = await paddedImage(page);
   await observeFiles(page);
   for (const [name, mimeType, buffer] of [
@@ -191,11 +189,7 @@ test("a file the browser cannot compress can still be selected as original on it
 for (const reason of ["empty picture track", "unsupported encoders"] as const) {
   test(`video with ${reason} retains the original bytes`, async ({ page }) => {
     await openComposer(page);
-    // Real MediaRecorder output declaring a video track without picture packets.
-    const source = reason === "empty picture track"
-      ? Buffer.concat([readFileSync(join(__dirname, "fixtures/empty-video-track.webm")),
-        Buffer.from([0xec, 0x30, 0xc8, 0xe0]), Buffer.alloc(1_100_000)])
-      : await recordedVideo(page, 1920, 1080, false, true);
+    const source = videoFixture({ width: 1920, height: 1080, empty: reason === "empty picture track", padded: true });
     await observeFiles(page);
     if (reason === "unsupported encoders") {
       await page.evaluate(() => Object.defineProperty(window, "VideoEncoder", { configurable: true, value: undefined }));
@@ -208,7 +202,7 @@ for (const reason of ["empty picture track", "unsupported encoders"] as const) {
 
 test("removing a video during codec negotiation prevents it uploading when negotiation finishes", async ({ page }) => {
   await openComposer(page);
-  const source = await recordedVideo(page, 1920, 1080, false, true);
+  const source = videoFixture({ width: 1920, height: 1080, padded: true });
   await page.evaluate(() => {
     const original = VideoEncoder.isConfigSupported.bind(VideoEncoder);
     const gate = new Promise<void>((resolve) => Object.assign(window, { resumeCodecCheck: resolve }));

@@ -1,9 +1,9 @@
 import { expect, test } from "./fixtures";
-import { recordedVideo } from "./recorded-video";
+import { videoFixture } from "./recorded-video";
 import { E2E_CHANNEL, E2E_NOW, E2E_USER_SENDER, openGeneralChannelWithHistory } from "./workspace-fixtures";
 
 test("generic MIME WebM plays inline and in the lightbox; audio files have native controls", async ({ page }) => {
-  const video = await recordedVideo(page);
+  const video = videoFixture();
   const wav = Buffer.alloc(44 + 8000);
   wav.write("RIFF"); wav.writeUInt32LE(wav.length - 8, 4); wav.write("WAVEfmt ", 8);
   wav.writeUInt32LE(16, 16); wav.writeUInt16LE(1, 20); wav.writeUInt16LE(1, 22);
