@@ -9,6 +9,7 @@ import {
   loadBetterAuthSession,
   isTransientAuthSessionError,
   sendBetterAuthOtp,
+  setAppSessionToken,
   signInWithBetterAuthGoogle,
   signOutBetterAuth,
   verifyBetterAuthOtpWithRetry,
@@ -383,6 +384,7 @@ async function persistNativeSession(payload: AuthResponse): Promise<void> {
   if (!isNativeShell()) {
     return;
   }
+  setAppSessionToken(payload.refreshToken);
 
   const response = await xmatrixRawResponse(WEB_PROXY_ROUTES.native_session, {
     method: "POST",
@@ -399,6 +401,7 @@ async function clearNativeSession(): Promise<void> {
   if (!isNativeShell()) {
     return;
   }
+  setAppSessionToken(null);
 
   await xmatrixRawResponse(WEB_PROXY_ROUTES.native_session, {
     method: "DELETE",
@@ -428,9 +431,11 @@ async function loadNativeSessionState(): Promise<Omit<AuthState, "loading">> {
 
   const payload = (await response.json().catch(() => ({}))) as { session?: AuthResponse | null };
   if (!payload.session?.token || !payload.session.user) {
+    setAppSessionToken(null);
     return { session: null, user: null };
   }
 
+  setAppSessionToken(payload.session.refreshToken);
   return {
     session: authResponseToWebSession(payload.session),
     user: payload.session.user,
