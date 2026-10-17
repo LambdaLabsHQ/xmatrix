@@ -99,7 +99,7 @@ test("hot-path operations retain bounded stage, transaction phase, and SQLSTATE"
       "postgres.launch", "launch_prepare"],
     ["launch.directory-publish-many", "entity_space_route_publish_many_v1",
       "postgres.launch", "directory_publish"],
-    ["machine-control.issue_batch", "machine_control_issue_batch_v1",
+    ["machine-control.issue_batch", "machine_control_issue_batch_v2",
       "postgres.machine", "command_issue"],
   ];
   for (const [operation, queryName] of cases) recordPostgresQueryObservation(env, {

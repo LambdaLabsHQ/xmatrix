@@ -329,7 +329,11 @@ function serializeAgentLaunch(row: QueryResultRow): SerializedAgentLaunch {
     state: String(row.state) as AgentLaunchState,
     attempt: Number(row.attempt),
     retryable: row.retryable === true,
-    ...(row.state === "queued" && row.daemon_offline === true ? { daemonOffline: true } : {}),
+    ...(row.state === "queued" && row.daemon_offline === true ? { daemonOffline: true,
+      // Its first spawn was routed to a daemon that had just dropped (a restart).
+      ...(runMetadata.machineReconnect && typeof runMetadata.machineReconnect === "object" &&
+        (runMetadata.machineReconnect as Record<string, unknown>).controlId === row.control_id
+        ? { machineReconnecting: true } : {}) } : {}),
     ...(errorStage ? { errorStage } : {}),
     ...(errorCode ? { errorCode } : {}),
     ...(errorMessage ? { errorMessage } : {}),

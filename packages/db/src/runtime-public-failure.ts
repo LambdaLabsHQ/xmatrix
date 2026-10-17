@@ -21,6 +21,7 @@ const LAUNCH_FAILURE_MESSAGES: Record<string, string> = {
   runtime_transaction_retry_exhausted: "Startup could not acquire its required state after bounded retries. Refresh status before retrying.",
   runtime_sql_contract_error: "The startup service encountered an internal error. Use the diagnostic reference to investigate.",
   machine_offline: "The selected machine is offline. Reconnect it and check the original invocation.",
+  machine_reconnect_expired: "The machine did not reconnect in time, so the agent was not started. Summon it again once the machine is online.",
 };
 
 export function publicLaunchFailureMessage(code: unknown, detail?: unknown): string {
