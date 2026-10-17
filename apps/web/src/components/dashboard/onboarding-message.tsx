@@ -10,6 +10,7 @@ import { recordOnboardingStep } from "@/lib/onboarding-funnel";
 import { useOnboardingCopy, useOnboardingLocale } from "@/lib/onboarding-locale";
 import { xmatrixApiRequest } from "@/lib/query/api-client";
 import { BringAgentsIn } from "./bring-agents-in";
+import { BringWorkIn } from "./bring-work-in";
 import { signedOutRegistrations } from "./harness-sign-in";
 import { SignedOutAgents } from "./signed-out-agents";
 import { useInstalledHarnesses } from "./use-installed-harnesses";
@@ -124,6 +125,7 @@ function AgentsInMessage({ spaceId, token, userId, starting, onSendStarter }: {
           </li>
         ))}
       </ul>
+      {spaceId && token && <BringWorkIn spaceId={spaceId} token={token} copy={copy} />}
       </>}
       {starting && <p className="mt-2 text-[13px] leading-5 text-muted-foreground" role="status">{copy.starting(starting.name)}</p>}
     </div>

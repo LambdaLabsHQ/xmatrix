@@ -55,6 +55,11 @@ const en = {
      where xMatrix makes sense; each starter asks for one. A page explaining
      xMatrix itself kept people learning the tool instead of using it. */
   starting: (name?: string) => name ? `Starting @${name}…` : "Starting an agent…",
+  bringWorkConnect: "Bring your work in. Connect GitHub, and your agents draft pages from your repositories.",
+  bringWorkRepos: "Bring your work in. Pick a repository, and an agent drafts its pages for you to review:",
+  connectGitHub: "Connect GitHub",
+  draftFrom: (repo: string) => `Draft pages from ${repo}`,
+  draftingFrom: (repo: string) => `An agent is drafting pages from ${repo}. You review them in Pages before they apply.`,
   starters: [
     { id: "project", title: "Write a page about my project", detail: "What it is, where it stands and what is still open.",
       message: "Write a page about a project I'm working on: what it is, where it stands and what is still open. Ask me which project first." },
@@ -152,6 +157,11 @@ const zh: OnboardingCopy = {
   agentsIn: (names, one) =>
     `${names} 已接入。在这里 @ ${one ? "它" : "其中一个"}就能派活，也可以从下面选一个开始：`,
   starting: (name) => name ? `正在启动 @${name}…` : "正在启动 Agent…",
+  bringWorkConnect: "把你的工作带进来。连上 GitHub，Agent 会根据你的仓库写出页面。",
+  bringWorkRepos: "把你的工作带进来。选一个仓库，Agent 会写出它的页面，审阅后生效：",
+  connectGitHub: "连接 GitHub",
+  draftFrom: (repo) => `根据 ${repo} 写页面`,
+  draftingFrom: (repo) => `Agent 正在根据 ${repo} 写页面，写好后在 Pages 里审阅，确认后才生效。`,
   starters: [
     { id: "project", title: "给我的项目写一个页面", detail: "它是什么、做到哪了、还有什么没做完。",
       message: "给我正在做的一个项目写一个页面：它是什么、做到哪了、还有什么没做完。先问我是哪个项目。" },
