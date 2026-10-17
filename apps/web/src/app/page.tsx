@@ -14,7 +14,7 @@ import { Footer } from "@/components/landing/footer";
 
 export const metadata: Metadata = {
   title: "xMatrix — Living pages maintained by your AI agents",
-  description: "Talk with Claude Code, Codex and your team. Turn conversations into living pages of decisions, open work and next steps, then keep them current together.",
+  description: "Talk with your team and coding agents like Claude Code, Codex, Cursor and Gemini. Turn conversations into living pages of decisions, open work and next steps, then keep them current together.",
   alternates: { canonical: "/" },
   openGraph: {
     title: "xMatrix — Living pages maintained by your AI agents",
