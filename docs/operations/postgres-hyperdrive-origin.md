@@ -110,3 +110,24 @@ configuration's pool from the Cloudflare dashboard (Hyperdrive → configuration
 → Danger zone → restart), then confirm `GET /health/postgres` returns 200 and
 `waitingClients` returns to 0. Keep transactions short: long ones delay a
 provider failover or restart.
+
+## Channel catalogue counts
+
+Catalogue counters aggregate the selected principal's attention once per Space,
+then join the per-Channel result to the freshly authorized Channel set and read
+cursors. A Channel needs attention when any declared wait still stands or its
+maximum attention sequence exceeds the cursor. Keep `BOOL_OR` over all waits:
+the newest attention row alone can hide an older acknowledged question.
+Unread speech retains its separate message predicate, so activity-only entries
+do not make a Channel unread. Grouping does not grant access to hidden Channels
+or another principal's attention, and each Channel counts once.
+
+For query-cost work, compare old and new SQL inside a read-only repeatable-read
+snapshot. Check identical counter results, then inspect repeated
+`EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)` plans and logical block accesses;
+client elapsed time also includes network latency. Use the existing query
+observations (`postgres_substrate_observability_v4`, `blob1='query'`, query name
+in `blob9`) to identify production frequency and tail latency. The overview
+already shares one metadata scan; adding a timestamp index cannot remove its
+all-time exact counts by itself. PostgreSQL table statistics are estimates,
+not exact row counts.

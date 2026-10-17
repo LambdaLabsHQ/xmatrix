@@ -618,19 +618,24 @@ export class PostgresChannelCatalogRepository {
       }
       const statsRows = input.countsOnly || input.includeCounts !== false
         ? await transaction.query<StatsRow>({
-        name: "channel_catalog_counts_v9",
+        name: "channel_catalog_counts_v10",
         text: `WITH catalog_input AS (
             SELECT $1::text AS space_id,$2::text AS principal_id,$3::text AS principal_kind
-          ), ${PRINCIPAL_CONTEXT_CTE}, ${AUTHORIZED_CHANNELS_CTE}, facts AS (
+          ), ${PRINCIPAL_CONTEXT_CTE}, ${AUTHORIZED_CHANNELS_CTE}, attention_by_channel AS (
+            SELECT attention.channel_id,MAX(attention.timeline_sequence) AS last_sequence,
+              BOOL_OR(${declaredWaitStandsSql("attention")}) AS has_wait
+            FROM data.message_attention attention CROSS JOIN catalog_input input
+            WHERE attention.space_id=input.space_id
+              AND attention.subject_id=input.principal_kind||':'||input.principal_id
+            GROUP BY attention.channel_id
+          ), facts AS (
             SELECT channel.*,COALESCE(cursor_row.acknowledged_sequence,0) AS read_sequence,
               ${UNREAD_MESSAGE_EXISTS_SQL} AS has_unread,
-              EXISTS (SELECT 1 FROM data.message_attention attention
-                WHERE attention.space_id=channel.space_id
-                  AND attention.channel_id=channel.channel_id
-                  AND attention.subject_id=input.principal_kind||':'||input.principal_id
-                  AND (${declaredWaitStandsSql("attention")} OR attention.timeline_sequence>COALESCE(cursor_row.acknowledged_sequence,0)))
+              COALESCE(attention_flags.has_wait
+                OR attention_flags.last_sequence>COALESCE(cursor_row.acknowledged_sequence,0),FALSE)
                 AS has_attention
             FROM authorized_channels channel CROSS JOIN catalog_input input
+            LEFT JOIN attention_by_channel attention_flags ON attention_flags.channel_id=channel.channel_id
             LEFT JOIN data.delivery_cursors cursor_row
               ON cursor_row.space_id=channel.space_id AND cursor_row.channel_id=channel.channel_id
                 AND cursor_row.subject_id=input.principal_kind||':'||input.principal_id
