@@ -48,6 +48,8 @@ const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
 const LOGIN_CODE_LENGTH = 6;
 const RESEND_COOLDOWN_SECONDS = 30;
 const PENDING_DESKTOP_DEVICE_LOGIN_KEY = "xmatrix.pendingDesktopDeviceLogin";
+/* The app also asks at once when it is brought back, so a long wait between polls is never needed. */
+const DESKTOP_POLL_MAX_SECONDS = 10;
 
 type DesktopLoginState = {
   status: "idle" | "opening" | "waiting" | "complete" | "error";
@@ -73,6 +75,13 @@ type DeviceLoginPollResponse = {
   hubUrl?: string;
   relayUrl?: string;
   error?: string;
+};
+
+type DeviceRequestDescription = {
+  createdAt: string;
+  hostname?: string;
+  platform?: string;
+  requestedFrom?: string;
 };
 
 type PendingDesktopDeviceLogin = {
@@ -121,6 +130,7 @@ function LoginContent() {
     verifySecondFactor,
     signInWithSocial,
     setSessionFromAuthResponse,
+    logout,
     user,
     session,
     loading: authLoading,
@@ -150,6 +160,11 @@ function LoginContent() {
      it is approved only by an explicit click after the person compares the
      code, never by opening a link while signed in. */
   const [deviceApprovalConfirmed, setDeviceApprovalConfirmed] = useState(false);
+  /* What the waiting device says about itself, read once to show beside its code. */
+  const [deviceRequest, setDeviceRequest] = useState<DeviceRequestDescription | "unknown" | null>(null);
+  const [deviceDeclined, setDeviceDeclined] = useState(false);
+  /* The older terminal sign-in hands a session to a local port; it too waits for an explicit click. */
+  const [legacyApprovalConfirmed, setLegacyApprovalConfirmed] = useState(false);
   const [desktopBridge, setDesktopBridge] = useState<DesktopBridge | null>(null);
   const [nativeClient, setNativeClient] = useState<NativeLoginClient>("desktop");
   const [desktopLogin, setDesktopLogin] = useState<DesktopLoginState>({ status: "idle" });
@@ -158,6 +173,7 @@ function LoginContent() {
   const desktopLoginStartedRef = useRef(false);
   const desktopLoginRunRef = useRef(0);
   const desktopPollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const desktopPollNowRef = useRef<(() => void) | null>(null);
   const setSessionFromAuthResponseRef = useRef(setSessionFromAuthResponse);
   const otpVerificationStartedRef = useRef(false);
 
@@ -175,20 +191,29 @@ function LoginContent() {
   const legacyCliContext = parseCliLoginContext(cliCallback, cliState, cliHub);
   const cliCallbackContext = isCliCallbackContext(legacyCliContext) ? legacyCliContext : null;
   const cliError = legacyCliContext?.error ?? "";
-  const formError =
-    cliError ||
-    error ||
-    authError ||
-    (oauthError ? "Sign-in did not complete. Try again, or use a login code." : "");
+  const formError = cliError || error || authError || (oauthError ? socialSignInFailure(oauthError) : "");
   const cliMode = Boolean(deviceCode || legacyCliContext);
   const awaitingDeviceConfirmation = Boolean(
     session?.access_token && deviceCode && userCode && !deviceApprovalConfirmed && !cliComplete,
+  );
+  const awaitingLegacyConfirmation = Boolean(
+    session?.access_token && cliCallbackContext && !legacyApprovalConfirmed && !cliComplete,
   );
   const desktopMode = Boolean(desktopBridge) && !cliMode;
   const desktopModeActive = desktopMode && !user;
   const deviceClientLabel = getDeviceClientLabel(deviceClient);
   const nativeAppLabel = getNativeAppLabel(nativeClient);
   const nativeReturnUrl = nativeLoginReturnUrl(deviceClient);
+
+  useEffect(() => {
+    if (!awaitingDeviceConfirmation || !deviceCode || !userCode || deviceRequest !== null) return;
+    let cancelled = false;
+    void describeDeviceRequest(deviceCode, userCode)
+      .then((description) => { if (!cancelled) setDeviceRequest(description); })
+      // Not reading the description only leaves the code to compare.
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [awaitingDeviceConfirmation, deviceCode, userCode, deviceRequest]);
 
   useEffect(() => {
     const bridge = getDesktopBridge();
@@ -299,10 +324,9 @@ function LoginContent() {
           }
 
           clearPendingDesktopDeviceLogin();
+          // This computer's terminal sign-in rides along; the app signs in whether or not it can.
           if (bridge.saveCliSession) {
-            const cliSession = await exchangeDesktopCliSession(payload.token);
-            await bridge.saveCliSession(cliSession);
-            await bridge.startDaemon?.();
+            await handDesktopSessionToCli(bridge, payload.token);
           }
 
           await setSessionFromAuthResponseRef.current({
@@ -324,19 +348,20 @@ function LoginContent() {
           setDesktopLogin({
             status: "error",
             verificationUrl: pendingLogin.verificationUrl,
-            error: "Browser login expired. Start a fresh sign-in.",
+            error: payload.error && payload.error !== "Device login request expired"
+              ? payload.error : "Browser login expired. Start a fresh sign-in.",
           });
           return;
         }
 
         pendingPollCount += 1;
         const serverInterval = Math.max(5, payload.interval || pollInterval);
-        pollInterval = Math.min(30, serverInterval * Math.max(1, Math.ceil(pendingPollCount / 3)));
+        pollInterval = Math.min(DESKTOP_POLL_MAX_SECONDS, serverInterval * Math.max(1, Math.ceil(pendingPollCount / 3)));
         writePendingDesktopDeviceLogin({ ...pendingLogin, interval: pollInterval, pendingPollCount });
         desktopPollTimerRef.current = setTimeout(pollForApproval, pollInterval * 1000);
       } catch (nextError) {
         if (Date.now() < pendingLogin.expiresAt && isTransientDeviceLoginPollError(nextError)) {
-          pollInterval = Math.min(30, Math.max(5, pollInterval));
+          pollInterval = Math.min(DESKTOP_POLL_MAX_SECONDS, Math.max(5, pollInterval));
           setDesktopLogin({
             status: "waiting",
             verificationUrl: pendingLogin.verificationUrl,
@@ -355,8 +380,28 @@ function LoginContent() {
       }
     }
 
+    // Coming back to the app is when the browser has most likely finished: ask at once.
+    desktopPollNowRef.current = () => {
+      if (!loginRunIsCurrent()) return;
+      if (desktopPollTimerRef.current) clearTimeout(desktopPollTimerRef.current);
+      desktopPollTimerRef.current = null;
+      void pollForApproval();
+    };
     void pollForApproval();
   }
+
+  useEffect(() => {
+    if (!desktopBridge) return;
+    const pollNow = () => {
+      if (document.visibilityState === "visible" && desktopPollTimerRef.current) desktopPollNowRef.current?.();
+    };
+    window.addEventListener("focus", pollNow);
+    document.addEventListener("visibilitychange", pollNow);
+    return () => {
+      window.removeEventListener("focus", pollNow);
+      document.removeEventListener("visibilitychange", pollNow);
+    };
+  }, [desktopBridge]);
 
   async function handleDesktopBrowserLogin() {
     if (!desktopBridge || cliMode || authLoading || user || desktopLoginStartedRef.current) {
@@ -446,6 +491,7 @@ function LoginContent() {
       if (
         !session?.access_token ||
         !cliCallbackContext ||
+        !legacyApprovalConfirmed ||
         legacyCliSubmittedRef.current
       ) {
         return;
@@ -479,6 +525,7 @@ function LoginContent() {
         setCliComplete(true);
       } catch (nextError) {
         legacyCliSubmittedRef.current = false;
+        setLegacyApprovalConfirmed(false);
         setError(userErrorMessage(nextError, "Couldn't hand the session to your terminal") ?? "");
       } finally {
         setLoading(false);
@@ -500,6 +547,7 @@ function LoginContent() {
     }
   }, [
     cliCallbackContext,
+    legacyApprovalConfirmed,
     deviceApprovalConfirmed,
     deviceCode,
     userCode,
@@ -566,10 +614,7 @@ function LoginContent() {
     setError("");
     setSocialLoading(provider);
     try {
-      await signInWithSocial(
-        provider,
-        cliMode ? window.location.href : nextPath ? `${window.location.origin}${nextPath}` : undefined,
-      );
+      await signInWithSocial(provider, cliMode ? window.location.href : nextPath || undefined);
     } catch (nextError) {
       setError(formatLoginError(nextError));
       setSocialLoading(null);
@@ -638,6 +683,30 @@ function LoginContent() {
     }
   }
 
+  async function handleDeclineDevice() {
+    if (!deviceCode || !userCode) return;
+    setLoading(true);
+    setError("");
+    try {
+      await declineDeviceRequest(deviceCode, userCode);
+      setDeviceDeclined(true);
+    } catch (nextError) {
+      if (isDeviceLoginAlreadyCompletedError(nextError)) setDeviceRequest("unknown");
+      else setError(userErrorMessage(nextError, "Couldn't decline the sign-in") ?? "");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  /* Signs this browser out and comes back to the same request, to answer it as someone else. */
+  async function switchAccount() {
+    setLoading(true);
+    const query = new URLSearchParams(searchParams);
+    for (const name of ["error", "error_description", "auth_error", "two_factor"]) query.delete(name);
+    await logout({ redirectTo: `/login?${query}` });
+    setLoading(false);
+  }
+
   const productName = deviceProductName(deviceClient);
   const signingInAs = user?.email ? <>Signing in as <strong>{user.email}</strong></> : null;
 
@@ -683,28 +752,48 @@ function LoginContent() {
             <Link href="/">Back to Home</Link>
           </AuthLinks>
         </>
+      ) : deviceDeclined ? (
+        <AuthHeading title="Sign-in declined">
+          Nothing was shared. The {deviceClientLabel} that asked can&apos;t use this request any more. You can
+          close this tab.
+        </AuthHeading>
+      ) : awaitingDeviceConfirmation && deviceRequest === "unknown" ? (
+        <>
+          <AuthHeading title="This sign-in request has ended">
+            It expired or was already answered. Start a fresh sign-in from your {deviceClientLabel}.
+          </AuthHeading>
+          <AuthLinks><Link href="/app">Open xMatrix here</Link></AuthLinks>
+        </>
       ) : awaitingDeviceConfirmation ? (
         <>
           <AuthHeading title={`Approve ${productName}?`}>
-            Approve only if your {deviceClientLabel} shows this code. Approving signs it in as you.
+            Approve only if your {deviceClientLabel} shows this code and you started this sign-in yourself.
+            Approving signs it in as you.
           </AuthHeading>
           <AuthRequest
             icon={<ShieldCheck className="size-4" />}
             title={`${productName} is asking to sign in`}
             code={userCode}
           >
+            {deviceRequest && deviceRequest !== "unknown" ? <>{describeRequester(deviceRequest)}<br /></> : null}
             {signingInAs}
           </AuthRequest>
-          <AuthError>{formError}</AuthError>
-          <div className="auth-stack">
-            <AuthPrimaryButton onClick={() => setDeviceApprovalConfirmed(true)} disabled={loading}>
-              {loading ? <Spinner /> : null}
-              Approve
-            </AuthPrimaryButton>
-            <AuthSecondaryButton onClick={() => router.replace("/app")} disabled={loading}>
-              This is not my code
-            </AuthSecondaryButton>
-          </div>
+          <ApprovalChoices error={formError} loading={loading} onApprove={() => setDeviceApprovalConfirmed(true)}
+            declineLabel="This is not my request" onDecline={() => void handleDeclineDevice()}
+            onSwitchAccount={() => void switchAccount()} />
+        </>
+      ) : awaitingLegacyConfirmation ? (
+        <>
+          <AuthHeading title="Approve xMatrix CLI?">
+            A terminal on this computer asked to sign in. Approve only if you just ran{" "}
+            <code className="auth-inline-code">xmatrix login</code>. Approving signs it in as you.
+          </AuthHeading>
+          <AuthRequest icon={<ShieldCheck className="size-4" />} title="xMatrix CLI is asking to sign in">
+            {signingInAs}
+          </AuthRequest>
+          <ApprovalChoices error={formError} loading={loading} onApprove={() => setLegacyApprovalConfirmed(true)}
+            declineLabel="Cancel" onDecline={() => router.replace("/app")}
+            onSwitchAccount={() => void switchAccount()} />
         </>
       ) : desktopModeActive ? (
         <>
@@ -915,6 +1004,98 @@ function LoginContent() {
   );
 }
 
+/** Hands the desktop app's new session to this computer's CLI and daemon; a failure is the CLI's, not the sign-in's. */
+async function handDesktopSessionToCli(bridge: DesktopBridge, token: string) {
+  try {
+    const cliSession = await exchangeDesktopCliSession(token);
+    await bridge.saveCliSession?.(cliSession);
+    await bridge.startDaemon?.();
+  } catch (cliError) {
+    console.warn("Signed in, but this computer's CLI session could not be updated", cliError);
+  }
+}
+
+async function describeDeviceRequest(deviceCode: string, userCode: string): Promise<DeviceRequestDescription | "unknown"> {
+  const response = await xmatrixRawResponse(WEB_PROXY_ROUTES.cli_device_describe, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ deviceCode, userCode }),
+  });
+  if (response.status === 404 || response.status === 409) return "unknown";
+  if (!response.ok) throw await errorFromResponse(response);
+  return (await response.json()) as DeviceRequestDescription;
+}
+
+async function declineDeviceRequest(deviceCode: string, userCode: string): Promise<void> {
+  const response = await xmatrixRawResponse(WEB_PROXY_ROUTES.cli_device_decline, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ deviceCode, userCode }),
+  });
+  if (!response.ok) throw await errorFromResponse(response);
+}
+
+/** "Asked 2 minutes ago near Berlin, DE · daniel-laptop (darwin)" */
+function describeRequester(request: DeviceRequestDescription): string {
+  const minutes = Math.max(0, Math.round((Date.now() - Date.parse(request.createdAt)) / 60_000));
+  const when = minutes < 1 ? "Asked just now" : minutes === 1 ? "Asked 1 minute ago" : `Asked ${minutes} minutes ago`;
+  const where = request.requestedFrom ? ` near ${request.requestedFrom}` : "";
+  const machine = request.hostname
+    ? ` · ${request.hostname}${request.platform ? ` (${request.platform})` : ""}` : "";
+  return `${when}${where}${machine}`;
+}
+
+/**
+ * What a returning Google or GitHub sign-in that failed means for the person.
+ * The provider's or Better Auth's code arrives in `?error=`.
+ */
+function socialSignInFailure(code: string): string {
+  switch (code) {
+    case "access_denied":
+      return "Sign-in was cancelled. Choose a way to sign in when you're ready.";
+    case "email_not_found":
+      return "That account didn't share a verified email address. Add one there, or use a login code.";
+    case "account_not_linked":
+    case "unable_to_link_account":
+      return "This email already has an xMatrix account. Sign in with a login code, then link the account in Settings.";
+    case "state_not_found":
+    case "state_mismatch":
+    case "please_restart_the_process":
+    case "invalid_callback_request":
+      return "That sign-in took too long or was finished in another browser. Start it again.";
+    default:
+      return "Sign-in did not complete. Try again, or use a login code.";
+  }
+}
+
+/** Approve, turn down, or answer as someone else: the choices for any device asking to sign in. */
+function ApprovalChoices({ error, loading, onApprove, declineLabel, onDecline, onSwitchAccount }: {
+  error: string;
+  loading: boolean;
+  onApprove: () => void;
+  declineLabel: string;
+  onDecline: () => void;
+  onSwitchAccount: () => void;
+}) {
+  return (
+    <>
+      <AuthError>{error}</AuthError>
+      <div className="auth-stack">
+        <AuthPrimaryButton onClick={onApprove} disabled={loading}>
+          {loading ? <Spinner /> : null}
+          Approve
+        </AuthPrimaryButton>
+        <AuthSecondaryButton onClick={onDecline} disabled={loading}>{declineLabel}</AuthSecondaryButton>
+      </div>
+      <AuthLinks>
+        <button type="button" className="auth-text-button" disabled={loading} onClick={onSwitchAccount}>
+          Use a different account
+        </button>
+      </AuthLinks>
+    </>
+  );
+}
+
 function Spinner() {
   return <AnimatedIcon icon={Loader2} className="size-4 animate-spin" />;
 }
@@ -1009,7 +1190,7 @@ async function approveDeviceLogin(
   deviceCode: string,
   userCode: string
 ): Promise<void> {
-  const response = await xmatrixRawResponse("/api/xmatrix/cli/device/approve", {
+  const response = await xmatrixRawResponse(WEB_PROXY_ROUTES.cli_device_approve, {
     method: "POST",
     headers: {
       "content-type": "application/json",

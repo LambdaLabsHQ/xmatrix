@@ -51,8 +51,14 @@ a successful browser sign-in still requires explicit device approval. Cleanup
 removes provider callback parameters only from login return pages. A return to
 `/oauth/authorize` retains the outside app's own `state` and authorization query;
 otherwise the resumed consent flow loses its browser binding. Return origins
-still must match the app origin. Provider
-refusals return to `/login` with a provider-neutral error and email recovery.
+still must match the app origin. A refused or cancelled provider sign-in
+returns to the sign-in page it started from, with that page's own query (the
+device request, `next`) and without the provider's callback leftovers, so a
+device waiting for approval is not lost with the attempt. The page words the
+refusal by its code (cancelled, no verified email, an existing account to link,
+an expired or foreign-browser state) and offers email recovery. Both providers
+ask with `prompt=select_account`, so a browser signed in to one Google or
+GitHub account can still choose another.
 GitHub uses the existing `GITHUB_APP_CLIENT_ID` / `GITHUB_APP_CLIENT_SECRET`
 and `/api/auth/callback/github`; the App needs Email addresses: read permission.
 No repository installation or Space connector grant is created by signing in.

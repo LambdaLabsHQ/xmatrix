@@ -9,7 +9,7 @@ import {
   relayRuntimeSingleCell,
 } from "./relay-authority-locator";
 import { HUB_ROUTES, REPOSITORY_ACCESS_UNAVAILABLE, deriveHumanConnectionUrl, githubRepositoryReference, repositoryAccessUnavailableDetail, stableMachineDaemonId, withMachineSpawnHarness, hasControlCharacter, sha256Hex } from "@xmatrix/protocol";
-import { admitAttempt } from "./auth-attempt-limit";
+import { admitAttempt, loginEmailAttemptLimits } from "./auth-attempt-limit";
 import { launchTargetRepos } from "./launch-target-repositories";
 import type { Env } from "./types";
 import { platformAdminForRequest, testEnvironmentForRequest } from "./index-routes-admin";
@@ -21,8 +21,8 @@ import { runtimeRepository, updateAgentLaunch } from "./runtime";
 import { controlErrorResponse } from "./postgres-authority-http";
 import { githubRepositoryTokenRunRefusal, legacyUnboundRepositoryTokenEnabled } from "./github-repository-token-run-binding";
 import { adoptLegacyMachineIds } from "@xmatrix/db";
-import { hasBetterAuthConfig, mockAuthUserForToken, readBearerToken, verifyAuthToken, type AuthSession, type AuthUser } from "./auth";
-import { betterAuthHandlerErrorResponse, betterAuthRouteErrorStatus, createAuth, createBetterAuthSessionForUser, refreshBetterAuthSession, sendBetterAuthLoginOtp, verifyBetterAuthEmailOtp } from "./better-auth";
+import { hasBetterAuthConfig, InvalidAuthTokenError, mockAuthUserForToken, readBearerToken, verifyAuthToken, type AuthSession, type AuthUser } from "./auth";
+import { accessTokenSessionAlive, betterAuthHandlerErrorResponse, betterAuthRouteErrorStatus, createAuth, createBetterAuthSessionForUser, refreshBetterAuthSession, revokeBetterAuthSession, sendBetterAuthLoginOtp, verifyBetterAuthEmailOtp } from "./better-auth";
 import { EMAIL_DELIVERY_CONFIGURATION_ERROR, EmailDeliveryConfigurationError, loginEmailErrorLog } from "./email-delivery";
 import { logAuthMetric } from "./auth-observability";
 import { SESSION_EXCHANGE_USER_MISMATCH } from "./auth-errors";
@@ -31,7 +31,7 @@ import { machineHostnameObservation } from "./machine-hostname-observation";
 import { signMachineDaemonCredential } from "./connections/machine-daemon/auth";
 import { applyMachineDaemonSpawnLaunchResult, dispatchMachineDaemonRunLifecycleReplica, machineSpawnRegistryEvidenceMatches } from "./index-routes-machine-daemon-admission";
 import { RELAY_RUNTIME_MACHINE_DAEMON_WAIT_PATH } from "./runtime-transport/relay-runtime-product-adapter";
-import { LOGIN_RATE_LIMIT_PER_EMAIL, LOGIN_RATE_LIMIT_PER_CLIENT, hubOrigin, betterAuthRouteGroup, logBetterAuthHandlerMetrics, authCorsPreflight, withAuthCors, parseCliRedirectUri, requireAuth, requireMachineDaemonAuth, machineRouteIdentityMatches, appendMachinePrincipal, requireHumanAuth, requestFailure, productCommandId, clientKey, internalClientHeaders, getDeviceAuthBroker, jsonErrors, requestErrorResponse, machineDaemonControl } from "./index-shared";
+import { LOGIN_RATE_LIMIT_PER_CLIENT, hubOrigin, betterAuthRouteGroup, logBetterAuthHandlerMetrics, authCorsPreflight, withAuthCors, parseCliRedirectUri, requireAuth, requireMachineDaemonAuth, machineRouteIdentityMatches, appendMachinePrincipal, requireHumanAuth, requestFailure, productCommandId, clientKey, internalClientHeaders, getDeviceAuthBroker, jsonErrors, requestErrorResponse, machineDaemonControl } from "./index-shared";
 import { appOrigin } from "./deployment-origins";
 import { registerIndexRoutesAuthSpaceInstances } from "./index-routes-auth-space-instances";
 import { registerIndexRoutesAuthSpaceManagement } from "./index-routes-auth-space-management";
@@ -85,14 +85,23 @@ async function machineDaemonPoll(c: Context<{ Bindings: Env }>, internalPath: st
   };
 }
 
-async function deviceAuthResponse(c: Context<{ Bindings: Env }>, action: "start" | "approve" | "token",
-  authorization?: string): Promise<Response> {
+async function deviceAuthResponse(c: Context<{ Bindings: Env }>,
+  action: "start" | "approve" | "token" | "describe" | "decline", authorization?: string): Promise<Response> {
   const internalUrl = new URL(`/internal/device-auth/${action}`, c.req.url);
+  const location = action === "start" ? requestLocation(c.req.raw) : undefined;
   const response = await getDeviceAuthBroker(c.env).fetch(new Request(internalUrl.toString(), {
-    method: "POST", headers: internalClientHeaders(c.req.raw, authorization ? { authorization } : undefined),
+    method: "POST", headers: internalClientHeaders(c.req.raw, {
+      ...(authorization ? { authorization } : {}), ...(location ? { "x-client-location": location } : {}) }),
     body: await c.req.text(),
   }));
   return relayResponse(response, { "cache-control": "no-store" });
+}
+
+/** Where Cloudflare's edge places a request, coarsely: "City, CC", or the country alone. */
+function requestLocation(request: Request): string | undefined {
+  const cf = (request as Request & { cf?: { city?: unknown; country?: unknown } }).cf;
+  const place = [cf?.city, cf?.country].filter((part): part is string => typeof part === "string" && part.length > 0);
+  return place.length ? place.join(", ") : undefined;
 }
 
 function machineObservations(c: Context<{ Bindings: Env }>, body: Parameters<typeof machineHostnameObservation>[0]) {
@@ -149,7 +158,7 @@ export function registerIndexRoutesAuthSpace(app: Hono<{ Bindings: Env }>): void
     const client = clientKey(c.req.raw);
     if (!await admitAttempt(c.env, [
       { key: `login:client:${await sha256Hex(client)}`, max: LOGIN_RATE_LIMIT_PER_CLIENT },
-      { key: `login:email:${await sha256Hex(email.toLowerCase())}`, max: LOGIN_RATE_LIMIT_PER_EMAIL },
+      ...await loginEmailAttemptLimits(email),
     ])) {
       await logAuthMetric({ routeGroup: "login_code_send", status: 429, outcome: "rate_limited" });
       return c.json({ error: "Too many login attempts. Try again later." }, 429);
@@ -214,6 +223,23 @@ export function registerIndexRoutesAuthSpace(app: Hono<{ Bindings: Env }>): void
     return deviceAuthResponse(c, "approve", authorization);
   });
   app.post(HUB_ROUTES.device_token, async (c) => deviceAuthResponse(c, "token"));
+  app.post(HUB_ROUTES.device_describe, async (c) => deviceAuthResponse(c, "describe"));
+  app.post(HUB_ROUTES.device_decline, async (c) => deviceAuthResponse(c, "decline"));
+  // A signed-out app or terminal ends its own session here, so the token it held stops working.
+  app.post(HUB_ROUTES.sign_out, async (c) => {
+    const body = (await c.req.json<{ refreshToken?: unknown }>().catch(() => ({}))) as { refreshToken?: unknown };
+    const refreshToken = typeof body.refreshToken === "string" ? body.refreshToken.trim() : "";
+    if (!refreshToken) return c.json({ error: "Refresh token is required" }, 400);
+    try {
+      await revokeBetterAuthSession(c.env, refreshToken);
+    } catch (error) {
+      const failure = requestFailure(error);
+      await logAuthMetric({ routeGroup: "sign_out", status: failure.status, outcome: "revoke_failed" });
+      return failureResponse(failure);
+    }
+    await logAuthMetric({ routeGroup: "sign_out", status: 200, outcome: "revoked" });
+    return c.json({ ok: true });
+  });
 
   app.post(HUB_ROUTES.exchange_session, async (c) => {
     const token = readBearerToken(c.req.header("authorization"));
@@ -225,6 +251,7 @@ export function registerIndexRoutesAuthSpace(app: Hono<{ Bindings: Env }>): void
     let authUser: AuthUser;
     try {
       authUser = await verifyAuthToken(token, c.env);
+      if (!await accessTokenSessionAlive(c.env, token)) throw new InvalidAuthTokenError();
     } catch (error) {
       const failure = requestFailure(error);
       await logAuthMetric({ routeGroup: "exchange_session", status: failure.status,

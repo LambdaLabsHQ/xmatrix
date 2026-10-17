@@ -19,10 +19,13 @@ type CookieOptions = Omit<typeof FIRST_PARTY_COOKIE_OPTIONS, "maxAge"> & { maxAg
 /** A request's cookie store or a response's cookies; both write the same way. */
 type CookieWriter = { set(name: string, value: string, options: CookieOptions): unknown };
 
+/** As long as the Hub session an app signs in with, so a phone opened weekly stays signed in. */
+const NATIVE_SESSION_COOKIE_OPTIONS = { ...FIRST_PARTY_COOKIE_OPTIONS, maxAge: 60 * 60 * 24 * 30 };
+
 export function setNativeSessionCookies(cookies: CookieWriter, payload: AuthResponse) {
-  cookies.set(NATIVE_ACCESS_COOKIE, payload.token, FIRST_PARTY_COOKIE_OPTIONS);
-  cookies.set(NATIVE_REFRESH_COOKIE, payload.refreshToken || "", FIRST_PARTY_COOKIE_OPTIONS);
-  cookies.set(NATIVE_PROVIDER_COOKIE, payload.authProvider || "", FIRST_PARTY_COOKIE_OPTIONS);
+  cookies.set(NATIVE_ACCESS_COOKIE, payload.token, NATIVE_SESSION_COOKIE_OPTIONS);
+  cookies.set(NATIVE_REFRESH_COOKIE, payload.refreshToken || "", NATIVE_SESSION_COOKIE_OPTIONS);
+  cookies.set(NATIVE_PROVIDER_COOKIE, payload.authProvider || "", NATIVE_SESSION_COOKIE_OPTIONS);
 }
 
 export function clearNativeSessionCookies(cookies: CookieWriter) {
@@ -44,12 +47,7 @@ export function isTransientHubStatus(status: number): boolean {
  * Throws TransientNativeSessionRefreshError when the Hub cannot answer now.
  */
 export async function refreshNativeSession(refreshToken: string): Promise<AuthResponse | null> {
-  const response = await fetch(withRoute(getXMatrixHubUrl(), HUB_ROUTES.refresh), {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ refreshToken }),
-    cache: "no-store",
-  }).catch((error) => {
+  const response = await postRefreshToken(HUB_ROUTES.refresh, refreshToken).catch((error) => {
     console.warn("[auth] native session refresh unreachable", error);
     throw new TransientNativeSessionRefreshError("Native session refresh is temporarily unavailable");
   });
@@ -63,6 +61,21 @@ export async function refreshNativeSession(refreshToken: string): Promise<AuthRe
 
   const payload = (await response.json().catch(() => null)) as Partial<AuthResponse> | null;
   return isCompleteAuthResponse(payload) ? payload : null;
+}
+
+/** Ends the Hub session a signed-out app held. Best effort: the cookies are cleared either way. */
+export async function revokeNativeSession(refreshToken: string): Promise<void> {
+  await postRefreshToken(HUB_ROUTES.sign_out, refreshToken)
+    .catch((error) => console.warn("[auth] native session revoke unreachable", error));
+}
+
+function postRefreshToken(route: string, refreshToken: string): Promise<Response> {
+  return fetch(withRoute(getXMatrixHubUrl(), route), {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ refreshToken }),
+    cache: "no-store",
+  });
 }
 
 export function isCompleteAuthResponse(payload: Partial<AuthResponse> | null): payload is AuthResponse {
