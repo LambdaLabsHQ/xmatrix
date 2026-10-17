@@ -1,23 +1,16 @@
 import type { Context, Hono } from "hono";
 import {
-  HUB_ROUTES, onboardingLocale, parseHarnessInventory, sha256Hex, type OnboardingLocale, type AgentRegistrationSummary, type SetupIntentHarness, type SetupIntentStatus,
+  HUB_ROUTES, parseHarnessInventory, type AgentRegistrationSummary, type SetupIntentHarness, type SetupIntentStatus,
 } from "@xmatrix/protocol";
 import type { Env } from "./types";
 import type { SetupIntentRead } from "./device-auth";
 import { readBearerToken } from "./auth";
-import { admitAttempt } from "./auth-attempt-limit";
-import { appOrigin } from "./deployment-origins";
-import { EmailDeliveryConfigurationError, escapeHtml, loginEmailErrorLog, sendEmail } from "./email-delivery";
 import { getDeviceAuthBroker, internalClientHeaders, jsonErrors, requireAuth, requireHumanAuth } from "./index-shared";
 import { listAgentRegistrations } from "./agent-registrations";
 import { listOwnerMachineDaemons, machineRepository } from "./machines";
 import { getSpace } from "./spaces";
 
 const NO_STORE = { "cache-control": "private, no-store" };
-
-/** How many setup links one person may email themselves in a rolling day. */
-export const SETUP_LINK_EMAILS_PER_DAY = 3;
-const DAY_MS = 24 * 60 * 60_000;
 
 /**
  * Connecting a machine from the Web (docs/design/onboarding-connect-machine.md).
@@ -58,36 +51,6 @@ export function registerSetupIntentRoutes(app: Hono<{ Bindings: Env }>): void {
     return relay(await broker(c, "decline", { ownerUserId: owner.id, intentId: c.req.param("intentId") }));
   }));
 
-  /* On a phone the command cannot run, so the page emails its link to the
-     person's own sign-in address: opened on a computer, it continues the same
-     setup there. The recipient is the account's address, never one the caller
-     names, and the link carries the intent id and nothing else. The body may
-     name only the language to write in. */
-  app.post("/api/setup-intents/:intentId/email", (c) => jsonErrors(c, async () => {
-    const owner = requireHumanAuth(await requireAuth(c.req.raw, c.env));
-    const intentId = c.req.param("intentId");
-    const request = await c.req.json().catch(() => null) as { locale?: unknown } | null;
-    const words = SETUP_LINK_EMAIL[onboardingLocale(typeof request?.locale === "string" ? request.locale : null)];
-    const response = await broker(c, "read", { ownerUserId: owner.id, intentId });
-    if (!response.ok) return relay(response);
-    if (!owner.email) return c.json({ error: "This account has no email address", code: "no_account_email" }, 409);
-    if (!await admitAttempt(c.env, [{
-      key: `setup-link-email:${await sha256Hex(owner.id)}`, max: SETUP_LINK_EMAILS_PER_DAY, windowMs: DAY_MS,
-    }])) {
-      return c.json({ error: words.limited, code: "setup_link_email_limited" }, 429);
-    }
-    const link = new URL("/connect/computer", appOrigin(c.env));
-    link.searchParams.set("intent", intentId);
-    try {
-      await sendEmail(c.env, owner.email, setupLinkEmail(link.toString(), words));
-    } catch (error) {
-      console.error("Failed to send setup link", { routeGroup: "setup_link_email", error: loginEmailErrorLog(error) });
-      return c.json({ error: "Couldn't send the email. Try again in a moment.",
-        code: error instanceof EmailDeliveryConfigurationError ? error.code : "email_delivery_failed" }, 503);
-    }
-    return c.body(null, 204);
-  }));
-
   /* The terminal, now signed in as the owner, says which Machine it became. */
   app.post("/api/setup-intents/:intentId/machine", (c) => jsonErrors(c, async () => {
     const owner = requireHumanAuth(await requireAuth(c.req.raw, c.env));
@@ -96,36 +59,6 @@ export function registerSetupIntentRoutes(app: Hono<{ Bindings: Env }>): void {
       ownerUserId: owner.id, intentId: c.req.param("intentId"), machineId: body.machineId,
     }));
   }));
-}
-
-/* The setup email's words, in the language of the person's first ten
-   minutes (onboardingLocale). */
-const SETUP_LINK_EMAIL = {
-  en: {
-    subject: "Continue setting up xMatrix on your computer",
-    open: "Open this link on the computer your agents run on to bring them into xMatrix:",
-    button: "Continue setup",
-    notYou: "You sent this from your phone. If you didn't, you can ignore this email.",
-    limited: "You've sent this link 3 times today. Try again tomorrow.",
-  },
-  zh: {
-    subject: "在电脑上继续接入 xMatrix",
-    open: "在运行 Agent 的那台电脑上打开这个链接，把它们接入 xMatrix：",
-    button: "继续接入",
-    notYou: "这封邮件是你在手机上发的。如果不是你，忽略即可。",
-    limited: "今天已经发了 3 次，明天再试。",
-  },
-} satisfies Record<OnboardingLocale, Record<string, string>>;
-
-/** The email that carries the setup link to the person's computer. */
-function setupLinkEmail(link: string, words: typeof SETUP_LINK_EMAIL[OnboardingLocale]) {
-  const safeLink = escapeHtml(link);
-  return {
-    subject: words.subject,
-    text: [words.open, "", link, "", words.notYou].join("\n"),
-    html: `<p>${words.open}</p><p><a href="${safeLink}">${words.button}</a></p>`
-      + `<p style="color:#667085;font-size:13px">${words.notYou}</p>`,
-  };
 }
 
 async function broker(c: Context<{ Bindings: Env }>, action: string, body: Record<string, unknown>,

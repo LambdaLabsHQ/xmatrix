@@ -10,9 +10,7 @@ import {
   readBearerToken,
   verifyAuthToken,
 } from "./auth";
-import {
-  MAX_ATTEMPT_WINDOW_MS, attemptStorageKey, attemptWindowMs, chargeAttempt, type AttemptLimit,
-} from "./auth-attempt-limit";
+import { ATTEMPT_WINDOW_MS, chargeAttempt, type AttemptLimit } from "./auth-attempt-limit";
 import { logAuthMetric } from "./auth-observability";
 import { postgresControlErrorResponse } from "./postgres-authority-http";
 import { transientError } from "./error-contract";
@@ -142,11 +140,10 @@ export class DeviceAuthBroker extends DurableObject<Env> {
     const body = (await request.json().catch(() => ({}))) as { limits?: unknown };
     const limits = Array.isArray(body.limits) ? body.limits as AttemptLimit[] : [];
     if (limits.length === 0 || !limits.every((limit) => typeof limit?.key === "string" && limit.key
-      && Number.isInteger(limit.max) && limit.max > 0 && (limit.windowMs === undefined
-        || (Number.isInteger(limit.windowMs) && limit.windowMs > 0 && limit.windowMs <= MAX_ATTEMPT_WINDOW_MS)))) {
+      && Number.isInteger(limit.max) && limit.max > 0)) {
       return Response.json({ error: "limits must name each counter and its allowance" }, { status: 400 });
     }
-    const keys = limits.map(attemptStorageKey);
+    const keys = limits.map((limit) => `attempts:${limit.key}`);
     const stored = await this.ctx.storage.get<number[]>(keys);
     const { admitted, next } = chargeAttempt(keys.map((key) => stored.get(key) ?? []), limits, Date.now());
     await this.ctx.storage.put(Object.fromEntries(keys.map((key, index) => [key, next[index]])));
@@ -618,7 +615,7 @@ export class DeviceAuthBroker extends DurableObject<Env> {
       prefix: "attempts:", limit: 128, startAfter: this.attemptPruneCursor });
     this.attemptPruneCursor = attempts.size === 128 ? [...attempts.keys()].at(-1) : undefined;
     for (const [key, times] of attempts.entries()) {
-      if ((times.at(-1) ?? 0) <= now - attemptWindowMs(key)) expiredKeys.push(key);
+      if ((times.at(-1) ?? 0) <= now - ATTEMPT_WINDOW_MS) expiredKeys.push(key);
     }
 
     // Device counters kept before "attempts:" were never removed.

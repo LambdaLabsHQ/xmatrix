@@ -9,8 +9,6 @@ import { harnessDisplayVersion, harnessTooOldSentence, type HarnessTooOld, type 
 type Starter = { id: OnboardingStarter; title: string; detail: string; message: string };
 
 const en = {
-  /** Which language this is, for words the Hub writes (the setup email). */
-  locale: "en" as OnboardingLocale,
   listNames: (names: string[]) => names.length <= 1 ? names[0] ?? ""
     : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`,
   /** Between words: Chinese runs sentences together. */
@@ -46,11 +44,6 @@ const en = {
   download: ["Download the desktop app", ". It finds the agents installed there."],
   server: (copied: boolean) => ["Setting up a server? ", copied ? "Copied" : "Copy a setup prompt",
     " for an agent already running there, or ", "read the steps", "."],
-  emailOffer: "On your phone? Email this to yourself and open it on your computer.",
-  sendToComputer: "Send to my computer",
-  emailSent: "Sent to your email. Open it on your computer to continue there.",
-  /** The page the emailed link opens on the computer, while it signs in and opens the Space. */
-  continueSetup: "Opening your setup…",
   preparingCommand: "Preparing a command…",
   copy: (copied: boolean): string => copied ? "Copied" : "Copy",
   agentsIn: (names: string, one: boolean) =>
@@ -117,7 +110,6 @@ const en = {
 export type OnboardingCopy = typeof en;
 
 const zh: OnboardingCopy = {
-  locale: "zh",
   listNames: (names) => names.length <= 1 ? names[0] ?? ""
     : `${names.slice(0, -1).join("、")} 和 ${names[names.length - 1]}`,
   gap: "",
@@ -152,10 +144,6 @@ const zh: OnboardingCopy = {
   download: ["下载桌面 App", "，它会找到电脑上装好的 Agent。"],
   server: (copied) => ["要接一台服务器？", copied ? "已复制" : "复制一段设置提示",
     "发给已经在那里运行的 Agent，或者", "看操作步骤", "。"],
-  emailOffer: "在用手机？把它发到自己的邮箱，在电脑上打开。",
-  sendToComputer: "发到我的电脑",
-  emailSent: "已发到你的邮箱。在电脑上打开邮件，就能接着往下做。",
-  continueSetup: "正在打开你的接入步骤…",
   preparingCommand: "正在生成命令…",
   copy: (copied) => copied ? "已复制" : "复制",
   agentsIn: (names, one) =>
