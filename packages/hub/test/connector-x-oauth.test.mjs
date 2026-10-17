@@ -138,15 +138,17 @@ test("X encrypted account lists fail closed on duplicate identities, malformed g
   assert.deepEqual(parseXAccounts("[]"), []);
   const original = account();
   assert.deepEqual(parseXAccounts(xAccountFields([original]).accounts), [original]);
+  assert.equal(parseXAccounts(JSON.stringify(Array.from({ length: 5 }, (_, i) => account({ id: String(i + 1) })))).length, 5);
   assert.deepEqual(xAccountFields([]), { accounts: null });
   assert.deepEqual(grantFieldsForgottenOnDisconnect("x"), { accounts: null });
+  const bulky = Array.from({ length: 80 }, (_, i) => account({ id: String(i + 1), accessToken: "a".repeat(2048), refreshToken: "r".repeat(2048) }));
+  assert.throws(() => xAccountFields(bulky), /exceed the 256 KiB/u);
   for (const value of ["not-json", "{}", JSON.stringify([original, original]),
-    JSON.stringify(Array.from({ length: 5 }, (_, i) => account({ id: String(i + 1) }))),
     JSON.stringify([account({ id: "0" })]), JSON.stringify([account({ username: "bad/handle" })]),
     JSON.stringify([account({ generation: "not-a-generation" })]), JSON.stringify([account({ ownerUserId: "other/user" })]),
     JSON.stringify([account({ accessToken: "private-access-token\nsecret" })]), JSON.stringify([account({ refreshToken: "x".repeat(2049) })]),
     JSON.stringify([account({ expiresAt: 0 })]), JSON.stringify([account({ refreshing: crypto.randomUUID() })]),
-    JSON.stringify([account({ extra: "界".repeat(2900) })])]) {
+    JSON.stringify([account({ extra: "界".repeat(90_000) })])]) {
     assert.throws(() => parseXAccounts(value), error => error.status === 409 && !/private-access-token|private-refresh-token/u.test(error.message));
   }
 });

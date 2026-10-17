@@ -1,3 +1,5 @@
+import { appCredentialValueLimit } from "@xmatrix/db";
+import { utf8ByteLength } from "@xmatrix/protocol";
 import type { Env } from "../types";
 import { upstreamMeter, type UpstreamMeter } from "../usage-cost-metering";
 import type { AgentRegistrationIdentity } from "./agent-caller";
@@ -21,7 +23,8 @@ export interface GmailMailbox { account: string; address: string; owner: string 
 /** Who runs an action: the Human, or an Agent (its registration) and the user whose Run it is. */
 export interface GmailCaller { userId: string; agent?: AgentRegistrationIdentity }
 
-export const MAX_MAILBOXES = 10;
+/* Mailboxes are not counted. The list is bounded only by the size the platform stores for it. */
+const MAX_VALUE_BYTES = appCredentialValueLimit("gmail", "mailboxes");
 const ACCOUNT_ID = /^[A-Za-z0-9_-]{4,128}$/u;
 const ADDRESS = /^[^\s@<>(),;:"\\[\]]{1,64}@[^\s@<>(),;:"\\[\]]{1,189}$/u;
 const OWNER = /^(?:user:[A-Za-z0-9_.:-]{1,128}|agent:[^/\s]{1,300}\/[^/\s]{1,300}\/[^/\s]{1,300})$/u;
@@ -32,7 +35,7 @@ export function parseMailboxes(value: string | undefined): GmailMailbox[] {
   if (!value) throw new ProviderRequestError(401, "Connect a Gmail mailbox first");
   let parsed: unknown;
   try { parsed = JSON.parse(value); } catch { parsed = undefined; }
-  if (!Array.isArray(parsed) || parsed.length === 0 || parsed.length > MAX_MAILBOXES) {
+  if (!Array.isArray(parsed) || parsed.length === 0) {
     throw new ProviderRequestError(502, "the stored Gmail mailboxes are unreadable; reconnect Gmail");
   }
   return parsed.map((entry) => {
@@ -46,7 +49,11 @@ export function parseMailboxes(value: string | undefined): GmailMailbox[] {
 }
 
 export function serializeMailboxes(mailboxes: readonly GmailMailbox[]): string {
-  return JSON.stringify(mailboxes.map(({ account, address, owner }) => ({ account, address, owner })));
+  const value = JSON.stringify(mailboxes.map(({ account, address, owner }) => ({ account, address, owner })));
+  if (utf8ByteLength(value) > MAX_VALUE_BYTES) {
+    throw new ProviderRequestError(409, `the Gmail mailboxes exceed the ${MAX_VALUE_BYTES / 1024} KiB this connection stores; remove one first`);
+  }
+  return value;
 }
 
 /** An Agent owner: `agent:` and its registration's owner, machine and harness, each URI-encoded. */
@@ -81,8 +88,8 @@ function apiKey(env: Env): string {
 /**
  * The stored list with the account one Connect just created added: a mailbox
  * already present is replaced (its old Composio account deleted) and keeps its
- * owner; a new one belongs to the connecting admin. Past the limit, the new
- * account is deleted and Connect fails.
+ * owner; a new one belongs to the connecting admin. A list that would not fit
+ * the credential deletes the new account and Connect fails.
  */
 export async function addConnectedMailbox(env: Env, input: { spaceId: string; actorUserId: string; account: string }):
   Promise<Record<string, string>> {
@@ -95,13 +102,16 @@ export async function addConnectedMailbox(env: Env, input: { spaceId: string; ac
   const current = stored?.values.mailboxes ? parseMailboxes(stored.values.mailboxes) : [];
   const replaced = current.filter((mailbox) => mailbox.address === address);
   const kept = current.filter((mailbox) => mailbox.address !== address);
-  if (kept.length >= MAX_MAILBOXES) {
+  const owner = replaced[0]?.owner ?? `user:${input.actorUserId}`;
+  let mailboxes: string;
+  try {
+    mailboxes = serializeMailboxes([...kept, { account: input.account, address, owner }]);
+  } catch (error) {
     await deleteComposioAccount(key, input.account, meter);
-    throw new ProviderRequestError(409, `a Space connects at most ${MAX_MAILBOXES} Gmail mailboxes; remove one first`);
+    throw error;
   }
   for (const old of replaced) if (old.account !== input.account) await deleteComposioAccount(key, old.account, meter);
-  const owner = replaced[0]?.owner ?? `user:${input.actorUserId}`;
-  return { mailboxes: serializeMailboxes([...kept, { account: input.account, address, owner }]) };
+  return { mailboxes };
 }
 
 /** The mailboxes as a Space admin manages them: address and owner, never the Composio account. */

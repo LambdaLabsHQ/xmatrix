@@ -19,10 +19,14 @@ import { beginSentryAttempt, lockSentryAttempt, consumeSentryAttempt, retireSent
 const MAX_FIELDS = 16;
 const MAX_VALUE_BYTES = 8 * 1024;
 /*
- * A field that holds one grant per connected login grows with the logins a
+ * A field that holds one grant per connected account grows with the accounts a
  * Space adds, so it gets a bound sized for that rather than for one token.
  */
-const LIST_VALUE_BYTES: Readonly<Record<string, number>> = { "cloudflare:logins": 256 * 1024 };
+const LIST_VALUE_BYTES: Readonly<Record<string, number>> = {
+  "cloudflare:logins": 256 * 1024,
+  "gmail:mailboxes": 256 * 1024,
+  "x:accounts": 256 * 1024,
+};
 
 /** The largest value a connection may store in one credential field. */
 export function appCredentialValueLimit(providerId: string, field: string): number {

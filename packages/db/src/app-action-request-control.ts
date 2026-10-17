@@ -1,6 +1,7 @@
 import type { QueryResultRow } from "pg";
 import { utf8ByteLength } from "@xmatrix/protocol";
 import { requireChannelCapability } from "./channel-capability-policy.js";
+import { appCredentialValueLimit } from "./app-credential-control.js";
 import { AppControlError } from "./app-control.js";
 import { appRequestText as text } from "./app-request-text.js";
 import { decryptSecretValue, encryptSecretValue } from "./secret-value-control.js";
@@ -100,9 +101,9 @@ export class PostgresAppActionRequestRepository {
         secret_ref: "credentials", authority_version: Number(scope.credential_version),
       })) as Record<string, unknown> | null;
       const serialized = envelope?.accounts;
-      if (typeof serialized !== "string" || utf8ByteLength(serialized) > 8192) throw changed();
+      if (typeof serialized !== "string" || utf8ByteLength(serialized) > appCredentialValueLimit("x", "accounts")) throw changed();
       const accounts: unknown = JSON.parse(serialized);
-      if (!Array.isArray(accounts) || accounts.length > 4) throw changed();
+      if (!Array.isArray(accounts)) throw changed();
       const ids = new Set<string>();
       let matches = 0;
       for (const account of accounts) {

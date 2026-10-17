@@ -7,6 +7,8 @@ import { exchangeOAuthGrant, oauthAuthorizeUrl, oauthClient } from "../src/conne
 import { deleteComposioAccount } from "../src/connectors/composio.ts";
 import { agentMailboxOwner, mayUseMailbox, parseMailboxes } from "../src/connectors/gmail-mailboxes.ts";
 import { grantFieldsForgottenOnDisconnect } from "../src/connectors/oauth.ts";
+import { appCredentialValueLimit } from "@xmatrix/db";
+import { utf8ByteLength } from "@xmatrix/protocol";
 import { compileCommonJsSourceModule } from "./support/commonjs-source-module.mjs";
 import { getAppConnectorProvider } from "../src/app-connectors.ts";
 import { verifyGitHubAppState } from "../src/index-shared.ts";
@@ -310,6 +312,8 @@ test("Connect adds a mailbox: a repeat replaces its account and keeps its owner,
   const profiles = { ca_new1: "ME@example.com", ca_new2: "three@example.com" };
   const http = await import("../src/connectors/http.ts");
   const dependencies = {
+    "@xmatrix/db": { appCredentialValueLimit },
+    "@xmatrix/protocol": { utf8ByteLength },
     "./composio": {
       composioGet: async (credentials) => ({ emailAddress: profiles[credentials.composioAccountId] }),
       deleteComposioAccount: async (_key, id) => { deleted.push(id); },
@@ -320,7 +324,7 @@ test("Connect adds a mailbox: a repeat replaces its account and keeps its owner,
     "./oauth": { oauthClient: () => ({ clientSecret: "composio-project-key" }) },
     "../usage-cost-metering": metering,
   };
-  const { addConnectedMailbox } = load(name => { assert.ok(dependencies[name], name); return dependencies[name]; },
+  const { addConnectedMailbox, serializeMailboxes } = load(name => { assert.ok(dependencies[name], name); return dependencies[name]; },
     { crypto, Date, Object, JSON, encodeURIComponent });
   const input = { spaceId: "space-1", actorUserId: "user-1" };
   const again = JSON.parse((await addConnectedMailbox({}, { ...input, account: "ca_new1" })).mailboxes);
@@ -329,7 +333,32 @@ test("Connect adds a mailbox: a repeat replaces its account and keeps its owner,
   const added = JSON.parse((await addConnectedMailbox({}, { ...input, account: "ca_new2" })).mailboxes);
   assert.deepEqual(added.at(-1), { account: "ca_new2", address: "three@example.com", owner: "user:user-1" });
   stored = Array.from({ length: 10 }, (_, index) => ({ account: `ca_full${index}`, address: `m${index}@example.com`, owner: "user:user-1" }));
-  await assert.rejects(addConnectedMailbox({}, { ...input, account: "ca_new2" }), /at most 10/u);
+  const eleven = JSON.parse((await addConnectedMailbox({}, { ...input, account: "ca_new2" })).mailboxes);
+  assert.equal(eleven.length, 11);
+  const extra = { account: "ca_new2", address: "three@example.com", owner: "user:user-1" };
+  const fat = (index) => ({
+    account: `cafat${String(index).padStart(16, "0")}`,
+    address: `${String(index).padStart(4, "0")}${"m".repeat(60)}@${"d".repeat(180)}.com`,
+    owner: `user:${"u".repeat(120)}`,
+  });
+  const short = (index) => ({ account: `cashort${index}`, address: `s${index}@e.com`, owner: "user:user-1" });
+  const fits = (list) => { try { serializeMailboxes(list); return true; } catch { return false; } };
+  let batch = [];
+  const fill = (make) => {
+    for (let index = 0; ; index += 1) {
+      const withItem = [...batch, make(index)];
+      if (!fits(withItem)) return;
+      batch = withItem;
+      if (!fits([...batch, extra])) return;
+    }
+  };
+  fill(fat);
+  fill(short);
+  assert.ok(batch.length > 10);
+  assert.equal(fits(batch), true);
+  assert.equal(fits([...batch, extra]), false);
+  stored = batch;
+  await assert.rejects(addConnectedMailbox({}, { ...input, account: "ca_new2" }), /exceed the 256 KiB/u);
   assert.equal(deleted.at(-1), "ca_new2");
 });
 

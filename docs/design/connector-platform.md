@@ -10,8 +10,9 @@ Status: implemented platform. Each provider's registration, production release
 and native acceptance are tracked separately; availability in the registry does
 not imply a passed native acceptance test.
 
-X uses one company OAuth application with up to four separately owned user
-grants per Space. Stable account ID and authorization generation bind every
+X uses one company OAuth application with separately owned user grants per
+Space. Accounts are not counted; the `accounts` credential holds at most 256 KiB.
+Stable account ID and authorization generation bind every
 approved publication; account refresh uses durable credential-store leases.
 Video commands persist frozen input and encrypted outcomes in PostgreSQL; a
 scoped Durable Object alarm stores scheduling references only and performs the
@@ -435,9 +436,9 @@ messages/send, belongs to `send` and `reply`, whose manifest
 `defaultPolicy: "ask"` stages an immutable email for a Space admin to approve
 once in that Channel (§3.5). A read-only grant would need the company's own
 Google app verified for `gmail.readonly` (OAuth verification and CASA).
-One Gmail connection holds up to ten mailboxes. Its only credential,
-`mailboxes`, lists each mailbox's Composio account, address and owner: a
-Space member (`user:<id>`) or an Agent registration
+One Gmail connection's only credential, `mailboxes`, lists each mailbox's
+Composio account, address and owner. Mailboxes are not counted; the field holds
+at most 256 KiB. An owner is a Space member (`user:<id>`) or an Agent registration
 (`agent:<owner>/<machine>/<harness>`, each part URI-encoded). A member's
 mailbox serves that member and their Agents' Runs; an Agent's serves only
 Runs of that registration, resolved from the calling Instance through its

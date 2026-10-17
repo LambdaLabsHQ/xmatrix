@@ -1,4 +1,4 @@
-import { ControlError } from "@xmatrix/db";
+import { appCredentialValueLimit, ControlError } from "@xmatrix/db";
 import { utf8ByteLength } from "@xmatrix/protocol";
 import type { Env } from "../types";
 import { retryablePostgresFailure } from "../postgres-error-classification";
@@ -28,13 +28,14 @@ export interface XActionCapability {
 
 const ID = /^[1-9][0-9]{0,19}$/u;
 const UUID = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/u;
-export const MAX_X_ACCOUNTS = 4;
+/* Accounts are not counted. The list is bounded only by the size the platform stores for it. */
+const MAX_VALUE_BYTES = appCredentialValueLimit("x", "accounts");
 
 export function parseXAccounts(value: string | undefined): XAccount[] {
   if (!value) return [];
   let parsed: unknown;
   try { parsed = JSON.parse(value); } catch { parsed = undefined; }
-  if (!Array.isArray(parsed) || parsed.length > MAX_X_ACCOUNTS || utf8ByteLength(value) > 8192) {
+  if (!Array.isArray(parsed) || utf8ByteLength(value) > MAX_VALUE_BYTES) {
     throw new ProviderRequestError(409, "The X account list is invalid; reconnect X");
   }
   const seen = new Set<string>();
@@ -59,6 +60,9 @@ export function parseXAccounts(value: string | undefined): XAccount[] {
 export function xAccountFields(accounts: readonly XAccount[]): { accounts: string | null } {
   if (!accounts.length) return { accounts: null };
   const value = JSON.stringify(accounts);
+  if (utf8ByteLength(value) > MAX_VALUE_BYTES) {
+    throw new ProviderRequestError(409, `the X accounts exceed the ${MAX_VALUE_BYTES / 1024} KiB this connection stores; remove one first`);
+  }
   parseXAccounts(value);
   return { accounts: value };
 }
@@ -110,7 +114,6 @@ export async function connectXAccount(env: Env, input: { spaceId: string; actorU
       throw new ProviderRequestError(403, "This X account belongs to another Space member");
     }
     const kept = current.filter(a => a.id !== account.id);
-    if (kept.length >= MAX_X_ACCOUNTS) throw new ProviderRequestError(409, `A Space connects at most ${MAX_X_ACCOUNTS} X accounts`);
     await repository.put({ requestId: crypto.randomUUID(), spaceId: input.spaceId, providerId: "x", actorUserId: input.actorUserId,
       fields: xAccountFields([...kept, account]), policy: { allowed: ["accounts"] }, at: new Date().toISOString(),
       expectedGrant: { connectionVersion: input.snapshot.connectionVersion, version: latest.credentialVersion,
