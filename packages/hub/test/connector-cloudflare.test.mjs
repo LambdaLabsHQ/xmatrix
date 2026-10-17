@@ -334,20 +334,14 @@ test("each Connect adds a login; the same login connecting again replaces itself
   assert.throws(() => parseCloudflareLogins("[{\"id\":\"x\"}]"), /unreadable/u, "a malformed list fails closed");
 });
 
-test("more than five logins connect; only a list that does not fit the credential is refused", () => {
-  let stored = {};
-  for (let n = 0; n < 6; n += 1) {
-    stored = addCloudflareLogin(stored, { accessToken: "a", refreshToken: "r", expiresAt: 1,
-      accounts: [{ id: n.toString(16).padStart(32, "0"), name: "A" }], actorUserId: "user-1" });
-  }
-  assert.equal(parseCloudflareLogins(stored.logins).length, 6);
+test("only a list that exceeds the stored bound is refused", () => {
   const bulky = { accessToken: "a".repeat(2048), refreshToken: "r".repeat(2048), expiresAt: 1, actorUserId: "user-1" };
   assert.throws(() => {
-    let next = stored;
-    for (let n = 0; n < 4; n += 1) {
-      next = addCloudflareLogin(next, { ...bulky, accounts: [{ id: (n + 10).toString(16).padStart(32, "a"), name: "B" }] });
+    let next = {};
+    for (let n = 0; n < 80; n += 1) {
+      next = addCloudflareLogin(next, { ...bulky, accounts: [{ id: n.toString(16).padStart(32, "a"), name: "B" }] });
     }
-  }, /no longer fit/u);
+  }, /exceed the 256 KiB this connection stores; remove one first/u);
 });
 
 test("only expiring login grants are renewed, and a refused renewal keeps that login's grant", async () => {
@@ -403,7 +397,7 @@ test("D1 queries run one read-only statement and show bounded rows", async () =>
   assert.doesNotMatch(listed.value.summary, /tables/u, "Cloudflare's list reports 0 tables for every database");
 
   const original = globalThis.fetch;
-  globalThis.fetch = async (url) => String(url).endsWith("/accounts?per_page=50")
+  globalThis.fetch = async (url) => new URL(String(url)).pathname.endsWith("/accounts")
     ? Response.json({ success: true, result: [{ id: ACCOUNT, name: "Acme" }] })
     : Response.json({ success: false, errors: [{ code: 10000, message: "Authentication error" }] });
   try {
@@ -413,4 +407,29 @@ test("D1 queries run one read-only statement and show bounded rows", async () =>
     globalThis.fetch = original;
   }
   assert.equal(CLOUDFLARE_ACTIONS.query_database.effect, "read");
+});
+
+test("logins are not counted, and every page of accounts is read", async () => {
+  let stored = {};
+  for (let index = 0; index < 12; index++) {
+    const id = index.toString(16).padStart(32, "0");
+    stored = { ...stored, ...addCloudflareLogin(stored, { accessToken: `t${index}`, refreshToken: `r${index}`, expiresAt: 1,
+      accounts: [{ id, name: `Account ${index}` }], actorUserId: "user-1" }) };
+  }
+  assert.equal(parseCloudflareLogins(stored.logins).length, 12, "a Space adds as many logins as it has Cloudflare users");
+
+  const page = (from, count) => Array.from({ length: count }, (_, index) =>
+    ({ id: (from + index).toString(16).padStart(32, "a"), name: `A${from + index}` }));
+  const original = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    const number = Number(new URL(String(url)).searchParams.get("page"));
+    return Response.json({ success: true, result: number === 1 ? page(0, 50) : page(50, 3),
+      result_info: { page: number, total_pages: 2 } });
+  };
+  try {
+    const { value } = { value: await CLOUDFLARE_ACTIONS.list_accounts.execute({ credentials: { oauthToken: "t" } }, {}) };
+    assert.match(value.summary, /^53 Cloudflare accounts reachable/u, "accounts past the first page are reachable");
+  } finally {
+    globalThis.fetch = original;
+  }
 });

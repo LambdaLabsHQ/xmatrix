@@ -51,20 +51,41 @@ function logins(credentials: Credentials): Login[] {
   return list;
 }
 
-async function cloudflare(token: string, path: string, init: RequestInit & { json?: unknown } = {}): Promise<unknown> {
+async function cloudflarePayload(token: string, path: string, init: RequestInit & { json?: unknown } = {}):
+  Promise<Record<string, unknown>> {
   const payload = await providerJson(providerUrl("https://api.cloudflare.com/client/v4/", path),
     { ...init, headers: { authorization: `Bearer ${token}` } });
   if (payload.success !== true) {
     const reasons = (Array.isArray(payload.errors) ? payload.errors : []).map((error) => text(record(error).message)).filter(Boolean);
     throw new ProviderRequestError(502, `Cloudflare refused the request${reasons.length ? `: ${reasons.join("; ").slice(0, 300)}` : ""}`);
   }
-  return payload.result;
+  return payload;
+}
+
+async function cloudflare(token: string, path: string, init: RequestInit & { json?: unknown } = {}): Promise<unknown> {
+  return (await cloudflarePayload(token, path, init)).result;
+}
+
+/*
+ * Every page of a Cloudflare list. The page bound only stops a provider that
+ * never reports its last page; real lists end long before it.
+ */
+const MAX_PAGES = 100;
+async function cloudflareList(token: string, path: string, perPage: number): Promise<Record<string, unknown>[]> {
+  const items: Record<string, unknown>[] = [];
+  for (let page = 1; page <= MAX_PAGES; page++) {
+    const payload = await cloudflarePayload(token, `${path}${path.includes("?") ? "&" : "?"}page=${page}&per_page=${perPage}`);
+    const result = Array.isArray(payload.result) ? payload.result.map(record) : [];
+    items.push(...result);
+    const pages = Number(record(payload.result_info).total_pages);
+    if (result.length < perPage || (Number.isFinite(pages) && page >= pages)) return items;
+  }
+  throw new ProviderRequestError(502, "Cloudflare did not finish listing");
 }
 
 /** The accounts one token reaches, with their names. */
 export async function cloudflareAccounts(token: string): Promise<CloudflareAccountRef[]> {
-  const result = await cloudflare(token, "accounts?per_page=50");
-  return (Array.isArray(result) ? result : []).map(record)
+  return (await cloudflareList(token, "accounts", 50))
     .map((account) => ({ id: text(account.id).toLowerCase(), name: text(account.name) }))
     .filter((account) => CLOUDFLARE_ACCOUNT_ID.test(account.id));
 }
@@ -404,8 +425,7 @@ export const CLOUDFLARE_ACTIONS: Record<string, ConnectorAction> = {
     },
     async execute({ credentials }, input) {
       const target = await cloudflareTarget(credentials, input.account);
-      const listed = await cloudflare(target.token, `accounts/${target.account}/d1/database?per_page=100`).catch(d1Refusal);
-      const databases = (Array.isArray(listed) ? listed : []).map(record);
+      const databases = await cloudflareList(target.token, `accounts/${target.account}/d1/database`, 100).catch(d1Refusal);
       /* The list endpoint reports num_tables as 0 for every database, so only the size is shown. */
       const lines = databases.map((database) => `${oneLine(text(database.name), 64)}  ${text(database.uuid)}` +
         `${Number(database.file_size) > 0 ? `  ${(Number(database.file_size) / 1_048_576).toFixed(1)} MiB` : ""}`);
