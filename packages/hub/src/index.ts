@@ -75,6 +75,7 @@ import { registerIndexRoutesAutomation } from "./index-routes-automation";
 import { registerIndexRoutesSpaceJoinRequests } from "./index-routes-space-join-requests";
 import { registerIndexRoutesChannelAgent } from "./index-routes-channel-agent";
 import { registerIndexRoutesHumanProfile } from "./index-routes-human-profile";
+import { registerAppSignInRoutes } from "./index-routes-app-sign-in";
 import { registerIndexRoutesHumanAvatar } from "./index-routes-human-avatar";
 import { registerIndexRoutesMachineDaemonAdmission } from "./index-routes-machine-daemon-admission";
 import { registerIndexRoutesAppleBilling } from "./index-routes-apple-billing";
@@ -96,6 +97,8 @@ registerRequestBodyLimit(app);
 registerClientCompatibilityGate(app);
 registerIndexRoutesPostgresReadiness(app);
 registerIndexRoutesAdmin(app);
+// Before the sign-in library's own /api/auth/* routes.
+registerAppSignInRoutes(app);
 registerIndexRoutesAuthSpace(app);
 registerIndexRoutesMachineDaemonAdmission(app);
 registerIndexRoutesBilling(app);

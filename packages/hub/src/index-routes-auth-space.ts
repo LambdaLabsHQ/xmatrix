@@ -37,7 +37,6 @@ import { registerIndexRoutesAuthSpaceInstances } from "./index-routes-auth-space
 import { registerIndexRoutesAuthSpaceManagement } from "./index-routes-auth-space-management";
 import { handoffGitHubConnectAuthorization, githubConnectReturnUrl, isGitHubConnectState } from "./github-connect-authorization";
 import { registerMachineExecutionRoutes } from "./index-routes-machine-executions";
-import { registerAppSignInRoutes } from "./index-routes-app-sign-in";
 import { registerReplyRecoveryRoutes } from "./index-routes-reply-recovery";
 import { wakeAgentLaunchCoordinator } from "./agent-launch-coordinator-wake";
 import { connectionUseRefused, getAppConnection } from "./apps";
@@ -114,7 +113,6 @@ function machineObservations(c: Context<{ Bindings: Env }>, body: Parameters<typ
 }
 
 export function registerIndexRoutesAuthSpace(app: Hono<{ Bindings: Env }>): void {
-  registerAppSignInRoutes(app);
   registerMachineExecutionRoutes(app);
   registerReplyRecoveryRoutes(app);
   app.get("/", (c) => {
