@@ -59,6 +59,8 @@ OAuth callbacks whose state cannot recover a per-flow error URL return to the
 deployment's login page. Error redirects are failed callback metrics, and Google
 session creation requires an issued session cookie. See
 [OAuth callback recovery](../operations/oauth-callback-recovery.md).
+The signed OAuth state cookie shares the server state's ten-minute lifetime;
+missing, mismatched, replayed and expired state still refuse the callback.
 
 Connector OAuth checks current target-Space owner/admin authority both before
 starting consent and before exchanging a retained signed state. The credential
