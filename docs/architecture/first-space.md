@@ -65,7 +65,7 @@ is how to connect one.
   display locale for the Space, else the browser's first language; any `zh` tag
   gets Chinese (`onboardingLocale`). The Hub writes the conversation name and
   both steps in that language, and the Web draws the first ten minutes (the
-  steps, the three starters, Bring them in, empty Space and Agents, the download
+  steps, the starters, Bring them in, empty Space and Agents, the download
   card) from `apps/web/src/lib/onboarding-copy.ts`. The rest of the app is
   English; a client that posts no body gets English.
 

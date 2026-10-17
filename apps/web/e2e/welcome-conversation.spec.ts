@@ -108,10 +108,10 @@ test.describe("desktop", () => {
           instance("instance-claude-3", "3", "idle", "2026-01-01T00:00:01.000Z")] },
     };
     const agentsIn = await welcomeWithAgentIn(page, { harness: "claude", channel: { memberPresence } });
-    await agentsIn.getByRole("button", { name: /Show me how to hand you work/u }).click({ timeout: 20_000 });
+    await agentsIn.getByRole("button", { name: /Plan something with me/u }).click({ timeout: 20_000 });
     // The working one first; one whose wake failed would not act on it.
     await expect.poll(async () => (await fixtureRequestBodies(page, "send")).map((sent) => (sent as { body?: string }).body))
-      .toEqual(["@claude:3 Read https://xmatrix.sh/start.md and write a page on how I should hand you work through xMatrix."]);
+      .toEqual(["@claude:3 Help me plan something I'm working on, and keep the plan in a page as we go."]);
   });
 });
 

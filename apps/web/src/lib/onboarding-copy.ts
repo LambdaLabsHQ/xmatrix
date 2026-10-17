@@ -51,17 +51,15 @@ const en = {
   copy: (copied: boolean): string => copied ? "Copied" : "Copy",
   agentsIn: (names: string, one: boolean) =>
     `${names} ${one ? "is" : "are"} in. Mention ${one ? "it" : "one"} here to give ${one ? "it" : "them"} work, or start with one of these:`,
-  /* The first task should end in a page, which is where xMatrix makes sense;
-     each starter asks for one. The last names the canonical runbook on
-     purpose: an agent asked to explain xMatrix from memory invents an answer. */
+  /* The first task should end in a page about the person's own work, which is
+     where xMatrix makes sense; each starter asks for one. A page explaining
+     xMatrix itself kept people learning the tool instead of using it. */
   starting: (name?: string) => name ? `Starting @${name}…` : "Starting an agent…",
   starters: [
     { id: "project", title: "Write a page about my project", detail: "What it is, where it stands and what is still open.",
       message: "Write a page about a project I'm working on: what it is, where it stands and what is still open. Ask me which project first." },
     { id: "plan", title: "Plan something with me", detail: "The plan stays in a page as we go.",
       message: "Help me plan something I'm working on, and keep the plan in a page as we go." },
-    { id: "xmatrix", title: "Show me how to hand you work", detail: "Reads xmatrix.sh/start.md and writes it up as a page.",
-      message: "Read https://xmatrix.sh/start.md and write a page on how I should hand you work through xMatrix." },
   ] as Starter[],
   installedTitle: "Your installed agents",
   installedBody: "Turn them on to summon them. Choose a working folder when you send the first task.",
@@ -159,8 +157,6 @@ const zh: OnboardingCopy = {
       message: "给我正在做的一个项目写一个页面：它是什么、做到哪了、还有什么没做完。先问我是哪个项目。" },
     { id: "plan", title: "和我一起做个计划", detail: "边聊边把计划写进页面。",
       message: "帮我规划一件正在做的事，边聊边把计划写进一个页面。" },
-    { id: "xmatrix", title: "教我怎么给你派活", detail: "读 xmatrix.sh/start.md，整理成一个页面。",
-      message: "读 https://xmatrix.sh/start.md，写一个页面，讲我该怎么通过 xMatrix 给你派活。" },
   ],
   installedTitle: "你已安装的 Agent",
   installedBody: "开启后就能召唤它们。发第一个任务时再选工作目录。",
