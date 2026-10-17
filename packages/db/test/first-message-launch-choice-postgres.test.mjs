@@ -339,6 +339,11 @@ integration("a first message no request finished summoning stays due for its coo
   const due = () => database.transaction({ requestId: "due", operation: "test.due", placement },
     tx => readDueFirstMessageSummons(tx, channel));
   try {
+    await client.query(`INSERT INTO control.postgres_shards (shard_id,state,capacity_class,created_at,updated_at)
+      VALUES ('shard-0','active','test',now(),now()) ON CONFLICT DO NOTHING`);
+    await client.query(`INSERT INTO control.space_placement
+      (space_id,shard_id,placement_epoch,state,target_shard_id,plan_class,created_at,updated_at)
+      VALUES ($1,'shard-0',1,'active',NULL,'test',now(),now())`, [space]);
     await row("decided", { choice: "start", harness: "claude" });
     await row("undecided");
     await row("just-decided", { choice: "start", harness: "codex", since: 1 });
