@@ -4,6 +4,7 @@ import { AnimatedIcon } from "@/components/ui/animated-icon";
 import { Suspense, useEffect, useRef, useState, type FormEvent } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
+import Image from "next/image";
 import {
   ArrowRight,
   Loader2,
@@ -41,7 +42,7 @@ import {
 } from "@/lib/native-login-client";
 import { errorFromResponse, isTransientFailure, xmatrixRawResponse, XMatrixApiError, unexpectedResponse } from "@/lib/query/api-client";
 import { isAbort, userErrorMessage } from "@/lib/user-facing-error";
-import { isTransientAuthSessionError } from "@/lib/auth-client";
+import { isTransientAuthSessionError, type SocialSignInProvider } from "@/lib/auth-client";
 
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
 const LOGIN_CODE_LENGTH = 6;
@@ -118,7 +119,7 @@ function LoginContent() {
     signInWithOtp,
     verifyOtp,
     verifySecondFactor,
-    signInWithGoogle,
+    signInWithSocial,
     setSessionFromAuthResponse,
     user,
     session,
@@ -127,7 +128,7 @@ function LoginContent() {
 
   const [email, setEmail] = useState("");
   const [otp, setOtp] = useState("");
-  /* A password or Google sign-in that waits on the authenticator code arrives with `two_factor`. */
+  /* A password or social sign-in that waits on the authenticator code arrives with `two_factor`. */
   const [step, setStep] = useState<"email" | "otp" | "two_factor">(
     () => searchParams.get("two_factor") ? "two_factor" : "email");
   const [secondCode, setSecondCode] = useState("");
@@ -136,7 +137,7 @@ function LoginContent() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState(false);
-  const [googleLoading, setGoogleLoading] = useState(false);
+  const [socialLoading, setSocialLoading] = useState<SocialSignInProvider | null>(null);
   /* The last code check got no answer: the code is unspent and can be sent again. */
   const [codeUnanswered, setCodeUnanswered] = useState(false);
   const [resendAt, setResendAt] = useState(0);
@@ -178,7 +179,7 @@ function LoginContent() {
     cliError ||
     error ||
     authError ||
-    (oauthError ? "Google sign-in did not complete. Try again, or use a login code." : "");
+    (oauthError ? "Sign-in did not complete. Try again, or use a login code." : "");
   const cliMode = Boolean(deviceCode || legacyCliContext);
   const awaitingDeviceConfirmation = Boolean(
     session?.access_token && deviceCode && userCode && !deviceApprovalConfirmed && !cliComplete,
@@ -561,16 +562,17 @@ function LoginContent() {
     }
   }
 
-  async function handleGoogleLogin() {
+  async function handleSocialLogin(provider: SocialSignInProvider) {
     setError("");
-    setGoogleLoading(true);
+    setSocialLoading(provider);
     try {
-      await signInWithGoogle(
+      await signInWithSocial(
+        provider,
         cliMode ? window.location.href : nextPath ? `${window.location.origin}${nextPath}` : undefined,
       );
     } catch (nextError) {
       setError(formatLoginError(nextError));
-      setGoogleLoading(false);
+      setSocialLoading(null);
     }
   }
 
@@ -755,9 +757,13 @@ function LoginContent() {
             </AuthRequest>
           ) : null}
           <div className="auth-stack">
-            <AuthSecondaryButton onClick={handleGoogleLogin} disabled={loading || googleLoading}>
-              {googleLoading ? <Spinner /> : <GoogleIcon className="size-[18px]" />}
+            <AuthSecondaryButton onClick={() => handleSocialLogin("google")} disabled={loading || socialLoading !== null}>
+              {socialLoading === "google" ? <Spinner /> : <GoogleIcon className="size-[18px]" />}
               Continue with Google
+            </AuthSecondaryButton>
+            <AuthSecondaryButton onClick={() => handleSocialLogin("github")} disabled={loading || socialLoading !== null}>
+              {socialLoading === "github" ? <Spinner /> : <Image src="/app-connectors/github.svg" alt="" width={18} height={18} />}
+              Continue with GitHub
             </AuthSecondaryButton>
             <AuthDivider />
             <form onSubmit={handleSendEmail} className="auth-stack">
@@ -779,7 +785,7 @@ function LoginContent() {
                 className="auth-input"
               />
               <AuthError>{formError}</AuthError>
-              <AuthPrimaryButton type="submit" disabled={loading || googleLoading}>
+              <AuthPrimaryButton type="submit" disabled={loading || socialLoading !== null}>
                 {loading ? <Spinner /> : null}
                 {loading ? "Sending code…" : "Continue with email"}
               </AuthPrimaryButton>
