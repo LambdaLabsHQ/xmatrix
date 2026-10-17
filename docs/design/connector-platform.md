@@ -874,9 +874,15 @@ sees there, so each provider narrows delivery to what one Space may read:
   after the claim releases it; that event, or `tokens_revoked` naming bot
   tokens, disconnects the bindings made before it (credentials kept). A
   Connect after the event is not retired by a delayed or replayed delivery,
-  and a delivery without `event_time` retires nothing. Two current bindings
-  that predate claims route nowhere until one disconnects; the earliest of them
-  holds the claim. The Slack app must subscribe to both events.
+  and a delivery without `event_time` retires nothing. The claim, not the
+  number of current bindings, decides use: only the claiming Space's binding
+  resolves the bot for actions and receives events, and an event is delivered
+  only when Slack's signed `event_time` is at or after the claim (routing, each
+  subscription route, the final append and Automations all check it), so
+  content from before an uninstall never reaches the next claimant. A binding
+  of an unclaimed workspace is no Space's. Existing bindings were backfilled,
+  the earliest of a shared workspace holding it. The Slack app must subscribe
+  to both events.
   The bot belongs to its binding, not to the stored credentials: regenerating a
   Hub-minted field (the ingress key) keeps the binding, so a shared workspace
   stays refused; any other manual edit unbinds the grant and drops its values

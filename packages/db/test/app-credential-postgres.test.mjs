@@ -373,8 +373,10 @@ const oauthInput = (space, installationId = 'T1') => ({ requestId: crypto.random
   providerId: 'slack', actorUserId: 'owner', fields: { botToken: `fixture-${installationId}` },
   policy: oauthPolicy, oauthInstallation: { appClientId: 'app-1', installationId },
   initialize: { ingressKey: `fixture-key-${installationId}` }, at });
+// Slack dates each event; one well after every fixture's Connect.
+const later = '2100-01-01T00:00:00.000Z';
 const readOAuth = async (apps, extra = {}) => (await apps.oauthEventConnections({ requestId: crypto.randomUUID(),
-  providerId: 'slack', appClientId: 'app-1', installationId: 'T1', limit: 50, ...extra }))
+  providerId: 'slack', appClientId: 'app-1', installationId: 'T1', limit: 50, eventAt: later, ...extra }))
   .map(({ connectionId, spaceId }) => ({ connectionId, spaceId }));
 
 async function useVercel(sql, space) {
@@ -467,7 +469,11 @@ integration('OAuth installation binding is atomic with credentials and invalidat
     assert.deepEqual(await readOAuth(apps), expected);
     // Each route names the credential version its binding is for, so a delivery can be fenced to it.
     assert.deepEqual((await apps.oauthEventConnections({ requestId: crypto.randomUUID(), providerId: 'slack',
-      appClientId: 'app-1', installationId: 'T1', limit: 50 })).map((row) => row.credentialVersion), [1]);
+      appClientId: 'app-1', installationId: 'T1', limit: 50, eventAt: later })).map((row) => row.credentialVersion), [1]);
+    // A Slack event is fenced to the claim current when Slack dates it: undated or older, it routes nowhere.
+    assert.deepEqual(await readOAuth(apps, { eventAt: undefined }), []);
+    assert.deepEqual(await readOAuth(apps, { eventAt: '2026-10-01T00:00:00.000Z' }), []);
+    assert.deepEqual(await readOAuth(apps, { eventAt: at }), expected);
     const read = () => credentials.resolve({ requestId: crypto.randomUUID(), spaceId: space, providerId: 'slack' });
     const before = await read();
     await assert.rejects(credentials.put({ ...oauthInput(space, 'T2'), fields: { invalidField: 'bad' } }), /Unsupported/);
@@ -541,24 +547,29 @@ integration('OAuth routing scopes by provider, application, workspace and curren
       await sql("DELETE FROM data.app_slack_workspace_claims WHERE app_client_id='app-1'");
       await otherCredentials.put(oauthInput(other));
       assert.deepEqual(await readOAuth(apps), [{ connectionId: `${other}:slack`, spaceId: other }]);
-      // Two current bindings predate that rule: which Space should read it is unknown, so neither does,
-      // and neither acts with the shared bot (its credential read says so).
+      // Two current bindings predate claims: the claimant alone reads the
+      // workspace and acts with its bot; the other binding, however current, neither.
       await sql("UPDATE data.app_connector_connections SET status='configured' WHERE space_id=$1", [space]);
-      assert.deepEqual(await readOAuth(apps), []);
+      assert.deepEqual(await readOAuth(apps), [{ connectionId: `${other}:slack`, spaceId: other }]);
       const shared = async (repository, id) => (await repository.resolve({ requestId: crypto.randomUUID(), spaceId: id,
         providerId: 'slack' })).oauthGrant.workspaceShared;
-      assert.deepEqual([await shared(credentials, space), await shared(otherCredentials, other)], [true, true]);
+      assert.deepEqual([await shared(credentials, space), await shared(otherCredentials, other)], [true, false]);
       // Regenerating the ingress key cannot launder the shared bot into an unbound manual token.
-      await otherCredentials.put({ ...oauthInput(other), oauthInstallation: undefined, initialize: undefined,
+      await credentials.put({ ...oauthInput(space), oauthInstallation: undefined, initialize: undefined,
         fields: { ingressKey: 'regenerated-key' } });
-      assert.equal(await shared(otherCredentials, other), true);
+      assert.equal(await shared(credentials, space), true);
+      // An unclaimed workspace (released by an uninstall) is no binding's: none reads it or uses its bot.
+      await sql("DELETE FROM data.app_slack_workspace_claims WHERE app_client_id='app-1'");
+      assert.deepEqual(await readOAuth(apps), []);
+      assert.deepEqual([await shared(credentials, space), await shared(otherCredentials, other)], [true, true]);
+      await otherSql(`INSERT INTO data.app_slack_workspace_claims (app_client_id,installation_id,space_id,claimed_at)
+        VALUES ('app-1','T1',$1,$2)`, [other, at]);
       // A binding made before grant generations existed is still a binding of the workspace.
       await otherSql('UPDATE data.app_connector_oauth_installations SET grant_generation=NULL WHERE space_id=$1', [other]);
-      assert.deepEqual([await shared(credentials, space), await shared(otherCredentials, other)], [true, true]);
+      assert.deepEqual([await shared(credentials, space), await shared(otherCredentials, other)], [true, false]);
       await assert.rejects(readOAuth(apps, { limit: 1 }), /exceeds its bound/, 'overflow fails closed, never partially routes');
       await sql("UPDATE data.app_connector_connections SET status='disconnected' WHERE space_id=$1", [space]);
       assert.deepEqual(await readOAuth(apps), [{ connectionId: `${other}:slack`, spaceId: other }]);
-      assert.equal(await shared(otherCredentials, other), false);
       await otherSql('UPDATE data.app_connector_credentials SET version=version+1 WHERE space_id=$1', [other]);
       assert.deepEqual(await readOAuth(apps), [], 'mismatched credential versions never route');
   });
@@ -627,8 +638,15 @@ integration('subscription route reads recheck OAuth bindings after the initial i
       source_ref,features_json,version,created_by,created_at,updated_at) VALUES
       ($2||':r1',$2||':slack',$2,$2||':a','repository','slack:c1','["messages"]',1,'owner',$1,$1)`, [at, space]);
     const routes = () => apps.connectorEventRoutes({ requestId: crypto.randomUUID(), connectionId: `${space}:slack`,
-      sourceRef: 'slack:c1', limit: 10, oauthBinding: { providerId: 'slack', appClientId: 'app-1', installationId: 'T1' } });
+      sourceRef: 'slack:c1', limit: 10, oauthBinding: { providerId: 'slack', appClientId: 'app-1', installationId: 'T1', eventAt } });
+    let eventAt = later;
     assert.equal((await routes()).length, 1);
+    // Routes keep the claim fence: an event dated before the claim, or undated, reaches no subscription.
+    eventAt = '2026-10-01T00:00:00.000Z';
+    assert.deepEqual(await routes(), []);
+    eventAt = undefined;
+    assert.deepEqual(await routes(), []);
+    eventAt = later;
     await credentials.put(oauthInput(space, 'T2'));
     assert.deepEqual(await routes(), [], 'old workspace events cannot reach newly authorized workspace subscriptions');
   });

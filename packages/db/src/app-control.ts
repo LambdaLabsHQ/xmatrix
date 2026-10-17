@@ -299,6 +299,16 @@ export const SLACK_WORKSPACE_HELD_SQL = (binding: string, connection: string, cr
     JOIN data.app_connector_credentials ${credential} ON ${credential}.connection_id=${binding}.connection_id
       AND ${credential}.space_id=${binding}.space_id AND ${credential}.version=${binding}.credential_version`;
 
+/**
+ * Binding `binding` speaks for its Slack workspace: its Space holds the
+ * workspace's claim (claimSlackWorkspace) and, when `eventAt` is given, held it
+ * by then, so content from before an uninstall never reaches a later claimant.
+ */
+export const SLACK_WORKSPACE_OWNED_SQL = (binding: string, eventAt?: string) => `EXISTS (SELECT 1
+    FROM data.app_slack_workspace_claims w WHERE w.app_client_id=${binding}.app_client_id
+      AND w.installation_id=${binding}.installation_id AND w.space_id=${binding}.space_id${eventAt
+        ? ` AND ${eventAt} IS NOT NULL AND w.claimed_at<=${eventAt}` : ""})`;
+
 /** A connection `c` linked to GitHub App installation `$1`, by its one id or its list. */
 const GITHUB_INSTALLATION_LINKED_SQL = `(c.metadata_json->>'installationId'=$1 OR EXISTS (
             SELECT 1 FROM jsonb_array_elements_text(CASE
@@ -531,7 +541,7 @@ export class PostgresAppRepository {
   /** The Hub has authenticated the application's signature and workspace id.
    * Only current OAuth grants from that application may receive its events. */
   async oauthEventConnections(input: { requestId: string; providerId: string; appClientId: string;
-    installationId: string; limit: number }) {
+    installationId: string; limit: number; /** Slack's own time for the event; a Slack event without one routes nowhere. */ eventAt?: string }) {
     const providerId = text(input.providerId, "providerId", 80);
     const appClientId = text(input.appClientId, "appClientId", 256);
     const installationId = text(input.installationId, "installationId", 128);
@@ -539,21 +549,22 @@ export class PostgresAppRepository {
         input.limit < 1 || input.limit > 100) throw new AppControlError("invalid_app_request", 400, "Invalid OAuth event route");
     return this.database.transaction({ requestId: text(input.requestId, "requestId", 200),
       operation: "app.oauth-event-connections" }, async (tx) => {
-      const rows = await tx.query<QueryResultRow>({ name: "app_oauth_event_connections_v2", text: `SELECT
-        i.connection_id,i.space_id,i.credential_version,i.grant_generation,c.status FROM data.app_connector_oauth_installations i
+      const rows = await tx.query<QueryResultRow>({ name: "app_oauth_event_connections_v3", text: `SELECT
+        i.connection_id,i.space_id,i.credential_version,i.grant_generation,c.status,
+        (i.provider_id<>'slack' OR ${SLACK_WORKSPACE_OWNED_SQL("i", "$5::timestamptz")}) AS owned
+        FROM data.app_connector_oauth_installations i
         JOIN data.app_connector_connections c ON ${SLACK_WORKSPACE_HELD_SQL("i", "c", "k")}
         WHERE i.provider_id=$1 AND i.app_client_id=$2 AND i.installation_id=$3
           AND NOT EXISTS (SELECT 1 FROM data.space_deletions d WHERE d.space_id=i.space_id)
-        ORDER BY i.connection_id LIMIT $4`, values: [providerId, appClientId, installationId, input.limit + 1],
-      maxRows: input.limit + 1 });
+        ORDER BY i.connection_id LIMIT $4`, values: [providerId, appClientId, installationId, input.limit + 1,
+        input.eventAt === undefined ? null : iso(input.eventAt)], maxRows: input.limit + 1 });
       if (rows.length > input.limit) throw new AppControlError("too_many_installations", 503,
         "OAuth installation routing exceeds its bound", true);
-      // A Slack workspace speaks for one Space (claimSlackWorkspace),
-      // held through a failed check until a disconnect. Two holding bindings
-      // predate that rule; which Space should read it is not known, so neither
-      // does until one disconnects. Only a configured connection is delivered to.
-      if (providerId === "slack" && rows.length > 1) return [];
-      return rows.filter(row => row.status === "configured").map(row => ({ connectionId: String(row.connection_id), spaceId: String(row.space_id),
+      // A Slack workspace speaks for the one Space that claims it
+      // (claimSlackWorkspace), and only for what Slack dates from that claim on:
+      // another Space's binding, however current, and an event from before an
+      // uninstall get nothing. Only a configured connection is delivered to.
+      return rows.filter(row => row.owned === true && row.status === "configured").map(row => ({ connectionId: String(row.connection_id), spaceId: String(row.space_id),
         credentialVersion: Number(row.credential_version),
         grantGeneration: row.grant_generation === null ? null : String(row.grant_generation) }));
     });
@@ -670,7 +681,8 @@ export class PostgresAppRepository {
 
   /** Subscription authority, read only after authenticating the provider delivery. */
   async connectorEventRoutes(input: { requestId: string; connectionId: string; sourceRef: string;
-    limit: number; oauthBinding?: { providerId: string; appClientId: string; installationId: string; credentialVersion?: number; grantGeneration?: string };
+    limit: number; oauthBinding?: { providerId: string; appClientId: string; installationId: string; credentialVersion?: number; grantGeneration?: string;
+      /** Slack's own time for the event, fenced to the workspace's current claim. */ eventAt?: string };
     googleChatBinding?: { appIdentity: string; chatSpace: string; grantGeneration: string };
     feishuBinding?: { appIdentity: string; chatSpace: string; grantGeneration: string };
     teamsBinding?: { appIdentity: string; chatSpace: string; grantGeneration: string };
@@ -701,7 +713,7 @@ export class PostgresAppRepository {
     }
     return this.database.transaction({ requestId: text(input.requestId, "requestId", 200),
       operation: "app.connector-event-routes" }, async (tx) => {
-      const rows = await tx.query<QueryResultRow>({ name: "app_connector_event_routes_v10", text: `SELECT
+      const rows = await tx.query<QueryResultRow>({ name: "app_connector_event_routes_v11", text: `SELECT
         r.space_id,r.channel_id,r.created_by,r.features_json
         FROM data.app_source_relations r JOIN data.app_connector_connections c
           ON c.connection_id=r.connection_id AND c.space_id=r.space_id
@@ -714,7 +726,8 @@ export class PostgresAppRepository {
             WHERE i.connection_id=c.connection_id AND i.space_id=c.space_id AND i.provider_id=c.provider_id
               AND i.provider_id=$4 AND i.app_client_id=$5 AND i.installation_id=$6
               AND ($7::bigint IS NULL OR i.credential_version=$7)
-              AND ($8::uuid IS NULL OR i.grant_generation=$8::uuid)))
+              AND ($8::uuid IS NULL OR i.grant_generation=$8::uuid)
+              AND (i.provider_id<>'slack' OR ${SLACK_WORKSPACE_OWNED_SQL("i", "$16::timestamptz")})))
           AND ($9::text IS NULL OR ($12='googlechat' AND EXISTS (SELECT 1 FROM data.app_googlechat_room_bindings g
             WHERE g.connection_id=c.connection_id AND g.space_id=c.space_id AND c.provider_id='googlechat'
               AND g.active AND g.app_identity=$9 AND g.chat_space=$10 AND g.grant_generation=$11::uuid
@@ -746,7 +759,8 @@ export class PostgresAppRepository {
         ORDER BY r.channel_id LIMIT $3`, values: [connectionId, sourceRef, bounded ? limit + 1 : limit, binding?.providerId ?? null,
           binding?.appClientId ?? null, binding?.installationId ?? null, binding?.credentialVersion ?? null,
           binding?.grantGeneration ?? null, chat?.appIdentity ?? null, chat?.chatSpace ?? null,
-          chat?.grantGeneration ?? null, roomProvider, wecom?.appIdentity ?? null, wecom?.companyDigest ?? null, wecom?.grantGeneration ?? null], maxRows: bounded ? limit + 1 : limit });
+          chat?.grantGeneration ?? null, roomProvider, wecom?.appIdentity ?? null, wecom?.companyDigest ?? null, wecom?.grantGeneration ?? null,
+          binding?.eventAt === undefined ? null : iso(binding.eventAt)], maxRows: bounded ? limit + 1 : limit });
       if (bounded && rows.length > limit) throw new AppControlError("too_many_routes", 503,
         chat ? "Google Chat event routing exceeds its bound" : "Sentry event routing exceeds its bound", true);
       return rows.map((row) => ({ spaceId: String(row.space_id), channelId: String(row.channel_id),

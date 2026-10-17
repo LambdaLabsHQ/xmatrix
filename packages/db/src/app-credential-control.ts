@@ -2,7 +2,7 @@ import type { QueryResultRow } from "pg";
 import { SENTRY_PUBLIC_INTEGRATION_SCOPES, utf8ByteLength } from "@xmatrix/protocol";
 
 import type { AuthorityDatabase, DatabaseTransaction } from "./contracts.js";
-import { AppControlError, SLACK_WORKSPACE_HELD_SQL, SLACK_WORKSPACE_TAKEN } from "./app-control.js";
+import { AppControlError, SLACK_WORKSPACE_HELD_SQL, SLACK_WORKSPACE_OWNED_SQL, SLACK_WORKSPACE_TAKEN } from "./app-control.js";
 import { appRequestText as text } from "./app-request-text.js";
 import { decryptSecretValue, encryptSecretValue } from "./secret-value-control.js";
 import { lockDiscordInstallation } from "./discord-installation-lifecycle.js";
@@ -64,9 +64,9 @@ export interface ResolvedAppCredentials {
    * when one is current. Its generation changes with every Connect (null for
    * a binding made before generations existed, which any Connect replaces),
    * so with the credential version it names this grant exactly.
-   * `workspaceShared` says another Space's current binding holds the same
-   * Slack workspace (bindings made before one Space per workspace was
-   * enforced), whose bot this grant must then not use.
+   * `workspaceShared` says this Space does not hold the Slack workspace's
+   * claim (another Space does, or none since an uninstall), so its bot, shared
+   * by every binding of the workspace, this grant must not use.
    */
   oauthGrant?: { grantGeneration: string | null; workspaceShared: boolean };
 }
@@ -472,13 +472,10 @@ export class PostgresAppCredentialRepository {
     return this.database.transaction({ requestId: text(input.requestId, "requestId", 200),
       operation: "app.credentials.resolve" }, async (tx) => {
       if (actorUserId !== null) await requireSpaceAdmin(tx, spaceId, actorUserId);
-      const rows = await tx.query<QueryResultRow>({ name: "app_credential_resolve_v2", text: `SELECT
+      const rows = await tx.query<QueryResultRow>({ name: "app_credential_resolve_v3", text: `SELECT
         k.*,c.status,c.created_by,c.provider_id,c.version AS connection_version,c.search_rank_sequence,
-        i.connection_id AS bound_connection_id,i.grant_generation,(i.provider_id='slack' AND EXISTS (SELECT 1 FROM data.app_connector_oauth_installations o
-          JOIN data.app_connector_connections oc ON ${SLACK_WORKSPACE_HELD_SQL("o", "oc", "ok")}
-          WHERE o.provider_id='slack' AND o.app_client_id=i.app_client_id AND o.installation_id=i.installation_id
-            AND o.connection_id<>i.connection_id
-            AND NOT EXISTS (SELECT 1 FROM data.space_deletions d WHERE d.space_id=o.space_id))) AS workspace_shared
+        i.connection_id AS bound_connection_id,i.grant_generation,
+        (i.provider_id='slack' AND NOT ${SLACK_WORKSPACE_OWNED_SQL("i")}) AS workspace_shared
         FROM data.app_connector_credentials k
         JOIN data.app_connector_connections c ON c.connection_id=k.connection_id AND c.space_id=k.space_id
         LEFT JOIN data.app_connector_oauth_installations i ON i.connection_id=k.connection_id AND i.space_id=k.space_id

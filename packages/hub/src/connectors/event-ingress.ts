@@ -88,7 +88,13 @@ export async function handleAppConnectorDelivery(input: { env: Env; request: Req
   if (typeof installationId !== "string" || !/^[A-Za-z0-9_-]{1,128}$/u.test(installationId)) {
     return Response.json({ error: "Missing provider workspace" }, { status: 400 });
   }
-  const binding = { providerId: provider.id, appClientId: client.clientId, installationId };
+  // A Slack workspace's bot changes hands only through an uninstall, so each
+  // delivery is fenced by Slack's own (signed) event time to the claim current
+  // then: content from before an uninstall never reaches the next claimant.
+  const eventSeconds = payload.event_time;
+  const eventAt = provider.id === "slack" && typeof eventSeconds === "number" && Number.isSafeInteger(eventSeconds) && eventSeconds > 0
+    ? new Date(eventSeconds * 1000).toISOString() : undefined;
+  const binding = { providerId: provider.id, appClientId: client.clientId, installationId, ...(eventAt ? { eventAt } : {}) };
   const query = () => apps.oauthEventConnections({ requestId: crypto.randomUUID(), ...binding, limit: MAX_OAUTH_CONNECTIONS });
   const connections = await query();
   const visible = dependencies.linearVisible ?? linearEventVisible;
@@ -105,7 +111,8 @@ export async function handleAppConnectorDelivery(input: { env: Env; request: Req
       const current = async () => (await query()).some(candidate => candidate.connectionId === connection.connectionId &&
         (!proof || (candidate.credentialVersion === proof.credentialVersion &&
           candidate.grantGeneration === proof.grantGeneration)));
-      const append = proof ? currentConnectorAppend(dependencies.append, current) : dependencies.append;
+      // The final append rechecks the grant (Linear) or the workspace's claim (Slack) it was routed by.
+      const append = proof || provider.id === "slack" ? currentConnectorAppend(dependencies.append, current) : dependencies.append;
       delivered += await deliverEvent(env, apps, append, provider.id, connection.connectionId, event, proof
         ? { ...binding, credentialVersion: proof.credentialVersion, ...(proof.grantGeneration ? { grantGeneration: proof.grantGeneration } : {}) }
         : binding);
@@ -164,7 +171,7 @@ export async function deliverEvent(
   providerId: string,
   connectionId: string,
   event: ConnectorEvent,
-  oauthBinding?: { providerId: string; appClientId: string; installationId: string; credentialVersion?: number; grantGeneration?: string },
+  oauthBinding?: { providerId: string; appClientId: string; installationId: string; credentialVersion?: number; grantGeneration?: string; eventAt?: string },
   googleChatBinding?: { appIdentity: string; chatSpace: string; grantGeneration: string },
   feishuBinding?: { appIdentity: string; chatSpace: string; grantGeneration: string },
   telegramBinding?: { appIdentity: string; chatSpace: string; grantGeneration: string },

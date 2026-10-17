@@ -41,7 +41,7 @@ function fixture(bindings = [{ connectionId: 'space-a:slack', spaceId: 'space-a'
     async linearVisible(_env, spaceId, event) { visibility.push({ spaceId, subject: event.subject }); return readable(spaceId); },
   } };
 }
-const message = (team = 'T1') => ({ type: 'event_callback', team_id: team, event_id: 'Ev1',
+const message = (team = 'T1') => ({ type: 'event_callback', team_id: team, event_id: 'Ev1', event_time: 1760000000,
   event: { type: 'message', channel: 'C1', user: 'U1', text: 'hello', ts: '1.2' } });
 const send = async (provider, payload, f, options = {}) => handleAppConnectorDelivery({
   env: options.env ?? env, provider: connectorProvider(provider),
@@ -64,6 +64,8 @@ test('Slack routes only its signed workspace through current OAuth application b
   assert.deepEqual(f.automations.map(t => t.spaceId), ['space-a', 'space-b']);
   assert.ok(f.queries.every(q => q.providerId === 'slack' && q.appClientId === 'slack-app' && q.installationId === 'T1'));
   assert.ok(f.routes.every(q => q.oauthBinding.installationId === 'T1'));
+  // Slack's signed event time fences every lookup to the workspace claim current then.
+  assert.ok([...f.queries, ...f.routes.map(q => q.oauthBinding)].every(q => q.eventAt === '2025-10-09T08:53:20.000Z'));
   assert.ok(f.appends.every(a => !a.channelId.includes('attacker')));
   await send('slack', message(), f);
   assert.equal(f.appends[0].commandId, f.appends[2].commandId, 'redelivery uses the existing append dedupe key');
