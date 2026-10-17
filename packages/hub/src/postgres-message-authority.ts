@@ -622,6 +622,17 @@ export async function postgresMessageReceipt(
     runProof: input.runProof, expectedBodyHash: input.expectedBodyHash });
 }
 
+/** Whether this exact message identity was written, including a later tombstone. */
+export async function postgresMessageExists(
+  env: Env,
+  input: PostgresMessageQueryInput & { messageId: string },
+  dependencies: PostgresMessageDependencies = {},
+): Promise<boolean> {
+  const context = await postgresMessageQueryContextFromDependencies(env, input, "message-exists", dependencies);
+  return context.messages.exists({ requestId: context.requestId, spaceId: context.spaceId,
+    channelId: context.channelId, messageId: input.messageId, principal: context.actor });
+}
+
 type PostgresMessageHistoryInput = {
   channelId: string;
   before?: string;
