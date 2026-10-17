@@ -1194,6 +1194,9 @@ export function AppsView({
       ? { tone: "success", message: providerId === "x"
         ? "X account connected. Confirm its handle below and use Add X account to authorize your other account."
         : `${name} is connected. Subscribe a channel or allow its actions below.` }
+      : outcome === "elsewhere"
+      ? { tone: "warning", message: `This ${name} workspace is already connected to another xMatrix Space. ` +
+        "Disconnect it there, or have a workspace admin remove the xMatrix app, then connect again." }
       : { tone: "warning", message: providerId === "x"
         ? "X authorization did not finish. Use Add X account to try again."
         : `${name} did not finish connecting. Try again, or paste a token under Credentials.` });
