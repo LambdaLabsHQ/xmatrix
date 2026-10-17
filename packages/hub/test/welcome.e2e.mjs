@@ -120,7 +120,7 @@ test("concurrent welcome calls converge on the same two steps", () =>
   withOwnerWorker("Margaret Hamilton", async ({ worker, token, call }) => {
     const space = await personal(call);
     await withWelcomeAgent(worker, token, space.id, async () => {
-      const results = await Promise.all([welcome(call, space.id), welcome(call, space.id)]);
+      const results = await Promise.all(Array.from({ length: 8 }, () => welcome(call, space.id)));
       for (const result of results) assert.equal(result.status, 200, JSON.stringify(result.body));
       assert.equal(results[0].body.channelId, results[1].body.channelId);
       assert.deepEqual((await steps(call, results[0].body.channelId)).map(step => step.stage),

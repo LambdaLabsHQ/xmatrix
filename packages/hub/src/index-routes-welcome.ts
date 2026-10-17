@@ -79,9 +79,11 @@ async function appendWelcomeStep(env: Env, owner: { id: string; email: string },
     const detail = await response.text().catch(() => "");
     if (response.status === 409) {
       const failure = JSON.parse(detail);
-      // Another tab can win between the read and append. A conflict alone is
-      // insufficient: confirm the exact step committed before acknowledging it.
-      if ((failure.code === "idempotency_conflict" || failure.code === "message_exists") && await written()) return;
+      // Another tab can commit after append's preflight: its different prepared
+      // timestamp also makes our sequence reservation stale. In every case,
+      // confirm the exact step committed before acknowledging that conflict.
+      if (["idempotency_conflict", "message_exists", "message_sequence_reservation_invalid"].includes(failure.code) &&
+          await written()) return;
     }
     throw new Error(`welcome ${stage} message failed (${response.status})${detail ? `: ${detail.slice(0, 200)}` : ""}`);
   }

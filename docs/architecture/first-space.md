@@ -52,6 +52,28 @@ is how to connect one.
   command and its approval, the machine's agents, the Space's registrations),
   so the conversation reopened later shows what happened, never a stale command.
 
+## Sending the setup to a computer
+
+A phone cannot run the setup command. On a phone the first step offers "Send
+to my computer", which emails the command's link to the person's own sign-in
+address, and that link continues the same setup on the computer.
+
+- `POST /api/setup-intents/:intentId/email` (Web:
+  `/api/xmatrix/setup-intents/:intentId/email`) takes no body. The Hub reads
+  the intent as its owner, so another person's or an expired intent answers
+  404, and sends to the address of the signed-in account, never one the caller
+  names. It goes through the same Cloudflare Email Sending binding as sign-in
+  codes; no third party is involved.
+- Three per person in a rolling day (`429 setup_link_email_limited`), counted
+  in the device-login broker's attempt counters, with the window carried in
+  the counter's key.
+- The link is `/connect/computer?intent=<intent id>` and carries nothing else.
+  Opened on the computer it signs the person in if needed, keeps the intent as
+  that tab's command for its Space and opens the Space, so the phone and the
+  computer show the same command and either can approve the terminal. An
+  intent that expired in the meantime (they last 30 minutes) opens the app,
+  whose empty Space shows a fresh command.
+
 ## Counting who gets through
 
 Most of bringing agents in leaves a fact in the Hub: a machine connected, an
@@ -65,6 +87,7 @@ the person's screen sees are counted on their own (`onboarding-funnel.ts`):
 | `command_shown` | the setup command is on screen |
 | `command_copied` | its copy button is pressed |
 | `download_clicked` | "Download the desktop app" is followed |
+| `link_emailed` | on a phone, the setup link is emailed to the person's computer |
 | `terminal_seen` | the terminal's sign-in request is shown for approval |
 | `approved` | the person approves it |
 | `starter_chosen` | a first task in the welcome is chosen (`starter_chosen:<id>`) |

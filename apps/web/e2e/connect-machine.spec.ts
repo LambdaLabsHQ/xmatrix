@@ -1,6 +1,6 @@
 import { expect, test } from "./fixtures";
 import {
-  E2E_DESKTOP_CONTEXT, E2E_SPACE, fixtureRequestBodies, fixtureRequests, fixtureRule, installWorkspaceStubs,
+  E2E_DESKTOP_CONTEXT, E2E_MOBILE_CONTEXT, E2E_SPACE, fixtureRequestBodies, fixtureRequests, fixtureRule, installWorkspaceStubs,
 } from "./workspace-fixtures";
 
 test.use(E2E_DESKTOP_CONTEXT);
@@ -11,7 +11,8 @@ const terminal = { userCode: "WDJB-MJHT", hostname: "daniel-laptop", platform: "
 
 type Rule = Parameters<typeof fixtureRule>[1];
 
-async function openWithIntent(page: import("@playwright/test").Page, state: Record<string, unknown>, rules: Rule[] = []) {
+async function openWithIntent(page: import("@playwright/test").Page, state: Record<string, unknown>, rules: Rule[] = [],
+  path = "/app") {
   await installWorkspaceStubs(page, { spaces: [E2E_SPACE] });
   await fixtureRule(page, { id: "intent-create", pattern: "**/api/xmatrix/setup-intents",
     responder: { kind: "static", json: { ...base, phase: "waiting" } } });
@@ -20,7 +21,7 @@ async function openWithIntent(page: import("@playwright/test").Page, state: Reco
   for (const rule of rules) await fixtureRule(page, rule);
   await fixtureRule(page, { id: "funnel", pattern: "**/api/xmatrix/observable/onboarding-step", method: "POST",
     responder: { kind: "static", status: 202, json: {} } });
-  await page.goto("/app", { waitUntil: "domcontentloaded" });
+  await page.goto(path, { waitUntil: "domcontentloaded" });
   return page.getByTestId("connect-machine");
 }
 
@@ -124,4 +125,35 @@ test("a connected machine with no agent offers the installer of whichever agent 
   await picker.getByRole("combobox", { name: "Agent to install" }).click();
   await picker.getByRole("option", { name: "Qwen Code" }).click();
   await expect(picker).toContainText("npm install -g @qwen-code/qwen-code@latest");
+});
+
+test.describe("on a phone", () => {
+  test.use(E2E_MOBILE_CONTEXT);
+
+  test("the command's link is emailed to the person's own computer, three a day", async ({ page }) => {
+    const connect = await openWithIntent(page, { ...base, phase: "waiting" }, [{
+      id: "intent-email", pattern: `**/api/xmatrix/setup-intents/${INTENT}/email`, method: "POST",
+      responder: { kind: "static", status: 429,
+        json: { error: "You've sent this link 3 times today. Try again tomorrow.", code: "setup_link_email_limited" } } }]);
+    const send = connect.getByRole("button", { name: "Send to my computer" });
+    await send.click();
+    // The day's limit says so, rather than "busy, try again".
+    await expect(connect.getByRole("alert")).toHaveText("You've sent this link 3 times today. Try again tomorrow.");
+    await fixtureRule(page, { id: "intent-email", pattern: `**/api/xmatrix/setup-intents/${INTENT}/email`, method: "POST",
+      responder: { kind: "static", json: {} } });
+    await send.click();
+    await expect(connect).toContainText("Sent to your email. Open it on your computer to continue there.");
+    await expect.poll(async () => (await counted(page)).filter((event) => event.step === "link_emailed"))
+      .toEqual([{ step: "link_emailed", surface: "space", device: "phone" }]);
+  });
+});
+
+test("the emailed link opens the same setup on the computer", async ({ page }) => {
+  // A fresh command would carry another id; the link's own must be the one shown.
+  const connect = await openWithIntent(page, { ...base, phase: "waiting" }, [{ id: "intent-create",
+    pattern: "**/api/xmatrix/setup-intents", responder: { kind: "static", json: { ...base, intentId: "f".repeat(32), phase: "waiting" } } }],
+  `/connect/computer?intent=${INTENT}`);
+  await expect(page).toHaveURL(new RegExp(`/app/${E2E_SPACE.id}`, "u"));
+  await expect(connect).toContainText(`bash -s -- --connect ${INTENT}`);
+  expect(await fixtureRequests(page, "intent-create")).toHaveLength(0);
 });
