@@ -3129,10 +3129,11 @@ async fn perform_required_fetch_and_resolve(base_repo: &Path) -> Result<Resolved
             .or_insert(0) += 1;
     }
     let mut last_error = GitCommandError::from(GitRunError::Failed);
+    let mut refetch = false;
     for attempt in 1..=GIT_FETCH_ATTEMPTS {
         // Each attempt asks origin again: the branch itself may have changed
         // or vanished since the previous attempt.
-        match confirm_origin_default_once(base_repo).await {
+        match confirm_origin_default_once(base_repo, refetch).await {
             Ok(resolved) => return Ok(resolved),
             Err(ConfirmError::Git(error)) => last_error = error,
             Err(ConfirmError::Pool(error)) => return Err(error),
@@ -3141,6 +3142,9 @@ async fn perform_required_fetch_and_resolve(base_repo: &Path) -> Result<Resolved
         if matches!(last_error.kind, GitRunError::Auth | GitRunError::NotFound) {
             break;
         }
+        // Repeating negotiation assumes the same missing delta bases exist.
+        // Download a complete pack on the next attempt, within this budget.
+        refetch |= last_error.kind == GitRunError::MissingDeltaBase;
         if attempt < GIT_FETCH_ATTEMPTS {
             // A lock clears in moments; an unreachable remote needs longer.
             let step_ms = if matches!(last_error.kind, GitRunError::Network | GitRunError::Timeout) {
@@ -3182,7 +3186,7 @@ enum ConfirmError {
     Pool(PoolError),
 }
 
-async fn confirm_origin_default_once(base_repo: &Path) -> Result<ResolvedBase, ConfirmError> {
+async fn confirm_origin_default_once(base_repo: &Path, refetch: bool) -> Result<ResolvedBase, ConfirmError> {
     let advertised = git(
         base_repo,
         &["ls-remote", "--symref", "origin", "HEAD"],
@@ -3197,11 +3201,11 @@ async fn confirm_origin_default_once(base_repo: &Path) -> Result<ResolvedBase, C
             "could not resolve origin default branch: origin advertises none with a commit",
         ))
     })?;
-    materialize_advertised_default(base_repo, &branch, &advertised_oid, confirmed_at).await
+    materialize_advertised_default(base_repo, &branch, &advertised_oid, confirmed_at, refetch).await
 }
 
 async fn materialize_advertised_default(
-    base_repo: &Path, branch: &str, advertised_oid: &str, mut confirmed_at: String,
+    base_repo: &Path, branch: &str, advertised_oid: &str, mut confirmed_at: String, refetch: bool,
 ) -> Result<ResolvedBase, ConfirmError> {
     // Only fetch and resolve this one ref: every branch-specific step below
     // reads the branch origin named just now.
@@ -3216,14 +3220,21 @@ async fn materialize_advertised_default(
     .ok();
     let previous_default = git(base_repo,
         &["symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"], GIT_LOCAL_TIMEOUT).await.ok();
-    if held.as_deref() != Some(advertised_oid) {
+    if refetch || held.as_deref() != Some(advertised_oid) {
         // The remote-tracking ref is a cache of origin, including rewritten
         // history: force only this ref; local branches and leased worktrees
         // stay untouched.
         let refspec = format!("+refs/heads/{branch}:{tracking}");
+        let mut args = vec!["fetch", "--no-tags"];
+        if refetch {
+            // Append objects without pruning the shared store or changing any
+            // local branch, index, or leased worktree. Git 2.36+ supports this.
+            args.extend(["--refetch", "--no-auto-maintenance"]);
+        }
+        args.extend(["origin", &refspec]);
         git(
             base_repo,
-            &["fetch", "--no-tags", "origin", &refspec],
+            &args,
             GIT_FETCH_TIMEOUT,
         )
         .await
@@ -4359,6 +4370,7 @@ enum GitRunError {
     Auth,
     NotFound,
     Network,
+    MissingDeltaBase,
     PathTooLong,
     DiskFull,
     PermissionDenied,
@@ -4375,6 +4387,7 @@ impl GitRunError {
             Self::Auth => "authentication failed",
             Self::NotFound => "repository not found",
             Self::Network => "could not reach the remote",
+            Self::MissingDeltaBase => "missing delta base objects",
             Self::PathTooLong => "path too long",
             Self::DiskFull => "disk full",
             Self::PermissionDenied => "permission denied",
@@ -4434,6 +4447,11 @@ fn classify_git_failure(stderr: &str) -> GitRunError {
         || lower.contains("tls connection")
     {
         return GitRunError::Network;
+    }
+    if lower.contains("unresolved deltas left after unpacking")
+        || (lower.contains("pack has ") && lower.contains(" unresolved delta"))
+    {
+        return GitRunError::MissingDeltaBase;
     }
     if lower.contains("permission denied") || lower.contains("operation not permitted") {
         return GitRunError::PermissionDenied;
