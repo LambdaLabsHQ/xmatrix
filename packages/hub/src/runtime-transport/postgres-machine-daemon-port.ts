@@ -120,6 +120,7 @@ export class PostgresMachineDaemonPort implements MachineDaemonSocketBackend {
 
   static fromEnv(input: { env: Env; terminateInstance?: (instanceId: string) => void;
     quotaChanged?: PostgresMachineDaemonPortDependencies["quotaChanged"];
+    runtimeSelf?: { cellName(): string; fetch(request: Request): Promise<Response> };
     keepAlive?: (task: Promise<unknown>) => void }): PostgresMachineDaemonPort {
     return new PostgresMachineDaemonPort({
       authenticate: (token) => verifyMachineDaemonCredential(token, input.env),
@@ -128,7 +129,9 @@ export class PostgresMachineDaemonPort implements MachineDaemonSocketBackend {
       launchUpdate: (update) => updateAgentLaunch(input.env, update),
       machineConnected: (route) => wakeMachineChannels(input.env, route),
       textTaskAnswered: (task) => channelAboutRequest(task.requestId)
-        ? channelAboutAnswered(input.env, task) : pageSummaryAnswered(input.env, task),
+        ? channelAboutAnswered(input.env, task, input.runtimeSelf ? { runtimeSelf: {
+          cellName: input.runtimeSelf.cellName(), fetch: request => input.runtimeSelf!.fetch(request),
+        } } : {}) : pageSummaryAnswered(input.env, task),
       terminateInstance: input.terminateInstance,
       quotaChanged: input.quotaChanged,
       observeAgentLaunchStage: (stage, outcome, durationMs) => recordAgentLaunchStage({
