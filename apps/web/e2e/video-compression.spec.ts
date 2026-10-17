@@ -1,7 +1,9 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { ALL_FORMATS, BufferSource, Input } from "mediabunny";
 import { expect, test, type Page } from "./fixtures";
-import { fixtureJson, fixtureRequestBodies, fixtureRule } from "./in-page-api-fixtures";
+import { fixtureJson, fixtureRequestBodies, fixtureRule, releaseFixture } from "./in-page-api-fixtures";
 import { recordedVideo } from "./recorded-video";
 import { E2E_CHANNEL, E2E_DESKTOP_CONTEXT, openGeneralChannelWithHistory } from "./workspace-fixtures";
 
@@ -19,12 +21,17 @@ async function openComposer(page: Page) {
 async function observeFiles(page: Page) {
   await page.evaluate(() => {
     const files: File[] = [];
-    Object.assign(window, { mediaFiles: files });
+    const urls: string[] = [];
+    const revoked: string[] = [];
+    Object.assign(window, { mediaFiles: files, mediaUrls: { urls, revoked } });
     const original = URL.createObjectURL.bind(URL);
     URL.createObjectURL = (blob) => {
-      if (blob instanceof File) files.push(blob);
-      return original(blob);
+      const url = original(blob);
+      if (blob instanceof File) { files.push(blob); urls.push(url); }
+      return url;
     };
+    const revoke = URL.revokeObjectURL.bind(URL);
+    URL.revokeObjectURL = (url) => { revoked.push(url); revoke(url); };
   });
 }
 
@@ -42,8 +49,8 @@ for (const portrait of [false, true]) {
   test(`video upload compresses ${portrait ? "portrait without audio" : "landscape with audio"} and sends the resulting dimensions`, async ({ page }) => {
     const width = portrait ? 720 : 1280;
     const height = portrait ? 1280 : 720;
-    const source = await recordedVideo(page, portrait ? 1080 : 1920, portrait ? 1920 : 1080, !portrait, true);
     await openComposer(page);
+    const source = await recordedVideo(page, portrait ? 1080 : 1920, portrait ? 1920 : 1080, !portrait, true);
     await observeFiles(page);
     await page.locator('input[type="file"]').setInputFiles({ name: "capture.webm", mimeType: "application/octet-stream", buffer: source });
     await expect(page.getByText(/Ready ·/)).toBeVisible();
@@ -77,43 +84,131 @@ for (const portrait of [false, true]) {
 }
 
 test("Original preserves image and video bytes above the automatic compression threshold", async ({ page }) => {
-  const video = await recordedVideo(page, 1920, 1080, true, true);
   await openComposer(page);
-  await page.getByRole("checkbox", { name: "Upload original images and videos" }).check();
-  const png = await page.evaluate(() => {
-    const canvas = document.createElement("canvas");
-    canvas.width = canvas.height = 16;
-    return canvas.toDataURL("image/png").split(",")[1];
-  });
+  const video = await recordedVideo(page, 1920, 1080, true, true);
+  const image = await paddedImage(page);
+  await observeFiles(page);
   for (const [name, mimeType, buffer] of [
-    ["original.png", "image/png", Buffer.concat([Buffer.from(png, "base64"), Buffer.alloc(1_100_000)])],
+    ["original.png", "image/png", image],
     ["original.webm", "video/webm", video],
   ] as const) {
-    await observeFiles(page);
     await page.locator('input[type="file"]').setInputFiles({ name, mimeType, buffer });
-    await expect(page.getByRole("button", { name: `Remove ${name}`, exact: true })).toBeVisible();
+    const choice = page.getByRole("checkbox", { name: `Upload original ${name}`, exact: true });
+    await expect(choice).toBeEnabled();
+    await choice.check();
+    await expect(choice).toBeEnabled();
+    await expect(choice).toBeChecked();
     const uploaded = await lastFile(page);
     expect(uploaded).toMatchObject({ name, type: mimeType, size: buffer.length });
     expect(Buffer.from(uploaded.bytes, "base64").equals(buffer)).toBe(true);
     const intents = await fixtureRequestBodies(page, "media-intent");
     expect(intents.at(-1)).toMatchObject({ contentHash: createHash("sha256").update(buffer).digest("hex"), encodedSize: buffer.length });
     await page.getByRole("button", { name: `Remove ${name}`, exact: true }).click();
+    await expect.poll(() => page.evaluate(() => {
+      const { urls, revoked } = (window as unknown as { mediaUrls: { urls: string[]; revoked: string[] } }).mediaUrls;
+      return urls.every((url) => revoked.includes(url));
+    })).toBe(true);
   }
 });
 
-test("unsupported video encoders keep the original", async ({ page }) => {
-  const source = await recordedVideo(page, 1920, 1080, false, true);
+async function paddedImage(page: Page) {
+  const png = await page.evaluate(() => {
+    const canvas = document.createElement("canvas");
+    canvas.width = canvas.height = 16;
+    return canvas.toDataURL("image/png").split(",")[1];
+  });
+  return Buffer.concat([Buffer.from(png, "base64"), Buffer.alloc(1_100_000)]);
+}
+
+test("image preview choices are independent, reversible and preserve outgoing order", async ({ page }) => {
   await openComposer(page);
-  await observeFiles(page);
-  await page.evaluate(() => Object.defineProperty(window, "VideoEncoder", { configurable: true, value: undefined }));
-  await page.locator('input[type="file"]').setInputFiles({ name: "fallback.webm", mimeType: "video/webm", buffer: source });
-  await expect(page.getByText(/Ready ·/)).toBeVisible();
-  expect(Buffer.from((await lastFile(page)).bytes, "base64").equals(source)).toBe(true);
+  const buffer = await paddedImage(page);
+  await page.locator('input[type="file"]').setInputFiles(["first.png", "second.png"].map((name) => ({ name, mimeType: "image/png", buffer })));
+  const first = page.getByRole("checkbox", { name: "Upload original first.png", exact: true });
+  const second = page.getByRole("checkbox", { name: "Upload original second.png", exact: true });
+  await expect(first).toBeEnabled();
+  await expect(second).toBeEnabled();
+  await expect(page.getByRole("checkbox", { name: "Upload original images and videos" })).toHaveCount(0);
+  // The option lives on the individual picture, not in the input bar.
+  await expect(page.locator(".composer-image-attachment").filter({ has: first })).toHaveCount(1);
+  await first.check();
+  await expect(first).toBeEnabled();
+  await expect(second).not.toBeChecked();
+  await first.uncheck();
+  await expect(first).toBeEnabled();
+  await second.check();
+  await expect(second).toBeEnabled();
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+  await expect.poll(() => fixtureRequestBodies(page, "media-send")).toEqual([
+    expect.objectContaining({ attachments: [
+      expect.objectContaining({ name: "first.jpg", encodedBytes: expect.any(Number) }),
+      expect.objectContaining({ name: "second.png", encodedBytes: buffer.length, contentHash: createHash("sha256").update(buffer).digest("hex") }),
+    ] }),
+  ]);
+  const [body] = await fixtureRequestBodies(page, "media-send") as { attachments: { encodedBytes: number; sourceMedia?: unknown }[] }[];
+  expect(body.attachments[0].encodedBytes).toBeLessThan(1_000_000);
+  expect(body.attachments.every((attachment) => attachment.sourceMedia === undefined)).toBe(true);
 });
 
-test("removing a video during codec negotiation prevents it uploading when negotiation finishes", async ({ page }) => {
-  const source = await recordedVideo(page, 1920, 1080, false, true);
+for (const outcome of ["cancel", "failure"] as const) {
+  test(`a quality change blocks send and retains the prior attachment on ${outcome}`, async ({ page }) => {
+    await openComposer(page);
+    const buffer = await paddedImage(page);
+    await page.locator('input[type="file"]').setInputFiles({ name: "keep.png", mimeType: "image/png", buffer });
+    const choice = page.getByRole("checkbox", { name: "Upload original keep.png", exact: true });
+    await expect(choice).toBeEnabled();
+    const originalIntent = (await fixtureRequestBodies(page, "media-intent"))[0];
+    await fixtureRule(page, { id: "quality-hold", pattern: "**/relay-v2/private-r2/upload-intents", method: "POST",
+      responder: { kind: "deferred", status: outcome === "failure" ? 403 : 200, json: outcome === "failure" ? { error: "Quality upload refused" } : { ok: true } } });
+    await choice.check();
+    await expect.poll(() => fixtureRequestBodies(page, "quality-hold")).toHaveLength(1);
+    await expect(page.getByRole("button", { name: "Send", exact: true })).toBeDisabled();
+    if (outcome === "cancel") await page.getByRole("button", { name: "Cancel keep.png", exact: true }).click();
+    await releaseFixture(page, "quality-hold");
+    await expect(choice).toBeEnabled();
+    await expect(choice).not.toBeChecked();
+    await page.getByRole("button", { name: "Send", exact: true }).click();
+    await expect.poll(() => fixtureRequestBodies(page, "media-send")).toEqual([
+      expect.objectContaining({ attachments: [expect.objectContaining({ contentHash: (originalIntent as { contentHash: string }).contentHash })] }),
+    ]);
+  });
+}
+
+test("a file the browser cannot compress can still be selected as original on its preview", async ({ page }) => {
   await openComposer(page);
+  const buffer = Buffer.alloc(1_100_000, 7);
+  await page.locator('input[type="file"]').setInputFiles({ name: "external.png", mimeType: "image/png", buffer });
+  const choice = page.getByRole("checkbox", { name: "Upload original external.png", exact: true });
+  await expect(choice).toBeEnabled();
+  await choice.check();
+  await expect(choice).toBeEnabled();
+  await expect(choice).toBeChecked();
+  await expect.poll(() => fixtureRequestBodies(page, "media-intent")).toEqual([
+    expect.objectContaining({ contentHash: createHash("sha256").update(buffer).digest("hex"), encodedSize: buffer.length }),
+  ]);
+});
+
+for (const reason of ["empty picture track", "unsupported encoders"] as const) {
+  test(`video with ${reason} retains the original bytes`, async ({ page }) => {
+    await openComposer(page);
+    // Real MediaRecorder output declaring a video track without picture packets.
+    const source = reason === "empty picture track"
+      ? Buffer.concat([readFileSync(join(__dirname, "fixtures/empty-video-track.webm")),
+        Buffer.from([0xec, 0x30, 0xc8, 0xe0]), Buffer.alloc(1_100_000)])
+      : await recordedVideo(page, 1920, 1080, false, true);
+    await observeFiles(page);
+    if (reason === "unsupported encoders") {
+      await page.evaluate(() => Object.defineProperty(window, "VideoEncoder", { configurable: true, value: undefined }));
+    }
+    await page.locator('input[type="file"]').setInputFiles({ name: "fallback.webm", mimeType: "video/webm", buffer: source });
+    await expect(page.getByText(/Ready ·/)).toBeVisible();
+    expect(Buffer.from((await lastFile(page)).bytes, "base64").equals(source)).toBe(true);
+  });
+}
+
+test("removing a video during codec negotiation prevents it uploading when negotiation finishes", async ({ page }) => {
+  await openComposer(page);
+  const source = await recordedVideo(page, 1920, 1080, false, true);
   await page.evaluate(() => {
     const original = VideoEncoder.isConfigSupported.bind(VideoEncoder);
     const gate = new Promise<void>((resolve) => Object.assign(window, { resumeCodecCheck: resolve }));
