@@ -782,3 +782,35 @@ test('an environment that failed to start in the last 30 minutes goes after ever
   assert.equal(chosen.parameterEvidence.placement.ranking[1].startupFailedAt, '2026-10-17T09:38:00.000Z');
   assert.equal(chosen.parameterEvidence.placement.ranking[0].startupFailedAt, undefined);
 });
+
+test('equally fit, the harness that measurably replies sooner runs the work; a strong fit may still be slower', async () => {
+  // 2026-10-17 production medians, connected Run to first reply: Claude 22 s, Grok 60 s, OpenCode 160 s.
+  const harness = (name, responseLatencyMs) => ({ ...candidates[0],
+    key: { ...candidates[0].key, harness: name }, ...(responseLatencyMs ? { responseLatencyMs } : {}),
+    observations: { evaluatedAt: 'now', outstandingMachineAllocations: 0, outstandingRegistrationAllocations: 0,
+      quota: { remainingPercent: 100, assumed: true },
+      machineResources: { observedAt: 'now', cpuLogicalCount: 8, loadAverage: [0, 0, 0] } } });
+  const claude = harness('claude', 22_000), grok = harness('grok', 60_000), opencode = harness('opencode', 160_000);
+  const ranked = jointRanking([opencode, grok, claude], () => 1 / 3);
+  assert.deepEqual(ranked.map(item => item.candidate.key.harness), ['claude', 'grok', 'opencode']);
+  assert.deepEqual(ranked.map(item => Math.round(item.responseQuality * 100) / 100), [1, 0.37, 0.14]);
+  assert.deepEqual(ranked.map(item => item.frontier), [true, false, false]);
+  // A strong fit outweighs a slower reply until the wait costs more than the fit gains.
+  const strong = name => candidate => candidate.key.harness === name ? 2 / 3 : 1 / 3;
+  assert.equal(jointRanking([claude, grok], strong('grok'))[0].candidate, grok);
+  assert.equal(jointRanking([claude, opencode], strong('opencode'))[0].candidate, claude);
+  // Without enough launches a harness is not judged on speed, and the only
+  // measured one is its own fastest: neither is held back.
+  const unmeasured = harness('kimi');
+  assert.equal(jointRanking([unmeasured, grok], () => 1 / 3)[0].responseQuality, undefined);
+  assert.deepEqual(jointRanking([grok, unmeasured], () => 1 / 3).map(item => [item.candidate.key.harness, item.frontier]),
+    [['grok', true], ['kimi', true]]);
+  // The chooser records each one's measured latency, and the evidence parses.
+  const chosen = await registrationLaunchChooser(async input => answer(input))({ message: '@auto', tags: {},
+    candidates: [grok, claude] });
+  assert.equal(chosen.key.harness, 'claude');
+  assert.deepEqual(chosen.parameterEvidence.placement.ranking.map(item => [item.harness, item.responseLatencyMs, item.responseQuality]),
+    [['claude', 22_000, 1], ['grok', 60_000, 0.367]]);
+  const { parseLaunchParameterEvidence } = await import('@xmatrix/protocol');
+  assert.deepEqual(parseLaunchParameterEvidence(chosen.parameterEvidence), chosen.parameterEvidence);
+});
