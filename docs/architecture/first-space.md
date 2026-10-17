@@ -43,8 +43,25 @@ is how to connect one.
   a concurrent append conflict is accepted only after the exact step is read
   back as written:
   - `bring-agents`, at once;
-  - `agents-in`, once the Space has an enabled agent; the Web asks again when
-    it sees one, and the Hub checks the fact before writing.
+  - `agents-in`, once the Space has an enabled agent that can answer; the Web
+    asks again when it sees one, and the Hub checks the fact before writing.
+    An agent of the person's own whose machine reports its program signed out
+    (`login: "signed_out"`) answers nothing, so it does not count: the step
+    names the program and the machine ("Claude Code on mac-mini is not signed
+    in") and offers the harness sign-in in place, and no card is shown
+    while no agent can answer.
+  Once an agent can answer, the step offers one card for each way of working,
+  each a single click: start a new conversation and just say it (routing picks
+  the agent); have two of the person's agents work together (a new
+  conversation whose composer holds `@a @b …` for them to finish); write a page
+  with an agent (a new page that opens co-writing with it); connect another
+  computer (Machines). Under them, bringing work in: connect GitHub, or draft
+  pages from one of its repositories (the page import).
+- On a phone (the shell's phone width) the first step shows no command, and no
+  setup command is prepared: a command is no use there. It says to open
+  xmatrix.sh on the computer and sign in with the same email, where the
+  computer shows its own command; the phone then sees that computer's agents
+  arrive.
 - The messages are `xmatrix.onboarding.v1` system notices (`xmatrixSystemNotice`,
   `system_fact` provenance), written under the owner's principal with the
   xMatrix label, so no Agent takes them as the owner's request. A message names
@@ -55,7 +72,7 @@ is how to connect one.
   display locale for the Space, else the browser's first language; any `zh` tag
   gets Chinese (`onboardingLocale`). The Hub writes the conversation name and
   both steps in that language, and the Web draws the first ten minutes (the
-  steps, the three starters, Bring them in, empty Space and Agents, the download
+  steps, the cards, Bring them in, empty Space and Agents, the download
   card) from `apps/web/src/lib/onboarding-copy.ts`. The rest of the app is
   English; a client that posts no body gets English.
 
@@ -74,7 +91,7 @@ the person's screen sees are counted on their own (`onboarding-funnel.ts`):
 | `download_clicked` | "Download the desktop app" is followed |
 | `terminal_seen` | the terminal's sign-in request is shown for approval |
 | `approved` | the person approves it |
-| `starter_chosen` | a first task in the welcome is chosen (`starter_chosen:<id>`) |
+| `starter_chosen` | a card in the welcome is chosen (`talk`, `together`, `cowrite`, `machines`) |
 
 - Each step names where it was shown (`welcome`, `space`, `agents`, or
   `shell` for the app before any of them) and what

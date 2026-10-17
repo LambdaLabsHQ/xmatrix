@@ -47,6 +47,11 @@ export function pageStatusLine(page: PageDocument, blockId: string): string {
 
 const PageReferenceContext = createContext<PageReferenceScope | null>(null);
 
+/** The Space's pages, as the timeline around a message reaches them; null outside one. */
+export function usePageReferenceScope(): PageReferenceScope | null {
+  return useContext(PageReferenceContext);
+}
+
 export function PageReferenceScopeProvider({
   scope,
   children,

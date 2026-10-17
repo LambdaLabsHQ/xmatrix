@@ -1,12 +1,11 @@
-import { harnessDisplayVersion, harnessTooOldSentence, type HarnessTooOld, type OnboardingLocale, type OnboardingStarter } from "@xmatrix/protocol";
+import { harnessDisplayVersion, harnessTooOldSentence, type HarnessTooOld, type OnboardingLocale } from "@xmatrix/protocol";
 
 /* The words of a new person's first ten minutes, in English and Chinese
    (onboarding-locale.ts picks one): the welcome conversation, the three
-   setup steps, the starters, Bring them in, the empty Space and Agents
+   setup steps, the cards, Bring them in, the empty Space and Agents
    screens, and the download card. Only the first of the two sentences
    xMatrix teaches appears here; everything else is plain instructions. */
 
-type Starter = { id: OnboardingStarter; title: string; detail: string; message: string };
 
 const en = {
   listNames: (names: string[]) => names.length <= 1 ? names[0] ?? ""
@@ -20,6 +19,7 @@ const en = {
   worksWith: (names: string, all: boolean) => all ? `Works with ${names}` : `Works with ${names} and `,
   more: (count: number) => `${count} more`,
   runCommand: "Run this on your computer",
+  signInOnComputer: "On your computer, open xmatrix.sh and sign in with this same email",
   otherPlatform: (windows: boolean): string => windows ? "macOS or Linux?" : "Windows?",
   waitingForComputer: "Waiting for your computer…",
   checkTerminal: "Nothing yet? The terminal says what went wrong.",
@@ -37,6 +37,9 @@ const en = {
   bringThemIn: "Bring them in",
   tooOld: (tooOld: HarnessTooOld) => harnessTooOldSentence(tooOld),
   nothingUntilUpdated: "Nothing is sent to it until it is updated.",
+  signedOut: (program: string, machine: string) =>
+    `${program} on ${machine} is not signed in, so it cannot take work yet. Sign it in here:`,
+  signIn: "Sign in",
   noAgentYet: (machine: string) => `${machine} has no agent yet. Install one there and it shows up here:`,
   tryAgain: "Try again",
   noTerminal: "No terminal?",
@@ -48,18 +51,25 @@ const en = {
   copy: (copied: boolean): string => copied ? "Copied" : "Copy",
   agentsIn: (names: string, one: boolean) =>
     `${names} ${one ? "is" : "are"} in. Mention ${one ? "it" : "one"} here to give ${one ? "it" : "them"} work, or start with one of these:`,
-  /* The first task should end in a page, which is where xMatrix makes sense;
-     each starter asks for one. The last names the canonical runbook on
-     purpose: an agent asked to explain xMatrix from memory invents an answer. */
-  starting: (name?: string) => name ? `Starting @${name}…` : "Starting an agent…",
-  starters: [
-    { id: "project", title: "Write a page about my project", detail: "What it is, where it stands and what is still open.",
-      message: "Write a page about a project I'm working on: what it is, where it stands and what is still open. Ask me which project first." },
-    { id: "plan", title: "Plan something with me", detail: "The plan stays in a page as we go.",
-      message: "Help me plan something I'm working on, and keep the plan in a page as we go." },
-    { id: "xmatrix", title: "Show me how to hand you work", detail: "Reads xmatrix.sh/start.md and writes it up as a page.",
-      message: "Read https://xmatrix.sh/start.md and write a page on how I should hand you work through xMatrix." },
-  ] as Starter[],
+  /* The first task should end in a page about the person's own work, which is
+     where xMatrix makes sense; each starter asks for one. A page explaining
+     xMatrix itself kept people learning the tool instead of using it. */
+  /* What xMatrix is for, one card each: talking, several agents at once, the
+     live page, every computer. One click shows it. */
+  talk: { title: "Start a new conversation", detail: "Say what you want done. No need to @ anyone: xMatrix picks an AI to take it." },
+  together: { title: "Get several AIs working together", detail: (a: string, b: string) =>
+    `@${a} and @${b} split the work and pass it between them. You watch it come together.`,
+    needsTwo: "Bring in one more AI, and they can work together.",
+    draft: (a: string, b: string) => `@${a} @${b} Work on this together and split it between you: ` },
+  machines: { title: "Connect another computer", detail: "Your work machine, your home machine, a server. Their AIs meet in one conversation." },
+  /* The live document people came for: a page they write in, with an agent writing beside them. */
+  coWrite: { title: "Write something with AI", detail: (agent: string) => `You write a line. @${agent} writes the next.`,
+    pageTitle: "What I'm working on" },
+  bringWorkConnect: "Bring your work in. Connect GitHub, and your repositories become pages.",
+  bringWorkRepos: "Pick a repository. It becomes pages, yours to review first.",
+  connectGitHub: "Connect GitHub",
+  draftFrom: (repo: string) => repo,
+  draftingFrom: (repo: string) => `Turning ${repo} into pages. They wait in Pages for your review.`,
   installedTitle: "Your installed agents",
   installedBody: "Turn them on to summon them. Choose a working folder when you send the first task.",
   enabling: "Enabling…",
@@ -120,6 +130,7 @@ const zh: OnboardingCopy = {
   worksWith: (names, all) => all ? `支持 ${names}` : `支持 ${names}，还有`,
   more: (count) => `另外 ${count} 个`,
   runCommand: "在你的电脑上运行这条命令",
+  signInOnComputer: "在电脑上打开 xmatrix.sh，用同一个邮箱登录",
   otherPlatform: (windows) => windows ? "用 macOS 或 Linux？" : "用 Windows？",
   waitingForComputer: "正在等你的电脑连上…",
   checkTerminal: "还没反应？终端里会写哪里出了错。",
@@ -137,6 +148,8 @@ const zh: OnboardingCopy = {
   tooOld: (tooOld) => `${tooOld.machineName ? `${tooOld.machineName} 上的 ` : ""}${tooOld.program} 是 ` +
     `${harnessDisplayVersion(tooOld.version)}，版本太旧，xMatrix 需要 ${tooOld.minimumVersion} 或更新。`,
   nothingUntilUpdated: "更新之前不会给它派活。",
+  signedOut: (program, machine) => `${machine} 上的 ${program} 还没登录，登录之前接不了活。在这里登录：`,
+  signIn: "登录",
   noAgentYet: (machine) => `${machine} 上还没有 Agent。在那台电脑上装一个，它就会出现在这里：`,
   tryAgain: "重试",
   noTerminal: "没有终端？",
@@ -148,15 +161,17 @@ const zh: OnboardingCopy = {
   copy: (copied) => copied ? "已复制" : "复制",
   agentsIn: (names, one) =>
     `${names} 已接入。在这里 @ ${one ? "它" : "其中一个"}就能派活，也可以从下面选一个开始：`,
-  starting: (name) => name ? `正在启动 @${name}…` : "正在启动 Agent…",
-  starters: [
-    { id: "project", title: "给我的项目写一个页面", detail: "它是什么、做到哪了、还有什么没做完。",
-      message: "给我正在做的一个项目写一个页面：它是什么、做到哪了、还有什么没做完。先问我是哪个项目。" },
-    { id: "plan", title: "和我一起做个计划", detail: "边聊边把计划写进页面。",
-      message: "帮我规划一件正在做的事，边聊边把计划写进一个页面。" },
-    { id: "xmatrix", title: "教我怎么给你派活", detail: "读 xmatrix.sh/start.md，整理成一个页面。",
-      message: "读 https://xmatrix.sh/start.md，写一个页面，讲我该怎么通过 xMatrix 给你派活。" },
-  ],
+  talk: { title: "开一个新对话", detail: "说一件你想做的事。不用 @ 谁，xMatrix 会挑一个 AI 来接。" },
+  together: { title: "让多个 AI 一起协作", detail: (a, b) => `@${a} 和 @${b} 分工干活、互相接力，你看着事情做成。`,
+    needsTwo: "再接一个 AI，就能让它们一起协作。", draft: (a, b) => `@${a} @${b} 你们分工合作，一起把这件事做完：` },
+  machines: { title: "再接一台电脑", detail: "公司的、家里的电脑或服务器，上面的 AI 能在同一个对话里碰头。" },
+  coWrite: { title: "和 AI 一起写点什么", detail: (agent) => `你写一句，@${agent} 接一句。`,
+    pageTitle: "我手上的事" },
+  bringWorkConnect: "把工作带进来。连上 GitHub，仓库就成了页面。",
+  bringWorkRepos: "选一个仓库，它会变成几页。你看过，才算数。",
+  connectGitHub: "连接 GitHub",
+  draftFrom: (repo) => repo,
+  draftingFrom: (repo) => `正在把 ${repo} 写成页面，写好会在 Pages 里等你过目。`,
   installedTitle: "你已安装的 Agent",
   installedBody: "开启后就能召唤它们。发第一个任务时再选工作目录。",
   enabling: "正在开启…",

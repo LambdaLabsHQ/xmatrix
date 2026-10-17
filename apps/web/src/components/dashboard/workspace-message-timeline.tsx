@@ -287,7 +287,7 @@ import { useAndroidBackHandler } from "./use-android-back";
 
 import { cn } from "@/lib/utils";
 import { CrossSpaceReadCard, crossSpaceReadMetadata } from "@/components/dashboard/cross-space-read-card";
-import { OnboardingMessage, starterAddress, startingStarter } from "@/components/dashboard/onboarding-message";
+import { OnboardingMessage } from "@/components/dashboard/onboarding-message";
 import {
   SecretAccessRequestCardView, SecretRequestCardView, secretAccessRequestMetadata, secretRequestMetadata,
 } from "@/components/dashboard/secret-request-card";
@@ -497,7 +497,6 @@ export const MessageTimeline = memo(function MessageTimeline({
   onRebornSender,
   reborningSenderKey,
   onQuestionnaireAnswer,
-  onSendMessage,
   onOpenInternalAppLink,
   onOpenPage,
   onJumpToMessage,
@@ -539,8 +538,6 @@ export const MessageTimeline = memo(function MessageTimeline({
   highlightMessageId?: string;
   threadRootMessage?: TimelineItem;
   threadRootChannel?: ChannelSnapshot;
-  /** Sends a message as the person in the open conversation. */
-  onSendMessage: (body: string) => void;
 } & Pick<MessageRowProps,
   "onReact" | "onEdit" | "onRecall" | "onUnsentAction" | "onReply" | "onOpenThread" | "onMentionSender" |
   "onRebornSender" | "onQuestionnaireAnswer" | "onOpenInternalAppLink" | "onJumpToMessage"
@@ -586,9 +583,6 @@ export const MessageTimeline = memo(function MessageTimeline({
     }
     return grouped;
   }, [invocationQueryData]);
-  const starting = useMemo(() => startingStarter({ presence: channel?.presence, timeline,
-    launches: agentLaunchesByMessage, refused: invocationRejectionsByMessage }),
-  [channel?.presence, timeline, agentLaunchesByMessage, invocationRejectionsByMessage]);
   const launchChoicesByMessage = useMemo(() => new Map((invocationQueryData?.launchChoices ?? [])
     .map(choice => [choice.messageId, choice] as const)), [invocationQueryData]);
   const registrationCatalog = useAgentRegistrationCatalog(channel?.spaceId ?? "", token ?? "",
@@ -687,10 +681,6 @@ export const MessageTimeline = memo(function MessageTimeline({
   const stableOnMentionSender = useStableCallback(onMentionSender);
   const stableOnRebornSender = useStableCallback(onRebornSender);
   const stableOnQuestionnaireAnswer = useStableCallback(onQuestionnaireAnswer);
-  // Rows hold only the Channel's id, so presence changes do not render them;
-  // the address is read from the Channel as it is when the starter is clicked.
-  const stableOnSendStarter = useStableCallback((starter: string) =>
-    onSendMessage(`${starterAddress(channel?.presence)} ${starter}`));
   const stableOnOpenAgentTrace = useStableCallback(onOpenAgentTrace);
   const stableOnOpenHumanProfile = useStableCallback(onOpenHumanProfile);
   const stableOnOpenInternalAppLink = useStableCallback(onOpenInternalAppLink);
@@ -1098,7 +1088,6 @@ export const MessageTimeline = memo(function MessageTimeline({
                 onRebornSender={stableOnRebornSender}
                 reborningSender={false}
                 onQuestionnaireAnswer={stableOnQuestionnaireAnswer}
-                onSendStarter={stableOnSendStarter}
                 onOpenAgentTrace={stableOnOpenAgentTrace}
                 onOpenHumanProfile={stableOnOpenHumanProfile}
                 onOpenInternalAppLink={stableOnOpenInternalAppLink}
@@ -1178,9 +1167,6 @@ export const MessageTimeline = memo(function MessageTimeline({
                       message.author === reborningSenderKey)
                   }
                   onQuestionnaireAnswer={stableOnQuestionnaireAnswer}
-                  // Only the welcome row reads it, so only that row renders when it changes.
-                  starterStarting={onboardingStageOf(message.metadata) ? starting : undefined}
-                  onSendStarter={stableOnSendStarter}
                   onOpenAgentTrace={stableOnOpenAgentTrace}
                   onOpenHumanProfile={stableOnOpenHumanProfile}
                   onOpenInternalAppLink={stableOnOpenInternalAppLink}
@@ -1700,8 +1686,6 @@ export const MessageRow = memo(function MessageRow({
   onRebornSender,
   reborningSender,
   onQuestionnaireAnswer,
-  onSendStarter,
-  starterStarting,
   onOpenAgentTrace,
   onOpenHumanProfile,
   onOpenInternalAppLink,
@@ -2567,7 +2551,7 @@ export const MessageRow = memo(function MessageRow({
             )}
             {onboardingStage ? (
               <OnboardingMessage stage={onboardingStage} spaceId={channel?.spaceId ?? null} token={token}
-                userId={currentUserIdentityId.replace(/^user:/, "")} starting={starterStarting} onSendStarter={onSendStarter} />
+                userId={currentUserIdentityId.replace(/^user:/, "")} />
             ) : crossSpaceRead ? (
               <CrossSpaceReadCard
                 request={crossSpaceRead}

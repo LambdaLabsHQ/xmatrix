@@ -12,9 +12,11 @@ test("names read as a sentence in each language", () => {
   assert.equal(zh.listNames(["Claude Code", "Codex", "Gemini"]), "Claude Code、Codex 和 Gemini");
 });
 
-test("Chinese starters are the same first tasks, each ending in a page", () => {
+test("the welcome's cards say the same in both languages", () => {
   const { en, zh } = ONBOARDING_COPY;
-  assert.deepEqual(zh.starters.map((starter) => starter.id), en.starters.map((starter) => starter.id));
-  for (const starter of zh.starters) assert.match(starter.message, /页面/u, starter.id);
-  assert.match(zh.starters.find((starter) => starter.id === "xmatrix").message, /https:\/\/xmatrix\.sh\/start\.md/u);
+  for (const card of ["talk", "together", "coWrite", "machines"]) {
+    assert.deepEqual(Object.keys(zh[card]).sort(), Object.keys(en[card]).sort(), card);
+  }
+  assert.equal(zh.together.draft("claude", "codex").startsWith("@claude @codex "), true);
+  assert.equal(en.together.draft("claude", "codex").startsWith("@claude @codex "), true);
 });

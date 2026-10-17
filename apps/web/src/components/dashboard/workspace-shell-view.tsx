@@ -104,6 +104,7 @@ import { channelTitle } from "@/components/dashboard/channel-links";
 import { WorkspaceSearchDialog, WorkspaceSearchView } from "./workspace-search";
 import { searchRequestFromParams, searchRequestParams, type SearchFilters } from "./workspace-search-model";
 import { parseAppLocation } from "./workspace-shell-navigation";
+import { OnboardingActionsContext, type OnboardingActions } from "./onboarding-actions";
 import { ConversationPageCards } from "@/components/pages/conversation-page-cards";
 
 /**
@@ -728,7 +729,20 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
   const canMovePages = Boolean(currentSpace && user &&
     ["owner", "admin"].includes(transferSpaceRole(currentSpace, user.id) || ""));
   // Both clients lead to the same action; each controls where it is visible.
-  const startNewConversation = useStableCallback(() => openNewConversation());
+  // What New conversation's composer opens holding: a welcome card's draft, else nothing.
+  const [newConversationDraft, setNewConversationDraft] = useState("");
+  const startNewConversation = useStableCallback(() => {
+    setNewConversationDraft("");
+    openNewConversation();
+  });
+  const onboardingActions = useMemo<OnboardingActions>(() => ({
+    startConversation: (draft) => {
+      setNewConversationDraft(draft);
+      openNewConversation();
+    },
+    connectAnotherComputer: () => changeAppViewRef.current("machines"),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the shell's actions are stable for its life
+  }), []);
   const createNewPage = useStableCallback(() => void pageCreation.create(null));
   const manageMachines = useStableCallback(() => changeAppView("machines"));
   // One object while what it offers is the same: the list column that shows it is memoized.
@@ -1018,6 +1032,8 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
   const channelHasPendingApprovals = pendingCrossSpaceReads.length > 0 || pendingConnectorActions.length > 0;
   const newConversationSurface = (
     <NewConversation
+      key={newConversationDraft}
+      initialDraft={newConversationDraft}
       space={currentSpace}
       token={token ?? null}
       workspaces={projects}
@@ -1153,7 +1169,6 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
         onRebornSender={handleTimelineRebornSender}
         reborningSenderKey={reborningAgentInstanceId}
         onQuestionnaireAnswer={handleTimelineQuestionnaireAnswer}
-        onSendMessage={runSelectedChannelCommand}
         onOpenInternalAppLink={handleTimelineOpenInternalAppLink}
         onOpenPage={openPageAt}
         onJumpToMessage={handleTimelineJumpToMessage}
@@ -1401,6 +1416,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     // Files are accepted by the whole window, not by the composer element, so
     // the drop surface has to sit above the app's isolate stacking context.
     <AttachmentDropZoneProvider>
+    <OnboardingActionsContext.Provider value={onboardingActions}>
     <RealtimeChannelsContext.Provider value={model.realtimeChannels}>
     <RealtimeEventsContext.Provider value={model.realtimeEventViews}>
     <PresentedChannelTailContext.Provider value={model.presentedChannelTail}>
@@ -1697,6 +1713,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     </PresentedChannelTailContext.Provider>
     </RealtimeEventsContext.Provider>
     </RealtimeChannelsContext.Provider>
+    </OnboardingActionsContext.Provider>
     </AttachmentDropZoneProvider>
   );
 }
