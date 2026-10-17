@@ -5,6 +5,7 @@ import type { Env } from "./types";
 import { listAgentRegistrations } from "./agent-registrations";
 import { deterministicConversationId } from "./deterministic-id";
 import { jsonErrors, requireAuth, requireHumanAuth } from "./index-shared";
+import { postgresMessageExists, withPostgresMessageRequestScope } from "./postgres-message-authority";
 import { dispatchProductMessageAppend } from "./product-message-append";
 import { createChannel, getSpace, personalSpaceId } from "./spaces";
 import { XMATRIX_SYSTEM_AVATAR_URL, XMATRIX_SYSTEM_LABEL } from "./xmatrix-system-identity";
@@ -58,6 +59,13 @@ export function registerWelcomeRoutes(app: Hono<{ Bindings: Env }>): void {
 async function appendWelcomeStep(env: Env, owner: { id: string; email: string }, channelId: string,
   stage: OnboardingStage, body: string): Promise<void> {
   const messageId = `system:welcome:${channelId}:${stage}`;
+  const written = () => withPostgresMessageRequestScope(env, (scope) => postgresMessageExists(env, {
+    channelId, messageId, principal: { kind: "user", id: owner.id },
+  }, scope));
+  // The first published step is a historical fact. Handles and account details
+  // may change; rebuilding that command would conflict with its original digest.
+  // Read the durable message, whose identity outlives the idempotency record.
+  if (await written()) return;
   const response = await dispatchProductMessageAppend(env, channelId, {
     commandId: `product:welcome:${channelId}:${stage}`, messageId, channelId, body,
     messageKind: ONBOARDING_MESSAGE_KIND,
@@ -69,6 +77,12 @@ async function appendWelcomeStep(env: Env, owner: { id: string; email: string },
   });
   if (!response.ok) {
     const detail = await response.text().catch(() => "");
+    if (response.status === 409) {
+      const failure = JSON.parse(detail);
+      // Another tab can win between the read and append. A conflict alone is
+      // insufficient: confirm the exact step committed before acknowledging it.
+      if ((failure.code === "idempotency_conflict" || failure.code === "message_exists") && await written()) return;
+    }
     throw new Error(`welcome ${stage} message failed (${response.status})${detail ? `: ${detail.slice(0, 200)}` : ""}`);
   }
 }

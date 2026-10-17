@@ -1861,6 +1861,23 @@ export class PostgresMessageRepository {
     });
   }
 
+  /** A committed identity stays written even after recall, deletion or replay expiry. */
+  async exists(input: {
+    requestId: string; spaceId: string; channelId: string; messageId: string; principal: MessagePrincipal;
+  }): Promise<boolean> {
+    const { requestId, spaceId, channelId, messageId, principal } = messageIdentity(input);
+    return this.inSpace(requestId, "message.exists", spaceId, async (transaction) => {
+      await messageChannelCapability(transaction, { spaceId, channelId, principal }, "message_content_read");
+      const rows = await transaction.query({
+        name: "message_exists_v1",
+        text: `SELECT message_id FROM data.messages
+          WHERE space_id=$1 AND channel_id=$2 AND message_id=$3 LIMIT 1`,
+        values: [spaceId, channelId, messageId], maxRows: 1,
+      });
+      return rows.length > 0;
+    });
+  }
+
   async mutationCandidate(input: {
     requestId: string;
     spaceId: string;

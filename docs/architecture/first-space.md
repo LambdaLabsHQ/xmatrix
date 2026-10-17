@@ -36,7 +36,12 @@ is how to connect one.
   `{ "channelId": null }`. Agent Runs are refused.
 - The conversation is closed ("Welcome to xMatrix", only the owner) and its
   id derives from the Space. Each message has a fixed id and command, so a
-  reload, a second tab or a retry replays it instead of adding one:
+  reload, a second tab or a retry keeps the first published step instead of
+  adding one. The Hub checks the durable message identity, including a later
+  tombstone, rather than rebuilding an append from a changed Agent list or
+  account snapshot. This remains true after command replay retention expires;
+  a concurrent append conflict is accepted only after the exact step is read
+  back as written:
   - `bring-agents`, at once;
   - `agents-in`, once the Space has an enabled agent; the Web asks again when
     it sees one, and the Hub checks the fact before writing.
