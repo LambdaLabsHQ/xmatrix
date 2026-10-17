@@ -124,6 +124,37 @@ integration("connector grants resolve only from the requested Space and reject t
   });
 });
 
+// Open-project governance §2: a participant writes in their intake, but the
+// Space's connected apps act with its credentials, which, like its secrets,
+// are for members. Reading the connection there is unchanged.
+integration("a participant cannot use the Space's connected apps, even in their own intake", async () => {
+  await withDatabase(async ({ sql, database, space }) => {
+    await sql(`INSERT INTO data.space_members (space_id,user_id,role,version,created_at,updated_at) VALUES
+      ($2,'participant','participant',1,$1,$1),($2,'viewer','viewer',1,$1,$1)`, [at, space]);
+    await sql(`INSERT INTO data.channels (channel_id,space_id,name,name_key,mode,search_rank_sequence,version,
+      metadata_json,created_at,updated_at) VALUES ($2||':intake',$2,'intake','intake','open',$2||':rank-intake',1,
+      '{"intakeOf":"participant"}'::jsonb,$1,$1)`, [at, space]);
+    const apps = new PostgresAppRepository(database);
+    const channelId = `${space}:intake`, connectionId = `${space}:webhook`;
+    const connection = (actorUserId, use) => apps.getConnection({ requestId: crypto.randomUUID(), connectionId,
+      actorUserId, channelId, use });
+    const command = (actorUserId, kind, input) => apps.command({ commandId: crypto.randomUUID(), connectionId, channelId,
+      principal: { kind: "user", id: actorUserId }, ...input }, kind);
+    const subscribe = (actorUserId) => command(actorUserId, "put-relation", { sourceKind: "repository",
+      sourceRef: "webhook:deploys", features: ["delivery"] });
+    const refused = (error) => error instanceof AppControlError && error.code === "channel_not_found";
+    for (const actorUserId of ["participant", "viewer"]) {
+      assert.equal((await connection(actorUserId)).connection.id, connectionId, `a ${actorUserId} still reads it`);
+      await assert.rejects(connection(actorUserId, true), refused);
+      await assert.rejects(subscribe(actorUserId), refused);
+      await assert.rejects(command(actorUserId, "record-execution", { executionId: `run-${actorUserId}-${space}`,
+        messageId: "message-1", actionId: "post" }), refused);
+    }
+    assert.equal((await connection("member", true)).connection.id, connectionId, "a member uses it there");
+    assert.equal((await subscribe("member")).relation.channelId, channelId);
+  });
+});
+
 integration("event routes are the configured connection's Channels subscribed to the source", async () => {
   await withDatabase(async ({ sql, database, space }) => {
     const apps = new PostgresAppRepository(database);

@@ -9,9 +9,10 @@ shared user grant.
 | --- | --- |
 | OAuth start | Current owner/admin membership in the requested Space, before signed state or a Composio connect request |
 | OAuth completion | Signed provider/Space/initiator state, the same signed-in Human, and current owner/admin membership before exchange; the write rechecks membership |
-| Connector execution | The authorized Channel determines its Space connection; credentials resolve by that connection, without an owner/global fallback |
+| Connector execution | The authorized Channel determines its Space connection; credentials resolve by that connection, without an owner/global fallback. Acting with a connection (actions, approval requests, subscriptions) needs owner/admin/member, as Run secret reads do; a viewer or open-project participant only reads |
 | Composio | A connect attempt uses `xmatrix:<space>:<nonce>`; calls name the saved connected account |
-| GitHub repository token | Current daemons bind the live admitted Run, Machine, execution and repository; the Channel determines the Space's linked installations |
+| GitHub installation link | Connect names only installations the person administers on GitHub: their own account's, or an organization's whose every covered repository they administer |
+| GitHub repository token | Current daemons bind the live admitted Run, Machine, execution and repository; the Channel determines the Space's linked installations; the Machine owner must be owner/admin/member there |
 | Run secret read | The exact live Run/Instance/execution, registration admission, token Space and current owner membership; `ask` approvals also join on Space |
 | New ciphertext | AES-GCM additional data binds connector values to connection/version and Space secrets to Space/alias/value version |
 
@@ -21,7 +22,8 @@ exchange it through `POST /api/connectors/oauth/complete`. Anonymous callbacks
 cannot link installations or issue installation-selection grants. This closes
 the forwarded-connect-link path that could associate someone else's GitHub
 installations with the initiator's Space. Newly issued grants use purpose
-`github-grant:v2`; earlier grants are rejected and require a fresh Connect.
+`github-grant:v3` and name only installations the person administers; earlier
+grants named every installation they reached and are rejected.
 Existing state can complete under the new authenticated checks. This reuses the
 already shipped Web completion page and proxy, so the Hub change fails closed
 without requiring a new browser protocol or company credential rotation.

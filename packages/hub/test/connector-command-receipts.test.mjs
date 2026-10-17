@@ -22,7 +22,7 @@ async function harness(credentials = { mailboxes: JSON.stringify([mailbox]), com
     if (name === "@xmatrix/protocol") return protocol;
     if (name === "../apps") return {
       appCommand: async (_env, command, input) => { persisted.push({ command, input }); },
-      listAppConnections: async () => [{ id: "space:gmail", providerId: "gmail", status: "configured" }],
+      usableAppConnections: async () => [{ id: "space:gmail", providerId: "gmail", status: "configured" }],
     };
     if (name === "../spaces") return { getChannel: async () => ({ channel: { spaceId: "space" } }) };
     if (name === "../product-message-append") return {
