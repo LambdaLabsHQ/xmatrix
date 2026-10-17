@@ -31,7 +31,8 @@ signup ledger or the overall seven-day active-user metric.
 The aggregate output counts each person once within each classification:
 
 - `humanMessage`: at least one retained, non-recalled user message after signup
-  and before `to`, excluding `scheduled-message:` triggers.
+  and before `to`, excluding `scheduled-message:` triggers and `system:` notices
+  that xMatrix posts under the person's name (welcome steps, run failures).
 - `firstReply`: a launch triggered by such a message has a recorded first reply
   after that message and before `to`. Launch connection alone is insufficient.
 - `pageCreated`: a surviving Page credits the account as creator after signup.

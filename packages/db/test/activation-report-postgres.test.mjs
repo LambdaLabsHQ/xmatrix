@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { integration, isolatedPostgres } from "./postgres-database.fixture.mjs";
 import { readActivationReport } from "../scripts/activation-report.mjs";
 
-integration("activation SQL excludes automation, requires actual replies and ordered Pages, and refuses incomplete shards", async () => {
+integration("activation SQL excludes automation and xMatrix notices, requires actual replies and ordered Pages, and refuses incomplete shards", async () => {
   const f = await isolatedPostgres("activation", { migrate: false, shard: false, runtimeRole: false });
   try {
     // Minimal input records exercise the report against real PostgreSQL. This
@@ -19,13 +19,15 @@ integration("activation SQL excludes automation, requires actual replies and ord
       INSERT INTO control.postgres_local_identity VALUES('shard-0');
       INSERT INTO control.space_placement VALUES('s','shard-0','active');
       INSERT INTO control.auth_users VALUES('person','2026-09-01'),('scheduled','2026-09-01'),
-        ('connected','2026-09-01'),('recalled','2026-09-01'),('old','2026-08-01');
+        ('connected','2026-09-01'),('recalled','2026-09-01'),('welcomed','2026-09-01'),('old','2026-08-01');
       INSERT INTO data.messages VALUES
         ('person','s','m','c','2026-09-02','user',NULL,NULL),
         ('person','s','m2','c','2026-09-09','user',NULL,NULL),
         ('scheduled','s','scheduled-message:a','c','2026-09-02','user',NULL,NULL),
         ('connected','s','m3','c','2026-09-02','user',NULL,NULL),
-        ('recalled','s','m4','c','2026-09-02','user',NULL,'2026-09-03');
+        ('recalled','s','m4','c','2026-09-02','user',NULL,'2026-09-03'),
+        ('welcomed','s','system:welcome:c:bring-agents','c','2026-09-02','user',NULL,NULL),
+        ('welcomed','s','system:machine-run-failure:a','c','2026-09-09','user',NULL,NULL);
       INSERT INTO data.agent_launches VALUES
         ('s','c','m','2026-09-02T01:00Z'),('s','c','m3',NULL),
         ('s','c','scheduled-message:a','2026-09-02T01:00Z');
@@ -37,7 +39,7 @@ integration("activation SQL excludes automation, requires actual replies and ord
     assert.equal(result.coveredShards, 1);
     assert.deepEqual(result.cohorts.confirmedExternal, { registrations: 1, humanMessage: 1,
       firstReply: 1, pageCreated: 1, activatedWithPage: 1, weekTwoEligible: 1, weekTwoActive: 1 });
-    assert.equal(result.cohorts.unclassified.registrations, 3);
+    assert.equal(result.cohorts.unclassified.registrations, 4);
     assert.equal(result.cohorts.unclassified.humanMessage, 1);
     assert.equal(result.cohorts.unclassified.firstReply, 0);
     assert.equal(result.cohorts.unclassified.activatedWithPage, 0);

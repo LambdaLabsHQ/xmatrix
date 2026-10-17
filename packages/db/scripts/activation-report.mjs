@@ -81,7 +81,7 @@ export async function readActivationReport(config, from, to, env = process.env) 
         SELECT m.author_id,m.space_id,m.message_id,m.channel_id,m.sent_at
         FROM data.messages m JOIN cohort c ON c.id=m.author_id
         WHERE m.space_id=ANY($3::text[]) AND m.author_kind='user'
-          AND m.message_id NOT LIKE 'scheduled-message:%'
+          AND m.message_id NOT LIKE 'scheduled-message:%' AND m.message_id NOT LIKE 'system:%'
           AND m.deleted_at IS NULL AND m.recalled_at IS NULL
           AND m.sent_at >= c.registered_at AND m.sent_at < $4
       ) SELECT c.id,
