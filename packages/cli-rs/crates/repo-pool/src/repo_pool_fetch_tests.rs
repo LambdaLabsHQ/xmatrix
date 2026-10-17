@@ -52,7 +52,7 @@ async fn lease_recovers_missing_delta_bases_without_resetting_existing_work() {
         .await
         .expect("a lease repairs missing delta bases within the fetch retry budget");
     assert_eq!(rev(&recovered.worktree_path, "HEAD"), new_tip);
-    assert_eq!(std::fs::read_to_string(recovered.worktree_path.join("payload.txt")).unwrap(), updated);
+    assert_eq!(std::fs::read_to_string(recovered.worktree_path.join("payload.txt")).unwrap().replace("\r\n", "\n"), updated);
     assert_eq!(rev(&older.worktree_path, "HEAD"), local_tip);
     assert_eq!(current_branch(&older.worktree_path), "keep-local-work");
     assert_eq!(std::fs::read_to_string(older.worktree_path.join("README.md")).unwrap(), "uncommitted work\n");
