@@ -54,6 +54,33 @@ test.describe("desktop", () => {
   });
 });
 
+test.describe("desktop app", () => {
+  test.use(E2E_DESKTOP_CONTEXT);
+
+  test("the desktop app keeps its own first screen, which finds this computer's agents", async ({ page }) => {
+    await page.addInitScript(() => {
+      const now = new Date().toISOString();
+      (window as unknown as Record<string, unknown>).xmatrixDesktop = {
+        client: "desktop", platform: "darwin",
+        getContext: async () => ({ client: "desktop", platform: "darwin", version: "0.16.600", hostId: "Laptop",
+          hostName: "Laptop", isPackaged: true, startUrl: "" }),
+        setBadge: async () => undefined, setTitle: async () => undefined, notify: async () => true,
+        openExternal: async () => undefined, checkCliInstalled: async () => ({ installed: true }),
+        openCliInstall: async () => undefined, checkForUpdates: async () => undefined,
+        getUpdateStatus: async () => ({ state: "disabled", enabled: false }),
+        getDaemonStatus: async () => ({ state: "running", pid: 1, updatedAt: now }),
+        startDaemon: async () => ({ state: "running", pid: 1, updatedAt: now }),
+        getSetupStatus: async () => ({ setupVersion: 1, completedAt: now }),
+        discoverAgentPresets: async () => [],
+      };
+    });
+    await welcomeOnFirstOpen(page);
+    await expect(page.getByText("No agent runtime found on Laptop", { exact: true })).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByText("Welcome to xMatrix", { exact: true }).first()).toBeVisible();
+    await expect(page).not.toHaveURL(/welcome/u);
+  });
+});
+
 test.describe("mobile", () => {
   test.use(E2E_MOBILE_CONTEXT);
 
