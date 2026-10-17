@@ -45,12 +45,17 @@ test.describe("desktop", () => {
       registrations: harnessRegistrations(["codex"]) });
     await fixtureJson(page, "history", `**/api/xmatrix/channels/${WELCOME.id}/history**`, { messages: [BRING, IN], hasMore: false });
     await fixtureJson(page, "send", `**/api/xmatrix/channels/${WELCOME.id}/messages`, { message: { id: "sent" } }, { method: "POST" });
+    await fixtureRule(page, { id: "funnel", pattern: "**/api/xmatrix/observable/onboarding-step", method: "POST",
+      responder: { kind: "static", status: 202, json: {} } });
     await page.goto("/app/personal-sspaceperso/channels/welcome-to-xmatrix-cchannelwel");
     const agentsIn = page.locator('[data-onboarding-stage="agents-in"]');
     await expect(agentsIn).toContainText("@codex is in. Mention it here to give it work", { timeout: 20_000 });
     await agentsIn.getByRole("button", { name: /Plan something with me/u }).click();
     await expect.poll(async () => (await fixtureRequestBodies(page, "send")).map((sent) => (sent as { body?: string }).body))
       .toEqual(["@auto Help me plan something I'm working on, and keep the plan in a page as we go."]);
+    // Which first task people choose is counted too.
+    await expect.poll(() => fixtureRequestBodies(page, "funnel"))
+      .toEqual([{ step: "starter_chosen", surface: "welcome", device: "desktop_web", starter: "plan" }]);
   });
 });
 

@@ -28,7 +28,7 @@ const ACTION_CLASS = actionClass({ variant: "secondary", size: "sm" });
 /**
  * The GitHub accounts and organizations this Space reaches, one App
  * installation each. Connecting authorizes on GitHub, which confirms the
- * installations this person reaches; they are linked here directly, since
+ * installations this person administers; they are linked here directly, since
  * GitHub does not return to xMatrix for an installation that is unchanged.
  */
 export function GitHubInstallationAccounts({ spaceId, token, onManage, onAuthorize, onInstall, onChanged }: {
@@ -131,7 +131,8 @@ export function GitHubInstallationAccounts({ spaceId, token, onManage, onAuthori
       ) : null}
       {installations?.authorized && installations.available.length === 0 ? (
         <p className="mt-3 text-xs leading-5 text-muted-foreground">
-          Every account where your GitHub can reach the App is already linked.
+          Every account you administer with the App installed is already linked. An organization
+          you do not own is linked by one of its owners.
         </p>
       ) : null}
       {error ? <p className="mt-3 text-xs text-destructive" role="alert">{error}</p> : null}
