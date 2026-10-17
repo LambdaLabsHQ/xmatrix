@@ -554,7 +554,7 @@ test("Message sequence reservation reallocates an uncommitted rollout collision"
         ? [{ message_id: "message-from-prior-worker" }]
         : query.name === "message_sequence_allocate_v1"
           ? [{ allocated_sequence: 9 }]
-          : query.name === "message_sequence_reservation_reallocate_v1"
+          : query.name === "message_sequence_reservation_reallocate_v2"
             ? [{ channel_id: "channel-1", sequence: 9, state: "reserved" }]
             : []
   ));
@@ -563,10 +563,13 @@ test("Message sequence reservation reallocates an uncommitted rollout collision"
     channelId: "channel-1", observedPostgresHead: 8,
   }), { sequence: 9, state: "reserved" });
   const reallocation = db.calls.find(
-    (call) => call.name === "message_sequence_reservation_reallocate_v1",
+    (call) => call.name === "message_sequence_reservation_reallocate_v2",
   );
-  assert.equal(reallocation.values[6], 7);
+  assert.equal(reallocation.values[5], 7);
   assert.match(reallocation.text, /state='reserved'/u);
+  // PostgreSQL refuses a statement with a parameter it never reads.
+  const read = new Set([...reallocation.text.matchAll(/\$(\d+)/gu)].map(match => Number(match[1])));
+  assert.deepEqual([...read].sort((a, b) => a - b), reallocation.values.map((_value, index) => index + 1));
 });
 
 test("Message append reconciliation reads the command idempotency receipt", async () => {

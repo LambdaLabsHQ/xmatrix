@@ -186,6 +186,9 @@ export const roomText = (headroom: number | undefined) => headroom === undefined
 export function placementReason(ranking: readonly LaunchPlacementCandidate[], compared: boolean): string {
   const [chosen] = ranking;
   if (!chosen) return "";
+  // The breaker: an environment that just failed to start is tried after every other.
+  const failed = !chosen.startupFailedAt && ranking.find(item => item.startupFailedAt && item.fit >= chosen.fit);
+  if (failed) return `${failed.harness}${failed.machineName ? ` on ${failed.machineName}` : ""} failed to start in the last 30 minutes, so it goes last`;
   if (chosen.network && ranking.some(item => item.networkQuality !== undefined &&
     item.networkQuality < (chosen.networkQuality ?? 0))) {
     return `Fit, available resources and measured HTTPS reliability/tail latency favour this machine`;
