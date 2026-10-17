@@ -39,6 +39,14 @@ const RESULT_TYPES: Record<string, string> = {
   cleanup: "machine_worktree_cleanup_result", request_resolve: "machine_request_resolve_result",
 };
 const REPLAY_TTL_MS = 30 * 24 * 60 * 60 * 1_000;
+/**
+ * A report sent on an older connection is refused by the epoch fence before
+ * its replay is read, and every report has a fresh command id, so a report's
+ * replay only answers a retry of the same request, which comes within
+ * seconds. Reports are most of the daemon's commands and each stores the
+ * whole daemon record, so a month of them was over half the database.
+ */
+const REPORT_REPLAY_TTL_MS = 24 * 60 * 60 * 1_000;
 const COMMAND_TTL_MS = 30 * 24 * 60 * 60 * 1_000;
 const QUOTA_PROBE_WINDOW_MS = 15_000;
 /**
@@ -188,10 +196,10 @@ async function replay(tx: DatabaseTransaction, ownerUserId: string, commandId: s
 }
 
 async function storeReplay(tx: DatabaseTransaction, input: { ownerUserId: string; commandId: string;
-  requestDigest: string; value: Record<string, unknown>; at: string }) {
+  requestDigest: string; value: Record<string, unknown>; at: string; ttlMs: number }) {
   await storeScopedCommandReplay(tx, "machine_control_replay_write_v1", {
     scopeKind: "user", scopeId: input.ownerUserId, commandId: input.commandId,
-    commandKind: "machine-daemon-control", requestDigest: input.requestDigest, result: input.value, at: input.at, ttlMs: REPLAY_TTL_MS,
+    commandKind: "machine-daemon-control", requestDigest: input.requestDigest, result: input.value, at: input.at, ttlMs: input.ttlMs,
   });
 }
 
@@ -604,7 +612,8 @@ export class PostgresMachineControlRepository {
           ? { runLifecycleStopPurpose: completion.stopPurpose }
           : {}) };
       if (completion?.reused !== true) {
-        await storeReplay(tx, { ownerUserId, commandId, requestDigest, value, at });
+        await storeReplay(tx, { ownerUserId, commandId, requestDigest, value, at,
+          ttlMs: action === "report" ? REPORT_REPLAY_TTL_MS : REPLAY_TTL_MS });
       }
       return value;
     });

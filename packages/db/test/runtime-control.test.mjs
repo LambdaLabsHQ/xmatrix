@@ -295,6 +295,8 @@ test("a pre-spawn failure still owes a notice when launch update already failed 
   assert.equal(value.startupFailureNoticeContext?.runId, "run-1");
   const replay = db.calls.find(q => q.name === "machine_lifecycle_replay_write_v1");
   assert.ok(JSON.stringify(replay.values).includes("startupFailureNoticeContext"), "notice delivery survives report replay");
+  assert.equal(Date.parse(replay.values[7]) - Date.parse(replay.values[6]), 30 * 24 * 60 * 60 * 1_000,
+    "a terminal lifecycle event keeps its month-long replay");
 });
 
 for (const [status, recoverableLaunchFailure, executionCancellation] of [["stopped", false], ["completed", false],
@@ -593,6 +595,9 @@ for (const snapshotComplete of [false, true]) {
     assert.equal(db.calls.some(q => q.name === "machine_lifecycle_snapshot_head_v2"), snapshotComplete);
     const progress = db.calls.filter(q => q.name === "machine_lifecycle_invocation_progress_v1");
     assert.deepEqual(progress.map(q => q.values[2]), ["run-1"]);
+    const replay = db.calls.find(q => q.name === "machine_lifecycle_replay_write_v1");
+    assert.equal(Date.parse(replay.values[7]) - Date.parse(replay.values[6]), 24 * 60 * 60 * 1_000,
+      "a snapshot's replay keeps a day");
   });
 }
 

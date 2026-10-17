@@ -19,6 +19,16 @@ expiry rules. Readers already refuse expired receipts. Their cleanup was
 implemented before the credit rollout; it must be verified through execution
 receipts rather than assumed absent from a large table size.
 
+Scoped command replays keep 30 days, except the two high-volume daemon
+streams, which keep one day: Machine daemon `report` commands
+(`machine-daemon-control`) and Run snapshots (`machine_run_lifecycle` for
+`machine_run_snapshot`). On 2026-10-16 those two were about 85% of the 1.5M
+replay rows and most of the 3.1 GB table. A report from an older connection
+is refused by the epoch fence before its replay is read, every report has a
+fresh command id, and the snapshot head refuses an older registry sequence,
+so neither replay answers anything after the sender's own prompt retries.
+Rows written before the change expire on their original 30-day schedule.
+
 Financial receipts (`data.space_credit_purchases` and
 `data.paid_call_receipts`) are not TTL replays. Preserve them for the lifetime
 of their Space; they move with the Space and are removed only by its existing
