@@ -841,14 +841,18 @@ function ChannelSectionRows({ channels, row }: {
   ));
 }
 
-type ChannelSectionItem =
-  | { kind: "heading"; label: string; count?: number; mark: ListSectionMark }
-  | { kind: "row"; channel: ChannelSnapshot };
-
 /**
- * The same sections as ChannelSectionRows, as one virtualized list: headings
- * and rows are items, and only those near the viewport are mounted, scrolled
+ * The same sections as ChannelSectionRows, virtualized: each section's heading,
+ * then its rows, of which only those near the viewport are mounted, scrolled
  * by the list's own material sheet (`scrollRoot`).
+ *
+ * Each section is its own list of rows only. react-virtuoso remembers a
+ * size per position, not per item, so with headings in the same list a
+ * conversation entering or leaving "Needs you" left a heading's size at a
+ * row's place. Scrolling back up over it, Virtuoso corrected the difference
+ * mid-flick, which on iPhone blanks the list above a line cut through a row
+ * (user 2026-10-17). Rows are one height, so a section's positions all hold
+ * the same size whichever conversations fill them.
  */
 function VirtualChannelSections({ scrollRoot, scrollToChannelRef, channels, pinnedChannelIds, row }: {
   scrollRoot: HTMLElement | null;
@@ -858,34 +862,40 @@ function VirtualChannelSections({ scrollRoot, scrollToChannelRef, channels, pinn
   pinnedChannelIds: ReadonlySet<string>;
   row: (channel: ChannelSnapshot) => ReactNode;
 }) {
-  const items = useMemo<ChannelSectionItem[]>(() => channelListSections(channels, pinnedChannelIds).flatMap((section) => [
-    { kind: "heading" as const, label: section.label, count: section.count, mark: section.mark },
-    ...section.channels.map((channel) => ({ kind: "row" as const, channel })),
-  ]), [channels, pinnedChannelIds]);
-  const listRef = useRef<VirtuosoHandle | null>(null);
-  const itemsRef = useRef(items);
-  itemsRef.current = items;
+  const sections = useMemo(() => channelListSections(channels, pinnedChannelIds), [channels, pinnedChannelIds]);
+  const listRefs = useRef(new Map<string, VirtuosoHandle>());
+  const sectionsRef = useRef(sections);
+  sectionsRef.current = sections;
   useEffect(() => {
     if (!scrollToChannelRef) return;
     scrollToChannelRef.current = (channelId) => {
-      const index = itemsRef.current.findIndex((item) => item.kind === "row" && item.channel.id === channelId);
-      if (index >= 0) listRef.current?.scrollIntoView({ index });
+      for (const section of sectionsRef.current) {
+        const index = section.channels.findIndex((channel) => channel.id === channelId);
+        if (index >= 0) {
+          listRefs.current.get(section.label)?.scrollIntoView({ index });
+          return;
+        }
+      }
     };
     return () => { scrollToChannelRef.current = null; };
   }, [scrollToChannelRef]);
-  if (!scrollRoot || items.length === 0) return null;
-  return (
-    <Virtuoso
-      ref={listRef}
-      customScrollParent={scrollRoot}
-      data={items}
-      computeItemKey={(_index, item) => (item.kind === "row" ? item.channel.id : `section:${item.label}`)}
-      increaseViewportBy={CONVERSATION_LIST_PRELOAD_PX}
-      itemContent={(_index, item) => (item.kind === "row"
-        ? row(item.channel)
-        : <ListSectionHeading label={item.label} count={item.count} mark={item.mark} />)}
-    />
-  );
+  if (!scrollRoot) return null;
+  return sections.map((section) => (
+    <Fragment key={section.label}>
+      <ListSectionHeading label={section.label} count={section.count} mark={section.mark} />
+      <Virtuoso
+        ref={(handle) => {
+          if (handle) listRefs.current.set(section.label, handle);
+          else listRefs.current.delete(section.label);
+        }}
+        customScrollParent={scrollRoot}
+        data={section.channels}
+        computeItemKey={(_index, channel) => channel.id}
+        increaseViewportBy={CONVERSATION_LIST_PRELOAD_PX}
+        itemContent={(_index, channel) => row(channel)}
+      />
+    </Fragment>
+  ));
 }
 
 /** When the row last moved: the time the list ranks it by, not only its last message's. */
