@@ -127,6 +127,8 @@ try {
     "packages/db/test/sentry-event-postgres.test.mjs",
     "packages/db/test/gmail-routing-postgres.test.mjs",
     "packages/db/test/message-attention-wait-postgres.test.mjs",
+    // An append's two transactions lock the Channel counter before the reservation.
+    "packages/db/test/message-sequence-lock-order-postgres.test.mjs",
     "packages/db/test/github-write-policy-migration-postgres.test.mjs",
     "packages/db/test/message-history-tombstone-senders-postgres.test.mjs",
     // A history page is one fenced statement, and a placed single read must

@@ -140,7 +140,7 @@ function agentAppendDatabase({ calls = [], sequenceChannelId, commitChannelId = 
           if (query.name === "message_append_commit_facts_v5") return [{
             search_rank: "pg:00000000000000000001", content_revision: 0, channel_id: commitChannelId,
           }];
-          if (query.name === "message_append_publish_unmetered_v2") return [{
+          if (query.name === "message_append_publish_unmetered_v3") return [{
             status: null, grace_until: null, seat_quantity: null, seat_count: null,
             prior_free_message_count: 0, free_message_count: 1,
             accepted: true, channel_id: commitChannelId, sequence_confirmed: true,

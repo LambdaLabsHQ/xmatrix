@@ -73,7 +73,7 @@ function committedAppend(query, searchRank) {
   if (query.name === "message_append_commit_facts_v5") return [{
     search_rank: searchRank, content_revision: 0, channel_id: "channel-1",
   }];
-  if (query.name === "message_append_publish_unmetered_v2") return [appendPublication({
+  if (query.name === "message_append_publish_unmetered_v3") return [appendPublication({
     result_json: JSON.parse(query.values[4]),
   })];
   return undefined;
@@ -137,7 +137,7 @@ test("append commits structured invocation intent with its source and excludes o
       : query.name === "message_append_commit_facts_v5"
         ? [{ search_rank: "pg:00000000000000000043", content_revision: 0, channel_id: "channel-1" }]
       : query.name === "message_agent_targets_commit_v1" ? [{ message_id: "message-1" }]
-      : query.name === "message_append_publish_unmetered_v2"
+      : query.name === "message_append_publish_unmetered_v3"
         ? [{ accepted: true, channel_id: "channel-1", sequence_confirmed: true, result_json: JSON.parse(query.values[4]) }]
       : query.name === "message_live_routing_recipients_v4"
         ? [{ user_id: "alice", recipient_count: "2" }, { user_id: "bob", recipient_count: "2" }]
@@ -158,7 +158,7 @@ test("append commits structured invocation intent with its source and excludes o
     userId: "alice", notification: { reason: "mention", attention: { channelId: "channel-1", unreadAttentionCount: 1,
       lastAttentionAt: "2026-09-20T00:00:00.000Z", lastMessageId: "message-1", lastMessageSequence: 7,
       primaryTriggerKind: "mention", triggerKinds: ["mention"], updatedAt: "2026-09-20T00:00:00.000Z" } } }] });
-  const receipt = JSON.parse(db.calls.find(call => call.name === "message_append_publish_unmetered_v2").values[4]);
+  const receipt = JSON.parse(db.calls.find(call => call.name === "message_append_publish_unmetered_v3").values[4]);
   assert.equal("liveRouting" in receipt, false);
   const stored = JSON.parse(db.calls.find(call => call.name === "message_agent_targets_commit_v1").values[3]);
   assert.deepEqual(stored, { entityVersion: 1, bodyHash, targets: [], selections: invocationSelections });
@@ -683,12 +683,12 @@ test("a billing notice goes back with its commit, never into the stored receipt"
     query.name === "message_append_preflight_v4" ? [appendPreflight()]
       : query.name === "message_append_commit_facts_v5"
         ? [{ search_rank: "pg:00000000000000000042", content_revision: 0, channel_id: "channel-1" }]
-      : query.name === "message_append_publish_noticing_v2"
+      : query.name === "message_append_publish_noticing_v3"
         ? [appendPublication({ raised: true, result_json: JSON.parse(query.values[4]) })]
       : []));
   const result = await new PostgresMessageRepository(db, false, noticing).append(appendRequest());
   assert.deepEqual(result.billingNotice, { key: "credits:2026-09-01:1", body: "80% used" });
-  const publish = db.calls.find((call) => call.name === "message_append_publish_noticing_v2");
+  const publish = db.calls.find((call) => call.name === "message_append_publish_noticing_v3");
   assert.equal("billingNotice" in JSON.parse(publish.values[4]), false);
   assert.equal(publish.values[12], "user", "the policy is told who wrote it");
 });
@@ -714,10 +714,10 @@ test("Message append reauthorizes and commits every relational fact with one out
     "message_append_preflight_v4",
     "message_append_commit_facts_v5",
     "message_append_attention_batch_v5",
-    "message_append_publish_unmetered_v2",
+    "message_append_publish_unmetered_v3",
   ]) assert.equal(db.calls.some((call) => call.name === queryName), true, queryName);
   const billingAdvance = db.calls.find(
-    (call) => call.name === "message_append_publish_unmetered_v2",
+    (call) => call.name === "message_append_publish_unmetered_v3",
   );
   assert.doesNotMatch(billingAdvance.text, /space_billing_/u,
     "the default deployment meters nothing, so publishing reads no billing table");
@@ -1156,7 +1156,7 @@ async function appendReplyTo(replyTarget, senderSnapshot =
       : query.name === "message_attention_authorize_v3" ? query.values[2].map(subject_id => ({ subject_id }))
       : query.name === "message_append_commit_facts_v5"
         ? [{ search_rank: "pg:00000000000000000043", content_revision: 0, channel_id: "channel-1" }]
-      : query.name === "message_append_publish_unmetered_v2"
+      : query.name === "message_append_publish_unmetered_v3"
         ? [{ accepted: true, channel_id: "channel-1", sequence_confirmed: true, result_json: JSON.parse(query.values[4]) }]
       : []));
   const result = await new PostgresMessageRepository(db).append(appendRequest({
