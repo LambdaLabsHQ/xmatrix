@@ -15,6 +15,8 @@ type GitHubInstallationAccount = {
   type: string;
   avatarUrl?: string;
   repositorySelection?: string;
+  /** A linked account is used only once an administrator of it confirmed it by connecting. */
+  confirmed?: boolean;
 };
 
 type GitHubInstallations = {
@@ -163,6 +165,11 @@ function AccountRow({ account, children }: { account: GitHubInstallationAccount;
           {account.type === "Organization" ? "Organization" : account.type === "User" ? "Personal account" : account.type}
           {account.repositorySelection === "all" ? " · all repositories" : account.repositorySelection === "selected" ? " · selected repositories" : ""}
         </span>
+        {account.confirmed === false ? (
+          <span className="block text-xs text-muted-foreground" data-testid="github-installation-unconfirmed">
+            Paused until its owner, or an owner of the organization, uses Find my GitHub accounts here.
+          </span>
+        ) : null}
       </span>
       <span className="flex gap-2">{children}</span>
     </li>

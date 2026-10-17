@@ -15,6 +15,9 @@ export async function githubAppEnv() {
   return { GITHUB_APP_ID: "12345", GITHUB_APP_PRIVATE_KEY: await githubAppPrivateKey() };
 }
 
+/** The GitHub user Connect recorded as linking installation 777; GitHub answers that they administer it. */
+export const GITHUB_LINKER = { githubUserId: 4242, login: "the-linker" };
+
 /** space-1's configured GitHub connection, through installation 777 unless overridden. */
 export function githubConnection(overrides = {}) {
   return {
@@ -23,8 +26,20 @@ export function githubConnection(overrides = {}) {
     providerName: "GitHub",
     status: "configured",
     metadata: { installationIds: ["777"] },
+    githubLinks: [{ installationId: "777", githubUserId: GITHUB_LINKER.githubUserId }],
     ...overrides,
   };
+}
+
+/** GitHub naming the recorded linker, and their live admin permission on any repository. */
+export function githubLinkerAnswer(url) {
+  if (url.endsWith(`/user/${GITHUB_LINKER.githubUserId}`)) {
+    return jsonResponse({ id: GITHUB_LINKER.githubUserId, login: GITHUB_LINKER.login });
+  }
+  if (url.endsWith(`/collaborators/${GITHUB_LINKER.login}/permission`)) {
+    return jsonResponse({ permission: "admin", user: { id: GITHUB_LINKER.githubUserId, login: GITHUB_LINKER.login } });
+  }
+  return undefined;
 }
 
 export function jsonResponse(payload, status = 200) {
@@ -46,7 +61,7 @@ export function stubGitHubFetch(handler) {
       body: init?.body ? JSON.parse(init.body) : undefined,
     };
     calls.push(call);
-    return handler(call);
+    return githubLinkerAnswer(url) ?? handler(call);
   };
   return {
     calls,

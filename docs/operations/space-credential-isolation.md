@@ -11,9 +11,10 @@ shared user grant.
 | OAuth completion | Signed provider/Space/initiator state, the same signed-in Human, and current owner/admin membership before exchange; the write rechecks membership |
 | Connector execution | The authorized Channel determines its Space connection; credentials resolve by that connection, without an owner/global fallback. Acting with a connection (actions, approval requests, subscriptions, and reads of the provider's catalog such as GitHub launch targets, completion and Jev's repository list) needs owner/admin/member, as Run secret reads do; a viewer or open-project participant only reads the connection's configuration. A subscription delivers only while its creator still holds that role |
 | Composio | A connect attempt uses `xmatrix:<space>:<nonce>`; calls name the saved connected account |
-| Slack app events | One Space per workspace: Connect elsewhere is refused while a Space's binding is current; older duplicate bindings route nowhere; a verified uninstall retires them |
-| Linear app events | Each Space receives an event only when its own grant reads the event's subject |
-| GitHub installation link | Connect names only installations the person administers on GitHub: their own account's, or an organization's whose every covered repository they administer |
+| Slack app events | One Space per workspace: Connect elsewhere is refused while a Space's binding holds it (a failed check keeps the hold; a disconnect, a dated uninstall or deleting the Space releases it); older duplicate bindings neither route nor use the bot |
+| Linear app events | Each Space receives an event only when its own grant reads the event's subject, and only while that exact grant (credential version and binding generation) is current |
+| GitHub installation link | Connect names only installations the person administers on GitHub: their own account's, or an organization's whose every covered repository they administer. Connect alone records that GitHub user (`app_github_installation_links`); connection metadata never supplies the record |
+| GitHub repository use | A token mint, a GitHub action, a webhook delivery, an Automation trigger or a claim check for a repository needs the GitHub user recorded for its installation to administer that repository now, read live with the installation's token. A link without a record, a repository added to the installation later, or a linker who lost the role is refused |
 | GitHub repository token | Current daemons bind the live admitted Run, Machine, execution and repository; the Channel determines the Space's linked installations; the Machine owner must be owner/admin/member there |
 | Run secret read | The exact live Run/Instance/execution, registration admission, token Space and current owner membership; `ask` approvals also join on Space |
 | New ciphertext | AES-GCM additional data binds connector values to connection/version and Space secrets to Space/alias/value version |
@@ -24,8 +25,18 @@ exchange it through `POST /api/connectors/oauth/complete`. Anonymous callbacks
 cannot link installations or issue installation-selection grants. This closes
 the forwarded-connect-link path that could associate someone else's GitHub
 installations with the initiator's Space. Newly issued grants use purpose
-`github-grant:v3` and name only installations the person administers; earlier
-grants named every installation they reached and are rejected.
+`github-grant:v4`, name only installations the person administers and carry
+the GitHub user id GitHub's `/user` returned; earlier grants are rejected.
+
+Installations linked before Connect recorded who linked them have no record
+and are paused: the Apps view marks them, and an administrator of the account
+restores them by running Find my GitHub accounts in that Space, which records
+them for every already-linked installation they administer. No backfill
+guesses who linked an installation. An installation token already minted
+before a refusal stays valid until GitHub expires it (at most one hour). The
+repository picker offers an installation's repositories only while its
+recorded linker administers one of them, so it may still name a repository
+added later, which then cannot be used.
 Existing state can complete under the new authenticated checks. This reuses the
 already shipped Web completion page and proxy, so the Hub change fails closed
 without requiring a new browser protocol or company credential rotation.

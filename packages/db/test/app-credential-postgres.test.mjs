@@ -1064,6 +1064,33 @@ const githubPolicy = { id: "github", name: "GitHub", authMode: "oauth", scopes: 
   secretRefs: [], capabilities: [], metadataFields: ["repository", "installationId", "installationIds",
     "commentWriteChannelId"] };
 
+// Who handed an installation to the Space is a fact only GitHub Connect
+// records: a Space admin, for installations the Space links now; a link it
+// no longer has loses its record, and the connection view carries the rest.
+integration("only an admin's GitHub Connect records who linked an installation, and only while it is linked", async () => {
+  await withDatabase(async ({ sql, database, space }) => {
+    const apps = new PostgresAppRepository(database);
+    const upsert = (body) => apps.upsert({ commandId: crypto.randomUUID(), spaceId: space, actorUserId: "owner",
+      provider: githubPolicy, body, at });
+    await upsert({ status: "configured", authMode: "oauth", metadata: { installationIds: ["111", "222"] } });
+    const record = (actorUserId, installationIds, githubUserId = 77) => apps.recordGitHubInstallationLinks({
+      requestId: crypto.randomUUID(), spaceId: space, actorUserId, githubUserId, installationIds, at });
+    const links = async () => (await apps.getConnection({ requestId: crypto.randomUUID(),
+      connectionId: `${space}:github`, actorUserId: "member" })).connection.githubLinks;
+    try {
+      await assert.rejects(record("member", ["111"]), (error) => error.code === "space_not_found");
+      assert.deepEqual(await links(), []);
+      assert.deepEqual((await record("owner", ["111", "333"])).recorded, ["111"], "an installation not linked here is not recorded");
+      assert.deepEqual(await links(), [{ installationId: "111", githubUserId: 77 }]);
+      await upsert({ metadata: { installationIds: ["222"] } });
+      assert.deepEqual((await record("owner", ["222"], 88)).recorded, ["222"]);
+      assert.deepEqual(await links(), [{ installationId: "222", githubUserId: 88 }], "the unlinked one's record is gone");
+    } finally {
+      await sql("DELETE FROM data.app_github_installation_links WHERE space_id=$1", [space]);
+    }
+  });
+});
+
 integration("a GitHub install appends its installation and keeps every other installation and config", async () => {
   await withDatabase(async ({ database, space }) => {
     const apps = new PostgresAppRepository(database);

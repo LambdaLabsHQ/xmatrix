@@ -623,7 +623,12 @@ section it keeps true, and it is written there:
   the occurrence's time, posts its message there and writes back to the
   section (§5.2). An occurrence never inherits an earlier one's chatter: what
   carries over lives on the page. The chip and Schedules open the last
-  occurrence's conversation.
+  occurrence's conversation. An Automation with connector or GitHub event
+  triggers uses closed occurrence conversations even when its Page is readable
+  to the whole Space. Any captured trigger event also requires a closed
+  conversation, including an `owed` event that can name a private pull request,
+  even if its trigger configuration has since changed. A retry that
+  finds an older open conversation refuses to append those private details.
 - **An occurrence that starts an Agent holds its section.** It claims the
   section for its conversation, shown under the Automation's name. The Run
   takes that claim over when it claims the section, and writing the section
@@ -672,7 +677,14 @@ which change to look at.
 Access follows the page, for people and Agents alike:
 
 - **Read**: anyone who can read the page, including every Agent Run whose
-  owner can; there is no birth-conversation restriction.
+  owner can; there is no birth-conversation restriction. Pending trigger
+  summaries and URLs additionally require the reader (or the Agent's current
+  owner) to be a Space owner, admin or member. Viewers and participants still
+  see the schedule, without connected-app event details; the stored events
+  are preserved for authorized readers and delivery. Author-entered trigger
+  configuration, including repository names, follows the Page's visibility.
+  An authorized author or Agent can also publish event content into Page prose;
+  the automatic event projection does not restrict those explicit Page writes.
 - **Create, edit, pause, resume, move, delete**: anyone who can edit the page.
   On a suggest-only page an Agent's change is refused and it asks a person,
   because an Automation is not text a person can review as a suggestion.

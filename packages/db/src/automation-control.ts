@@ -248,6 +248,21 @@ function authorityRoot(row: QueryResultRow): string {
   return typeof root === "string" && root ? root : String(row.owner_user_id);
 }
 
+/**
+ * The (Space, user) pairs among these whose user is a member who may use the
+ * Space's connected apps now: owner, admin or member, not a viewer or an
+ * open-project participant (open-project-governance.md §2).
+ */
+async function appUsers(tx: DatabaseTransaction, pairs: Array<{ spaceId: string; userId: string }>): Promise<Set<string>> {
+  if (pairs.length === 0) return new Set();
+  const rows = await tx.query<QueryResultRow>({ name: "automation_app_users_v1", text: `SELECT m.space_id,m.user_id
+    FROM data.space_members m JOIN unnest($1::text[],$2::text[]) AS pair(space_id,user_id)
+      ON pair.space_id=m.space_id AND pair.user_id=m.user_id
+    WHERE m.role NOT IN ('viewer','participant')`,
+  values: [pairs.map((pair) => pair.spaceId), pairs.map((pair) => pair.userId)], maxRows: pairs.length });
+  return new Set(rows.map((row) => `${String(row.space_id)}\u0000${String(row.user_id)}`));
+}
+
 /** `reasonRequired` is always false: no Automation change needs a stated
  * reason. It stays on the wire for CLIs that still require the field. */
 function capabilities(row: QueryResultRow) {
@@ -296,7 +311,21 @@ async function withPageAccess(tx: DatabaseTransaction, userId: string,
     const access = pages.get(String(row.page_id));
     if (access) visible.push({ ...row, can_manage: access.canEdit });
   }
-  return visible;
+  return withEventReadAccess(tx, userId, visible);
+}
+
+/** A readable schedule does not grant use of the Space's connected apps or their event details. */
+async function withEventReadAccess(tx: DatabaseTransaction, userId: string,
+  rows: readonly QueryResultRow[]): Promise<QueryResultRow[]> {
+  const channels = [...new Set(rows.filter((row) => Array.isArray(row.trigger_events) && row.trigger_events.length)
+    .map((row) => String(row.channel_id)))];
+  if (channels.length === 0) return [...rows];
+  const allowed = await tx.query<QueryResultRow>({ name: "automation_event_read_access_v1", text: `SELECT c.channel_id
+    FROM data.channels c JOIN data.space_members m ON m.space_id=c.space_id AND m.user_id=$2
+    WHERE c.channel_id=ANY($1::text[]) AND m.role IN ('owner','admin','member')`,
+  values: [channels, userId], maxRows: channels.length });
+  const readable = new Set(allowed.map((row) => String(row.channel_id)));
+  return rows.map((row) => readable.has(String(row.channel_id)) ? row : { ...row, trigger_events: null });
 }
 
 /** The Human read predicate: a page's Automation passes here and is checked against its page afterwards. */
@@ -854,7 +883,7 @@ export class PostgresAutomationRepository {
               principalKindSql: "'agent'", principalIdSql: "$1" })}
             AND ${MESSAGE_AUTOMATION_SQL} AND t.automation_id>$3 ORDER BY t.automation_id LIMIT $4`,
         values: [authority.principalId, authority.channelId, cursor, limit + 1], maxRows: limit + 1 });
-        const page = rows.slice(0, limit);
+        const page = await withEventReadAccess(tx, authority.ownerUserId, rows.slice(0, limit));
         return { tasks: page.map(automationFromRow), cursor: rows.length > limit
           ? String(page.at(-1)?.automation_id ?? "") : null,
           executionEnabled: true, agentManagementEnabled: true };
@@ -983,7 +1012,8 @@ export class PostgresAutomationRepository {
               principalKindSql: "'agent'", principalIdSql: "$1" })} AND ${MESSAGE_AUTOMATION_SQL} LIMIT 1`,
         values: [authority.principalId, automationId, authority.channelId], maxRows: 1 });
         if (!rows[0]) throw new AutomationControlError("automation_not_found", 404, "Automation not found");
-        return { task: automationFromRow(rows[0]) };
+        const visible = await withEventReadAccess(tx, authority.ownerUserId, rows);
+        return { task: automationFromRow(visible[0]!) };
       }
       const userId = humanPrincipal(input);
       const rows = await withPageAccess(tx, userId, await tx.query<QueryResultRow>({ name: "automation_get_v5", text: `SELECT
@@ -1572,7 +1602,7 @@ export class PostgresAutomationRepository {
    * §6.2). The caller decides which of them the event really fires.
    */
   async triggeredBy(input: { requestId: string; trigger: Record<string, unknown>; spaceId?: string;
-    pageId?: string }): Promise<Array<{ automationId: string; channelId: string; spaceId: string; pageId: string;
+    pageId?: string; appUse?: boolean }): Promise<Array<{ automationId: string; channelId: string; spaceId: string; pageId: string;
       authorityRootUserId: string; triggers: unknown[] }>> {
     const requestId = text(input.requestId, "requestId", 200);
     return this.database.transaction({ requestId, operation: "automation.triggered-by" }, async (tx) => {
@@ -1583,7 +1613,11 @@ export class PostgresAutomationRepository {
           AND ($2::text IS NULL OR c.space_id=$2) AND ($3::text IS NULL OR a.page_id=$3)
         ORDER BY a.automation_id LIMIT 200`,
       values: [JSON.stringify([input.trigger]), input.spaceId ?? null, input.pageId ?? null], maxRows: 200 });
-      return rows.map((row) => ({ automationId: String(row.automation_id), channelId: String(row.channel_id),
+      // An event from the Space's connected apps concerns only Automations whose authority may use them now.
+      const users = input.appUse ? await appUsers(tx, rows.map((row) => ({ spaceId: String(row.space_id),
+        userId: authorityRoot(row) }))) : undefined;
+      return rows.filter((row) => !users || users.has(`${String(row.space_id)}\u0000${authorityRoot(row)}`))
+        .map((row) => ({ automationId: String(row.automation_id), channelId: String(row.channel_id),
         spaceId: String(row.space_id), pageId: String(row.page_id), authorityRootUserId: authorityRoot(row),
         triggers: Array.isArray(json(row.payload_json).triggers) ? json(row.payload_json).triggers as unknown[] : [] }));
     });
@@ -1595,7 +1629,7 @@ export class PostgresAutomationRepository {
    * Returns the conversation to tell, or null when nothing changed.
    */
   async fireTrigger(input: { requestId: string; automationId: string; eventId: string;
-    event: Record<string, unknown>; at: string }, dingtalkEffect?: DingTalkEffectAuthority): Promise<string | null> {
+    event: Record<string, unknown>; at: string; appUse?: boolean }, dingtalkEffect?: DingTalkEffectAuthority): Promise<string | null> {
     const requestId = text(input.requestId, "requestId", 200);
     const at = timestamp(input.at, "at");
     const placement=dingtalkEffect ? await this.placement(requestId,"automation.dingtalk-effect.placement",dingtalkEffect.spaceId) : undefined;
@@ -1619,6 +1653,11 @@ export class PostgresAutomationRepository {
       values: [text(input.automationId, "automationId", 300)], maxRows: 1 });
       const row = rows[0];
       if (!row) { if (dingtalkEffect) dingtalkDenied(); return null; }
+      // Checked again under the Automation's lock: an authority who lost member
+      // rights keeps the Automation, but connected-app events no longer reach it.
+      if (input.appUse && !(await appUsers(tx, [{ spaceId: String(row.space_id), userId: authorityRoot(row) }])).size) {
+        return null;
+      }
       if (dingtalkEffect && source) {
         const destination=dingtalkEffect.destination;
         const triggers=json(row.payload_json).triggers;

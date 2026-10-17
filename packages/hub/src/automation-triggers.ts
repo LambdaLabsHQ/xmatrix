@@ -1,6 +1,6 @@
 import { PostgresAutomationRepository, PostgresPageRepository } from "@xmatrix/db";
 import { automationReferences, type AutomationTrigger } from "@xmatrix/protocol";
-import { githubConnectionHasInstallation, githubPullRequestPaths } from "./app-connectors";
+import { githubPullRequestPaths, githubRepositoryDelegated } from "./app-connectors";
 import { record, text } from "./github-subscription-domain";
 import { tellPageAutomationChannels } from "./page-automation-wake";
 import { createPostgresAuthorityDatabase, createPostgresAuthorityFleet } from "./postgres-authority-fleet";
@@ -80,11 +80,15 @@ export async function fireGitHubAutomationTriggers(env: Env, event: string,
     const key = `${spaceId}\u0000${userId}`;
     if (!connected.has(key)) connected.set(key, (async () => {
       const connection = await findAppConnection(env, { spaceId, providerId: "github", actorUserId: userId });
-      return connection?.status === "configured" && githubConnectionHasInstallation(connection, fired.installationId);
+      const [owner, repo] = fired.repository.split("/") as [string, string];
+      // Only what the installation's linking administrator administers now fires the Space's Automations.
+      return connection?.status === "configured" &&
+        await githubRepositoryDelegated(env, connection, fired.installationId, owner, repo);
     })().catch(() => false));
     return connected.get(key)!;
   };
-  return fireAcrossShards(env, { trigger: { kind: fired.kind, repository: fired.repository } }, async (candidate) => {
+  // A connected app's event reaches only Automations whose authority may use it now.
+  return fireAcrossShards(env, { trigger: { kind: fired.kind, repository: fired.repository }, appUse: true }, async (candidate) => {
     let matches = false;
     for (const trigger of candidate.triggers as AutomationTrigger[]) {
       if (trigger.kind !== fired.kind || trigger.repository !== fired.repository ||
@@ -115,7 +119,7 @@ async function fireAcrossShards(env: Env, query: Omit<Parameters<PostgresAutomat
       if (!event) continue;
       const channel = await repository.fireTrigger({ requestId: crypto.randomUUID(), automationId: candidate.automationId,
         eventId: event.id, event: { kind: event.kind, summary: event.summary, ...(event.url ? { url: event.url } : {}) },
-        at: new Date().toISOString() });
+        at: new Date().toISOString(), ...(query.appUse ? { appUse: true } : {}) });
       if (channel) channels.push(channel);
     }
   }
@@ -132,8 +136,9 @@ export function connectorTriggerMatches(trigger: AutomationTrigger, event: { pro
 
 /**
  * A connector delivered an event for a connection: fires the Automations in
- * that connection's Space whose event trigger concerns it. The ingress already
- * authenticated the delivery to the connection, so no further check is needed.
+ * that connection's Space whose event trigger concerns it and whose authority
+ * may use the Space's connected apps now. The ingress already authenticated
+ * the delivery to the connection.
  */
 export async function fireConnectorAutomationTriggers(env: Env, input: { spaceId: string; provider: string; authorizedUserId?: string;
   event: { eventId: string; sourceRef: string; feature: string; summary: string; url?: string } }): Promise<number> {
@@ -141,7 +146,7 @@ export async function fireConnectorAutomationTriggers(env: Env, input: { spaceId
   const source = input.event.sourceRef.slice(input.provider.length + 1);
   const fired: FiredEvent = { id: `${input.provider}:${input.event.eventId}`.slice(0, 200), kind: "event",
     summary: input.event.summary, ...(input.event.url ? { url: input.event.url } : {}) };
-  return fireAcrossShards(env, { trigger: { kind: "event", provider: input.provider }, spaceId: input.spaceId },
+  return fireAcrossShards(env, { trigger: { kind: "event", provider: input.provider }, spaceId: input.spaceId, appUse: true },
     async (candidate) => (!input.authorizedUserId || candidate.authorityRootUserId === input.authorizedUserId) &&
       (candidate.triggers as AutomationTrigger[]).some((trigger) => connectorTriggerMatches(trigger,
       { provider: input.provider, source, feature: input.event.feature })) ? fired : undefined);
