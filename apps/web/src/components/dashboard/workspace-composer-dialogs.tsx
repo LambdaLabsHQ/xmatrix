@@ -834,6 +834,7 @@ export const Composer = memo(function Composer({
       // Checked here as well as inside the task: a card can be removed while an
       // upload that already finished waits its turn to commit.
       if (!registry.isLive(entry.id, generation)) {
+        if (result.ok && result.attachment?.url) URL.revokeObjectURL(result.attachment.url);
         clearPendingAttachment(entry.id);
         continue;
       }
@@ -937,9 +938,12 @@ export const Composer = memo(function Composer({
     if (uploaded.kind === "video") {
       // Read the file we actually uploaded, so resized dimensions stay accurate.
       const withMetadata = await attachVideoMetadata(uploadFile, uploaded);
-      return registry.isLive(entry.id, generation) ? withMetadata : null;
+      if (registry.isLive(entry.id, generation)) return withMetadata;
+    } else if (registry.isLive(entry.id, generation)) {
+      return uploaded;
     }
-    return registry.isLive(entry.id, generation) ? uploaded : null;
+    if (uploaded.url) URL.revokeObjectURL(uploaded.url);
+    return null;
   }
 
   function fileCandidates(files: FileList | File[]): AttachmentDropCandidate[] {

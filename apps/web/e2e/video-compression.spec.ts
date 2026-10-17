@@ -135,3 +135,26 @@ test("removing a video during codec negotiation prevents it uploading when negot
   ]);
   await expect(page.getByText("cancel.webm", { exact: true })).toHaveCount(0);
 });
+
+test("cancelling after upload releases files waiting for video metadata", async ({ page }) => {
+  await openComposer(page);
+  await page.evaluate(() => {
+    const created: string[] = [];
+    const revoked: string[] = [];
+    Object.assign(window, { resourceUrls: { created, revoked } });
+    const create = URL.createObjectURL.bind(URL);
+    const revoke = URL.revokeObjectURL.bind(URL);
+    URL.createObjectURL = (blob) => { const url = create(blob); if (blob instanceof File) created.push(url); return url; };
+    URL.revokeObjectURL = (url) => { revoked.push(url); revoke(url); };
+    // Hold metadata loading until the real five-second metadata deadline.
+    const descriptor = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, "src")!;
+    Object.defineProperty(HTMLMediaElement.prototype, "src", { ...descriptor, set: () => undefined });
+  });
+  await page.locator('input[type="file"]').setInputFiles({ name: "metadata.webm", mimeType: "video/webm", buffer: Buffer.from("metadata fixture") });
+  await expect.poll(() => page.evaluate(() => (window as unknown as { resourceUrls: { created: string[] } }).resourceUrls.created.length)).toBe(2);
+  await page.getByRole("button", { name: "Cancel metadata.webm", exact: true }).click();
+  await expect.poll(() => page.evaluate(() => {
+    const { created, revoked } = (window as unknown as { resourceUrls: { created: string[]; revoked: string[] } }).resourceUrls;
+    return created.every((url) => revoked.includes(url));
+  })).toBe(true);
+});

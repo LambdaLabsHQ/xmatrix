@@ -88,6 +88,8 @@ within 1280 pixels and targets 2.5 Mbps, preferring H.264 MP4 with a WebM fallba
 Audio tracks must survive conversion; unsupported codecs, failures, a two-minute
 deadline, or a result that is no smaller retain the original. Removing a pending
 attachment cancels conversion. Metadata describes the uploaded result.
+Cancelled uploads release their local preview URLs, including while awaiting
+video metadata or an earlier file in the same batch.
 The composer's **Original** checkbox applies to newly added images and videos
 from every intake source and skips compression; originals retain their bytes,
 filename and MIME type, subject to the existing 64 MiB attachment limit. With
