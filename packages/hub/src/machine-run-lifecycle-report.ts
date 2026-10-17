@@ -3,7 +3,9 @@ import { PostgresMachineLifecycleRepository, RuntimeControlError, type Authority
 
 import { wakeAgentLaunchCoordinator } from "./agent-launch-coordinator-wake";
 import { isRecoverableLaunchFailure } from "./live-run-admission";
-import { publishMachineRunFailureNotice, publishMachineStopResultNotice, publishRepositoryBaselineNotice } from "./machine-run-failure-notice";
+import { publishMachineRunFailureNotice, publishMachineStopResultNotice, publishRepositoryBaselineNotice,
+  publishStartupFallbackNotice } from "./machine-run-failure-notice";
+import { dispatchStartupFallback } from "./registration-launch-dispatch";
 import { createPostgresAuthorityDatabase } from "./postgres-authority-fleet";
 import {
   POSTGRES_AUTHORITY_TIMEOUTS,
@@ -44,7 +46,7 @@ function optionalMachineName(value: unknown): string | undefined {
 export async function machineRunLifecycleReport(
   env: Env,
   input: Record<string, unknown>,
-  dependencies: { database?: AuthorityDatabase } = {},
+  dependencies: { database?: AuthorityDatabase; startupFallback?: typeof dispatchStartupFallback } = {},
 ): Promise<Record<string, unknown>> {
   const database = dependencies.database ?? createPostgresAuthorityDatabase(env, {
     applicationName: "xmatrix-hub-runtime", ...POSTGRES_AUTHORITY_TIMEOUTS });
@@ -81,6 +83,13 @@ export async function machineRunLifecycleReport(
         agentName: text(context.agentName, "agentName"), machineId: text(context.machineId, "machineId"),
         hostId: optionalHostname(context.hostId), machineName: optionalMachineName(context.machineName), ...failure,
       });
+      // An `@auto` summon's work goes to the next-ranked Agent, once. Its
+      // command is per Run, so a replay of this report recovers that launch.
+      const handed = await (dependencies.startupFallback ?? dispatchStartupFallback)(env, {
+        channelId: text(context.channelId, "channelId"), runId: text(context.runId, "runId") });
+      if (handed) await publishStartupFallbackNotice(env, { runId: text(context.runId, "runId"),
+        channelId: text(context.channelId, "channelId"), agentName: handed.agentName,
+        ownerUserId: text(context.ownerUserId, "ownerUserId"), ownerEmail: ownerEmail(context.ownerUserId) });
     }
   }
   if ("repositoryBaselineNoticeContext" in value) {
