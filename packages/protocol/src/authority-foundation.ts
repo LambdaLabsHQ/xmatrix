@@ -144,6 +144,9 @@ function appConnectionRoutes<Api extends "/api" | "/api/xmatrix">(api: Api) {
   };
 }
 
+/** Where an app's Google or GitHub sign-in comes back to the Hub before the app gets its code. */
+export const APP_SIGN_IN_FINISH_PATH = "/api/auth/app/finish";
+
 export const HUB_ROUTES = {
   login: "/api/auth/cli/login",
   otp_verify: "/api/auth/cli/otp-verify",
@@ -157,6 +160,11 @@ export const HUB_ROUTES = {
   exchange_session: "/api/auth/cli/exchange-session",
   /** A signed-out app or terminal ends the session its refresh token names. */
   sign_out: "/api/auth/cli/sign-out",
+  /** An app opens this in the system sign-in sheet or browser to sign in at Google or GitHub. */
+  app_sign_in_start: "/api/auth/app/start",
+  app_sign_in_finish: APP_SIGN_IN_FINISH_PATH,
+  /** The app trades its one-time code and PKCE verifier for a session. */
+  app_sign_in_token: "/api/auth/app/token",
   refresh: "/api/auth/refresh",
   me: "/api/auth/me",
   me_profile: "/api/me/profile",
@@ -391,6 +399,7 @@ export const WEB_PROXY_ROUTES = {
   cli_device_approve: "/api/xmatrix/cli/device/approve",
   cli_device_describe: "/api/xmatrix/cli/device/describe",
   cli_device_decline: "/api/xmatrix/cli/device/decline",
+  app_sign_in_token: "/api/xmatrix/app-sign-in/token",
   native_session: "/api/xmatrix/native-session",
   me: "/api/xmatrix/me",
   me_profile: "/api/xmatrix/me/profile",

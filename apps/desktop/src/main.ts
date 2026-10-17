@@ -76,6 +76,12 @@ import { planWindowOpen } from "./window-navigation";
 import { signInServiceId } from "./sign-in-services";
 import { signInWithWindow } from "./sign-in-window";
 import {
+  authorizeInBrowser,
+  hubSignInStartUrl,
+  isRedirectParam,
+  type BrowserAuthorizationRequest,
+} from "./browser-authorization";
+import {
   aggregateBadge,
   appSpaceKey,
   cascadeBounds,
@@ -2940,6 +2946,22 @@ function registerIpcHandlers() {
     if (!id) throw new Error("Unknown sign-in service");
     const fresh = typeof options === "object" && options !== null && (options as { fresh?: unknown }).fresh === true;
     return signInWithWindow(id, BrowserWindow.fromWebContents(event.sender), { fresh });
+  }));
+
+  ipcMain.handle("desktop:authorize-in-browser", secureIpc((event, request: unknown) => {
+    const { url, redirectParam } = (typeof request === "object" && request !== null ? request : {}) as
+      Partial<BrowserAuthorizationRequest>;
+    const start = hubSignInStartUrl(url, { allowLocal: !app.isPackaged });
+    if (!start || !isRedirectParam(redirectParam)) throw new Error("Not an xMatrix sign-in page");
+    const window = BrowserWindow.fromWebContents(event.sender);
+    return authorizeInBrowser(start, redirectParam, (page) => shell.openExternal(page), () => {
+      // The browser answered: bring the app that asked back in front of it.
+      if (window && !window.isDestroyed()) {
+        if (window.isMinimized()) window.restore();
+        window.show();
+        window.focus();
+      }
+    });
   }));
 
   ipcMain.handle("desktop:check-for-updates", secureIpc(() => checkForUpdates(true)));

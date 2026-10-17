@@ -137,11 +137,15 @@ integration("a Google sign-in returns to the login page for the code instead of 
 });
 
 test("the code page keeps a login-page sign-in's own parameters and carries any other destination as next", () => {
-  const env = { APP_URL: "https://app.example.test" };
+  const env = { APP_URL: "https://app.example.test", HUB_URL: "https://hub.example.test" };
   assert.equal(secondFactorPage(env, "https://app.example.test/login?device_code=d&user_code=U"),
     "https://app.example.test/login?device_code=d&user_code=U&two_factor=1");
   assert.equal(secondFactorPage(env, "https://app.example.test/oauth/authorize?client_id=c"),
     "https://app.example.test/login?two_factor=1&next=%2Foauth%2Fauthorize%3Fclient_id%3Dc");
   assert.equal(secondFactorPage(env, "https://elsewhere.example/"), "https://app.example.test/login?two_factor=1");
   assert.equal(secondFactorPage(env, undefined), "https://app.example.test/login?two_factor=1");
+  // An app's sign-in continues to the Hub page that hands the app its code; no other Hub page does.
+  assert.equal(secondFactorPage(env, "https://hub.example.test/api/auth/app/finish?flow=f"),
+    `https://app.example.test/login?two_factor=1&continue=${encodeURIComponent("https://hub.example.test/api/auth/app/finish?flow=f")}`);
+  assert.equal(secondFactorPage(env, "https://hub.example.test/api/auth/other?flow=f"), "https://app.example.test/login?two_factor=1");
 });

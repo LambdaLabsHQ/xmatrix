@@ -37,6 +37,16 @@ public final class AppConfigurationTest {
   }
 
   @Test
+  public void inPlaceSignInOpensOnlyTheHubSignInStartPage() {
+    assertTrue(AppConfiguration.isHubSignInStart("https", "xmatrix-hub.xmatrix.sh", null, "/api/auth/app/start"));
+    assertFalse(AppConfiguration.isHubSignInStart("http", "xmatrix-hub.xmatrix.sh", null, "/api/auth/app/start"));
+    assertFalse(AppConfiguration.isHubSignInStart("https", "evil.example", null, "/api/auth/app/start"));
+    assertFalse(AppConfiguration.isHubSignInStart("https", "xmatrix.sh.evil.example", null, "/api/auth/app/start"));
+    assertFalse(AppConfiguration.isHubSignInStart("https", "xmatrix-hub.xmatrix.sh", "user", "/api/auth/app/start"));
+    assertFalse(AppConfiguration.isHubSignInStart("https", "xmatrix-hub.xmatrix.sh", null, "/login"));
+  }
+
+  @Test
   public void bareNativeLoginReturnOnlyResumesTheExistingWebView() {
     assertTrue(AppConfiguration.isNativeLoginResume("xmatrix", "login", null));
     assertTrue(AppConfiguration.isNativeLoginResume("XMATRIX", "LOGIN", ""));
