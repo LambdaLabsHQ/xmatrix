@@ -58,6 +58,7 @@ const en = {
   /* The first task should end in a page, which is where xMatrix makes sense;
      each starter asks for one. The last names the canonical runbook on
      purpose: an agent asked to explain xMatrix from memory invents an answer. */
+  starting: (name?: string) => name ? `Starting @${name}…` : "Starting an agent…",
   starters: [
     { id: "project", title: "Write a page about my project", detail: "What it is, where it stands and what is still open.",
       message: "Write a page about a project I'm working on: what it is, where it stands and what is still open. Ask me which project first." },
@@ -159,6 +160,7 @@ const zh: OnboardingCopy = {
   copy: (copied) => copied ? "已复制" : "复制",
   agentsIn: (names, one) =>
     `${names} 已接入。在这里 @ ${one ? "它" : "其中一个"}就能派活，也可以从下面选一个开始：`,
+  starting: (name) => name ? `正在启动 @${name}…` : "正在启动 Agent…",
   starters: [
     { id: "project", title: "给我的项目写一个页面", detail: "它是什么、做到哪了、还有什么没做完。",
       message: "给我正在做的一个项目写一个页面：它是什么、做到哪了、还有什么没做完。先问我是哪个项目。" },

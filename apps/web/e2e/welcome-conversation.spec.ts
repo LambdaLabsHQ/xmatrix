@@ -1,6 +1,6 @@
 import { expect, test } from "./fixtures";
 import {
-  E2E_CHANNEL, E2E_DESKTOP_CONTEXT, E2E_MOBILE_CONTEXT, E2E_NOW, E2E_SPACE, fixtureChannelCatalog, fixtureJson,
+  E2E_CHANNEL, E2E_DESKTOP_CONTEXT, E2E_MOBILE_CONTEXT, E2E_NOW, E2E_SPACE, E2E_USER_SENDER, fixtureChannelCatalog, fixtureJson,
   fixtureRequestBodies, fixtureRequests, fixtureRule, harnessRegistrations, installWorkspaceStubs, openWorkspaceWithStubs,
   releaseFixture,
 } from "./workspace-fixtures";
@@ -29,14 +29,17 @@ async function welcomeOnFirstOpen(page: import("@playwright/test").Page) {
   await releaseFixture(page, "welcome");
 }
 
-/* The welcome once an agent is in: both steps written, a send to answer,
-   and the conversation open. Returns the agents-in step. */
+/* The welcome once an agent is in: both steps written, a send to answer
+   (with the message `sent`, when given, as the Hub stores it), and the
+   conversation open. Returns the agents-in step. */
 async function welcomeWithAgentIn(page: import("@playwright/test").Page,
-  { harness = "codex", channel = {}, funnel = false }: { harness?: string; channel?: object; funnel?: boolean } = {}) {
+  { harness = "codex", channel = {}, funnel = false, sent }: { harness?: string; channel?: object; funnel?: boolean; sent?: string } = {}) {
   await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], registrations: harnessRegistrations([harness]),
     channels: [{ ...WELCOME, messageCount: 2, lastMessageSequence: 2, ...channel }] });
   await fixtureJson(page, "history", `**/api/xmatrix/channels/${WELCOME.id}/history**`, { messages: [BRING, IN], hasMore: false });
-  await fixtureJson(page, "send", `**/api/xmatrix/channels/${WELCOME.id}/messages`, { message: { id: "sent" } }, { method: "POST" });
+  await fixtureJson(page, "send", `**/api/xmatrix/channels/${WELCOME.id}/messages`, { message: sent === undefined ? { id: "sent" }
+    : { messageId: "sent", channelId: WELCOME.id, sequence: 3, body: sent, sentAt: E2E_NOW,
+      from: { ...E2E_USER_SENDER, identityId: "user:e2e-user" } } }, { method: "POST" });
   if (funnel) await fixtureRule(page, { id: "funnel", pattern: "**/api/xmatrix/observable/onboarding-step", method: "POST",
     responder: { kind: "static", status: 202, json: {} } });
   await page.goto("/app/personal-sspaceperso/channels/welcome-to-xmatrix-cchannelwel");
@@ -55,7 +58,8 @@ test.describe("desktop", () => {
   });
 
   test("once an agent is in, a starter is sent as the person's own message to Auto", async ({ page }) => {
-    const agentsIn = await welcomeWithAgentIn(page, { funnel: true });
+    const agentsIn = await welcomeWithAgentIn(page, { funnel: true,
+      sent: "@auto Help me plan something I'm working on, and keep the plan in a page as we go." });
     await expect(agentsIn).toContainText("@codex is in. Mention it here to give it work", { timeout: 20_000 });
     await agentsIn.getByRole("button", { name: /Plan something with me/u }).click();
     await expect.poll(async () => (await fixtureRequestBodies(page, "send")).map((sent) => (sent as { body?: string }).body))
@@ -63,6 +67,9 @@ test.describe("desktop", () => {
     // Which first task people choose is counted too.
     await expect.poll(() => fixtureRequestBodies(page, "funnel"))
       .toEqual([{ step: "starter_chosen", surface: "welcome", device: "desktop_web", starter: "plan" }]);
+    // Until that agent is here there is nothing to address, and another starter would start a second one.
+    await expect(agentsIn.getByRole("status")).toHaveText("Starting an agent…");
+    await expect(agentsIn.getByRole("button", { name: /Write a page about my project/u })).toBeDisabled();
   });
 
   test("a starter goes to the agent already in the conversation instead of starting another", async ({ page }) => {
