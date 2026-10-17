@@ -11,9 +11,17 @@ shared user grant.
 | OAuth completion | Signed provider/Space/initiator state, the same signed-in Human, and current owner/admin membership before exchange; the write rechecks membership |
 | Connector execution | The authorized Channel determines its Space connection; credentials resolve by that connection, without an owner/global fallback |
 | Composio | A connect attempt uses `xmatrix:<space>:<nonce>`; calls name the saved connected account |
-| GitHub repository token | The live admitted Run, Machine, execution and repository bind the request; the Channel determines the Space's linked installations |
+| GitHub repository token | Current daemons bind the live admitted Run, Machine, execution and repository; the Channel determines the Space's linked installations |
 | Run secret read | The exact live Run/Instance/execution, registration admission, token Space and current owner membership; `ask` approvals also join on Space |
 | New ciphertext | AES-GCM additional data binds connector values to connection/version and Space secrets to Space/alias/value version |
+
+The committed production configuration still enables
+`GITHUB_REPOSITORY_TOKEN_LEGACY_UNBOUND_ENABLED`. An older daemon that omits
+Run identity uses the owner's Channel access and that Channel's Space
+installation check, without the newer Run/repository admission binding. This
+is broader Machine authority, not a Space-independent installation fallback.
+Retirement requires confirming the minimum supported daemon sends Run identity;
+see [launch-target authorization](../design/launch-target-authorization.md).
 
 ## Historical owner-secret migration
 
