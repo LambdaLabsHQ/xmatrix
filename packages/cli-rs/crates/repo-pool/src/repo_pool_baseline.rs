@@ -141,7 +141,7 @@ pub async fn observe_lease_baseline_at(
     };
     let fetch_repo = fetch_repo_for_pool(layout, base_repo);
     let remote = if continued {
-        tokio::time::timeout(GIT_LOCAL_TIMEOUT, confirm_origin_default_once(&fetch_repo))
+        tokio::time::timeout(GIT_LOCAL_TIMEOUT, confirm_origin_default_once(&fetch_repo, false))
             .await
             .ok()
             .and_then(Result::ok)
