@@ -41,6 +41,7 @@
     "clsx": "2.1.1",
     "lib0": "0.2.118",
     "lucide-react": "1.7.0",
+    "mediabunny": "1.61.5",
     "next": "15.5.24",
     "prosemirror-commands": "1.7.2",
     "prosemirror-dropcursor": "1.8.4",

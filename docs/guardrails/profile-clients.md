@@ -78,9 +78,20 @@ precedence. Existing immutable references and authenticated media loading are
 unchanged. HTTPS links to direct audio/video files offer a reader-initiated
 preview; external media is not contacted before that click. Playback failure
 keeps a download or original link available. Codec support depends on the host
-browser; this does not add transcoding, DRM, streaming manifests, or third-party
+browser; playback does not add DRM, streaming manifests, or third-party
 website embeds. Coverage is in `multimedia-attachments.spec.ts` and
 `attachment-media-type.test.cjs`.
+
+The shared Web composer compresses videos above 1 MB before upload using native
+WebCodecs through a lazily loaded Mediabunny converter. It fits the longest edge
+within 1280 pixels and targets 2.5 Mbps, preferring H.264 MP4 with a WebM fallback.
+Audio tracks must survive conversion; unsupported codecs, failures, a two-minute
+deadline, or a result that is no smaller retain the original. Removing a pending
+attachment cancels conversion. Metadata describes the uploaded result.
+The composer's **Original** checkbox applies to newly added images and videos
+from every intake source and skips compression; originals retain their bytes,
+filename and MIME type, subject to the existing 64 MiB attachment limit. With
+Original unchecked, images retain the existing 1 MB compression target.
 
 ### Registration-backed Channel presence
 

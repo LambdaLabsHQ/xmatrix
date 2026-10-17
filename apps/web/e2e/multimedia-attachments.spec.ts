@@ -1,34 +1,9 @@
 import { expect, test } from "./fixtures";
+import { recordedVideo } from "./recorded-video";
 import { E2E_CHANNEL, E2E_NOW, E2E_USER_SENDER, openGeneralChannelWithHistory } from "./workspace-fixtures";
 
 test("generic MIME WebM plays inline and in the lightbox; audio files have native controls", async ({ page }) => {
-  // Generate a real VP8 WebM in Chromium rather than asserting only the tag.
-  const encoded = await page.evaluate(async () => {
-    const canvas = document.createElement("canvas");
-    canvas.width = canvas.height = 32;
-    const context = canvas.getContext("2d")!;
-    context.fillStyle = "green";
-    context.fillRect(0, 0, 32, 32);
-    const stream = canvas.captureStream(10);
-    const recorder = new MediaRecorder(stream, { mimeType: "video/webm;codecs=vp8" });
-    const chunks: Blob[] = [];
-    const stopped = new Promise<void>((resolve) => { recorder.onstop = () => resolve(); });
-    recorder.ondataavailable = (event) => chunks.push(event.data);
-    recorder.start();
-    let frame = 0;
-    const animation = setInterval(() => {
-      context.fillStyle = frame++ % 2 ? "green" : "blue";
-      context.fillRect(0, 0, 32, 32);
-    }, 50);
-    await new Promise((resolve) => setTimeout(resolve, 500));
-    clearInterval(animation);
-    recorder.stop();
-    await stopped;
-    stream.getTracks().forEach((track) => track.stop());
-    const bytes = new Uint8Array(await new Blob(chunks).arrayBuffer());
-    return btoa(String.fromCharCode(...bytes));
-  });
-  const video = Buffer.from(encoded, "base64");
+  const video = await recordedVideo(page);
   const wav = Buffer.alloc(44 + 8000);
   wav.write("RIFF"); wav.writeUInt32LE(wav.length - 8, 4); wav.write("WAVEfmt ", 8);
   wav.writeUInt32LE(16, 16); wav.writeUInt16LE(1, 20); wav.writeUInt16LE(1, 22);

@@ -205,7 +205,7 @@ export type PendingAttachment = {
   kind: ChannelAttachment["kind"];
   name: string;
   size: number;
-  status: "reading" | "uploading" | "failed";
+  status: "reading" | "compressing" | "uploading" | "failed";
   progress: number;
   error?: string;
   /** A local object URL for an image, so it can be seen before it is uploaded. */
@@ -235,7 +235,9 @@ export function PendingAttachmentCard({
       ? progress >= 95
         ? "Verifying upload"
         : `Uploading ${progress}%`
-      : "Preparing";
+      : attachment.status === "compressing"
+        ? `Compressing ${progress}%`
+        : "Preparing";
   return (
     <div className="group relative flex h-20 w-44 shrink-0 overflow-hidden rounded-md border border-border bg-muted">
       {attachment.previewUrl && onOpen ? (
@@ -460,30 +462,30 @@ export async function readVideoAttachmentMetadata(file: File): Promise<VideoAtta
   if (typeof document === "undefined") return {};
 
   const objectUrl = URL.createObjectURL(file);
+  const video = document.createElement("video");
   try {
-    const video = document.createElement("video");
     video.muted = true;
     video.playsInline = true;
     video.preload = "metadata";
     await new Promise<void>((resolve, reject) => {
-      video.onloadedmetadata = () => resolve();
-      video.onerror = () => reject(new UserFacingProblem("This video couldn't be read."));
+      const failed = () => {
+        clearTimeout(deadline);
+        reject(new UserFacingProblem("This video couldn't be read."));
+      };
+      const deadline = setTimeout(failed, 5_000);
+      video.onloadedmetadata = () => { clearTimeout(deadline); resolve(); };
+      video.onerror = failed;
       video.src = objectUrl;
     });
 
     const durationMs = Number.isFinite(video.duration) ? Math.round(video.duration * 1000) : undefined;
     const width = video.videoWidth || undefined;
     const height = video.videoHeight || undefined;
-    const seekTarget = Number.isFinite(video.duration) && video.duration > 1 ? Math.min(1, video.duration / 10) : 0;
-    if (seekTarget > 0) {
-      await new Promise<void>((resolve) => {
-        video.onseeked = () => resolve();
-        video.currentTime = seekTarget;
-      });
-    }
-
     return { durationMs, width, height };
   } finally {
+    video.onloadedmetadata = video.onerror = null;
+    video.removeAttribute("src");
+    video.load();
     URL.revokeObjectURL(objectUrl);
   }
 }
