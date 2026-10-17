@@ -681,7 +681,10 @@ Access follows the page, for people and Agents alike:
   summaries and URLs additionally require the reader (or the Agent's current
   owner) to be a Space owner, admin or member. Viewers and participants still
   see the schedule, without connected-app event details; the stored events
-  are preserved for authorized readers and delivery.
+  are preserved for authorized readers and delivery. Author-entered trigger
+  configuration, including repository names, follows the Page's visibility.
+  An authorized author or Agent can also publish event content into Page prose;
+  the automatic event projection does not restrict those explicit Page writes.
 - **Create, edit, pause, resume, move, delete**: anyone who can edit the page.
   On a suggest-only page an Agent's change is refused and it asks a person,
   because an Automation is not text a person can review as a suggestion.
