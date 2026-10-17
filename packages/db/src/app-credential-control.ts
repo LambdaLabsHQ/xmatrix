@@ -18,6 +18,16 @@ import { beginSentryAttempt, lockSentryAttempt, consumeSentryAttempt, retireSent
 
 const MAX_FIELDS = 16;
 const MAX_VALUE_BYTES = 8 * 1024;
+/*
+ * A field that holds one grant per connected login grows with the logins a
+ * Space adds, so it gets a bound sized for that rather than for one token.
+ */
+const LIST_VALUE_BYTES: Readonly<Record<string, number>> = { "cloudflare:logins": 256 * 1024 };
+
+/** The largest value a connection may store in one credential field. */
+export function appCredentialValueLimit(providerId: string, field: string): number {
+  return LIST_VALUE_BYTES[`${providerId.toLowerCase()}:${field}`] ?? MAX_VALUE_BYTES;
+}
 const FIELD_NAME = /^[A-Za-z][A-Za-z0-9]{0,63}$/u;
 
 export interface AppCredentialFieldPolicy {
@@ -142,7 +152,7 @@ export class PostgresAppCredentialRepository {
     for (const [name, value] of [...entries, ...Object.entries(input.initialize ?? {})]) {
       if (!FIELD_NAME.test(name) || !input.policy.allowed.includes(name)) throw new AppControlError(
         "invalid_app_request", 400, "Unsupported connector credential field");
-      if (value !== null && (typeof value !== "string" || !value || utf8ByteLength(value) > MAX_VALUE_BYTES)) {
+      if (value !== null && (typeof value !== "string" || !value || utf8ByteLength(value) > appCredentialValueLimit(providerId, name))) {
         throw new AppControlError("invalid_app_request", 400, `${name} is invalid`);
       }
     }

@@ -19,8 +19,6 @@ interface CloudflareLogin {
   connectedAt: string;
 }
 
-const MAX_LOGINS = 5;
-
 export function CloudflareLogins({ spaceId, token, userId, members, adding, canAdd, onAdd, onChanged }: {
   spaceId: string;
   token: string;
@@ -57,13 +55,12 @@ export function CloudflareLogins({ spaceId, token, userId, members, adding, canA
   };
   const label = (login: CloudflareLogin) => login.accounts.map((account) => account.name || account.id).join(", ") || "Cloudflare login";
   const busy = adding || remove.isPending;
-  const full = (logins.data?.length ?? 0) >= MAX_LOGINS;
 
   return (
     <div className="space-y-3" data-testid="cloudflare-logins">
       <p className="text-xs leading-5 text-muted-foreground">
         Add a login for each Cloudflare user whose accounts this Space works with. To add another user, sign out of
-        Cloudflare first or finish the sign-in in a private window. Up to {MAX_LOGINS} logins can be connected.
+        Cloudflare first or finish the sign-in in a private window.
       </p>
       <p className="text-xs leading-5 text-muted-foreground">
         Commands use the default account, or name another as <code>&lt;account id&gt;/…</code>.
@@ -97,7 +94,7 @@ export function CloudflareLogins({ spaceId, token, userId, members, adding, canA
         {logins.data?.length === 0 ? <li className="py-2 text-muted-foreground">No Cloudflare login is connected.</li> : null}
       </ul>
       {!canAdd ? <p className="text-xs text-muted-foreground">Cloudflare one-click connect must be configured before logins can be added.</p> : null}
-      <Button size="sm" type="button" disabled={busy || !canAdd || full} onClick={onAdd}>
+      <Button size="sm" type="button" disabled={busy || !canAdd} onClick={onAdd}>
         {adding ? <AnimatedIcon icon={Loader2} className="animate-spin" /> : <Plus />} Add Cloudflare login
       </Button>
     </div>

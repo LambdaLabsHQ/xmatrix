@@ -74,7 +74,8 @@ scopes include every scope in the manifest, `d1.read` among them) or with an
 account API token that has Notifications Edit, Workers Observability Write,
 Workers Scripts Edit and D1 Read.
 
-One connection holds up to five Cloudflare logins. Every Connect adds a login
+One connection holds any number of Cloudflare logins, bounded only by the
+256 KiB the platform stores for its `logins` credential. Every Connect adds a login
 with its own rotating grant; a login that reaches exactly the accounts of an
 existing one replaces it. To add another Cloudflare user, that user signs out
 of Cloudflare first or finishes the sign-in in a private window. Apps →
