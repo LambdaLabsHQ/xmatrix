@@ -1,8 +1,8 @@
 # X connector
 
 The `x` connector uses one company-owned X application and independent user
-authorizations for company and personal accounts. A Space can hold up to four
-accounts. Connecting both accounts does not combine their grants: each has its
+authorizations for company and personal accounts. A Space is not limited to a
+fixed number of accounts. Connecting accounts does not combine their grants: each has its
 own stable X user ID, connecting Human owner and authorization generation.
 Only that member and their Agents can use the account; being a Space admin or
 sharing its Channel does not confer account access.
@@ -44,15 +44,15 @@ admin to remove one account without removing another. Removal includes the
 observed generation so a stale UI cannot delete a newer authorization.
 Reconnect an account by using its **Reconnect** button and authorizing that
 same X account again; confirm the handle on X's consent screen. The signed
-flow binds the selected stable account ID and rejects another account. At the
-four-account limit, existing accounts can still reconnect; remove an unused
-connection before adding a different account.
+flow binds the selected stable account ID and rejects another account. A
+Connect that would not fit the 256 KiB `accounts` field asks to remove an
+account first; reconnecting an existing account replaces only that grant.
 
 ## Credentials and refresh
 
-Account tokens stay in the encrypted connector credential store, in a bounded
-`accounts` JSON field of at most four entries and 8 KiB. The Space secret
-catalog, connection metadata, browser account list and Agent environment do
+Account tokens stay in the encrypted connector credential store, in an
+`accounts` JSON field of at most 256 KiB. There is no fixed count of accounts.
+The Space secret catalog, connection metadata, browser account list and Agent environment do
 not contain account credentials. The account management API exposes only ID,
 handle, generation, owner, access-token expiry and reconnect status.
 
