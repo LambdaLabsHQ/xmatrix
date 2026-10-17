@@ -137,6 +137,7 @@ import { type AppConnectorManifest } from "@/lib/app-connectors";
 import { ConnectorCredentials, connectorGeneratesCredentials, connectorTakesCredentials, connectorWritableCredentials } from "./connector-credentials";
 import { ConnectorPolicy, connectorWriteActions } from "./connector-policy";
 import { GmailMailboxes } from "./gmail-mailboxes";
+import { CloudflareLogins } from "./cloudflare-logins";
 import { XAccounts } from "./x-accounts";
 
 import { useAuth } from "@/lib/auth-context";
@@ -1601,15 +1602,22 @@ export function AppsView({
             onAdd={() => void configureConnector(connector)} />
         </ToolDetailSection>
       ) : null}
-      {connector.id === "x" && token && currentSpace && user?.id ? (
-        <ToolDetailSection title="X accounts">
-          <XAccounts key={currentSpace.id} spaceId={currentSpace.id} token={token} userId={user.id}
-            members={currentSpace.members} adding={updatingProviderId === connector.id}
-            canAdd={oauthProviders.includes(connector.id)} onAdd={() => void configureConnector(connector)}
-            onReconnect={(accountId) => void configureConnector(connector, { xAccountId: accountId })}
-            onChanged={async () => { await connectionsQuery.refetch(); }} />
-        </ToolDetailSection>
-      ) : null}
+      {(connector.id === "cloudflare" || connector.id === "x") && token && currentSpace && user?.id ? (() => {
+        // Both keep one OAuth grant per connected login; Connect adds one.
+        const grants = { spaceId: currentSpace.id, token, userId: user.id, members: currentSpace.members,
+          adding: updatingProviderId === connector.id, canAdd: oauthProviders.includes(connector.id),
+          onAdd: () => void configureConnector(connector), onChanged: async () => { await connectionsQuery.refetch(); } };
+        return connector.id === "cloudflare" ? (
+          <ToolDetailSection title="Cloudflare logins">
+            <CloudflareLogins key={currentSpace.id} {...grants} />
+          </ToolDetailSection>
+        ) : (
+          <ToolDetailSection title="X accounts">
+            <XAccounts key={currentSpace.id} {...grants}
+              onReconnect={(accountId) => void configureConnector(connector, { xAccountId: accountId })} />
+          </ToolDetailSection>
+        );
+      })() : null}
       {configuring && selectedConnection && configurationDraft ? (
         <ToolDetailSection title="Configuration">
           <p className="mb-4 text-sm text-muted-foreground">Choose where this connector can run and which write actions are allowed.</p>
