@@ -207,7 +207,7 @@
   {
     "id": "grok",
     "displayName": "Grok Build",
-    "description": "Grok Build CLI through the ACP agent WebSocket serve backend (non-PTY; stdio fallback available).",
+    "description": "Grok Build CLI through its ACP stdio backend (non-PTY).",
     "runtime": "grok",
     "avatarUrl": "/agent-vendors/grok.svg",
     "defaultArgs": [],

@@ -1424,7 +1424,7 @@ fn codex_transport_kind() -> CodexTransportKind {
                 CodexTransportKind::WebSocket
             }
         },
-        // Match Grok: default local app-server transport is WebSocket serve.
+        // Codex app-server defaults to its local WebSocket transport.
         Err(_) => CodexTransportKind::WebSocket,
     }
 }
