@@ -54,6 +54,8 @@ import {
 import type {
   DesktopAgentPresetDiscovery,
   DesktopAgentPresetInput,
+  DesktopDaemonFailure,
+  DesktopDaemonFailureStage,
   DesktopDaemonState,
   DesktopDaemonStatus,
   DesktopSetupStatus,
@@ -68,7 +70,7 @@ import {
   type DesktopNotificationPayload,
 } from "./notifications";
 import { readableUpdateErrorMessage, shouldShowUpdateRecovery } from "./update-errors";
-import { daemonFailureNeedsLogin } from "./daemon-failure";
+import { daemonFailureNeedsLogin, redactDaemonDetail } from "./daemon-failure";
 import { DEFAULT_SHELL_BACKGROUND_COLOR, desktopTitleBarOptions } from "./window-chrome";
 import { planWindowOpen } from "./window-navigation";
 import { signInServiceId } from "./sign-in-services";
@@ -154,6 +156,10 @@ let daemonHeartbeatInFlight = false;
 let daemonRestartTimer: NodeJS.Timeout | null = null;
 let daemonKeepAliveEnabled = false;
 let daemonStartInFlight: Promise<DesktopDaemonStatus> | null = null;
+/** Why the last start failed; shown and reported until the daemon runs again. */
+let lastDaemonFailure: DesktopDaemonFailure | null = null;
+/** Installing the seed failed: keep-alive restarts leave it until the person retries. */
+let seedInstallFailure: { message: string; failure: DesktopDaemonFailure } | null = null;
 let appIsQuitting = false;
 type DesktopLocalProfileSelection =
   | { mode: "follow-default" }
@@ -971,7 +977,9 @@ function setDaemonStatus(
   state: DesktopDaemonState,
   status: Partial<Omit<DesktopDaemonStatus, "state" | "updatedAt">> = {}
 ) {
-  daemonStatus = createDaemonStatus(state, status);
+  if (state === "running" || state === "stopped") lastDaemonFailure = null;
+  else if (status.failure) lastDaemonFailure = status.failure;
+  daemonStatus = createDaemonStatus(state, { ...status, ...(lastDaemonFailure ? { failure: lastDaemonFailure } : {}) });
   sendDaemonStatus();
   return getDaemonStatus();
 }
@@ -1018,6 +1026,14 @@ function daemonLoginRequiredMessage(output: string) {
     "xMatrix daemon needs a fresh CLI session. Sign in from the desktop app or run xmatrix login.",
     summary,
   ].filter(Boolean).join(" ");
+}
+
+function daemonFailure(stage: DesktopDaemonFailureStage, output: string, exitCode?: number | null): DesktopDaemonFailure {
+  return {
+    stage,
+    detail: redactDaemonDetail(output, app.getPath("home")),
+    ...(typeof exitCode === "number" && Number.isSafeInteger(exitCode) ? { exitCode } : {}),
+  };
 }
 
 function daemonExitMessage(message: string, output: string) {
@@ -1610,6 +1626,7 @@ async function installCliFromDesktopSeed(): Promise<DesktopCliInstallResult> {
     env: { ...process.env, PATH: augmentPath(process.env.PATH) },
   });
   if (result.ok) {
+    seedInstallFailure = null;
     await startDaemonBestEffort();
   }
   return result;
@@ -1937,14 +1954,18 @@ function powershellSingleQuoted(value: string) {
 }
 
 function runWindowsDaemonTaskCommand(scriptBody: string): Promise<boolean> {
-  if (process.platform !== "win32") return Promise.resolve(false);
+  return runWindowsDaemonTaskCommandOutcome(scriptBody).then((outcome) => outcome.started);
+}
+
+function runWindowsDaemonTaskCommandOutcome(scriptBody: string): Promise<ManagedStart> {
+  if (process.platform !== "win32") return Promise.resolve({ started: false, output: "" });
 
   return new Promise((resolve) => {
     execFile(
       "powershell",
       ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", scriptBody],
       { timeout: 5_000 },
-      (error) => resolve(!error)
+      (error, stdout, stderr) => resolve({ started: !error, output: `${stdout || ""}${stderr || ""}` })
     );
   });
 }
@@ -1955,8 +1976,8 @@ function windowsDaemonTaskIsInstalled(): Promise<boolean> {
   );
 }
 
-function startWindowsDaemonTaskIfInstalled(): Promise<boolean> {
-  return runWindowsDaemonTaskCommand(
+function startWindowsDaemonTaskIfInstalled(): Promise<ManagedStart> {
+  return runWindowsDaemonTaskCommandOutcome(
     [
       "$ErrorActionPreference='Stop'",
       `$taskName=${powershellSingleQuoted(WINDOWS_DAEMON_TASK_NAME)}`,
@@ -1966,11 +1987,16 @@ function startWindowsDaemonTaskIfInstalled(): Promise<boolean> {
   );
 }
 
-async function finishInstalledDaemonStartup(started: boolean, errorMessage: string, waitingMessage: string) {
-  if (!started) return setDaemonStatus("error", { message: errorMessage });
+type ManagedStart = { started: boolean; output: string; exitCode?: number };
+
+async function finishInstalledDaemonStartup(start: ManagedStart, errorMessage: string, notUpMessage: string) {
+  if (!start.started) {
+    return setDaemonStatus("error", { message: errorMessage, failure: daemonFailure("service_start", start.output, start.exitCode) });
+  }
+  const since = Date.now();
   const existing = await waitForExistingDaemonProcess();
   if (existing) return runningLocalDaemonStatus(existing.pid, true);
-  return setDaemonStatus("starting", { message: waitingMessage });
+  return setDaemonStatus("error", { message: notUpMessage, failure: daemonFailure("service_not_up", managedDaemonLogTail(since)) });
 }
 
 async function startWindowsDaemonTaskIfAvailable(options: { force?: boolean } = {}) {
@@ -1992,7 +2018,7 @@ async function startWindowsDaemonTaskIfAvailable(options: { force?: boolean } = 
   const started = await startWindowsDaemonTaskIfInstalled();
   return finishInstalledDaemonStartup(started,
     "xMatrix daemon task is installed, but Windows could not start it.",
-    "xMatrix daemon scheduled task is starting; waiting for the daemon lock owner...",
+    "Windows started the xMatrix daemon task, but the daemon did not come up.",
   );
 }
 
@@ -2014,16 +2040,42 @@ function macDaemonLaunchAgentIsInstalled(): Promise<boolean> {
   });
 }
 
-function kickstartMacDaemonLaunchAgent(options: { force?: boolean } = {}): Promise<boolean> {
+function kickstartMacDaemonLaunchAgent(options: { force?: boolean } = {}): Promise<ManagedStart> {
   const target = macDaemonLaunchAgentTarget();
-  if (!target) return Promise.resolve(false);
+  if (!target) return Promise.resolve({ started: false, output: "" });
 
   const args = ["kickstart", ...(options.force ? ["-k"] : []), target];
   return new Promise((resolve) => {
-    execFile("launchctl", args, { timeout: 5_000 }, (error) => {
-      resolve(!error);
+    execFile("launchctl", args, { timeout: 5_000 }, (error, stdout, stderr) => {
+      const code: unknown = (error as { code?: unknown } | null)?.code;
+      resolve({
+        started: !error,
+        output: `${stdout || ""}${stderr || ""}${error ? `\n${error.message}` : ""}`,
+        ...(typeof code === "number" ? { exitCode: code } : {}),
+      });
     });
   });
+}
+
+/** The managed service's own log, as far as it was written since `since`. */
+function managedDaemonLogTail(since: number): string {
+  if (process.platform !== "darwin") return "";
+  const logPath = path.join(app.getPath("home"), "Library", "Logs", "xmatrix-daemon.err.log");
+  try {
+    const stat = fs.statSync(logPath);
+    if (stat.mtimeMs < since - 1_000) return "";
+    const length = Math.min(stat.size, DAEMON_OUTPUT_MAX_CHARS);
+    const handle = fs.openSync(logPath, "r");
+    try {
+      const buffer = Buffer.alloc(length);
+      fs.readSync(handle, buffer, 0, length, stat.size - length);
+      return buffer.toString("utf8");
+    } finally {
+      fs.closeSync(handle);
+    }
+  } catch {
+    return "";
+  }
 }
 
 async function startMacDaemonLaunchAgentIfAvailable(options: { force?: boolean } = {}) {
@@ -2039,7 +2091,7 @@ async function startMacDaemonLaunchAgentIfAvailable(options: { force?: boolean }
   const started = await kickstartMacDaemonLaunchAgent(options);
   return finishInstalledDaemonStartup(started,
     "xMatrix daemon LaunchAgent is installed, but macOS could not start it.",
-    "xMatrix daemon LaunchAgent is starting; waiting for the daemon lock owner...",
+    "macOS started the xMatrix daemon LaunchAgent, but the daemon did not come up.",
   );
 }
 
@@ -2088,11 +2140,45 @@ async function startDaemonBestEffortInner() {
   }
 
   const executable = resolveCliExecutable();
+  if (!executable || !path.isAbsolute(executable)) {
+    const seeded = await installSeedCliForDaemon();
+    if (seeded) return seeded;
+  }
   if (!executable) {
     return setDaemonStatus("missing", {
       message: "xMatrix CLI was not found. Install the xMatrix CLI to run the local daemon.",
     });
   }
+  return spawnDaemon(executable);
+}
+
+/**
+ * A fresh App has no installed CLI: it signs in through its seed, but nothing
+ * on PATH can run the daemon. Once signed in, it installs the seed, which
+ * registers the login-session service, and starts that. A failed install waits
+ * for the person's retry rather than repeating on every keep-alive check.
+ */
+async function installSeedCliForDaemon(): Promise<DesktopDaemonStatus | null> {
+  const seedPath = desktopCliSeedPath({ resourcesPath: process.resourcesPath, platform: process.platform });
+  if (!selectedCliContext?.session || !fs.existsSync(seedPath)) return null;
+  if (seedInstallFailure) return setDaemonStatus("error", seedInstallFailure);
+  setDaemonStatus("starting", { message: "Installing the xMatrix CLI from this App..." });
+  const result = await installCliFromSeed({
+    seedPath,
+    platform: process.platform,
+    env: { ...process.env, PATH: augmentPath(process.env.PATH) },
+  });
+  if (!result.ok) {
+    seedInstallFailure = { message: result.message, failure: daemonFailure("cli_install", result.message, result.exitCode) };
+    return setDaemonStatus("error", seedInstallFailure);
+  }
+  return (await startMacDaemonLaunchAgentIfAvailable())
+    ?? (await startWindowsDaemonTaskIfAvailable())
+    ?? (await findExistingDaemonProcess().then((found) => found ? runningLocalDaemonStatus(found.pid, true) : null))
+    ?? spawnDaemon(result.installedPath);
+}
+
+function spawnDaemon(executable: string) {
   setDaemonStatus("starting", { message: `Starting xMatrix daemon from ${executable}...` });
   try {
     daemonProcess = spawn(executable, ["daemon"], {
@@ -2102,7 +2188,7 @@ async function startDaemonBestEffortInner() {
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Could not start xMatrix daemon.";
-    setDaemonStatus("error", { message });
+    setDaemonStatus("error", { message, failure: daemonFailure("spawn", message) });
     scheduleDaemonRestart("Could not start xMatrix daemon; retrying...");
     return getDaemonStatus();
   }
@@ -2131,10 +2217,12 @@ async function startDaemonBestEffortInner() {
     const message = missing
       ? "xmatrix CLI was not found on PATH."
       : daemonExitMessage(error.message || "Could not start xMatrix daemon.", daemonOutput);
+    const needsLogin = daemonFailureNeedsLogin(`${message} ${daemonOutput}`);
     setDaemonStatus(missing ? "missing" : "error", {
       message,
+      ...(!missing && !needsLogin ? { failure: daemonFailure("spawn", `${daemonOutput}\n${error.message}`) } : {}),
     });
-    if (!missing && !daemonFailureNeedsLogin(`${message} ${daemonOutput}`)) {
+    if (!missing && !needsLogin) {
       scheduleDaemonRestart("xMatrix daemon start failed; retrying...");
     }
   });
@@ -2157,6 +2245,7 @@ async function startDaemonBestEffortInner() {
     }
     setDaemonStatus(code === 0 || signal ? "stopped" : "error", {
       message: daemonExitMessage(message, daemonOutput),
+      ...(code !== 0 && !signal ? { failure: daemonFailure("exit", daemonOutput, code) } : {}),
     });
     scheduleDaemonRestart(
       signal
@@ -2168,6 +2257,12 @@ async function startDaemonBestEffortInner() {
   });
 
   return getDaemonStatus();
+}
+
+/** The person asked to start it again: a failed seed install is tried again too. */
+function retryDaemonStart() {
+  seedInstallFailure = null;
+  return startDaemonBestEffort();
 }
 
 async function stopDaemon(options: { disableKeepAlive?: boolean } = {}) {
@@ -2196,6 +2291,7 @@ async function stopDaemon(options: { disableKeepAlive?: boolean } = {}) {
 }
 
 async function restartDaemon() {
+  seedInstallFailure = null;
   enableDaemonKeepAlive();
   clearDaemonRestartTimer();
 
@@ -2816,7 +2912,7 @@ function registerIpcHandlers() {
   ipcMain.handle("desktop:install-cli", secureIpc(() => installCliFromDesktopSeed()));
 
   ipcMain.handle("desktop:get-daemon-status", secureIpc(() => getDaemonStatus()));
-  ipcMain.handle("desktop:start-daemon", secureIpc(() => startDaemonBestEffort()));
+  ipcMain.handle("desktop:start-daemon", secureIpc(() => retryDaemonStart()));
   ipcMain.handle("desktop:stop-daemon", secureIpc(() => stopDaemon()));
   ipcMain.handle("desktop:restart-daemon", secureIpc(() => restartDaemon()));
   ipcMain.handle("desktop:switch-environment", secureIpc((_event, environment: unknown) =>

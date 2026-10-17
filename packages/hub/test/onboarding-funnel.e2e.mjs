@@ -19,3 +19,21 @@ test("a signed-in person's onboarding step is counted; anything else is refused"
       assert.equal(refused.body.code, "invalid_onboarding_step");
     }
   }));
+
+const daemonFailure = (call, body) => call("/api/observable/desktop-daemon-failure", { method: "POST", body });
+
+test("a signed-in person's failed daemon start is written; anything else is refused", () =>
+  withOwnerWorker("Ada Lovelace", async ({ call }) => {
+    const report = { stage: "exit", exitCode: 1, detail: "Permission denied", platform: "darwin", appVersion: "1.0.540" };
+    assert.equal((await daemonFailure(call, report)).status, 204);
+    for (const invalid of [
+      { ...report, stage: "page_viewed" },
+      { ...report, exitCode: 1.5 },
+      { ...report, appVersion: undefined },
+      { ...report, email: "ada@example.com" },
+    ]) {
+      const refused = await daemonFailure(call, invalid);
+      assert.equal(refused.status, 400, JSON.stringify(invalid));
+      assert.equal(refused.body.code, "invalid_daemon_failure");
+    }
+  }));
