@@ -51,7 +51,7 @@ import {
   registrationSwitch,
   type MyAgentAction,
 } from "./my-agents-registrations";
-import { BringAgentsInPanel } from "./space-agent-setup-card";
+import { BringAgentsIn } from "./bring-agents-in";
 import { SetupCardShell } from "./space-setup-card-chrome";
 import { formatRelativeAge } from "./time-display";
 import { registrationTupleId, useRegistrationCommand } from "./use-registration-command";
@@ -308,7 +308,7 @@ export function MyAgentsView({
        anywhere yet this shows where agents come from. */
     detail = (
       <SetupCardShell>
-        <BringAgentsInPanel spaceId={spaceId} token={token} userId={currentUserId} />
+        <BringAgentsIn spaceId={spaceId} token={token} userId={currentUserId} />
       </SetupCardShell>
     );
   } else if (catalog.data && rows.length === 0) {

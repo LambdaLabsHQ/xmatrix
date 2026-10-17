@@ -78,7 +78,8 @@ export function SpaceAgentSetupCard({
   return (
     <SetupCardShell>
         {state.kind === "unreachable" && <UnreachablePanel onRetry={onRetryAgents} />}
-        {state.kind === "no-local-machine" && <BringAgentsInPanel spaceId={spaceId} token={token} userId={userId} phone={phone} />}
+        {/* Web and phone: the same flow xMatrix sends in a welcome conversation. */}
+        {state.kind === "no-local-machine" && <BringAgentsIn spaceId={spaceId} token={token} userId={userId} phone={phone} />}
         {state.kind === "discovering" && (
           <SetupCardHeader
             icon={Loader2}
@@ -241,15 +242,6 @@ function UnreachablePanel({ onRetry }: { onRetry: () => void }) {
       </button>
     </>
   );
-}
-
-/* Web and phone: agents are not in this tab, so the one thing to learn here
-   is how to bring them in; the same flow xMatrix sends in a welcome
-   conversation. */
-export function BringAgentsInPanel({ spaceId, token, userId, phone = false }: {
-  spaceId: string | null; token: string | undefined; userId: string | undefined; phone?: boolean;
-}) {
-  return <BringAgentsIn spaceId={spaceId} token={token} userId={userId} phone={phone} />;
 }
 
 function localInstallPlatform(): InstallPlatform {
