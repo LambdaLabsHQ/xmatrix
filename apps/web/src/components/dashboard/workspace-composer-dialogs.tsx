@@ -104,6 +104,7 @@ import {
   planAttachmentIntake,
 } from "./composer-attachment-intake";
 import type { AttachmentIntakeEntry } from "./composer-attachment-intake";
+import { prepareVideoAttachmentFile } from "./video-attachment-compression";
 import { useAttachmentDropSink } from "./composer-attachment-drop-zone";
 import type { AttachmentDropCandidate } from "./composer-attachment-drop-zone";
 
@@ -425,6 +426,7 @@ export const Composer = memo(function Composer({
     onDraftChange(value, invocationDraftRef.current);
   };
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
+  const [originalMedia, setOriginalMedia] = useState(false);
   const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
   const [openComposerImageId, setOpenComposerImageId] = useState<string | null>(null);
   // Object URLs behind pending image previews, revoked when their card goes.
@@ -448,7 +450,7 @@ export const Composer = memo(function Composer({
   const composerDropSinkId = useId();
   const readingAttachment =
     intakeBusy ||
-    pendingAttachments.some((attachment) => attachment.status === "reading" || attachment.status === "uploading");
+    pendingAttachments.some((attachment) => attachment.status !== "failed");
   const canSend =
     writable &&
     (localDraft.trim().length > 0 || attachments.length > 0) &&
@@ -783,12 +785,13 @@ export const Composer = memo(function Composer({
     if (plan.error) setAttachmentError(plan.error);
 
     const uploadable = plan.entries.filter((entry) => !entry.rejection);
-    if (uploadable.length > 0) await uploadAttachmentEntries(uploadable);
+    if (uploadable.length > 0) await uploadAttachmentEntries(uploadable, originalMedia);
     return plan.entries.length;
   }
 
   async function uploadAttachmentEntries(
-    entries: AttachmentIntakeEntry<File>[]
+    entries: AttachmentIntakeEntry<File>[],
+    useOriginalMedia: boolean,
   ): Promise<void> {
     const registry = uploadRegistryRef.current;
     // Claimed before the first await, so a card removed meanwhile is already
@@ -817,7 +820,7 @@ export const Composer = memo(function Composer({
     // An open Channel's files are visible to its whole Space, so the scope exists before the Channel does.
     const scope = spaceVisibilityScope(spaceId);
     const uploads = entries.map((entry) =>
-      run(() => uploadAttachmentEntry(entry, scope, uploadToken, generation)).then(
+      run(() => uploadAttachmentEntry(entry, scope, uploadToken, generation, useOriginalMedia)).then(
         (attachment) => ({ ok: true as const, attachment }),
         (error: unknown) => ({ ok: false as const, error })
       )
@@ -850,11 +853,6 @@ export const Composer = memo(function Composer({
       const uploaded = result.attachment;
       clearPendingAttachment(entry.id);
       appendDraftAttachment(uploaded);
-      if (uploaded.kind === "video") {
-        void attachVideoMetadata(entry.file, uploaded).then((withMetadata) => {
-          updateDraftAttachment(uploaded.id, withMetadata);
-        });
-      }
     }
   }
 
@@ -902,7 +900,8 @@ export const Composer = memo(function Composer({
     entry: AttachmentIntakeEntry<File>,
     uploadScope: string,
     uploadToken: string,
-    generation: number
+    generation: number,
+    useOriginalMedia: boolean,
   ): Promise<ChannelAttachment | null> {
     const registry = uploadRegistryRef.current;
     // Queued behind the concurrency gate: nothing to abort, so the check is the
@@ -910,18 +909,22 @@ export const Composer = memo(function Composer({
     if (!registry.isLive(entry.id, generation)) return null;
 
     let uploadFile = entry.file;
-    if (entry.kind === "image") {
+    if (entry.kind === "image" && !useOriginalMedia) {
       const prepared = await prepareImageAttachmentFile(entry.file);
       if (!registry.isLive(entry.id, generation)) return null;
       if (!prepared) throw new UserFacingProblem("Image must be 1 MB or smaller.");
       uploadFile = prepared;
-      if (uploadFile.size !== entry.file.size || uploadFile.name !== entry.file.name) {
-        updatePendingAttachment(entry.id, {
-          name: uploadFile.name || entry.name,
-          size: uploadFile.size,
-        });
-      }
     }
+    if (entry.kind === "video" && !useOriginalMedia) {
+      const controller = new AbortController();
+      if (!registry.trackRequest(entry.id, controller)) return null;
+      uploadFile = await prepareVideoAttachmentFile(entry.file, {
+        signal: controller.signal,
+        onProgress: (progress) => updatePendingAttachment(entry.id, { status: "compressing", progress }),
+      });
+      if (!registry.isLive(entry.id, generation)) return null;
+    }
+    updatePendingAttachment(entry.id, { name: uploadFile.name || entry.name, size: uploadFile.size });
 
     updatePendingAttachment(entry.id, { status: "uploading", progress: 4 });
     const uploaded = await uploadChannelAttachment(
@@ -931,6 +934,11 @@ export const Composer = memo(function Composer({
       (progress) => updatePendingAttachment(entry.id, { progress }),
       (request) => registry.trackRequest(entry.id, request)
     );
+    if (uploaded.kind === "video") {
+      // Read the file we actually uploaded, so resized dimensions stay accurate.
+      const withMetadata = await attachVideoMetadata(uploadFile, uploaded);
+      return registry.isLive(entry.id, generation) ? withMetadata : null;
+    }
     return registry.isLive(entry.id, generation) ? uploaded : null;
   }
 
@@ -1010,14 +1018,6 @@ export const Composer = memo(function Composer({
 
   function appendDraftAttachment(attachment: ChannelAttachment) {
     onAttachmentsChange((current) => [...current, attachment]);
-  }
-
-  function updateDraftAttachment(id: string, attachment: ChannelAttachment) {
-    onAttachmentsChange((current) =>
-      current.map((currentAttachment) =>
-        currentAttachment.id === id ? { ...currentAttachment, ...attachment } : currentAttachment
-      )
-    );
   }
 
   function updatePendingAttachment(id: string, patch: Partial<PendingAttachment>) {
@@ -1221,6 +1221,12 @@ export const Composer = memo(function Composer({
                 disabled={!attachmentsEnabled}
                 onClick={() => fileInputRef.current?.click()}
               />
+              <label className="flex cursor-pointer items-center gap-1 pr-2 text-xs" title="Upload original images and videos without compression">
+                <input type="checkbox" checked={originalMedia} disabled={!attachmentsEnabled}
+                  aria-label="Upload original images and videos"
+                  onChange={(event) => setOriginalMedia(event.target.checked)} />
+                Original
+              </label>
             </div>
           }
           boxHeader={
