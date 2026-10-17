@@ -4,8 +4,11 @@
 -- check, revoking one token or deleting the Space does not take it out. So the
 -- claim outlives the Space's connection, binding and the Space itself, and only
 -- Slack's signed app_uninstalled (dated after the claim) releases it.
--- Existing bindings claim their workspace; where bindings made before one
--- Space per workspace share one, the earliest binding keeps it.
+-- A workspace bound by one Space's bindings is claimed by that Space. Where
+-- bindings made before one Space per workspace share one, nothing records
+-- which Space should have it (a binding's updated_at moves with every token
+-- refresh), so it stays unclaimed: no binding uses its bot or receives its
+-- events until one Space disconnects and the other connects again.
 SET LOCAL lock_timeout = '5s';
 
 CREATE TABLE data.app_slack_workspace_claims (
@@ -17,7 +20,8 @@ CREATE TABLE data.app_slack_workspace_claims (
 );
 
 INSERT INTO data.app_slack_workspace_claims (app_client_id, installation_id, space_id, claimed_at)
-SELECT DISTINCT ON (app_client_id, installation_id) app_client_id, installation_id, space_id, updated_at
+SELECT app_client_id, installation_id, min(space_id), min(updated_at)
 FROM data.app_connector_oauth_installations
 WHERE provider_id = 'slack'
-ORDER BY app_client_id, installation_id, updated_at, connection_id;
+GROUP BY app_client_id, installation_id
+HAVING count(DISTINCT space_id) = 1;
