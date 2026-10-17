@@ -381,6 +381,11 @@ test("D1 queries run one read-only statement and show bounded rows", async () =>
   assert.match(value.summary, /source\tviews\npod cast\t0/u, "tabs in values cannot shift columns");
   assert.doesNotMatch(value.summary, /\t50\n|\t59/u);
 
+  const listed = await actWith(twoLogins, `@cloudflare:list_databases:${OTHER}`, { ...perToken,
+    [`GET accounts/${OTHER}/d1/database`]: [{ name: "stockpulse-db", uuid: db, num_tables: 0, file_size: 3 * 1_048_576 }] });
+  assert.match(listed.value.summary, new RegExp(`stockpulse-db  ${db}  3\\.0 MiB`, "u"));
+  assert.doesNotMatch(listed.value.summary, /tables/u, "Cloudflare's list reports 0 tables for every database");
+
   const original = globalThis.fetch;
   globalThis.fetch = async (url) => String(url).endsWith("/accounts?per_page=50")
     ? Response.json({ success: true, result: [{ id: ACCOUNT, name: "Acme" }] })
