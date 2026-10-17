@@ -57,6 +57,28 @@ test.describe("desktop", () => {
     await expect.poll(() => fixtureRequestBodies(page, "funnel"))
       .toEqual([{ step: "starter_chosen", surface: "welcome", device: "desktop_web", starter: "plan" }]);
   });
+
+  test("a starter goes to the agent already in the conversation instead of starting another", async ({ page }) => {
+    const instance = (id: string, slot: string, status: string, lastSeenAt: string, extra: object = {}) =>
+      ({ id, channelInstanceId: slot, label: `claude:${slot}`, connectedAt: E2E_NOW, lastSeenAt, status, ...extra });
+    const memberPresence = {
+      "agent:claude": { registration: { ownerUserId: "e2e-user", machineId: "machine-1", harness: "claude" }, kind: "agent",
+        status: "idle", label: "claude", instances: [
+          instance("instance-claude-1", "1", "offline", "2026-01-01T00:00:03.000Z", { rest: "wake_failed", restReason: "spawn_failed" }),
+          instance("instance-claude-2", "2", "offline", "2026-01-01T00:00:02.000Z", { rest: "sleeping" }),
+          instance("instance-claude-3", "3", "idle", "2026-01-01T00:00:01.000Z")] },
+    };
+    await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], registrations: harnessRegistrations(["claude"]),
+      channels: [{ ...WELCOME, messageCount: 2, lastMessageSequence: 2, memberPresence }] });
+    await fixtureJson(page, "history", `**/api/xmatrix/channels/${WELCOME.id}/history**`, { messages: [BRING, IN], hasMore: false });
+    await fixtureJson(page, "send", `**/api/xmatrix/channels/${WELCOME.id}/messages`, { message: { id: "sent" } }, { method: "POST" });
+    await page.goto("/app/personal-sspaceperso/channels/welcome-to-xmatrix-cchannelwel");
+    const agentsIn = page.locator('[data-onboarding-stage="agents-in"]');
+    await agentsIn.getByRole("button", { name: /Show me how to hand you work/u }).click({ timeout: 20_000 });
+    // The working one first; one whose wake failed would not act on it.
+    await expect.poll(async () => (await fixtureRequestBodies(page, "send")).map((sent) => (sent as { body?: string }).body))
+      .toEqual(["@claude:3 Read https://xmatrix.sh/start.md and write a page on how I should hand you work through xMatrix."]);
+  });
 });
 
 test.describe("an agent too old for xMatrix", () => {
