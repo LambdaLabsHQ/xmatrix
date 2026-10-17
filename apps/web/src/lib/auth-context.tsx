@@ -325,8 +325,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (provider === "google" && !isBetterAuthGoogleEnabled()) {
       throw new Error("Google sign-in is not configured for this account. Use a login code while setup is completed.");
     }
-    await signInWithBetterAuthSocial(provider, buildBetterAuthCallbackUrl(returnTo),
-      buildBetterAuthCallbackUrl(window.location.href));
+    const callbackURL = buildBetterAuthCallbackUrl(returnTo);
+    await signInWithBetterAuthSocial(provider, callbackURL, buildBetterAuthCallbackUrl(window.location.href),
+      newAccountCallbackUrl(callbackURL));
   };
 
   const signInWithPassword = async (email: string, password: string) => {
@@ -549,6 +550,18 @@ function normalizeOAuthReturnPath(returnTo?: string): string {
   } catch {
     return "/app";
   }
+}
+
+/**
+ * Where a sign-in that made a new account lands: the same place in the app,
+ * flagged so the app says so. Anywhere else keeps its own flow.
+ */
+function newAccountCallbackUrl(callbackURL: string): string {
+  const url = new URL(callbackURL);
+  // Only the app itself says so; an outside app's authorization query must stay as it was signed.
+  if (url.pathname !== "/app" && !url.pathname.startsWith("/app/")) return callbackURL;
+  url.searchParams.set("new_account", "1");
+  return url.toString();
 }
 
 function isBetterAuthGoogleEnabled(): boolean {

@@ -25,6 +25,8 @@ test("PKCE S256: the RFC 7636 verifier matches its challenge, any other does not
 test("the app's callback carries its code or the refusal, and always its own state", () => {
   assert.equal(appSignInCallback("xmatrix://auth", "state-0123456789ab", { code: "c0de" }),
     "xmatrix://auth?code=c0de&state=state-0123456789ab");
+  assert.equal(appSignInCallback("xmatrix://auth", "state-0123456789ab", { code: "c0de", newAccount: true }),
+    "xmatrix://auth?code=c0de&new_account=1&state=state-0123456789ab");
   assert.equal(appSignInCallback("http://127.0.0.1:53682/callback", "state-0123456789ab", { error: "access_denied" }),
     "http://127.0.0.1:53682/callback?error=access_denied&state=state-0123456789ab");
 });

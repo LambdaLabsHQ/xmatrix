@@ -16,6 +16,9 @@ import { getDeviceAuthBroker, hubOrigin, internalClientHeaders, requestFailure }
 import { failureResponse } from "./error-contract";
 import type { Env } from "./types";
 
+/** How recently an account was made for a provider sign-in to count as having made it. */
+const NEW_ACCOUNT_WINDOW_MS = 10 * 60 * 1000;
+
 /**
  * An app signs in at Google or GitHub in the system's sign-in sheet or browser
  * (app-sign-in.ts): `start` opens the provider, `finish` is where the provider
@@ -53,22 +56,26 @@ export function registerAppSignInRoutes(app: Hono<{ Bindings: Env }>): void {
   app.get(HUB_ROUTES.app_sign_in_finish, async (c) => {
     const flowId = c.req.query("flow") ?? "";
     const refused = c.req.query("failed") === "1" || Boolean(c.req.query("error"));
-    let user = null;
+    let signedIn: Awaited<ReturnType<typeof betterAuthUserFromCookies>> = null;
     if (!refused) {
       try {
-        user = await betterAuthUserFromCookies(c.env, c.req.header("cookie") ?? null);
+        signedIn = await betterAuthUserFromCookies(c.env, c.req.header("cookie") ?? null);
       } catch (error) {
         console.error("App sign-in could not read the provider's session", { error: (error as Error).message });
       }
     }
+    const user = signedIn?.user;
     const answer = await brokerJson<{ redirectUri: string; state: string; code?: string }>(c, "answer",
       { flowId, ...(user ? { user } : {}) });
     if (!answer) return endedPage(c, 410, "This sign-in has ended. Go back to xMatrix and start again.");
     const error = answer.code ? undefined : c.req.query("error") || (refused ? "access_denied" : "no_session");
     await logAuthMetric({ routeGroup: "app_sign_in_finish", status: 302, outcome: error ?? "signed_in",
       ...(user ? { userId: user.id } : {}) });
+    // An account the provider sign-in just made is said so in the app.
+    const newAccount = signedIn?.createdAt !== null && signedIn?.createdAt !== undefined
+      && Date.now() - signedIn.createdAt < NEW_ACCOUNT_WINDOW_MS;
     return c.redirect(appSignInCallback(answer.redirectUri, answer.state,
-      answer.code ? { code: answer.code } : { error: error ?? "no_session" }), 302);
+      answer.code ? { code: answer.code, newAccount } : { error: error ?? "no_session" }), 302);
   });
 
   app.post(HUB_ROUTES.app_sign_in_token, async (c) => {

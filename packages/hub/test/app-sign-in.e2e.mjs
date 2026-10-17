@@ -58,6 +58,8 @@ test("an app signs in at a provider and redeems its code once, with its own veri
     const callback = new URL(finished.headers.get("location"));
     assert.equal(`${callback.protocol}//${callback.host}`, "xmatrix://auth");
     assert.equal(callback.searchParams.get("state"), state);
+    // The provider sign-in made this account just now, and the app is told so.
+    assert.equal(callback.searchParams.get("new_account"), "1");
     const code = callback.searchParams.get("code");
     assert.match(code, /^[a-f0-9]{64}$/u);
 

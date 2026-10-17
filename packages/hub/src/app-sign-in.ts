@@ -62,10 +62,12 @@ export async function pkceVerifierMatches(verifier: string, challenge: string): 
 
 /** The app's callback, carrying either the code or the reason there is none. */
 export function appSignInCallback(redirectUri: string, state: string,
-  answer: { code: string } | { error: string }): string {
+  answer: { code: string; newAccount?: boolean } | { error: string }): string {
   const url = new URL(redirectUri);
-  if ("code" in answer) url.searchParams.set("code", answer.code);
-  else url.searchParams.set("error", answer.error);
+  if ("code" in answer) {
+    url.searchParams.set("code", answer.code);
+    if (answer.newAccount) url.searchParams.set("new_account", "1");
+  } else url.searchParams.set("error", answer.error);
   url.searchParams.set("state", state);
   return url.toString();
 }

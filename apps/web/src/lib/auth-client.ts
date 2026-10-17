@@ -269,10 +269,13 @@ export async function signInWithBetterAuthSocial(
   provider: SocialSignInProvider,
   callbackURL: string,
   errorCallbackURL: string,
+  newUserCallbackURL: string,
 ): Promise<void> {
   const response = await authClient.signIn.social({
     provider,
     callbackURL,
+    // A sign-in that made a new account says so where it lands (NewAccountStep).
+    newUserCallbackURL,
     // Without this, a failed sign-in redirects to the Hub's own error URL and
     // the person is left on a JSON document with no way back. It returns to
     // the page the sign-in started on, so a device waiting for approval or a
