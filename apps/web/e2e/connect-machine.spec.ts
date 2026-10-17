@@ -34,7 +34,8 @@ test("a waiting terminal is approved with the code it shows", async ({ page }) =
   const connect = await openWithIntent(page, { ...base, phase: "approval", terminal }, [{
     id: "intent-approve", pattern: `**/api/xmatrix/setup-intents/${INTENT}/approve`,
     responder: { kind: "static", json: { ok: true } } }]);
-  await expect(connect).toContainText("daniel-laptop wants to connect with code WDJB-MJHT");
+  await expect(connect).toContainText("daniel-laptop wants to connect with code");
+  await expect(connect).toContainText("WDJB-MJHT");
   await connect.getByRole("button", { name: "Approve", exact: true }).click();
   await expect.poll(() => fixtureRequestBodies(page, "intent-approve")).toEqual([{ userCode: "WDJB-MJHT" }]);
 });
