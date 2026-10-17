@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect } from "react";
-import { GITHUB_CONNECT_OUTCOMES, keepGitHubConnectReturn } from "@/lib/github-connect-return";
+import { GITHUB_CONNECT_OUTCOMES, keepGitHubConnectReturn, takeGitHubReturnPath } from "@/lib/github-connect-return";
 
-/** Where every GitHub connect lands: it keeps the result for this tab, then opens the Space's Apps view. */
+/** Where every GitHub connect lands: it keeps the result for this tab, then opens the Space's Apps view,
+ * or, once connected, the place in the app the connect started from (the welcome conversation). */
 export function GitHubConnectReturn() {
   useEffect(() => {
     const query = new URLSearchParams(window.location.search);
@@ -13,7 +14,7 @@ export function GitHubConnectReturn() {
     const outcome = GITHUB_CONNECT_OUTCOMES.find((known) => known === reported) ?? "failed";
     keepGitHubConnectReturn(outcome, query.get("grant"));
     const space = query.get("space");
-    window.location.replace(space ? `/app/${encodeURIComponent(space)}/apps` : "/app");
+    window.location.replace(takeGitHubReturnPath(outcome) ?? (space ? `/app/${encodeURIComponent(space)}/apps` : "/app"));
   }, []);
   return (
     <main className="mx-auto flex min-h-screen max-w-lg flex-col justify-center gap-5 px-6 py-12">

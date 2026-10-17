@@ -40,6 +40,7 @@ const en = {
   nothingUntilUpdated: "Nothing is sent to it until it is updated.",
   signedOut: (program: string, machine: string) =>
     `${program} on ${machine} is not signed in, so it cannot take work yet. Sign it in here:`,
+  signIn: "Sign in",
   noAgentYet: (machine: string) => `${machine} has no agent yet. Install one there and it shows up here:`,
   tryAgain: "Try again",
   noTerminal: "No terminal?",
@@ -145,6 +146,7 @@ const zh: OnboardingCopy = {
     `${harnessDisplayVersion(tooOld.version)}，版本太旧，xMatrix 需要 ${tooOld.minimumVersion} 或更新。`,
   nothingUntilUpdated: "更新之前不会给它派活。",
   signedOut: (program, machine) => `${machine} 上的 ${program} 还没登录，登录之前接不了活。在这里登录：`,
+  signIn: "登录",
   noAgentYet: (machine) => `${machine} 上还没有 Agent。在那台电脑上装一个，它就会出现在这里：`,
   tryAgain: "重试",
   noTerminal: "没有终端？",

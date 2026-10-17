@@ -8,6 +8,7 @@ import { AnimatedIcon } from "@/components/ui/animated-icon";
 import { actionClass } from "@/components/ui/action-tone";
 import type { OnboardingCopy } from "@/lib/onboarding-copy";
 import { xmatrixApiRequest } from "@/lib/query/api-client";
+import { keepGitHubReturnPath } from "@/lib/github-connect-return";
 import { userErrorMessage } from "@/lib/user-facing-error";
 
 /* "Bring your work in", the second sentence onboarding teaches, said as soon
@@ -23,7 +24,11 @@ export function BringWorkIn({ spaceId, token, copy }: { spaceId: string; token: 
   });
   const connect = useMutation({
     mutationFn: () => xmatrixApiRequest<{ url?: string }>({ url: WEB_PROXY_ROUTES.github_app_install(spaceId), token }),
-    onSuccess: (payload) => { if (payload.url) window.location.assign(payload.url); },
+    onSuccess: (payload) => {
+      if (!payload.url) return;
+      keepGitHubReturnPath(window.location.pathname);
+      window.location.assign(payload.url);
+    },
   });
   const [drafting, setDrafting] = useState<string | null>(null);
   const draft = useMutation({
@@ -51,7 +56,7 @@ export function BringWorkIn({ spaceId, token, copy }: { spaceId: string; token: 
         <div className="mt-2 flex flex-wrap gap-2">
           {repos.map((repo) => (
             <button key={repo.value} type="button" disabled={draft.isPending} onClick={() => draft.mutate(repo.value)}
-              className={actionClass({ variant: "quiet", size: "sm" })}>{copy.draftFrom(repo.value)}</button>
+              className={actionClass({ variant: "secondary", size: "sm" })}>{copy.draftFrom(repo.value)}</button>
           ))}
         </div>
       )}

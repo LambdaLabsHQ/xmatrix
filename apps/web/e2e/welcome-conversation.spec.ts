@@ -33,8 +33,8 @@ async function welcomeOnFirstOpen(page: import("@playwright/test").Page) {
    (with the message `sent`, when given, as the Hub stores it), and the
    conversation open. Returns the agents-in step. */
 async function welcomeWithAgentIn(page: import("@playwright/test").Page,
-  { harness = "codex", channel = {}, funnel = false, sent, login }:
-  { harness?: string; channel?: object; funnel?: boolean; sent?: string; login?: string } = {}) {
+  { harness = "codex", channel = {}, funnel = false, sent, login, repositories }:
+  { harness?: string; channel?: object; funnel?: boolean; sent?: string; login?: string; repositories?: object } = {}) {
   // With `login`, the agent is the person's own and its machine reports that sign-in state.
   const registrations = harnessRegistrations([harness]).map((registration) => login
     ? { ...registration, key: { ...registration.key, ownerUserId: "e2e-user" } } : registration);
@@ -50,6 +50,7 @@ async function welcomeWithAgentIn(page: import("@playwright/test").Page,
   await fixtureJson(page, "send", `**/api/xmatrix/channels/${WELCOME.id}/messages`, { message: sent === undefined ? { id: "sent" }
     : { messageId: "sent", channelId: WELCOME.id, sequence: 3, body: sent, sentAt: E2E_NOW,
       from: { ...E2E_USER_SENDER, identityId: "user:e2e-user" } } }, { method: "POST" });
+  if (repositories) await fixtureJson(page, "repositories", "**/page-migration/import/repositories", repositories);
   if (funnel) await fixtureRule(page, { id: "funnel", pattern: "**/api/xmatrix/observable/onboarding-step", method: "POST",
     responder: { kind: "static", status: 202, json: {} } });
   await page.goto("/app/personal-sspaceperso/channels/welcome-to-xmatrix-cchannelwel");
@@ -95,6 +96,21 @@ test.describe("desktop", () => {
     const agentsIn = await welcomeWithAgentIn(page, { harness: "claude", login: "signed_in" });
     await expect(agentsIn).toContainText("@claude is in. Mention it here to give it work", { timeout: 20_000 });
     await expect(page.getByTestId("signed-out-agent")).toHaveCount(0);
+  });
+
+  test("bring your work in: a Space without GitHub is offered the connect", async ({ page }) => {
+    const agentsIn = await welcomeWithAgentIn(page, { repositories: { repos: [], repoStatus: "not-connected" } });
+    await expect(agentsIn.getByTestId("bring-work-in")).toContainText("Bring your work in. Connect GitHub", { timeout: 20_000 });
+    await expect(agentsIn.getByRole("button", { name: "Connect GitHub", exact: true })).toBeVisible();
+  });
+
+  test("bring your work in: a Space with GitHub drafts pages from a repository", async ({ page }) => {
+    const agentsIn = await welcomeWithAgentIn(page,
+      { repositories: { repos: [{ value: "acme/site" }, { value: "acme/api" }], repoStatus: "authorized" } });
+    await fixtureJson(page, "import", "**/page-migration/import", { conversationId: "channel-import" }, { method: "POST" });
+    await agentsIn.getByRole("button", { name: "Draft pages from acme/api", exact: true }).click({ timeout: 20_000 });
+    await expect.poll(() => fixtureRequestBodies(page, "import")).toEqual([{ repository: "acme/api" }]);
+    await expect(agentsIn.getByTestId("bring-work-in")).toContainText("An agent is drafting pages from acme/api.");
   });
 
   test("a starter goes to the agent already in the conversation instead of starting another", async ({ page }) => {

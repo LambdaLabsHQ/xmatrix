@@ -61,10 +61,12 @@ export function signedOutRegistrations(registrations: readonly AgentRegistration
     harnessSignInView({ registration, userId, daemons }).state === "signed_out");
 }
 
-export function HarnessSignInSection({ registration, token, userId, bare = false }: {
+export function HarnessSignInSection({ registration, token, userId, bare = false, signInLabel = "Sign in" }: {
   registration: AgentRegistrationSummary; token: string; userId: string;
   /** Only the sign-in itself, under a sentence the caller already wrote. */
   bare?: boolean;
+  /** The button's word in the caller's language. */
+  signInLabel?: string;
 }) {
   const queryClient = useQueryClient();
   const daemonKey = useMemo(() => xmatrixQueryKeys.domain({ userId }, "machine-daemons", []), [userId]);
@@ -160,7 +162,7 @@ export function HarnessSignInSection({ registration, token, userId, bare = false
             <Button size="sm" variant="outline" disabled={busy || Boolean(view.blocker)}
               onClick={() => queue.mutate({ step: "start" })}>
               {starting ? <AnimatedIcon icon={Loader2} className="animate-spin" /> : <LogIn />}
-              {starting ? "Starting sign-in…" : operation ? "Sign-in pending" : view.state === "signed_in" ? "Sign in again" : "Sign in"}
+              {starting ? "Starting sign-in…" : operation ? "Sign-in pending" : view.state === "signed_in" ? "Sign in again" : signInLabel}
             </Button>
           )}
         </div>

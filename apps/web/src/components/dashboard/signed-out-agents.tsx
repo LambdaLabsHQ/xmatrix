@@ -16,7 +16,8 @@ export function SignedOutAgents({ registrations, token, userId, copy }: {
     <div key={JSON.stringify(registration.key)} className="mt-3" data-testid="signed-out-agent">
       <p>{copy.signedOut(agentPresetById(registration.key.harness)?.displayName ?? registration.displayName,
         registration.machineName)}</p>
-      <div className="mt-2"><HarnessSignInSection registration={registration} token={token} userId={userId} bare /></div>
+      <div className="mt-2"><HarnessSignInSection registration={registration} token={token} userId={userId} bare
+        signInLabel={copy.signIn} /></div>
     </div>
   ));
 }
