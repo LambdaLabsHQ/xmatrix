@@ -3,8 +3,7 @@
 import { useEffect, useRef } from "react";
 import { useMutation } from "@tanstack/react-query";
 import {
-  channelPresenceInstances, isChannelResidentInstance, isLiveAgentStatus, WEB_PROXY_ROUTES,
-  type ChannelPresence, type OnboardingStage, type OnboardingStarter, type SerializedAgentLaunch,
+  WEB_PROXY_ROUTES, type OnboardingStage, type OnboardingStarter,
 } from "@xmatrix/protocol";
 import { recordOnboardingStep } from "@/lib/onboarding-funnel";
 import { useOnboardingCopy, useOnboardingLocale } from "@/lib/onboarding-locale";
@@ -25,56 +24,12 @@ import { useInstalledHarnesses } from "./use-installed-harnesses";
    agents, the machine's report), so reopening the conversation later shows
    what happened, never a stale command. */
 
-/* `@auto` and `@<harness>` always start a new instance: that is how work is
-   split between agents in parallel. Someone trying the starters one after
-   another means the conversation they already have, so a starter goes to the
-   instance already here: working, idle or asleep, the most recently seen
-   first. One whose wake failed, or whose machine is offline, would not act on
-   it, so Auto starts another. */
-export function starterAddress(presence: ChannelPresence | undefined): string {
-  const here = channelPresenceInstances(presence).filter(instance => instance.channelInstanceId &&
-    isChannelResidentInstance(instance) && instance.rest !== "wake_failed" && !instance.offlineReason);
-  const rank = (instance: (typeof here)[number]) => [isLiveAgentStatus(instance.status) ? 1 : 0, Date.parse(instance.lastSeenAt) || 0];
-  const [instance] = here.sort((left, right) => {
-    const [leftLive, leftSeen] = rank(left), [rightLive, rightSeen] = rank(right);
-    return rightLive - leftLive || rightSeen - leftSeen;
-  });
-  return instance ? `@${instance.agentName}:${instance.channelInstanceId}` : "@auto";
-}
-
-/* Until the instance the person's last `@auto` starts is here, there is
-   nothing to address and another starter would start a second one, so the
-   starters wait. It waits only while that summon is the conversation's last
-   word, and what ends it is what the conversation shows anyway: the instance
-   arriving, its launch connecting or failing, a refusal, or any later
-   message. The name is the harness once routing chose it. */
-export function startingStarter(input: {
-  presence: ChannelPresence | undefined;
-  timeline: ReadonlyArray<{ own?: boolean; isEvent?: boolean; body: string; messageId?: string; sendStatus?: string }>;
-  launches: ReadonlyMap<string, readonly SerializedAgentLaunch[]>;
-  refused: ReadonlyMap<string, unknown>;
-}): { name?: string } | undefined {
-  if (starterAddress(input.presence) !== "@auto") return undefined;
-  const last = [...input.timeline].reverse().find(item => !item.isEvent);
-  if (!last?.own || !last.body.startsWith("@auto ") || last.sendStatus === "failed") return undefined;
-  if (!last.messageId) return {};
-  if (input.refused.has(last.messageId)) return undefined;
-  const launches = input.launches.get(last.messageId) ?? [];
-  if (launches.some(launch => launch.state === "connected" || launch.state === "failed" || launch.state === "cancelled")) return undefined;
-  const name = launches.find(launch => launch.targetName)?.targetName;
-  return name ? { name } : {};
-}
-
-export function OnboardingMessage({ stage, spaceId, token, userId, starting, onSendStarter }: {
+export function OnboardingMessage({ stage, spaceId, token, userId }: {
   stage: OnboardingStage; spaceId: string | null; token: string | null; userId: string;
-  /** Set while the instance a starter asked for is still starting (`startingStarter`). */
-  starting?: { name?: string };
-  /** Sends a starter as the person's own message in this conversation, addressed by `starterAddress`. */
-  onSendStarter: (message: string) => void;
 }) {
   return stage === "bring-agents"
     ? <BringAgentsMessage spaceId={spaceId} token={token} userId={userId} />
-    : <AgentsInMessage spaceId={spaceId} token={token} userId={userId} starting={starting} onSendStarter={onSendStarter} />;
+    : <AgentsInMessage spaceId={spaceId} token={token} userId={userId} />;
 }
 
 /* Once an agent is in and can answer, xMatrix says so in the next message.
@@ -97,9 +52,8 @@ function BringAgentsMessage({ spaceId, token, userId }: { spaceId: string | null
   return <BringAgentsIn spaceId={spaceId} token={token} userId={userId} surface="welcome" />;
 }
 
-function AgentsInMessage({ spaceId, token, userId, starting, onSendStarter }: {
-  spaceId: string | null; token: string | null; userId: string; starting?: { name?: string };
-  onSendStarter: (message: string) => void;
+function AgentsInMessage({ spaceId, token, userId }: {
+  spaceId: string | null; token: string | null; userId: string;
 }) {
   const pages = usePageReferenceScope();
   const fleet = useInstalledHarnesses(spaceId, token, userId);
@@ -132,14 +86,14 @@ function AgentsInMessage({ spaceId, token, userId, starting, onSendStarter }: {
       {handles.length > 0 && <>
       <p className={signedOut.length > 0 ? "mt-3" : undefined}>{copy.agentsIn(copy.listNames(handles), handles.length === 1)}</p>
       <ul className="m-0 mt-3 grid list-none gap-2 p-0 sm:grid-cols-2">
-        {actions && <Card title={copy.talk.title} detail={copy.talk.detail} disabled={Boolean(starting)}
+        {actions && <Card title={copy.talk.title} detail={copy.talk.detail}
           onClick={() => { count("talk"); actions.startConversation(""); }} />}
         {actions && <Card title={copy.together.title}
           detail={pair ? copy.together.detail(pair[0], pair[1]) : copy.together.needsTwo}
-          disabled={!pair || Boolean(starting)}
+          disabled={!pair}
           onClick={() => { if (!pair) return; count("together"); actions.startConversation(copy.together.draft(pair[0], pair[1])); }} />}
         {writer && spaceId && token && pages && <Card title={copy.coWrite.title} detail={copy.coWrite.detail(writer)}
-          disabled={Boolean(starting) || coWrite.isPending} onClick={() => { count("cowrite"); coWrite.mutate(writer); }} />}
+          disabled={coWrite.isPending} onClick={() => { count("cowrite"); coWrite.mutate(writer); }} />}
         {actions && <Card title={copy.machines.title} detail={copy.machines.detail}
           onClick={() => { count("machines"); actions.connectAnotherComputer(); }} />}
       </ul>
@@ -147,7 +101,6 @@ function AgentsInMessage({ spaceId, token, userId, starting, onSendStarter }: {
         {userErrorMessage(coWrite.error, "Couldn't create the page")}</p>}
       {spaceId && token && <BringWorkIn spaceId={spaceId} token={token} copy={copy} />}
       </>}
-      {starting && <p className="mt-2 text-[13px] leading-5 text-muted-foreground" role="status">{copy.starting(starting.name)}</p>}
     </div>
   );
 }

@@ -58,10 +58,12 @@ const en = {
   starting: (name?: string) => name ? `Starting @${name}…` : "Starting an agent…",
   /* What xMatrix is for, one card each: talking, several agents at once, the
      live page, every computer. One click shows it. */
-  talk: { title: "Just say it", detail: "Start a conversation and say what you need. xMatrix picks the AI." },
-  together: { title: "Let your AIs talk it over", detail: (a: string, b: string) => `@${a} and @${b} discuss it while you watch.`,
-    needsTwo: "Bring in one more AI, and they can talk it over.", draft: (a: string, b: string) => `@${a} @${b} Talk it over together: ` },
-  machines: { title: "Any computer works", detail: "Your work machine, your home machine, a server. All in one conversation." },
+  talk: { title: "Start a new conversation", detail: "Say what you want done. No need to @ anyone: xMatrix picks an AI to take it." },
+  together: { title: "Get several AIs working together", detail: (a: string, b: string) =>
+    `@${a} and @${b} split the work and pass it between them. You watch it come together.`,
+    needsTwo: "Bring in one more AI, and they can work together.",
+    draft: (a: string, b: string) => `@${a} @${b} Work on this together and split it between you: ` },
+  machines: { title: "Connect another computer", detail: "Your work machine, your home machine, a server. Their AIs meet in one conversation." },
   /* The live document people came for: a page they write in, with an agent writing beside them. */
   coWrite: { title: "Write something with AI", detail: (agent: string) => `You write a line. @${agent} writes the next.`,
     pageTitle: "What I'm working on" },
@@ -168,10 +170,10 @@ const zh: OnboardingCopy = {
   agentsIn: (names, one) =>
     `${names} 已接入。在这里 @ ${one ? "它" : "其中一个"}就能派活，也可以从下面选一个开始：`,
   starting: (name) => name ? `正在启动 @${name}…` : "正在启动 Agent…",
-  talk: { title: "直接开口", detail: "开个新对话，说你想做的事。xMatrix 替你挑 AI。" },
-  together: { title: "让几个 AI 一起商量", detail: (a, b) => `@${a} 和 @${b} 同场讨论，你在旁边看。`,
-    needsTwo: "再接一个 AI，就能让它们一起商量。", draft: (a, b) => `@${a} @${b} 你们一起商量一下：` },
-  machines: { title: "换台电脑也行", detail: "公司的、家里的电脑和服务器，都能叫进同一个对话。" },
+  talk: { title: "开一个新对话", detail: "说一件你想做的事。不用 @ 谁，xMatrix 会挑一个 AI 来接。" },
+  together: { title: "让多个 AI 一起协作", detail: (a, b) => `@${a} 和 @${b} 分工干活、互相接力，你看着事情做成。`,
+    needsTwo: "再接一个 AI，就能让它们一起协作。", draft: (a, b) => `@${a} @${b} 你们分工合作，一起把这件事做完：` },
+  machines: { title: "再接一台电脑", detail: "公司的、家里的电脑或服务器，上面的 AI 能在同一个对话里碰头。" },
   coWrite: { title: "和 AI 一起写点什么", detail: (agent) => `你写一句，@${agent} 接一句。`,
     pageTitle: "我手上的事" },
   bringWorkConnect: "把工作带进来。连上 GitHub，仓库就成了页面。",
