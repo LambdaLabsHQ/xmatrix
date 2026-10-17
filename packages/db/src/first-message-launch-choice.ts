@@ -126,6 +126,12 @@ export class PostgresFirstMessageLaunchChoiceRepository {
     });
   }
 
+  /** xMatrix's summon of this decided first message finished dispatching. */
+  async summoned(input: { requestId: string; channelId: string; messageId: string }): Promise<void> {
+    await this.transaction(input.requestId, "first-message-launch.summoned",
+      tx => markFirstMessageSummoned(tx, input.channelId, input.messageId));
+  }
+
   /** Jev could not read the message: nothing will be decided, and the message says why. */
   async fail(input: { requestId: string; channelId: string; messageId: string; failureCode: string }): Promise<void> {
     await this.transaction(input.requestId, "first-message-launch.fail", tx => tx.query({
@@ -134,6 +140,45 @@ export class PostgresFirstMessageLaunchChoiceRepository {
         WHERE channel_id=$1 AND message_id=$2 AND choice IS NULL AND failure_code IS NULL`,
       values: [input.channelId, input.messageId, input.failureCode.slice(0, 120)], maxRows: 0 }));
   }
+}
+
+/** How long after its decision (or, undecided, its deadline) a first message's
+ * summon is left to the request that holds it before the Channel's
+ * coordinator finishes it. */
+const FIRST_MESSAGE_SUMMON_GRACE_SECONDS = 20;
+/** A first message still unsummoned this long after it was sent is given up. */
+const FIRST_MESSAGE_SUMMON_GIVE_UP_SECONDS = 15 * 60;
+
+/**
+ * A first message whose summon no request finished: decided to start and not
+ * summoned, or not decided at all once its deadline passed. `choice` is the
+ * table's alias. Its due time is `FIRST_MESSAGE_SUMMON_DUE_AT_SQL`.
+ */
+export const FIRST_MESSAGE_SUMMON_PENDING_SQL = `choice.summoned_at IS NULL AND choice.failure_code IS NULL
+  AND choice.choice IS DISTINCT FROM 'none'
+  AND choice.created_at>clock_timestamp()-make_interval(secs => ${FIRST_MESSAGE_SUMMON_GIVE_UP_SECONDS})`;
+export const FIRST_MESSAGE_SUMMON_DUE_AT_SQL = `COALESCE(choice.chosen_at,choice.deadline_at)
+  +make_interval(secs => ${FIRST_MESSAGE_SUMMON_GRACE_SECONDS})`;
+
+/** A first message the coordinator finishes; `harness` absent is still undecided. */
+export interface PendingFirstMessageSummon { messageId: string; authorUserId: string; harness?: string }
+
+/** The Channel's first messages whose summon is due now. */
+export async function readDueFirstMessageSummons(tx: DatabaseTransaction, channelId: string): Promise<PendingFirstMessageSummon[]> {
+  const rows = await tx.query<FirstMessageLaunchChoiceRow>({ name: "first_message_summon_due_v1", text: `SELECT
+    choice.message_id,choice.author_user_id,choice.chosen_harness FROM data.first_message_launch_choices choice
+    WHERE choice.channel_id=$1 AND ${FIRST_MESSAGE_SUMMON_PENDING_SQL} AND ${FIRST_MESSAGE_SUMMON_DUE_AT_SQL}<=clock_timestamp()
+    ORDER BY choice.created_at LIMIT 10`, values: [channelId], maxRows: 10 });
+  return rows.map(row => ({ messageId: String(row.message_id), authorUserId: String(row.author_user_id),
+    ...(row.chosen_harness ? { harness: String(row.chosen_harness) } : {}) }));
+}
+
+/** xMatrix's summon of a decided first message finished dispatching. */
+async function markFirstMessageSummoned(tx: DatabaseTransaction, channelId: string, messageId: string): Promise<void> {
+  await tx.query({ name: "first_message_summoned_v1", text: `UPDATE data.first_message_launch_choices
+    SET summoned_at=GREATEST(clock_timestamp(),created_at),updated_at=GREATEST(clock_timestamp(),created_at)
+    WHERE channel_id=$1 AND message_id=$2 AND choice='start' AND summoned_at IS NULL`,
+  values: [channelId, messageId], maxRows: 0 });
 }
 
 /** The Channel's first message, from a Human or Agent, unedited and still shown. */

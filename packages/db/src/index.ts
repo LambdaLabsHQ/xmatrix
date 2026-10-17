@@ -228,7 +228,9 @@ export { PostgresRegistrationRevocationRepository, type RegistrationStopIntent }
 
 export type { RegistrationLaunchCandidate, RegistrationLaunchChooser } from "./agent-registration-launch.js";
 export { PostgresRegistrationLaunchRepository, reconcileRegistrationPreparationCancellations } from "./agent-registration-launch.js";
-export { PostgresFirstMessageLaunchChoiceRepository, readFirstMessageLaunchChoices, type FirstMessageLaunchChooser } from "./first-message-launch-choice.js";
+export { PostgresFirstMessageLaunchChoiceRepository, readFirstMessageLaunchChoices, readDueFirstMessageSummons,
+  FIRST_MESSAGE_SUMMON_PENDING_SQL, FIRST_MESSAGE_SUMMON_DUE_AT_SQL, type PendingFirstMessageSummon,
+  type FirstMessageLaunchChooser } from "./first-message-launch-choice.js";
 export { readRegistrationQuotaProbeTargets, REGISTRATION_QUOTA_PROBE_TARGET_PREFIX,
   type RegistrationQuotaProbeTarget } from "./agent-registration-quota-probe.js";
 

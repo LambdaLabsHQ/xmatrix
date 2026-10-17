@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 
 import { Client } from "pg";
 import { digestCanonicalCloneCborV1 } from "@xmatrix/protocol";
-import { createAuthorityDatabase, PostgresFirstMessageLaunchChoiceRepository, readFirstMessageLaunchChoices } from "../dist/index.js";
+import { createAuthorityDatabase, PostgresFirstMessageLaunchChoiceRepository, readDueFirstMessageSummons,
+  readFirstMessageLaunchChoices } from "../dist/index.js";
 
 
 /** A registration of `harness` in the Space that routing may use, owned by a member. */
@@ -319,6 +320,40 @@ integration("an Agent's first message persists an immediate owner-bound decision
     await client.query("DELETE FROM data.instances WHERE instance_id=$1", [instance]);
     await client.query("DELETE FROM data.run_agent_registrations WHERE run_id=$1", [run]);
     await client.query("DELETE FROM data.runs WHERE run_id=$1", [run]);
+    await removeSpace(client, space);
+    await client.end();
+  }
+});
+
+integration("a first message no request finished summoning stays due for its coordinator until it is summoned", async () => {
+  const { space, channel, client, database, placement, choices } = await firstLaunchFixture();
+  // Each row as the request that held it left it: `age` seconds since it was
+  // created, decided `since` seconds ago (or its deadline that long past).
+  const row = (id, { choice = null, harness = null, failure = null, since = 30, age = 60 } = {}) => client.query(`INSERT INTO
+    data.first_message_launch_choices (channel_id,message_id,space_id,author_user_id,deadline_at,choice,chosen_harness,
+      chosen_by,chosen_at,failure_code,created_at,updated_at)
+    VALUES ($1,$2,$3,'author',now()-make_interval(secs => $4),$5::text,$6,CASE WHEN $5::text IS NULL THEN NULL ELSE 'jev' END,
+      CASE WHEN $5::text IS NULL THEN NULL ELSE now()-make_interval(secs => $4) END,$7,
+      now()-make_interval(secs => $8),now()-make_interval(secs => $8))`,
+  [channel, id, space, since, choice, harness, failure, age]);
+  const due = () => database.transaction({ requestId: "due", operation: "test.due", placement },
+    tx => readDueFirstMessageSummons(tx, channel));
+  try {
+    await row("decided", { choice: "start", harness: "claude" });
+    await row("undecided");
+    await row("just-decided", { choice: "start", harness: "codex", since: 1 });
+    await row("declined", { choice: "none" });
+    await row("unreadable", { failure: "registration_not_found" });
+    await row("abandoned", { choice: "start", harness: "claude", since: 20 * 60, age: 20 * 60 });
+    assert.deepEqual(await due(), [
+      { messageId: "decided", authorUserId: "author", harness: "claude" },
+      { messageId: "undecided", authorUserId: "author" },
+    ], "a fresh decision is still its request's; declined, failed and abandoned ones are nobody's");
+    await choices.summoned({ requestId: "summoned", channelId: channel, messageId: "decided" });
+    await choices.summoned({ requestId: "summoned-undecided", channelId: channel, messageId: "undecided" });
+    assert.deepEqual(await due(), [{ messageId: "undecided", authorUserId: "author" }],
+      "only a decided start is marked summoned");
+  } finally {
     await removeSpace(client, space);
     await client.end();
   }
