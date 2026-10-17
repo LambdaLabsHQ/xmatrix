@@ -2,7 +2,6 @@
 
 import { useEffect, useRef } from "react";
 import { useMutation } from "@tanstack/react-query";
-import { ChevronRight } from "lucide-react";
 import {
   channelPresenceInstances, isChannelResidentInstance, isLiveAgentStatus, WEB_PROXY_ROUTES,
   type ChannelPresence, type OnboardingStage, type SerializedAgentLaunch,
@@ -125,18 +124,15 @@ function AgentsInMessage({ spaceId, token, userId, starting, onSendStarter }: {
       <SignedOutAgents registrations={signedOut} token={token} userId={userId} copy={copy} />
       {handles.length > 0 && <>
       <p className={signedOut.length > 0 ? "mt-3" : undefined}>{copy.agentsIn(copy.listNames(handles), handles.length === 1)}</p>
-      <ul className="m-0 mt-2 list-none p-0">
+      <ul className="m-0 mt-3 grid list-none gap-2 p-0 sm:grid-cols-3">
         {writer && spaceId && token && pages && (
           <li className="m-0 p-0">
             <button type="button" disabled={Boolean(starting) || coWrite.isPending} onClick={() => {
               recordOnboardingStep(token, { step: "starter_chosen", surface: "welcome", starter: "cowrite" });
               coWrite.mutate(writer);
-            }} className="group/starter -mx-2 flex w-[calc(100%+1rem)] items-center gap-3 rounded-lg px-2 py-2 text-left hover:bg-foreground/[0.04] disabled:opacity-50">
-              <span className="min-w-0 flex-1">
-                <span className="block font-semibold">{copy.coWrite.title}</span>
-                <span className="block text-[13px] leading-5 text-muted-foreground">{copy.coWrite.detail(writer)}</span>
-              </span>
-              <ChevronRight aria-hidden="true" className="size-4 shrink-0 text-muted-foreground group-hover/starter:text-foreground" />
+            }} className="app-paper-tile flex h-full w-full flex-col items-start gap-1 px-3.5 py-3 text-left disabled:opacity-50">
+              <span className="block font-semibold">{copy.coWrite.title}</span>
+              <span className="block text-[13px] leading-5 text-muted-foreground">{copy.coWrite.detail(writer)}</span>
             </button>
           </li>
         )}
@@ -146,12 +142,9 @@ function AgentsInMessage({ spaceId, token, userId, starting, onSendStarter }: {
               recordOnboardingStep(token, { step: "starter_chosen", surface: "welcome", starter: starter.id });
               onSendStarter(starter.message);
             }}
-              className="group/starter -mx-2 flex w-[calc(100%+1rem)] items-center gap-3 rounded-lg px-2 py-2 text-left hover:bg-foreground/[0.04] disabled:opacity-50">
-              <span className="min-w-0 flex-1">
-                <span className="block font-semibold">{starter.title}</span>
-                <span className="block text-[13px] leading-5 text-muted-foreground">{starter.detail}</span>
-              </span>
-              <ChevronRight aria-hidden="true" className="size-4 shrink-0 text-muted-foreground group-hover/starter:text-foreground" />
+              className="app-paper-tile flex h-full w-full flex-col items-start gap-1 px-3.5 py-3 text-left disabled:opacity-50">
+              <span className="block font-semibold">{starter.title}</span>
+              <span className="block text-[13px] leading-5 text-muted-foreground">{starter.detail}</span>
             </button>
           </li>
         ))}
