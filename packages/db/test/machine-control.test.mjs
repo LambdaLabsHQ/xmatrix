@@ -175,7 +175,8 @@ test("Machine connect establishes a fenced PostgreSQL connection epoch", async (
   assert.equal(value.connectionEpoch, 1);
   assert.equal(value.daemon.id, "daemon-1");
   assert.equal(value.daemon.connectedAt, "2026-08-30T00:00:00.000Z");
-  assert.equal(db.calls.some((call) => call.name === "machine_control_replay_write_v1"), true);
+  const replay = db.calls.find((call) => call.name === "machine_control_replay_write_v1");
+  assert.equal(Date.parse(replay.values[7]) - Date.parse(replay.values[6]), 30 * 24 * 60 * 60 * 1_000);
 });
 
 test("Machine enroll recovers migrated audit evidence after its replay expires", async () => {
@@ -673,6 +674,9 @@ test("a routed exit report is recorded for the coordinator in the report transac
     "machine-1", "Workstation", "channel-1", 3, "exit-1"]);
   assert.ok(routed.db.calls.indexOf(recorded) < routed.db.calls.findIndex((call) =>
     call.name === "machine_control_replay_write_v1"), "recorded before the report's replay commits");
+  // A report's replay only answers a retry on the same connection: it keeps a day, not a month.
+  const reportReplay = routed.db.calls.find((call) => call.name === "machine_control_replay_write_v1");
+  assert.equal(Date.parse(reportReplay.values[7]) - Date.parse(reportReplay.values[6]), 24 * 60 * 60 * 1_000);
 
   // Without a route nothing can finalize it; the report still commits and is answered.
   const unrouted = report(false, exited);

@@ -35,6 +35,13 @@ const registrationNameJoinSql = (spaceParam: string) => `LEFT JOIN data.run_agen
 const REGISTRATION_AGENT_NAME_SQL = "COALESCE(registration.display_name,r.metadata_json->>'agentName')";
 
 const REPLAY_TTL_MS = 30 * 24 * 60 * 60 * 1_000;
+/**
+ * A Run snapshot's replay only answers a retry of the same registry sequence:
+ * the snapshot head already refuses an older one, and a snapshot without
+ * causal evidence has a fresh id each time. They outnumber every other
+ * lifecycle event, so they keep a day rather than a month.
+ */
+const SNAPSHOT_REPLAY_TTL_MS = 24 * 60 * 60 * 1_000;
 const LEGACY_SNAPSHOT_SETTLE_MS = 60_000;
 
 interface RegistryCausalEvidence {
@@ -113,12 +120,12 @@ async function replay(tx: DatabaseTransaction, spaceId: string, commandId: strin
 }
 
 async function commit(tx: DatabaseTransaction, input: { spaceId: string; commandId: string;
-  requestDigest: string; value: Record<string, unknown>; at: string }) {
+  requestDigest: string; value: Record<string, unknown>; at: string; ttlMs: number }) {
   await commitRuntime(tx, input.spaceId, input.value, input.at,
     { head: "machine_lifecycle_head_advance_v1", outbox: "machine_lifecycle_outbox_v1" });
   await storeScopedCommandReplay(tx, "machine_lifecycle_replay_write_v1", {
     scopeKind: "space", scopeId: input.spaceId, commandId: input.commandId,
-    commandKind: "machine_run_lifecycle", requestDigest: input.requestDigest, result: input.value, at: input.at, ttlMs: REPLAY_TTL_MS,
+    commandKind: "machine_run_lifecycle", requestDigest: input.requestDigest, result: input.value, at: input.at, ttlMs: input.ttlMs,
   });
 }
 
@@ -333,7 +340,8 @@ export class PostgresMachineLifecycleRepository {
           });
         } else Object.assign(value, { startupFailureNoticeContext: notice });
       }
-      await commit(tx, { spaceId: String(channel.space_id), commandId, requestDigest, value, at });
+      await commit(tx, { spaceId: String(channel.space_id), commandId, requestDigest, value, at,
+        ttlMs: eventType === "machine_run_snapshot" ? SNAPSHOT_REPLAY_TTL_MS : REPLAY_TTL_MS });
       return value;
     });
     await this.publishRuntimeRoutes(commandId, placement,
