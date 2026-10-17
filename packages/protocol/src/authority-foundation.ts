@@ -405,6 +405,8 @@ export const WEB_PROXY_ROUTES = {
   cli_device_decline: "/api/xmatrix/cli/device/decline",
   app_sign_in_token: "/api/xmatrix/app-sign-in/token",
   native_session: "/api/xmatrix/native-session",
+  /** A native app page's account calls, sent on with the app's own session cookie. */
+  native_auth: "/api/xmatrix/native-auth",
   me: "/api/xmatrix/me",
   me_profile: "/api/xmatrix/me/profile",
   me_sessions: "/api/xmatrix/me/sessions",

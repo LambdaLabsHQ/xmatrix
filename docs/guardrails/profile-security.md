@@ -52,6 +52,13 @@ hash or `auth`, blob1 `auth`, blob2 the provider, blob3 the route group, blob4
 the outcome, blob5 the status. Workers logs keep only some of these lines, too
 few to read a sign-in funnel from.
 
+A desktop or phone app's 30-day session token stays in its HTTP-only cookie.
+`GET /api/xmatrix/native-session` gives the page only the hour-long access
+token, and the page's account calls (two-step verification, linked GitHub,
+outside apps, sign-out) go through `/api/xmatrix/native-auth/*`. That route
+adds the session from the cookie and forwards only those Better Auth paths. A
+write through it must come from the site's own origin.
+
 ### Apps signing in in place
 
 The desktop and phone apps sign in where they are, without a device code: email

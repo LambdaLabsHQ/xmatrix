@@ -9,7 +9,7 @@ import {
   loadBetterAuthSession,
   isTransientAuthSessionError,
   sendBetterAuthOtp,
-  setAppSessionToken,
+  routeAccountCallsThroughApp,
   signInWithAppleIdToken,
   signInWithBetterAuthPasskey,
   signInWithBetterAuthSocial,
@@ -424,7 +424,7 @@ async function persistNativeSession(payload: AuthResponse): Promise<void> {
   if (!isNativeShell()) {
     return;
   }
-  setAppSessionToken(payload.refreshToken);
+  routeAccountCallsThroughApp(true);
 
   for (const waitMs of [0, 700, 1500]) {
     if (waitMs) await delay(waitMs);
@@ -442,7 +442,7 @@ async function clearNativeSession(): Promise<void> {
   if (!isNativeShell()) {
     return;
   }
-  setAppSessionToken(null);
+  routeAccountCallsThroughApp(false);
 
   await xmatrixRawResponse(WEB_PROXY_ROUTES.native_session, {
     method: "DELETE",
@@ -472,11 +472,11 @@ async function loadNativeSessionState(): Promise<Omit<AuthState, "loading">> {
 
   const payload = (await response.json().catch(() => ({}))) as { session?: AuthResponse | null };
   if (!payload.session?.token || !payload.session.user) {
-    setAppSessionToken(null);
+    routeAccountCallsThroughApp(false);
     return { session: null, user: null };
   }
 
-  setAppSessionToken(payload.session.refreshToken);
+  routeAccountCallsThroughApp(true);
   return {
     session: authResponseToWebSession(payload.session),
     user: payload.session.user,
