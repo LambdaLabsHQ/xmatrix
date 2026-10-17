@@ -11,6 +11,7 @@ import {
   sendBetterAuthOtp,
   setAppSessionToken,
   signInWithAppleIdToken,
+  signInWithBetterAuthPasskey,
   signInWithBetterAuthSocial,
   signOutBetterAuth,
   verifyBetterAuthOtpWithRetry,
@@ -51,6 +52,8 @@ interface AuthContextValue extends AuthState {
   verifySecondFactor: (code: string, options: { backup: boolean; trustDevice: boolean }) => Promise<void>;
   /** `returnTo` is where a completed sign-in goes; a failed one comes back to the page it started on. */
   signInWithSocial: (provider: SocialSignInProvider, returnTo?: string) => Promise<void>;
+  /** Signs in with a passkey; `autoFill` waits for the browser to offer one in the email field. */
+  signInWithPasskey: (autoFill?: boolean) => Promise<void>;
   /** Signs in with the identity token the iOS app's Sign in with Apple returned. */
   signInWithApple: (input: Parameters<typeof signInWithAppleIdToken>[0]) => Promise<SignInStep>;
   setSessionFromAuthResponse: (payload: AuthResponse) => Promise<void>;
@@ -307,6 +310,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await adoptSignedInSession();
   };
 
+  const signInWithPasskey = async (autoFill = false) => {
+    await signInWithBetterAuthPasskey(autoFill);
+    await adoptSignedInSession();
+  };
+
   const signInWithApple = async (input: Parameters<typeof signInWithAppleIdToken>[0]) => {
     if (await signInWithAppleIdToken(input) === "two_factor") return "two_factor";
     await adoptSignedInSession();
@@ -358,6 +366,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         verifySecondFactor,
         signInWithSocial,
         signInWithApple,
+        signInWithPasskey,
         setSessionFromAuthResponse,
         logout,
       }}

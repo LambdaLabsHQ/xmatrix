@@ -76,6 +76,7 @@ import { registerIndexRoutesSpaceJoinRequests } from "./index-routes-space-join-
 import { registerIndexRoutesChannelAgent } from "./index-routes-channel-agent";
 import { registerIndexRoutesHumanProfile } from "./index-routes-human-profile";
 import { registerAppSignInRoutes } from "./index-routes-app-sign-in";
+import { registerAuthSessionRoutes } from "./index-routes-auth-sessions";
 import { registerIndexRoutesHumanAvatar } from "./index-routes-human-avatar";
 import { registerIndexRoutesMachineDaemonAdmission } from "./index-routes-machine-daemon-admission";
 import { registerIndexRoutesAppleBilling } from "./index-routes-apple-billing";
@@ -132,6 +133,7 @@ registerSetupIntentRoutes(app);
 registerWelcomeRoutes(app);
 registerOnboardingFunnelRoutes(app);
 registerIndexRoutesHumanProfile(app);
+registerAuthSessionRoutes(app);
 registerIndexRoutesHumanAvatar(app);
 registerAccountDeletionRoutes(app);
 

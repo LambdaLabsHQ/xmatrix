@@ -37,6 +37,7 @@ import { registerIndexRoutesAuthSpaceInstances } from "./index-routes-auth-space
 import { registerIndexRoutesAuthSpaceManagement } from "./index-routes-auth-space-management";
 import { handoffGitHubConnectAuthorization, githubConnectReturnUrl, isGitHubConnectState } from "./github-connect-authorization";
 import { registerMachineExecutionRoutes } from "./index-routes-machine-executions";
+import { SESSION_LABELS, sessionLabel } from "./auth-sessions";
 import { registerReplyRecoveryRoutes } from "./index-routes-reply-recovery";
 import { wakeAgentLaunchCoordinator } from "./agent-launch-coordinator-wake";
 import { connectionUseRefused, getAppConnection } from "./apps";
@@ -277,7 +278,8 @@ export function registerIndexRoutesAuthSpace(app: Hono<{ Bindings: Env }>): void
     }
 
     try {
-      const session = await createBetterAuthSessionForUser(c.env, authUser);
+      const session = await createBetterAuthSessionForUser(c.env, authUser,
+        sessionLabel(SESSION_LABELS.cli, c.req.header("user-agent")));
       return await issuedSessionResponse(c, session, [
         { routeGroup: "session_created", outcome: "exchange_session" },
       ]);

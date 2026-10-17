@@ -104,6 +104,7 @@ export const AUTH_ROUTE_ATTEMPTS: Readonly<Record<string, number>> = {
   "/api/auth/email-otp/send-verification-otp": 3,
   // Each code allows three guesses before it is spent; this bounds one client's guesses across addresses.
   "/api/auth/sign-in/email-otp": 10,
+  "/api/auth/passkey/verify-authentication": 10,
   // The plugin also locks an account after 10 wrong codes; this bounds one client across accounts.
   "/api/auth/two-factor/verify-totp": 10,
   "/api/auth/two-factor/verify-backup-code": 5,

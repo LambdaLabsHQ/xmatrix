@@ -2937,7 +2937,18 @@ async fn cmd_daemon_connected(
         }
     };
 
+    // This connection's own session ends with it; the next connection exchanges a fresh one.
+    if let Some(state) = daemon_session.as_ref() {
+        let ended = state.read().await.session.clone();
+        end_daemon_session(ended).await;
+    }
     Ok(exit)
+}
+
+/// Ends a daemon session nothing will use again, briefly: a Hub that cannot
+/// answer must not hold up the daemon, and the session expires on its own.
+async fn end_daemon_session(session: CliSession) {
+    let _ = tokio::time::timeout(Duration::from_secs(3), auth::end_hub_session(&session)).await;
 }
 
 fn daemon_access_token_from_saved_session(session: &CliSession) -> String {
@@ -3123,22 +3134,25 @@ async fn reload_daemon_session_from_saved_session(
         expires_at: saved.expires_at,
     };
 
-    let result = {
+    let (result, unused) = {
         let mut guard = session_state.write().await;
         if guard.session.user.id != daemon_session.user.id
             || !saved_daemon_session_source_is_newer(guard.source.as_ref(), &candidate_source)
         {
-            DaemonSessionReloadResult::AlreadyCurrent
+            (DaemonSessionReloadResult::AlreadyCurrent, daemon_session)
         } else {
             let generation = guard.generation.saturating_add(1);
             let saved_session_reload_gate = guard.saved_session_reload_gate.clone();
-            *guard = DaemonSessionValue {
-                session: daemon_session,
-                source: Some(candidate_source),
-                generation,
-                saved_session_reload_gate,
-            };
-            DaemonSessionReloadResult::Reloaded
+            let replaced = std::mem::replace(
+                &mut *guard,
+                DaemonSessionValue {
+                    session: daemon_session,
+                    source: Some(candidate_source),
+                    generation,
+                    saved_session_reload_gate,
+                },
+            );
+            (DaemonSessionReloadResult::Reloaded, replaced.session)
         }
     };
 
@@ -3148,6 +3162,9 @@ async fn reload_daemon_session_from_saved_session(
             "⚠".yellow().bold()
         );
     }
+    // Whichever session lost (the one replaced, or the fresh one a concurrent reload made
+    // redundant) is used by nothing now, so it ends rather than lingering until it expires.
+    tokio::spawn(end_daemon_session(unused));
     Ok(result)
 }
 

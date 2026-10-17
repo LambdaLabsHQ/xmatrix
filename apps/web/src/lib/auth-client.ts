@@ -2,6 +2,7 @@
 
 import { createAuthClient } from "better-auth/client";
 import { emailOTPClient, twoFactorClient } from "better-auth/client/plugins";
+import { passkeyClient } from "@better-auth/passkey/client";
 import { trimEnd, WEB_PROXY_ROUTES } from "@xmatrix/protocol";
 
 import type { AuthUser } from "@/lib/auth-context";
@@ -63,7 +64,7 @@ function appSessionHeaders(): Record<string, string> {
 
 const authClient = createAuthClient({
   baseURL: getAuthBaseUrl(),
-  plugins: [emailOTPClient(), twoFactorClient()],
+  plugins: [emailOTPClient(), twoFactorClient(), passkeyClient()],
   fetchOptions: { auth: { type: "Bearer", token: () => appSessionToken ?? undefined } },
 });
 
@@ -298,6 +299,43 @@ export async function signInWithAppleIdToken(input: {
   }).catch(() => { throw new TransientAuthSessionError(); });
   if (response.error) throwAuthClientError(response.error, "Couldn't sign in with Apple");
   return signInStep(response.data);
+}
+
+/**
+ * Signs in with a passkey. `autoFill` waits quietly for the browser to offer
+ * one in the email field instead of asking at once. A dismissed prompt is a
+ * cancellation, not a failure.
+ */
+export async function signInWithBetterAuthPasskey(autoFill = false): Promise<void> {
+  const response = await authClient.signIn.passkey({ autoFill }).catch(() => { throw new TransientAuthSessionError(); });
+  if (response?.error) throwPasskeyError(response.error, "Couldn't sign in with that passkey");
+}
+
+/** A passkey prompt the person dismissed is a cancellation; anything else is the refusal it says. */
+function throwPasskeyError(error: { code?: string; message?: string; status?: number }, fallback: string): never {
+  if (error.code === "AUTH_CANCELLED" || error.code === "ERROR_CEREMONY_ABORTED") {
+    throw new DOMException("The passkey prompt was dismissed.", "AbortError");
+  }
+  throwAuthClientError(error, fallback);
+}
+
+export interface AccountPasskey { id: string; name?: string | null; createdAt?: string | Date | null; aaguid?: string | null }
+
+export async function listAccountPasskeys(): Promise<AccountPasskey[]> {
+  const response = await authClient.passkey.listUserPasskeys();
+  if (response.error) throwAuthClientError(response.error, "Couldn't read your passkeys");
+  return (response.data ?? []) as AccountPasskey[];
+}
+
+/** Makes a passkey for this account on this device, or in the password manager the browser offers. */
+export async function addAccountPasskey(name: string): Promise<void> {
+  const response = await authClient.passkey.addPasskey({ name });
+  if (response?.error) throwPasskeyError(response.error, "Couldn't add a passkey");
+}
+
+export async function deleteAccountPasskey(id: string): Promise<void> {
+  const response = await authClient.passkey.deletePasskey({ id });
+  if (response.error) throwAuthClientError(response.error, "Couldn't remove that passkey");
 }
 
 export async function verifyBetterAuthPassword(email: string, password: string): Promise<SignInStep> {
