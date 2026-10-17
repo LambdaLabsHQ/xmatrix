@@ -72,7 +72,7 @@ const authClient = createAuthClient({
   fetchOptions: {
     customFetchImpl: (input, init) => {
       const href = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
-      return fetch(accountUrl(href), init);
+      return xmatrixRawResponse(accountUrl(href), init);
     },
   },
 });

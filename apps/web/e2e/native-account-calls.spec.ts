@@ -32,7 +32,7 @@ test("a native app's account calls go through its own session route, with no ref
     await route.fulfill({ json: null });
   });
 
-  await page.goto("/app?view=profile", { waitUntil: "domcontentloaded" });
+  await page.goto("/app/personal-sspaceperso/profile", { waitUntil: "domcontentloaded" });
   await expect(page.getByTestId("two-factor-settings")).toBeVisible();
   await expect.poll(() => accountCalls).toContain("/api/xmatrix/native-auth/get-session");
   expect(hubAuthCalls.filter(path => path.endsWith("/get-session"))).toEqual([]);
