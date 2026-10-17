@@ -272,10 +272,6 @@ function ComposerInputSurface({
         <div className="composer-input-row flex min-w-0 items-end gap-2">
           {inputLeading}
           <div className="relative min-w-0 flex-1">
-          <ComposerTextHighlight value={textareaValue ?? draft} textareaRef={textareaRef}
-            mentionIndex={mentionIndex} currentUserIdentityId={user ? `user:${user.id}` : undefined}
-            references={referenceRanges} summonReadings={summonReadings} summonReadingPending={summonReadingPending}
-            hint={stripEmptyPasteSentinel(textareaValue ?? draft).length === 0 ? placeholder : undefined} />
           <Textarea
             ref={textareaRef}
             value={textareaValue ?? draft}
@@ -319,6 +315,13 @@ function ComposerInputSurface({
               compact ? "min-h-0 p-0 text-sm" : "min-h-9 px-0 py-1.5 text-sm sm:min-h-11 sm:py-2 sm:text-[15px]"
             )}
           />
+          {/* After the textarea: a later sibling's ref is still null while an
+              earlier one's layout effects run, and the mirror reads the
+              textarea's metrics in its own. */}
+          <ComposerTextHighlight value={textareaValue ?? draft} textareaRef={textareaRef}
+            mentionIndex={mentionIndex} currentUserIdentityId={user ? `user:${user.id}` : undefined}
+            references={referenceRanges} summonReadings={summonReadings} summonReadingPending={summonReadingPending}
+            hint={stripEmptyPasteSentinel(textareaValue ?? draft).length === 0 ? placeholder : undefined} />
           {onSummonStartAnyway && summonReadings?.some(reading => reading.choice !== "summon") &&
             <ComposerSummonOptions readings={summonReadings}
             textareaRef={textareaRef} disabled={disabled || !enabled || sending} onStartAnyway={onSummonStartAnyway} />}
