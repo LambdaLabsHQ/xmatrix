@@ -128,6 +128,7 @@ import { createPortal } from "react-dom";
 import {
   AlertTriangle,
   AtSign,
+  Check,
   Cpu,
   FileText,
   FolderOpen,
@@ -309,10 +310,23 @@ export function AttachmentOriginalOption({ name, checked, onChange }: {
   checked: boolean;
   onChange?: (original: boolean) => void;
 }) {
+  // A media-badge toggle on the thumbnail itself: a dark scrim pill reads on
+  // both light screenshots and dark photos without covering the preview.
   return (
-    <label className="absolute bottom-0 left-0 z-10 flex h-7 cursor-pointer items-center gap-1 rounded-bl-md rounded-tr-md bg-background/95 px-1.5 text-[10px] text-foreground">
+    <label className={cn(
+      "absolute bottom-1 left-1 z-10 inline-flex h-[18px] select-none items-center gap-[3px] rounded-full pl-[3px] pr-1.5 text-[10px] font-medium leading-none backdrop-blur-md has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-white",
+      checked ? "bg-black/60 text-white" : "bg-black/40 text-white/90",
+      onChange ? "cursor-pointer" : "cursor-default opacity-70",
+    )}>
       <input type="checkbox" checked={checked} disabled={!onChange}
-        aria-label={`Upload original ${name}`} onChange={(event) => onChange?.(event.target.checked)} />
+        aria-label={`Upload original ${name}`} onChange={(event) => onChange?.(event.target.checked)}
+        className="absolute inset-0 m-0 cursor-[inherit] appearance-none rounded-full opacity-0" />
+      <span aria-hidden className={cn(
+        "flex size-3 items-center justify-center rounded-full",
+        checked ? "bg-white text-black" : "ring-[1.25px] ring-inset ring-white/85",
+      )}>
+        {checked && <Check className="size-2.5" strokeWidth={3} />}
+      </span>
       Original
     </label>
   );
