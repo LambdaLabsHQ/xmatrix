@@ -43,8 +43,8 @@ async function welcomeWithAgentIn(page: import("@playwright/test").Page,
     machineId: "machine", machineName: "Workstation", hostId: "host-1", hostName: "Workstation", status: "online",
     connectedAt: E2E_NOW, lastSeenAt: new Date().toISOString(), daemonVersion: "1.0.546",
     metadata: { platform: "macos", capabilities: ["machine_harness_action_v1", "machine_harness_login_v1"],
-      harnesses: { schemaVersion: 1, capturedAt: E2E_NOW, items: [
-        ...harnesses.map((id) => ({ id, installed: true, probeStatus: "ok", version: "2.1.170", login }))] } } }] : undefined;
+      harnesses: { schemaVersion: 1, capturedAt: E2E_NOW, items:
+        harnesses.map((id) => ({ id, installed: true, probeStatus: "ok", version: "2.1.170", login })) } } }] : undefined;
   await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], registrations, machineDaemons,
     channels: [{ ...WELCOME, messageCount: 2, lastMessageSequence: 2, ...channel }] });
   await fixtureJson(page, "history", `**/api/xmatrix/channels/${WELCOME.id}/history**`, { messages: [BRING, IN], hasMore: false });
