@@ -10,12 +10,12 @@ import {
   readBearerToken,
   verifyAuthToken,
 } from "./auth";
-import { ATTEMPT_WINDOW_MS, chargeAttempt, type AttemptLimit } from "./auth-attempt-limit";
+import { ATTEMPT_WINDOW_MS, chargeAttempt, MAX_ATTEMPT_WINDOW_MS, type AttemptLimit } from "./auth-attempt-limit";
 import { logAuthMetric } from "./auth-observability";
 import { postgresControlErrorResponse } from "./postgres-authority-http";
 import { transientError } from "./error-contract";
 import { SESSION_EXCHANGE_USER_MISMATCH } from "./auth-errors";
-import { createBetterAuthSessionForUser } from "./better-auth";
+import { accessTokenSessionAlive, createBetterAuthSessionForUser } from "./better-auth";
 import {
   boundedRedemptionExpiry,
   DeviceAuthRedemptionCoordinator,
@@ -31,6 +31,8 @@ const DEVICE_TOKEN_RATE_LIMIT = 120;
 const SETUP_INTENT_TTL_MS = 30 * 60 * 1000;
 const SETUP_INTENT_RATE_LIMIT = 20;
 const HOSTNAME_MAX = 120;
+/** How long a declined request is kept, so the terminal still waiting learns why it ended. */
+const DECLINED_NOTICE_MS = 2 * 60 * 1000;
 
 type DeviceAuthStatus = "pending" | "approved";
 
@@ -52,6 +54,10 @@ interface DeviceAuthSession {
   /** What the terminal says it runs on, shown beside the code for comparison. */
   hostname?: string;
   platform?: string;
+  /** Where the request came from, coarsely, as the edge saw it: "City, CC". */
+  requestedFrom?: string;
+  /** Set when the person in the browser said this request is not theirs. */
+  declinedAt?: string;
 }
 
 /**
@@ -127,6 +133,10 @@ export class DeviceAuthBroker extends DurableObject<Env> {
         return this.handleIntentMachine(request);
       case "/internal/device-auth/approve":
         return this.handleApprove(request);
+      case "/internal/device-auth/describe":
+        return this.handleDescribe(request);
+      case "/internal/device-auth/decline":
+        return this.handleDecline(request);
       case "/internal/device-auth/token":
         return this.handleToken(request);
       case "/internal/attempts/admit":
@@ -140,10 +150,11 @@ export class DeviceAuthBroker extends DurableObject<Env> {
     const body = (await request.json().catch(() => ({}))) as { limits?: unknown };
     const limits = Array.isArray(body.limits) ? body.limits as AttemptLimit[] : [];
     if (limits.length === 0 || !limits.every((limit) => typeof limit?.key === "string" && limit.key
-      && Number.isInteger(limit.max) && limit.max > 0)) {
+      && Number.isInteger(limit.max) && limit.max > 0 && (limit.windowMs === undefined
+        || (Number.isInteger(limit.windowMs) && limit.windowMs > 0 && limit.windowMs <= MAX_ATTEMPT_WINDOW_MS)))) {
       return Response.json({ error: "limits must name each counter and its allowance" }, { status: 400 });
     }
-    const keys = limits.map((limit) => `attempts:${limit.key}`);
+    const keys = limits.map(attemptStorageKey);
     const stored = await this.ctx.storage.get<number[]>(keys);
     const { admitted, next } = chargeAttempt(keys.map((key) => stored.get(key) ?? []), limits, Date.now());
     await this.ctx.storage.put(Object.fromEntries(keys.map((key, index) => [key, next[index]])));
@@ -166,6 +177,7 @@ export class DeviceAuthBroker extends DurableObject<Env> {
       interval: DEVICE_AUTH_POLL_INTERVAL_SECONDS,
       ...boundedText("hostname", body.hostname),
       ...boundedText("platform", body.platform),
+      ...boundedText("requestedFrom", request.headers.get("x-client-location")),
     };
 
     if (body.setupIntentId !== undefined) {
@@ -214,6 +226,64 @@ export class DeviceAuthBroker extends DurableObject<Env> {
     });
   }
 
+  /**
+   * What the browser shows beside the code before anyone approves: what the
+   * requester says it runs on, where it asked from and when. Only a caller
+   * holding both codes reads it, and only while the request waits.
+   */
+  private async handleDescribe(request: Request): Promise<Response> {
+    const waiting = await this.waitingRequest(request);
+    if (waiting instanceof Response) return waiting;
+    const { session } = waiting;
+    return Response.json({
+      createdAt: session.createdAt,
+      ...(session.hostname ? { hostname: session.hostname } : {}),
+      ...(session.platform ? { platform: session.platform } : {}),
+      ...(session.requestedFrom ? { requestedFrom: session.requestedFrom } : {}),
+    }, { headers: { "cache-control": "no-store" } });
+  }
+
+  /**
+   * The person in the browser says the request is not theirs. It can no longer
+   * be approved; the requester's next poll reads it as ended, with the reason.
+   */
+  private async handleDecline(request: Request): Promise<Response> {
+    const waiting = await this.waitingRequest(request);
+    if (waiting instanceof Response) return waiting;
+    const { deviceCode, session } = waiting;
+    // A setup command's terminal is freed, as when its owner declines on the setup page.
+    const intent = session.setupIntentId ? await this.loadIntent(session.setupIntentId) : null;
+    if (intent?.deviceCode === deviceCode) await this.ctx.storage.put(this.intentKey(intent.intentId), publicIntent(intent));
+    const now = Date.now();
+    await this.ctx.storage.put(this.sessionKey(deviceCode), {
+      ...session,
+      declinedAt: new Date(now).toISOString(),
+      expiresAt: new Date(Math.min(Date.parse(session.expiresAt), now + DECLINED_NOTICE_MS)).toISOString(),
+    } satisfies DeviceAuthSession);
+    await logAuthMetric({ routeGroup: "device_decline", status: 200, outcome: "declined" });
+    return Response.json({ ok: true }, { headers: { "cache-control": "no-store" } });
+  }
+
+  /** A request still waiting for approval, named by both of its codes. */
+  private async waitingRequest(request: Request): Promise<Response | { deviceCode: string; session: DeviceAuthSession }> {
+    const { deviceCode, userCode } = (await request.json().catch(() => ({}))) as {
+      deviceCode?: unknown; userCode?: unknown;
+    };
+    if (typeof deviceCode !== "string" || !deviceCode || typeof userCode !== "string" || !userCode) {
+      return Response.json({ error: "deviceCode and userCode are required" }, { status: 400 });
+    }
+    const session = await this.loadSession(deviceCode);
+    // A wrong code reads the same as an unknown request.
+    if (!session || this.isExpired(session) || normalizeUserCode(userCode) !== normalizeUserCode(session.userCode)) {
+      return Response.json({ error: "Unknown device code", code: "unknown_device_code" }, { status: 404 });
+    }
+    if (session.status !== "pending") {
+      return Response.json({ error: "This sign-in request was already approved", code: "device_login_approved" },
+        { status: 409 });
+    }
+    return { deviceCode, session };
+  }
+
   private async handleApprove(request: Request): Promise<Response> {
     const token = readBearerToken(request.headers.get("authorization"));
     if (!token) {
@@ -245,8 +315,9 @@ export class DeviceAuthBroker extends DurableObject<Env> {
     const { session } = pending;
 
     if (pending.expired) {
-      await logAuthMetric({ routeGroup: "device_approve", status: 410, outcome: "expired" });
-      return Response.json({ error: "Device login request expired" }, { status: 410 });
+      await logAuthMetric({ routeGroup: "device_approve", status: 410, outcome: session.declinedAt ? "declined" : "expired" });
+      return Response.json({ error: session.declinedAt ? "This sign-in request was declined" : "Device login request expired" },
+        { status: 410 });
     }
 
     if (normalizeUserCode(userCode) !== normalizeUserCode(session.userCode)) {
@@ -257,6 +328,8 @@ export class DeviceAuthBroker extends DurableObject<Env> {
     let user: AuthUser;
     try {
       user = await verifyAuthToken(token, this.env);
+      // Approving issues a new session, which a signed-out session's leftover token must not.
+      if (!await accessTokenSessionAlive(this.env, token)) throw new InvalidAuthTokenError();
     } catch (error) {
       if (!(error instanceof InvalidAuthTokenError)) {
         await logAuthMetric({ routeGroup: "device_approve", status: 503, outcome: "verification_unavailable" });
@@ -344,11 +417,13 @@ export class DeviceAuthBroker extends DurableObject<Env> {
     const { session } = pending;
 
     if (pending.expired) {
-      await logAuthMetric({ routeGroup: "device_token_expired", status: 200, outcome: "expired" });
+      await logAuthMetric({ routeGroup: "device_token_expired", status: 200,
+        outcome: session.declinedAt ? "declined" : "expired" });
       return Response.json(
         {
           status: "expired",
-          error: "Device login request expired",
+          // Every client reads `expired` as the end of the request and shows this reason.
+          error: session.declinedAt ? "This sign-in was declined in the browser." : "Device login request expired",
         },
         {
           headers: {
@@ -581,7 +656,8 @@ export class DeviceAuthBroker extends DurableObject<Env> {
       return Response.json({ error: "Unknown device code", code: "unknown_device_code" }, { status: 404 });
     }
     const expired = this.isExpired(session);
-    if (expired) await this.ctx.storage.delete(this.sessionKey(deviceCode));
+    // A declined request stays until its notice lapses, so every poll reads why it ended.
+    if (expired && !session.declinedAt) await this.ctx.storage.delete(this.sessionKey(deviceCode));
     return { session, expired };
   }
 
@@ -615,7 +691,7 @@ export class DeviceAuthBroker extends DurableObject<Env> {
       prefix: "attempts:", limit: 128, startAfter: this.attemptPruneCursor });
     this.attemptPruneCursor = attempts.size === 128 ? [...attempts.keys()].at(-1) : undefined;
     for (const [key, times] of attempts.entries()) {
-      if ((times.at(-1) ?? 0) <= now - ATTEMPT_WINDOW_MS) expiredKeys.push(key);
+      if ((times.at(-1) ?? 0) <= now - attemptWindowOfStorageKey(key)) expiredKeys.push(key);
     }
 
     // Device counters kept before "attempts:" were never removed.
@@ -639,7 +715,7 @@ export class DeviceAuthBroker extends DurableObject<Env> {
   }
 
   private isExpired(session: DeviceAuthSession): boolean {
-    return Date.parse(session.expiresAt) <= Date.now();
+    return Boolean(session.declinedAt) || Date.parse(session.expiresAt) <= Date.now();
   }
 
   private sessionKey(deviceCode: string): string {
@@ -690,15 +766,30 @@ function normalizeUserCode(value: string): string {
   return value.trim().replace(/[^a-zA-Z0-9]/g, "").toUpperCase();
 }
 
+/**
+ * Where a counter is kept. A counter with its own window carries it in the
+ * key, so pruning knows how long the counter's attempts still count.
+ */
+function attemptStorageKey(limit: AttemptLimit): string {
+  return limit.windowMs === undefined || limit.windowMs === ATTEMPT_WINDOW_MS
+    ? `attempts:${limit.key}` : `attempts:${limit.windowMs}ms:${limit.key}`;
+}
+
+function attemptWindowOfStorageKey(storageKey: string): number {
+  const windowMs = /^attempts:(\d+)ms:/u.exec(storageKey)?.[1];
+  return windowMs ? Math.min(Number(windowMs), MAX_ATTEMPT_WINDOW_MS) : ATTEMPT_WINDOW_MS;
+}
+
 function publicIntent(intent: SetupIntent): Omit<SetupIntent, "deviceCode"> {
   const { deviceCode: _deviceCode, ...rest } = intent;
   return rest;
 }
 
 /** A terminal's own description of itself, kept short and printable. */
-function boundedText(field: "hostname" | "platform", value: unknown): Partial<Record<"hostname" | "platform", string>> {
+function boundedText<Field extends "hostname" | "platform" | "requestedFrom">(field: Field, value: unknown):
+  Partial<Record<Field, string>> {
   if (typeof value !== "string") return {};
   // eslint-disable-next-line no-control-regex
   const text = value.replace(/[\u0000-\u001f\u007f]/gu, "").trim().slice(0, HOSTNAME_MAX);
-  return text ? { [field]: text } : {};
+  return text ? { [field]: text } as Partial<Record<Field, string>> : {};
 }

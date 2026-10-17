@@ -11,6 +11,24 @@ Part of the descriptive project profile. Not policy. The index is `project-profi
 - GitHub Actions release and runner-administration workflows/scripts that handle signing keys, App Store Connect credentials, Cloudflare credentials, Supabase keys, Android keystores, GitHub release tokens, runner scaler tokens, SSH authorization, Xcode installation, and CLI binaries.
 - Prompt/agent control paths in the CLI app-server integrations and channel-delivered message text.
 
+### Sign-in sessions and device approval
+
+Signing out ends the session at the Hub, not only on the device: the web and
+native apps call Better Auth's sign-out while they still hold the token, the
+native-session route revokes its refresh token through `POST
+/api/auth/cli/sign-out`, and `xmatrix logout` does the same before clearing its
+local credentials. Access tokens stay valid by signature for their hour, so the
+routes that turn one into a new session (session exchange and device approval)
+first check that the session it was minted from still exists.
+
+A device or terminal waiting for approval is described to the browser only by
+both of its codes: what it says it runs on, roughly where the request came from
+and when. The browser can approve, decline (the requester's next poll reads the
+request as ended, with the reason) or sign out to answer as another account.
+The older loopback CLI sign-in also waits for an explicit approval. Login codes
+are charged per address across both send routes (5 a minute, 20 an hour, 60 a
+day); checking a code is limited per client.
+
 ### Machine approval encryption independence
 
 Plain PostgreSQL machine-request decisions do not require the Secret catalog encryption key.

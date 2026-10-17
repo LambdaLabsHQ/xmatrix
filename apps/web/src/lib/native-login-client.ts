@@ -39,6 +39,10 @@ export function deviceProductName(client: string | null): string {
   return "xMatrix CLI";
 }
 
+/**
+ * Brings the app that asked back to the front once the browser approved it.
+ * Opening the app's login page makes it ask for its session at once.
+ */
 export function nativeLoginReturnUrl(client: string | null): string | null {
-  return client === "ios" || client === "android" ? NATIVE_LOGIN_RETURN_URL : null;
+  return client === "ios" || client === "android" || client === "desktop" ? NATIVE_LOGIN_RETURN_URL : null;
 }

@@ -18,3 +18,11 @@ test("attempts older than the window no longer count", () => {
   assert.deepEqual(chargeAttempt([[1_000]], limits, 1_000 + ATTEMPT_WINDOW_MS),
     { admitted: true, next: [[1_000 + ATTEMPT_WINDOW_MS]] });
 });
+
+test("a counter with its own window keeps counting past the default minute", () => {
+  const limits = [{ key: "email:hour", max: 2, windowMs: 60 * 60_000 }];
+  const later = 1_000 + 30 * 60_000;
+  assert.equal(chargeAttempt([[1_000, 2_000]], limits, later).admitted, false,
+    "two codes half an hour ago still fill an hourly allowance of two");
+  assert.equal(chargeAttempt([[1_000, 2_000]], limits, 2_000 + 60 * 60_000).admitted, true);
+});

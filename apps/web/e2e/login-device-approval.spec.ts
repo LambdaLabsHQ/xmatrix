@@ -9,6 +9,15 @@ async function stubApproval(page: import("@playwright/test").Page) {
     id: "device-approve", pattern: "**/api/xmatrix/cli/device/approve",
     responder: { kind: "static", json: { approved: true } },
   });
+  await fixtureRule(page, {
+    id: "device-describe", pattern: "**/api/xmatrix/cli/device/describe",
+    responder: { kind: "static", json: {
+      createdAt: new Date().toISOString(), hostname: "studio-mac", platform: "darwin", requestedFrom: "Berlin, DE" } },
+  });
+  await fixtureRule(page, {
+    id: "device-decline", pattern: "**/api/xmatrix/cli/device/decline",
+    responder: { kind: "static", json: { ok: true } },
+  });
 }
 
 test("a signed-in visitor approves a CLI sign-in only by an explicit click", async ({ page }) => {
@@ -29,10 +38,14 @@ test("a signed-in visitor approves a CLI sign-in only by an explicit click", asy
   await expect(page.getByText("You can return to your terminal. The CLI session is ready.")).toBeVisible();
 });
 
-test("declining a CLI sign-in sends nothing", async ({ page }) => {
+test("the request shows where it came from, and declining it ends it without approving", async ({ page }) => {
   await stubApproval(page);
   await page.goto(DEVICE_LOGIN, { waitUntil: "domcontentloaded" });
-  await page.getByRole("button", { name: "This is not my code" }).click();
-  await page.waitForURL(/\/app/u);
+  await expect(page.getByText(/near Berlin, DE · studio-mac \(darwin\)/u)).toBeVisible();
+  await page.getByRole("button", { name: "This is not my request" }).click();
+  await expect(page.getByText("Sign-in declined")).toBeVisible();
+  expect(await fixtureRequestBodies(page, "device-decline")).toEqual([
+    expect.objectContaining({ deviceCode: "device-code-e2e", userCode: "WDJB-MJHT" }),
+  ]);
   expect(await fixtureRequests(page, "device-approve")).toHaveLength(0);
 });

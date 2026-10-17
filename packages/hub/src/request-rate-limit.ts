@@ -1,6 +1,6 @@
 import { sha256Hex } from "@xmatrix/protocol";
 import type { Hono } from "hono";
-import { admitAttempt } from "./auth-attempt-limit";
+import { admitAttempt, loginEmailAttemptLimits, type AttemptLimit } from "./auth-attempt-limit";
 import type { Env } from "./types";
 
 /** A Workers Rate Limiting binding: a per-key counter over a fixed window. */
@@ -102,6 +102,8 @@ export const AUTH_ROUTE_ATTEMPTS: Readonly<Record<string, number>> = {
   "/api/auth/sign-in/email": 5,
   "/api/auth/request-password-reset": 3,
   "/api/auth/email-otp/send-verification-otp": 3,
+  // Each code allows three guesses before it is spent; this bounds one client's guesses across addresses.
+  "/api/auth/sign-in/email-otp": 10,
   // The plugin also locks an account after 10 wrong codes; this bounds one client across accounts.
   "/api/auth/two-factor/verify-totp": 10,
   "/api/auth/two-factor/verify-backup-code": 5,
@@ -123,9 +125,21 @@ async function admitAuthRoute(env: Env, request: Request, path: string): Promise
       worker: request.headers.get("CF-Worker") ?? "" });
     return undefined;
   }
-  if (await admitAttempt(env, [{ key: `${path}:${await sha256Hex(key)}`, max }])) return undefined;
+  const limits = [{ key: `${path}:${await sha256Hex(key)}`, max }, ...await addressedLoginEmailLimits(request, path)];
+  if (await admitAttempt(env, limits)) return undefined;
   console.warn("xMatrix rate limit exceeded", { rateClass: "auth_route", enforced: true, path });
   return rateLimitedResponse();
+}
+
+/**
+ * A login code asked for straight from the sign-in library is charged to its
+ * address like one asked for through the Hub's own login route, so the two
+ * routes share one allowance per address.
+ */
+async function addressedLoginEmailLimits(request: Request, path: string): Promise<AttemptLimit[]> {
+  if (path !== "/api/auth/email-otp/send-verification-otp") return [];
+  const body = (await request.clone().json().catch(() => null)) as { email?: unknown } | null;
+  return typeof body?.email === "string" && body.email.trim() ? loginEmailAttemptLimits(body.email) : [];
 }
 
 /**

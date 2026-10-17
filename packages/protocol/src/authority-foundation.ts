@@ -150,7 +150,13 @@ export const HUB_ROUTES = {
   device_start: "/api/auth/cli/device/start",
   device_approve: "/api/auth/cli/device/approve",
   device_token: "/api/auth/cli/device/token",
+  /** What a waiting request says about itself; both of its codes name it. */
+  device_describe: "/api/auth/cli/device/describe",
+  /** The person in the browser says a waiting request is not theirs. */
+  device_decline: "/api/auth/cli/device/decline",
   exchange_session: "/api/auth/cli/exchange-session",
+  /** A signed-out app or terminal ends the session its refresh token names. */
+  sign_out: "/api/auth/cli/sign-out",
   refresh: "/api/auth/refresh",
   me: "/api/auth/me",
   me_profile: "/api/me/profile",
@@ -382,6 +388,9 @@ export const WEB_PROXY_ROUTES = {
   cli_exchange_session: "/api/xmatrix/cli/exchange-session",
   cli_device_start: "/api/xmatrix/cli/device/start",
   cli_device_token: "/api/xmatrix/cli/device/token",
+  cli_device_approve: "/api/xmatrix/cli/device/approve",
+  cli_device_describe: "/api/xmatrix/cli/device/describe",
+  cli_device_decline: "/api/xmatrix/cli/device/decline",
   native_session: "/api/xmatrix/native-session",
   me: "/api/xmatrix/me",
   me_profile: "/api/xmatrix/me/profile",

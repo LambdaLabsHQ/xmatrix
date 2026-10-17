@@ -68,7 +68,6 @@ export { privateResponse } from "./private-response";
 
 export const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
 export const MAX_INVITE_EMAILS_PER_REQUEST = 100;
-export const LOGIN_RATE_LIMIT_PER_EMAIL = 5;
 export const LOGIN_RATE_LIMIT_PER_CLIENT = 20;
 export const CLIENT_METRIC_RATE_LIMIT = 60;
 export const CLIENT_METRIC_RATE_WINDOW_MS = 60_000;

@@ -47,10 +47,14 @@ interface AuthContextValue extends AuthState {
   signInWithPassword: (email: string, password: string) => Promise<SignInStep>;
   /** Finishes a sign-in that waits on the authenticator app's code. */
   verifySecondFactor: (code: string, options: { backup: boolean; trustDevice: boolean }) => Promise<void>;
-  signInWithSocial: (provider: SocialSignInProvider, redirectTo?: string) => Promise<void>;
+  /** `returnTo` is where a completed sign-in goes; a failed one comes back to the page it started on. */
+  signInWithSocial: (provider: SocialSignInProvider, returnTo?: string) => Promise<void>;
   setSessionFromAuthResponse: (payload: AuthResponse) => Promise<void>;
-  logout: (options?: { redirectTo?: "/login" | "/account/delete" }) => Promise<void>;
+  /** `redirectTo` may carry the sign-in page's own query, to sign in again to the same request. */
+  logout: (options?: { redirectTo?: LogoutDestination }) => Promise<void>;
 }
+
+type LogoutDestination = "/account/delete" | "/login" | `/login?${string}`;
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
@@ -291,11 +295,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setState({ ...next, loading: false });
   };
 
-  const signInWithSocial = async (provider: SocialSignInProvider, redirectTo?: string) => {
+  const signInWithSocial = async (provider: SocialSignInProvider, returnTo?: string) => {
     if (provider === "google" && !isBetterAuthGoogleEnabled()) {
       throw new Error("Google sign-in is not configured for this account. Use a login code while setup is completed.");
     }
-    await signInWithBetterAuthSocial(provider, buildBetterAuthCallbackUrl(redirectTo));
+    await signInWithBetterAuthSocial(provider, buildBetterAuthCallbackUrl(returnTo),
+      buildBetterAuthCallbackUrl(window.location.href));
   };
 
   const signInWithPassword = async (email: string, password: string) => {
@@ -306,10 +311,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return "signed_in";
   };
 
-  const logout = async (options?: { redirectTo?: "/login" | "/account/delete" }) => {
+  const logout = async (options?: { redirectTo?: LogoutDestination }) => {
+    const destination = logoutDestination(options?.redirectTo);
     if (mockAuthState) {
       setState(mockAuthState || { session: null, user: null, loading: false });
-      router.push(options?.redirectTo === "/account/delete" ? "/account/delete" : "/login");
+      router.push(destination);
       return;
     }
 
@@ -319,9 +325,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (accessToken) {
       await Promise.allSettled([disableBrowserPush(accessToken), forgetPhonePush(accessToken)]);
     }
-    await Promise.allSettled([clearNativeSession(), signOutBetterAuth()]);
+    // The session ends at the Hub while this app still holds its token; only then is the token forgotten.
+    await signOutBetterAuth().catch(() => undefined);
+    await clearNativeSession();
     setState({ session: null, user: null, loading: false });
-    router.push(options?.redirectTo === "/account/delete" ? "/account/delete" : "/login");
+    router.push(destination);
   };
 
   return (
@@ -381,21 +389,26 @@ async function loadSessionState(): Promise<Omit<AuthState, "loading">> {
   return { session: null, user: null };
 }
 
+/**
+ * Keeps a native app's session for its next launch. A sign-in that could not
+ * be kept is reported, rather than looking done until the app is reopened.
+ */
 async function persistNativeSession(payload: AuthResponse): Promise<void> {
   if (!isNativeShell()) {
     return;
   }
   setAppSessionToken(payload.refreshToken);
 
-  const response = await xmatrixRawResponse(WEB_PROXY_ROUTES.native_session, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(payload),
-  }).catch(() => null);
-
-  if (!response?.ok) {
-    return;
+  for (const waitMs of [0, 700, 1500]) {
+    if (waitMs) await delay(waitMs);
+    const response = await xmatrixRawResponse(WEB_PROXY_ROUTES.native_session, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload),
+    }).catch(() => null);
+    if (response?.ok) return;
   }
+  throw new Error("Signed in, but this app couldn't keep the session. Try again.");
 }
 
 async function clearNativeSession(): Promise<void> {
@@ -441,6 +454,12 @@ async function loadNativeSessionState(): Promise<Omit<AuthState, "loading">> {
     session: authResponseToWebSession(payload.session),
     user: payload.session.user,
   };
+}
+
+function logoutDestination(requested: LogoutDestination | undefined): LogoutDestination {
+  if (requested === "/account/delete") return requested;
+  // Only the sign-in page's own query comes back; anything else lands on the plain page.
+  return requested?.startsWith("/login?") && !requested.includes("//") ? requested : "/login";
 }
 
 function authResponseToWebSession(payload: AuthResponse): WebAuthSession {

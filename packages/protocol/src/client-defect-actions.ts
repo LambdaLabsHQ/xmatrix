@@ -36,6 +36,7 @@ const CLIENT_DEFECT_ACTIONS = [
   "Couldn't create the invite code",
   "Couldn't create the page",
   "Couldn't decide this request",
+  "Couldn't decline the sign-in",
   "Couldn't delete secret",
   "Couldn't delete the Space",
   "Couldn't delete the evaluator lineage",

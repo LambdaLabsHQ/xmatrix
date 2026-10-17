@@ -223,16 +223,25 @@ pub async fn cmd_logout(hub_url: &str, all: bool, all_profiles: bool) -> error::
         let store = xmatrix_cli_core::profile::ProfileStore::discover();
         let registry = store.load_or_bootstrap()?;
         for state_root in store.state_roots(&registry)? {
+            for session in config::sessions_in_state_root(state_root.as_path()).await {
+                auth::end_hub_session(&session).await;
+            }
             config::clear_all_sessions_in_state_root(state_root.as_path()).await?;
         }
         println!("{} Logged out of all local profiles", "✓".green().bold());
     } else if all {
+        for session in config::sessions_in_state_root(&config::profile_state_dir()).await {
+            auth::end_hub_session(&session).await;
+        }
         config::clear_all_sessions().await?;
         println!(
             "{} Logged out of all sessions in this profile",
             "✓".green().bold()
         );
     } else {
+        if let Some(session) = config::load_session_for_hub(hub_url).await {
+            auth::end_hub_session(&session).await;
+        }
         config::clear_session_for_hub(hub_url).await?;
         println!("{} Logged out of {}", "✓".green().bold(), hub_url);
     }

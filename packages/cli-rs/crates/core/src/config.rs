@@ -547,6 +547,22 @@ pub async fn clear_session_for_hub(hub_url: &str) -> Result<()> {
     write_config(&config).await
 }
 
+/// Every session saved under a state root, one per Hub; unreadable files are skipped.
+pub async fn sessions_in_state_root(state_root: &Path) -> Vec<CliSession> {
+    let mut sessions = Vec::new();
+    let Ok(mut entries) = tokio::fs::read_dir(state_root.join("sessions")).await else {
+        return sessions;
+    };
+    while let Ok(Some(entry)) = entries.next_entry().await {
+        if let Ok(raw) = tokio::fs::read_to_string(entry.path()).await
+            && let Ok(session) = parse_session(&raw)
+        {
+            sessions.push(session);
+        }
+    }
+    sessions
+}
+
 pub async fn clear_all_sessions() -> Result<()> {
     clear_all_sessions_in_state_root(&profile_state_dir()).await
 }
