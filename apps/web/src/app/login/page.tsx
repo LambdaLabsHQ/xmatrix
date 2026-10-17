@@ -1082,8 +1082,14 @@ async function describeDeviceRequest(deviceCode: string, userCode: string): Prom
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ deviceCode, userCode }),
   });
-  if (response.status === 404 || response.status === 409) return "unknown";
-  if (!response.ok) throw await errorFromResponse(response);
+  if (response.status === 409) return "unknown";
+  if (!response.ok) {
+    const failure = await errorFromResponse(response);
+    // Only the broker's own answer ends the request; a Hub still rolling out this route
+    // has no description to give, and the code alone is still there to compare.
+    if (failure instanceof XMatrixApiError && failure.code === "unknown_device_code") return "unknown";
+    throw failure;
+  }
   return (await response.json()) as DeviceRequestDescription;
 }
 
