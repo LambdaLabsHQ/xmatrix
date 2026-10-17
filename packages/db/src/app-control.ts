@@ -10,6 +10,7 @@ import {
 } from "./channel-capability-policy.js";
 import { commandFields } from "./command-fields.js";
 import { spaceMemberRole } from "./space-members.js";
+import { readsOnly } from "./space-roles.js";
 import { readScopedCommandReplay, storeScopedCommandReplay, COMMAND_REPLAY_TTL_MS as REPLAY_TTL_MS } from "./command-replay.js";
 
 
@@ -88,9 +89,9 @@ function pageCursor(value: unknown, arity: number): string[] | null {
   }
 }
 
-async function requireSpace(tx: DatabaseTransaction, spaceId: string, userId: string, write: boolean) {
+async function requireSpace(tx: DatabaseTransaction, spaceId: string, userId: string, write: boolean, use = false) {
   const role = await spaceMemberRole(tx, "app_space_role_v1", spaceId, userId);
-  if (!role || (write && role !== "owner" && role !== "admin")) {
+  if (!role || (write && role !== "owner" && role !== "admin") || (use && readsOnly(role))) {
     throw new AppControlError("space_not_found", 404, "Space not found");
   }
 }
@@ -317,7 +318,7 @@ export class PostgresAppRepository {
     );
   }
 
-  /** `use` lists them for acting in the Channel, which needs more than reading it. */
+  /** `use` lists them for acting with, in the Space or its Channel, which needs a member, not a reader. */
   async listConnections(input: { requestId: string; spaceId: string; actorUserId: string;
     channelId?: string; use?: boolean; cursor?: string | null; limit: number }) {
     const requestId = text(input.requestId, "requestId", 200);
@@ -328,7 +329,7 @@ export class PostgresAppRepository {
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 500) throw new AppControlError(
       "invalid_app_request", 400, "limit is invalid");
     return this.database.transaction({ requestId, operation: "app.connections.list" }, async (tx) => {
-      await requireSpace(tx, spaceId, actorUserId, false);
+      await requireSpace(tx, spaceId, actorUserId, false, input.use);
       if (input.channelId) await connectionChannel(tx, input.channelId, actorUserId, spaceId, input.use);
       const rows = await tx.query<QueryResultRow>({ name: "app_connections_list_v1", text: `SELECT *
         FROM data.app_connector_connections WHERE space_id=$1
@@ -355,7 +356,7 @@ export class PostgresAppRepository {
         if (input.allowMissing) return { connection: null };
         throw new AppControlError("app_connection_not_found", 404, "App connection not found");
       }
-      await requireSpace(tx, String(rows[0].space_id), actorUserId, false);
+      await requireSpace(tx, String(rows[0].space_id), actorUserId, false, input.use);
       if (input.channelId) await connectionChannel(tx, input.channelId, actorUserId, String(rows[0].space_id), input.use);
       return { connection: await connection(tx, rows[0], input.channelId) };
     });

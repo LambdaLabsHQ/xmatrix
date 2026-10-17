@@ -145,14 +145,22 @@ integration("a participant cannot use the Space's connected apps, even in their 
     const subscribe = (actorUserId) => command(actorUserId, "put-relation", { sourceKind: "repository",
       sourceRef: "webhook:deploys", features: ["delivery"] });
     const refused = (error) => error instanceof AppControlError && error.code === "channel_not_found";
+    // Without a Channel too: what the Space's credentials read (its private repository catalog) is a member's.
+    const spaceRefused = (error) => error instanceof AppControlError && error.code === "space_not_found";
     for (const actorUserId of ["participant", "viewer"]) {
       assert.equal((await connection(actorUserId)).connection.id, connectionId, `a ${actorUserId} still reads it`);
-      await assert.rejects(connection(actorUserId, true), refused);
+      await assert.rejects(connection(actorUserId, true), (error) => refused(error) || spaceRefused(error));
+      await assert.rejects(apps.getConnection({ requestId: crypto.randomUUID(), connectionId, actorUserId, use: true }),
+        spaceRefused);
+      await assert.rejects(apps.listConnections({ requestId: crypto.randomUUID(), spaceId: space, actorUserId, use: true,
+        limit: 10 }), spaceRefused);
       await assert.rejects(subscribe(actorUserId), refused);
       await assert.rejects(command(actorUserId, "record-execution", { executionId: `run-${actorUserId}-${space}`,
         messageId: "message-1", actionId: "post" }), refused);
     }
     assert.equal((await connection("member", true)).connection.id, connectionId, "a member uses it there");
+    assert.equal((await apps.getConnection({ requestId: crypto.randomUUID(), connectionId, actorUserId: "member",
+      use: true })).connection.id, connectionId, "and in the Space");
     assert.equal((await subscribe("member")).relation.channelId, channelId);
   });
 });

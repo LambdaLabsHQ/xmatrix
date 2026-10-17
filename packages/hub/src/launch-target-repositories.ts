@@ -1,7 +1,8 @@
 import type { LaunchTargetRepo, LaunchTargetRepoStatus } from "@xmatrix/protocol";
 import { spaceLaunchTargetRepositories } from "./app-connectors";
 import type { Env } from "./types";
-import { findAppConnection } from "./apps";
+import { connectionUseRefused, getAppConnection } from "./apps";
+import type { AppConnectorConnectionView } from "./app-connectors";
 
 /**
  * A Space's repo launch targets, re-resolved on every read: a disconnected or
@@ -22,7 +23,16 @@ export async function launchTargetRepos(
   repoStatus: LaunchTargetRepoStatus;
   repoStatusDetail?: string;
 }> {
-  const connection = await findAppConnection(env, { spaceId, providerId: "github", actorUserId: userId });
+  // The list names private repositories with the Space's installation, so it
+  // is for members: a viewer or participant is told, not shown none.
+  let connection: AppConnectorConnectionView | null;
+  try {
+    connection = (await getAppConnection(env, { connectionId: `${spaceId}:github`, actorUserId: userId, use: true,
+      allowMissing: true })).connection as AppConnectorConnectionView | null;
+  } catch (error) {
+    if (!connectionUseRefused(error)) throw error;
+    return { repos: [], repoStatus: "unavailable", repoStatusDetail: "github_repositories_require_member" };
+  }
   if (connection?.status !== "configured") {
     return { repos: [], repoStatus: "not-connected" };
   }

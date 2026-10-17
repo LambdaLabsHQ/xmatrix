@@ -93,6 +93,11 @@ export async function listAppConnections(env: PostgresAuthorityBindingEnv, input
 /** Why a Human who may read the Channel still cannot act with its Space's connections. */
 export const CONNECTED_APPS_NEED_MEMBER = "only Space members use its connected apps; viewers and participants cannot";
 
+/** The authority refused to let this Human act with the Space's connections: their role only reads them. */
+export function connectionUseRefused(error: unknown): boolean {
+  return error instanceof AppControlError && (error.code === "space_not_found" || error.code === "channel_not_found");
+}
+
 /**
  * The connections a Human may act with in this Channel, or `undefined` when
  * their role only reads them there: a viewer, or a participant, who writes in
@@ -104,7 +109,7 @@ export async function usableAppConnections(env: PostgresAuthorityBindingEnv, inp
   try {
     return await listAppConnections(env, { ...input, use: true });
   } catch (error) {
-    if (error instanceof AppControlError && error.code === "channel_not_found") return undefined;
+    if (connectionUseRefused(error)) return undefined;
     throw error;
   }
 }
