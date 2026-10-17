@@ -39,7 +39,7 @@ import { handoffGitHubConnectAuthorization, githubConnectReturnUrl, isGitHubConn
 import { registerMachineExecutionRoutes } from "./index-routes-machine-executions";
 import { registerReplyRecoveryRoutes } from "./index-routes-reply-recovery";
 import { wakeAgentLaunchCoordinator } from "./agent-launch-coordinator-wake";
-import { getAppConnection } from "./apps";
+import { connectionUseRefused, getAppConnection } from "./apps";
 import { getChannel, getSpace } from "./spaces";
 
 /** Records each successful-session metric, then hands the client its session and endpoints. */
@@ -641,8 +641,18 @@ export function registerIndexRoutesAuthSpace(app: Hono<{ Bindings: Env }>): void
       error: repositoryAccessUnavailableDetail(`${target.owner}/${target.repo}`, reason) }, 409, { "cache-control": "no-store" });
     // Resolved on every mint, so losing access or disconnecting the connector
     // takes effect immediately instead of at the end of some earlier grant.
-    const { connection } = await getAppConnection(c.env, { connectionId: `${spaceId}:github`,
-      actorUserId: principal.ownerUserId, allowMissing: true }) as { connection: { status?: unknown } | null };
+    // Acting with the connection in this Channel is a member's capability: a
+    // viewer, or a participant in their intake, keeps their own Git login.
+    const usable = await getAppConnection(c.env, { connectionId: `${spaceId}:github`,
+      actorUserId: principal.ownerUserId, channelId, use: true, allowMissing: true })
+      .catch((error: unknown) => {
+        if (connectionUseRefused(error)) return undefined;
+        throw error;
+      }) as { connection: { status?: unknown } | null } | undefined;
+    if (!usable) {
+      return c.json({ error: "github_repository_token_requires_member" }, 403, { "cache-control": "no-store" });
+    }
+    const { connection } = usable;
     if (!connection) return refuse("github_not_connected");
     if (connection.status !== "configured") return refuse("github_connection_not_configured");
 

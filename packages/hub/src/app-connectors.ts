@@ -430,6 +430,58 @@ export async function listGitHubUserInstallations(
   return accounts;
 }
 
+/** Bounds one Connect's authority check: GitHub calls grow with installations and their repositories. */
+const ADMINISTERED_INSTALLATION_LIMIT = 30;
+const ADMINISTERED_REPOSITORY_PAGES = 10;
+
+/**
+ * The installations among `accounts` this person may hand to a Space: their
+ * own account's, or an organization's whose every covered repository they
+ * administer, as its owners do. Reaching one repository of an installation
+ * proves membership, not authority over the rest of it, so such an
+ * installation is not returned; nor is one too large to check.
+ */
+export async function githubAdministeredInstallations(
+  env: AppConnectorEnv,
+  userToken: string,
+  accounts: readonly GitHubInstallationAccount[]
+): Promise<string[]> {
+  const viewer = githubString(githubObject(await fetchGitHubJson(env, "/user", userToken)).login)?.toLowerCase();
+  if (!viewer) throw new Error("github_user_unavailable");
+  const administered: string[] = [];
+  for (const account of accounts.slice(0, ADMINISTERED_INSTALLATION_LIMIT)) {
+    if (account.type === "User") {
+      if (account.login.toLowerCase() === viewer) administered.push(account.installationId);
+    } else if (account.type === "Organization" &&
+        await githubAdministersEveryRepository(env, userToken, account.installationId).catch(() => false)) {
+      administered.push(account.installationId);
+    }
+  }
+  return administered;
+}
+
+async function githubAdministersEveryRepository(env: AppConnectorEnv, userToken: string, installationId: string) {
+  const id = encodeURIComponent(installationId);
+  const installation = await githubInstallationAuthForId(env, installationId);
+  const covered = githubNumber(githubObject(await fetchGitHubJson(env, "/installation/repositories?per_page=1",
+    installation.token)).total_count);
+  if (typeof covered !== "number" || covered < 1 || covered > ADMINISTERED_REPOSITORY_PAGES * 100) return false;
+  // Counted by stable id: a page that shifts while being read cannot count one repository twice.
+  const administered = new Set<number>();
+  for (let page = 1; page <= ADMINISTERED_REPOSITORY_PAGES; page += 1) {
+    const payload = githubObject(await fetchGitHubJson(env,
+      `/user/installations/${id}/repositories?per_page=100&page=${page}`, userToken));
+    const repositories = Array.isArray(payload.repositories) ? payload.repositories.map(githubObject) : [];
+    for (const repository of repositories) {
+      const repositoryId = githubNumber(repository.id);
+      if (typeof repositoryId !== "number" || githubObject(repository.permissions).admin !== true) return false;
+      administered.add(repositoryId);
+    }
+    if (repositories.length < 100) break;
+  }
+  return administered.size === covered;
+}
+
 export function githubConnectionHasInstallation(
   connection: Pick<AppConnectorConnectionView, "metadata"> | { metadata?: Record<string, unknown> },
   installationId: string
