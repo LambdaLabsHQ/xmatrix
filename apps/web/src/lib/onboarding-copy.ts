@@ -20,7 +20,7 @@ const en = {
   worksWith: (names: string, all: boolean) => all ? `Works with ${names}` : `Works with ${names} and `,
   more: (count: number) => `${count} more`,
   runCommand: "Run this on your computer",
-  otherPlatform: (windows: boolean) => windows ? "macOS or Linux?" : "Windows?",
+  otherPlatform: (windows: boolean): string => windows ? "macOS or Linux?" : "Windows?",
   waitingForComputer: "Waiting for your computer…",
   checkTerminal: "Nothing yet? The terminal says what went wrong.",
   tryDesktop: "Still nothing? The desktop app connects without a terminal.",
@@ -48,7 +48,7 @@ const en = {
   sendToComputer: "Send to my computer",
   emailSent: "Sent to your email. Open it on your computer to continue there.",
   preparingCommand: "Preparing a command…",
-  copy: (copied: boolean) => copied ? "Copied" : "Copy",
+  copy: (copied: boolean): string => copied ? "Copied" : "Copy",
   agentsIn: (names: string, one: boolean) =>
     `${names} ${one ? "is" : "are"} in. Mention ${one ? "it" : "one"} here to give ${one ? "it" : "them"} work, or start with one of these:`,
   /* The first task should end in a page, which is where xMatrix makes sense;
