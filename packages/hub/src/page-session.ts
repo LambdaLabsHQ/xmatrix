@@ -159,11 +159,6 @@ function principalKey(principal: PageSessionPrincipal): string {
   return `${principal.kind}:${principal.id}`;
 }
 
-/** The origin of a co-writer's writes, so its own words are not news to it. */
-function coWriteOrigin(connectionId: string): string {
-  return `cowrite:${connectionId}`;
-}
-
 /** Stable 31-bit awareness client id for an Agent, distinct from Yjs's random ids in practice. */
 function agentClientId(key: string): number {
   let hash = 2166136261;
@@ -268,7 +263,7 @@ export class PageSession {
         const connection = this.connections.get(origin);
         if (connection) this.noteEditor(connection.principal);
       }
-      for (const [id, writer] of this.coWriters) if (origin !== coWriteOrigin(id)) writer.othersEdited();
+      for (const [id, writer] of this.coWriters) if (origin !== id) writer.othersEdited();
       // A typed word is not stored on its own: the stored typing still holds it, and a restart types it in.
       if (origin !== TYPING) void this.persist();
     });
@@ -667,9 +662,9 @@ export class PageSession {
       fragment: this.fragment,
       markdown: () => this.markdown(),
       write: (change) => {
-        authoredAs(this.doc, clientId, () => this.doc.transact(change, coWriteOrigin(connection.id)));
-        // Its edits commit as its own, from the conversation it co-writes from.
-        this.noteEditor(principal);
+        // Every live editor uses its connection as the origin: the update handler records
+        // authorship before persisting the document, including its very first streamed word.
+        authoredAs(this.doc, clientId, () => this.doc.transact(change, connection.id));
       },
       present: ({ activity, cursor, say, undoable, wrote }) => {
         const at = cursor ? Y.relativePositionToJSON(cursor) : null;
