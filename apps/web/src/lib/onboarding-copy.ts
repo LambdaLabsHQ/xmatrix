@@ -74,6 +74,15 @@ const en = {
   turnOnInstalled: "Turn on the installed agents so they can take work.",
   serviceStopped: "The background service that launches agents on this machine is not running yet.",
   startIt: "Start it",
+  /* The App could not start its background service, said as what it means
+     for the person; the CLI's own lines follow it for whoever reads them. */
+  daemonFailure: (stage: string): string => stage === "cli_install"
+    ? "xMatrix couldn't install its command-line tool on this computer, so agents can't start here yet."
+    : stage === "service_start"
+      ? "This computer didn't let xMatrix start its background service, so agents can't start here yet."
+      : "xMatrix's background service stopped right after it started, so agents can't start here yet.",
+  failureReported: "These details were sent to xMatrix so we can fix this.",
+  tryingAgain: "Trying again…",
   detectedBy: "Detected by checking installed commands. Manage installed harnesses and their Space switches from Machines.",
   usedHere: "used on this machine",
   chooseFolderLater: "You will choose the folder it works in when you send the first task.",
@@ -164,6 +173,13 @@ const zh: OnboardingCopy = {
   turnOnInstalled: "开启已安装的 Agent，它们就能接活。",
   serviceStopped: "这台电脑上负责启动 Agent 的后台服务还没运行。",
   startIt: "启动",
+  daemonFailure: (stage) => stage === "cli_install"
+    ? "xMatrix 没能在这台电脑上装好命令行工具，所以 Agent 暂时还起不来。"
+    : stage === "service_start"
+      ? "这台电脑没让 xMatrix 启动后台服务，所以 Agent 暂时还起不来。"
+      : "xMatrix 的后台服务刚启动就停了，所以 Agent 暂时还起不来。",
+  failureReported: "这些信息已经发给 xMatrix，我们会据此修复。",
+  tryingAgain: "正在重试…",
   detectedBy: "通过检查已安装的命令找到。在「Machines」里管理已安装的 Agent 和它们在各 Space 的开关。",
   usedHere: "在这台电脑上用过",
   chooseFolderLater: "发第一个任务时，再选它工作的目录。",

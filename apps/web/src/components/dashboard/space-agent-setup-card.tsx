@@ -14,10 +14,14 @@ import { InstalledHarnessSwitchList } from "./installed-harness-switch-list";
 import { AgentInstallPicker } from "./supported-agents";
 import { BringAgentsIn, RemoteMachineHint } from "./bring-agents-in";
 import type { useInstalledHarnesses } from "./use-installed-harnesses";
-import type {
-  SpaceAgentSetupCandidate,
-  SpaceAgentSetupState,
+import {
+  daemonFailureSentence,
+  shownDaemonFailure,
+  type SpaceAgentSetupCandidate,
+  type SpaceAgentSetupState,
 } from "./space-agent-setup";
+import type { DesktopDaemonFailure, DesktopDaemonStatus } from "@/lib/desktop/bridge";
+import { cn } from "@/lib/utils";
 
 /* The first screen of a Space that has no agent yet. It replaces the bare
    "No conversations yet" empty state: instead of asking the human to understand
@@ -46,6 +50,7 @@ export function SpaceAgentSetupCard({
   fleet,
   onBringAll,
   onManageMachines,
+  daemonStatus,
   phone = false,
 }: {
   state: SpaceAgentSetupState;
@@ -62,6 +67,8 @@ export function SpaceAgentSetupCard({
   fleet?: ReturnType<typeof useInstalledHarnesses>;
   onBringAll: () => void;
   onManageMachines: () => void;
+  /** The App's background service, when this is the desktop App. */
+  daemonStatus?: DesktopDaemonStatus | null;
   /** On a phone: the command is run on a computer, and only approved here. */
   phone?: boolean;
 }) {
@@ -77,9 +84,14 @@ export function SpaceAgentSetupCard({
     <button type="button" onClick={onManageMachines} className={actionClass({ variant: "secondary", size: "md" }, "mt-4 ml-2")}>{copy.manageMachines}</button>
   </SetupCardShell>;
   if (state.kind === "hidden") return null;
+  const daemonFailure = state.kind === "unreachable" || state.kind === "no-local-machine"
+    ? null : shownDaemonFailure(daemonStatus);
 
   return (
     <SetupCardShell>
+        {daemonFailure && state.kind !== "daemon-stopped" && (
+          <DaemonFailureNotice copy={copy} failure={daemonFailure} starting={daemonStatus?.state === "starting"} onRetry={onStartDaemon} className="mb-6" />
+        )}
         {state.kind === "unreachable" && <UnreachablePanel copy={copy} onRetry={onRetryAgents} />}
         {/* Web and phone: the same flow xMatrix sends in a welcome conversation. */}
         {state.kind === "no-local-machine" && <BringAgentsIn spaceId={spaceId} token={token} userId={userId} surface="space" phone={phone} />}
@@ -100,7 +112,10 @@ export function SpaceAgentSetupCard({
               title={copy.foundOn(describeCandidates(copy, state.candidates), hostLabel)}
               body={copy.turnOnInstalled}
             />
-            {state.kind === "daemon-stopped" && (
+            {state.kind === "daemon-stopped" && daemonFailure && (
+              <DaemonFailureNotice copy={copy} failure={daemonFailure} starting={daemonStatus?.state === "starting"} onRetry={onStartDaemon} className="mt-4" />
+            )}
+            {state.kind === "daemon-stopped" && !daemonFailure && (
               <div className={noticeClass("attention", "mt-4 p-3")}>
                 <p className="text-sm">
                   {copy.serviceStopped}
@@ -141,6 +156,44 @@ export function SpaceAgentSetupCard({
           </p>
         )}
     </SetupCardShell>
+  );
+}
+
+/* The background service did not start: what that means, one way to try
+   again, and the CLI's last lines (already redacted on this machine), which
+   the App also sends to xMatrix. */
+function DaemonFailureNotice({
+  copy,
+  failure,
+  starting,
+  onRetry,
+  className,
+}: {
+  copy: OnboardingCopy;
+  failure: DesktopDaemonFailure;
+  starting: boolean;
+  onRetry: () => void;
+  className?: string;
+}) {
+  return (
+    <div className={noticeClass("attention", cn("p-3", className))} role="alert">
+      <p className="text-sm">{daemonFailureSentence(failure, copy)}</p>
+      {failure.detail && (
+        <pre className="mt-2 max-h-32 overflow-auto whitespace-pre-wrap break-words font-mono text-xs text-muted-foreground">
+          {failure.detail}
+        </pre>
+      )}
+      <p className="mt-2 text-xs text-muted-foreground">{copy.failureReported}</p>
+      <button
+        type="button"
+        disabled={starting}
+        onClick={onRetry}
+        className={actionClass({ variant: "primary", size: "md" }, "mt-3")}
+      >
+        {starting ? <AnimatedIcon icon={Loader2} className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
+        {starting ? copy.tryingAgain : copy.tryAgain}
+      </button>
+    </div>
   );
 }
 

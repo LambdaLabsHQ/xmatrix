@@ -89,6 +89,8 @@ the person's screen sees are counted on their own (`onboarding-funnel.ts`):
 
 | Step | When |
 | --- | --- |
+| `app_loaded` | the signed-in app finds the person with no Space (`shell`) |
+| `space_ready` | it then has their personal Space (`shell`) |
 | `command_shown` | the setup command is on screen |
 | `command_copied` | its copy button is pressed |
 | `download_clicked` | "Download the desktop app" is followed |
@@ -97,7 +99,8 @@ the person's screen sees are counted on their own (`onboarding-funnel.ts`):
 | `approved` | the person approves it |
 | `starter_chosen` | a first task in the welcome is chosen (`starter_chosen:<id>`) |
 
-- Each step names where it was shown (`welcome`, `space`, `agents`) and what
+- Each step names where it was shown (`welcome`, `space`, `agents`, or
+  `shell` for the app before any of them) and what
   on: `phone` at the shell's phone width, `desktop_app` in the desktop app,
   otherwise `desktop_web`.
 - The Web reports each step once per showing. `POST
@@ -116,4 +119,35 @@ FROM xmatrix_diagnostics
 WHERE blob3 = 'onboarding_step' AND timestamp > NOW() - INTERVAL '1' DAY
 GROUP BY device, surface, step
 ORDER BY device, surface, people DESC
+```
+
+## When the App's background service does not start
+
+A fresh desktop App has no installed CLI. It signs in through the CLI seed it
+ships (`Resources/cli`), which also creates the Machine, but nothing on PATH
+can run the daemon. Once signed in, the App installs that seed
+(`xmatrix setup install --from <seed> --daemon`), which registers the
+login-session service (macOS LaunchAgent, Windows scheduled task), and starts
+it. A failed install waits for the person's "Try again" instead of repeating on
+every keep-alive check.
+
+When a start fails, the daemon status carries where (`cli_install`,
+`service_start`, `service_not_up`, `spawn`, `exit`), the exit code and the
+CLI's last lines; for a LaunchAgent that did not come up, the lines are read
+from `~/Library/Logs/xmatrix-daemon.err.log`. The App redacts them before they
+leave the machine (home directory, emails, URL queries, tokens; at most 8 lines
+and 600 characters). The App's first screen says what it means in one sentence,
+shows those lines and offers "Try again". The Web sends each failure once per
+page to `POST /api/observable/desktop-daemon-failure`, which writes one point to
+the diagnostics dataset under the person's keyed hash.
+
+The day's failures, by stage:
+
+```sql
+SELECT blob2 AS platform, blob5 AS app_version, blob4 AS stage, double3 AS exit_code, blob11 AS detail,
+  COUNT(DISTINCT index1) AS people
+FROM xmatrix_diagnostics
+WHERE blob3 = 'daemon_start_failed' AND timestamp > NOW() - INTERVAL '1' DAY
+GROUP BY platform, app_version, stage, exit_code, detail
+ORDER BY people DESC
 ```

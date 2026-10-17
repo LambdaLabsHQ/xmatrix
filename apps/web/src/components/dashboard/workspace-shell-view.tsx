@@ -981,6 +981,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
             // the failure this retries is the registration read.
             onRetryAgents={() => void registrationCatalog.refetch()}
             onBindAgent={(candidate) => void enableLocalHarnesses([candidate.presetId])}
+            daemonStatus={desktopDaemonStatus}
           />
         </div>
   );

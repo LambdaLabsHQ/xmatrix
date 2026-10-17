@@ -141,6 +141,8 @@ export type PlacedEnvironment<T> = { candidate: T; fit: number; headroom: number
  * is lost unless it is spent, so it is the cheaper to use. Then a sliver of
  * complete bandwidth and the utility sum break ties, then the fewest outstanding
  * Runs on the machine, whose load may not show yet, then candidate order.
+ * An environment that failed to start within the breaker window ranks after
+ * every one that did not, and is weighed only against its own kind.
  * Every environment is ranked.
  */
 export function jointRanking<T extends RegistrationLaunchCandidate>(candidates: readonly T[],
@@ -170,12 +172,15 @@ export function jointRanking<T extends RegistrationLaunchCandidate>(candidates: 
     return { candidate, index, fit, headroom, room, quotaPace, network, networkQuality, transferQuality,
       balance, utility: balance + 0.001 * (fit + room) };
   });
-  const dominated = (item: typeof weighed[number]) => weighed.some(other => other.fit >= item.fit &&
+  const tripped = (candidate: T) => candidate.startupFailedAt !== undefined;
+  const dominated = (item: typeof weighed[number]) => weighed.some(other =>
+    tripped(other.candidate) === tripped(item.candidate) && other.fit >= item.fit &&
     other.room >= item.room && other.quotaPace >= item.quotaPace && other.networkQuality >= item.networkQuality &&
     (other.fit > item.fit || other.room > item.room || other.quotaPace > item.quotaPace || other.networkQuality > item.networkQuality));
   const outstanding = (candidate: T) => candidate.observations?.outstandingMachineAllocations ?? 0;
   return weighed.map(item => ({ ...item, frontier: !dominated(item) }))
-    .sort((left, right) => Number(right.frontier) - Number(left.frontier) || right.balance - left.balance ||
+    .sort((left, right) => Number(tripped(left.candidate)) - Number(tripped(right.candidate)) ||
+      Number(right.frontier) - Number(left.frontier) || right.balance - left.balance ||
       right.networkQuality - left.networkQuality || right.quotaPace - left.quotaPace ||
       right.transferQuality - left.transferQuality || right.utility - left.utility ||
       outstanding(left.candidate) - outstanding(right.candidate) || left.index - right.index)
@@ -395,7 +400,8 @@ export function registrationLaunchChooser(evaluate: RoutingEvaluator, readContex
         fit: round(item.fit), ...(item.headroom !== undefined ? { headroom: round(item.headroom) } : {}),
         quotaPace: round(item.quotaPace), frontier: item.frontier, utility: round(item.utility),
         ...(item.network ? { network: item.network, networkQuality: round(item.networkQuality!) } : {}),
-        described: Boolean(item.candidate.description) })) },
+        described: Boolean(item.candidate.description),
+        ...(item.candidate.startupFailedAt ? { startupFailedAt: item.candidate.startupFailedAt } : {}) })) },
       ...(intent ? { intent: { source: "jev" as const, selected: "summon" as const, probabilities: intent.probabilities } }
         : summon?.readInDraft && tags.launch !== "force" ? { intent: { source: "draft" as const } }
         : summon ? { intent: { source: "author" as const } } : {}),

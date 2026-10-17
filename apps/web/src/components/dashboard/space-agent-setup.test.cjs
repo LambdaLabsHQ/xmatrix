@@ -189,3 +189,15 @@ test("a runtime with no config directory is reported as never used", () => {
   const [candidate] = spaceAgentSetupCandidates([discovery({ configDirs: [] })]);
   assert.equal(candidate.usedBefore, false);
 });
+
+test("a failed daemon start is shown, as a sentence, only while the daemon is down", () => {
+  const { daemonFailureSentence, shownDaemonFailure } = require("./space-agent-setup.ts");
+  const failure = { stage: "cli_install", detail: "Permission denied", exitCode: 1 };
+  assert.equal(shownDaemonFailure({ state: "error", failure, updatedAt: "" }), failure);
+  assert.equal(shownDaemonFailure({ state: "starting", failure, updatedAt: "" }), failure);
+  assert.equal(shownDaemonFailure({ state: "running", failure, updatedAt: "" }), null);
+  assert.equal(shownDaemonFailure({ state: "error", updatedAt: "" }), null);
+  assert.match(daemonFailureSentence(failure), /command-line tool/);
+  assert.match(daemonFailureSentence({ stage: "service_start", detail: "" }), /background service/);
+  assert.match(daemonFailureSentence({ stage: "exit", detail: "" }), /stopped right after/);
+});

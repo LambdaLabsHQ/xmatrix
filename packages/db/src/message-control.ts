@@ -1156,22 +1156,23 @@ export class PostgresMessageRepository {
       }>({
         name: collidedSequence === undefined
           ? "message_sequence_reservation_insert_v1"
-          : "message_sequence_reservation_reallocate_v1",
+          : "message_sequence_reservation_reallocate_v2",
         text: collidedSequence === undefined
           ? `INSERT INTO data.message_sequence_reservations
               (space_id,command_id,channel_id,sequence,state,fact_digest,created_at,updated_at,expires_at)
             VALUES ($1,$2,$3,$4,'reserved',NULL,$5,$5,$6)
             ON CONFLICT (space_id,command_id) DO NOTHING
             RETURNING channel_id,sequence,state`
+          // Every parameter must appear in the statement: PostgreSQL cannot
+          // type one it never reads, and refuses the whole reallocation.
           : `UPDATE data.message_sequence_reservations SET sequence=$4,updated_at=$5
             WHERE space_id=$1 AND command_id=$2 AND channel_id=$3
-              AND sequence=$7 AND state='reserved' AND fact_digest IS NULL
+              AND sequence=$6 AND state='reserved' AND fact_digest IS NULL
             RETURNING channel_id,sequence,state`,
         values: collidedSequence === undefined
           ? [spaceId, commandId, channelId, sequence, now.toISOString(),
               new Date(now.getTime() + IDEMPOTENCY_TTL_MS).toISOString()]
-          : [spaceId, commandId, channelId, sequence, now.toISOString(),
-              new Date(now.getTime() + IDEMPOTENCY_TTL_MS).toISOString(), collidedSequence],
+          : [spaceId, commandId, channelId, sequence, now.toISOString(), collidedSequence],
         maxRows: 1,
       }))[0];
       if (inserted) return { sequence: Number(inserted.sequence), state: inserted.state };

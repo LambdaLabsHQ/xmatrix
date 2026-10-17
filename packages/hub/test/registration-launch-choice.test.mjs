@@ -759,3 +759,26 @@ test('a Human-confirmed draft reading skips only intent and keeps the remaining 
   const { parseLaunchParameterEvidence } = await import('@xmatrix/protocol');
   assert.deepEqual(parseLaunchParameterEvidence(result.parameterEvidence), result.parameterEvidence);
 });
+
+test('an environment that failed to start in the last 30 minutes goes after every one that did not', async () => {
+  // 2026-10-17: `@auto` sent a new user's first task to a Grok that could not start, twice in a row.
+  const machine = (id, load, startupFailedAt) => ({ ...candidates[0], key: { ...candidates[0].key, machineId: id },
+    ...(startupFailedAt ? { startupFailedAt } : {}),
+    observations: { evaluatedAt: 'now', outstandingMachineAllocations: 0, outstandingRegistrationAllocations: 0,
+      quota: { remainingPercent: 100, assumed: true },
+      machineResources: { observedAt: 'now', cpuLogicalCount: 8, loadAverage: [load, 0, 0] } } });
+  const failed = machine('failed', 0, '2026-10-17T09:38:00.000Z'), busy = machine('busy', 6);
+  const ranked = jointRanking([failed, busy], () => 1);
+  assert.deepEqual(ranked.map(item => item.candidate.key.machineId), ['busy', 'failed']);
+  // Weighed only against its own kind: the failed one does not push the busy one off the frontier.
+  assert.deepEqual(ranked.map(item => item.frontier), [true, true]);
+  // A better fit that failed still goes last; with nothing else, it still runs the work.
+  assert.equal(jointRanking([failed, busy], candidate => candidate === failed ? 1 : 1 / 3)[0].candidate, busy);
+  assert.equal(jointRanking([failed], () => 1)[0].candidate, failed);
+  // The chooser records the breaker in its evidence.
+  const chosen = await registrationLaunchChooser(async input => answer(input))({ message: '@codex', tags: {},
+    candidates: [{ ...candidates[0], ...failed, key: candidates[0].key }, { ...candidates[1], observations: busy.observations }] });
+  assert.deepEqual(chosen.key, candidates[1].key);
+  assert.equal(chosen.parameterEvidence.placement.ranking[1].startupFailedAt, '2026-10-17T09:38:00.000Z');
+  assert.equal(chosen.parameterEvidence.placement.ranking[0].startupFailedAt, undefined);
+});

@@ -55,7 +55,7 @@ import { PostgresRegistrationExecutionRepository } from "./agent-registration-ex
 import { requireRegistrationAdmission } from "./agent-registration-access.js";
 import { REGISTRATION_KEY_SQL, registrationKeyValues } from "./agent-registration-rows.js";
 import { currentRegistrationQuotaJoin, registrationQuotaReading } from "./agent-registration-quota-probe.js";
-import { messageAuthoredForActor, readMessageInvocationSelections } from "./message-invocation-selections.js";
+import { firstMessageSummonId, messageAuthoredForActor, readMessageInvocationSelections } from "./message-invocation-selections.js";
 import { initialMessageSource, withInitialMessageSource } from "./runtime-initial-input.js";
 import { MessageAuthorityError } from "./message-authority-error.js";
 import { lockChannelLifecycle } from "./channel-capability-policy.js";
@@ -116,7 +116,17 @@ export interface RegistrationLaunchCandidate {
   /** Its owner keeps the Machine out of automatic assignment: only a launch
    * that names the Machine may run here. Absent when the launch named it. */
   autoAssign?: false;
+  /** The latest Run of this environment in the Space that failed to start
+   * within the last STARTUP_FAILURE_WINDOW_MINUTES; routing ranks it last. */
+  startupFailedAt?: string;
 }
+
+/** How long a failed start keeps an environment behind every other (the breaker). */
+export const STARTUP_FAILURE_WINDOW_MINUTES = 30;
+/** Run phases a process that exits in them never started: the stored
+ * (normalized) form of the phases a startup failure notice is posted for. */
+const STARTUP_FAILURE_PHASES = ["wrapper_startup_failed", "auth_resolving", "workspace_registering",
+  "relay_registering", "relay_register_retrying", "relay_auth_refresh_retrying", "runtime_starting"] as const;
 export type RegistrationLaunchChooser = (input: {
   message: string; sourceSequence?: number; tags: AutoLaunchTags; candidates: RegistrationLaunchCandidate[];
   /** Registrations seen but not offered, so an empty list can name the real cause. */
@@ -710,6 +720,8 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
   async dispatchInput(input: {
     /** The predecessor's stable Agent registration cannot receive its own work. */
     excludeSourceInstanceId?: string;
+    /** An environment that cannot take this work (it just failed to start it). */
+    excludeRegistration?: SpaceAgentRegistrationKey;
     commandId: string; actorUserId: string; channelId: string; body: string; runMetadata?: Record<string, unknown>;
     runId?: string; instanceId?: string;
     initialMessageId?: string; presentationMessageId?: string;
@@ -759,7 +771,8 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
     const requiredHostCapabilities = hostObservedRequirements(input.requiredCapabilities ?? []);
     const listed = await this.candidatesFor({ managedWorkspace: true, requiredHostCapabilities }, repositoryCatalog);
     const candidates = listed.offered
-      .filter(candidate => !excluded || !sameAgentRegistration(candidate.key, excluded));
+      .filter(candidate => !excluded || !sameAgentRegistration(candidate.key, excluded))
+      .filter(candidate => !input.excludeRegistration || !sameAgentRegistration(candidate.key, input.excludeRegistration));
     if (!candidates.length) {
       // Say which requirement left nothing, rather than that nothing exists.
       if (requiredHostCapabilities.length && (await this.candidatesFor({ managedWorkspace: true }, repositoryCatalog)).offered.length) {
@@ -790,6 +803,52 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
       ...(candidate.machineName ? { machineName: candidate.machineName } : {}),
       ...selectedParameters(selected, candidate.key.harness) };
     return this.withHost(commandId, await this.prepare(request));
+  }
+
+  /**
+   * Where a Run that failed to start came from, when that start may be retried
+   * once on another Agent: an `@auto` summon, or xMatrix's summon for a first
+   * message that named nobody, dispatched from its message. An Agent the author
+   * named, an any-input launch and such a retry itself (an any-input launch)
+   * have none. `readBody` reads the message as its author may.
+   */
+  async startupFallbackOrigin(input: { commandId: string; channelId: string; runId: string;
+    readBody: (actorUserId: string, sourceSequence: number) => Promise<string | undefined> }): Promise<{
+      actorUserId: string; sourceMessageId: string; body: string; sourceMention: string; tags: AutoLaunchTags;
+      failed: SpaceAgentRegistrationKey } | undefined> {
+    const commandId = text(input.commandId, 200), channelId = text(input.channelId), runId = text(input.runId);
+    const row = (await this.database.transaction({ requestId: commandId, operation: "registration.launch.fallback-origin",
+      placement: this.placement }, tx => tx.query({ name: "registration_launch_fallback_origin_v1", text: `SELECT
+        intent.actor_user_id,intent.source_message_id,intent.selection_index,intent.owner_user_id,intent.machine_id,
+        intent.harness,message.timeline_sequence
+        FROM data.registration_launch_intents intent JOIN data.messages message ON message.space_id=intent.space_id
+          AND message.channel_id=intent.channel_id AND message.message_id=intent.source_message_id
+        WHERE intent.run_id=$1 AND intent.channel_id=$2 AND intent.space_id=$3 AND intent.state='committed'
+          AND intent.command_id LIKE 'registration-launch%'`,
+      values: [runId, channelId, this.placement.spaceId], maxRows: 1 })))[0];
+    if (!row) return undefined;
+    const actorUserId = String(row.actor_user_id), sourceMessageId = String(row.source_message_id);
+    const body = await input.readBody(actorUserId, Number(row.timeline_sequence));
+    if (body === undefined) return undefined;
+    let source: Awaited<ReturnType<typeof readMessageInvocationSelections>>;
+    try {
+      source = await this.database.transaction({ requestId: commandId, operation: "registration.launch.fallback-source",
+        placement: this.placement }, tx => readMessageInvocationSelections(tx, { deriveFromText: true,
+        spaceId: this.placement.spaceId, channelId, messageId: sourceMessageId, actorUserId, body }));
+    } catch (error) {
+      // An edited, deleted or no longer authorized message starts nothing new.
+      if (error instanceof MessageAuthorityError && error.status < 500) return undefined;
+      throw error;
+    }
+    const selection = source?.selections[Number(row.selection_index)];
+    if (!selection || selection.target.kind !== "auto" && !sourceMessageId.startsWith(firstMessageSummonId(""))) return undefined;
+    const options = selectionLaunchConditions(body, selection);
+    if (options.error) return undefined;
+    // The author already asked for work; their other conditions still bind the retry.
+    const { launch: _launch, ...tags } = options.tags;
+    return { actorUserId, sourceMessageId, body, sourceMention: body.slice(selection.start, options.end), tags,
+      failed: parseSpaceAgentRegistrationKey({ spaceId: this.placement.spaceId, ownerUserId: row.owner_user_id,
+        machineId: row.machine_id, harness: row.harness }) };
   }
 
   /** A message that summons nobody: the harness Jev reads its author wants
@@ -858,7 +917,7 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
     });
     const observed = await this.database.transaction({ requestId: `registration-models:${target.harness ?? "auto"}`,
       operation: "registration.launch.model-catalog", placement: this.placement }, tx => tx.query({
-      name: "registration_launch_model_catalog_v2", text: `SELECT requested.owner,requested.machine,requested.harness,catalog.models,catalog.observed_at,parameter_catalog.parameters,parameter_catalog.parameter_model,parameter_catalog.parameters_observed_at
+      name: "registration_launch_model_catalog_v3", text: `SELECT requested.owner,requested.machine,requested.harness,catalog.models,catalog.observed_at,parameter_catalog.parameters,parameter_catalog.parameter_model,parameter_catalog.parameters_observed_at,startup.startup_failed_at
         FROM jsonb_to_recordset($1::jsonb) AS requested(owner text,machine text,harness text)
         LEFT JOIN LATERAL (SELECT i.presentation_json->'models' AS models,
           i.presentation_json->>'modelsObservedAt' AS observed_at
@@ -877,9 +936,17 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
             AND CASE WHEN pg_input_is_valid(i.presentation_json->>'parametersObservedAt','timestamp with time zone')
               THEN (i.presentation_json->>'parametersObservedAt')::timestamptz BETWEEN statement_timestamp()-interval '24 hours' AND statement_timestamp()
               ELSE FALSE END
-          ORDER BY (i.presentation_json->>'parametersObservedAt')::timestamptz DESC,i.instance_id LIMIT 1) parameter_catalog ON TRUE`,
+          ORDER BY (i.presentation_json->>'parametersObservedAt')::timestamptz DESC,i.instance_id LIMIT 1) parameter_catalog ON TRUE
+        LEFT JOIN LATERAL (SELECT max(run.finished_at) AS startup_failed_at
+          FROM data.run_agent_registrations r JOIN data.runs run ON run.run_id=r.run_id
+          WHERE r.space_id=$2 AND r.owner_user_id=requested.owner AND r.machine_id=requested.machine AND r.harness=requested.harness
+            AND run.status IN ('failed','exited') AND run.finished_at>=statement_timestamp()-interval '${STARTUP_FAILURE_WINDOW_MINUTES} minutes'
+            AND run.metadata_json->'stopRequest' IS NULL AND run.metadata_json->'executionCancellation' IS NULL
+            AND (run.metadata_json->'spawnResult'->>'ok'='false'
+              OR run.metadata_json->'invocationProgress'->>'phase'=ANY($3::text[]))) startup ON TRUE`,
       values: [JSON.stringify(candidates.map(candidate => ({ owner: candidate.key.ownerUserId,
-        machine: candidate.key.machineId, harness: candidate.key.harness }))),this.placement.spaceId], maxRows: 100 }));
+        machine: candidate.key.machineId, harness: candidate.key.harness }))),this.placement.spaceId,
+        [...STARTUP_FAILURE_PHASES]], maxRows: 100 }));
     // Resolve only references explicitly granted to this registration. Directory
     // metadata is factual context, never a source of new launch permissions.
     return this.directory.transaction({ requestId: `registration-workspaces:${target.harness ?? "auto"}`,
@@ -958,7 +1025,9 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
         const parameterObservation = daemonCapable(daemon, "machine_routing_parameters_v1")
           ? harnessParameterObservation(observation?.parameters, observation?.parameters_observed_at,
               observation?.parameter_model, models.map(model => environment.modelAliases?.[model] ?? model), Date.now()) : undefined;
+        const startupFailedAt = observation?.startup_failed_at ? new Date(observation.startup_failed_at).toISOString() : undefined;
         offered.push({ ...candidate, workspaceReferences, models, modelCatalog, ...parameterObservation,
+          ...(startupFailedAt ? { startupFailedAt } : {}),
           modelAliases: environment.modelAliases,
           // A machine tag selects by the owner's name or id, never a hostname.
           machineName: String(daemon.machine_name || ""),
