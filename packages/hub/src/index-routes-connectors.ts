@@ -201,7 +201,7 @@ export function registerConnectorRoutes(app: Hono<{ Bindings: Env }>): void {
         if (Object.keys(fields).length === 0) return c.json({ error: "Nothing to write" }, 400);
         const result = await connectorCredentialRepository(c.env).put({ requestId: crypto.randomUUID(),
           spaceId: c.req.param("spaceId"), providerId: policy.manifest.id, actorUserId: user.id, fields,
-          policy: { allowed: policy.allowed }, at: new Date().toISOString() });
+          policy: { allowed: policy.allowed, generated: policy.generated }, at: new Date().toISOString() });
         return view(await readGenerated(), { credentialFields: result.credentialFields });
       }));
 }

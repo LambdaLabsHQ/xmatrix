@@ -368,13 +368,14 @@ async function useSlack(sql, space) {
   await sql(`UPDATE data.app_connector_connections SET connection_id=$1||':slack',provider_id='slack',
     provider_name='Slack',auth_mode='oauth' WHERE space_id=$1`, [space]);
 }
-const oauthPolicy = { allowed: ['botToken', 'ingressKey', 'signingSecret'] };
+const oauthPolicy = { allowed: ['botToken', 'ingressKey', 'signingSecret'], generated: ['ingressKey'] };
 const oauthInput = (space, installationId = 'T1') => ({ requestId: crypto.randomUUID(), spaceId: space,
   providerId: 'slack', actorUserId: 'owner', fields: { botToken: `fixture-${installationId}` },
   policy: oauthPolicy, oauthInstallation: { appClientId: 'app-1', installationId },
   initialize: { ingressKey: `fixture-key-${installationId}` }, at });
-const readOAuth = (apps, extra = {}) => apps.oauthEventConnections({ requestId: crypto.randomUUID(),
-  providerId: 'slack', appClientId: 'app-1', installationId: 'T1', limit: 50, ...extra });
+const readOAuth = async (apps, extra = {}) => (await apps.oauthEventConnections({ requestId: crypto.randomUUID(),
+  providerId: 'slack', appClientId: 'app-1', installationId: 'T1', limit: 50, ...extra }))
+  .map(({ connectionId, spaceId }) => ({ connectionId, spaceId }));
 
 async function useVercel(sql, space) {
   await sql(`UPDATE data.app_connector_connections SET connection_id=$1||':vercel',provider_id='vercel',
@@ -464,6 +465,9 @@ integration('OAuth installation binding is atomic with credentials and invalidat
     await credentials.put(oauthInput(space));
     const expected = [{ connectionId: `${space}:slack`, spaceId: space }];
     assert.deepEqual(await readOAuth(apps), expected);
+    // Each route names the credential version its binding is for, so a delivery can be fenced to it.
+    assert.deepEqual((await apps.oauthEventConnections({ requestId: crypto.randomUUID(), providerId: 'slack',
+      appClientId: 'app-1', installationId: 'T1', limit: 50 })).map((row) => row.credentialVersion), [1]);
     const read = () => credentials.resolve({ requestId: crypto.randomUUID(), spaceId: space, providerId: 'slack' });
     const before = await read();
     await assert.rejects(credentials.put({ ...oauthInput(space, 'T2'), fields: { invalidField: 'bad' } }), /Unsupported/);
@@ -482,7 +486,18 @@ integration('OAuth installation binding is atomic with credentials and invalidat
     await credentials.put({ ...oauthInput(space), oauthInstallation: undefined, initialize: undefined,
       fields: { signingSecret: 'admin-signature-edit' } });
     assert.deepEqual(await readOAuth(apps, { installationId: 'T2' }), [], 'manual credentials require new grant evidence');
+    const manual = await read();
+    assert.equal(manual.oauthGrant, undefined);
+    assert.equal(manual.values.botToken, undefined, "leaving the grant leaves its bot behind, never as a manual token");
+    assert.deepEqual([manual.values.signingSecret, manual.values.ingressKey], ['admin-signature-edit', before.values.ingressKey]);
     await credentials.put(oauthInput(space));
+    const bound = await read();
+    await credentials.put({ ...oauthInput(space), oauthInstallation: undefined, initialize: undefined,
+      fields: { ingressKey: 'regenerated-key' } });
+    assert.deepEqual(await readOAuth(apps), expected, 'regenerating a Hub-minted field keeps the grant bound');
+    const regenerated = await read();
+    assert.deepEqual([regenerated.values.botToken, regenerated.values.ingressKey], [bound.values.botToken, 'regenerated-key']);
+    assert.deepEqual(regenerated.oauthGrant, bound.oauthGrant);
     await apps.command({ commandId: `delete-oauth-${space}`, spaceId: space, providerId: 'slack',
       principal: { kind: 'user', id: 'owner' } }, 'delete');
     assert.equal((await sql('SELECT count(*)::int AS n FROM data.app_connector_oauth_installations WHERE space_id=$1', [space])).rows[0].n, 0);
@@ -511,13 +526,77 @@ integration('OAuth routing scopes by provider, application, workspace and curren
       assert.deepEqual(await readOAuth(apps, { appClientId: 'retired-app' }), []);
       await otherSql(`UPDATE data.app_connector_connections SET metadata_json='{"installationId":"T1"}' WHERE space_id=$1`, [other]);
       assert.deepEqual(await readOAuth(apps), [{ connectionId: `${space}:slack`, spaceId: space }], 'caller metadata never widens delivery');
+      // One Slack workspace speaks for one Space: its bot reads the channels it
+      // was invited into, so another Space's Connect is refused while this one holds it.
+      await assert.rejects(otherCredentials.put(oauthInput(other)), (error) => error.code === 'workspace_connected_elsewhere');
+      assert.deepEqual(await readOAuth(apps), [{ connectionId: `${space}:slack`, spaceId: space }]);
+      // A failed check is not a disconnect: the workspace stays this Space's, and it is not delivered to meanwhile.
+      await sql("UPDATE data.app_connector_connections SET status='error' WHERE space_id=$1", [space]);
+      await assert.rejects(otherCredentials.put(oauthInput(other)), (error) => error.code === 'workspace_connected_elsewhere');
+      assert.deepEqual(await readOAuth(apps), []);
+      await sql("UPDATE data.app_connector_connections SET status='disconnected' WHERE space_id=$1", [space]);
       await otherCredentials.put(oauthInput(other));
-      assert.equal((await readOAuth(apps)).length, 2, 'two Spaces may explicitly authorize the same workspace');
+      assert.deepEqual(await readOAuth(apps), [{ connectionId: `${other}:slack`, spaceId: other }]);
+      // Two current bindings predate that rule: which Space should read it is unknown, so neither does,
+      // and neither acts with the shared bot (its credential read says so).
+      await sql("UPDATE data.app_connector_connections SET status='configured' WHERE space_id=$1", [space]);
+      assert.deepEqual(await readOAuth(apps), []);
+      const shared = async (repository, id) => (await repository.resolve({ requestId: crypto.randomUUID(), spaceId: id,
+        providerId: 'slack' })).oauthGrant.workspaceShared;
+      assert.deepEqual([await shared(credentials, space), await shared(otherCredentials, other)], [true, true]);
+      // Regenerating the ingress key cannot launder the shared bot into an unbound manual token.
+      await otherCredentials.put({ ...oauthInput(other), oauthInstallation: undefined, initialize: undefined,
+        fields: { ingressKey: 'regenerated-key' } });
+      assert.equal(await shared(otherCredentials, other), true);
+      // A binding made before grant generations existed is still a binding of the workspace.
+      await otherSql('UPDATE data.app_connector_oauth_installations SET grant_generation=NULL WHERE space_id=$1', [other]);
+      assert.deepEqual([await shared(credentials, space), await shared(otherCredentials, other)], [true, true]);
       await assert.rejects(readOAuth(apps, { limit: 1 }), /exceeds its bound/, 'overflow fails closed, never partially routes');
       await sql("UPDATE data.app_connector_connections SET status='disconnected' WHERE space_id=$1", [space]);
       assert.deepEqual(await readOAuth(apps), [{ connectionId: `${other}:slack`, spaceId: other }]);
+      assert.equal(await shared(otherCredentials, other), false);
       await otherSql('UPDATE data.app_connector_credentials SET version=version+1 WHERE space_id=$1', [other]);
       assert.deepEqual(await readOAuth(apps), [], 'mismatched credential versions never route');
+  });
+});
+
+integration('concurrent Connects of one Slack workspace from two Spaces bind exactly one', async () => {
+  await withSlackDatabasePair(async ({ database, space }, { database: otherDb, space: other }) => {
+    const apps = new PostgresAppRepository(database);
+    const results = await Promise.allSettled([new PostgresAppCredentialRepository(database, material).put(oauthInput(space)),
+      new PostgresAppCredentialRepository(otherDb, material).put(oauthInput(other))]);
+    assert.equal(results.filter((result) => result.status === 'fulfilled').length, 1);
+    assert.equal(results.find((result) => result.status === 'rejected').reason.code, 'workspace_connected_elsewhere');
+    assert.equal((await readOAuth(apps)).length, 1);
+  });
+});
+
+// Slack's own word that the app left the workspace (signature-verified by the
+// Hub) retires every binding of it: they disconnect, keeping their encrypted
+// credentials, and the workspace may be connected again by any Space.
+integration('a verified Slack uninstall retires the workspace so it can be connected again', async () => {
+  await withSlackDatabasePair(async ({ sql, database, space }, { database: otherDb, space: other }) => {
+    const apps = new PostgresAppRepository(database);
+    const credentials = new PostgresAppCredentialRepository(database, material);
+    await credentials.put(oauthInput(space));
+    const before = await credentials.resolve({ requestId: crypto.randomUUID(), spaceId: space, providerId: 'slack' });
+    const retire = (overrides = {}) => apps.retireSlackWorkspace({ requestId: crypto.randomUUID(), appClientId: 'app-1',
+      installationId: 'T1', at, eventAt: '2026-10-03T00:00:00.000Z', limit: 50, ...overrides });
+    assert.equal(await retire({ installationId: 'T9' }), 0);
+    assert.equal(await retire({ appClientId: 'other-app' }), 0);
+    // Slack's event predates this Connect (at is 2026-10-02): a delayed or replayed uninstall spares a newer grant.
+    assert.equal(await retire({ eventAt: '2026-10-01T00:00:00.000Z' }), 0);
+    assert.deepEqual(await readOAuth(apps), [{ connectionId: `${space}:slack`, spaceId: space }]);
+    assert.equal(await retire(), 1);
+    assert.equal(await retire(), 0, 'idempotent');
+    assert.deepEqual(await readOAuth(apps), []);
+    const after = await credentials.resolve({ requestId: crypto.randomUUID(), spaceId: space, providerId: 'slack' });
+    assert.equal(after.status, 'disconnected');
+    assert.deepEqual(after.values, before.values, 'credential evidence is kept until an admin reconnects');
+    await new PostgresAppCredentialRepository(otherDb, material).put(oauthInput(other));
+    assert.deepEqual(await readOAuth(apps), [{ connectionId: `${other}:slack`, spaceId: other }]);
+    assert.equal((await sql('SELECT count(*)::int AS n FROM data.app_connector_oauth_installations WHERE space_id=$1',
+      [space])).rows[0].n, 0);
   });
 });
 
@@ -568,17 +647,19 @@ integration('scheduled Space deletion excludes OAuth delivery, restoration resto
       const otherCredentials = new PostgresAppCredentialRepository(otherDb, material);
       const apps = new PostgresAppRepository(database);
       await credentials.put(oauthInput(space));
-      await otherCredentials.put(oauthInput(other));
       const ids = async () => (await readOAuth(apps)).map(row => row.spaceId).sort();
-      assert.deepEqual(await ids(), [space, other].sort());
+      assert.deepEqual(await ids(), [space]);
       const remove = () => spaces.mutateSpace({ requestId: crypto.randomUUID(), commandId: crypto.randomUUID(),
         actorUserId: 'owner', at: new Date().toISOString(), kind: 'space_delete', spaceId: space });
       await remove();
-      assert.deepEqual(await ids(), [other], 'scheduled deletion immediately blocks incoming delivery');
+      assert.deepEqual(await ids(), [], 'scheduled deletion immediately blocks incoming delivery');
       await spaces.restoreSpace({ requestId: crypto.randomUUID(), commandId: crypto.randomUUID(), actorUserId: 'owner',
         spaceId: space, at: new Date().toISOString() });
-      assert.deepEqual(await ids(), [space, other].sort());
+      assert.deepEqual(await ids(), [space]);
       const again = await remove();
+      // A Space scheduled for deletion no longer holds the workspace.
+      await otherCredentials.put(oauthInput(other));
+      assert.deepEqual(await ids(), [other]);
       const due = new Date(Date.parse(again.deletion.purgeAfter)+1000).toISOString();
       let status;
       for (let guard=0; guard<500; guard++) {
