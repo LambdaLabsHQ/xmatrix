@@ -543,27 +543,31 @@ integration('OAuth routing scopes by provider, application, workspace and curren
       // Nor is a disconnect in xMatrix: the bot stays in the channels it joined, so the claim stays.
       await sql("UPDATE data.app_connector_connections SET status='disconnected' WHERE space_id=$1", [space]);
       await assert.rejects(otherCredentials.put(oauthInput(other)), (error) => error.code === 'workspace_connected_elsewhere');
-      // Bindings made before claims existed, held while current (a disconnected one no longer holds):
+      // A workspace no claim names is held by a current binding (a disconnected one no longer holds):
       await sql("DELETE FROM data.app_slack_workspace_claims WHERE app_client_id='app-1'");
       await otherCredentials.put(oauthInput(other));
       assert.deepEqual(await readOAuth(apps), [{ connectionId: `${other}:slack`, spaceId: other }]);
-      // Two current bindings predate claims: the claimant alone reads the
-      // workspace and acts with its bot; the other binding, however current, neither.
+      // Older bindings of two Spaces sharing a workspace are contested (a claim
+      // naming no Space): neither reads it, acts with its bot or can claim it.
       await sql("UPDATE data.app_connector_connections SET status='configured' WHERE space_id=$1", [space]);
-      assert.deepEqual(await readOAuth(apps), [{ connectionId: `${other}:slack`, spaceId: other }]);
+      await sql("UPDATE data.app_slack_workspace_claims SET space_id=NULL WHERE app_client_id='app-1'");
+      assert.deepEqual(await readOAuth(apps), []);
       const shared = async (repository, id) => (await repository.resolve({ requestId: crypto.randomUUID(), spaceId: id,
         providerId: 'slack' })).oauthGrant.workspaceShared;
-      assert.deepEqual([await shared(credentials, space), await shared(otherCredentials, other)], [true, false]);
+      assert.deepEqual([await shared(credentials, space), await shared(otherCredentials, other)], [true, true]);
+      await sql("UPDATE data.app_connector_connections SET status='disconnected' WHERE space_id=$1", [space]);
+      for (const [repository, id] of [[otherCredentials, other], [credentials, space]]) {
+        await assert.rejects(repository.put(oauthInput(id)), (error) => error.code === 'workspace_connected_elsewhere',
+          'a local disconnect of one contested binding hands the shared bot to no one');
+      }
+      await sql("UPDATE data.app_connector_connections SET status='configured' WHERE space_id=$1", [space]);
       // Regenerating the ingress key cannot launder the shared bot into an unbound manual token.
       await credentials.put({ ...oauthInput(space), oauthInstallation: undefined, initialize: undefined,
         fields: { ingressKey: 'regenerated-key' } });
       assert.equal(await shared(credentials, space), true);
-      // An unclaimed workspace (released by an uninstall) is no binding's: none reads it or uses its bot.
-      await sql("DELETE FROM data.app_slack_workspace_claims WHERE app_client_id='app-1'");
-      assert.deepEqual(await readOAuth(apps), []);
-      assert.deepEqual([await shared(credentials, space), await shared(otherCredentials, other)], [true, true]);
-      await otherSql(`INSERT INTO data.app_slack_workspace_claims (app_client_id,installation_id,space_id,claimed_at)
-        VALUES ('app-1','T1',$1,$2)`, [other, at]);
+      // Once claimed (after an uninstall, by its next Connect), the claimant alone reads it and acts with its bot.
+      await otherSql("UPDATE data.app_slack_workspace_claims SET space_id=$1 WHERE app_client_id='app-1'", [other]);
+      assert.deepEqual(await readOAuth(apps), [{ connectionId: `${other}:slack`, spaceId: other }]);
       // A binding made before grant generations existed is still a binding of the workspace.
       await otherSql('UPDATE data.app_connector_oauth_installations SET grant_generation=NULL WHERE space_id=$1', [other]);
       assert.deepEqual([await shared(credentials, space), await shared(otherCredentials, other)], [true, false]);

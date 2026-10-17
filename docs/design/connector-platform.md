@@ -880,9 +880,10 @@ sees there, so each provider narrows delivery to what one Space may read:
   only when Slack's signed `event_time` is at or after the claim (routing, each
   subscription route, the final append and Automations all check it), so
   content from before an uninstall never reaches the next claimant. A binding
-  of an unclaimed workspace is no Space's. Existing bindings were backfilled
-  where one Space held the workspace; a workspace two Spaces' older bindings
-  share stays unclaimed until one disconnects and the other connects again. The Slack app must subscribe
+  of an unclaimed workspace is no Space's. Existing bindings were backfilled:
+  a workspace one Space held is claimed by it; one that two Spaces' older
+  bindings share is contested (a claim naming no Space), so neither uses it,
+  receives its events or can claim it until Slack's uninstall releases it. The Slack app must subscribe
   to both events.
   The bot belongs to its binding, not to the stored credentials: regenerating a
   Hub-minted field (the ingress key) keeps the binding, so a shared workspace

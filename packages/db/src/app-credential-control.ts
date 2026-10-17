@@ -154,7 +154,8 @@ export async function claimSlackWorkspace(tx: DatabaseTransaction, installation:
     WHERE i.provider_id='slack' AND i.app_client_id=$1 AND i.installation_id=$2 AND i.space_id<>$3
       AND NOT EXISTS (SELECT 1 FROM data.space_deletions d WHERE d.space_id=i.space_id)
     LIMIT 1`, values: [installation.appClientId, installation.installationId, spaceId], maxRows: 1 });
-  if ((claim[0] && String(claim[0].space_id) !== spaceId) || held[0]) {
+  // A contested claim (no Space: older bindings of two Spaces shared it) is no Space's to take either.
+  if ((claim[0] && (claim[0].space_id === null || String(claim[0].space_id) !== spaceId)) || held[0]) {
     throw new AppControlError(SLACK_WORKSPACE_TAKEN, 409,
       "This Slack workspace is already connected to another xMatrix Space; remove the xMatrix app from the Slack workspace to move it");
   }
