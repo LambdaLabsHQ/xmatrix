@@ -205,8 +205,8 @@ function createAuthWithDatabase(
       clientSecret: env.GOOGLE_CLIENT_SECRET,
     };
   }
-  // The GitHub App's own OAuth identity. People link it to prove which GitHub
-  // account is theirs, so their pull requests count as their claimed work.
+  // The GitHub App's OAuth identity supports sign-in and explicit profile
+  // linking. Space installations remain separate connector grants.
   if (env.GITHUB_APP_CLIENT_ID && env.GITHUB_APP_CLIENT_SECRET) {
     socialProviders.github = {
       clientId: env.GITHUB_APP_CLIENT_ID,

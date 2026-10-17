@@ -37,8 +37,9 @@ export function betterAuthRouteGroup(path: string, status?: number): string {
       ? `auth_token_${status}`
       : "auth_token";
   }
-  if (path.includes("/sign-in/social")) return "google_sign_in";
+  if (path.includes("/sign-in/social")) return "social_sign_in";
   if (path.includes("/callback/google")) return "google_callback";
+  if (path.includes("/callback/github")) return "github_callback";
   if (path.includes("/email-otp/")) return "better_auth_email_otp";
   if (path.includes("/sign-in/email-otp")) return "better_auth_email_otp";
   if (path.endsWith("/sign-in/email")) return "better_auth_password";
@@ -65,12 +66,12 @@ export async function logBetterAuthHandlerMetrics(path: string, response: Respon
 
   const sessionIssued = response.headers.getSetCookie().some((cookie) =>
     /^(?:__Secure-)?[^=;\s]+\.session_token=[^;\s]+/u.test(cookie));
-  if (path === "/api/auth/callback/google" && !callbackRejected && sessionIssued
+  if (oauthCallback && !callbackRejected && sessionIssued
       && response.status >= 200 && response.status < 400) {
     await logAuthMetric({
       routeGroup: "session_created",
       status: response.status,
-      outcome: "google_callback",
+      outcome: path.endsWith("/github") ? "github_callback" : "google_callback",
       authProvider: "better-auth",
     });
   }

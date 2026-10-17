@@ -15,6 +15,10 @@ English is the default language for repository documentation, guardrails, releas
 
 ## Current behavior
 
+The login page supports GitHub, Google and email. GitHub sign-in reuses the
+existing linked Human identity and GitHub App OAuth credentials, independently
+of Space connector installations. See [OAuth recovery](../operations/oauth-callback-recovery.md).
+
 Automation message occurrences link to actual persisted Runs through their exact
 canonical message and registration launches, including multiple Runs per message.
 Unused reservations and unstarted launches do not count; missing historical

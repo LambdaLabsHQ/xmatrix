@@ -3,6 +3,7 @@
  * Used by Playwright webServer and the isolated e2e/build.mjs child process.
  */
 export const WEB_E2E_FIXTURE_ENV = Object.freeze({
+  NEXT_PUBLIC_BETTER_AUTH_GOOGLE_ENABLED: "true",
   NEXT_PUBLIC_XMATRIX_MOCK_AUTH_TOKEN: "xmatrix-e2e-mock-token",
   NEXT_PUBLIC_XMATRIX_MOCK_AUTH_USER_ID: "e2e-user",
   NEXT_PUBLIC_XMATRIX_MOCK_AUTH_EMAIL: "e2e@xmatrix.test",
