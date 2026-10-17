@@ -84,7 +84,9 @@ export function ComposerTextHighlight({ value, textareaRef, mentionIndex, curren
     };
     sync();
     const observer = new ResizeObserver(sync);
-    observer.observe(input);
+    // The border box, so new padding (the iOS app's taller capsule) resyncs
+    // even when the line box keeps its size.
+    observer.observe(input, { box: "border-box" });
     input.addEventListener("scroll", scroll);
     // Webfont metrics replace the fallback's once Inter arrives.
     document.fonts?.addEventListener("loadingdone", sync);

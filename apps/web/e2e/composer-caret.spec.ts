@@ -66,6 +66,14 @@ test("selecting a channel on mobile leaves the composer unfocused", async ({ pag
 
   await expect(textarea).not.toBeFocused();
   await expect(textarea).toHaveValue("");
+  // Unfocused, nothing changes the draft after mount: the hint stands where
+  // the text starts from the first paint, on the send button's middle line.
+  const middle = async (selector: string) => {
+    const box = (await page.locator(selector).first().boundingBox())!;
+    return box.y + box.height / 2;
+  };
+  await expect.poll(async () => Math.abs(await middle(".app-composer-hint-trigger") - await middle(".app-composer-send")))
+    .toBeLessThanOrEqual(1);
 });
 
 test.describe("desktop channel selection", () => {
