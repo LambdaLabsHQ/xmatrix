@@ -5,6 +5,7 @@
  */
 const OUTCOME_KEY = "xmatrix:github-outcome";
 const GRANT_KEY = "xmatrix:github-grant";
+const RETURN_KEY = "xmatrix:github-return";
 
 export const GITHUB_CONNECT_OUTCOMES = ["connected", "updated", "authorized", "pending", "failed", "cancelled"] as const;
 export type GitHubConnectOutcome = (typeof GITHUB_CONNECT_OUTCOMES)[number];
@@ -24,4 +25,17 @@ export function takeGitHubConnectOutcome(): GitHubConnectOutcome | undefined {
 /** The installations GitHub confirmed for this tab's latest connect; the Hub checks it is still valid. */
 export function readGitHubGrant(): string | undefined {
   return window.sessionStorage.getItem(GRANT_KEY) ?? undefined;
+}
+
+/** Where in the app a connect started from outside Apps, to come back to once GitHub is connected. */
+export function keepGitHubReturnPath(path: string): void {
+  window.sessionStorage.setItem(RETURN_KEY, path);
+}
+
+/** That path, read once; only an app path, and only when nothing is left to do in Apps. */
+export function takeGitHubReturnPath(outcome: GitHubConnectOutcome): string | undefined {
+  const path = window.sessionStorage.getItem(RETURN_KEY);
+  window.sessionStorage.removeItem(RETURN_KEY);
+  if (outcome !== "connected" && outcome !== "updated") return undefined;
+  return path && /^\/app\/[^/]/u.test(path) && !path.startsWith("//") ? path : undefined;
 }

@@ -20,6 +20,7 @@ const en = {
   worksWith: (names: string, all: boolean) => all ? `Works with ${names}` : `Works with ${names} and `,
   more: (count: number) => `${count} more`,
   runCommand: "Run this on your computer",
+  signInOnComputer: "On your computer, open xmatrix.sh and sign in with this same email",
   otherPlatform: (windows: boolean): string => windows ? "macOS or Linux?" : "Windows?",
   waitingForComputer: "Waiting for your computer…",
   checkTerminal: "Nothing yet? The terminal says what went wrong.",
@@ -37,6 +38,9 @@ const en = {
   bringThemIn: "Bring them in",
   tooOld: (tooOld: HarnessTooOld) => harnessTooOldSentence(tooOld),
   nothingUntilUpdated: "Nothing is sent to it until it is updated.",
+  signedOut: (program: string, machine: string) =>
+    `${program} on ${machine} is not signed in, so it cannot take work yet. Sign it in here:`,
+  signIn: "Sign in",
   noAgentYet: (machine: string) => `${machine} has no agent yet. Install one there and it shows up here:`,
   tryAgain: "Try again",
   noTerminal: "No terminal?",
@@ -48,17 +52,23 @@ const en = {
   copy: (copied: boolean): string => copied ? "Copied" : "Copy",
   agentsIn: (names: string, one: boolean) =>
     `${names} ${one ? "is" : "are"} in. Mention ${one ? "it" : "one"} here to give ${one ? "it" : "them"} work, or start with one of these:`,
-  /* The first task should end in a page, which is where xMatrix makes sense;
-     each starter asks for one. The last names the canonical runbook on
-     purpose: an agent asked to explain xMatrix from memory invents an answer. */
+  /* The first task should end in a page about the person's own work, which is
+     where xMatrix makes sense; each starter asks for one. A page explaining
+     xMatrix itself kept people learning the tool instead of using it. */
   starting: (name?: string) => name ? `Starting @${name}…` : "Starting an agent…",
+  /* The live document people came for: a page they write in, with an agent writing beside them. */
+  coWrite: { title: "Write a page with an agent", detail: (agent: string) => `You write, and @${agent} writes beside you.`,
+    pageTitle: "What I'm working on" },
+  bringWorkConnect: "Bring your work in. Connect GitHub, and your agents draft pages from your repositories.",
+  bringWorkRepos: "Bring your work in. Pick a repository, and an agent drafts its pages for you to review:",
+  connectGitHub: "Connect GitHub",
+  draftFrom: (repo: string) => `Draft pages from ${repo}`,
+  draftingFrom: (repo: string) => `An agent is drafting pages from ${repo}. You review them in Pages before they apply.`,
   starters: [
     { id: "project", title: "Write a page about my project", detail: "What it is, where it stands and what is still open.",
       message: "Write a page about a project I'm working on: what it is, where it stands and what is still open. Ask me which project first." },
     { id: "plan", title: "Plan something with me", detail: "The plan stays in a page as we go.",
       message: "Help me plan something I'm working on, and keep the plan in a page as we go." },
-    { id: "xmatrix", title: "Show me how to hand you work", detail: "Reads xmatrix.sh/start.md and writes it up as a page.",
-      message: "Read https://xmatrix.sh/start.md and write a page on how I should hand you work through xMatrix." },
   ] as Starter[],
   installedTitle: "Your installed agents",
   installedBody: "Turn them on to summon them. Choose a working folder when you send the first task.",
@@ -120,6 +130,7 @@ const zh: OnboardingCopy = {
   worksWith: (names, all) => all ? `支持 ${names}` : `支持 ${names}，还有`,
   more: (count) => `另外 ${count} 个`,
   runCommand: "在你的电脑上运行这条命令",
+  signInOnComputer: "在电脑上打开 xmatrix.sh，用同一个邮箱登录",
   otherPlatform: (windows) => windows ? "用 macOS 或 Linux？" : "用 Windows？",
   waitingForComputer: "正在等你的电脑连上…",
   checkTerminal: "还没反应？终端里会写哪里出了错。",
@@ -137,6 +148,8 @@ const zh: OnboardingCopy = {
   tooOld: (tooOld) => `${tooOld.machineName ? `${tooOld.machineName} 上的 ` : ""}${tooOld.program} 是 ` +
     `${harnessDisplayVersion(tooOld.version)}，版本太旧，xMatrix 需要 ${tooOld.minimumVersion} 或更新。`,
   nothingUntilUpdated: "更新之前不会给它派活。",
+  signedOut: (program, machine) => `${machine} 上的 ${program} 还没登录，登录之前接不了活。在这里登录：`,
+  signIn: "登录",
   noAgentYet: (machine) => `${machine} 上还没有 Agent。在那台电脑上装一个，它就会出现在这里：`,
   tryAgain: "重试",
   noTerminal: "没有终端？",
@@ -149,13 +162,18 @@ const zh: OnboardingCopy = {
   agentsIn: (names, one) =>
     `${names} 已接入。在这里 @ ${one ? "它" : "其中一个"}就能派活，也可以从下面选一个开始：`,
   starting: (name) => name ? `正在启动 @${name}…` : "正在启动 Agent…",
+  coWrite: { title: "和 Agent 一起写一页", detail: (agent) => `你在页面里写，@${agent} 在旁边一起写。`,
+    pageTitle: "我手上的事" },
+  bringWorkConnect: "把你的工作带进来。连上 GitHub，Agent 会根据你的仓库写出页面。",
+  bringWorkRepos: "把你的工作带进来。选一个仓库，Agent 会写出它的页面，审阅后生效：",
+  connectGitHub: "连接 GitHub",
+  draftFrom: (repo) => `根据 ${repo} 写页面`,
+  draftingFrom: (repo) => `Agent 正在根据 ${repo} 写页面，写好后在 Pages 里审阅，确认后才生效。`,
   starters: [
     { id: "project", title: "给我的项目写一个页面", detail: "它是什么、做到哪了、还有什么没做完。",
       message: "给我正在做的一个项目写一个页面：它是什么、做到哪了、还有什么没做完。先问我是哪个项目。" },
     { id: "plan", title: "和我一起做个计划", detail: "边聊边把计划写进页面。",
       message: "帮我规划一件正在做的事，边聊边把计划写进一个页面。" },
-    { id: "xmatrix", title: "教我怎么给你派活", detail: "读 xmatrix.sh/start.md，整理成一个页面。",
-      message: "读 https://xmatrix.sh/start.md，写一个页面，讲我该怎么通过 xMatrix 给你派活。" },
   ],
   installedTitle: "你已安装的 Agent",
   installedBody: "开启后就能召唤它们。发第一个任务时再选工作目录。",

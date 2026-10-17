@@ -8303,6 +8303,18 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app :is(.app-tool-detail, 
   background: var(--app-ask-tint);
 }
 
+/* A choice xMatrix offers in a message (the welcome's first tasks, bringing
+   work in) is a piece of the same tinted paper as an ask, a little deeper
+   under the pointer: no rule, no rim, no shadow. */
+.xmatrix-app .app-paper-tile {
+  border-radius: 10px;
+  background: color-mix(in oklch, var(--foreground) 4%, var(--app-panel-paper, oklch(0.976 0.005 85)));
+}
+
+.xmatrix-app button.app-paper-tile:hover:not(:disabled) {
+  background: color-mix(in oklch, var(--foreground) 7%, var(--app-panel-paper, oklch(0.976 0.005 85)));
+}
+
 .xmatrix-app .app-ask-card[data-ask-card="open"],
 .xmatrix-app .app-channel-approvals {
   --app-ask-ink: var(--m-ink-attention, var(--accent));

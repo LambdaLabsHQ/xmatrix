@@ -40,6 +40,7 @@ import { PageReaderChangeMark } from "./page-reader-changes-bar";
 import type { SuggestionsReport } from "./page-suggestions";
 import { usePageSuggestions } from "./use-page-suggestions";
 import { PageWriteWith } from "./page-write-with";
+import { takeCoWriteRequest } from "@/lib/pages/co-write-request";
 import { usePageWriters } from "./page-writers";
 import { marginConversations, sectionConversationCounts, withOpenConversation, type LiveConversation } from "./page-margin-model";
 import { formatRelativeAge, mobileChatTimeLabel } from "@/components/dashboard/time-display";
@@ -997,6 +998,16 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     return () => onConversationDockChange?.(false);
   }, [spaceId, page, docked, onConversationDockChange]);
 
+  // A page made to be co-written at once calls its Agent as it opens (co-write-request.ts).
+  const coWriteRef = useRef<((harness: string, blockId: string | null) => Promise<void>) | null>(null);
+  useEffect(() => {
+    if (!page || !canEdit || !coWriteRef.current) return;
+    const harness = takeCoWriteRequest(page.pageId);
+    if (harness) void coWriteRef.current(harness, null);
+    // Once per page opened, not on every change to it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page?.pageId, canEdit]);
+
   if (!spaceId) return <div className="p-6 text-sm text-muted-foreground">Choose a Space to see its pages.</div>;
   if (canMigrate && tree.data && (!page || reviewing === spaceId)) {
     return (
@@ -1079,6 +1090,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
       setNotice(userErrorMessage(cause, "Couldn't start the Agent"));
     }
   };
+  coWriteRef.current = coWrite;
   const claim = (blockId: string) => (claimable(blockId) ? void claimBlock(blockId)
     : setNotice("Someone is already on this section."));
   // What selecting text offers, for the section the selection is in.

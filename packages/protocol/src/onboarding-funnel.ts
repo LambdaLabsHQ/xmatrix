@@ -20,7 +20,7 @@ export const ONBOARDING_DEVICES = ["phone", "desktop_web", "desktop_app"] as con
 export type OnboardingDevice = typeof ONBOARDING_DEVICES[number];
 
 /** The welcome conversation's first tasks, by id. */
-export const ONBOARDING_STARTERS = ["project", "plan", "xmatrix"] as const;
+export const ONBOARDING_STARTERS = ["cowrite", "project", "plan", "xmatrix"] as const;
 export type OnboardingStarter = typeof ONBOARDING_STARTERS[number];
 
 export type OnboardingFunnelEvent = { step: OnboardingFunnelStep; surface: OnboardingSurface; device: OnboardingDevice;

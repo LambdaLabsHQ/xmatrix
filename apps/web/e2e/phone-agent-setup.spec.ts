@@ -8,28 +8,20 @@ test.use(E2E_MOBILE_CONTEXT);
 const INTENT = "0123456789abcdef0123456789abcdef";
 const intent = { intentId: INTENT, spaceId: E2E_SPACE.id, expiresAt: "2099-01-01T00:00:00.000Z", registeredHarnesses: [] };
 
-test("a phone with no agent shows how to bring one in on a computer and approves its terminal", async ({ page }) => {
+test("a phone with no agent sends the person to their computer with the same email", async ({ page }) => {
   await installWorkspaceStubs(page, { spaces: [E2E_SPACE] });
   await fixtureRule(page, { id: "intent-create", pattern: "**/api/xmatrix/setup-intents", method: "POST",
     responder: { kind: "static", json: { ...intent, phase: "waiting" } } });
-  await fixtureRule(page, { id: "intent-read", pattern: `**/api/xmatrix/setup-intents/${INTENT}`,
-    responder: { kind: "static", json: { ...intent, phase: "waiting" } } });
-  await fixtureRule(page, { id: "intent-approve", pattern: `**/api/xmatrix/setup-intents/${INTENT}/approve`, method: "POST",
-    responder: { kind: "static", json: { ok: true } } });
   await page.goto("/app", { waitUntil: "domcontentloaded" });
   const connect = page.getByTestId("connect-machine");
   await expect(connect).toBeVisible({ timeout: 20_000 });
   await expect(connect).toContainText("Bring your agents into xMatrix.");
   await expect(connect).toContainText("Works with Claude Code, Codex, Cursor and");
-  await expect(connect).toContainText(`bash -s -- --connect ${INTENT}`);
+  // A command is no use on a phone: the computer signs in and shows its own.
+  await expect(connect).toContainText("On your computer, open xmatrix.sh and sign in with this same email");
+  await expect(connect).not.toContainText(`--connect`);
   await expect(page.getByText("Tap + to start one.", { exact: true })).toHaveCount(0);
-
-  // The command runs on the computer; the phone in hand approves it.
-  await fixtureRule(page, { id: "intent-read", pattern: `**/api/xmatrix/setup-intents/${INTENT}`, responder: { kind: "static",
-    json: { ...intent, phase: "approval", terminal: { userCode: "WDJB-MJHT", hostname: "daniel-laptop", platform: "macos-aarch64" } } } });
-  await expect(connect).toContainText("daniel-laptop wants to connect with code", { timeout: 20_000 });
-  await connect.getByRole("button", { name: "Approve", exact: true }).click();
-  await expect.poll(async () => (await fixtureRequests(page, "intent-approve")).length).toBe(1);
+  expect(await fixtureRequests(page, "intent-create")).toHaveLength(0);
 });
 
 test("a phone keeps its conversations listed even while the Space has no agent", async ({ page }) => {

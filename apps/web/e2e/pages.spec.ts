@@ -490,6 +490,19 @@ test.describe("on a phone", () => {
     expect(await browser.evaluate(() => window.localStorage.getItem("xmatrix.page-writer.space-personal"))).toBe("codex");
   });
 
+  test("a page made to be co-written calls its Agent as it opens, with no tap", async ({ page: browser }) => {
+    const writing = await stubCoWriting(browser, "");
+    await stubWriters(browser, ["claude", "codex"]);
+    // What the welcome's "Write a page with an agent" leaves for the page it made.
+    await browser.addInitScript(() => window.sessionStorage.setItem("xmatrix:co-write:p-relay", "codex"));
+    await expect(await openRelayOnPhone(browser, pageDocument(BODY))).toContainText("In progress");
+    await expect.poll(async () => (await fixtureRequestBodies(browser, "write-message"))[0]?.body).toMatch(
+      /^@codex launch:force You're co-writing page:p-relay with me live\./u);
+    expect(await fixtureRequestBodies(browser, "co-writing")).toEqual([{ conversationId: writing.id, live: true }]);
+    // Asked once: opening the page again does not call it again.
+    expect(await browser.evaluate(() => window.sessionStorage.getItem("xmatrix:co-write:p-relay"))).toBeNull();
+  });
+
   test("a heading's actions are named in one menu, and Co-write starts on that section", async ({ page: browser }) => {
     await stubCoWriting(browser, "status");
     await stubWriters(browser, ["claude"]);

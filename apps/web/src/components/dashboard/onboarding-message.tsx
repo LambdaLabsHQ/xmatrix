@@ -1,15 +1,22 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { ChevronRight } from "lucide-react";
+import { useMutation } from "@tanstack/react-query";
 import {
   channelPresenceInstances, isChannelResidentInstance, isLiveAgentStatus, WEB_PROXY_ROUTES,
   type ChannelPresence, type OnboardingStage, type SerializedAgentLaunch,
 } from "@xmatrix/protocol";
 import { recordOnboardingStep } from "@/lib/onboarding-funnel";
 import { useOnboardingCopy, useOnboardingLocale } from "@/lib/onboarding-locale";
+import { keepCoWriteRequest } from "@/lib/pages/co-write-request";
+import { pageApi } from "@/lib/pages/page-client";
 import { xmatrixApiRequest } from "@/lib/query/api-client";
+import { userErrorMessage } from "@/lib/user-facing-error";
 import { BringAgentsIn } from "./bring-agents-in";
+import { BringWorkIn } from "./bring-work-in";
+import { usePageReferenceScope } from "./page-reference-chip";
+import { signedOutRegistrations } from "./harness-sign-in";
+import { SignedOutAgents } from "./signed-out-agents";
 import { useInstalledHarnesses } from "./use-installed-harnesses";
 
 /* What xMatrix says to a new person in their welcome conversation. A message
@@ -69,11 +76,15 @@ export function OnboardingMessage({ stage, spaceId, token, userId, starting, onS
     : <AgentsInMessage spaceId={spaceId} token={token} userId={userId} starting={starting} onSendStarter={onSendStarter} />;
 }
 
-/* Once an agent is in, xMatrix says so in the next message. The Hub checks
-   the fact and writes that message once, so asking again only replays it. */
+/* Once an agent is in and can answer, xMatrix says so in the next message.
+   One whose program is signed out answers nothing, so it does not count. The
+   Hub checks the fact and writes that message once, so asking again only
+   replays it. */
 function BringAgentsMessage({ spaceId, token, userId }: { spaceId: string | null; token: string | null; userId: string }) {
   const fleet = useInstalledHarnesses(spaceId, token, userId);
-  const agentsIn = (fleet.catalog.data?.registrations ?? []).some((registration) => registration.state === "enabled");
+  const enabled = (fleet.catalog.data?.registrations ?? []).filter((registration) => registration.state === "enabled");
+  const signedOut = signedOutRegistrations(enabled, userId, fleet.daemons.data);
+  const agentsIn = fleet.daemons.isSuccess && enabled.length > signedOut.length;
   const locale = useOnboardingLocale(spaceId, token, userId);
   const asked = useRef(false);
   useEffect(() => {
@@ -89,32 +100,59 @@ function AgentsInMessage({ spaceId, token, userId, starting, onSendStarter }: {
   spaceId: string | null; token: string | null; userId: string; starting?: { name?: string };
   onSendStarter: (message: string) => void;
 }) {
+  const pages = usePageReferenceScope();
   const fleet = useInstalledHarnesses(spaceId, token, userId);
   const copy = useOnboardingCopy(spaceId, token, userId);
-  const handles = [...new Set((fleet.catalog.data?.registrations ?? [])
-    .filter((registration) => registration.state === "enabled")
+  const enabled = (fleet.catalog.data?.registrations ?? []).filter((registration) => registration.state === "enabled");
+  const signedOut = signedOutRegistrations(enabled, userId, fleet.daemons.data);
+  const handles = [...new Set(enabled.filter((registration) => !signedOut.includes(registration))
     .map((registration) => `@${registration.displayName}`))];
-  if (handles.length === 0) return null;
+  const writer = enabled.find((registration) => !signedOut.includes(registration))?.key.harness;
+  const coWrite = useMutation({
+    mutationFn: async (harness: string) => {
+      const { page } = await pageApi.create(spaceId!, token!, { title: copy.coWrite.pageTitle });
+      return { pageId: page.pageId, harness };
+    },
+    onSuccess: ({ pageId, harness }) => {
+      keepCoWriteRequest(pageId, harness);
+      pages?.onOpenPage(pageId);
+    },
+  });
+  if (handles.length === 0 && signedOut.length === 0) return null;
   return (
-    <div className="max-w-[34rem] text-[15px] leading-6" data-onboarding-stage="agents-in">
-      <p>{copy.agentsIn(copy.listNames(handles), handles.length === 1)}</p>
-      <ul className="m-0 mt-3 list-none border-t-[1px] border-border p-0">
+    <div className="app-paper-card max-w-[34rem] text-[15px] leading-6" data-onboarding-stage="agents-in">
+      <SignedOutAgents registrations={signedOut} token={token} userId={userId} copy={copy} />
+      {handles.length > 0 && <>
+      <p className={signedOut.length > 0 ? "mt-3" : undefined}>{copy.agentsIn(copy.listNames(handles), handles.length === 1)}</p>
+      <ul className="m-0 mt-3 grid list-none gap-2 p-0 sm:grid-cols-3">
+        {writer && spaceId && token && pages && (
+          <li className="m-0 p-0">
+            <button type="button" disabled={Boolean(starting) || coWrite.isPending} onClick={() => {
+              recordOnboardingStep(token, { step: "starter_chosen", surface: "welcome", starter: "cowrite" });
+              coWrite.mutate(writer);
+            }} className="app-paper-tile flex h-full w-full flex-col items-start gap-1 px-3.5 py-3 text-left disabled:opacity-50">
+              <span className="block font-semibold">{copy.coWrite.title}</span>
+              <span className="block text-[13px] leading-5 text-muted-foreground">{copy.coWrite.detail(writer)}</span>
+            </button>
+          </li>
+        )}
         {copy.starters.map((starter) => (
-          <li key={starter.id} className="m-0 border-b-[1px] border-border p-0">
+          <li key={starter.id} className="m-0 p-0">
             <button type="button" disabled={Boolean(starting)} onClick={() => {
               recordOnboardingStep(token, { step: "starter_chosen", surface: "welcome", starter: starter.id });
               onSendStarter(starter.message);
             }}
-              className="group/starter flex w-full items-center gap-3 py-3 text-left disabled:opacity-50">
-              <span className="min-w-0 flex-1">
-                <span className="block font-semibold">{starter.title}</span>
-                <span className="block text-[13px] leading-5 text-muted-foreground">{starter.detail}</span>
-              </span>
-              <ChevronRight aria-hidden="true" className="size-4 shrink-0 text-muted-foreground group-hover/starter:text-foreground" />
+              className="app-paper-tile flex h-full w-full flex-col items-start gap-1 px-3.5 py-3 text-left disabled:opacity-50">
+              <span className="block font-semibold">{starter.title}</span>
+              <span className="block text-[13px] leading-5 text-muted-foreground">{starter.detail}</span>
             </button>
           </li>
         ))}
       </ul>
+      {coWrite.error && <p role="alert" className="mt-2 text-[13px] leading-5 text-destructive">
+        {userErrorMessage(coWrite.error, "Couldn't create the page")}</p>}
+      {spaceId && token && <BringWorkIn spaceId={spaceId} token={token} copy={copy} />}
+      </>}
       {starting && <p className="mt-2 text-[13px] leading-5 text-muted-foreground" role="status">{copy.starting(starting.name)}</p>}
     </div>
   );
