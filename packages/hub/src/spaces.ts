@@ -21,6 +21,7 @@ import { wakeAgentLaunchCoordinator } from "./agent-launch-coordinator-wake";
 import { wakeRegistrationChannels } from "./registration-authority-wake";
 import { projectRegistrationQuota } from "./registration-quota-presentation";
 import { relayChannelCatalogPublishCommittedChanges } from "./relay-channel-catalog-notification-delivery";
+import type { RuntimeLiveDeliverySelf } from "./runtime-transport/runtime-route-directory-delivery";
 import { notifyWorkspaceResource } from "./workspace-resource-notification";
 import type { Env } from "./types";
 
@@ -33,8 +34,9 @@ export interface SpacesEnv extends PostgresAuthorityFleetEnv {
   RELAY_POSTGRES_AGENT_LAUNCH_CHANNEL?: DurableObjectNamespace;
 }
 
-/** Test seams: a database, and the after-commit catalog notice and Channel wake. */
+/** Authority dependencies and the publishing Runtime's local delivery capability. */
 export interface SpacesDependencies {
+  runtimeSelf?: RuntimeLiveDeliverySelf;
   database?: AuthorityDatabase;
   directoryDatabase?: AuthorityDatabase;
   publishCatalogChanges?: (changes: readonly ChannelCatalogChangeAudience[]) => Promise<void>;
@@ -71,7 +73,7 @@ async function publishCatalogChanges(env: SpacesEnv, dependencies: SpacesDepende
     const changes = await repository.channelCatalogChangeAudiences({ requestId, spaceIds });
     if (dependencies.publishCatalogChanges) await dependencies.publishCatalogChanges(changes);
     else await relayChannelCatalogPublishCommittedChanges({ env: env as Pick<Env, "RELAY_RUNTIME" |
-      "RELAY_RUNTIME_ROUTE_DIRECTORY" | "XMATRIX_RUNTIME_CELL_MODE">, changes });
+      "RELAY_RUNTIME_ROUTE_DIRECTORY" | "XMATRIX_RUNTIME_CELL_MODE">, changes, self: dependencies.runtimeSelf });
   } catch (error) {
     console.error("PostgreSQL Channel catalog notification failed", error);
   }

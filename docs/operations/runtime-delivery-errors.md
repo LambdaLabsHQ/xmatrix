@@ -22,6 +22,15 @@ deployed head sampling rate is one; an empty query is not proof of no failure.
 Keep unresolved incidents open until the originating failure is understood and
 any fix is verified in production.
 
+Machine text-task answers that update a conversation's About carry the current
+Runtime's local delivery capability through the catalog mutation and its
+after-commit notification. Deliver the catalog change directly to that cell;
+other occupied cells keep their routed delivery. An RPC back into the Runtime
+handling the daemon's completion waits behind that same socket event: the
+About is already committed, but the completion ACK stalls until the ordered
+queue's 30-second escape. Do not increase that budget or detach the notification
+to conceal the missing local delivery path.
+
 Machine Daemon application heartbeats are answered from the current authenticated
 socket session without joining the ordered Authority-operation queue. Connect
 catch-up and run reports may wait on database I/O longer than the CLI's liveness

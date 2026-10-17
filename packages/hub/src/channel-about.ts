@@ -2,7 +2,7 @@ import { ControlError } from "@xmatrix/db";
 import { utf8ByteLength, type TextTaskResult } from "@xmatrix/protocol";
 import { mangledChannelAboutText } from "./channel-about-text";
 import { channelMessageHistory } from "./channel-messages";
-import { channelSpaceId, configureChannel, getChannel, getSpace } from "./spaces";
+import { channelSpaceId, configureChannel, getChannel, getSpace, type SpacesDependencies } from "./spaces";
 import { issueTextTask, textTaskMachines } from "./text-task-machines";
 import type { Env } from "./types";
 
@@ -181,7 +181,8 @@ export async function startChannelAbout(env: Env, input: { channelId: string; sp
  * the About of the reading it answers; a person's change, or an About that read further, made
  * since that reading stands, and the next reading writes the About again.
  */
-export async function channelAboutAnswered(env: Env, task: { requestId: string; result: TextTaskResult; ownerUserId: string }):
+export async function channelAboutAnswered(env: Env, task: { requestId: string; result: TextTaskResult; ownerUserId: string },
+  dependencies: Pick<SpacesDependencies, "runtimeSelf"> = {}):
   Promise<void> {
   const request = channelAboutRequest(task.requestId);
   if (!request || task.result.status !== "completed" || !task.result.text) return;
@@ -194,7 +195,7 @@ export async function channelAboutAnswered(env: Env, task: { requestId: string; 
       ...(about.name ? { name: about.name, automaticName: true } : {}),
       summaryAuthor: { taskId: task.requestId, agentName: task.result.presetId,
         readRevision: request.readRevision, throughSequence: request.throughSequence },
-    });
+    }, dependencies);
   } catch (error) {
     if (error instanceof ControlError && error.status === 409) return;
     throw error;

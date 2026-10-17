@@ -1,6 +1,6 @@
 import type { ChannelCatalogChangeAudience } from "@xmatrix/db";
 import type { HumanChannelCatalogChangedMessage } from "@xmatrix/protocol/connections/human";
-import { publishRuntimeCommittedEvent } from "./runtime-transport/runtime-route-directory-delivery";
+import { publishRuntimeCommittedEvent, type RuntimeLiveDeliverySelf } from "./runtime-transport/runtime-route-directory-delivery";
 import type { Env } from "./types";
 
 const CHANNEL_CATALOG_COMMITTED_EVENT_CHANNEL = "space-channel-catalog";
@@ -11,6 +11,7 @@ export async function relayChannelCatalogPublishCommittedChanges(input: {
   env: Pick<Env, "RELAY_RUNTIME" | "RELAY_RUNTIME_ROUTE_DIRECTORY" |
     "XMATRIX_RUNTIME_CELL_MODE">;
   changes: readonly ChannelCatalogChangeAudience[];
+  self?: RuntimeLiveDeliverySelf;
 }): Promise<void> {
   for (const change of input.changes) {
     const event: HumanChannelCatalogChangedMessage = {
@@ -31,6 +32,7 @@ export async function relayChannelCatalogPublishCommittedChanges(input: {
           env: input.env,
           waitUntil: () => undefined,
           scopeId: change.spaceId,
+          self: input.self,
           payload: {
             channelId: CHANNEL_CATALOG_COMMITTED_EVENT_CHANNEL,
             changeSeq: change.revision,

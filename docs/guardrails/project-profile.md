@@ -242,6 +242,8 @@ feature. See [repository preparation](../daemon-service-model.md#repository-snap
 A conversation's About is one text task: the Hub hands a fresh harness
 execution that conversation's text alone and writes its answer as an immutable
 metadata revision. See [Channel metadata revisions](../design/channel-metadata-revisions.md).
+Its completion delivers catalog changes directly within the publishing Runtime
+and routes notifications to other cells, without a self-RPC on the daemon frame.
 
 Agent cards show the repository admitted for their Run instead of a managed
 checkout path. The optional Instance `repository` display field comes from
