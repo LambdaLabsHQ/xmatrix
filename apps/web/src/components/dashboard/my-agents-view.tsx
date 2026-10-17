@@ -5,7 +5,6 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   Bot,
-  HardDrive,
   Loader2,
   Plus,
   RotateCcw,
@@ -52,8 +51,8 @@ import {
   registrationSwitch,
   type MyAgentAction,
 } from "./my-agents-registrations";
-import { ConnectMachine, DesktopAppAlternative } from "./space-agent-setup-card";
-import { SupportedAgents } from "./supported-agents";
+import { BringAgentsInPanel } from "./space-agent-setup-card";
+import { SetupCardShell } from "./space-setup-card-chrome";
 import { formatRelativeAge } from "./time-display";
 import { registrationTupleId, useRegistrationCommand } from "./use-registration-command";
 import {
@@ -308,15 +307,9 @@ export function MyAgentsView({
     /* A browser cannot find anything on a machine, so with nothing installed
        anywhere yet this shows where agents come from. */
     detail = (
-      <ToolDetailEmpty icon={<HardDrive />} title="Bring your agents into xMatrix">
-        <p>
-          Your agents run on your own computer, and xMatrix connects them with the people they work
-          with. Bring in whichever of these you use.
-        </p>
-        <SupportedAgents className="justify-center" />
-        <ConnectMachine spaceId={spaceId} token={token} userId={currentUserId} centered />
-        <DesktopAppAlternative centered />
-      </ToolDetailEmpty>
+      <SetupCardShell>
+        <BringAgentsInPanel spaceId={spaceId} token={token} userId={currentUserId} />
+      </SetupCardShell>
     );
   } else if (catalog.data && rows.length === 0) {
     detail = (
