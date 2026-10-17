@@ -2,7 +2,8 @@ import type { BetterAuthPlugin } from "better-auth";
 import { createAuthMiddleware } from "better-auth/api";
 import { twoFactor } from "better-auth/plugins";
 
-import { appOrigin } from "./deployment-origins";
+import { APP_SIGN_IN_FINISH_PATH } from "@xmatrix/protocol";
+import { appOrigin, hubAuthBaseUrl } from "./deployment-origins";
 import type { Env } from "./types";
 
 /**
@@ -29,8 +30,14 @@ const POSTGRES_SCHEMA = {
   },
 };
 
+/**
+ * A first factor that signs in at once. `/sign-in/social` does so only with an
+ * identity token (the iOS app's Sign in with Apple); its redirect form makes
+ * no session, so the check passes it by.
+ */
 function isFirstFactorSignIn(path: string | undefined): boolean {
-  return path === "/sign-in/email" || path === "/sign-in/email-otp" || isSocialCallback(path);
+  return path === "/sign-in/email" || path === "/sign-in/email-otp" || path === "/sign-in/social"
+    || isSocialCallback(path);
 }
 
 function isSocialCallback(path: string | undefined): boolean {
@@ -60,7 +67,13 @@ export function secondFactorPage(env: Env, destination: string | undefined): str
   }
   page.searchParams.set("two_factor", "1");
   if (target?.origin === origin) page.searchParams.set("next", `${target.pathname}${target.search}`);
+  // An app's sign-in finishes on this Hub, which hands the app its code once the second factor is in.
+  if (target && isAppSignInFinish(env, target)) page.searchParams.set("continue", target.toString());
   return page.toString();
+}
+
+function isAppSignInFinish(env: Env, target: URL): boolean {
+  return target.origin === new URL(hubAuthBaseUrl(env)).origin && target.pathname === APP_SIGN_IN_FINISH_PATH;
 }
 
 export function twoFactorPlugins(env: Env, postgres: boolean): BetterAuthPlugin[] {

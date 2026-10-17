@@ -52,6 +52,12 @@ final class TrustedWebBridge {
         bridge.pushDevice(response -> replyProxy.postMessage(BridgeProtocol.reply(id, response)));
         return;
       }
+      if ("authorizeInBrowser".equals(request.method)) {
+        // Answered when the sign-in tab returns to the app, or is closed.
+        String id = request.id;
+        bridge.authorizeInBrowser(request.payload, response -> replyProxy.postMessage(BridgeProtocol.reply(id, response)));
+        return;
+      }
       String response = bridge.invoke(request.method, request.payload.toString());
       replyProxy.postMessage(BridgeProtocol.reply(request.id, response));
     } catch (Exception error) {

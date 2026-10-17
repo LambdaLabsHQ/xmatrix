@@ -127,6 +127,19 @@ export type DesktopBridge = {
    */
   serviceSignIn?: (service: string, options?: { fresh?: boolean }) =>
     Promise<{ status: "signed-in"; session: string } | { status: "cancelled" }>;
+  /**
+   * Open a Hub sign-in page in the system's sign-in sheet (iOS), a browser tab
+   * over the app (Android) or the default browser (desktop), and answer the
+   * URL the page finally returns to. The shell adds its own return address as
+   * `redirectParam`. Rejects with an AbortError when the person closes it.
+   * `ephemeral` keeps no browser sign-in around (iOS), to use another account.
+   * Absent on shells older than signing in in place.
+   */
+  authorizeInBrowser?: (request: { url: string; redirectParam: string; ephemeral?: boolean }) => Promise<string>;
+  /** Sign in with Apple, natively (iOS): the identity token for `nonce`, and the name Apple shares the first time. */
+  signInWithApple?: (request: { nonce: string }) => Promise<{
+    identityToken: string; givenName?: string; familyName?: string;
+  }>;
   checkForUpdates: () => Promise<DesktopUpdateStatus | void>;
   getUpdateStatus?: () => Promise<DesktopUpdateStatus>;
   installUpdate?: () => Promise<DesktopUpdateStatus>;

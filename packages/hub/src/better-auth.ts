@@ -29,6 +29,9 @@ import { TWO_FACTOR_REQUIRED, twoFactorPlugins } from "./two-factor";
 import { appOrigin, hubAuthBaseUrl } from "./deployment-origins";
 import type { Env } from "./types";
 
+/** The iOS app's bundle id, the audience of the identity tokens its Sign in with Apple returns. */
+const APPLE_APP_BUNDLE_ID = "sh.xmatrix.app";
+
 type BetterAuthUser = {
   id: string;
   email: string;
@@ -218,6 +221,15 @@ function createAuthWithDatabase(
       prompt: "select_account",
     };
   }
+
+  // The iOS app's Sign in with Apple hands its identity token straight to
+  // `/sign-in/social`; Apple signs it for the app's bundle id. There is no
+  // web redirect flow for Apple, so no client secret is configured.
+  socialProviders.apple = {
+    clientId: APPLE_APP_BUNDLE_ID,
+    clientSecret: "",
+    appBundleIdentifier: APPLE_APP_BUNDLE_ID,
+  };
 
   const jwtPlugin = postgresJwtPlugin(env, postgres);
   return betterAuth({
@@ -589,6 +601,32 @@ async function createPostgresSessionForUser(env: Env, user: AuthUser): Promise<A
   });
 
   return completeSessionExchange(env, sessionToken, sessionUser);
+}
+
+/**
+ * Starts a Google or GitHub sign-in whose provider answer comes back to
+ * `callbackURL` on this Hub. The browser that follows `url` must also keep
+ * `cookies`: they bind the provider's answer to that browser.
+ */
+export async function startBetterAuthSocialRedirect(env: Env, provider: "google" | "github",
+  callbackURL: string, errorCallbackURL: string): Promise<{ url: string; cookies: string[] }> {
+  const response = await callBetterAuth(env, "/sign-in/social", {
+    method: "POST",
+    body: JSON.stringify({ provider, callbackURL, errorCallbackURL, disableRedirect: true }),
+  });
+  const payload = (await response.json().catch(() => ({}))) as { url?: unknown };
+  if (typeof payload.url !== "string" || !payload.url) {
+    throw new BetterAuthRequestError(503, "Authentication service returned no provider address.");
+  }
+  return { url: payload.url, cookies: response.headers.getSetCookie() };
+}
+
+/** The person a browser request's own session cookie signs in, or null without one. */
+export async function betterAuthUserFromCookies(env: Env, cookieHeader: string | null): Promise<AuthUser | null> {
+  if (!cookieHeader) return null;
+  const response = await callBetterAuth(env, "/get-session", { headers: { cookie: cookieHeader } });
+  const payload = (await response.json().catch(() => null)) as BetterAuthGetSessionResponse | null;
+  return payload?.user?.id && payload.user.email ? authUserFromBetterAuthUser(payload.user) : null;
 }
 
 /**

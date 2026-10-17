@@ -77,6 +77,11 @@ function signInStep(data: unknown): SignInStep {
   return (data as { twoFactorRedirect?: unknown } | null)?.twoFactorRedirect === true ? "two_factor" : "signed_in";
 }
 
+/** The Hub origin that serves sign-in. */
+export function authBaseUrl(): string {
+  return getAuthBaseUrl();
+}
+
 function getAuthBaseUrl(): string {
   return (
     trimEnd(process.env.NEXT_PUBLIC_AUTH_BASE_URL?.trim() ?? "", "/") ||
@@ -276,6 +281,23 @@ export async function signInWithBetterAuthSocial(
   if (response.error) {
     throw new AuthClientError(response.error.message || "Sign-in failed", response.error.code, response.error.status);
   }
+}
+
+/**
+ * Signs in with the identity token the iOS app's Sign in with Apple returned.
+ * Apple shares the person's name only the first time, so it travels along.
+ */
+export async function signInWithAppleIdToken(input: {
+  identityToken: string; nonce: string; givenName?: string; familyName?: string;
+}): Promise<SignInStep> {
+  const name = input.givenName || input.familyName
+    ? { name: { firstName: input.givenName ?? "", lastName: input.familyName ?? "" } } : {};
+  const response = await authClient.signIn.social({
+    provider: "apple",
+    idToken: { token: input.identityToken, nonce: input.nonce, ...(Object.keys(name).length ? { user: name } : {}) },
+  }).catch(() => { throw new TransientAuthSessionError(); });
+  if (response.error) throwAuthClientError(response.error, "Couldn't sign in with Apple");
+  return signInStep(response.data);
 }
 
 export async function verifyBetterAuthPassword(email: string, password: string): Promise<SignInStep> {
