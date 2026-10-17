@@ -25,8 +25,8 @@ async function openWithIntent(page: import("@playwright/test").Page, state: Reco
 test("the Space's empty screen shows a setup command that carries only its id", async ({ page }) => {
   const connect = await openWithIntent(page, { ...base, phase: "waiting" });
   await expect(connect).toContainText(`bash -s -- --connect ${INTENT}`);
-  await expect(connect).toContainText("Waiting for the command…");
-  await connect.getByRole("button", { name: "On Windows?" }).click();
+  await expect(connect).toContainText("Waiting for your computer…");
+  await connect.getByRole("button", { name: "Windows?" }).click();
   await expect(connect).toContainText(`$env:XMATRIX_CONNECT='${INTENT}'`);
 });
 
@@ -46,7 +46,7 @@ test("a connected machine hands its agents to the installed-harness switches", a
     machine: { machineId: "machine-1", name: "daniel-laptop", online: true,
       harnesses: [{ id: "claude", installed: true }, { id: "codex", installed: true }, { id: "gemini", installed: false }] },
   });
-  await expect(connect).toContainText("daniel-laptop is connected. Found Claude Code and Codex.");
+  await expect(connect).toContainText("Found Claude Code and Codex.");
   // The switches read the same machine report, so the page reads it again now.
   await expect.poll(async () => (await fixtureRequests(page, "machine-daemons")).length).toBeGreaterThanOrEqual(2);
 });
@@ -69,7 +69,7 @@ test("a failed command preparation can be retried without reloading the Space", 
     responder: { kind: "static", json: { ...base, phase: "waiting" } } });
   await connect.getByRole("button", { name: "Try again", exact: true }).click();
   await expect(connect).toContainText(`bash -s -- --connect ${INTENT}`);
-  await expect(connect).toContainText("Waiting for the command…");
+  await expect(connect).toContainText("Waiting for your computer…");
   await expect(connect.getByRole("alert")).toHaveCount(0);
 });
 
@@ -98,7 +98,7 @@ test("a connected machine with no agent offers the installer of whichever agent 
     ...base, phase: "connected", terminal: { ...terminal, platform: "windows-x86_64" },
     machine: { machineId: "machine-1", name: "daniel-laptop", online: true, harnesses: [{ id: "claude", installed: false }] },
   });
-  await expect(connect).toContainText("daniel-laptop is connected, but no agent is installed there yet.");
+  await expect(connect).toContainText("daniel-laptop has no agent yet. Install one there and it shows up here:");
   const picker = connect.getByTestId("agent-install-picker");
   // The terminal said it is Windows, so it is shown Windows installers.
   await expect(picker).toContainText("irm 'https://claude.ai/install.ps1' | iex");

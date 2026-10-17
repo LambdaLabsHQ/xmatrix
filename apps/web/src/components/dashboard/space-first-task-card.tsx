@@ -3,46 +3,27 @@
 import { AnimatedIcon } from "@/components/ui/animated-icon";
 import { actionClass } from "@/components/ui/action-tone";
 import { useState } from "react";
-import { ArrowUp, FolderPlus, Loader2 } from "lucide-react";
-import { cn } from "@/lib/utils";
-import { SetupCardShell } from "./space-setup-card-chrome";
+import { ArrowUp, Check, FolderPlus, Loader2, Sparkles } from "lucide-react";
+import { suggestedSpaceFolderName } from "./space-first-task";
+import { SetupCardHeader, SetupCardShell } from "./space-setup-card-chrome";
 import type { ChosenWorkspace } from "./space-first-task-choose-workspace";
 import type { SpaceFirstTaskState } from "./space-first-task";
 
-/* The step after an agent is in, on every device. It says the third sentence
-   xMatrix teaches where it is about to become true: the first task ends in a
-   Page, because seeing a conclusion written into a page is the moment the
-   product makes sense. Each starter asks for one; the person may write their
-   own instead. The conversation is a side effect of the message, not a
-   prerequisite to understand first. */
+/* The step after an agent is bound: give it somewhere to work, then send it
+   something. The channel is a side effect of the message, not a prerequisite the
+   human has to understand first — the one line about what a channel is sits
+   here, where it is about to become true, and is confirmed a moment later by
+   watching the agent answer in it. */
 
-type Starter = { id: string; label: string; message: (inFolder: boolean) => string };
-
-export const FIRST_TASK_STARTERS: Starter[] = [
-  {
-    id: "project",
-    label: "My project",
-    message: (inFolder) => inFolder
-      ? "Read the project in this folder and write its page: what it is, where it stands and what is still open."
-      : "Write a page about a project I'm working on: what it is, where it stands and what is still open. Ask me which project first.",
-  },
-  {
-    id: "plan",
-    label: "A plan",
-    message: () => "Help me plan something I'm working on, and keep the plan in a page as we go.",
-  },
-  {
-    /* It names the canonical runbook on purpose: an agent asked to explain
-       xMatrix from memory invents an answer. */
-    id: "xmatrix",
-    label: "Learn xMatrix",
-    message: () => "Read https://xmatrix.sh/start.md and write a page on how I should hand you work through xMatrix.",
-  },
-];
+/* A fresh folder has no project to read, so the example message produces something
+   instead: a file the human can open. It names the canonical runbook on
+   purpose — an agent asked to explain xMatrix from memory invents an answer. */
+const DEFAULT_FIRST_MESSAGE =
+  "Read https://xmatrix.sh/start.md and write a notes.md in this folder with three sentences on how I should hand you work through xMatrix.";
 
 export function SpaceFirstTaskCard({
   state,
-  folderPicker,
+  spaceName,
   workspace,
   busy,
   error,
@@ -50,77 +31,90 @@ export function SpaceFirstTaskCard({
   onLaunch,
 }: {
   state: SpaceFirstTaskState;
-  /** The desktop app can point the agent at a folder; elsewhere it works in its own. */
-  folderPicker: boolean;
+  spaceName: string | undefined;
   /* Chosen in this session. Deliberately not persisted: a Space does not own a
-     directory until the association layer exists. */
+     directory until the association layer exists, and the card says so rather
+     than implying a binding it cannot keep. */
   workspace: ChosenWorkspace | null;
   busy: boolean;
   error: string | null;
   onChooseWorkspace: () => void;
   onLaunch: (message: string) => void;
 }) {
-  const [starterId, setStarterId] = useState<string | null>(FIRST_TASK_STARTERS[0]!.id);
-  const [draft, setDraft] = useState<string | null>(null);
-  const starter = FIRST_TASK_STARTERS.find((candidate) => candidate.id === starterId);
-  // A starter's words follow the folder until the person writes their own.
-  const message = draft ?? starter?.message(Boolean(workspace)) ?? "";
+  const [message, setMessage] = useState(DEFAULT_FIRST_MESSAGE);
 
   if (state.kind === "hidden") return null;
 
   return (
     <SetupCardShell>
-      <div data-testid="first-task">
-        <h2 className="text-lg font-black leading-tight">Just talk. Agents keep the facts in Pages</h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Ask for something. Your agent answers in a new conversation and writes what matters into a page.
+      <SetupCardHeader
+        icon={Sparkles}
+        title="Send the first message"
+        body="It answers in a new conversation — the room you and an agent share, where whoever you @ gets to work."
+      />
+
+      <div className="mt-4 rounded-md border border-border bg-background p-4">
+        <p className="text-sm font-bold">
+          {workspace ? "Working folder" : "First, pick a folder for the Agent"}
         </p>
-
-        <div role="radiogroup" aria-label="Start from" className="mt-5 flex flex-wrap gap-2">
-          {FIRST_TASK_STARTERS.map((candidate) => (
-            <button key={candidate.id} type="button" role="radio" aria-checked={candidate.id === starterId}
-              onClick={() => { setStarterId(candidate.id); setDraft(null); }}
-              className={cn("h-7 rounded-[999px] border-[1px] px-3 text-xs font-semibold",
-                candidate.id === starterId
-                  ? "border-foreground bg-muted text-foreground"
-                  : "border-border text-muted-foreground hover:text-foreground")}>
-              {candidate.label}
-            </button>
-          ))}
-        </div>
-
-        <textarea
-          aria-label="First message"
-          value={message}
-          onChange={(event) => { setDraft(event.target.value); setStarterId(null); }}
-          rows={4}
-          placeholder="Ask your agent for something"
-          className="mt-3 w-full resize-y rounded-[10px] border-[1px] border-border bg-background p-3 text-sm outline-none focus:border-foreground"
-        />
-
-        <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
-          {folderPicker ? (
-            <button type="button" disabled={busy} onClick={onChooseWorkspace}
-              className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground">
-              <FolderPlus className="size-4 shrink-0" />
-              <span className="min-w-0 truncate">
-                {workspace ? <span className="font-mono">{workspace.canonicalCwd}</span> : "Work in a folder of yours (optional)"}
-              </span>
-            </button>
-          ) : <span />}
-          <button type="button" disabled={busy || !message.trim()} onClick={() => onLaunch(message)}
-            className={actionClass({ variant: "primary", size: "md" }, "shrink-0")}>
-            {busy ? <AnimatedIcon icon={Loader2} className="size-4 animate-spin" /> : <ArrowUp className="size-4" strokeWidth={2.5} />}
-            Start
-          </button>
-        </div>
-
-        <p className="mt-4 text-xs text-muted-foreground">
-          The first reply takes about a minute while the agent starts. The conversation names itself from what you asked.
+        {workspace ? (
+          <p className="mt-1 min-w-0 font-mono text-xs text-muted-foreground [overflow-wrap:anywhere]">
+            {workspace.canonicalCwd}
+          </p>
+        ) : (
+          <p className="mt-1 text-sm text-muted-foreground">
+            The agent runs inside a folder you choose. A new, empty one is a good start — the picker
+            can create{" "}
+            <code className="rounded bg-muted px-1 py-0.5 font-mono">
+              ~/xmatrix/{suggestedSpaceFolderName(spaceName)}
+            </code>
+            .
+          </p>
+        )}
+        <button
+          type="button"
+          disabled={busy}
+          onClick={onChooseWorkspace}
+          className={actionClass({ variant: "secondary", size: "md" }, "mt-3")}
+        >
+          {busy ? <AnimatedIcon icon={Loader2} className="size-4 animate-spin" /> : <FolderPlus className="size-4" />}
+          {workspace ? "Choose a different folder" : "Choose or create a folder"}
+        </button>
+        <p className="mt-3 text-xs text-muted-foreground">
+          This choice applies to this Agent launch. It does not bind the folder to this space.
         </p>
-
-        {error && <p role="alert" className="mt-3 text-sm text-destructive">{error}</p>}
       </div>
+
+      <textarea
+        value={message}
+        onChange={(event) => setMessage(event.target.value)}
+        rows={3}
+        placeholder="Write a message"
+        className="mt-4 w-full resize-y rounded-md border border-border bg-background p-3 text-sm outline-none focus:ring-2 focus:ring-ring"
+      />
+
+      <div className="mt-4 flex justify-end">
+        <button
+          type="button"
+          disabled={busy || !workspace}
+          onClick={() => onLaunch(message)}
+          className={actionClass({ variant: "primary", size: "md" }, "shrink-0")}
+        >
+          {busy ? <AnimatedIcon icon={Loader2} className="size-4 animate-spin" /> : workspace ? <ArrowUp className="size-4" strokeWidth={2.5} /> : <Check className="size-4" />}
+          Start
+        </button>
+      </div>
+
+      <p className="mt-3 text-xs text-muted-foreground">
+        This starts a conversation with your message, addressed @auto. It names itself from what you asked; you can
+        rename it from its header at any time.
+      </p>
+
+      {error && (
+        <p className="mt-4 rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
+          {error}
+        </p>
+      )}
     </SetupCardShell>
   );
 }

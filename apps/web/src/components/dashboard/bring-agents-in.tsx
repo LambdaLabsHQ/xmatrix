@@ -50,11 +50,11 @@ export function BringAgentsIn({ spaceId, token, userId, phone = false }: {
   const machines = listNames([...new Set([...enabled, ...fleet.candidates].map((item) => item.machineName))]);
 
   return (
-    <div className="max-w-[34rem] text-[15px] leading-6" data-testid="bring-agents-in">
+    <div className="max-w-[34rem] text-[15px] leading-6" data-testid="connect-machine">
       <p>Bring your agents into xMatrix. They keep running on your own computer, and xMatrix connects them to your conversations and pages.</p>
       <AgentsLine className="mt-2" />
 
-      <ol className="m-0 mt-4 list-none border-t-[1px] border-border p-0" data-testid="connect-machine">
+      <ol className="m-0 mt-4 list-none border-t-[1px] border-border p-0">
         <SetupRow n={1} state={state(1)} title="Run this on your computer"
           aside={stage === 1 ? (
             <button type="button" onClick={() => setPlatform(platform === "windows" ? "unix" : "windows")}
@@ -91,7 +91,7 @@ export function BringAgentsIn({ spaceId, token, userId, phone = false }: {
 
         <SetupRow n={3} state={state(3)} title="Turn on the agents it finds"
           aside={stage === 4 ? listNames(enabled.map((registration) => registration.displayName))
-            : stage === 3 && !found && step?.kind !== "none-installed" ? <span className="flex items-center gap-1.5">{spinner} Looking…</span> : null}>
+            : stage === 3 && step?.kind === "looking" ? <span className="flex items-center gap-1.5">{spinner} Looking…</span> : null}>
           {stage === 3 && found && (
             <div role="status">
               <p>Found {listNames(fleet.candidates.map((candidate) => candidate.preset.displayName))}.</p>
@@ -101,6 +101,9 @@ export function BringAgentsIn({ spaceId, token, userId, phone = false }: {
                 Bring them in
               </button>
             </div>
+          )}
+          {stage === 3 && !found && step?.kind === "found" && (
+            <p role="status">Found {listNames(step.harnesses.map((harness) => harness.name))}.</p>
           )}
           {stage === 3 && !found && step?.kind === "none-installed" && (
             <div role="status">

@@ -6,6 +6,7 @@ const {
   composeFirstTaskMessage,
   isXmatrixManagedWorkspacePath,
   spaceFirstTaskState,
+  suggestedSpaceFolderName,
 } = require("./space-first-task.ts");
 
 function agent(overrides = {}) {
@@ -19,6 +20,7 @@ function input(overrides = {}) {
     spaceId: "space-1",
     spaceAgents: [agent()],
     spaceChannelCount: 0,
+    folderPickerAvailable: true,
     ...overrides,
   };
 }
@@ -26,12 +28,12 @@ function input(overrides = {}) {
 test("cached agents and an unfinished catalog cannot trigger the first task", () => {
   assert.deepEqual(spaceFirstTaskState(input({ channelsLoaded: false })), { kind: "hidden" });
   assert.deepEqual(spaceFirstTaskState(input({ agentsLoaded: false })), { kind: "hidden" });
-  assert.equal(spaceFirstTaskState(input()).kind, "first-task");
+  assert.equal(spaceFirstTaskState(input()).kind, "needs-workspace");
 });
 
-test("a bound agent with no channel yet is given its first task", () => {
+test("a bound agent with no channel yet is asked for a folder", () => {
   const state = spaceFirstTaskState(input());
-  assert.equal(state.kind, "first-task");
+  assert.equal(state.kind, "needs-workspace");
   assert.equal(state.agent.name, "claude-macbook");
 });
 
@@ -42,6 +44,12 @@ test("nothing about the machine's registered directories reaches this state", ()
   assert.deepEqual(Object.keys(state).sort(), ["agent", "kind"]);
 });
 
+test("without a folder picker the card steps aside instead of dead-ending", () => {
+  // Web and mobile have no picker, and this card replaces the timeline.
+  assert.deepEqual(spaceFirstTaskState(input({ folderPickerAvailable: false })), {
+    kind: "hidden",
+  });
+});
 
 test("guidance stops as soon as the Space has any channel", () => {
   assert.deepEqual(spaceFirstTaskState(input({ spaceChannelCount: 1 })), { kind: "hidden" });
@@ -62,13 +70,18 @@ test("Auto can start with a bound Agent regardless of its display name", () => {
   const state = spaceFirstTaskState(
     input({ spaceAgents: [agent({ id: "agent-3", name: "claude macbook" })] })
   );
-  assert.deepEqual(state, { kind: "first-task", agent: agent({ id: "agent-3", name: "claude macbook" }) });
+  assert.deepEqual(state, { kind: "needs-workspace", agent: agent({ id: "agent-3", name: "claude macbook" }) });
 });
 
 test("no Space selected means nothing to guide", () => {
   assert.deepEqual(spaceFirstTaskState(input({ spaceId: null })), { kind: "hidden" });
 });
 
+test("the suggested folder name follows the Space, with a fallback", () => {
+  assert.equal(suggestedSpaceFolderName("yibo-test"), "yibo-test");
+  assert.equal(suggestedSpaceFolderName("  "), "xmatrix");
+  assert.equal(suggestedSpaceFolderName(undefined), "xmatrix");
+});
 
 test("xMatrix's own directories are recognised, a real project named xmatrix is not", () => {
   for (const managed of [
@@ -114,6 +127,16 @@ test("a Windows directory survives Auto composition and shared parsing", () => {
   assert.equal(require("@xmatrix/protocol").parseAutoLaunchMentions(composed.body)[0].tags.pwd, path);
 });
 
+test("the Auto address itself is a valid first message", () => {
+  assert.deepEqual(
+    composeFirstTaskMessage({
+      workspacePath: "/Users/dev/demo",
+      message: "   ",
+    }),
+    { ok: true, body: "@auto pwd:/Users/dev/demo" }
+  );
+});
+
 test("other mentions remain ordinary message syntax", () => {
   const composed = composeFirstTaskMessage({
     workspacePath: "/Users/dev/demo",
@@ -124,6 +147,16 @@ test("other mentions remain ordinary message syntax", () => {
   });
 });
 
+test("no folder chosen yet is refused before send", () => {
+  assert.deepEqual(
+    composeFirstTaskMessage({
+      workspacePath: "",
+      message: "Write notes.md",
+    }),
+    { ok: false, reason: "Choose a folder for this space" }
+  );
+});
+
 test("xMatrix's own directory is refused even if it reaches composition", () => {
   const composed = composeFirstTaskMessage({
     workspacePath: "/Users/dev/.xmatrix/worktrees/abc123",
@@ -131,16 +164,4 @@ test("xMatrix's own directory is refused even if it reaches composition", () => 
   });
   assert.equal(composed.ok, false);
   assert.match(composed.reason, /xMatrix itself/u);
-});
-
-test("without a folder the first task goes to Auto, which works in its own folder", () => {
-  // The browser and the phone have no folder picker; they need none to start.
-  assert.deepEqual(composeFirstTaskMessage({ message: "Write a page about my project" }),
-    { ok: true, body: "@auto Write a page about my project" });
-  assert.deepEqual(composeFirstTaskMessage({ workspacePath: "  ", message: "Plan with me" }),
-    { ok: true, body: "@auto Plan with me" });
-});
-
-test("an empty first task is not sent", () => {
-  assert.equal(composeFirstTaskMessage({ workspacePath: "/Users/dev/demo", message: "  " }).ok, false);
 });

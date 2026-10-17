@@ -1,7 +1,9 @@
 "use client";
 
+import { useEffect, useRef } from "react";
 import { ChevronRight } from "lucide-react";
-import type { OnboardingStage } from "@xmatrix/protocol";
+import { WEB_PROXY_ROUTES, type OnboardingStage } from "@xmatrix/protocol";
+import { xmatrixApiRequest } from "@/lib/query/api-client";
 import { BringAgentsIn } from "./bring-agents-in";
 import { listNames } from "./connect-machine";
 import { useInstalledHarnesses } from "./use-installed-harnesses";
@@ -14,7 +16,7 @@ import { useInstalledHarnesses } from "./use-installed-harnesses";
 /* The first task should end in a page, which is where xMatrix makes sense;
    each starter asks for one. Sent as the person's own message, addressed to
    Auto, which picks one of their agents. */
-export const FIRST_TASK_STARTERS = [
+const FIRST_TASK_STARTERS = [
   { id: "project", title: "Write a page about my project", detail: "What it is, where it stands and what is still open.",
     message: "Write a page about a project I'm working on: what it is, where it stands and what is still open. Ask me which project first." },
   { id: "plan", title: "Plan something with me", detail: "The plan stays in a page as we go.",
@@ -31,8 +33,23 @@ export function OnboardingMessage({ stage, spaceId, token, userId, onSend }: {
   onSend: (body: string) => void;
 }) {
   return stage === "bring-agents"
-    ? <BringAgentsIn spaceId={spaceId} token={token} userId={userId} />
+    ? <BringAgentsMessage spaceId={spaceId} token={token} userId={userId} />
     : <AgentsInMessage spaceId={spaceId} token={token} userId={userId} onSend={onSend} />;
+}
+
+/* Once an agent is in, xMatrix says so in the next message. The Hub checks
+   the fact and writes that message once, so asking again only replays it. */
+function BringAgentsMessage({ spaceId, token, userId }: { spaceId: string | null; token: string | null; userId: string }) {
+  const fleet = useInstalledHarnesses(spaceId, token, userId);
+  const agentsIn = (fleet.catalog.data?.registrations ?? []).some((registration) => registration.state === "enabled");
+  const asked = useRef(false);
+  useEffect(() => {
+    if (!agentsIn || asked.current || !spaceId || !token) return;
+    asked.current = true;
+    void xmatrixApiRequest({ url: WEB_PROXY_ROUTES.space_welcome(spaceId), token, method: "POST" })
+      .catch((error: unknown) => console.warn("[xmatrix] welcome step unavailable", error));
+  }, [agentsIn, spaceId, token]);
+  return <BringAgentsIn spaceId={spaceId} token={token} userId={userId} />;
 }
 
 function AgentsInMessage({ spaceId, token, userId, onSend }: {

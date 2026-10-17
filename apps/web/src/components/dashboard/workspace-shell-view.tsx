@@ -78,7 +78,8 @@ import { spaceAgentSetupState } from "./space-agent-setup";
 import { useAgentRegistrationCatalog } from "./agent-capability-select";
 import { registrationListed } from "./my-agents-registrations";
 import { registrationTupleId } from "./use-registration-command";
-import { AGENT_PRESETS } from "@xmatrix/protocol";
+import { AGENT_PRESETS, WEB_PROXY_ROUTES } from "@xmatrix/protocol";
+import { xmatrixApiRequest } from "@/lib/query/api-client";
 import { harnessSpaceKey } from "./harness-space-switch";
 import { useInstalledHarnesses } from "./use-installed-harnesses";
 import { SpaceAgentSetupCard } from "./space-agent-setup-card";
@@ -458,11 +459,33 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       spaceAgents,
       spaceChannelCount,
       spaceId: currentSpaceId,
+      folderPickerAvailable: Boolean(desktopBridge?.chooseWorkspaceDirectory),
     }),
-    [spaceAgents, spaceChannelCount, currentSpaceId, channelsLoaded, agentsLoaded]
+    [spaceAgents, spaceChannelCount, currentSpaceId, desktopBridge, channelsLoaded, agentsLoaded]
   );
+  /* A new person's personal Space opens with the conversation in which
+     xMatrix tells them how to bring their agents in (index-routes-welcome.ts).
+     The Hub decides whether this Space gets one; while it answers, the empty
+     Space shows nothing rather than a screen about to be replaced. */
+  const [welcomeRequest, setWelcomeRequest] = useState<{ spaceId: string; pending: boolean } | null>(null);
+  const welcomeSpaceId = token && channelsLoaded && agentsLoaded && spaceChannelCount === 0 ? currentSpaceId : null;
+  useEffect(() => {
+    if (!welcomeSpaceId || !token || welcomeRequest?.spaceId === welcomeSpaceId) return;
+    setWelcomeRequest({ spaceId: welcomeSpaceId, pending: true });
+    void xmatrixApiRequest<{ channelId: string | null }>({
+      url: WEB_PROXY_ROUTES.space_welcome(welcomeSpaceId), token, method: "POST",
+    }).then(({ channelId }) => {
+      if (!channelId) return;
+      void currentSpaceCatalog.load(CONVERSATION_QUERY, { force: true });
+      // A phone lists it; a wider screen opens it.
+      if (!isMobileViewport) requestChannelNavigation(channelId);
+    }).catch((error: unknown) => {
+      console.warn("[xmatrix] welcome conversation unavailable", error);
+    }).finally(() => setWelcomeRequest({ spaceId: welcomeSpaceId, pending: false }));
+  }, [welcomeSpaceId, token, welcomeRequest?.spaceId, currentSpaceCatalog, isMobileViewport, requestChannelNavigation]);
+  const welcomePending = Boolean(welcomeRequest?.pending && welcomeRequest.spaceId === currentSpaceId);
   // Only on the empty first screen: an open conversation is never covered.
-  const showSpaceAgentSetup = (spaceAgentSetup.kind !== "hidden" || keepHarnessSetup) && !selectedChannel;
+  const showSpaceAgentSetup = (spaceAgentSetup.kind !== "hidden" || keepHarnessSetup) && !selectedChannel && !welcomePending;
   /* A failed read is not onboarding: it reads on the tool pages' paper, since
      wood carries only liquid glass and this screen has none. */
   const showSpaceFirstTask =
@@ -495,9 +518,9 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
 
   async function startFirstTask(message: string) {
     if (!token || !user || !currentSpaceId) return;
-    if (spaceFirstTask.kind !== "first-task") return;
+    if (spaceFirstTask.kind !== "needs-workspace" || !firstTaskWorkspace) return;
     const composed = composeFirstTaskMessage({
-      workspacePath: firstTaskWorkspace?.canonicalCwd,
+      workspacePath: firstTaskWorkspace.canonicalCwd,
       message,
     });
     if (!composed.ok) {
@@ -922,22 +945,6 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
   const showMobileAgentSetup = isMobileViewport && showSpaceAgentSetup && (
     (installedFleet.ready && installedFleet.candidates.length > 0) ||
     (spaceAgentSetup.kind === "no-local-machine" && spaceChannelCount === 0));
-  // Likewise the first task takes the phone list's place while the Space has an
-  // agent and no conversation.
-  const showMobileFirstTask = isMobileViewport && showSpaceFirstTask;
-  const renderSpaceFirstTask = () => (
-        <div className="app-tool-paper app-tool-detail min-h-0 flex-1 overflow-y-auto">
-          <SpaceFirstTaskCard
-            state={spaceFirstTask}
-            folderPicker={Boolean(desktopBridge?.chooseWorkspaceDirectory)}
-            workspace={firstTaskWorkspace}
-            busy={firstTaskBusy}
-            error={firstTaskError}
-            onChooseWorkspace={() => void chooseFirstTaskWorkspace()}
-            onLaunch={(task) => void startFirstTask(task)}
-          />
-        </div>
-  );
   const renderSpaceAgentSetup = (phone: boolean) => (
         <div className="app-tool-paper app-tool-detail min-h-0 flex-1 overflow-y-auto">
           <SpaceAgentSetupCard
@@ -972,7 +979,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
        is — otherwise "the channel list" and "Follow-ups" are the same
        selector now that both stay mounted. */
     <div className="app-mobile-chat-pane app-mobile-channel-list-pane relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden md:hidden">
-      {showMobileAgentSetup ? renderSpaceAgentSetup(true) : showMobileFirstTask ? renderSpaceFirstTask() : <MobileChannelChatList
+      {showMobileAgentSetup ? renderSpaceAgentSetup(true) : <MobileChannelChatList
             currentSpaceId={currentSpaceId}
             catalogPaging={currentSpaceCatalog}
             fallbackChannels={cachedCatalogChannels}
@@ -1065,7 +1072,19 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
           onOpenPage={openPage} excludePageId={placement === "beside-page" ? selectedPageId : null} />
       )}
       {showSpaceAgentSetup && !showMobileAgentSetup && renderSpaceAgentSetup(false)}
-      {showSpaceFirstTask && !showMobileFirstTask && renderSpaceFirstTask()}
+      {showSpaceFirstTask && (
+        <div className="app-tool-paper app-tool-detail min-h-0 flex-1 overflow-y-auto">
+          <SpaceFirstTaskCard
+            state={spaceFirstTask}
+            spaceName={currentSpace?.name}
+            workspace={firstTaskWorkspace}
+            busy={firstTaskBusy}
+            error={firstTaskError}
+            onChooseWorkspace={() => void chooseFirstTaskWorkspace()}
+            onLaunch={(task) => void startFirstTask(task)}
+          />
+        </div>
+      )}
       {selectedChannel && !showSpaceAgentSetup && !showSpaceFirstTask && placement !== "page-margin" && (
         <MobileChannelSummaryPlaque
           summary={selectedChannel.summary}

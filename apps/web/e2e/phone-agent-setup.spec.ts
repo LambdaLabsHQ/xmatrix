@@ -19,8 +19,8 @@ test("a phone with no agent shows how to bring one in on a computer and approves
   await page.goto("/app", { waitUntil: "domcontentloaded" });
   const connect = page.getByTestId("connect-machine");
   await expect(connect).toBeVisible({ timeout: 20_000 });
-  await expect(page.getByText("Bring your agents into xMatrix", { exact: true })).toBeVisible();
-  await expect(page.getByLabel("Claude Code")).toBeVisible();
+  await expect(connect).toContainText("Bring your agents into xMatrix.");
+  await expect(connect).toContainText("Works with Claude Code, Codex, Cursor and");
   await expect(connect).toContainText(`bash -s -- --connect ${INTENT}`);
   await expect(page.getByText("Tap + to start one.", { exact: true })).toHaveCount(0);
 
@@ -37,5 +37,5 @@ test("a phone keeps its conversations listed even while the Space has no agent",
   await page.goto("/app", { waitUntil: "domcontentloaded" });
   await expect(page.locator(".app-mobile-channel-list-pane").getByText(E2E_CHANNEL.name, { exact: true }))
     .toBeVisible({ timeout: 20_000 });
-  await expect(page.getByText("Bring your agents into xMatrix", { exact: true })).not.toBeVisible();
+  await expect(page.getByTestId("connect-machine")).not.toBeVisible();
 });
