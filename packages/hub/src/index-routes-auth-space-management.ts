@@ -6,7 +6,7 @@ import { deploymentPinnedSpace, finishScheduledSpaceDeletion } from "./space-del
 import { checkAppConnection } from "./app-connection-check";
 import { appCommand, findAppConnection, listAppConnections, listAppExecutions, upsertAppConnection } from "./apps";
 import { schedulerRepository } from "./automations";
-import { changeMembership, createSpaceInvite, deleteSpace, getChannel, getSpace, listSpaceDeletions, restoreSpace } from "./spaces";
+import { changeMembership, createSpaceInvite, deleteSpace, getChannel, listSpaceDeletions, restoreSpace } from "./spaces";
 import { SpaceControlError } from "@xmatrix/db";
 import { buildGitHubAppInstallUrl, describeGitHubInstallation, githubConnectionInstallationIds, resolveAppConnectorCompletionOptions, type AppConnectorConnectionView } from "./app-connectors";
 import { githubConnectAuthorizeUrl, githubConnectReturnUrl, githubGrantInstallationIds } from "./github-connect-authorization";
@@ -18,6 +18,7 @@ import { MAX_INVITE_EMAILS_PER_REQUEST, InviteEmailRequest, AdminInviteEmailRequ
 import { appOrigin } from "./deployment-origins";
 import { forgetConnectionGrant } from "./connectors/forget-grant";
 import { grantFieldsForgottenOnDisconnect } from "./connectors/oauth";
+import { connectorCredentialRepository } from "./connectors/credentials";
 
 /* The emails and role an invite-email request asks for, or why it is refused. */
 function inviteEmailTargets(body: InviteEmailRequest): { emails: string[]; role: string } | { error: string } {
@@ -171,7 +172,7 @@ export function registerIndexRoutesAuthSpaceManagement(app: Hono<{ Bindings: Env
       actorUserId: authUser.id }) });
   }));
   app.get("/api/apps/github/install", (c) => jsonErrors(c, async () => {
-    const authUser = await requireAuth(c.req.raw, c.env);
+    const authUser = requireHumanAuth(await requireAuth(c.req.raw, c.env));
     const spaceId = c.req.query("spaceId")?.trim();
     const modeQuery = c.req.query("mode")?.trim();
     const requestedInstallationId = c.req.query("installationId")?.trim();
@@ -188,7 +189,8 @@ export function registerIndexRoutesAuthSpaceManagement(app: Hono<{ Bindings: Env
     const clientSecret = c.env.GITHUB_APP_CLIENT_SECRET!.trim();
     const appSlug = c.env.GITHUB_APP_SLUG!.trim();
 
-    await getSpace(c.env, { spaceId, principal: { kind: "user", id: authUser.id } });
+    await connectorCredentialRepository(c.env).authorizeAdmin({ requestId: crypto.randomUUID(), spaceId,
+      actorUserId: authUser.id });
 
     // install/add authorize on GitHub, which shows which installations the
     // person reaches; mode=account opens GitHub's install page for a new

@@ -5,6 +5,7 @@ import { vercelApiUrl, vercelCompletionUrl, verifyVercel } from "../src/connecto
 import { connectorProvider } from "../src/connectors/registry.ts";
 import { sentryInstallationClient } from "../src/connectors/sentry-installation.ts";
 import * as metering from "../src/usage-cost-metering.ts";
+import * as githubAuthorization from "../src/github-connect-authorization.ts";
 
 const exchangeOAuthCode = async (...args) => (await exchangeOAuthGrant(...args)).fields;
 
@@ -139,6 +140,8 @@ test("the callback writes credentials only after verified state, provider scope 
   const effects = [];
   const exports = {};
   const dependencies = {
+    "./github-connect-authorization": githubAuthorization,
+    "./index-routes-auth-space-management": { linkGitHubInstallation: () => assert.fail("only GitHub Connect links installations") },
     "./connectors/sentry-installation": { sentryInstallationClient },
     "./connectors/teams-native": { teamsNativeApp: () => undefined },
     "./connectors/googlechat-native": { googleChatNativeApp: () => undefined },
@@ -151,7 +154,8 @@ test("the callback writes credentials only after verified state, provider scope 
       paidCallRepository: () => { throw new Error("Vercel must not call X billing"); } },
     "./admin-platform-access": { platformAdminSpaceId: () => "operator-space" },
     "./app-connectors": { getAppConnectorProvider: () => client.manifest },
-    "./connectors/credentials": { INGRESS_KEY_FIELD: "ingressKey", mintConnectorSecret: () => "fixture-ingress", connectorCredentialRepository: () => ({ put: async () => { effects.push("credentials"); } }) },
+    "./connectors/credentials": { INGRESS_KEY_FIELD: "ingressKey", mintConnectorSecret: () => "fixture-ingress", connectorCredentialRepository: () => ({
+      authorizeAdmin: async () => {}, put: async () => { effects.push("credentials"); } }) },
     "./connectors/oauth": {
       verifyOAuthState: async () => validState ? { client, spaceId: "space-vercel", userId: "admin" } : undefined,
       exchangeOAuthGrant: async () => { effects.push("exchange"); return { fields }; },

@@ -121,6 +121,13 @@ export class PostgresAppCredentialRepository {
       "Connector credential encryption is not configured");
   }
 
+  /** Authorize a provider request without reading or decrypting an existing grant. */
+  async authorizeAdmin(input: { requestId: string; spaceId: string; actorUserId: string }): Promise<void> {
+    const spaceId = text(input.spaceId, "spaceId"), userId = text(input.actorUserId, "actorUserId");
+    return this.database.transaction({ requestId: text(input.requestId, "requestId", 200),
+      operation: "app.credentials.authorize-admin" }, tx => requireSpaceAdmin(tx, spaceId, userId));
+  }
+
   /**
    * Writes the given fields over the current ones. A field set to `null` is
    * removed; fields not named keep their value. Returns field names only.

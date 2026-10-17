@@ -24,6 +24,8 @@ import { connectCloudflareLogin } from "./connectors/cloudflare-api";
 import { upstreamMeter } from "./usage-cost-metering";
 import { paidCallRepository, paidXCalls } from "./billing-paid-calls";
 import { platformAdminSpaceId } from "./admin-platform-access";
+import { completeGitHubConnectAuthorization, isGitHubConnectState } from "./github-connect-authorization";
+import { linkGitHubInstallation } from "./index-routes-auth-space-management";
 
 /*
  * One-click OAuth routes (docs/design/connector-platform.md §3.2): which
@@ -52,6 +54,10 @@ async function completeOAuthConnect(env: Env, request: Request, verified: Verifi
   /* Composio returns no code: the account is found from the signed state alone. */
   if (!input.code && verified.client.manifest.oauth.flow !== "composio") return appsRedirect(env, verified.spaceId, providerId, "failed");
   try {
+    // Signed state identifies the initiator; current Space authority still
+    // decides whether that person may exchange a grant now.
+    await connectorCredentialRepository(env).authorizeAdmin({ requestId: crypto.randomUUID(),
+      spaceId: verified.spaceId, actorUserId: verified.userId });
     if (providerId === "discord") {
       const current = await connectorCredentialRepository(env).installationSnapshot({ requestId: crypto.randomUUID(),
         spaceId: verified.spaceId, providerId: "discord", actorUserId: verified.userId });
@@ -120,16 +126,19 @@ export function registerConnectorOAuthRoutes(app: Hono<{ Bindings: Env }>): void
     const authenticated = await requireAuth(c.req.raw, c.env);
     if (authenticated.agentRun) return c.json({ error: "Connecting an app requires a Space admin" }, 403);
     const user = requireHumanAuth(authenticated);
-    if (c.req.param("providerId") === "sentry") {
+    const spaceId = c.req.param("spaceId"), providerId = c.req.param("providerId");
+    const repository = connectorCredentialRepository(c.env);
+    // Prove target-Space authority before signing state or creating a hosted
+    // account. A person's admin role in another Space grants nothing here.
+    await repository.authorizeAdmin({ requestId: crypto.randomUUID(), spaceId, actorUserId: user.id });
+    if (providerId === "sentry") {
       const native = sentryInstallationClient(c.env);
       if (native) {
-        await connectorCredentialRepository(c.env).readGenerated({ requestId: crypto.randomUUID(),
-          spaceId: c.req.param("spaceId"), providerId: "sentry", actorUserId: user.id, generated: [] });
         return c.json({ url: `https://sentry.io/sentry-apps/${encodeURIComponent(native.appSlug)}/external-install/` },
           200, { "cache-control": "private, no-store" });
       }
     }
-    const client = oauthClient(c.env, c.req.param("providerId"));
+    const client = oauthClient(c.env, providerId);
     if (!client) return c.json({ error: "One-click connect is not configured for this app" }, 404);
     let accountId: string | undefined;
     if (client.manifest.id === "x") {
@@ -143,12 +152,9 @@ export function registerConnectorOAuthRoutes(app: Hono<{ Bindings: Env }>): void
       await paidCallRepository(c.env).authorize({ spaceId: c.req.param("spaceId"), actorUserId: user.id,
         creditsWaived: c.req.param("spaceId") === platformAdminSpaceId(c.env) });
     }
-    const spaceId = c.req.param("spaceId");
     let connectionSnapshot;
     if (["discord", "x"].includes(client.manifest.id)) {
-      const repository = connectorCredentialRepository(c.env);
       const providerId = client.manifest.id as "discord" | "x";
-      await repository.readGenerated({ requestId: crypto.randomUUID(), spaceId, providerId, actorUserId: user.id, generated: [] });
       const existing = await getAppConnection(c.env, { connectionId: `${spaceId}:${providerId}`, actorUserId: user.id })
         .catch((error: unknown) => { if (error instanceof ControlError && error.status === 404) return null; throw error; });
       if (!existing) {
@@ -190,6 +196,16 @@ export function registerConnectorOAuthRoutes(app: Hono<{ Bindings: Env }>): void
     const body = await c.req.json().catch(() => null) as Record<string, unknown> | null;
     const field = (key: string) => typeof body?.[key] === "string" ? body[key] as string : undefined;
     const state = field("state") ?? "";
+    if (isGitHubConnectState(state)) {
+      const url = new URL(c.req.url);
+      url.searchParams.set("state", state);
+      url.searchParams.set("code", field("code") ?? "");
+      const response = await completeGitHubConnectAuthorization(c.env, new Request(url),
+        (spaceId, userId, installationId) => linkGitHubInstallation(c.env, spaceId, userId, installationId),
+        { userId: user.id, authorizeSpace: (spaceId, actorUserId) => connectorCredentialRepository(c.env)
+          .authorizeAdmin({ requestId: crypto.randomUUID(), spaceId, actorUserId }) });
+      return c.json({ redirect: response.headers.get("location") }, 200, { "cache-control": "private, no-store" });
+    }
     const verified = state ? await verifyOAuthState(c.env, state) : undefined;
     if (!verified) return c.json({ error: "Invalid or expired connect request" }, 400);
     if (verified.userId !== user.id) {

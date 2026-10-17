@@ -34,8 +34,8 @@ import { RELAY_RUNTIME_MACHINE_DAEMON_WAIT_PATH } from "./runtime-transport/rela
 import { LOGIN_RATE_LIMIT_PER_EMAIL, LOGIN_RATE_LIMIT_PER_CLIENT, hubOrigin, betterAuthRouteGroup, logBetterAuthHandlerMetrics, authCorsPreflight, withAuthCors, parseCliRedirectUri, requireAuth, requireMachineDaemonAuth, machineRouteIdentityMatches, appendMachinePrincipal, requireHumanAuth, requestFailure, productCommandId, clientKey, internalClientHeaders, getDeviceAuthBroker, jsonErrors, requestErrorResponse, machineDaemonControl } from "./index-shared";
 import { appOrigin } from "./deployment-origins";
 import { registerIndexRoutesAuthSpaceInstances } from "./index-routes-auth-space-instances";
-import { linkGitHubInstallation, registerIndexRoutesAuthSpaceManagement } from "./index-routes-auth-space-management";
-import { completeGitHubConnectAuthorization, githubConnectReturnUrl, isGitHubConnectState } from "./github-connect-authorization";
+import { registerIndexRoutesAuthSpaceManagement } from "./index-routes-auth-space-management";
+import { handoffGitHubConnectAuthorization, githubConnectReturnUrl, isGitHubConnectState } from "./github-connect-authorization";
 import { registerMachineExecutionRoutes } from "./index-routes-machine-executions";
 import { registerReplyRecoveryRoutes } from "./index-routes-reply-recovery";
 import { wakeAgentLaunchCoordinator } from "./agent-launch-coordinator-wake";
@@ -386,8 +386,7 @@ export function registerIndexRoutesAuthSpace(app: Hono<{ Bindings: Env }>): void
     }
     if (c.req.path === "/api/auth/callback/github" && isGitHubConnectState(c.req.query("state"))) {
       // Connecting GitHub shares the App's registered callback with account linking.
-      return await completeGitHubConnectAuthorization(c.env, c.req.raw,
-        (spaceId, userId, installationId) => linkGitHubInstallation(c.env, spaceId, userId, installationId))
+      return await handoffGitHubConnectAuthorization(c.env, c.req.raw)
         .catch(() => c.redirect(githubConnectReturnUrl(c.env, "failed"), 302));
     }
     let response: Response;

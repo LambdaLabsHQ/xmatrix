@@ -6,6 +6,7 @@ import { compileCommonJsSourceModule } from './support/commonjs-source-module.mj
 import { APP_CONNECTOR_PROVIDER_MANIFESTS } from '../../protocol/src/app-connector-manifests.ts';
 import * as oauth from '../src/connectors/oauth.ts';
 import * as metering from '../src/usage-cost-metering.ts';
+import * as githubAuthorization from '../src/github-connect-authorization.ts';
 import { HUB_ROUTES } from '../../protocol/src/authority-foundation.ts';
 import { stubFetchResponses } from './support/fetch-responses.mjs';
 
@@ -15,11 +16,12 @@ const env = { CONNECTOR_DISCORD_CLIENT_ID: appId, CONNECTOR_DISCORD_CLIENT_SECRE
   HUB_URL: 'https://hub.test', APP_URL: 'https://xmatrix.test' };
 function fixture() {
   const calls = []; const state = { agent: false, denied: false, version: 3, generation: 'generation', exists: true, failSave: false, failedCheck: false };
-  const repository = { async readGenerated() { calls.push('admin'); if (state.denied) throw Object.assign(new Error('private-denial'), { status: 404 }); return {}; },
+  const repository = { async authorizeAdmin() { calls.push('admin'); if (state.denied) throw Object.assign(new Error('private-denial'), { status: 404 }); },
     async installationSnapshot() { calls.push('snapshot'); if (state.denied) throw Object.assign(new Error('private-denial'), { status: 404 });
       return { connectionVersion: state.version, credentialVersion: 2, connectionGeneration: state.generation }; },
     async put(input) { calls.push(['put', input]); if (state.failSave) throw Object.assign(new Error('private-concurrent-change'), { status: 409 }); return {}; } };
   const imports = {
+    './github-connect-authorization': githubAuthorization,
     './connectors/sentry-installation': { sentryInstallationClient: () => undefined },
     './connectors/googlechat-native': { googleChatNativeApp: () => undefined },
     './connectors/oauth': oauth,
