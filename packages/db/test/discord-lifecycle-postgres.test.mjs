@@ -25,7 +25,8 @@ async function fixture(run) {
     await sql(`CREATE TABLE data.app_connector_credentials(connection_id text PRIMARY KEY,space_id text,
       field_names_json jsonb,encrypted_value_json jsonb,version bigint,updated_by text,created_at timestamptz,updated_at timestamptz)`);
     for (const migration of ['0140_expand_connector_oauth_installations.sql', '0141_expand_vercel_event_scope.sql',
-      '0142_expand_sentry_installation_binding.sql', '0144_expand_sentry_event_receipts.sql', '0153_expand_discord_installation_lifecycle.sql']) {
+      '0142_expand_sentry_installation_binding.sql', '0144_expand_sentry_event_receipts.sql', '0153_expand_discord_installation_lifecycle.sql',
+      '0202_expand_slack_workspace_claims.sql']) {
       // Execute the actual expand migration against the prior schema; unrelated
       // event-job tables need only their real source columns and foreign keys.
       await client.query('BEGIN');
