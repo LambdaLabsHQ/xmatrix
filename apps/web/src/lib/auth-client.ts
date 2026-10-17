@@ -49,23 +49,32 @@ class AuthClientError extends UserFacingProblem {
 }
 
 /**
- * A desktop or phone app signs in for itself and keeps the Hub session token,
- * so the Hub holds no cookie for it. Account calls carry that token instead.
+ * A desktop or phone app signed in with a session of its own, kept in an
+ * HTTP-only cookie the page cannot read. Its account calls go through the
+ * web's native-auth route, which adds that session on the way to the Hub.
  */
-let appSessionToken: string | null = null;
+let accountCallsThroughApp = false;
 
-export function setAppSessionToken(token: string | null | undefined): void {
-  appSessionToken = token?.trim() || null;
+export function routeAccountCallsThroughApp(on: boolean): void {
+  accountCallsThroughApp = on;
 }
 
-function appSessionHeaders(): Record<string, string> {
-  return appSessionToken ? { authorization: `Bearer ${appSessionToken}` } : {};
+/** Where an account call goes: straight to the Hub, or through the app's own session route. */
+function accountUrl(hubUrl: string): string {
+  const prefix = `${getAuthBaseUrl()}/api/auth/`;
+  return accountCallsThroughApp && hubUrl.startsWith(prefix)
+    ? `${WEB_PROXY_ROUTES.native_auth}/${hubUrl.slice(prefix.length)}` : hubUrl;
 }
 
 const authClient = createAuthClient({
   baseURL: getAuthBaseUrl(),
   plugins: [emailOTPClient(), twoFactorClient(), passkeyClient()],
-  fetchOptions: { auth: { type: "Bearer", token: () => appSessionToken ?? undefined } },
+  fetchOptions: {
+    customFetchImpl: (input, init) => {
+      const href = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      return fetch(accountUrl(href), init);
+    },
+  },
 });
 
 /**
@@ -454,10 +463,10 @@ export function oauthAuthorizeUrl(signedQuery: URLSearchParams): string {
 export interface OAuthClientSummary { name: string }
 
 async function oauthRequest(path: string, init: RequestInit = {}): Promise<Record<string, unknown>> {
-  const response = await xmatrixRawResponse(`${getAuthBaseUrl()}/api/auth${path}`, {
+  const response = await xmatrixRawResponse(accountUrl(`${getAuthBaseUrl()}/api/auth${path}`), {
     ...init, credentials: "include", cache: "no-store",
     headers: {
-      accept: "application/json", ...appSessionHeaders(),
+      accept: "application/json",
       ...(init.body ? { "content-type": "application/json" } : {}),
     },
   });
