@@ -21,7 +21,7 @@ import { connectorForCommand } from "./connectors/registry";
 import type { Env } from "./types";
 import { relayCrossChannelReply, type CrossChannelReplyOrigin } from "./product-cross-channel-reply";
 import { recordAgentLaunchStage } from "./postgres-observability";
-import { dispatchRegistrationLaunchesAfterMessage, wakeRestingInstances } from "./registration-launch-dispatch";
+import { dispatchRegistrationLaunchesAfterMessage, markFirstMessageSummoned, wakeRestingInstances } from "./registration-launch-dispatch";
 import { runtimeRepository } from "./runtime";
 import { ControlError } from "@xmatrix/db";
 import { AgentLaunchHandoverUnavailable } from "./agent-launch-coordinator-wake";
@@ -141,8 +141,10 @@ export function unconfirmedLaunchNoticeBody(error: unknown, diagnosticId: string
  * lifecycle mentions. actorUserId is resolved from the publishing Run's owner
  * upstream; it is never supplied by the message body. PostgreSQL checks both
  * current Channel permission and the unchanged owner-bound source publication. */
-/** A new conversation's first message that summons nobody, from a Human or an Agent. */
-async function startNewConversation(input: ProductMessagePostCommitInput): Promise<void> {
+/** A new conversation's first message that summons nobody, from a Human or an Agent.
+ * Its Channel's coordinator runs it again for a decision no request finished. */
+export async function startNewConversation(input: Pick<ProductMessagePostCommitInput,
+  "env" | "channelId" | "messageId" | "body" | "actorUserId" | "senderKind">): Promise<void> {
   const { harness } = await dispatchProductNewConversationStart({ env: input.env, channelId: input.channelId,
     messageId: input.messageId, body: input.body, actorUserId: input.actorUserId,
     authorKind: input.senderKind === "agent" ? "agent" : "user" });
@@ -156,11 +158,15 @@ async function startNewConversation(input: ProductMessagePostCommitInput): Promi
  * Channel, and that message goes through this same post-commit pipeline. It
  * launches as the first message's author, whose decision the launch
  * authority checks. Its id derives from the first message, so a retry
- * appends and launches nothing new.
+ * appends and launches nothing new. Once dispatched it is marked summoned;
+ * until then the Channel's coordinator retries it.
  */
 export async function summonFirstMessageHarness(input: { env: ProductMessagePostCommitEnv; channelId: string;
   messageId: string; actorUserId: string; harness: string },
-  dependencies = { append: dispatchProductMessageAppend, postCommit: dispatchProductMessagePostCommit }): Promise<void> {
+  dependencies: { append: typeof dispatchProductMessageAppend; postCommit: typeof dispatchProductMessagePostCommit;
+    summoned: typeof markFirstMessageSummoned } =
+    { append: dispatchProductMessageAppend, postCommit: dispatchProductMessagePostCommit, summoned: markFirstMessageSummoned },
+): Promise<void> {
   // The decision already answered whether to start, so Jev's intent check is skipped.
   const body = `@${input.harness} launch:force`;
   const messageId = firstMessageSummonId(input.messageId);
@@ -173,6 +179,7 @@ export async function summonFirstMessageHarness(input: { env: ProductMessagePost
   await dependencies.postCommit({ env: input.env, channelId: input.channelId, messageId, body,
     actorUserId: input.actorUserId, senderKind: "system", senderId: XMATRIX_SYSTEM_AUTHOR_ID,
     committedAt: new Date().toISOString() });
+  await dependencies.summoned(input.env, { channelId: input.channelId, messageId: input.messageId });
 }
 
 export async function dispatchProductMessageLaunches(input: ProductMessagePostCommitInput,
