@@ -60,6 +60,13 @@ deployment's login page. Error redirects are failed callback metrics, and Google
 session creation requires an issued session cookie. See
 [OAuth callback recovery](../operations/oauth-callback-recovery.md).
 
+Connector OAuth checks current target-Space owner/admin authority both before
+starting consent and before exchanging a retained signed state. The credential
+write checks it again after the provider request; another Space's admin role
+does not authorize the flow. See [connector platform](../design/connector-platform.md)
+and [Space credential isolation](../operations/space-credential-isolation.md)
+for historical secret copies and the local OS-user boundary.
+
 Repository contributions use the Prompt request issue form: current behavior
 and reproduction, the desired outcome, and acceptance checks are required;
 implementation prompts and reference patches are optional. Maintainers triage

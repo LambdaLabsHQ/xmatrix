@@ -103,6 +103,27 @@ integration("a connection's member read shows credential names, and deleting it 
   });
 });
 
+integration("connector grants resolve only from the requested Space and reject transplanted ciphertext", async () => {
+  await withDatabase(async a => {
+    await withDatabase(async b => {
+      const credentials = new PostgresAppCredentialRepository(a.database, material);
+      for (const [spaceId, apiToken] of [[a.space, "space-a-token"], [b.space, "space-b-token"]]) {
+        await credentials.put({ requestId: crypto.randomUUID(), spaceId, providerId: "webhook",
+          actorUserId: "owner", fields: { apiToken }, policy, at });
+      }
+      const resolve = spaceId => credentials.resolve({ requestId: crypto.randomUUID(), spaceId, providerId: "webhook" });
+      assert.equal((await resolve(a.space)).values.apiToken, "space-a-token");
+      assert.equal((await resolve(b.space)).values.apiToken, "space-b-token");
+      assert.equal(await resolve(`absent-${crypto.randomUUID()}`), null, "there is no owner-level or global grant fallback");
+      await a.sql(`UPDATE data.app_connector_credentials target SET encrypted_value_json=source.encrypted_value_json
+        FROM data.app_connector_credentials source WHERE target.connection_id=$1 AND source.connection_id=$2`,
+      [`${b.space}:webhook`, `${a.space}:webhook`]);
+      await assert.rejects(resolve(b.space), error => error.code === "secret_authority_corrupt");
+      assert.equal((await resolve(a.space)).values.apiToken, "space-a-token");
+    });
+  });
+});
+
 integration("event routes are the configured connection's Channels subscribed to the source", async () => {
   await withDatabase(async ({ sql, database, space }) => {
     const apps = new PostgresAppRepository(database);
