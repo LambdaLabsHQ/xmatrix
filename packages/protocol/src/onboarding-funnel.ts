@@ -5,12 +5,13 @@
  * page. Each is counted once per person, by where it was shown and on what.
  */
 export const ONBOARDING_FUNNEL_STEPS = [
-  "command_shown", "command_copied", "download_clicked", "terminal_seen", "approved", "starter_chosen",
+  "app_loaded", "space_ready", "command_shown", "command_copied", "download_clicked", "terminal_seen", "approved", "starter_chosen",
 ] as const;
 export type OnboardingFunnelStep = typeof ONBOARDING_FUNNEL_STEPS[number];
 
-/** Where the person was asked: the welcome conversation, an empty Space, Agents. */
-export const ONBOARDING_SURFACES = ["welcome", "space", "agents"] as const;
+/** Where the person was asked: the welcome conversation, an empty Space,
+ * Agents; `shell` is the app itself, before any of them is on screen. */
+export const ONBOARDING_SURFACES = ["welcome", "space", "agents", "shell"] as const;
 export type OnboardingSurface = typeof ONBOARDING_SURFACES[number];
 
 /** What the person was looking at it on. */
