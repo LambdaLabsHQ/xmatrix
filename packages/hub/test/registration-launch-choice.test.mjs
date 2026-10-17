@@ -814,3 +814,23 @@ test('equally fit, the harness that measurably replies sooner runs the work; a s
   const { parseLaunchParameterEvidence } = await import('@xmatrix/protocol');
   assert.deepEqual(parseLaunchParameterEvidence(chosen.parameterEvidence), chosen.parameterEvidence);
 });
+
+test('level on the weakest side, the next-weakest decides: a slow network does not hand the work to the worse fit', () => {
+  // 2026-10-17 15:46: on one machine whose network quality was 0.05, every
+  // environment was level on it, and a 0.25 fit Cursor beat a 0.94 fit Grok
+  // on reply time alone.
+  const now = Date.now(), observedAt = new Date(now - 1000).toISOString();
+  const slowNetwork = (harness, responseLatencyMs) => ({ ...candidates[0], key: { ...candidates[0].key, harness },
+    responseLatencyMs, observations: { evaluatedAt: observedAt, outstandingMachineAllocations: 0, outstandingRegistrationAllocations: 0,
+      quota: { remainingPercent: 100, assumed: true },
+      machineResources: { observedAt, cpuLogicalCount: 8, loadAverage: [0, 0, 0], network: { observedAt,
+        target: 'cloudflare-speed', protocol: 'https', attempts: 10, failures: 0, latencyP95Ms: 700, latencyMedianMs: 300 } } } });
+  const cursor = slowNetwork('cursor', 52_951), grok = slowNetwork('grok', 54_801), claude = slowNetwork('claude', 22_220);
+  const fits = { cursor: 0.25, grok: 0.94, claude: 0.01 };
+  const fast = { ...claude, key: { ...claude.key, machineId: 'fast' }, observations: { ...claude.observations,
+    machineResources: { ...claude.observations.machineResources, network: { ...claude.observations.machineResources.network,
+      latencyP95Ms: 35, latencyMedianMs: 20 } } } };
+  const ranked = jointRanking([cursor, grok, claude, fast], candidate => fits[candidate.key.harness], now);
+  assert.equal(ranked[0].candidate, grok);
+  assert.deepEqual(ranked.slice(1, 3).map(item => item.candidate.key.harness), ['cursor', 'claude']);
+});
