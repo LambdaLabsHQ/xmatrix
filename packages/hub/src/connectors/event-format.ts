@@ -83,10 +83,11 @@ export function eventMessage(input: { provider: string; title: string; url?: str
 export function connectorEvent(input: {
   eventId: string; sourceRef: string; feature: string; summary: string;
   provider: string; title: string; url?: string | undefined; details?: (string | undefined)[];
+  subject?: ConnectorEvent["subject"];
 }): ConnectorEvent {
-  const { eventId, sourceRef, feature, summary, url } = input;
+  const { eventId, sourceRef, feature, summary, url, subject } = input;
   return { eventId, sourceRef, feature, summary: summary.slice(0, 200),
-    body: eventMessage(input), ...(url ? { url } : {}) };
+    body: eventMessage(input), ...(url ? { url } : {}), ...(subject?.id ? { subject } : {}) };
 }
 
 export function lowerHeader(headers: Headers, name: string): string {

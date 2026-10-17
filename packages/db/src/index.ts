@@ -146,6 +146,7 @@ export {
   type ResolvedAppCredentials,
   type AppOAuthInstallation,
 } from "./app-credential-control.js";
+export { SLACK_WORKSPACE_TAKEN } from "./app-control.js";
 export {
   HumanProfileControlError,
   PostgresHumanProfileRepository,

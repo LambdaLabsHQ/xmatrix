@@ -858,6 +858,46 @@ It permits at most 50 authorized Spaces per installation; overflow fails before
 any delivery. Channel appends use the existing event/channel deduplication key;
 an append failure returns 503 for provider retry without duplicating successful appends.
 
+Proving membership of a workspace is not authority over everything the app
+sees there, so each provider narrows delivery to what one Space may read:
+
+- **Slack: one Space per workspace.** Slack issues one bot per workspace and
+  sends the messages of every channel it was invited into. A binding is
+  claimed under a per-workspace advisory lock and the claim
+  (`app_slack_workspace_claims`) names one Space: a Connect from any other
+  Space is refused (`workspace_connected_elsewhere`, shown as "already
+  connected to another xMatrix Space"). The bot stays in every channel it was
+  invited into until the app is uninstalled from the workspace, so the claim
+  outlives a disconnect in xMatrix, a failed check, a revoked token and the
+  Space's deletion; the claiming Space may connect again, which renews it.
+  Only a signature-verified `app_uninstalled` dated (Slack's `event_time`)
+  after the claim releases it; that event, or `tokens_revoked` naming bot
+  tokens, disconnects the bindings made before it (credentials kept). A
+  Connect after the event is not retired by a delayed or replayed delivery,
+  and a delivery without `event_time` retires nothing. The claim, not the
+  number of current bindings, decides use: only the claiming Space's binding
+  resolves the bot for actions and receives events, and an event is delivered
+  only when Slack's signed `event_time` is at or after the claim (routing, each
+  subscription route, the final append and Automations all check it), so
+  content from before an uninstall never reaches the next claimant. A binding
+  of an unclaimed workspace is no Space's. Existing bindings were backfilled,
+  the earliest of a shared workspace holding it. The Slack app must subscribe
+  to both events.
+  The bot belongs to its binding, not to the stored credentials: regenerating a
+  Hub-minted field (the ingress key) keeps the binding, so a shared workspace
+  stays refused; any other manual edit unbinds the grant and drops its values
+  (the bot token among them), keeping only Hub-minted fields and what the admin
+  wrote.
+- **Linear: each Space's own grant.** OAuth grants act as the connecting
+  user. Before an event reaches a Space, the Hub reads its subject (issue,
+  comment, project, project update or cycle) by id with that Space's token;
+  only a Space whose user can read it receives it, so private teams stay
+  private. The answer holds only for the grant that read it: routes, the final
+  append and Automations are fenced to that credential version, so a Connect in
+  between withholds the delivery and Linear's retry asks the new grant. An
+  object that can no longer be read (deleted) is not delivered; a Linear outage
+  answers 503 so Linear retries.
+
 Existing OAuth installs reconnect to establish this evidence; no backfill guesses
 workspace ownership. Human credential edits invalidate the binding until another
 OAuth grant, while server refreshes preserve it and require the credential version
