@@ -18,14 +18,27 @@ async function openWithIntent(page: import("@playwright/test").Page, state: Reco
   await fixtureRule(page, { id: "intent-read", pattern: `**/api/xmatrix/setup-intents/${INTENT}`,
     responder: { kind: "static", json: state } });
   for (const rule of rules) await fixtureRule(page, rule);
+  await fixtureRule(page, { id: "funnel", pattern: "**/api/xmatrix/observable/onboarding-step", method: "POST",
+    responder: { kind: "static", status: 202, json: {} } });
   await page.goto("/app", { waitUntil: "domcontentloaded" });
   return page.getByTestId("connect-machine");
 }
+
+/** The steps counted so far, as the Hub received them. */
+const counted = (page: import("@playwright/test").Page) => fixtureRequestBodies(page, "funnel");
 
 test("the Space's empty screen shows a setup command that carries only its id", async ({ page }) => {
   const connect = await openWithIntent(page, { ...base, phase: "waiting" });
   await expect(connect).toContainText(`bash -s -- --connect ${INTENT}`);
   await expect(connect).toContainText("Waiting for your computer…");
+  // Seeing and copying the command are counted once each, with where and on what.
+  const copy = connect.getByRole("button", { name: /^(Copy|Copied)$/u });
+  await copy.click();
+  await copy.click();
+  await expect.poll(() => counted(page)).toEqual([
+    { step: "command_shown", surface: "space", device: "desktop_web" },
+    { step: "command_copied", surface: "space", device: "desktop_web" },
+  ]);
   await connect.getByRole("button", { name: "Windows?" }).click();
   await expect(connect).toContainText(`$env:XMATRIX_CONNECT='${INTENT}'`);
 });
@@ -38,6 +51,12 @@ test("a waiting terminal is approved with the code it shows", async ({ page }) =
   await expect(connect).toContainText("WDJB-MJHT");
   await connect.getByRole("button", { name: "Approve", exact: true }).click();
   await expect.poll(() => fixtureRequestBodies(page, "intent-approve")).toEqual([{ userCode: "WDJB-MJHT" }]);
+  // The command was on screen until the terminal's request arrived.
+  await expect.poll(() => counted(page)).toEqual([
+    { step: "command_shown", surface: "space", device: "desktop_web" },
+    { step: "terminal_seen", surface: "space", device: "desktop_web" },
+    { step: "approved", surface: "space", device: "desktop_web" },
+  ]);
 });
 
 test("a connected machine hands its agents to the installed-harness switches", async ({ page }) => {

@@ -299,6 +299,10 @@ function createAuthWithDatabase(
     },
     advanced: {
       trustedProxyHeaders: true,
+      // Better Auth 1.6.33 stores OAuth state/PKCE for ten minutes but
+      // defaults its signed state cookie to five. Keep the browser proof
+      // for the same window so a slow provider login can still return.
+      cookies: { state: { attributes: { maxAge: 600 } } },
       ...(authCookiePrefix ? { cookiePrefix: authCookiePrefix } : {}),
       ...(authCookieDomain
         ? {
