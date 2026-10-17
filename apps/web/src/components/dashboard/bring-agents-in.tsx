@@ -69,11 +69,11 @@ export function BringAgentsIn({ spaceId, token, userId, surface, phone: phoneShe
   useEffect(() => { if (step?.kind === "approval") count("terminal_seen"); }, [step?.kind, count]);
 
   return (
-    <div className="max-w-[34rem] text-[15px] leading-6" data-testid="connect-machine">
+    <div className="app-paper-card max-w-[34rem] text-[15px] leading-6" data-testid="connect-machine">
       <p>{copy.bringAgents}</p>
       <AgentsLine className="mt-2" copy={copy} />
 
-      <ol className="m-0 mt-4 list-none border-t-[1px] border-border p-0">
+      <ol className="m-0 mt-3 list-none p-0">
         {phone && (
           <SetupRow n={1} state={state(1)} title={copy.signInOnComputer} aside={stage > 1 && machines ? machines : null}>
             {stage === 1 && <p role="status" className="flex items-center gap-1.5 text-[13px] leading-5 text-muted-foreground">
@@ -170,14 +170,15 @@ export function BringAgentsIn({ spaceId, token, userId, surface, phone: phoneShe
   );
 }
 
-/* A ruled row: the number (or a check once done), the title, and what is
-   happening now on the right. Only the step in progress opens. */
+/* A step on the paper: the number (or a check once done), the title, and what
+   is happening now on the right; space, not rules, between steps. Only the
+   step in progress opens. */
 function SetupRow({ n, state, title, aside, children }: {
   n: number; state: StepState; title: string; aside?: ReactNode; children?: ReactNode;
 }) {
   const open = Boolean(children) && state === "active";
   return (
-    <li className="m-0 grid grid-cols-[1.25rem_minmax(0,1fr)_auto] items-baseline gap-x-3 border-b-[1px] border-border px-0 py-3"
+    <li className="m-0 grid grid-cols-[1.25rem_minmax(0,1fr)_auto] items-baseline gap-x-3 px-0 py-2"
       data-state={state}>
       <span aria-hidden="true" className="text-[13px] font-semibold tabular-nums text-muted-foreground">
         {state === "done" ? <Check className="inline size-3.5 align-[-2px] text-foreground" strokeWidth={3} /> : n}

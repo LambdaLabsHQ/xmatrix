@@ -42,7 +42,7 @@ export function BringWorkIn({ spaceId, token, copy }: { spaceId: string; token: 
   const error = connect.error ? userErrorMessage(connect.error, "Couldn't connect the app")
     : draft.error ? userErrorMessage(draft.error, "Couldn't start drafting pages") : null;
   return (
-    <div className="mt-4 border-t-[1px] border-border pt-3" data-testid="bring-work-in">
+    <div className="mt-5" data-testid="bring-work-in">
       <p>{status === "not-connected" ? copy.bringWorkConnect : copy.bringWorkRepos}</p>
       {status === "not-connected" ? (
         <button type="button" disabled={connect.isPending} onClick={() => connect.mutate()}

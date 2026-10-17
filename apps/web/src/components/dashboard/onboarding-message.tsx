@@ -121,17 +121,17 @@ function AgentsInMessage({ spaceId, token, userId, starting, onSendStarter }: {
   });
   if (handles.length === 0 && signedOut.length === 0) return null;
   return (
-    <div className="max-w-[34rem] text-[15px] leading-6" data-onboarding-stage="agents-in">
+    <div className="app-paper-card max-w-[34rem] text-[15px] leading-6" data-onboarding-stage="agents-in">
       <SignedOutAgents registrations={signedOut} token={token} userId={userId} copy={copy} />
       {handles.length > 0 && <>
       <p className={signedOut.length > 0 ? "mt-3" : undefined}>{copy.agentsIn(copy.listNames(handles), handles.length === 1)}</p>
-      <ul className="m-0 mt-3 list-none border-t-[1px] border-border p-0">
+      <ul className="m-0 mt-2 list-none p-0">
         {writer && spaceId && token && pages && (
-          <li className="m-0 border-b-[1px] border-border p-0">
+          <li className="m-0 p-0">
             <button type="button" disabled={Boolean(starting) || coWrite.isPending} onClick={() => {
               recordOnboardingStep(token, { step: "starter_chosen", surface: "welcome", starter: "cowrite" });
               coWrite.mutate(writer);
-            }} className="group/starter flex w-full items-center gap-3 py-3 text-left disabled:opacity-50">
+            }} className="group/starter -mx-2 flex w-[calc(100%+1rem)] items-center gap-3 rounded-lg px-2 py-2 text-left hover:bg-foreground/[0.04] disabled:opacity-50">
               <span className="min-w-0 flex-1">
                 <span className="block font-semibold">{copy.coWrite.title}</span>
                 <span className="block text-[13px] leading-5 text-muted-foreground">{copy.coWrite.detail(writer)}</span>
@@ -141,12 +141,12 @@ function AgentsInMessage({ spaceId, token, userId, starting, onSendStarter }: {
           </li>
         )}
         {copy.starters.map((starter) => (
-          <li key={starter.id} className="m-0 border-b-[1px] border-border p-0">
+          <li key={starter.id} className="m-0 p-0">
             <button type="button" disabled={Boolean(starting)} onClick={() => {
               recordOnboardingStep(token, { step: "starter_chosen", surface: "welcome", starter: starter.id });
               onSendStarter(starter.message);
             }}
-              className="group/starter flex w-full items-center gap-3 py-3 text-left disabled:opacity-50">
+              className="group/starter -mx-2 flex w-[calc(100%+1rem)] items-center gap-3 rounded-lg px-2 py-2 text-left hover:bg-foreground/[0.04] disabled:opacity-50">
               <span className="min-w-0 flex-1">
                 <span className="block font-semibold">{starter.title}</span>
                 <span className="block text-[13px] leading-5 text-muted-foreground">{starter.detail}</span>
