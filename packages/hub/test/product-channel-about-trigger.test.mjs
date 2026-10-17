@@ -240,9 +240,11 @@ test("explicit controls and a nested handoff successor cannot allocate a second 
 test("a harness decided for a first message is summoned by an ordinary @ reply through the same pipeline", async () => {
   const appended = [];
   const committed = [];
+  const summoned = [];
   const dependencies = {
     append: async (_env, channelId, command) => { appended.push({ channelId, command }); return new Response("{}"); },
     postCommit: async input => { committed.push(input); },
+    summoned: async (_env, where) => { summoned.push({ ...where, afterDispatch: committed.length }); },
   };
   const input = { env: {}, channelId: "channel", messageId: "first", actorUserId: "author", harness: "codex" };
   await summonFirstMessageHarness(input, dependencies);
@@ -254,12 +256,17 @@ test("a harness decided for a first message is summoned by an ordinary @ reply t
   assert.deepEqual(command.principal, { kind: "user", id: "author" }, "authorized as the first message's author");
   assert.deepEqual(committed.map(value => [value.messageId, value.body, value.senderKind, value.senderId, value.actorUserId]),
     [["xmatrix-summon:first", "@codex launch:force", "system", "xmatrix", "author"]]);
+  // Marked only once its dispatch returned; until then its coordinator retries it.
+  assert.deepEqual(summoned, [{ channelId: "channel", messageId: "first", afterDispatch: 1 }]);
   // A retry reuses the same message, so it appends and launches nothing new.
   await summonFirstMessageHarness(input, dependencies);
   assert.equal(appended[1].command.messageId, command.messageId);
   await assert.rejects(summonFirstMessageHarness(input, { ...dependencies,
     append: async () => new Response("{}", { status: 503 }) }), /append failed \(503\)/u);
   assert.equal(committed.length, 2, "nothing is interpreted when the append failed");
+  await assert.rejects(summonFirstMessageHarness(input, { ...dependencies,
+    postCommit: async () => { throw new AgentLaunchHandoverUnavailable(503); } }), AgentLaunchHandoverUnavailable);
+  assert.equal(summoned.length, 2, "a summon whose dispatch failed is not marked, so it stays due");
 });
 
 test("a message's side interpretation runs in the background, never holding its response", async () => {

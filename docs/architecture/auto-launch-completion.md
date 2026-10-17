@@ -141,6 +141,17 @@ opens its author's window: reopening an older conversation shows how its choice
 ended and never counts down or reports `shown` again. An Agent-authored first
 message has no window: Jev's reading decides at once and posts the same reply.
 
+The decision and its reply run in the background of the request that sent
+the first message, and that budget can run out before the reply's launch
+dispatches. So once the decision's row exists, the Channel's launch
+coordinator is told about it. A row that is not marked `summoned_at` 20
+seconds after its decision (or, if still undecided, after its deadline) is
+finished by the coordinator's `firstMessageSummon` step. The step posts the
+decided reply, or decides again from the message's own body and then posts.
+The decision is still written once and the reply keeps its derived id, so
+this never starts a second Agent. A row still unsummoned 15 minutes after it
+was created is given up.
+
 ## Routing and rollout
 
 Replay recovers the durable launch before querying candidates or evaluating
