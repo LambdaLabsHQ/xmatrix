@@ -97,6 +97,15 @@ function retryBackoff(attempts: number): number {
   return Math.min(15 * 60_000, 5_000 * 2 ** Math.min(Math.max(0, attempts - 1), 8));
 }
 
+// The latest occurrence and its proved Runs share one projection across all
+// authorized catalogs. Message delivery status is independent of Run creation.
+const LATEST_OCCURRENCE_SQL = `SELECT x.*,(SELECT COALESCE(jsonb_agg(jsonb_build_object(
+  'runId',link.run_id,'instanceId',link.instance_id,'channelId',link.channel_id,'status',link.status)
+  ORDER BY link.selection_index,link.run_id),'[]'::jsonb) FROM data.automation_occurrence_runs link
+  WHERE link.occurrence_id=x.occurrence_id) AS run_links
+  FROM data.automation_occurrences x WHERE x.automation_id=t.automation_id
+  ORDER BY x.scheduled_for DESC,x.occurrence_id DESC LIMIT 1`;
+
 // The Hub shares one occurrence lifecycle with the retiring Durable Object
 // authority, whose SQLite row still says task_id/task_version; this maps the
 // PostgreSQL columns onto that in-memory row shape.
@@ -106,8 +115,8 @@ function occurrence(row: QueryResultRow): Record<string, unknown> {
     scheduled_for: iso(row.scheduled_for), status: String(row.status),
     lease_owner: row.lease_owner ? String(row.lease_owner) : null,
     lease_until: row.lease_until ? iso(row.lease_until) : null, attempts: Number(row.attempts),
-    next_attempt_at: iso(row.next_attempt_at), run_id: String(row.run_id),
-    instance_id: String(row.instance_id), control_id: String(row.control_id),
+    next_attempt_at: iso(row.next_attempt_at), run_id: row.run_id ? String(row.run_id) : null,
+    instance_id: row.instance_id ? String(row.instance_id) : null, control_id: String(row.control_id),
     delivery_kind: String(row.delivery_kind), message_id: row.message_id ? String(row.message_id) : null,
     error_code: row.error_code ? String(row.error_code) : null,
     error_message: row.error_message ? String(row.error_message) : null,
@@ -316,6 +325,7 @@ function automationFromRow(row: QueryResultRow): Record<string, unknown> {
   const taskCapabilities = capabilities(row);
   const canManage = Object.values(taskCapabilities).some((value) => value === true);
   const latest = row.execution_status ? {
+    runs: Array.isArray(row.execution_runs) ? row.execution_runs : [],
     status: String(row.execution_status), attempts: Number(row.execution_attempts) || 0,
     scheduledFor: iso(row.execution_scheduled_for), nextAttemptAt: iso(row.execution_next_attempt_at),
     updatedAt: iso(row.execution_updated_at),
@@ -336,7 +346,7 @@ function automationFromRow(row: QueryResultRow): Record<string, unknown> {
     nextRunAt: iso(row.next_run_at),
     enabled: row.enabled === true, runCount,
     ...(row.last_run_at ? { lastRunAt: iso(row.last_run_at) } : {}),
-    ...(row.last_run_id ? { lastRunId: String(row.last_run_id) } : {}),
+    ...(!messageAutomation && row.last_run_id ? { lastRunId: String(row.last_run_id) } : {}),
     ...(row.last_run_status ? { lastRunStatus: String(row.last_run_status) } : {}),
     ...(row.last_run_finished_at ? { lastRunFinishedAt: iso(row.last_run_finished_at) } : {}),
     ...(row.execution_cancellation ? { executionCancellation: publicExecutionCancellation(row.execution_cancellation) } : {}),
@@ -835,11 +845,10 @@ export class PostgresAutomationRepository {
           o.status AS execution_status,o.attempts AS execution_attempts,o.scheduled_for AS execution_scheduled_for,
           o.next_attempt_at AS execution_next_attempt_at,o.updated_at AS execution_updated_at,
           o.finished_at AS execution_finished_at,o.error_code AS execution_error_code,
-          o.error_message AS execution_error_message
+          o.error_message AS execution_error_message,o.run_links AS execution_runs
           FROM data.automations t JOIN data.channels c ON c.channel_id=t.channel_id
           LEFT JOIN data.runs r ON r.run_id=t.last_run_id AND r.owner_user_id=t.owner_user_id
-          LEFT JOIN LATERAL (SELECT * FROM data.automation_occurrences x WHERE x.automation_id=t.automation_id
-            ORDER BY x.scheduled_for DESC,x.occurrence_id DESC LIMIT 1) o ON true
+          LEFT JOIN LATERAL (${LATEST_OCCURRENCE_SQL}) o ON true
           WHERE t.channel_id=$2
             AND ${channelCapabilityPredicate({ capability: "automation_history_read", channelAlias: "c",
               principalKindSql: "'agent'", principalIdSql: "$1" })}
@@ -857,13 +866,12 @@ export class PostgresAutomationRepository {
         o.status AS execution_status,o.attempts AS execution_attempts,o.scheduled_for AS execution_scheduled_for,
         o.next_attempt_at AS execution_next_attempt_at,o.updated_at AS execution_updated_at,
         o.finished_at AS execution_finished_at,o.error_code AS execution_error_code,
-        o.error_message AS execution_error_message
+        o.error_message AS execution_error_message,o.run_links AS execution_runs
         FROM data.automations t JOIN data.channels c ON c.channel_id=t.channel_id
         JOIN data.space_members sm ON sm.space_id=c.space_id AND sm.user_id=$1
         LEFT JOIN data.channel_access ca ON ca.channel_id=c.channel_id AND ca.subject_kind='user' AND ca.subject_id=$1
         LEFT JOIN data.runs r ON r.run_id=t.last_run_id AND r.owner_user_id=t.owner_user_id
-        LEFT JOIN LATERAL (SELECT * FROM data.automation_occurrences x WHERE x.automation_id=t.automation_id
-          ORDER BY x.scheduled_for DESC,x.occurrence_id DESC LIMIT 1) o ON true
+        LEFT JOIN LATERAL (${LATEST_OCCURRENCE_SQL}) o ON true
         WHERE ${humanReadable("$1")}
           AND ($2::text IS NULL OR c.space_id=$2) AND ($3::text IS NULL OR c.channel_id=$3)
           AND ${MESSAGE_AUTOMATION_SQL} AND t.automation_id>$4 ORDER BY t.automation_id LIMIT $5`,
@@ -889,11 +897,10 @@ export class PostgresAutomationRepository {
         o.status AS execution_status,o.attempts AS execution_attempts,o.scheduled_for AS execution_scheduled_for,
         o.next_attempt_at AS execution_next_attempt_at,o.updated_at AS execution_updated_at,
         o.finished_at AS execution_finished_at,o.error_code AS execution_error_code,
-        o.error_message AS execution_error_message
+        o.error_message AS execution_error_message,o.run_links AS execution_runs
         FROM data.automations t JOIN data.channels c ON c.channel_id=t.channel_id
         LEFT JOIN data.runs r ON r.run_id=t.last_run_id AND r.owner_user_id=t.owner_user_id
-        LEFT JOIN LATERAL (SELECT * FROM data.automation_occurrences x WHERE x.automation_id=t.automation_id
-          ORDER BY x.scheduled_for DESC,x.occurrence_id DESC LIMIT 1) o ON true
+        LEFT JOIN LATERAL (${LATEST_OCCURRENCE_SQL}) o ON true
         WHERE t.page_id=$1 AND c.space_id=$2 ORDER BY t.created_at,t.automation_id LIMIT 200`,
       values: [text(input.pageId, "pageId", 300), spaceId], maxRows: 200 });
       const visible = await withPageAccess(tx, text(input.userId, "userId", 300), rows);
@@ -928,14 +935,13 @@ export class PostgresAutomationRepository {
           o.status AS execution_status,o.attempts AS execution_attempts,
           o.scheduled_for AS execution_scheduled_for,o.next_attempt_at AS execution_next_attempt_at,
           o.updated_at AS execution_updated_at,o.finished_at AS execution_finished_at,
-          o.error_code AS execution_error_code,o.error_message AS execution_error_message
+          o.error_code AS execution_error_code,o.error_message AS execution_error_message,o.run_links AS execution_runs
           FROM data.automations t JOIN data.channels c ON c.channel_id=t.channel_id
           JOIN data.space_members sm ON sm.space_id=c.space_id AND sm.user_id=$1
           LEFT JOIN data.channel_access ca ON ca.channel_id=c.channel_id
             AND ca.subject_kind='user' AND ca.subject_id=$1
           LEFT JOIN data.runs r ON r.run_id=t.last_run_id AND r.owner_user_id=t.owner_user_id
-          LEFT JOIN LATERAL (SELECT * FROM data.automation_occurrences x
-            WHERE x.automation_id=t.automation_id ORDER BY x.scheduled_for DESC,x.occurrence_id DESC LIMIT 1) o ON true
+          LEFT JOIN LATERAL (${LATEST_OCCURRENCE_SQL}) o ON true
           WHERE c.space_id=ANY($2::text[]) AND ${humanReadable("$1")}
             AND ${MESSAGE_AUTOMATION_SQL} AND t.automation_id>$3 ORDER BY t.automation_id LIMIT $4`,
         values: [input.userId, group.map((route) => route.spaceId), input.cursor, input.limit + 1],
@@ -968,11 +974,10 @@ export class PostgresAutomationRepository {
           o.status AS execution_status,o.attempts AS execution_attempts,o.scheduled_for AS execution_scheduled_for,
           o.next_attempt_at AS execution_next_attempt_at,o.updated_at AS execution_updated_at,
           o.finished_at AS execution_finished_at,o.error_code AS execution_error_code,
-          o.error_message AS execution_error_message
+          o.error_message AS execution_error_message,o.run_links AS execution_runs
           FROM data.automations t JOIN data.channels c ON c.channel_id=t.channel_id
           LEFT JOIN data.runs r ON r.run_id=t.last_run_id AND r.owner_user_id=t.owner_user_id
-          LEFT JOIN LATERAL (SELECT * FROM data.automation_occurrences x WHERE x.automation_id=t.automation_id
-            ORDER BY x.scheduled_for DESC,x.occurrence_id DESC LIMIT 1) o ON true
+          LEFT JOIN LATERAL (${LATEST_OCCURRENCE_SQL}) o ON true
           WHERE t.automation_id=$2 AND t.channel_id=$3 AND ${agentBirthBindingSql("t.channel_id", "$1")}
             AND ${channelCapabilityPredicate({ capability: "automation_history_read", channelAlias: "c",
               principalKindSql: "'agent'", principalIdSql: "$1" })} AND ${MESSAGE_AUTOMATION_SQL} LIMIT 1`,
@@ -987,13 +992,12 @@ export class PostgresAutomationRepository {
         o.status AS execution_status,o.attempts AS execution_attempts,o.scheduled_for AS execution_scheduled_for,
         o.next_attempt_at AS execution_next_attempt_at,o.updated_at AS execution_updated_at,
         o.finished_at AS execution_finished_at,o.error_code AS execution_error_code,
-        o.error_message AS execution_error_message
+        o.error_message AS execution_error_message,o.run_links AS execution_runs
         FROM data.automations t JOIN data.channels c ON c.channel_id=t.channel_id
         JOIN data.space_members sm ON sm.space_id=c.space_id AND sm.user_id=$1
         LEFT JOIN data.channel_access ca ON ca.channel_id=c.channel_id AND ca.subject_kind='user' AND ca.subject_id=$1
         LEFT JOIN data.runs r ON r.run_id=t.last_run_id AND r.owner_user_id=t.owner_user_id
-        LEFT JOIN LATERAL (SELECT * FROM data.automation_occurrences x WHERE x.automation_id=t.automation_id
-          ORDER BY x.scheduled_for DESC,x.occurrence_id DESC LIMIT 1) o ON true
+        LEFT JOIN LATERAL (${LATEST_OCCURRENCE_SQL}) o ON true
         WHERE t.automation_id=$2 AND ${humanReadable("$1")} AND ${MESSAGE_AUTOMATION_SQL} LIMIT 1`,
       values: [userId, automationId], maxRows: 1 }));
       if (!rows[0]) throw new AutomationControlError(
@@ -1119,12 +1123,12 @@ export class PostgresAutomationRepository {
           continue;
         }
         const occurrenceId = `scheduled-occurrence:${crypto.randomUUID()}`;
-        // The occurrence records its reserved natural key; the dispatch that
-        // later starts it must use exactly these ids.
+        // Message occurrences deliver invocations, not Runs. Registration launch
+        // owns every actual Run, joined by its exact canonical source message.
         const legacyIds = executionIds(occurrenceId);
-        const reserved = await reserveNaturalKey(tx, { creationKey: legacyIds.runId,
+        const reserved = deliveryKind === "message" ? null : await reserveNaturalKey(tx, { creationKey: legacyIds.runId,
           channelId: String(current.channel_id), scope: "instance", at: now });
-        const ids = { ...legacyIds, runId: reserved.runId, instanceId: reserved.instanceId! };
+        const ids = { ...legacyIds, runId: reserved?.runId ?? null, instanceId: reserved?.instanceId ?? null };
         const messageId = deliveryKind === "message"
           ? `scheduled-message:${occurrenceId.slice("scheduled-occurrence:".length)}`.slice(0, 200) : null;
         // The occurrence takes the events that made it due, to name them.

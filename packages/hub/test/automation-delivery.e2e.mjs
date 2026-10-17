@@ -18,6 +18,7 @@ import {
   waitForChannelHistoryMessage,
   waitForTask,
 } from "./automation-api.fixture.mjs";
+import { inWorkerTransaction } from "./registration-launch.fixture.mjs";
 
 async function sectionClaims(worker, spaceId, pageId) {
   return (await json(await worker.fetch(
@@ -62,6 +63,11 @@ test("due Automation commits one canonical message with App metadata and no dupl
     assert.equal(delivered.metadata?.appMentions?.[0]?.appId, "github");
     assert.equal(delivered.metadata?.appMentions?.[0]?.actionId, "issue_to_channel");
     assert.equal(persisted.lastMessageId, delivered.messageId);
+    assert.deepEqual(persisted.latestExecution.runs, [], "message delivery alone proves no Run");
+    const [occurrence] = await inWorkerTransaction(worker, tx => tx.query({ text:
+      "SELECT run_id,instance_id FROM data.automation_occurrences WHERE automation_id=$1",
+    values: [task.id] }));
+    assert.deepEqual(occurrence, { run_id: null, instance_id: null }, "message occurrences reserve no phantom Run");
     assert.equal(persisted.lastRunAt !== undefined, true);
     assert.equal(Date.parse(persisted.nextRunAt) > Date.now(), true);
     assert.equal((await channelHistory(worker, task.channelId))
@@ -134,6 +140,11 @@ test("scheduled tagged Auto uses the shared post-commit dispatcher without a lau
     // The occurrence's Run works in the occurrence's own conversation.
     assert.equal(spawn.channelId, persisted.lastChannelId);
     assert.notEqual(spawn.channelId, task.channelId);
+    assert.deepEqual(persisted.latestExecution.runs?.map(({ runId, instanceId, channelId }) =>
+      ({ runId, instanceId, channelId })),
+    [{ runId: spawn.runId, instanceId: spawn.instanceId, channelId: spawn.channelId }],
+    "the occurrence links the persisted Run created from its exact message");
+    assert.equal(persisted.lastRunId, undefined, "a delivered message is not a Run id");
     // Its section is held for that conversation from the start, so a Run that never writes it leaves it owed.
     const [held] = await sectionClaims(worker, space.id, persisted.pageId);
     assert.equal(held.blockId, "schedules");
@@ -203,6 +214,44 @@ test("pausing before due prevents the scheduled message commit", async () => {
     const persisted = (await listTasks(worker)).automations.find((candidate) => candidate.id === task.id);
     assert.equal(persisted.deliveryCount, 0);
   } finally {
+    await worker.stop();
+  }
+});
+
+test("one occurrence associates every concurrent invocation with its own persisted Run", async () => {
+  const unique = randomUUID();
+  const worker = await startPgHubWorker({ vars: {
+    XMATRIX_MOCK_AUTH_TOKEN: MOCK_TOKEN,
+    XMATRIX_MOCK_AUTH_USER_ID: `scheduled-multiple-${unique}`,
+    XMATRIX_MOCK_AUTH_EMAIL: "scheduled-multiple@example.com",
+    RELAY_AUTOMATION_EXECUTION_ENABLED: "true", XMATRIX_MOCK_SCHEDULE_DELAY_MS: "1200",
+  } });
+  let daemon;
+  try {
+    const machineId = `machine:multiple-${unique}`, hostId = `multiple-${unique}`;
+    daemon = await connectDaemon(worker, { machineId, hostId });
+    const { space } = await createSpaceAndChannel(worker, unique, "multiple");
+    const { key: registration, canonicalCwd } = await createRoutableAgent(worker,
+      { token: MOCK_TOKEN, spaceId: space.id, name: `multiple-${unique}`, machineId, hostId });
+    const summon = `@auto harness:codex machine:${machineId} pwd:"${canonicalCwd}"`;
+    const task = await createTask(worker, { spaceId: space.id, name: "Concurrent occurrence invocations",
+      message: { body: `${summon} inspect first\n${summon} inspect second` }, intervalMinutes: 15 });
+    const first = await daemon.inbox.waitFor(message => message.type === "machine_spawn_agent" &&
+      isSpawnOf(message, registration), "first invocation", 20_000);
+    const second = await daemon.inbox.waitFor(message => message.type === "machine_spawn_agent" &&
+      isSpawnOf(message, registration) && message.runId !== first.runId, "second invocation", 20_000);
+    assert.equal(first.channelId, second.channelId);
+    assert.equal(first.sourceMessageId, second.sourceMessageId);
+    const persisted = await waitForTask(worker, task.id, candidate => candidate.latestExecution?.runs?.length === 2);
+    assert.deepEqual(persisted.latestExecution.runs.map(run => run.runId).sort(), [first.runId, second.runId].sort());
+    assert.notEqual(first.instanceId, second.instanceId);
+    for (const spawn of [first, second]) sendSpawnResult(daemon, spawn,
+      { channelId: spawn.channelId, ok: false, error: "provider startup rejected for regression" });
+    const failed = await waitForTask(worker, task.id,
+      candidate => candidate.latestExecution?.runs?.every(run => run.status === "failed"));
+    assert.equal(failed.latestExecution.runs.length, 2, "failed provider starts remain attributable persisted Runs");
+  } finally {
+    daemon?.ws.close();
     await worker.stop();
   }
 });
