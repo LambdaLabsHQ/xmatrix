@@ -382,7 +382,7 @@ use super::protocol::{
     MessageSender, SerializedAgent,
 };
 use super::{
-    AcpSession, AcpTransportKind, AcpVendorConfig, AgentPresentationAdapter,
+    AcpSession, AcpVendorConfig, AgentPresentationAdapter,
     AgentPresentationFacts, AgentRuntimeStateTracker, CodexAppSession, CodexThreadActivity,
     CodexThreadActivityEvent, CodexTransportKind, CodexTransportRecoveryState,
     DAEMON_COMMAND_ADMISSION_REQUEST_TIMEOUT_SECS, DAEMON_COMMAND_LEASE_RENEW_FAILURE_WINDOW_SECS,
@@ -422,7 +422,7 @@ use super::{
     extract_llm_usage, finish_agent_disconnect, format_incoming_channel_message,
     format_incoming_channel_message_with_context, format_incoming_channel_message_with_local_paths,
     generic_acp_spawn_args, goal_resume_turn_payload, grok_acp_spawn_args,
-    grok_resume_session_path, grok_ws_url_from_banner_line,
+    grok_resume_session_path, StderrTail, with_stderr_tail,
     headless_identity_runtime_mismatch_from_values, image_extension_for_mime_type,
     inbound_channel_message_from_event, inbound_delivery_batch_max_messages_from_env,
     is_bounded_retryable_session_register_error, is_claude_code_agent, is_claude_launcher_token,
