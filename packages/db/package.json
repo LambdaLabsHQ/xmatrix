@@ -20,6 +20,7 @@
     "sql:prepare-audit": "node scripts/sql-prepare-audit.mjs",
     "compatibility:smoke": "node scripts/compatibility-smoke.mjs",
     "capacity:inspect": "node scripts/substrate.mjs capacity",
+    "automation:run-links": "node scripts/automation-run-links-report.mjs",
     "shard:admission": "node scripts/shard-admission.mjs",
     "lifecycle:maintain": "node scripts/postgres-lifecycle-maintenance.mjs",
     "space:move": "node scripts/space-shard-move.mjs",
