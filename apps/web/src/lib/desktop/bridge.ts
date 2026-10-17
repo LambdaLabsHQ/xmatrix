@@ -1,6 +1,6 @@
 "use client";
 import type { DesktopUpdateStatus, DesktopDaemonStatus, DesktopCliInstallResult, DesktopSetupStatus, DesktopClipboardImage, DesktopCliSessionPayload, DesktopNotification, DesktopBadgeState, DesktopNotificationReply, DesktopAgentPresetInput, DesktopWorkspaceCandidateFields, DesktopAgentPresetDiscoveryShape } from "@xmatrix/protocol";
-export type { DesktopUpdateStatus, DesktopDaemonStatus, DesktopCliInstallResult, DesktopSetupStatus, DesktopClipboardImage, DesktopCliSessionPayload } from "@xmatrix/protocol";
+export type { DesktopUpdateStatus, DesktopDaemonStatus, DesktopDaemonFailure, DesktopCliInstallResult, DesktopSetupStatus, DesktopClipboardImage, DesktopCliSessionPayload } from "@xmatrix/protocol";
 
 type NativeBridgeClient = "desktop" | "ios" | "android" | string;
 type NativeBridgePlatform = NodeJS.Platform | "ios" | "android" | string;

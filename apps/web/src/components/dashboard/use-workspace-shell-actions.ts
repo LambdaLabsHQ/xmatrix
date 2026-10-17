@@ -4,6 +4,7 @@ import { presenceInstanceId } from "@xmatrix/protocol";
 import type { ObservabilityEvent } from "@xmatrix/protocol";
 import { pageShellActions } from "./page-shell-actions";
 import { useDesktopFullScreen } from "@/lib/desktop/use-desktop-full-screen";
+import { reportDesktopDaemonFailure } from "@/lib/desktop-daemon-failure-report";
 import { discussionDraft, discussionTitle } from "./selection-discussion";
 import { pageApi } from "@/lib/pages/page-client";
 import { createConversation } from "./start-conversation";
@@ -1026,6 +1027,11 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
       cancelled = true;
     };
   }, [s.desktopBridge, s.desktopDaemonStatus, s.token, setDesktopContext, s.desktopCliSessionSyncTokenRef, setDesktopDaemonStatus, readLocalMachineName]);
+
+  const daemonFailure = s.desktopDaemonStatus?.state === "running" ? undefined : s.desktopDaemonStatus?.failure;
+  useEffect(() => {
+    if (daemonFailure && s.desktopContext) reportDesktopDaemonFailure(s.token, daemonFailure, s.desktopContext);
+  }, [daemonFailure, s.desktopContext, s.token]);
 
   useEffect(() => {
     if (!s.desktopBridge) return;
