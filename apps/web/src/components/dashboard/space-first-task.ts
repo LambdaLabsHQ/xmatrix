@@ -73,13 +73,6 @@ export function spaceFirstTaskState(input: {
   return { kind: "first-task", agent };
 }
 
-/** A folder suggestion the human can accept in the picker, named for the Space. */
-export function suggestedSpaceFolderName(spaceName: string | undefined): string {
-  const trimmed = (spaceName || "").trim();
-  if (!trimmed) return "xmatrix";
-  return trimmed;
-}
-
 export type FirstTaskComposition =
   | { ok: true; body: string }
   | { ok: false; reason: string };

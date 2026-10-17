@@ -458,9 +458,8 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       spaceAgents,
       spaceChannelCount,
       spaceId: currentSpaceId,
-      folderPickerAvailable: Boolean(desktopBridge?.chooseWorkspaceDirectory),
     }),
-    [spaceAgents, spaceChannelCount, currentSpaceId, desktopBridge, channelsLoaded, agentsLoaded]
+    [spaceAgents, spaceChannelCount, currentSpaceId, channelsLoaded, agentsLoaded]
   );
   // Only on the empty first screen: an open conversation is never covered.
   const showSpaceAgentSetup = (spaceAgentSetup.kind !== "hidden" || keepHarnessSetup) && !selectedChannel;
@@ -496,9 +495,9 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
 
   async function startFirstTask(message: string) {
     if (!token || !user || !currentSpaceId) return;
-    if (spaceFirstTask.kind !== "needs-workspace" || !firstTaskWorkspace) return;
+    if (spaceFirstTask.kind !== "first-task") return;
     const composed = composeFirstTaskMessage({
-      workspacePath: firstTaskWorkspace.canonicalCwd,
+      workspacePath: firstTaskWorkspace?.canonicalCwd,
       message,
     });
     if (!composed.ok) {
@@ -923,6 +922,22 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
   const showMobileAgentSetup = isMobileViewport && showSpaceAgentSetup && (
     (installedFleet.ready && installedFleet.candidates.length > 0) ||
     (spaceAgentSetup.kind === "no-local-machine" && spaceChannelCount === 0));
+  // Likewise the first task takes the phone list's place while the Space has an
+  // agent and no conversation.
+  const showMobileFirstTask = isMobileViewport && showSpaceFirstTask;
+  const renderSpaceFirstTask = () => (
+        <div className="app-tool-paper app-tool-detail min-h-0 flex-1 overflow-y-auto">
+          <SpaceFirstTaskCard
+            state={spaceFirstTask}
+            folderPicker={Boolean(desktopBridge?.chooseWorkspaceDirectory)}
+            workspace={firstTaskWorkspace}
+            busy={firstTaskBusy}
+            error={firstTaskError}
+            onChooseWorkspace={() => void chooseFirstTaskWorkspace()}
+            onLaunch={(task) => void startFirstTask(task)}
+          />
+        </div>
+  );
   const renderSpaceAgentSetup = (phone: boolean) => (
         <div className="app-tool-paper app-tool-detail min-h-0 flex-1 overflow-y-auto">
           <SpaceAgentSetupCard
@@ -957,7 +972,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
        is — otherwise "the channel list" and "Follow-ups" are the same
        selector now that both stay mounted. */
     <div className="app-mobile-chat-pane app-mobile-channel-list-pane relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden md:hidden">
-      {showMobileAgentSetup ? renderSpaceAgentSetup(true) : <MobileChannelChatList
+      {showMobileAgentSetup ? renderSpaceAgentSetup(true) : showMobileFirstTask ? renderSpaceFirstTask() : <MobileChannelChatList
             currentSpaceId={currentSpaceId}
             catalogPaging={currentSpaceCatalog}
             fallbackChannels={cachedCatalogChannels}
@@ -1050,19 +1065,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
           onOpenPage={openPage} excludePageId={placement === "beside-page" ? selectedPageId : null} />
       )}
       {showSpaceAgentSetup && !showMobileAgentSetup && renderSpaceAgentSetup(false)}
-      {showSpaceFirstTask && (
-        <div className="app-tool-paper app-tool-detail min-h-0 flex-1 overflow-y-auto">
-          <SpaceFirstTaskCard
-            state={spaceFirstTask}
-            spaceName={currentSpace?.name}
-            workspace={firstTaskWorkspace}
-            busy={firstTaskBusy}
-            error={firstTaskError}
-            onChooseWorkspace={() => void chooseFirstTaskWorkspace()}
-            onLaunch={(task) => void startFirstTask(task)}
-          />
-        </div>
-      )}
+      {showSpaceFirstTask && !showMobileFirstTask && renderSpaceFirstTask()}
       {selectedChannel && !showSpaceAgentSetup && !showSpaceFirstTask && placement !== "page-margin" && (
         <MobileChannelSummaryPlaque
           summary={selectedChannel.summary}
