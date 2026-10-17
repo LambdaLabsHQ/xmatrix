@@ -66,7 +66,9 @@ to my computer", which emails the command's link to the person's own sign-in
 address, and that link continues the same setup on the computer.
 
 - `POST /api/setup-intents/:intentId/email` (Web:
-  `/api/xmatrix/setup-intents/:intentId/email`) takes no body. The Hub reads
+  `/api/xmatrix/setup-intents/:intentId/email`) takes only `{ locale }`, the
+  language of the person's first ten minutes; the email and the day's-limit
+  sentence are written in it (English or Chinese). The Hub reads
   the intent as its owner, so another person's or an expired intent answers
   404, and sends to the address of the signed-in account, never one the caller
   names. It goes through the same Cloudflare Email Sending binding as sign-in

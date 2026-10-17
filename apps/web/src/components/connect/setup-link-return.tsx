@@ -4,6 +4,8 @@ import { useEffect } from "react";
 import { WEB_PROXY_ROUTES, type SetupIntentStatus } from "@xmatrix/protocol";
 import { rememberSetupIntent } from "@/components/dashboard/use-setup-intent";
 import { useAuth } from "@/lib/auth-context";
+import { ONBOARDING_COPY } from "@/lib/onboarding-copy";
+import { useBrowserOnboardingLocale } from "@/lib/onboarding-locale";
 import { xmatrixApiRequest } from "@/lib/query/api-client";
 
 /** Where the setup link a person emailed from their phone lands on their
@@ -13,6 +15,7 @@ import { xmatrixApiRequest } from "@/lib/query/api-client";
 export function SetupLinkReturn() {
   const { loading, session } = useAuth();
   const token = session?.access_token;
+  const copy = ONBOARDING_COPY[useBrowserOnboardingLocale()];
   useEffect(() => {
     if (loading) return;
     const intentId = new URLSearchParams(window.location.search).get("intent") ?? "";
@@ -29,8 +32,7 @@ export function SetupLinkReturn() {
   }, [loading, token]);
   return (
     <main className="mx-auto flex min-h-screen max-w-lg flex-col justify-center gap-5 px-6 py-12">
-      <h1 className="text-2xl font-semibold">Bring your agents into xMatrix</h1>
-      <p className="text-sm text-muted-foreground">Opening your setup…</p>
+      <p className="text-sm text-muted-foreground">{copy.continueSetup}</p>
     </main>
   );
 }
