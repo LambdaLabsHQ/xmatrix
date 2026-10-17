@@ -5,6 +5,16 @@ import { GitPullRequest } from "lucide-react";
 
 import { actionClass } from "@/components/ui/action-tone";
 import { linkGitHubAccount, linkedGitHubAccount, unlinkGitHubAccount } from "@/lib/auth-client";
+import { getDesktopBridge } from "@/lib/desktop/bridge";
+
+/**
+ * GitHub's sign-in opens in the system browser from an app, and its answer
+ * only counts in the browser that asked; so an app links from the browser.
+ */
+function linkGitHub(): Promise<void> {
+  const app = getDesktopBridge();
+  return app ? app.openExternal(window.location.href) : linkGitHubAccount(window.location.href);
+}
 
 /**
  * The GitHub account that is this person's. Their pull requests pass the
@@ -17,7 +27,7 @@ export function GitHubAccountLink() {
   const change = useMutation({
     mutationFn: () => account.data
       ? unlinkGitHubAccount(account.data.accountId)
-      : linkGitHubAccount(window.location.href),
+      : linkGitHub(),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["auth", "linked-github-account"] }),
   });
   return (
