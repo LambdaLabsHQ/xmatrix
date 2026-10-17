@@ -63,6 +63,9 @@ test.describe("desktop", () => {
     // Which first task people choose is counted too.
     await expect.poll(() => fixtureRequestBodies(page, "funnel"))
       .toEqual([{ step: "starter_chosen", surface: "welcome", device: "desktop_web", starter: "plan" }]);
+    // Until that agent is here there is nothing to address, and another starter would start a second one.
+    await expect(agentsIn.getByRole("status")).toHaveText("Starting an agent…");
+    await expect(agentsIn.getByRole("button", { name: /Write a page about my project/u })).toBeDisabled();
   });
 
   test("a starter goes to the agent already in the conversation instead of starting another", async ({ page }) => {

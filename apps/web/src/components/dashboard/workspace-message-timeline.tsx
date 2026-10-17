@@ -287,7 +287,7 @@ import { useAndroidBackHandler } from "./use-android-back";
 
 import { cn } from "@/lib/utils";
 import { CrossSpaceReadCard, crossSpaceReadMetadata } from "@/components/dashboard/cross-space-read-card";
-import { OnboardingMessage, starterAddress } from "@/components/dashboard/onboarding-message";
+import { OnboardingMessage, starterAddress, startingStarter } from "@/components/dashboard/onboarding-message";
 import {
   SecretAccessRequestCardView, SecretRequestCardView, secretAccessRequestMetadata, secretRequestMetadata,
 } from "@/components/dashboard/secret-request-card";
@@ -586,6 +586,9 @@ export const MessageTimeline = memo(function MessageTimeline({
     }
     return grouped;
   }, [invocationQueryData]);
+  const starting = useMemo(() => startingStarter({ presence: channel?.presence, timeline,
+    launches: agentLaunchesByMessage, refused: invocationRejectionsByMessage }),
+  [channel?.presence, timeline, agentLaunchesByMessage, invocationRejectionsByMessage]);
   const launchChoicesByMessage = useMemo(() => new Map((invocationQueryData?.launchChoices ?? [])
     .map(choice => [choice.messageId, choice] as const)), [invocationQueryData]);
   const registrationCatalog = useAgentRegistrationCatalog(channel?.spaceId ?? "", token ?? "",
@@ -1175,6 +1178,8 @@ export const MessageTimeline = memo(function MessageTimeline({
                       message.author === reborningSenderKey)
                   }
                   onQuestionnaireAnswer={stableOnQuestionnaireAnswer}
+                  // Only the welcome row reads it, so only that row renders when it changes.
+                  starterStarting={onboardingStageOf(message.metadata) ? starting : undefined}
                   onSendStarter={stableOnSendStarter}
                   onOpenAgentTrace={stableOnOpenAgentTrace}
                   onOpenHumanProfile={stableOnOpenHumanProfile}
@@ -1696,6 +1701,7 @@ export const MessageRow = memo(function MessageRow({
   reborningSender,
   onQuestionnaireAnswer,
   onSendStarter,
+  starterStarting,
   onOpenAgentTrace,
   onOpenHumanProfile,
   onOpenInternalAppLink,
@@ -2561,7 +2567,7 @@ export const MessageRow = memo(function MessageRow({
             )}
             {onboardingStage ? (
               <OnboardingMessage stage={onboardingStage} spaceId={channel?.spaceId ?? null} token={token}
-                userId={currentUserIdentityId.replace(/^user:/, "")} onSendStarter={onSendStarter} />
+                userId={currentUserIdentityId.replace(/^user:/, "")} starting={starterStarting} onSendStarter={onSendStarter} />
             ) : crossSpaceRead ? (
               <CrossSpaceReadCard
                 request={crossSpaceRead}
