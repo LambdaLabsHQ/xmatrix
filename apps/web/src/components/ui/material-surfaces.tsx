@@ -75,27 +75,3 @@ export const LiquidGlassPill = React.forwardRef<HTMLElement, LiquidPillProps>(
   }
 );
 
-export type MaterialChipTone = "neutral" | "success" | "warning" | "muted";
-
-type MaterialChipProps = React.HTMLAttributes<HTMLElement> & {
-  as?: React.ElementType;
-  tone?: MaterialChipTone;
-  type?: React.ButtonHTMLAttributes<HTMLButtonElement>["type"];
-};
-
-export const MaterialChip = React.forwardRef<HTMLElement, MaterialChipProps>(function MaterialChip(
-  { as, className, tone = "neutral", ...props },
-  ref
-) {
-  const Component = as || "span";
-
-  return (
-    <Component
-      ref={ref}
-      data-material="chip"
-      data-tone={tone}
-      className={cn("app-material-chip", className)}
-      {...props}
-    />
-  );
-});
