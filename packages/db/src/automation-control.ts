@@ -296,7 +296,21 @@ async function withPageAccess(tx: DatabaseTransaction, userId: string,
     const access = pages.get(String(row.page_id));
     if (access) visible.push({ ...row, can_manage: access.canEdit });
   }
-  return visible;
+  return withEventReadAccess(tx, userId, visible);
+}
+
+/** A readable schedule does not grant use of the Space's connected apps or their event details. */
+async function withEventReadAccess(tx: DatabaseTransaction, userId: string,
+  rows: readonly QueryResultRow[]): Promise<QueryResultRow[]> {
+  const channels = [...new Set(rows.filter((row) => Array.isArray(row.trigger_events) && row.trigger_events.length)
+    .map((row) => String(row.channel_id)))];
+  if (channels.length === 0) return [...rows];
+  const allowed = await tx.query<QueryResultRow>({ name: "automation_event_read_access_v1", text: `SELECT c.channel_id
+    FROM data.channels c JOIN data.space_members m ON m.space_id=c.space_id AND m.user_id=$2
+    WHERE c.channel_id=ANY($1::text[]) AND m.role IN ('owner','admin','member')`,
+  values: [channels, userId], maxRows: channels.length });
+  const readable = new Set(allowed.map((row) => String(row.channel_id)));
+  return rows.map((row) => readable.has(String(row.channel_id)) ? row : { ...row, trigger_events: null });
 }
 
 /** The Human read predicate: a page's Automation passes here and is checked against its page afterwards. */
@@ -854,7 +868,7 @@ export class PostgresAutomationRepository {
               principalKindSql: "'agent'", principalIdSql: "$1" })}
             AND ${MESSAGE_AUTOMATION_SQL} AND t.automation_id>$3 ORDER BY t.automation_id LIMIT $4`,
         values: [authority.principalId, authority.channelId, cursor, limit + 1], maxRows: limit + 1 });
-        const page = rows.slice(0, limit);
+        const page = await withEventReadAccess(tx, authority.ownerUserId, rows.slice(0, limit));
         return { tasks: page.map(automationFromRow), cursor: rows.length > limit
           ? String(page.at(-1)?.automation_id ?? "") : null,
           executionEnabled: true, agentManagementEnabled: true };
@@ -983,7 +997,8 @@ export class PostgresAutomationRepository {
               principalKindSql: "'agent'", principalIdSql: "$1" })} AND ${MESSAGE_AUTOMATION_SQL} LIMIT 1`,
         values: [authority.principalId, automationId, authority.channelId], maxRows: 1 });
         if (!rows[0]) throw new AutomationControlError("automation_not_found", 404, "Automation not found");
-        return { task: automationFromRow(rows[0]) };
+        const visible = await withEventReadAccess(tx, authority.ownerUserId, rows);
+        return { task: automationFromRow(visible[0]!) };
       }
       const userId = humanPrincipal(input);
       const rows = await withPageAccess(tx, userId, await tx.query<QueryResultRow>({ name: "automation_get_v5", text: `SELECT
