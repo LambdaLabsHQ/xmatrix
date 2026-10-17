@@ -188,7 +188,7 @@ export type {
 } from "./agent-launch.js";
 export {
   DECISION_ANSWER_ISSUES, launchRefusal, parameterFailureCodeFromDecisionRecord, parseDecisionAnswerFailure, parseHarnessTooOld,
-  PREPARATION_REJECTION_MESSAGES, preparationFailureSummary, preparationRejectionMessage,
+  PREPARATION_REJECTION_MESSAGES, preparationFailureSummary, preparationRejectionMessage, rejectionCause,
   REGISTRATION_PREPARATION_REJECTION_CODES, START_INTENT_CATEGORIES, START_INTENT_INSTRUCTIONS,
   isLaunchHintRejection, LAUNCH_HINT_REJECTION_CODES,
   SUMMON_INTENT_CATEGORIES, SUMMON_INTENT_INSTRUCTIONS, SUMMON_INTENT_REJECTION_CODES, parseDraftSummonIntents,

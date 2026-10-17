@@ -6,7 +6,7 @@ import { createContext, useCallback, useContext, useEffect, useId, useMemo, useS
 import { Popover } from "@base-ui/react/popover";
 import { LiquidGlassCard } from "@/components/ui/material-surfaces";
 import { Check, CircleHelp, Clock3, LoaderCircle, TriangleAlert, X, Zap } from "lucide-react";
-import { preparationFailureSummary, WEB_PROXY_ROUTES } from "@xmatrix/protocol";
+import { preparationFailureSummary, rejectionCause, WEB_PROXY_ROUTES } from "@xmatrix/protocol";
 import { useAuth } from "@/lib/auth-context";
 import { useXMatrixQueryFetch } from "@/lib/query/use-query-fetch";
 import { declinedIntentCopy, type DeclinedIntent } from "./summon-intent";
@@ -142,8 +142,10 @@ export function MentionInvocationRejectionChip({ rejection, unavailable, labelCo
     context={<>
       {decision && <RoutingDecisionBoard decision={decision} compact />}
     </>}
-    view={{ ...invocationChipStatus("Failed",
-      unavailable ? `${rejection.message} Status could not be refreshed; this is the last confirmed outcome.` : rejection.message),
+    // The subtitle already says nothing was started, so the detail is the cause alone.
+    view={{ ...invocationChipStatus("Failed", unavailable
+      ? `${rejectionCause(rejection.message)} Status could not be refreshed; this is the last confirmed outcome.`
+      : rejectionCause(rejection.message)),
       terminal: true, steps: [] }} />;
 }
 

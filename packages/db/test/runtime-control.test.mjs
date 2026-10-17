@@ -552,7 +552,7 @@ test(`routing rejection ${rejectionCode} binds publication, replays once, and ne
     /"workspace" answer selected an option that was not offered/);
   if (rejectionCode === 'registration_harness_outdated') assert.equal(view.rejections[0].message,
     'Cursor CLI on Laptop is 2025.09.12, too old for xMatrix, which needs 2026.01.01 or later. ' +
-    'Run `cursor-agent update` there, then try again. No launch was allocated.');
+    'Run "cursor-agent update" there, then try again. No launch was allocated.');
   assert.doesNotMatch(JSON.stringify(view.rejections), /must-not-store/);
   assert.equal(value.rejected[0].routingDecision.rows[0].quotaObservation.status, 'stale');
   assert.doesNotMatch(JSON.stringify(saved), /must-not-store/);

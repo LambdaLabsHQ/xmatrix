@@ -70,7 +70,7 @@ refusal is one sentence filled from the registry and the machine's report
 machine's platform:
 
 > Cursor CLI on Laptop is 2025.09.12, too old for xMatrix, which needs
-> 2026.01.01 or later. Run `cursor-agent update` there, then try again.
+> 2026.01.01 or later. Run "cursor-agent update" there, then try again.
 
 The rejection stores those facts, not the text. The connect flow and the
 Agents list say the same sentence and offer the update in place. A new

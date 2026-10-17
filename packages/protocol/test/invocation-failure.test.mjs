@@ -51,7 +51,7 @@ test("a launch only a too-old harness could take names the program, its version 
 
   assert.equal(preparationRejectionMessage("registration_harness_outdated", tooOld),
     "Cursor CLI on Laptop is 2025.09.12, too old for xMatrix, which needs 2026.01.01 or later. " +
-    "Run `cursor-agent update` there, then try again. No launch was allocated.");
+    'Run "cursor-agent update" there, then try again. No launch was allocated.');
   const { machineName: _machine, update: _update, ...unnamed } = tooOld;
   assert.equal(preparationFailureSummary("registration_harness_outdated", unnamed),
     "Cursor CLI is 2025.09.12, too old for xMatrix, which needs 2026.01.01 or later. Update it on that computer, then try again.");

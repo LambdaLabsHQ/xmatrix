@@ -268,7 +268,7 @@ export function parseHarnessTooOld(value: unknown): HarnessTooOld | undefined {
 /** What is too old, and the one thing to do about it. */
 function harnessTooOldMessage(tooOld: HarnessTooOld): string {
   const where = tooOld.machineName ? "there" : "on that computer";
-  return `${harnessTooOldSentence(tooOld)} ${tooOld.update ? `Run \`${tooOld.update}\` ${where}` : `Update it ${where}`}, ` +
+  return `${harnessTooOldSentence(tooOld)} ${tooOld.update ? `Run "${tooOld.update}" ${where}` : `Update it ${where}`}, ` +
     "then try again. No launch was allocated.";
 }
 
@@ -281,9 +281,15 @@ export function preparationRejectionMessage(code: string, detail?: unknown): str
     : Object.hasOwn(PREPARATION_REJECTION_MESSAGES, code) ? PREPARATION_REJECTION_MESSAGES[code] : undefined;
 }
 
+/** A rejection's message for a card that already says nothing was started: only the cause. */
+export function rejectionCause(message: string): string {
+  return message.replace(/ No launch was allocated\.$/u, "");
+}
+
 /** The card already says that launch allocation failed, so show only the cause. */
 export function preparationFailureSummary(code: string, detail?: unknown): string | undefined {
-  return preparationRejectionMessage(code, detail)?.replace(/ No launch was allocated\.$/u, "");
+  const message = preparationRejectionMessage(code, detail);
+  return message === undefined ? undefined : rejectionCause(message);
 }
 
 /** Historical decision records predate typed preflight rejection codes. */
