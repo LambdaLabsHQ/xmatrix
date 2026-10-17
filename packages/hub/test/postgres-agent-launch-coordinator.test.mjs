@@ -5,6 +5,7 @@ import test from "node:test";
 import {
   machineSpawnCommand,
   publishClaimedAgentLaunches,
+  reconnectWaitUntil,
 } from "../src/postgres-agent-launch-coordinator.ts";
 
 function launch(index, overrides = {}) {
@@ -52,6 +53,18 @@ const claimed = (rows) => rows.map((row) => ({
   shard: { shardId: "shard-0", database: {} },
   row,
 }));
+
+/** How durable Launches settle when their commands read back as `status`. */
+async function reconciled(rows, status) {
+  const settled = [];
+  await publishClaimedAgentLaunches(claimed(rows), {
+    async publishDirectory() {},
+    async issueBatch() { throw new Error("must not reissue"); },
+    async readBatch() { return status; },
+    async settle(_database, _shardId, settlements) { settled.push(...settlements); },
+  });
+  return settled;
+}
 
 test("Machine spawn publication canonicalizes PostgreSQL Launch coordinates", () => {
   const row = launch(1, { spawn_payload_json: {
@@ -163,23 +176,39 @@ test("durable commands reconcile as one batch and isolate per-target failure", a
   ["2026-09-05T00:00:01.500Z", "2026-09-05T00:00:01.500Z"]);
 });
 
+// A summon routed to a daemon that is restarting waits for it a bounded time:
+// once its spawn expired unclaimed, nothing can start it, and the summon fails
+// with that reason instead of reading "queued" for as long as the machine is away.
+test("a spawn that expired before any daemon claimed it fails its Launch", async () => {
+  const rows = [launch(1, { state: "queued", command_durable_at: "2026-09-05T00:00:01Z" }),
+    launch(2, { state: "queued", command_durable_at: "2026-09-05T00:00:01Z" })];
+  const settled = await reconciled(rows, { daemon: { status: "offline" }, commands: rows.map((row, index) => ({
+    controlId: row.control_id, status: "queued", createdAt: "2026-09-05T00:00:01.000Z",
+    ...(index === 0 ? { expired: true } : {}) })) });
+  assert.deepEqual(settled.map((item) => [item.state, item.retryable, item.errorCode ?? null]),
+    [["failed", false, "machine_reconnect_expired"], ["queued", false, null]]);
+  assert.equal(settled[1].daemonOffline, true, "an unexpired spawn keeps waiting for its machine");
+});
+
+test("only the first spawn prepared on a reconnecting daemon is bounded by its wait", () => {
+  const waitUntil = "2026-09-05T00:05:00.000Z";
+  const machineReconnect = { controlId: "control-1", waitUntil };
+  assert.equal(reconnectWaitUntil(launch(1, { machine_reconnect: machineReconnect })), waitUntil);
+  // A retry the daemon asked for after it reconnected carries a new control id.
+  assert.equal(reconnectWaitUntil(launch(1, { control_id: "control-retry", machine_reconnect: machineReconnect })), undefined);
+  assert.equal(reconnectWaitUntil(launch(1)), undefined);
+  assert.equal(reconnectWaitUntil(launch(1, { machine_reconnect: { controlId: "control-1", waitUntil: "soon" } })), undefined);
+});
+
 test("a connected Launch still reconciles late durable spawn evidence", async () => {
   const row = launch(1, { state: "connected", command_durable_at: "2026-09-05T00:00:01Z" });
-  const settled = [];
-  await publishClaimedAgentLaunches(claimed([row]), {
-    async publishDirectory() {},
-    async issueBatch() { throw new Error("must not reissue"); },
-    async readBatch() {
-      return ({ commands: [{
-        controlId: row.control_id,
-        status: "completed",
-        createdAt: "2026-09-05T00:00:01.000Z",
-        completedAt: "2026-09-05T00:00:03.000Z",
-        result: { ok: true, spawnedAt: "2026-09-05T00:00:02.000Z" },
-      }] });
-    },
-    async settle(_database, _shardId, settlements) { settled.push(...settlements); },
-  });
+  const settled = await reconciled([row], { commands: [{
+    controlId: row.control_id,
+    status: "completed",
+    createdAt: "2026-09-05T00:00:01.000Z",
+    completedAt: "2026-09-05T00:00:03.000Z",
+    result: { ok: true, spawnedAt: "2026-09-05T00:00:02.000Z" },
+  }] });
   assert.equal(settled.length, 1);
   assert.equal(settled[0].state, "spawned");
   assert.equal(settled[0].spawnedAt, "2026-09-05T00:00:02.000Z");
@@ -191,18 +220,10 @@ test("a connected Launch whose command cannot say when it spawned records its co
     launch(2, { state: "connected", connected_at: new Date("2026-09-05T00:00:05.000Z") }),
     launch(3, { state: "connected", connected_at: "2026-09-05T00:00:06.000Z" }),
   ];
-  const settled = [];
-  await publishClaimedAgentLaunches(claimed(rows), {
-    async publishDirectory() {},
-    async issueBatch() { throw new Error("must not reissue"); },
-    async readBatch() {
-      return ({ delivered: 0, commands: [
-        { controlId: rows[1].control_id, status: "pending", createdAt: "2026-09-05T00:00:01.000Z" },
-        { controlId: rows[2].control_id, status: "failed", result: { ok: false, error: "gone" } },
-      ] });
-    },
-    async settle(_database, _shardId, settlements) { settled.push(...settlements); },
-  });
+  const settled = await reconciled(rows, { delivered: 0, commands: [
+    { controlId: rows[1].control_id, status: "pending", createdAt: "2026-09-05T00:00:01.000Z" },
+    { controlId: rows[2].control_id, status: "failed", result: { ok: false, error: "gone" } },
+  ] });
   assert.deepEqual(settled.map((item) => [item.state, item.spawnedAt, item.retryable, item.errorCode]), [
     ["spawned", "2026-09-05T00:00:04.000Z", false, undefined],
     ["spawned", "2026-09-05T00:00:05.000Z", false, undefined],

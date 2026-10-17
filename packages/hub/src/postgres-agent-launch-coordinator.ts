@@ -63,6 +63,8 @@ export interface LaunchRow extends QueryResultRow {
   directory_published: boolean;
   command_durable_at: string | Date | null;
   connected_at?: string | Date | null;
+  /** The Run's `machineReconnect`: its first spawn waits for a reconnecting daemon until then. */
+  machine_reconnect?: unknown;
 }
 
 export interface ClaimedAgentLaunch {
@@ -132,7 +134,7 @@ export async function claim(database: AuthorityDatabase, shardId: string, owner:
   target?: AgentLaunchWakeTarget): Promise<LaunchRow[]> {
   const claimedAt = new Date().toISOString();
   return database.transaction({ requestId: owner, operation: "launch.coordinator.claim" }, async (tx) =>
-    [...await tx.query<LaunchRow>({ name: "agent_launch_coordinator_claim_v7", text: `WITH eligible AS
+    [...await tx.query<LaunchRow>({ name: "agent_launch_coordinator_claim_v8", text: `WITH eligible AS
       MATERIALIZED (SELECT next_attempt_at FROM data.agent_launches launch
         WHERE ${ACTIVE_LAUNCH_SQL} AND next_attempt_at<=clock_timestamp()
           AND (lease_until IS NULL OR lease_until<clock_timestamp())
@@ -153,7 +155,8 @@ export async function claim(database: AuthorityDatabase, shardId: string, owner:
           wake_requested_at=COALESCE(wake_requested_at,$6::timestamptz),
           updated_at=GREATEST(updated_at,$6::timestamptz)
         FROM due WHERE launch.launch_id=due.launch_id RETURNING launch.*
-      ) SELECT claimed.*,run.version AS run_version,instance.version AS instance_version,
+      ) SELECT claimed.*,run.version AS run_version,run.metadata_json->'machineReconnect' AS machine_reconnect,
+          instance.version AS instance_version,
           head.commit_sequence AS route_version,head.updated_at AS route_updated_at,
           placement.placement_epoch,eligible_stats.eligible_count,
           eligible_stats.oldest_eligible_at,
@@ -319,6 +322,16 @@ function launchInitialSource(row: LaunchRow) {
   return candidate?.channelId === row.channel_id && candidate.messageId === row.trigger_id ? candidate : undefined;
 }
 
+/** Until when this Launch's spawn waits for a reconnecting daemon: only the
+ * first spawn prepared on it, never a retry the daemon asked for later. */
+export function reconnectWaitUntil(row: LaunchRow): string | undefined {
+  const reconnect = row.machine_reconnect;
+  if (!reconnect || typeof reconnect !== "object" || Array.isArray(reconnect)) return undefined;
+  const { controlId, waitUntil } = reconnect as Record<string, unknown>;
+  return controlId === row.control_id && typeof waitUntil === "string" && Number.isFinite(Date.parse(waitUntil))
+    ? waitUntil : undefined;
+}
+
 export function machineSpawnCommand(row: LaunchRow): Record<string, unknown> {
   const source = launchInitialSource(row);
   return { ...withInitialMessageSource(row.spawn_payload_json, source),
@@ -361,6 +374,11 @@ function commandSettlement(row: LaunchRow, command: Record<string, unknown> | un
     daemonOffline, errorStage: "command_issue", errorCode: "machine_command_missing",
     errorMessage: "Durable Machine command could not be reconciled", incrementAttempt: true };
   const commandDurableAt = typeof command.createdAt === "string" ? command.createdAt : undefined;
+  // Expired before any daemon claimed it, the spawn can no longer run: its
+  // machine did not come back in time.
+  if (command.expired === true) return { row, state: "failed", retryable: false, daemonOffline: false,
+    ...(commandDurableAt ? { commandDurableAt } : {}), errorStage: "command_issue",
+    errorCode: "machine_reconnect_expired", errorMessage: "The machine did not reconnect before the startup command expired" };
   const result = command.result && typeof command.result === "object" && !Array.isArray(command.result)
     ? command.result as Record<string, unknown> : null;
   if ((command.status === "completed" || command.status === "failed") && result) {
@@ -818,8 +836,11 @@ export class RelayPostgresAgentLaunchCoordinatorService {
           commandId: await batchId(rows), action: "issue_batch", ownerUserId: first.owner_user_id,
           ownerEmail: `${first.owner_user_id.replace(/[^a-zA-Z0-9._-]/gu, "_")}@unknown.invalid`,
           machineId: first.machine_id, hostId: first.hostname ?? "", payload: {}, metadata: {}, capabilities: [],
-          commands: rows.map((row) => ({ controlId: row.control_id, commandType: "spawn",
-            payload: machineSpawnCommand(row) })),
+          commands: rows.map((row) => {
+            const expiresAt = reconnectWaitUntil(row);
+            return { controlId: row.control_id, commandType: "spawn", payload: machineSpawnCommand(row),
+              ...(expiresAt ? { expiresAt } : {}) };
+          }),
           principal: { kind: "user", id: first.owner_user_id },
         });
       },

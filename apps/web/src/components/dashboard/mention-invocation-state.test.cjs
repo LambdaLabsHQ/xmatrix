@@ -52,6 +52,13 @@ test("a summon lists every step on one level", () => {
   const admitted = { ...queued, admittedAt: at };
   assert.equal(step(summonView(admitted), "Process started").state, "current");
   assert.equal(summonView({ ...queued, daemonOffline: true }).animate, false, "a queued command waits without spinning");
+  // A machine that is only restarting says so on the summon itself, and keeps moving.
+  const reconnecting = summonView({ ...queued, daemonOffline: true, machineReconnecting: true });
+  assert.equal(reconnecting.label, "Starting");
+  assert.equal(reconnecting.detail, "Machine reconnecting — starts when it's back.");
+  assert.equal(step(reconnecting, "Machine accepted").status, "Reconnecting");
+  assert.equal(reconnecting.animate, true);
+  assert.match(summonView({ ...queued, daemonOffline: true }).detail, /queued until the selected machine reconnects/);
 });
 test("a server connection claim is not a joined channel", () => {
   const view = summonView(base);

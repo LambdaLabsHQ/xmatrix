@@ -12,8 +12,8 @@ import {
   waitForChannelHistoryMessage,
 } from "./agent-mention-spawn.fixture.mjs";
 import {
-  channelSpaceId, connectDaemon, createClosedChannel, createWorkspace, isSpawnOf, registerTestAgent, sendSpawnResult,
-  startPgHubWorker, testMachine,
+  channelSpaceId, connectDaemon, createClosedChannel, createWorkspace, inTestTransaction, isSpawnOf, registerTestAgent,
+  sendSpawnResult, startPgHubWorker, testMachine,
 } from "./agent-launch-postgres.fixture.mjs";
 
 /**
@@ -190,7 +190,7 @@ test("a Workstation renews an exact spawn lease over the live socket", async () 
   }
 });
 
-test("a mention to an offline Workstation is refused, and after reconnect it launches and the agent reply reaches the channel", async () => {
+test("a mention to a long-offline Workstation is refused, one to a restarting Workstation waits and starts on reconnect", async () => {
   const userId = `daemon-reconnect-e2e-${randomUUID()}`;
   const worker = await startPgHubWorker({
     vars: {
@@ -201,6 +201,7 @@ test("a mention to an offline Workstation is refused, and after reconnect it lau
     },
   });
   let firstDaemon;
+  let restarting;
   let daemon;
   let agent;
   try {
@@ -216,25 +217,41 @@ test("a mention to an offline Workstation is refused, and after reconnect it lau
     const registration = await registerTestAgent(worker, { token: MOCK_TOKEN,
       spaceId: await channelSpaceId(channelId), machineId, displayName: "codex-reconnect-route", canonicalCwd });
     const mention = `@auto harness:codex machine:${machineId} pwd:"${canonicalCwd}" resume after Workstation reconnect`;
-    const accepted = await postChannelMessage(worker, MOCK_TOKEN, channelId, mention);
-    // A registered launch is prepared against an online Workstation. One that
-    // is offline is refused as that fact, not queued behind it.
-    const offlineMessageId = accepted.message.messageId;
-    let offline;
-    for (let attempt = 0; attempt < 100 && !offline?.rejections?.length; attempt += 1) {
-      offline = await json(await worker.fetch(`/api/channels/${encodeURIComponent(channelId)}/agent-launches/query`, {
-        method: "POST", headers: { ...auth, "content-type": "application/json" },
-        body: JSON.stringify({ sourceMessageIds: [offlineMessageId], pageSize: 20 }) }));
-      if (!offline.rejections?.length) await sleep(50);
-    }
+    const invocation = async (messageId, settled) => {
+      let value;
+      for (let attempt = 0; attempt < 100 && !settled(value); attempt += 1) {
+        value = await json(await worker.fetch(`/api/channels/${encodeURIComponent(channelId)}/agent-launches/query`, {
+          method: "POST", headers: { ...auth, "content-type": "application/json" },
+          body: JSON.stringify({ sourceMessageIds: [messageId], pageSize: 20 }) }));
+        if (!settled(value)) await sleep(50);
+      }
+      return value;
+    };
+    // A Workstation that has been away longer than a restart takes is offline:
+    // the summon is refused as that fact, not queued behind it.
+    await inTestTransaction(tx => tx.query({ text: `UPDATE data.machine_daemons
+      SET updated_at=clock_timestamp()-interval '10 minutes' WHERE machine_id=$1`, values: [machineId] }));
+    const offlineMessageId = (await postChannelMessage(worker, MOCK_TOKEN, channelId, mention)).message.messageId;
+    const offline = await invocation(offlineMessageId, value => value?.rejections?.length > 0);
     assert.deepEqual(offline.launches, []);
     assert.equal(offline.rejections[0].code, "registration_daemon_offline");
 
+    // A daemon that just dropped (a self-update restart) is waited for: the
+    // summon is queued on it and starts when it reconnects.
+    restarting = await connectDaemon(worker, { machineId, hostId });
+    restarting.ws.close();
+    await sleep(100);
+    const waitingMessageId = (await postChannelMessage(worker, MOCK_TOKEN, channelId, mention)).message.messageId;
+    const waiting = await invocation(waitingMessageId, value => value?.launches?.[0]?.daemonOffline === true);
+    assert.deepEqual(waiting.rejections ?? [], []);
+    assert.equal(waiting.launches[0].state, "queued");
+    assert.equal(waiting.launches[0].machineReconnecting, true);
+
     daemon = await connectDaemon(worker, { machineId, hostId });
-    await postChannelMessage(worker, MOCK_TOKEN, channelId, mention);
     const command = await daemon.inbox.waitFor(
       (message) => message.type === "machine_spawn_agent"
         && message.channelId === channelId
+        && message.launchId === waiting.launches[0].launchId
         && isSpawnOf(message, registration),
       "queued machine spawn after reconnect",
     );
@@ -259,6 +276,7 @@ test("a mention to an offline Workstation is refused, and after reconnect it lau
   } finally {
     if (agent) agent.ws.close();
     if (daemon) daemon.ws.close();
+    if (restarting) restarting.ws.close();
     if (firstDaemon) firstDaemon.ws.close();
     await worker.stop();
   }

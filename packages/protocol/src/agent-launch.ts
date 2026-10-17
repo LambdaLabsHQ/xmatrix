@@ -29,6 +29,10 @@ export interface SerializedAgentLaunch {
   attempt: number;
   retryable: boolean;
   daemonOffline?: boolean;
+  /** Queued on a daemon that dropped moments before this launch was prepared
+   * (a restart, such as a self-update): it starts when that daemon reconnects,
+   * or fails as `machine_reconnect_expired`. Presentation only. */
+  machineReconnecting?: boolean;
   errorStage?: string;
   errorCode?: string;
   errorMessage?: string;
