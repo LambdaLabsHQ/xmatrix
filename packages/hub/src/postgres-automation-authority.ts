@@ -113,11 +113,13 @@ export class PostgresScheduleOccurrenceLifecycle implements ScheduleOccurrenceLi
       requestId: crypto.randomUUID(), occurrenceId: occurrence.id,
       leaseOwner: String(occurrence.lease_owner), now, deliveryKind: occurrence.delivery_kind,
       ...(occurrence.message_id ? { messageId: occurrence.message_id } : {}),
-      runId: occurrence.run_id, instanceId: occurrence.instance_id });
+      ...(occurrence.run_id ? { runId: occurrence.run_id } : {}),
+      ...(occurrence.instance_id ? { instanceId: occurrence.instance_id } : {}) });
   }
 
   async markDispatched(occurrence: AutomationOccurrenceRow,
     automation: AutomationExecutionRow, now: string): Promise<void> {
+    if (!occurrence.run_id) throw new Error("Direct Automation Run id is unavailable");
     await this.occurrenceRepository(occurrence.id).markDispatched({ requestId: crypto.randomUUID(),
       occurrenceId: occurrence.id, leaseOwner: String(occurrence.lease_owner), taskId: automation.id,
       runId: occurrence.run_id, executionTimeoutMs: occurrence.execution_timeout_ms, now });
@@ -163,6 +165,7 @@ export class PostgresScheduleOccurrenceLifecycle implements ScheduleOccurrenceLi
         run_metadata_json: Record<string, unknown>;
       }>;
       for (const occurrence of candidates) {
+        if (!occurrence.run_id) throw new Error("Automation timeout has no direct Run");
         this.bind(occurrence, repository);
         const metadata = occurrence.run_metadata_json;
         const machineId = typeof metadata.machineId === "string" ? metadata.machineId.trim() : "";

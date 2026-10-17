@@ -35,8 +35,9 @@ export interface AutomationOccurrenceRow extends AuthoritySqlRow {
   lease_until: string | null;
   attempts: number;
   next_attempt_at: string;
-  run_id: string;
-  instance_id: string;
+  /** Direct agent_run only; message occurrences link through registration launches. */
+  run_id: string | null;
+  instance_id: string | null;
   control_id: string;
   delivery_kind: "agent_run" | "message";
   message_id: string | null;

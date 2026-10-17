@@ -15,6 +15,11 @@ English is the default language for repository documentation, guardrails, releas
 
 ## Current behavior
 
+Automation message occurrences link to actual persisted Runs through their exact
+canonical message and registration launches, including multiple Runs per message.
+Unused reservations and unstarted launches do not count; missing historical
+evidence stays unknown. See [Automation Run links](../operations/automation-run-links.md).
+
 Pages type committed Agent edits in as people type: the structure goes in
 first, then the words as small CRDT insertions, a few at a time. Several Agents
 and people type at once, and every moment of the page reads back from Markdown

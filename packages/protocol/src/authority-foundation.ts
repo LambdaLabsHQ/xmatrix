@@ -1050,6 +1050,9 @@ export function automationTriggersFrom(value: unknown): AutomationTrigger[] {
 }
 
 export interface AutomationExecutionStatus {
+  /** Exact persisted Runs of this occurrence. Older Hubs omit this projection.
+   * Empty means no provable Run, independently of message delivery status. */
+  runs?: Array<{ runId: string; instanceId: string | null; channelId: string; status: RunStatus }>;
   status: "pending" | "leased" | "prepared" | "dispatched" | "failed" | "cancelled";
   attempts: number;
   scheduledFor: string;

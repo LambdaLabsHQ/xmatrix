@@ -37,6 +37,7 @@ export class PostgresScheduledRunCleanup implements ScheduledRunCleanup {
   }
 
   async abandon(occurrence: AutomationOccurrenceRow, reason: string): Promise<void> {
+    if (occurrence.delivery_kind === "message" || !occurrence.run_id || !occurrence.instance_id) return;
     let instance: Record<string, unknown>;
     try {
       const result = await this.repository.getInstance({
