@@ -308,7 +308,7 @@ export function MyAgentsView({
        anywhere yet this shows where agents come from. */
     detail = (
       <SetupCardShell>
-        <BringAgentsIn spaceId={spaceId} token={token} userId={currentUserId} />
+        <BringAgentsIn spaceId={spaceId} token={token} userId={currentUserId} surface="agents" />
       </SetupCardShell>
     );
   } else if (catalog.data && rows.length === 0) {

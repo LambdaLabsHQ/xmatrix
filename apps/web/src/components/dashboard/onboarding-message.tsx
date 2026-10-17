@@ -2,7 +2,8 @@
 
 import { useEffect, useRef } from "react";
 import { ChevronRight } from "lucide-react";
-import { WEB_PROXY_ROUTES, type OnboardingStage } from "@xmatrix/protocol";
+import { WEB_PROXY_ROUTES, type OnboardingStage, type OnboardingStarter } from "@xmatrix/protocol";
+import { recordOnboardingStep } from "@/lib/onboarding-funnel";
 import { xmatrixApiRequest } from "@/lib/query/api-client";
 import { BringAgentsIn } from "./bring-agents-in";
 import { listNames } from "./connect-machine";
@@ -25,7 +26,7 @@ const FIRST_TASK_STARTERS = [
      xMatrix from memory invents an answer. */
   { id: "xmatrix", title: "Show me how to hand you work", detail: "Reads xmatrix.sh/start.md and writes it up as a page.",
     message: "Read https://xmatrix.sh/start.md and write a page on how I should hand you work through xMatrix." },
-] as const;
+] as const satisfies ReadonlyArray<{ id: OnboardingStarter; title: string; detail: string; message: string }>;
 
 export function OnboardingMessage({ stage, spaceId, token, userId, onSend }: {
   stage: OnboardingStage; spaceId: string | null; token: string | null; userId: string;
@@ -49,7 +50,7 @@ function BringAgentsMessage({ spaceId, token, userId }: { spaceId: string | null
     void xmatrixApiRequest({ url: WEB_PROXY_ROUTES.space_welcome(spaceId), token, method: "POST" })
       .catch((error: unknown) => console.warn("[xmatrix] welcome step unavailable", error));
   }, [agentsIn, spaceId, token]);
-  return <BringAgentsIn spaceId={spaceId} token={token} userId={userId} />;
+  return <BringAgentsIn spaceId={spaceId} token={token} userId={userId} surface="welcome" />;
 }
 
 function AgentsInMessage({ spaceId, token, userId, onSend }: {
@@ -69,7 +70,10 @@ function AgentsInMessage({ spaceId, token, userId, onSend }: {
       <ul className="m-0 mt-3 list-none border-t-[1px] border-border p-0">
         {FIRST_TASK_STARTERS.map((starter) => (
           <li key={starter.id} className="m-0 border-b-[1px] border-border p-0">
-            <button type="button" onClick={() => onSend(`@auto ${starter.message}`)}
+            <button type="button" onClick={() => {
+              recordOnboardingStep(token, { step: "starter_chosen", surface: "welcome", starter: starter.id });
+              onSend(`@auto ${starter.message}`);
+            }}
               className="group/starter flex w-full items-center gap-3 py-3 text-left">
               <span className="min-w-0 flex-1">
                 <span className="block font-semibold">{starter.title}</span>
