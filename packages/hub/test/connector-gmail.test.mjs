@@ -303,13 +303,14 @@ test("Check reads every mailbox's profile", async () => {
   assert.deepEqual(checked.calls.map(call => call.body.connected_account_id), ["ca_mailbox1", "ca_mailbox2", "ca_mailbox3"]);
 });
 
-test("Connect adds a mailbox: a repeat replaces its account and keeps its owner, and the list is bounded", async () => {
+test("Connect adds a mailbox: a repeat replaces its account and keeps its owner, and only a list that would not fit is refused", async () => {
   const load = await compileCommonJsSourceModule(new URL("../src/connectors/gmail-mailboxes.ts", import.meta.url));
   let stored = [{ ...mailbox, owner: "user:user-7" }, { account: "ca_mailbox2", address: "two@example.com", owner: "user:user-1" }];
   const deleted = [];
   const profiles = { ca_new1: "ME@example.com", ca_new2: "three@example.com" };
   const http = await import("../src/connectors/http.ts");
   const dependencies = {
+    "./account-list": await import("../src/connectors/account-list.ts"),
     "./composio": {
       composioGet: async (credentials) => ({ emailAddress: profiles[credentials.composioAccountId] }),
       deleteComposioAccount: async (_key, id) => { deleted.push(id); },
@@ -328,9 +329,18 @@ test("Connect adds a mailbox: a repeat replaces its account and keeps its owner,
   assert.deepEqual(deleted, ["ca_mailbox1"]);
   const added = JSON.parse((await addConnectedMailbox({}, { ...input, account: "ca_new2" })).mailboxes);
   assert.deepEqual(added.at(-1), { account: "ca_new2", address: "three@example.com", owner: "user:user-1" });
-  stored = Array.from({ length: 10 }, (_, index) => ({ account: `ca_full${index}`, address: `m${index}@example.com`, owner: "user:user-1" }));
-  await assert.rejects(addConnectedMailbox({}, { ...input, account: "ca_new2" }), /at most 10/u);
-  assert.equal(deleted.at(-1), "ca_new2");
+  stored = Array.from({ length: 12 }, (_, index) => ({ account: `ca_more${index}`, address: `m${index}@example.com`, owner: "user:user-1" }));
+  assert.equal(JSON.parse((await addConnectedMailbox({}, { ...input, account: "ca_new2" })).mailboxes).length, 13,
+    "mailboxes are not counted");
+  /* Fill the list to just under its stored bound; one more mailbox no longer fits. */
+  const entry = (index) => ({ account: `ca_full${index}`, address: `${"m".repeat(60)}${index}@example.com`, owner: "user:user-1" });
+  stored = [];
+  while (JSON.stringify([...stored, entry(stored.length)]).length < 256 * 1024 - 150) stored.push(entry(stored.length));
+  const room = 256 * 1024 - 30 - JSON.stringify([...stored, { ...entry(0), address: "p@" }]).length;
+  stored.push({ ...entry(stored.length), address: `p@${"d".repeat(room - 4)}.com` });
+  deleted.length = 0;
+  await assert.rejects(addConnectedMailbox({}, { ...input, account: "ca_new2" }), /exceed the 256 KiB this connection stores/u);
+  assert.deepEqual(deleted, ["ca_new2"], "the refused Connect's new Composio account is deleted, and nothing else");
 });
 
 // Approval must show the actual reply destination and hold it stable: a later metadata

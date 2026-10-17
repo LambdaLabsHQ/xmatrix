@@ -1,6 +1,5 @@
-import { appCredentialValueLimit } from "@xmatrix/db";
-import { utf8ByteLength } from "@xmatrix/protocol";
 import type { Env } from "../types";
+import { parseAccountList, serializeAccountList, type AccountListField } from "./account-list";
 import { connectorCredentialRepository } from "./credentials";
 import { ProviderRequestError } from "./http";
 
@@ -31,14 +30,13 @@ export interface CloudflareLoginView {
   connectedAt: string;
 }
 
-/* Logins are not counted: the list is bounded only by the size the platform stores for it. */
-const MAX_VALUE_BYTES = appCredentialValueLimit("cloudflare", "logins");
+const LOGINS: AccountListField = { providerId: "cloudflare", field: "logins",
+  invalid: { status: 502, message: "the stored Cloudflare logins are unreadable; reconnect Cloudflare" } };
 const ACCOUNT_NAME = 200;
 const UUID = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/u;
 const ACCOUNT = /^[a-f0-9]{32}$/u;
 const TOKEN = /^[\x21-\x7e]{1,2048}$/u;
 const ACTOR = /^[A-Za-z0-9_.:-]{1,128}$/u;
-const INVALID = "the stored Cloudflare logins are unreadable; reconnect Cloudflare";
 
 function account(value: unknown): CloudflareAccountRef | undefined {
   const { id, name } = (value ?? {}) as Record<string, unknown>;
@@ -48,41 +46,30 @@ function account(value: unknown): CloudflareAccountRef | undefined {
 
 /** The stored list; a malformed value fails closed rather than being read in part. */
 export function parseCloudflareLogins(value: string | undefined): CloudflareLogin[] {
-  if (!value) return [];
-  let parsed: unknown;
-  try { parsed = JSON.parse(value); } catch { parsed = undefined; }
-  if (!Array.isArray(parsed)) throw new ProviderRequestError(502, INVALID);
-  const seen = new Set<string>();
-  return parsed.map((entry: unknown) => {
-    const login = (entry ?? {}) as Record<string, unknown>;
+  return parseAccountList(LOGINS, value, (login) => {
     const accounts = Array.isArray(login.accounts) ? login.accounts.map(account) : [];
-    if (typeof login.id !== "string" || !UUID.test(login.id) || seen.has(login.id) ||
+    if (typeof login.id !== "string" || !UUID.test(login.id) ||
         typeof login.accessToken !== "string" || !TOKEN.test(login.accessToken) ||
         typeof login.refreshToken !== "string" || !TOKEN.test(login.refreshToken) ||
         !Number.isSafeInteger(login.expiresAt) || Number(login.expiresAt) <= 0 ||
         !Array.isArray(login.accounts) || accounts.some((item) => !item) ||
         typeof login.connectedBy !== "string" || !ACTOR.test(login.connectedBy) ||
         typeof login.connectedAt !== "string" || Number.isNaN(Date.parse(login.connectedAt))) {
-      throw new ProviderRequestError(502, INVALID);
+      return undefined;
     }
-    seen.add(login.id);
     return { id: login.id, accessToken: login.accessToken, refreshToken: login.refreshToken,
       expiresAt: Number(login.expiresAt), accounts: accounts as CloudflareAccountRef[],
       connectedBy: login.connectedBy, connectedAt: login.connectedAt };
-  });
+  }, (login) => login.id);
 }
 
 /** The credential value for a list: `null` clears it. Refuses a list that would not fit. */
 export function serializeCloudflareLogins(logins: readonly CloudflareLogin[]): string | null {
-  if (!logins.length) return null;
-  const value = JSON.stringify(logins.map((login) => ({ id: login.id, accessToken: login.accessToken,
+  const value = serializeAccountList(LOGINS, logins.map((login) => ({ id: login.id, accessToken: login.accessToken,
     refreshToken: login.refreshToken, expiresAt: login.expiresAt, connectedBy: login.connectedBy,
     connectedAt: login.connectedAt,
-    accounts: login.accounts.map(({ id, name }) => ({ id, name: name.slice(0, ACCOUNT_NAME) })) })));
-  if (utf8ByteLength(value) > MAX_VALUE_BYTES) {
-    throw new ProviderRequestError(409, `the Cloudflare logins exceed the ${MAX_VALUE_BYTES / 1024} KiB this connection stores; remove one first`);
-  }
-  parseCloudflareLogins(value);
+    accounts: login.accounts.map(({ id, name }) => ({ id, name: name.slice(0, ACCOUNT_NAME) })) })), "Cloudflare logins");
+  if (value) parseCloudflareLogins(value);
   return value;
 }
 

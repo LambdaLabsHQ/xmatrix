@@ -1140,8 +1140,9 @@ integration("X approvals survive token rotation and other accounts while fencing
     await write([rotated, other], { asHub: true, expectedVersion: before.version, expectedGrant: before, actorUserId: "hub:oauth-refresh" });
     await assert.rejects(authorize(list), changed, "list-wide approval retains the whole-envelope fence");
     await authorize(approved);
-    await write([rotated, other, { id: "303", generation: crypto.randomUUID(), ownerUserId: "member" }]);
-    assert.equal((await decide(pending)).claimed, true, "a pending approval survives rotation and another account's addition");
+    await write([rotated, other, ...["303", "304", "305", "306"].map(id => ({ id, generation: crypto.randomUUID(), ownerUserId: "member" }))]);
+    assert.equal((await decide(pending)).claimed, true,
+      "a pending approval survives rotation and other accounts' addition, past the old four-account cap");
     await authorize(pending);
     await authorize(approved);
 

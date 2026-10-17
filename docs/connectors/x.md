@@ -50,8 +50,9 @@ connection before adding a different account.
 
 ## Credentials and refresh
 
-Account tokens stay in the encrypted connector credential store, in a bounded
-`accounts` JSON field of at most four entries and 8 KiB. The Space secret
+Account tokens stay in the encrypted connector credential store, in the
+`accounts` JSON field. A Space connects any number of accounts; the field is
+stored up to 256 KiB and a Connect that would not fit is refused. The Space secret
 catalog, connection metadata, browser account list and Agent environment do
 not contain account credentials. The account management API exposes only ID,
 handle, generation, owner, access-token expiry and reconnect status.

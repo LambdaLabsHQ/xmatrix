@@ -1,7 +1,7 @@
 import { ControlError } from "@xmatrix/db";
-import { utf8ByteLength } from "@xmatrix/protocol";
 import type { Env } from "../types";
 import { retryablePostgresFailure } from "../postgres-error-classification";
+import { parseAccountList, serializeAccountList, type AccountListField } from "./account-list";
 import { connectorCredentialRepository } from "./credentials";
 import { ProviderRequestError } from "./http";
 
@@ -28,20 +28,14 @@ export interface XActionCapability {
 
 const ID = /^[1-9][0-9]{0,19}$/u;
 const UUID = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/u;
-export const MAX_X_ACCOUNTS = 4;
+const X_ACCOUNTS: AccountListField = { providerId: "x", field: "accounts",
+  invalid: { status: 409, message: "The X account list is invalid; reconnect X" } };
 
 export function parseXAccounts(value: string | undefined): XAccount[] {
-  if (!value) return [];
-  let parsed: unknown;
-  try { parsed = JSON.parse(value); } catch { parsed = undefined; }
-  if (!Array.isArray(parsed) || parsed.length > MAX_X_ACCOUNTS || utf8ByteLength(value) > 8192) {
-    throw new ProviderRequestError(409, "The X account list is invalid; reconnect X");
-  }
-  const seen = new Set<string>();
-  return parsed.map((item: unknown) => {
-    const a = item as Partial<XAccount> | null;
+  return parseAccountList(X_ACCOUNTS, value, (item) => {
+    const a = item as Partial<XAccount>;
     const token = (v: unknown) => typeof v === "string" && /^[\x21-\x7e]{1,2048}$/u.test(v);
-    if (!a || typeof a !== "object" || typeof a.id !== "string" || !ID.test(a.id) || seen.has(a.id) ||
+    if (typeof a.id !== "string" || !ID.test(a.id) ||
         typeof a.username !== "string" || !/^[A-Za-z0-9_]{1,15}$/u.test(a.username) ||
         typeof a.generation !== "string" || !UUID.test(a.generation) ||
         typeof a.ownerUserId !== "string" || !/^[A-Za-z0-9_.:-]{1,128}$/u.test(a.ownerUserId) ||
@@ -49,17 +43,15 @@ export function parseXAccounts(value: string | undefined): XAccount[] {
         !Number.isSafeInteger(a.expiresAt) || a.expiresAt! <= 0 || typeof a.scopes !== "string" || a.scopes.length > 500 ||
         (a.needsReconnect !== undefined && typeof a.needsReconnect !== "boolean") ||
         (a.refreshing !== undefined && (!UUID.test(a.refreshing) || !Number.isSafeInteger(a.refreshStartedAt)))) {
-      throw new ProviderRequestError(409, "The X account list is invalid; reconnect X");
+      return undefined;
     }
-    seen.add(a.id);
     return a as XAccount;
-  });
+  }, (account) => account.id);
 }
 
 export function xAccountFields(accounts: readonly XAccount[]): { accounts: string | null } {
-  if (!accounts.length) return { accounts: null };
-  const value = JSON.stringify(accounts);
-  parseXAccounts(value);
+  const value = serializeAccountList(X_ACCOUNTS, accounts, "X accounts");
+  if (value) parseXAccounts(value);
   return { accounts: value };
 }
 
@@ -110,7 +102,6 @@ export async function connectXAccount(env: Env, input: { spaceId: string; actorU
       throw new ProviderRequestError(403, "This X account belongs to another Space member");
     }
     const kept = current.filter(a => a.id !== account.id);
-    if (kept.length >= MAX_X_ACCOUNTS) throw new ProviderRequestError(409, `A Space connects at most ${MAX_X_ACCOUNTS} X accounts`);
     await repository.put({ requestId: crypto.randomUUID(), spaceId: input.spaceId, providerId: "x", actorUserId: input.actorUserId,
       fields: xAccountFields([...kept, account]), policy: { allowed: ["accounts"] }, at: new Date().toISOString(),
       expectedGrant: { connectionVersion: input.snapshot.connectionVersion, version: latest.credentialVersion,
