@@ -6,6 +6,9 @@ import {
   agentLaunchExecutable,
   AUTO_LAUNCH_FIELDS,
   agentPresetForLauncher,
+  agentPresetById,
+  harnessVersionOutdated,
+  parseHarnessInventory,
   digestCanonicalCloneCborV1,
   parseSpaceAgentRegistrationKey,
   parseSpaceAgentConfiguration,
@@ -922,6 +925,13 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
           registeredWorkspaceIds: new Set(workspaces.map(row => String(row.workspace_id))) });
         if (!route) { droppedOther = true; continue; }
         const { daemon, workspaceReferences } = route;
+        // A harness the machine reports older than the version xMatrix can
+        // talk to would only fail at startup: it is named, never routed to.
+        if (harnessOutdatedOn(daemon, candidate.key.harness)) {
+          const machineName = String(daemon.machine_name || "");
+          blocked.push({ machineId: candidate.key.machineId, ...(machineName ? { machineName } : {}), reason: "harness_outdated" });
+          continue;
+        }
         // Jev never sees a machine whose daemon cannot show the host abilities
         // the work needs; workspace() checks the same evidence again at launch.
         const machineResources = currentMachineResources(daemon, Date.parse(evaluatedAt));
@@ -962,7 +972,8 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
           description: typeof row.metadata_json?.displayName === "string"
             ? row.metadata_json.displayName.slice(0, 500) : "Registered workspace" }))] });
       }
-      return { offered, blocked, offlineOnly: offered.length === 0 && blocked.length > 0 && !droppedOther };
+      return { offered, blocked, offlineOnly: offered.length === 0 && blocked.length > 0 && !droppedOther &&
+        blocked.every(block => block.reason === "daemon_offline") };
     });
   }
 
@@ -970,6 +981,13 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
 
 function daemonCapable(row: QueryResultRow, capability: string): boolean {
   return Array.isArray(row.capabilities_json) && row.capabilities_json.includes(capability);
+}
+
+/** The machine's own report of this harness, against the oldest version its preset can be launched as. */
+export function harnessOutdatedOn(daemon: QueryResultRow, harness: string): boolean {
+  const metadata = daemon.metadata_json && typeof daemon.metadata_json === "object" ? daemon.metadata_json as Record<string, unknown> : undefined;
+  const item = parseHarnessInventory(metadata?.harnesses)?.items.find(entry => entry.id === harness && entry.installed);
+  return harnessVersionOutdated(agentPresetById(harness)?.management, item?.version);
 }
 
 /** The part of one registration a launch can actually be routed to, by the

@@ -54,6 +54,12 @@ export interface HarnessLogin {
 export interface HarnessManagement {
   /** null means no verified CLI version command. Capture group 1 is the version. */
   version: (HarnessCommand & { regex: string }) | null;
+  /**
+   * The oldest version that speaks the protocol xMatrix launches it with, from
+   * the vendor's own changelog (`sources`). An older install is never routed
+   * to and is offered an update instead; absent means none is known.
+   */
+  minimumVersion?: string;
   /** null means no verified native recipe for that platform. */
   install: { unix: HarnessCommand | null; windows: HarnessCommand | null };
   update: { unix: HarnessCommand | null; windows: HarnessCommand | null };
@@ -321,4 +327,24 @@ export function harnessActionAvailable(management: HarnessManagement | undefined
       return management.autoUpdate.controls.length > 0 ||
         (["notify", "manual", "unknown"].includes(management.autoUpdate.behavior) && any(management.update));
   }
+}
+
+/** Numeric dot segments in order; a build suffix such as `-4852336` carries no order. */
+export function compareHarnessVersions(left: string, right: string): number | undefined {
+  const segments = (value: string) => value.trim().match(/^v?(\d+(?:\.\d+){0,3})/u)?.[1]?.split(".").map(Number);
+  const a = segments(left);
+  const b = segments(right);
+  if (!a || !b) return undefined;
+  for (let index = 0; index < Math.max(a.length, b.length); index += 1) {
+    const difference = (a[index] ?? 0) - (b[index] ?? 0);
+    if (difference !== 0) return difference < 0 ? -1 : 1;
+  }
+  return 0;
+}
+
+/** An installed version older than the one xMatrix needs; an unknown version is not judged. */
+export function harnessVersionOutdated(management: Pick<HarnessManagement, "minimumVersion"> | undefined,
+  version: string | undefined): boolean {
+  const minimum = management?.minimumVersion;
+  return Boolean(minimum && version && compareHarnessVersions(version, minimum) === -1);
 }

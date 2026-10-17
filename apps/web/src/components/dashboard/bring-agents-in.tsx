@@ -14,6 +14,7 @@ import {
   type ConnectStep, type InstallPlatform,
 } from "./connect-machine";
 import { AgentInstallPicker, AgentsLine } from "./supported-agents";
+import { CandidateUpdateButton } from "./harness-update-button";
 import { useInstalledHarnesses } from "./use-installed-harnesses";
 import { useSetupIntent } from "./use-setup-intent";
 
@@ -100,6 +101,15 @@ export function BringAgentsIn({ spaceId, token, userId, phone = false }: {
                 {fleet.enablingAll ? <AnimatedIcon icon={Loader2} className="size-4 animate-spin" /> : null}
                 Bring them in
               </button>
+              {fleet.candidates.filter((candidate) => candidate.outdated).map((candidate) => (
+                <div key={candidate.id} className="mt-3 text-[13px] leading-5 text-muted-foreground">
+                  <p>{candidate.preset.displayName} {displayVersion(candidate.version)} is older than {candidate.preset.management?.minimumVersion},
+                    the first version xMatrix can talk to. Nothing is sent to it until it is updated.</p>
+                  {candidate.daemon.status === "online" && (
+                    <div className="mt-1.5"><CandidateUpdateButton fleet={fleet} candidate={candidate} /></div>
+                  )}
+                </div>
+              ))}
             </div>
           )}
           {stage === 3 && !found && step?.kind === "found" && (
@@ -166,4 +176,9 @@ export function RemoteMachineHint() {
         className="font-semibold text-foreground underline-offset-2 hover:underline">read the steps</a>.
     </p>
   );
+}
+
+/** A dated build without its hash: `2025.09.12-4852336` reads as `2025.09.12`. */
+function displayVersion(version: string | undefined): string {
+  return (version ?? "").replace(/-[0-9a-f]{6,}$/iu, "");
 }

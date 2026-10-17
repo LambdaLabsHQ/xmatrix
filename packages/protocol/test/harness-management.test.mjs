@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { AGENT_PRESETS, harnessActionAvailable, harnessOutputTail, parseHarnessActionRequest, parseHarnessActionResult,
-  parseHarnessInventory } from "../dist/index.js";
+import { AGENT_PRESETS, compareHarnessVersions, harnessActionAvailable, harnessOutputTail, harnessVersionOutdated,
+  parseHarnessActionRequest, parseHarnessActionResult, parseHarnessInventory } from "../dist/index.js";
 
 const inventory = { schemaVersion: 1, capturedAt: "2026-09-30T12:00:00Z",
   items: [{ id: "codex", installed: true, path: "C:\\bin\\codex.cmd", version: "1.2.3", probeStatus: "ok" }] };
@@ -145,4 +145,16 @@ test("sign-in is offered exactly for presets with an official headless sign-in",
       if (pattern) assert.doesNotThrow(() => new RegExp(pattern.replace(/^\(\?[a-z]+\)/u, "")), `${preset.id}: ${pattern}`);
     }
   }
+});
+
+test("a Cursor CLI from before its ACP mode is outdated; dated builds compare by date, not by their hash", () => {
+  const cursor = AGENT_PRESETS.find((preset) => preset.id === "cursor").management;
+  // The release a new user's first task failed on: `agent acp` did not answer in JSON.
+  assert.equal(harnessVersionOutdated(cursor, "2025.09.12-4852336"), true);
+  assert.equal(harnessVersionOutdated(cursor, "2026.09.26-dd393fe"), false);
+  assert.equal(harnessVersionOutdated(cursor, undefined), false, "an unknown version is not judged");
+  assert.equal(harnessVersionOutdated(AGENT_PRESETS.find((preset) => preset.id === "codex").management, "0.1.0"), false,
+    "no minimum, no judgement");
+  assert.equal(compareHarnessVersions("2026.01.01-abc", "2026.01.01"), 0);
+  assert.equal(compareHarnessVersions("2.1.302", "2.1.4"), 1);
 });

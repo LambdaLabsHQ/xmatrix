@@ -9,6 +9,7 @@ export {
   MACHINE_HARNESS_ACTION_CAPABILITY, MACHINE_HARNESS_CURSOR_LAUNCHER_CAPABILITY, MACHINE_HARNESS_LOGIN_CAPABILITY, MACHINE_HARNESS_LOGIN_START_CANCEL_CAPABILITY,
   MACHINE_HARNESS_RELEASE_CAPABILITY, MACHINE_HARNESS_UNINSTALL_CAPABILITY,
   parseHarnessActionRequest, validHarnessLoginCode, parseHarnessActionResult, parseHarnessInventory,
+  compareHarnessVersions, harnessVersionOutdated,
 } from "./harness-management.js";
 export type {
   HarnessAction, HarnessActionRequest, HarnessActionResult, HarnessActionStatus, HarnessAutoUpdate,

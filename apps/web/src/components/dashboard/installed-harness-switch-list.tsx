@@ -3,6 +3,7 @@
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
 import { harnessSpaceSwitch } from "./harness-space-switch";
+import { CandidateUpdateButton } from "./harness-update-button";
 import type { useInstalledHarnesses } from "./use-installed-harnesses";
 
 /** Installed candidates which have no active registration yet. Existing
@@ -25,7 +26,12 @@ export function InstalledHarnessSwitchList({ fleet, onlyNew = false }: {
       return <div key={candidate.id} className="flex items-center justify-between gap-3 border-b border-border py-3 last:border-0">
         <div className="min-w-0 text-sm">
           <p className="font-semibold">{candidate.preset.displayName}</p>
-          <p className="text-xs text-muted-foreground">{candidate.machineName} · {candidate.daemon.status === "online" ? "Installed" : "Offline · last reported installed"}</p>
+          <p className="text-xs text-muted-foreground">{candidate.machineName} · {candidate.outdated
+            ? `${candidate.version} is too old for xMatrix`
+            : candidate.daemon.status === "online" ? "Installed" : "Offline · last reported installed"}</p>
+          {candidate.outdated && candidate.daemon.status === "online" && (
+            <div className="mt-1"><CandidateUpdateButton fleet={fleet} candidate={candidate} /></div>
+          )}
         </div>
         {toggle ? <Switch checked={pending ? pending.on : toggle.on} disabled={Boolean(fleet.pending) || fleet.enablingAll}
           label={`Enabled: ${candidate.preset.displayName} on ${candidate.machineName}`}

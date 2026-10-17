@@ -33,7 +33,7 @@ export function useInstalledHarnesses(spaceId?: string | null, token?: string | 
       setEnablingAll(false);
     }
   }
-  return { ...control, candidates, enablingAll, enableAll, daemons,
+  return { ...control, token, candidates, enablingAll, enableAll, daemons,
     ready: control.ready && daemons.isSuccess,
     error: control.error ?? (daemons.isError ? "Your machines could not be read. Try refreshing." : null) };
 }
