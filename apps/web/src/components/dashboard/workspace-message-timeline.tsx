@@ -287,7 +287,7 @@ import { useAndroidBackHandler } from "./use-android-back";
 
 import { cn } from "@/lib/utils";
 import { CrossSpaceReadCard, crossSpaceReadMetadata } from "@/components/dashboard/cross-space-read-card";
-import { OnboardingMessage } from "@/components/dashboard/onboarding-message";
+import { OnboardingMessage, starterAddress } from "@/components/dashboard/onboarding-message";
 import {
   SecretAccessRequestCardView, SecretRequestCardView, secretAccessRequestMetadata, secretRequestMetadata,
 } from "@/components/dashboard/secret-request-card";
@@ -539,9 +539,11 @@ export const MessageTimeline = memo(function MessageTimeline({
   highlightMessageId?: string;
   threadRootMessage?: TimelineItem;
   threadRootChannel?: ChannelSnapshot;
+  /** Sends a message as the person in the open conversation. */
+  onSendMessage: (body: string) => void;
 } & Pick<MessageRowProps,
   "onReact" | "onEdit" | "onRecall" | "onUnsentAction" | "onReply" | "onOpenThread" | "onMentionSender" |
-  "onRebornSender" | "onQuestionnaireAnswer" | "onSendMessage" | "onOpenInternalAppLink" | "onJumpToMessage"
+  "onRebornSender" | "onQuestionnaireAnswer" | "onOpenInternalAppLink" | "onJumpToMessage"
 >) {
   const [visibleInvocationScope, setVisibleInvocationScope] = useState<{ channelId: string; ids: string[] } | null>(null);
   const visibleInvocationIds = visibleInvocationScope?.channelId === channel?.id ? visibleInvocationScope?.ids : undefined;
@@ -682,7 +684,10 @@ export const MessageTimeline = memo(function MessageTimeline({
   const stableOnMentionSender = useStableCallback(onMentionSender);
   const stableOnRebornSender = useStableCallback(onRebornSender);
   const stableOnQuestionnaireAnswer = useStableCallback(onQuestionnaireAnswer);
-  const stableOnSendMessage = useStableCallback(onSendMessage);
+  // Rows hold only the Channel's id, so presence changes do not render them;
+  // the address is read from the Channel as it is when the starter is clicked.
+  const stableOnSendStarter = useStableCallback((starter: string) =>
+    onSendMessage(`${starterAddress(channel?.presence)} ${starter}`));
   const stableOnOpenAgentTrace = useStableCallback(onOpenAgentTrace);
   const stableOnOpenHumanProfile = useStableCallback(onOpenHumanProfile);
   const stableOnOpenInternalAppLink = useStableCallback(onOpenInternalAppLink);
@@ -1090,7 +1095,7 @@ export const MessageTimeline = memo(function MessageTimeline({
                 onRebornSender={stableOnRebornSender}
                 reborningSender={false}
                 onQuestionnaireAnswer={stableOnQuestionnaireAnswer}
-                onSendMessage={stableOnSendMessage}
+                onSendStarter={stableOnSendStarter}
                 onOpenAgentTrace={stableOnOpenAgentTrace}
                 onOpenHumanProfile={stableOnOpenHumanProfile}
                 onOpenInternalAppLink={stableOnOpenInternalAppLink}
@@ -1170,7 +1175,7 @@ export const MessageTimeline = memo(function MessageTimeline({
                       message.author === reborningSenderKey)
                   }
                   onQuestionnaireAnswer={stableOnQuestionnaireAnswer}
-                  onSendMessage={stableOnSendMessage}
+                  onSendStarter={stableOnSendStarter}
                   onOpenAgentTrace={stableOnOpenAgentTrace}
                   onOpenHumanProfile={stableOnOpenHumanProfile}
                   onOpenInternalAppLink={stableOnOpenInternalAppLink}
@@ -1690,7 +1695,7 @@ export const MessageRow = memo(function MessageRow({
   onRebornSender,
   reborningSender,
   onQuestionnaireAnswer,
-  onSendMessage,
+  onSendStarter,
   onOpenAgentTrace,
   onOpenHumanProfile,
   onOpenInternalAppLink,
@@ -2556,7 +2561,7 @@ export const MessageRow = memo(function MessageRow({
             )}
             {onboardingStage ? (
               <OnboardingMessage stage={onboardingStage} spaceId={channel?.spaceId ?? null} token={token}
-                userId={currentUserIdentityId.replace(/^user:/, "")} presence={channel?.presence} onSend={onSendMessage} />
+                userId={currentUserIdentityId.replace(/^user:/, "")} onSendStarter={onSendStarter} />
             ) : crossSpaceRead ? (
               <CrossSpaceReadCard
                 request={crossSpaceRead}

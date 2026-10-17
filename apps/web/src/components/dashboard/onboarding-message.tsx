@@ -38,7 +38,7 @@ const FIRST_TASK_STARTERS = [
    instance already here: working, idle or asleep, the most recently seen
    first. One whose wake failed, or whose machine is offline, would not act on
    it, so Auto starts another. */
-function starterAddress(presence: ChannelPresence | undefined): string {
+export function starterAddress(presence: ChannelPresence | undefined): string {
   const here = channelPresenceInstances(presence).filter(instance => instance.channelInstanceId &&
     isChannelResidentInstance(instance) && instance.rest !== "wake_failed" && !instance.offlineReason);
   const rank = (instance: (typeof here)[number]) => [isLiveAgentStatus(instance.status) ? 1 : 0, Date.parse(instance.lastSeenAt) || 0];
@@ -49,16 +49,14 @@ function starterAddress(presence: ChannelPresence | undefined): string {
   return instance ? `@${instance.agentName}:${instance.channelInstanceId}` : "@auto";
 }
 
-export function OnboardingMessage({ stage, spaceId, token, userId, presence, onSend }: {
+export function OnboardingMessage({ stage, spaceId, token, userId, onSendStarter }: {
   stage: OnboardingStage; spaceId: string | null; token: string | null; userId: string;
-  /** Who is in this conversation, so a starter goes to the agent already here. */
-  presence: ChannelPresence | undefined;
-  /** Sends a starter as the person's own message in this conversation. */
-  onSend: (body: string) => void;
+  /** Sends a starter as the person's own message in this conversation, addressed by `starterAddress`. */
+  onSendStarter: (message: string) => void;
 }) {
   return stage === "bring-agents"
     ? <BringAgentsMessage spaceId={spaceId} token={token} userId={userId} />
-    : <AgentsInMessage spaceId={spaceId} token={token} userId={userId} presence={presence} onSend={onSend} />;
+    : <AgentsInMessage spaceId={spaceId} token={token} userId={userId} onSendStarter={onSendStarter} />;
 }
 
 /* Once an agent is in, xMatrix says so in the next message. The Hub checks
@@ -76,9 +74,8 @@ function BringAgentsMessage({ spaceId, token, userId }: { spaceId: string | null
   return <BringAgentsIn spaceId={spaceId} token={token} userId={userId} surface="welcome" />;
 }
 
-function AgentsInMessage({ spaceId, token, userId, presence, onSend }: {
-  spaceId: string | null; token: string | null; userId: string; presence: ChannelPresence | undefined;
-  onSend: (body: string) => void;
+function AgentsInMessage({ spaceId, token, userId, onSendStarter }: {
+  spaceId: string | null; token: string | null; userId: string; onSendStarter: (message: string) => void;
 }) {
   const fleet = useInstalledHarnesses(spaceId, token, userId);
   const handles = [...new Set((fleet.catalog.data?.registrations ?? [])
@@ -96,7 +93,7 @@ function AgentsInMessage({ spaceId, token, userId, presence, onSend }: {
           <li key={starter.id} className="m-0 border-b-[1px] border-border p-0">
             <button type="button" onClick={() => {
               recordOnboardingStep(token, { step: "starter_chosen", surface: "welcome", starter: starter.id });
-              onSend(`${starterAddress(presence)} ${starter.message}`);
+              onSendStarter(starter.message);
             }}
               className="group/starter flex w-full items-center gap-3 py-3 text-left">
               <span className="min-w-0 flex-1">
