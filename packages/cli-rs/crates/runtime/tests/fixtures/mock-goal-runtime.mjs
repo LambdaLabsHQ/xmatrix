@@ -613,15 +613,27 @@ function handleAcp(message) {
           mcpCapabilities: { http: true, sse: true },
           sessionCapabilities: { list: {}, resume: {} },
         },
-        authMethods: [{ id: "login", name: "Login", description: "fixture login" }],
+        authMethods: provider === "acp-cursor-login"
+          ? [{ id: "cursor_login", name: "Cursor Login", description: "fixture login" }]
+          : [{ id: "login", name: "Login", description: "fixture login" }],
         agentInfo: { name: "Kimi Code CLI", version: "0.30.0" },
       });
       break;
     case "authenticate":
+      // Current Cursor CLI advertises only cursor_login and rejects anything else.
+      if (provider === "acp-cursor-login" && message.params?.methodId !== "cursor_login") {
+        send({ jsonrpc: "2.0", id: message.id, error: { code: -32602, message: "Invalid params",
+          data: { message: `Unknown authentication method: ${message.params?.methodId}. Supported method: cursor_login` } } });
+        break;
+      }
       acpState.authenticateSeen = true;
       response(message, {});
       break;
     case "session/new":
+      if (provider === "acp-cursor-login" && !acpState.authenticateSeen) {
+        send({ jsonrpc: "2.0", id: message.id, error: { code: -32000, message: "Authentication required" } });
+        break;
+      }
       response(message, {
         sessionId: "acp-fixture-session",
         configOptions: [
@@ -718,6 +730,7 @@ const handlers = {
   zcode: handleZcode,
   grok: handleGrok,
   acp: handleAcp,
+  "acp-cursor-login": handleAcp,
   "acp-live-canary": handleAcp,
 };
 

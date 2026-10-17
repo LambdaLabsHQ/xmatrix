@@ -8,13 +8,30 @@ import type { Env } from "./types";
  * of which refused anyone in production.
  */
 
-/** Attempts are counted over this rolling window. */
+/** Attempts are counted over this rolling window unless a counter names its own. */
 export const ATTEMPT_WINDOW_MS = 60_000;
+
+/** The longest window a counter may name. */
+export const MAX_ATTEMPT_WINDOW_MS = 7 * 24 * 60 * 60_000;
 
 /** One counter to charge, and how many attempts it allows per window. */
 export interface AttemptLimit {
   key: string;
   max: number;
+  /** A longer rolling window than ATTEMPT_WINDOW_MS, such as a day. */
+  windowMs?: number;
+}
+
+/** Where the broker keeps a counter. A counter with its own window carries it
+ * in the key, so pruning knows when its newest attempt has left the window. */
+export function attemptStorageKey(limit: AttemptLimit): string {
+  return limit.windowMs ? `attempts:window-${limit.windowMs}:${limit.key}` : `attempts:${limit.key}`;
+}
+
+/** The window of a counter kept under `storageKey`. */
+export function attemptWindowMs(storageKey: string): number {
+  const named = /^attempts:window-(\d+):/u.exec(storageKey);
+  return named ? Number(named[1]) : ATTEMPT_WINDOW_MS;
 }
 
 /**
@@ -24,7 +41,8 @@ export interface AttemptLimit {
  */
 export function chargeAttempt(recent: readonly number[][], limits: readonly AttemptLimit[], now: number):
   { admitted: boolean; next: number[][] } {
-  const live = recent.map((times) => times.filter((time) => time > now - ATTEMPT_WINDOW_MS));
+  const live = recent.map((times, index) =>
+    times.filter((time) => time > now - (limits[index].windowMs ?? ATTEMPT_WINDOW_MS)));
   const admitted = limits.every((limit, index) => live[index].length < limit.max);
   return { admitted, next: admitted ? live.map((times) => [...times, now]) : live };
 }

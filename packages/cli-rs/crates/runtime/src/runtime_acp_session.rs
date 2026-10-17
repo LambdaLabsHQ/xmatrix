@@ -154,6 +154,7 @@ impl AcpSession {
             next_id: 1,
             session_id: None,
             loaded_goal: None,
+            auth_method_ids: Vec::new(),
             presentation: AgentPresentationFacts::default(),
             config,
             activity: ChannelActivityReporter::default(),
@@ -283,7 +284,9 @@ impl AcpSession {
     }
 
     /// Generic vendors skip `authenticate` up front; when the agent still
-    /// answers authRequired (-32000), retry once after `methodId: "login"`.
+    /// answers authRequired (-32000), retry once after authenticating with
+    /// `login`, or the agent's own method when it does not advertise `login`
+    /// (current Cursor CLI accepts only `cursor_login`).
     async fn request_with_login_retry(
         &mut self,
         method: &str,
@@ -295,9 +298,10 @@ impl AcpSession {
                 if self.config.authenticate.is_none()
                     && err.code == Some(ACP_AUTH_REQUIRED_CODE) =>
             {
+                let method_id = acp_retry_auth_method(&self.auth_method_ids);
                 self.request(
                     "authenticate",
-                    Some(serde_json::json!({ "methodId": "login" })),
+                    Some(serde_json::json!({ "methodId": method_id })),
                 )
                 .await?;
                 self.request(method, Some(params)).await
@@ -328,9 +332,10 @@ impl AcpSession {
         resume_requested: bool,
         trusted_rules: Option<&str>,
     ) -> error::Result<AgentPresentationSnapshot> {
-        let _ = self
+        let initialized = self
             .request_with_login_retry("initialize", acp_initialize_params())
             .await?;
+        self.auth_method_ids = acp_auth_method_ids(&initialized);
         self.notify("notifications/initialized", None).await?;
 
         if let Some(authenticate) = self.config.authenticate.clone() {
@@ -1429,3 +1434,22 @@ fn redact_data_urls_value(value: &Value) -> Value {
     reason = "each #[tokio::test] runs on its own thread; the guard only serializes process-global env across test threads"
 )]
 mod tests;
+
+fn acp_auth_method_ids(initialize_result: &Value) -> Vec<String> {
+    initialize_result
+        .get("authMethods")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|method| method.get("id").and_then(Value::as_str))
+        .map(str::to_string)
+        .collect()
+}
+
+fn acp_retry_auth_method(advertised: &[String]) -> String {
+    if advertised.is_empty() || advertised.iter().any(|id| id == "login") {
+        "login".to_string()
+    } else {
+        advertised[0].clone()
+    }
+}

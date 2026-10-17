@@ -44,6 +44,9 @@ const en = {
   download: ["Download the desktop app", ". It finds the agents installed there."],
   server: (copied: boolean) => ["Setting up a server? ", copied ? "Copied" : "Copy a setup prompt",
     " for an agent already running there, or ", "read the steps", "."],
+  emailOffer: "On your phone? Email this to yourself and open it on your computer.",
+  sendToComputer: "Send to my computer",
+  emailSent: "Sent to your email. Open it on your computer to continue there.",
   preparingCommand: "Preparing a command…",
   copy: (copied: boolean) => copied ? "Copied" : "Copy",
   agentsIn: (names: string, one: boolean) =>
@@ -134,6 +137,9 @@ const zh: OnboardingCopy = {
   download: ["下载桌面 App", "，它会找到电脑上装好的 Agent。"],
   server: (copied) => ["要接一台服务器？", copied ? "已复制" : "复制一段设置提示",
     "发给已经在那里运行的 Agent，或者", "看操作步骤", "。"],
+  emailOffer: "在用手机？把它发到自己的邮箱，在电脑上打开。",
+  sendToComputer: "发到我的电脑",
+  emailSent: "已发到你的邮箱。在电脑上打开邮件，就能接着往下做。",
   preparingCommand: "正在生成命令…",
   copy: (copied) => copied ? "已复制" : "复制",
   agentsIn: (names, one) =>
