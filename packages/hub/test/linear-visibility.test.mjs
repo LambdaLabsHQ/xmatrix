@@ -13,7 +13,8 @@ const visibility = await loadCommonJsSourceModule(new URL("../src/connectors/lin
   (name) => name === "./connection-credentials"
     ? { connectionCredentials: async (_env, spaceId) => spaceId === "unconnected" ? {} : { oauthToken: `token-${spaceId}` } }
     : name === "./credentials" ? { connectorCredentialRepository: () => ({ resolve: async ({ spaceId }) =>
-      stored.get(spaceId) ?? { status: "configured", version: 7, values: { oauthToken: `token-${spaceId}` } } }) }
+      stored.get(spaceId) ?? { status: "configured", version: 7, values: { oauthToken: `token-${spaceId}` },
+        oauthGrant: { grantGeneration: `grant-${spaceId}`, workspaceShared: false } } }) }
     : name === "./http" ? http : assert.fail(`unexpected import ${name}`));
 const issue = { eventId: "e", sourceRef: "linear:eng", feature: "issue", summary: "", body: "",
   subject: { entity: "issue", id: "issue-1" } };
@@ -21,7 +22,8 @@ const issue = { eventId: "e", sourceRef: "linear:eng", feature: "issue", summary
 test("a Space receives a Linear event only when its own grant reads the event's subject", async () => {
   const visible = (spaceId, event = issue) => visibility.linearEventVisible({}, spaceId, event);
   const read = await withProviderResponses([{ body: { data: { issue: { id: "issue-1" } } } }], () => visible("space-a"));
-  assert.equal(read.result, 7, "the version of the grant that read it");
+  assert.deepEqual(read.result, { credentialVersion: 7, grantGeneration: "grant-space-a" },
+    "the grant that read it, fixed before the read");
   assert.equal(new Headers(read.calls[0].headers).get("authorization"), "Bearer token-space-a");
   assert.deepEqual(read.calls[0].body.variables, { id: "issue-1" });
   assert.match(read.calls[0].body.query, /issue\(id: \$id\) \{ id \}/u);
@@ -29,10 +31,13 @@ test("a Space receives a Linear event only when its own grant reads the event's 
     { body: { data: { issue: { id: "another" } } } }, { status: 401, body: {} }]) {
     assert.equal((await withProviderResponses([response], () => visible("space-b"))).result, undefined);
   }
-  // A Connect between the read and the answer stored another grant.
-  stored.set("space-c", { status: "configured", version: 8, values: { oauthToken: "token-after-reconnect" } });
-  assert.equal((await withProviderResponses([{ body: { data: { issue: { id: "issue-1" } } } }],
-    () => visible("space-c"))).result, undefined);
+  // The stored grant is not the token about to read (a Connect in between), or has no binding: no read at all.
+  stored.set("space-c", { status: "configured", version: 8, values: { oauthToken: "token-after-reconnect" },
+    oauthGrant: { grantGeneration: "grant-c", workspaceShared: false } });
+  stored.set("space-d", { status: "configured", version: 2, values: { oauthToken: "token-space-d" } });
+  for (const spaceId of ["space-c", "space-d"]) {
+    assert.equal((await withProviderResponses([], () => visible(spaceId))).result, undefined);
+  }
   await assert.rejects(withProviderResponses([{ status: 503, body: {} }], () => visible("space-b")),
     (error) => error instanceof ProviderRequestError && error.status === 503, "an outage is retried, not dropped");
   assert.equal((await withProviderResponses([], () => visible("unconnected"))).result, undefined);

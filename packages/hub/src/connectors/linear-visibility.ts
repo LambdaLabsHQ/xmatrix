@@ -15,15 +15,19 @@ const LINEAR_SUBJECTS = new Set(["issue", "comment", "project", "projectUpdate",
  * Something it cannot read now (a private team's issue, or one already
  * deleted) is not delivered. An outage is thrown, so Linear retries.
  *
- * Answers the credential version of the grant that read it, or undefined: the
- * answer speaks only for that grant, so the caller delivers only while it is
- * still the Space's current one.
+ * Answers which grant read it (its credential version and binding
+ * generation, fixed before the read), or undefined: the answer speaks only for
+ * that grant, so the caller delivers only while exactly it is still current.
  */
-export async function linearEventVisible(env: Env, spaceId: string, event: ConnectorEvent): Promise<number | undefined> {
+export async function linearEventVisible(env: Env, spaceId: string, event: ConnectorEvent):
+  Promise<{ credentialVersion: number; grantGeneration: string | null } | undefined> {
   const subject = event.subject;
   if (!subject || !LINEAR_SUBJECTS.has(subject.entity) || !/^[A-Za-z0-9-]{1,64}$/u.test(subject.id)) return undefined;
+  // Refreshed first if due; then the proof names the stored grant whose token reads.
   const token = (await connectionCredentials(env, spaceId, "linear")).oauthToken;
-  if (!token) return undefined;
+  const grant = await connectorCredentialRepository(env).resolve({ requestId: crypto.randomUUID(), spaceId,
+    providerId: "linear" });
+  if (!token || grant?.status !== "configured" || !grant.oauthGrant || grant.values.oauthToken !== token) return undefined;
   let payload: Record<string, unknown>;
   try {
     payload = await providerJson("https://api.linear.app/graphql", { method: "POST",
@@ -34,9 +38,6 @@ export async function linearEventVisible(env: Env, spaceId: string, event: Conne
     throw error;
   }
   const data = (payload.data ?? {}) as Record<string, { id?: unknown } | null | undefined>;
-  if (data[subject.entity]?.id !== subject.id) return undefined;
-  // A Connect or refresh since the read stored a different token: not the grant that read it.
-  const current = await connectorCredentialRepository(env).resolve({ requestId: crypto.randomUUID(), spaceId,
-    providerId: "linear" });
-  return current?.status === "configured" && current.values.oauthToken === token ? current.version : undefined;
+  return data[subject.entity]?.id === subject.id
+    ? { credentialVersion: grant.version, grantGeneration: grant.oauthGrant.grantGeneration } : undefined;
 }

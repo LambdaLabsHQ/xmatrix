@@ -519,15 +519,27 @@ integration('OAuth routing scopes by provider, application, workspace and curren
       // was invited into, so another Space's Connect is refused while this one holds it.
       await assert.rejects(otherCredentials.put(oauthInput(other)), (error) => error.code === 'workspace_connected_elsewhere');
       assert.deepEqual(await readOAuth(apps), [{ connectionId: `${space}:slack`, spaceId: space }]);
+      // A failed check is not a disconnect: the workspace stays this Space's, and it is not delivered to meanwhile.
+      await sql("UPDATE data.app_connector_connections SET status='error' WHERE space_id=$1", [space]);
+      await assert.rejects(otherCredentials.put(oauthInput(other)), (error) => error.code === 'workspace_connected_elsewhere');
+      assert.deepEqual(await readOAuth(apps), []);
       await sql("UPDATE data.app_connector_connections SET status='disconnected' WHERE space_id=$1", [space]);
       await otherCredentials.put(oauthInput(other));
       assert.deepEqual(await readOAuth(apps), [{ connectionId: `${other}:slack`, spaceId: other }]);
-      // Two current bindings predate that rule: which Space should read it is unknown, so neither does.
+      // Two current bindings predate that rule: which Space should read it is unknown, so neither does,
+      // and neither acts with the shared bot (its credential read says so).
       await sql("UPDATE data.app_connector_connections SET status='configured' WHERE space_id=$1", [space]);
       assert.deepEqual(await readOAuth(apps), []);
+      const shared = async (repository, id) => (await repository.resolve({ requestId: crypto.randomUUID(), spaceId: id,
+        providerId: 'slack' })).oauthGrant.workspaceShared;
+      assert.deepEqual([await shared(credentials, space), await shared(otherCredentials, other)], [true, true]);
+      // A binding made before grant generations existed is still a binding of the workspace.
+      await otherSql('UPDATE data.app_connector_oauth_installations SET grant_generation=NULL WHERE space_id=$1', [other]);
+      assert.deepEqual([await shared(credentials, space), await shared(otherCredentials, other)], [true, true]);
       await assert.rejects(readOAuth(apps, { limit: 1 }), /exceeds its bound/, 'overflow fails closed, never partially routes');
       await sql("UPDATE data.app_connector_connections SET status='disconnected' WHERE space_id=$1", [space]);
       assert.deepEqual(await readOAuth(apps), [{ connectionId: `${other}:slack`, spaceId: other }]);
+      assert.equal(await shared(otherCredentials, other), false);
       await otherSql('UPDATE data.app_connector_credentials SET version=version+1 WHERE space_id=$1', [other]);
       assert.deepEqual(await readOAuth(apps), [], 'mismatched credential versions never route');
   });

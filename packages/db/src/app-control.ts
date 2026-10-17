@@ -261,6 +261,20 @@ const LIVE_SOURCE_RELATION_SQL = `c.status='configured'
           AND ${channelCapabilityPredicate({ capability: "app_new_work", channelAlias: "channel",
             principalKindSql: "'user'", principalIdSql: "r.created_by" })}`;
 
+/** A Slack workspace connected here is already another Space's. */
+export const SLACK_WORKSPACE_TAKEN = "workspace_connected_elsewhere";
+
+/**
+ * Joins `connection` and `credential` to OAuth binding `binding` while the
+ * binding still holds its workspace: its credential version is current and
+ * its connection is not disconnected (a failed check keeps the hold).
+ */
+export const SLACK_WORKSPACE_HELD_SQL = (binding: string, connection: string, credential: string) =>
+  `${connection}.connection_id=${binding}.connection_id AND ${connection}.space_id=${binding}.space_id
+      AND ${connection}.provider_id=${binding}.provider_id AND ${connection}.status<>'disconnected'
+    JOIN data.app_connector_credentials ${credential} ON ${credential}.connection_id=${binding}.connection_id
+      AND ${credential}.space_id=${binding}.space_id AND ${credential}.version=${binding}.credential_version`;
+
 /** A connection `c` linked to GitHub App installation `$1`, by its one id or its list. */
 const GITHUB_INSTALLATION_LINKED_SQL = `(c.metadata_json->>'installationId'=$1 OR EXISTS (
             SELECT 1 FROM jsonb_array_elements_text(CASE
@@ -463,23 +477,22 @@ export class PostgresAppRepository {
     return this.database.transaction({ requestId: text(input.requestId, "requestId", 200),
       operation: "app.oauth-event-connections" }, async (tx) => {
       const rows = await tx.query<QueryResultRow>({ name: "app_oauth_event_connections_v2", text: `SELECT
-        i.connection_id,i.space_id,i.credential_version FROM data.app_connector_oauth_installations i
-        JOIN data.app_connector_connections c ON c.connection_id=i.connection_id AND c.space_id=i.space_id
-          AND c.provider_id=i.provider_id AND c.status='configured'
-        JOIN data.app_connector_credentials k ON k.connection_id=i.connection_id AND k.space_id=i.space_id
-          AND k.version=i.credential_version
+        i.connection_id,i.space_id,i.credential_version,i.grant_generation,c.status FROM data.app_connector_oauth_installations i
+        JOIN data.app_connector_connections c ON ${SLACK_WORKSPACE_HELD_SQL("i", "c", "k")}
         WHERE i.provider_id=$1 AND i.app_client_id=$2 AND i.installation_id=$3
           AND NOT EXISTS (SELECT 1 FROM data.space_deletions d WHERE d.space_id=i.space_id)
         ORDER BY i.connection_id LIMIT $4`, values: [providerId, appClientId, installationId, input.limit + 1],
       maxRows: input.limit + 1 });
       if (rows.length > input.limit) throw new AppControlError("too_many_installations", 503,
         "OAuth installation routing exceeds its bound", true);
-      // A Slack workspace speaks for one Space (slack-workspace-claim.ts). Two
-      // current bindings predate that rule; which Space should read it is not
-      // known, so neither does until one disconnects.
+      // A Slack workspace speaks for one Space (claimSlackWorkspace),
+      // held through a failed check until a disconnect. Two holding bindings
+      // predate that rule; which Space should read it is not known, so neither
+      // does until one disconnects. Only a configured connection is delivered to.
       if (providerId === "slack" && rows.length > 1) return [];
-      return rows.map(row => ({ connectionId: String(row.connection_id), spaceId: String(row.space_id),
-        credentialVersion: Number(row.credential_version) }));
+      return rows.filter(row => row.status === "configured").map(row => ({ connectionId: String(row.connection_id), spaceId: String(row.space_id),
+        credentialVersion: Number(row.credential_version),
+        grantGeneration: row.grant_generation === null ? null : String(row.grant_generation) }));
     });
   }
 

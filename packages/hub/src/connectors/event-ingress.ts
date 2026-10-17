@@ -99,17 +99,15 @@ export async function handleAppConnectorDelivery(input: { env: Env; request: Req
       // and only while that grant is current: a Connect since the read is a
       // different grant, so routes, the final append and Automations are
       // fenced to the credential version that read it.
-      let fence: typeof binding & { credentialVersion?: number } = binding;
-      if (provider.id === "linear") {
-        const credentialVersion = await visible(env, connection.spaceId, event);
-        if (credentialVersion === undefined) continue;
-        fence = { ...binding, credentialVersion };
-      }
+      const proof = provider.id === "linear" ? await visible(env, connection.spaceId, event) : undefined;
+      if (provider.id === "linear" && !proof) continue;
       const current = async () => (await query()).some(candidate => candidate.connectionId === connection.connectionId &&
-        (fence.credentialVersion === undefined || candidate.credentialVersion === fence.credentialVersion));
-      const append = fence.credentialVersion === undefined ? dependencies.append
-        : currentConnectorAppend(dependencies.append, current);
-      delivered += await deliverEvent(env, apps, append, provider.id, connection.connectionId, event, fence);
+        (!proof || (candidate.credentialVersion === proof.credentialVersion &&
+          candidate.grantGeneration === proof.grantGeneration)));
+      const append = proof ? currentConnectorAppend(dependencies.append, current) : dependencies.append;
+      delivered += await deliverEvent(env, apps, append, provider.id, connection.connectionId, event, proof
+        ? { ...binding, credentialVersion: proof.credentialVersion, ...(proof.grantGeneration ? { grantGeneration: proof.grantGeneration } : {}) }
+        : binding);
       // Reauthorization can change the workspace between the first lookup and dispatch.
       if (dependencies.automations && await current()) {
         await dependencies.automations(env, { spaceId: connection.spaceId, provider: provider.id, event })

@@ -1,3 +1,4 @@
+import { AppControlError, SLACK_WORKSPACE_TAKEN } from "@xmatrix/db";
 import { getAppConnectorProvider } from "../app-connectors";
 import type { Env } from "../types";
 import { connectorCredentialRepository } from "./credentials";
@@ -21,6 +22,13 @@ export async function connectionCredentials(env: Env, spaceId: string, providerI
   Promise<Record<string, string>> {
   const repository = connectorCredentialRepository(env);
   const resolved = await repository.resolve({ requestId: crypto.randomUUID(), spaceId, providerId });
+  // A Slack workspace speaks for one Space: while bindings made before that
+  // rule share one, neither Space acts with its bot. The connection and its
+  // encrypted grant stay until an administrator disconnects one of them.
+  if (resolved?.oauthGrant?.workspaceShared) {
+    throw new AppControlError(SLACK_WORKSPACE_TAKEN, 409,
+      "This Slack workspace is also connected to another xMatrix Space; disconnect it in one of them");
+  }
   const credentials: Record<string, string> = { ...resolved?.values };
   const verify = grantVerifier(providerId, credentials);
   let refreshed = await refreshOAuthFields(env, providerId, credentials).catch(error => {

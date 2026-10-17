@@ -1,3 +1,4 @@
+import { AppControlError, SLACK_WORKSPACE_TAKEN } from "@xmatrix/db";
 import { agentRegistrationOf } from "./agent-caller";
 import { teamsActionCapability } from "./teams-native";
 import { dingtalkActionCapability } from "./dingtalk-native";
@@ -215,6 +216,8 @@ async function runAction(providerId: string, input: ConnectorCommandInput, actio
       await announceActionRequests(input.env, scope.spaceId, input.channelId);
       return approvalReceipt(manifest.name, actionId, request);
     } catch (error) {
+      const shared = sharedWorkspace(error);
+      if (shared) return result("blocked", shared);
       return result("failed", error instanceof ProviderRequestError ? error.message : "could not create an approval request");
     }
   }
@@ -237,11 +240,18 @@ async function runAction(providerId: string, input: ConnectorCommandInput, actio
           (context.x?.billingSummary?.() ? `\n${context.x.billingSummary()}` : "") };
       }
     } catch (error) {
+      const shared = sharedWorkspace(error);
+      if (shared) return { status: "blocked", summary: shared };
       if (error instanceof ProviderRequestError) return { status: "failed", summary: error.message };
       return { status: "failed", summary: error instanceof DOMException && error.name === "TimeoutError"
         ? "the provider did not answer in time" : "the provider call failed" };
     }
   });
+}
+
+/** A Slack workspace still shared by two Spaces' older bindings: its refusal says what to do. */
+function sharedWorkspace(error: unknown): string | undefined {
+  return error instanceof AppControlError && error.code === SLACK_WORKSPACE_TAKEN ? error.message : undefined;
 }
 
 /** A Channel's pending requests changed: its admins' open Channels read the list again instead of polling it. */

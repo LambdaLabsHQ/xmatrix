@@ -110,7 +110,7 @@ async function completeOAuthConnect(env: Env, request: Request, verified: Verifi
     if ((checked as { ok?: unknown }).ok !== true) return appsRedirect(env, verified.spaceId, providerId, "failed");
     return completion ?? appsRedirect(env, verified.spaceId, providerId, "connected");
   } catch (error) {
-    // The workspace is another Space's (slack-workspace-claim.ts): say so, rather than that Connect failed.
+    // The workspace is another Space's (claimSlackWorkspace): say so, rather than that Connect failed.
     if (error instanceof ControlError && error.code === SLACK_WORKSPACE_TAKEN) {
       return appsRedirect(env, verified.spaceId, providerId, "elsewhere");
     }

@@ -20,8 +20,9 @@ async function request(provider, payload, secret = env[`CONNECTOR_${provider.toU
   return new Request(`https://hub.test/api/connectors/${provider}/events?spaceId=attacker`,
     { method: 'POST', headers, body });
 }
-function fixture(bindings = [{ connectionId: 'space-a:slack', spaceId: 'space-a', credentialVersion: 3 }],
-  readable = () => 3) {
+const currentGrant = { credentialVersion: 3, grantGeneration: 'grant-3' };
+function fixture(bindings = [{ connectionId: 'space-a:slack', spaceId: 'space-a', ...currentGrant }],
+  readable = () => currentGrant) {
   const queries = [], routes = [], appends = [], automations = [], visibility = [], retirements = [];
   const apps = {
     async oauthEventConnections(query) { queries.push(query); return bindings; },
@@ -36,7 +37,7 @@ function fixture(bindings = [{ connectionId: 'space-a:slack', spaceId: 'space-a'
     apps: () => apps,
     async append(_env, _channel, command) { appends.push(command); return new Response('{}'); },
     async automations(_env, trigger) { automations.push(trigger); },
-    // The credential version whose grant read the event's subject, or undefined.
+    // The grant (credential version and binding generation) that read the event's subject, or undefined.
     async linearVisible(_env, spaceId, event) { visibility.push({ spaceId, subject: event.subject }); return readable(spaceId); },
   } };
 }
@@ -80,7 +81,7 @@ test('unknown installations acknowledge without cross-Space delivery; forgeries 
 });
 
 test('Linear app events require a signed organization id and fresh timestamp', async () => {
-  const f = fixture([{ connectionId: 'space-a:linear', spaceId: 'space-a', credentialVersion: 3 }]);
+  const f = fixture([{ connectionId: 'space-a:linear', spaceId: 'space-a', ...currentGrant }]);
   const payload = { type: 'Issue', action: 'create', organizationId: 'org-a', webhookTimestamp: Date.now(),
     data: { id: 'issue-a', identifier: 'ENG-1', title: 'Test', team: { key: 'ENG' } } };
   assert.equal((await send('linear', payload, f)).status, 200);
@@ -96,8 +97,9 @@ test('Linear app events require a signed organization id and fresh timestamp', a
 // Space takes an event only when its own grant reads what it is about, so a
 // private team's issue never reaches a Space whose member cannot see it.
 test('a Linear event reaches only the Spaces whose own grant reads its subject', async () => {
-  const f = fixture([{ connectionId: 'space-a:linear', spaceId: 'space-a', credentialVersion: 3 },
-    { connectionId: 'space-b:linear', spaceId: 'space-b', credentialVersion: 5 }], (spaceId) => spaceId === 'space-a' ? 3 : undefined);
+  const f = fixture([{ connectionId: 'space-a:linear', spaceId: 'space-a', ...currentGrant },
+    { connectionId: 'space-b:linear', spaceId: 'space-b', credentialVersion: 5, grantGeneration: 'grant-5' }],
+    (spaceId) => spaceId === 'space-a' ? currentGrant : undefined);
   const payload = { type: 'Issue', action: 'create', organizationId: 'org-a', webhookTimestamp: Date.now(),
     data: { id: 'issue-private', identifier: 'SEC-1', title: 'Private team issue', team: { key: 'SEC' } } };
   assert.deepEqual(await (await send('linear', payload, f)).json(), { ok: true, events: 1, delivered: 1 });
@@ -105,18 +107,19 @@ test('a Linear event reaches only the Spaces whose own grant reads its subject',
   assert.deepEqual(f.automations.map((trigger) => trigger.spaceId), ['space-a']);
   assert.deepEqual(f.visibility, [{ spaceId: 'space-a', subject: { entity: 'issue', id: 'issue-private' } },
     { spaceId: 'space-b', subject: { entity: 'issue', id: 'issue-private' } }]);
-  assert.equal(f.routes[0].oauthBinding.credentialVersion, 3, 'routes are read for the grant that read the subject');
+  assert.deepEqual([f.routes[0].oauthBinding.credentialVersion, f.routes[0].oauthBinding.grantGeneration], [3, 'grant-3'],
+    'routes are read for the grant that read the subject');
 });
 
 // What one grant could read says nothing about the grant a later Connect
-// stores: once the Space's current credential version differs from the one
-// that read the subject, nothing is appended and no Automation fires; Linear
-// retries, and the retry asks the new grant.
+// stores, even one with the same token or a recreated version number: once the
+// Space's current binding is not the one that read the subject, nothing is
+// appended and no Automation fires; Linear retries, and the retry asks the new grant.
 test('a Linear Connect after the visibility read withholds the delivery', async () => {
-  const f = fixture([{ connectionId: 'space-a:linear', spaceId: 'space-a', credentialVersion: 3 }], () => 3);
+  const f = fixture([{ connectionId: 'space-a:linear', spaceId: 'space-a', ...currentGrant }]);
   let reads = 0;
   f.apps.oauthEventConnections = async () => [{ connectionId: 'space-a:linear', spaceId: 'space-a',
-    credentialVersion: ++reads === 1 ? 3 : 4 }];
+    credentialVersion: 3, grantGeneration: ++reads === 1 ? 'grant-3' : 'recreated-grant' }];
   const payload = { type: 'Issue', action: 'create', organizationId: 'org-a', webhookTimestamp: Date.now(),
     data: { id: 'issue-private', identifier: 'SEC-1', title: 'Private team issue', team: { key: 'SEC' } } };
   await assert.rejects(send('linear', payload, f), /Connector Channel delivery failed/u);
@@ -126,6 +129,18 @@ test('a Linear Connect after the visibility read withholds the delivery', async 
 
 // Slack's signed word that the app left the workspace retires its bindings
 // before anything is routed; a revoked user token alone retires nothing.
+// A Linear binding made before grant generations existed has none; its proof
+// says so, and it keeps delivering until a Connect replaces it.
+test('a Linear binding without a grant generation still delivers what its grant reads', async () => {
+  const legacy = { credentialVersion: 3, grantGeneration: null };
+  const f = fixture([{ connectionId: 'space-a:linear', spaceId: 'space-a', ...legacy }], () => legacy);
+  const payload = { type: 'Issue', action: 'create', organizationId: 'org-a', webhookTimestamp: Date.now(),
+    data: { id: 'issue-a', identifier: 'ENG-1', title: 'Test', team: { key: 'ENG' } } };
+  assert.deepEqual(await (await send('linear', payload, f)).json(), { ok: true, events: 1, delivered: 1 });
+  assert.equal(f.routes[0].oauthBinding.grantGeneration, undefined);
+  assert.equal(f.automations.length, 1);
+});
+
 test('a signed Slack uninstall retires the workspace instead of routing', async () => {
   const f = fixture();
   const uninstalled = { type: 'event_callback', team_id: 'T1', event_id: 'Ev2', event_time: 1760000000,

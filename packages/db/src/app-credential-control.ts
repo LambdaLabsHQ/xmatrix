@@ -2,11 +2,10 @@ import type { QueryResultRow } from "pg";
 import { SENTRY_PUBLIC_INTEGRATION_SCOPES, utf8ByteLength } from "@xmatrix/protocol";
 
 import type { AuthorityDatabase, DatabaseTransaction } from "./contracts.js";
-import { AppControlError } from "./app-control.js";
+import { AppControlError, SLACK_WORKSPACE_HELD_SQL, SLACK_WORKSPACE_TAKEN } from "./app-control.js";
 import { appRequestText as text } from "./app-request-text.js";
 import { decryptSecretValue, encryptSecretValue } from "./secret-value-control.js";
 import { lockDiscordInstallation } from "./discord-installation-lifecycle.js";
-import { claimSlackWorkspace } from "./slack-workspace-claim.js";
 import { beginSentryAttempt, lockSentryAttempt, consumeSentryAttempt, retireSentryAttempt } from "./sentry-installation-lifecycle.js";
 
 /*
@@ -58,6 +57,16 @@ export interface ResolvedAppCredentials {
   connectionVersion: number;
   connectionGeneration: string;
   values: Record<string, string>;
+  /**
+   * The provider-confirmed OAuth binding these credentials are the grant of,
+   * when one is current. Its generation changes with every Connect (null for
+   * a binding made before generations existed, which any Connect replaces),
+   * so with the credential version it names this grant exactly.
+   * `workspaceShared` says another Space's current binding holds the same
+   * Slack workspace (bindings made before one Space per workspace was
+   * enforced), whose bot this grant must then not use.
+   */
+  oauthGrant?: { grantGeneration: string | null; workspaceShared: boolean };
 }
 
 /* The envelope's additional data binds it to this connection and version, so
@@ -114,6 +123,33 @@ async function readInstallationSnapshot(tx: DatabaseTransaction, spaceId: string
   values: [`${spaceId}:${providerId}`], maxRows: 1 });
   return { connectionVersion: Number(rows[0].version), credentialVersion: Number(credentials[0]?.version ?? 0),
     connectionGeneration: String(rows[0].search_rank_sequence) };
+}
+
+/**
+ * A Slack workspace speaks for one Space. Slack issues one bot per workspace,
+ * and its events carry whatever channels that bot was invited into, so a
+ * second Space bound to the same workspace would read the first Space's
+ * private channels. The Space whose binding is current keeps the workspace,
+ * through a failed check too, until it disconnects, its Space is deleted, or
+ * Slack retires the installation (app uninstalled); a later Connect elsewhere
+ * is refused. Serialized per workspace before any connection or credential
+ * lock, so two concurrent Connects cannot both bind.
+ */
+
+export async function claimSlackWorkspace(tx: DatabaseTransaction, installation: AppOAuthInstallation,
+  connectionId: string): Promise<void> {
+  await tx.query({ name: "slack_workspace_lock_v1", text: "SELECT pg_advisory_xact_lock(hashtextextended($1,0))",
+    values: [`slack:${installation.appClientId}:${installation.installationId}`], maxRows: 1 });
+  const held = await tx.query<QueryResultRow>({ name: "slack_workspace_claim_v1", text: `SELECT i.connection_id
+    FROM data.app_connector_oauth_installations i
+    JOIN data.app_connector_connections c ON ${SLACK_WORKSPACE_HELD_SQL("i", "c", "k")}
+    WHERE i.provider_id='slack' AND i.app_client_id=$1 AND i.installation_id=$2 AND i.connection_id<>$3
+      AND NOT EXISTS (SELECT 1 FROM data.space_deletions d WHERE d.space_id=i.space_id)
+    LIMIT 1`, values: [installation.appClientId, installation.installationId, connectionId], maxRows: 1 });
+  if (held[0]) {
+    throw new AppControlError(SLACK_WORKSPACE_TAKEN, 409,
+      "This Slack workspace is already connected to another xMatrix Space");
+  }
 }
 
 export class PostgresAppCredentialRepository {
@@ -414,16 +450,27 @@ export class PostgresAppCredentialRepository {
     return this.database.transaction({ requestId: text(input.requestId, "requestId", 200),
       operation: "app.credentials.resolve" }, async (tx) => {
       if (actorUserId !== null) await requireSpaceAdmin(tx, spaceId, actorUserId);
-      const rows = await tx.query<QueryResultRow>({ name: "app_credential_resolve_v1", text: `SELECT
-        k.*,c.status,c.created_by,c.provider_id,c.version AS connection_version,c.search_rank_sequence FROM data.app_connector_credentials k
+      const rows = await tx.query<QueryResultRow>({ name: "app_credential_resolve_v2", text: `SELECT
+        k.*,c.status,c.created_by,c.provider_id,c.version AS connection_version,c.search_rank_sequence,
+        i.connection_id AS bound_connection_id,i.grant_generation,(i.provider_id='slack' AND EXISTS (SELECT 1 FROM data.app_connector_oauth_installations o
+          JOIN data.app_connector_connections oc ON ${SLACK_WORKSPACE_HELD_SQL("o", "oc", "ok")}
+          WHERE o.provider_id='slack' AND o.app_client_id=i.app_client_id AND o.installation_id=i.installation_id
+            AND o.connection_id<>i.connection_id
+            AND NOT EXISTS (SELECT 1 FROM data.space_deletions d WHERE d.space_id=o.space_id))) AS workspace_shared
+        FROM data.app_connector_credentials k
         JOIN data.app_connector_connections c ON c.connection_id=k.connection_id AND c.space_id=k.space_id
+        LEFT JOIN data.app_connector_oauth_installations i ON i.connection_id=k.connection_id AND i.space_id=k.space_id
+          AND i.provider_id=c.provider_id AND i.credential_version=k.version
         WHERE k.connection_id=$1 AND NOT EXISTS (SELECT 1 FROM data.space_deletions d WHERE d.space_id=k.space_id) LIMIT 1`, values: [`${spaceId}:${providerId}`], maxRows: 1 });
       const row = rows[0];
       if (!row) return null;
       return { connectionId: String(row.connection_id), spaceId: String(row.space_id),
         providerId: String(row.provider_id), status: String(row.status), createdBy: String(row.created_by),
         version: Number(row.version), connectionVersion: Number(row.connection_version),
-        connectionGeneration: String(row.search_rank_sequence), values: await decryptValues(this.material, row) };
+        connectionGeneration: String(row.search_rank_sequence), values: await decryptValues(this.material, row),
+        ...(row.bound_connection_id ? { oauthGrant: {
+          grantGeneration: row.grant_generation === null ? null : String(row.grant_generation),
+          workspaceShared: row.workspace_shared === true } } : {}) };
     });
   }
 }
