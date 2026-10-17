@@ -129,6 +129,8 @@ export const GLOBAL_DATA_TABLES = Object.freeze([
   // Application-wide signed retirement survives removal of all Space bindings.
   // App connections themselves remain movement blockers on the primary shard.
   "app_sentry_installation_lifecycle",
+  // A Slack workspace's claim names its Space and outlives it; only Slack's uninstall releases it.
+  "app_slack_workspace_claims",
   "app_googlechat_room_lifecycle",
   "app_feishu_room_lifecycle",
   "app_teams_room_lifecycle",
