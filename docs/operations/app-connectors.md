@@ -69,30 +69,57 @@ provider's webhook at the ingress URL. Then subscribe a channel with
 ### Cloudflare
 
 Cloudflare connects with OAuth (`CONNECTOR_CLOUDFLARE_CLIENT_ID` /
-`CONNECTOR_CLOUDFLARE_CLIENT_SECRET`, a Cloudflare OAuth client with the
-scopes in the manifest) or with an account API token that has Notifications
-Edit, Workers Observability Write and Workers Scripts Edit. When the login
-reaches more than one account, it still connects; set Account ID on the
-connection before subscribing or running actions.
+`CONNECTOR_CLOUDFLARE_CLIENT_SECRET`, a Cloudflare OAuth client whose allowed
+scopes include every scope in the manifest, `d1.read` among them) or with an
+account API token that has Notifications Edit, Workers Observability Write,
+Workers Scripts Edit and D1 Read.
+
+One connection holds up to five Cloudflare logins. Every Connect adds a login
+with its own rotating grant; a login that reaches exactly the accounts of an
+existing one replaces it. To add another Cloudflare user, that user signs out
+of Cloudflare first or finishes the sign-in in a private window. Apps →
+Cloudflare → Cloudflare logins lists each login's accounts and who connected
+it, and removes one. Removing a login forgets its grant in xMatrix; the
+Cloudflare user revokes the application under My Profile → Access Management.
+A connection made before logins existed keeps its single grant until the next
+Connect, which turns it into the first login.
+
+Default account ID is the account a command or a bare alert type uses when it
+names none. The first login sets it when that login reaches one account;
+adding a login never changes it. Every command may name another account by
+its id (`<account id>/<worker>`); `@cloudflare:list_accounts:*` lists the
+accounts the logins reach. Which login serves an account is read from
+Cloudflare on every call, and a refused login does not hide the accounts the
+others reach.
 
 Nothing is configured in the Cloudflare dashboard. The Space's subscriptions
 are the authority for which notifications reach xMatrix:
 
-- `@cloudflare:subscribe:<alert type>` checks the type against the account's
-  available alerts, creates one webhook destination named `xMatrix · <Space id>`
-  for the connection's ingress URL (once), and creates a notification policy
-  named `xMatrix · <alert type> · <Space id>` that sends to it. Names carry
+- `@cloudflare:subscribe:<alert type>` (default account) or
+  `@cloudflare:subscribe:<account id>/<alert type>` (any other account) checks
+  the type against that account's available alerts, creates one webhook
+  destination named `xMatrix · <Space id>` for the connection's ingress URL
+  (once per account), and creates a notification policy named
+  `xMatrix · <alert type> · <Space id>` that sends to it. Names carry
   the Space, so Spaces sharing an account never touch each other's policies. A type that needs filters is
-  refused with Cloudflare's reason.
-- When no Channel in the Space subscribes to the type any more, the Hub
+  refused with Cloudflare's reason. Naming the default account explicitly is
+  refused, because its alerts arrive under the bare alert type.
+- When no Channel in the Space subscribes to the source any more, the Hub
   deletes that Space's policy. Policies with other names are never touched.
-- `*` routes every notification the account already sends to the
+- `*` routes every notification the accounts already send to the
   destination and configures nothing; the destination's test message reaches
   only `*`.
 
 Each delivery is `fired` or `resolved` (`alert_event`), deduplicated by
 `alert_correlation_id` and edge, so an Automation can use
-`--on cloudflare:fired:workers_observability_real_time_issue`.
+`--on cloudflare:fired:workers_observability_real_time_issue`. An alert from
+an account other than the default arrives as `<account id>/<alert type>`.
+
+D1 reads run one `SELECT` (or `WITH`, `VALUES`, `EXPLAIN`) per command and
+show at most 50 rows in the Channel. The `d1.read` grant is what keeps them
+read-only; the Hub also refuses a second statement or any statement that
+changes data before calling Cloudflare. Grants from before D1 was offered are
+told to reconnect.
 
 ### App Store Connect
 
@@ -170,7 +197,7 @@ section, and none is ever shown again.
 | Bitbucket Cloud | `read_pull_request:<workspace/repo!5>` (read), `comment:<workspace/repo!5> <text>` |
 | Jira | `read_issue:<ENG-9>` (read), `comment:<ENG-9>`, `transition:<ENG-9> <status>` |
 | Vercel | `redeploy:<deployment id>` |
-| Cloudflare | `query_logs:<worker> [minutes] [error\|warn\|log]` (read), `list_deployments:<worker>` (read), `rollback:<worker> [version id] [reason]` |
+| Cloudflare | `list_accounts:*`, `query_logs:[<account id>/]<worker> [minutes] [error\|warn\|log]`, `list_deployments:[<account id>/]<worker>`, `list_databases:<account id>\|*`, `query_database:[<account id>/]<database> <SELECT …>` (reads), `rollback:[<account id>/]<worker> [version id] [reason]` |
 | App Store Connect | `list_apps:*`, `status:<bundle id>`, `builds:<bundle id> [version]`, `read_version:<bundle id> <version>`, `reviews:<bundle id> [unanswered]`, `read_app:<bundle id>`, `review_messages:<bundle id>`, `web_session:*` (reads), `create_version:<bundle id> <version> [release=manual\|after_approval]`, `set_metadata:<bundle id> <version> {json}`, `set_build:<bundle id> <version> <build number>`, `submit:<bundle id> <version>`, `cancel_submission:<bundle id> [platform]`, `release:<bundle id> <version> [phased]`, `pause_phased_release:<bundle id> <version>`, `resume_phased_release:<bundle id> <version>`, `complete_phased_release:<bundle id> <version>`, `reply_review:<review id> <text>`, `set_app_info:<bundle id> {json}`, `set_age_rating:<bundle id> {json}`, `set_price:<bundle id> free\|<amount> [territory]`, `set_availability:<bundle id> all\|<codes> [new=on\|off]`, `set_review_contact:<bundle id> <version> {json}`, `upload_build:<bundle id> <version> <build number> <file> <bytes>`, `upload_screenshot:<bundle id> <file> <bytes>`, `commit_upload:<id> build\|image`, `delete_upload:<id> build\|image`, `set_screenshots:<bundle id> <version> {json}`, `declare_encryption:<bundle id> <version> <build number> exempt\|non_exempt`; more reads: `read_upload:<id> build\|image [from]`, `build_uploads:<bundle id> [build number]`, `screenshot_specs:* [store]`, `screenshots:<bundle id> <version> [locale]`. Signing: `signing:<bundle id>`, `read_certificate:<id>`, `read_profile:<id>` (reads), `register_bundle_id:<bundle id> <name> [platform=…]`, `enable_capability:<bundle id> <CAPABILITY>`, `create_certificate:<type> <signing request>`, `create_profile:<bundle id> <certificate id> [store=…]`. TestFlight: `testflight:<bundle id>`, `feedback:<bundle id> [crashes]`, `crash_log:<feedback id>` (reads), `add_to_group:<bundle id> <version> <build number> <group>`, `submit_beta_review:<bundle id> <version> <build number>`, `set_test_notes:<bundle id> <version> <build number> <locale> <notes>` |
 | Feishu | `send:<chat id>` |
 | Telegram | `send:<chat id>` |

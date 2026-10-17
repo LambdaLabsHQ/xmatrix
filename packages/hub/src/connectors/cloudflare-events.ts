@@ -8,10 +8,24 @@ import { connectorEvent, excerpt, oneLine, record, sourceToken, text } from "./e
  * source is the notification's alert type; the feature is whether the alert
  * fired or resolved, so a Channel or Automation can follow either edge. The
  * destination's test message carries neither and reaches `*` subscriptions only.
+ * An alert from an account other than the connection's default carries the
+ * account in its source, so each account's subscriptions stay apart.
  */
 
 export const CLOUDFLARE_ACCOUNT_ID = /^[a-f0-9]{32}$/u;
 const DATA_FIELDS = 6;
+
+/**
+ * The source a delivery from `account` routes to: the bare alert type for the
+ * default account (Account ID), `<account id>/<alert type>` for any other. A
+ * connection with no default account and no logins predates several accounts
+ * and keeps bare types. Subscribing refuses a source this never produces.
+ */
+export function cloudflareSource(credentials: Readonly<Record<string, string>>, account: string, alertType: string): string {
+  const fallback = credentials.accountId?.trim().toLowerCase();
+  const qualified = CLOUDFLARE_ACCOUNT_ID.test(account) && (fallback ? account !== fallback : Boolean(credentials.logins));
+  return qualified ? `${account}/${alertType}` : alertType;
+}
 
 /* A few scalar fields of the alert's `data` (worker, zone, threshold), never nested payloads. */
 function dataSummary(data: unknown): string | undefined {
@@ -24,7 +38,7 @@ function dataSummary(data: unknown): string | undefined {
 
 export const receiveCloudflareDelivery = createSignedJsonReceiver({
   name: "Cloudflare", secretField: "webhookSecret", proof: { header: "cf-webhook-auth", token: true },
-}, (_, payload) => {
+}, (delivery, payload) => {
   const alertType = sourceToken(payload.alert_type);
   const resolved = text(payload.alert_event) === "ALERT_STATE_EVENT_END";
   const name = text(payload.name) || text(payload.policy_name) || alertType || "Cloudflare notification";
@@ -35,7 +49,7 @@ export const receiveCloudflareDelivery = createSignedJsonReceiver({
     : `${alertType || "test"}:${text(payload.ts)}:${text(payload.policy_id)}`;
   return { ok: true, events: [connectorEvent({
     eventId: `cloudflare:${occurrence}`.slice(0, 160),
-    sourceRef: `cloudflare:${alertType || "test"}`,
+    sourceRef: `cloudflare:${alertType ? cloudflareSource(delivery.credentials, account, alertType) : "test"}`,
     feature: resolved ? "resolved" : "fired",
     summary: `${resolved ? "Resolved" : "Fired"}: ${name}`,
     provider: "Cloudflare", title: `${resolved ? "✅ Resolved" : "🔴 Fired"} · ${name}`,

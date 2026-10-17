@@ -20,6 +20,7 @@ import { getAppConnection, upsertAppConnection } from "./apps";
 import type { Env } from "./types";
 import { addConnectedMailbox } from "./connectors/gmail-mailboxes";
 import { connectXAccount } from "./connectors/x-accounts";
+import { connectCloudflareLogin } from "./connectors/cloudflare-api";
 import { upstreamMeter } from "./usage-cost-metering";
 import { paidCallRepository, paidXCalls } from "./billing-paid-calls";
 import { platformAdminSpaceId } from "./admin-platform-access";
@@ -69,6 +70,12 @@ async function completeOAuthConnect(env: Env, request: Request, verified: Verifi
       const checked = await checkAppConnection(env, { spaceId: verified.spaceId, providerId,
         userId: verified.userId, commandId: `connector-x-check:${crypto.randomUUID()}` });
       return appsRedirect(env, verified.spaceId, providerId, (checked as { ok?: unknown }).ok === true ? "connected" : "failed");
+    }
+    /* A Cloudflare Connect adds one login to the connection's list. */
+    if (providerId === "cloudflare") {
+      const stored = await connectorCredentialRepository(env).resolveForAdmin({ requestId: crypto.randomUUID(),
+        spaceId: verified.spaceId, providerId, actorUserId: verified.userId });
+      grant.fields = await connectCloudflareLogin(stored?.values ?? {}, grant.fields, verified.userId);
     }
     /* A Gmail Connect adds one mailbox to the connection's list. */
     if (providerId === "gmail") grant.fields = await addConnectedMailbox(env, { spaceId: verified.spaceId,
