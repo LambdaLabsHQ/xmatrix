@@ -276,8 +276,9 @@ final class WebContainerTests: XCTestCase {
 
 
     func testAttachmentDownloadLinkBecomesANativeDownload() async {
-        let (coordinator, _) = makeCoordinator()
+        let (coordinator, container) = makeCoordinator()
         coordinator.load(AppConfiguration.mobileTabURL(.messages))
+        XCTAssertEqual(container.subviews.count, 1)
         let webView = page(coordinator)
         let delegate = webView.navigationDelegate as! WebContainerView.PageCoordinator
         let action = DownloadLinkAction(URL(string: "blob:https://xmatrix.sh/5f0c1d2e")!)
