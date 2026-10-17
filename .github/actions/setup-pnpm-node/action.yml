@@ -47,11 +47,29 @@ runs:
     - name: Enable PNPM
       shell: bash
       run: |
+        set -euo pipefail
         pnpm_prefix="$RUNNER_TEMP/xmatrix-pnpm-11.3.0"
-        npm install --global --prefix "$pnpm_prefix" --no-audit --no-fund pnpm@11.3.0
-        echo "$pnpm_prefix/bin" >> "$GITHUB_PATH"
+        log=$(mktemp)
+        trap 'rm -f "$log"' EXIT
+        # npm can surface a tarball ECONNRESET without retrying it. Keep one
+        # retry budget around this pinned bootstrap, before PNPM is available.
+        for attempt in 1 2 3; do
+          if npm install --global --prefix "$pnpm_prefix" --no-audit --no-fund \
+              --color=false --fetch-retries=0 --fetch-timeout=60000 pnpm@11.3.0 2>&1 | tee "$log"; then
+            break
+          else
+            status=$?
+          fi
+          if [ "$attempt" -eq 3 ] || ! grep -Eq \
+              '^npm (error|ERR!) code (ECONNRESET|ETIMEDOUT|ESOCKETTIMEDOUT|EAI_AGAIN|ECONNREFUSED|ENETUNREACH|EHOSTUNREACH|E408|E429|E500|E502|E503|E504)[[:space:]]*$' "$log"; then
+            exit "$status"
+          fi
+          echo "Transient npm bootstrap failure; retry $attempt/2 in $((attempt * 2)) seconds." >&2
+          sleep "$((attempt * 2))"
+        done
         node --version
         "$pnpm_prefix/bin/pnpm" --version
+        echo "$pnpm_prefix/bin" >> "$GITHUB_PATH"
 
     # An ephemeral GitHub-hosted runner starts with an empty store, so it
     # restores one from the Actions cache, keyed by the lockfile. Persistent
