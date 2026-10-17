@@ -1,16 +1,23 @@
 import type { Context, Hono } from "hono";
 import {
-  HUB_ROUTES, parseHarnessInventory, type AgentRegistrationSummary, type SetupIntentHarness, type SetupIntentStatus,
+  HUB_ROUTES, parseHarnessInventory, sha256Hex, type AgentRegistrationSummary, type SetupIntentHarness, type SetupIntentStatus,
 } from "@xmatrix/protocol";
 import type { Env } from "./types";
 import type { SetupIntentRead } from "./device-auth";
 import { readBearerToken } from "./auth";
+import { admitAttempt } from "./auth-attempt-limit";
+import { appOrigin } from "./deployment-origins";
+import { EmailDeliveryConfigurationError, escapeHtml, loginEmailErrorLog, sendEmail } from "./email-delivery";
 import { getDeviceAuthBroker, internalClientHeaders, jsonErrors, requireAuth, requireHumanAuth } from "./index-shared";
 import { listAgentRegistrations } from "./agent-registrations";
 import { listOwnerMachineDaemons, machineRepository } from "./machines";
 import { getSpace } from "./spaces";
 
 const NO_STORE = { "cache-control": "private, no-store" };
+
+/** How many setup links one person may email themselves in a rolling day. */
+export const SETUP_LINK_EMAILS_PER_DAY = 3;
+const DAY_MS = 24 * 60 * 60_000;
 
 /**
  * Connecting a machine from the Web (docs/design/onboarding-connect-machine.md).
@@ -51,6 +58,33 @@ export function registerSetupIntentRoutes(app: Hono<{ Bindings: Env }>): void {
     return relay(await broker(c, "decline", { ownerUserId: owner.id, intentId: c.req.param("intentId") }));
   }));
 
+  /* On a phone the command cannot run, so the page emails its link to the
+     person's own sign-in address: opened on a computer, it continues the same
+     setup there. The recipient is the account's address, never one the caller
+     names, and the link carries the intent id and nothing else. */
+  app.post("/api/setup-intents/:intentId/email", (c) => jsonErrors(c, async () => {
+    const owner = requireHumanAuth(await requireAuth(c.req.raw, c.env));
+    const intentId = c.req.param("intentId");
+    const response = await broker(c, "read", { ownerUserId: owner.id, intentId });
+    if (!response.ok) return relay(response);
+    if (!owner.email) return c.json({ error: "This account has no email address", code: "no_account_email" }, 409);
+    if (!await admitAttempt(c.env, [{
+      key: `setup-link-email:${await sha256Hex(owner.id)}`, max: SETUP_LINK_EMAILS_PER_DAY, windowMs: DAY_MS,
+    }])) {
+      return c.json({ error: "You've sent this link 3 times today. Try again tomorrow.", code: "setup_link_email_limited" }, 429);
+    }
+    const link = new URL("/connect/computer", appOrigin(c.env));
+    link.searchParams.set("intent", intentId);
+    try {
+      await sendEmail(c.env, owner.email, setupLinkEmail(link.toString()));
+    } catch (error) {
+      console.error("Failed to send setup link", { routeGroup: "setup_link_email", error: loginEmailErrorLog(error) });
+      return c.json({ error: "Couldn't send the email. Try again in a moment.",
+        code: error instanceof EmailDeliveryConfigurationError ? error.code : "email_delivery_failed" }, 503);
+    }
+    return c.body(null, 204);
+  }));
+
   /* The terminal, now signed in as the owner, says which Machine it became. */
   app.post("/api/setup-intents/:intentId/machine", (c) => jsonErrors(c, async () => {
     const owner = requireHumanAuth(await requireAuth(c.req.raw, c.env));
@@ -59,6 +93,24 @@ export function registerSetupIntentRoutes(app: Hono<{ Bindings: Env }>): void {
       ownerUserId: owner.id, intentId: c.req.param("intentId"), machineId: body.machineId,
     }));
   }));
+}
+
+/** The email that carries the setup link to the person's computer. */
+export function setupLinkEmail(link: string) {
+  const safeLink = escapeHtml(link);
+  return {
+    subject: "Continue setting up xMatrix on your computer",
+    text: [
+      "Open this link on the computer your agents run on to bring them into xMatrix:",
+      "",
+      link,
+      "",
+      "You sent this from your phone. If you didn't, you can ignore this email.",
+    ].join("\n"),
+    html: `<p>Open this link on the computer your agents run on to bring them into xMatrix:</p>`
+      + `<p><a href="${safeLink}">Continue setup</a></p>`
+      + `<p style="color:#667085;font-size:13px">You sent this from your phone. If you didn't, you can ignore this email.</p>`,
+  };
 }
 
 async function broker(c: Context<{ Bindings: Env }>, action: string, body: Record<string, unknown>,
