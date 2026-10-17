@@ -53,7 +53,8 @@ export async function executeRegistrationLaunchDispatch(input: {
         // Keep the typed domain code so diagnose names the actual cause; only
         // an untyped value collapses to the generic rejection.
         code: REGISTRATION_PREPARATION_REJECTION_CODES.includes(item.code) || /^[a-z][a-z0-9_]{2,79}$/u.test(item.code)
-          ? item.code : "registration_launch_rejected" })),
+          ? item.code : "registration_launch_rejected",
+        ...(item.tooOld ? { tooOld: item.tooOld } : {}) })),
     });
   }
   return { ...result, shardId: placement.shardId, channelId: input.channelId };

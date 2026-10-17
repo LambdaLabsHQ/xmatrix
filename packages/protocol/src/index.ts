@@ -9,11 +9,12 @@ export {
   MACHINE_HARNESS_ACTION_CAPABILITY, MACHINE_HARNESS_CURSOR_LAUNCHER_CAPABILITY, MACHINE_HARNESS_LOGIN_CAPABILITY, MACHINE_HARNESS_LOGIN_START_CANCEL_CAPABILITY,
   MACHINE_HARNESS_RELEASE_CAPABILITY, MACHINE_HARNESS_UNINSTALL_CAPABILITY,
   parseHarnessActionRequest, validHarnessLoginCode, parseHarnessActionResult, parseHarnessInventory,
+  compareHarnessVersions, harnessCommandLabel, harnessCommandLine, harnessDisplayVersion, harnessTooOld, harnessTooOldSentence,
 } from "./harness-management.js";
 export type {
   HarnessAction, HarnessActionRequest, HarnessActionResult, HarnessActionStatus, HarnessAutoUpdate,
   HarnessCommand, HarnessInventory, HarnessInventoryItem, HarnessLogin, HarnessLoginProgress, HarnessLoginState,
-  HarnessManagement,
+  HarnessManagement, HarnessTooOld,
 } from "./harness-management.js";
 export {
   MACHINE_WORKTREE_ACTION_CAPABILITY, parseWorktreeActionRequest, parseWorktreeActionResult,
@@ -186,8 +187,8 @@ export type {
   SerializedFirstMessageLaunchChoice,
 } from "./agent-launch.js";
 export {
-  DECISION_ANSWER_ISSUES, launchRefusalCode, parameterFailureCodeFromDecisionRecord, parseDecisionAnswerFailure,
-  PREPARATION_REJECTION_MESSAGES, preparationFailureSummary, preparationRejectionMessage,
+  DECISION_ANSWER_ISSUES, launchRefusal, parameterFailureCodeFromDecisionRecord, parseDecisionAnswerFailure, parseHarnessTooOld,
+  PREPARATION_REJECTION_MESSAGES, preparationFailureSummary, preparationRejectionMessage, rejectionCause,
   REGISTRATION_PREPARATION_REJECTION_CODES, START_INTENT_CATEGORIES, START_INTENT_INSTRUCTIONS,
   isLaunchHintRejection, LAUNCH_HINT_REJECTION_CODES,
   SUMMON_INTENT_CATEGORIES, SUMMON_INTENT_INSTRUCTIONS, SUMMON_INTENT_REJECTION_CODES, parseDraftSummonIntents,
