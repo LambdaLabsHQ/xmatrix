@@ -2,7 +2,7 @@
 
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { HARNESS_ACTION_SETTLE_MS, type AgentPreset, type HarnessAction, type HarnessActionStatus, type SerializedMachineDaemon } from "@xmatrix/protocol";
+import { HARNESS_ACTION_SETTLE_MS, harnessCommandLabel, type AgentPreset, type HarnessAction, type HarnessActionStatus, type SerializedMachineDaemon } from "@xmatrix/protocol";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { statusInkClass } from "@/components/ui/status-tone";
@@ -14,7 +14,7 @@ import { useHarnessSpaceControl } from "./use-harness-space-control";
 import { fetchMachineDaemons } from "./workspace-admin-views";
 import { queueHarnessAction, readHarnessAction, readRecentHarnessActions, refreshHarnessInventory } from "./machine-harness-api";
 import { HARNESS_ACTION_LABELS, describeHarnessAction } from "./machine-harness-action-status";
-import { harnessAutoUpdateSupported, harnessCommandLabel, harnessUpdateAvailable, machineHarnessState } from "./machine-harness-state";
+import { harnessAutoUpdateSupported, harnessUpdateAvailable, machineHarnessState } from "./machine-harness-state";
 import { UserFacingProblem, userErrorMessage } from "@/lib/user-facing-error";
 
 type HarnessRowState = ReturnType<typeof machineHarnessState>["rows"][number];

@@ -538,6 +538,8 @@ test(`routing rejection ${rejectionCode} binds publication, replays once, and ne
     rejected: [{ sourceMention: '@auto machine:missing', code: rejectionCode,
       ...(rejectionCode === 'routing_parameter_invalid_answer' ? { answerFailure: {
         questionKey: 'workspace', issue: 'choice_not_offered', private: 'must-not-store' } } : {}),
+      ...(rejectionCode === 'registration_harness_outdated' ? { tooOld: { program: 'Cursor CLI', version: '2025.09.12-4852336',
+        minimumVersion: '2026.01.01', machineName: 'Laptop', update: 'cursor-agent update', private: 'must-not-store' } } : {}),
       routingDecision: {
       source: 'deterministic', evaluatedAt: '2026-09-22T18:00:00Z', candidateCount: 1, secret: 'must-not-store',
       rows: [{ harness: 'codex', machineId: 'machine-a', activeRuns: 1,
@@ -548,6 +550,9 @@ test(`routing rejection ${rejectionCode} binds publication, replays once, and ne
   assert.equal(view.rejections[0].code, rejectionCode);
   if (rejectionCode === 'routing_parameter_invalid_answer') assert.match(view.rejections[0].message,
     /"workspace" answer selected an option that was not offered/);
+  if (rejectionCode === 'registration_harness_outdated') assert.equal(view.rejections[0].message,
+    'Cursor CLI on Laptop is 2025.09.12, too old for xMatrix, which needs 2026.01.01 or later. ' +
+    'Run `cursor-agent update` there, then try again. No launch was allocated.');
   assert.doesNotMatch(JSON.stringify(view.rejections), /must-not-store/);
   assert.equal(value.rejected[0].routingDecision.rows[0].quotaObservation.status, 'stale');
   assert.doesNotMatch(JSON.stringify(saved), /must-not-store/);

@@ -55,11 +55,13 @@ export interface HarnessManagement {
   /** null means no verified CLI version command. Capture group 1 is the version. */
   version: (HarnessCommand & { regex: string }) | null;
   /**
-   * The oldest version that speaks the protocol xMatrix launches it with, from
-   * the vendor's own changelog (`sources`). An older install is never routed
-   * to and is offered an update instead; absent means none is known.
+   * The oldest version of `program` that speaks the protocol xMatrix launches
+   * it with, from the vendor's own changelog (`sources`). `program` is the
+   * vendor's name for what `version` reports on (Cursor's is the Cursor CLI,
+   * not the editor): what a person is told is too old. An older install is
+   * never routed to and is offered an update instead; absent means none is known.
    */
-  minimumVersion?: string;
+  minimumVersion?: { program: string; version: string };
   /** null means no verified native recipe for that platform. */
   install: { unix: HarnessCommand | null; windows: HarnessCommand | null };
   update: { unix: HarnessCommand | null; windows: HarnessCommand | null };
@@ -342,9 +344,47 @@ export function compareHarnessVersions(left: string, right: string): number | un
   return 0;
 }
 
+/** What is too old, wherever xMatrix says so: the program, the version its
+ * machine reports and the oldest one xMatrix can talk to. */
+export interface HarnessTooOld {
+  program: string;
+  version: string;
+  minimumVersion: string;
+  /** The machine's name as its owner gave it. */
+  machineName?: string;
+  /** The program's own update, as typed in that machine's terminal. */
+  update?: string;
+}
+
 /** An installed version older than the one xMatrix needs; an unknown version is not judged. */
-export function harnessVersionOutdated(management: Pick<HarnessManagement, "minimumVersion"> | undefined,
-  version: string | undefined): boolean {
+export function harnessTooOld(management: Pick<HarnessManagement, "minimumVersion"> | undefined,
+  version: string | undefined): HarnessTooOld | undefined {
   const minimum = management?.minimumVersion;
-  return Boolean(minimum && version && compareHarnessVersions(version, minimum) === -1);
+  if (!minimum || !version || compareHarnessVersions(version, minimum.version) !== -1) return undefined;
+  return { program: minimum.program, version, minimumVersion: minimum.version };
+}
+
+/** A dated build without its hash: `2025.09.12-4852336` reads as `2025.09.12`. */
+export function harnessDisplayVersion(version: string): string {
+  return version.replace(/-[0-9a-f]{6,}$/iu, "");
+}
+
+/** "Cursor CLI on Laptop is 2025.09.12, too old for xMatrix, which needs 2026.01.01 or later." */
+export function harnessTooOldSentence(tooOld: HarnessTooOld): string {
+  return `${tooOld.program}${tooOld.machineName ? ` on ${tooOld.machineName}` : ""} is ${harnessDisplayVersion(tooOld.version)}, ` +
+    `too old for xMatrix, which needs ${tooOld.minimumVersion} or later.`;
+}
+
+/** Display argv as documentation; this text is never sent for execution. */
+export function harnessCommandLabel(recipe: HarnessCommand | null | undefined): string | undefined {
+  return recipe ? [recipe.command, ...recipe.args.map((arg) => /\s|["'`]/u.test(arg) ? JSON.stringify(arg) : arg)].join(" ") : undefined;
+}
+
+/** A recipe as a person types it in a terminal: the script, not the shell
+ * wrapping it (`bash -c`, `powershell -Command`). */
+export function harnessCommandLine(recipe: HarnessCommand): string {
+  const script = recipe.command === "powershell" && recipe.args.includes("-Command")
+    ? recipe.args[recipe.args.indexOf("-Command") + 1]
+    : (recipe.command === "bash" || recipe.command === "sh") && recipe.args[0] === "-c" ? recipe.args[1] : undefined;
+  return script ?? harnessCommandLabel(recipe)!;
 }

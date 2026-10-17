@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 require("./typescript-require.cjs").installTypeScriptRequire();
-const { machineHarnessState, harnessUpdateAvailable, harnessCommandLabel, harnessAutoUpdateSupported } = require("./machine-harness-state.ts");
+const { machineHarnessState, harnessUpdateAvailable, harnessAutoUpdateSupported } = require("./machine-harness-state.ts");
 const { AGENT_PRESETS } = require("@xmatrix/protocol");
 const inventory = { schemaVersion: 1, capturedAt: "2026-10-01T08:00:00Z",
   items: [{ id: "codex", installed: true, probeStatus: "ok", version: "1.2.3", latestVersion: "1.3.0", autoUpdate: "enabled" }] };
@@ -35,9 +35,7 @@ test("unknown, equal, newer and unparseable versions never claim an update exist
     assert.equal(harnessUpdateAvailable(current, latest), false);
   }
 });
-test("confirmation displays argv and unsupported automatic controls stay unavailable", () => {
-  assert.equal(harnessCommandLabel({ command: "npm", args: ["install", "package name"] }), 'npm install "package name"');
-  assert.equal(harnessCommandLabel(null), undefined);
+test("unsupported automatic controls stay unavailable", () => {
   assert.equal(harnessAutoUpdateSupported(AGENT_PRESETS.find(preset => preset.id === "zcode")), false);
   assert.equal(harnessAutoUpdateSupported(AGENT_PRESETS.find(preset => preset.id === "claude")), true);
 });

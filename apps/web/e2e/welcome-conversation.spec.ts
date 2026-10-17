@@ -75,8 +75,8 @@ test.describe("an agent too old for xMatrix", () => {
     await page.goto("/app/personal-sspaceperso/channels/welcome-to-xmatrix-cchannelwel");
     const welcome = page.getByTestId("connect-machine");
     await expect(welcome).toContainText("Found Claude Code and Cursor.", { timeout: 20_000 });
-    await expect(welcome).toContainText("Cursor 2025.09.12 is older than 2026.01.01");
-    await welcome.getByRole("button", { name: "Update Cursor" }).click();
+    await expect(welcome).toContainText("Cursor CLI on Laptop is 2025.09.12, too old for xMatrix, which needs 2026.01.01 or later.");
+    await welcome.getByRole("button", { name: "Update Cursor CLI" }).click();
     await expect.poll(() => fixtureRequestBodies(page, "update")).toEqual([
       { machineId: "machine:laptop", hostId: "host-laptop", presetId: "cursor", action: "update" },
     ]);

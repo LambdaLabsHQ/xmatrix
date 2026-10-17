@@ -1,4 +1,4 @@
-import { AGENT_PRESETS, harnessVersionOutdated, parseHarnessInventory, type AgentRegistrationSummary, type SerializedMachineDaemon } from "@xmatrix/protocol";
+import { AGENT_PRESETS, harnessTooOld, parseHarnessInventory, type AgentRegistrationSummary, type SerializedMachineDaemon } from "@xmatrix/protocol";
 import { harnessSpaceKey, harnessSpaceRegistration } from "./harness-space-switch";
 
 /** Observed installed pairs, never registrations or authorization evidence.
@@ -16,10 +16,11 @@ export function installedHarnessCandidates(spaceId: string, userId: string,
       const id = JSON.stringify([key.spaceId, key.ownerUserId, key.machineId, key.harness]);
       if (seen.has(id)) return [];
       seen.add(id);
-      return [{ id, key, preset, daemon, machineName: daemon.machineName ?? daemon.name, registration: harnessSpaceRegistration(registrations, key),
-        version: item.version,
-        // xMatrix routes nothing to it until it is updated (agent-registration-launch.ts).
-        outdated: harnessVersionOutdated(preset.management, item.version) }];
+      const machineName = daemon.machineName ?? daemon.name;
+      // xMatrix routes nothing to it until it is updated (agent-registration-launch.ts).
+      const tooOld = harnessTooOld(preset.management, item.version);
+      return [{ id, key, preset, daemon, machineName, registration: harnessSpaceRegistration(registrations, key),
+        ...(tooOld ? { tooOld: { ...tooOld, machineName } } : {}) }];
     });
   }).sort((left, right) => left.preset.displayName.localeCompare(right.preset.displayName) ||
     left.machineName.localeCompare(right.machineName));
