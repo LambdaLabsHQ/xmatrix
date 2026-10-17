@@ -103,6 +103,14 @@ async function appChannelCapability(tx: DatabaseTransaction, channelId: string,
     error: (failure) => new AppControlError(failure.code, failure.status, failure.message) });
 }
 
+/** The Channel a Human reads a Space's connections in, or acts with them in (`use`). */
+async function connectionChannel(tx: DatabaseTransaction, channelId: string, userId: string, spaceId: string,
+  use: boolean | undefined): Promise<void> {
+  const grant = await appChannelCapability(tx, channelId, { kind: "user", id: userId },
+    use ? "app_new_work" : "app_history_read");
+  if (use && grant.spaceId !== spaceId) throw new AppControlError("channel_not_found", 404, "Channel not found");
+}
+
 /** Subscriptions shown per connection; a batch query reads this many connections at once. */
 const RELATIONS_PER_CONNECTION = 500;
 const CONNECTIONS_PER_RELATION_QUERY = 20;
@@ -283,8 +291,9 @@ export class PostgresAppRepository {
     );
   }
 
+  /** `use` lists them for acting in the Channel, which needs more than reading it. */
   async listConnections(input: { requestId: string; spaceId: string; actorUserId: string;
-    channelId?: string; cursor?: string | null; limit: number }) {
+    channelId?: string; use?: boolean; cursor?: string | null; limit: number }) {
     const requestId = text(input.requestId, "requestId", 200);
     const spaceId = text(input.spaceId, "spaceId", 300);
     const actorUserId = text(input.actorUserId, "actorUserId", 300);
@@ -294,8 +303,7 @@ export class PostgresAppRepository {
       "invalid_app_request", 400, "limit is invalid");
     return this.database.transaction({ requestId, operation: "app.connections.list" }, async (tx) => {
       await requireSpace(tx, spaceId, actorUserId, false);
-      if (input.channelId) await appChannelCapability(
-        tx, input.channelId, { kind: "user", id: actorUserId }, "app_history_read");
+      if (input.channelId) await connectionChannel(tx, input.channelId, actorUserId, spaceId, input.use);
       const rows = await tx.query<QueryResultRow>({ name: "app_connections_list_v1", text: `SELECT *
         FROM data.app_connector_connections WHERE space_id=$1
           AND ($2::text IS NULL OR (provider_id,connection_id)>($2,$3))
@@ -309,7 +317,7 @@ export class PostgresAppRepository {
   }
 
   async getConnection(input: { requestId: string; connectionId: string; actorUserId: string;
-    channelId?: string; allowMissing?: boolean }) {
+    channelId?: string; use?: boolean; allowMissing?: boolean }) {
     const requestId = text(input.requestId, "requestId", 200);
     const connectionId = text(input.connectionId, "connectionId", 300);
     const actorUserId = text(input.actorUserId, "actorUserId", 300);
@@ -322,8 +330,7 @@ export class PostgresAppRepository {
         throw new AppControlError("app_connection_not_found", 404, "App connection not found");
       }
       await requireSpace(tx, String(rows[0].space_id), actorUserId, false);
-      if (input.channelId) await appChannelCapability(
-        tx, input.channelId, { kind: "user", id: actorUserId }, "app_history_read");
+      if (input.channelId) await connectionChannel(tx, input.channelId, actorUserId, String(rows[0].space_id), input.use);
       return { connection: await connection(tx, rows[0], input.channelId) };
     });
   }

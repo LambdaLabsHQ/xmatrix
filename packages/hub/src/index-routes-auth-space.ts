@@ -20,7 +20,7 @@ import { listOwnerMachineDaemons, machineDaemonCommand, machineDatabase, machine
 import { runtimeRepository, updateAgentLaunch } from "./runtime";
 import { controlErrorResponse } from "./postgres-authority-http";
 import { githubRepositoryTokenRunRefusal, legacyUnboundRepositoryTokenEnabled } from "./github-repository-token-run-binding";
-import { adoptLegacyMachineIds } from "@xmatrix/db";
+import { adoptLegacyMachineIds, AppControlError } from "@xmatrix/db";
 import { hasBetterAuthConfig, mockAuthUserForToken, readBearerToken, verifyAuthToken, type AuthSession, type AuthUser } from "./auth";
 import { betterAuthHandlerErrorResponse, betterAuthRouteErrorStatus, createAuth, createBetterAuthSessionForUser, refreshBetterAuthSession, sendBetterAuthLoginOtp, verifyBetterAuthEmailOtp } from "./better-auth";
 import { EMAIL_DELIVERY_CONFIGURATION_ERROR, EmailDeliveryConfigurationError, loginEmailErrorLog } from "./email-delivery";
@@ -641,8 +641,18 @@ export function registerIndexRoutesAuthSpace(app: Hono<{ Bindings: Env }>): void
       error: repositoryAccessUnavailableDetail(`${target.owner}/${target.repo}`, reason) }, 409, { "cache-control": "no-store" });
     // Resolved on every mint, so losing access or disconnecting the connector
     // takes effect immediately instead of at the end of some earlier grant.
-    const { connection } = await getAppConnection(c.env, { connectionId: `${spaceId}:github`,
-      actorUserId: principal.ownerUserId, allowMissing: true }) as { connection: { status?: unknown } | null };
+    // Acting with the connection in this Channel is a member's capability: a
+    // viewer, or a participant in their intake, keeps their own Git login.
+    const usable = await getAppConnection(c.env, { connectionId: `${spaceId}:github`,
+      actorUserId: principal.ownerUserId, channelId, use: true, allowMissing: true })
+      .catch((error: unknown) => {
+        if (error instanceof AppControlError && error.code === "channel_not_found") return undefined;
+        throw error;
+      }) as { connection: { status?: unknown } | null } | undefined;
+    if (!usable) {
+      return c.json({ error: "github_repository_token_requires_member" }, 403, { "cache-control": "no-store" });
+    }
+    const { connection } = usable;
     if (!connection) return refuse("github_not_connected");
     if (connection.status !== "configured") return refuse("github_connection_not_configured");
 

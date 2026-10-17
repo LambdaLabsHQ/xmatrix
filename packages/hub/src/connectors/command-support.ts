@@ -1,7 +1,7 @@
 import { plainRecord, utf8ByteLength } from "@xmatrix/protocol";
 import type { AppConnectorProviderManifest } from "@xmatrix/protocol";
 import { dispatchProductMessageAppend } from "../product-message-append";
-import { appCommand, listAppConnections } from "../apps";
+import { appCommand, CONNECTED_APPS_NEED_MEMBER, usableAppConnections } from "../apps";
 import { getChannel } from "../spaces";
 import type { ConnectorCommandInput } from "./provider";
 
@@ -37,7 +37,8 @@ export async function commandScope(manifest: AppConnectorProviderManifest, input
   Promise<CommandScope | string> {
   const principal = { kind: "user" as const, id: input.actorUserId };
   const spaceId = await channelSpace(manifest, input.env, input.channelId, principal);
-  const listed = await listAppConnections(input.env, { spaceId, channelId: input.channelId, actorUserId: input.actorUserId });
+  const listed = await usableAppConnections(input.env, { spaceId, channelId: input.channelId, actorUserId: input.actorUserId });
+  if (!listed) return CONNECTED_APPS_NEED_MEMBER;
   const connection = listed.map(record).find((candidate) => candidate.providerId === manifest.id);
   if (!connection || connection.status !== "configured" || typeof connection.id !== "string") {
     return `connect ${manifest.name} to this Space first`;

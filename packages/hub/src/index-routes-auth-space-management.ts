@@ -399,7 +399,7 @@ export function registerIndexRoutesAuthSpaceManagement(app: Hono<{ Bindings: Env
       typeof body.grant === "string" ? body.grant.trim() : undefined, { spaceId, userId: authUser.id });
     if (!granted) return c.json({ error: "Connect GitHub again to choose accounts" }, 409);
     if (!granted.includes(installationId)) {
-      return c.json({ error: "Your GitHub account cannot reach this installation" }, 403);
+      return c.json({ error: "Only its own account, or an owner of its organization, links this installation" }, 403);
     }
     if (!await linkGitHubInstallation(c.env, spaceId, authUser.id, installationId)) {
       return c.json({ error: "GitHub installation could not be linked" }, 409);

@@ -88,7 +88,8 @@ integration("GitHub authenticated completion refuses another admin and grants on
     const url = await githubAuthorization.githubConnectAuthorizeUrl(env, { spaceId: spaces[0], userId: original });
     const state = new URL(url).searchParams.get("state");
     const provider = stubFetchResponses([{ body: { access_token: "temporary-user-token" } },
-      { body: { installations: [{ id: 111, account: { login: "fixture" } }] } }]);
+      { body: { installations: [{ id: 111, account: { login: "fixture", type: "User" } }] } },
+      { body: { login: "fixture" } }]);
     try {
       principal.id = other;
       assert.match((await (await complete(state)).json()).redirect, /github=failed/u);
@@ -100,7 +101,7 @@ integration("GitHub authenticated completion refuses another admin and grants on
       assert.equal(redirect.searchParams.get("github"), "authorized");
       assert.deepEqual(await githubAuthorization.githubGrantInstallationIds(env, grant, { spaceId: spaces[0], userId: original }), ["111"]);
       assert.equal(await githubAuthorization.githubGrantInstallationIds(env, grant, { spaceId: spaces[1], userId: original }), undefined);
-      assert.equal(provider.calls.length, 2);
+      assert.equal(provider.calls.length, 3);
     } finally { principal.id = original; provider.restore(); }
   });
 });
