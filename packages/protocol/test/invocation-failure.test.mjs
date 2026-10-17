@@ -39,6 +39,15 @@ test("a named offline machine is not reported as a missing registration", () => 
   assert.equal(launchRefusalCode("registration_harness_unavailable", "Laptop", offline), "registration_harness_unavailable");
 });
 
+test("a launch only an outdated harness could take says to update it", () => {
+  const outdated = [{ machineId: "laptop-id", machineName: "Laptop", reason: "harness_outdated" }];
+  assert.equal(launchRefusalCode("registration_not_found", undefined, outdated), "registration_harness_outdated");
+  assert.equal(launchRefusalCode("registration_machine_unavailable", "Laptop", outdated), "registration_harness_outdated");
+  // Another machine being too old says nothing about the one named.
+  assert.equal(launchRefusalCode("registration_machine_unavailable", "Other", outdated), "registration_machine_unavailable");
+  assert.match(preparationRejectionMessage("registration_harness_outdated"), /older than the first one xMatrix can talk to/);
+});
+
 test("historical failure evidence resolves to the same public cause as new rejections", () => {
   for (const [record, expected] of [
     [{ status: "failed", reason: "timeout" }, "routing_parameter_jev_aborted"],

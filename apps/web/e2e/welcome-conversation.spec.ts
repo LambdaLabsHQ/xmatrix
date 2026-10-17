@@ -54,6 +54,35 @@ test.describe("desktop", () => {
   });
 });
 
+test.describe("an agent too old for xMatrix", () => {
+  test.use(E2E_DESKTOP_CONTEXT);
+
+  test("is named with its version and updated in place, and nothing is sent to it before", async ({ page }) => {
+    const daemon = {
+      id: "daemon-laptop", userId: "e2e-user", email: "e2e@xmatrix.test", name: "Laptop", machineId: "machine:laptop",
+      machineName: "Laptop", hostId: "host-laptop", hostName: "Laptop", status: "online", connectedAt: E2E_NOW,
+      lastSeenAt: new Date().toISOString(), daemonVersion: "1.0.515",
+      metadata: { platform: "macos", capabilities: ["machine_harness_action_v1"], harnesses: { schemaVersion: 1, capturedAt: E2E_NOW,
+        items: [{ id: "claude", installed: true, probeStatus: "ok", version: "2.1.302" },
+          { id: "cursor", installed: true, probeStatus: "ok", version: "2025.09.12-4852336" }] } },
+    };
+    await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], channels: [WELCOME], machineDaemons: [daemon] });
+    await fixtureJson(page, "history", `**/api/xmatrix/channels/${WELCOME.id}/history**`, { messages: [BRING], hasMore: false });
+    await fixtureRule(page, { id: "update", pattern: "**/api/xmatrix/machine-daemons/harness-actions", method: "POST",
+      responder: { kind: "static", status: 202, json: { controlId: "control-update", status: "queued" } } });
+    await fixtureJson(page, "update-status", "**/api/xmatrix/machine-daemons/harness-actions/control-update",
+      { controlId: "control-update", presetId: "cursor", action: "update", status: "succeeded" });
+    await page.goto("/app/personal-sspaceperso/channels/welcome-to-xmatrix-cchannelwel");
+    const welcome = page.getByTestId("connect-machine");
+    await expect(welcome).toContainText("Found Claude Code and Cursor.", { timeout: 20_000 });
+    await expect(welcome).toContainText("Cursor 2025.09.12 is older than 2026.01.01");
+    await welcome.getByRole("button", { name: "Update Cursor" }).click();
+    await expect.poll(() => fixtureRequestBodies(page, "update")).toEqual([
+      { machineId: "machine:laptop", hostId: "host-laptop", presetId: "cursor", action: "update" },
+    ]);
+  });
+});
+
 test.describe("desktop app", () => {
   test.use(E2E_DESKTOP_CONTEXT);
 

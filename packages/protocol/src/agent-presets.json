@@ -356,6 +356,7 @@
         "args": ["--version"],
         "regex": "([0-9]+(?:\\.[0-9]+){1,3}(?:[-+][0-9A-Za-z.-]+)?)"
       },
+      "minimumVersion": "2026.01.01",
       "install": {
         "unix": {
           "command": "bash",
@@ -402,7 +403,7 @@
         "controls": [],
         "notes": "No documented disable switch. Current launcher is agent; legacy cursor-agent aliases remain discoverable."
       },
-      "sources": ["https://cursor.com/docs/cli/installation"],
+      "sources": ["https://cursor.com/docs/cli/installation", "https://cursor.com/docs/cli/changelog"],
       "checkedAt": "2026-09-30"
     }
   },

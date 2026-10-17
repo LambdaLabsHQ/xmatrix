@@ -87,7 +87,8 @@ export const REGISTRATION_PREPARATION_REJECTION_CODES = [
   "registration_machine_unavailable", "registration_machine_ambiguous", "registration_harness_unavailable", "registration_model_unavailable",
   "registration_effort_unavailable", "registration_parameter_unavailable", "registration_directory_unavailable",
   "registration_quota_exhausted", "registration_machine_not_auto_assigned",
-  "registration_workspace_or_daemon_unavailable", "registration_daemon_offline", "registration_workspace_not_configured",
+  "registration_workspace_or_daemon_unavailable", "registration_daemon_offline", "registration_harness_outdated",
+  "registration_workspace_not_configured",
   "registration_workspace_constraint_mismatch", "registration_workspaces_limit", "registration_invocation_target_mismatch",
   "registration_source_changed", "registration_environment_changed", "registration_launch_changed",
   "registration_launch_aborted", "registration_launch_recovery_unavailable", "invalid_registration_launch",
@@ -147,6 +148,7 @@ export const PREPARATION_REJECTION_MESSAGES: Readonly<Record<string, string>> = 
   registration_launch_rejected: "The registered summon could not satisfy its current configuration or authorization. No launch was allocated.",
   registration_workspace_or_daemon_unavailable: "The selected machine's daemon or registered workspace is unavailable for this launch. No launch was allocated.",
   registration_daemon_offline: "This machine is offline, so nothing was launched. It can be used again when it reconnects. No launch was allocated.",
+  registration_harness_outdated: "This agent's version on that machine is older than the first one xMatrix can talk to, so nothing was launched. Update it there, from Machines or with its own update command, and mention it again. No launch was allocated.",
   registration_workspace_not_configured: "The selected registration has no configured workspace for this launch. No launch was allocated.",
   registration_workspace_constraint_mismatch: "The selected workspace does not satisfy this invocation's repository or directory constraint. No launch was allocated.",
   registration_workspaces_limit: "Too many registered workspaces matched this invocation. No launch was allocated.",
@@ -221,7 +223,8 @@ function parameterAnswerMessage(detail: DecisionAnswerFailure): string {
 export interface LaunchMachineBlock {
   machineId: string;
   machineName?: string;
-  reason: "daemon_offline";
+  /** `harness_outdated`: the machine reports this harness older than its preset's minimum version. */
+  reason: "daemon_offline" | "harness_outdated";
 }
 
 /**
@@ -231,7 +234,13 @@ export interface LaunchMachineBlock {
  */
 export function launchRefusalCode(code: string, machineTag: string | undefined,
   blocked: readonly LaunchMachineBlock[]): string {
-  if (!machineTag || (code !== "registration_machine_unavailable" && code !== "registration_not_found")) return code;
+  if (code !== "registration_machine_unavailable" && code !== "registration_not_found") return code;
+  // Nothing else could take it because what there was is too old to talk to.
+  if (blocked.some(block => block.reason === "harness_outdated" &&
+      (!machineTag || machineTagSelects(machineTag, block.machineId, block.machineName)))) {
+    return "registration_harness_outdated";
+  }
+  if (!machineTag) return code;
   return blocked.some(block => block.reason === "daemon_offline" &&
     machineTagSelects(machineTag, block.machineId, block.machineName))
     ? "registration_daemon_offline" : code;
