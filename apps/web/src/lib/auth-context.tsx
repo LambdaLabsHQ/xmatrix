@@ -10,6 +10,7 @@ import {
   isTransientAuthSessionError,
   sendBetterAuthOtp,
   setAppSessionToken,
+  signInWithAppleIdToken,
   signInWithBetterAuthSocial,
   signOutBetterAuth,
   verifyBetterAuthOtpWithRetry,
@@ -27,6 +28,7 @@ import {
   shouldRefreshAuthSessionState,
 } from "./auth-session-policy";
 import { getDesktopBridge } from "./desktop/bridge";
+import { handDesktopSessionToCli } from "./desktop/session-exchange";
 import { disableBrowserPush, forgetPhonePush, registerPhonePush } from "./push-subscription";
 import { XMatrixQueryProvider } from "./query/query-provider";
 import { xmatrixRawResponse } from "@/lib/query/api-client";
@@ -49,6 +51,8 @@ interface AuthContextValue extends AuthState {
   verifySecondFactor: (code: string, options: { backup: boolean; trustDevice: boolean }) => Promise<void>;
   /** `returnTo` is where a completed sign-in goes; a failed one comes back to the page it started on. */
   signInWithSocial: (provider: SocialSignInProvider, returnTo?: string) => Promise<void>;
+  /** Signs in with the identity token the iOS app's Sign in with Apple returned. */
+  signInWithApple: (input: Parameters<typeof signInWithAppleIdToken>[0]) => Promise<SignInStep>;
   setSessionFromAuthResponse: (payload: AuthResponse) => Promise<void>;
   /** `redirectTo` may carry the sign-in page's own query, to sign in again to the same request. */
   logout: (options?: { redirectTo?: LogoutDestination }) => Promise<void>;
@@ -269,6 +273,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       throw new Error("Login response did not include a refresh token");
     }
 
+    await handDesktopSessionToCli(getDesktopBridge(), payload.token);
     await persistNativeSession(payload);
     setState({
       session: authResponseToWebSession(payload),
@@ -281,6 +286,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (await verifyBetterAuthOtpWithRetry(email, token) === "two_factor") return "two_factor";
     const next = await loadBetterAuthSessionAfterSignIn();
     if (next.session && next.user) {
+      await handDesktopSessionToCli(getDesktopBridge(), next.session.access_token);
       setState({ ...next, loading: false });
     } else {
       setState((prev) => ({ ...prev, loading: false }));
@@ -288,11 +294,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return "signed_in";
   };
 
-  const verifySecondFactor = async (code: string, options: { backup: boolean; trustDevice: boolean }) => {
-    await verifyBetterAuthSecondFactor(code, options);
+  /** The session a first or second factor just made, taken up here; a desktop app hands it to its CLI too. */
+  const adoptSignedInSession = async () => {
     const next = await loadBetterAuthSessionAfterSignIn();
     if (!next.session || !next.user) throw new Error("Couldn't confirm sign-in. Try again.");
+    await handDesktopSessionToCli(getDesktopBridge(), next.session.access_token);
     setState({ ...next, loading: false });
+  };
+
+  const verifySecondFactor = async (code: string, options: { backup: boolean; trustDevice: boolean }) => {
+    await verifyBetterAuthSecondFactor(code, options);
+    await adoptSignedInSession();
+  };
+
+  const signInWithApple = async (input: Parameters<typeof signInWithAppleIdToken>[0]) => {
+    if (await signInWithAppleIdToken(input) === "two_factor") return "two_factor";
+    await adoptSignedInSession();
+    return "signed_in";
   };
 
   const signInWithSocial = async (provider: SocialSignInProvider, returnTo?: string) => {
@@ -305,9 +323,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signInWithPassword = async (email: string, password: string) => {
     if (await verifyBetterAuthPassword(email, password) === "two_factor") return "two_factor";
-    const next = await loadBetterAuthSessionAfterSignIn();
-    if (!next.session || !next.user) throw new Error("Couldn't confirm sign-in. Try again.");
-    setState({ ...next, loading: false });
+    await adoptSignedInSession();
     return "signed_in";
   };
 
@@ -341,6 +357,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         signInWithPassword,
         verifySecondFactor,
         signInWithSocial,
+        signInWithApple,
         setSessionFromAuthResponse,
         logout,
       }}

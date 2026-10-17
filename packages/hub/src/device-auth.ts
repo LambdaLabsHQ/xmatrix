@@ -17,6 +17,11 @@ import { transientError } from "./error-contract";
 import { SESSION_EXCHANGE_USER_MISMATCH } from "./auth-errors";
 import { accessTokenSessionAlive, createBetterAuthSessionForUser } from "./better-auth";
 import {
+  APP_SIGN_IN_CODE_TTL_MS,
+  APP_SIGN_IN_FLOW_TTL_MS,
+  pkceVerifierMatches,
+} from "./app-sign-in";
+import {
   boundedRedemptionExpiry,
   DeviceAuthRedemptionCoordinator,
   type DeviceAuthRedemptionResult,
@@ -58,6 +63,26 @@ interface DeviceAuthSession {
   requestedFrom?: string;
   /** Set when the person in the browser said this request is not theirs. */
   declinedAt?: string;
+}
+
+/**
+ * An app signing itself in at Google or GitHub (app-sign-in.ts). The flow is
+ * started before the provider page opens and answered when the provider
+ * returns; its code is redeemed once, by the holder of the PKCE verifier.
+ */
+interface AppSignInFlow {
+  flowId: string;
+  challenge: string;
+  redirectUri: string;
+  state: string;
+  createdAt: string;
+  expiresAt: string;
+  /** Set once the provider answered; the flow cannot be answered twice. */
+  answeredAt?: string;
+  code?: string;
+  user?: AuthUser;
+  issuedSession?: AuthSession;
+  issuedAt?: string;
 }
 
 /**
@@ -141,6 +166,15 @@ export class DeviceAuthBroker extends DurableObject<Env> {
         return this.handleToken(request);
       case "/internal/attempts/admit":
         return this.handleAttemptAdmit(request);
+      case "/internal/app-sign-in/start":
+        return this.handleAppSignInStart(request);
+      case "/internal/app-sign-in/answer":
+        return this.handleAppSignInAnswer(request);
+      case "/internal/app-sign-in/redeem":
+        if (await this.isRateLimited("app-sign-in", clientKey(request), DEVICE_TOKEN_RATE_LIMIT)) {
+          return Response.json({ error: "Too many sign-in attempts" }, { status: 429 });
+        }
+        return this.handleAppSignInRedeem(request);
       default:
         return Response.json({ error: "Not found" }, { status: 404 });
     }
@@ -536,6 +570,89 @@ export class DeviceAuthBroker extends DurableObject<Env> {
     );
   }
 
+  private async handleAppSignInStart(request: Request): Promise<Response> {
+    const { challenge, redirectUri, state } = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+    if (typeof challenge !== "string" || typeof redirectUri !== "string" || typeof state !== "string") {
+      return Response.json({ error: "challenge, redirectUri and state are required" }, { status: 400 });
+    }
+    const now = Date.now();
+    const flow: AppSignInFlow = {
+      flowId: crypto.randomUUID().replace(/-/g, ""),
+      challenge, redirectUri, state,
+      createdAt: new Date(now).toISOString(),
+      expiresAt: new Date(now + APP_SIGN_IN_FLOW_TTL_MS).toISOString(),
+    };
+    await this.ctx.storage.put(this.appFlowKey(flow.flowId), flow);
+    return Response.json({ flowId: flow.flowId }, { headers: { "cache-control": "no-store" } });
+  }
+
+  /**
+   * The provider answered: a signed-in user gets a one-time code, a refusal
+   * its reason. Either way the app's callback address and state come back,
+   * and the flow cannot be answered again.
+   */
+  private async handleAppSignInAnswer(request: Request): Promise<Response> {
+    const { flowId, user } = (await request.json().catch(() => ({}))) as { flowId?: unknown; user?: AuthUser };
+    const flow = typeof flowId === "string" && /^[a-f0-9]{32}$/u.test(flowId)
+      ? await this.ctx.storage.get<AppSignInFlow>(this.appFlowKey(flowId)) : undefined;
+    if (!flow || Date.parse(flow.expiresAt) <= Date.now() || flow.answeredAt) {
+      return Response.json({ error: "This sign-in has ended", code: "app_sign_in_ended" }, { status: 404 });
+    }
+    const now = Date.now();
+    const code = user?.id ? `${crypto.randomUUID()}${crypto.randomUUID()}`.replace(/-/g, "") : undefined;
+    const answered: AppSignInFlow = {
+      ...flow,
+      answeredAt: new Date(now).toISOString(),
+      ...(code && user ? { code, user, expiresAt: new Date(now + APP_SIGN_IN_CODE_TTL_MS).toISOString() } : {}),
+    };
+    await this.ctx.storage.put(this.appFlowKey(flow.flowId), answered);
+    if (code) await this.ctx.storage.put(this.appCodeKey(code), flow.flowId);
+    return Response.json({ redirectUri: flow.redirectUri, state: flow.state, ...(code ? { code } : {}) },
+      { headers: { "cache-control": "no-store" } });
+  }
+
+  /**
+   * The app trades its code and verifier for a session of its own. A repeat
+   * of the same redemption (a lost response) gets the same session back
+   * within the code's lifetime; a wrong verifier gets nothing.
+   */
+  private async handleAppSignInRedeem(request: Request): Promise<Response> {
+    const { code, codeVerifier } = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+    const flowId = typeof code === "string" && /^[a-f0-9]{64}$/u.test(code)
+      ? await this.ctx.storage.get<string>(this.appCodeKey(code)) : undefined;
+    const flow = flowId ? await this.ctx.storage.get<AppSignInFlow>(this.appFlowKey(flowId)) : undefined;
+    if (!flow?.user || flow.code !== code || Date.parse(flow.expiresAt) <= Date.now()
+      || typeof codeVerifier !== "string" || !await pkceVerifierMatches(codeVerifier, flow.challenge)) {
+      await logAuthMetric({ routeGroup: "app_sign_in_token", status: 400, outcome: "invalid_grant" });
+      return Response.json({ error: "This sign-in code is not valid. Start the sign-in again.", code: "invalid_grant" },
+        { status: 400 });
+    }
+    const user = flow.user;
+    const redemption = await this.redemptionCoordinator.redeem({
+      deviceCode: `app:${flow.flowId}`,
+      session: flow,
+      issue: async () => {
+        const issued = await createBetterAuthSessionForUser(this.env, user);
+        if (issued.user.id !== user.id) throw new Error(SESSION_EXCHANGE_USER_MISMATCH);
+        return issued;
+      },
+      persist: async (issuedSession, issuedAt) => {
+        await this.ctx.storage.put(this.appFlowKey(flow.flowId), { ...flow, issuedSession, issuedAt });
+      },
+    });
+    await logAuthMetric({ routeGroup: "app_sign_in_token", status: 200,
+      outcome: redemption.replayed ? "replayed" : "issued", userId: user.id });
+    return Response.json(redemption.issuedSession, { headers: { "cache-control": "no-store" } });
+  }
+
+  private appFlowKey(flowId: string): string {
+    return `app-sign-in:${flowId}`;
+  }
+
+  private appCodeKey(code: string): string {
+    return `app-sign-in-code:${code}`;
+  }
+
   private async handleIntentCreate(request: Request): Promise<Response> {
     const { ownerUserId, spaceId } = (await request.json().catch(() => ({}))) as {
       ownerUserId?: unknown; spaceId?: unknown;
@@ -683,6 +800,13 @@ export class DeviceAuthBroker extends DurableObject<Env> {
     const intents = await this.ctx.storage.list<SetupIntent>({ prefix: "setup-intent:" });
     for (const [key, intent] of intents.entries()) {
       if (Date.parse(intent.expiresAt) <= now) expiredKeys.push(key);
+    }
+
+    const appFlows = await this.ctx.storage.list<AppSignInFlow>({ prefix: "app-sign-in:" });
+    for (const [key, flow] of appFlows.entries()) {
+      if (Date.parse(flow.expiresAt) > now) continue;
+      expiredKeys.push(key);
+      if (flow.code) expiredKeys.push(this.appCodeKey(flow.code));
     }
 
     // Attempt counters whose newest attempt has left the window, a bounded

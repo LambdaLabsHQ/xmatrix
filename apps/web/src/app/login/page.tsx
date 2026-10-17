@@ -28,9 +28,10 @@ import {
   getDesktopBridge,
   type DesktopBridge,
 } from "@/lib/desktop/bridge";
-import { exchangeDesktopCliSession, requestCliSessionExchange } from "@/lib/desktop/session-exchange";
+import { requestCliSessionExchange } from "@/lib/desktop/session-exchange";
+import { AppSignInRefused, appleSignInNonce, signInAppWithProvider } from "@/lib/app-sign-in";
 import { Input } from "@/components/ui/input";
-import { WEB_PROXY_ROUTES, type AuthResponse } from "@xmatrix/protocol";
+import { APP_SIGN_IN_FINISH_PATH, WEB_PROXY_ROUTES, type AuthResponse } from "@xmatrix/protocol";
 import {
   deviceClientLabel as getDeviceClientLabel,
   deviceProductName,
@@ -42,7 +43,7 @@ import {
 } from "@/lib/native-login-client";
 import { errorFromResponse, isTransientFailure, xmatrixRawResponse, XMatrixApiError, unexpectedResponse } from "@/lib/query/api-client";
 import { isAbort, userErrorMessage } from "@/lib/user-facing-error";
-import { isTransientAuthSessionError, type SocialSignInProvider } from "@/lib/auth-client";
+import { authBaseUrl, isTransientAuthSessionError, type SocialSignInProvider } from "@/lib/auth-client";
 
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
 const LOGIN_CODE_LENGTH = 6;
@@ -92,6 +93,12 @@ type PendingDesktopDeviceLogin = {
   pendingPollCount?: number;
 };
 
+const AppleIcon = (props: React.ComponentProps<"svg">) => (
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" {...props}>
+    <path d="M16.37 12.6c-.02-2.2 1.8-3.26 1.88-3.31-1.03-1.5-2.62-1.7-3.18-1.73-1.35-.14-2.64.8-3.33.8-.69 0-1.74-.78-2.86-.76-1.47.02-2.83.86-3.59 2.17-1.53 2.66-.39 6.6 1.1 8.76.73 1.06 1.6 2.24 2.73 2.2 1.1-.04 1.51-.71 2.84-.71 1.32 0 1.7.71 2.86.69 1.18-.02 1.93-1.07 2.65-2.13.84-1.22 1.18-2.41 1.2-2.47-.03-.01-2.3-.88-2.32-3.5ZM14.2 6.13c.6-.73 1.01-1.75.9-2.76-.87.04-1.92.58-2.54 1.31-.56.65-1.05 1.69-.92 2.68.97.08 1.96-.49 2.56-1.23Z" />
+  </svg>
+);
+
 const GoogleIcon = (props: React.ComponentProps<"svg">) => (
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" {...props}>
     <path
@@ -129,6 +136,7 @@ function LoginContent() {
     verifyOtp,
     verifySecondFactor,
     signInWithSocial,
+    signInWithApple,
     setSessionFromAuthResponse,
     logout,
     user,
@@ -147,7 +155,7 @@ function LoginContent() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState(false);
-  const [socialLoading, setSocialLoading] = useState<SocialSignInProvider | null>(null);
+  const [socialLoading, setSocialLoading] = useState<SocialSignInProvider | "apple" | null>(null);
   /* The last code check got no answer: the code is unspent and can be sent again. */
   const [codeUnanswered, setCodeUnanswered] = useState(false);
   const [resendAt, setResendAt] = useState(0);
@@ -176,6 +184,7 @@ function LoginContent() {
   const desktopPollNowRef = useRef<(() => void) | null>(null);
   const setSessionFromAuthResponseRef = useRef(setSessionFromAuthResponse);
   const otpVerificationStartedRef = useRef(false);
+  const appSignInAttemptRef = useRef(0);
 
   const cliCallback = searchParams.get("cli_callback");
   const cliState = searchParams.get("cli_state");
@@ -201,6 +210,11 @@ function LoginContent() {
   );
   const desktopMode = Boolean(desktopBridge) && !cliMode;
   const desktopModeActive = desktopMode && !user;
+  /* An app that can open the provider's page in place signs in right here, like the web; older ones use the browser. */
+  const inAppSignIn = desktopModeActive && Boolean(desktopBridge?.authorizeInBrowser);
+  const browserSignIn = desktopModeActive && !inAppSignIn;
+  /* The second factor of an app's provider sign-in is asked in its sign-in sheet; the Hub hands the app its code after. */
+  const continueAfterSecondFactor = appSignInContinuation(searchParams.get("continue"));
   const deviceClientLabel = getDeviceClientLabel(deviceClient);
   const nativeAppLabel = getNativeAppLabel(nativeClient);
   const nativeReturnUrl = nativeLoginReturnUrl(deviceClient);
@@ -268,14 +282,11 @@ function LoginContent() {
       return;
     }
 
-    startDesktopDeviceLoginPolling(pending, desktopBridge);
+    startDesktopDeviceLoginPolling(pending);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- resumes a pending login when its inputs change, not per render
   }, [authLoading, cliMode, desktopBridge, nextPath, user]);
 
-  function startDesktopDeviceLoginPolling(
-    pendingLogin: PendingDesktopDeviceLogin,
-    bridge: DesktopBridge
-  ) {
+  function startDesktopDeviceLoginPolling(pendingLogin: PendingDesktopDeviceLogin) {
     const runId = desktopLoginRunRef.current + 1;
     desktopLoginRunRef.current = runId;
     desktopLoginStartedRef.current = true;
@@ -324,11 +335,7 @@ function LoginContent() {
           }
 
           clearPendingDesktopDeviceLogin();
-          // This computer's terminal sign-in rides along; the app signs in whether or not it can.
-          if (bridge.saveCliSession) {
-            await handDesktopSessionToCli(bridge, payload.token);
-          }
-
+          // Taking the session up also hands this computer's CLI its own.
           await setSessionFromAuthResponseRef.current({
             token: payload.token,
             refreshToken: payload.refreshToken,
@@ -441,7 +448,7 @@ function LoginContent() {
         verificationUrl: pendingLogin.verificationUrl,
       });
       await bridge.openExternal(pendingLogin.verificationUrl);
-      startDesktopDeviceLoginPolling(pendingLogin, bridge);
+      startDesktopDeviceLoginPolling(pendingLogin);
     } catch (nextError) {
       clearPendingDesktopDeviceLogin();
       desktopLoginStartedRef.current = false;
@@ -621,6 +628,55 @@ function LoginContent() {
     }
   }
 
+  /** Google or GitHub, opened in place by the app; the app redeems what comes back. */
+  async function handleAppProviderSignIn(provider: SocialSignInProvider) {
+    if (!desktopBridge) return;
+    const attempt = ++appSignInAttemptRef.current;
+    setError("");
+    setSocialLoading(provider);
+    try {
+      const signedIn = await signInAppWithProvider(desktopBridge, provider);
+      if (attempt !== appSignInAttemptRef.current) return;
+      await setSessionFromAuthResponse(signedIn);
+      router.replace(nextPath || "/app");
+    } catch (nextError) {
+      if (attempt !== appSignInAttemptRef.current) return;
+      if (!isAbort(nextError)) {
+        setError(nextError instanceof AppSignInRefused ? socialSignInFailure(nextError.code) : formatLoginError(nextError));
+      }
+      setSocialLoading(null);
+    }
+  }
+
+  /* The browser tab may simply be closed; the app stops waiting for it here. */
+  function stopWaitingForBrowser() {
+    appSignInAttemptRef.current += 1;
+    setSocialLoading(null);
+  }
+
+  async function handleAppleSignIn() {
+    if (!desktopBridge?.signInWithApple) return;
+    setError("");
+    setSocialLoading("apple");
+    try {
+      const { nonce, hashed } = await appleSignInNonce();
+      const apple = await desktopBridge.signInWithApple({ nonce: hashed });
+      if (await signInWithApple({ ...apple, nonce }) === "two_factor") {
+        setStep("two_factor");
+        setSocialLoading(null);
+        return;
+      }
+      router.replace(nextPath || "/app");
+    } catch (nextError) {
+      if (!isAbort(nextError)) setError(formatLoginError(nextError));
+      setSocialLoading(null);
+    }
+  }
+
+  function signInWithProvider(provider: SocialSignInProvider) {
+    void (inAppSignIn ? handleAppProviderSignIn(provider) : handleSocialLogin(provider));
+  }
+
   async function handleSendEmail(event: FormEvent) {
     event.preventDefault();
     setError("");
@@ -674,6 +730,10 @@ function LoginContent() {
     setLoading(true);
     try {
       await verifySecondFactor(code, { backup: useBackupCode, trustDevice });
+      if (continueAfterSecondFactor) {
+        window.location.assign(continueAfterSecondFactor);
+        return;
+      }
       if (!cliMode) router.push(nextPath || "/app");
     } catch (nextError) {
       setSecondCode("");
@@ -795,7 +855,7 @@ function LoginContent() {
             declineLabel="Cancel" onDecline={() => router.replace("/app")}
             onSwitchAccount={() => void switchAccount()} />
         </>
-      ) : desktopModeActive ? (
+      ) : browserSignIn ? (
         <>
           <AuthHeading
             title={
@@ -846,14 +906,26 @@ function LoginContent() {
             </AuthRequest>
           ) : null}
           <div className="auth-stack">
-            <AuthSecondaryButton onClick={() => handleSocialLogin("google")} disabled={loading || socialLoading !== null}>
+            {inAppSignIn && desktopBridge?.signInWithApple ? (
+              <AuthSecondaryButton onClick={() => void handleAppleSignIn()} disabled={loading || socialLoading !== null}>
+                {socialLoading === "apple" ? <Spinner /> : <AppleIcon className="size-[18px]" />}
+                Continue with Apple
+              </AuthSecondaryButton>
+            ) : null}
+            <AuthSecondaryButton onClick={() => signInWithProvider("google")} disabled={loading || socialLoading !== null}>
               {socialLoading === "google" ? <Spinner /> : <GoogleIcon className="size-[18px]" />}
               Continue with Google
             </AuthSecondaryButton>
-            <AuthSecondaryButton onClick={() => handleSocialLogin("github")} disabled={loading || socialLoading !== null}>
+            <AuthSecondaryButton onClick={() => signInWithProvider("github")} disabled={loading || socialLoading !== null}>
               {socialLoading === "github" ? <Spinner /> : <Image src="/app-connectors/github.svg" alt="" width={18} height={18} />}
               Continue with GitHub
             </AuthSecondaryButton>
+            {inAppSignIn && desktopBridge?.client === "desktop" && (socialLoading === "google" || socialLoading === "github") ? (
+              <p role="status" className="auth-hint">
+                Finish signing in in your browser.{" "}
+                <button type="button" className="auth-text-button" onClick={stopWaitingForBrowser}>Cancel</button>
+              </p>
+            ) : null}
             <AuthDivider />
             <form onSubmit={handleSendEmail} className="auth-stack">
               <label htmlFor="login-email" className="auth-label">
@@ -1004,17 +1076,6 @@ function LoginContent() {
   );
 }
 
-/** Hands the desktop app's new session to this computer's CLI and daemon; a failure is the CLI's, not the sign-in's. */
-async function handDesktopSessionToCli(bridge: DesktopBridge, token: string) {
-  try {
-    const cliSession = await exchangeDesktopCliSession(token);
-    await bridge.saveCliSession?.(cliSession);
-    await bridge.startDaemon?.();
-  } catch (cliError) {
-    console.warn("Signed in, but this computer's CLI session could not be updated", cliError);
-  }
-}
-
 async function describeDeviceRequest(deviceCode: string, userCode: string): Promise<DeviceRequestDescription | "unknown"> {
   const response = await xmatrixRawResponse(WEB_PROXY_ROUTES.cli_device_describe, {
     method: "POST",
@@ -1098,6 +1159,18 @@ function ApprovalChoices({ error, loading, onApprove, declineLabel, onDecline, o
 
 function Spinner() {
   return <AnimatedIcon icon={Loader2} className="size-4 animate-spin" />;
+}
+
+/** The Hub page that hands an app its sign-in code, if `value` is one; nothing else is followed. */
+function appSignInContinuation(value: string | null): string | null {
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    const hub = new URL(authBaseUrl());
+    return url.origin === hub.origin && url.pathname === APP_SIGN_IN_FINISH_PATH ? url.toString() : null;
+  } catch {
+    return null;
+  }
 }
 
 function normalizeNextPath(next: string | null): string {

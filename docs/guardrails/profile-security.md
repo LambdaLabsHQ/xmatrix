@@ -29,6 +29,24 @@ The older loopback CLI sign-in also waits for an explicit approval. Login codes
 are charged per address across both send routes (5 a minute, 20 an hour, 60 a
 day); checking a code is limited per client.
 
+### Apps signing in in place
+
+The desktop and phone apps sign in where they are, without a device code: email
+codes, passwords and Sign in with Apple (iOS, native) run in the app's own page;
+Google and GitHub open the Hub's `/api/auth/app/start` page in the system
+sign-in sheet (iOS `ASWebAuthenticationSession`), a browser tab over the app
+(Android Custom Tabs) or the browser (desktop). The provider returns to
+`/api/auth/app/finish`, which hands the app a one-time code at its own address:
+`xmatrix://auth`, or a loopback port of the desktop app (RFC 8252). Only the page
+that started the flow can redeem the code, at `/api/auth/app/token`, because it
+alone holds the PKCE verifier; the code lasts two minutes, is handed over once,
+and a lost redemption answer is replayed rather than issuing a second session.
+An account with two-step verification is asked for its code in the sheet, and
+the Hub then continues to the app. Apple identity tokens are accepted only for
+the iOS app's bundle id; `/sign-in/social` with an identity token is a first
+factor and waits for the second like any other. Shells without in-place sign-in
+keep the browser device-code flow.
+
 ### Machine approval encryption independence
 
 Plain PostgreSQL machine-request decisions do not require the Secret catalog encryption key.
