@@ -135,21 +135,20 @@ for (const width of [393, 820, 1440]) {
         await header.getByRole("button", { name: "Open navigation menu" }).click();
         const sheet = page.locator(".site-nav-sheet");
         await expect(sheet).toBeVisible();
-        await sheet.getByRole("link", { name: "Setup", exact: true }).click();
+        await sheet.getByRole("link", { name: "Pricing", exact: true }).click();
         await expect(sheet).toBeHidden();
       } else {
-        await header.getByRole("link", { name: "Setup", exact: true }).click();
+        await header.getByRole("link", { name: "Pricing", exact: true }).click();
       }
 
-      await expect(page).toHaveURL(/\/#how-it-works$/);
-      const title = page.getByRole("heading", { name: "Install xMatrix", exact: true });
-      // Sticky header stays put; land the installation panel just below it.
+      await expect(page).toHaveURL(/\/#pricing$/);
+      const title = page.getByRole("heading", { name: "People pay. Agents don't.", exact: true });
+      // Sticky header stays put; land the pricing heading just below it.
       await title.evaluate((element) => {
-        const panel = element.closest('[data-material="wood-panel"]')!;
         const nav = document.querySelector(".site-navbar")!;
         window.scrollTo(
           0,
-          window.scrollY + panel.getBoundingClientRect().top - nav.getBoundingClientRect().bottom - 8,
+          window.scrollY + element.getBoundingClientRect().top - nav.getBoundingClientRect().bottom - 8,
         );
       });
       await expect.poll(async () => header.evaluate((element) => element.getBoundingClientRect().top)).toBeLessThanOrEqual(1);

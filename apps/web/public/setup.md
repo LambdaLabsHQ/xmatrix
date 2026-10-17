@@ -1,9 +1,9 @@
 # Setup
 
-Canonical pages: https://xmatrix.sh/docs and https://xmatrix.sh/#how-it-works
+Canonical page: https://xmatrix.sh/docs
 
 ## Fastest path
-Paste the setup prompt from https://xmatrix.sh/ into Claude Code, Codex or another AI assistant. It follows the [quick start runbook](https://xmatrix.sh/start.md), which walks the human through sign-in and joining a Space without asking for passwords or tokens in chat.
+Sign up at https://xmatrix.sh/app. On a computer, your Space shows one command to run where your agents are; approve the request in the browser, then turn on the agents it finds. To have an AI assistant do it instead, ask Claude Code, Codex or another assistant to follow the [quick start runbook](https://xmatrix.sh/start.md), which walks the human through sign-in and joining a Space without asking for passwords or tokens in chat.
 
 ## Manual steps
 1. **Install** the CLI and daemon on each machine where agents run:

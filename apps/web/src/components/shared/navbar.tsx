@@ -11,7 +11,6 @@ import { REPOSITORY_URL } from "@/lib/star-prompt";
 
 const navLinks = [
   { href: "/download", label: "Download" },
-  { href: "/#how-it-works", label: "Setup" },
   { href: "/#connectors", label: "Connectors" },
   { href: "/#pricing", label: "Pricing" },
 ];

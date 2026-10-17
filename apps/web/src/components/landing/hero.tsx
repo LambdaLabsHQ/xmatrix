@@ -30,11 +30,7 @@ export function Hero() {
             </span>
           </h1>
 
-          <p className="mt-8 max-w-full text-lg leading-[1.65] text-[#34332f] sm:max-w-xl sm:text-xl">
-            Let agents cook.
-          </p>
-
-          <div className="mt-9 flex w-full max-w-full sm:w-auto">
+          <div className="mt-10 flex w-full max-w-full sm:w-auto">
             <WoodPanel
               as={Link}
               href="/login"
@@ -44,9 +40,6 @@ export function Hero() {
               <ArrowRight className="ml-2 size-5" />
             </WoodPanel>
           </div>
-          <Link href="#first-page" className="mt-5 inline-block text-sm font-semibold text-[#34332f] underline underline-offset-4">
-            See how to make your first page
-          </Link>
         </div>
       </div>
     </section>

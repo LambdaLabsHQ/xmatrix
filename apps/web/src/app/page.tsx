@@ -6,8 +6,6 @@ import { AgentStrip } from "@/components/landing/agent-strip";
 import { LivePage } from "@/components/landing/live-page";
 import { Why } from "@/components/landing/why";
 import { Faq } from "@/components/landing/faq";
-import { HowItWorks } from "@/components/landing/how-it-works";
-import { FirstPage } from "@/components/landing/first-page";
 import { Connectors } from "@/components/landing/connectors";
 import { Pricing } from "@/components/landing/pricing";
 import { Footer } from "@/components/landing/footer";
@@ -34,8 +32,6 @@ export default function Home() {
       <LivePage />
       <QuickStart />
       <Why />
-      <HowItWorks />
-      <FirstPage />
       <Connectors />
       <Pricing />
       <Faq />
