@@ -143,6 +143,13 @@ checks that authority again after the provider request. A
 connect link sent to someone else therefore cannot store their provider account
 in the sender's Space.
 
+GitHub App authorization uses the same authenticated completion page and POST,
+after its separate `/api/auth/callback/github` redirect verifies `xmgh.` state.
+That anonymous callback exchanges no code and links no installation. Completion
+checks the initiating Human and current target-Space admin role before GitHub
+installation discovery. Installation-selection grants use purpose
+`github-grant:v2`; grants from the earlier anonymous flow require fresh consent.
+
 Google Docs & Drive uses one `google` connection and the canonical platform pair
 `CONNECTOR_GOOGLE_CLIENT_ID` / `CONNECTOR_GOOGLE_CLIENT_SECRET`. The web-server
 authorization-code flow requests only `drive.file`, offline access and consent;

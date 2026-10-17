@@ -15,6 +15,17 @@ shared user grant.
 | Run secret read | The exact live Run/Instance/execution, registration admission, token Space and current owner membership; `ask` approvals also join on Space |
 | New ciphertext | AES-GCM additional data binds connector values to connection/version and Space secrets to Space/alias/value version |
 
+GitHub's separate App OAuth callback also hands its code to `/connect/oauth`.
+Only the initiating signed-in Human, still an admin of the signed Space, may
+exchange it through `POST /api/connectors/oauth/complete`. Anonymous callbacks
+cannot link installations or issue installation-selection grants. This closes
+the forwarded-connect-link path that could associate someone else's GitHub
+installations with the initiator's Space. Newly issued grants use purpose
+`github-grant:v2`; earlier grants are rejected and require a fresh Connect.
+Existing state can complete under the new authenticated checks. This reuses the
+already shipped Web completion page and proxy, so the Hub change fails closed
+without requiring a new browser protocol or company credential rotation.
+
 The committed production configuration still enables
 `GITHUB_REPOSITORY_TOKEN_LEGACY_UNBOUND_ENABLED`. An older daemon that omits
 Run identity uses the owner's Channel access and that Channel's Space
@@ -60,6 +71,13 @@ against real membership rows: admin in one Space/member in another, absent
 Space, revoked membership, viewer and scheduled deletion. It observes that
 refused starts and completions make no external provider call. Both OAuth
 regressions fail before the authorization fix.
+
+`github-connect-authorization.test.mjs` verifies that a different signed-in
+person cannot authorize or automatically link installations for the initiator,
+that the anonymous callback makes no provider call, and that old grants are
+rejected. The identity regression fails before the fix. The PostgreSQL route
+cases also exercise GitHub start/completion, including another current admin
+and a successful initiator-scoped grant.
 
 The two-Space cases in `space-secret-postgres.test.mjs` and
 `app-credential-postgres.test.mjs` exercise independent same-alias values,

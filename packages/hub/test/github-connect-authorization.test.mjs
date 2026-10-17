@@ -1,12 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import {
+import * as authorization from "../src/github-connect-authorization.ts";
+import { signGitHubAppState } from "../src/index-shared.ts";
+const {
   completeGitHubConnectAuthorization,
   githubConnectAuthorizeUrl,
   githubGrantInstallationIds,
   isGitHubConnectState,
-} from "../src/github-connect-authorization.ts";
+  handoffGitHubConnectAuthorization,
+} = authorization;
 
 const env = {
   GITHUB_APP_CLIENT_ID: "client-id",
@@ -31,11 +34,11 @@ async function withGitHub(reachable, run) {
   try { return await run(requests); } finally { globalThis.fetch = original; }
 }
 
-async function callback(state, query = "code=the-code") {
+async function callback(state, query = "code=the-code", userId = "admin") {
   const links = [];
   const response = await completeGitHubConnectAuthorization(env,
     new Request(`https://hub.test/api/auth/callback/github?${query}&state=${encodeURIComponent(state)}`),
-    async (...args) => { links.push(args); return true; });
+    async (...args) => { links.push(args); return true; }, { userId, authorizeSpace: async () => {} });
   return { response, links, location: new URL(response.headers.get("location")) };
 }
 
@@ -95,5 +98,36 @@ test("a declined authorization, a forged state, or a grant as a state links noth
     const asState = await callback(`xmgh.${granted}`);
     assert.equal(asState.location.toString(), "https://app.test/connect/github?github=failed");
     assert.deepEqual([...declined.links, ...forged.links, ...asState.links], []);
+  });
+});
+
+test("a different signed-in person cannot give the initiator's Space their GitHub installations", async () => {
+  for (const installation of [{ id: "222", setupAction: "install" }, undefined]) {
+    const state = stateOf(await githubConnectAuthorizeUrl(env, { spaceId: "space-1", userId: "admin", installation }));
+    await withGitHub(["111", "222"], async requests => {
+      const result = await callback(state, "code=other-persons-code", "other-person");
+      assert.equal(result.location.searchParams.get("github"), "failed");
+      assert.deepEqual(result.links, []);
+      assert.equal(result.location.searchParams.has("grant"), false);
+      assert.deepEqual(requests, [], "identity is checked before code exchange or installation discovery");
+    });
+  }
+});
+
+test("a grant issued before authenticated completion must be authorized again", async () => {
+  const legacy = await signGitHubAppState({ purpose: "github-grant", spaceId: "space-1", userId: "admin",
+    installationIds: ["111"], expiresAt: Date.now() + 60_000 }, env.GITHUB_APP_CLIENT_SECRET);
+  assert.equal(await githubGrantInstallationIds(env, legacy, { spaceId: "space-1", userId: "admin" }), undefined);
+});
+
+test("the anonymous GitHub callback only hands state and code to authenticated completion", async () => {
+  const state = stateOf(await githubConnectAuthorizeUrl(env, { spaceId: "space-1", userId: "admin" }));
+  await withGitHub(["111"], async requests => {
+    const request = new Request(`https://hub.test/api/auth/callback/github?code=private-code&state=${encodeURIComponent(state)}&installation_id=999`);
+    const response = await handoffGitHubConnectAuthorization(env, request);
+    const target = new URL(response.headers.get("location"));
+    assert.equal(target.origin + target.pathname, "https://app.test/connect/oauth");
+    assert.deepEqual(Object.fromEntries(target.searchParams), { state, code: "private-code" });
+    assert.deepEqual(requests, [], "anonymous callbacks exchange no code and discover no installations");
   });
 });

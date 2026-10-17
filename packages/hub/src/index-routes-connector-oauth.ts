@@ -24,6 +24,8 @@ import { connectCloudflareLogin } from "./connectors/cloudflare-api";
 import { upstreamMeter } from "./usage-cost-metering";
 import { paidCallRepository, paidXCalls } from "./billing-paid-calls";
 import { platformAdminSpaceId } from "./admin-platform-access";
+import { completeGitHubConnectAuthorization, isGitHubConnectState } from "./github-connect-authorization";
+import { linkGitHubInstallation } from "./index-routes-auth-space-management";
 
 /*
  * One-click OAuth routes (docs/design/connector-platform.md §3.2): which
@@ -194,6 +196,16 @@ export function registerConnectorOAuthRoutes(app: Hono<{ Bindings: Env }>): void
     const body = await c.req.json().catch(() => null) as Record<string, unknown> | null;
     const field = (key: string) => typeof body?.[key] === "string" ? body[key] as string : undefined;
     const state = field("state") ?? "";
+    if (isGitHubConnectState(state)) {
+      const url = new URL(c.req.url);
+      url.searchParams.set("state", state);
+      url.searchParams.set("code", field("code") ?? "");
+      const response = await completeGitHubConnectAuthorization(c.env, new Request(url),
+        (spaceId, userId, installationId) => linkGitHubInstallation(c.env, spaceId, userId, installationId),
+        { userId: user.id, authorizeSpace: (spaceId, actorUserId) => connectorCredentialRepository(c.env)
+          .authorizeAdmin({ requestId: crypto.randomUUID(), spaceId, actorUserId }) });
+      return c.json({ redirect: response.headers.get("location") }, 200, { "cache-control": "private, no-store" });
+    }
     const verified = state ? await verifyOAuthState(c.env, state) : undefined;
     if (!verified) return c.json({ error: "Invalid or expired connect request" }, 400);
     if (verified.userId !== user.id) {

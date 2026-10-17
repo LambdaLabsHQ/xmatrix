@@ -12,7 +12,8 @@ import { signGitHubAppState, verifyGitHubAppState } from "./index-shared";
  */
 const CONNECT_STATE_PREFIX = "xmgh.";
 const CONNECT_PURPOSE = "github-connect";
-const GRANT_PURPOSE = "github-grant";
+// Older grants could be issued by an anonymous callback without initiator proof.
+const GRANT_PURPOSE = "github-grant:v2";
 const CONNECT_TTL_MS = 10 * 60_000;
 const GRANT_TTL_MS = 30 * 60_000;
 
@@ -104,6 +105,7 @@ export async function completeGitHubConnectAuthorization(
   env: ConnectEnv,
   request: Request,
   link: (spaceId: string, userId: string, installationId: string) => Promise<boolean>,
+  principal: { userId: string; authorizeSpace: (spaceId: string, userId: string) => Promise<void> },
 ): Promise<Response> {
   const url = new URL(request.url);
   const redirect = (target: string) => Response.redirect(target, 302);
@@ -115,6 +117,8 @@ export async function completeGitHubConnectAuthorization(
   if (!spaceId || !userId) return redirect(githubConnectReturnUrl(env, "failed"));
   const apps = (outcome: GitHubConnectOutcome, grant?: string) =>
     redirect(githubConnectReturnUrl(env, outcome, { spaceId, grant }));
+  if (principal.userId !== userId) return apps("failed");
+  try { await principal.authorizeSpace(spaceId, userId); } catch { return apps("failed"); }
   if (url.searchParams.get("error")) return apps("cancelled");
   const code = url.searchParams.get("code");
   const token = code ? await exchangeCode(env, code).catch(() => undefined) : undefined;
@@ -135,6 +139,23 @@ export async function completeGitHubConnectAuthorization(
     expiresAt: Date.now() + GRANT_TTL_MS,
   }, clientSecret);
   return apps("authorized", grant);
+}
+
+/** The anonymous provider redirect only hands state/code to the signed-in app. */
+export async function handoffGitHubConnectAuthorization(env: ConnectEnv, request: Request): Promise<Response> {
+  const url = new URL(request.url), state = url.searchParams.get("state") ?? "";
+  const payload = isGitHubConnectState(state) && state.length <= 4096
+    ? await verified(state.slice(CONNECT_STATE_PREFIX.length), credentials(env).clientSecret, CONNECT_PURPOSE) : undefined;
+  if (!payload || typeof payload.spaceId !== "string" || typeof payload.userId !== "string") {
+    return Response.redirect(githubConnectReturnUrl(env, "failed"), 302);
+  }
+  if (url.searchParams.has("error")) return Response.redirect(githubConnectReturnUrl(env, "cancelled"), 302);
+  const code = url.searchParams.get("code") ?? "";
+  if (!code || code.length > 2048) return Response.redirect(githubConnectReturnUrl(env, "failed"), 302);
+  const target = new URL("/connect/oauth", appOrigin(env));
+  target.searchParams.set("state", state);
+  target.searchParams.set("code", code);
+  return Response.redirect(target.toString(), 302);
 }
 
 /** The installations a grant from this Space's own authorization lets this person link. */
