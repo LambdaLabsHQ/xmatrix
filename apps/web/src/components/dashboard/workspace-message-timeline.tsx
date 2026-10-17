@@ -11,7 +11,7 @@ import { messageLinkOriginLabel, messageLinkOriginTitle, type MessageLinkOrigin 
 
 import { sha256 } from "@noble/hashes/sha2.js";
 
-import { nonOperationalMentionRanges, lowercaseHex, messageExternalAppSource } from "@xmatrix/protocol";
+import { nonOperationalMentionRanges, lowercaseHex, messageExternalAppSource, onboardingStageOf } from "@xmatrix/protocol";
 import { userErrorMessage } from "@/lib/user-facing-error";
 import { sameValue, shareByKey } from "../../lib/same-value";
 
@@ -287,7 +287,7 @@ import { useAndroidBackHandler } from "./use-android-back";
 
 import { cn } from "@/lib/utils";
 import { CrossSpaceReadCard, crossSpaceReadMetadata } from "@/components/dashboard/cross-space-read-card";
-import { OnboardingMessage, onboardingMessageStage } from "@/components/dashboard/onboarding-message";
+import { OnboardingMessage } from "@/components/dashboard/onboarding-message";
 import {
   SecretAccessRequestCardView, SecretRequestCardView, secretAccessRequestMetadata, secretRequestMetadata,
 } from "@/components/dashboard/secret-request-card";
@@ -497,6 +497,7 @@ export const MessageTimeline = memo(function MessageTimeline({
   onRebornSender,
   reborningSenderKey,
   onQuestionnaireAnswer,
+  onSendMessage,
   onOpenInternalAppLink,
   onOpenPage,
   onJumpToMessage,
@@ -540,7 +541,7 @@ export const MessageTimeline = memo(function MessageTimeline({
   threadRootChannel?: ChannelSnapshot;
 } & Pick<MessageRowProps,
   "onReact" | "onEdit" | "onRecall" | "onUnsentAction" | "onReply" | "onOpenThread" | "onMentionSender" |
-  "onRebornSender" | "onQuestionnaireAnswer" | "onOpenInternalAppLink" | "onJumpToMessage"
+  "onRebornSender" | "onQuestionnaireAnswer" | "onSendMessage" | "onOpenInternalAppLink" | "onJumpToMessage"
 >) {
   const [visibleInvocationScope, setVisibleInvocationScope] = useState<{ channelId: string; ids: string[] } | null>(null);
   const visibleInvocationIds = visibleInvocationScope?.channelId === channel?.id ? visibleInvocationScope?.ids : undefined;
@@ -681,6 +682,7 @@ export const MessageTimeline = memo(function MessageTimeline({
   const stableOnMentionSender = useStableCallback(onMentionSender);
   const stableOnRebornSender = useStableCallback(onRebornSender);
   const stableOnQuestionnaireAnswer = useStableCallback(onQuestionnaireAnswer);
+  const stableOnSendMessage = useStableCallback(onSendMessage);
   const stableOnOpenAgentTrace = useStableCallback(onOpenAgentTrace);
   const stableOnOpenHumanProfile = useStableCallback(onOpenHumanProfile);
   const stableOnOpenInternalAppLink = useStableCallback(onOpenInternalAppLink);
@@ -1088,6 +1090,7 @@ export const MessageTimeline = memo(function MessageTimeline({
                 onRebornSender={stableOnRebornSender}
                 reborningSender={false}
                 onQuestionnaireAnswer={stableOnQuestionnaireAnswer}
+                onSendMessage={stableOnSendMessage}
                 onOpenAgentTrace={stableOnOpenAgentTrace}
                 onOpenHumanProfile={stableOnOpenHumanProfile}
                 onOpenInternalAppLink={stableOnOpenInternalAppLink}
@@ -1167,6 +1170,7 @@ export const MessageTimeline = memo(function MessageTimeline({
                       message.author === reborningSenderKey)
                   }
                   onQuestionnaireAnswer={stableOnQuestionnaireAnswer}
+                  onSendMessage={stableOnSendMessage}
                   onOpenAgentTrace={stableOnOpenAgentTrace}
                   onOpenHumanProfile={stableOnOpenHumanProfile}
                   onOpenInternalAppLink={stableOnOpenInternalAppLink}
@@ -1686,6 +1690,7 @@ export const MessageRow = memo(function MessageRow({
   onRebornSender,
   reborningSender,
   onQuestionnaireAnswer,
+  onSendMessage,
   onOpenAgentTrace,
   onOpenHumanProfile,
   onOpenInternalAppLink,
@@ -1786,7 +1791,7 @@ export const MessageRow = memo(function MessageRow({
     ...(message.mentionReadStatuses?.length ? { statuses: message.mentionReadStatuses } : {}),
   }), [message.mentionReadStatuses, message.sequence, agentLaunches, agentStops, stopReceiptsLoaded, invocationRejections, continuationInvocations, messageTargetEvidence, launchStatusUnavailable, onRetryAgentLaunch, onLaunchAnyway, contextOnly, displayBody, nonOperationalRanges, message.editedAt, message.own, message.messageId, message.body, message.sentAt]);
   const questionnaire = questionnaireMetadata(message.metadata);
-  const onboardingStage = onboardingMessageStage(message.metadata);
+  const onboardingStage = onboardingStageOf(message.metadata);
   const crossSpaceRead = crossSpaceReadMetadata(message.metadata);
   const secretRequest = crossSpaceRead ? null : secretRequestMetadata(message.metadata);
   const secretAccessRequest = crossSpaceRead ? null : secretAccessRequestMetadata(message.metadata);
@@ -2551,7 +2556,7 @@ export const MessageRow = memo(function MessageRow({
             )}
             {onboardingStage ? (
               <OnboardingMessage stage={onboardingStage} spaceId={channel?.spaceId ?? null} token={token}
-                userId={currentUserIdentityId.replace(/^user:/, "")} />
+                userId={currentUserIdentityId.replace(/^user:/, "")} onSend={onSendMessage} />
             ) : crossSpaceRead ? (
               <CrossSpaceReadCard
                 request={crossSpaceRead}

@@ -10,32 +10,36 @@ import { SUPPORTED_AGENTS, agentInstallCommand } from "./supported-agents-catalo
 
 function AgentMark({ preset }: { preset: AgentPreset }) {
   // eslint-disable-next-line @next/next/no-img-element -- a 20px harness preset icon, as on summon chips.
-  return <img src={preset.avatarUrl} alt="" aria-hidden="true" className="size-5 object-contain" />;
+  return <img src={preset.avatarUrl} alt="" aria-hidden="true" className="size-full object-contain" />;
 }
 
-/** The leading agents that fit one line of a phone, by their marks. */
-const FIRST_LINE = 8;
+/** How many marks lead the line: the agents most people arrive with. */
+const LEADING_MARKS = 6;
+/** How many agents the line names before it counts the rest. */
+const NAMED = 3;
 
-/** The agents by their marks, the leading ones first; the rest unfold on request. */
-export function SupportedAgents({ className }: { className?: string }) {
+/* One line that answers "does it work with mine?": the leading marks
+   overlapped, the first names, and how many more, which unfold into every
+   name on request. */
+export function AgentsLine({ className }: { className?: string }) {
   const [all, setAll] = useState(false);
-  const shown = all ? SUPPORTED_AGENTS : SUPPORTED_AGENTS.slice(0, FIRST_LINE);
-  const more = SUPPORTED_AGENTS.length - shown.length;
+  const names = SUPPORTED_AGENTS.map((preset) => preset.displayName);
   return (
-    <div className={cn("flex flex-wrap items-center gap-2.5", className)} data-testid="supported-agents">
-      <ul aria-label="Agents xMatrix brings in" className="contents">
-        {shown.map((preset) => (
-          <li key={preset.id} title={preset.displayName} aria-label={preset.displayName}>
+    <div className={cn("flex items-start gap-2 text-[13px] leading-5 text-muted-foreground", className)} data-testid="supported-agents">
+      <span aria-hidden="true" className="flex shrink-0 gap-1 py-0.5">
+        {SUPPORTED_AGENTS.slice(0, LEADING_MARKS).map((preset) => (
+          <span key={preset.id} className="flex size-4 items-center justify-center overflow-hidden rounded-[4px]">
             <AgentMark preset={preset} />
-          </li>
+          </span>
         ))}
-      </ul>
-      {more > 0 && (
-        <button type="button" onClick={() => setAll(true)} aria-label={`Show ${more} more agents`}
-          className="text-xs font-semibold text-muted-foreground hover:text-foreground">
-          +{more}
-        </button>
-      )}
+      </span>
+      <p className="min-w-0">
+        Works with {all ? `${names.slice(0, -1).join(", ")} and ${names.at(-1)}` : `${names.slice(0, NAMED).join(", ")} and `}
+        {!all && (
+          <button type="button" onClick={() => setAll(true)}
+            className="font-semibold text-foreground underline-offset-2 hover:underline">{names.length - NAMED} more</button>
+        )}.
+      </p>
     </div>
   );
 }

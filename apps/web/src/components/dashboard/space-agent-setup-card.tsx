@@ -1,25 +1,16 @@
 "use client";
 
 import { AnimatedIcon } from "@/components/ui/animated-icon";
-import { useState } from "react";
 import { actionClass } from "@/components/ui/action-tone";
 import { agentPresetAvatarUrl } from "@xmatrix/protocol";
 import { Check, CloudOff, Loader2, PlayCircle, RefreshCw, Terminal } from "lucide-react";
 import { noticeClass } from "@/components/ui/status-tone";
-import { quickStartRunbookUrl, quickStartSeedPrompt } from "@/lib/quick-start";
-import { useCopyToClipboard } from "@/lib/use-copy-to-clipboard";
-import { cn } from "@/lib/utils";
 import { SetupCardHeader, SetupCardShell } from "./space-setup-card-chrome";
 import { IdentityAvatar } from "./identity-avatar";
-import { useNow } from "./agent-work-intent";
-import {
-  connectStep, defaultInstallPlatform, listNames, setupInstallCommand, terminalInstallPlatform,
-  type ConnectStep, type InstallPlatform,
-} from "./connect-machine";
-import { useSetupIntent } from "./use-setup-intent";
+import { defaultInstallPlatform, type InstallPlatform } from "./connect-machine";
 import { InstalledHarnessSwitchList } from "./installed-harness-switch-list";
-import { AgentInstallPicker, SupportedAgents } from "./supported-agents";
-import { CommandBlock } from "./command-block";
+import { AgentInstallPicker } from "./supported-agents";
+import { BringAgentsIn, RemoteMachineHint } from "./bring-agents-in";
 import type { useInstalledHarnesses } from "./use-installed-harnesses";
 import type {
   SpaceAgentSetupCandidate,
@@ -253,168 +244,16 @@ function UnreachablePanel({ onRetry }: { onRetry: () => void }) {
 }
 
 /* Web and phone: agents are not in this tab, so the one thing to learn here
-   is how to bring them in. Whoever uses an agent CLI already has a terminal
-   open, so one pasted command comes first, and the terminal it runs in is
-   approved on this page, which may be the phone in the person's hand. The
-   desktop app, which finds installed agents without a terminal, is the
-   quieter way in. */
+   is how to bring them in; the same flow xMatrix sends in a welcome
+   conversation. */
 export function BringAgentsInPanel({ spaceId, token, userId, phone = false }: {
   spaceId: string | null; token: string | undefined; userId: string | undefined; phone?: boolean;
 }) {
-  return (
-    <div data-testid="bring-agents-in">
-      <h2 className="text-lg font-black leading-tight">Bring your agents into xMatrix</h2>
-      <p className="mt-1 text-sm text-muted-foreground">Works with the agent you already use.</p>
-      <SupportedAgents className="mt-3" />
-      <ConnectMachine spaceId={spaceId} token={token} userId={userId} />
-      <div className="mt-7 space-y-1 text-xs text-muted-foreground">
-        <p>
-          Prefer an app?{" "}
-          {phone
-            ? <>Download it on that computer from <span className="font-semibold text-foreground">xmatrix.sh/download</span>.</>
-            : <a href="/download" className="font-semibold text-foreground underline-offset-2 hover:underline">Download xMatrix</a>}
-        </p>
-        {!phone && <RemoteMachineHint />}
-      </div>
-    </div>
-  );
+  return <BringAgentsIn spaceId={spaceId} token={token} userId={userId} phone={phone} />;
 }
 
 function localInstallPlatform(): InstallPlatform {
   return typeof navigator === "undefined" ? "unix" : defaultInstallPlatform(navigator.userAgent);
-}
-
-type StepState = "pending" | "active" | "done";
-
-/* Which of the three steps the connection is on: the command, its approval,
-   and the agents its machine reports. */
-function connectStage(step: ConnectStep | null): 1 | 2 | 3 {
-  if (!step || step.kind === "waiting") return 1;
-  return step.kind === "approval" || step.kind === "connecting" ? 2 : 3;
-}
-
-function stepState(stage: number, n: number): StepState {
-  return stage > n ? "done" : stage === n ? "active" : "pending";
-}
-
-/* One command for the machine, then what happened to it, as it happens: the
-   terminal asking to be approved, the machine coming online and the agents it
-   has. Each step shows only the line it needs now. Once the agents are
-   reported, the installed-agent switches take over. */
-export function ConnectMachine({ spaceId, token, userId }: {
-  spaceId: string | null; token: string | undefined; userId: string | undefined;
-}) {
-  const intent = useSetupIntent(spaceId, token, userId);
-  const [platform, setPlatform] = useState<InstallPlatform>(() => localInstallPlatform());
-  const now = useNow(1_000);
-  const command = intent.intentId ? setupInstallCommand(intent.intentId, platform) : null;
-  const step = intent.status ? connectStep(intent.status, now - intent.shownAt) : null;
-  const stage = connectStage(step);
-  const installPlatform = terminalInstallPlatform(intent.status?.terminal?.platform) ?? platform;
-  const spinner = <AnimatedIcon icon={Loader2} className="size-3.5 shrink-0 animate-spin" />;
-  return (
-    <ol className="mt-6 space-y-5" data-testid="connect-machine">
-      <SetupStep n={1} state={stepState(stage, 1)} title="Run this on your computer">
-        {stage === 1 && <>
-          <CommandBlock command={command} />
-          <button type="button" onClick={() => setPlatform(platform === "windows" ? "unix" : "windows")}
-            className="mt-1.5 text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline">
-            {platform === "windows" ? "On macOS or Linux?" : "On Windows?"}
-          </button>
-          {step?.kind === "waiting" && (
-            <div role="status" className="mt-2 text-xs text-muted-foreground">
-              <p className="flex items-center gap-1.5">{spinner} Waiting for the command…</p>
-              {step.hint === "check-terminal" && <p className="mt-1">Nothing yet? The terminal says what went wrong.</p>}
-              {step.hint === "try-desktop" && <p className="mt-1">Still nothing? The desktop app connects without a terminal.</p>}
-            </div>
-          )}
-        </>}
-      </SetupStep>
-      <SetupStep n={2} state={stepState(stage, 2)} title="Approve it here">
-        {step?.kind === "approval" && (
-          <div role="status">
-            <p className="text-sm"><strong>{step.hostname}</strong> wants to connect with code</p>
-            <p className="mt-1 font-mono text-base font-bold tracking-[0.06em]">{step.userCode}</p>
-            <p className="mt-1 text-xs text-muted-foreground">Approve it only if the terminal shows the same code.</p>
-            <div className="mt-3 flex items-center gap-2">
-              <button type="button" disabled={intent.busy} onClick={() => void intent.approve(step.userCode)}
-                className={actionClass({ variant: "primary", size: "sm" })}>Approve</button>
-              <button type="button" disabled={intent.busy} onClick={() => void intent.decline()}
-                className={actionClass({ variant: "quiet", size: "sm" })}>Not mine</button>
-            </div>
-          </div>
-        )}
-        {step?.kind === "connecting" && (
-          <p role="status" className="flex items-center gap-1.5 text-xs text-muted-foreground">{spinner} {step.hostname} is signing in…</p>
-        )}
-      </SetupStep>
-      <SetupStep n={3} state={stepState(stage, 3)} title="Turn on the agents it finds">
-        {step?.kind === "looking" && (
-          <p role="status" className="flex items-center gap-1.5 text-xs text-muted-foreground">{spinner} {step.machineName} is connected. Looking for agents…</p>
-        )}
-        {step?.kind === "found" && (
-          <p role="status" className="text-xs text-muted-foreground">
-            {step.machineName} is connected. Found {listNames(step.harnesses.map((harness) => harness.name))}.
-          </p>
-        )}
-        {step?.kind === "none-installed" && (
-          <div role="status">
-            <p className="text-xs text-muted-foreground">{step.machineName} is connected, but no agent is installed there yet. Install one there and it shows up here.</p>
-            <AgentInstallPicker className="mt-3" platform={installPlatform} />
-          </div>
-        )}
-      </SetupStep>
-      {intent.error && <li className="list-none">
-        <p role="alert" className="text-sm text-destructive">{intent.error}</p>
-        <button type="button" disabled={intent.busy || intent.retrying} onClick={intent.retry}
-          className={actionClass({ variant: "secondary", size: "sm" }, "mt-2")}>
-          <RefreshCw className="size-4" /> Try again
-        </button>
-      </li>}
-    </ol>
-  );
-}
-
-/* A numbered step of one action. Done steps keep their line short, so the
-   card only ever grows where the person is. */
-function SetupStep({ n, state, title, children }: {
-  n: number; state: StepState; title: string; children?: React.ReactNode;
-}) {
-  return (
-    <li className="grid grid-cols-[1.5rem_minmax(0,1fr)] gap-x-3" data-state={state}>
-      <span aria-hidden="true" className={cn(
-        "flex size-6 items-center justify-center rounded-[999px] text-xs font-bold",
-        state === "done" ? "bg-foreground text-background"
-          : state === "active" ? "border-[1.5px] border-foreground text-foreground"
-            : "border-[1px] border-border text-muted-foreground",
-      )}>
-        {state === "done" ? <Check className="size-3.5" strokeWidth={3} /> : n}
-      </span>
-      <div className="min-w-0">
-        <p className={cn("flex min-h-6 items-center text-sm font-semibold", state === "pending" && "text-muted-foreground")}>{title}</p>
-        {children && <div className="mt-2">{children}</div>}
-      </div>
-    </li>
-  );
-}
-
-/* The remote path from the landing page: a machine with no GUI (a server, a
-   build box) is set up by handing this prompt to an agent that already runs
-   there, so it does not need the desktop app at all. */
-function RemoteMachineHint() {
-  const { copied, copy } = useCopyToClipboard(quickStartSeedPrompt);
-  return (
-    <p>
-      Setting up a server?{" "}
-      <button type="button" onClick={() => void copy()}
-        className="font-semibold text-foreground underline-offset-2 hover:underline">
-        {copied ? "Copied" : "Copy a setup prompt"}
-      </button>{" "}
-      for an agent already running there, or{" "}
-      <a href={quickStartRunbookUrl} target="_blank" rel="noreferrer"
-        className="font-semibold text-foreground underline-offset-2 hover:underline">read the steps</a>.
-    </p>
-  );
 }
 
 function describeCandidates(candidates: SpaceAgentSetupCandidate[]): string {
