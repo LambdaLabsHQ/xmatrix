@@ -992,7 +992,7 @@ or generates a webhook secret in the Apps view.
 | Jira Cloud | email + API token, webhook secret | issue created/updated/commented | create/transition/comment issue |
 | Notion | internal integration token | — (polling deferred) | read page, append block, create page |
 | Vercel | access token + webhook secret | deployment created/succeeded/error | redeploy |
-| Cloudflare | OAuth or API token; Hub-registered destination secret | notifications fired/resolved by alert type; subscriptions own the account's `xMatrix ·` policies | query logs, list deployments (read); rollback |
+| Cloudflare | Up to five OAuth logins in one encrypted `logins` credential (each Connect adds one), or an API token; Hub-registered destination secret | notifications fired/resolved by alert type, `<account id>/<alert type>` for accounts other than the default; subscriptions own each account's `xMatrix ·` policies | list accounts, query logs, list deployments, list D1 databases, read-only D1 query (read); rollback — each may name its account |
 | App Store Connect | API key (Key ID, Issuer ID, `.p8`); Hub-registered webhook secret | version state, build upload, TestFlight review and feedback; subscriptions own the app's `xMatrix ·` webhook | status, builds, version, app record and reviews (read); create version, set listing, attach build, submit, cancel, release, reply to review; set app info, age rating, price, availability and review contact; upload builds and screenshots; signing certificates and profiles; TestFlight groups, beta review and tester feedback |
 | Discord | bot token | — | post message |
 | Feishu/Lark | custom app id/secret + verification token | message in linked chat | send message |

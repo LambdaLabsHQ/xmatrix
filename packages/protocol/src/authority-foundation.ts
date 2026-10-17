@@ -99,6 +99,10 @@ function appConnectionRoutes<Api extends "/api" | "/api/xmatrix">(api: Api) {
       `${api}/spaces/${encodeURIComponent(spaceId)}/app-connections/gmail/notifications`,
     space_app_connection_gmail_mailboxes: (spaceId: string) =>
       `${api}/spaces/${encodeURIComponent(spaceId)}/app-connections/gmail/mailboxes`,
+    space_app_connection_cloudflare_logins: (spaceId: string) =>
+      `${api}/spaces/${encodeURIComponent(spaceId)}/app-connections/cloudflare/logins`,
+    space_app_connection_cloudflare_login: (spaceId: string, loginId: string) =>
+      `${api}/spaces/${encodeURIComponent(spaceId)}/app-connections/cloudflare/logins/${encodeURIComponent(loginId)}`,
     space_app_connection_x_accounts: (spaceId: string) =>
       `${api}/spaces/${encodeURIComponent(spaceId)}/app-connections/x/accounts`,
     space_app_connection_x_account: (spaceId: string, accountId: string) =>
