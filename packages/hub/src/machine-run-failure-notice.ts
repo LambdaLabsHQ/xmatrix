@@ -48,6 +48,26 @@ export async function publishMachineRunFailureNotice(env: Env, input: MachineRun
   await appendChannelMessage(env, input.channelId, await machineRunFailureNoticeCommand(input));
 }
 
+/** The same message went to another Agent after a failed start. Stable per
+ * failed Run, so a replay never adds a second line. */
+export async function startupFallbackNoticeCommand(input: {
+  runId: string; channelId: string; agentName: string; ownerUserId: string; ownerEmail: string;
+}) {
+  const digest = await sha256Hex(input.runId);
+  return {
+    commandId: `startup-fallback-notice:${digest}`.slice(0, 200),
+    messageId: `system:startup-fallback:${digest}`.slice(0, 200), channelId: input.channelId,
+    body: `@${input.agentName} is taking this message instead.`,
+    messageKind: "xmatrix.system.runtime-failure", ...systemNoticeAuthor(input),
+    residual: { appMetadata: { xmatrixProvenance: "system_fact", xmatrixSystemNotice: true,
+      source: "startup_fallback", runId: input.runId } },
+  };
+}
+
+export async function publishStartupFallbackNotice(env: Env, input: Parameters<typeof startupFallbackNoticeCommand>[0]): Promise<void> {
+  await appendChannelMessage(env, input.channelId, await startupFallbackNoticeCommand(input));
+}
+
 export interface MachineStopResultNotice {
   runId: string; controlKey: string; channelId: string; agentName: string; ok: boolean; detail?: string;
   ownerUserId: string; ownerEmail: string; machineId: string; hostId: string;

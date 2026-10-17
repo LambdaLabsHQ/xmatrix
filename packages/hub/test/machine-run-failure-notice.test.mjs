@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { machineRunFailureNoticeCommand, machineStopResultNoticeCommand, repositoryBaselineNoticeCommand } from "../src/machine-run-failure-notice.ts";
+import { machineRunFailureNoticeCommand, machineStopResultNoticeCommand, repositoryBaselineNoticeCommand,
+  startupFallbackNoticeCommand } from "../src/machine-run-failure-notice.ts";
 
 const base = { runId: "run-1", channelId: "channel-1", agentName: "grok", ownerUserId: "owner",
   ownerEmail: "owner@example.test", machineId: "machine:a", hostId: "cursor" };
@@ -76,4 +77,14 @@ test("fetch stderr survives in both the Channel body and invocation metadata", a
   assert.equal(notice.body, `Couldn't start @grok.\n\n${detail}`);
   assert.equal(notice.residual.appMetadata.failureDetail, detail);
   assert.equal(notice.residual.appMetadata.failureCode, "repository_fetch_failed");
+});
+
+test("the Agent that takes over a failed start is named once per failed Run", async () => {
+  const notice = await startupFallbackNoticeCommand({ ...base, agentName: "claude" });
+  assert.equal(notice.body, "@claude is taking this message instead.");
+  assert.equal(notice.residual.appMetadata.source, "startup_fallback");
+  assert.equal(notice.messageKind, "xmatrix.system.runtime-failure");
+  assert.deepEqual(await startupFallbackNoticeCommand({ ...base, agentName: "claude" }), notice);
+  assert.notEqual((await startupFallbackNoticeCommand({ ...base, runId: "run-2", agentName: "claude" })).messageId, notice.messageId);
+  assert.notEqual(notice.messageId, (await machineRunFailureNoticeCommand({ ...base, detail: "boom" })).messageId);
 });

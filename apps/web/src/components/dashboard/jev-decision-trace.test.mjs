@@ -123,6 +123,10 @@ test("the placement reason names the trade-off routing made", () => {
     "Best suited, with 40% room. Its description was read");
   assert.equal(placementReason([described(at("codex", "idle", 1 / 3, 0.85), false), at("claude", "busy", 0.32, 0.1)], true),
     "All equally suited; most room here (85% room). codex has no description here, so it was judged by name");
+  const failed = item => ({ ...item, startupFailedAt: "2026-10-17T09:38:00.000Z" });
+  assert.equal(placementReason([at("claude", "warm", 1 / 3, 0.4), failed(at("grok", "mac", 1 / 3, 0.9))], true),
+    "grok on mac failed to start in the last 30 minutes, so it goes last");
+  assert.equal(placementReason([at("claude", "warm", 0.68, 0.4), failed(at("grok", "mac", 1 / 3, 0.9))], true), "Best suited, with 40% room");
   assert.deepEqual([fitLevel(0.32), fitLevel(0.68), fitLevel(0), fitLevel(1)], ["Capable", "Strong fit", "Unsuitable", "Asked for"]);
   assert.deepEqual([roomText(undefined), roomText(-0.2), roomText(0.414)], ["room unknown", "overloaded", "41% room"]);
 });

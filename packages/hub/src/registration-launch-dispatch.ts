@@ -4,12 +4,13 @@ import { registrationLaunchContextReader } from "./registration-launch-context";
 import { START_INTENT_DECLINED, registrationLaunchChooser } from "./registration-launch-choice";
 import { REGISTRATION_PREPARATION_REJECTION_CODES, digestCanonicalCloneCborV1 } from "@xmatrix/protocol";
 import type { RoutingEvaluator } from "./agent-routing-evaluation";
-import type { AutoLaunchTags, DraftSummonIntent } from "@xmatrix/protocol";
+import type { AutoLaunchTags, DraftSummonIntent, SpaceAgentRegistrationKey } from "@xmatrix/protocol";
 import {
   PostgresChannelSpaceDirectory, PostgresRegistrationLaunchRepository, PostgresRegistrationRebornRepository,
   PostgresSpacePlacementDirectory, PostgresRuntimeRepository, RegistrationAccessError, type AuthorityDatabase,
-  PostgresFirstMessageLaunchChoiceRepository,
+  PostgresFirstMessageLaunchChoiceRepository, PostgresMessageRepository,
 } from "@xmatrix/db";
+import { postgresProductMessage } from "./postgres-message-authority";
 import { dispatchPreparedAgentLaunchWake } from "./product-agent-mention-authority-adapter";
 import { scheduleAgentRoutingQuotaRefresh } from "./agent-routing-quota-refresh";
 import { jevEvaluator, refreshChannelRoutingQuota, runtimePlacement } from "./runtime";
@@ -68,6 +69,8 @@ interface RegistrationInputLaunch {
 interface RegistrationInputRequest {
   /** Exclude the stable registration bound to this predecessor Instance. */
   excludeSourceInstanceId?: string;
+  /** Exclude an environment that just failed to start this work. */
+  excludeRegistration?: SpaceAgentRegistrationKey;
   commandId: string; actorUserId: string; channelId: string; body: string; runMetadata?: Record<string, unknown>;
   runId?: string; instanceId?: string;
   initialMessageId?: string; presentationMessageId?: string; tags?: AutoLaunchTags;
@@ -236,6 +239,42 @@ export async function dispatchRegistrationInput(input: RegistrationInputRequest 
   });
   return { runId: result.runId, instanceId: result.instanceId, launchId: result.launchId,
     agentName: result.agentName, hostId: result.hostId, reused: result.reused };
+}
+
+/**
+ * A Run that failed to start for an `@auto` summon, or for xMatrix's summon of
+ * a first message that named nobody, hands the same message to the next-ranked
+ * Agent, once: the retry is an any-input launch, which has no retry of its
+ * own. The failed environment is excluded; the author's other conditions
+ * still bind. One command per failed Run, so a replay recovers the same launch.
+ * Undefined when the Run has no such origin or nothing else can take the work.
+ */
+export async function dispatchStartupFallback(env: Env, input: { channelId: string; runId: string },
+  dispatch: typeof dispatchRegistrationInput = dispatchRegistrationInput): Promise<{ agentName: string } | undefined> {
+  const { database, directory } = runtimePlacement(env);
+  const commandId = `startup-fallback:${input.runId}`.slice(0, 200);
+  const { placement, repository } = await channelLaunchRepository({ database, directory, commandId, channelId: input.channelId });
+  const origin = await repository.startupFallbackOrigin({ commandId, channelId: input.channelId, runId: input.runId,
+    readBody: async (actorUserId, sourceSequence) => {
+      const page = await new PostgresMessageRepository(database).history({ requestId: commandId, spaceId: placement.spaceId,
+        principal: { kind: "user", id: actorUserId }, channelId: input.channelId, beforeSequence: sourceSequence + 1, limit: 1 });
+      const message = page.messages.map(postgresProductMessage).find(item => item.sequence === sourceSequence);
+      return typeof message?.body === "string" ? message.body : undefined;
+    } });
+  if (!origin) return undefined;
+  try {
+    const launched = await dispatch({ env, commandId, actorUserId: origin.actorUserId, channelId: input.channelId,
+      body: origin.body, tags: origin.tags, excludeRegistration: origin.failed,
+      // The retry answers the same message and is drawn on its summon, like the launch it replaces.
+      initialMessageId: origin.sourceMessageId, presentationMessageId: origin.sourceMessageId,
+      runMetadata: { sourceMention: origin.sourceMention } });
+    return { agentName: launched.agentName };
+  } catch (error) {
+    // Nothing else can take the work, or routing could not choose now: the
+    // failure notice stands on its own rather than a retry arriving late.
+    if (error instanceof RegistrationAccessError) return undefined;
+    throw error;
+  }
 }
 
 /** The reborn/handoff repository placed on the Channel's Space shard. */

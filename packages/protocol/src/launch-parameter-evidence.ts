@@ -19,6 +19,9 @@ export interface LaunchPlacementCandidate {
   /** Whether the Space had described the harness when its fit was read; false
    * means it was judged without one. Absent from decisions made before it was recorded. */
   described?: boolean;
+  /** When it last failed to start within the breaker window: it was ranked
+   * after every environment that had not. */
+  startupFailedAt?: string;
 }
 
 /** Public decision evidence contains opaque workspace handles, never private directory catalogs. */
@@ -112,12 +115,15 @@ function parsePlacement(value: unknown, evaluatedAt: number): LaunchParameterEvi
       !unit(item.fit, 0, 1) || item.headroom !== undefined && !unit(item.headroom, -1_000, 1) ||
       item.quotaPace !== undefined && !unit(item.quotaPace, 0, 1e12) || typeof item.frontier !== "boolean" || !unit(item.utility, -1_000, 2) ||
       item.described !== undefined && typeof item.described !== "boolean" ||
+      item.startupFailedAt !== undefined && (typeof item.startupFailedAt !== "string" ||
+        item.startupFailedAt.length > 40 || !Number.isFinite(Date.parse(item.startupFailedAt))) ||
       item.network !== undefined && (!network || !unit(item.networkQuality, 0, 1))) return null;
     ranking.push({ harness: item.harness, machineId: item.machineId,
       ...(item.machineName !== undefined ? { machineName: item.machineName as string } : {}),
       fit: item.fit, ...(item.headroom !== undefined ? { headroom: item.headroom as number } : {}),
       ...(item.quotaPace !== undefined ? { quotaPace: item.quotaPace as number } : {}), frontier: item.frontier, utility: item.utility,
       ...(item.described !== undefined ? { described: item.described as boolean } : {}),
+      ...(item.startupFailedAt !== undefined ? { startupFailedAt: item.startupFailedAt as string } : {}),
       ...(network ? { network, networkQuality: item.networkQuality as number } : {}) });
   }
   return { profile: "balanced", ranking };
