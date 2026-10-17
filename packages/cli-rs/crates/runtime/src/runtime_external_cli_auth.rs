@@ -1971,7 +1971,7 @@ impl ZcodeAppSession {
 }
 
 /// Grok ACP backend: a thin shell over the generic ACP runner with the full
-/// Grok vendor config (WebSocket serve, billing quota, goal grammar, skill
+/// Grok vendor config (ACP over stdio, billing quota, goal grammar, skill
 /// overlay, `_meta.rules`).
 async fn run_grok_app_external(run: ExternalRun<'_>) -> error::Result<()> {
     run_acp_app_external(AcpVendorConfig::grok(), run).await
@@ -2789,7 +2789,7 @@ type AcpGoalStatusFromTextHook =
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum AcpVendorFlavor {
-    /// Grok Build: WebSocket serve transport, `grok agent` argv, and every
+    /// Grok Build: `grok agent ... stdio` argv and every
     /// vendor hook (billing quota, goal grammar, skill overlay, `_meta.rules`).
     Grok,
     /// Vendor-neutral ACP over stdio (e.g. Kimi Code via `kimi acp`): no
