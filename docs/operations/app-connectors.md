@@ -442,6 +442,12 @@ Register each provider's OAuth app with the redirect URI
   workspace bindings and application signing secrets; Vercel uses the Integration
   binding and Client Secret described above. Other inbound setups use their
   per-connection ingress URL and the provider's signing secret.
+- A Slack workspace connects to one Space at a time; Connect elsewhere is
+  refused until it disconnects, or until a Slack workspace admin removes the
+  xMatrix app, which retires it everywhere. The Slack app's Event Subscriptions
+  must include the `app_uninstalled` and `tokens_revoked` events for that.
+  Linear events reach a Space only when its connecting user can read the issue,
+  comment or project they are about.
 - A pasted token keeps working alongside OAuth. Actions prefer the OAuth token
   when one is stored.
 

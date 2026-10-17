@@ -20,20 +20,22 @@ async function request(provider, payload, secret = env[`CONNECTOR_${provider.toU
   return new Request(`https://hub.test/api/connectors/${provider}/events?spaceId=attacker`,
     { method: 'POST', headers, body });
 }
-function fixture(bindings = [{ connectionId: 'space-a:slack', spaceId: 'space-a' }]) {
-  const queries = [], routes = [], appends = [], automations = [];
+function fixture(bindings = [{ connectionId: 'space-a:slack', spaceId: 'space-a' }], readable = () => true) {
+  const queries = [], routes = [], appends = [], automations = [], visibility = [], retirements = [];
   const apps = {
     async oauthEventConnections(query) { queries.push(query); return bindings; },
+    async retireSlackWorkspace(input) { retirements.push(input); return 1; },
     async connectorEventRoutes(query) {
       routes.push(query);
       return [{ channelId: `${query.connectionId}:channel`, authorityRootUserId: 'owner', features: ['messages', 'issue'] }];
     },
   };
-  return { queries, routes, appends, automations, apps, dependencies: {
+  return { queries, routes, appends, automations, visibility, retirements, apps, dependencies: {
     credentials() { throw new Error('App delivery must not decrypt arbitrary Space tokens'); },
     apps: () => apps,
     async append(_env, _channel, command) { appends.push(command); return new Response('{}'); },
     async automations(_env, trigger) { automations.push(trigger); },
+    async linearVisible(_env, spaceId, event) { visibility.push({ spaceId, subject: event.subject }); return readable(spaceId); },
   } };
 }
 const message = (team = 'T1') => ({ type: 'event_callback', team_id: team, event_id: 'Ev1',
@@ -86,6 +88,39 @@ test('Linear app events require a signed organization id and fresh timestamp', a
   for (const timestamp of [undefined, 'invalid', Date.now()-120000]) {
     assert.equal((await send('linear', { ...payload, webhookTimestamp: timestamp }, f)).status, 401);
   }
+});
+
+// One Linear organization webhook serves every Space that connected it; each
+// Space takes an event only when its own grant reads what it is about, so a
+// private team's issue never reaches a Space whose member cannot see it.
+test('a Linear event reaches only the Spaces whose own grant reads its subject', async () => {
+  const f = fixture([{ connectionId: 'space-a:linear', spaceId: 'space-a' }, { connectionId: 'space-b:linear', spaceId: 'space-b' }],
+    (spaceId) => spaceId === 'space-a');
+  const payload = { type: 'Issue', action: 'create', organizationId: 'org-a', webhookTimestamp: Date.now(),
+    data: { id: 'issue-private', identifier: 'SEC-1', title: 'Private team issue', team: { key: 'SEC' } } };
+  assert.deepEqual(await (await send('linear', payload, f)).json(), { ok: true, events: 1, delivered: 1 });
+  assert.deepEqual(f.appends.map((append) => append.channelId), ['space-a:linear:channel']);
+  assert.deepEqual(f.automations.map((trigger) => trigger.spaceId), ['space-a']);
+  assert.deepEqual(f.visibility, [{ spaceId: 'space-a', subject: { entity: 'issue', id: 'issue-private' } },
+    { spaceId: 'space-b', subject: { entity: 'issue', id: 'issue-private' } }]);
+});
+
+// Slack's signed word that the app left the workspace retires its bindings
+// before anything is routed; a revoked user token alone retires nothing.
+test('a signed Slack uninstall retires the workspace instead of routing', async () => {
+  const f = fixture();
+  const uninstalled = { type: 'event_callback', team_id: 'T1', event_id: 'Ev2', event: { type: 'app_uninstalled' } };
+  assert.deepEqual(await (await send('slack', uninstalled, f)).json(), { ok: true, events: 0, delivered: 0, retired: 1 });
+  assert.deepEqual(f.retirements.map(({ appClientId, installationId, limit }) => ({ appClientId, installationId, limit })),
+    [{ appClientId: 'slack-app', installationId: 'T1', limit: 50 }]);
+  assert.equal(f.queries.length, 0);
+  const botRevoked = { ...uninstalled, event: { type: 'tokens_revoked', tokens: { bot: ['B1'] } } };
+  await send('slack', botRevoked, f);
+  assert.equal(f.retirements.length, 2);
+  await send('slack', { ...uninstalled, event: { type: 'tokens_revoked', tokens: { oauth: ['U1'] } } }, f);
+  assert.equal(f.retirements.length, 2, 'a user token revocation keeps the bot installation');
+  assert.equal((await send('slack', uninstalled, f, { secret: 'wrong' })).status, 401);
+  assert.equal(f.retirements.length, 2, 'an unsigned uninstall retires nothing');
 });
 
 test('reauthorization between workspace lookup and route reads suppresses stale automation delivery', async () => {
