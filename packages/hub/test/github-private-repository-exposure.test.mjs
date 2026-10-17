@@ -76,6 +76,7 @@ function webhookHarness(exposure) {
     dependencies: {
       exposure,
       resolveRoutes: async () => [route],
+      delegated: async () => true,
       append: async (_env, channelId, message) => {
         appended.push({ channelId, body: message.body });
         return { ok: true };

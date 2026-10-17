@@ -110,7 +110,13 @@ Selection does not follow the rule that credentials already follow.
    pushes), targets the calling machine, sits in the named Channel, and was
    launched into the named repository (`metadata.remoteRepo`, compared
    case-insensitively). A machine can therefore no longer mint for a
-   repository of the Space that none of its Runs was admitted to. The token
+   repository of the Space that none of its Runs was admitted to. On both the
+   Run-bound and the compatibility path, the machine owner must be able to act
+   with the Space's connected apps in that Channel (owner/admin/member); a
+   viewer or open-project participant is refused with
+   `github_repository_token_requires_member` and keeps their own Git login.
+   The repository must also still be administered by the GitHub user Connect
+   recorded as linking its installation (`github_repository_not_delegated`). The token
    requests only `contents: write` and `metadata: read` (falling back to
    `contents: read` for an installation without write), never pull requests,
    issues, Actions, workflows or secrets; a push that changes

@@ -27,7 +27,7 @@ person's role is their level, and the capabilities follow from it.
 | Level | Role | Can |
 |---|---|---|
 | visitor | not a member | read published pages |
-| participant | `participant` | read the Space's open conversations and pages; start conversations, which go to intake; write in the conversations they started; bring their own Agents on their own budget |
+| participant | `participant` | read the Space's open conversations and pages; start conversations, which go to intake; write in the conversations they started; bring their own Agents on their own budget. The Space's secrets, connected apps and GitHub repository tokens stay with members: a participant's Agents use their own credentials |
 | contributor | `member` | everything a member can today: claim blocks, edit pages, start work with the project's Agents |
 | committer | `member`, vouched | also open blocks for competition and triage intake |
 | maintainer | `owner` / `admin` | everything, including editing the governance page and the roles of others |

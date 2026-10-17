@@ -15,6 +15,8 @@ type GitHubInstallationAccount = {
   type: string;
   avatarUrl?: string;
   repositorySelection?: string;
+  /** A linked account is used only once an administrator of it confirmed it by connecting. */
+  confirmed?: boolean;
 };
 
 type GitHubInstallations = {
@@ -28,7 +30,7 @@ const ACTION_CLASS = actionClass({ variant: "secondary", size: "sm" });
 /**
  * The GitHub accounts and organizations this Space reaches, one App
  * installation each. Connecting authorizes on GitHub, which confirms the
- * installations this person reaches; they are linked here directly, since
+ * installations this person administers; they are linked here directly, since
  * GitHub does not return to xMatrix for an installation that is unchanged.
  */
 export function GitHubInstallationAccounts({ spaceId, token, onManage, onAuthorize, onInstall, onChanged }: {
@@ -131,7 +133,8 @@ export function GitHubInstallationAccounts({ spaceId, token, onManage, onAuthori
       ) : null}
       {installations?.authorized && installations.available.length === 0 ? (
         <p className="mt-3 text-xs leading-5 text-muted-foreground">
-          Every account where your GitHub can reach the App is already linked.
+          Every account you administer with the App installed is already linked. An organization
+          you do not own is linked by one of its owners.
         </p>
       ) : null}
       {error ? <p className="mt-3 text-xs text-destructive" role="alert">{error}</p> : null}
@@ -162,6 +165,11 @@ function AccountRow({ account, children }: { account: GitHubInstallationAccount;
           {account.type === "Organization" ? "Organization" : account.type === "User" ? "Personal account" : account.type}
           {account.repositorySelection === "all" ? " · all repositories" : account.repositorySelection === "selected" ? " · selected repositories" : ""}
         </span>
+        {account.confirmed === false ? (
+          <span className="block text-xs text-muted-foreground" data-testid="github-installation-unconfirmed">
+            Paused until its owner, or an owner of the organization, uses Find my GitHub accounts here.
+          </span>
+        ) : null}
       </span>
       <span className="flex gap-2">{children}</span>
     </li>

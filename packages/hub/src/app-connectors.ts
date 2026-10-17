@@ -27,6 +27,12 @@ export interface AppConnectorConnectionView {
   capabilities?: string[];
   metadata?: Record<string, unknown>;
   version?: number;
+  /**
+   * Who handed each linked GitHub installation to the Space, as Connect
+   * recorded it (never connection metadata). A repository is used through an
+   * installation only while that GitHub user administers it.
+   */
+  githubLinks?: Array<{ installationId: string; githubUserId: number }>;
 }
 
 export interface GitHubRepositoryRef {
@@ -428,6 +434,111 @@ export async function listGitHubUserInstallations(
     if (installations.length < 100) break;
   }
   return accounts;
+}
+
+/** Bounds one Connect's authority check: GitHub calls grow with installations and their repositories. */
+const ADMINISTERED_INSTALLATION_LIMIT = 30;
+const ADMINISTERED_REPOSITORY_PAGES = 10;
+
+/**
+ * The installations among `accounts` this person may hand to a Space: their
+ * own account's, or an organization's whose every covered repository they
+ * administer, as its owners do. Reaching one repository of an installation
+ * proves membership, not authority over the rest of it, so such an
+ * installation is not returned; nor is one too large to check.
+ */
+export async function githubAdministeredInstallations(
+  env: AppConnectorEnv,
+  userToken: string,
+  accounts: readonly GitHubInstallationAccount[]
+): Promise<{ githubUserId: number; installationIds: string[] }> {
+  const user = githubObject(await fetchGitHubJson(env, "/user", userToken));
+  const viewer = githubString(user.login)?.toLowerCase();
+  const githubUserId = githubNumber(user.id);
+  if (!viewer || typeof githubUserId !== "number" || githubUserId < 1) throw new Error("github_user_unavailable");
+  const administered: string[] = [];
+  for (const account of accounts.slice(0, ADMINISTERED_INSTALLATION_LIMIT)) {
+    if (account.type === "User") {
+      if (account.login.toLowerCase() === viewer) administered.push(account.installationId);
+    } else if (account.type === "Organization" &&
+        await githubAdministersEveryRepository(env, userToken, account.installationId).catch(() => false)) {
+      administered.push(account.installationId);
+    }
+  }
+  return { githubUserId, installationIds: administered };
+}
+
+/**
+ * Whether the GitHub user who linked `installationId` to this Space
+ * administers `owner/repo` now, read live with the installation's own token
+ * (Metadata read covers it). A repository added to the installation later, a
+ * person who lost admin rights or left, and a link made before Connect
+ * recorded who made it all answer no.
+ */
+async function githubLinkerAdministers(env: AppConnectorEnv, connection: AppConnectorConnectionView,
+  installationId: string, owner: string, repo: string, token: string): Promise<boolean> {
+  const link = connection.githubLinks?.find((candidate) => candidate.installationId === installationId);
+  if (!link) return false;
+  const login = githubString(githubObject(await fetchGitHubJson(env, `/user/${link.githubUserId}`, token)).login);
+  if (!login) return false;
+  const permission = githubObject(await fetchGitHubJson(env, `/repos/${encodeURIComponent(owner)}/${
+    encodeURIComponent(repo)}/collaborators/${encodeURIComponent(login)}/permission`, token).catch((error: unknown) => {
+    if (error instanceof Error && error.message === "github_api_404") return {};
+    throw error;
+  }));
+  // The login is looked up from the recorded id; the answer must name that same id.
+  return githubNumber(githubObject(permission.user).id) === link.githubUserId && permission.permission === "admin";
+}
+
+/** Repositories a picker checks for its linking administrator before offering an installation. */
+const LINKER_LIVENESS_PROBES = 3;
+
+/** Whether the installation's linking administrator administers one of its first repositories now. */
+async function githubLinkerStillAdministers(env: AppConnectorEnv, connection: AppConnectorConnectionView,
+  installationId: string, repositories: GitHubInstallationRepository[], token: string): Promise<boolean> {
+  for (const repository of repositories.slice(0, LINKER_LIVENESS_PROBES)) {
+    if (await githubLinkerAdministers(env, connection, installationId, repository.owner, repository.name, token)) return true;
+  }
+  return false;
+}
+
+/**
+ * Whether this Space may take a GitHub delivery or event about `owner/repo`
+ * from `installationId`: the installation is linked here and its linking
+ * administrator still administers the repository. Any failure answers no.
+ */
+export async function githubRepositoryDelegated(env: AppConnectorEnv, connection: AppConnectorConnectionView,
+  installationId: string, owner: string, repo: string): Promise<boolean> {
+  if (!githubConnectionHasInstallation(connection, installationId)) return false;
+  try {
+    const auth = await githubInstallationAuthForId(env, installationId, { repositories: [repo],
+      permissions: { metadata: "read" } });
+    return await githubLinkerAdministers(env, connection, installationId, owner, repo, auth.token);
+  } catch {
+    return false;
+  }
+}
+
+async function githubAdministersEveryRepository(env: AppConnectorEnv, userToken: string, installationId: string) {
+  const id = encodeURIComponent(installationId);
+  const installation = await githubInstallationAuthForId(env, installationId);
+  const covered = githubNumber(githubObject(await fetchGitHubJson(env, "/installation/repositories?per_page=1",
+    installation.token)).total_count);
+  if (typeof covered !== "number" || covered < 1 || covered > ADMINISTERED_REPOSITORY_PAGES * 100) return false;
+  // Counted by stable id: a page that shifts while being read cannot count one repository twice.
+  const administered = new Set<number>();
+  for (let page = 1; page <= ADMINISTERED_REPOSITORY_PAGES; page += 1) {
+    const payload = githubObject(await fetchGitHubJson(env,
+      `/user/installations/${id}/repositories?per_page=100&page=${page}`, userToken));
+    const repositories = Array.isArray(payload.repositories) ? payload.repositories.map(githubObject) : [];
+    for (const repository of repositories) {
+      const repositoryId = githubNumber(repository.id);
+      if (typeof repositoryId !== "number" || githubObject(repository.permissions).admin !== true) return false;
+      administered.add(repositoryId);
+    }
+    if (repositories.length < 100) break;
+  }
+  return administered.size === covered;
 }
 
 export function githubConnectionHasInstallation(
@@ -1802,11 +1913,9 @@ async function githubInstallationAuthWithCapability(
   env: AppConnectorEnv,
   connection: AppConnectorConnectionView,
   capability: string,
-  repository?: { owner: string; repo: string }
+  repository: { owner: string; repo: string }
 ): Promise<GitHubInstallationAuth> {
-  const auth = repository
-    ? await githubInstallationAuthForRepository(env, connection, repository.owner, repository.repo)
-    : await githubInstallationAuth(env, connection);
+  const auth = await githubInstallationAuthForRepository(env, connection, repository.owner, repository.repo);
   if (!githubAuthHasCapability(auth, connection, capability)) {
     throw new Error(`missing_capabilities:${capability}`);
   }
@@ -1869,23 +1978,6 @@ async function fetchGitHubPullRequestSnapshot(
   };
 }
 
-async function githubInstallationAuth(env: AppConnectorEnv, connection: AppConnectorConnectionView): Promise<GitHubInstallationAuth> {
-  const installationIds = githubConnectionInstallationIds(connection);
-  if (installationIds.length === 0) {
-    throw new Error("github_installation_missing");
-  }
-  let lastError: unknown;
-  for (const installationId of installationIds) {
-    try {
-      return await githubInstallationAuthForId(env, installationId);
-    } catch (error) {
-      lastError = error;
-    }
-  }
-  if (lastError instanceof Error) throw lastError;
-  throw new Error("github_installation_token_missing");
-}
-
 /**
  * Resolve the exact GitHub App installation for owner/repo, verify it belongs to this
  * Space connection, then mint a short-lived installation token for that id only.
@@ -1903,7 +1995,8 @@ async function githubInstallationAuthForRepository(
   }
   const scope = { repositories: [repo], ...(permissions ? { permissions } : {}) };
 
-  let resolvedId: string;
+  let resolvedId: string | undefined;
+  let lookupError: unknown;
   try {
     resolvedId = await resolveGitHubRepositoryInstallationId(env, owner, repo);
   } catch (error) {
@@ -1913,15 +2006,23 @@ async function githubInstallationAuthForRepository(
     if (error instanceof Error && error.message === "github_api_404") {
       throw new Error("github_repository_not_installed");
     }
-    return await githubInstallationAuthByProbe(env, allowed, owner, repo, scope, error);
+    lookupError = error;
   }
-  if (!allowed.includes(resolvedId)) {
+  if (resolvedId !== undefined && !allowed.includes(resolvedId)) {
     // The lookup answered: the repository belongs to an installation this
     // Space did not connect. That is the precise refusal, and no other
     // installation may stand in for it.
     throw new Error("github_installation_not_linked_to_space");
   }
-  return await githubInstallationAuthForId(env, resolvedId, scope);
+  const installed = resolvedId !== undefined
+    ? { installationId: resolvedId, auth: await githubInstallationAuthForId(env, resolvedId, scope) }
+    : await githubInstallationAuthByProbe(env, allowed, owner, repo, scope, lookupError);
+  // Linking an installation delegates only what its linking administrator
+  // administers: checked live for this repository on every use.
+  if (!await githubLinkerAdministers(env, connection, installed.installationId, owner, repo, installed.auth.token)) {
+    throw new Error("github_repository_not_delegated");
+  }
+  return installed.auth;
 }
 
 /**
@@ -1937,13 +2038,15 @@ async function githubInstallationAuthByProbe(
   repo: string,
   scope: { repositories: string[]; permissions?: GitHubPermissionRequest },
   lookupError: unknown
-): Promise<GitHubInstallationAuth> {
+): Promise<{ installationId: string; auth: GitHubInstallationAuth }> {
   let lastError: unknown = lookupError;
   for (const installationId of allowed) {
     try {
       const auth = await githubInstallationAuthForId(env, installationId, scope);
       const covered = auth.repositories ?? await githubTokenRepositories(env, auth.token);
-      if (covered.some((fullName) => fullName.toLowerCase() === `${owner}/${repo}`.toLowerCase())) return auth;
+      if (covered.some((fullName) => fullName.toLowerCase() === `${owner}/${repo}`.toLowerCase())) {
+        return { installationId, auth };
+      }
       lastError = new Error("github_installation_not_linked_to_space");
     } catch (error) {
       lastError = error;
@@ -2046,6 +2149,7 @@ async function fetchGitHubInstallationRepositories(
   for (const installationId of installationIds) {
     try {
       const auth = await githubInstallationAuthForId(env, installationId);
+      const listed = new Map<string, GitHubInstallationRepository>();
       for (let page = 1; page <= GITHUB_CONNECTOR_REPOSITORY_PAGE_LIMIT; page += 1) {
         const payload = githubObject(
           await fetchGitHubJson(
@@ -2063,9 +2167,7 @@ async function fetchGitHubInstallationRepositories(
           const fullName = githubString(repository.full_name)?.trim().slice(0, 321) || `${owner}/${name}`;
           const id = String(githubNumber(repository.id) ?? fullName.toLowerCase());
           const activityAtMs = githubRepositoryActivityMs(repository);
-          const existing = repositories.get(id);
-          if (existing && existing.activityAtMs >= activityAtMs) continue;
-          repositories.set(id, {
+          listed.set(id, {
             id,
             owner,
             name,
@@ -2076,6 +2178,15 @@ async function fetchGitHubInstallationRepositories(
           });
         }
         if (pageRepositories.length < GITHUB_CONNECTOR_REPOSITORY_PAGE_SIZE) break;
+      }
+      // Offered only while the administrator who linked it still administers
+      // some of it; each repository is checked again when it is used.
+      if (!await githubLinkerStillAdministers(env, connection, installationId, [...listed.values()], auth.token)) {
+        throw new Error("github_repository_not_delegated");
+      }
+      for (const [id, repository] of listed) {
+        const existing = repositories.get(id);
+        if (!existing || existing.activityAtMs < repository.activityAtMs) repositories.set(id, repository);
       }
       succeeded += 1;
     } catch (error) {

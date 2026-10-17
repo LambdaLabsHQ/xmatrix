@@ -147,8 +147,14 @@ GitHub App authorization uses the same authenticated completion page and POST,
 after its separate `/api/auth/callback/github` redirect verifies `xmgh.` state.
 That anonymous callback exchanges no code and links no installation. Completion
 checks the initiating Human and current target-Space admin role before GitHub
-installation discovery. Installation-selection grants use purpose
-`github-grant:v2`; grants from the earlier anonymous flow require fresh consent.
+installation discovery. Discovery names only installations that person
+administers on GitHub: their own account's, or an organization's whose every
+covered repository they administer. Reaching an installation through one
+repository is membership, not authority to hand all of it to a Space.
+Installation-selection grants use purpose `github-grant:v4` and carry the
+GitHub user id `/user` returned; earlier grants require fresh consent. Linking
+records that user (`app_github_installation_links`), and every later use of a
+repository through the installation requires them to administer it then.
 
 Google Docs & Drive uses one `google` connection and the canonical platform pair
 `CONNECTOR_GOOGLE_CLIENT_ID` / `CONNECTOR_GOOGLE_CLIENT_SECRET`. The web-server

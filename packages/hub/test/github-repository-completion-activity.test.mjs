@@ -10,7 +10,7 @@ import {
   resolveAppConnectorCompletionOptions,
   spaceLaunchTargetRepositories,
 } from "../src/app-connectors.ts";
-import { githubAppEnv, githubConnection, jsonResponse } from "./support/github-app.mjs";
+import { githubAppEnv, githubConnection, githubLinkerAnswer, jsonResponse } from "./support/github-app.mjs";
 
 const GITHUB_APP_ENV = await githubAppEnv();
 
@@ -32,6 +32,8 @@ function stubInstallationCatalog(repositories) {
   const original = globalThis.fetch;
   globalThis.fetch = async (input) => {
     const url = typeof input === "string" ? input : input.url;
+    const linker = githubLinkerAnswer(url);
+    if (linker) return linker;
     if (url.includes("/access_tokens")) {
       return jsonResponse({
         token: "ghs_catalog",

@@ -10,6 +10,7 @@ import {
 } from "./channel-capability-policy.js";
 import { commandFields } from "./command-fields.js";
 import { spaceMemberRole } from "./space-members.js";
+import { readsOnly } from "./space-roles.js";
 import { readScopedCommandReplay, storeScopedCommandReplay, COMMAND_REPLAY_TTL_MS as REPLAY_TTL_MS } from "./command-replay.js";
 
 
@@ -88,9 +89,9 @@ function pageCursor(value: unknown, arity: number): string[] | null {
   }
 }
 
-async function requireSpace(tx: DatabaseTransaction, spaceId: string, userId: string, write: boolean) {
+async function requireSpace(tx: DatabaseTransaction, spaceId: string, userId: string, write: boolean, use = false) {
   const role = await spaceMemberRole(tx, "app_space_role_v1", spaceId, userId);
-  if (!role || (write && role !== "owner" && role !== "admin")) {
+  if (!role || (write && role !== "owner" && role !== "admin") || (use && readsOnly(role))) {
     throw new AppControlError("space_not_found", 404, "Space not found");
   }
 }
@@ -101,6 +102,14 @@ async function appChannelCapability(tx: DatabaseTransaction, channelId: string,
 ): Promise<ChannelCapabilityGrant> {
   return requireChannelCapability(tx, { channelId, principal, capability,
     error: (failure) => new AppControlError(failure.code, failure.status, failure.message) });
+}
+
+/** The Channel a Human reads a Space's connections in, or acts with them in (`use`). */
+async function connectionChannel(tx: DatabaseTransaction, channelId: string, userId: string, spaceId: string,
+  use: boolean | undefined): Promise<void> {
+  const grant = await appChannelCapability(tx, channelId, { kind: "user", id: userId },
+    use ? "app_new_work" : "app_history_read");
+  if (use && grant.spaceId !== spaceId) throw new AppControlError("channel_not_found", 404, "Channel not found");
 }
 
 /** Subscriptions shown per connection; a batch query reads this many connections at once. */
@@ -145,12 +154,35 @@ async function credentialFieldsByConnection(tx: DatabaseTransaction, connectionI
     Array.isArray(row.field_names_json) ? (row.field_names_json as unknown[]).map(String) : []]));
 }
 
-/** Connection rows as the App authority returns them, reading their details in two queries. */
+/** A Space links at most this many GitHub installations; each has at most one link record. */
+const GITHUB_LINKS_PER_CONNECTION = 32;
+
+/** Who handed each linked GitHub installation to its Space, as GitHub Connect recorded it. */
+async function githubLinksByConnection(tx: DatabaseTransaction, connectionIds: string[]) {
+  const byConnection = new Map<string, { installationId: string; githubUserId: number }[]>();
+  if (connectionIds.length === 0) return byConnection;
+  const rows = await tx.query<QueryResultRow>({ name: "app_connection_github_links_v1", text: `SELECT
+    connection_id,installation_id,github_user_id FROM (SELECT connection_id,installation_id,github_user_id,
+      row_number() OVER (PARTITION BY connection_id ORDER BY installation_id) AS position
+      FROM data.app_github_installation_links WHERE connection_id=ANY($1::text[])) ranked
+    WHERE position<=$2 ORDER BY connection_id,installation_id`,
+  values: [connectionIds, GITHUB_LINKS_PER_CONNECTION], maxRows: connectionIds.length * GITHUB_LINKS_PER_CONNECTION });
+  for (const row of rows) {
+    const id = String(row.connection_id);
+    byConnection.set(id, [...byConnection.get(id) ?? [],
+      { installationId: String(row.installation_id), githubUserId: Number(row.github_user_id) }]);
+  }
+  return byConnection;
+}
+
+/** Connection rows as the App authority returns them, reading their details in a few queries. */
 async function connectionViews(tx: DatabaseTransaction, rows: QueryResultRow[], channelId?: string) {
   if (rows.length === 0) return [];
   const ids = rows.map((row) => String(row.connection_id));
   const subscriptions = channelId ? await relationsByConnection(tx, ids, channelId) : new Map<string, Subscription[]>();
   const credentials = await credentialFieldsByConnection(tx, ids);
+  const githubLinks = await githubLinksByConnection(tx,
+    rows.filter((row) => row.provider_id === "github").map((row) => String(row.connection_id)));
   return rows.map((row) => {
     const id = String(row.connection_id);
     const subscribed = subscriptions.get(id) ?? [];
@@ -163,6 +195,7 @@ async function connectionViews(tx: DatabaseTransaction, rows: QueryResultRow[], 
       ...(row.last_checked_at ? { lastCheckedAt: iso(row.last_checked_at as string | Date) } : {}),
       ...(row.error ? { error: String(row.error) } : {}),
       ...(row.metadata_json ? { metadata: row.metadata_json } : {}), version: Number(row.version),
+      ...(row.provider_id === "github" ? { githubLinks: githubLinks.get(id) ?? [] } : {}),
       ...(channelId ? { channelState: { channelId,
         enabled: true,
         bound: subscribed.length > 0, subscriptions: subscribed } } : {}) };
@@ -245,9 +278,11 @@ function routeRead(input: { sourceRef: string; limit: number }): { sourceRef: st
  * returns needs no second check, and a lapsed subscriber's route is skipped
  * rather than failing the append for every other Channel.
  */
+// A subscription delivers while its creator may still subscribe there now: one
+// made before they lost that (a member turned participant) stays, but is silent.
 const LIVE_SOURCE_RELATION_SQL = `c.status='configured'
           AND NOT EXISTS (SELECT 1 FROM data.space_deletions d WHERE d.space_id=r.space_id)
-          AND ${channelCapabilityPredicate({ capability: "message_append", channelAlias: "channel",
+          AND ${channelCapabilityPredicate({ capability: "app_new_work", channelAlias: "channel",
             principalKindSql: "'user'", principalIdSql: "r.created_by" })}`;
 
 /** A connection `c` linked to GitHub App installation `$1`, by its one id or its list. */
@@ -283,8 +318,9 @@ export class PostgresAppRepository {
     );
   }
 
+  /** `use` lists them for acting with, in the Space or its Channel, which needs a member, not a reader. */
   async listConnections(input: { requestId: string; spaceId: string; actorUserId: string;
-    channelId?: string; cursor?: string | null; limit: number }) {
+    channelId?: string; use?: boolean; cursor?: string | null; limit: number }) {
     const requestId = text(input.requestId, "requestId", 200);
     const spaceId = text(input.spaceId, "spaceId", 300);
     const actorUserId = text(input.actorUserId, "actorUserId", 300);
@@ -293,9 +329,8 @@ export class PostgresAppRepository {
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 500) throw new AppControlError(
       "invalid_app_request", 400, "limit is invalid");
     return this.database.transaction({ requestId, operation: "app.connections.list" }, async (tx) => {
-      await requireSpace(tx, spaceId, actorUserId, false);
-      if (input.channelId) await appChannelCapability(
-        tx, input.channelId, { kind: "user", id: actorUserId }, "app_history_read");
+      await requireSpace(tx, spaceId, actorUserId, false, input.use);
+      if (input.channelId) await connectionChannel(tx, input.channelId, actorUserId, spaceId, input.use);
       const rows = await tx.query<QueryResultRow>({ name: "app_connections_list_v1", text: `SELECT *
         FROM data.app_connector_connections WHERE space_id=$1
           AND ($2::text IS NULL OR (provider_id,connection_id)>($2,$3))
@@ -309,7 +344,7 @@ export class PostgresAppRepository {
   }
 
   async getConnection(input: { requestId: string; connectionId: string; actorUserId: string;
-    channelId?: string; allowMissing?: boolean }) {
+    channelId?: string; use?: boolean; allowMissing?: boolean }) {
     const requestId = text(input.requestId, "requestId", 200);
     const connectionId = text(input.connectionId, "connectionId", 300);
     const actorUserId = text(input.actorUserId, "actorUserId", 300);
@@ -321,10 +356,48 @@ export class PostgresAppRepository {
         if (input.allowMissing) return { connection: null };
         throw new AppControlError("app_connection_not_found", 404, "App connection not found");
       }
-      await requireSpace(tx, String(rows[0].space_id), actorUserId, false);
-      if (input.channelId) await appChannelCapability(
-        tx, input.channelId, { kind: "user", id: actorUserId }, "app_history_read");
+      await requireSpace(tx, String(rows[0].space_id), actorUserId, false, input.use);
+      if (input.channelId) await connectionChannel(tx, input.channelId, actorUserId, String(rows[0].space_id), input.use);
       return { connection: await connection(tx, rows[0], input.channelId) };
+    });
+  }
+
+  /**
+   * Record who handed these GitHub installations to the Space: the GitHub user
+   * the Hub's own Connect completion read from `/user` after confirming they
+   * administer each one. Only installations the connection links now are
+   * recorded, and records of ones it no longer links are dropped. Connection
+   * metadata, which Space admins edit, never supplies a record.
+   */
+  async recordGitHubInstallationLinks(input: { requestId: string; spaceId: string; actorUserId: string;
+    githubUserId: number; installationIds: string[]; at: string }) {
+    const requestId = text(input.requestId, "requestId", 200);
+    const spaceId = text(input.spaceId, "spaceId", 300);
+    const actorUserId = text(input.actorUserId, "actorUserId", 300);
+    const at = iso(input.at);
+    if (!Number.isSafeInteger(input.githubUserId) || input.githubUserId < 1 || !Array.isArray(input.installationIds) ||
+        input.installationIds.length > 100 ||
+        input.installationIds.some((id) => typeof id !== "string" || !/^[1-9][0-9]{0,19}$/u.test(id))) {
+      throw new AppControlError("invalid_app_request", 400, "Invalid GitHub installation link record");
+    }
+    const connectionId = `${spaceId}:github`;
+    return this.database.transaction({ requestId, operation: "app.github-links.record" }, async (tx) => {
+      await requireSpace(tx, spaceId, actorUserId, true);
+      const rows = await tx.query<QueryResultRow>({ name: "app_github_links_connection_v1", text: `SELECT metadata_json
+        FROM data.app_connector_connections WHERE connection_id=$1 AND space_id=$2 FOR UPDATE`,
+      values: [connectionId, spaceId], maxRows: 1 });
+      if (!rows[0]) return { recorded: [] as string[] };
+      const linked = githubInstallationIds(rows[0]);
+      const recorded = [...new Set(input.installationIds)].filter((id) => linked.includes(id));
+      await tx.query({ name: "app_github_links_prune_v1", text: `DELETE FROM data.app_github_installation_links
+        WHERE connection_id=$1 AND NOT (installation_id=ANY($2::text[]))`, values: [connectionId, linked], maxRows: 0 });
+      if (recorded.length > 0) await tx.query({ name: "app_github_links_record_v1", text: `INSERT INTO
+        data.app_github_installation_links (connection_id,space_id,installation_id,github_user_id,linked_by,linked_at)
+        SELECT $1,$2,installation_id,$4,$5,$6 FROM unnest($3::text[]) AS installation_id
+        ON CONFLICT (connection_id,installation_id) DO UPDATE SET github_user_id=EXCLUDED.github_user_id,
+          linked_by=EXCLUDED.linked_by,linked_at=EXCLUDED.linked_at`,
+      values: [connectionId, spaceId, recorded, input.githubUserId, actorUserId, at], maxRows: 0 });
+      return { recorded };
     });
   }
 
@@ -393,7 +466,7 @@ export class PostgresAppRepository {
     const { limit } = routeRead({ sourceRef: sourceRefs[0]!, limit: input.limit });
     return this.database.transaction({ requestId: text(input.requestId, "requestId", 200),
       operation: "app.github-subscription-routes", statement: "single_read" }, async (tx) => {
-      const rows = await tx.query<QueryResultRow>({ name: "app_github_subscription_routes_v7", text: `SELECT
+      const rows = await tx.query<QueryResultRow>({ name: "app_github_subscription_routes_v8", text: `SELECT
         r.relation_id,r.space_id,r.channel_id,r.connection_id,r.created_by,r.created_at,r.source_kind,lower(r.source_ref) AS source_ref
         FROM data.app_source_relations r JOIN data.app_connector_connections c
           ON c.connection_id=r.connection_id AND c.space_id=r.space_id
@@ -563,7 +636,7 @@ export class PostgresAppRepository {
     }
     return this.database.transaction({ requestId: text(input.requestId, "requestId", 200),
       operation: "app.connector-event-routes" }, async (tx) => {
-      const rows = await tx.query<QueryResultRow>({ name: "app_connector_event_routes_v9", text: `SELECT
+      const rows = await tx.query<QueryResultRow>({ name: "app_connector_event_routes_v10", text: `SELECT
         r.space_id,r.channel_id,r.created_by,r.features_json
         FROM data.app_source_relations r JOIN data.app_connector_connections c
           ON c.connection_id=r.connection_id AND c.space_id=r.space_id
