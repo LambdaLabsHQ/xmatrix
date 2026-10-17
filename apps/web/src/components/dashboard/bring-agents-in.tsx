@@ -7,7 +7,7 @@ import { AnimatedIcon } from "@/components/ui/animated-icon";
 import { actionClass } from "@/components/ui/action-tone";
 import { quickStartRunbookUrl, quickStartSeedPrompt } from "@/lib/quick-start";
 import { ONBOARDING_COPY, type OnboardingCopy } from "@/lib/onboarding-copy";
-import { useOnboardingSteps } from "@/lib/onboarding-funnel";
+import { onboardingDevice, useOnboardingSteps } from "@/lib/onboarding-funnel";
 import { useOnboardingCopy } from "@/lib/onboarding-locale";
 import { useCopyToClipboard } from "@/lib/use-copy-to-clipboard";
 import { cn } from "@/lib/utils";
@@ -17,6 +17,8 @@ import {
   connectStep, defaultInstallPlatform, setupInstallCommand, terminalInstallPlatform,
   type ConnectStep, type InstallPlatform,
 } from "./connect-machine";
+import { signedOutRegistrations } from "./harness-sign-in";
+import { SignedOutAgents } from "./signed-out-agents";
 import { AgentInstallPicker, AgentsLine } from "./supported-agents";
 import { CandidateUpdateButton } from "./harness-update-button";
 import { useInstalledHarnesses } from "./use-installed-harnesses";
@@ -27,7 +29,10 @@ import { useSetupIntent } from "./use-setup-intent";
    and three ruled rows (number, title, status) where only the step in
    progress opens. The command is run on the computer the agents use; the
    terminal it starts is approved here, which may be a phone in the person's
-   hand. Every line is read from the facts, so a finished flow stays finished. */
+   hand. Every line is read from the facts, so a finished flow stays finished.
+   On a phone there is no command to show: a command is no use there, and
+   the computer signs in with the same email and shows its own. The phone
+   then sees that computer's agents arrive. */
 
 type StepState = "pending" | "active" | "done";
 type Stage = 1 | 2 | 3 | 4;
@@ -37,12 +42,14 @@ function connectStage(step: ConnectStep | null): Stage {
   return step.kind === "approval" || step.kind === "connecting" ? 2 : 3;
 }
 
-export function BringAgentsIn({ spaceId, token, userId, surface, phone = false }: {
+export function BringAgentsIn({ spaceId, token, userId, surface, phone: phoneShell = false }: {
   spaceId: string | null; token: string | null | undefined; userId: string | undefined;
   /** Where it is shown, for counting who gets through (onboarding-funnel.ts). */
   surface: OnboardingSurface; phone?: boolean;
 }) {
-  const intent = useSetupIntent(spaceId, token ?? undefined, userId);
+  // Read once, before a setup command would be prepared for this screen.
+  const [phone] = useState(() => phoneShell || onboardingDevice() === "phone");
+  const intent = useSetupIntent(phone ? null : spaceId, token ?? undefined, userId);
   const fleet = useInstalledHarnesses(spaceId, token, userId);
   const copy = useOnboardingCopy(spaceId, token, userId);
   const { listNames } = copy;
@@ -67,7 +74,13 @@ export function BringAgentsIn({ spaceId, token, userId, surface, phone = false }
       <AgentsLine className="mt-2" copy={copy} />
 
       <ol className="m-0 mt-4 list-none border-t-[1px] border-border p-0">
-        <SetupRow n={1} state={state(1)} title={copy.runCommand}
+        {phone && (
+          <SetupRow n={1} state={state(1)} title={copy.signInOnComputer} aside={stage > 1 && machines ? machines : null}>
+            {stage === 1 && <p role="status" className="flex items-center gap-1.5 text-[13px] leading-5 text-muted-foreground">
+              {spinner} {copy.waitingForComputer}</p>}
+          </SetupRow>
+        )}
+        {!phone && <SetupRow n={1} state={state(1)} title={copy.runCommand}
           aside={stage === 1 ? (
             <button type="button" onClick={() => setPlatform(platform === "windows" ? "unix" : "windows")}
               className="underline-offset-2 hover:text-foreground hover:underline">
@@ -82,9 +95,9 @@ export function BringAgentsIn({ spaceId, token, userId, surface, phone = false }
               {step?.kind === "waiting" && step.hint === "try-desktop" && <p>{copy.tryDesktop}</p>}
             </div>
           </>}
-        </SetupRow>
+        </SetupRow>}
 
-        <SetupRow n={2} state={state(2)} title={copy.approveHere}
+        {!phone && <SetupRow n={2} state={state(2)} title={copy.approveHere}
           aside={step?.kind === "connecting" ? <span className="flex items-center gap-1.5">{spinner} {copy.signingIn}</span>
             : null}>
           {step?.kind === "approval" && (
@@ -100,9 +113,9 @@ export function BringAgentsIn({ spaceId, token, userId, surface, phone = false }
               </div>
             </div>
           )}
-        </SetupRow>
+        </SetupRow>}
 
-        <SetupRow n={3} state={state(3)} title={copy.turnOnFound}
+        <SetupRow n={phone ? 2 : 3} state={state(3)} title={copy.turnOnFound}
           aside={stage === 4 ? listNames(enabled.map((registration) => registration.displayName))
             : stage === 3 && step?.kind === "looking" ? <span className="flex items-center gap-1.5">{spinner} {copy.looking}</span> : null}>
           {stage === 3 && found && (
@@ -122,6 +135,10 @@ export function BringAgentsIn({ spaceId, token, userId, surface, phone = false }
                 </div>
               ))}
             </div>
+          )}
+          {stage === 4 && (
+            <SignedOutAgents registrations={signedOutRegistrations(enabled, userId, fleet.daemons.data)}
+              token={token} userId={userId} copy={copy} />
           )}
           {stage === 3 && !found && step?.kind === "found" && (
             <p role="status">{copy.found(listNames(step.harnesses.map((harness) => harness.name)))}</p>
