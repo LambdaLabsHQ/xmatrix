@@ -368,7 +368,7 @@ async function useSlack(sql, space) {
   await sql(`UPDATE data.app_connector_connections SET connection_id=$1||':slack',provider_id='slack',
     provider_name='Slack',auth_mode='oauth' WHERE space_id=$1`, [space]);
 }
-const oauthPolicy = { allowed: ['botToken', 'ingressKey', 'signingSecret'] };
+const oauthPolicy = { allowed: ['botToken', 'ingressKey', 'signingSecret'], generated: ['ingressKey'] };
 const oauthInput = (space, installationId = 'T1') => ({ requestId: crypto.randomUUID(), spaceId: space,
   providerId: 'slack', actorUserId: 'owner', fields: { botToken: `fixture-${installationId}` },
   policy: oauthPolicy, oauthInstallation: { appClientId: 'app-1', installationId },
@@ -486,7 +486,18 @@ integration('OAuth installation binding is atomic with credentials and invalidat
     await credentials.put({ ...oauthInput(space), oauthInstallation: undefined, initialize: undefined,
       fields: { signingSecret: 'admin-signature-edit' } });
     assert.deepEqual(await readOAuth(apps, { installationId: 'T2' }), [], 'manual credentials require new grant evidence');
+    const manual = await read();
+    assert.equal(manual.oauthGrant, undefined);
+    assert.equal(manual.values.botToken, undefined, "leaving the grant leaves its bot behind, never as a manual token");
+    assert.deepEqual([manual.values.signingSecret, manual.values.ingressKey], ['admin-signature-edit', before.values.ingressKey]);
     await credentials.put(oauthInput(space));
+    const bound = await read();
+    await credentials.put({ ...oauthInput(space), oauthInstallation: undefined, initialize: undefined,
+      fields: { ingressKey: 'regenerated-key' } });
+    assert.deepEqual(await readOAuth(apps), expected, 'regenerating a Hub-minted field keeps the grant bound');
+    const regenerated = await read();
+    assert.deepEqual([regenerated.values.botToken, regenerated.values.ingressKey], [bound.values.botToken, 'regenerated-key']);
+    assert.deepEqual(regenerated.oauthGrant, bound.oauthGrant);
     await apps.command({ commandId: `delete-oauth-${space}`, spaceId: space, providerId: 'slack',
       principal: { kind: 'user', id: 'owner' } }, 'delete');
     assert.equal((await sql('SELECT count(*)::int AS n FROM data.app_connector_oauth_installations WHERE space_id=$1', [space])).rows[0].n, 0);
@@ -533,6 +544,10 @@ integration('OAuth routing scopes by provider, application, workspace and curren
       const shared = async (repository, id) => (await repository.resolve({ requestId: crypto.randomUUID(), spaceId: id,
         providerId: 'slack' })).oauthGrant.workspaceShared;
       assert.deepEqual([await shared(credentials, space), await shared(otherCredentials, other)], [true, true]);
+      // Regenerating the ingress key cannot launder the shared bot into an unbound manual token.
+      await otherCredentials.put({ ...oauthInput(other), oauthInstallation: undefined, initialize: undefined,
+        fields: { ingressKey: 'regenerated-key' } });
+      assert.equal(await shared(otherCredentials, other), true);
       // A binding made before grant generations existed is still a binding of the workspace.
       await otherSql('UPDATE data.app_connector_oauth_installations SET grant_generation=NULL WHERE space_id=$1', [other]);
       assert.deepEqual([await shared(credentials, space), await shared(otherCredentials, other)], [true, true]);

@@ -873,6 +873,11 @@ sees there, so each provider narrows delivery to what one Space may read:
   Space may connect it; a Connect after the event is not retired by a delayed
   or replayed delivery, and a delivery without `event_time` retires nothing.
   The Slack app must subscribe to both events for this release path.
+  The bot belongs to its binding, not to the stored credentials: regenerating a
+  Hub-minted field (the ingress key) keeps the binding, so a shared workspace
+  stays refused; any other manual edit unbinds the grant and drops its values
+  (the bot token among them), keeping only Hub-minted fields and what the admin
+  wrote.
 - **Linear: each Space's own grant.** OAuth grants act as the connecting
   user. Before an event reaches a Space, the Hub reads its subject (issue,
   comment, project, project update or cycle) by id with that Space's token;

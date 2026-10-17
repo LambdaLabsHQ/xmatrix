@@ -35,6 +35,8 @@ const FIELD_NAME = /^[A-Za-z][A-Za-z0-9]{0,63}$/u;
 export interface AppCredentialFieldPolicy {
   /** Every field the provider manifest declares. */
   allowed: readonly string[];
+  /** Fields the Hub mints (ingress key, webhook secrets); writing only these is not a credential edit. */
+  generated?: readonly string[];
 }
 
 /** Only the Hub's code exchange may supply this provider-authenticated binding. */
@@ -281,8 +283,18 @@ export class PostgresAppCredentialRepository {
           input.expectedVersion !== Number(current?.version ?? 0))) {
         throw new AppControlError("credential_changed", 409, "Connector credentials changed during refresh", true);
       }
+      const bound = !installation && !input.asHub && current ? (await tx.query<QueryResultRow>({
+        name: "app_oauth_installation_held_v1", text: `SELECT 1 FROM data.app_connector_oauth_installations
+        WHERE connection_id=$1 AND credential_version=$2 FOR UPDATE`, values: [connectionId, Number(current.version)], maxRows: 1 }))[0] : undefined;
+      // Regenerating a Hub-minted field leaves the grant, and so its binding, as it was.
+      const generatedOnly = !!bound && entries.every(([name, value]) => value !== null && !!input.policy.generated?.includes(name));
       // Native installation is an explicit replacement, never a fallback to old manual credentials.
       const values = current && !verified && !expected ? await decryptValues(this.material, current) : {};
+      // Leaving a provider-bound grant for manual credentials keeps none of that
+      // grant's values: a bot only its binding may use must not become manual.
+      if (bound && !generatedOnly) {
+        for (const name of Object.keys(values)) if (!input.policy.generated?.includes(name)) delete values[name];
+      }
       for (const [name, value] of Object.entries(input.initialize ?? {})) {
         if (!values[name]) values[name] = value;
       }
@@ -301,7 +313,7 @@ export class PostgresAppCredentialRepository {
       if (names.length > MAX_FIELDS) throw new AppControlError("invalid_app_request", 400, "Too many credential fields");
       // Human credential edits replace the credential evidence for the binding.
       // A server refresh preserves it; a new grant replaces it atomically.
-      if (!input.asHub || names.length === 0) {
+      if ((!input.asHub && !generatedOnly) || names.length === 0) {
         if (providerId === "wecom") {
           await tx.query({ name: "wecom_manual_installation_replace_v1", text: `DELETE FROM data.app_wecom_installations WHERE connection_id=$1`, values: [connectionId], maxRows: 0 });
           await tx.query({ name: "wecom_manual_attempt_replace_v1", text: `DELETE FROM data.app_wecom_install_attempts WHERE connection_id=$1`, values: [connectionId], maxRows: 0 });
@@ -341,7 +353,7 @@ export class PostgresAppCredentialRepository {
           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,gen_random_uuid(),$9)`, values: [connectionId, spaceId, providerId,
           installation.appClientId, installation.installationId, version, new Date(input.at).toISOString(),
           installation.eventScopeId ?? null, installation.discordAuthorizedAt ?? null], maxRows: 0 });
-      } else if (input.asHub) {
+      } else if (input.asHub || generatedOnly) {
         await tx.query({ name: "app_oauth_installation_refresh_v1", text: `UPDATE
           data.app_connector_oauth_installations SET credential_version=$2,updated_at=$3
           WHERE connection_id=$1`, values: [connectionId, version, new Date(input.at).toISOString()], maxRows: 0 });
