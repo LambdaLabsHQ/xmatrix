@@ -1,8 +1,10 @@
 import { connectorDatabase, integration } from "./postgres-database.fixture.mjs";
+import { spaceSecretFixture } from "./space-secret-postgres.fixture.mjs";
 import assert from "node:assert/strict";
 
 import {
   AppControlError,
+  createAuthorityDatabase,
   PostgresAppActionPolicyRepository,
   PostgresAppActionRequestRepository,
   PostgresAppCredentialRepository,
@@ -153,6 +155,55 @@ integration("a participant cannot use the Space's connected apps, even in their 
     assert.equal((await connection("member", true)).connection.id, connectionId, "a member uses it there");
     assert.equal((await subscribe("member")).relation.channelId, channelId);
   });
+});
+
+// A subscription made while its creator could subscribe stays, but delivers
+// only while they still can: one a member made in what became their intake
+// stops when they become a participant, and nothing is deleted.
+integration("a subscription delivers only while its creator may still use the Space's connected apps", async () => {
+  await withDatabase(async ({ sql, database, space }) => {
+    await sql(`INSERT INTO data.channels (channel_id,space_id,name,name_key,mode,search_rank_sequence,version,
+      metadata_json,created_at,updated_at) VALUES ($2||':mine',$2,'mine','mine','open',$2||':rank-mine',1,
+      '{"intakeOf":"member"}'::jsonb,$1,$1)`, [at, space]);
+    await sql(`INSERT INTO data.app_source_relations (relation_id,connection_id,space_id,channel_id,source_kind,
+      source_ref,features_json,version,created_by,created_at,updated_at) VALUES
+      ($2||':r',$2||':webhook',$2,$2||':mine','repository','webhook:deploys','["delivery"]',1,'member',$1,$1)`,
+    [at, space]);
+    const routes = () => new PostgresAppRepository(database).connectorEventRoutes({ requestId: crypto.randomUUID(),
+      connectionId: `${space}:webhook`, sourceRef: "webhook:deploys", limit: 10 });
+    assert.equal((await routes()).length, 1);
+    await sql("UPDATE data.space_members SET role='participant' WHERE space_id=$1 AND user_id='member'", [space]);
+    assert.deepEqual(await routes(), []);
+    assert.equal((await sql("SELECT count(*)::int AS n FROM data.app_source_relations WHERE space_id=$1", [space]))
+      .rows[0].n, 1, "the subscription itself is kept");
+  });
+});
+
+// The same holds for the Agents a participant brings: an Agent principal acts
+// with the Space's connected apps only while its Run's owner is a member.
+integration("a participant's own Agent cannot use the Space's connected apps either", async () => {
+  const fixture = await spaceSecretFixture();
+  const { ids, client } = fixture;
+  try {
+    await addConnection((text, values) => client.query(text, values), ids.space, "webhook", "Webhook");
+    await client.query(`UPDATE data.channels SET metadata_json=jsonb_build_object('intakeOf',$2::text)
+      WHERE channel_id=$1`, [ids.channel, ids.owner]);
+    const apps = new PostgresAppRepository(createAuthorityDatabase({ connectionString: process.env.XMATRIX_TEST_POSTGRES_URL,
+      shardId: "shard-0", applicationName: "app-agent-owner-role", statementTimeoutMs: 5_000, transactionTimeoutMs: 10_000 }));
+    const subscribe = (sourceRef) => apps.command({ commandId: crypto.randomUUID(), connectionId: `${ids.space}:webhook`,
+      channelId: ids.channel, principal: { kind: "agent", id: ids.instance }, sourceKind: "repository", sourceRef,
+      features: ["delivery"] }, "put-relation");
+    assert.equal((await subscribe("webhook:member")).relation.channelId, ids.channel, "a member's Agent subscribes");
+    await client.query("UPDATE data.space_members SET role='participant' WHERE space_id=$1 AND user_id=$2",
+      [ids.space, ids.owner]);
+    await assert.rejects(subscribe("webhook:participant"),
+      (error) => error instanceof AppControlError && error.code === "channel_not_found");
+  } finally {
+    for (const table of ["app_source_relations", "app_connector_connections"]) {
+      await client.query(`DELETE FROM data.${table} WHERE space_id=$1`, [ids.space]);
+    }
+    await fixture.close();
+  }
 });
 
 integration("event routes are the configured connection's Channels subscribed to the source", async () => {

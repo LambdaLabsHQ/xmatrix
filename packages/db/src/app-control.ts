@@ -253,9 +253,11 @@ function routeRead(input: { sourceRef: string; limit: number }): { sourceRef: st
  * returns needs no second check, and a lapsed subscriber's route is skipped
  * rather than failing the append for every other Channel.
  */
+// A subscription delivers while its creator may still subscribe there now: one
+// made before they lost that (a member turned participant) stays, but is silent.
 const LIVE_SOURCE_RELATION_SQL = `c.status='configured'
           AND NOT EXISTS (SELECT 1 FROM data.space_deletions d WHERE d.space_id=r.space_id)
-          AND ${channelCapabilityPredicate({ capability: "message_append", channelAlias: "channel",
+          AND ${channelCapabilityPredicate({ capability: "app_new_work", channelAlias: "channel",
             principalKindSql: "'user'", principalIdSql: "r.created_by" })}`;
 
 /** A connection `c` linked to GitHub App installation `$1`, by its one id or its list. */
@@ -400,7 +402,7 @@ export class PostgresAppRepository {
     const { limit } = routeRead({ sourceRef: sourceRefs[0]!, limit: input.limit });
     return this.database.transaction({ requestId: text(input.requestId, "requestId", 200),
       operation: "app.github-subscription-routes", statement: "single_read" }, async (tx) => {
-      const rows = await tx.query<QueryResultRow>({ name: "app_github_subscription_routes_v7", text: `SELECT
+      const rows = await tx.query<QueryResultRow>({ name: "app_github_subscription_routes_v8", text: `SELECT
         r.relation_id,r.space_id,r.channel_id,r.connection_id,r.created_by,r.created_at,r.source_kind,lower(r.source_ref) AS source_ref
         FROM data.app_source_relations r JOIN data.app_connector_connections c
           ON c.connection_id=r.connection_id AND c.space_id=r.space_id
@@ -570,7 +572,7 @@ export class PostgresAppRepository {
     }
     return this.database.transaction({ requestId: text(input.requestId, "requestId", 200),
       operation: "app.connector-event-routes" }, async (tx) => {
-      const rows = await tx.query<QueryResultRow>({ name: "app_connector_event_routes_v9", text: `SELECT
+      const rows = await tx.query<QueryResultRow>({ name: "app_connector_event_routes_v10", text: `SELECT
         r.space_id,r.channel_id,r.created_by,r.features_json
         FROM data.app_source_relations r JOIN data.app_connector_connections c
           ON c.connection_id=r.connection_id AND c.space_id=r.space_id
