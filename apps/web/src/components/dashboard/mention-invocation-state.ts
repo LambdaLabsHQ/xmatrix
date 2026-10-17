@@ -112,8 +112,10 @@ export function summonView(launch: SerializedAgentLaunch, records: readonly Seri
       note: intent, at: decision?.evaluatedAt, state: "done" as const } } : {}),
     lead: { label: "Environment selected", at: decision?.evaluatedAt, state: "done" },
     startup: [
-      { label: "Machine accepted", status: launch.daemonOffline ? "Queuing" : "Dispatching", at: launch.admittedAt,
-        waiting: launch.daemonOffline ? "The command is queued until the selected machine reconnects."
+      { label: "Machine accepted", status: launch.machineReconnecting ? "Reconnecting" : launch.daemonOffline ? "Queuing" : "Dispatching",
+        at: launch.admittedAt,
+        waiting: launch.machineReconnecting ? "Machine reconnecting — starts when it's back."
+          : launch.daemonOffline ? "The command is queued until the selected machine reconnects."
           : launch.commandDurableAt ? "Waiting for the machine to accept the command." : "Preparing the machine command." },
       { label: "Process started", status: "Spawning", at: startupCheckpoint(activity, "cwd_ready") || launch.spawnedAt,
         waiting: launch.spawnedAt ? "Preparing the working directory." : "Creating the process." },
@@ -121,7 +123,8 @@ export function summonView(launch: SerializedAgentLaunch, records: readonly Seri
     ],
     activity, reasoningAt, reasoning: Boolean(reasoningAt || execution || reasoningReported(activity)),
     failed: launch.state === "failed", stopped: launch.state === "cancelled", failureMessage: launch.errorMessage,
-    queued: launch.daemonOffline, unavailable,
+    // A machine that is only restarting is moments away: its wait keeps moving.
+    queued: launch.daemonOffline && !launch.machineReconnecting, unavailable,
   }), executionId: execution?.executionId };
 }
 

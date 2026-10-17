@@ -21,11 +21,11 @@ test("PostgreSQL Machine issue_batch wakes once after its transaction commits", 
   const database = { cacheMode: "disabled", async transaction(_context, callback) {
     return callback({ async query(query) {
       if (query.name === "machine_control_daemon_lock_v1" ||
-          query.name === "machine_control_daemon_update_v2") return [daemon];
+          query.name === "machine_control_daemon_update_v3") return [daemon];
       if (query.name === "machine_control_issue_batch_channels_v3") {
         return [{ channel_id: "channel-1", archived_at: null }];
       }
-      if (query.name === "machine_control_issue_batch_v1") {
+      if (query.name === "machine_control_issue_batch_v2") {
         return commandRows.map((row) => ({ command_id: row.command_id }));
       }
       if (query.name === "machine_control_issue_batch_read_v1") return commandRows;
