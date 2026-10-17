@@ -184,6 +184,7 @@ import { errorFromResponse, xmatrixApiRequest, requireResponseOk, xmatrixRawResp
 import { userErrorMessage } from "@/lib/user-facing-error";
 import { xmatrixQueryKeys } from "@/lib/query/query-keys";
 
+import { recordOnboardingStep } from "@/lib/onboarding-funnel";
 import { ChannelPresenceConflict, decodeChannelSnapshot, emptyChannelPresence, presenceInstanceId, reduceChannelPresence, WEB_PROXY_ROUTES, type AgentInstancePresence, type ChannelPresence, type SerializedChannel } from "@xmatrix/protocol";
 
 import type {
@@ -1681,17 +1682,22 @@ export async function fetchSpaces(token: string, signal?: AbortSignal): Promise<
 
 /* The Spaces a signed-in person lands with. Someone with none is given their
    own, so the first screen is a Space they can act in rather than an empty
-   app; the Hub creates it only for an account that has no Space at all. */
+   app; the Hub creates it only for an account that has no Space at all.
+   Only such a person counts `app_loaded` and `space_ready`, so the funnel
+   tells a first load that never got this far from a Space that failed. */
 export async function fetchSpacesForLanding(
   token: string,
   signal?: AbortSignal,
 ): Promise<SerializedSpace[]> {
   const spaces = await fetchSpaces(token, signal);
   if (spaces.length > 0) return spaces;
+  recordOnboardingStep(token, { step: "app_loaded", surface: "shell" });
   const data = await xmatrixApiRequest<{ space?: SerializedSpace | null }>({
     url: WEB_PROXY_ROUTES.personal_space, token, method: "POST", signal,
   });
-  return data.space ? [data.space] : fetchSpaces(token, signal);
+  const landed = data.space ? [data.space] : await fetchSpaces(token, signal);
+  if (landed.length > 0) recordOnboardingStep(token, { step: "space_ready", surface: "shell" });
+  return landed;
 }
 
 export async function fetchProjects(

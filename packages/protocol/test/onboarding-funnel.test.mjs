@@ -6,6 +6,8 @@ test("an onboarding step is only a step, where it was shown, on what, and a firs
   for (const step of ONBOARDING_FUNNEL_STEPS.filter((item) => item !== "starter_chosen")) {
     assert.deepEqual(parseOnboardingFunnelEvent({ step, surface: "space", device: "phone" }), { step, surface: "space", device: "phone" });
   }
+  assert.deepEqual(parseOnboardingFunnelEvent({ step: "app_loaded", surface: "shell", device: "desktop_web" }),
+    { step: "app_loaded", surface: "shell", device: "desktop_web" });
   assert.deepEqual(parseOnboardingFunnelEvent({ step: "starter_chosen", surface: "welcome", device: "desktop_app", starter: "xmatrix" }),
     { step: "starter_chosen", surface: "welcome", device: "desktop_app", starter: "xmatrix" });
   for (const invalid of [

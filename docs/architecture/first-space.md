@@ -82,6 +82,8 @@ the person's screen sees are counted on their own (`onboarding-funnel.ts`):
 
 | Step | When |
 | --- | --- |
+| `app_loaded` | the signed-in app finds the person with no Space (`shell`) |
+| `space_ready` | it then has their personal Space (`shell`) |
 | `command_shown` | the setup command is on screen |
 | `command_copied` | its copy button is pressed |
 | `download_clicked` | "Download the desktop app" is followed |
@@ -90,7 +92,8 @@ the person's screen sees are counted on their own (`onboarding-funnel.ts`):
 | `approved` | the person approves it |
 | `starter_chosen` | a first task in the welcome is chosen (`starter_chosen:<id>`) |
 
-- Each step names where it was shown (`welcome`, `space`, `agents`) and what
+- Each step names where it was shown (`welcome`, `space`, `agents`, or
+  `shell` for the app before any of them) and what
   on: `phone` at the shell's phone width, `desktop_app` in the desktop app,
   otherwise `desktop_web`.
 - The Web reports each step once per showing. `POST
