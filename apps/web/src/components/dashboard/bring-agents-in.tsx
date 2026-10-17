@@ -1,11 +1,12 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
-import { harnessTooOldSentence } from "@xmatrix/protocol";
+import { useEffect, useState, type ReactNode } from "react";
+import { harnessTooOldSentence, type OnboardingSurface } from "@xmatrix/protocol";
 import { Check, Loader2 } from "lucide-react";
 import { AnimatedIcon } from "@/components/ui/animated-icon";
 import { actionClass } from "@/components/ui/action-tone";
 import { quickStartRunbookUrl, quickStartSeedPrompt } from "@/lib/quick-start";
+import { useOnboardingSteps } from "@/lib/onboarding-funnel";
 import { useCopyToClipboard } from "@/lib/use-copy-to-clipboard";
 import { cn } from "@/lib/utils";
 import { CommandBlock } from "./command-block";
@@ -34,8 +35,10 @@ function connectStage(step: ConnectStep | null): Stage {
   return step.kind === "approval" || step.kind === "connecting" ? 2 : 3;
 }
 
-export function BringAgentsIn({ spaceId, token, userId, phone = false }: {
-  spaceId: string | null; token: string | null | undefined; userId: string | undefined; phone?: boolean;
+export function BringAgentsIn({ spaceId, token, userId, surface, phone = false }: {
+  spaceId: string | null; token: string | null | undefined; userId: string | undefined;
+  /** Where it is shown, for counting who gets through (onboarding-funnel.ts). */
+  surface: OnboardingSurface; phone?: boolean;
 }) {
   const intent = useSetupIntent(spaceId, token ?? undefined, userId);
   const fleet = useInstalledHarnesses(spaceId, token, userId);
@@ -50,6 +53,9 @@ export function BringAgentsIn({ spaceId, token, userId, phone = false }: {
   const state = (n: number): StepState => stage > n ? "done" : stage === n ? "active" : "pending";
   const spinner = <AnimatedIcon icon={Loader2} className="size-3.5 shrink-0 animate-spin" />;
   const machines = listNames([...new Set([...enabled, ...fleet.candidates].map((item) => item.machineName))]);
+  const count = useOnboardingSteps(token, surface);
+  useEffect(() => { if (stage === 1 && command) count("command_shown"); }, [stage, command, count]);
+  useEffect(() => { if (step?.kind === "approval") count("terminal_seen"); }, [step?.kind, count]);
 
   return (
     <div className="max-w-[34rem] text-[15px] leading-6" data-testid="connect-machine">
@@ -65,7 +71,7 @@ export function BringAgentsIn({ spaceId, token, userId, phone = false }: {
             </button>
           ) : stage > 1 && machines ? machines : null}>
           {stage === 1 && <>
-            <CommandBlock command={command} />
+            <CommandBlock command={command} onCopy={() => count("command_copied")} />
             <div role="status" className="mt-2 text-[13px] leading-5 text-muted-foreground">
               <p className="flex items-center gap-1.5">{spinner} Waiting for your computer…</p>
               {step?.kind === "waiting" && step.hint === "check-terminal" && <p>Nothing yet? The terminal says what went wrong.</p>}
@@ -82,7 +88,7 @@ export function BringAgentsIn({ spaceId, token, userId, phone = false }: {
               <p><strong>{step.hostname}</strong> wants to connect with code <strong className="font-mono">{step.userCode}</strong>.</p>
               <p className="text-[13px] leading-5 text-muted-foreground">Approve it only if the terminal shows the same code.</p>
               <div className="mt-2 flex items-center gap-2">
-                <button type="button" disabled={intent.busy} onClick={() => void intent.approve(step.userCode)}
+                <button type="button" disabled={intent.busy} onClick={() => { count("approved"); void intent.approve(step.userCode); }}
                   className={actionClass({ variant: "primary", size: "sm" })}>Approve</button>
                 <button type="button" disabled={intent.busy} onClick={() => void intent.decline()}
                   className={actionClass({ variant: "quiet", size: "sm" })}>Not mine</button>
@@ -132,7 +138,8 @@ export function BringAgentsIn({ spaceId, token, userId, phone = false }: {
           No terminal?{" "}
           {phone
             ? <>Download the desktop app on that computer from <span className="font-semibold text-foreground">xmatrix.sh/download</span>.</>
-            : <><a href="/download" className="font-semibold text-foreground underline-offset-2 hover:underline">Download the desktop app</a>. It finds the agents installed there.</>}
+            : <><a href="/download" onClick={() => count("download_clicked")}
+              className="font-semibold text-foreground underline-offset-2 hover:underline">Download the desktop app</a>. It finds the agents installed there.</>}
         </p>
       )}
       {stage < 4 && !phone && <div className="text-[13px] leading-5 text-muted-foreground"><RemoteMachineHint /></div>}

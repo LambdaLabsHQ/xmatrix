@@ -342,6 +342,7 @@ export const HUB_ROUTES = {
   cross_space_read_grant_decision: (spaceId: string, grantId: string) =>
     `/api/spaces/${encodeURIComponent(spaceId)}/cross-space-read-grants/${encodeURIComponent(grantId)}/decision`,
   observable_client_metrics: "/api/observable/client-metrics",
+  observable_onboarding_step: "/api/observable/onboarding-step",
   context_feed: "/api/context/feed",
   assistant_memory: "/api/assistant-memory",
   shared_memory: "/api/shared-memory",
@@ -535,6 +536,7 @@ export const WEB_PROXY_ROUTES = {
   slack_oauth_approve: "/api/xmatrix/migrations/slack/oauth/approve",
   slack_oauth_token: "/api/xmatrix/migrations/slack/oauth/token",
   observable_events: "/api/xmatrix/observable/events",
+  observable_onboarding_step: "/api/xmatrix/observable/onboarding-step",
   trace_instance_events: (instanceId: string) =>
     `/api/xmatrix/trace/instances/${encodeURIComponent(instanceId)}/events`,
   channel_pending_cross_space_reads: (channelId: string) =>

@@ -569,6 +569,7 @@ export {
 } from "./read-bounded-stream.js";
 export * from "./setup-intent.js";
 export * from "./onboarding-message.js";
+export * from "./onboarding-funnel.js";
 export { cleanRepositoryBaseline } from "./repository-baseline.js";
 export type { RepositoryBaseline } from "./repository-baseline.js";
 

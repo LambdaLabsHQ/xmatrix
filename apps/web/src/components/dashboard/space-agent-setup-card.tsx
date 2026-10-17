@@ -79,7 +79,7 @@ export function SpaceAgentSetupCard({
     <SetupCardShell>
         {state.kind === "unreachable" && <UnreachablePanel onRetry={onRetryAgents} />}
         {/* Web and phone: the same flow xMatrix sends in a welcome conversation. */}
-        {state.kind === "no-local-machine" && <BringAgentsIn spaceId={spaceId} token={token} userId={userId} phone={phone} />}
+        {state.kind === "no-local-machine" && <BringAgentsIn spaceId={spaceId} token={token} userId={userId} surface="space" phone={phone} />}
         {state.kind === "discovering" && (
           <SetupCardHeader
             icon={Loader2}

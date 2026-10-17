@@ -46,3 +46,39 @@ is how to connect one.
   only its step; the Web draws what the step shows from the facts (the setup
   command and its approval, the machine's agents, the Space's registrations),
   so the conversation reopened later shows what happened, never a stale command.
+
+## Counting who gets through
+
+Most of bringing agents in leaves a fact in the Hub: a machine connected, an
+agent turned on, a first message, a first reply, a first page. The steps only
+the person's screen sees are counted on their own (`onboarding-funnel.ts`):
+
+| Step | When |
+| --- | --- |
+| `command_shown` | the setup command is on screen |
+| `command_copied` | its copy button is pressed |
+| `download_clicked` | "Download the desktop app" is followed |
+| `terminal_seen` | the terminal's sign-in request is shown for approval |
+| `approved` | the person approves it |
+| `starter_chosen` | a first task in the welcome is chosen (`starter_chosen:<id>`) |
+
+- Each step names where it was shown (`welcome`, `space`, `agents`) and what
+  on: `phone` at the shell's phone width, `desktop_app` in the desktop app,
+  otherwise `desktop_web`.
+- The Web reports each step once per showing. `POST
+  /api/observable/onboarding-step` takes only those three values (and a first
+  task's id), and writes one point to the diagnostics dataset. That point
+  holds the person's keyed hash and nothing else that identifies them: no
+  email, no Space, no conversation.
+- No page views, and no third-party analytics.
+
+The day's funnel, by people (Analytics Engine SQL; the production dataset is
+`xmatrix_diagnostics`):
+
+```sql
+SELECT blob2 AS device, blob5 AS surface, blob4 AS step, COUNT(DISTINCT index1) AS people
+FROM xmatrix_diagnostics
+WHERE blob3 = 'onboarding_step' AND timestamp > NOW() - INTERVAL '1' DAY
+GROUP BY device, surface, step
+ORDER BY device, surface, people DESC
+```
