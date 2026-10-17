@@ -4,7 +4,7 @@ import { useEffect, useRef } from "react";
 import { ChevronRight } from "lucide-react";
 import {
   channelPresenceInstances, isChannelResidentInstance, isLiveAgentStatus, WEB_PROXY_ROUTES,
-  type ChannelPresence, type OnboardingStage,
+  type ChannelPresence, type OnboardingStage, type SerializedAgentLaunch,
 } from "@xmatrix/protocol";
 import { recordOnboardingStep } from "@/lib/onboarding-funnel";
 import { useOnboardingCopy, useOnboardingLocale } from "@/lib/onboarding-locale";
@@ -34,14 +34,39 @@ export function starterAddress(presence: ChannelPresence | undefined): string {
   return instance ? `@${instance.agentName}:${instance.channelInstanceId}` : "@auto";
 }
 
-export function OnboardingMessage({ stage, spaceId, token, userId, onSendStarter }: {
+/* Until the instance the person's last `@auto` starts is here, there is
+   nothing to address and another starter would start a second one, so the
+   starters wait. It waits only while that summon is the conversation's last
+   word, and what ends it is what the conversation shows anyway: the instance
+   arriving, its launch connecting or failing, a refusal, or any later
+   message. The name is the harness once routing chose it. */
+export function startingStarter(input: {
+  presence: ChannelPresence | undefined;
+  timeline: ReadonlyArray<{ own?: boolean; isEvent?: boolean; body: string; messageId?: string; sendStatus?: string }>;
+  launches: ReadonlyMap<string, readonly SerializedAgentLaunch[]>;
+  refused: ReadonlyMap<string, unknown>;
+}): { name?: string } | undefined {
+  if (starterAddress(input.presence) !== "@auto") return undefined;
+  const last = [...input.timeline].reverse().find(item => !item.isEvent);
+  if (!last?.own || !last.body.startsWith("@auto ") || last.sendStatus === "failed") return undefined;
+  if (!last.messageId) return {};
+  if (input.refused.has(last.messageId)) return undefined;
+  const launches = input.launches.get(last.messageId) ?? [];
+  if (launches.some(launch => launch.state === "connected" || launch.state === "failed" || launch.state === "cancelled")) return undefined;
+  const name = launches.find(launch => launch.targetName)?.targetName;
+  return name ? { name } : {};
+}
+
+export function OnboardingMessage({ stage, spaceId, token, userId, starting, onSendStarter }: {
   stage: OnboardingStage; spaceId: string | null; token: string | null; userId: string;
+  /** Set while the instance a starter asked for is still starting (`startingStarter`). */
+  starting?: { name?: string };
   /** Sends a starter as the person's own message in this conversation, addressed by `starterAddress`. */
   onSendStarter: (message: string) => void;
 }) {
   return stage === "bring-agents"
     ? <BringAgentsMessage spaceId={spaceId} token={token} userId={userId} />
-    : <AgentsInMessage spaceId={spaceId} token={token} userId={userId} onSendStarter={onSendStarter} />;
+    : <AgentsInMessage spaceId={spaceId} token={token} userId={userId} starting={starting} onSendStarter={onSendStarter} />;
 }
 
 /* Once an agent is in, xMatrix says so in the next message. The Hub checks
@@ -60,8 +85,9 @@ function BringAgentsMessage({ spaceId, token, userId }: { spaceId: string | null
   return <BringAgentsIn spaceId={spaceId} token={token} userId={userId} surface="welcome" />;
 }
 
-function AgentsInMessage({ spaceId, token, userId, onSendStarter }: {
-  spaceId: string | null; token: string | null; userId: string; onSendStarter: (message: string) => void;
+function AgentsInMessage({ spaceId, token, userId, starting, onSendStarter }: {
+  spaceId: string | null; token: string | null; userId: string; starting?: { name?: string };
+  onSendStarter: (message: string) => void;
 }) {
   const fleet = useInstalledHarnesses(spaceId, token, userId);
   const copy = useOnboardingCopy(spaceId, token, userId);
@@ -75,11 +101,11 @@ function AgentsInMessage({ spaceId, token, userId, onSendStarter }: {
       <ul className="m-0 mt-3 list-none border-t-[1px] border-border p-0">
         {copy.starters.map((starter) => (
           <li key={starter.id} className="m-0 border-b-[1px] border-border p-0">
-            <button type="button" onClick={() => {
+            <button type="button" disabled={Boolean(starting)} onClick={() => {
               recordOnboardingStep(token, { step: "starter_chosen", surface: "welcome", starter: starter.id });
               onSendStarter(starter.message);
             }}
-              className="group/starter flex w-full items-center gap-3 py-3 text-left">
+              className="group/starter flex w-full items-center gap-3 py-3 text-left disabled:opacity-50">
               <span className="min-w-0 flex-1">
                 <span className="block font-semibold">{starter.title}</span>
                 <span className="block text-[13px] leading-5 text-muted-foreground">{starter.detail}</span>
@@ -89,6 +115,7 @@ function AgentsInMessage({ spaceId, token, userId, onSendStarter }: {
           </li>
         ))}
       </ul>
+      {starting && <p className="mt-2 text-[13px] leading-5 text-muted-foreground" role="status">{copy.starting(starting.name)}</p>}
     </div>
   );
 }

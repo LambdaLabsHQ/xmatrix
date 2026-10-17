@@ -655,6 +655,8 @@ export type MessageRowProps = {
   onQuestionnaireAnswer: (message: TimelineItem, answer: QuestionnaireAnswer) => Promise<boolean>;
   /** Sends an onboarding starter as the person's own message, to the agent already in the conversation if any. */
   onSendStarter: (message: string) => void;
+  /** Set on the welcome row while the instance its last starter asked for is still starting. */
+  starterStarting?: { name?: string };
   onOpenAgentTrace: (target: AgentTraceTarget) => void;
   onOpenInternalAppLink: (href: string) => boolean;
   onJumpToMessage: (messageId: string, sequence?: number) => void;
