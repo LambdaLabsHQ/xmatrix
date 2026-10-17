@@ -143,20 +143,19 @@ for (const width of [393, 820, 1440]) {
 
       await expect(page).toHaveURL(/\/#pricing$/);
       const title = page.getByRole("heading", { name: "People pay. Agents don't.", exact: true });
-      // Sticky header stays put; land the pricing heading just below it.
-      await title.evaluate((element) => {
+      // Sticky header stays put; land the pricing heading just below it. The
+      // sections above it can still settle, so realign before each check.
+      await expect.poll(async () => title.evaluate((element) => {
         const nav = document.querySelector(".site-navbar")!;
         window.scrollTo(
           0,
           window.scrollY + element.getBoundingClientRect().top - nav.getBoundingClientRect().bottom - 8,
         );
-      });
-      await expect.poll(async () => header.evaluate((element) => element.getBoundingClientRect().top)).toBeLessThanOrEqual(1);
-      await expect(title).toBeInViewport();
-      await expect.poll(async () => title.evaluate((element) => {
         const rect = element.getBoundingClientRect();
         return element.contains(document.elementFromPoint(rect.left + 2, rect.top + rect.height / 2));
       })).toBe(true);
+      await expect.poll(async () => header.evaluate((element) => element.getBoundingClientRect().top)).toBeLessThanOrEqual(1);
+      await expect(title).toBeInViewport();
     }
   });
 }
