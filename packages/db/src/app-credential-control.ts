@@ -131,27 +131,37 @@ async function readInstallationSnapshot(tx: DatabaseTransaction, spaceId: string
  * A Slack workspace speaks for one Space. Slack issues one bot per workspace,
  * and its events carry whatever channels that bot was invited into, so a
  * second Space bound to the same workspace would read the first Space's
- * private channels. The Space whose binding is current keeps the workspace,
- * through a failed check too, until it disconnects, its Space is deleted, or
- * Slack retires the installation (app uninstalled); a later Connect elsewhere
- * is refused. Serialized per workspace before any connection or credential
- * lock, so two concurrent Connects cannot both bind.
+ * private channels. Disconnecting in xMatrix, a failed check, a revoked token
+ * or deleting the Space leaves that bot in those channels, so the workspace's
+ * claim outlives all of them: only Slack's signed app_uninstalled, dated after
+ * the claim, releases it (retireSlackWorkspace). Until then a Connect from any
+ * other Space is refused; the claiming Space may connect again, which renews
+ * the claim. Serialized per workspace before any connection or credential
+ * lock, so two concurrent Connects cannot both claim.
  */
 
 export async function claimSlackWorkspace(tx: DatabaseTransaction, installation: AppOAuthInstallation,
-  connectionId: string): Promise<void> {
+  spaceId: string, at: string): Promise<void> {
   await tx.query({ name: "slack_workspace_lock_v1", text: "SELECT pg_advisory_xact_lock(hashtextextended($1,0))",
     values: [`slack:${installation.appClientId}:${installation.installationId}`], maxRows: 1 });
-  const held = await tx.query<QueryResultRow>({ name: "slack_workspace_claim_v1", text: `SELECT i.connection_id
+  const claim = await tx.query<QueryResultRow>({ name: "slack_workspace_claim_read_v1", text: `SELECT space_id
+    FROM data.app_slack_workspace_claims WHERE app_client_id=$1 AND installation_id=$2 FOR UPDATE`,
+  values: [installation.appClientId, installation.installationId], maxRows: 1 });
+  // Bindings made before claims existed still hold their workspace while current.
+  const held = claim[0] ? [] : await tx.query<QueryResultRow>({ name: "slack_workspace_claim_v2", text: `SELECT i.connection_id
     FROM data.app_connector_oauth_installations i
     JOIN data.app_connector_connections c ON ${SLACK_WORKSPACE_HELD_SQL("i", "c", "k")}
-    WHERE i.provider_id='slack' AND i.app_client_id=$1 AND i.installation_id=$2 AND i.connection_id<>$3
+    WHERE i.provider_id='slack' AND i.app_client_id=$1 AND i.installation_id=$2 AND i.space_id<>$3
       AND NOT EXISTS (SELECT 1 FROM data.space_deletions d WHERE d.space_id=i.space_id)
-    LIMIT 1`, values: [installation.appClientId, installation.installationId, connectionId], maxRows: 1 });
-  if (held[0]) {
+    LIMIT 1`, values: [installation.appClientId, installation.installationId, spaceId], maxRows: 1 });
+  if ((claim[0] && String(claim[0].space_id) !== spaceId) || held[0]) {
     throw new AppControlError(SLACK_WORKSPACE_TAKEN, 409,
-      "This Slack workspace is already connected to another xMatrix Space");
+      "This Slack workspace is already connected to another xMatrix Space; remove the xMatrix app from the Slack workspace to move it");
   }
+  await tx.query({ name: "slack_workspace_claim_write_v1", text: `INSERT INTO data.app_slack_workspace_claims
+    (app_client_id,installation_id,space_id,claimed_at) VALUES ($1,$2,$3,$4)
+    ON CONFLICT (app_client_id,installation_id) DO UPDATE SET claimed_at=GREATEST(data.app_slack_workspace_claims.claimed_at,EXCLUDED.claimed_at)`,
+  values: [installation.appClientId, installation.installationId, spaceId, new Date(at).toISOString()], maxRows: 0 });
 }
 
 export class PostgresAppCredentialRepository {
@@ -254,7 +264,7 @@ export class PostgresAppCredentialRepository {
       operation: "app.credentials.put" }, async (tx) => {
       if (!input.asHub) await requireSpaceAdmin(tx, spaceId, actorUserId);
       if (providerId === "discord" && installation) await lockDiscordInstallation(tx, installation, `${spaceId}:discord`);
-      if (providerId === "slack" && installation) await claimSlackWorkspace(tx, installation, `${spaceId}:slack`);
+      if (providerId === "slack" && installation) await claimSlackWorkspace(tx, installation, spaceId, input.at);
       if (verified) await lockSentryAttempt(tx, installation!, spaceId, verified.attemptId, String(input.fields.oauthExpiresAt));
       const connectionId = `${spaceId}:${providerId}`;
       const connections = await tx.query<QueryResultRow>({ name: "app_credential_connection_v2", text: `SELECT

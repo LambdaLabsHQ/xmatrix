@@ -31,7 +31,7 @@ async function withDatabase(run) {
   const cleanup = async () => {
     for (const table of ["app_connector_action_requests", "app_connector_action_policies", "app_connector_credentials", "app_source_relations",
       "app_connector_connections",
-      "channels", "space_members"]) await sql(`DELETE FROM data.${table} WHERE space_id=$1`, [space]);
+      "channels", "space_members", "app_slack_workspace_claims"]) await sql(`DELETE FROM data.${table} WHERE space_id=$1`, [space]);
   };
   try {
     await sql(`INSERT INTO data.space_members (space_id,user_id,role,version,created_at,updated_at) VALUES
@@ -534,7 +534,11 @@ integration('OAuth routing scopes by provider, application, workspace and curren
       await sql("UPDATE data.app_connector_connections SET status='error' WHERE space_id=$1", [space]);
       await assert.rejects(otherCredentials.put(oauthInput(other)), (error) => error.code === 'workspace_connected_elsewhere');
       assert.deepEqual(await readOAuth(apps), []);
+      // Nor is a disconnect in xMatrix: the bot stays in the channels it joined, so the claim stays.
       await sql("UPDATE data.app_connector_connections SET status='disconnected' WHERE space_id=$1", [space]);
+      await assert.rejects(otherCredentials.put(oauthInput(other)), (error) => error.code === 'workspace_connected_elsewhere');
+      // Bindings made before claims existed, held while current (a disconnected one no longer holds):
+      await sql("DELETE FROM data.app_slack_workspace_claims WHERE app_client_id='app-1'");
       await otherCredentials.put(oauthInput(other));
       assert.deepEqual(await readOAuth(apps), [{ connectionId: `${other}:slack`, spaceId: other }]);
       // Two current bindings predate that rule: which Space should read it is unknown, so neither does,
@@ -573,7 +577,8 @@ integration('concurrent Connects of one Slack workspace from two Spaces bind exa
 
 // Slack's own word that the app left the workspace (signature-verified by the
 // Hub) retires every binding of it: they disconnect, keeping their encrypted
-// credentials, and the workspace may be connected again by any Space.
+// credentials, and the workspace may be connected again by any Space. A revoked
+// bot token disconnects them too, but its workspace stays this Space's.
 integration('a verified Slack uninstall retires the workspace so it can be connected again', async () => {
   await withSlackDatabasePair(async ({ sql, database, space }, { database: otherDb, space: other }) => {
     const apps = new PostgresAppRepository(database);
@@ -581,19 +586,29 @@ integration('a verified Slack uninstall retires the workspace so it can be conne
     await credentials.put(oauthInput(space));
     const before = await credentials.resolve({ requestId: crypto.randomUUID(), spaceId: space, providerId: 'slack' });
     const retire = (overrides = {}) => apps.retireSlackWorkspace({ requestId: crypto.randomUUID(), appClientId: 'app-1',
-      installationId: 'T1', at, eventAt: '2026-10-03T00:00:00.000Z', limit: 50, ...overrides });
+      installationId: 'T1', at, eventAt: '2026-10-03T00:00:00.000Z', limit: 50, uninstalled: true, ...overrides });
     assert.equal(await retire({ installationId: 'T9' }), 0);
     assert.equal(await retire({ appClientId: 'other-app' }), 0);
     // Slack's event predates this Connect (at is 2026-10-02): a delayed or replayed uninstall spares a newer grant.
     assert.equal(await retire({ eventAt: '2026-10-01T00:00:00.000Z' }), 0);
     assert.deepEqual(await readOAuth(apps), [{ connectionId: `${space}:slack`, spaceId: space }]);
-    assert.equal(await retire(), 1);
+    const otherCredentials = new PostgresAppCredentialRepository(otherDb, material);
+    assert.equal(await retire({ uninstalled: false }), 1, 'tokens_revoked disconnects the binding');
+    assert.deepEqual(await readOAuth(apps), []);
+    await assert.rejects(otherCredentials.put(oauthInput(other)), (error) => error.code === 'workspace_connected_elsewhere',
+      'a revoked token leaves the bot in place, so the workspace is not released');
+    await credentials.put(oauthInput(space));
+    // A delayed uninstall dated before this Space's own reconnect spares the renewed claim.
+    await credentials.put({ ...oauthInput(space), at: '2026-10-04T00:00:00.000Z' });
+    assert.equal(await retire({ eventAt: '2026-10-03T12:00:00.000Z' }), 0);
+    await assert.rejects(otherCredentials.put(oauthInput(other)), (error) => error.code === 'workspace_connected_elsewhere');
+    assert.equal(await retire({ eventAt: '2026-10-05T00:00:00.000Z' }), 1);
     assert.equal(await retire(), 0, 'idempotent');
     assert.deepEqual(await readOAuth(apps), []);
     const after = await credentials.resolve({ requestId: crypto.randomUUID(), spaceId: space, providerId: 'slack' });
     assert.equal(after.status, 'disconnected');
     assert.deepEqual(after.values, before.values, 'credential evidence is kept until an admin reconnects');
-    await new PostgresAppCredentialRepository(otherDb, material).put(oauthInput(other));
+    await otherCredentials.put(oauthInput(other));
     assert.deepEqual(await readOAuth(apps), [{ connectionId: `${other}:slack`, spaceId: other }]);
     assert.equal((await sql('SELECT count(*)::int AS n FROM data.app_connector_oauth_installations WHERE space_id=$1',
       [space])).rows[0].n, 0);
@@ -657,7 +672,10 @@ integration('scheduled Space deletion excludes OAuth delivery, restoration resto
         spaceId: space, at: new Date().toISOString() });
       assert.deepEqual(await ids(), [space]);
       const again = await remove();
-      // A Space scheduled for deletion no longer holds the workspace.
+      // Deleting the Space leaves its bot in the workspace's channels: the claim holds until Slack uninstalls the app.
+      await assert.rejects(otherCredentials.put(oauthInput(other)), (error) => error.code === 'workspace_connected_elsewhere');
+      assert.equal(await apps.retireSlackWorkspace({ requestId: crypto.randomUUID(), appClientId: 'app-1', installationId: 'T1',
+        at, eventAt: new Date(Date.now() + 60_000).toISOString(), limit: 50, uninstalled: true }), 1);
       await otherCredentials.put(oauthInput(other));
       assert.deepEqual(await ids(), [other]);
       const due = new Date(Date.parse(again.deletion.purgeAfter)+1000).toISOString();

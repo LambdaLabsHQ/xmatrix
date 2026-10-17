@@ -10,12 +10,14 @@ import { connectorEvent, excerpt, lowerHeader, record, sourceToken, text } from 
  */
 
 /**
- * Slack retired this workspace's installation: the app was uninstalled, or its
- * bot token revoked, at Slack's own `event_time` (milliseconds; undefined when
- * the delivery does not say). Read only from a delivery whose signature was
- * verified. Undefined when the delivery retires nothing.
+ * Slack retired this workspace's grant: the app was uninstalled (`uninstalled`,
+ * which also takes its bot out of every channel), or a bot token revoked, at
+ * Slack's own `event_time` (milliseconds; undefined when the delivery does not
+ * say). Read only from a delivery whose signature was verified. Undefined when
+ * the delivery retires nothing.
  */
-export function slackRetirement(payload: Record<string, unknown>): { eventAt: number | undefined } | undefined {
+export function slackRetirement(payload: Record<string, unknown>):
+  { eventAt: number | undefined; uninstalled: boolean } | undefined {
   if (payload.type !== "event_callback") return undefined;
   const event = record(payload.event);
   const bots = record(event.tokens).bot;
@@ -23,7 +25,8 @@ export function slackRetirement(payload: Record<string, unknown>): { eventAt: nu
     return undefined;
   }
   const seconds = payload.event_time;
-  return { eventAt: typeof seconds === "number" && Number.isSafeInteger(seconds) && seconds > 0 ? seconds * 1000 : undefined };
+  return { eventAt: typeof seconds === "number" && Number.isSafeInteger(seconds) && seconds > 0 ? seconds * 1000 : undefined,
+    uninstalled: event.type === "app_uninstalled" };
 }
 
 export const receiveSlackDelivery = createSignedJsonReceiver({

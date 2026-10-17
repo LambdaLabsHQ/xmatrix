@@ -1196,7 +1196,7 @@ export function AppsView({
         : `${name} is connected. Subscribe a channel or allow its actions below.` }
       : outcome === "elsewhere"
       ? { tone: "warning", message: `This ${name} workspace is already connected to another xMatrix Space. ` +
-        "Disconnect it there, or have a workspace admin remove the xMatrix app, then connect again." }
+        "To move it here, a Slack workspace admin removes the xMatrix app from the workspace first, then connect again." }
       : { tone: "warning", message: providerId === "x"
         ? "X authorization did not finish. Use Add X account to try again."
         : `${name} did not finish connecting. Try again, or paste a token under Credentials.` });

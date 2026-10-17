@@ -68,9 +68,9 @@ export async function handleAppConnectorDelivery(input: { env: Env; request: Req
   const payload = parseJsonObject(rawBody)!;
   const installationId = provider.id === "slack" ? payload.team_id : payload.organizationId;
   const apps = dependencies.apps(env);
-  // Slack says the app left the workspace: the bindings made before that
-  // retire, so the workspace can be connected again (by whichever Space
-  // connects it next). A Connect after Slack's event is not retired by it.
+  // Slack retired the grant: the bindings made before that disconnect, and a
+  // Connect after Slack's event is not retired by it. Only an uninstall frees
+  // the workspace for another Space; a revoked token leaves its bot in place.
   const retirement = provider.id === "slack" ? slackRetirement(payload) : undefined;
   if (retirement) {
     if (typeof installationId !== "string" || !/^[A-Za-z0-9_-]{1,128}$/u.test(installationId)) {
@@ -79,7 +79,8 @@ export async function handleAppConnectorDelivery(input: { env: Env; request: Req
     // Without Slack's own event time it cannot be ordered against a newer Connect: it retires nothing.
     const retired = retirement.eventAt === undefined ? 0 : await apps.retireSlackWorkspace({ requestId: crypto.randomUUID(),
       appClientId: client.clientId, installationId, at: new Date().toISOString(),
-      eventAt: new Date(retirement.eventAt).toISOString(), limit: MAX_OAUTH_CONNECTIONS });
+      eventAt: new Date(retirement.eventAt).toISOString(), limit: MAX_OAUTH_CONNECTIONS,
+      uninstalled: retirement.uninstalled });
     return Response.json({ ok: true, events: 0, delivered: 0, retired });
   }
   if (result.events.length === 0) return Response.json({ ok: true, events: 0, delivered: 0 });

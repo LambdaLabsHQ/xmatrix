@@ -147,8 +147,8 @@ test('a signed Slack uninstall retires the workspace instead of routing', async 
     event: { type: 'app_uninstalled' } };
   assert.deepEqual(await (await send('slack', uninstalled, f)).json(), { ok: true, events: 0, delivered: 0, retired: 1 });
   // Only bindings made before Slack's own event time retire, so a delayed delivery spares a newer Connect.
-  assert.deepEqual(f.retirements.map(({ appClientId, installationId, eventAt, limit }) => ({ appClientId, installationId, eventAt, limit })),
-    [{ appClientId: 'slack-app', installationId: 'T1', eventAt: '2025-10-09T08:53:20.000Z', limit: 50 }]);
+  assert.deepEqual(f.retirements.map(({ appClientId, installationId, eventAt, limit, uninstalled }) => ({ appClientId, installationId, eventAt, limit, uninstalled })),
+    [{ appClientId: 'slack-app', installationId: 'T1', eventAt: '2025-10-09T08:53:20.000Z', limit: 50, uninstalled: true }]);
   assert.equal(f.queries.length, 0);
   const { event_time: _, ...undated } = uninstalled;
   assert.deepEqual(await (await send('slack', undated, f)).json(), { ok: true, events: 0, delivered: 0, retired: 0 });
@@ -156,6 +156,8 @@ test('a signed Slack uninstall retires the workspace instead of routing', async 
   const botRevoked = { ...uninstalled, event: { type: 'tokens_revoked', tokens: { bot: ['B1'] } } };
   await send('slack', botRevoked, f);
   assert.equal(f.retirements.length, 2);
+  // A revoked bot token disconnects; only an uninstall takes the bot out of its channels and frees the workspace.
+  assert.equal(f.retirements[1].uninstalled, false);
   await send('slack', { ...uninstalled, event: { type: 'tokens_revoked', tokens: { oauth: ['U1'] } } }, f);
   assert.equal(f.retirements.length, 2, 'a user token revocation keeps the bot installation');
   assert.equal((await send('slack', uninstalled, f, { secret: 'wrong' })).status, 401);

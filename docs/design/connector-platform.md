@@ -863,16 +863,20 @@ sees there, so each provider narrows delivery to what one Space may read:
 
 - **Slack: one Space per workspace.** Slack issues one bot per workspace and
   sends the messages of every channel it was invited into. A binding is
-  claimed under a per-workspace advisory lock: while another Space's binding of
-  the same app and workspace is current, Connect is refused
-  (`workspace_connected_elsewhere`, shown as "already connected to another
-  xMatrix Space"). Two current bindings that predate this rule route nowhere
-  until one disconnects. A signature-verified `app_uninstalled`, or
-  `tokens_revoked` naming bot tokens, retires the workspace's bindings made
-  before Slack's `event_time` (disconnected, credentials kept), after which any
-  Space may connect it; a Connect after the event is not retired by a delayed
-  or replayed delivery, and a delivery without `event_time` retires nothing.
-  The Slack app must subscribe to both events for this release path.
+  claimed under a per-workspace advisory lock and the claim
+  (`app_slack_workspace_claims`) names one Space: a Connect from any other
+  Space is refused (`workspace_connected_elsewhere`, shown as "already
+  connected to another xMatrix Space"). The bot stays in every channel it was
+  invited into until the app is uninstalled from the workspace, so the claim
+  outlives a disconnect in xMatrix, a failed check, a revoked token and the
+  Space's deletion; the claiming Space may connect again, which renews it.
+  Only a signature-verified `app_uninstalled` dated (Slack's `event_time`)
+  after the claim releases it; that event, or `tokens_revoked` naming bot
+  tokens, disconnects the bindings made before it (credentials kept). A
+  Connect after the event is not retired by a delayed or replayed delivery,
+  and a delivery without `event_time` retires nothing. Two current bindings
+  that predate claims route nowhere until one disconnects; the earliest of them
+  holds the claim. The Slack app must subscribe to both events.
   The bot belongs to its binding, not to the stored credentials: regenerating a
   Hub-minted field (the ingress key) keeps the binding, so a shared workspace
   stays refused; any other manual edit unbinds the grant and drops its values

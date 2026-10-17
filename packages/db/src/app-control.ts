@@ -630,7 +630,7 @@ export class PostgresAppRepository {
    * by a delayed or replayed delivery of it.
    */
   async retireSlackWorkspace(input: { requestId: string; appClientId: string; installationId: string; at: string;
-    eventAt: string; limit: number }): Promise<number> {
+    eventAt: string; limit: number; uninstalled: boolean }): Promise<number> {
     const appClientId = text(input.appClientId, "appClientId", 256);
     const installationId = text(input.installationId, "installationId", 128);
     const at = iso(input.at);
@@ -641,6 +641,13 @@ export class PostgresAppRepository {
       operation: "app.slack-workspace-retire" }, async tx => {
       await tx.query({ name: "slack_workspace_lock_v1", text: "SELECT pg_advisory_xact_lock(hashtextextended($1,0))",
         values: [`slack:${appClientId}:${installationId}`], maxRows: 1 });
+      // Only an uninstall takes the bot out of the workspace's channels, so only
+      // it frees the workspace for another Space (claimSlackWorkspace); a
+      // revoked token disconnects its bindings and keeps the claim.
+      if (input.uninstalled) {
+        await tx.query({ name: "app_slack_claim_release_v1", text: `DELETE FROM data.app_slack_workspace_claims
+          WHERE app_client_id=$1 AND installation_id=$2 AND claimed_at<$3`, values: [appClientId, installationId, eventAt], maxRows: 0 });
+      }
       const rows = await tx.query<QueryResultRow>({ name: "app_slack_retirement_lock_v1", text: `SELECT i.connection_id
         FROM data.app_connector_oauth_installations i
         JOIN data.app_connector_connections c ON c.connection_id=i.connection_id AND c.space_id=i.space_id
