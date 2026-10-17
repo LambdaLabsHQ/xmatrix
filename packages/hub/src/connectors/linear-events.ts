@@ -28,6 +28,7 @@ export const receiveLinearDelivery = createSignedJsonReceiver({
     const url = safeUrl(data.url) ?? safeUrl(payload.url);
     const state = text(record(data.state).name);
     events.push(connectorEvent({ eventId: `linear:${deliveryId}`, sourceRef: `linear:${team || "*"}`, feature: "issue",
+      subject: { entity: "issue", id: text(data.id) },
       summary: `${text(data.identifier)} ${verb}: ${text(data.title)}`,
       provider: `Linear · ${team.toUpperCase() || "issue"}`,
       title: `${text(data.identifier)} ${verb} — ${text(data.title)}`, url,
@@ -37,6 +38,7 @@ export const receiveLinearDelivery = createSignedJsonReceiver({
     const team = sourceToken(record(issue.team).key || String(text(issue.identifier)).split("-")[0]);
     const url = safeUrl(data.url) ?? safeUrl(payload.url);
     events.push(connectorEvent({ eventId: `linear:${deliveryId}`, sourceRef: `linear:${team || "*"}`, feature: "comment",
+      subject: { entity: "comment", id: text(data.id) },
       summary: `Comment ${verb} on ${text(issue.identifier) || "an issue"}`,
       provider: `Linear · ${team.toUpperCase() || "comment"}`,
       title: `Comment ${verb} on ${text(issue.identifier)} ${text(issue.title)}`.trim(), url,
@@ -45,6 +47,7 @@ export const receiveLinearDelivery = createSignedJsonReceiver({
     const url = safeUrl(data.url) ?? safeUrl(payload.url);
     const name = text(data.name) || text(record(data.project).name) || type;
     events.push(connectorEvent({ eventId: `linear:${deliveryId}`, sourceRef: "linear:*", feature: "project",
+      subject: { entity: type === "Project" ? "project" : type === "ProjectUpdate" ? "projectUpdate" : "cycle", id: text(data.id) },
       summary: `${type} ${verb}: ${name}`,
       provider: "Linear", title: `${type} ${verb} — ${name}`, url,
       details: [type === "ProjectUpdate" ? excerpt(data.body) : undefined] }));
