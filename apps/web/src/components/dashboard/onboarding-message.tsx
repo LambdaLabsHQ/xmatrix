@@ -2,7 +2,10 @@
 
 import { useEffect, useRef } from "react";
 import { ChevronRight } from "lucide-react";
-import { WEB_PROXY_ROUTES, type OnboardingStage } from "@xmatrix/protocol";
+import {
+  channelPresenceInstances, isChannelResidentInstance, isLiveAgentStatus, WEB_PROXY_ROUTES,
+  type ChannelPresence, type OnboardingStage,
+} from "@xmatrix/protocol";
 import { recordOnboardingStep } from "@/lib/onboarding-funnel";
 import { useOnboardingCopy, useOnboardingLocale } from "@/lib/onboarding-locale";
 import { xmatrixApiRequest } from "@/lib/query/api-client";
@@ -14,14 +17,31 @@ import { useInstalledHarnesses } from "./use-installed-harnesses";
    agents, the machine's report), so reopening the conversation later shows
    what happened, never a stale command. */
 
-export function OnboardingMessage({ stage, spaceId, token, userId, onSend }: {
+/* `@auto` and `@<harness>` always start a new instance: that is how work is
+   split between agents in parallel. Someone trying the starters one after
+   another means the conversation they already have, so a starter goes to the
+   instance already here: working, idle or asleep, the most recently seen
+   first. One whose wake failed, or whose machine is offline, would not act on
+   it, so Auto starts another. */
+export function starterAddress(presence: ChannelPresence | undefined): string {
+  const here = channelPresenceInstances(presence).filter(instance => instance.channelInstanceId &&
+    isChannelResidentInstance(instance) && instance.rest !== "wake_failed" && !instance.offlineReason);
+  const rank = (instance: (typeof here)[number]) => [isLiveAgentStatus(instance.status) ? 1 : 0, Date.parse(instance.lastSeenAt) || 0];
+  const [instance] = here.sort((left, right) => {
+    const [leftLive, leftSeen] = rank(left), [rightLive, rightSeen] = rank(right);
+    return rightLive - leftLive || rightSeen - leftSeen;
+  });
+  return instance ? `@${instance.agentName}:${instance.channelInstanceId}` : "@auto";
+}
+
+export function OnboardingMessage({ stage, spaceId, token, userId, onSendStarter }: {
   stage: OnboardingStage; spaceId: string | null; token: string | null; userId: string;
-  /** Sends a starter as the person's own message in this conversation. */
-  onSend: (body: string) => void;
+  /** Sends a starter as the person's own message in this conversation, addressed by `starterAddress`. */
+  onSendStarter: (message: string) => void;
 }) {
   return stage === "bring-agents"
     ? <BringAgentsMessage spaceId={spaceId} token={token} userId={userId} />
-    : <AgentsInMessage spaceId={spaceId} token={token} userId={userId} onSend={onSend} />;
+    : <AgentsInMessage spaceId={spaceId} token={token} userId={userId} onSendStarter={onSendStarter} />;
 }
 
 /* Once an agent is in, xMatrix says so in the next message. The Hub checks
@@ -40,8 +60,8 @@ function BringAgentsMessage({ spaceId, token, userId }: { spaceId: string | null
   return <BringAgentsIn spaceId={spaceId} token={token} userId={userId} surface="welcome" />;
 }
 
-function AgentsInMessage({ spaceId, token, userId, onSend }: {
-  spaceId: string | null; token: string | null; userId: string; onSend: (body: string) => void;
+function AgentsInMessage({ spaceId, token, userId, onSendStarter }: {
+  spaceId: string | null; token: string | null; userId: string; onSendStarter: (message: string) => void;
 }) {
   const fleet = useInstalledHarnesses(spaceId, token, userId);
   const copy = useOnboardingCopy(spaceId, token, userId);
@@ -57,7 +77,7 @@ function AgentsInMessage({ spaceId, token, userId, onSend }: {
           <li key={starter.id} className="m-0 border-b-[1px] border-border p-0">
             <button type="button" onClick={() => {
               recordOnboardingStep(token, { step: "starter_chosen", surface: "welcome", starter: starter.id });
-              onSend(`@auto ${starter.message}`);
+              onSendStarter(starter.message);
             }}
               className="group/starter flex w-full items-center gap-3 py-3 text-left">
               <span className="min-w-0 flex-1">

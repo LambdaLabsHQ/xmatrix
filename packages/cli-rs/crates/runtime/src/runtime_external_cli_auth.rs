@@ -2717,12 +2717,6 @@ fn sync_acp_presentation_state(
     write_current_run_effort(latest_effort.as_deref());
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum AcpTransportKind {
-    WebSocket,
-    Stdio,
-}
-
 #[derive(Clone)]
 struct AcpInterrupter {
     write: AppServerWrite,
@@ -2922,15 +2916,9 @@ impl AcpVendorConfig {
         self.display_name.to_ascii_lowercase()
     }
 
-    fn acp_spawn_args(
-        &self,
-        cmd_args: &[String],
-        transport: AcpTransportKind,
-        bind: Option<&str>,
-        secret: Option<&str>,
-    ) -> Vec<String> {
+    fn acp_spawn_args(&self, cmd_args: &[String]) -> Vec<String> {
         match self.flavor {
-            AcpVendorFlavor::Grok => grok_acp_spawn_args(cmd_args, transport, bind, secret),
+            AcpVendorFlavor::Grok => grok_acp_spawn_args(cmd_args),
             AcpVendorFlavor::Generic => {
                 generic_acp_spawn_args(cmd_args, self.preset_acp_args.as_deref())
             }
@@ -3005,6 +2993,8 @@ struct AcpSession {
     inbox: ProviderInbox,
     process_tree: process_tree::ProcessTreeGuard,
     child: Child,
+    /// The agent's last stderr lines, still echoed to the Run's own stderr.
+    stderr_tail: StderrTail,
     next_id: u64,
     session_id: Option<String>,
     /// Latest structured goal from a successful session/load history replay.

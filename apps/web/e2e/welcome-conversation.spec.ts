@@ -29,12 +29,18 @@ async function welcomeOnFirstOpen(page: import("@playwright/test").Page) {
   await releaseFixture(page, "welcome");
 }
 
-/* The welcome once @codex is in: both steps written, a send to answer. */
-async function welcomeWithAgentIn(page: import("@playwright/test").Page) {
-    await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], channels: [{ ...WELCOME, messageCount: 2, lastMessageSequence: 2 }],
-      registrations: harnessRegistrations(["codex"]) });
-    await fixtureJson(page, "history", `**/api/xmatrix/channels/${WELCOME.id}/history**`, { messages: [BRING, IN], hasMore: false });
-    await fixtureJson(page, "send", `**/api/xmatrix/channels/${WELCOME.id}/messages`, { message: { id: "sent" } }, { method: "POST" });
+/* The welcome once an agent is in: both steps written, a send to answer,
+   and the conversation open. Returns the agents-in step. */
+async function welcomeWithAgentIn(page: import("@playwright/test").Page,
+  { harness = "codex", channel = {}, funnel = false }: { harness?: string; channel?: object; funnel?: boolean } = {}) {
+  await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], registrations: harnessRegistrations([harness]),
+    channels: [{ ...WELCOME, messageCount: 2, lastMessageSequence: 2, ...channel }] });
+  await fixtureJson(page, "history", `**/api/xmatrix/channels/${WELCOME.id}/history**`, { messages: [BRING, IN], hasMore: false });
+  await fixtureJson(page, "send", `**/api/xmatrix/channels/${WELCOME.id}/messages`, { message: { id: "sent" } }, { method: "POST" });
+  if (funnel) await fixtureRule(page, { id: "funnel", pattern: "**/api/xmatrix/observable/onboarding-step", method: "POST",
+    responder: { kind: "static", status: 202, json: {} } });
+  await page.goto("/app/personal-sspaceperso/channels/welcome-to-xmatrix-cchannelwel");
+  return page.locator('[data-onboarding-stage="agents-in"]');
 }
 
 test.describe("desktop", () => {
@@ -49,11 +55,7 @@ test.describe("desktop", () => {
   });
 
   test("once an agent is in, a starter is sent as the person's own message to Auto", async ({ page }) => {
-    await welcomeWithAgentIn(page);
-    await fixtureRule(page, { id: "funnel", pattern: "**/api/xmatrix/observable/onboarding-step", method: "POST",
-      responder: { kind: "static", status: 202, json: {} } });
-    await page.goto("/app/personal-sspaceperso/channels/welcome-to-xmatrix-cchannelwel");
-    const agentsIn = page.locator('[data-onboarding-stage="agents-in"]');
+    const agentsIn = await welcomeWithAgentIn(page, { funnel: true });
     await expect(agentsIn).toContainText("@codex is in. Mention it here to give it work", { timeout: 20_000 });
     await agentsIn.getByRole("button", { name: /Plan something with me/u }).click();
     await expect.poll(async () => (await fixtureRequestBodies(page, "send")).map((sent) => (sent as { body?: string }).body))
@@ -61,6 +63,23 @@ test.describe("desktop", () => {
     // Which first task people choose is counted too.
     await expect.poll(() => fixtureRequestBodies(page, "funnel"))
       .toEqual([{ step: "starter_chosen", surface: "welcome", device: "desktop_web", starter: "plan" }]);
+  });
+
+  test("a starter goes to the agent already in the conversation instead of starting another", async ({ page }) => {
+    const instance = (id: string, slot: string, status: string, lastSeenAt: string, extra: object = {}) =>
+      ({ id, channelInstanceId: slot, label: `claude:${slot}`, connectedAt: E2E_NOW, lastSeenAt, status, ...extra });
+    const memberPresence = {
+      "agent:claude": { registration: { ownerUserId: "e2e-user", machineId: "machine-1", harness: "claude" }, kind: "agent",
+        status: "idle", label: "claude", instances: [
+          instance("instance-claude-1", "1", "offline", "2026-01-01T00:00:03.000Z", { rest: "wake_failed", restReason: "spawn_failed" }),
+          instance("instance-claude-2", "2", "offline", "2026-01-01T00:00:02.000Z", { rest: "sleeping" }),
+          instance("instance-claude-3", "3", "idle", "2026-01-01T00:00:01.000Z")] },
+    };
+    const agentsIn = await welcomeWithAgentIn(page, { harness: "claude", channel: { memberPresence } });
+    await agentsIn.getByRole("button", { name: /Show me how to hand you work/u }).click({ timeout: 20_000 });
+    // The working one first; one whose wake failed would not act on it.
+    await expect.poll(async () => (await fixtureRequestBodies(page, "send")).map((sent) => (sent as { body?: string }).body))
+      .toEqual(["@claude:3 Read https://xmatrix.sh/start.md and write a page on how I should hand you work through xMatrix."]);
   });
 });
 
@@ -144,9 +163,7 @@ test.describe("a Chinese browser", () => {
   });
 
   test("starters are sent in Chinese", async ({ page }) => {
-    await welcomeWithAgentIn(page);
-    await page.goto("/app/personal-sspaceperso/channels/welcome-to-xmatrix-cchannelwel");
-    const agentsIn = page.locator('[data-onboarding-stage="agents-in"]');
+    const agentsIn = await welcomeWithAgentIn(page);
     await expect(agentsIn).toContainText("@codex 已接入。在这里 @ 它就能派活", { timeout: 20_000 });
     await agentsIn.getByRole("button", { name: /和我一起做个计划/u }).click();
     await expect.poll(async () => (await fixtureRequestBodies(page, "send")).map((sent) => (sent as { body?: string }).body))
