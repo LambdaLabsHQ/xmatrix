@@ -1,4 +1,4 @@
-import { PostgresAppRepository, type AuthorityDatabase, type RegistrationRepositoryReader } from "@xmatrix/db";
+import { AppControlError, PostgresAppRepository, type AuthorityDatabase, type RegistrationRepositoryReader } from "@xmatrix/db";
 import { spaceLaunchTargetRepositories, type AppConnectorEnv } from "./app-connectors";
 import { utf8ByteLength } from "@xmatrix/protocol";
 
@@ -15,8 +15,9 @@ function decisionDescription(value: string | undefined): string {
 
 /** The repositories Jev chooses among, from the same GitHub catalog completion
  * reads. It is information for a choice, not an authorization: with no
- * configured connection it offers none, and the launch path treats a failed
- * read the same way. Reads stay request-local. */
+ * configured connection it offers none, nor to a viewer or participant, who
+ * do not use the Space's connections; the launch path treats a failed read the
+ * same way. Reads stay request-local. */
 export function registrationRepositoryCatalog(env: AppConnectorEnv, database: AuthorityDatabase, spaceId: string,
   repositories = spaceLaunchTargetRepositories): RegistrationRepositoryReader {
   const reads = new Map<string, ReturnType<RegistrationRepositoryReader>>();
@@ -24,8 +25,13 @@ export function registrationRepositoryCatalog(env: AppConnectorEnv, database: Au
     const prior = reads.get(actorUserId);
     if (prior) return prior;
     const read = (async () => {
-      const { connection } = await new PostgresAppRepository(database).getConnection({
-        requestId: `registration-repos:${crypto.randomUUID()}`, connectionId: `${spaceId}:github`, actorUserId, allowMissing: true });
+      const read = await new PostgresAppRepository(database).getConnection({
+        requestId: `registration-repos:${crypto.randomUUID()}`, connectionId: `${spaceId}:github`, actorUserId,
+        use: true, allowMissing: true }).catch((error: unknown) => {
+        if (error instanceof AppControlError && error.code === "space_not_found") return undefined;
+        throw error;
+      });
+      const connection = read?.connection;
       if (!connection || connection.status !== "configured") return undefined;
       const repos = await repositories(env, { ...connection, status: "configured" });
       return { repositories: repos.map(repo => repo.value),
