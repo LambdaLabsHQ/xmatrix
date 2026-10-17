@@ -1557,6 +1557,8 @@ export class PostgresMessageRepository {
       // former makes the first (or second) message in every new Channel collide.
       // The database sequence is shared with the other PostgreSQL authority
       // writers and gives each inserted message its own stable ordering key.
+      // A preflight that waited on a concurrent writer keeps its old statement
+      // snapshot. The insert itself must arbitrate the durable message identity.
       const committedFacts = (await transaction.query<AppendCommittedFactsRow>({
         name: "message_append_commit_facts_v5",
         text: `WITH search_rank AS MATERIALIZED (
@@ -1574,6 +1576,7 @@ export class PostgresMessageRepository {
             SELECT $1,$2,$3,$4,1,$5,$6,$7,$8,'hot-inline',$3,NULL,'[]','[]',$9::jsonb,
               $10,NULL,NULL,NULL,$10,search_rank.value,$11,$12,$13,$14,NULL,$8,$15,$16,$17,
               NULL,$10,1,$21::jsonb,$22,$23,$24,$25::jsonb FROM search_rank
+            ON CONFLICT (space_id,message_id) DO NOTHING
             RETURNING message_id,channel_id
           ), mutation_row AS (
             INSERT INTO data.message_mutations
@@ -1603,7 +1606,7 @@ export class PostgresMessageRepository {
         maxRows: 1,
       }))[0];
       if (!committedFacts?.channel_id) throw new MessageAuthorityError(
-        "channel_not_found", 404, "Channel not found",
+        "message_exists", 409, "Message already exists",
       );
       const searchRank = bounded(committedFacts.search_rank, "searchRank");
       if (agentTargets.length || invocationSelections) {
