@@ -1,6 +1,8 @@
 import type { Hono } from "hono";
 import { ControlError } from "@xmatrix/db";
-import { ONBOARDING_MESSAGE_KIND, type AgentRegistrationSummary, type OnboardingStage } from "@xmatrix/protocol";
+import {
+  ONBOARDING_MESSAGE_KIND, onboardingLocale, type AgentRegistrationSummary, type OnboardingLocale, type OnboardingStage,
+} from "@xmatrix/protocol";
 import type { Env } from "./types";
 import { listAgentRegistrations } from "./agent-registrations";
 import { deterministicConversationId } from "./deterministic-id";
@@ -12,17 +14,24 @@ import { XMATRIX_SYSTEM_AVATAR_URL, XMATRIX_SYSTEM_LABEL } from "./xmatrix-syste
 
 const NO_STORE = { "cache-control": "private, no-store" };
 
-const WELCOME_CONVERSATION_NAME = "Welcome to xMatrix";
-
 /* What a client that cannot draw the step reads, and what an Agent in the
-   conversation sees. The Web draws each step from the facts instead. */
-const BRING_AGENTS_BODY = "Bring your agents into xMatrix. They keep running on your own computer: open xmatrix.sh there, " +
-  "sign in and run the one command it shows, or download the desktop app.";
-
-function agentsInBody(handles: string[]): string {
-  return `${handles.join(", ")} ${handles.length === 1 ? "is" : "are"} in. Mention ${handles.length === 1 ? "it" : "one"} here to give ` +
-    `${handles.length === 1 ? "it" : "them"} work.`;
-}
+   conversation sees. The Web draws each step from the facts instead. Written
+   in the language the person's browser asked for (onboardingLocale). */
+const WELCOME = {
+  en: {
+    name: "Welcome to xMatrix",
+    bringAgents: "Bring your agents into xMatrix. They keep running on your own computer: open xmatrix.sh there, " +
+      "sign in and run the one command it shows, or download the desktop app.",
+    agentsIn: (handles: string[]) => `${handles.join(", ")} ${handles.length === 1 ? "is" : "are"} in. ` +
+      `Mention ${handles.length === 1 ? "it" : "one"} here to give ${handles.length === 1 ? "it" : "them"} work.`,
+  },
+  zh: {
+    name: "欢迎来到 xMatrix",
+    bringAgents: "把你的 Agent 带进 xMatrix。它们照常在你自己的电脑上运行：在那台电脑上打开 xmatrix.sh，" +
+      "登录后运行页面上的那条命令，或者下载桌面 App。",
+    agentsIn: (handles: string[]) => `${handles.join("、")} 已接入。在这里 @ ${handles.length === 1 ? "它" : "其中一个"}就能派活。`,
+  },
+} satisfies Record<OnboardingLocale, { name: string; bringAgents: string; agentsIn: (handles: string[]) => string }>;
 
 /**
  * A new person's personal Space opens with a conversation in which xMatrix
@@ -35,6 +44,9 @@ export function registerWelcomeRoutes(app: Hono<{ Bindings: Env }>): void {
   app.post("/api/spaces/:spaceId/welcome", (c) => jsonErrors(c, async () => {
     const owner = requireHumanAuth(await requireAuth(c.req.raw, c.env));
     const spaceId = c.req.param("spaceId");
+    // Older clients post no body: English.
+    const request = await c.req.json().catch(() => null) as { locale?: unknown } | null;
+    const words = WELCOME[onboardingLocale(typeof request?.locale === "string" ? request.locale : null)];
     if (spaceId !== await personalSpaceId(owner.id)) return c.json({ channelId: null }, 200, NO_STORE);
     const principal = { kind: "user" as const, id: owner.id };
     // Membership, read as the caller: a deleted personal Space is not reopened.
@@ -43,15 +55,15 @@ export function registerWelcomeRoutes(app: Hono<{ Bindings: Env }>): void {
     try {
       await createChannel(c.env, {
         commandId: `welcome-conversation:${spaceId}`, channelId, spaceId,
-        name: WELCOME_CONVERSATION_NAME, mode: "closed", principal, metadata: { welcome: true },
+        name: words.name, mode: "closed", principal, metadata: { welcome: true },
       });
     } catch (error) {
       // Made by an earlier call: the conversation is the person's now.
       if (!(error instanceof ControlError && error.status === 409)) throw error;
     }
-    await appendWelcomeStep(c.env, owner, channelId, "bring-agents", BRING_AGENTS_BODY);
+    await appendWelcomeStep(c.env, owner, channelId, "bring-agents", words.bringAgents);
     const handles = await enabledAgentHandles(c.env, owner.id, spaceId);
-    if (handles.length > 0) await appendWelcomeStep(c.env, owner, channelId, "agents-in", agentsInBody(handles));
+    if (handles.length > 0) await appendWelcomeStep(c.env, owner, channelId, "agents-in", words.agentsIn(handles));
     return c.json({ channelId }, 200, NO_STORE);
   }));
 }

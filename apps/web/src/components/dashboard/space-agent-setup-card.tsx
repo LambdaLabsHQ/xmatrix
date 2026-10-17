@@ -5,6 +5,8 @@ import { actionClass } from "@/components/ui/action-tone";
 import { agentPresetAvatarUrl } from "@xmatrix/protocol";
 import { Check, CloudOff, Loader2, PlayCircle, RefreshCw, Terminal } from "lucide-react";
 import { noticeClass } from "@/components/ui/status-tone";
+import type { OnboardingCopy } from "@/lib/onboarding-copy";
+import { useOnboardingCopy } from "@/lib/onboarding-locale";
 import { SetupCardHeader, SetupCardShell } from "./space-setup-card-chrome";
 import { IdentityAvatar } from "./identity-avatar";
 import { defaultInstallPlatform, type InstallPlatform } from "./connect-machine";
@@ -70,15 +72,16 @@ export function SpaceAgentSetupCard({
   /** On a phone: the command is run on a computer, and only approved here. */
   phone?: boolean;
 }) {
+  const copy = useOnboardingCopy(spaceId, token, userId);
   if (fleet && ((fleet.ready && fleet.candidates.length > 0) || fleet.enablingAll)) return <SetupCardShell>
-    <SetupCardHeader title="Your installed agents" body="Turn them on to summon them. Choose a working folder when you send the first task." />
+    <SetupCardHeader title={copy.installedTitle} body={copy.installedBody} />
     <InstalledHarnessSwitchList fleet={fleet} />
     <button type="button" disabled={!fleet.ready || Boolean(fleet.pending) || fleet.enablingAll}
       onClick={onBringAll} className={actionClass({ variant: "primary", size: "md" }, "mt-4")}>
       {fleet.enablingAll ? <AnimatedIcon icon={Loader2} className="size-4 animate-spin" /> : <Check className="size-4" />}
-      {fleet.enablingAll ? "Enabling…" : "Bring them in"}
+      {fleet.enablingAll ? copy.enabling : copy.bringThemIn}
     </button>
-    <button type="button" onClick={onManageMachines} className={actionClass({ variant: "secondary", size: "md" }, "mt-4 ml-2")}>Manage machines</button>
+    <button type="button" onClick={onManageMachines} className={actionClass({ variant: "secondary", size: "md" }, "mt-4 ml-2")}>{copy.manageMachines}</button>
   </SetupCardShell>;
   if (state.kind === "hidden") return null;
   const daemonFailure = state.kind === "unreachable" || state.kind === "no-local-machine"
@@ -87,35 +90,35 @@ export function SpaceAgentSetupCard({
   return (
     <SetupCardShell>
         {daemonFailure && state.kind !== "daemon-stopped" && (
-          <DaemonFailureNotice failure={daemonFailure} starting={daemonStatus?.state === "starting"} onRetry={onStartDaemon} className="mb-6" />
+          <DaemonFailureNotice copy={copy} failure={daemonFailure} starting={daemonStatus?.state === "starting"} onRetry={onStartDaemon} className="mb-6" />
         )}
-        {state.kind === "unreachable" && <UnreachablePanel onRetry={onRetryAgents} />}
+        {state.kind === "unreachable" && <UnreachablePanel copy={copy} onRetry={onRetryAgents} />}
         {/* Web and phone: the same flow xMatrix sends in a welcome conversation. */}
         {state.kind === "no-local-machine" && <BringAgentsIn spaceId={spaceId} token={token} userId={userId} surface="space" phone={phone} />}
         {state.kind === "discovering" && (
           <SetupCardHeader
             icon={Loader2}
             iconClassName="animate-spin"
-            title="Looking for agents on this machine"
-            body="Checking which agent runtimes are installed and which directories they have worked in."
+            title={copy.discoveringTitle}
+            body={copy.discoveringBody}
           />
         )}
         {state.kind === "no-runtime" && (
-          <NoRuntimePanel hostLabel={hostLabel} onRefresh={onRefresh} />
+          <NoRuntimePanel copy={copy} hostLabel={hostLabel} onRefresh={onRefresh} />
         )}
         {(state.kind === "daemon-stopped" || state.kind === "ready-to-bind") && (
           <>
             <SetupCardHeader
-              title={`Found ${describeCandidates(state.candidates)} on ${hostLabel}`}
-              body="Turn on the installed agents so they can take work."
+              title={copy.foundOn(describeCandidates(copy, state.candidates), hostLabel)}
+              body={copy.turnOnInstalled}
             />
             {state.kind === "daemon-stopped" && daemonFailure && (
-              <DaemonFailureNotice failure={daemonFailure} starting={daemonStatus?.state === "starting"} onRetry={onStartDaemon} className="mt-4" />
+              <DaemonFailureNotice copy={copy} failure={daemonFailure} starting={daemonStatus?.state === "starting"} onRetry={onStartDaemon} className="mt-4" />
             )}
             {state.kind === "daemon-stopped" && !daemonFailure && (
               <div className={noticeClass("attention", "mt-4 p-3")}>
                 <p className="text-sm">
-                  The background service that launches agents on this machine is not running yet.
+                  {copy.serviceStopped}
                 </p>
                 <button
                   type="button"
@@ -123,7 +126,7 @@ export function SpaceAgentSetupCard({
                   className={actionClass({ variant: "primary", size: "md" }, "mt-3")}
                 >
                   <PlayCircle className="size-4" />
-                  Start it
+                  {copy.startIt}
                 </button>
               </div>
             )}
@@ -132,6 +135,7 @@ export function SpaceAgentSetupCard({
                 <CandidateRow
                   key={candidate.presetId}
                   candidate={candidate}
+                  copy={copy}
                   disabled={state.kind === "daemon-stopped" || Boolean(busy)}
                   onBind={() => onBindAgent(candidate)}
                 />
@@ -139,10 +143,10 @@ export function SpaceAgentSetupCard({
             </div>
             <button type="button" disabled={state.kind === "daemon-stopped" || Boolean(busy) || !fleet?.ready}
               onClick={onBringAll} className={actionClass({ variant: "primary", size: "md" }, "mt-4")}>
-              <Check className="size-4" /> Bring them in
+              <Check className="size-4" /> {copy.bringThemIn}
             </button>
             <p className="mt-4 text-xs text-muted-foreground">
-              Detected by checking installed commands. Manage installed harnesses and their Space switches from Machines.
+              {copy.detectedBy}
             </p>
           </>
         )}
@@ -159,11 +163,13 @@ export function SpaceAgentSetupCard({
    again, and the CLI's last lines (already redacted on this machine), which
    the App also sends to xMatrix. */
 function DaemonFailureNotice({
+  copy,
   failure,
   starting,
   onRetry,
   className,
 }: {
+  copy: OnboardingCopy;
   failure: DesktopDaemonFailure;
   starting: boolean;
   onRetry: () => void;
@@ -171,13 +177,13 @@ function DaemonFailureNotice({
 }) {
   return (
     <div className={noticeClass("attention", cn("p-3", className))} role="alert">
-      <p className="text-sm">{daemonFailureSentence(failure)}</p>
+      <p className="text-sm">{daemonFailureSentence(failure, copy)}</p>
       {failure.detail && (
         <pre className="mt-2 max-h-32 overflow-auto whitespace-pre-wrap break-words font-mono text-xs text-muted-foreground">
           {failure.detail}
         </pre>
       )}
-      <p className="mt-2 text-xs text-muted-foreground">These details were sent to xMatrix so we can fix this.</p>
+      <p className="mt-2 text-xs text-muted-foreground">{copy.failureReported}</p>
       <button
         type="button"
         disabled={starting}
@@ -185,7 +191,7 @@ function DaemonFailureNotice({
         className={actionClass({ variant: "primary", size: "md" }, "mt-3")}
       >
         {starting ? <AnimatedIcon icon={Loader2} className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
-        {starting ? "Trying again…" : "Try again"}
+        {starting ? copy.tryingAgain : copy.tryAgain}
       </button>
     </div>
   );
@@ -193,10 +199,12 @@ function DaemonFailureNotice({
 
 function CandidateRow({
   candidate,
+  copy,
   disabled,
   onBind,
 }: {
   candidate: SpaceAgentSetupCandidate;
+  copy: OnboardingCopy;
   disabled: boolean;
   onBind: () => void;
 }) {
@@ -217,7 +225,7 @@ function CandidateRow({
               <span className="font-black">{candidate.displayName}</span>
               {candidate.usedBefore && (
                 <span className="app-space-agent-used-label text-xs font-bold">
-                  used on this machine
+                  {copy.usedHere}
                 </span>
               )}
             </div>
@@ -226,7 +234,7 @@ function CandidateRow({
                 for, and this card is rendered inside one Space. The working
                 folder is chosen explicitly in the next step. */}
             <p className="mt-2 text-sm text-foreground">
-              You will choose the folder it works in when you send the first task.
+              {copy.chooseFolderLater}
             </p>
           </div>
         </div>
@@ -237,7 +245,7 @@ function CandidateRow({
           className={actionClass({ variant: "primary", size: "md" })}
         >
           <Check className="size-4" />
-          Enable
+          {copy.enable}
         </button>
       </div>
     </div>
@@ -245,9 +253,11 @@ function CandidateRow({
 }
 
 function NoRuntimePanel({
+  copy,
   hostLabel,
   onRefresh,
 }: {
+  copy: OnboardingCopy;
   hostLabel: string;
   onRefresh: () => void;
 }) {
@@ -255,19 +265,19 @@ function NoRuntimePanel({
     <>
       <SetupCardHeader
         icon={Terminal}
-        title={`No agent runtime found on ${hostLabel}`}
-        body="xMatrix launches an agent CLI that already lives on a machine — it does not ship one. Install one here, or point xMatrix at the machine you actually code on."
+        title={copy.noRuntimeTitle(hostLabel)}
+        body={copy.noRuntimeBody}
       />
-      <AgentInstallPicker className="mt-4" platform={localInstallPlatform()} />
+      <AgentInstallPicker className="mt-4" copy={copy} platform={localInstallPlatform()} />
       <button
         type="button"
         onClick={onRefresh}
         className={actionClass({ variant: "secondary", size: "md" }, "mt-4")}
       >
         <RefreshCw className="size-4" />
-        Check again
+        {copy.checkAgain}
       </button>
-      <div className="mt-6 text-xs text-muted-foreground"><RemoteMachineHint /></div>
+      <div className="mt-6 text-xs text-muted-foreground"><RemoteMachineHint copy={copy} /></div>
     </>
   );
 }
@@ -275,13 +285,13 @@ function NoRuntimePanel({
 /* The registration read failed. This screen deliberately says nothing about
    whether the Space has agents — that is exactly what is not known — and
    reports the one thing that is known instead. */
-function UnreachablePanel({ onRetry }: { onRetry: () => void }) {
+function UnreachablePanel({ copy, onRetry }: { copy: OnboardingCopy; onRetry: () => void }) {
   return (
     <>
       <SetupCardHeader
         icon={CloudOff}
-        title="Cannot reach xMatrix right now"
-        body="This Space's agents could not be loaded, so nothing here is up to date. Your agents and their work are unaffected — this is a connection problem, not a change to the Space."
+        title={copy.unreachableTitle}
+        body={copy.unreachableBody}
       />
       <button
         type="button"
@@ -289,7 +299,7 @@ function UnreachablePanel({ onRetry }: { onRetry: () => void }) {
         className={actionClass({ variant: "secondary", size: "md" }, "mt-4")}
       >
         <RefreshCw className="size-4" />
-        Try again
+        {copy.tryAgain}
       </button>
     </>
   );
@@ -299,9 +309,9 @@ function localInstallPlatform(): InstallPlatform {
   return typeof navigator === "undefined" ? "unix" : defaultInstallPlatform(navigator.userAgent);
 }
 
-function describeCandidates(candidates: SpaceAgentSetupCandidate[]): string {
+function describeCandidates(copy: OnboardingCopy, candidates: SpaceAgentSetupCandidate[]): string {
   const [first] = candidates;
-  if (!first) return "an agent";
+  if (!first) return copy.anAgent;
   if (candidates.length === 1) return first.displayName;
-  return `${first.displayName} and ${candidates.length - 1} more`;
+  return copy.andMore(first.displayName, candidates.length - 1);
 }

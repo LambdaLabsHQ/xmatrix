@@ -1,3 +1,4 @@
+import { ONBOARDING_COPY, type OnboardingCopy } from "@/lib/onboarding-copy";
 import type {
   DesktopAgentPresetDiscovery,
   DesktopDaemonFailure,
@@ -122,17 +123,9 @@ export function spaceAgentSetupState(
   return { kind: "ready-to-bind", candidates };
 }
 
-/* The App could not start its background service. Said once, as what it means
-   for the person; the CLI's own lines follow it for whoever reads them. */
-export function daemonFailureSentence(failure: DesktopDaemonFailure): string {
-  switch (failure.stage) {
-    case "cli_install":
-      return "xMatrix couldn't install its command-line tool on this computer, so agents can't start here yet.";
-    case "service_start":
-      return "This computer didn't let xMatrix start its background service, so agents can't start here yet.";
-    default:
-      return "xMatrix's background service stopped right after it started, so agents can't start here yet.";
-  }
+/* What a background-service failure means for the person (onboarding-copy.ts). */
+export function daemonFailureSentence(failure: DesktopDaemonFailure, copy: OnboardingCopy = ONBOARDING_COPY.en): string {
+  return copy.daemonFailure(failure.stage);
 }
 
 /* The failure to show: only while the daemon is not running. */

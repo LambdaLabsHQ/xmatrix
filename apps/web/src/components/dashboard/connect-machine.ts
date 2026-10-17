@@ -65,8 +65,3 @@ export function connectStep(status: SetupIntentStatus, waitingForMs: number): Co
   return harnesses.length > 0 ? { kind: "found", machineName, harnesses } : { kind: "none-installed", machineName };
 }
 
-/** "Claude Code", "Claude Code and Codex", "Claude Code, Codex and Gemini". */
-export function listNames(names: string[]): string {
-  if (names.length <= 1) return names[0] ?? "";
-  return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
-}

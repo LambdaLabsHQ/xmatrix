@@ -51,6 +51,13 @@ is how to connect one.
   only its step; the Web draws what the step shows from the facts (the setup
   command and its approval, the machine's agents, the Space's registrations),
   so the conversation reopened later shows what happened, never a stale command.
+- Language: the Web posts `{ "locale": "zh" | "en" }` from the person's saved
+  display locale for the Space, else the browser's first language; any `zh` tag
+  gets Chinese (`onboardingLocale`). The Hub writes the conversation name and
+  both steps in that language, and the Web draws the first ten minutes (the
+  steps, the three starters, Bring them in, empty Space and Agents, the download
+  card) from `apps/web/src/lib/onboarding-copy.ts`. The rest of the app is
+  English; a client that posts no body gets English.
 
 ## Sending the setup to a computer
 
