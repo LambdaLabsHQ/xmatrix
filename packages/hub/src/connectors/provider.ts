@@ -142,6 +142,12 @@ export interface ConnectorEvent {
   /** Bounded markdown posted to subscribed Channels. Untrusted content. */
   body: string;
   url?: string;
+  /**
+   * The provider object the event is about, for a provider whose one delivery
+   * serves several connections that may each read different things (Linear):
+   * each connection takes it only if its own grant reads this object.
+   */
+  subject?: { entity: string; id: string };
 }
 
 export type ConnectorDeliveryResult =

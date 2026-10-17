@@ -285,6 +285,20 @@ const LIVE_SOURCE_RELATION_SQL = `c.status='configured'
           AND ${channelCapabilityPredicate({ capability: "app_new_work", channelAlias: "channel",
             principalKindSql: "'user'", principalIdSql: "r.created_by" })}`;
 
+/** A Slack workspace connected here is already another Space's. */
+export const SLACK_WORKSPACE_TAKEN = "workspace_connected_elsewhere";
+
+/**
+ * Joins `connection` and `credential` to OAuth binding `binding` while the
+ * binding still holds its workspace: its credential version is current and
+ * its connection is not disconnected (a failed check keeps the hold).
+ */
+export const SLACK_WORKSPACE_HELD_SQL = (binding: string, connection: string, credential: string) =>
+  `${connection}.connection_id=${binding}.connection_id AND ${connection}.space_id=${binding}.space_id
+      AND ${connection}.provider_id=${binding}.provider_id AND ${connection}.status<>'disconnected'
+    JOIN data.app_connector_credentials ${credential} ON ${credential}.connection_id=${binding}.connection_id
+      AND ${credential}.space_id=${binding}.space_id AND ${credential}.version=${binding}.credential_version`;
+
 /** A connection `c` linked to GitHub App installation `$1`, by its one id or its list. */
 const GITHUB_INSTALLATION_LINKED_SQL = `(c.metadata_json->>'installationId'=$1 OR EXISTS (
             SELECT 1 FROM jsonb_array_elements_text(CASE
@@ -525,19 +539,23 @@ export class PostgresAppRepository {
         input.limit < 1 || input.limit > 100) throw new AppControlError("invalid_app_request", 400, "Invalid OAuth event route");
     return this.database.transaction({ requestId: text(input.requestId, "requestId", 200),
       operation: "app.oauth-event-connections" }, async (tx) => {
-      const rows = await tx.query<QueryResultRow>({ name: "app_oauth_event_connections_v1", text: `SELECT
-        i.connection_id,i.space_id FROM data.app_connector_oauth_installations i
-        JOIN data.app_connector_connections c ON c.connection_id=i.connection_id AND c.space_id=i.space_id
-          AND c.provider_id=i.provider_id AND c.status='configured'
-        JOIN data.app_connector_credentials k ON k.connection_id=i.connection_id AND k.space_id=i.space_id
-          AND k.version=i.credential_version
+      const rows = await tx.query<QueryResultRow>({ name: "app_oauth_event_connections_v2", text: `SELECT
+        i.connection_id,i.space_id,i.credential_version,i.grant_generation,c.status FROM data.app_connector_oauth_installations i
+        JOIN data.app_connector_connections c ON ${SLACK_WORKSPACE_HELD_SQL("i", "c", "k")}
         WHERE i.provider_id=$1 AND i.app_client_id=$2 AND i.installation_id=$3
           AND NOT EXISTS (SELECT 1 FROM data.space_deletions d WHERE d.space_id=i.space_id)
         ORDER BY i.connection_id LIMIT $4`, values: [providerId, appClientId, installationId, input.limit + 1],
       maxRows: input.limit + 1 });
       if (rows.length > input.limit) throw new AppControlError("too_many_installations", 503,
         "OAuth installation routing exceeds its bound", true);
-      return rows.map(row => ({ connectionId: String(row.connection_id), spaceId: String(row.space_id) }));
+      // A Slack workspace speaks for one Space (claimSlackWorkspace),
+      // held through a failed check until a disconnect. Two holding bindings
+      // predate that rule; which Space should read it is not known, so neither
+      // does until one disconnects. Only a configured connection is delivered to.
+      if (providerId === "slack" && rows.length > 1) return [];
+      return rows.filter(row => row.status === "configured").map(row => ({ connectionId: String(row.connection_id), spaceId: String(row.space_id),
+        credentialVersion: Number(row.credential_version),
+        grantGeneration: row.grant_generation === null ? null : String(row.grant_generation) }));
     });
   }
 
@@ -598,6 +616,53 @@ export class PostgresAppRepository {
       await tx.query({ name: "app_vercel_retirement_state_v1", text: `UPDATE data.app_connector_connections
         SET status='disconnected',version=version+1,updated_at=$2 WHERE connection_id=ANY($1::text[])`, values: [ids, at], maxRows: 0 });
       await tx.query({ name: "app_vercel_retirement_binding_v1", text: `DELETE FROM
+        data.app_connector_oauth_installations WHERE connection_id=ANY($1::text[])`, values: [ids], maxRows: 0 });
+      return rows.length;
+    });
+  }
+
+  /**
+   * Only a verified Slack delivery that the app was uninstalled from the
+   * workspace, or that its bot token was revoked, retires that workspace's
+   * bindings made before Slack's event: they disconnect, keeping encrypted
+   * credentials until an administrator reconnects, and the workspace may then
+   * be connected again. A Connect after the event is a newer grant, untouched
+   * by a delayed or replayed delivery of it.
+   */
+  async retireSlackWorkspace(input: { requestId: string; appClientId: string; installationId: string; at: string;
+    eventAt: string; limit: number; uninstalled: boolean }): Promise<number> {
+    const appClientId = text(input.appClientId, "appClientId", 256);
+    const installationId = text(input.installationId, "installationId", 128);
+    const at = iso(input.at);
+    const eventAt = iso(input.eventAt);
+    if (!/^[A-Za-z0-9_-]{1,128}$/u.test(installationId) || !Number.isSafeInteger(input.limit) || input.limit < 1 ||
+        input.limit > 100) throw new AppControlError("invalid_app_request", 400, "Invalid Slack retirement");
+    return this.database.transaction({ requestId: text(input.requestId, "requestId", 200),
+      operation: "app.slack-workspace-retire" }, async tx => {
+      await tx.query({ name: "slack_workspace_lock_v1", text: "SELECT pg_advisory_xact_lock(hashtextextended($1,0))",
+        values: [`slack:${appClientId}:${installationId}`], maxRows: 1 });
+      // Only an uninstall takes the bot out of the workspace's channels, so only
+      // it frees the workspace for another Space (claimSlackWorkspace); a
+      // revoked token disconnects its bindings and keeps the claim.
+      if (input.uninstalled) {
+        await tx.query({ name: "app_slack_claim_release_v1", text: `DELETE FROM data.app_slack_workspace_claims
+          WHERE app_client_id=$1 AND installation_id=$2 AND claimed_at<$3`, values: [appClientId, installationId, eventAt], maxRows: 0 });
+      }
+      const rows = await tx.query<QueryResultRow>({ name: "app_slack_retirement_lock_v1", text: `SELECT i.connection_id
+        FROM data.app_connector_oauth_installations i
+        JOIN data.app_connector_connections c ON c.connection_id=i.connection_id AND c.space_id=i.space_id
+          AND c.provider_id=i.provider_id
+        WHERE i.provider_id='slack' AND i.app_client_id=$1 AND i.installation_id=$2 AND i.updated_at<$4
+        ORDER BY i.connection_id LIMIT $3 FOR UPDATE OF c,i`,
+      values: [appClientId, installationId, input.limit + 1, eventAt], maxRows: input.limit + 1 });
+      if (rows.length > input.limit) throw new AppControlError("too_many_installations", 503,
+        "Slack retirement exceeds its bound", true);
+      if (!rows.length) return 0;
+      const ids = rows.map(row => String(row.connection_id));
+      await tx.query({ name: "app_slack_retirement_state_v1", text: `UPDATE data.app_connector_connections
+        SET status='disconnected',version=version+1,updated_at=$2 WHERE connection_id=ANY($1::text[])
+          AND status<>'disconnected'`, values: [ids, at], maxRows: 0 });
+      await tx.query({ name: "app_slack_retirement_binding_v1", text: `DELETE FROM
         data.app_connector_oauth_installations WHERE connection_id=ANY($1::text[])`, values: [ids], maxRows: 0 });
       return rows.length;
     });
