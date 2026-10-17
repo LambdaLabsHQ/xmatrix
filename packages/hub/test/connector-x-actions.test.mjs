@@ -51,6 +51,9 @@ test("X account listing returns only bounded metadata without credentials or gra
   f.connect([]);
   assert.match((await X_ACTIONS.accounts.execute(f.context, {})).summary, /no connected X accounts/u);
   f.connect(Array.from({ length: 5 }, (_, i) => ({ id: String(i + 1), username: `account${i}`, generation: "g" })));
+  assert.match((await X_ACTIONS.accounts.execute(f.context, {})).summary, /@account0 \(1\)[\s\S]*@account4 \(5\)/u,
+    "a fifth account is listed, not treated as inconsistent");
+  f.connect([{ id: "1", username: "bad name", generation: "g" }]);
   await assert.rejects(X_ACTIONS.accounts.execute(f.context, {}), /inconsistent/u);
   await assert.rejects(X_ACTIONS.accounts.execute({ credentials: {} }, {}), /Connect an X account/u);
 });

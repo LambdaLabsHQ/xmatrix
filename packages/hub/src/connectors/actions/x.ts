@@ -19,7 +19,7 @@ function capability(context: ConnectorActionContext): XCapability {
 
 async function accounts(context: ConnectorActionContext): Promise<XAccount[]> {
   const values = await capability(context).accounts();
-  if (values.length > 4 || values.some(value => !ID.test(value.id) || !USERNAME.test(value.username) ||
+  if (values.some(value => !ID.test(value.id) || !USERNAME.test(value.username) ||
       !value.generation || value.generation.length > 200)) {
     throw new ProviderRequestError(409, "X account connections are inconsistent; reconnect the account");
   }
