@@ -9,7 +9,7 @@ shared user grant.
 | --- | --- |
 | OAuth start | Current owner/admin membership in the requested Space, before signed state or a Composio connect request |
 | OAuth completion | Signed provider/Space/initiator state, the same signed-in Human, and current owner/admin membership before exchange; the write rechecks membership |
-| Connector execution | The authorized Channel determines its Space connection; credentials resolve by that connection, without an owner/global fallback. Acting with a connection (actions, approval requests, subscriptions) needs owner/admin/member, as Run secret reads do; a viewer or open-project participant only reads |
+| Connector execution | The authorized Channel determines its Space connection; credentials resolve by that connection, without an owner/global fallback. Acting with a connection (actions, approval requests, subscriptions, and reads of the provider's catalog such as GitHub launch targets, completion and Jev's repository list) needs owner/admin/member, as Run secret reads do; a viewer or open-project participant only reads the connection's configuration. A subscription delivers only while its creator still holds that role |
 | Composio | A connect attempt uses `xmatrix:<space>:<nonce>`; calls name the saved connected account |
 | GitHub installation link | Connect names only installations the person administers on GitHub: their own account's, or an organization's whose every covered repository they administer |
 | GitHub repository token | Current daemons bind the live admitted Run, Machine, execution and repository; the Channel determines the Space's linked installations; the Machine owner must be owner/admin/member there |

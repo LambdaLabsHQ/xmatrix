@@ -20,7 +20,7 @@ import { listOwnerMachineDaemons, machineDaemonCommand, machineDatabase, machine
 import { runtimeRepository, updateAgentLaunch } from "./runtime";
 import { controlErrorResponse } from "./postgres-authority-http";
 import { githubRepositoryTokenRunRefusal, legacyUnboundRepositoryTokenEnabled } from "./github-repository-token-run-binding";
-import { adoptLegacyMachineIds, AppControlError } from "@xmatrix/db";
+import { adoptLegacyMachineIds } from "@xmatrix/db";
 import { hasBetterAuthConfig, mockAuthUserForToken, readBearerToken, verifyAuthToken, type AuthSession, type AuthUser } from "./auth";
 import { betterAuthHandlerErrorResponse, betterAuthRouteErrorStatus, createAuth, createBetterAuthSessionForUser, refreshBetterAuthSession, sendBetterAuthLoginOtp, verifyBetterAuthEmailOtp } from "./better-auth";
 import { EMAIL_DELIVERY_CONFIGURATION_ERROR, EmailDeliveryConfigurationError, loginEmailErrorLog } from "./email-delivery";
@@ -39,7 +39,7 @@ import { handoffGitHubConnectAuthorization, githubConnectReturnUrl, isGitHubConn
 import { registerMachineExecutionRoutes } from "./index-routes-machine-executions";
 import { registerReplyRecoveryRoutes } from "./index-routes-reply-recovery";
 import { wakeAgentLaunchCoordinator } from "./agent-launch-coordinator-wake";
-import { getAppConnection } from "./apps";
+import { connectionUseRefused, getAppConnection } from "./apps";
 import { getChannel, getSpace } from "./spaces";
 
 /** Records each successful-session metric, then hands the client its session and endpoints. */
@@ -646,7 +646,7 @@ export function registerIndexRoutesAuthSpace(app: Hono<{ Bindings: Env }>): void
     const usable = await getAppConnection(c.env, { connectionId: `${spaceId}:github`,
       actorUserId: principal.ownerUserId, channelId, use: true, allowMissing: true })
       .catch((error: unknown) => {
-        if (error instanceof AppControlError && error.code === "channel_not_found") return undefined;
+        if (connectionUseRefused(error)) return undefined;
         throw error;
       }) as { connection: { status?: unknown } | null } | undefined;
     if (!usable) {

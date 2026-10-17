@@ -4,7 +4,7 @@ import { deliveryProven, GITHUB_SIGNATURE } from "./connectors/delivery-proof";
 import type { Env } from "./types";
 import { deploymentPinnedSpace, finishScheduledSpaceDeletion } from "./space-deletion-effects";
 import { checkAppConnection } from "./app-connection-check";
-import { appCommand, findAppConnection, listAppConnections, listAppExecutions, upsertAppConnection } from "./apps";
+import { appCommand, CONNECTED_APPS_NEED_MEMBER, connectionUseRefused, findAppConnection, listAppConnections, listAppExecutions, upsertAppConnection } from "./apps";
 import { schedulerRepository } from "./automations";
 import { changeMembership, createSpaceInvite, deleteSpace, getChannel, listSpaceDeletions, restoreSpace } from "./spaces";
 import { SpaceControlError } from "@xmatrix/db";
@@ -153,7 +153,10 @@ export function registerIndexRoutesAuthSpaceManagement(app: Hono<{ Bindings: Env
     }
     const spaceId = c.req.param("spaceId");
     const providerId = c.req.param("providerId").trim().toLowerCase();
-    const listed = await listAppConnections(c.env, { spaceId, actorUserId: authUser.id });
+    // Completion names the provider's private catalog with the Space's credentials: a member's to read.
+    const listed = await listAppConnections(c.env, { spaceId, actorUserId: authUser.id, use: true })
+      .catch((error: unknown) => { if (connectionUseRefused(error)) return undefined; throw error; });
+    if (!listed) return c.json({ error: CONNECTED_APPS_NEED_MEMBER }, 403);
     const connection = (listed as unknown as AppConnectorConnectionView[])
       .find((candidate) => candidate.providerId === providerId);
     if (!connection) return c.json({ error: "App connection not found" }, 404);
