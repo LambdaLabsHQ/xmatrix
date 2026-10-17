@@ -2061,20 +2061,19 @@ function kickstartMacDaemonLaunchAgent(options: { force?: boolean } = {}): Promi
 function managedDaemonLogTail(since: number): string {
   if (process.platform !== "darwin") return "";
   const logPath = path.join(app.getPath("home"), "Library", "Logs", "xmatrix-daemon.err.log");
+  let handle: number | undefined;
   try {
-    const stat = fs.statSync(logPath);
+    handle = fs.openSync(logPath, "r");
+    const stat = fs.fstatSync(handle);
     if (stat.mtimeMs < since - 1_000) return "";
     const length = Math.min(stat.size, DAEMON_OUTPUT_MAX_CHARS);
-    const handle = fs.openSync(logPath, "r");
-    try {
-      const buffer = Buffer.alloc(length);
-      fs.readSync(handle, buffer, 0, length, stat.size - length);
-      return buffer.toString("utf8");
-    } finally {
-      fs.closeSync(handle);
-    }
+    const buffer = Buffer.alloc(length);
+    const read = fs.readSync(handle, buffer, 0, length, stat.size - length);
+    return buffer.subarray(0, read).toString("utf8");
   } catch {
     return "";
+  } finally {
+    if (handle !== undefined) fs.closeSync(handle);
   }
 }
 
