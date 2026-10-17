@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { DatabaseSync } from "node:sqlite";
 
 import { APP_CONNECTOR_PROVIDER_MANIFESTS } from "../../protocol/src/app-connector-manifests.ts";
 import { parseActionCommand } from "../src/connectors/action-parse.ts";
@@ -369,8 +370,29 @@ test("only expiring login grants are renewed, and a refused renewal keeps that l
 });
 
 test("D1 queries run one read-only statement and show bounded rows", async () => {
+  for (const sql of [
+    "WITH /* ' */ c AS (SELECT 1) DELETE FROM victims RETURNING * -- '",
+    'WITH /* " */ c AS (SELECT 1) DELETE FROM victims RETURNING * -- "',
+    "WITH -- ' \n c AS (SELECT 1) DELETE FROM victims RETURNING * -- '",
+    "SELECT 1 /* ' */; DELETE FROM victims; -- '",
+  ]) {
+    const database = new DatabaseSync(":memory:");
+    try {
+      database.exec("CREATE TABLE victims(id INTEGER); INSERT INTO victims VALUES (1)");
+      database.exec(sql);
+      assert.equal(database.prepare("SELECT count(*) AS n FROM victims").get().n, 0,
+        "the rejected input really is a valid SQLite mutation");
+    } finally { database.close(); }
+    assert.equal(typeof CLOUDFLARE_ACTIONS.query_database.parse({ target: "fixture", text: sql }), "string",
+      `a quote inside a comment cannot conceal a mutation: ${sql}`);
+  }
+  for (const sql of [
+    "SELECT '/* not a comment */', '-- still a string', 'it''s DELETE'",
+    'SELECT "a""--b", `a``/*b`, [a--b] FROM victims',
+    "/* leading ' quote */ WITH c AS (SELECT 1) SELECT * FROM c; -- trailing ' quote",
+  ]) assert.equal(readOnlySql(sql), undefined, sql);
   for (const sql of ["DELETE FROM users", "SELECT 1; DROP TABLE users", "WITH x AS (SELECT 1) DELETE FROM users",
-    "PRAGMA table_info(users)", "SELECT 1 /* ; */; UPDATE users SET a=1", "SELECT 'unterminated"]) {
+    "PRAGMA table_info(users)", "SELECT 1 /* ; */; UPDATE users SET a=1", "SELECT 'unterminated", "SELECT 1 /* unterminated"]) {
     assert.equal(typeof readOnlySql(sql), "string", sql);
   }
   assert.equal(readOnlySql("SELECT 'DELETE; DROP' AS note, deleted_at FROM \"update\" -- ; DROP\n;"), undefined,

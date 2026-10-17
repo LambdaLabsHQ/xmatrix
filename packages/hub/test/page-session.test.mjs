@@ -1265,6 +1265,23 @@ async function annWithStreamingWriter(ports = {}) {
   return { h, ann, writer };
 }
 
+test("a streamed Agent edit survives a restart before its first commit with its own authorship", async () => {
+  const { h, writer } = await annWithStreamingWriter();
+  writer.write(1, '⟦after "none"⟧\nA durable first word.');
+  writer.done(1);
+  const written = h.session.markdown();
+  assert.match(written, /A durable first word\./u);
+  assert.equal(h.commits.length, 0);
+
+  const resumed = new PageSession(h.ports);
+  cleanups.push(() => resumed.destroy());
+  await resumed.ensureLoaded(human("ann"), h.persisted.at(-1));
+  assert.equal(resumed.markdown(), written, "visible Agent words are pending edits, not abandoned presentation");
+  await resumed.commit();
+  assert.equal(h.commits.at(-1).principal, agent.id);
+  assert.deepEqual(h.commits.at(-1).conversationIds, ["conv-1"]);
+});
+
 test("an Agent writing from its conversation hears what did not reach the page, and why", async () => {
   const { ann, writer } = await annWithStreamingWriter();
   writer.write(1, "⟦after \"no such words\"⟧\nlost⟦end⟧⟦after \"In progress\"⟧\nNext: review\n");
