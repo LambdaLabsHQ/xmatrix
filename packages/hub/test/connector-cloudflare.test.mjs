@@ -334,6 +334,16 @@ test("each Connect adds a login; the same login connecting again replaces itself
   assert.throws(() => parseCloudflareLogins("[{\"id\":\"x\"}]"), /unreadable/u, "a malformed list fails closed");
 });
 
+test("only a list that exceeds the stored bound is refused", () => {
+  const bulky = { accessToken: "a".repeat(2048), refreshToken: "r".repeat(2048), expiresAt: 1, actorUserId: "user-1" };
+  assert.throws(() => {
+    let next = {};
+    for (let n = 0; n < 80; n += 1) {
+      next = addCloudflareLogin(next, { ...bulky, accounts: [{ id: n.toString(16).padStart(32, "a"), name: "B" }] });
+    }
+  }, /exceed the 256 KiB this connection stores; remove one first/u);
+});
+
 test("only expiring login grants are renewed, and a refused renewal keeps that login's grant", async () => {
   const stale = { ...storedLogin(LOGIN_A, "token-a", [{ id: ACCOUNT, name: "Acme" }]), expiresAt: Date.now() - 1 };
   const fresh = storedLogin(LOGIN_B, "token-b", [{ id: OTHER, name: "Side" }]);
