@@ -100,6 +100,7 @@
 		12F7A2002C00000100000001 /* XMatrixApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12F7A1002C00000100000001 /* XMatrixApp.swift */; };
 		12F7A2012C00000100000001 /* WebContainerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12F7A1012C00000100000001 /* WebContainerView.swift */; };
 		12F7A2022C00000100000001 /* NativeBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12F7A1022C00000100000001 /* NativeBridge.swift */; };
+		A5516E0B2C00000100000001 /* AppSignIn.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5516E0A2C00000100000001 /* AppSignIn.swift */; };
 		12F7A2032C00000100000001 /* AppConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12F7A1032C00000100000001 /* AppConfiguration.swift */; };
 		12F7A2042C00000100000001 /* AppRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12F7A1042C00000100000001 /* AppRouter.swift */; };
 		12F7A2072C00000100000001 /* PushRegistration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12F7A1082C00000100000001 /* PushRegistration.swift */; };
@@ -113,6 +114,7 @@
 		12F7A1002C00000100000001 /* XMatrixApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XMatrixApp.swift; sourceTree = "<group>"; };
 		12F7A1012C00000100000001 /* WebContainerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebContainerView.swift; sourceTree = "<group>"; };
 		12F7A1022C00000100000001 /* NativeBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeBridge.swift; sourceTree = "<group>"; };
+		A5516E0A2C00000100000001 /* AppSignIn.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSignIn.swift; sourceTree = "<group>"; };
 		12F7A1032C00000100000001 /* AppConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppConfiguration.swift; sourceTree = "<group>"; };
 		12F7A1042C00000100000001 /* AppRouter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppRouter.swift; sourceTree = "<group>"; };
 		12F7A1082C00000100000001 /* PushRegistration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PushRegistration.swift; sourceTree = "<group>"; };
@@ -149,6 +151,7 @@
 				12F7A1002C00000100000001 /* XMatrixApp.swift */,
 				12F7A1012C00000100000001 /* WebContainerView.swift */,
 				12F7A1022C00000100000001 /* NativeBridge.swift */,
+				A5516E0A2C00000100000001 /* AppSignIn.swift */,
 				04F893235851327B3AD47005 /* AppleSubscriptions.swift */,
 				12F7A1032C00000100000001 /* AppConfiguration.swift */,
 				12F7A1042C00000100000001 /* AppRouter.swift */,
@@ -243,6 +246,7 @@
 				12F7A2002C00000100000001 /* XMatrixApp.swift in Sources */,
 				12F7A2012C00000100000001 /* WebContainerView.swift in Sources */,
 				12F7A2022C00000100000001 /* NativeBridge.swift in Sources */,
+				A5516E0B2C00000100000001 /* AppSignIn.swift in Sources */,
 				CF310D587854D1B7C926F1D5 /* AppleSubscriptions.swift in Sources */,
 				12F7A2032C00000100000001 /* AppConfiguration.swift in Sources */,
 				12F7A2042C00000100000001 /* AppRouter.swift in Sources */,

@@ -9,6 +9,7 @@ import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Build;
+import androidx.browser.customtabs.CustomTabsIntent;
 import androidx.core.app.NotificationCompat;
 import java.util.function.Consumer;
 import org.json.JSONObject;
@@ -16,6 +17,8 @@ import org.json.JSONObject;
 public final class NativeBridge {
   private static final String CHANNEL_ID = "xmatrix-default";
   private final MainActivity activity;
+  /** The page waiting for an in-place sign-in to return; one at a time. */
+  private Consumer<String> pendingSignIn;
 
   NativeBridge(MainActivity activity) {
     this.activity = activity;
@@ -72,6 +75,61 @@ public final class NativeBridge {
         reply.accept(failure(error.getMessage()));
       }
     });
+  }
+
+  /**
+   * Opens the Hub's sign-in page in a browser tab over the app, with the
+   * app's own address to return to. Answered when that address is opened
+   * (signInReturned) or the tab is closed without it (signInClosed).
+   */
+  void authorizeInBrowser(JSONObject payload, Consumer<String> reply) {
+    Uri start = Uri.parse(payload.optString("url", ""));
+    String redirectParam = payload.optString("redirectParam", "");
+    if (!AppConfiguration.isHubSignInStart(start) || !redirectParam.matches("[a-z_]{1,32}")) {
+      reply.accept(failure("Not an xMatrix sign-in page"));
+      return;
+    }
+    Uri.Builder page = start.buildUpon().clearQuery();
+    for (String name : start.getQueryParameterNames()) {
+      if (name.equals(redirectParam)) continue;
+      for (String value : start.getQueryParameters(name)) page.appendQueryParameter(name, value);
+    }
+    Uri url = page.appendQueryParameter(redirectParam, AppConfiguration.SIGN_IN_CALLBACK).build();
+    activity.runOnUiThread(() -> {
+      if (pendingSignIn != null) pendingSignIn.accept(failure("AbortError: A newer sign-in replaced this one"));
+      pendingSignIn = reply;
+      try {
+        new CustomTabsIntent.Builder().setShowTitle(true).build().launchUrl(activity, url);
+      } catch (Exception noCustomTabs) {
+        if (!activity.openExternal(url)) {
+          pendingSignIn = null;
+          reply.accept(failure("No browser can open the sign-in page"));
+        }
+      }
+    });
+  }
+
+  /** The sign-in tab returned to the app; its address carries the code or the reason. */
+  void signInReturned(Uri callback) {
+    Consumer<String> reply = pendingSignIn;
+    pendingSignIn = null;
+    if (reply == null) return;
+    try {
+      reply.accept(success(callback.toString()));
+    } catch (Exception error) {
+      reply.accept(failure(error.getMessage()));
+    }
+  }
+
+  /** The app is in front again without the sign-in returning: the tab was closed. */
+  void signInClosed() {
+    Consumer<String> reply = pendingSignIn;
+    pendingSignIn = null;
+    if (reply != null) reply.accept(failure("AbortError: The sign-in was closed"));
+  }
+
+  boolean signInPending() {
+    return pendingSignIn != null;
   }
 
   private JSONObject contextPayload() throws Exception {

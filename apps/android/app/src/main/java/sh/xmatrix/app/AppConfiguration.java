@@ -132,6 +132,26 @@ final class AppConfiguration {
     return builder.build().toString();
   }
 
+  /** The address an in-place sign-in returns the app to, with its code. */
+  static final String SIGN_IN_CALLBACK = "xmatrix://auth";
+
+  static boolean isSignInCallback(Uri uri) {
+    return uri != null && APP_SCHEME.equalsIgnoreCase(uri.getScheme()) && "auth".equalsIgnoreCase(uri.getHost());
+  }
+
+  /** The Hub's sign-in start page: the only page the app opens for an in-place sign-in. */
+  static boolean isHubSignInStart(Uri uri) {
+    return uri != null && isHubSignInStart(uri.getScheme(), uri.getHost(), uri.getUserInfo(), uri.getPath());
+  }
+
+  static boolean isHubSignInStart(String scheme, String host, String userInfo, String path) {
+    return host != null
+      && "https".equalsIgnoreCase(scheme)
+      && userInfo == null
+      && (host.equalsIgnoreCase(WEB_HOST) || host.toLowerCase(java.util.Locale.ROOT).endsWith("." + WEB_HOST))
+      && "/api/auth/app/start".equals(path);
+  }
+
   static boolean isNativeLoginResume(Uri uri) {
     return uri != null && isNativeLoginResume(
       uri.getScheme(),
