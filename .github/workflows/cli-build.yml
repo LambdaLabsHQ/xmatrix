@@ -12,9 +12,9 @@ on:
 
 # Builds and signs every CLI binary, and each build machine uploads its own
 # binary straight into the release as a run-attempt part. Nothing here is
-# reachable: client-publish.yml seals the release and moves the stable channel
+# reachable: client-publish.yml seals the release and moves the dev channel
 # only after the train's client-readiness gate, so the builds may run while Hub
-# and Web are still deploying.
+# and Web are still deploying. Stable waits for Release Promote.
 concurrency:
   group: cli-build-${{ github.ref }}
   cancel-in-progress: false

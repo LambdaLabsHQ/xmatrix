@@ -567,7 +567,9 @@ jobs:
                 ...(receipt.hubUrl ? [["Hub", receipt.hubUrl]] : []),
                 ...(receipt.webUrl ? [["Web", receipt.webUrl]] : []),
                 ...receipt.components.filter((component) => !["hub", "web"].includes(component))
-                  .map((component) => [component, "published"]),
+                  .map((component) => [component, component === "cli"
+                    ? "published to dev; stable moves with Release Promote"
+                    : "published"]),
                 ["SHA", receipt.deploySha],
               ])
               .write();

@@ -3,7 +3,7 @@ name: Desktop Release
 on:
   workflow_call:
 
-# Desktop publishes only the stable channel from Production Release. The macOS
+# Desktop publishes the dev and stable channels from Production Release. The macOS
 # and Windows build machines upload their signed files straight into the
 # release as run-attempt parts; client-publish.yml seals it and moves the
 # channel without transferring any artifact again.
@@ -815,4 +815,7 @@ jobs:
       component: desktop
       tag: ${{ needs.plan.outputs.tag }}
       parts: macos,windows
+      # Installed Apps update from stable and new people download it: the
+      # train moves it, as it moves dev. Nothing promotes it later.
+      channels: dev,stable
     secrets: inherit
