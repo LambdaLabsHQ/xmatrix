@@ -1,3 +1,4 @@
+import { appCredentialValueLimit } from "@xmatrix/db";
 import { utf8ByteLength } from "@xmatrix/protocol";
 import type { Env } from "../types";
 import { connectorCredentialRepository } from "./credentials";
@@ -30,11 +31,9 @@ export interface CloudflareLoginView {
   connectedAt: string;
 }
 
-export const MAX_CLOUDFLARE_LOGINS = 5;
-/* The snapshot is a label, not authority; it stays small so five logins fit one credential value. */
-const SNAPSHOT_ACCOUNTS = 6;
-const SNAPSHOT_NAME = 48;
-const MAX_VALUE_BYTES = 8 * 1024;
+/* Logins are not counted: the list is bounded only by the size the platform stores for it. */
+const MAX_VALUE_BYTES = appCredentialValueLimit("cloudflare", "logins");
+const ACCOUNT_NAME = 200;
 const UUID = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/u;
 const ACCOUNT = /^[a-f0-9]{32}$/u;
 const TOKEN = /^[\x21-\x7e]{1,2048}$/u;
@@ -43,7 +42,7 @@ const INVALID = "the stored Cloudflare logins are unreadable; reconnect Cloudfla
 
 function account(value: unknown): CloudflareAccountRef | undefined {
   const { id, name } = (value ?? {}) as Record<string, unknown>;
-  if (typeof id !== "string" || !ACCOUNT.test(id) || typeof name !== "string" || name.length > SNAPSHOT_NAME) return undefined;
+  if (typeof id !== "string" || !ACCOUNT.test(id) || typeof name !== "string" || name.length > ACCOUNT_NAME) return undefined;
   return { id, name };
 }
 
@@ -52,7 +51,7 @@ export function parseCloudflareLogins(value: string | undefined): CloudflareLogi
   if (!value) return [];
   let parsed: unknown;
   try { parsed = JSON.parse(value); } catch { parsed = undefined; }
-  if (!Array.isArray(parsed) || parsed.length > MAX_CLOUDFLARE_LOGINS) throw new ProviderRequestError(502, INVALID);
+  if (!Array.isArray(parsed)) throw new ProviderRequestError(502, INVALID);
   const seen = new Set<string>();
   return parsed.map((entry: unknown) => {
     const login = (entry ?? {}) as Record<string, unknown>;
@@ -61,7 +60,7 @@ export function parseCloudflareLogins(value: string | undefined): CloudflareLogi
         typeof login.accessToken !== "string" || !TOKEN.test(login.accessToken) ||
         typeof login.refreshToken !== "string" || !TOKEN.test(login.refreshToken) ||
         !Number.isSafeInteger(login.expiresAt) || Number(login.expiresAt) <= 0 ||
-        !Array.isArray(login.accounts) || login.accounts.length > SNAPSHOT_ACCOUNTS || accounts.some((item) => !item) ||
+        !Array.isArray(login.accounts) || accounts.some((item) => !item) ||
         typeof login.connectedBy !== "string" || !ACTOR.test(login.connectedBy) ||
         typeof login.connectedAt !== "string" || Number.isNaN(Date.parse(login.connectedAt))) {
       throw new ProviderRequestError(502, INVALID);
@@ -79,9 +78,9 @@ export function serializeCloudflareLogins(logins: readonly CloudflareLogin[]): s
   const value = JSON.stringify(logins.map((login) => ({ id: login.id, accessToken: login.accessToken,
     refreshToken: login.refreshToken, expiresAt: login.expiresAt, connectedBy: login.connectedBy,
     connectedAt: login.connectedAt,
-    accounts: login.accounts.slice(0, SNAPSHOT_ACCOUNTS).map(({ id, name }) => ({ id, name: name.slice(0, SNAPSHOT_NAME) })) })));
+    accounts: login.accounts.map(({ id, name }) => ({ id, name: name.slice(0, ACCOUNT_NAME) })) })));
   if (utf8ByteLength(value) > MAX_VALUE_BYTES) {
-    throw new ProviderRequestError(409, "the Cloudflare logins no longer fit the connection; remove one first");
+    throw new ProviderRequestError(409, `the Cloudflare logins exceed the ${MAX_VALUE_BYTES / 1024} KiB this connection stores; remove one first`);
   }
   parseCloudflareLogins(value);
   return value;
@@ -113,13 +112,10 @@ export function addCloudflareLogin(stored: Readonly<Record<string, string>>, gra
   const current = parseCloudflareLogins(stored.logins);
   const legacy = stored.oauthToken && stored.oauthRefreshToken ? [{ id: crypto.randomUUID(), accessToken: stored.oauthToken,
     refreshToken: stored.oauthRefreshToken, expiresAt: Number(stored.oauthExpiresAt) || 1,
-    accounts: (grant.legacyAccounts ?? []).slice(0, SNAPSHOT_ACCOUNTS), connectedBy: "unknown", connectedAt: at }] : [];
+    accounts: grant.legacyAccounts ?? [], connectedBy: "unknown", connectedAt: at }] : [];
   const login: CloudflareLogin = { id: crypto.randomUUID(), accessToken: grant.accessToken, refreshToken: grant.refreshToken,
-    expiresAt: grant.expiresAt, accounts: grant.accounts.slice(0, SNAPSHOT_ACCOUNTS), connectedBy: grant.actorUserId, connectedAt: at };
+    expiresAt: grant.expiresAt, accounts: grant.accounts, connectedBy: grant.actorUserId, connectedAt: at };
   const kept = [...current, ...legacy].filter((item) => !sameAccounts(item.accounts, login.accounts));
-  if (kept.length >= MAX_CLOUDFLARE_LOGINS) {
-    throw new ProviderRequestError(409, `a Space connects at most ${MAX_CLOUDFLARE_LOGINS} Cloudflare logins; remove one first`);
-  }
   const first = current.length === 0 && legacy.length === 0;
   return {
     logins: serializeCloudflareLogins([...kept, login]),

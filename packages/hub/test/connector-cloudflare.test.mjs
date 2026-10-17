@@ -387,7 +387,7 @@ test("D1 queries run one read-only statement and show bounded rows", async () =>
   assert.doesNotMatch(listed.value.summary, /tables/u, "Cloudflare's list reports 0 tables for every database");
 
   const original = globalThis.fetch;
-  globalThis.fetch = async (url) => String(url).endsWith("/accounts?per_page=50")
+  globalThis.fetch = async (url) => new URL(String(url)).pathname.endsWith("/accounts")
     ? Response.json({ success: true, result: [{ id: ACCOUNT, name: "Acme" }] })
     : Response.json({ success: false, errors: [{ code: 10000, message: "Authentication error" }] });
   try {
@@ -397,4 +397,29 @@ test("D1 queries run one read-only statement and show bounded rows", async () =>
     globalThis.fetch = original;
   }
   assert.equal(CLOUDFLARE_ACTIONS.query_database.effect, "read");
+});
+
+test("logins are not counted, and every page of accounts is read", async () => {
+  let stored = {};
+  for (let index = 0; index < 12; index++) {
+    const id = index.toString(16).padStart(32, "0");
+    stored = { ...stored, ...addCloudflareLogin(stored, { accessToken: `t${index}`, refreshToken: `r${index}`, expiresAt: 1,
+      accounts: [{ id, name: `Account ${index}` }], actorUserId: "user-1" }) };
+  }
+  assert.equal(parseCloudflareLogins(stored.logins).length, 12, "a Space adds as many logins as it has Cloudflare users");
+
+  const page = (from, count) => Array.from({ length: count }, (_, index) =>
+    ({ id: (from + index).toString(16).padStart(32, "a"), name: `A${from + index}` }));
+  const original = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    const number = Number(new URL(String(url)).searchParams.get("page"));
+    return Response.json({ success: true, result: number === 1 ? page(0, 50) : page(50, 3),
+      result_info: { page: number, total_pages: 2 } });
+  };
+  try {
+    const { value } = { value: await CLOUDFLARE_ACTIONS.list_accounts.execute({ credentials: { oauthToken: "t" } }, {}) };
+    assert.match(value.summary, /^53 Cloudflare accounts reachable/u, "accounts past the first page are reachable");
+  } finally {
+    globalThis.fetch = original;
+  }
 });

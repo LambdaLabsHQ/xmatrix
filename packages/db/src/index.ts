@@ -142,6 +142,7 @@ export {
 } from "./app-action-policy-control.js";
 export {
   PostgresAppCredentialRepository,
+  appCredentialValueLimit,
   type ResolvedAppCredentials,
   type AppOAuthInstallation,
 } from "./app-credential-control.js";
