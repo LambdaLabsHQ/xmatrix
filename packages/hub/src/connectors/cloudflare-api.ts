@@ -406,8 +406,8 @@ export const CLOUDFLARE_ACTIONS: Record<string, ConnectorAction> = {
       const target = await cloudflareTarget(credentials, input.account);
       const listed = await cloudflare(target.token, `accounts/${target.account}/d1/database?per_page=100`).catch(d1Refusal);
       const databases = (Array.isArray(listed) ? listed : []).map(record);
+      /* The list endpoint reports num_tables as 0 for every database, so only the size is shown. */
       const lines = databases.map((database) => `${oneLine(text(database.name), 64)}  ${text(database.uuid)}` +
-        `${Number.isFinite(Number(database.num_tables)) ? `  ${Number(database.num_tables)} tables` : ""}` +
         `${Number(database.file_size) > 0 ? `  ${(Number(database.file_size) / 1_048_576).toFixed(1)} MiB` : ""}`);
       return { summary: `${oneLine(target.name, 80)}: ${databases.length} D1 databases` +
         (lines.length ? `\n${quoteRetrievedText(lines.join("\n"))}` : ""),
