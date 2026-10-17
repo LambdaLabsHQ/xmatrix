@@ -49,6 +49,15 @@ bootstrap isolated PostgreSQL tools, Web uses the existing browser fixtures,
 and native tests use the pinned toolchains. Signing and production publication
 remain governed by Production Release Intent and its immutable release train.
 
+The shared Node setup bootstraps pinned PNPM with at most three npm install
+attempts for recognized connection, timeout, DNS and transient HTTP errors.
+Each registry request has a 60-second timeout; npm's nested retries are disabled
+and the outer retries wait two and four seconds. Authentication, package
+integrity, permissions, disk and other install failures stop immediately.
+PNPM enters the job's PATH only after installation and its version probe succeed.
+This recovery applies only to package-manager bootstrap, never validation or
+deployment failures.
+
 CLI release builds run both macOS architectures in parallel on isolated hosted
 VMs. When `XMATRIX_RUNNER_FLEET=self-hosted`, macOS builds remain serialized
 across architectures and release runs because runner services can share the
