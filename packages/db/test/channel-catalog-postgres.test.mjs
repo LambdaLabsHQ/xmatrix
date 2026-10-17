@@ -871,3 +871,36 @@ integration("two writers of the same metadata revision commit exactly one new co
     assert.equal(result.revisions.length, 2);
   } finally { await client.end(); }
 });
+
+// The aggregate counts Channels, keeps an acknowledged older wait, and cannot
+// pick up another principal's or an unreadable Channel's attention rows.
+integration("catalog counts keep older declared waits without multiplying or widening attention", async () => {
+  await seed();
+  const client = new Client({ connectionString });
+  await client.connect();
+  const repository = new PostgresChannelCatalogRepository(createAuthorityDatabase({ connectionString, shardId: "shard-0" }));
+  const read = () => repository.page({ requestId: crypto.randomUUID(), spaceId: "space-catalog",
+    principal: { kind: "user", id: "user-1" }, view: "flat", filter: "all", countsOnly: true });
+  try {
+    await client.query(`INSERT INTO data.messages SELECT (jsonb_populate_record(NULL::data.messages,
+      to_jsonb(source)||jsonb_build_object('message_id',item.id,'search_rank_sequence',item.id,
+        'timeline_sequence',item.seq,'author_kind','agent','author_id','root-00:1'))).*
+      FROM data.messages source CROSS JOIN (VALUES ('older-wait',2),('newer-mention',3)) item(id,seq)
+      WHERE source.message_id='message-1'`);
+    await client.query(`UPDATE data.instances SET rest_state='sleeping' WHERE instance_id='root-00:1'`);
+    await client.query(`INSERT INTO data.message_attention
+      (space_id,subject_id,channel_id,message_id,kind,timeline_sequence,created_at,awaiting_response) VALUES
+      ('space-catalog','user:user-1','child','older-wait','reply',2,$1,TRUE),
+      ('space-catalog','user:user-1','child','newer-mention','mention',3,$1,FALSE),
+      ('space-catalog','user:user-1','closed-hidden','hidden','mention',1,$1,FALSE),
+      ('space-catalog','user:someone-else','grandchild','other-principal','mention',1,$1,FALSE)`, [now]);
+    await client.query(`INSERT INTO data.delivery_cursors
+      (space_id,subject_id,channel_id,acknowledged_sequence,version,updated_at)
+      VALUES ('space-catalog','user:user-1','child',3,1,$1)`, [now]);
+    assert.deepEqual((await read()).counts, { active: 60, unread: 1, mentions: 1 });
+    await client.query(`UPDATE data.instances SET rest_state='stopped' WHERE instance_id='root-00:1'`);
+    assert.deepEqual((await read()).counts, { active: 60, unread: 0, mentions: 0 });
+    await client.query(`DELETE FROM data.delivery_cursors WHERE space_id='space-catalog' AND subject_id='user:user-1'`);
+    assert.deepEqual((await read()).counts, { active: 60, unread: 1, mentions: 1 });
+  } finally { await client.end(); }
+});
