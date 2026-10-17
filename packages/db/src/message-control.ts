@@ -1694,7 +1694,7 @@ export class PostgresMessageRepository {
       // statement, so a metered counter is never locked across another round trip.
       const billing = this.billing.message;
       const admission = (await transaction.query<MessagePublishRow>({
-        name: `message_append_publish_${this.billing.id}_v2`,
+        name: `message_append_publish_${this.billing.id}_v3`,
         text: `WITH ${billing.ctes}, accepted AS MATERIALIZED (
             SELECT admission.*,$5::jsonb AS result_json FROM admission
             WHERE NOT $10 OR (${billing.accepts})
@@ -1717,24 +1717,31 @@ export class PostgresMessageRepository {
              commit_sequence,created_at,expires_at)
             SELECT $2,$7,'message-append',$8,outbox_row.payload_json,$4,$6,$9 FROM outbox_row
             RETURNING result_json
+          ), sequence_confirm AS (
+            -- The Channel's counter is locked before the reservation, the
+            -- order reserveAppendSequence takes them in: a duplicate of this
+            -- command reserving at the same moment holds the counter while its
+            -- unique check waits on this reservation's update, and the
+            -- opposite order is a deadlock (40P01). The reservation commit
+            -- reads this CTE, so it runs after it; a reservation that does
+            -- not commit fails the statement and rolls the confirmation back.
+            UPDATE data.channel_message_sequences SET
+              confirmed_sequence=GREATEST(confirmed_sequence,$4),updated_at=$6
+            WHERE space_id=$2 AND channel_id=$11
+              AND EXISTS (SELECT 1 FROM receipt)
+            RETURNING channel_id
           ), reservation_commit AS (
             UPDATE data.message_sequence_reservations SET
               state='committed',fact_digest=$12,
               updated_at=GREATEST(updated_at,$6::timestamptz)
             WHERE space_id=$2 AND command_id=$7 AND channel_id=$11 AND sequence=$4
               AND (fact_digest IS NULL OR fact_digest=$12)
-              AND EXISTS (SELECT 1 FROM receipt)
-            RETURNING channel_id
-          ), sequence_confirm AS (
-            UPDATE data.channel_message_sequences SET
-              confirmed_sequence=GREATEST(confirmed_sequence,$4),updated_at=$6
-            WHERE space_id=$2 AND channel_id=$11
-              AND EXISTS (SELECT 1 FROM reservation_commit)
+              AND EXISTS (SELECT 1 FROM sequence_confirm)
             RETURNING channel_id
           ) SELECT admission.*,(SELECT result_json FROM receipt) AS result_json,
               (SELECT channel_id FROM activity_row) AS channel_id,
               EXISTS (SELECT 1 FROM accepted) AS accepted,
-              EXISTS (SELECT 1 FROM sequence_confirm) AS sequence_confirmed,
+              EXISTS (SELECT 1 FROM reservation_commit) AS sequence_confirmed,
               $13::text AS author_kind,$14::boolean AS credits_waived FROM admission`,
         values: [`message:${spaceId}:${messageId}:1`, spaceId, messageId, sequence,
           JSON.stringify(result), sentAt, commandId, requestDigest, expiresAt,
