@@ -2556,7 +2556,7 @@ export const MessageRow = memo(function MessageRow({
             )}
             {onboardingStage ? (
               <OnboardingMessage stage={onboardingStage} spaceId={channel?.spaceId ?? null} token={token}
-                userId={currentUserIdentityId.replace(/^user:/, "")} onSend={onSendMessage} />
+                userId={currentUserIdentityId.replace(/^user:/, "")} presence={channel?.presence} onSend={onSendMessage} />
             ) : crossSpaceRead ? (
               <CrossSpaceReadCard
                 request={crossSpaceRead}
