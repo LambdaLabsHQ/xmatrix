@@ -55,7 +55,7 @@ integration("launch survives a hostname change with stale Workspace metadata and
         updated_at timestamptz,PRIMARY KEY (space_id,subject_id,channel_id));
       CREATE TABLE data.first_message_launch_choices (space_id text,channel_id text,message_id text,author_user_id text,choice text);
       CREATE TABLE data.machine_daemons (daemon_id text,owner_user_id text,machine_id text,hostname text,status text,
-        capabilities_json jsonb,connection_epoch bigint);
+        capabilities_json jsonb,connection_epoch bigint,updated_at timestamptz NOT NULL DEFAULT now());
       CREATE TABLE data.machine_run_routes (run_id text,owner_user_id text,machine_id text,terminal_at timestamptz);
       CREATE TABLE data.space_control_heads (space_id text PRIMARY KEY,commit_sequence bigint,updated_at timestamptz);
       CREATE TABLE data.outbox (outbox_id text PRIMARY KEY,space_id text,topic text,aggregate_kind text,aggregate_id text,
@@ -678,6 +678,24 @@ integration("launch survives a hostname change with stale Workspace metadata and
     await sql(`UPDATE data.machine_daemons SET status='offline'`);
     await assert.rejects(() => reborn.prepare({ commandId: 'default-reborn-offline', actorUserId: 'caller', channelId: 'channel',
       sourceMessageId: 'repository', sourceInstanceId: cold.instanceId, prompt: 'continue' }),
+    error => error.code === 'registration_daemon_offline' && error.status === 409);
+    // A daemon that dropped moments ago is restarting (a self-update): a summon
+    // to its machine is prepared and waits for it, bounded from when it dropped.
+    await sql(`UPDATE data.machine_daemons SET updated_at=now()-interval '30 seconds'`);
+    const reconnecting = await launches.dispatchInput({ commandId: 'reconnecting-daemon', actorUserId: 'caller',
+      channelId: 'channel', body: 'Continue in the registered directory' }, async ({ candidates }) => ({
+        key: candidates[0].key, model: '', workspaceReference: 'workspace', useRuntimeDefaultModel: true }));
+    const waiting = (await sql(`SELECT run.metadata_json->'machineReconnect' AS reconnect,launch.control_id
+      FROM data.runs run JOIN data.agent_launches launch ON launch.run_id=run.run_id WHERE run.run_id=$1`,
+    [reconnecting.runId])).rows[0];
+    assert.equal(waiting.reconnect.controlId, waiting.control_id, "the first spawn is the one that waits");
+    assert.ok(Math.abs(Date.parse(waiting.reconnect.waitUntil) - (Date.now() + 270_000)) < 15_000,
+      "the wait ends five minutes after the daemon dropped");
+    await sql(`UPDATE data.runs SET status='failed' WHERE run_id=$1`, [reconnecting.runId]);
+    // Past the grace the machine is simply offline, and the summon is refused as that.
+    await sql(`UPDATE data.machine_daemons SET updated_at=now()-interval '3 minutes'`);
+    await assert.rejects(() => launches.dispatchInput({ commandId: 'offline-past-grace', actorUserId: 'caller',
+      channelId: 'channel', body: 'Continue in the registered directory' }, async () => assert.fail('nothing to choose')),
     error => error.code === 'registration_daemon_offline' && error.status === 409);
     await sql(`UPDATE data.machine_daemons SET status='online'`);
     const defaultReborn = await reborn.prepare({ commandId: 'default-reborn', actorUserId: 'caller', channelId: 'channel',

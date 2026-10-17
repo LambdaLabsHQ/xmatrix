@@ -953,12 +953,16 @@ export class PostgresMachineControlRepository {
       ownerUserId: input.ownerUserId, machineId: input.machineId, hostName, hostId: input.hostId,
       parentMachineId: (body as Record<string, unknown>).parentMachineId });
     if (input.current) {
-      const rows = await tx.query<QueryResultRow>({ name: "machine_control_daemon_update_v2", text: `UPDATE
+      // An offline daemon stays offline since the moment it went offline: a
+      // repeated unregister or failed delivery does not move that moment, which
+      // is when a launch stops waiting for the daemon to reconnect.
+      const rows = await tx.query<QueryResultRow>({ name: "machine_control_daemon_update_v3", text: `UPDATE
         data.machine_daemons SET owner_email=$1,hostname=COALESCE($2,hostname),
         display_name=COALESCE($3,display_name),status=$4,
         capabilities_json=CASE WHEN jsonb_array_length($5::jsonb)>0 THEN $5::jsonb ELSE capabilities_json END,
         metadata_json=CASE WHEN $6::jsonb<>'{}'::jsonb THEN $6::jsonb ELSE metadata_json END,
-        connection_epoch=connection_epoch+$7,version=version+1,updated_at=$8
+        connection_epoch=connection_epoch+$7,version=version+1,
+        updated_at=CASE WHEN status='offline' AND $4='offline' THEN updated_at ELSE $8 END
         WHERE daemon_id=$9 RETURNING *`, values: [input.ownerEmail, hostName, displayName, status,
       JSON.stringify(capabilities), JSON.stringify(hostnameMetadata(body)), input.action === "connect" ? 1 : 0,
       input.at, input.daemonId], maxRows: 1 });
@@ -1162,7 +1166,13 @@ export class PostgresMachineControlRepository {
       const payload = record(command.payload, `commands[${index}].payload`);
       if (commandType !== "spawn" || payload.requestId !== controlId) throw new MachineControlError(
         "invalid_machine_command", 400, "Batch publication accepts exact spawn commands only");
-      return { controlId, commandType, payload,
+      // A spawn may be given a shorter life than the default (a launch that
+      // waits a bounded time for its daemon to reconnect); never a longer one.
+      const expiresAt = command.expiresAt === undefined ? undefined
+        : typeof command.expiresAt === "string" && Number.isFinite(Date.parse(command.expiresAt))
+          ? new Date(command.expiresAt).toISOString() : (() => { throw new MachineControlError(
+            "invalid_machine_command", 400, `commands[${index}].expiresAt is invalid`); })();
+      return { controlId, commandType, payload, expiresAt,
         spaceId: text(payload.spaceId, "payload.spaceId", 300),
         runId: text(payload.runId, "payload.runId", 300),
         channelId: text(payload.channelId, "payload.channelId", 180),
@@ -1175,7 +1185,7 @@ export class PostgresMachineControlRepository {
     }
     const encoded = commands.map((command) => ({ command_id: command.controlId,
       command_type: command.commandType, payload: command.payload, run_id: command.runId,
-      channel_id: command.channelId, execution_key: command.executionKey }));
+      channel_id: command.channelId, execution_key: command.executionKey, expires_at: command.expiresAt ?? null }));
     const authorized = await tx.query<QueryResultRow>({ name: "machine_control_issue_batch_channels_v3",
       text: `SELECT c.channel_id FROM data.channels c
         JOIN jsonb_to_recordset($1::jsonb) AS requested(channel_id text,space_id text)
@@ -1191,14 +1201,15 @@ export class PostgresMachineControlRepository {
       throw new MachineControlError("channel_not_found", 404, "Channel not found");
     }
     const expiresAt = new Date(Date.parse(at) + COMMAND_TTL_MS).toISOString();
-    const inserted = await tx.query<QueryResultRow>({ name: "machine_control_issue_batch_v1", text: `INSERT INTO
+    const inserted = await tx.query<QueryResultRow>({ name: "machine_control_issue_batch_v2", text: `INSERT INTO
         data.machine_daemon_commands
         (command_id,owner_user_id,machine_id,hostname,command_type,payload_json,status,attempts,
          lease_until,result_json,version,created_at,updated_at,lease_owner,lease_generation,
          available_at,expires_at,completed_at)
-      SELECT x.command_id,$2,$3,$4,x.command_type,x.payload,'pending',0,NULL,NULL,1,$5,$5,NULL,0,$5,$6,NULL
+      SELECT x.command_id,$2,$3,$4,x.command_type,x.payload,'pending',0,NULL,NULL,1,$5,$5,NULL,0,$5,
+        LEAST(COALESCE(x.expires_at,$6::timestamptz),$6::timestamptz),NULL
       FROM jsonb_to_recordset($1::jsonb)
-        AS x(command_id text,command_type text,payload jsonb,run_id text,channel_id text,execution_key text)
+        AS x(command_id text,command_type text,payload jsonb,run_id text,channel_id text,execution_key text,expires_at timestamptz)
       ON CONFLICT (command_id) DO NOTHING RETURNING command_id`,
     values: [JSON.stringify(encoded), ownerUserId, machineId, hostId, at, expiresAt],
     maxRows: commands.length });
@@ -1551,8 +1562,11 @@ export class PostgresMachineControlRepository {
     }
     return this.database.transaction({ requestId: text(input.requestId, "requestId", 200),
       operation: "machine-control.status-batch" }, async (tx) => {
-      const rows = await tx.query<QueryResultRow>({ name: "machine_control_status_batch_v2", text: `SELECT
-          command_id,command_type,payload_json,status,result_json,created_at,completed_at
+      // A pending command past its expiry can no longer be claimed (claim
+      // checks the same expiry under its row lock), so it never will run.
+      const rows = await tx.query<QueryResultRow>({ name: "machine_control_status_batch_v3", text: `SELECT
+          command_id,command_type,payload_json,status,result_json,created_at,completed_at,
+          status='pending' AND expires_at<=clock_timestamp() AS expired
           FROM data.machine_daemon_commands WHERE owner_user_id=$1 AND machine_id=$2
             AND command_id=ANY($3::text[]) ORDER BY command_id`,
         values: [ownerUserId, machineId, commands.map((item) => item.controlId)],
@@ -1566,6 +1580,7 @@ export class PostgresMachineControlRepository {
           const row = byId.get(item.controlId);
           if (!row) return { controlId: item.controlId, status: "missing" };
           return { ...commandStatus(row, item.controlId, "spawn", item.expected),
+            ...(row.expired === true ? { expired: true } : {}),
             createdAt: new Date(row.created_at as Date | string).toISOString() };
         }) };
     });

@@ -355,6 +355,17 @@ assumption, not a provider measurement: it does not refresh timestamps, write a
 synthetic provider observation, or replace a valid measured zero. The headroom
 ranking reads this default like any other quota reading.
 
+A Machine whose daemon went offline at most two minutes ago, with no daemon of
+it online, is reconnecting (a restart such as a self-update): its registrations
+are still offered, but only when no online Machine can take the summon. Its
+launch is prepared and queued, and the spawn is delivered when the daemon
+reconnects; the invocation shows "Machine reconnecting — starts when it's
+back." The wait is bounded: the spawn command expires five minutes after the
+daemon went offline, and the Launch then fails as `machine_reconnect_expired`.
+When the daemon went offline is the Hub's own record of the offline transition;
+a repeated unregister or failed delivery does not move it. After the grace a
+summon is refused as `registration_daemon_offline`, as before.
+
 The daemon samples machine resources about every 30 seconds with its run
 snapshot: logical CPU count and usage, memory, swap, the 1/5/15-minute load
 average (not on Windows, where none exists), and total/available space on the

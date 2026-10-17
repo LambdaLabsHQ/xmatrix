@@ -129,6 +129,25 @@ export interface RegistrationLaunchCandidate {
 export const RESPONSE_LATENCY_WINDOW_DAYS = 30;
 export const RESPONSE_LATENCY_MIN_SAMPLES = 20;
 
+/** A daemon that disconnected this recently, while no daemon of its Machine is
+ * online, is taken to be restarting — a self-update, a dropped connection — and
+ * stays the Machine's route: a launch prepared on it is queued and its spawn is
+ * delivered when the daemon reconnects. The moment it went offline is the Hub's
+ * own record (`machine_daemons.updated_at` of the offline row), never a claim. */
+export const MACHINE_RECONNECT_GRACE_SECONDS = 120;
+/** How long after its daemon went offline a launch routed in that grace waits
+ * for it. Its spawn command expires then, so a later reconnect cannot start it,
+ * and the coordinator fails the Launch as `machine_reconnect_expired`. */
+export const MACHINE_RECONNECT_WAIT_SECONDS = 300;
+/** A daemon row (`alias` with its dot) in the reconnect grace. */
+const RECONNECTING_DAEMON_SQL = (alias: string) => `(${alias}status='offline'
+  AND ${alias}updated_at>=statement_timestamp()-interval '${MACHINE_RECONNECT_GRACE_SECONDS} seconds'
+  AND NOT EXISTS (SELECT 1 FROM data.machine_daemons online_daemon WHERE online_daemon.owner_user_id=${alias}owner_user_id
+    AND online_daemon.machine_id=${alias}machine_id AND online_daemon.status='online'))`;
+/** When a launch routed through a reconnecting daemon stops waiting for it. */
+const RECONNECT_WAIT_UNTIL_SQL = (alias: string) =>
+  `CASE WHEN ${alias}status='offline' THEN ${alias}updated_at+interval '${MACHINE_RECONNECT_WAIT_SECONDS} seconds' END`;
+
 /** How long a failed start keeps an environment behind every other (the breaker). */
 export const STARTUP_FAILURE_WINDOW_MINUTES = 30;
 /** Run phases a process that exits in them never started: the stored
@@ -421,6 +440,8 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
 
   // v3 daemons take launch settings from the Hub registration. A v2 daemon
   // still requires a local installation record, so it cannot be routed here.
+  // A daemon in the reconnect grace routes too, and the route says until when
+  // the launch waits for it (`reconnect_wait_until`).
   private async workspace(input: LaunchRequest) {
     const required = input.requiredHostCapabilities ?? [];
     // An effort on the runtime default model needs a daemon that carries it there.
@@ -439,9 +460,10 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
         }
         // A daemon runs a registered launch with no workspace reference only
         // once it declares the managed-directory capability.
-        const repoRoutes = (capabilities: readonly string[]) => tx.query({ name: "registration_launch_repo_route_v6",
-          text: `SELECT hostname FROM data.machine_daemons
-          WHERE owner_user_id=$1 AND machine_id=$2 AND status='online' AND capabilities_json ? 'registration_launch_v3'
+        const repoRoutes = (capabilities: readonly string[]) => tx.query({ name: "registration_launch_repo_route_v7",
+          text: `SELECT hostname,${RECONNECT_WAIT_UNTIL_SQL("daemon.")} AS reconnect_wait_until FROM data.machine_daemons daemon
+          WHERE owner_user_id=$1 AND machine_id=$2 AND (status='online' OR ${RECONNECTING_DAEMON_SQL("daemon.")})
+            AND capabilities_json ? 'registration_launch_v3'
             AND ($3::text IS NULL OR capabilities_json ? $3)
             AND (NOT $4::boolean OR capabilities_json ? 'registration_optional_model_v1')
             AND (NOT $6::boolean OR capabilities_json ? 'machine_routing_parameters_v1')
@@ -456,14 +478,15 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
         if (routes.length !== 1) throw new RegistrationAccessError(unrouted, 409);
         const managedKey = `registration-${(await digestCanonicalCloneCborV1([input.key,input.commandId])).slice(0,48)}`;
         // The flag marks an unregistered cwd.
-        return { hostname: routes[0]!.hostname, canonical_cwd: `.xmatrix-management/${managedKey}`, managed_key: managedKey,
+        return { hostname: routes[0]!.hostname, reconnect_wait_until: routes[0]!.reconnect_wait_until,
+          canonical_cwd: `.xmatrix-management/${managedKey}`, managed_key: managedKey,
           ...(repo ? { remote_repo: repo } : {}), metadata_json: { displayName: repo ?? "xMatrix", managedWorkspaceKey: managedKey,
             syntheticManagedWorkspace: true, ...(repo ? { remoteRepo: repo } : {}) } };
       }
-      const workspaceRoutes = (capabilities: readonly string[]) => tx.query({ name: "registration_launch_workspace_v5",
-        text: `SELECT w.canonical_cwd,w.metadata_json,d.hostname
+      const workspaceRoutes = (capabilities: readonly string[]) => tx.query({ name: "registration_launch_workspace_v6",
+        text: `SELECT w.canonical_cwd,w.metadata_json,d.hostname,${RECONNECT_WAIT_UNTIL_SQL("d.")} AS reconnect_wait_until
         FROM data.workspaces w JOIN data.machine_daemons d ON d.owner_user_id=w.owner_user_id AND d.machine_id=w.machine_id
-        WHERE w.workspace_id=$1 AND w.owner_user_id=$2 AND w.machine_id=$3 AND d.status='online'
+        WHERE w.workspace_id=$1 AND w.owner_user_id=$2 AND w.machine_id=$3 AND (d.status='online' OR ${RECONNECTING_DAEMON_SQL("d.")})
           AND d.capabilities_json ? 'registration_launch_v3'
           AND (NOT $4::boolean OR d.capabilities_json ? 'registration_optional_model_v1')
           AND (NOT $6::boolean OR d.capabilities_json ? 'machine_routing_parameters_v1')
@@ -535,6 +558,10 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
       // for that exact spawn before abandoning it.
       const metadata = { ...input.runMetadata, machineId: input.key.machineId, hostId: workspace.hostname ?? "", hostname: workspace.hostname ?? undefined, executionKey: row.execution_key, resumeSessionKey,
         spawnControlId: row.control_id,
+        // Routed to a daemon that is reconnecting: this first spawn waits for it
+        // until then, and no longer (the coordinator bounds its command).
+        ...(workspace.reconnect_wait_until ? { machineReconnect: { controlId: row.control_id,
+          waitUntil: new Date(workspace.reconnect_wait_until).toISOString() } } : {}),
         ...(workspace.managed_key ? { managedWorkspaceKey: workspace.managed_key } : {}),
         ...(initialMessageId !== undefined ? { sourceMessageId: initialMessageId } : {}),
         summonedByUserId: input.actorUserId, identityKind: "instance",
@@ -972,6 +999,8 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
       operation: "registration.launch.workspace-catalog" }, async tx => {
       const offered: RegistrationLaunchCandidate[] = [];
       const blocked: LaunchMachineBlock[] = [];
+      /** Offered through a daemon in the reconnect grace. */
+      const waiting = new Set<RegistrationLaunchCandidate>();
       let droppedOther = false;
       for (const candidate of candidates) {
         const workspaces = await tx.query({ name: "registration_launch_workspace_catalog_v1",
@@ -980,22 +1009,29 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
             ORDER BY workspace_id LIMIT 101`,
           values: [candidate.key.ownerUserId,candidate.key.machineId,candidate.workspaceReferences], maxRows: 101 });
         if (workspaces.length > 100) throw new RegistrationAccessError("registration_workspaces_limit", 409);
-        // The daemons preparation can route to (see workspace()): online and
-        // taking launch settings from the Hub registration.
-        const daemons = await tx.query({ name: "registration_launch_daemon_facts_v7",
-          text: `SELECT hostname,capabilities_json,metadata_json,connection_epoch,status,(SELECT name FROM data.machines machine
+        // The daemons preparation can route to (see workspace()): online, or
+        // in the reconnect grace, and taking launch settings from the Hub registration.
+        const daemons = await tx.query({ name: "registration_launch_daemon_facts_v8",
+          text: `SELECT hostname,capabilities_json,metadata_json,connection_epoch,status,
+            status='offline' AND updated_at>=statement_timestamp()-interval '${MACHINE_RECONNECT_GRACE_SECONDS} seconds' AS reconnecting,
+            (SELECT name FROM data.machines machine
             WHERE machine.owner_user_id=$1 AND machine.machine_id=$2) AS machine_name,(SELECT auto_assign FROM data.machines machine
             WHERE machine.owner_user_id=$1 AND machine.machine_id=$2) AS auto_assign
             FROM data.machine_daemons WHERE owner_user_id=$1 AND machine_id=$2
             ORDER BY (status='online') DESC, hostname LIMIT 8`,
           values: [candidate.key.ownerUserId,candidate.key.machineId], maxRows: 8 });
         // A known daemon that is not connected is the cause. Dropping it here
-        // used to make the chooser say the machine had no registration.
-        if (daemons.length > 0 && !daemons.some(row => row.status === "online")) {
+        // used to make the chooser say the machine had no registration. One
+        // that dropped moments ago is restarting: the launch waits for it.
+        const online = daemons.filter(row => row.status === "online");
+        const reconnecting = online.length ? [] : daemons.filter(row => row.reconnecting === true);
+        const offline = () => {
           const machineName = typeof daemons[0]?.machine_name === "string" ? daemons[0].machine_name : "";
           blocked.push({ machineId: candidate.key.machineId, ...(machineName ? { machineName } : {}), reason: "daemon_offline" });
-          continue;
-        }
+        };
+        if (daemons.length > 0 && !online.length && !reconnecting.length) { offline(); continue; }
+        // A reconnecting machine that cannot be offered stays refused as offline.
+        const drop = () => { if (reconnecting.length) offline(); else droppedOther = true; };
         const facts = await tx.query({ name: "registration_launch_observations_v3", text: `SELECT
           e.declaration_json,statement_timestamp() AS evaluated_at,
           (SELECT count(*)::int FROM control.registration_execution_allocations a
@@ -1011,15 +1047,15 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
         const evaluatedAt = new Date(fact?.evaluated_at ?? Date.now()).toISOString();
         const environment = fact ? parseAgentRegistrationEnvironment(fact.declaration_json) : undefined;
         if (!environment?.enabled || environment.availableUntil && Date.parse(environment.availableUntil) <= Date.parse(evaluatedAt)) {
-          droppedOther = true; continue;
+          drop(); continue;
         }
         const models = candidate.models.filter(model => environment.models.includes(model));
-        if (candidate.models.length && !models.length) { droppedOther = true; continue; }
-        const online = daemons.filter(row => row.status === "online" && daemonCapable(row, "registration_launch_v3"));
-        const route = routableRegistrationLaunch(online, { runtimeDefaultOnly: !models.length,
+        if (candidate.models.length && !models.length) { drop(); continue; }
+        const route = routableRegistrationLaunch((online.length ? online : reconnecting)
+          .filter(row => daemonCapable(row, "registration_launch_v3")), { runtimeDefaultOnly: !models.length,
           workspaceReferences: candidate.workspaceReferences, managedWorkspace: target.managedWorkspace === true,
           registeredWorkspaceIds: new Set(workspaces.map(row => String(row.workspace_id))) });
-        if (!route) { droppedOther = true; continue; }
+        if (!route) { drop(); continue; }
         const { daemon, workspaceReferences } = route;
         // A harness the machine reports older than the version xMatrix can
         // talk to would only fail at startup: it is named, never routed to.
@@ -1033,7 +1069,7 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
         // the work needs; workspace() checks the same evidence again at launch.
         const machineResources = currentMachineResources(daemon, Date.parse(evaluatedAt));
         if (target.requiredHostCapabilities?.some(capability =>
-            !machineResources?.hostCapabilities?.includes(capability))) { droppedOther = true; continue; }
+            !machineResources?.hostCapabilities?.includes(capability))) { drop(); continue; }
         const directories = workspaces.filter(row => workspaceReferences.includes(String(row.workspace_id)));
 
         const quota = registrationQuotaReading(fact);
@@ -1071,6 +1107,15 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
           canonicalCwd: row.canonical_cwd, machineId: candidate.key.machineId,
           description: typeof row.metadata_json?.displayName === "string"
             ? row.metadata_json.displayName.slice(0, 500) : "Registered workspace" }))] });
+        if (!online.length) waiting.add(offered.at(-1)!);
+      }
+      // A machine that is online starts the work now; one still reconnecting
+      // is offered only when no other can take it.
+      const ready = offered.filter(candidate => !waiting.has(candidate));
+      if (ready.length && ready.length < offered.length) {
+        for (const candidate of offered) if (waiting.has(candidate)) blocked.push({ machineId: candidate.key.machineId,
+          ...(candidate.machineName ? { machineName: candidate.machineName } : {}), reason: "daemon_offline" });
+        offered.splice(0, offered.length, ...ready);
       }
       return { offered, blocked, offlineOnly: offered.length === 0 && blocked.length > 0 && !droppedOther &&
         blocked.every(block => block.reason === "daemon_offline") };

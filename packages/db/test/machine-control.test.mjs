@@ -196,7 +196,7 @@ test("Machine enroll recovers migrated audit evidence after its replay expires",
   });
   assert.equal(db.calls.some((call) => call.name === "machine_control_enrollment_audit_v1"), false);
   assert.equal(db.calls.some((call) => call.name === "machine_control_replay_write_v1"), false);
-  assert.equal(db.calls.some((call) => call.name === "machine_control_daemon_update_v2"), false);
+  assert.equal(db.calls.some((call) => call.name === "machine_control_daemon_update_v3"), false);
 });
 
 test("Machine enroll rejects mismatched migrated audit evidence", async () => {
@@ -335,7 +335,7 @@ test("a result lands after its lease lapsed or its connection turned over, fence
     : query.name === "machine_control_complete_replay_lock_v2" || query.name === "machine_control_lease_lock_v3"
       ? [command]
     : query.name === "machine_control_complete_v1" ? [{ command_id: "spawn-1" }]
-    : query.name === "machine_control_daemon_update_v2" ? [daemon] : []);
+    : query.name === "machine_control_daemon_update_v3" ? [daemon] : []);
   const input = {
     commandId: "complete-spawn-late", action: "complete", controlId: "spawn-1",
     ownerUserId: "user-1", ownerEmail: "one@example.com", machineId: "machine-1",
@@ -404,7 +404,7 @@ test("Machine issue_batch persists exact spawn commands and reuses identical com
   let insertCount = 0;
   const db = database((query) => query.name === "machine_control_issue_batch_channels_v3"
     ? [{ channel_id: "channel-1", archived_at: null }]
-    : query.name === "machine_control_issue_batch_v1"
+    : query.name === "machine_control_issue_batch_v2"
     ? (++insertCount === 1 ? rows.map((row) => ({ command_id: row.command_id })) : [])
     : batchIssueReadRows(query, rows));
   const commands = rows.map((row) => ({
@@ -421,7 +421,7 @@ test("Machine issue_batch persists exact spawn commands and reuses identical com
 
   assert.deepEqual(first.commands.map((entry) => entry.reused), [false, false, false]);
   assert.deepEqual(replayed.commands.map((entry) => entry.reused), [true, true, true]);
-  assert.equal(db.calls.filter((call) => call.name === "machine_control_issue_batch_v1").length, 2);
+  assert.equal(db.calls.filter((call) => call.name === "machine_control_issue_batch_v2").length, 2);
   assert.equal(db.calls.filter((call) => call.name === "machine_control_run_routes_batch_v2").length, 2);
 });
 
@@ -438,7 +438,7 @@ test("Machine issue_batch accepts the coordinator's full 100-command claim", asy
   }));
   const db = database((query) => query.name === "machine_control_issue_batch_channels_v3"
     ? [{ channel_id: "channel-1", archived_at: null }]
-    : query.name === "machine_control_issue_batch_v1"
+    : query.name === "machine_control_issue_batch_v2"
     ? rows.map((row) => ({ command_id: row.command_id }))
     : batchIssueReadRows(query, rows));
   const value = await new PostgresMachineControlRepository(db).command({
@@ -462,7 +462,7 @@ test("Machine issue_batch rejects a spawn command without Space authority", asyn
       instanceId: "instance-1", executionKey: "execution-1", channelId: "channel-1",
     } }],
   }), (error) => error instanceof MachineControlError && error.code === "invalid_machine_command");
-  assert.equal(db.calls.some((call) => call.name === "machine_control_issue_batch_v1"), false);
+  assert.equal(db.calls.some((call) => call.name === "machine_control_issue_batch_v2"), false);
 });
 
 test("Machine statusMany returns ordered durable status and rejects a payload mismatch", async () => {
@@ -472,7 +472,7 @@ test("Machine statusMany returns ordered durable status and rejects a payload mi
     result_json: { ok: true }, created_at: new Date("2026-08-30T00:00:00.000Z"),
     completed_at: new Date("2026-08-30T00:00:03.000Z"),
   };
-  const db = database((query) => query.name === "machine_control_status_batch_v2"
+  const db = database((query) => query.name === "machine_control_status_batch_v3"
     ? [row] : query.name === "machine_control_status_batch_daemon_v2" ? [daemon] : []);
   const repository = new PostgresMachineControlRepository(db);
   const value = await repository.statusMany({
@@ -511,7 +511,7 @@ test("Machine spawn completion validates the fields its result protocol can echo
         ? [command]
         : query.name === "machine_control_complete_v1"
           ? [{ command_id: "spawn-1" }]
-          : query.name === "machine_control_daemon_update_v2"
+          : query.name === "machine_control_daemon_update_v3"
             ? [daemon]
             : []);
 
@@ -571,7 +571,7 @@ test("Machine completion replay acknowledges an identical durable result after r
       ? [{ request_digest: "old-epoch-digest", result_json: { action: "complete" } }]
       : query.name === "machine_control_complete_replay_lock_v2"
         ? [completed]
-        : query.name === "machine_control_daemon_update_v2"
+        : query.name === "machine_control_daemon_update_v3"
           ? [connected]
           : query.name === "machine_control_run_route_read_v2"
             ? [{ channel_id: "channel-1" }]
@@ -616,7 +616,7 @@ test("Machine exact completion replay crosses a newer daemon epoch after its ACK
   let storedReplay;
   const db = database((query) => {
     if (query.name === "machine_control_daemon_lock_v1" ||
-        query.name === "machine_control_daemon_update_v2") {
+        query.name === "machine_control_daemon_update_v3") {
       return [{ ...daemon, connection_epoch: connectionEpoch }];
     }
     if (query.name === "machine_control_replay_read_v1") {
@@ -656,7 +656,7 @@ test("Machine exact completion replay crosses a newer daemon epoch after its ACK
 test("a routed exit report is recorded for the coordinator in the report transaction", async () => {
   const report = (routed, payload) => {
     const db = database((query) => query.name === "machine_control_daemon_lock_v1" ||
-        query.name === "machine_control_daemon_update_v2" ? [{ ...daemon, connection_epoch: 3 }]
+        query.name === "machine_control_daemon_update_v3" ? [{ ...daemon, connection_epoch: 3 }]
       : query.name === "machine_control_run_route_read_v2" && routed ? [{ channel_id: "channel-1" }]
       : []);
     return { db, value: new PostgresMachineControlRepository(db).command({
@@ -712,7 +712,7 @@ test("Complete snapshots fan out to reported and recently reported Run routes on
   const capturedAt = "2026-09-15T12:00:00.000Z";
   const db = database((query) => query.name === "machine_control_daemon_lock_v1"
     ? [daemon]
-    : query.name === "machine_control_daemon_update_v2"
+    : query.name === "machine_control_daemon_update_v3"
       ? [daemon]
       : query.name === "machine_control_snapshot_routes_v3"
         ? [{ channel_id: "channel-live" }]
@@ -739,7 +739,7 @@ test("Partial snapshots reach only the Channels of the Runs they name, and bind 
   const observedAt = new Date(Date.now() - 1_000).toISOString();
   const db = database((query) => query.name === "machine_control_daemon_lock_v1"
     ? [daemon]
-    : query.name === "machine_control_daemon_update_v2"
+    : query.name === "machine_control_daemon_update_v3"
       ? [daemon]
       : query.name === "machine_control_route_progress_v2"
         ? [{ channel_id: "channel-b" }, { channel_id: "channel-a" }, { channel_id: "channel-b" }]
@@ -772,7 +772,7 @@ test("Snapshots persist a valid harness inventory for their connection and drop 
   const capturedAt = new Date(Date.now() - 1_000).toISOString();
   async function report(harnessInventory) {
     const db = database((query) => query.name === "machine_control_daemon_lock_v1" ||
-      query.name === "machine_control_daemon_update_v2" ? [daemon] : []);
+      query.name === "machine_control_daemon_update_v3" ? [daemon] : []);
     await new PostgresMachineControlRepository(db).command({
       commandId: `inventory-${crypto.randomUUID()}`, action: "report", eventType: "machine_run_snapshot",
       ownerUserId: "user-1", ownerEmail: "one@example.com", machineId: "machine-1",
@@ -799,7 +799,7 @@ test("Connect keeps only a validated cached harness inventory in metadata", asyn
   const capturedAt = new Date(Date.now() - 1_000).toISOString();
   async function connect(harnesses) {
     const db = database((query) => query.name === "machine_control_daemon_lock_v1" ||
-      query.name === "machine_control_daemon_update_v2" ? [daemon] : []);
+      query.name === "machine_control_daemon_update_v3" ? [daemon] : []);
     await new PostgresMachineControlRepository(db).command({
       commandId: `connect-${crypto.randomUUID()}`, action: "connect", ownerUserId: "user-1",
       ownerEmail: "one@example.com", machineId: "machine-1", hostId: "host-1", daemonId: "daemon-1",
@@ -807,7 +807,7 @@ test("Connect keeps only a validated cached harness inventory in metadata", asyn
       metadata: { xmatrixDaemonVersion: "0.16.600", harnesses }, payload: {},
       principal: machinePrincipal(),
     });
-    const update = db.calls.find((call) => call.name === "machine_control_daemon_update_v2");
+    const update = db.calls.find((call) => call.name === "machine_control_daemon_update_v3");
     return update && JSON.parse(update.values[5]);
   }
   const valid = await connect({ schemaVersion: 1, capturedAt, items: [{ id: "codex", installed: false, probeStatus: "missing" }] });
@@ -832,7 +832,7 @@ test("Machine stop completion rejects unknown cleanup outcomes", async () => {
 test("an older daemon's host-command approval notice is refused, and nothing is recorded", async () => {
   const db = database((query) => query.name === "machine_control_daemon_lock_v1"
     ? [daemon]
-    : query.name === "machine_control_daemon_update_v2" ? [daemon] : []);
+    : query.name === "machine_control_daemon_update_v3" ? [daemon] : []);
   await assert.rejects(new PostgresMachineControlRepository(db).command({
     commandId: "notice-1", action: "report", eventType: "machine_request_notice",
     ownerUserId: "user-1", ownerEmail: "one@example.com", machineId: "machine-1",

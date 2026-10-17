@@ -63,6 +63,69 @@ integration("quota probe machine lease round trip rejects stale epochs and subst
   } finally { await session.close(); }
 });
 
+// A summon routed to a restarting daemon waits for it from the moment the Hub
+// saw it go offline. A failed delivery to the still-offline daemon must not move
+// that moment, and the bounded spawn must never reach a daemon after it expired.
+integration("a reconnect-bounded spawn expires unclaimed and the offline moment stays put", async () => {
+  await seed();
+  const session = createAuthorityDatabase({ connectionString, shardId: "shard-0" }).openSession();
+  const client = new Client({ connectionString });
+  await client.connect();
+  try {
+    const controls = new PostgresMachineControlRepository(session);
+    const machine = { ownerUserId: "owner", ownerEmail: "owner@example.test", machineId: "restart-machine",
+      hostId: "restart-host", daemonId: "restart-daemon" };
+    const principal = { kind: "machine", id: "machine-daemon:owner:restart-machine:restart-host",
+      ownerUserId: "owner", machineId: "restart-machine", hostId: "restart-host" };
+    const owner = { kind: "user", id: "owner" };
+    const connect = () => controls.command({ ...machine, commandId: randomUUID(), action: "connect",
+      principal, capabilities: [], payload: {}, metadata: {} });
+    const connected = await connect();
+    await controls.command({ ...machine, commandId: randomUUID(), action: "unregister", principal,
+      connectionEpoch: connected.connectionEpoch, payload: {} });
+    await client.query(`UPDATE data.machine_daemons SET updated_at=clock_timestamp()-interval '90 seconds'
+      WHERE daemon_id='restart-daemon'`);
+    const wentOffline = (await client.query(`SELECT updated_at FROM data.machine_daemons
+      WHERE daemon_id='restart-daemon'`)).rows[0].updated_at.toISOString();
+    await controls.command({ ...machine, commandId: randomUUID(), action: "failed-deliver", principal: owner, payload: {} });
+    const after = (await client.query(`SELECT status,updated_at FROM data.machine_daemons
+      WHERE daemon_id='restart-daemon'`)).rows[0];
+    assert.equal(after.status, "offline");
+    assert.equal(after.updated_at.toISOString(), wentOffline, "a failed delivery does not restart the reconnect grace");
+
+    const spawn = (id) => ({ controlId: `control-${id}`, commandType: "spawn", payload: {
+      type: "machine_spawn_agent", requestId: `control-${id}`, spaceId: "space-launch", channelId: "channel-launch",
+      runId: `run-${id}`, instanceId: `instance-${id}`, executionKey: `execution-${id}` } });
+    const soon = new Date(Date.now() + 60_000).toISOString();
+    await controls.command({ ...machine, commandId: randomUUID(), action: "issue_batch", principal: owner, payload: {},
+      commands: [{ ...spawn("bounded"), expiresAt: soon }, spawn("default"),
+        { ...spawn("longer"), expiresAt: new Date(Date.now() + 365 * 86_400_000).toISOString() }] });
+    const life = Object.fromEntries((await client.query(`SELECT command_id,
+        extract(epoch FROM expires_at-created_at)::float8 AS seconds
+      FROM data.machine_daemon_commands WHERE owner_user_id='owner' AND machine_id='restart-machine'`)).rows
+      .map(row => [row.command_id, Number(row.seconds)]));
+    assert.ok(life["control-bounded"] <= 61, "the bounded spawn keeps its shorter life");
+    assert.equal(life["control-longer"], life["control-default"], "a caller can shorten a spawn's life, never extend it");
+    // The daemon stays away past the bound.
+    await client.query(`UPDATE data.machine_daemon_commands SET expires_at=clock_timestamp()-interval '1 second'
+      WHERE command_id='control-bounded'`);
+    const status = await controls.statusMany({ requestId: randomUUID(), ownerUserId: "owner", machineId: "restart-machine",
+      hostId: "restart-host", commands: ["bounded", "default"].map(id => ({ controlId: `control-${id}`,
+        expected: { runId: `run-${id}` } })) });
+    assert.deepEqual(status.commands.map(command => [command.controlId, command.status, command.expired === true]),
+      [["control-bounded", "queued", true], ["control-default", "queued", false]]);
+
+    const reconnected = await connect();
+    const claimed = await controls.command({ ...machine, commandId: randomUUID(), action: "claim", principal,
+      connectionEpoch: reconnected.connectionEpoch, commandTypes: ["spawn"], payload: {} });
+    assert.deepEqual(claimed.commands.map(command => command.controlId).sort(), ["control-default", "control-longer"],
+      "an expired spawn never reaches the daemon that came back too late");
+  } finally {
+    await client.end();
+    await session.close();
+  }
+});
+
 integration("runtime grant migration repairs existing relations and protects future ones", async () => {
   assert.ok(connectionString, "XMATRIX_TEST_POSTGRES_URL is required for runtime grant tests");
   const client = new Client({ connectionString });
