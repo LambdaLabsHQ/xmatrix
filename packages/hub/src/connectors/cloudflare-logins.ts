@@ -30,8 +30,7 @@ export interface CloudflareLoginView {
   connectedAt: string;
 }
 
-export const MAX_CLOUDFLARE_LOGINS = 5;
-/* The snapshot is a label, not authority; it stays small so five logins fit one credential value. */
+/* The snapshot is a label, not authority. There is no count of logins; the credential value is the bound. */
 const SNAPSHOT_ACCOUNTS = 6;
 const SNAPSHOT_NAME = 48;
 const MAX_VALUE_BYTES = 8 * 1024;
@@ -52,7 +51,7 @@ export function parseCloudflareLogins(value: string | undefined): CloudflareLogi
   if (!value) return [];
   let parsed: unknown;
   try { parsed = JSON.parse(value); } catch { parsed = undefined; }
-  if (!Array.isArray(parsed) || parsed.length > MAX_CLOUDFLARE_LOGINS) throw new ProviderRequestError(502, INVALID);
+  if (!Array.isArray(parsed)) throw new ProviderRequestError(502, INVALID);
   const seen = new Set<string>();
   return parsed.map((entry: unknown) => {
     const login = (entry ?? {}) as Record<string, unknown>;
@@ -117,9 +116,6 @@ export function addCloudflareLogin(stored: Readonly<Record<string, string>>, gra
   const login: CloudflareLogin = { id: crypto.randomUUID(), accessToken: grant.accessToken, refreshToken: grant.refreshToken,
     expiresAt: grant.expiresAt, accounts: grant.accounts.slice(0, SNAPSHOT_ACCOUNTS), connectedBy: grant.actorUserId, connectedAt: at };
   const kept = [...current, ...legacy].filter((item) => !sameAccounts(item.accounts, login.accounts));
-  if (kept.length >= MAX_CLOUDFLARE_LOGINS) {
-    throw new ProviderRequestError(409, `a Space connects at most ${MAX_CLOUDFLARE_LOGINS} Cloudflare logins; remove one first`);
-  }
   const first = current.length === 0 && legacy.length === 0;
   return {
     logins: serializeCloudflareLogins([...kept, login]),

@@ -1,3 +1,4 @@
+import assert from "node:assert/strict";
 import { startPgHubWorker } from "./agent-launch-postgres.fixture.mjs";
 
 /**
@@ -30,4 +31,11 @@ export async function withOwnerWorker(name, check) {
   } finally {
     await worker.stop();
   }
+}
+
+/** The caller's personal Space, made on its first call; `null` once the caller has any Space. */
+export async function personalSpace(call) {
+  const { status, body } = await call("/api/personal-space", { method: "POST" });
+  assert.equal(status, 200, JSON.stringify(body));
+  return body.space;
 }

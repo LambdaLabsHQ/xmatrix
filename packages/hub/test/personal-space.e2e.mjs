@@ -1,15 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { prepareTestAgentRun } from "./e2e-utils.mjs";
-import { withOwnerWorker } from "./owner-worker.mjs";
+import { personalSpace, withOwnerWorker } from "./owner-worker.mjs";
 import { humanHandleShortCode, neutralHumanIdentity } from "@xmatrix/protocol";
 
 const spaceIds = async (call) => (await call("/api/spaces")).body.spaces.map((space) => space.id);
-async function personal(call) {
-  const { status, body } = await call("/api/personal-space", { method: "POST" });
-  assert.equal(status, 200, JSON.stringify(body));
-  return body.space;
-}
+const personal = personalSpace;
 
 test("a person with no Space gets one personal Space, once", () =>
   withOwnerWorker("Ada Lovelace", async ({ call }) => {
