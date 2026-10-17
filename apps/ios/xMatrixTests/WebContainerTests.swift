@@ -286,7 +286,9 @@ final class WebContainerTests: XCTestCase {
     }
 
     func testDownloadedMediaGoesToPhotosAndEverythingElseToFiles() {
-        let destination = { WebContainerView.PageCoordinator.destination(for: URL(fileURLWithPath: "/tmp/\($0)")) }
+        func destination(_ name: String) -> WebContainerView.PageCoordinator.DownloadDestination {
+            WebContainerView.PageCoordinator.destination(for: URL(fileURLWithPath: "/tmp/\(name)"))
+        }
         XCTAssertEqual(destination("clip.mp4"), .photos(.video))
         XCTAssertEqual(destination("clip.MOV"), .photos(.video))
         XCTAssertEqual(destination("shot.png"), .photos(.photo))
