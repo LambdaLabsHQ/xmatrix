@@ -11,6 +11,8 @@ shared user grant.
 | OAuth completion | Signed provider/Space/initiator state, the same signed-in Human, and current owner/admin membership before exchange; the write rechecks membership |
 | Connector execution | The authorized Channel determines its Space connection; credentials resolve by that connection, without an owner/global fallback. Acting with a connection (actions, approval requests, subscriptions, and reads of the provider's catalog such as GitHub launch targets, completion and Jev's repository list) needs owner/admin/member, as Run secret reads do; a viewer or open-project participant only reads the connection's configuration. A subscription delivers only while its creator still holds that role |
 | Composio | A connect attempt uses `xmatrix:<space>:<nonce>`; calls name the saved connected account |
+| Slack app events | One Space per workspace: Connect elsewhere is refused while a Space's binding is current; older duplicate bindings route nowhere; a verified uninstall retires them |
+| Linear app events | Each Space receives an event only when its own grant reads the event's subject |
 | GitHub installation link | Connect names only installations the person administers on GitHub: their own account's, or an organization's whose every covered repository they administer |
 | GitHub repository token | Current daemons bind the live admitted Run, Machine, execution and repository; the Channel determines the Space's linked installations; the Machine owner must be owner/admin/member there |
 | Run secret read | The exact live Run/Instance/execution, registration admission, token Space and current owner membership; `ask` approvals also join on Space |

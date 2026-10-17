@@ -9,6 +9,18 @@ import { connectorEvent, excerpt, lowerHeader, record, sourceToken, text } from 
  * into Slack never loop. A source is a Slack channel id.
  */
 
+/**
+ * Slack retired this workspace's installation: the app was uninstalled, or its
+ * bot token revoked. Read only from a delivery whose signature was verified.
+ */
+export function slackInstallationRetired(payload: Record<string, unknown>): boolean {
+  if (payload.type !== "event_callback") return false;
+  const event = record(payload.event);
+  if (event.type === "app_uninstalled") return true;
+  const bots = record(event.tokens).bot;
+  return event.type === "tokens_revoked" && Array.isArray(bots) && bots.length > 0;
+}
+
 export const receiveSlackDelivery = createSignedJsonReceiver({
   name: "Slack", secretField: "signingSecret", proof: {
     header: "x-slack-signature", prefix: "v0=",

@@ -6,6 +6,7 @@ import { AppControlError } from "./app-control.js";
 import { appRequestText as text } from "./app-request-text.js";
 import { decryptSecretValue, encryptSecretValue } from "./secret-value-control.js";
 import { lockDiscordInstallation } from "./discord-installation-lifecycle.js";
+import { claimSlackWorkspace } from "./slack-workspace-claim.js";
 import { beginSentryAttempt, lockSentryAttempt, consumeSentryAttempt, retireSentryAttempt } from "./sentry-installation-lifecycle.js";
 
 /*
@@ -215,6 +216,7 @@ export class PostgresAppCredentialRepository {
       operation: "app.credentials.put" }, async (tx) => {
       if (!input.asHub) await requireSpaceAdmin(tx, spaceId, actorUserId);
       if (providerId === "discord" && installation) await lockDiscordInstallation(tx, installation, `${spaceId}:discord`);
+      if (providerId === "slack" && installation) await claimSlackWorkspace(tx, installation, `${spaceId}:slack`);
       if (verified) await lockSentryAttempt(tx, installation!, spaceId, verified.attemptId, String(input.fields.oauthExpiresAt));
       const connectionId = `${spaceId}:${providerId}`;
       const connections = await tx.query<QueryResultRow>({ name: "app_credential_connection_v2", text: `SELECT

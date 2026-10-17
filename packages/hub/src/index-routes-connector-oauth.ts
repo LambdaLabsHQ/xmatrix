@@ -15,7 +15,7 @@ import { exchangeOAuthGrant, oauthAuthorizeUrl, oauthClient, oauthProviderIds, o
 import { appOrigin } from "./deployment-origins";
 import { vercelCompletionUrl } from "./connectors/vercel-api";
 import { connectorHubOrigin, requireAuth, requireHumanAuth, jsonErrors } from "./index-shared";
-import { ControlError } from "@xmatrix/db";
+import { ControlError, SLACK_WORKSPACE_TAKEN } from "@xmatrix/db";
 import { getAppConnection, upsertAppConnection } from "./apps";
 import type { Env } from "./types";
 import { addConnectedMailbox } from "./connectors/gmail-mailboxes";
@@ -35,7 +35,7 @@ import { linkGitHubInstallation } from "./index-routes-auth-space-management";
  * check still decides.
  */
 
-function appsRedirect(env: Env, spaceId: string, providerId: string, outcome: "connected" | "failed"): string {
+function appsRedirect(env: Env, spaceId: string, providerId: string, outcome: "connected" | "failed" | "elsewhere"): string {
   const url = new URL(`/app/${encodeURIComponent(spaceId)}/apps`, appOrigin(env));
   url.searchParams.set("connector", providerId);
   url.searchParams.set("oauth", outcome);
@@ -110,6 +110,10 @@ async function completeOAuthConnect(env: Env, request: Request, verified: Verifi
     if ((checked as { ok?: unknown }).ok !== true) return appsRedirect(env, verified.spaceId, providerId, "failed");
     return completion ?? appsRedirect(env, verified.spaceId, providerId, "connected");
   } catch (error) {
+    // The workspace is another Space's (slack-workspace-claim.ts): say so, rather than that Connect failed.
+    if (error instanceof ControlError && error.code === SLACK_WORKSPACE_TAKEN) {
+      return appsRedirect(env, verified.spaceId, providerId, "elsewhere");
+    }
     console.error("Connector OAuth callback failed", providerId, ["discord", "x"].includes(providerId) ? "installation rejected" : error instanceof Error ? error.message : "unknown");
     return appsRedirect(env, verified.spaceId, providerId, "failed");
   }
