@@ -1,22 +1,16 @@
 import type { Context, Hono } from "hono";
 import {
-  HUB_ROUTES, parseHarnessInventory, sha256Hex, type AgentRegistrationSummary, type SetupIntentHarness, type SetupIntentStatus,
+  HUB_ROUTES, parseHarnessInventory, type AgentRegistrationSummary, type SetupIntentHarness, type SetupIntentStatus,
 } from "@xmatrix/protocol";
 import type { Env } from "./types";
 import type { SetupIntentRead } from "./device-auth";
 import { readBearerToken } from "./auth";
-import { admitAttempt } from "./auth-attempt-limit";
-import { appOrigin } from "./deployment-origins";
-import { EMAIL_DELIVERY_CONFIGURATION_ERROR, EmailDeliveryConfigurationError, sendEmail } from "./email-delivery";
-import { setupLinkEmail } from "./setup-link-email";
 import { getDeviceAuthBroker, internalClientHeaders, jsonErrors, requireAuth, requireHumanAuth } from "./index-shared";
 import { listAgentRegistrations } from "./agent-registrations";
 import { listOwnerMachineDaemons, machineRepository } from "./machines";
 import { getSpace } from "./spaces";
 
 const NO_STORE = { "cache-control": "private, no-store" };
-/** Setup links one person may mail to themselves per minute: a second tap, not a stream. */
-const SETUP_LINK_EMAILS_PER_MINUTE = 2;
 
 /**
  * Connecting a machine from the Web (docs/design/onboarding-connect-machine.md).
@@ -55,25 +49,6 @@ export function registerSetupIntentRoutes(app: Hono<{ Bindings: Env }>): void {
   app.post("/api/setup-intents/:intentId/decline", (c) => jsonErrors(c, async () => {
     const owner = requireHumanAuth(await requireAuth(c.req.raw, c.env));
     return relay(await broker(c, "decline", { ownerUserId: owner.id, intentId: c.req.param("intentId") }));
-  }));
-
-  /* Someone on a phone cannot run the setup command, so they mail the link to
-     their own address and pick it up on the computer their agents use. */
-  app.post(HUB_ROUTES.setup_link_email, (c) => jsonErrors(c, async () => {
-    const owner = requireHumanAuth(await requireAuth(c.req.raw, c.env));
-    if (!await admitAttempt(c.env, [
-      { key: `setup-link-email:${await sha256Hex(owner.id)}`, max: SETUP_LINK_EMAILS_PER_MINUTE },
-    ])) {
-      return c.json({ error: "The link was just sent. Check your inbox." }, 429, NO_STORE);
-    }
-    try {
-      await sendEmail(c.env, owner.email, setupLinkEmail(appOrigin(c.env)));
-    } catch (error) {
-      if (!(error instanceof EmailDeliveryConfigurationError)) throw error;
-      console.error("Setup link email is not configured", { providerMessage: error.providerMessage });
-      return c.json({ error: "Email delivery is not configured.", code: EMAIL_DELIVERY_CONFIGURATION_ERROR }, 503, NO_STORE);
-    }
-    return c.json({ sentTo: owner.email }, 202, NO_STORE);
   }));
 
   /* The terminal, now signed in as the owner, says which Machine it became. */
