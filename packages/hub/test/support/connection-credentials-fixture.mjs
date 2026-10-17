@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { AppControlError, SLACK_WORKSPACE_TAKEN } from "@xmatrix/db";
 import { compileCommonJsSourceModule } from "./commonjs-source-module.mjs";
 import { getAppConnectorProvider } from "../../src/app-connectors.ts";
 import { verifyNotion } from "../../src/connectors/actions/notion.ts";
@@ -12,6 +13,7 @@ const load = await compileCommonJsSourceModule(new URL("../../src/connectors/con
 /** Run the actual credential orchestrator with a scoped repository, without a database shortcut. */
 export function credentialExecutor(repository) {
   const dependencies = {
+    "@xmatrix/db": { AppControlError, SLACK_WORKSPACE_TAKEN },
     "../app-connectors": { getAppConnectorProvider },
     "./credentials": { connectorCredentialRepository: () => repository },
     "./actions/notion": { verifyNotion }, "./http": { ProviderRequestError }, "./oauth": { refreshOAuthFields },

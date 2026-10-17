@@ -330,6 +330,7 @@ export const SPACE_PURGE_EXCLUDED_TABLES: Readonly<Record<string, string>> = Obj
   "data.space_control_heads": "removed by the finalizing transaction",
   "control.space_placement": "removed by the finalizing transaction",
   "data.space_deletions": "the audit record of the deletion itself",
+  "data.app_slack_workspace_claims": "the workspace's bot stays in its channels until Slack uninstalls it",
 });
 
 function stepName(index: number): string {
