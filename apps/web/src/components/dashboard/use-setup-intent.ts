@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { WEB_PROXY_ROUTES, type OnboardingLocale, type SetupIntentStatus } from "@xmatrix/protocol";
+import { WEB_PROXY_ROUTES, type SetupIntentStatus } from "@xmatrix/protocol";
 import { XMatrixApiError, xmatrixApiRequest } from "@/lib/query/api-client";
 import { xmatrixQueryKeys } from "@/lib/query/query-keys";
 import { userErrorMessage } from "@/lib/user-facing-error";
@@ -21,9 +21,7 @@ function rememberedIntent(spaceId: string): string | null {
   }
 }
 
-/** The command this tab shows for a Space; a setup link opened on another
- * device hands its command over here. */
-export function rememberSetupIntent(spaceId: string, intentId: string | null): void {
+function remember(spaceId: string, intentId: string | null): void {
   try {
     if (intentId) window.sessionStorage.setItem(storageKey(spaceId), intentId);
     else window.sessionStorage.removeItem(storageKey(spaceId));
@@ -59,7 +57,7 @@ export function useSetupIntent(spaceId: string | null, token: string | undefined
       url: WEB_PROXY_ROUTES.setup_intents, token, method: "POST", body: { spaceId },
     }).then((created) => {
       if (cancelled) return;
-      rememberSetupIntent(spaceId, created.intentId);
+      remember(spaceId, created.intentId);
       setIntentId(created.intentId);
       setShownAt(Date.now());
     }).catch((reason: unknown) => {
@@ -87,7 +85,7 @@ export function useSetupIntent(spaceId: string | null, token: string | undefined
   const expired = status.error instanceof XMatrixApiError && status.error.status === 404;
   useEffect(() => {
     if (!expired || !spaceId) return;
-    rememberSetupIntent(spaceId, null);
+    remember(spaceId, null);
     setIntentId(null);
   }, [expired, spaceId]);
 
@@ -110,17 +108,6 @@ export function useSetupIntent(spaceId: string | null, token: string | undefined
   const decline = () => act(() => xmatrixApiRequest({
     url: WEB_PROXY_ROUTES.setup_intent_decline(intentId!), token, method: "POST",
   }));
-  /** Emails the command's link to the person's own address, in `locale`; the reason it failed, or null. */
-  const emailLink = async (locale: OnboardingLocale): Promise<string | null> => {
-    try {
-      await xmatrixApiRequest({ url: WEB_PROXY_ROUTES.setup_intent_email(intentId!), token, method: "POST", body: { locale } });
-      return null;
-    } catch (reason) {
-      // The day's three are spent: the Hub's own sentence, not "busy, try again".
-      if (reason instanceof XMatrixApiError && reason.code === "setup_link_email_limited") return reason.message;
-      return userErrorMessage(reason, "Couldn't send the email");
-    }
-  };
   const retry = () => {
     setError(null);
     if (intentId) void status.refetch();
@@ -129,7 +116,7 @@ export function useSetupIntent(spaceId: string | null, token: string | undefined
   return {
     intentId, status: status.error ? undefined : status.data, shownAt,
     error: error || (!expired && status.error ? userErrorMessage(status.error, "Couldn't prepare a setup command", "Couldn't check the connection") : null),
-    busy, retrying: status.isFetching, approve, decline, emailLink, retry,
+    busy, retrying: status.isFetching, approve, decline, retry,
   };
 }
 

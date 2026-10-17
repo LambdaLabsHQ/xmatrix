@@ -105,7 +105,6 @@ const CLIENT_DEFECT_ACTIONS = [
   "Couldn't save the harness switch",
   "Couldn't save the secret",
   "Couldn't send that to the machine",
-  "Couldn't send the email",
   "Couldn't send the invite",
   "Couldn't send the message",
   "Couldn't send the question",

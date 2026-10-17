@@ -21,7 +21,6 @@ import { AgentInstallPicker, AgentsLine } from "./supported-agents";
 import { CandidateUpdateButton } from "./harness-update-button";
 import { useInstalledHarnesses } from "./use-installed-harnesses";
 import { useSetupIntent } from "./use-setup-intent";
-import { useIsMobileViewport } from "./workspace-shell-helpers";
 
 /* Bringing agents in, wherever xMatrix asks for it: in the welcome
    conversation, on an empty Space, in Agents. One left edge, two type sizes,
@@ -38,13 +37,12 @@ function connectStage(step: ConnectStep | null): Stage {
   return step.kind === "approval" || step.kind === "connecting" ? 2 : 3;
 }
 
-export function BringAgentsIn({ spaceId, token, userId, surface, phone: phoneShell = false }: {
+export function BringAgentsIn({ spaceId, token, userId, surface, phone = false }: {
   spaceId: string | null; token: string | null | undefined; userId: string | undefined;
   /** Where it is shown, for counting who gets through (onboarding-funnel.ts). */
   surface: OnboardingSurface; phone?: boolean;
 }) {
   const intent = useSetupIntent(spaceId, token ?? undefined, userId);
-  const phone = useIsMobileViewport() || phoneShell;
   const fleet = useInstalledHarnesses(spaceId, token, userId);
   const copy = useOnboardingCopy(spaceId, token, userId);
   const { listNames } = copy;
@@ -77,7 +75,6 @@ export function BringAgentsIn({ spaceId, token, userId, surface, phone: phoneShe
             </button>
           ) : stage > 1 && machines ? machines : null}>
           {stage === 1 && <>
-            {phone && <EmailToComputer intent={intent} copy={copy} onSent={() => count("link_emailed")} />}
             <CommandBlock command={command} copy={copy} onCopy={() => count("command_copied")} />
             <div role="status" className="mt-2 text-[13px] leading-5 text-muted-foreground">
               <p className="flex items-center gap-1.5">{spinner} {copy.waitingForComputer}</p>
@@ -152,39 +149,6 @@ export function BringAgentsIn({ spaceId, token, userId, surface, phone: phoneShe
         </p>
       )}
       {stage < 4 && !phone && <div className="text-[13px] leading-5 text-muted-foreground"><RemoteMachineHint copy={copy} /></div>}
-    </div>
-  );
-}
-
-/* A phone cannot run the command, so the person mails its link to their own
-   sign-in address and opens it on the computer, where the same setup goes on.
-   The Hub allows three a day. */
-function EmailToComputer({ intent, copy, onSent }: {
-  intent: ReturnType<typeof useSetupIntent>; copy: OnboardingCopy; onSent: () => void;
-}) {
-  const [state, setState] = useState<"idle" | "sending" | "sent">("idle");
-  const [error, setError] = useState<string | null>(null);
-  const send = async () => {
-    setState("sending");
-    setError(null);
-    const failure = await intent.emailLink(copy.locale);
-    setState(failure ? "idle" : "sent");
-    setError(failure);
-    if (!failure) onSent();
-  };
-  return (
-    <div className="mb-3">
-      {state === "sent"
-        ? <p role="status">{copy.emailSent}</p>
-        : <>
-          <p>{copy.emailOffer}</p>
-          <button type="button" disabled={!intent.intentId || state === "sending"} onClick={() => void send()}
-            className={actionClass({ variant: "primary", size: "sm" }, "mt-2")}>
-            {state === "sending" ? <AnimatedIcon icon={Loader2} className="size-4 animate-spin" /> : null}
-            {copy.sendToComputer}
-          </button>
-        </>}
-      {error && <p role="alert" className="mt-1 text-[13px] leading-5 text-destructive">{error}</p>}
     </div>
   );
 }

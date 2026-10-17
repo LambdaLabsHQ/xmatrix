@@ -5,7 +5,7 @@
  * page. Each is counted once per person, by where it was shown and on what.
  */
 export const ONBOARDING_FUNNEL_STEPS = [
-  "app_loaded", "space_ready", "command_shown", "command_copied", "download_clicked", "link_emailed", "terminal_seen", "approved",
+  "app_loaded", "space_ready", "command_shown", "command_copied", "download_clicked", "terminal_seen", "approved",
   "starter_chosen",
 ] as const;
 export type OnboardingFunnelStep = typeof ONBOARDING_FUNNEL_STEPS[number];
