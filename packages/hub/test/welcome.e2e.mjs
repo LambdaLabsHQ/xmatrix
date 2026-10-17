@@ -140,6 +140,56 @@ test("concurrent welcome calls converge on the same two steps", () =>
     });
   }));
 
+// A reserve for a command holds its Channel's sequence row while it checks for
+// the command's reservation; the append committing that reservation must take
+// the sequence row first, or the two wait on each other (40P01).
+test("a step's append and a concurrent reserve of it take the sequence row in one order", () =>
+  withOwnerWorker("Grace Hopper", async ({ worker, token, call }) => {
+    const space = await personal(call);
+    const { channelId } = (await welcome(call, space.id)).body;
+    const commandId = `product:welcome:${channelId}:agents-in`;
+    const sequenceRow = "WHERE space_id=$1 AND channel_id=$2";
+    await inWorkerTransaction(worker, async tx => {
+      const [{ allocated_sequence: sequence }] = await tx.query({
+        text: `UPDATE data.channel_message_sequences SET allocated_sequence=allocated_sequence+1
+          ${sequenceRow} RETURNING allocated_sequence`, values: [space.id, channelId] });
+      await tx.query({
+        text: `INSERT INTO data.message_sequence_reservations
+          (space_id,command_id,channel_id,sequence,state,created_at,updated_at,expires_at)
+          VALUES ($1,$2,$3,$4,'reserved',now(),now(),now()+interval '1 day')`,
+        values: [space.id, commandId, channelId, sequence] });
+    });
+    await withWelcomeAgent(worker, token, space.id, async () => {
+      const { append: appended } = await inWorkerTransaction(worker, async reserve => {
+        const [{ xid }] = await reserve.query({ text: `UPDATE data.channel_message_sequences
+          SET updated_at=updated_at ${sequenceRow} RETURNING pg_current_xact_id()::text AS xid`,
+          values: [space.id, channelId] });
+        const append = welcome(call, space.id);
+        // The append's lock timeout is short: act as soon as it waits on this transaction.
+        for (let waited = 0; ; waited += 20) {
+          const [{ waiting }] = await inWorkerTransaction(worker, tx => tx.query({
+            text: `SELECT count(*)::int AS waiting FROM pg_locks
+              WHERE NOT granted AND locktype='transactionid' AND transactionid::text=$1`, values: [xid] }));
+          if (waiting > 0) break;
+          assert.ok(waited < 20_000, "the append never waited on the Channel's sequence row");
+          await new Promise(resolve => setTimeout(resolve, 20));
+        }
+        // The reserve's own check for the command, while the append waits on it.
+        await reserve.query({
+          text: `INSERT INTO data.message_sequence_reservations
+            (space_id,command_id,channel_id,sequence,state,created_at,updated_at,expires_at)
+            VALUES ($1,$2,$3,1000000,'reserved',now(),now(),now()+interval '1 day')
+            ON CONFLICT (space_id,command_id) DO NOTHING`,
+          values: [space.id, commandId, channelId] });
+        // Committed before the append is awaited: it waits on this transaction.
+        return { append };
+      });
+      const appendedResult = await appended;
+      assert.equal(appendedResult.status, 200, JSON.stringify(appendedResult.body));
+      assert.deepEqual((await steps(call, channelId)).map(step => step.stage), ["bring-agents", "agents-in"]);
+    });
+  }));
+
 test("only a person's own personal Space gets a welcome", () =>
   withOwnerWorker("Alan Turing", async ({ worker, token, call }) => {
     const space = await personal(call);
