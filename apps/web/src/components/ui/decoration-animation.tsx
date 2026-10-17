@@ -103,10 +103,25 @@ export function useDecorationSpin(enabled = true) {
 
 /** All effects share one document clock at playbackRate 1. A synchronous
  * currentTime assignment completes a pending pause, so neither member can
- * retain a different held time or finish an old async continuation later. */
+ * retain a different held time or finish an old async continuation later.
+ * A compositor resolves a percentage keyframe against its target's box when
+ * the effect starts and may keep that length after the box resizes; members
+ * whose motions cancel then drift apart by the size change. Reapplying the
+ * same keyframes on resize resolves them against the current box. */
 function createSynchronizedClock(effects: readonly KeyframeEffect[]): DecorationClock | undefined {
   if (!effects.length || typeof document.timeline.currentTime !== "number") return;
   const animations = effects.map(effect => new Animation(effect, document.timeline));
+  const sizes = new Map<Element, string>();
+  const resizes = typeof ResizeObserver === "function" ? new ResizeObserver((entries) => {
+    let resized = false;
+    for (const entry of entries) {
+      const size = `${entry.contentRect.width}x${entry.contentRect.height}`;
+      if (sizes.has(entry.target) && sizes.get(entry.target) !== size) resized = true;
+      sizes.set(entry.target, size);
+    }
+    if (resized) for (const effect of effects) effect.setKeyframes(effect.getKeyframes());
+  }) : undefined;
+  for (const effect of effects) if (effect.target) resizes?.observe(effect.target);
   let heldTime = 0;
   let state: AnimationPlayState = "paused";
   const clock: DecorationClock = {
@@ -134,6 +149,7 @@ function createSynchronizedClock(effects: readonly KeyframeEffect[]): Decoration
       state = "paused";
     },
     cancel() {
+      resizes?.disconnect();
       for (const animation of animations) animation.cancel();
       state = "idle";
     },
