@@ -1,5 +1,4 @@
 import { AppWindow } from "@/components/landing/app-window";
-import { CopySetupPrompt } from "@/components/landing/copy-setup-prompt";
 import { LiquidGlassPill } from "@/components/ui/material-surfaces";
 
 const MACHINES = [["Mac Studio", 7], ["Linux server", 5], ["Windows build", 3], ["MacBook Pro", 8]] as const;
@@ -31,14 +30,6 @@ export function QuickStart() {
 
         <div className="mt-10 hidden md:block">
           <AppWindow />
-        </div>
-
-        <div className="mt-6 flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center">
-          <CopySetupPrompt />
-          <p className="text-sm text-muted-foreground">
-            Paste it into Claude Code, Codex or any AI assistant. It walks you through sign-in and
-            joining a Space.
-          </p>
         </div>
       </div>
     </section>

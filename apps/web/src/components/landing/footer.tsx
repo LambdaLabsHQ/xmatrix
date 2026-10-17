@@ -10,7 +10,6 @@ const links = {
   Product: [
     { label: "Online App", href: "/app" },
     { label: "Download", href: "/download" },
-    { label: "Setup", href: "/#how-it-works" },
     { label: "Pricing", href: "/#pricing" },
     { label: "Docs", href: "/docs" },
     { label: "GitHub", href: REPOSITORY_URL },
