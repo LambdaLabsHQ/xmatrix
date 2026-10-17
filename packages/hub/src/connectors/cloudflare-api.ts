@@ -308,16 +308,45 @@ async function deployments(target: CloudflareTarget, name: string) {
  */
 const WRITES = /\b(?:INSERT|UPDATE|DELETE|REPLACE\s+INTO|UPSERT|CREATE|DROP|ALTER|ATTACH|DETACH|PRAGMA|VACUUM|REINDEX|ANALYZE|BEGIN|COMMIT|ROLLBACK|SAVEPOINT|RELEASE|TRUNCATE)\b/iu;
 
+/** SQL outside quoted tokens and comments, in lexical order. A quote in a comment
+ * never opens a string, and a comment marker in a string never opens a comment. */
+function sqlCode(sql: string): string | undefined {
+  let code = "";
+  for (let at = 0; at < sql.length;) {
+    if (sql.startsWith("--", at)) {
+      const end = sql.indexOf("\n", at + 2);
+      at = end < 0 ? sql.length : end + 1;
+      code += " ";
+    } else if (sql.startsWith("/*", at)) {
+      const end = sql.indexOf("*/", at + 2);
+      if (end < 0) return undefined;
+      at = end + 2;
+      code += " ";
+    } else if ("'\"`[".includes(sql[at]!)) {
+      const close = sql[at] === "[" ? "]" : sql[at]!;
+      at++;
+      for (;;) {
+        const end = sql.indexOf(close, at);
+        if (end < 0) return undefined;
+        at = end + 1;
+        if (close !== "]" && sql[at] === close) { at++; continue; }
+        break;
+      }
+      code += " _ ";
+    } else {
+      code += sql[at++]!;
+    }
+  }
+  return code;
+}
+
 export function readOnlySql(sql: string): string | undefined {
   const statement = sql.trim();
   if (!statement) return "write a SELECT after the database";
   if (statement.length > MAX_SQL) return `the query is at most ${MAX_SQL} characters`;
-  /* Literals, quoted identifiers and comments cannot hide a keyword or a second statement. */
-  const bare = statement
-    .replace(/'(?:[^']|'')*'|"(?:[^"]|"")*"|`(?:[^`]|``)*`|\[[^\]]*\]/gu, " _ ")
-    .replace(/--[^\n]*|\/\*[\s\S]*?(?:\*\/|$)/gu, " ")
-    .trim().replace(/;\s*$/u, "");
-  if (/['"`[]/u.test(bare)) return "the query has an unterminated quote";
+  const code = sqlCode(statement);
+  if (code === undefined) return "the query has an unterminated quote or comment";
+  const bare = code.trim().replace(/;\s*$/u, "");
   if (bare.includes(";")) return "run one statement at a time";
   if (!/^(?:SELECT|WITH|VALUES|EXPLAIN)\b/iu.test(bare)) return "only SELECT, WITH, VALUES or EXPLAIN queries run here";
   if (WRITES.test(bare)) return "the query may only read; it names a statement that changes the database";
