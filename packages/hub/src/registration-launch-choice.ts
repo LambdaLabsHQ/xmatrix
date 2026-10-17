@@ -1,4 +1,4 @@
-import { launchHarnessParameters, launchRefusalCode, validateHarnessParameterValues,
+import { launchHarnessParameters, launchRefusal, validateHarnessParameterValues,
   cursorQuotaBucketForModel, routingQuotaObservation, routingQuotaPace,
   machineNetworkObservation, type MachineNetworkObservation } from "@xmatrix/protocol";
 import { RegistrationAccessError, type RegistrationLaunchCandidate, type RegistrationLaunchChooser } from "@xmatrix/db";
@@ -213,7 +213,10 @@ export function registrationLaunchChooser(evaluate: RoutingEvaluator, readContex
     const blocked = blockedRegistrations ?? [];
     const narrow = (code: string, matches: (candidate: RegistrationLaunchCandidate) => boolean) => {
       eligible = eligible.filter(matches);
-      if (!eligible.length) throw new RegistrationAccessError(launchRefusalCode(code, tags.machine, blocked), 409);
+      if (!eligible.length) {
+        const refusal = launchRefusal(code, tags.machine, blocked);
+        throw new RegistrationAccessError(refusal.code, 409, refusal.tooOld);
+      }
     };
     if (tags.machine) {
       const named = eligible.filter(candidate => machineTagSelects(tags.machine!, candidate.key.machineId, candidate.machineName));

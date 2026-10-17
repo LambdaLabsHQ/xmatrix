@@ -6,6 +6,10 @@ import {
   agentLaunchExecutable,
   AUTO_LAUNCH_FIELDS,
   agentPresetForLauncher,
+  agentPresetById,
+  harnessCommandLine,
+  harnessTooOld,
+  parseHarnessInventory,
   digestCanonicalCloneCborV1,
   parseSpaceAgentRegistrationKey,
   parseSpaceAgentConfiguration,
@@ -31,9 +35,10 @@ import {
   type HarnessParameter,
   harnessParameterObservation,
   launchHarnessParameters,
-  launchRefusalCode,
+  launchRefusal,
   validateHarnessParameterValues,
   type AutoLaunchTags,
+  type HarnessTooOld,
   type LaunchMachineBlock,
   type LaunchParameterEvidence,
   type DraftSummonIntent,
@@ -610,11 +615,16 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
       return { selectionCount: 0, prepared: [], rejected: [] };
     }
     const prepared: Array<{ runId: string; instanceId: string; launchId: string; reused: boolean }> = [];
-    const rejected: Array<{ selectionIndex: number; code: string; sourceMention: string }> = [];
+    const rejected: Array<{ selectionIndex: number; code: string; sourceMention: string; tooOld?: HarnessTooOld }> = [];
     // The summon as written, address through its last condition: the text the
     // web parses from the message and binds this launch or refusal to.
     const summonText = (selection: { start: number; end: number; text: string }) =>
       input.body.slice(selection.start, selectionLaunchConditions(input.body, selection).end);
+    // A refusal keeps what its error says is too old, so the reply can name it.
+    const refused = (selectionIndex: number, selection: { start: number; end: number; text: string }, code: string, error: unknown) => {
+      const tooOld = error instanceof RegistrationAccessError ? error.tooOld : undefined;
+      rejected.push({ selectionIndex, code, sourceMention: summonText(selection), ...(tooOld ? { tooOld } : {}) });
+    };
     for (const [selectionIndex, selection] of source.selections.entries()) {
       if (input.forceMention !== undefined && summonText(selection) !== input.forceMention) continue;
       try {
@@ -646,9 +656,9 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
         const listed = await this.candidatesFor({ ...target, managedWorkspace }, repositoryCatalog);
         const candidates = listed.offered;
         if (!candidates.length) {
-          const code = listed.offlineOnly ? "registration_daemon_offline"
-            : launchRefusalCode("registration_not_found", options.tags.machine, listed.blocked);
-          throw new RegistrationAccessError(code, code === "registration_daemon_offline" ? 409 : 404);
+          const refusal = listed.offlineOnly ? { code: "registration_daemon_offline" }
+            : launchRefusal("registration_not_found", options.tags.machine, listed.blocked);
+          throw new RegistrationAccessError(refusal.code, refusal.code === "registration_daemon_offline" ? 409 : 404, refusal.tooOld);
         }
         if (!choose) {
           rejected.push({ selectionIndex, code: "registration_selection_unconfigured", sourceMention: summonText(selection) });
@@ -668,7 +678,7 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
           const code = error instanceof RegistrationAccessError &&
             REGISTRATION_PREPARATION_REJECTION_CODES.includes(error.code)
             ? error.code : "registration_selection_failed";
-          rejected.push({ selectionIndex, code, sourceMention: summonText(selection) });
+          refused(selectionIndex, selection, code, error);
           continue;
         }
         const candidate = candidates.find(item => sameAgentRegistration(item.key, selected.key) && item.key.spaceId === selected.key.spaceId);
@@ -685,7 +695,7 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
           ...selectedParameters(selected, candidate.key.harness) }));
       } catch (error) {
         if ((error instanceof RegistrationAccessError || error instanceof MessageAuthorityError) && error.status < 500) {
-          rejected.push({ selectionIndex, code: error.code, sourceMention: summonText(selection) });
+          refused(selectionIndex, selection, error.code, error);
           continue;
         }
         throw error;
@@ -755,9 +765,9 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
       if (requiredHostCapabilities.length && (await this.candidatesFor({ managedWorkspace: true }, repositoryCatalog)).offered.length) {
         throw new RegistrationAccessError("registration_capability_unavailable", 409);
       }
-      const code = listed.offlineOnly ? "registration_daemon_offline"
-        : launchRefusalCode("registration_not_found", input.tags?.machine, listed.blocked);
-      throw new RegistrationAccessError(code, code === "registration_daemon_offline" ? 409 : 404);
+      const refusal = listed.offlineOnly ? { code: "registration_daemon_offline" }
+        : launchRefusal("registration_not_found", input.tags?.machine, listed.blocked);
+      throw new RegistrationAccessError(refusal.code, refusal.code === "registration_daemon_offline" ? 409 : 404, refusal.tooOld);
     }
     // A caller may constrain the directory or repository it states.
     const tags: AutoLaunchTags = { ...input.tags };
@@ -790,7 +800,10 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
     const repositoryCatalog = summonRepositoryCatalog(this.repositoryReader, text(input.actorUserId), undefined);
     const listed = await this.candidatesFor({ managedWorkspace: true }, repositoryCatalog);
     const candidates = listed.offered;
-    if (!candidates.length) throw new RegistrationAccessError("registration_not_found", 404);
+    if (!candidates.length) {
+      const refusal = launchRefusal("registration_not_found", undefined, listed.blocked);
+      throw new RegistrationAccessError(refusal.code, 404, refusal.tooOld);
+    }
     const selected = await choose({ message: input.body, tags: {}, candidates, managedWorkspace: true, askToStart: true,
       ...(input.onHarness ? { onHarness: input.onHarness } : {}) });
     return selected.key.harness;
@@ -922,6 +935,14 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
           registeredWorkspaceIds: new Set(workspaces.map(row => String(row.workspace_id))) });
         if (!route) { droppedOther = true; continue; }
         const { daemon, workspaceReferences } = route;
+        // A harness the machine reports older than the version xMatrix can
+        // talk to would only fail at startup: it is named, never routed to.
+        const tooOld = harnessTooOldOn(daemon, candidate.key.harness);
+        if (tooOld) {
+          blocked.push({ machineId: candidate.key.machineId, ...(tooOld.machineName ? { machineName: tooOld.machineName } : {}),
+            reason: "harness_outdated", tooOld });
+          continue;
+        }
         // Jev never sees a machine whose daemon cannot show the host abilities
         // the work needs; workspace() checks the same evidence again at launch.
         const machineResources = currentMachineResources(daemon, Date.parse(evaluatedAt));
@@ -962,7 +983,8 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
           description: typeof row.metadata_json?.displayName === "string"
             ? row.metadata_json.displayName.slice(0, 500) : "Registered workspace" }))] });
       }
-      return { offered, blocked, offlineOnly: offered.length === 0 && blocked.length > 0 && !droppedOther };
+      return { offered, blocked, offlineOnly: offered.length === 0 && blocked.length > 0 && !droppedOther &&
+        blocked.every(block => block.reason === "daemon_offline") };
     });
   }
 
@@ -970,6 +992,22 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
 
 function daemonCapable(row: QueryResultRow, capability: string): boolean {
   return Array.isArray(row.capabilities_json) && row.capabilities_json.includes(capability);
+}
+
+/** The machine's own report of this harness when it is older than the oldest
+ * version its preset can be launched as: what is too old, where, and the
+ * preset's update for that machine's platform. */
+export function harnessTooOldOn(daemon: QueryResultRow, harness: string): HarnessTooOld | undefined {
+  const metadata = daemon.metadata_json && typeof daemon.metadata_json === "object" ? daemon.metadata_json as Record<string, unknown> : undefined;
+  const item = parseHarnessInventory(metadata?.harnesses)?.items.find(entry => entry.id === harness && entry.installed);
+  const management = agentPresetById(harness)?.management;
+  const tooOld = harnessTooOld(management, item?.version);
+  if (!tooOld) return undefined;
+  const machineName = typeof daemon.machine_name === "string" ? daemon.machine_name.trim() : "";
+  const platform = metadata?.platform === "windows" || metadata?.platform === "win32" ? "windows"
+    : ["macos", "darwin", "linux"].includes(String(metadata?.platform)) ? "unix" : undefined;
+  const update = platform ? management?.update[platform] : undefined;
+  return { ...tooOld, ...(machineName ? { machineName } : {}), ...(update ? { update: harnessCommandLine(update) } : {}) };
 }
 
 /** The part of one registration a launch can actually be routed to, by the

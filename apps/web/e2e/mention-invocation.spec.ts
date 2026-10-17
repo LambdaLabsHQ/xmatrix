@@ -591,6 +591,8 @@ test("tagged preflight rejection shows candidate evidence without a fabricated l
   const dialog = page.getByRole('dialog');
   await expect(dialog).toContainText('Rejected before launch allocation');
   await expect(dialog).toContainText('No eligible environment matched this summon.');
+  // The subtitle says it; the cause does not repeat it.
+  await expect(dialog).not.toContainText('No launch was allocated');
   await expect(dialog.getByText('Candidate observations')).toBeVisible();
   await expect(dialog.locator('.app-routing-row')).toHaveCount(0);
   await expect(dialog).not.toContainText('profile-a');

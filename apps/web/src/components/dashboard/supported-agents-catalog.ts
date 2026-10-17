@@ -1,6 +1,5 @@
-import { AGENT_PRESETS, type AgentPreset } from "@xmatrix/protocol";
+import { AGENT_PRESETS, harnessCommandLine, type AgentPreset } from "@xmatrix/protocol";
 import type { InstallPlatform } from "./connect-machine";
-import { harnessCommandLabel } from "./machine-harness-state";
 
 /* Every agent xMatrix can bring in, so a newcomer finds the one they already
    use instead of reading that only two are welcome. The registry is the
@@ -18,14 +17,9 @@ export const SUPPORTED_AGENTS: AgentPreset[] = AGENT_PRESETS
   .filter((preset) => preset.id !== "custom" && preset.avatarUrl)
   .sort((a, b) => leadRank(a) - leadRank(b));
 
-/**
- * The upstream installer as a person pastes it: the script, not the shell
- * wrapping it. Only a verified recipe counts; a prose hint cannot be pasted.
- */
+/** The upstream installer as a person pastes it. Only a verified recipe
+ * counts; a prose hint cannot be pasted. */
 export function agentInstallCommand(preset: AgentPreset, platform: InstallPlatform): string | undefined {
   const recipe = preset.management?.install[platform];
-  if (!recipe) return undefined;
-  const script = recipe.command === "powershell" ? recipe.args[recipe.args.indexOf("-Command") + 1]
-    : (recipe.command === "bash" || recipe.command === "sh") && recipe.args[0] === "-c" ? recipe.args[1] : undefined;
-  return script ?? harnessCommandLabel(recipe);
+  return recipe ? harnessCommandLine(recipe) : undefined;
 }

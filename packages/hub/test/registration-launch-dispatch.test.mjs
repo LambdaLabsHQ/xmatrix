@@ -7,6 +7,8 @@ import {
   executeFirstMessageDecision,
 } from "../src/registration-launch-dispatch.ts";
 
+const tooOld = { program: 'Cursor CLI', version: '2025.09.12-4852336', minimumVersion: '2026.01.01', machineName: 'Laptop', update: 'cursor-agent update' };
+
 test('composite dispatch persists sanitized rejection through current source and channel authority', async t => {
   const { PostgresRegistrationLaunchRepository } = await import('@xmatrix/db');
   const { digestCanonicalCloneCborV1 } = await import('@xmatrix/protocol');
@@ -17,6 +19,7 @@ test('composite dispatch persists sanitized rejection through current source and
   t.mock.method(PostgresRegistrationLaunchRepository.prototype, 'dispatchFromMessage', async () => ({
     mode: 'composite', selectionCount: 1, prepared: [], rejected: [
       { selectionIndex: 0, sourceMention: '@codex', code: 'registration_directory_unavailable' },
+      { selectionIndex: 1, sourceMention: '@cursor', code: 'registration_harness_outdated', tooOld },
     ],
   }));
   const database = { cacheMode: 'disabled', transaction: async (_context, callback) => callback({ query: async query => {
@@ -33,6 +36,8 @@ test('composite dispatch persists sanitized rejection through current source and
   assert.equal(writes.length, 1);
   assert.equal(writes[0].sourceMessageId, 'message');
   assert.equal(writes[0].rejected[0].code, 'registration_directory_unavailable');
+  // A refusal for a too-old harness keeps what is too old, so its reply names it.
+  assert.deepEqual(writes[0].rejected[1].tooOld, tooOld);
   assert.equal(Object.hasOwn(writes[0], 'bodyHash'), false);
   allowed = false;
   await assert.rejects(executeRegistrationLaunchDispatch(input));

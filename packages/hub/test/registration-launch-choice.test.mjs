@@ -317,6 +317,14 @@ test('a named machine whose daemon is offline is not reported as a missing envir
   }), error => error.code === 'registration_machine_unavailable');
 });
 
+test('a machine whose harness is too old to talk to is refused naming it, without asking Jev', async () => {
+  const tooOld = { program: 'Cursor CLI', version: '2025.09.12-4852336', minimumVersion: '2026.01.01', machineName: 'Laptop' };
+  await assert.rejects(registrationLaunchChooser(async () => assert.fail('Jev must not be called'))({
+    message: '@auto machine:Laptop', tags: { machine: 'Laptop' }, candidates,
+    blocked: [{ machineId: 'laptop-id', machineName: 'Laptop', reason: 'harness_outdated', tooOld }],
+  }), error => error.code === 'registration_harness_outdated' && error.status === 409 && error.tooOld === tooOld);
+});
+
 test('explicit machine, model and effort failures retain their exact phase', async () => {
   const cases = [
     [{ machine: 'missing' }, 'registration_machine_unavailable'],

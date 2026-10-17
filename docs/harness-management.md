@@ -54,6 +54,29 @@ access controls govern this metadata, including machine-local launcher paths.
 Consumers should validate it with `parseHarnessInventory` and display its
 capture time, rather than treating an offline machine's inventory as live.
 
+## Too old to talk to
+
+A preset may set `minimumVersion: { program, version }`: the oldest version
+that speaks the protocol xMatrix launches it with, taken from the vendor's own
+changelog, and the vendor's name for the program `version` reports on. That
+name is what a person is told is too old, so it names the program and not the
+product around it: Cursor's is the Cursor CLI, not the editor. An unknown
+version is not judged.
+
+Launch routing leaves out a harness its machine reports older than that, so
+`@auto` hands the work to another agent. When nothing else can take it, the
+refusal is one sentence filled from the registry and the machine's report
+(`harnessTooOld`, `harnessTooOldSentence`), plus the preset's update for that
+machine's platform:
+
+> Cursor CLI on Laptop is 2025.09.12, too old for xMatrix, which needs
+> 2026.01.01 or later. Run "cursor-agent update" there, then try again.
+
+The rejection stores those facts, not the text. The connect flow and the
+Agents list say the same sentence and offer the update in place. A new
+conversation's first message records only its failure code, so a refusal
+there reads the code's text without the program's name.
+
 ## Harness actions
 
 `HARNESS_ACTIONS` are `install`, `update`, `uninstall`, `auto_update_on`,
