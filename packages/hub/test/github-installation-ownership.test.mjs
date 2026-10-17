@@ -11,18 +11,21 @@ const env = { GITHUB_APP_CLIENT_SECRET: "app-secret" };
 
 const account = (installationId, login, type = "Organization") => ({ installationId, login, type });
 
-function fixture({ granted = ["111"], stored = ["111"], listed = [], status = "configured",
+function fixture({ granted = ["111"], stored = ["111"], confirmed = [], listed = [], status = "configured",
   statePayload = { spaceId: "space-1", userId: "admin" } } = {}) {
   const upserts = [];
   const authorizations = [];
   const credentialPuts = [];
+  const records = [];
   const imports = {
     hono: { Hono },
     "./apps": {
       upsertAppConnection: async (_env, input) => { upserts.push(input); return { connection: {} }; },
+      recordGitHubInstallationLinks: async (_env, input) => { records.push(input); return input.installationIds; },
       listAppConnections: async () => listed,
       findAppConnection: async () => ({ providerId: "github", status,
-        metadata: { installationIds: stored, repository: "org/repo" } }),
+        metadata: { installationIds: stored, repository: "org/repo" },
+        githubLinks: confirmed.map((installationId) => ({ installationId, githubUserId: 77 })) }),
     },
     "./app-connectors": {
       githubConnectionInstallationIds,
@@ -35,9 +38,12 @@ function fixture({ granted = ["111"], stored = ["111"], listed = [], status = "c
       },
       githubConnectReturnUrl: (_env, outcome, target = {}) =>
         `https://xmatrix.test/connect/github?github=${outcome}${target.spaceId ? `&space=${target.spaceId}` : ""}`,
-      // The grant "grant" is this admin's own authorization for space-1.
+      // The grant "grant" is this admin's own authorization for space-1, as GitHub user 77.
       githubGrantInstallationIds: async (_env, grant, input) =>
         grant === "grant" && input.spaceId === "space-1" && input.userId === "admin" ? granted : undefined,
+      githubGrant: async (_env, grant, input) =>
+        grant === "grant" && input.spaceId === "space-1" && input.userId === "admin"
+          ? { installationIds: granted, githubUserId: 77 } : undefined,
     },
     "./deployment-origins": { appOrigin: () => "https://xmatrix.test" },
     "./connectors/forget-grant": { forgetConnectionGrant: async (_env, input) => { credentialPuts.push(input); } },
@@ -58,7 +64,7 @@ function fixture({ granted = ["111"], stored = ["111"], listed = [], status = "c
   const link = (installationId, grant = "grant") => app.request("/api/spaces/space-1/app-connections/github/installations", {
     method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ installationId, grant }) }, env);
   const list = (grant) => app.request(`/api/spaces/space-1/app-connections/github/installations${grant ? `?grant=${grant}` : ""}`, {}, env);
-  return { app, setup, patch, link, list, upserts, authorizations, credentialPuts };
+  return { app, setup, patch, link, list, upserts, authorizations, credentialPuts, records };
 }
 
 const outcome = (response) => new URL(response.headers.get("location")).searchParams.get("github");
@@ -97,6 +103,8 @@ test("Link links only an installation the admin's own grant for this Space names
   assert.deepEqual(f.upserts, []);
   assert.equal((await f.link("222")).status, 200);
   assert.deepEqual(f.upserts.map((upsert) => upsert.body.metadataAppend), [{ installationIds: "222" }]);
+  // The GitHub user the grant names is recorded as handing it over; without that record it is not usable.
+  assert.deepEqual(f.records, [{ spaceId: "space-1", actorUserId: "admin", githubUserId: 77, installationIds: ["222"] }]);
 });
 
 test("Link appends and never replaces the stored metadata of a connected Space", async () => {
@@ -173,10 +181,10 @@ test("Disconnecting a Google or Composio connection forgets its grant before the
 });
 
 test("the accounts list shows linked accounts, and after authorizing the granted ones not linked yet", async () => {
-  const f = fixture({ stored: ["111", "404"], granted: ["111", "222"] });
+  const f = fixture({ stored: ["111", "404"], confirmed: ["111"], granted: ["111", "222"] });
   const without = await (await f.list()).json();
-  assert.deepEqual(without.linked.map((item) => [item.installationId, item.login]),
-    [["111", "org-111"], ["404", "Installation 404"]]);
+  assert.deepEqual(without.linked.map((item) => [item.installationId, item.login, item.confirmed]),
+    [["111", "org-111", true], ["404", "Installation 404", false]]);
   assert.deepEqual(without.available, []);
   assert.equal(without.authorized, false);
   const authorized = await (await f.list("grant")).json();

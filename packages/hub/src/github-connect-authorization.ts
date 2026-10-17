@@ -14,8 +14,9 @@ import { signGitHubAppState, verifyGitHubAppState } from "./index-shared";
  */
 const CONNECT_STATE_PREFIX = "xmgh.";
 const CONNECT_PURPOSE = "github-connect";
-// v2 grants named every installation the person reached, not those they administer.
-const GRANT_PURPOSE = "github-grant:v3";
+// v2 grants named every installation the person reached, not those they
+// administer; v3 grants did not name the GitHub user recorded as linking them.
+const GRANT_PURPOSE = "github-grant:v4";
 const CONNECT_TTL_MS = 10 * 60_000;
 const GRANT_TTL_MS = 30 * 60_000;
 
@@ -98,15 +99,24 @@ async function exchangeCode(env: ConnectEnv, code: string): Promise<string | und
   return typeof payload.access_token === "string" && payload.access_token ? payload.access_token : undefined;
 }
 
+/** What a completed authorization does in the Space, as the GitHub user GitHub named. */
+export interface GitHubConnectInstallations {
+  /** Link one installation and record this GitHub user as the one who linked it. */
+  link(spaceId: string, userId: string, installationId: string, githubUserId: number): Promise<boolean>;
+  /** Record this GitHub user for installations the Space already links, so they stay usable. */
+  confirm(spaceId: string, userId: string, githubUserId: number, installationIds: string[]): Promise<void>;
+}
+
 /**
  * GitHub's return from the authorization page. A fresh installation is
  * linked when the person administers it; otherwise the installations they
- * administer come back as a short-lived signed grant the Space may link from.
+ * administer come back as a short-lived signed grant the Space may link from,
+ * and those it already links are confirmed as theirs to delegate.
  */
 export async function completeGitHubConnectAuthorization(
   env: ConnectEnv,
   request: Request,
-  link: (spaceId: string, userId: string, installationId: string) => Promise<boolean>,
+  installations: GitHubConnectInstallations,
   principal: { userId: string; authorizeSpace: (spaceId: string, userId: string) => Promise<void> },
 ): Promise<Response> {
   const url = new URL(request.url);
@@ -131,14 +141,17 @@ export async function completeGitHubConnectAuthorization(
   const administered = reachable && await githubAdministeredInstallations(env, token, reachable).catch(() => undefined);
   if (!administered) return apps("failed");
 
+  const { githubUserId, installationIds } = administered;
   if (installationId) {
     // installation_id arrived unsigned from GitHub's setup redirect: only an
     // installation this person's GitHub account administers is linked.
-    if (!administered.includes(installationId) || !await link(spaceId, userId, installationId)) return apps("failed");
+    if (!installationIds.includes(installationId) ||
+        !await installations.link(spaceId, userId, installationId, githubUserId)) return apps("failed");
     return apps(payload?.setupAction === "update" ? "updated" : "connected");
   }
+  try { await installations.confirm(spaceId, userId, githubUserId, installationIds); } catch { return apps("failed"); }
   const grant = await signGitHubAppState({
-    purpose: GRANT_PURPOSE, spaceId, userId, installationIds: administered,
+    purpose: GRANT_PURPOSE, spaceId, userId, githubUserId, installationIds,
     expiresAt: Date.now() + GRANT_TTL_MS,
   }, clientSecret);
   return apps("authorized", grant);
@@ -161,15 +174,27 @@ export async function handoffGitHubConnectAuthorization(env: ConnectEnv, request
   return Response.redirect(target.toString(), 302);
 }
 
+/**
+ * A grant from this Space's own authorization: the installations it lets this
+ * person link, and the GitHub user GitHub named, who is recorded as linking them.
+ */
+export async function githubGrant(env: ConnectEnv, grant: string | undefined, input: {
+  spaceId: string;
+  userId: string;
+}): Promise<{ installationIds: string[]; githubUserId: number } | undefined> {
+  if (!grant) return undefined;
+  const payload = await verified(grant, credentials(env).clientSecret, GRANT_PURPOSE);
+  if (!payload || payload.spaceId !== input.spaceId || payload.userId !== input.userId ||
+      !Array.isArray(payload.installationIds) || !Number.isSafeInteger(payload.githubUserId) ||
+      Number(payload.githubUserId) < 1) return undefined;
+  return { installationIds: payload.installationIds.filter((id): id is string => typeof id === "string"),
+    githubUserId: Number(payload.githubUserId) };
+}
+
 /** The installations a grant from this Space's own authorization lets this person link. */
 export async function githubGrantInstallationIds(env: ConnectEnv, grant: string | undefined, input: {
   spaceId: string;
   userId: string;
 }): Promise<string[] | undefined> {
-  if (!grant) return undefined;
-  const payload = await verified(grant, credentials(env).clientSecret, GRANT_PURPOSE);
-  if (!payload || payload.spaceId !== input.spaceId || payload.userId !== input.userId) return undefined;
-  return Array.isArray(payload.installationIds)
-    ? payload.installationIds.filter((id): id is string => typeof id === "string")
-    : undefined;
+  return (await githubGrant(env, grant, input))?.installationIds;
 }

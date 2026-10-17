@@ -1,6 +1,6 @@
 import { plainRecord } from "@xmatrix/protocol";
 import { PostgresGovernanceRepository, PostgresPageRepository } from "@xmatrix/db";
-import { githubConnectionHasInstallation, githubConnectionInstallationIds, publishGitHubCheckRun,
+import { githubConnectionInstallationIds, githubRepositoryDelegated, publishGitHubCheckRun,
   type AppConnectorConnectionView } from "./app-connectors";
 import { authUserByGitHubId } from "./auth-authority";
 import { startPreReview } from "./github-pre-review";
@@ -64,19 +64,21 @@ function governance(env: Env): PostgresGovernanceRepository {
 
 /**
  * The Space's configured GitHub connection, only when it covers the
- * installation the webhook came from. GitHub signs which installation, and so
- * which repositories, a delivery speaks for; a pull request from any other
- * installation, or a delivery naming none, cannot touch the Space's claims or
- * fire its owed Automations. Missing evidence fails closed.
+ * installation the webhook came from and that installation's linking
+ * administrator administers the repository now. GitHub signs which
+ * installation, and so which repositories, a delivery speaks for; a pull
+ * request from any other installation or repository, or a delivery naming
+ * none, cannot touch the Space's claims or fire its owed Automations. Missing
+ * evidence fails closed.
  */
-async function connectedGitHub(env: Env, spaceId: string, installationId: string):
+async function connectedGitHub(env: Env, spaceId: string, installationId: string, owner: string, repo: string):
   Promise<AppConnectorConnectionView | null> {
   if (!installationId) return null;
   const space = await governance(env).read({ requestId: crypto.randomUUID(), spaceId }).catch(() => null);
   if (!space) return null;
   const connection = await findAppConnection(env, { spaceId, providerId: "github", actorUserId: space.ownerUserId });
-  return connection?.status === "configured" && githubConnectionHasInstallation(connection, installationId)
-    ? connection : null;
+  return connection?.status === "configured" &&
+    await githubRepositoryDelegated(env, connection, installationId, owner, repo) ? connection : null;
 }
 
 export async function checkPullRequestClaims(env: Env, payload: Record<string, unknown>): Promise<void> {
@@ -96,7 +98,7 @@ export async function checkPullRequestClaims(env: Env, payload: Record<string, u
     const author = typeof authorId === "number" || typeof authorId === "string"
       ? await authUserByGitHubId(env, String(authorId)) : null;
     for (const spaceId of spaces) {
-      if (!await connectedGitHub(env, spaceId, installationId)) continue;
+      if (!await connectedGitHub(env, spaceId, installationId, owner, repo)) continue;
       const { completed } = await pages(env).completePullRequestClaims({ requestId: crypto.randomUUID(), spaceId,
         pullRequestUrl: url });
       await askForWriteback(env, { pullRequestUrl: url, completed });
@@ -120,7 +122,7 @@ export async function checkPullRequestClaims(env: Env, payload: Record<string, u
 
   for (const spaceId of spaces) {
     // Only a pull request from the Space's own installation may attach to its claims.
-    const connection = await connectedGitHub(env, spaceId, installationId);
+    const connection = await connectedGitHub(env, spaceId, installationId, owner, repo);
     if (!connection) continue;
     const results = [];
     for (const reference of references.filter((item) => item.spaceId === spaceId)) {

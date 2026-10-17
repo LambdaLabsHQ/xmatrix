@@ -1,6 +1,6 @@
 import { PostgresAutomationRepository, PostgresPageRepository } from "@xmatrix/db";
 import { automationReferences, type AutomationTrigger } from "@xmatrix/protocol";
-import { githubConnectionHasInstallation, githubPullRequestPaths } from "./app-connectors";
+import { githubPullRequestPaths, githubRepositoryDelegated } from "./app-connectors";
 import { record, text } from "./github-subscription-domain";
 import { tellPageAutomationChannels } from "./page-automation-wake";
 import { createPostgresAuthorityDatabase, createPostgresAuthorityFleet } from "./postgres-authority-fleet";
@@ -80,7 +80,10 @@ export async function fireGitHubAutomationTriggers(env: Env, event: string,
     const key = `${spaceId}\u0000${userId}`;
     if (!connected.has(key)) connected.set(key, (async () => {
       const connection = await findAppConnection(env, { spaceId, providerId: "github", actorUserId: userId });
-      return connection?.status === "configured" && githubConnectionHasInstallation(connection, fired.installationId);
+      const [owner, repo] = fired.repository.split("/") as [string, string];
+      // Only what the installation's linking administrator administers now fires the Space's Automations.
+      return connection?.status === "configured" &&
+        await githubRepositoryDelegated(env, connection, fired.installationId, owner, repo);
     })().catch(() => false));
     return connected.get(key)!;
   };

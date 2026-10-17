@@ -22,9 +22,11 @@ async function withSpaces(run) {
   const spaces = [0, 1].map(() => `oauth-authorization-${crypto.randomUUID()}`);
   const repository = new PostgresAppCredentialRepository(database, "test-encryption-key");
   const principal = { id: `oauth-admin-${crypto.randomUUID()}` };
+  const confirmations = [];
   const imports = {
     "./github-connect-authorization": githubAuthorization,
-    "./index-routes-auth-space-management": { linkGitHubInstallation: () => assert.fail("a refused GitHub Connect cannot link an installation") },
+    "./index-routes-auth-space-management": { linkGitHubInstallation: () => assert.fail("a refused GitHub Connect cannot link an installation"),
+      confirmGitHubInstallations: async (...args) => { confirmations.push(args.slice(1)); } },
     "./connectors/oauth": oauth, "./usage-cost-metering": metering, "@xmatrix/protocol": { HUB_ROUTES },
     "@xmatrix/db": { ControlError },
     "./connectors/credentials": { connectorCredentialRepository: () => repository },
@@ -48,7 +50,7 @@ async function withSpaces(run) {
   try {
     await sql(`INSERT INTO data.space_members(space_id,user_id,role,version,created_at,updated_at)
       VALUES ($1,$3,'admin',1,now(),now()),($2,$3,'member',1,now(),now())`, [...spaces, principal.id]);
-    await run({ spaces, sql, principal, start, complete });
+    await run({ spaces, sql, principal, start, complete, confirmations });
   } finally {
     await sql("DELETE FROM data.space_deletions WHERE space_id=ANY($1::text[])", [spaces]);
     await sql("DELETE FROM data.space_members WHERE space_id=ANY($1::text[])", [spaces]);
@@ -81,7 +83,7 @@ integration("OAuth start requires admin authority in the target Space before sig
 });
 
 integration("GitHub authenticated completion refuses another admin and grants only the initiator's Space", async () => {
-  await withSpaces(async ({ spaces, sql, principal, complete }) => {
+  await withSpaces(async ({ spaces, sql, principal, complete, confirmations }) => {
     const original = principal.id, other = `other-admin-${crypto.randomUUID()}`;
     await sql(`INSERT INTO data.space_members(space_id,user_id,role,version,created_at,updated_at)
       VALUES ($1,$2,'admin',1,now(),now())`, [spaces[0], other]);
@@ -89,7 +91,7 @@ integration("GitHub authenticated completion refuses another admin and grants on
     const state = new URL(url).searchParams.get("state");
     const provider = stubFetchResponses([{ body: { access_token: "temporary-user-token" } },
       { body: { installations: [{ id: 111, account: { login: "fixture", type: "User" } }] } },
-      { body: { login: "fixture" } }]);
+      { body: { login: "fixture", id: 31 } }]);
     try {
       principal.id = other;
       assert.match((await (await complete(state)).json()).redirect, /github=failed/u);
@@ -102,6 +104,7 @@ integration("GitHub authenticated completion refuses another admin and grants on
       assert.deepEqual(await githubAuthorization.githubGrantInstallationIds(env, grant, { spaceId: spaces[0], userId: original }), ["111"]);
       assert.equal(await githubAuthorization.githubGrantInstallationIds(env, grant, { spaceId: spaces[1], userId: original }), undefined);
       assert.equal(provider.calls.length, 3);
+      assert.deepEqual(confirmations, [[spaces[0], original, 31, ["111"]]], "only the initiator's GitHub user is recorded");
     } finally { principal.id = original; provider.restore(); }
   });
 });

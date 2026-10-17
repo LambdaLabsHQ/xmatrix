@@ -25,7 +25,7 @@ import { upstreamMeter } from "./usage-cost-metering";
 import { paidCallRepository, paidXCalls } from "./billing-paid-calls";
 import { platformAdminSpaceId } from "./admin-platform-access";
 import { completeGitHubConnectAuthorization, isGitHubConnectState } from "./github-connect-authorization";
-import { linkGitHubInstallation } from "./index-routes-auth-space-management";
+import { confirmGitHubInstallations, linkGitHubInstallation } from "./index-routes-auth-space-management";
 
 /*
  * One-click OAuth routes (docs/design/connector-platform.md §3.2): which
@@ -201,7 +201,10 @@ export function registerConnectorOAuthRoutes(app: Hono<{ Bindings: Env }>): void
       url.searchParams.set("state", state);
       url.searchParams.set("code", field("code") ?? "");
       const response = await completeGitHubConnectAuthorization(c.env, new Request(url),
-        (spaceId, userId, installationId) => linkGitHubInstallation(c.env, spaceId, userId, installationId),
+        { link: (spaceId, userId, installationId, githubUserId) =>
+          linkGitHubInstallation(c.env, spaceId, userId, installationId, githubUserId),
+        confirm: (spaceId, userId, githubUserId, installationIds) =>
+          confirmGitHubInstallations(c.env, spaceId, userId, githubUserId, installationIds) },
         { userId: user.id, authorizeSpace: (spaceId, actorUserId) => connectorCredentialRepository(c.env)
           .authorizeAdmin({ requestId: crypto.randomUUID(), spaceId, actorUserId }) });
       return c.json({ redirect: response.headers.get("location") }, 200, { "cache-control": "private, no-store" });

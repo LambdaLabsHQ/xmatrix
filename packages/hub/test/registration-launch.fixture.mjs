@@ -9,6 +9,7 @@ import { randomUUID } from "node:crypto";
 import { createServer } from "node:http";
 
 import { Client } from "pg";
+import { GITHUB_LINKER } from "./support/github-app.mjs";
 
 export { githubAppPrivateKey } from "./support/github-app.mjs";
 
@@ -178,6 +179,15 @@ export function githubInstallationCatalog(id, repositories) {
         response.end(JSON.stringify({ repositories, total_count: repositories.length }));
         return;
       }
+      // The installation's recorded linker administers its repositories.
+      if (request.url === `/user/${GITHUB_LINKER.githubUserId}`) {
+        response.end(JSON.stringify({ id: GITHUB_LINKER.githubUserId, login: GITHUB_LINKER.login }));
+        return;
+      }
+      if (request.url?.endsWith(`/collaborators/${GITHUB_LINKER.login}/permission`)) {
+        response.end(JSON.stringify({ permission: "admin", user: { id: GITHUB_LINKER.githubUserId, login: GITHUB_LINKER.login } }));
+        return;
+      }
       response.statusCode = 404;
       response.end("{}");
     });
@@ -189,14 +199,21 @@ export function githubInstallationCatalog(id, repositories) {
   });
 }
 
-/** Connect a Space to one GitHub App installation, as the user who installed it. */
-export function connectGitHubInstallation(worker, { spaceId, userId, installationId }) {
-  return inWorkerTransaction(worker, tx => tx.query({ text: `INSERT INTO data.app_connector_connections
+/**
+ * Connect a Space to one GitHub App installation, as the user who installed
+ * it, with Connect's record of the GitHub administrator (`GITHUB_LINKER`) who
+ * handed it over.
+ */
+export async function connectGitHubInstallation(worker, { spaceId, userId, installationId }) {
+  await inWorkerTransaction(worker, tx => tx.query({ text: `INSERT INTO data.app_connector_connections
     (connection_id,space_id,provider_id,provider_name,status,auth_mode,scopes_json,secret_refs_json,capabilities_json,
      channel_ids_json,created_by,metadata_json,search_rank_sequence,version,created_at,updated_at)
     VALUES ($1,$2,'github','GitHub','configured','oauth','[]','[]','[]','[]',$3,$4::jsonb,$5,1,now(),now())
     ON CONFLICT DO NOTHING`,
   values: [`${spaceId}:github`, spaceId, userId, JSON.stringify({ installationIds: [installationId] }), randomUUID()] }));
+  await inWorkerTransaction(worker, tx => tx.query({ text: `INSERT INTO data.app_github_installation_links
+    (connection_id,space_id,installation_id,github_user_id,linked_by,linked_at) VALUES ($1,$2,$3,$4,$5,now())
+    ON CONFLICT DO NOTHING`, values: [`${spaceId}:github`, spaceId, String(installationId), GITHUB_LINKER.githubUserId, userId] }));
 }
 
 /**
