@@ -58,6 +58,7 @@ The injected bridge mirrors the Electron preload API used by `apps/web/src/lib/d
 - `checkCliInstalled` always returns `{ "installed": false }`.
 - Desktop auto-update methods return a disabled status because iOS updates are handled by the App Store or TestFlight.
 - `xmatrix://channel/:id` and `xmatrix://login?...` deep links are mapped to the same web routes as the Electron app.
+- `<a download>` links (including the blob: URLs attachment downloads use) and `Content-Disposition: attachment` responses become native `WKDownload`s: MP4/MOV videos and images are saved straight to Photos, everything else is offered to Files.
 
 ## Native mobile tab dock
 
