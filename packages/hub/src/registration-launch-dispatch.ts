@@ -124,6 +124,8 @@ export async function executeFirstMessageDecision(input: {
   commandId: string; actorUserId: string; channelId: string; messageId: string; body: string;
   /** The author is a Human, who may choose first. */
   window: boolean;
+  /** The decision's row exists: hand its unfinished summon to the Channel's coordinator. */
+  opened?: () => Promise<void>;
 }): Promise<FirstMessageDecision> {
   const { placement, repository } = await channelLaunchRepository(input);
   const choose = registrationLaunchChooser(input.evaluatorFor(placement.spaceId));
@@ -145,11 +147,13 @@ type FirstMessageChoices = Pick<PostgresFirstMessageLaunchChoiceRepository, "ope
 export async function decideFirstMessageLaunch(input: {
   commandId: string; actorUserId: string; channelId: string; messageId: string; choices: FirstMessageChoices;
   read: (onHarness: (harness: string) => Promise<void>) => Promise<string>;
+  opened?: () => Promise<void>;
 }, wait: (ms: number) => Promise<void> = ms => new Promise(resolve => setTimeout(resolve, ms)), now = Date.now,
 ): Promise<FirstMessageDecision> {
   const request = (step: string) => `${input.commandId}:${step}`.slice(0, 200);
   const where = { channelId: input.channelId, messageId: input.messageId };
   const window = await input.choices.open({ requestId: request("open"), ...where, authorUserId: input.actorUserId });
+  await input.opened?.();
   if (window.chosenBy === "author") return { claimed: false };
   let reading: Promise<{ deadlineAt: string }> | undefined;
   const recommend = (harness?: string) => reading ??= input.choices.recommend({ requestId: request("recommend"), ...where,
@@ -217,7 +221,34 @@ export function decideNewConversationLaunch(env: Env, input: {
   const evaluatorFor = jevEvaluator(env, { feature: "start_intent", actorUserId: input.actorUserId,
     channelId: input.channelId, sourceMessageId: input.commandId, invocationId: input.commandId });
   if (!evaluatorFor) throw new RegistrationAccessError("registration_selection_unconfigured", 503);
-  return executeFirstMessageDecision({ ...runtimePlacement(env), evaluatorFor, ...input });
+  // The request deciding this may end before its summon does (a background
+  // budget runs out); the coordinator then finishes it once it is due.
+  return executeFirstMessageDecision({ ...runtimePlacement(env), evaluatorFor, ...input,
+    opened: () => wakeAgentLaunchCoordinator(env, input.channelId, ["firstMessageSummon"]).catch(error =>
+      console.warn("First message summon handover failed", { channelId: input.channelId, messageId: input.messageId,
+        error: error instanceof Error ? error.message : String(error) })) });
+}
+
+/** xMatrix's summon of a decided first message finished dispatching. */
+export async function markFirstMessageSummoned(env: Env, input: { channelId: string; messageId: string }): Promise<void> {
+  const { database, directory } = runtimePlacement(env);
+  const commandId = `first-message-summoned:${input.messageId}`.slice(0, 200);
+  const { placement } = await channelLaunchRepository({ database, directory, commandId, channelId: input.channelId });
+  await new PostgresFirstMessageLaunchChoiceRepository(database, { spaceId: placement.spaceId, shardId: placement.shardId,
+    placementEpoch: placement.placementEpoch }).summoned({ requestId: commandId, ...input });
+}
+
+/** The body of a Channel's first message, read as its author. */
+export async function readFirstMessageBody(env: Env, input: { channelId: string; messageId: string; authorUserId: string }) {
+  const { database, directory } = runtimePlacement(env);
+  const commandId = `first-message-body:${input.messageId}`.slice(0, 200);
+  const { placement } = await channelLaunchRepository({ database, directory, commandId, channelId: input.channelId });
+  const page = await new PostgresMessageRepository(database).history({ requestId: commandId, spaceId: placement.spaceId,
+    principal: { kind: "user", id: input.authorUserId }, channelId: input.channelId, beforeSequence: 2, limit: 1 });
+  const message = page.messages.map(postgresProductMessage).find(item => Number(item.sequence) === 1);
+  if (message?.messageId !== input.messageId || typeof message.body !== "string") return undefined;
+  const from = message.from as { kind?: unknown } | undefined;
+  return { body: message.body, authorKind: from?.kind === "agent" ? "agent" as const : "user" as const };
 }
 
 /** Hub-side caller for any-input launches; wakes the daemon after the durable prepare. */
