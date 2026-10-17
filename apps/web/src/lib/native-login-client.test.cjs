@@ -23,9 +23,9 @@ test("native login labels distinguish Android from desktop and CLI", () => {
   assert.equal(deviceClientLabel(null), "terminal");
 });
 
-test("mobile browser login returns through the registered app scheme", () => {
+test("an app's browser login returns through the registered app scheme; a terminal's does not", () => {
   assert.equal(nativeLoginReturnUrl("android"), "xmatrix://login");
   assert.equal(nativeLoginReturnUrl("ios"), "xmatrix://login");
-  assert.equal(nativeLoginReturnUrl("desktop"), null);
+  assert.equal(nativeLoginReturnUrl("desktop"), "xmatrix://login");
   assert.equal(nativeLoginReturnUrl(null), null);
 });
