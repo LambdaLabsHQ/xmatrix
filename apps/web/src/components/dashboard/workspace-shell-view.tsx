@@ -1118,7 +1118,6 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
         onRebornSender={handleTimelineRebornSender}
         reborningSenderKey={reborningAgentInstanceId}
         onQuestionnaireAnswer={handleTimelineQuestionnaireAnswer}
-        onSendMessage={runSelectedChannelCommand}
         onOpenInternalAppLink={handleTimelineOpenInternalAppLink}
         onOpenPage={openPageAt}
         onJumpToMessage={handleTimelineJumpToMessage}

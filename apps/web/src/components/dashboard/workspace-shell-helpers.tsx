@@ -653,8 +653,6 @@ export type MessageRowProps = {
   onRebornSender: (message: TimelineItem) => void;
   reborningSender: boolean;
   onQuestionnaireAnswer: (message: TimelineItem, answer: QuestionnaireAnswer) => Promise<boolean>;
-  /** Sends a message as the person in the open conversation, such as an onboarding starter. */
-  onSendMessage: (body: string) => void;
   onOpenAgentTrace: (target: AgentTraceTarget) => void;
   onOpenInternalAppLink: (href: string) => boolean;
   onJumpToMessage: (messageId: string, sequence?: number) => void;

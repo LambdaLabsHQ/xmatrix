@@ -497,7 +497,6 @@ export const MessageTimeline = memo(function MessageTimeline({
   onRebornSender,
   reborningSenderKey,
   onQuestionnaireAnswer,
-  onSendMessage,
   onOpenInternalAppLink,
   onOpenPage,
   onJumpToMessage,
@@ -541,7 +540,7 @@ export const MessageTimeline = memo(function MessageTimeline({
   threadRootChannel?: ChannelSnapshot;
 } & Pick<MessageRowProps,
   "onReact" | "onEdit" | "onRecall" | "onUnsentAction" | "onReply" | "onOpenThread" | "onMentionSender" |
-  "onRebornSender" | "onQuestionnaireAnswer" | "onSendMessage" | "onOpenInternalAppLink" | "onJumpToMessage"
+  "onRebornSender" | "onQuestionnaireAnswer" | "onOpenInternalAppLink" | "onJumpToMessage"
 >) {
   const [visibleInvocationScope, setVisibleInvocationScope] = useState<{ channelId: string; ids: string[] } | null>(null);
   const visibleInvocationIds = visibleInvocationScope?.channelId === channel?.id ? visibleInvocationScope?.ids : undefined;
@@ -682,7 +681,6 @@ export const MessageTimeline = memo(function MessageTimeline({
   const stableOnMentionSender = useStableCallback(onMentionSender);
   const stableOnRebornSender = useStableCallback(onRebornSender);
   const stableOnQuestionnaireAnswer = useStableCallback(onQuestionnaireAnswer);
-  const stableOnSendMessage = useStableCallback(onSendMessage);
   const stableOnOpenAgentTrace = useStableCallback(onOpenAgentTrace);
   const stableOnOpenHumanProfile = useStableCallback(onOpenHumanProfile);
   const stableOnOpenInternalAppLink = useStableCallback(onOpenInternalAppLink);
@@ -1090,7 +1088,6 @@ export const MessageTimeline = memo(function MessageTimeline({
                 onRebornSender={stableOnRebornSender}
                 reborningSender={false}
                 onQuestionnaireAnswer={stableOnQuestionnaireAnswer}
-                onSendMessage={stableOnSendMessage}
                 onOpenAgentTrace={stableOnOpenAgentTrace}
                 onOpenHumanProfile={stableOnOpenHumanProfile}
                 onOpenInternalAppLink={stableOnOpenInternalAppLink}
@@ -1170,7 +1167,6 @@ export const MessageTimeline = memo(function MessageTimeline({
                       message.author === reborningSenderKey)
                   }
                   onQuestionnaireAnswer={stableOnQuestionnaireAnswer}
-                  onSendMessage={stableOnSendMessage}
                   onOpenAgentTrace={stableOnOpenAgentTrace}
                   onOpenHumanProfile={stableOnOpenHumanProfile}
                   onOpenInternalAppLink={stableOnOpenInternalAppLink}
@@ -1690,7 +1686,6 @@ export const MessageRow = memo(function MessageRow({
   onRebornSender,
   reborningSender,
   onQuestionnaireAnswer,
-  onSendMessage,
   onOpenAgentTrace,
   onOpenHumanProfile,
   onOpenInternalAppLink,
@@ -2399,7 +2394,8 @@ export const MessageRow = memo(function MessageRow({
               App
             </span>
           )}
-          {shouldShowProvenanceBadge(message.provenance) && (
+          {/* xMatrix's own onboarding speaks in its own voice; the tag would only say who wrote it twice. */}
+          {shouldShowProvenanceBadge(message.provenance) && !onboardingStage && (
             <span
               className={provenanceBadgeClass(message.provenance, message.body)}
               title={provenanceTitle(message.provenance, message.body)}
@@ -2555,7 +2551,7 @@ export const MessageRow = memo(function MessageRow({
             )}
             {onboardingStage ? (
               <OnboardingMessage stage={onboardingStage} spaceId={channel?.spaceId ?? null} token={token}
-                userId={currentUserIdentityId.replace(/^user:/, "")} onSend={onSendMessage} />
+                userId={currentUserIdentityId.replace(/^user:/, "")} />
             ) : crossSpaceRead ? (
               <CrossSpaceReadCard
                 request={crossSpaceRead}
