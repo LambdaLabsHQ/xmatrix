@@ -3009,6 +3009,8 @@ struct AcpSession {
     session_id: Option<String>,
     /// Latest structured goal from a successful session/load history replay.
     loaded_goal: Option<protocol::AgentGoalStatus>,
+    /// `authMethods` ids the agent advertised in its initialize result.
+    auth_method_ids: Vec<String>,
     presentation: AgentPresentationFacts,
     config: AcpVendorConfig,
     /// The plan outlives a turn, so what it already reported does too.
