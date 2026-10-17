@@ -65,7 +65,7 @@ import {
   workspacesInSpace,
 } from "./space-scoped-tool-content";
 
-import type { TimelineItem } from "./workspace-shell-message-model";
+import type { ComposerChannelAttachment, TimelineItem } from "./workspace-shell-message-model";
 
 import {
   IMAGE_ATTACHMENT_TYPES,
@@ -111,6 +111,7 @@ import type { AttachmentDropCandidate } from "./composer-attachment-drop-zone";
 import {
   PendingAttachment,
   PendingAttachmentCard,
+  AttachmentOriginalOption,
   attachVideoMetadata,
   avatarInitials,
   channelAttachmentKindForFile,
@@ -426,7 +427,6 @@ export const Composer = memo(function Composer({
     onDraftChange(value, invocationDraftRef.current);
   };
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
-  const [originalMedia, setOriginalMedia] = useState(false);
   const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
   const [openComposerImageId, setOpenComposerImageId] = useState<string | null>(null);
   // Object URLs behind pending image previews, revoked when their card goes.
@@ -466,15 +466,14 @@ export const Composer = memo(function Composer({
     completionApiRef.current?.dismissCompletion();
   }, []);
   const cursor = completionApiRef.current?.cursor ?? 0;
-  // An image can be opened as soon as it is in the composer, uploaded or not:
-  // a new conversation keeps its files local until the message is sent.
-  // Listed in the order the cards are drawn: pending first, then uploaded.
+  // Gallery navigation follows the visible cards, including in-place quality changes.
   const composerImages = useMemo(() => [
-    ...pendingAttachments.flatMap((attachment) => attachment.kind === "image" && attachment.previewUrl
-      ? [{ id: attachment.id, name: attachment.name, src: attachment.previewUrl }] : []),
-    ...attachments.flatMap((attachment) => attachment.kind === "image"
-      ? [{ id: attachment.id, name: attachment.name, src: attachment.url ?? attachment.dataUrl ?? "" }] : []),
-  ], [attachments, pendingAttachments]);
+    ...pendingAttachments.filter((attachment) => !attachment.replacesId),
+    ...attachments.map((attachment) => pendingAttachments.find((pending) => pending.replacesId === attachment.id) ?? attachment),
+  ].flatMap((attachment) => {
+    const src = "status" in attachment ? attachment.previewUrl : attachment.url ?? attachment.dataUrl;
+    return attachment.kind === "image" && src ? [{ id: attachment.id, name: attachment.name, src }] : [];
+  }), [attachments, pendingAttachments]);
   const openComposerImage = composerImages.find((image) => image.id === openComposerImageId) ?? null;
   useAndroidBackHandler(Boolean(openComposerImage), () => {
     setOpenComposerImageId(null);
@@ -755,7 +754,7 @@ export const Composer = memo(function Composer({
       candidates,
       attachmentsEnabled,
       draftCount: attachments.length,
-      pendingCount: pendingAttachments.length + ledger.reservedCount(),
+      pendingCount: pendingAttachments.filter((attachment) => !attachment.replacesId).length + ledger.reservedCount(),
       maxAttachments: MAX_ATTACHMENTS,
       maxBytes: MAX_ATTACHMENT_BYTES,
       maxBytesLabel: formatFileSize(MAX_ATTACHMENT_BYTES),
@@ -779,19 +778,21 @@ export const Composer = memo(function Composer({
           status: entry.rejection ? "failed" : "reading",
           progress: 0,
           error: entry.rejection ?? undefined,
+          sourceFile: !entry.rejection && (entry.kind === "image" || entry.kind === "video") ? entry.file : undefined,
         })),
       ]);
     }
     if (plan.error) setAttachmentError(plan.error);
 
     const uploadable = plan.entries.filter((entry) => !entry.rejection);
-    if (uploadable.length > 0) await uploadAttachmentEntries(uploadable, originalMedia);
+    if (uploadable.length > 0) await uploadAttachmentEntries(uploadable);
     return plan.entries.length;
   }
 
   async function uploadAttachmentEntries(
     entries: AttachmentIntakeEntry<File>[],
-    useOriginalMedia: boolean,
+    useOriginalMedia = false,
+    replaces?: ChannelAttachment,
   ): Promise<void> {
     const registry = uploadRegistryRef.current;
     // Claimed before the first await, so a card removed meanwhile is already
@@ -800,6 +801,11 @@ export const Composer = memo(function Composer({
     for (const entry of entries) registry.begin(entry.id);
 
     function failEntries(message: string) {
+      if (replaces) {
+        for (const entry of entries) clearPendingAttachment(entry.id);
+        setAttachmentError(message);
+        return;
+      }
       for (const entry of entries) {
         registry.settle(entry.id);
         updatePendingAttachment(entry.id, { status: "failed", error: message, progress: 0 });
@@ -839,6 +845,11 @@ export const Composer = memo(function Composer({
         continue;
       }
       if (!result.ok) {
+        if (replaces) {
+          clearPendingAttachment(entry.id);
+          setAttachmentError(userErrorMessage(result.error, "Couldn't upload the file"));
+          continue;
+        }
         registry.settle(entry.id);
         updatePendingAttachment(entry.id, {
           status: "failed",
@@ -851,9 +862,16 @@ export const Composer = memo(function Composer({
         clearPendingAttachment(entry.id);
         continue;
       }
-      const uploaded = result.attachment;
+      const uploaded: ComposerChannelAttachment = {
+        ...result.attachment,
+        ...(entry.kind === "image" || entry.kind === "video"
+          ? { sourceMedia: { file: entry.file, original: useOriginalMedia } } : {}),
+      };
       clearPendingAttachment(entry.id);
-      appendDraftAttachment(uploaded);
+      if (replaces) {
+        onAttachmentsChange((current) => current.map((attachment) => attachment.id === replaces.id ? uploaded : attachment));
+        if (replaces.url) URL.revokeObjectURL(replaces.url);
+      } else appendDraftAttachment(uploaded);
     }
   }
 
@@ -886,7 +904,11 @@ export const Composer = memo(function Composer({
         body,
         ...(invocationSelections ? { invocationSelections } : {}),
         ...(summonIntents.length ? { summonIntents } : {}),
-        attachments,
+        attachments: attachments.map((attachment) => {
+          const uploaded = { ...attachment } as ComposerChannelAttachment;
+          delete uploaded.sourceMedia;
+          return uploaded;
+        }),
       });
     } catch (error) {
       setAttachmentError(userErrorMessage(error, "Couldn't prepare the message"));
@@ -1016,7 +1038,51 @@ export const Composer = memo(function Composer({
     }
   }
 
+  function changeAttachmentOriginal(attachment: ChannelAttachment, original: boolean) {
+    const source = (attachment as ComposerChannelAttachment).sourceMedia;
+    if (!source || pendingAttachments.some((pending) => pending.replacesId === attachment.id)) return;
+    const entry: AttachmentIntakeEntry<File> = {
+      id: crypto.randomUUID(), file: source.file, name: source.file.name,
+      kind: attachment.kind, size: source.file.size, rejection: null,
+    };
+    setAttachmentError(null);
+    const previewUrl = entry.kind === "image" ? pendingPreviewUrl(entry) : undefined;
+    setPendingAttachments((current) => [...current, {
+      id: entry.id, name: entry.name, kind: entry.kind, size: entry.size,
+      previewUrl,
+      status: "reading", progress: 0, replacesId: attachment.id, original,
+    }]);
+    void uploadAttachmentEntries([entry], original, attachment);
+  }
+
+  function renderPendingAttachment(attachment: PendingAttachment, key = attachment.id) {
+    return <PendingAttachmentCard key={key} attachment={attachment}
+      onOpen={() => setOpenComposerImageId(attachment.id)}
+      onOriginalChange={attachmentsEnabled && writable && !sending && !preparingSend && attachment.status === "failed" && attachment.sourceFile ? (original) => {
+        const file = attachment.sourceFile!;
+        removePendingAttachment(attachment.id);
+        setAttachmentError(null);
+        const entry = { id: crypto.randomUUID(), file, name: file.name, kind: attachment.kind, size: file.size, rejection: null };
+        const previewUrl = entry.kind === "image" ? pendingPreviewUrl(entry) : undefined;
+        setPendingAttachments((current) => [...current, { ...entry, sourceFile: file, previewUrl, original, status: "reading", progress: 0 }]);
+        void uploadAttachmentEntries([entry], original);
+      } : undefined}
+      onRemove={() => removePendingAttachment(attachment.id)} />;
+  }
+
+  function renderOriginalOption(attachment: ChannelAttachment) {
+    const source = (attachment as ComposerChannelAttachment).sourceMedia;
+    return source ? <AttachmentOriginalOption name={source.file.name} checked={source.original}
+      onChange={attachmentsEnabled && writable && !sending && !preparingSend
+        ? (original) => changeAttachmentOriginal(attachment, original) : undefined} /> : null;
+  }
+
   function removeAttachment(id: string) {
+    const attachment = attachments.find((item) => item.id === id);
+    if (attachment?.url) URL.revokeObjectURL(attachment.url);
+    for (const pending of pendingAttachments) {
+      if (pending.replacesId === id) removePendingAttachment(pending.id);
+    }
     onAttachmentsChange((current) => current.filter((attachment) => attachment.id !== id));
   }
 
@@ -1072,7 +1138,7 @@ export const Composer = memo(function Composer({
     if (!(target instanceof Element)) return;
     if (
       target.closest(
-        "a, button, input, textarea, select, [role='button'], [contenteditable='true'], .composer-image-attachment"
+        "a, button, input, label, textarea, select, [role='button'], [contenteditable='true'], .composer-image-attachment"
       )
     ) {
       return;
@@ -1214,7 +1280,7 @@ export const Composer = memo(function Composer({
               attachments.length > 0
             ) {
               event.preventDefault();
-              onAttachmentsChange((current) => current.slice(0, -1));
+              removeAttachment(attachments[attachments.length - 1].id);
             }
           }}
           inputLeading={
@@ -1225,12 +1291,6 @@ export const Composer = memo(function Composer({
                 disabled={!attachmentsEnabled}
                 onClick={() => fileInputRef.current?.click()}
               />
-              <label className="flex cursor-pointer items-center gap-1 pr-2 text-xs" title="Upload original images and videos without compression">
-                <input type="checkbox" checked={originalMedia} disabled={!attachmentsEnabled}
-                  aria-label="Upload original images and videos"
-                  onChange={(event) => setOriginalMedia(event.target.checked)} />
-                Original
-              </label>
             </div>
           }
           boxHeader={
@@ -1266,21 +1326,16 @@ export const Composer = memo(function Composer({
               )}
               {(attachments.length > 0 || pendingAttachments.length > 0) && (
                 <div className="flex gap-2 overflow-x-auto px-3 py-3">
-                  {pendingAttachments.map((attachment) => (
-                    <PendingAttachmentCard
-                      key={attachment.id}
-                      attachment={attachment}
-                      onOpen={() => setOpenComposerImageId(attachment.id)}
-                      onRemove={() => removePendingAttachment(attachment.id)}
-                    />
-                  ))}
-                  {attachments.map((attachment) =>
-                    attachment.kind === "video" ? (
+                  {pendingAttachments.filter((attachment) => !attachment.replacesId).map((attachment) => renderPendingAttachment(attachment))}
+                  {attachments.map((attachment) => {
+                    const replacement = pendingAttachments.find((pending) => pending.replacesId === attachment.id);
+                    if (replacement) return renderPendingAttachment(replacement, attachment.id);
+                    return attachment.kind === "video" ? (
                       <div
                         key={attachment.id}
                         className="group relative flex h-20 w-44 shrink-0 overflow-hidden rounded-md border border-border bg-muted"
                       >
-                        <div className="flex size-20 shrink-0 items-center justify-center bg-black text-white">
+                        <div className="relative flex size-20 shrink-0 items-center justify-center bg-black text-white">
                           {attachment.thumbnailUrl ? (
                             <LoadingImage
                               src={attachment.thumbnailUrl}
@@ -1290,6 +1345,7 @@ export const Composer = memo(function Composer({
                           ) : (
                             <Video className="size-7" />
                           )}
+                          {renderOriginalOption(attachment)}
                         </div>
                         <ReadyAttachmentDetails attachment={attachment} separator="·" onRemove={() => removeAttachment(attachment.id)} />
                       </div>
@@ -1320,6 +1376,7 @@ export const Composer = memo(function Composer({
                             className="block h-full w-full rounded-md object-cover"
                           />
                         </button>
+                        {renderOriginalOption(attachment)}
                         <button
                           type="button"
                           title="Remove attachment"
@@ -1331,7 +1388,7 @@ export const Composer = memo(function Composer({
                         </button>
                       </div>
                     )
-                  )}
+                  })}
                 </div>
               )}
               {openComposerImage && typeof document !== "undefined" && createPortal(

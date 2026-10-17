@@ -73,6 +73,19 @@ export async function prepareVideoAttachmentFile(
     await conversion.execute();
     const buffer = target.buffer;
     if (stopped || !buffer?.byteLength || buffer.byteLength >= file.size) return file;
+    // A declared but empty input track may be omitted by the muxer without
+    // appearing in discardedTracks. Accept only a result with every media track.
+    const result = new media.Input({ source: new media.BufferSource(buffer), formats: media.ALL_FORMATS });
+    try {
+      const [sourceVideo, sourceAudio, resultVideo, resultAudio] = await Promise.all([
+        input.getVideoTracks(), input.getAudioTracks(), result.getVideoTracks(), result.getAudioTracks(),
+      ]);
+      if (sourceVideo.length !== resultVideo.length || sourceAudio.length !== resultAudio.length) return file;
+      for (const track of [...resultVideo, ...resultAudio]) {
+        if (!(await new media.EncodedPacketSink(track).getFirstPacket({ metadataOnly: true }))) return file;
+      }
+      if (stopped) return file;
+    } finally { result.dispose(); }
     const base = (file.name || "video").replace(/\.[^.]+$/, "") || "video";
     return new File([buffer], `${base}.${mp4 ? "mp4" : "webm"}`, {
       type: mp4 ? "video/mp4" : "video/webm", lastModified: file.lastModified,

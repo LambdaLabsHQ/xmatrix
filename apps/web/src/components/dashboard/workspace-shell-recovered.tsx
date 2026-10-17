@@ -128,6 +128,7 @@ import { createPortal } from "react-dom";
 import {
   AlertTriangle,
   AtSign,
+  Check,
   Cpu,
   FileText,
   FolderOpen,
@@ -210,15 +211,21 @@ export type PendingAttachment = {
   error?: string;
   /** A local object URL for an image, so it can be seen before it is uploaded. */
   previewUrl?: string;
+  /** Keep the existing draft in its slot until a quality change succeeds. */
+  replacesId?: string;
+  original?: boolean;
+  sourceFile?: File;
 };
 
 export function PendingAttachmentCard({
   attachment,
   onOpen,
+  onOriginalChange,
   onRemove,
 }: {
   attachment: PendingAttachment;
   onOpen?: () => void;
+  onOriginalChange?: (original: boolean) => void;
   onRemove: () => void;
 }) {
   const Icon =
@@ -240,26 +247,31 @@ export function PendingAttachmentCard({
         : "Preparing";
   return (
     <div className="group relative flex h-20 w-44 shrink-0 overflow-hidden rounded-md border border-border bg-muted">
-      {attachment.previewUrl && onOpen ? (
-        <button
-          type="button"
-          aria-label={`Open ${attachment.name}`}
-          className="block size-20 shrink-0 cursor-zoom-in bg-background"
-          onClick={onOpen}
-        >
-          <LoadingImage
-            src={attachment.previewUrl}
-            alt={attachment.name}
-            className="block h-full w-full object-cover"
-          />
-        </button>
-      ) : attachment.kind === "image" ? (
-        <MediaSkeleton label="Loading image" className="app-media-skeleton-thumb" />
-      ) : (
-        <div className={cn("flex size-20 shrink-0 items-center justify-center", attachment.kind === "video" ? "bg-black text-white" : "bg-background text-muted-foreground")}>
-          <Icon className="size-6" />
-        </div>
-      )}
+      <div className="relative size-20 shrink-0">
+        {attachment.previewUrl && onOpen ? (
+          <button
+            type="button"
+            aria-label={`Open ${attachment.name}`}
+            className="block size-20 shrink-0 cursor-zoom-in bg-background"
+            onClick={onOpen}
+          >
+            <LoadingImage
+              src={attachment.previewUrl}
+              alt={attachment.name}
+              className="block h-full w-full object-cover"
+            />
+          </button>
+        ) : attachment.kind === "image" ? (
+          <MediaSkeleton label="Loading image" className="app-media-skeleton-thumb" />
+        ) : (
+          <div className={cn("flex size-20 shrink-0 items-center justify-center", attachment.kind === "video" ? "bg-black text-white" : "bg-background text-muted-foreground")}>
+            <Icon className="size-6" />
+          </div>
+        )}
+        {(attachment.kind === "image" || attachment.kind === "video") && (
+          <AttachmentOriginalOption name={attachment.name} checked={attachment.original ?? false} onChange={onOriginalChange} />
+        )}
+      </div>
       <div className="flex min-w-0 flex-1 flex-col justify-center gap-1 px-2 py-2">
         <div className="truncate text-xs font-bold text-foreground" title={attachment.name}>
           {attachment.name}
@@ -290,6 +302,33 @@ export function PendingAttachmentCard({
         <X className="size-3.5" />
       </button>
     </div>
+  );
+}
+
+export function AttachmentOriginalOption({ name, checked, onChange }: {
+  name: string;
+  checked: boolean;
+  onChange?: (original: boolean) => void;
+}) {
+  // A media-badge toggle on the thumbnail itself: a dark scrim pill reads on
+  // both light screenshots and dark photos without covering the preview.
+  return (
+    <label className={cn(
+      "absolute bottom-1 left-1 z-10 inline-flex h-[18px] select-none items-center gap-[3px] rounded-full pl-[3px] pr-1.5 text-[10px] font-medium leading-none backdrop-blur-md has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-white",
+      checked ? "bg-black/60 text-white" : "bg-black/40 text-white/90",
+      onChange ? "cursor-pointer" : "cursor-default opacity-70",
+    )}>
+      <input type="checkbox" checked={checked} disabled={!onChange}
+        aria-label={`Upload original ${name}`} onChange={(event) => onChange?.(event.target.checked)}
+        className="absolute inset-0 m-0 cursor-[inherit] appearance-none rounded-full opacity-0" />
+      <span aria-hidden className={cn(
+        "flex size-3 items-center justify-center rounded-full",
+        checked ? "bg-white text-black" : "ring-[1.25px] ring-inset ring-white/85",
+      )}>
+        {checked && <Check className="size-2.5" strokeWidth={3} />}
+      </span>
+      Original
+    </label>
   );
 }
 

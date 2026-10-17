@@ -40,6 +40,8 @@ export type ComposerSendSnapshot = {
 /** Channel attachment with optional in-flight Relay V2 upload binding. */
 export type ComposerChannelAttachment = ChannelAttachment & {
   relayV2Upload?: PreparedMessageAttachmentUpload;
+  /** Browser-local source retained while this draft can switch upload quality. */
+  sourceMedia?: { file: File; original: boolean };
 };
 
 export type ChannelAgentAvatarItem = {
