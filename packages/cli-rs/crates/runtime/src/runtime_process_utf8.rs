@@ -194,12 +194,97 @@ impl AppServerChild {
         })
     }
 
+    /// Echo a piped stderr to this process's stderr (the Run's err.log) and
+    /// keep its last lines. Drains bytes, not UTF-8 lines, so a stray byte
+    /// never stops the drain and blocks the child on a full pipe.
+    fn tee_stderr(&mut self) -> StderrTail {
+        let tail = StderrTail::default();
+        let Some(stderr) = self.child.stderr.take() else {
+            return tail;
+        };
+        let sink = tail.clone();
+        tokio::spawn(async move {
+            let mut reader = BufReader::new(stderr);
+            let mut line = Vec::new();
+            while matches!(reader.read_until(b'\n', &mut line).await, Ok(n) if n > 0) {
+                let _ = std::io::stderr().write_all(&line);
+                sink.push(&String::from_utf8_lossy(&line));
+                line.clear();
+            }
+        });
+        tail
+    }
+
     fn take_stdin(&mut self) -> error::Result<tokio::process::ChildStdin> {
         self.child
             .stdin
             .take()
             .ok_or_else(|| CliError::Launch(format!("{} stdin unavailable", self.label)))
     }
+}
+
+/// The last few non-blank stderr lines of an app-server, ANSI escapes and
+/// control bytes removed.
+#[derive(Clone, Default)]
+struct StderrTail(Arc<Mutex<VecDeque<String>>>);
+
+impl StderrTail {
+    const LINES: usize = 6;
+    const CHARS: usize = 600;
+
+    fn push(&self, raw: &str) {
+        let line = strip_terminal_escapes(raw);
+        let line = line.trim();
+        if line.is_empty() {
+            return;
+        }
+        let mut lines = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        if lines.len() == Self::LINES {
+            lines.pop_front();
+        }
+        lines.push_back(line.to_string());
+    }
+
+    /// The kept lines joined, cut from the front to `CHARS`; None when the
+    /// child wrote nothing.
+    fn text(&self) -> Option<String> {
+        let lines = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        if lines.is_empty() {
+            return None;
+        }
+        let joined = lines.iter().cloned().collect::<Vec<_>>().join(" | ");
+        let skip = joined.chars().count().saturating_sub(Self::CHARS);
+        Some(joined.chars().skip(skip).collect())
+    }
+}
+
+fn with_stderr_tail(detail: String, tail: &StderrTail) -> String {
+    match tail.text() {
+        Some(text) => format!("{detail}; stderr: {text}"),
+        None => detail,
+    }
+}
+
+fn strip_terminal_escapes(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '\u{1b}' {
+            // CSI `ESC [ ... final` and two-byte `ESC x` sequences.
+            if chars.next_if_eq(&'[').is_some() {
+                for next in chars.by_ref() {
+                    if ('@'..='~').contains(&next) {
+                        break;
+                    }
+                }
+            } else {
+                chars.next();
+            }
+        } else if !ch.is_control() || ch == '\t' {
+            out.push(ch);
+        }
+    }
+    out
 }
 
 type AppServerWsWrite = futures_util::stream::SplitSink<

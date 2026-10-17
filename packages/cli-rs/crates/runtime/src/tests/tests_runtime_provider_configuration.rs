@@ -171,54 +171,36 @@ fn grok_runtime_detection_and_spawn_args() {
     assert!(is_grok_tool("/Users/dev/.local/bin/grok"));
     assert!(!is_grok_tool("node"));
 
-    // Default transport is WebSocket serve.
-    let ws_args = grok_acp_spawn_args(
-        &[],
-        AcpTransportKind::WebSocket,
-        Some("127.0.0.1:2419"),
-        Some("test-secret"),
-    );
-    assert_eq!(ws_args.first().map(String::as_str), Some("agent"));
-    assert!(ws_args.iter().any(|arg| arg == "serve"));
-    // serve owns bind/secret: ... serve --bind ... --secret ...
-    let serve_idx = ws_args.iter().position(|arg| arg == "serve").unwrap();
-    assert!(
-        ws_args[serve_idx..]
-            .windows(2)
-            .any(|pair| { pair[0] == "--bind" && pair[1] == "127.0.0.1:2419" })
-    );
-    assert!(
-        ws_args[serve_idx..]
-            .windows(2)
-            .any(|pair| { pair[0] == "--secret" && pair[1] == "test-secret" })
-    );
-    assert!(ws_args.iter().any(|arg| arg == "--always-approve"));
+    // Grok speaks ACP over stdio: no serve port, bind address or server key.
+    let args = grok_acp_spawn_args(&[]);
+    assert_eq!(args, vec!["agent", "--always-approve", "stdio"]);
 
-    let stdio_args = grok_acp_spawn_args(&[], AcpTransportKind::Stdio, None, None);
-    assert!(stdio_args.iter().any(|arg| arg == "stdio"));
-    assert!(!stdio_args.iter().any(|arg| arg == "serve"));
+    let flags = grok_acp_spawn_args(&["--effort".to_string(), "high".to_string()]);
+    assert_eq!(flags, vec!["agent", "--effort", "high", "--always-approve", "stdio"]);
 
-    let custom = grok_acp_spawn_args(
-        &["agent".to_string(), "stdio".to_string()],
-        AcpTransportKind::Stdio,
-        None,
-        None,
-    );
-    assert!(custom.iter().any(|arg| arg == "--always-approve"));
-    assert!(custom.iter().any(|arg| arg == "stdio"));
+    let custom = grok_acp_spawn_args(&["stdio".to_string()]);
+    assert_eq!(custom, vec!["agent", "--always-approve", "stdio"]);
 
+    let approved = grok_acp_spawn_args(&["agent".to_string(), "--yolo".to_string(), "stdio".to_string()]);
+    assert_eq!(approved, vec!["agent", "--yolo", "stdio"]);
+
+    let tail = StderrTail::default();
+    assert_eq!(with_stderr_tail("closed".into(), &tail), "closed");
+    tail.push("\u{1b}[1;31mError:\u{1b}[0m Not logged in. Run `grok login`.\n");
+    tail.push("   \n");
     assert_eq!(
-        grok_ws_url_from_banner_line("   WebSocket URL: ws://127.0.0.1:12421/ws?server-key=abc")
-            .as_deref(),
-        Some("ws://127.0.0.1:12421/ws?server-key=abc")
+        with_stderr_tail("closed".into(), &tail),
+        "closed; stderr: Error: Not logged in. Run `grok login`."
     );
+    for n in 0..10 {
+        tail.push(&format!("line {n}"));
+    }
     assert_eq!(
-        grok_ws_url_from_banner_line(
-            "   WebSocket URL: ws://127.0.0.1:64997/ws?server-key=testdebug"
-        )
-        .as_deref(),
-        Some("ws://127.0.0.1:64997/ws?server-key=testdebug")
+        tail.text().as_deref(),
+        Some("line 4 | line 5 | line 6 | line 7 | line 8 | line 9")
     );
+    tail.push(&"x".repeat(2000));
+    assert_eq!(tail.text().map(|text| text.chars().count()), Some(600));
 
     assert!(acp_message_id_matches(Some(&serde_json::json!(3)), 3));
     assert!(acp_message_id_matches(Some(&serde_json::json!("3")), 3));
