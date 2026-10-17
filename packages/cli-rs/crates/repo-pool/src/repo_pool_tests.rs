@@ -9,6 +9,7 @@ mod tests {
     use super::*;
     include!("../../core/tests/support/fs_cleanup.rs");
     include!("repo_pool_baseline_tests.rs");
+    include!("repo_pool_fetch_tests.rs");
 
     #[test]
     fn default_pool_root_tracks_the_local_config_root() {
@@ -3353,6 +3354,14 @@ worktree /pools/b\nHEAD 3333333333333333333333333333333333333333\ndetached\n";
 
     #[test]
     fn git_failures_are_classified_without_raw_stderr() {
+        for stderr in [
+            "fatal: pack has 51 unresolved deltas\nfatal: fetch-pack: invalid index-pack output",
+            "fatal: pack has 1 unresolved delta",
+            "fatal: unresolved deltas left after unpacking\nfatal: unpack-objects failed",
+        ] {
+            assert_eq!(classify_git_failure(stderr), GitRunError::MissingDeltaBase);
+        }
+        assert_eq!(classify_git_failure("fatal: fetch-pack: invalid index-pack output"), GitRunError::Failed);
         assert_eq!(
             classify_git_failure(
                 "fatal: Unable to create '/repo/.git/refs/remotes/origin/main.lock': File exists."

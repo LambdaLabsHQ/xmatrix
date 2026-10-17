@@ -207,6 +207,13 @@ when the remote-tracking ref already holds the advertised tip. A local
 cannot leave new leases on a stale ref; the local note is rewritten to the
 confirmed branch afterwards.
 
+If Git reports unresolved delta bases while fetching, the next attempt uses
+`git fetch --refetch --no-auto-maintenance` (Git 2.36 or later) to download
+the default branch's objects without trusting the incomplete local store.
+Recovery shares the existing three-attempt budget and 120-second command
+timeouts; it does not prune objects, delete the clone, or reset any checkout.
+Other fetch failures keep their existing retry and authorization behavior.
+
 Only leases that run at the same moment share one confirmation; a finished
 confirmation is never reused, so a lease started after a merge sees it. The base
 oid is origin's tip as this confirmation observed it (if origin moves between
