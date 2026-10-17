@@ -131,12 +131,15 @@ and pasted authorization URLs fail before deployment. Registering or rotating an
 application requires the normal Production Release Intent and release train.
 Space connection tokens remain separate encrypted connection credentials.
 
-One-click connects start with a signed, expiring state bound to the provider,
-Space and admin. The provider's redirect to `/api/connectors/oauth/callback`
+One-click connects verify current owner/admin membership in the target Space
+before signing state or creating a Composio account. The signed, expiring state
+binds the provider, Space and initiating admin. The provider's redirect to `/api/connectors/oauth/callback`
 carries no xMatrix session, so the Hub only checks the state there and hands the
 grant to the app's `/connect/oauth` page. That page completes it with
 `POST /api/connectors/oauth/complete` as the signed-in user, and the Hub
-exchanges the code only when that user is the admin named in the state. A
+exchanges the code only when that user is the admin named in the state and
+still holds owner/admin authority in that active Space. The credential write
+checks that authority again after the provider request. A
 connect link sent to someone else therefore cannot store their provider account
 in the sender's Space.
 

@@ -151,7 +151,8 @@ test("the callback writes credentials only after verified state, provider scope 
       paidCallRepository: () => { throw new Error("Vercel must not call X billing"); } },
     "./admin-platform-access": { platformAdminSpaceId: () => "operator-space" },
     "./app-connectors": { getAppConnectorProvider: () => client.manifest },
-    "./connectors/credentials": { INGRESS_KEY_FIELD: "ingressKey", mintConnectorSecret: () => "fixture-ingress", connectorCredentialRepository: () => ({ put: async () => { effects.push("credentials"); } }) },
+    "./connectors/credentials": { INGRESS_KEY_FIELD: "ingressKey", mintConnectorSecret: () => "fixture-ingress", connectorCredentialRepository: () => ({
+      authorizeAdmin: async () => {}, put: async () => { effects.push("credentials"); } }) },
     "./connectors/oauth": {
       verifyOAuthState: async () => validState ? { client, spaceId: "space-vercel", userId: "admin" } : undefined,
       exchangeOAuthGrant: async () => { effects.push("exchange"); return { fields }; },

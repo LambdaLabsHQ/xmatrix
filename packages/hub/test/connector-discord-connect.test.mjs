@@ -15,7 +15,7 @@ const env = { CONNECTOR_DISCORD_CLIENT_ID: appId, CONNECTOR_DISCORD_CLIENT_SECRE
   HUB_URL: 'https://hub.test', APP_URL: 'https://xmatrix.test' };
 function fixture() {
   const calls = []; const state = { agent: false, denied: false, version: 3, generation: 'generation', exists: true, failSave: false, failedCheck: false };
-  const repository = { async readGenerated() { calls.push('admin'); if (state.denied) throw Object.assign(new Error('private-denial'), { status: 404 }); return {}; },
+  const repository = { async authorizeAdmin() { calls.push('admin'); if (state.denied) throw Object.assign(new Error('private-denial'), { status: 404 }); },
     async installationSnapshot() { calls.push('snapshot'); if (state.denied) throw Object.assign(new Error('private-denial'), { status: 404 });
       return { connectionVersion: state.version, credentialVersion: 2, connectionGeneration: state.generation }; },
     async put(input) { calls.push(['put', input]); if (state.failSave) throw Object.assign(new Error('private-concurrent-change'), { status: 409 }); return {}; } };
