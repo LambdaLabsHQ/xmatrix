@@ -2248,23 +2248,27 @@ async fn provider_goal_adapters_round_trip_offline() {
     .expect("offline provider goal adapters should not hang");
 }
 
+/// The ACP wire fixture in `mode`, driven through `tool`'s generic adapter.
+async fn spawn_generic_acp_fixture(mode: &str, tool: &str) -> AcpSession {
+    AcpSession::spawn_stdio_with_prefix_args(
+        "node",
+        &[goal_runtime_fixture_path(), mode.to_string()],
+        &[],
+        Some(env!("CARGO_MANIFEST_DIR")),
+        AcpVendorConfig::generic(tool),
+    )
+    .await
+    .expect("spawn generic ACP fixture")
+}
+
 /// Kimi adapter against its ACP wire fixture: configOptions presentation,
 /// streaming output/usage, and kind-driven permission auto-approval.
 #[tokio::test]
 async fn generic_acp_session_streams_and_auto_approves_permission() {
     tokio::time::timeout(Duration::from_secs(10), async {
         require_node_fixture_runtime();
-        let fixture = goal_runtime_fixture_path();
         let cwd = env!("CARGO_MANIFEST_DIR");
-        let mut session = AcpSession::spawn_stdio_with_prefix_args(
-            "node",
-            &[fixture, "acp".to_string()],
-            &[],
-            Some(cwd),
-            AcpVendorConfig::generic("kimi"),
-        )
-        .await
-        .expect("spawn generic ACP fixture");
+        let mut session = spawn_generic_acp_fixture("acp", "kimi").await;
         let presentation = session
             .initialize(Some(cwd), None, false, None)
             .await
@@ -2314,17 +2318,8 @@ async fn generic_acp_session_streams_and_auto_approves_permission() {
 async fn generic_acp_session_retries_auth_with_advertised_method() {
     tokio::time::timeout(Duration::from_secs(10), async {
         require_node_fixture_runtime();
-        let fixture = goal_runtime_fixture_path();
         let cwd = env!("CARGO_MANIFEST_DIR");
-        let mut session = AcpSession::spawn_stdio_with_prefix_args(
-            "node",
-            &[fixture, "acp-cursor-login".to_string()],
-            &[],
-            Some(cwd),
-            AcpVendorConfig::generic("cursor"),
-        )
-        .await
-        .expect("spawn cursor_login ACP fixture");
+        let mut session = spawn_generic_acp_fixture("acp-cursor-login", "cursor").await;
         session
             .initialize(Some(cwd), None, false, None)
             .await
