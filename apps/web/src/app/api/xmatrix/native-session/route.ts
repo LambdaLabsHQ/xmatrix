@@ -64,10 +64,14 @@ export async function DELETE(request: Request) {
   return response;
 }
 
+/**
+ * What the app's page may read of its session: the hour-long access token and
+ * who it is. The 30-day refresh token stays in its HTTP-only cookie; the page
+ * reaches account calls through the native-auth route instead.
+ */
 function sessionResponse(payload: AuthResponse) {
   return {
     token: payload.token,
-    refreshToken: payload.refreshToken,
     authProvider: payload.authProvider,
     user: payload.user,
     hubUrl: payload.hubUrl,
