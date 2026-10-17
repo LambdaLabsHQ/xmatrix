@@ -10,12 +10,13 @@ import {
   isTransientAuthSessionError,
   sendBetterAuthOtp,
   setAppSessionToken,
-  signInWithBetterAuthGoogle,
+  signInWithBetterAuthSocial,
   signOutBetterAuth,
   verifyBetterAuthOtpWithRetry,
   verifyBetterAuthPassword,
   verifyBetterAuthSecondFactor,
   type SignInStep,
+  type SocialSignInProvider,
   type WebAuthSession,
 } from "./auth-client";
 import { sameValue } from "./same-value";
@@ -46,7 +47,7 @@ interface AuthContextValue extends AuthState {
   signInWithPassword: (email: string, password: string) => Promise<SignInStep>;
   /** Finishes a sign-in that waits on the authenticator app's code. */
   verifySecondFactor: (code: string, options: { backup: boolean; trustDevice: boolean }) => Promise<void>;
-  signInWithGoogle: (redirectTo?: string) => Promise<void>;
+  signInWithSocial: (provider: SocialSignInProvider, redirectTo?: string) => Promise<void>;
   setSessionFromAuthResponse: (payload: AuthResponse) => Promise<void>;
   logout: (options?: { redirectTo?: "/login" | "/account/delete" }) => Promise<void>;
 }
@@ -290,11 +291,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setState({ ...next, loading: false });
   };
 
-  const signInWithGoogle = async (redirectTo?: string) => {
-    if (!isBetterAuthGoogleEnabled()) {
+  const signInWithSocial = async (provider: SocialSignInProvider, redirectTo?: string) => {
+    if (provider === "google" && !isBetterAuthGoogleEnabled()) {
       throw new Error("Google sign-in is not configured for this account. Use a login code while setup is completed.");
     }
-    await signInWithBetterAuthGoogle(buildBetterAuthCallbackUrl(redirectTo));
+    await signInWithBetterAuthSocial(provider, buildBetterAuthCallbackUrl(redirectTo));
   };
 
   const signInWithPassword = async (email: string, password: string) => {
@@ -331,7 +332,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         verifyOtp,
         signInWithPassword,
         verifySecondFactor,
-        signInWithGoogle,
+        signInWithSocial,
         setSessionFromAuthResponse,
         logout,
       }}
