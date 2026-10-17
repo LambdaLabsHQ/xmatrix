@@ -154,12 +154,35 @@ async function credentialFieldsByConnection(tx: DatabaseTransaction, connectionI
     Array.isArray(row.field_names_json) ? (row.field_names_json as unknown[]).map(String) : []]));
 }
 
-/** Connection rows as the App authority returns them, reading their details in two queries. */
+/** A Space links at most this many GitHub installations; each has at most one link record. */
+const GITHUB_LINKS_PER_CONNECTION = 32;
+
+/** Who handed each linked GitHub installation to its Space, as GitHub Connect recorded it. */
+async function githubLinksByConnection(tx: DatabaseTransaction, connectionIds: string[]) {
+  const byConnection = new Map<string, { installationId: string; githubUserId: number }[]>();
+  if (connectionIds.length === 0) return byConnection;
+  const rows = await tx.query<QueryResultRow>({ name: "app_connection_github_links_v1", text: `SELECT
+    connection_id,installation_id,github_user_id FROM (SELECT connection_id,installation_id,github_user_id,
+      row_number() OVER (PARTITION BY connection_id ORDER BY installation_id) AS position
+      FROM data.app_github_installation_links WHERE connection_id=ANY($1::text[])) ranked
+    WHERE position<=$2 ORDER BY connection_id,installation_id`,
+  values: [connectionIds, GITHUB_LINKS_PER_CONNECTION], maxRows: connectionIds.length * GITHUB_LINKS_PER_CONNECTION });
+  for (const row of rows) {
+    const id = String(row.connection_id);
+    byConnection.set(id, [...byConnection.get(id) ?? [],
+      { installationId: String(row.installation_id), githubUserId: Number(row.github_user_id) }]);
+  }
+  return byConnection;
+}
+
+/** Connection rows as the App authority returns them, reading their details in a few queries. */
 async function connectionViews(tx: DatabaseTransaction, rows: QueryResultRow[], channelId?: string) {
   if (rows.length === 0) return [];
   const ids = rows.map((row) => String(row.connection_id));
   const subscriptions = channelId ? await relationsByConnection(tx, ids, channelId) : new Map<string, Subscription[]>();
   const credentials = await credentialFieldsByConnection(tx, ids);
+  const githubLinks = await githubLinksByConnection(tx,
+    rows.filter((row) => row.provider_id === "github").map((row) => String(row.connection_id)));
   return rows.map((row) => {
     const id = String(row.connection_id);
     const subscribed = subscriptions.get(id) ?? [];
@@ -172,6 +195,7 @@ async function connectionViews(tx: DatabaseTransaction, rows: QueryResultRow[], 
       ...(row.last_checked_at ? { lastCheckedAt: iso(row.last_checked_at as string | Date) } : {}),
       ...(row.error ? { error: String(row.error) } : {}),
       ...(row.metadata_json ? { metadata: row.metadata_json } : {}), version: Number(row.version),
+      ...(row.provider_id === "github" ? { githubLinks: githubLinks.get(id) ?? [] } : {}),
       ...(channelId ? { channelState: { channelId,
         enabled: true,
         bound: subscribed.length > 0, subscriptions: subscribed } } : {}) };
@@ -335,6 +359,45 @@ export class PostgresAppRepository {
       await requireSpace(tx, String(rows[0].space_id), actorUserId, false, input.use);
       if (input.channelId) await connectionChannel(tx, input.channelId, actorUserId, String(rows[0].space_id), input.use);
       return { connection: await connection(tx, rows[0], input.channelId) };
+    });
+  }
+
+  /**
+   * Record who handed these GitHub installations to the Space: the GitHub user
+   * the Hub's own Connect completion read from `/user` after confirming they
+   * administer each one. Only installations the connection links now are
+   * recorded, and records of ones it no longer links are dropped. Connection
+   * metadata, which Space admins edit, never supplies a record.
+   */
+  async recordGitHubInstallationLinks(input: { requestId: string; spaceId: string; actorUserId: string;
+    githubUserId: number; installationIds: string[]; at: string }) {
+    const requestId = text(input.requestId, "requestId", 200);
+    const spaceId = text(input.spaceId, "spaceId", 300);
+    const actorUserId = text(input.actorUserId, "actorUserId", 300);
+    const at = iso(input.at);
+    if (!Number.isSafeInteger(input.githubUserId) || input.githubUserId < 1 || !Array.isArray(input.installationIds) ||
+        input.installationIds.length > 100 ||
+        input.installationIds.some((id) => typeof id !== "string" || !/^[1-9][0-9]{0,19}$/u.test(id))) {
+      throw new AppControlError("invalid_app_request", 400, "Invalid GitHub installation link record");
+    }
+    const connectionId = `${spaceId}:github`;
+    return this.database.transaction({ requestId, operation: "app.github-links.record" }, async (tx) => {
+      await requireSpace(tx, spaceId, actorUserId, true);
+      const rows = await tx.query<QueryResultRow>({ name: "app_github_links_connection_v1", text: `SELECT metadata_json
+        FROM data.app_connector_connections WHERE connection_id=$1 AND space_id=$2 FOR UPDATE`,
+      values: [connectionId, spaceId], maxRows: 1 });
+      if (!rows[0]) return { recorded: [] as string[] };
+      const linked = githubInstallationIds(rows[0]);
+      const recorded = [...new Set(input.installationIds)].filter((id) => linked.includes(id));
+      await tx.query({ name: "app_github_links_prune_v1", text: `DELETE FROM data.app_github_installation_links
+        WHERE connection_id=$1 AND NOT (installation_id=ANY($2::text[]))`, values: [connectionId, linked], maxRows: 0 });
+      if (recorded.length > 0) await tx.query({ name: "app_github_links_record_v1", text: `INSERT INTO
+        data.app_github_installation_links (connection_id,space_id,installation_id,github_user_id,linked_by,linked_at)
+        SELECT $1,$2,installation_id,$4,$5,$6 FROM unnest($3::text[]) AS installation_id
+        ON CONFLICT (connection_id,installation_id) DO UPDATE SET github_user_id=EXCLUDED.github_user_id,
+          linked_by=EXCLUDED.linked_by,linked_at=EXCLUDED.linked_at`,
+      values: [connectionId, spaceId, recorded, input.githubUserId, actorUserId, at], maxRows: 0 });
+      return { recorded };
     });
   }
 

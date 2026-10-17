@@ -53,6 +53,17 @@ export async function appCommand(env: SubscriptionIndexEnv, kind: AppCommandKind
     kind));
 }
 
+/**
+ * Record the GitHub user GitHub Connect named as the one handing these
+ * installations to the Space; only installations it links now are recorded.
+ */
+export async function recordGitHubInstallationLinks(env: PostgresAuthorityBindingEnv, input: {
+  spaceId: string; actorUserId: string; githubUserId: number; installationIds: string[];
+}): Promise<string[]> {
+  return (await appRepository(env).recordGitHubInstallationLinks({ requestId: crypto.randomUUID(), ...input,
+    at: new Date().toISOString() })).recorded;
+}
+
 /** One of a Space's app connections, as a user who may see it reads it. */
 export function getAppConnection(env: PostgresAuthorityBindingEnv, input: { connectionId: string; actorUserId: string;
   channelId?: string; use?: boolean; allowMissing?: boolean }) {

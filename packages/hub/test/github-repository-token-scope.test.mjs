@@ -10,17 +10,18 @@ import { test } from "node:test";
 import {
   mintGitHubRepositoryToken,
 } from "../src/app-connectors.ts";
-import { githubAppEnv, jsonResponse, stubGitHubFetch, stubGitHubInstallation } from "./support/github-app.mjs";
+import { GITHUB_LINKER, githubAppEnv, jsonResponse, stubGitHubFetch, stubGitHubInstallation } from "./support/github-app.mjs";
 
 const GITHUB_APP_ENV = await githubAppEnv();
 
-function connection(installationIds) {
+function connection(installationIds, githubUserId = GITHUB_LINKER.githubUserId) {
   return {
     id: "space-1:github",
     providerId: "github",
     providerName: "GitHub",
     status: "configured",
     metadata: { installationIds },
+    githubLinks: installationIds.map((installationId) => ({ installationId, githubUserId })),
   };
 }
 
@@ -189,6 +190,36 @@ test("when the lookup is down, the installation that covers exactly owner/repo i
   try {
     const grant = await mintGitHubRepositoryToken(GITHUB_APP_ENV, connection(["111", "777"]), "LambdaLabsHQ", "xmatrix");
     assert.equal(grant.token, "ghs_right");
+  } finally {
+    github.restore();
+  }
+});
+
+// Linking an installation delegates only what its linking administrator
+// administers, checked live: an installation linked before Connect recorded
+// who linked it, a repository that person does not administer (one added to
+// the installation later, or after they lost the role), and an answer about a
+// different GitHub user all mint nothing.
+test("a repository is minted only while the administrator who linked its installation administers it", async () => {
+  const other = { githubUserId: 5151, login: "former-admin" };
+  const answers = { permission: "write", userId: other.githubUserId };
+  const github = stubGitHubInstallation({ contents: "write", metadata: "read" }, (call) => {
+    if (call.url.endsWith(`/user/${other.githubUserId}`)) return jsonResponse({ id: other.githubUserId, login: other.login });
+    if (call.url.endsWith(`/collaborators/${other.login}/permission`)) {
+      return jsonResponse({ permission: answers.permission, user: { id: answers.userId, login: other.login } });
+    }
+    return jsonResponse({}, 404);
+  });
+  const mint = (linked) => mintGitHubRepositoryToken(GITHUB_APP_ENV, linked, "LambdaLabsHQ", "xmatrix");
+  const refused = (error) => error instanceof Error && error.message === "github_repository_not_delegated";
+  try {
+    await assert.rejects(mint({ ...connection(["777"]), githubLinks: [] }), refused);
+    await assert.rejects(mint(connection(["777"], other.githubUserId)), refused);
+    Object.assign(answers, { permission: "admin", userId: 6000 });
+    await assert.rejects(mint(connection(["777"], other.githubUserId)), refused,
+      "the login now names someone else");
+    answers.userId = other.githubUserId;
+    assert.equal((await mint(connection(["777"], other.githubUserId))).token, "ghs_scoped");
   } finally {
     github.restore();
   }

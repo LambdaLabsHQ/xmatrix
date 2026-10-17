@@ -283,7 +283,7 @@ export const SPACE_PURGE_STEPS: readonly { table: string; predicate: string }[] 
     "data.agent_launches", "data.agent_message_executions", "data.agent_reborn_intents",
     "data.agent_registration_commands",
     "data.app_gmail_routes", "data.app_connector_action_requests", "data.app_connector_action_policies", "data.app_connector_connections",
-    "data.app_connector_credentials", "data.app_connector_oauth_installations",
+    "data.app_connector_credentials", "data.app_connector_oauth_installations", "data.app_github_installation_links",
     "data.app_wecom_install_attempts", "data.app_wecom_installations",
     "data.app_teams_link_attempts", "data.app_teams_room_bindings",
     "data.app_googlechat_link_attempts", "data.app_googlechat_room_bindings",

@@ -10,7 +10,7 @@ import {
   resolveAppConnectorCompletionOptions,
   spaceLaunchTargetRepositories,
 } from "../src/app-connectors.ts";
-import { githubAppEnv, githubConnection, jsonResponse } from "./support/github-app.mjs";
+import { githubAppEnv, githubConnection, githubLinkerAnswer, jsonResponse } from "./support/github-app.mjs";
 
 const GITHUB_APP_ENV = await githubAppEnv();
 
@@ -32,6 +32,8 @@ function stubInstallationCatalog(repositories) {
   const original = globalThis.fetch;
   globalThis.fetch = async (input) => {
     const url = typeof input === "string" ? input : input.url;
+    const linker = githubLinkerAnswer(url);
+    if (linker) return linker;
     if (url.includes("/access_tokens")) {
       return jsonResponse({
         token: "ghs_catalog",
@@ -145,5 +147,40 @@ test("organization completion stays alphabetical", async () => {
     );
   } finally {
     github.restore();
+  }
+});
+
+// A catalog names private repositories, so it offers each one only while the
+// administrator Connect recorded as linking its installation administers it
+// now, asked repository by repository: one added to the installation later,
+// which they only read, is not named.
+test("launch targets and completion offer only repositories the installation's linker administers now", async () => {
+  const linker = { githubUserId: 93939, login: "catalog-linker" };
+  const original = globalThis.fetch;
+  globalThis.fetch = async (input) => {
+    const url = typeof input === "string" ? input : input.url;
+    if (url.includes("/access_tokens")) return jsonResponse({ token: "ghs_catalog", permissions: { metadata: "read" } });
+    if (url.includes("/installation/repositories")) {
+      return jsonResponse({ total_count: 2, repositories: [
+        repo({ id: 11, owner: "audit-org", name: "permitted", private: true, pushed_at: "2026-08-01T00:00:00Z" }),
+        repo({ id: 12, owner: "audit-org", name: "added-later", private: true, pushed_at: "2026-08-02T00:00:00Z",
+          description: "not theirs to hand over" }),
+      ] });
+    }
+    if (url.endsWith(`/user/${linker.githubUserId}`)) return jsonResponse({ id: linker.githubUserId, login: linker.login });
+    if (url.endsWith(`/collaborators/${linker.login}/permission`)) {
+      return jsonResponse({ permission: url.includes("/repos/audit-org/permitted/") ? "admin" : "read",
+        user: { id: linker.githubUserId, login: linker.login } });
+    }
+    return jsonResponse({ message: "unexpected" }, 404);
+  };
+  try {
+    const connection = githubConnection({ githubLinks: [{ installationId: "777", githubUserId: linker.githubUserId }] });
+    assert.deepEqual((await spaceLaunchTargetRepositories(GITHUB_APP_ENV, connection)).map((target) => target.value),
+      ["audit-org/permitted"]);
+    assert.deepEqual((await resolveAppConnectorCompletionOptions(GITHUB_APP_ENV, connection, "github-repositories",
+      "audit-org")).map((option) => option.value), ["permitted"]);
+  } finally {
+    globalThis.fetch = original;
   }
 });

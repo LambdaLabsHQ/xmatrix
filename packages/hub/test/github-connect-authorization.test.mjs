@@ -7,6 +7,7 @@ import { githubAppEnv } from "./support/github-app.mjs";
 const {
   completeGitHubConnectAuthorization,
   githubConnectAuthorizeUrl,
+  githubGrant,
   githubGrantInstallationIds,
   isGitHubConnectState,
   handoffGitHubConnectAuthorization,
@@ -21,6 +22,7 @@ const env = {
 };
 
 const API = "https://api.github.com";
+const VIEWER_ID = 9001;
 
 /**
  * GitHub for the person connecting (`viewer`): the code exchange, the
@@ -37,7 +39,7 @@ async function withGitHub(reachable, run, viewer = "the-admin") {
     const target = String(url);
     requests.push({ url: target, body: init.body ? JSON.parse(init.body) : undefined });
     if (target === "https://github.com/login/oauth/access_token") return Response.json({ access_token: "user-token" });
-    if (target === `${API}/user`) return Response.json({ login: viewer });
+    if (target === `${API}/user`) return Response.json({ login: viewer, id: VIEWER_ID });
     if (target.startsWith(`${API}/user/installations?`)) {
       return Response.json({ installations: installations.map(({ id, type, login }) => ({ id: Number(id), account: { login, type } })) });
     }
@@ -59,11 +61,13 @@ async function withGitHub(reachable, run, viewer = "the-admin") {
 }
 
 async function callback(state, query = "code=the-code", userId = "admin") {
-  const links = [];
+  const links = [], confirmed = [];
   const response = await completeGitHubConnectAuthorization(env,
     new Request(`https://hub.test/api/auth/callback/github?${query}&state=${encodeURIComponent(state)}`),
-    async (...args) => { links.push(args); return true; }, { userId, authorizeSpace: async () => {} });
-  return { response, links, location: new URL(response.headers.get("location")) };
+    { link: async (...args) => { links.push(args); return true; },
+      confirm: async (...args) => { confirmed.push(args); } },
+    { userId, authorizeSpace: async () => {} });
+  return { response, links, confirmed, location: new URL(response.headers.get("location")) };
 }
 
 const stateOf = (url) => new URL(url).searchParams.get("state");
@@ -80,13 +84,17 @@ test("Connect authorizes with the App's own client on its registered callback", 
 test("authorizing returns a grant of exactly the installations this person administers, for this Space", async () => {
   const state = stateOf(await githubConnectAuthorizeUrl(env, { spaceId: "space-1", userId: "admin" }));
   await withGitHub(["111", "222"], async (requests) => {
-    const { location, links } = await callback(state);
+    const { location, links, confirmed } = await callback(state);
     assert.equal(location.origin + location.pathname, "https://app.test/connect/github");
     assert.equal(location.searchParams.get("space"), "space-1");
     assert.equal(location.searchParams.get("github"), "authorized");
     assert.deepEqual(links, []);
+    // Those the Space already links are confirmed as this GitHub user's to delegate.
+    assert.deepEqual(confirmed, [["space-1", "admin", VIEWER_ID, ["111", "222"]]]);
     const grant = location.searchParams.get("grant");
     assert.deepEqual(await githubGrantInstallationIds(env, grant, { spaceId: "space-1", userId: "admin" }), ["111", "222"]);
+    assert.deepEqual(await githubGrant(env, grant, { spaceId: "space-1", userId: "admin" }),
+      { installationIds: ["111", "222"], githubUserId: VIEWER_ID });
     assert.equal(await githubGrantInstallationIds(env, grant, { spaceId: "space-2", userId: "admin" }), undefined);
     assert.equal(await githubGrantInstallationIds(env, grant, { spaceId: "space-1", userId: "other" }), undefined);
     assert.deepEqual(requests[0].body, { client_id: "client-id", client_secret: "client-secret", code: "the-code",
@@ -100,7 +108,7 @@ test("a fresh installation is linked only when the installer administers it", as
   await withGitHub(["111", "222"], async () => {
     const installed = await callback(stateOf(await fresh("install")));
     assert.equal(installed.location.searchParams.get("github"), "connected");
-    assert.deepEqual(installed.links, [["space-1", "admin", "222"]]);
+    assert.deepEqual(installed.links, [["space-1", "admin", "222", VIEWER_ID]]);
     const updated = await callback(stateOf(await fresh("update")));
     assert.equal(updated.location.searchParams.get("github"), "updated");
   });
@@ -161,7 +169,7 @@ test("a different signed-in person cannot give the initiator's Space their GitHu
 });
 
 test("a grant issued before installation authority was checked must be authorized again", async () => {
-  for (const purpose of ["github-grant", "github-grant:v2"]) {
+  for (const purpose of ["github-grant", "github-grant:v2", "github-grant:v3"]) {
     const legacy = await signGitHubAppState({ purpose, spaceId: "space-1", userId: "admin",
       installationIds: ["111"], expiresAt: Date.now() + 60_000 }, env.GITHUB_APP_CLIENT_SECRET);
     assert.equal(await githubGrantInstallationIds(env, legacy, { spaceId: "space-1", userId: "admin" }), undefined);
