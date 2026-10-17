@@ -78,7 +78,8 @@ import { spaceAgentSetupState } from "./space-agent-setup";
 import { useAgentRegistrationCatalog } from "./agent-capability-select";
 import { registrationListed } from "./my-agents-registrations";
 import { registrationTupleId } from "./use-registration-command";
-import { AGENT_PRESETS } from "@xmatrix/protocol";
+import { AGENT_PRESETS, WEB_PROXY_ROUTES } from "@xmatrix/protocol";
+import { xmatrixApiRequest } from "@/lib/query/api-client";
 import { harnessSpaceKey } from "./harness-space-switch";
 import { useInstalledHarnesses } from "./use-installed-harnesses";
 import { SpaceAgentSetupCard } from "./space-agent-setup-card";
@@ -444,6 +445,10 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       spaceAgentsUnreachable,
     ]
   );
+  const spaceChannelCount = currentSpaceId
+    ? Math.max(onboardingCatalog.rows.length,
+      channels.filter((channel) => channel.spaceId === currentSpaceId).length)
+    : channels.length;
   // Once an agent is bound the shell would fall back to "No conversations yet",
   // which can only point at New conversation. Sending the first task is what
   // creates the first one.
@@ -452,18 +457,35 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       channelsLoaded,
       agentsLoaded,
       spaceAgents,
-      spaceChannelCount: currentSpaceId
-        ? Math.max(onboardingCatalog.rows.length,
-          channels.filter((channel) => channel.spaceId === currentSpaceId).length)
-        : channels.length,
+      spaceChannelCount,
       spaceId: currentSpaceId,
       folderPickerAvailable: Boolean(desktopBridge?.chooseWorkspaceDirectory),
     }),
-    [spaceAgents, channels, currentSpaceId, desktopBridge, channelsLoaded, agentsLoaded,
-      onboardingCatalog.rows.length]
+    [spaceAgents, spaceChannelCount, currentSpaceId, desktopBridge, channelsLoaded, agentsLoaded]
   );
+  /* A new person's personal Space opens with the conversation in which
+     xMatrix tells them how to bring their agents in (index-routes-welcome.ts).
+     The Hub decides whether this Space gets one; while it answers, the empty
+     Space shows nothing rather than a screen about to be replaced. */
+  const [welcomeRequest, setWelcomeRequest] = useState<{ spaceId: string; pending: boolean } | null>(null);
+  const welcomeSpaceId = token && channelsLoaded && agentsLoaded && spaceChannelCount === 0 ? currentSpaceId : null;
+  useEffect(() => {
+    if (!welcomeSpaceId || !token || welcomeRequest?.spaceId === welcomeSpaceId) return;
+    setWelcomeRequest({ spaceId: welcomeSpaceId, pending: true });
+    void xmatrixApiRequest<{ channelId: string | null }>({
+      url: WEB_PROXY_ROUTES.space_welcome(welcomeSpaceId), token, method: "POST",
+    }).then(({ channelId }) => {
+      if (!channelId) return;
+      void currentSpaceCatalog.load(CONVERSATION_QUERY, { force: true });
+      // A phone lists it; a wider screen opens it.
+      if (!isMobileViewport) requestChannelNavigation(channelId);
+    }).catch((error: unknown) => {
+      console.warn("[xmatrix] welcome conversation unavailable", error);
+    }).finally(() => setWelcomeRequest({ spaceId: welcomeSpaceId, pending: false }));
+  }, [welcomeSpaceId, token, welcomeRequest?.spaceId, currentSpaceCatalog, isMobileViewport, requestChannelNavigation]);
+  const welcomePending = Boolean(welcomeRequest?.pending && welcomeRequest.spaceId === currentSpaceId);
   // Only on the empty first screen: an open conversation is never covered.
-  const showSpaceAgentSetup = (spaceAgentSetup.kind !== "hidden" || keepHarnessSetup) && !selectedChannel;
+  const showSpaceAgentSetup = (spaceAgentSetup.kind !== "hidden" || keepHarnessSetup) && !selectedChannel && !welcomePending;
   /* A failed read is not onboarding: it reads on the tool pages' paper, since
      wood carries only liquid glass and this screen has none. */
   const showSpaceFirstTask =
@@ -917,11 +939,16 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     );
   }
 
-  const showMobileHarnessSetup = isMobileViewport && showSpaceAgentSetup && installedFleet.ready &&
-    installedFleet.candidates.length > 0;
-  const spaceAgentSetupSurface = (
+  // A phone has no room beside its list, so the setup takes the list's place
+  // when a machine reports agents to turn on, or when a Space with no agent has
+  // no conversation either and the list would only say "No conversations yet".
+  const showMobileAgentSetup = isMobileViewport && showSpaceAgentSetup && (
+    (installedFleet.ready && installedFleet.candidates.length > 0) ||
+    (spaceAgentSetup.kind === "no-local-machine" && spaceChannelCount === 0));
+  const renderSpaceAgentSetup = (phone: boolean) => (
         <div className="app-tool-paper app-tool-detail min-h-0 flex-1 overflow-y-auto">
           <SpaceAgentSetupCard
+            phone={phone}
             state={spaceAgentSetup}
             spaceId={currentSpaceId ?? null}
             token={token ?? undefined}
@@ -952,7 +979,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
        is — otherwise "the channel list" and "Follow-ups" are the same
        selector now that both stay mounted. */
     <div className="app-mobile-chat-pane app-mobile-channel-list-pane relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden md:hidden">
-      {showMobileHarnessSetup ? spaceAgentSetupSurface : <MobileChannelChatList
+      {showMobileAgentSetup ? renderSpaceAgentSetup(true) : <MobileChannelChatList
             currentSpaceId={currentSpaceId}
             catalogPaging={currentSpaceCatalog}
             fallbackChannels={cachedCatalogChannels}
@@ -1044,7 +1071,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
         <ConversationPageCards spaceId={selectedChannel.spaceId} conversationId={selectedChannel.id} token={token}
           onOpenPage={openPage} excludePageId={placement === "beside-page" ? selectedPageId : null} />
       )}
-      {showSpaceAgentSetup && !showMobileHarnessSetup && spaceAgentSetupSurface}
+      {showSpaceAgentSetup && !showMobileAgentSetup && renderSpaceAgentSetup(false)}
       {showSpaceFirstTask && (
         <div className="app-tool-paper app-tool-detail min-h-0 flex-1 overflow-y-auto">
           <SpaceFirstTaskCard
@@ -1110,6 +1137,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
         onRebornSender={handleTimelineRebornSender}
         reborningSenderKey={reborningAgentInstanceId}
         onQuestionnaireAnswer={handleTimelineQuestionnaireAnswer}
+        onSendMessage={runSelectedChannelCommand}
         onOpenInternalAppLink={handleTimelineOpenInternalAppLink}
         onOpenPage={openPageAt}
         onJumpToMessage={handleTimelineJumpToMessage}

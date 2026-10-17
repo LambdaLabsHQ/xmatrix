@@ -22,3 +22,27 @@ which nothing can be done and nothing says how to start.
   Spaces existed) to the billing policy's `spaceCreation` check. The official
   policy refuses a new Space (`402 free_space_limit`) while the account owns
   two Free Spaces besides these; paid and deleted Spaces do not count.
+
+## The welcome conversation
+
+The personal Space opens with a conversation in which xMatrix, not the owner,
+tells a new person how to bring their agents in. Agents run on the person's
+own computer, so a Space without one can do nothing; the first thing it says
+is how to connect one.
+
+- `POST /api/spaces/:spaceId/welcome` (Web: `/api/xmatrix/spaces/:spaceId/welcome`)
+  makes it. The Web shell calls it when a Space it shows has no conversation;
+  only the caller's own personal Space gets one, and any other Space answers
+  `{ "channelId": null }`. Agent Runs are refused.
+- The conversation is closed ("Welcome to xMatrix", only the owner) and its
+  id derives from the Space. Each message has a fixed id and command, so a
+  reload, a second tab or a retry replays it instead of adding one:
+  - `bring-agents`, at once;
+  - `agents-in`, once the Space has an enabled agent; the Web asks again when
+    it sees one, and the Hub checks the fact before writing.
+- The messages are `xmatrix.onboarding.v1` system notices (`xmatrixSystemNotice`,
+  `system_fact` provenance), written under the owner's principal with the
+  xMatrix label, so no Agent takes them as the owner's request. A message names
+  only its step; the Web draws what the step shows from the facts (the setup
+  command and its approval, the machine's agents, the Space's registrations),
+  so the conversation reopened later shows what happened, never a stale command.

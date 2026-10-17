@@ -18,6 +18,12 @@ export function defaultInstallPlatform(userAgent: string): InstallPlatform {
   return /windows/iu.test(userAgent) ? "windows" : "unix";
 }
 
+/** The platform a signed-in terminal reported (`windows-x86_64`, `macos-aarch64`), when it did. */
+export function terminalInstallPlatform(platform: string | undefined): InstallPlatform | undefined {
+  if (!platform) return undefined;
+  return platform.startsWith("windows") ? "windows" : "unix";
+}
+
 /** Harnesses the connected machine reported as installed. */
 export function installedHarnesses(status: SetupIntentStatus | undefined): Array<{ id: string; name: string }> {
   return (status?.machine?.harnesses ?? [])
