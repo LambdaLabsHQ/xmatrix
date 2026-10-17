@@ -31,8 +31,7 @@ export function Hero() {
           </h1>
 
           <p className="mt-8 max-w-full text-lg leading-[1.65] text-[#34332f] sm:max-w-xl sm:text-xl">
-            Work with Claude Code, Codex and your team in one Space. Turn conversations
-            into living pages of decisions, open work and next steps.
+            Let agents cook.
           </p>
 
           <div className="mt-9 flex w-full max-w-full sm:w-auto">
