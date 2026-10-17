@@ -1,4 +1,5 @@
 import { AGENT_PRESETS, type SetupIntentStatus } from "@xmatrix/protocol";
+import { ONBOARDING_COPY } from "@/lib/onboarding-copy";
 
 /* Connecting a machine from the Web (docs/design/onboarding-connect-machine.md).
    The Hub derives every fact; this file only turns them into the one line the
@@ -66,7 +67,4 @@ export function connectStep(status: SetupIntentStatus, waitingForMs: number): Co
 }
 
 /** "Claude Code", "Claude Code and Codex", "Claude Code, Codex and Gemini". */
-export function listNames(names: string[]): string {
-  if (names.length <= 1) return names[0] ?? "";
-  return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
-}
+export const listNames: (names: string[]) => string = ONBOARDING_COPY.en.listNames;

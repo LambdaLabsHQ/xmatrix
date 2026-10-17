@@ -13,3 +13,14 @@ export function onboardingStageOf(metadata: Record<string, unknown> | undefined)
   if (!metadata || metadata.kind !== ONBOARDING_MESSAGE_KIND) return null;
   return (ONBOARDING_STAGES as readonly unknown[]).includes(metadata.stage) ? metadata.stage as OnboardingStage : null;
 }
+
+/**
+ * The language of a new person's first ten minutes: Chinese for any `zh`
+ * tag, English otherwise. Only that path is translated; the rest of the app
+ * stays English.
+ */
+export type OnboardingLocale = "en" | "zh";
+
+export function onboardingLocale(tag: string | null | undefined): OnboardingLocale {
+  return /^zh(?:-|_|$)/iu.test(tag?.trim() ?? "") ? "zh" : "en";
+}

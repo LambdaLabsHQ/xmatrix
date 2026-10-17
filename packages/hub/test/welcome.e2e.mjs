@@ -51,6 +51,18 @@ test("a personal Space opens with xMatrix's welcome, written once", () =>
     assert.equal(written[0].from, "xMatrix");
   }));
 
+test("a Chinese browser's welcome is written in Chinese", () =>
+  withOwnerWorker("Lin Huiyin", async ({ call }) => {
+    const space = await personal(call);
+    const { channelId } = (await welcome(call, space.id, { body: { locale: "zh-CN" } })).body;
+    const page = await call(`/api/channels/page?spaceId=${encodeURIComponent(space.id)}&view=flat&filter=all`);
+    const row = page.body.rows.find((candidate) => (candidate.channel?.id ?? candidate.id) === channelId);
+    assert.equal((row?.channel ?? row)?.name, "欢迎来到 xMatrix", JSON.stringify(row));
+    const [written] = await steps(call, channelId);
+    assert.equal(written.stage, "bring-agents");
+    assert.match(written.body, /^把你的 Agent 带进 xMatrix。/u);
+  }));
+
 test("once an agent is in, xMatrix says so in the welcome, once", () =>
   withOwnerWorker("Grace Hopper", async ({ worker, token, call }) => {
     const space = await personal(call);

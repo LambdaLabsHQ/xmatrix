@@ -31,6 +31,7 @@ import { Button } from "@/components/ui/button";
 import { noticeClass, statusInkClass } from "@/components/ui/status-tone";
 import { Switch } from "@/components/ui/switch";
 import { useAuth } from "@/lib/auth-context";
+import { useOnboardingCopy } from "@/lib/onboarding-locale";
 import { xmatrixApiRequest } from "@/lib/query/api-client";
 import { xmatrixQueryKeys } from "@/lib/query/query-keys";
 import { cn } from "@/lib/utils";
@@ -118,6 +119,7 @@ export function MyAgentsView({
   const [item, select] = useToolItem();
 
   const fleet = useInstalledHarnesses(spaceId, token, currentUserId);
+  const copy = useOnboardingCopy(spaceId, token, currentUserId);
   const newCandidates = fleet.candidates.filter((candidate) => !candidate.registration);
 
   function act(registration: AgentRegistrationSummary, action: MyAgentAction) {
@@ -313,9 +315,9 @@ export function MyAgentsView({
     );
   } else if (catalog.data && rows.length === 0) {
     detail = (
-      <ToolDetailEmpty icon={<Bot />} title={newCandidates.length ? "Enable an installed harness" : "Connect your agents"}>
-        <p>Turn on an installed harness in the list, or install one from Machines.</p>
-        <Button size="sm" variant="outline" onClick={onOpenMachines}><Plus /> Manage machines</Button>
+      <ToolDetailEmpty icon={<Bot />} title={newCandidates.length ? copy.enableInstalledTitle : copy.connectAgentsTitle}>
+        <p>{copy.enableOrInstall}</p>
+        <Button size="sm" variant="outline" onClick={onOpenMachines}><Plus /> {copy.manageMachines}</Button>
       </ToolDetailEmpty>
     );
   }

@@ -80,6 +80,7 @@ import { registrationListed } from "./my-agents-registrations";
 import { registrationTupleId } from "./use-registration-command";
 import { AGENT_PRESETS, WEB_PROXY_ROUTES } from "@xmatrix/protocol";
 import { xmatrixApiRequest } from "@/lib/query/api-client";
+import { useOnboardingLocale } from "@/lib/onboarding-locale";
 import { harnessSpaceKey } from "./harness-space-switch";
 import { useInstalledHarnesses } from "./use-installed-harnesses";
 import { SpaceAgentSetupCard } from "./space-agent-setup-card";
@@ -469,11 +470,12 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
      Space shows nothing rather than a screen about to be replaced. */
   const [welcomeRequest, setWelcomeRequest] = useState<{ spaceId: string; pending: boolean; channelId?: string } | null>(null);
   const welcomeSpaceId = token && channelsLoaded && agentsLoaded && spaceChannelCount === 0 ? currentSpaceId : null;
+  const welcomeLocale = useOnboardingLocale(currentSpaceId, token, user?.id);
   useEffect(() => {
     if (!welcomeSpaceId || !token || welcomeRequest?.spaceId === welcomeSpaceId) return;
     setWelcomeRequest({ spaceId: welcomeSpaceId, pending: true });
     void xmatrixApiRequest<{ channelId: string | null }>({
-      url: WEB_PROXY_ROUTES.space_welcome(welcomeSpaceId), token, method: "POST",
+      url: WEB_PROXY_ROUTES.space_welcome(welcomeSpaceId), token, method: "POST", body: { locale: welcomeLocale },
     }).then(({ channelId }) => {
       if (!channelId) return null;
       void currentSpaceCatalog.load(CONVERSATION_QUERY, { force: true });
@@ -487,7 +489,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       return null;
     }).then((channelId) => setWelcomeRequest({ spaceId: welcomeSpaceId, pending: false, ...(channelId ? { channelId } : {}) }));
   }, [welcomeSpaceId, token, welcomeRequest?.spaceId, currentSpaceCatalog, isMobileViewport, desktopBridge,
-    requestChannelNavigation]);
+    requestChannelNavigation, welcomeLocale]);
   const welcomePending = Boolean(welcomeRequest?.pending && welcomeRequest.spaceId === currentSpaceId);
   const welcomeChannelId = welcomeRequest?.spaceId === currentSpaceId ? welcomeRequest.channelId : undefined;
   const desktopWelcomeOpened = useRef<string | null>(null);

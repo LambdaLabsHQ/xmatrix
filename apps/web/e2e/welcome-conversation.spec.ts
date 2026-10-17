@@ -124,3 +124,30 @@ test.describe("mobile", () => {
       .toBeVisible({ timeout: 20_000 });
   });
 });
+
+test.describe("a Chinese browser", () => {
+  test.use({ ...E2E_DESKTOP_CONTEXT, locale: "zh-CN" });
+
+  test("is welcomed, set up and given its starters in Chinese", async ({ page }) => {
+    await welcomeOnFirstOpen(page);
+    await expect.poll(() => fixtureRequestBodies(page, "welcome")).toEqual([{ locale: "zh" }]);
+    const welcome = page.getByTestId("connect-machine");
+    await expect(welcome).toContainText("把你的 Agent 带进 xMatrix。", { timeout: 20_000 });
+    await expect(welcome).toContainText("在你的电脑上运行这条命令");
+    await expect(welcome).toContainText("在这里批准");
+    await expect(welcome).toContainText("下载桌面 App");
+  });
+
+  test("starters are sent in Chinese", async ({ page }) => {
+    await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], channels: [{ ...WELCOME, messageCount: 2, lastMessageSequence: 2 }],
+      registrations: harnessRegistrations(["codex"]) });
+    await fixtureJson(page, "history", `**/api/xmatrix/channels/${WELCOME.id}/history**`, { messages: [BRING, IN], hasMore: false });
+    await fixtureJson(page, "send", `**/api/xmatrix/channels/${WELCOME.id}/messages`, { message: { id: "sent" } }, { method: "POST" });
+    await page.goto("/app/personal-sspaceperso/channels/welcome-to-xmatrix-cchannelwel");
+    const agentsIn = page.locator('[data-onboarding-stage="agents-in"]');
+    await expect(agentsIn).toContainText("@codex 已接入。在这里 @ 它就能派活", { timeout: 20_000 });
+    await agentsIn.getByRole("button", { name: /和我一起做个计划/u }).click();
+    await expect.poll(async () => (await fixtureRequestBodies(page, "send")).map((sent) => (sent as { body?: string }).body))
+      .toEqual(["@auto 帮我规划一件正在做的事，边聊边把计划写进一个页面。"]);
+  });
+});

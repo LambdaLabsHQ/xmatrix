@@ -1,18 +1,20 @@
 "use client";
 
 import { useEffect, useState, type ReactNode } from "react";
-import { harnessTooOldSentence, type OnboardingSurface } from "@xmatrix/protocol";
+import type { OnboardingSurface } from "@xmatrix/protocol";
 import { Check, Loader2 } from "lucide-react";
 import { AnimatedIcon } from "@/components/ui/animated-icon";
 import { actionClass } from "@/components/ui/action-tone";
 import { quickStartRunbookUrl, quickStartSeedPrompt } from "@/lib/quick-start";
+import { ONBOARDING_COPY, type OnboardingCopy } from "@/lib/onboarding-copy";
 import { useOnboardingSteps } from "@/lib/onboarding-funnel";
+import { useOnboardingCopy } from "@/lib/onboarding-locale";
 import { useCopyToClipboard } from "@/lib/use-copy-to-clipboard";
 import { cn } from "@/lib/utils";
 import { CommandBlock } from "./command-block";
 import { useNow } from "./agent-work-intent";
 import {
-  connectStep, defaultInstallPlatform, listNames, setupInstallCommand, terminalInstallPlatform,
+  connectStep, defaultInstallPlatform, setupInstallCommand, terminalInstallPlatform,
   type ConnectStep, type InstallPlatform,
 } from "./connect-machine";
 import { AgentInstallPicker, AgentsLine } from "./supported-agents";
@@ -42,6 +44,8 @@ export function BringAgentsIn({ spaceId, token, userId, surface, phone = false }
 }) {
   const intent = useSetupIntent(spaceId, token ?? undefined, userId);
   const fleet = useInstalledHarnesses(spaceId, token, userId);
+  const copy = useOnboardingCopy(spaceId, token, userId);
+  const { listNames } = copy;
   const [platform, setPlatform] = useState<InstallPlatform>(() =>
     typeof navigator === "undefined" ? "unix" : defaultInstallPlatform(navigator.userAgent));
   const now = useNow(1_000);
@@ -59,58 +63,59 @@ export function BringAgentsIn({ spaceId, token, userId, surface, phone = false }
 
   return (
     <div className="max-w-[34rem] text-[15px] leading-6" data-testid="connect-machine">
-      <p>Bring your agents into xMatrix. They keep running on your own computer, and xMatrix connects them to your conversations and pages.</p>
-      <AgentsLine className="mt-2" />
+      <p>{copy.bringAgents}</p>
+      <AgentsLine className="mt-2" copy={copy} />
 
       <ol className="m-0 mt-4 list-none border-t-[1px] border-border p-0">
-        <SetupRow n={1} state={state(1)} title="Run this on your computer"
+        <SetupRow n={1} state={state(1)} title={copy.runCommand}
           aside={stage === 1 ? (
             <button type="button" onClick={() => setPlatform(platform === "windows" ? "unix" : "windows")}
               className="underline-offset-2 hover:text-foreground hover:underline">
-              {platform === "windows" ? "macOS or Linux?" : "Windows?"}
+              {copy.otherPlatform(platform === "windows")}
             </button>
           ) : stage > 1 && machines ? machines : null}>
           {stage === 1 && <>
-            <CommandBlock command={command} onCopy={() => count("command_copied")} />
+            <CommandBlock command={command} copy={copy} onCopy={() => count("command_copied")} />
             <div role="status" className="mt-2 text-[13px] leading-5 text-muted-foreground">
-              <p className="flex items-center gap-1.5">{spinner} Waiting for your computer…</p>
-              {step?.kind === "waiting" && step.hint === "check-terminal" && <p>Nothing yet? The terminal says what went wrong.</p>}
-              {step?.kind === "waiting" && step.hint === "try-desktop" && <p>Still nothing? The desktop app connects without a terminal.</p>}
+              <p className="flex items-center gap-1.5">{spinner} {copy.waitingForComputer}</p>
+              {step?.kind === "waiting" && step.hint === "check-terminal" && <p>{copy.checkTerminal}</p>}
+              {step?.kind === "waiting" && step.hint === "try-desktop" && <p>{copy.tryDesktop}</p>}
             </div>
           </>}
         </SetupRow>
 
-        <SetupRow n={2} state={state(2)} title="Approve it here"
-          aside={step?.kind === "connecting" ? <span className="flex items-center gap-1.5">{spinner} Signing in…</span>
+        <SetupRow n={2} state={state(2)} title={copy.approveHere}
+          aside={step?.kind === "connecting" ? <span className="flex items-center gap-1.5">{spinner} {copy.signingIn}</span>
             : null}>
           {step?.kind === "approval" && (
             <div role="status">
-              <p><strong>{step.hostname}</strong> wants to connect with code <strong className="font-mono">{step.userCode}</strong>.</p>
-              <p className="text-[13px] leading-5 text-muted-foreground">Approve it only if the terminal shows the same code.</p>
+              <p><strong>{step.hostname}</strong>{copy.wantsToConnect[0]}<strong
+                className="font-mono">{step.userCode}</strong>{copy.wantsToConnect[1]}</p>
+              <p className="text-[13px] leading-5 text-muted-foreground">{copy.sameCodeOnly}</p>
               <div className="mt-2 flex items-center gap-2">
                 <button type="button" disabled={intent.busy} onClick={() => { count("approved"); void intent.approve(step.userCode); }}
-                  className={actionClass({ variant: "primary", size: "sm" })}>Approve</button>
+                  className={actionClass({ variant: "primary", size: "sm" })}>{copy.approve}</button>
                 <button type="button" disabled={intent.busy} onClick={() => void intent.decline()}
-                  className={actionClass({ variant: "quiet", size: "sm" })}>Not mine</button>
+                  className={actionClass({ variant: "quiet", size: "sm" })}>{copy.notMine}</button>
               </div>
             </div>
           )}
         </SetupRow>
 
-        <SetupRow n={3} state={state(3)} title="Turn on the agents it finds"
+        <SetupRow n={3} state={state(3)} title={copy.turnOnFound}
           aside={stage === 4 ? listNames(enabled.map((registration) => registration.displayName))
-            : stage === 3 && step?.kind === "looking" ? <span className="flex items-center gap-1.5">{spinner} Looking…</span> : null}>
+            : stage === 3 && step?.kind === "looking" ? <span className="flex items-center gap-1.5">{spinner} {copy.looking}</span> : null}>
           {stage === 3 && found && (
             <div role="status">
-              <p>Found {listNames(fleet.candidates.map((candidate) => candidate.preset.displayName))}.</p>
+              <p>{copy.found(listNames(fleet.candidates.map((candidate) => candidate.preset.displayName)))}</p>
               <button type="button" disabled={!fleet.ready || Boolean(fleet.pending) || fleet.enablingAll}
                 onClick={() => void fleet.enableAll()} className={actionClass({ variant: "primary", size: "sm" }, "mt-2")}>
                 {fleet.enablingAll ? <AnimatedIcon icon={Loader2} className="size-4 animate-spin" /> : null}
-                Bring them in
+                {copy.bringThemIn}
               </button>
               {fleet.candidates.map((candidate) => candidate.tooOld && (
                 <div key={candidate.id} className="mt-3 text-[13px] leading-5 text-muted-foreground">
-                  <p>{harnessTooOldSentence(candidate.tooOld)} Nothing is sent to it until it is updated.</p>
+                  <p>{copy.tooOld(candidate.tooOld)}{copy.gap}{copy.nothingUntilUpdated}</p>
                   {candidate.daemon.status === "online" && (
                     <div className="mt-1.5"><CandidateUpdateButton fleet={fleet} candidate={candidate} tooOld={candidate.tooOld} /></div>
                   )}
@@ -119,12 +124,13 @@ export function BringAgentsIn({ spaceId, token, userId, surface, phone = false }
             </div>
           )}
           {stage === 3 && !found && step?.kind === "found" && (
-            <p role="status">Found {listNames(step.harnesses.map((harness) => harness.name))}.</p>
+            <p role="status">{copy.found(listNames(step.harnesses.map((harness) => harness.name)))}</p>
           )}
           {stage === 3 && !found && step?.kind === "none-installed" && (
             <div role="status">
-              <p>{step.machineName} has no agent yet. Install one there and it shows up here:</p>
-              <AgentInstallPicker className="mt-2" platform={terminalInstallPlatform(intent.status?.terminal?.platform) ?? platform} />
+              <p>{copy.noAgentYet(step.machineName)}</p>
+              <AgentInstallPicker className="mt-2" copy={copy}
+                platform={terminalInstallPlatform(intent.status?.terminal?.platform) ?? platform} />
             </div>
           )}
         </SetupRow>
@@ -132,17 +138,17 @@ export function BringAgentsIn({ spaceId, token, userId, surface, phone = false }
 
       {intent.error && <p role="alert" className="mt-2 text-[13px] leading-5 text-destructive">{intent.error}{" "}
         <button type="button" disabled={intent.busy || intent.retrying} onClick={intent.retry}
-          className="font-semibold underline-offset-2 hover:underline">Try again</button></p>}
+          className="font-semibold underline-offset-2 hover:underline">{copy.tryAgain}</button></p>}
       {stage < 4 && (
         <p className="mt-3 text-[13px] leading-5 text-muted-foreground">
-          No terminal?{" "}
+          {copy.noTerminal}{copy.gap}
           {phone
-            ? <>Download the desktop app on that computer from <span className="font-semibold text-foreground">xmatrix.sh/download</span>.</>
+            ? <>{copy.phoneDownload[0]}<span className="font-semibold text-foreground">{copy.phoneDownload[1]}</span>{copy.phoneDownload[2]}</>
             : <><a href="/download" onClick={() => count("download_clicked")}
-              className="font-semibold text-foreground underline-offset-2 hover:underline">Download the desktop app</a>. It finds the agents installed there.</>}
+              className="font-semibold text-foreground underline-offset-2 hover:underline">{copy.download[0]}</a>{copy.download[1]}</>}
         </p>
       )}
-      {stage < 4 && !phone && <div className="text-[13px] leading-5 text-muted-foreground"><RemoteMachineHint /></div>}
+      {stage < 4 && !phone && <div className="text-[13px] leading-5 text-muted-foreground"><RemoteMachineHint copy={copy} /></div>}
     </div>
   );
 }
@@ -169,18 +175,19 @@ function SetupRow({ n, state, title, aside, children }: {
 /* The remote path from the landing page: a machine with no GUI (a server, a
    build box) is set up by handing this prompt to an agent that already runs
    there, so it does not need the desktop app at all. */
-export function RemoteMachineHint() {
+export function RemoteMachineHint({ copy: words = ONBOARDING_COPY.en }: { copy?: OnboardingCopy }) {
   const { copied, copy } = useCopyToClipboard(quickStartSeedPrompt);
+  const [ask, action, middle, steps, end] = words.server(copied);
   return (
     <p>
-      Setting up a server?{" "}
+      {ask}
       <button type="button" onClick={() => void copy()}
         className="font-semibold text-foreground underline-offset-2 hover:underline">
-        {copied ? "Copied" : "Copy a setup prompt"}
-      </button>{" "}
-      for an agent already running there, or{" "}
+        {action}
+      </button>
+      {middle}
       <a href={quickStartRunbookUrl} target="_blank" rel="noreferrer"
-        className="font-semibold text-foreground underline-offset-2 hover:underline">read the steps</a>.
+        className="font-semibold text-foreground underline-offset-2 hover:underline">{steps}</a>{end}
     </p>
   );
 }
