@@ -47,9 +47,24 @@ class AuthClientError extends UserFacingProblem {
   }
 }
 
+/**
+ * A desktop or phone app signs in for itself and keeps the Hub session token,
+ * so the Hub holds no cookie for it. Account calls carry that token instead.
+ */
+let appSessionToken: string | null = null;
+
+export function setAppSessionToken(token: string | null | undefined): void {
+  appSessionToken = token?.trim() || null;
+}
+
+function appSessionHeaders(): Record<string, string> {
+  return appSessionToken ? { authorization: `Bearer ${appSessionToken}` } : {};
+}
+
 const authClient = createAuthClient({
   baseURL: getAuthBaseUrl(),
   plugins: [emailOTPClient(), twoFactorClient()],
+  fetchOptions: { auth: { type: "Bearer", token: () => appSessionToken ?? undefined } },
 });
 
 /**
@@ -370,7 +385,10 @@ export interface OAuthClientSummary { name: string }
 async function oauthRequest(path: string, init: RequestInit = {}): Promise<Record<string, unknown>> {
   const response = await xmatrixRawResponse(`${getAuthBaseUrl()}/api/auth${path}`, {
     ...init, credentials: "include", cache: "no-store",
-    headers: { accept: "application/json", ...(init.body ? { "content-type": "application/json" } : {}) },
+    headers: {
+      accept: "application/json", ...appSessionHeaders(),
+      ...(init.body ? { "content-type": "application/json" } : {}),
+    },
   });
   const payload = (await response.json().catch(() => ({}))) as Record<string, unknown>;
   if (!response.ok) {
