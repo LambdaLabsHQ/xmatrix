@@ -248,6 +248,21 @@ function authorityRoot(row: QueryResultRow): string {
   return typeof root === "string" && root ? root : String(row.owner_user_id);
 }
 
+/**
+ * The (Space, user) pairs among these whose user is a member who may use the
+ * Space's connected apps now: owner, admin or member, not a viewer or an
+ * open-project participant (open-project-governance.md §2).
+ */
+async function appUsers(tx: DatabaseTransaction, pairs: Array<{ spaceId: string; userId: string }>): Promise<Set<string>> {
+  if (pairs.length === 0) return new Set();
+  const rows = await tx.query<QueryResultRow>({ name: "automation_app_users_v1", text: `SELECT m.space_id,m.user_id
+    FROM data.space_members m JOIN unnest($1::text[],$2::text[]) AS pair(space_id,user_id)
+      ON pair.space_id=m.space_id AND pair.user_id=m.user_id
+    WHERE m.role NOT IN ('viewer','participant')`,
+  values: [pairs.map((pair) => pair.spaceId), pairs.map((pair) => pair.userId)], maxRows: pairs.length });
+  return new Set(rows.map((row) => `${String(row.space_id)}\u0000${String(row.user_id)}`));
+}
+
 /** `reasonRequired` is always false: no Automation change needs a stated
  * reason. It stays on the wire for CLIs that still require the field. */
 function capabilities(row: QueryResultRow) {
@@ -1572,7 +1587,7 @@ export class PostgresAutomationRepository {
    * §6.2). The caller decides which of them the event really fires.
    */
   async triggeredBy(input: { requestId: string; trigger: Record<string, unknown>; spaceId?: string;
-    pageId?: string }): Promise<Array<{ automationId: string; channelId: string; spaceId: string; pageId: string;
+    pageId?: string; appUse?: boolean }): Promise<Array<{ automationId: string; channelId: string; spaceId: string; pageId: string;
       authorityRootUserId: string; triggers: unknown[] }>> {
     const requestId = text(input.requestId, "requestId", 200);
     return this.database.transaction({ requestId, operation: "automation.triggered-by" }, async (tx) => {
@@ -1583,7 +1598,11 @@ export class PostgresAutomationRepository {
           AND ($2::text IS NULL OR c.space_id=$2) AND ($3::text IS NULL OR a.page_id=$3)
         ORDER BY a.automation_id LIMIT 200`,
       values: [JSON.stringify([input.trigger]), input.spaceId ?? null, input.pageId ?? null], maxRows: 200 });
-      return rows.map((row) => ({ automationId: String(row.automation_id), channelId: String(row.channel_id),
+      // An event from the Space's connected apps concerns only Automations whose authority may use them now.
+      const users = input.appUse ? await appUsers(tx, rows.map((row) => ({ spaceId: String(row.space_id),
+        userId: authorityRoot(row) }))) : undefined;
+      return rows.filter((row) => !users || users.has(`${String(row.space_id)}\u0000${authorityRoot(row)}`))
+        .map((row) => ({ automationId: String(row.automation_id), channelId: String(row.channel_id),
         spaceId: String(row.space_id), pageId: String(row.page_id), authorityRootUserId: authorityRoot(row),
         triggers: Array.isArray(json(row.payload_json).triggers) ? json(row.payload_json).triggers as unknown[] : [] }));
     });
@@ -1595,7 +1614,7 @@ export class PostgresAutomationRepository {
    * Returns the conversation to tell, or null when nothing changed.
    */
   async fireTrigger(input: { requestId: string; automationId: string; eventId: string;
-    event: Record<string, unknown>; at: string }, dingtalkEffect?: DingTalkEffectAuthority): Promise<string | null> {
+    event: Record<string, unknown>; at: string; appUse?: boolean }, dingtalkEffect?: DingTalkEffectAuthority): Promise<string | null> {
     const requestId = text(input.requestId, "requestId", 200);
     const at = timestamp(input.at, "at");
     const placement=dingtalkEffect ? await this.placement(requestId,"automation.dingtalk-effect.placement",dingtalkEffect.spaceId) : undefined;
@@ -1619,6 +1638,11 @@ export class PostgresAutomationRepository {
       values: [text(input.automationId, "automationId", 300)], maxRows: 1 });
       const row = rows[0];
       if (!row) { if (dingtalkEffect) dingtalkDenied(); return null; }
+      // Checked again under the Automation's lock: an authority who lost member
+      // rights keeps the Automation, but connected-app events no longer reach it.
+      if (input.appUse && !(await appUsers(tx, [{ spaceId: String(row.space_id), userId: authorityRoot(row) }])).size) {
+        return null;
+      }
       if (dingtalkEffect && source) {
         const destination=dingtalkEffect.destination;
         const triggers=json(row.payload_json).triggers;

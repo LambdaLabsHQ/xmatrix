@@ -9,6 +9,8 @@ import { timingSafeEqual } from "@xmatrix/protocol";
 import type { ConnectorEvent, ConnectorProvider } from "./provider";
 import { oauthClient } from "./oauth";
 import { parseJsonObject } from "./event-format";
+import { linearEventVisible } from "./linear-visibility";
+import { slackInstallationRetired } from "./slack-events";
 
 /*
  * Per-connection event ingress (docs/design/connector-platform.md §3.3):
@@ -30,6 +32,8 @@ export interface ConnectorIngressDependencies {
   apps: typeof connectorAppRepository;
   append: typeof dispatchProductMessageAppend;
   automations?: typeof fireConnectorAutomationTriggers;
+  /** Whether a Space's own Linear grant reads what an event is about. */
+  linearVisible?: typeof linearEventVisible;
 }
 
 /** Shared Channel append and Automation effects; provider authentication stays separate. */
@@ -61,20 +65,34 @@ export async function handleAppConnectorDelivery(input: { env: Env; request: Req
     url: new URL(request.url), credentials: { signingSecret } });
   if (result.ok === "respond") return result.response;
   if (!result.ok) return Response.json({ error: result.error }, { status: result.status });
-  if (result.events.length === 0) return Response.json({ ok: true, events: 0, delivered: 0 });
-  if (result.events.length > MAX_EVENTS_PER_DELIVERY) return Response.json({ error: "Too many connector events" }, { status: 413 });
   const payload = parseJsonObject(rawBody)!;
   const installationId = provider.id === "slack" ? payload.team_id : payload.organizationId;
+  const apps = dependencies.apps(env);
+  // Slack says the app left the workspace: its bindings retire, so the
+  // workspace can be connected again (by whichever Space connects it next).
+  if (provider.id === "slack" && slackInstallationRetired(payload)) {
+    if (typeof installationId !== "string" || !/^[A-Za-z0-9_-]{1,128}$/u.test(installationId)) {
+      return Response.json({ error: "Missing provider workspace" }, { status: 400 });
+    }
+    const retired = await apps.retireSlackWorkspace({ requestId: crypto.randomUUID(), appClientId: client.clientId,
+      installationId, at: new Date().toISOString(), limit: MAX_OAUTH_CONNECTIONS });
+    return Response.json({ ok: true, events: 0, delivered: 0, retired });
+  }
+  if (result.events.length === 0) return Response.json({ ok: true, events: 0, delivered: 0 });
+  if (result.events.length > MAX_EVENTS_PER_DELIVERY) return Response.json({ error: "Too many connector events" }, { status: 413 });
   if (typeof installationId !== "string" || !/^[A-Za-z0-9_-]{1,128}$/u.test(installationId)) {
     return Response.json({ error: "Missing provider workspace" }, { status: 400 });
   }
-  const apps = dependencies.apps(env);
   const binding = { providerId: provider.id, appClientId: client.clientId, installationId };
   const query = () => apps.oauthEventConnections({ requestId: crypto.randomUUID(), ...binding, limit: MAX_OAUTH_CONNECTIONS });
   const connections = await query();
+  const visible = dependencies.linearVisible ?? linearEventVisible;
   let delivered = 0;
   for (const connection of connections) {
     for (const event of result.events) {
+      // One Linear delivery serves every Space that connected the organization;
+      // each takes only what its own grant reads (private teams stay private).
+      if (provider.id === "linear" && !await visible(env, connection.spaceId, event)) continue;
       delivered += await deliverEvent(env, apps, dependencies.append, provider.id, connection.connectionId, event, binding);
       // Reauthorization can change the workspace between the first lookup and dispatch.
       if (dependencies.automations && (await query()).some(current => current.connectionId === connection.connectionId)) {
