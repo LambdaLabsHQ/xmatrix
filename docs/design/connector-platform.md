@@ -866,15 +866,20 @@ sees there, so each provider narrows delivery to what one Space may read:
   (`workspace_connected_elsewhere`, shown as "already connected to another
   xMatrix Space"). Two current bindings that predate this rule route nowhere
   until one disconnects. A signature-verified `app_uninstalled`, or
-  `tokens_revoked` naming bot tokens, retires every binding of the workspace
-  (disconnected, credentials kept), after which any Space may connect it. The
-  Slack app must subscribe to both events for this release path.
+  `tokens_revoked` naming bot tokens, retires the workspace's bindings made
+  before Slack's `event_time` (disconnected, credentials kept), after which any
+  Space may connect it; a Connect after the event is not retired by a delayed
+  or replayed delivery, and a delivery without `event_time` retires nothing.
+  The Slack app must subscribe to both events for this release path.
 - **Linear: each Space's own grant.** OAuth grants act as the connecting
   user. Before an event reaches a Space, the Hub reads its subject (issue,
   comment, project, project update or cycle) by id with that Space's token;
   only a Space whose user can read it receives it, so private teams stay
-  private. An object that can no longer be read (deleted) is not delivered; a
-  Linear outage answers 503 so Linear retries.
+  private. The answer holds only for the grant that read it: routes, the final
+  append and Automations are fenced to that credential version, so a Connect in
+  between withholds the delivery and Linear's retry asks the new grant. An
+  object that can no longer be read (deleted) is not delivered; a Linear outage
+  answers 503 so Linear retries.
 
 Existing OAuth installs reconnect to establish this evidence; no backfill guesses
 workspace ownership. Human credential edits invalidate the binding until another

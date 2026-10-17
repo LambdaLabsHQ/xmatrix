@@ -373,8 +373,9 @@ const oauthInput = (space, installationId = 'T1') => ({ requestId: crypto.random
   providerId: 'slack', actorUserId: 'owner', fields: { botToken: `fixture-${installationId}` },
   policy: oauthPolicy, oauthInstallation: { appClientId: 'app-1', installationId },
   initialize: { ingressKey: `fixture-key-${installationId}` }, at });
-const readOAuth = (apps, extra = {}) => apps.oauthEventConnections({ requestId: crypto.randomUUID(),
-  providerId: 'slack', appClientId: 'app-1', installationId: 'T1', limit: 50, ...extra });
+const readOAuth = async (apps, extra = {}) => (await apps.oauthEventConnections({ requestId: crypto.randomUUID(),
+  providerId: 'slack', appClientId: 'app-1', installationId: 'T1', limit: 50, ...extra }))
+  .map(({ connectionId, spaceId }) => ({ connectionId, spaceId }));
 
 async function useVercel(sql, space) {
   await sql(`UPDATE data.app_connector_connections SET connection_id=$1||':vercel',provider_id='vercel',
@@ -464,6 +465,9 @@ integration('OAuth installation binding is atomic with credentials and invalidat
     await credentials.put(oauthInput(space));
     const expected = [{ connectionId: `${space}:slack`, spaceId: space }];
     assert.deepEqual(await readOAuth(apps), expected);
+    // Each route names the credential version its binding is for, so a delivery can be fenced to it.
+    assert.deepEqual((await apps.oauthEventConnections({ requestId: crypto.randomUUID(), providerId: 'slack',
+      appClientId: 'app-1', installationId: 'T1', limit: 50 })).map((row) => row.credentialVersion), [1]);
     const read = () => credentials.resolve({ requestId: crypto.randomUUID(), spaceId: space, providerId: 'slack' });
     const before = await read();
     await assert.rejects(credentials.put({ ...oauthInput(space, 'T2'), fields: { invalidField: 'bad' } }), /Unsupported/);
@@ -550,9 +554,12 @@ integration('a verified Slack uninstall retires the workspace so it can be conne
     await credentials.put(oauthInput(space));
     const before = await credentials.resolve({ requestId: crypto.randomUUID(), spaceId: space, providerId: 'slack' });
     const retire = (overrides = {}) => apps.retireSlackWorkspace({ requestId: crypto.randomUUID(), appClientId: 'app-1',
-      installationId: 'T1', at, limit: 50, ...overrides });
+      installationId: 'T1', at, eventAt: '2026-10-03T00:00:00.000Z', limit: 50, ...overrides });
     assert.equal(await retire({ installationId: 'T9' }), 0);
     assert.equal(await retire({ appClientId: 'other-app' }), 0);
+    // Slack's event predates this Connect (at is 2026-10-02): a delayed or replayed uninstall spares a newer grant.
+    assert.equal(await retire({ eventAt: '2026-10-01T00:00:00.000Z' }), 0);
+    assert.deepEqual(await readOAuth(apps), [{ connectionId: `${space}:slack`, spaceId: space }]);
     assert.equal(await retire(), 1);
     assert.equal(await retire(), 0, 'idempotent');
     assert.deepEqual(await readOAuth(apps), []);

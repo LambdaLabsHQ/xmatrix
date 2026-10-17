@@ -10,7 +10,7 @@ import type { ConnectorEvent, ConnectorProvider } from "./provider";
 import { oauthClient } from "./oauth";
 import { parseJsonObject } from "./event-format";
 import { linearEventVisible } from "./linear-visibility";
-import { slackInstallationRetired } from "./slack-events";
+import { slackRetirement } from "./slack-events";
 
 /*
  * Per-connection event ingress (docs/design/connector-platform.md §3.3):
@@ -68,14 +68,18 @@ export async function handleAppConnectorDelivery(input: { env: Env; request: Req
   const payload = parseJsonObject(rawBody)!;
   const installationId = provider.id === "slack" ? payload.team_id : payload.organizationId;
   const apps = dependencies.apps(env);
-  // Slack says the app left the workspace: its bindings retire, so the
-  // workspace can be connected again (by whichever Space connects it next).
-  if (provider.id === "slack" && slackInstallationRetired(payload)) {
+  // Slack says the app left the workspace: the bindings made before that
+  // retire, so the workspace can be connected again (by whichever Space
+  // connects it next). A Connect after Slack's event is not retired by it.
+  const retirement = provider.id === "slack" ? slackRetirement(payload) : undefined;
+  if (retirement) {
     if (typeof installationId !== "string" || !/^[A-Za-z0-9_-]{1,128}$/u.test(installationId)) {
       return Response.json({ error: "Missing provider workspace" }, { status: 400 });
     }
-    const retired = await apps.retireSlackWorkspace({ requestId: crypto.randomUUID(), appClientId: client.clientId,
-      installationId, at: new Date().toISOString(), limit: MAX_OAUTH_CONNECTIONS });
+    // Without Slack's own event time it cannot be ordered against a newer Connect: it retires nothing.
+    const retired = retirement.eventAt === undefined ? 0 : await apps.retireSlackWorkspace({ requestId: crypto.randomUUID(),
+      appClientId: client.clientId, installationId, at: new Date().toISOString(),
+      eventAt: new Date(retirement.eventAt).toISOString(), limit: MAX_OAUTH_CONNECTIONS });
     return Response.json({ ok: true, events: 0, delivered: 0, retired });
   }
   if (result.events.length === 0) return Response.json({ ok: true, events: 0, delivered: 0 });
@@ -91,11 +95,23 @@ export async function handleAppConnectorDelivery(input: { env: Env; request: Req
   for (const connection of connections) {
     for (const event of result.events) {
       // One Linear delivery serves every Space that connected the organization;
-      // each takes only what its own grant reads (private teams stay private).
-      if (provider.id === "linear" && !await visible(env, connection.spaceId, event)) continue;
-      delivered += await deliverEvent(env, apps, dependencies.append, provider.id, connection.connectionId, event, binding);
+      // each takes only what its own grant reads (private teams stay private),
+      // and only while that grant is current: a Connect since the read is a
+      // different grant, so routes, the final append and Automations are
+      // fenced to the credential version that read it.
+      let fence: typeof binding & { credentialVersion?: number } = binding;
+      if (provider.id === "linear") {
+        const credentialVersion = await visible(env, connection.spaceId, event);
+        if (credentialVersion === undefined) continue;
+        fence = { ...binding, credentialVersion };
+      }
+      const current = async () => (await query()).some(candidate => candidate.connectionId === connection.connectionId &&
+        (fence.credentialVersion === undefined || candidate.credentialVersion === fence.credentialVersion));
+      const append = fence.credentialVersion === undefined ? dependencies.append
+        : currentConnectorAppend(dependencies.append, current);
+      delivered += await deliverEvent(env, apps, append, provider.id, connection.connectionId, event, fence);
       // Reauthorization can change the workspace between the first lookup and dispatch.
-      if (dependencies.automations && (await query()).some(current => current.connectionId === connection.connectionId)) {
+      if (dependencies.automations && await current()) {
         await dependencies.automations(env, { spaceId: connection.spaceId, provider: provider.id, event })
           .catch(() => console.error("Connector Automation triggers failed", provider.id));
       }
