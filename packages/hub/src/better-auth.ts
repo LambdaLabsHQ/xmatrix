@@ -1,4 +1,5 @@
 import { betterAuth, type BetterAuthOptions } from "better-auth";
+import { decodeJwt } from "jose";
 import { APIError } from "better-auth/api";
 import { bearer, emailOTP, jwt } from "better-auth/plugins";
 
@@ -203,6 +204,9 @@ function createAuthWithDatabase(
     socialProviders.google = {
       clientId: env.GOOGLE_CLIENT_ID,
       clientSecret: env.GOOGLE_CLIENT_SECRET,
+      // Always ask which account, so a browser signed in to one Google
+      // account can still sign in to xMatrix with another.
+      prompt: "select_account",
     };
   }
   // The GitHub App's OAuth identity supports sign-in and explicit profile
@@ -211,6 +215,7 @@ function createAuthWithDatabase(
     socialProviders.github = {
       clientId: env.GITHUB_APP_CLIENT_ID,
       clientSecret: env.GITHUB_APP_CLIENT_SECRET,
+      prompt: "select_account",
     };
   }
 
@@ -584,6 +589,54 @@ async function createPostgresSessionForUser(env: Env, user: AuthUser): Promise<A
   });
 
   return completeSessionExchange(env, sessionToken, sessionUser);
+}
+
+/**
+ * Ends the session a refresh token names, so neither it nor an access token
+ * minted from it is accepted again. Ending a session that is already gone is
+ * not an error: signing out twice signs out once.
+ */
+export async function revokeBetterAuthSession(env: Env, sessionToken: string): Promise<void> {
+  if (authAuthority(env) === "postgres") {
+    await authPostgresTransaction(env, "auth.session_revoke", async (transaction) => {
+      await transaction.query({
+        name: "auth_session_revoke_v1",
+        text: "DELETE FROM control.auth_sessions WHERE token = $1",
+        values: [sessionToken], maxRows: 0,
+      });
+    });
+    return;
+  }
+  await requireAuthD1(env).prepare('DELETE FROM "session" WHERE "token" = ?').bind(sessionToken).run();
+}
+
+/**
+ * Whether the session an already-verified access token was minted from still
+ * exists. Access tokens are checked by signature alone for their hour, so a
+ * route that turns one into a new session asks this first: a signed-out
+ * session's leftover token must not become a fresh one. A token minted from
+ * no session (an Agent Run's, a test's) has nothing to check.
+ */
+export async function accessTokenSessionAlive(env: Env, verifiedToken: string): Promise<boolean> {
+  let sessionId: unknown;
+  try {
+    sessionId = decodeJwt(verifiedToken).auth_session_id;
+  } catch {
+    return true;
+  }
+  if (typeof sessionId !== "string" || !sessionId) return true;
+  if (authAuthority(env) === "postgres") {
+    const rows = await authPostgresTransaction(env, "auth.session_alive", async (transaction) =>
+      transaction.query<{ id: string }>({
+        name: "auth_session_alive_v1",
+        text: "SELECT id FROM control.auth_sessions WHERE id = $1 AND expires_at > now() LIMIT 1",
+        values: [sessionId], maxRows: 1,
+      }));
+    return rows.length > 0;
+  }
+  const row = await requireAuthD1(env).prepare('SELECT "id" FROM "session" WHERE "id" = ? AND "expiresAt" > ?')
+    .bind(sessionId, new Date().toISOString()).first();
+  return Boolean(row);
 }
 
 async function createBetterAuthJwtForSession(env: Env, sessionToken: string): Promise<string> {

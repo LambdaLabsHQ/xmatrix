@@ -443,6 +443,31 @@ pub async fn exchange_instance_session(hub_url: &str, token: &str) -> Result<Aut
     .map_err(|e| CliError::Auth(format!("Session exchange failed: {e}")))
 }
 
+/// Ends a saved session at the Hub before it is forgotten locally, so the
+/// token it held stops working. Best effort: an unreachable Hub never keeps
+/// anyone signed in on this machine.
+pub async fn end_hub_session(session: &CliSession) {
+    let Some(refresh_token) = session
+        .refresh_token
+        .as_deref()
+        .filter(|token| !token.is_empty())
+    else {
+        return;
+    };
+    let url = with_route(&session.hub_url, HubRoutes::SIGN_OUT);
+    let request = crate::http::request_json::<serde_json::Value>(
+        &url,
+        "POST",
+        None,
+        Some(serde_json::json!({ "refreshToken": refresh_token })),
+    );
+    match tokio::time::timeout(Duration::from_secs(10), request).await {
+        Ok(Ok(_)) => {}
+        Ok(Err(err)) => eprintln!("Could not end the session at the Hub: {err}"),
+        Err(_) => eprintln!("Could not end the session at the Hub: timed out"),
+    }
+}
+
 pub async fn refresh_cli_session(session: &CliSession) -> Result<CliSession> {
     let _lock = acquire_session_refresh_lock().await?;
     let session = newest_saved_session_for_refresh(session).await;

@@ -14,6 +14,7 @@ impl HubRoutes {
     pub const DEVICE_TOKEN: &str = "/api/auth/cli/device/token";
     pub const REFRESH: &str = "/api/auth/refresh";
     pub const EXCHANGE_SESSION: &str = "/api/auth/cli/exchange-session";
+    pub const SIGN_OUT: &str = "/api/auth/cli/sign-out";
     pub const ME: &str = "/api/auth/me";
     pub const AGENT_INSTANCES: &str = "/api/agent-instances";
     pub const MACHINE_DAEMONS: &str = "/api/machine-daemons";

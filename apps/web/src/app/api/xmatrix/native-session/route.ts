@@ -9,6 +9,7 @@ import {
   isCompleteAuthResponse,
   isTransientHubStatus,
   refreshNativeSession,
+  revokeNativeSession,
   setNativeSessionCookies,
 } from "@/lib/native-session";
 
@@ -54,7 +55,10 @@ export async function POST(request: Request) {
   return response;
 }
 
-export async function DELETE() {
+export async function DELETE(request: Request) {
+  // Signing out ends the session at the Hub too, so the token this app held stops working.
+  const refreshToken = parseCookieHeader(request.headers.get("cookie")).get(NATIVE_REFRESH_COOKIE);
+  if (refreshToken) await revokeNativeSession(refreshToken);
   const response = NextResponse.json({ ok: true });
   clearNativeSessionCookies(response.cookies);
   return response;
