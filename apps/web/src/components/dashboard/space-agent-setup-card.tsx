@@ -3,12 +3,10 @@
 import { AnimatedIcon } from "@/components/ui/animated-icon";
 import { useState } from "react";
 import { actionClass } from "@/components/ui/action-tone";
-import { WEB_PROXY_ROUTES, agentPresetAvatarUrl } from "@xmatrix/protocol";
-import { Check, CloudOff, Copy, Download, HardDrive, Loader2, Mail, PlayCircle, RefreshCw, Terminal } from "lucide-react";
+import { agentPresetAvatarUrl } from "@xmatrix/protocol";
+import { Check, CloudOff, Copy, Download, HardDrive, Loader2, PlayCircle, RefreshCw, Terminal } from "lucide-react";
 import { noticeClass } from "@/components/ui/status-tone";
-import { xmatrixApiRequest } from "@/lib/query/api-client";
 import { quickStartRunbookUrl, quickStartSeedPrompt } from "@/lib/quick-start";
-import { userErrorMessage } from "@/lib/user-facing-error";
 import { useCopyToClipboard } from "@/lib/use-copy-to-clipboard";
 import { cn } from "@/lib/utils";
 import { SetupCardHeader, SetupCardShell } from "./space-setup-card-chrome";
@@ -70,7 +68,7 @@ export function SpaceAgentSetupCard({
   fleet?: ReturnType<typeof useInstalledHarnesses>;
   onBringAll: () => void;
   onManageMachines: () => void;
-  /** On a phone, where no agent runs and no command can be pasted. */
+  /** On a phone: the command is run on a computer, and only approved here. */
   phone?: boolean;
 }) {
   if (fleet && ((fleet.ready && fleet.candidates.length > 0) || fleet.enablingAll)) return <SetupCardShell>
@@ -88,9 +86,7 @@ export function SpaceAgentSetupCard({
   return (
     <SetupCardShell>
         {state.kind === "unreachable" && <UnreachablePanel onRetry={onRetryAgents} />}
-        {state.kind === "no-local-machine" && (phone
-          ? <ContinueOnComputerPanel token={token} />
-          : <BringAgentsInPanel spaceId={spaceId} token={token} userId={userId} />)}
+        {state.kind === "no-local-machine" && <BringAgentsInPanel spaceId={spaceId} token={token} userId={userId} phone={phone} />}
         {state.kind === "discovering" && (
           <SetupCardHeader
             icon={Loader2}
@@ -255,12 +251,14 @@ function UnreachablePanel({ onRetry }: { onRetry: () => void }) {
   );
 }
 
-/* A browser on a computer: agents are not in this tab, so the one thing to
-   learn here is where they are. Whoever uses an agent CLI already has a
-   terminal open, so one pasted command approved on this page comes first;
-   the desktop app, which finds installed agents without one, is the other way. */
-function BringAgentsInPanel({ spaceId, token, userId }: {
-  spaceId: string | null; token: string | undefined; userId: string | undefined;
+/* Web and phone: agents are not in this tab, so the one thing to learn here
+   is where they are and how to bring them in. Whoever uses an agent CLI
+   already has a terminal open, so one pasted command comes first; the
+   terminal it runs in is approved on this page, which may be a phone in the
+   person's hand. The desktop app, which finds installed agents without a
+   terminal, is the other way. */
+function BringAgentsInPanel({ spaceId, token, userId, phone }: {
+  spaceId: string | null; token: string | undefined; userId: string | undefined; phone: boolean;
 }) {
   return (
     <>
@@ -271,8 +269,10 @@ function BringAgentsInPanel({ spaceId, token, userId }: {
       />
       <SupportedAgents className="mt-4" />
       <ConnectMachine spaceId={spaceId} token={token} userId={userId} />
-      <DesktopAppAlternative />
-      <RemoteMachineHint />
+      {phone
+        ? <p className="mt-4 text-sm text-muted-foreground">Prefer an app? Download xMatrix on that computer from xmatrix.sh/download. It finds the agents installed there without a terminal.</p>
+        : <DesktopAppAlternative />}
+      {!phone && <RemoteMachineHint />}
     </>
   );
 }
@@ -286,50 +286,6 @@ export function DesktopAppAlternative({ centered = false }: { centered?: boolean
         <Download className="size-4" />
         Download xMatrix
       </a>
-    </div>
-  );
-}
-
-/* A phone runs no agent and pastes no command, so the next step is named for
-   the computer the agents use, and the link is mailed there. Once that
-   computer reports its agents, the installed-agent switches show here too. */
-function ContinueOnComputerPanel({ token }: { token: string | undefined }) {
-  const [sentTo, setSentTo] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  const send = async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      const sent = await xmatrixApiRequest<{ sentTo: string }>({
-        url: WEB_PROXY_ROUTES.setup_link_email, token, method: "POST", body: {},
-      });
-      setSentTo(sent.sentTo);
-    } catch (reason) {
-      setError(userErrorMessage(reason, "Couldn't send the link"));
-    } finally {
-      setBusy(false);
-    }
-  };
-  return (
-    <div data-testid="continue-on-computer">
-      <SetupCardHeader
-        icon={HardDrive}
-        title="Bring your agents into xMatrix"
-        body="Your agents run on your computer. Open xmatrix.sh there and sign in: one command brings them in, and then you can talk to them from this phone."
-      />
-      <SupportedAgents className="mt-4" />
-      {sentTo
-        ? <p role="status" className="mt-4 flex items-center gap-2 text-sm">
-          <Check className="size-4 shrink-0 text-primary" />
-          <span>Sent to <strong>{sentTo}</strong>. Open it on your computer.</span>
-        </p>
-        : <button type="button" disabled={busy || !token} onClick={() => void send()}
-          className={actionClass({ variant: "primary", size: "md" }, "mt-4")}>
-          {busy ? <AnimatedIcon icon={Loader2} className="size-4 animate-spin" /> : <Mail className="size-4" />}
-          Email me the link
-        </button>}
-      {error && <p role="alert" className="mt-2 text-sm text-destructive">{error}</p>}
     </div>
   );
 }
