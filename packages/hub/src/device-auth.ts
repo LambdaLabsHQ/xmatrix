@@ -11,7 +11,7 @@ import {
   verifyAuthToken,
 } from "./auth";
 import { ATTEMPT_WINDOW_MS, chargeAttempt, MAX_ATTEMPT_WINDOW_MS, type AttemptLimit } from "./auth-attempt-limit";
-import { logAuthMetric } from "./auth-observability";
+import { countAuthMetricsIn, logAuthMetric } from "./auth-observability";
 import { postgresControlErrorResponse } from "./postgres-authority-http";
 import { transientError } from "./error-contract";
 import { SESSION_EXCHANGE_USER_MISMATCH } from "./auth-errors";
@@ -128,6 +128,11 @@ interface StartDeviceAuthResponse {
 export class DeviceAuthBroker extends DurableObject<Env> {
   private readonly redemptionCoordinator = new DeviceAuthRedemptionCoordinator();
   private attemptPruneCursor: string | undefined;
+
+  constructor(ctx: DurableObjectState, env: Env) {
+    super(ctx, env);
+    countAuthMetricsIn(env.DIAGNOSTICS_AE);
+  }
 
   async fetch(request: Request): Promise<Response> {
     await this.pruneExpiredSessions();

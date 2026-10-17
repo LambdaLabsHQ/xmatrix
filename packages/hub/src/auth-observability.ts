@@ -8,6 +8,19 @@ type AuthMetricInput = {
   userId?: string;
 };
 
+/**
+ * Where sign-in metrics are counted. Workers logs keep only some of these
+ * lines, too few to read a sign-in funnel from, so each one is also a point in
+ * the diagnostics dataset: index1 the person's short hash (or `auth`), blob1
+ * `auth`, blob2 the provider, blob3 the route group, blob4 the outcome, blob5
+ * the status. Set once per isolate from its bindings.
+ */
+let authMetricDataset: AnalyticsEngineDataset | undefined;
+
+export function countAuthMetricsIn(dataset: AnalyticsEngineDataset | undefined): void {
+  authMetricDataset = dataset;
+}
+
 export async function logAuthMetric(input: AuthMetricInput): Promise<void> {
   const userIdHash = input.userId ? await hashForLog(input.userId) : undefined;
   console.log(
@@ -21,6 +34,15 @@ export async function logAuthMetric(input: AuthMetricInput): Promise<void> {
       userIdHash,
     })
   );
+  try {
+    authMetricDataset?.writeDataPoint({
+      indexes: [userIdHash ?? "auth"],
+      blobs: ["auth", input.authProvider ?? "", input.routeGroup, input.outcome ?? "", String(input.status)],
+      doubles: [1],
+    });
+  } catch {
+    // Counting never fails the sign-in it counts.
+  }
 }
 
 function minuteBucket(): string {

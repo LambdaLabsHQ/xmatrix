@@ -76,6 +76,7 @@ import { registerIndexRoutesSpaceJoinRequests } from "./index-routes-space-join-
 import { registerIndexRoutesChannelAgent } from "./index-routes-channel-agent";
 import { registerIndexRoutesHumanProfile } from "./index-routes-human-profile";
 import { registerAppSignInRoutes } from "./index-routes-app-sign-in";
+import { countAuthMetricsIn } from "./auth-observability";
 import { registerAuthSessionRoutes } from "./index-routes-auth-sessions";
 import { registerIndexRoutesHumanAvatar } from "./index-routes-human-avatar";
 import { registerIndexRoutesMachineDaemonAdmission } from "./index-routes-machine-daemon-admission";
@@ -139,6 +140,7 @@ registerAccountDeletionRoutes(app);
 
 export default {
   fetch: async (request: Request, env: Env, executionCtx: ExecutionContext) => {
+    countAuthMetricsIn(env.DIAGNOSTICS_AE);
     try {
       return await (redirectInsecureRequest(request) ?? app.fetch(request, env, executionCtx));
     } finally {

@@ -46,6 +46,12 @@ second factor. The app shells don't offer passkeys to the page yet. A desktop
 app can also sign in by a signed-in phone scanning a device-sign-in code
 (`scanned=1`, so the approving page doesn't try to open an app on the phone).
 
+Every sign-in metric (`logAuthMetric`) is also a point in the diagnostics
+Analytics Engine dataset (`xmatrix_diagnostics`): index1 the person's short
+hash or `auth`, blob1 `auth`, blob2 the provider, blob3 the route group, blob4
+the outcome, blob5 the status. Workers logs keep only some of these lines, too
+few to read a sign-in funnel from.
+
 ### Apps signing in in place
 
 The desktop and phone apps sign in where they are, without a device code: email
