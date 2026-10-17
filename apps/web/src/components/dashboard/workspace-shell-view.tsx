@@ -467,7 +467,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
      xMatrix tells them how to bring their agents in (index-routes-welcome.ts).
      The Hub decides whether this Space gets one; while it answers, the empty
      Space shows nothing rather than a screen about to be replaced. */
-  const [welcomeRequest, setWelcomeRequest] = useState<{ spaceId: string; pending: boolean } | null>(null);
+  const [welcomeRequest, setWelcomeRequest] = useState<{ spaceId: string; pending: boolean; channelId?: string } | null>(null);
   const welcomeSpaceId = token && channelsLoaded && agentsLoaded && spaceChannelCount === 0 ? currentSpaceId : null;
   useEffect(() => {
     if (!welcomeSpaceId || !token || welcomeRequest?.spaceId === welcomeSpaceId) return;
@@ -475,15 +475,28 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     void xmatrixApiRequest<{ channelId: string | null }>({
       url: WEB_PROXY_ROUTES.space_welcome(welcomeSpaceId), token, method: "POST",
     }).then(({ channelId }) => {
-      if (!channelId) return;
+      if (!channelId) return null;
       void currentSpaceCatalog.load(CONVERSATION_QUERY, { force: true });
-      // A phone lists it; a wider screen opens it.
-      if (!isMobileViewport) requestChannelNavigation(channelId);
+      // A phone lists it; a wider screen opens it. The desktop app keeps its
+      // own first screen, which finds this computer's agents and can start
+      // the background service, and opens the conversation once one is in.
+      if (!isMobileViewport && !desktopBridge?.discoverAgentPresets) requestChannelNavigation(channelId);
+      return channelId;
     }).catch((error: unknown) => {
       console.warn("[xmatrix] welcome conversation unavailable", error);
-    }).finally(() => setWelcomeRequest({ spaceId: welcomeSpaceId, pending: false }));
-  }, [welcomeSpaceId, token, welcomeRequest?.spaceId, currentSpaceCatalog, isMobileViewport, requestChannelNavigation]);
+      return null;
+    }).then((channelId) => setWelcomeRequest({ spaceId: welcomeSpaceId, pending: false, ...(channelId ? { channelId } : {}) }));
+  }, [welcomeSpaceId, token, welcomeRequest?.spaceId, currentSpaceCatalog, isMobileViewport, desktopBridge,
+    requestChannelNavigation]);
   const welcomePending = Boolean(welcomeRequest?.pending && welcomeRequest.spaceId === currentSpaceId);
+  const welcomeChannelId = welcomeRequest?.spaceId === currentSpaceId ? welcomeRequest.channelId : undefined;
+  const desktopWelcomeOpened = useRef<string | null>(null);
+  useEffect(() => {
+    if (!welcomeChannelId || !desktopBridge?.discoverAgentPresets || spaceAgents.length === 0) return;
+    if (selectedChannel || desktopWelcomeOpened.current === welcomeChannelId) return;
+    desktopWelcomeOpened.current = welcomeChannelId;
+    requestChannelNavigation(welcomeChannelId);
+  }, [welcomeChannelId, desktopBridge, spaceAgents.length, selectedChannel, requestChannelNavigation]);
   // Only on the empty first screen: an open conversation is never covered.
   const showSpaceAgentSetup = (spaceAgentSetup.kind !== "hidden" || keepHarnessSetup) && !selectedChannel && !welcomePending;
   /* A failed read is not onboarding: it reads on the tool pages' paper, since
