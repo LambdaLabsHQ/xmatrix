@@ -2,6 +2,7 @@
 
 import { AnimatedIcon } from "@/components/ui/animated-icon";
 import { PrivateSignInEmail } from "./private-sign-in-email";
+import { SignedInSessions } from "./signed-in-sessions";
 
 import { actionClass } from "@/components/ui/action-tone";
 import { ChannelTransferQueue } from "./channel-transfer-queue";
@@ -821,12 +822,15 @@ export function SettingsView({
           </p>
         </div>
       ) },
-    { key: "session", label: "Session", icon: LogOut, summary: "Sign out of this browser", content: (
+    { key: "session", label: "Session", icon: LogOut, summary: "Where you're signed in", content: (
         <div className="app-settings-section min-w-0">
+          <ToolDetailSection title="Signed in">
+            <SignedInSessions token={token} />
+          </ToolDetailSection>
           <ToolDetailSection title="Session">
             <ToolSettingRow
               title="Sign out"
-              description="Sign out of this browser session. CLI sessions remain separate."
+              description="Sign out of this browser. Your computers and agents stay signed in."
               control={
                 <button onClick={onLogout} className={actionClass({ variant: "danger" })}>
                   <LogOut className="size-4" />

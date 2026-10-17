@@ -29,6 +29,12 @@ fresh command id, and the snapshot head refuses an older registry sequence,
 so neither replay answers anything after the sender's own prompt retries.
 Rows written before the change expire on their original 30-day schedule.
 
+Expired sign-in sessions (`control.auth_sessions` past `expires_at`) are
+removed in the same bounded batches. Every sign-in check already refuses them;
+on 2026-10-17 there were about 50,000 such rows that nothing had ever cleaned.
+Live sessions are never touched by maintenance; a person ends their own from
+Settings, and signing out ends the one they used.
+
 Financial receipts (`data.space_credit_purchases` and
 `data.paid_call_receipts`) are not TTL replays. Preserve them for the lifetime
 of their Space; they move with the Space and are removed only by its existing

@@ -8,6 +8,7 @@ import { useCallback, useState } from "react";
 
 import { ConnectedAiApps } from "@/components/dashboard/connected-ai-apps";
 import { TwoFactorSettings } from "@/components/dashboard/two-factor-settings";
+import { PasskeySettings } from "@/components/dashboard/passkey-settings";
 import { GitHubAccountLink } from "@/components/dashboard/github-account-link";
 import { HumanProfileEditor, humanProfileRefusal } from "@/components/dashboard/human-profile-editor";
 import {
@@ -290,6 +291,7 @@ export function HumanProfileView({
                   />
                 </li>
               ) : null}
+              <li className="py-3"><PasskeySettings /></li>
               <li className="py-3"><TwoFactorSettings /></li>
               <li className="py-3"><GitHubAccountLink /></li>
               <li className="py-3"><ConnectedAiApps /></li>

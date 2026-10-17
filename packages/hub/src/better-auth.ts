@@ -2,11 +2,12 @@ import { betterAuth, type BetterAuthOptions } from "better-auth";
 import { decodeJwt } from "jose";
 import { APIError } from "better-auth/api";
 import { bearer, emailOTP, jwt } from "better-auth/plugins";
+import { passkey } from "@better-auth/passkey";
 
 import {
 } from "@xmatrix/protocol";
 
-import { AUTH_POSTGRES_MODELS } from "./auth-postgres-models";
+import { AUTH_POSTGRES_MODELS, AUTH_POSTGRES_PASSKEY_SCHEMA } from "./auth-postgres-models";
 import {
   authAuthority,
   authPostgresTransaction,
@@ -349,6 +350,14 @@ function createAuthWithDatabase(
       jwtPlugin,
       bearer(),
       ...twoFactorPlugins(env, postgres),
+      // Passkeys belong to the app's own domain, so one made on xmatrix.sh
+      // signs in on any of its pages; the Hub only checks them.
+      passkey({
+        rpID: new URL(appOrigin(env)).hostname,
+        rpName: "xMatrix",
+        origin: appOrigin(env),
+        ...(postgres ? { schema: AUTH_POSTGRES_PASSKEY_SCHEMA } : {}),
+      }),
       // Outside AI apps sign in through the PostgreSQL authority only.
       ...(postgres ? mcpOAuthPlugins(env) : []),
     ],
@@ -509,12 +518,18 @@ async function completeSessionExchange(
   };
 }
 
+/**
+ * A session the Hub issues itself, for a terminal, daemon or app that proved
+ * who it is. `label` names what holds it in the person's session list, where
+ * a browser's own sessions show their user agent.
+ */
 export async function createBetterAuthSessionForUser(
   env: Env,
-  user: AuthUser
+  user: AuthUser,
+  label?: string,
 ): Promise<AuthSession> {
   if (authAuthority(env) === "postgres") {
-    return createPostgresSessionForUser(env, user);
+    return createPostgresSessionForUser(env, user, label);
   }
   const authDatabase = requireAuthD1(env);
 
@@ -555,7 +570,7 @@ export async function createBetterAuthSessionForUser(
   return completeSessionExchange(env, sessionToken, sessionUser);
 }
 
-async function createPostgresSessionForUser(env: Env, user: AuthUser): Promise<AuthSession> {
+async function createPostgresSessionForUser(env: Env, user: AuthUser, label?: string): Promise<AuthSession> {
   const { now, expiresAt, sessionToken, sessionId, name } = sessionExchangeFacts(user);
   const existingUser = await authPostgresTransaction(
     env,
@@ -592,11 +607,11 @@ async function createPostgresSessionForUser(env: Env, user: AuthUser): Promise<A
       values: [sessionUser.id, now], maxRows: 0,
     });
     await transaction.query({
-      name: "auth_session_exchange_insert_session_v1",
+      name: "auth_session_exchange_insert_session_v2",
       text: `INSERT INTO control.auth_sessions
-        (id, expires_at, token, created_at, updated_at, user_id)
-        VALUES ($1, $2, $3, $4, $4, $5)`,
-      values: [sessionId, expiresAt, sessionToken, now, sessionUser.id], maxRows: 0,
+        (id, expires_at, token, created_at, updated_at, user_id, user_agent)
+        VALUES ($1, $2, $3, $4, $4, $5, $6)`,
+      values: [sessionId, expiresAt, sessionToken, now, sessionUser.id, label?.slice(0, 256) ?? null], maxRows: 0,
     });
   });
 

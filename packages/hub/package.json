@@ -21,6 +21,7 @@
   "dependencies": {
     "@apple/app-store-server-library": "3.1.0",
     "@better-auth/oauth-provider": "1.6.33",
+    "@better-auth/passkey": "1.6.33",
     "@xmatrix/billing": "workspace:*",
     "@xmatrix/db": "workspace:*",
     "@xmatrix/decision-model": "workspace:*",

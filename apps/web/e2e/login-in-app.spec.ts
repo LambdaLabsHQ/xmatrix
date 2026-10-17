@@ -8,14 +8,14 @@ type AuthorizeRequest = { url: string; redirectParam: string };
  * A phone app that can open the provider's page in place: the shell's sheet is
  * stubbed to answer the address the Hub would send it back to.
  */
-async function openAsPhoneApp(page: Page, options: { inPlace: boolean; answerState?: "same" | "other" }) {
-  await page.addInitScript(({ inPlace, answerState }) => {
+async function openAsPhoneApp(page: Page, options: { inPlace: boolean; answerState?: "same" | "other"; client?: "ios" | "desktop" }) {
+  await page.addInitScript(({ inPlace, answerState, client = "ios" }) => {
     const shell = window as unknown as Record<string, unknown>;
     shell.__xmatrixDisableMockAuth = true;
     shell.__authorizeRequests = [];
     shell.xmatrixDesktop = {
-      client: "ios", platform: "ios",
-      getContext: async () => ({ client: "ios", platform: "ios", version: "1.0.600" }),
+      client, platform: client === "ios" ? "ios" : "darwin",
+      getContext: async () => ({ client, platform: client === "ios" ? "ios" : "darwin", version: "1.0.600" }),
       setBadge: async () => undefined, setTitle: async () => undefined,
       notify: async () => true, openExternal: async () => undefined,
       checkCliInstalled: async () => ({ installed: false }),
@@ -87,4 +87,22 @@ test("an app without in-place sign-in keeps signing in through the browser", asy
   await page.goto("/login");
   await expect(page.getByRole("button", { name: "Sign in with browser" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Continue with Google" })).toHaveCount(0);
+});
+
+test("a desktop app signs in by a signed-in phone scanning its code, and remembers how this app last signed in", async ({ page }) => {
+  await page.addInitScript(() => window.localStorage.setItem("xmatrix.lastSignInMethod", "github"));
+  await openAsPhoneApp(page, { inPlace: true, answerState: "same", client: "desktop" });
+  await page.route("**/api/xmatrix/cli/device/start", route => route.fulfill({ json: {
+    deviceCode: "device-code-phone", userCode: "PHON-E123", expiresIn: 600, interval: 5,
+    verificationUri: "https://xmatrix.sh/login",
+    verificationUriComplete: "https://xmatrix.sh/login?device_code=device-code-phone&user_code=PHON-E123",
+  } }));
+  await page.route("**/api/xmatrix/cli/device/token", route => route.fulfill({ json: { status: "pending", interval: 5 } }));
+  await page.goto("/login");
+  await expect(page.getByRole("button", { name: /Continue with GitHub\s*Last used/u })).toBeVisible();
+
+  await page.getByRole("button", { name: "Sign in with your phone" }).click();
+  await expect(page.getByRole("img", { name: "Sign-in code to scan with your phone" })).toBeVisible();
+  await page.getByRole("button", { name: "Use another way" }).click();
+  await expect(page.getByRole("button", { name: "Continue with Google" })).toBeVisible();
 });

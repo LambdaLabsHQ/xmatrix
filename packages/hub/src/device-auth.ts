@@ -16,6 +16,7 @@ import { postgresControlErrorResponse } from "./postgres-authority-http";
 import { transientError } from "./error-contract";
 import { SESSION_EXCHANGE_USER_MISMATCH } from "./auth-errors";
 import { accessTokenSessionAlive, createBetterAuthSessionForUser } from "./better-auth";
+import { SESSION_LABELS, sessionLabel } from "./auth-sessions";
 import {
   APP_SIGN_IN_CODE_TTL_MS,
   APP_SIGN_IN_FLOW_TTL_MS,
@@ -632,7 +633,7 @@ export class DeviceAuthBroker extends DurableObject<Env> {
       deviceCode: `app:${flow.flowId}`,
       session: flow,
       issue: async () => {
-        const issued = await createBetterAuthSessionForUser(this.env, user);
+        const issued = await createBetterAuthSessionForUser(this.env, user, SESSION_LABELS.app);
         if (issued.user.id !== user.id) throw new Error(SESSION_EXCHANGE_USER_MISMATCH);
         return issued;
       },
@@ -863,7 +864,8 @@ export class DeviceAuthBroker extends DurableObject<Env> {
       return { token: session.token, authProvider: "mock", user: session.user };
     }
 
-    const issued = await createBetterAuthSessionForUser(this.env, session.user);
+    const issued = await createBetterAuthSessionForUser(this.env, session.user,
+      sessionLabel(SESSION_LABELS.device, [session.hostname, session.platform].filter(Boolean).join(" ")));
     if (issued.user.id !== session.user.id) {
       throw new Error(SESSION_EXCHANGE_USER_MISMATCH);
     }

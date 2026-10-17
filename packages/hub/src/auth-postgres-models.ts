@@ -55,3 +55,18 @@ export const AUTH_POSTGRES_MODELS = Object.freeze({
     }),
   }),
 });
+
+/** Better Auth's passkey model (the passkey plugin), as migration 0204 stores it. */
+export const AUTH_POSTGRES_PASSKEY_SCHEMA = {
+  passkey: {
+    modelName: "control.auth_passkeys",
+    fields: {
+      publicKey: "public_key",
+      userId: "user_id",
+      credentialID: "credential_id",
+      deviceType: "device_type",
+      backedUp: "backed_up",
+      createdAt: "created_at",
+    },
+  },
+};

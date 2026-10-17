@@ -29,6 +29,23 @@ The older loopback CLI sign-in also waits for an explicit approval. Login codes
 are charged per address across both send routes (5 a minute, 20 an hour, 60 a
 day); checking a code is limited per client.
 
+Settings lists where a person is signed in (`GET /api/me/sessions`, the 50 most
+recent, current first) and ends any one of their own sessions, the other
+browsers and apps, or everything else including terminals and daemons. Sessions
+the Hub issues itself carry a label (`xMatrix CLI`, `xMatrix device sign-in`,
+`xMatrix app`) in place of a user agent; older unlabelled ones belong to
+terminals and daemons. A daemon ends the session it stops using when it reloads
+or disconnects, instead of leaving it for the 30-day expiry.
+
+Passkeys (`@better-auth/passkey`, table `control.auth_passkeys`, migration 0204)
+belong to the app's own domain (`rpID` is `APP_URL`'s host, and only that origin
+is accepted), so one made on xmatrix.sh signs in on any of its pages while the
+Hub only verifies them. A browser offers saved passkeys in the email field; a
+passkey sign-in is itself possession plus a device check and is not asked for a
+second factor. The app shells don't offer passkeys to the page yet. A desktop
+app can also sign in by a signed-in phone scanning a device-sign-in code
+(`scanned=1`, so the approving page doesn't try to open an app on the phone).
+
 ### Apps signing in in place
 
 The desktop and phone apps sign in where they are, without a device code: email

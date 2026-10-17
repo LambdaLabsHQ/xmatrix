@@ -96,7 +96,7 @@ test("maintenance deletes expired PostgreSQL sequence reservations with the same
   ]));
   assert.equal(result.deletedExpiredIdempotencyRows, 0);
   assert.equal(result.deletedExpiredSequenceReservationRows, 1_250);
-  assert.deepEqual(result.batchesByRelation, { idempotency: 1, sequenceReservation: 2, messageExecution: 1, wecomInstallAttempt: 1, dingtalkCompanyAttempt: 1, retainedOutbox: 1, scopedCommandReplay: 1 });
+  assert.deepEqual(result.batchesByRelation, { idempotency: 1, sequenceReservation: 2, messageExecution: 1, wecomInstallAttempt: 1, dingtalkCompanyAttempt: 1, retainedOutbox: 1, authSession: 1, scopedCommandReplay: 1 });
   const deletes = fake.calls.filter(
     ({ text }) => text.includes("DELETE FROM data.message_sequence_reservations"),
   );
@@ -144,6 +144,14 @@ test("maintenance purges expired private WeCom installation attempts within its 
   assert.equal(result.deletedExpiredWeComInstallAttempts, 3);
   const deletes = fake.calls.filter(value => value.text.includes("DELETE FROM data.app_wecom_install_attempts"));
   assert.deepEqual(deletes.map(value => value.values[0]), [2, 1]); assertBoundedExpiryDeletes(deletes);
+});
+
+test("maintenance purges only expired sign-in sessions, in bounded batches", async () => {
+  const fake = clientWithExpired("control.auth_sessions", 1_500);
+  const result = await runLifecycleMaintenance(fake, parseLifecycleOptions([]));
+  assert.equal(result.deletedExpiredAuthSessions, 1_500);
+  const deletes = fake.calls.filter(value => value.text.includes("DELETE FROM control.auth_sessions"));
+  assert.deepEqual(deletes.map(value => value.values[0]), [1_000, 1_000]); assertBoundedExpiryDeletes(deletes);
 });
 
 test("maintenance expires scoped command replays last, in bounded batches", async () => {

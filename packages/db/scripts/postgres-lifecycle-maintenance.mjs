@@ -80,7 +80,7 @@ async function readSnapshot(client) {
       WHERE (namespace.nspname='data'
         AND relation.relname IN (
           'idempotency_keys','message_sequence_reservations','agent_message_executions','outbox','message_mutations'
-        )) OR (namespace.nspname='control' AND relation.relname='scoped_control_command_replays')
+        )) OR (namespace.nspname='control' AND relation.relname IN ('scoped_control_command_replays','auth_sessions'))
       ORDER BY relation.relname`);
   // One scan of the outbox serves both its per-status counts and its oldest row.
   const outbox = await snapshotQuery(client, "outbox by status",
@@ -117,6 +117,9 @@ async function readSnapshot(client) {
           ORDER BY expires_at,scope_kind,scope_id,command_id LIMIT $1
         ) bounded) AS scoped_command_replay_rows,
         (SELECT COUNT(*)::integer FROM (
+          SELECT 1 FROM control.auth_sessions WHERE expires_at<=now() ORDER BY expires_at,id LIMIT $1
+        ) bounded) AS auth_session_rows,
+        (SELECT COUNT(*)::integer FROM (
           SELECT 1 FROM data.outbox WHERE status='pending' AND attempts=0 AND lease_until IS NULL
             AND available_at<now()-interval '35 days' AND created_at<now()-interval '35 days'
             AND updated_at<now()-interval '35 days'
@@ -132,6 +135,7 @@ async function readSnapshot(client) {
     ),
     expiredMessageExecutionRowsCapped: Number(expired.rows[0]?.message_execution_rows ?? 0),
     expiredScopedCommandReplayRowsCapped: Number(expired.rows[0]?.scoped_command_replay_rows ?? 0),
+    expiredAuthSessionRowsCapped: Number(expired.rows[0]?.auth_session_rows ?? 0),
     retainedOutboxRowsCapped: Number(expired.rows[0]?.retained_outbox_rows ?? 0),
     expiredIdempotencyRowsCappedAt: MAX_MANUAL_ROWS + 1,
   };
@@ -176,6 +180,12 @@ async function deleteBatch(client, relation, limit) {
                 ORDER BY expires_at,state_digest LIMIT $1 FOR UPDATE SKIP LOCKED
               ) DELETE FROM data.app_dingtalk_company_attempts target USING expired
                 WHERE target.ctid=expired.ctid RETURNING 1`
+            : relation === "auth-session"
+              ? `WITH expired AS MATERIALIZED (
+                  SELECT ctid FROM control.auth_sessions WHERE expires_at<=now()
+                  ORDER BY expires_at,id LIMIT $1 FOR UPDATE SKIP LOCKED
+                ) DELETE FROM control.auth_sessions target USING expired
+                  WHERE target.ctid=expired.ctid RETURNING 1`
             : relation === "scoped-command-replay"
               ? `WITH expired AS MATERIALIZED (
                   -- now() is stable, so the expiry index bounds the scan instead of filtering
@@ -204,8 +214,8 @@ export async function runLifecycleMaintenance(client, options, dependencies = {}
   await client.query("SET lock_timeout = '2s'");
   const before = await snapshot(client);
   const startedAt = monotonicNow();
-  const deleted = { idempotency: 0, sequenceReservation: 0, messageExecution: 0, wecomInstallAttempt: 0, dingtalkCompanyAttempt: 0, retainedOutbox: 0, scopedCommandReplay: 0 };
-  const batches = { idempotency: 0, sequenceReservation: 0, messageExecution: 0, wecomInstallAttempt: 0, dingtalkCompanyAttempt: 0, retainedOutbox: 0, scopedCommandReplay: 0 };
+  const deleted = { idempotency: 0, sequenceReservation: 0, messageExecution: 0, wecomInstallAttempt: 0, dingtalkCompanyAttempt: 0, retainedOutbox: 0, authSession: 0, scopedCommandReplay: 0 };
+  const batches = { idempotency: 0, sequenceReservation: 0, messageExecution: 0, wecomInstallAttempt: 0, dingtalkCompanyAttempt: 0, retainedOutbox: 0, authSession: 0, scopedCommandReplay: 0 };
   if (!options.dryRun) {
     for (const target of [
       { relation: "idempotency", key: "idempotency" },
@@ -214,6 +224,8 @@ export async function runLifecycleMaintenance(client, options, dependencies = {}
       { relation: "wecom-install-attempt", key: "wecomInstallAttempt" },
       { relation: "dingtalk-company-attempt", key: "dingtalkCompanyAttempt" },
       { relation: "retained-outbox", key: "retainedOutbox" },
+      // An expired session is refused by every sign-in check; only its row remains.
+      { relation: "auth-session", key: "authSession" },
       // Every reader already ignores expired replays; this only frees their rows.
       // Last, because it is the largest and must not starve the others' budget.
       { relation: "scoped-command-replay", key: "scopedCommandReplay" },
@@ -240,6 +252,7 @@ export async function runLifecycleMaintenance(client, options, dependencies = {}
     deletedExpiredDingTalkCompanyAttempts: deleted.dingtalkCompanyAttempt,
     deletedExpiredScopedCommandReplays: deleted.scopedCommandReplay,
     deletedRetainedOutboxRows: deleted.retainedOutbox,
+    deletedExpiredAuthSessions: deleted.authSession,
     batches: Object.values(batches).reduce((sum, count) => sum + count, 0),
     batchesByRelation: batches,
     elapsedMs: Math.max(0, monotonicNow() - startedAt),

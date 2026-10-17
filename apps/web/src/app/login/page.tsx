@@ -1,7 +1,8 @@
 "use client";
 
 import { AnimatedIcon } from "@/components/ui/animated-icon";
-import { Suspense, useEffect, useRef, useState, type FormEvent } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { renderSVG } from "uqr";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
@@ -137,6 +138,7 @@ function LoginContent() {
     verifySecondFactor,
     signInWithSocial,
     signInWithApple,
+    signInWithPasskey,
     setSessionFromAuthResponse,
     logout,
     user,
@@ -155,7 +157,7 @@ function LoginContent() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState(false);
-  const [socialLoading, setSocialLoading] = useState<SocialSignInProvider | "apple" | null>(null);
+  const [socialLoading, setSocialLoading] = useState<SocialSignInProvider | "apple" | "passkey" | null>(null);
   /* The last code check got no answer: the code is unspent and can be sent again. */
   const [codeUnanswered, setCodeUnanswered] = useState(false);
   const [resendAt, setResendAt] = useState(0);
@@ -174,6 +176,11 @@ function LoginContent() {
   /* The older terminal sign-in hands a session to a local port; it too waits for an explicit click. */
   const [legacyApprovalConfirmed, setLegacyApprovalConfirmed] = useState(false);
   const [desktopBridge, setDesktopBridge] = useState<DesktopBridge | null>(null);
+  const [webAuthnAvailable, setWebAuthnAvailable] = useState(false);
+  /* The desktop app shows a code for a signed-in phone to scan and approve. */
+  const [phoneSignIn, setPhoneSignIn] = useState(false);
+  /* How this browser last signed in, to put that way first in mind. */
+  const [lastUsed, setLastUsed] = useState<SignInMethod | null>(null);
   const [nativeClient, setNativeClient] = useState<NativeLoginClient>("desktop");
   const [desktopLogin, setDesktopLogin] = useState<DesktopLoginState>({ status: "idle" });
   const legacyCliSubmittedRef = useRef(false);
@@ -213,11 +220,14 @@ function LoginContent() {
   /* An app that can open the provider's page in place signs in right here, like the web; older ones use the browser. */
   const inAppSignIn = desktopModeActive && Boolean(desktopBridge?.authorizeInBrowser);
   const browserSignIn = desktopModeActive && !inAppSignIn;
+  /* Passkeys are made for the site's own domain in a browser; the app shells don't offer them to the page yet. */
+  const passkeysOffered = webAuthnAvailable && !desktopBridge;
   /* The second factor of an app's provider sign-in is asked in its sign-in sheet; the Hub hands the app its code after. */
   const continueAfterSecondFactor = appSignInContinuation(searchParams.get("continue"));
   const deviceClientLabel = getDeviceClientLabel(deviceClient);
   const nativeAppLabel = getNativeAppLabel(nativeClient);
-  const nativeReturnUrl = nativeLoginReturnUrl(deviceClient);
+  /* A request scanned on another device has no app here to bring back. */
+  const nativeReturnUrl = searchParams.get("scanned") ? null : nativeLoginReturnUrl(deviceClient);
 
   useEffect(() => {
     if (!awaitingDeviceConfirmation || !deviceCode || !userCode || deviceRequest !== null) return;
@@ -230,6 +240,8 @@ function LoginContent() {
   }, [awaitingDeviceConfirmation, deviceCode, userCode, deviceRequest]);
 
   useEffect(() => {
+    setLastUsed(readLastSignInMethod());
+    setWebAuthnAvailable("PublicKeyCredential" in window);
     const bridge = getDesktopBridge();
     setDesktopBridge(bridge);
     if (!bridge) return;
@@ -410,10 +422,12 @@ function LoginContent() {
     };
   }, [desktopBridge]);
 
-  async function handleDesktopBrowserLogin() {
+  /** Starts a device sign-in: approved in the browser, or (`viaPhone`) by a signed-in phone scanning its code. */
+  async function handleDesktopBrowserLogin(viaPhone = false) {
     if (!desktopBridge || cliMode || authLoading || user || desktopLoginStartedRef.current) {
       return;
     }
+    setPhoneSignIn(viaPhone);
 
     const bridge = desktopBridge;
     clearPendingDesktopDeviceLogin();
@@ -434,6 +448,7 @@ function LoginContent() {
       const deviceLogin = (await startResponse.json()) as DeviceLoginStartResponse;
       const verificationUrl = new URL(deviceLogin.verificationUriComplete);
       verificationUrl.searchParams.set("client", nativeClient);
+      if (viaPhone) verificationUrl.searchParams.set("scanned", "1");
       const pendingLogin: PendingDesktopDeviceLogin = {
         deviceCode: deviceLogin.deviceCode,
         verificationUrl: verificationUrl.toString(),
@@ -447,7 +462,7 @@ function LoginContent() {
         status: "waiting",
         verificationUrl: pendingLogin.verificationUrl,
       });
-      await bridge.openExternal(pendingLogin.verificationUrl);
+      if (!viaPhone) await bridge.openExternal(pendingLogin.verificationUrl);
       startDesktopDeviceLoginPolling(pendingLogin);
     } catch (nextError) {
       clearPendingDesktopDeviceLogin();
@@ -620,10 +635,40 @@ function LoginContent() {
   async function handleSocialLogin(provider: SocialSignInProvider) {
     setError("");
     setSocialLoading(provider);
+    // The browser leaves for the provider here; a sign-in that comes back is how it was used.
+    rememberSignInMethod(provider);
     try {
       await signInWithSocial(provider, cliMode ? window.location.href : nextPath || undefined);
     } catch (nextError) {
       setError(formatLoginError(nextError));
+      setSocialLoading(null);
+    }
+  }
+
+  // A browser that can offer a saved passkey in the email field does so; choosing it signs in.
+  useEffect(() => {
+    if (!passkeysOffered || step !== "email" || user || cliMode) return;
+    let active = true;
+    void PublicKeyCredential.isConditionalMediationAvailable?.().then((available) => {
+      if (!active || !available) return;
+      signInWithPasskey(true)
+        .then(() => { if (active) router.replace(nextPath || "/app"); })
+        // Nothing chosen, or the prompt was set aside for another way in.
+        .catch(() => undefined);
+    });
+    return () => { active = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- offered once per visit to the email step
+  }, [passkeysOffered, step, user, cliMode]);
+
+  async function handlePasskeySignIn() {
+    setError("");
+    setSocialLoading("passkey");
+    try {
+      await signInWithPasskey();
+      rememberSignInMethod("passkey");
+      if (!cliMode) router.replace(nextPath || "/app");
+    } catch (nextError) {
+      if (!isAbort(nextError)) setError(formatLoginError(nextError));
       setSocialLoading(null);
     }
   }
@@ -638,6 +683,7 @@ function LoginContent() {
       const signedIn = await signInAppWithProvider(desktopBridge, provider);
       if (attempt !== appSignInAttemptRef.current) return;
       await setSessionFromAuthResponse(signedIn);
+      rememberSignInMethod(provider);
       router.replace(nextPath || "/app");
     } catch (nextError) {
       if (attempt !== appSignInAttemptRef.current) return;
@@ -661,6 +707,7 @@ function LoginContent() {
     try {
       const { nonce, hashed } = await appleSignInNonce();
       const apple = await desktopBridge.signInWithApple({ nonce: hashed });
+      rememberSignInMethod("apple");
       if (await signInWithApple({ ...apple, nonce }) === "two_factor") {
         setStep("two_factor");
         setSocialLoading(null);
@@ -705,6 +752,7 @@ function LoginContent() {
     setLoading(true);
 
     try {
+      rememberSignInMethod("email");
       if (await verifyOtp(email.trim(), otp.trim()) === "two_factor") {
         setStep("two_factor");
         return;
@@ -881,7 +929,7 @@ function LoginContent() {
           <AuthError>{desktopLogin.error}</AuthError>
           <div className="auth-stack">
             {desktopLogin.status === "idle" || desktopLogin.status === "error" ? (
-              <AuthPrimaryButton onClick={handleDesktopBrowserLogin} disabled={authLoading}>
+              <AuthPrimaryButton onClick={() => void handleDesktopBrowserLogin()} disabled={authLoading}>
                 <ExternalLink className="size-4" />
                 {desktopLogin.status === "error" ? "Start a fresh sign-in" : "Sign in with browser"}
               </AuthPrimaryButton>
@@ -893,6 +941,16 @@ function LoginContent() {
             ) : null}
           </div>
         </>
+      ) : inAppSignIn && phoneSignIn && desktopLogin.status !== "idle" ? (
+        <PhoneSignIn verificationUrl={desktopLogin.verificationUrl} error={desktopLogin.error}
+          onCancel={() => {
+            desktopLoginRunRef.current += 1;
+            desktopLoginStartedRef.current = false;
+            clearPendingDesktopDeviceLogin();
+            if (desktopPollTimerRef.current) clearTimeout(desktopPollTimerRef.current);
+            setDesktopLogin({ status: "idle" });
+            setPhoneSignIn(false);
+          }} />
       ) : step === "email" ? (
         <>
           <AuthHeading title={cliMode ? `Sign in to approve ${productName}` : "Welcome to xMatrix"}>
@@ -910,15 +968,18 @@ function LoginContent() {
               <AuthSecondaryButton onClick={() => void handleAppleSignIn()} disabled={loading || socialLoading !== null}>
                 {socialLoading === "apple" ? <Spinner /> : <AppleIcon className="size-[18px]" />}
                 Continue with Apple
+                <LastUsed shown={lastUsed === "apple"} />
               </AuthSecondaryButton>
             ) : null}
             <AuthSecondaryButton onClick={() => signInWithProvider("google")} disabled={loading || socialLoading !== null}>
               {socialLoading === "google" ? <Spinner /> : <GoogleIcon className="size-[18px]" />}
               Continue with Google
+              <LastUsed shown={lastUsed === "google"} />
             </AuthSecondaryButton>
             <AuthSecondaryButton onClick={() => signInWithProvider("github")} disabled={loading || socialLoading !== null}>
               {socialLoading === "github" ? <Spinner /> : <Image src="/app-connectors/github.svg" alt="" width={18} height={18} />}
               Continue with GitHub
+              <LastUsed shown={lastUsed === "github"} />
             </AuthSecondaryButton>
             {inAppSignIn && desktopBridge?.client === "desktop" && (socialLoading === "google" || socialLoading === "github") ? (
               <p role="status" className="auth-hint">
@@ -934,7 +995,7 @@ function LoginContent() {
               <Input
                 id="login-email"
                 type="email"
-                autoComplete="email"
+                autoComplete={passkeysOffered ? "email webauthn" : "email"}
                 placeholder="you@company.com"
                 required
                 autoFocus
@@ -949,10 +1010,24 @@ function LoginContent() {
               <AuthPrimaryButton type="submit" disabled={loading || socialLoading !== null}>
                 {loading ? <Spinner /> : null}
                 {loading ? "Sending code…" : "Continue with email"}
+                <LastUsed shown={lastUsed === "email"} />
               </AuthPrimaryButton>
             </form>
           </div>
           <AuthLinks>
+            {passkeysOffered ? (
+              <button type="button" className="auth-text-button" onClick={() => void handlePasskeySignIn()}
+                disabled={loading || socialLoading !== null}>
+                {socialLoading === "passkey" ? "Waiting for your passkey…" : "Sign in with a passkey"}
+                {lastUsed === "passkey" ? " · last used" : ""}
+              </button>
+            ) : null}
+            {inAppSignIn && desktopBridge?.client === "desktop" ? (
+              <button type="button" className="auth-text-button" onClick={() => void handleDesktopBrowserLogin(true)}
+                disabled={loading || socialLoading !== null}>
+                Sign in with your phone
+              </button>
+            ) : null}
             <Link href={`/login/password${searchParams.toString() ? `?${searchParams}` : ""}`}>
               Sign in with password
             </Link>
@@ -1133,6 +1208,57 @@ function socialSignInFailure(code: string): string {
     default:
       return "Sign-in did not complete. Try again, or use a login code.";
   }
+}
+
+type SignInMethod = "google" | "github" | "apple" | "email" | "passkey";
+const LAST_SIGN_IN_METHOD_KEY = "xmatrix.lastSignInMethod";
+
+function rememberSignInMethod(method: SignInMethod) {
+  try {
+    window.localStorage.setItem(LAST_SIGN_IN_METHOD_KEY, method);
+  } catch {
+    // Without storage the page simply shows no hint.
+  }
+}
+
+function readLastSignInMethod(): SignInMethod | null {
+  try {
+    const value = window.localStorage.getItem(LAST_SIGN_IN_METHOD_KEY);
+    return value === "google" || value === "github" || value === "apple" || value === "email" || value === "passkey"
+      ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+function LastUsed({ shown }: { shown: boolean }) {
+  return shown ? <span className="ml-auto text-xs font-normal opacity-70">Last used</span> : null;
+}
+
+/** The desktop app's sign-in for a phone that is already signed in: scan, approve there, done here. */
+function PhoneSignIn({ verificationUrl, error, onCancel }: {
+  verificationUrl?: string;
+  error?: string;
+  onCancel: () => void;
+}) {
+  const code = useMemo(() => verificationUrl
+    ? renderSVG(verificationUrl, { border: 1, whiteColor: "#ffffff", blackColor: "#111827" }) : null, [verificationUrl]);
+  return (
+    <>
+      <AuthHeading title="Sign in with your phone">
+        Scan this with your phone&apos;s camera and approve on the phone, where you&apos;re signed in. This computer
+        continues on its own.
+      </AuthHeading>
+      {code ? (
+        <div className="mx-auto size-48 rounded-md bg-white p-2" role="img" aria-label="Sign-in code to scan with your phone"
+          dangerouslySetInnerHTML={{ __html: code }} />
+      ) : <AuthRequest icon={<Spinner />} title="Making a code…" />}
+      <AuthError>{error}</AuthError>
+      <AuthLinks>
+        <button type="button" className="auth-text-button" onClick={onCancel}>Use another way</button>
+      </AuthLinks>
+    </>
+  );
 }
 
 /** Approve, turn down, or answer as someone else: the choices for any device asking to sign in. */
