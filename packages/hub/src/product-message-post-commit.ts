@@ -2,7 +2,7 @@ import { captureServerErrorDiagnostic } from "./server-error-diagnostic";
 import type { ChannelAttachment, DraftSummonIntent } from "@xmatrix/protocol";
 import { parseMessageInteraction, parseConnectorActionCommand, createInstanceMentions, filterOperationalMentions, hasRetiredAgentLaunchMention, parseAutoLaunchMentions,
   isLaunchHintRejection, parseHarnessCapabilityMentions, PREPARATION_REJECTION_MESSAGES, RETIRED_AGENT_LAUNCH_NOTICE,
-  REGISTRATION_PREPARATION_REJECTION_CODES } from "@xmatrix/protocol";
+  REGISTRATION_PREPARATION_REJECTION_CODES, HARNESS_SIGNED_OUT_NOTICE_KIND, preparationRejectionMessage } from "@xmatrix/protocol";
 import { startChannelAbout } from "./channel-about";
 import {
   dispatchProductAgentMentionsAfterAuthorityMessage,
@@ -214,12 +214,24 @@ export async function dispatchProductMessageLaunches(input: ProductMessagePostCo
     // The system notice is source-bound and idempotent across message retries.
     // A hint already lives on the mention's card: Jev's reading, or how to
     // name the machine. A launch that failed still tells the Channel.
-    for (const code of new Set((rejected ?? []).map(item => item.code))) {
-      if (isLaunchHintRejection(code)) continue;
-      const reason = REGISTRATION_PREPARATION_REJECTION_CODES.includes(code)
-        ? PREPARATION_REJECTION_MESSAGES[code] : PREPARATION_REJECTION_MESSAGES.registration_launch_rejected;
-      await notice({ ...input, sourceMessageId: input.messageId, replyToMessageId: input.messageId,
-        body: `Agent launch failed: ${reason} (${REGISTRATION_PREPARATION_REJECTION_CODES.includes(code) ? code : "registration_launch_rejected"})`,
+    // A too-old or signed-out program is named, and a signed-out one's notice carries what to sign in
+    // and the summon to send again once it is (HARNESS_SIGNED_OUT_NOTICE_KIND).
+    const notices = new Map<string, Record<string, unknown> | undefined>();
+    for (const item of rejected ?? []) {
+      if (isLaunchHintRejection(item.code)) continue;
+      const known = REGISTRATION_PREPARATION_REJECTION_CODES.includes(item.code);
+      const code = known ? item.code : "registration_launch_rejected";
+      const signedOut = code === "registration_harness_signed_out" ? item.signedOut : undefined;
+      // What is too old, or signed out, is named; any other code is its own sentence.
+      const reason = known ? preparationRejectionMessage(code, signedOut ?? item.tooOld) ?? PREPARATION_REJECTION_MESSAGES[code]
+        : PREPARATION_REJECTION_MESSAGES.registration_launch_rejected;
+      const body = `Agent launch failed: ${reason} (${code})`;
+      if (!notices.has(body)) notices.set(body, signedOut && item.sourceMention
+        ? { kind: HARNESS_SIGNED_OUT_NOTICE_KIND, signedOut, sourceMention: item.sourceMention } : undefined);
+    }
+    for (const [body, metadata] of notices) {
+      await notice({ ...input, sourceMessageId: input.messageId, replyToMessageId: input.messageId, body,
+        ...(metadata ? { metadata } : {}),
       }).catch(error => {
         logPostCommitFailure("Launch rejection notice failed", input, error);
         throw new AgentLaunchHandoverUnavailable();

@@ -11,7 +11,7 @@ import { messageLinkOriginLabel, messageLinkOriginTitle, type MessageLinkOrigin 
 
 import { sha256 } from "@noble/hashes/sha2.js";
 
-import { nonOperationalMentionRanges, lowercaseHex, messageExternalAppSource, onboardingStageOf } from "@xmatrix/protocol";
+import { harnessSignedOutNoticeOf, nonOperationalMentionRanges, lowercaseHex, messageExternalAppSource, onboardingStageOf } from "@xmatrix/protocol";
 import { userErrorMessage } from "@/lib/user-facing-error";
 import { sameValue, shareByKey } from "../../lib/same-value";
 
@@ -288,6 +288,7 @@ import { useAndroidBackHandler } from "./use-android-back";
 import { cn } from "@/lib/utils";
 import { CrossSpaceReadCard, crossSpaceReadMetadata } from "@/components/dashboard/cross-space-read-card";
 import { OnboardingMessage } from "@/components/dashboard/onboarding-message";
+import { HarnessSignedOutNotice } from "@/components/dashboard/harness-signed-out-notice";
 import {
   SecretAccessRequestCardView, SecretRequestCardView, secretAccessRequestMetadata, secretRequestMetadata,
 } from "@/components/dashboard/secret-request-card";
@@ -644,6 +645,16 @@ export const MessageTimeline = memo(function MessageTimeline({
     if (!response.ok) throw await errorFromResponse(response);
     await refetchAgentLaunches();
   }, [channelId, refetchAgentLaunches, token]);
+  // A summon refused because its program was signed out is sent again, as its
+  // author's own launch, once that program is signed in from the notice.
+  const timelineRef = useRef(timeline);
+  timelineRef.current = timeline;
+  const resendSignedOutSummon = useCallback(async (sourceMessageId: string, sourceMention: string) => {
+    const source = timelineRef.current.find((item) => item.messageId === sourceMessageId);
+    if (!source?.own) return false;
+    await launchAnyway(sourceMessageId, source.body, sourceMention);
+    return true;
+  }, [launchAnyway]);
   // The channel's media store, kept among the recent ones when the view moves
   // on so reopening the channel shows its media at once. Ordinary message
   // progress and token refresh are excluded from the dependency list so they
@@ -1141,6 +1152,7 @@ export const MessageTimeline = memo(function MessageTimeline({
                   launchStatusUnavailable={agentLaunchQuery.isError}
                   onRetryAgentLaunch={retryAgentLaunch}
                   onLaunchAnyway={launchAnyway}
+                  onResendSignedOutSummon={resendSignedOutSummon}
                   launchWindow={launchWindowsByMessage.get(message.messageId || message.id)}
                   launchChoiceOffered={offersLaunchChoice(message, channel)}
                   launchOptions={launchOptions}
@@ -1665,6 +1677,7 @@ export const MessageRow = memo(function MessageRow({
   launchStatusUnavailable,
   onRetryAgentLaunch,
   onLaunchAnyway,
+  onResendSignedOutSummon,
   launchWindow,
   launchChoiceOffered = false,
   launchOptions = NO_LAUNCH_OPTIONS,
@@ -1702,6 +1715,8 @@ export const MessageRow = memo(function MessageRow({
   launchStatusUnavailable?: boolean;
   onRetryAgentLaunch: (launch: SerializedAgentLaunch) => Promise<void>;
   onLaunchAnyway?: (messageId: string, body: string, sourceMention: string) => Promise<void>;
+  /** Sends a signed-out notice's summon again once its program is signed in; false when the viewer cannot. */
+  onResendSignedOutSummon?: (sourceMessageId: string, sourceMention: string) => Promise<boolean>;
   /** A new conversation's first message: which Agent starts, chosen for a few seconds. */
   launchWindow?: InteractionDecisionWindow;
   /** The author's own fresh first message, offered before the Hub's record arrives. */
@@ -1787,6 +1802,7 @@ export const MessageRow = memo(function MessageRow({
   }), [message.mentionReadStatuses, message.sequence, agentLaunches, agentStops, stopReceiptsLoaded, invocationRejections, continuationInvocations, messageTargetEvidence, launchStatusUnavailable, onRetryAgentLaunch, onLaunchAnyway, contextOnly, displayBody, nonOperationalRanges, message.editedAt, message.own, message.messageId, message.body, message.sentAt]);
   const questionnaire = questionnaireMetadata(message.metadata);
   const onboardingStage = onboardingStageOf(message.metadata);
+  const signedOutNotice = harnessSignedOutNoticeOf(message.metadata);
   const crossSpaceRead = crossSpaceReadMetadata(message.metadata);
   const secretRequest = crossSpaceRead ? null : secretRequestMetadata(message.metadata);
   const secretAccessRequest = crossSpaceRead ? null : secretAccessRequestMetadata(message.metadata);
@@ -2580,6 +2596,12 @@ export const MessageRow = memo(function MessageRow({
               />
             ) : routingDecision ? (
               <RoutingDecisionBoard decision={routingDecision} />
+            ) : signedOutNotice ? (
+              <HarnessSignedOutNotice signedOut={signedOutNotice.signedOut} spaceId={channel?.spaceId ?? null} token={token}
+                userId={currentUserIdentityId.replace(/^user:/, "")}
+                onSignedIn={onResendSignedOutSummon && (() => onResendSignedOutSummon(signedOutNotice.sourceMessageId,
+                  signedOutNotice.sourceMention))}
+                notice={<RichMessageContent body={displayBody} components={markdownComponents} />} />
             ) : isMachineRunFailureNotice(message) ? (
               <NamedMachineRunFailureNotice body={displayBody} metadata={message.metadata} spaceId={channel?.spaceId} token={token} />
             ) : (

@@ -40,6 +40,9 @@ const en = {
   signedOut: (program: string, machine: string) =>
     `${program} on ${machine} is not signed in, so it cannot take work yet. Sign it in here:`,
   signIn: "Sign in",
+  /** After a signed-out notice's sign-in: its summon was sent again. */
+  signedInResent: "Your message went to it again.",
+  resendFailed: "Your message could not be sent again. Send it once more.",
   noAgentYet: (machine: string) => `${machine} has no agent yet. Install one there and it shows up here:`,
   tryAgain: "Try again",
   noTerminal: "No terminal?",
@@ -150,6 +153,8 @@ const zh: OnboardingCopy = {
   nothingUntilUpdated: "更新之前不会给它派活。",
   signedOut: (program, machine) => `${machine} 上的 ${program} 还没登录，登录之前接不了活。在这里登录：`,
   signIn: "登录",
+  signedInResent: "你的消息已重新交给它。",
+  resendFailed: "消息没能重新发出，请再发一次。",
   noAgentYet: (machine) => `${machine} 上还没有 Agent。在那台电脑上装一个，它就会出现在这里：`,
   tryAgain: "重试",
   noTerminal: "没有终端？",

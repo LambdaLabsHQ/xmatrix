@@ -4,7 +4,7 @@ import { registrationLaunchContextReader } from "./registration-launch-context";
 import { START_INTENT_DECLINED, registrationLaunchChooser } from "./registration-launch-choice";
 import { REGISTRATION_PREPARATION_REJECTION_CODES, digestCanonicalCloneCborV1 } from "@xmatrix/protocol";
 import type { RoutingEvaluator } from "./agent-routing-evaluation";
-import type { AutoLaunchTags, DraftSummonIntent, SpaceAgentRegistrationKey } from "@xmatrix/protocol";
+import type { AutoLaunchTags, DraftSummonIntent, HarnessSignedOut, HarnessTooOld, SpaceAgentRegistrationKey } from "@xmatrix/protocol";
 import {
   PostgresChannelSpaceDirectory, PostgresRegistrationLaunchRepository, PostgresRegistrationRebornRepository,
   PostgresSpacePlacementDirectory, PostgresRuntimeRepository, RegistrationAccessError, type AuthorityDatabase,
@@ -55,7 +55,7 @@ export async function executeRegistrationLaunchDispatch(input: {
         // an untyped value collapses to the generic rejection.
         code: REGISTRATION_PREPARATION_REJECTION_CODES.includes(item.code) || /^[a-z][a-z0-9_]{2,79}$/u.test(item.code)
           ? item.code : "registration_launch_rejected",
-        ...(item.tooOld ? { tooOld: item.tooOld } : {}) })),
+        ...(item.tooOld ? { tooOld: item.tooOld } : {}), ...(item.signedOut ? { signedOut: item.signedOut } : {}) })),
     });
   }
   return { ...result, shardId: placement.shardId, channelId: input.channelId };
@@ -358,8 +358,11 @@ interface MessageLaunch {
 
 interface MessageLaunchResult {
   selectionCount?: number; shardId?: string;
-  prepared?: Array<{ launchId: string }>; rejected?: Array<{ code: string }>;
+  prepared?: Array<{ launchId: string }>; rejected?: MessageLaunchRejection[];
 }
+
+/** A summon the dispatch refused, and the program it names: too old, or signed out. */
+export interface MessageLaunchRejection { code: string; sourceMention?: string; tooOld?: HarnessTooOld; signedOut?: HarnessSignedOut }
 
 type MessageLaunchDependencies = {
   launch?: (input: MessageLaunch) => Promise<MessageLaunchResult>;
@@ -395,7 +398,7 @@ export async function dispatchRegistrationLaunchesAfterMessage(input: {
   draftIntents?: DraftSummonIntent[];
   scheduleBackground?: (task: Promise<unknown>) => void;
 }, dependencies: MessageLaunchDependencies = {},
-): Promise<{ selectionCount: number; prepared: Array<{ launchId: string }>; rejected?: Array<{ code: string }> }> {
+): Promise<{ selectionCount: number; prepared: Array<{ launchId: string }>; rejected?: MessageLaunchRejection[] }> {
   const result = await dispatchFromMessage({ ...input, commandId: `registration-launch:${input.messageId}` }, dependencies);
   if (result.selectionCount > 0) {
     // Jev chose from persisted quota facts; refresh them (including the
