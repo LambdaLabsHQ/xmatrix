@@ -5,13 +5,13 @@ import test from "node:test";
 
 test("tagged Hub deployment reuses only its exact request gate before production mutation", () => {
   // The request's Hub gate is CI's Hub job on the exact release commit: the
-  // request passes that commit to ci.yml, and every ci.yml checkout tests it.
+  // request passes that commit to ci.yml, and each job selects it after verification.
   const request = expandWorkflowAnchors(readFileSync(new URL("../.github/workflows/production-release-request.yml", import.meta.url), "utf8"));
   const gates = request.slice(request.indexOf("\n  ci:"), request.indexOf("\n  ios:"));
   assert.match(gates, /uses: \.\/\.github\/workflows\/ci\.yml[\s\S]*ref: \$\{\{ needs\.plan\.outputs\.deploy_sha \}\}/u);
   const ci = expandWorkflowAnchors(readFileSync(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8"));
   const ciHub = ci.slice(ci.indexOf("\n  hub:"), ci.indexOf("\n  desktop:"));
-  const checkout = ciHub.indexOf("ref: ${{ inputs.ref }}");
+  const checkout = ciHub.indexOf('git checkout --detach "$CI_RELEASE_REF"');
   const bootstrap = ciHub.indexOf("run: bash scripts/setup-test-postgres.sh");
   const gate = ciHub.indexOf("node scripts/ci.mjs ${{ matrix.partition }}");
   assert.ok(checkout >= 0 && bootstrap > checkout && gate > bootstrap);
