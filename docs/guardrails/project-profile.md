@@ -36,7 +36,9 @@ Pages type committed Agent edits in as people type: the structure goes in
 first, then the words as small CRDT insertions, a few at a time. Several Agents
 and people type at once, and every moment of the page reads back from Markdown
 as itself. Stored typing lets a restarted session finish a committed edit while
-keeping human typing. See [live documents](../design/pages-live-document.md).
+keeping human typing. Choosing a page co-writer immediately acknowledges the
+selection; desktop feedback offers its conversation and explains to continue
+writing in the page. See [live documents](../design/pages-live-document.md).
 
 
 Channel presence uses the protocol's read-only Instance-ID map, separate from

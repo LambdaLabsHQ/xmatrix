@@ -6,7 +6,7 @@ import * as syncProtocol from "y-protocols/sync";
 import * as Y from "yjs";
 
 import { expect, test } from "./fixtures";
-import { fixtureJson, fixtureRequestBodies, fixtureRequestRecords } from "./in-page-api-fixtures";
+import { fixtureJson, fixtureRequestBodies, fixtureRequestRecords, fixtureRule, releaseFixture } from "./in-page-api-fixtures";
 import { editPageMarkdown, pageDocument, pageMarkdown, startedMarkdown } from "./page-document-fixture";
 import {
   E2E_CHANNEL, E2E_DESKTOP_CONTEXT, E2E_SPACE, E2E_USER_SENDER, harnessRegistrations, installWorkspaceStubs,
@@ -415,6 +415,38 @@ test("a bookmark says in small type what the last change to its section did", as
   await expect(card.locator(".conversation-page-bookmark-detail strong")).toHaveText("In progress");
   await expect(card).not.toContainText("Planned");
 });
+
+for (const refused of [false, true]) {
+  test(`desktop co-writing acknowledges the selection while its request is pending (${refused ? "refused" : "accepted"})`, async ({ page: browser }) => {
+    await stubCoWriting(browser, "");
+    await stubWriters(browser, ["claude", "codex"]);
+    await fixtureRule(browser, { id: "writer-create", pattern: /\/api\/xmatrix\/channels$/u, method: "POST",
+      responder: { kind: "deferred", ...(refused ? { status: 403, json: { error: "forbidden" } }
+        : { json: { channel: { ...E2E_CHANNEL, id: "channel-write", name: "Co-writing Relay" } } }) } });
+    await openLivePage(browser);
+    const controls = browser.getByTestId("page-controls");
+    await controls.getByRole("button", { name: /Co-write$/u }).click();
+    await browser.getByTestId("page-write-with").getByRole("button", { name: "codex" }).click();
+    await expect(browser.getByTestId("page-write-with")).toBeHidden();
+    const feedback = browser.getByRole("status").filter({ hasText: "codex is starting" });
+    await expect(feedback).toBeVisible();
+    await expect(controls.getByRole("button", { name: /Co-write$/u })).toBeDisabled();
+    await releaseFixture(browser, "writer-create");
+    if (refused) {
+      await expect(feedback).toBeHidden();
+      await expect(browser.getByText(/Couldn't start the Agent/u)).toBeVisible();
+      await expect(controls.getByRole("button", { name: /Co-write$/u })).toBeEnabled();
+      expect(await fixtureRequestBodies(browser, "write-message")).toEqual([]);
+      return;
+    }
+    await expect.poll(async () => (await fixtureRequestBodies(browser, "write-message"))[0]?.body)
+      .toMatch(/^@codex launch:force You're co-writing page:p-relay/u);
+    await expect(feedback).toContainText("Write in the page");
+    await expect(browser).not.toHaveURL(/conversation=/u);
+    await feedback.getByRole("button", { name: "Conversation", exact: true }).click();
+    await expect(browser).toHaveURL(/conversation=channel-write/u);
+  });
+}
 
 test.describe("on a phone", () => {
   test.use({ viewport: { width: 393, height: 852 }, deviceScaleFactor: 3, isMobile: true, hasTouch: true });
