@@ -1635,7 +1635,13 @@ async function installCliFromDesktopSeed(): Promise<DesktopCliInstallResult> {
   });
   if (result.ok) {
     seedInstallFailure = null;
+    machineNameRequired = false;
     await startDaemonBestEffort();
+  } else {
+    // The same failure as the automatic install: shown with its lines and
+    // reported, not only returned to the button that asked.
+    seedInstallFailure = { message: result.message, failure: daemonFailure("cli_install", result.message, result.exitCode) };
+    setDaemonStatus("error", seedInstallFailure);
   }
   return result;
 }
@@ -2255,10 +2261,27 @@ function spawnDaemon(executable: string) {
       });
       return;
     }
-    setDaemonStatus(code === 0 || signal ? "stopped" : "error", {
-      message: daemonExitMessage(message, daemonOutput),
-      ...(code !== 0 && !signal ? { failure: daemonFailure("exit", daemonOutput, code) } : {}),
-    });
+    if (code !== 0 && !signal) {
+      // The local service the setup registered stops older daemons when it
+      // starts its own (Windows ends them with 0xFFFFFFFF): this one was
+      // replaced, not broken. Only a daemon nobody replaced has failed.
+      void findExistingDaemonProcess().then((found) => {
+        if (daemonProcess) return;
+        if (found) {
+          runningLocalDaemonStatus(found.pid, true);
+          return;
+        }
+        setDaemonStatus("error", {
+          message: daemonExitMessage(message, daemonOutput),
+          failure: daemonFailure("exit", daemonOutput, code),
+        });
+      }, () => setDaemonStatus("error", {
+        message: daemonExitMessage(message, daemonOutput),
+        failure: daemonFailure("exit", daemonOutput, code),
+      }));
+    } else {
+      setDaemonStatus("stopped", { message: daemonExitMessage(message, daemonOutput) });
+    }
     scheduleDaemonRestart(
       signal
         ? daemonExitMessage("xMatrix daemon stopped unexpectedly; restarting daemon...", daemonOutput)

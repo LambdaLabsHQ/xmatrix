@@ -1,5 +1,6 @@
 "use client";
 
+import { useDesktopDaemonFailureDelivered } from "@/lib/desktop-daemon-failure-report";
 import { AnimatedIcon } from "@/components/ui/animated-icon";
 import { actionClass } from "@/components/ui/action-tone";
 import { agentPresetAvatarUrl } from "@xmatrix/protocol";
@@ -175,6 +176,7 @@ function DaemonFailureNotice({
   onRetry: () => void;
   className?: string;
 }) {
+  const delivered = useDesktopDaemonFailureDelivered(failure);
   return (
     <div className={noticeClass("attention", cn("p-3", className))} role="alert">
       <p className="text-sm">{daemonFailureSentence(failure, copy)}</p>
@@ -183,7 +185,7 @@ function DaemonFailureNotice({
           {failure.detail}
         </pre>
       )}
-      <p className="mt-2 text-xs text-muted-foreground">{copy.failureReported}</p>
+      {delivered && <p className="mt-2 text-xs text-muted-foreground">{copy.failureReported}</p>}
       <button
         type="button"
         disabled={starting}
