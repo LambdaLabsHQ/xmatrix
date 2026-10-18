@@ -7,9 +7,8 @@ function token(value: unknown): string | undefined {
 
 export function sentryEventMetadata(event: Record<string, unknown>): string[] {
   const lines: string[] = [];
-  const time = event.dateCreated;
-  if (typeof time === "string" && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$/u.test(time) &&
-      Number.isFinite(Date.parse(time))) lines.push(`Event time: ${time}`);
+  const time = timestamp("Event time", event.dateCreated);
+  if (time) lines.push(time);
   const releaseValue = event.release;
   const release = token(releaseValue && typeof releaseValue === "object"
     ? (releaseValue as { version?: unknown }).version : releaseValue);
@@ -44,6 +43,20 @@ export function sentryEventMetadata(event: Record<string, unknown>): string[] {
     }
   }
   return [...new Set(lines)];
+}
+
+function timestamp(label: string, value: unknown): string | undefined {
+  if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$/u.test(value) &&
+      Number.isFinite(Date.parse(value))) return `${label}: ${value}`;
+}
+
+export function sentryIssueMetadata(issue: Record<string, unknown>): string[] {
+  const count = issue.count;
+  return [
+    ((typeof count === "string" && /^\d{1,16}$/u.test(count)) || typeof count === "number") &&
+      Number.isSafeInteger(Number(count)) && Number(count) >= 0 ? `Occurrences: ${count}` : undefined,
+    timestamp("First seen", issue.firstSeen), timestamp("Last seen", issue.lastSeen),
+  ].filter((line): line is string => line !== undefined);
 }
 
 export function sentryExceptionMechanism(value: Record<string, unknown>): string | undefined {

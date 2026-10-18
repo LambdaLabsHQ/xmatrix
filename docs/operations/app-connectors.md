@@ -322,7 +322,11 @@ do not prevent an otherwise successful read from finalizing.
 Sentry issue reads include the latest event's terminal twenty exception frames
 and up to eight earlier `src/` callers outside `node_modules`, in stack order.
 This keeps application entry points visible when dependency frames fill the
-tail. Only frame names, paths and positions are returned; local variables,
+tail. When source maps replaced the generated locations, up to eight terminal
+generated asset paths and positions are included separately, without URL
+credentials, queries, fragments or inline script schemes. Issue occurrence
+count and first/last-seen UTC times support recurrence checks; these are issue
+totals, not release-specific counts. Only frame names, paths and positions are returned; local variables,
 source context, requests and breadcrumbs remain excluded. The full receipt
 still has the shared 12,000-character context limit.
 

@@ -1,7 +1,7 @@
 import { providerJson, providerUrl, ProviderRequestError } from "../http";
 import type { ConnectorAction } from "../provider";
 import { taskContextExcerpt } from "./task-context";
-import { sentryEventMetadata, sentryExceptionMechanism } from "./sentry-event-metadata";
+import { sentryEventMetadata, sentryExceptionMechanism, sentryIssueMetadata } from "./sentry-event-metadata";
 import { isSentryInstallationGrant, sentryOrganization, validateSentryInstallationCredentials,
   verifySentryInstallation } from "../sentry-installation";
 
@@ -37,6 +37,20 @@ function fieldString(value: unknown): string | undefined {
   }
 }
 
+/** Generated locations identify deployed scripts, never inline code or URL credentials. */
+function generatedLocation(value: unknown): string | undefined {
+  if (typeof value !== "string" || value.length > 2048 || /[\s\p{Cc}]/u.test(value)) return undefined;
+  try {
+    const url = new URL(value);
+    if (!["http:", "https:", "app:"].includes(url.protocol) || url.username || url.password) return undefined;
+    url.search = "";
+    url.hash = "";
+    return url.href;
+  } catch {
+    return /^[A-Za-z0-9_./@+-]{1,512}$/u.test(value) ? value : undefined;
+  }
+}
+
 /** Exception metadata only: never export request headers/bodies, local variables, users or breadcrumbs. */
 function exceptionContext(entries: unknown): { lines: string[]; partial: boolean } {
   if (!Array.isArray(entries)) throw new ProviderRequestError(502, "Sentry did not confirm event entries");
@@ -52,8 +66,9 @@ function exceptionContext(entries: unknown): { lines: string[]; partial: boolean
       if (!value || typeof value !== "object" || Array.isArray(value)) continue;
       const type = fieldString(value.type);
       const message = fieldString(value.value);
-      const frames = Array.isArray(value.stacktrace?.frames) ? value.stacktrace.frames
-        : Array.isArray(value.rawStacktrace?.frames) ? value.rawStacktrace.frames : [];
+      const mapped = Array.isArray(value.stacktrace?.frames) ? value.stacktrace.frames : [];
+      const raw = Array.isArray(value.rawStacktrace?.frames) ? value.rawStacktrace.frames : [];
+      const frames = mapped.length ? mapped : raw;
       if (!type && !message && !frames.length) continue;
       exceptions++;
       const headline = [type, message].filter(Boolean).join(": ");
@@ -77,6 +92,21 @@ function exceptionContext(entries: unknown): { lines: string[]; partial: boolean
         if (Number.isSafeInteger(line)) label.push(`line ${line}`);
         if (Number.isSafeInteger(column)) label.push(`column ${column}`);
         if (label.length) lines.push(`Frame: ${label.join(" · ")}`);
+      }
+      // Source maps replace filenames and positions. Keep a small, separate
+      // generated tail so a dependency frame still identifies its shipped asset.
+      if (mapped.length) {
+        partial ||= raw.length > 8;
+        for (const frame of raw.slice(-8)) {
+          const location = generatedLocation(frame?.filename ?? frame?.absPath);
+          if (!location) continue;
+          const label = [location];
+          const line = frame.lineNo ?? frame.lineno;
+          const column = frame.colNo ?? frame.colno;
+          if (Number.isSafeInteger(line)) label.push(`line ${line}`);
+          if (Number.isSafeInteger(column)) label.push(`column ${column}`);
+          lines.push(`Generated frame: ${label.join(" · ")}`);
+        }
       }
     }
     if (exceptions === 3) { partial ||= entries.indexOf(entry) < entries.length - 1; break; }
@@ -105,7 +135,7 @@ const READ_ISSUE: ConnectorAction = {
       throw new ProviderRequestError(502, "Sentry did not confirm the issue event");
     }
     const stack = exceptionContext(event.entries);
-    const context = [`Issue ${issue.shortId || id}: ${issue.title}`, `Status: ${issue.status}`,
+    const context = [`Issue ${issue.shortId || id}: ${issue.title}`, `Status: ${issue.status}`, ...sentryIssueMetadata(issue),
       typeof issue.culprit === "string" ? `Culprit: ${issue.culprit}` : "",
       typeof event.platform === "string" ? `Platform: ${event.platform}` : "",
       `Latest event: ${event.eventID}`, ...sentryEventMetadata(event), ...stack.lines].filter(Boolean).join("\n\n");
