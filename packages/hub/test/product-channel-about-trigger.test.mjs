@@ -48,6 +48,24 @@ test("mixed summon results report only rejected allocations and bound unknown er
   assert.equal(success.length, 0);
 });
 
+test("a summon only a signed-out program could take names it and carries its sign-in on the notice", async () => {
+  const input = { env: {}, channelId: "channel", messageId: "summon",
+    senderKind: "user", senderId: "human", actorUserId: "human", body: "@auto fix the build" };
+  const signedOut = { harness: "codex", program: "Codex", machineId: "machine:mac", machineName: "mac-mini" };
+  const tooOld = { program: "Cursor CLI", version: "2025.09.12", minimumVersion: "2026.01.01", machineName: "Laptop" };
+  const notices = [];
+  await dispatchProductMessageLaunches(input, { registration: async () => ({ selectionCount: 2, prepared: [], rejected: [
+    { code: "registration_harness_signed_out", sourceMention: "@auto", signedOut },
+    { code: "registration_harness_outdated", sourceMention: "@cursor", tooOld }] }) }, async value => notices.push(value));
+  assert.equal(notices.length, 2);
+  assert.equal(notices[0].body, "Agent launch failed: Codex on mac-mini is not signed in, so it can't take work. " +
+    "Sign it in from here, then the message goes to it. No launch was allocated. (registration_harness_signed_out)");
+  assert.deepEqual(notices[0].metadata, { kind: "xmatrix.harness-signed-out.v1", signedOut, sourceMention: "@auto" });
+  // What is too old is named in the Channel too, not only on the mention's card.
+  assert.match(notices[1].body, /^Agent launch failed: Cursor CLI on Laptop is 2025\.09\.12, too old/);
+  assert.equal(notices[1].metadata, undefined);
+});
+
 test("a mention Jev declined posts no Channel notice; its card says why", async () => {
   const input = { env: {}, channelId: "channel", messageId: "summon",
     senderKind: "user", senderId: "human", actorUserId: "human", body: "Correction: @claude was named in a heading" };

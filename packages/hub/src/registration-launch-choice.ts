@@ -236,7 +236,7 @@ export function registrationLaunchChooser(evaluate: RoutingEvaluator, readContex
       eligible = eligible.filter(matches);
       if (!eligible.length) {
         const refusal = launchRefusal(code, tags.machine, blocked);
-        throw new RegistrationAccessError(refusal.code, 409, refusal.tooOld);
+        throw new RegistrationAccessError(refusal.code, 409, refusal.tooOld, refusal.signedOut);
       }
     };
     if (tags.machine) {

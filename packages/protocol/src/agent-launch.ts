@@ -1,3 +1,5 @@
+import type { HarnessSignedOut } from "./invocation-failure.js";
+
 export const AGENT_LAUNCH_STATES = [
   "prepared",
   "queued",
@@ -82,6 +84,8 @@ export interface SerializedAgentInvocationRejection {
   code: string;
   message: string;
   routingDecision?: RoutingDecisionEvidence;
+  /** For `registration_harness_signed_out`: the program to sign in, and where. */
+  signedOut?: HarnessSignedOut;
   rejectedAt: string;
   evidenceExpiresAt: string;
 }

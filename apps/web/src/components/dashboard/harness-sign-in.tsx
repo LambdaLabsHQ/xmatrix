@@ -61,8 +61,10 @@ export function signedOutRegistrations(registrations: readonly AgentRegistration
     harnessSignInView({ registration, userId, daemons }).state === "signed_out");
 }
 
-export function HarnessSignInSection({ registration, token, userId, bare = false, signInLabel = "Sign in" }: {
+export function HarnessSignInSection({ registration, token, userId, bare = false, signInLabel = "Sign in", onSignedIn }: {
   registration: AgentRegistrationSummary; token: string; userId: string;
+  /** Called once a sign-in started here finishes signed in. */
+  onSignedIn?: () => void;
   /** Only the sign-in itself, under a sentence the caller already wrote. */
   bare?: boolean;
   /** The button's word in the caller's language. */
@@ -139,6 +141,7 @@ export function HarnessSignInSection({ registration, token, userId, bare = false
     if (operation.step === "cancel") return;
     if (settled.status === "succeeded" && login?.state === "signed_in") {
       setNotice({ text: "Signed in.", error: false });
+      onSignedIn?.();
     } else if (login?.state !== "cancelled") {
       setNotice({ text: settled.error ?? "The sign-in did not finish.", error: true });
     }

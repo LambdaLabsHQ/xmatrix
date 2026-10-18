@@ -1,4 +1,5 @@
 import { expect, test } from "./fixtures";
+import { fixtureClaudePasteCodeSignIn } from "./harness-sign-in-fixtures";
 import { E2E_DESKTOP_CONTEXT, E2E_NOW, E2E_SPACE, fixtureJson, fixtureRequestBodies, fixtureRule,
   installWorkspaceStubs } from "./workspace-fixtures";
 
@@ -68,14 +69,7 @@ test("a device-code sign-in shows its link and code, then waits for the browser 
 test("a paste-code sign-in hands back the pasted code and settles signed in", async ({ page }) => {
   const section = await openAgent(page, "claude-studio");
   await expect(section).toContainText("Signed in");
-  await fixtureJson(page, "sign-in-start", `**/api/xmatrix/machine-daemons/harness-actions/${encodeURIComponent(START)}`, {
-    controlId: START, presetId: "claude", action: "login_start", status: "succeeded",
-    result: { presetId: "claude", action: "login_start", status: "succeeded", login: { state: "awaiting_user",
-      flow: "url_paste_code", verificationUri: "https://claude.com/cai/oauth/authorize?code=true&state=e2e" } } });
-  await fixtureJson(page, "sign-in-finish", `**/api/xmatrix/machine-daemons/harness-actions/${encodeURIComponent(FINISH)}`, {
-    controlId: FINISH, presetId: "claude", action: "login_finish", status: "succeeded",
-    result: { presetId: "claude", action: "login_finish", status: "succeeded",
-      login: { state: "signed_in", flow: "url_paste_code" } } });
+  await fixtureClaudePasteCodeSignIn(page, START, FINISH);
   await section.getByRole("button", { name: "Sign in again", exact: true }).click();
   const code = section.getByRole("textbox", { name: "Sign-in code" });
   await expect(code).toBeVisible();

@@ -39,6 +39,7 @@ import {
   validateHarnessParameterValues,
   type AutoLaunchTags,
   type HarnessTooOld,
+  type HarnessSignedOut,
   type LaunchMachineBlock,
   type LaunchParameterEvidence,
   type DraftSummonIntent,
@@ -660,15 +661,18 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
       return { selectionCount: 0, prepared: [], rejected: [] };
     }
     const prepared: Array<{ runId: string; instanceId: string; launchId: string; reused: boolean }> = [];
-    const rejected: Array<{ selectionIndex: number; code: string; sourceMention: string; tooOld?: HarnessTooOld }> = [];
+    const rejected: Array<{ selectionIndex: number; code: string; sourceMention: string; tooOld?: HarnessTooOld;
+      signedOut?: HarnessSignedOut }> = [];
     // The summon as written, address through its last condition: the text the
     // web parses from the message and binds this launch or refusal to.
     const summonText = (selection: { start: number; end: number; text: string }) =>
       input.body.slice(selection.start, selectionLaunchConditions(input.body, selection).end);
-    // A refusal keeps what its error says is too old, so the reply can name it.
+    // A refusal keeps what its error says is too old or signed out, so the reply can name it.
     const refused = (selectionIndex: number, selection: { start: number; end: number; text: string }, code: string, error: unknown) => {
       const tooOld = error instanceof RegistrationAccessError ? error.tooOld : undefined;
-      rejected.push({ selectionIndex, code, sourceMention: summonText(selection), ...(tooOld ? { tooOld } : {}) });
+      const signedOut = error instanceof RegistrationAccessError ? error.signedOut : undefined;
+      rejected.push({ selectionIndex, code, sourceMention: summonText(selection), ...(tooOld ? { tooOld } : {}),
+        ...(signedOut ? { signedOut } : {}) });
     };
     for (const [selectionIndex, selection] of source.selections.entries()) {
       if (input.forceMention !== undefined && summonText(selection) !== input.forceMention) continue;
@@ -703,7 +707,7 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
         if (!candidates.length) {
           const refusal = listed.offlineOnly ? { code: "registration_daemon_offline" }
             : launchRefusal("registration_not_found", options.tags.machine, listed.blocked);
-          throw new RegistrationAccessError(refusal.code, refusal.code === "registration_daemon_offline" ? 409 : 404, refusal.tooOld);
+          throw new RegistrationAccessError(refusal.code, refusal.code === "registration_daemon_offline" ? 409 : 404, refusal.tooOld, refusal.signedOut);
         }
         if (!choose) {
           rejected.push({ selectionIndex, code: "registration_selection_unconfigured", sourceMention: summonText(selection) });
@@ -815,7 +819,7 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
       }
       const refusal = listed.offlineOnly ? { code: "registration_daemon_offline" }
         : launchRefusal("registration_not_found", input.tags?.machine, listed.blocked);
-      throw new RegistrationAccessError(refusal.code, refusal.code === "registration_daemon_offline" ? 409 : 404, refusal.tooOld);
+      throw new RegistrationAccessError(refusal.code, refusal.code === "registration_daemon_offline" ? 409 : 404, refusal.tooOld, refusal.signedOut);
     }
     // A caller may constrain the directory or repository it states.
     const tags: AutoLaunchTags = { ...input.tags };
@@ -896,7 +900,7 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
     const candidates = listed.offered;
     if (!candidates.length) {
       const refusal = launchRefusal("registration_not_found", undefined, listed.blocked);
-      throw new RegistrationAccessError(refusal.code, 404, refusal.tooOld);
+      throw new RegistrationAccessError(refusal.code, 404, refusal.tooOld, refusal.signedOut);
     }
     const selected = await choose({ message: input.body, tags: {}, candidates, managedWorkspace: true, askToStart: true,
       ...(input.onHarness ? { onHarness: input.onHarness } : {}) });
@@ -1065,6 +1069,14 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
             reason: "harness_outdated", tooOld });
           continue;
         }
+        // A harness its machine reports signed out answers nothing sent to it:
+        // it is named, with its sign-in, and never routed to.
+        const signedOut = harnessSignedOutOn(daemon, candidate.key);
+        if (signedOut) {
+          blocked.push({ machineId: candidate.key.machineId, ...(signedOut.machineName ? { machineName: signedOut.machineName } : {}),
+            reason: "harness_signed_out", signedOut });
+          continue;
+        }
         // Jev never sees a machine whose daemon cannot show the host abilities
         // the work needs; workspace() checks the same evidence again at launch.
         const machineResources = currentMachineResources(daemon, Date.parse(evaluatedAt));
@@ -1142,6 +1154,17 @@ export function harnessTooOldOn(daemon: QueryResultRow, harness: string): Harnes
     : ["macos", "darwin", "linux"].includes(String(metadata?.platform)) ? "unix" : undefined;
   const update = platform ? management?.update[platform] : undefined;
   return { ...tooOld, ...(machineName ? { machineName } : {}), ...(update ? { update: harnessCommandLine(update) } : {}) };
+}
+
+/** The machine's own report that this harness is signed out of its account:
+ * which program on which machine. An unchecked or unknown sign-in is not judged. */
+export function harnessSignedOutOn(daemon: QueryResultRow, key: { harness: string; machineId: string }): HarnessSignedOut | undefined {
+  const metadata = daemon.metadata_json && typeof daemon.metadata_json === "object" ? daemon.metadata_json as Record<string, unknown> : undefined;
+  const item = parseHarnessInventory(metadata?.harnesses)?.items.find(entry => entry.id === key.harness && entry.installed);
+  if (item?.login !== "signed_out") return undefined;
+  const machineName = typeof daemon.machine_name === "string" ? daemon.machine_name.trim() : "";
+  return { harness: key.harness, program: agentPresetById(key.harness)?.displayName ?? key.harness,
+    machineId: key.machineId, ...(machineName ? { machineName } : {}) };
 }
 
 /** The part of one registration a launch can actually be routed to, by the

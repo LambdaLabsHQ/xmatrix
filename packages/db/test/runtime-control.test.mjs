@@ -508,7 +508,7 @@ for (const ok of [true, false]) test(`an applied ${ok ? "successful" : "recovera
     { controlId: "control-1", ok, at: undefined });
 });
 
-for (const rejectionCode of ['routing_no_eligible', 'routing_selection_failed', 'routing_parameter_selection_failed',
+for (const rejectionCode of ['registration_harness_signed_out', 'routing_no_eligible', 'routing_selection_failed', 'routing_parameter_selection_failed',
   'routing_parameter_constraints_invalid', 'routing_parameter_models_empty', 'routing_parameter_workspaces_empty',
   'routing_parameter_catalog_invalid', 'routing_parameter_catalog_unavailable', 'routing_parameter_invalid_answer',
   'routing_parameter_jev_aborted', 'routing_parameter_jev_invalid_input', 'routing_parameter_jev_customer_verification_required',
@@ -540,6 +540,8 @@ test(`routing rejection ${rejectionCode} binds publication, replays once, and ne
         questionKey: 'workspace', issue: 'choice_not_offered', private: 'must-not-store' } } : {}),
       ...(rejectionCode === 'registration_harness_outdated' ? { tooOld: { program: 'Cursor CLI', version: '2025.09.12-4852336',
         minimumVersion: '2026.01.01', machineName: 'Laptop', update: 'cursor-agent update', private: 'must-not-store' } } : {}),
+      ...(rejectionCode === 'registration_harness_signed_out' ? { signedOut: { harness: 'codex', program: 'Codex',
+        machineId: 'machine-a', machineName: 'mac-mini', private: 'must-not-store' } } : {}),
       routingDecision: {
       source: 'deterministic', evaluatedAt: '2026-09-22T18:00:00Z', candidateCount: 1, secret: 'must-not-store',
       rows: [{ harness: 'codex', machineId: 'machine-a', activeRuns: 1,
@@ -553,6 +555,11 @@ test(`routing rejection ${rejectionCode} binds publication, replays once, and ne
   if (rejectionCode === 'registration_harness_outdated') assert.equal(view.rejections[0].message,
     'Cursor CLI on Laptop is 2025.09.12, too old for xMatrix, which needs 2026.01.01 or later. ' +
     'Run "cursor-agent update" there, then try again. No launch was allocated.');
+  if (rejectionCode === 'registration_harness_signed_out') {
+    assert.equal(view.rejections[0].message, "Codex on mac-mini is not signed in, so it can't take work. " +
+      'Sign it in from here, then the message goes to it. No launch was allocated.');
+    assert.deepEqual(view.rejections[0].signedOut, { harness: 'codex', program: 'Codex', machineId: 'machine-a', machineName: 'mac-mini' });
+  } else assert.equal(view.rejections[0].signedOut, undefined);
   assert.doesNotMatch(JSON.stringify(view.rejections), /must-not-store/);
   assert.equal(value.rejected[0].routingDecision.rows[0].quotaObservation.status, 'stale');
   assert.doesNotMatch(JSON.stringify(saved), /must-not-store/);
