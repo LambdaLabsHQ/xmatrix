@@ -634,7 +634,11 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
     if (!row.launch_request_json || typeof row.launch_request_json !== "object" || Array.isArray(row.launch_request_json)) {
       throw new RegistrationAccessError("registration_launch_recovery_unavailable", 409);
     }
-    return this.prepare({ ...row.launch_request_json, ...input });
+    // Dispatch callers can carry services and transient picker state. Only
+    // these source fields may overlay the immutable persisted launch request.
+    return this.prepare({ ...row.launch_request_json, commandId: input.commandId, actorUserId: input.actorUserId,
+      channelId: input.channelId, sourceMessageId: input.sourceMessageId,
+      selectionIndex: input.selectionIndex, body: input.body });
   }
 
   /** Consume stored invocation intent. Capability selections pick among currently
