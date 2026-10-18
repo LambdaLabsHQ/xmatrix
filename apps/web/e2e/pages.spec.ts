@@ -448,7 +448,7 @@ test.describe("on a phone", () => {
     const roomBox = (await editor.locator(".page-edge-room.is-reader-change").first().boundingBox())!;
     expect(roomBox.x).toBeLessThanOrEqual(markBox.x);
     expect(roomBox.y + roomBox.height).toBeGreaterThanOrEqual(markBox.y + markBox.height - 2);
-    // A paragraph that is all new is marked in the margin, even beside one whose words changed.
+    // A paragraph that is all new keeps the same word-level cue as changed words.
     await expect(editor.locator(".page-reader-change.is-block", { hasText: "The second region is next" })).toHaveCount(1);
     await expect(editor.locator(".page-reader-change:not(.is-block)", { hasText: "The second region" })).toHaveCount(0);
     await expect(editor.locator(".page-reader-change:not(.is-block)", { hasText: "Shipped" })).toHaveCount(1);
@@ -960,6 +960,10 @@ test("what changed since the reader last read the page stays as a diff until it 
   const added = editor.locator(".page-reader-change");
   await expect(added.filter({ hasText: "Shipped" })).toBeVisible();
   await expect(added.filter({ hasText: "Late reviews" })).toHaveCount(1);
+  // Whole new blocks stay discoverable without putting a vertical bar beside every paragraph.
+  const newParagraph = added.filter({ hasText: "The second region is next" });
+  await expect(newParagraph).toHaveCSS("text-decoration-line", "underline");
+  expect(await newParagraph.evaluate((element) => getComputedStyle(element, "::after").content)).toBe("none");
   await expect(editor.locator(".page-reader-removed")).toContainText("Planned for next");
   await browser.screenshot({ path: test.info().outputPath("pages-reader-changes.png") });
   // The diff does not play out or fade, and the page is not read behind its reader's back.
@@ -1395,6 +1399,8 @@ test("on a long page, who works out of view shows at its edges, and what an Agen
   await expect(tinted).toContainText(["shipping Friday"]);
   const inked = editor.locator(`.page-agent-ink[data-client="${AGENT_CLIENT}"]`);
   await expect.poll(async () => (await inked.allTextContents()).join("")).toBe("none yet, shipping Friday");
+  // The Agent's ink already identifies its paragraph; no extra margin bar crowds the document.
+  expect(await inked.first().evaluate((element) => getComputedStyle(element.closest("p")!, "::before").content)).toBe("none");
   await browser.screenshot({ path: test.info().outputPath("pages-people-below.png") });
 
   // Its face takes the reader to the Agent's line, beside which it now stands; the one now above is
