@@ -335,14 +335,11 @@ mod tests {
             "# Notes\n\n![shot.png](xmatrix:page-media/{image} \"Before\") and `![x](xmatrix:page-media/{video})`\n\n![clip](xmatrix:page-media/{video})\n"
         );
         assert_eq!(page_media_images(&page), vec![image.clone(), video.clone()]);
-        let saved = HashMap::from([(
-            image.clone(),
-            PathBuf::from("/home/me/.config/xmatrix/attachment-cache/page-media").join(&image),
-        )]);
+        // Joined as this platform joins paths: on Windows, its last separator is a backslash.
+        let local = PathBuf::from("/home/me/.config/xmatrix/attachment-cache/page-media").join(&image);
+        let saved = HashMap::from([(image.clone(), local.clone())]);
         let read = to_local(&page, &saved);
-        assert!(read.contains(&format!(
-            "![shot.png](/home/me/.config/xmatrix/attachment-cache/page-media/{image} \"Before\")"
-        )));
+        assert!(read.contains(&format!("![shot.png]({} \"Before\")", local.display())));
         assert!(read.contains(&format!("![clip](xmatrix:page-media/{video})")), "a video stays on the page");
         assert_eq!(to_page(&read, HashSet::new()), (page, Vec::new()));
     }
