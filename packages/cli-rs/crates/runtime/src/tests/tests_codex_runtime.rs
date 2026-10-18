@@ -2504,44 +2504,31 @@ async fn claude_stream_set_model_switch_live() {
 
 #[test]
 fn daemon_run_exit_from_status_file_recovers_terminal_run() {
-    let marker = DaemonRunStatusMarker {
-        phase: "turn_completed".to_string(),
-        completed: true,
-        delivered: true,
-        pid: i32::MAX as u32,
-        updated_at_millis: super::unix_millis_now(),
-        ..test_daemon_status_marker()
-    };
-    let status_path = PathBuf::from("/tmp/run-recovered.status.json");
+    let (status_path, marker) = orphan_terminal_status_fixture("turn_completed", true);
 
     let exit = daemon_run_exit_from_status_file(&status_path, &marker)
         .expect("terminal status should produce a recovered run exit");
 
     assert_eq!(exit.registry_key, None);
-    assert_eq!(exit.run_id.as_deref(), Some("run-recovered"));
-    assert_eq!(exit.execution_key, None);
+    assert_eq!(exit.run_id.as_deref(), Some("channel:instance#execution"));
+    assert_eq!(exit.execution_key.as_deref(), Some("exact-execution-key"));
     assert_eq!(exit.pid, i32::MAX as u32);
     assert_eq!(exit.exit_code, Some(0));
     assert_eq!(exit.completed, Some(true));
     assert_eq!(exit.delivered, Some(true));
     assert_eq!(exit.status_phase.as_deref(), Some("turn_completed"));
+    fs::remove_dir_all(status_path.parent().unwrap()).unwrap();
 }
 
 #[test]
 fn daemon_run_exit_from_status_file_preserves_failed_run_outcome() {
-    let marker = DaemonRunStatusMarker {
-        phase: "turn_failed".to_string(),
-        detail: Some("Reconnecting... 2/5".to_string()),
-        pid: i32::MAX as u32,
-        updated_at_millis: super::unix_millis_now(),
-        ..test_daemon_status_marker()
-    };
-    let status_path = PathBuf::from("/tmp/run-failed.status.json");
+    let (status_path, mut marker) = orphan_terminal_status_fixture("turn_failed", false);
+    marker.detail = Some("Reconnecting... 2/5".to_string());
 
     let exit = daemon_run_exit_from_status_file(&status_path, &marker)
         .expect("failed terminal status should produce a recovered run exit");
 
-    assert_eq!(exit.run_id.as_deref(), Some("run-failed"));
+    assert_eq!(exit.run_id.as_deref(), Some("channel:instance#execution"));
     assert_eq!(exit.exit_code, None);
     assert_eq!(exit.completed, Some(false));
     assert_eq!(exit.delivered, Some(false));
@@ -2550,6 +2537,97 @@ fn daemon_run_exit_from_status_file_preserves_failed_run_outcome() {
         exit.run_status_detail.as_deref(),
         Some("Reconnecting... 2/5")
     );
+    fs::remove_dir_all(status_path.parent().unwrap()).unwrap();
+}
+
+fn orphan_terminal_status_fixture(
+    phase: &str,
+    completed: bool,
+) -> (PathBuf, DaemonRunStatusMarker) {
+    let dir =
+        std::env::temp_dir().join(format!("xmatrix-orphan-terminal-{}", uuid::Uuid::new_v4()));
+    fs::create_dir_all(&dir).unwrap();
+    let run_id = "channel:instance#execution";
+    let label = super::daemon_run_file_label(Some(run_id), None, "codex");
+    let status_path = dir.join(format!("{label}.status.json"));
+    let marker = DaemonRunStatusMarker {
+        phase: phase.to_string(),
+        completed,
+        delivered: completed,
+        pid: i32::MAX as u32,
+        updated_at_millis: super::unix_millis_now(),
+        ..test_daemon_status_marker()
+    };
+    assert!(persist_daemon_run_status_marker(&status_path, &marker));
+    assert!(super::persist_daemon_run_sidecar(
+        &super::PersistedDaemonRun {
+            pid: marker.pid,
+            run_id: Some(run_id.to_string()),
+            execution_key: Some("exact-execution-key".to_string()),
+            status_file_path: Some(status_path.clone()),
+            ..test_empty_persisted_daemon_run()
+        }
+    ));
+    (status_path, marker)
+}
+
+// The receipt handler removes the recovery sidecar, while diagnostics retain
+// status/log files. Reconnect must not turn those retained files into new exits.
+#[test]
+fn orphan_terminal_report_stays_recoverable_until_receipt_then_stops_replaying() {
+    let (status_path, marker) = orphan_terminal_status_fixture("turn_completed", true);
+    for _ in 0..2 {
+        assert!(
+            super::daemon_run_exit_from_orphan_status_file(&status_path, &marker, &HashSet::new())
+                .is_some()
+        );
+    }
+    let sidecar = super::daemon_run_sidecar_path_for_status(&status_path).unwrap();
+    assert_eq!(
+        super::remove_daemon_run_sidecar_path(&sidecar, marker.pid),
+        super::DaemonRunSidecarRemoval::Removed
+    );
+    let retained = read_daemon_run_status_marker(Some(&status_path)).unwrap();
+    assert!(
+        super::daemon_run_exit_from_orphan_status_file(&status_path, &retained, &HashSet::new())
+            .is_none()
+    );
+    assert_eq!(retained.phase, "turn_completed");
+    fs::remove_dir_all(status_path.parent().unwrap()).unwrap();
+}
+
+#[test]
+fn orphan_terminal_report_refuses_mismatched_or_unknown_recovery_identity() {
+    for invalid in ["pid", "path", "identity", "malformed"] {
+        let (status_path, marker) = orphan_terminal_status_fixture("turn_failed", false);
+        let sidecar = super::daemon_run_sidecar_path_for_status(&status_path).unwrap();
+        let mut run: super::PersistedDaemonRun =
+            serde_json::from_slice(&fs::read(&sidecar).unwrap()).unwrap();
+        match invalid {
+            "pid" => run.pid -= 1,
+            "path" => {
+                run.status_file_path = Some(status_path.with_file_name("another.status.json"))
+            }
+            "identity" => {
+                run.run_id = None;
+                run.execution_key = None;
+            }
+            "malformed" => {}
+            _ => unreachable!(),
+        }
+        let bytes = if invalid == "malformed" {
+            b"{".to_vec()
+        } else {
+            serde_json::to_vec(&run).unwrap()
+        };
+        fs::write(&sidecar, bytes).unwrap();
+        assert!(
+            daemon_run_exit_from_status_file(&status_path, &marker).is_none(),
+            "{invalid}"
+        );
+        assert!(sidecar.exists(), "invalid recovery evidence is preserved");
+        fs::remove_dir_all(status_path.parent().unwrap()).unwrap();
+    }
 }
 
 #[test]

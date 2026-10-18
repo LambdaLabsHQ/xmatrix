@@ -2011,14 +2011,6 @@ fn daemon_run_status_file_label(path: &Path) -> Option<String> {
         .filter(|label| !label.trim().is_empty())
 }
 
-fn daemon_run_ids_from_file_label(label: &str) -> (Option<String>, Option<String>) {
-    if label.starts_with("run-") {
-        (Some(label.to_string()), None)
-    } else {
-        (None, Some(label.to_string()))
-    }
-}
-
 fn daemon_run_status_is_terminal(marker: &DaemonRunStatusMarker) -> bool {
     marker.completed
         || matches!(
@@ -2037,8 +2029,22 @@ fn daemon_run_exit_from_status_file(
     if crate::process_tree::process_alive(marker.pid) {
         return None;
     }
+    // Status/log files outlive their receipt cleanup. Only a retained registry
+    // sidecar represents an exit still eligible for recovery; a sanitized file
+    // label is neither a Run identity nor evidence that a report is pending.
+    let run = read_daemon_run_sidecar(&daemon_run_sidecar_path_for_status(status_file_path)?)?;
+    if run.pid != marker.pid
+        || run.status_file_path.as_deref() != Some(status_file_path)
+        || (run.run_id.is_none() && run.execution_key.is_none())
+        || !persisted_profile_lineage_matches(
+            run.profile_id.as_deref(),
+            config::active_profile_context().as_ref(),
+        )
+        || !daemon_run_recovery_files_are_private(&run)
+    {
+        return None;
+    }
     let label = daemon_run_status_file_label(status_file_path)?;
-    let (run_id, execution_key) = daemon_run_ids_from_file_label(&label);
     let parent = status_file_path.parent()?;
     let stdout_log_path = parent.join(format!("{label}.out.log"));
     let stderr_log_path = parent.join(format!("{label}.err.log"));
@@ -2050,10 +2056,10 @@ fn daemon_run_exit_from_status_file(
         connection_retry: marker.connection_retry.clone(),
         wrapper_ready_at_millis: marker.wrapper_ready_at_millis,
         registry_key: None,
-        run_id,
-        execution_key,
-        agent_id: None,
-        agent_name: None,
+        run_id: run.run_id,
+        execution_key: run.execution_key,
+        agent_id: run.agent_id,
+        agent_name: run.agent_name,
         pid: marker.pid,
         status: marker
             .detail

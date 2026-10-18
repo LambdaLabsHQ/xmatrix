@@ -404,32 +404,32 @@ fn orphan_sidecar_removed_audit_event(
 
 fn read_daemon_run_sidecars_from_dir(dir: &Path) -> Vec<PersistedDaemonRun> {
     config::daemon_run_sidecar_paths(dir)
-        .filter_map(|path| {
-            let raw = std::fs::read_to_string(&path).ok()?;
-            match serde_json::from_str::<PersistedDaemonRun>(&raw) {
-                Ok(run) if daemon_run_sidecar_path(&run).as_deref() == Some(path.as_path()) => {
-                    Some(run)
-                }
-                Ok(run) => {
-                    append_daemon_registry_audit(&format!(
-                        "sidecar_path_mismatch path={} expected={}",
-                        path.display(),
-                        daemon_run_sidecar_path(&run)
-                            .map(|expected| expected.display().to_string())
-                            .unwrap_or_else(|| "none".to_string())
-                    ));
-                    None
-                }
-                Err(err) => {
-                    append_daemon_registry_audit(&format!(
-                        "sidecar_parse_failed path={} error={err}",
-                        path.display()
-                    ));
-                    None
-                }
-            }
-        })
+        .filter_map(|path| read_daemon_run_sidecar(&path))
         .collect()
+}
+
+fn read_daemon_run_sidecar(path: &Path) -> Option<PersistedDaemonRun> {
+    let raw = std::fs::read_to_string(path).ok()?;
+    match serde_json::from_str::<PersistedDaemonRun>(&raw) {
+        Ok(run) if daemon_run_sidecar_path(&run).as_deref() == Some(path) => Some(run),
+        Ok(run) => {
+            append_daemon_registry_audit(&format!(
+                "sidecar_path_mismatch path={} expected={}",
+                path.display(),
+                daemon_run_sidecar_path(&run)
+                    .map(|expected| expected.display().to_string())
+                    .unwrap_or_else(|| "none".to_string())
+            ));
+            None
+        }
+        Err(err) => {
+            append_daemon_registry_audit(&format!(
+                "sidecar_parse_failed path={} error={err}",
+                path.display()
+            ));
+            None
+        }
+    }
 }
 
 fn daemon_run_sidecar_is_recoverable(run: &PersistedDaemonRun) -> bool {
