@@ -91,11 +91,9 @@ export async function withExecution(
   return commandResult(manifest.name, action.id, outcome);
 }
 
-/* The receipt reports what the Hub already did, so it is a system fact:
-   context for every Instance, never a turn. It replies to the command's
-   message, where everyone in the Channel, the sender included, reads the
-   outcome; delivering it as work made the sender's own receipt cancel the
-   turn that sent the command. */
+/* Receipts resume the exact calling Instance after its current turn. The
+   trusted caller identity survives approvals and durable execution; provider
+   text and mutable names never decide who receives the result as work. */
 export async function publishCommandStatus(manifest: AppConnectorProviderManifest, input: ConnectorCommandInput,
   lines: readonly string[]): Promise<void> {
   if (lines.length === 0) return;
@@ -109,7 +107,9 @@ export async function publishCommandStatus(manifest: AppConnectorProviderManifes
     ...(manifest.id === "x" ? { messageKind: "xmatrix.system.x_receipt" } : {}),
     principal: { kind: "user", id: input.actorUserId },
     appAuthorId: manifest.id,
-    residual: { appMetadata: { xmatrixProvenance: "system_fact" },
+    residual: { appMetadata: { xmatrixProvenance: "system_fact",
+      ...(input.senderKind === "agent" && input.senderId && input.commandMessageId !== null
+        ? { xmatrixConnectorRequesterInstanceId: input.senderId } : {}) },
       ...(input.commandMessageId === null ? {} : { replyToMessageId: input.commandMessageId ?? input.messageId }) },
   });
   if (!response.ok) throw await failure(`${manifest.name} connector status`, response);

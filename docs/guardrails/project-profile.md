@@ -15,6 +15,12 @@ English is the default language for repository documentation, guardrails, releas
 
 ## Current behavior
 
+Connector action receipts resume only the exact authenticated calling Instance,
+queueing behind an active turn; subscribed App events reach existing Channel
+Instances and resume sleeping/interrupted ones through the bounded wake
+boundary. Stopped Instances remain stopped. See
+[Connector delivery](../design/connector-platform.md).
+
 Gmail notifications default to minute INBOX count polling with a separate
 15-minute Composio incremental-ID check. Our Google grant uses labels plus
 basic mailbox identity, while existing Composio content access stays separate.

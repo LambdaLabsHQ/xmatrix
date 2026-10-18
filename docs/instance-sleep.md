@@ -110,7 +110,12 @@ its Runs rest on.
 
 Every committed Human or Agent message goes through
 `dispatchProductMessagePostCommit`. With PostgreSQL launch authority that entry
-point now also runs `resting-instance-wake` for the message's Channel:
+point now also runs `resting-instance-wake` for the message's Channel.
+Committed Connector App messages enter the same wake authority directly, without
+interpreting their external bodies. Native events reach existing Channel
+Instances; action receipts restrict the wake to the authenticated calling
+Instance, recorded in Hub-only metadata. Human receipts and other system facts
+remain context. Live and catch-up App work queues behind any active turn:
 
 1. Messages that are themselves lifecycle controls (`/kill all`, `:stop`,
    `:reborn`, `:handoff:`) and Auto/harness launch requests (`@auto`, `@claude`,
