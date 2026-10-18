@@ -225,12 +225,20 @@ const PAGE_SESSION_PING = "ping";
 const PAGE_HEARTBEAT_INTERVAL_MS = 25_000;
 const PAGE_HEARTBEAT_TIMEOUT_MS = 10_000;
 
+/** A new page whose making failed is tried again on a write at least this much later. */
+const PAGE_MAKE_RETRY_MS = 2_000;
+/** A new page left while it is being made has this long to take what was written since. */
+const PAGE_LEAVE_FLUSH_MS = 15_000;
+
 export class PageLiveSession {
   readonly doc = new Y.Doc();
   /** The page; null while it is a new page nobody has written on yet, which exists only here. */
   pageId: string | null;
   private making: Promise<string> | null = null;
+  private retryAt = 0;
   private reached = false;
+  /** Left while being made: it closes once what was written since has reached the made page. */
+  private leaving = false;
   private destroyed = false;
   /** The page's document (docs/design/pages-live-document.md §4.1), which the editor binds. */
   readonly fragment = this.doc.getXmlFragment(PAGE_DOCUMENT_FRAGMENT);
@@ -258,7 +266,7 @@ export class PageLiveSession {
       this.send(encodePageSync(encoder => syncProtocol.writeUpdate(encoder, update)));
       // This person's own edit, for the page's "Saving… / Saved" line.
       this.emit({ type: "local-edit" });
-      if (this.pageId === null) void this.make().catch(() => undefined);
+      if (this.pageId === null && Date.now() >= this.retryAt) void this.make().catch(() => undefined);
     });
     this.awareness.on("update", ({ added, updated, removed }: { added: number[]; updated: number[]; removed: number[] },
       origin: unknown) => {
@@ -309,22 +317,22 @@ export class PageLiveSession {
   }
 
   /**
-   * Makes the new page this document is the start of, once, and resolves to its id; a failure
-   * notifies and is tried again on the next write.
+   * Makes the new page this document is the start of, once, and resolves to its id. After a failure
+   * a write tries again, at most every PAGE_MAKE_RETRY_MS.
    */
   make(): Promise<string> {
     if (this.pageId !== null) return Promise.resolve(this.pageId);
     if (!this.making) {
       this.making = this.input.make!(Y.encodeStateAsUpdate(this.doc)).then(({ pageId, seeded }) => {
         this.pageId = pageId;
-        if (!this.destroyed) {
-          this.emit({ type: "made", pageId, seeded });
-          if (seeded) this.connection.start();
-        }
+        if (this.destroyed) return pageId;
+        if (!this.leaving) this.emit({ type: "made", pageId, seeded });
+        if (seeded) this.connection.start();
+        else if (this.leaving) this.close();
         return pageId;
       }, (cause: unknown) => {
         this.making = null;
-        if (!this.destroyed) this.emit({ type: "error", code: "page_create_failed" });
+        this.retryAt = Date.now() + PAGE_MAKE_RETRY_MS;
         throw cause;
       });
     }
@@ -387,6 +395,8 @@ export class PageLiveSession {
         this.emit({ type: "synced" });
       }
       if (reply) this.send(reply);
+      // Its answer to the session's first sync message carries what was written here since the page was made.
+      if (this.leaving && kind === syncProtocol.messageYjsSyncStep1) this.close();
     } else if (type === MESSAGE_AWARENESS) {
       awarenessProtocol.applyAwarenessUpdate(this.awareness, decoding.readVarUint8Array(decoder), this);
     } else if (type === MESSAGE_NOTICE) {
@@ -398,6 +408,19 @@ export class PageLiveSession {
   }
 
   destroy(): void {
+    // A new page left while it is being made still takes what was written after its first write.
+    const making = this.pageId === null ? this.making : null;
+    if (making && !this.leaving) {
+      this.leaving = true;
+      setTimeout(() => this.close(), PAGE_LEAVE_FLUSH_MS);
+      making.catch(() => this.close());
+      return;
+    }
+    this.close();
+  }
+
+  private close(): void {
+    if (this.destroyed) return;
     this.destroyed = true;
     // Tell the others this person left while the socket is still up.
     awarenessProtocol.removeAwarenessStates(this.awareness, [this.doc.clientID], "local");

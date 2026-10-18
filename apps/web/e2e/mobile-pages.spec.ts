@@ -191,8 +191,9 @@ test("a phone shows why a page could not be made, and writing on it tries again"
   await expect(page).toHaveURL(/page=new/u);
   await fixtureJson(page, "retry-create", PAGE_TREE_PATTERN,
     { page: summary("p-retry", null, "Retry") }, { method: "POST" });
-  // What was written stays on the page, and the next words make it.
+  // What was written stays on the page, and words written a moment later make it (not one try per keystroke).
   await expect(page.getByTestId("page-editor").locator("h1")).toHaveText("Retry");
+  await page.waitForTimeout(2_100);
   await page.keyboard.type("Notes");
   await expect(page).toHaveURL(/page=p-retry/u);
   expect(await fixtureRequestBodies(page, "failed-create")).toHaveLength(1);

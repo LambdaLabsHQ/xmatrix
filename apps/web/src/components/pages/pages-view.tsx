@@ -689,7 +689,11 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     // One session per page; it must not churn when the auth context re-renders.
     const live = kept ?? new PageLiveSession({ spaceId, pageId, token: tokenRef.current,
       user: { name: userName, color: pageAuthorColor({ kind: "user", id: userId }) },
-      ...(pending ? { make: (document: Uint8Array) => make.current(document) } : {}) });
+      // A failed make says why on the page; a later write tries again.
+      ...(pending ? { make: (document: Uint8Array) => make.current(document).catch((cause: unknown) => {
+        setNotice(userErrorMessage(cause, "Couldn't create the page"));
+        throw cause;
+      }) } : {}) });
     if (!kept) {
       setSession(live);
       setNotice(null);
@@ -712,12 +716,10 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
           : live.underway ? "saving" : "offline"), 700);
       }
       if (event.type === "made") {
+        setNotice(null);
         madeHere.current = event.pageId;
         if (event.seeded) madeSession.current = live;
         selectPage.current(event.pageId);
-      }
-      if (event.type === "error" && event.code === "page_create_failed") {
-        setNotice("Couldn't create the page. Writing on it tries again.");
       }
       if (event.type === "synced") {
         setSynced(true);
