@@ -6,6 +6,45 @@ import { actionRefusal, isPolicyAction } from "../src/connectors/connector-comma
 import { stubFetchResponses } from "./support/fetch-responses.mjs";
 
 const read = SENTRY_ACTIONS.read_issue;
+// WEB-M/WEB-N: mapped dependency frames alone cannot identify the deployed chunk.
+test("mapped Sentry stacks retain bounded generated locations and occurrence evidence", async () => {
+  const { result, calls } = await run([{ body: { ...issue, count: "7",
+    firstSeen: "2026-10-18T16:18:04Z", lastSeen: "2026-10-18T16:19:07Z" } }, { body: { ...event,
+    entries: [{ type: "exception", data: { values: [{ type: "TypeError", value: "missing module",
+      stacktrace: { frames: [{ filename: "webpack://_N_E/webpack/bootstrap", lineNo: 21 }] },
+      rawStacktrace: { frames: Array.from({ length: 9 }, (_, n) => ({
+        filename: `https://xmatrix.sh/_next/static/chunks/${n}-abcdef123.js?private-query#private-fragment`,
+        absPath: "https://private-host.example/private-path", function: "private-function",
+        lineNo: 1, colNo: n + 10, vars: { token: "private-local" }, context: [[1, "private-source"]],
+      })) },
+    }] } }],
+  } }], undefined, "123");
+  assert.match(result.summary, /Occurrences: 7/);
+  assert.match(result.summary, /First seen: 2026-10-18T16:18:04Z/);
+  assert.match(result.summary, /Last seen: 2026-10-18T16:19:07Z/);
+  assert.match(result.summary, /Frame: webpack:\/\/_N_E\/webpack\/bootstrap · line 21/);
+  assert.match(result.summary, /Generated frame: https:\/\/xmatrix.sh\/_next\/static\/chunks\/8-abcdef123.js · line 1 · column 18/);
+  assert.equal((result.summary.match(/Generated frame:/g) ?? []).length, 8);
+  assert.match(result.summary, /rich content omitted or bounded/);
+  assert.doesNotMatch(result.summary, /private-|chunks\/0-/);
+  assert.equal(calls.length, 2, "no extra events are fetched");
+});
+
+test("malformed occurrence evidence and non-asset generated locations stay out of Sentry context", async () => {
+  const { result } = await run([{ body: { ...issue, count: "7 private-count",
+    firstSeen: "private-first", lastSeen: "2026-10-18T16:19:07Z\nprivate-last" } }, { body: { ...event,
+    entries: [{ type: "exception", data: { values: [{ type: "Error", value: "kept",
+      stacktrace: { frames: [{ filename: "src/owner.ts", lineNo: 3 }] },
+      rawStacktrace: { frames: [null, { filename: "data:text/javascript,private-source" },
+        { filename: "https://private-user:private-password@xmatrix.sh/chunk.js" },
+        { filename: "blob:https://xmatrix.sh/private-id" }, { filename: "private-file\nsource" },
+        { filename: "x".repeat(2049) }] },
+    }] } }],
+  } }], undefined, "123");
+  assert.match(result.summary, /Frame: src\/owner.ts · line 3/);
+  assert.doesNotMatch(result.summary, /Occurrences:|First seen:|Last seen:|Generated frame:|private-/);
+});
+
 // WEB-F: dependency frames hid the application effect that entered the loop.
 test("long Sentry stacks retain application callers before the dependency tail", async () => {
   const caller = { module: "src/components/pages/page-editor", function: "refreshSections",
@@ -189,6 +228,10 @@ test("optional exception type and value still return issue title and confirmed f
       include: [/TypeError: truncated/, /index\.js/], exclude: /private-local/ },
     { values: [{ type: null, value: null, rawStacktrace: { frames: [{ filename: "chunk.js", lineno: 9, colno: 3 }] } }],
       include: [/Exception 1\n/, /chunk\.js · line 9 · column 3/], exclude: /null/ },
+    { values: [{ stacktrace: { frames: [] }, rawStacktrace: { frames: [{
+      filename: "https://xmatrix.sh/chunk.js?private-query#private-fragment", lineno: 9,
+      module: "private-module", function: "private-function", vars: { token: "private-local" },
+    }] } }], include: [/Frame: https:\/\/xmatrix.sh\/chunk\.js · line 9/], exclude: /Generated frame:|private-/ },
     { values: [{ type: "Error", value: "kept", stacktrace: { frames: [null, frame] } }],
       include: [/Error: kept/, /index\.js/], exclude: /private-local/ },
     { values: [null, { type: "Error", value: "second", stacktrace: { frames: [frame] } }],

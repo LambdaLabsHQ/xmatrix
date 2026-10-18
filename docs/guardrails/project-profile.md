@@ -131,6 +131,12 @@ registry sidecar. Once its receipt cleanup removes that sidecar, retained status
 and log artifacts cannot replay the exit on reconnect. See
 [daemon recovery](../daemon-service-model.md#invocation-progress-evidence).
 
+Sentry issue reads retain bounded generated script locations alongside mapped
+exception callers, plus issue occurrence totals and first/last-seen UTC times.
+Generated locations exclude URL credentials, queries, fragments and inline code;
+source context, locals and request data remain private. See
+[connector operations](../operations/app-connectors.md).
+
 Outside AI applications can read and write a person's Pages and Channels
 through the remote OAuth MCP server, using the person's existing access.
 Open client registration supports outside MCP apps; consent explicitly labels
