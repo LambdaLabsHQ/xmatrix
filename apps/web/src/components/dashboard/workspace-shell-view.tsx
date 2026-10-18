@@ -1275,7 +1275,8 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
   // One Pages document surface, whether read on the desktop, pushed over the
   // phone's Pages list, or shown while the Space is being moved to pages.
   const pagesViewSurface = selectedPageId === NEW_PAGE_ID ? (
-    <PageDraft key={currentSpaceId} creation={pageCreation} layout={isMobileViewport ? "phone" : "desktop"} />
+    <PageDraft key={currentSpaceId} creation={pageCreation} spaceId={currentSpaceId} token={token ?? ""}
+      layout={isMobileViewport ? "phone" : "desktop"} />
   ) : (
     <PagesView spaceId={currentSpaceId} token={token ?? ""} selectedPageId={selectedPageId}
       onSelectPage={openPage} onOpenSection={openPageAt} onPageDeleted={closePage} conversation={pageConversation} focusSection={pageSectionRequest}

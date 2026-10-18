@@ -2,7 +2,8 @@ import type { Page } from "@playwright/test";
 
 import { expect, test } from "./fixtures";
 import { fixtureJson, fixtureRequestBodies } from "./in-page-api-fixtures";
-import { E2E_CHANNEL, E2E_DESKTOP_CONTEXT, E2E_SPACE, installPageTreeStubs, openWorkspaceWithStubs } from "./workspace-fixtures";
+import { E2E_CHANNEL, E2E_DESKTOP_CONTEXT, E2E_SPACE, harnessRegistrations, installPageTreeStubs, openWorkspaceWithStubs }
+  from "./workspace-fixtures";
 
 /* A desktop list leads with its +: its first row, full width and square like
    the rows, set apart by its tone. Nothing floats over what is open. */
@@ -101,6 +102,29 @@ test("the page tree leads with New page, and Ctrl+N there makes a page", async (
     { title: "Plans", parentPageId: null, body: "# Plans\n\nWhat we do next\n" },
   ]);
   await expect(page).toHaveURL(/page=p-new/u);
+});
+
+test("a new page offers co-writing before anything is written, and calling an Agent makes it", async ({ page }) => {
+  await installPageTreeStubs(page, ["Home"]);
+  const registrations = harnessRegistrations(["claude", "codex"]);
+  await fixtureJson(page, "registration-catalog", "**/agent-registrations", { registrations,
+    capabilities: registrations.map((registration) => ({ harness: registration.key.harness, models: [], locations: [registration] })) });
+  await page.goto(`/app/${encodeURIComponent(E2E_SPACE.id)}/pages`, { waitUntil: "domcontentloaded" });
+  await page.locator(".app-sidebar").getByText("Home", { exact: true }).click();
+  await expect(page.locator(".app-page-article")).toBeVisible();
+  await stubPageCreate(page);
+
+  await page.keyboard.press("Control+n");
+  await expect(page.getByTestId("page-draft")).toBeVisible();
+  await page.keyboard.type("Plans");
+  // The draft offers the same Co-write a page does, and picking an Agent does not save it first without one.
+  await page.getByRole("button", { name: "Co-write" }).click();
+  const picker = page.getByTestId("page-write-with");
+  await picker.getByRole("button", { name: "codex" }).click();
+  await expect.poll(() => fixtureRequestBodies(page, "page-create")).toEqual([{ title: "Plans", parentPageId: null }]);
+  await expect(page).toHaveURL(/page=p-new/u);
+  // The page it made calls that Agent as it opens (co-write-request.ts), and remembers it as the one to offer.
+  expect(await page.evaluate(() => window.localStorage.getItem("xmatrix.page-writer.space-personal"))).toBe("codex");
 });
 
 test("the agent list leads with Manage machines, and an agent, its machines and the + are one height", async ({ page }) => {
