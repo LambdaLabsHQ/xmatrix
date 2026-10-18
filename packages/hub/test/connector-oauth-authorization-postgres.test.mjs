@@ -9,6 +9,7 @@ import { signGitHubAppState } from "../src/index-shared.ts";
 import * as githubAuthorization from "../src/github-connect-authorization.ts";
 import { compileCommonJsSourceModule } from "./support/commonjs-source-module.mjs";
 import { stubFetchResponses } from "./support/fetch-responses.mjs";
+import { gmailPollCallback } from "../src/connectors/gmail-poll-oauth.ts";
 
 const load = await compileCommonJsSourceModule(new URL("../src/index-routes-connector-oauth.ts", import.meta.url));
 const management = await compileCommonJsSourceModule(new URL("../src/index-routes-auth-space-management.ts", import.meta.url));
@@ -24,6 +25,7 @@ async function withSpaces(run) {
   const principal = { id: `oauth-admin-${crypto.randomUUID()}` };
   const confirmations = [];
   const imports = {
+    "./connectors/gmail-poll-oauth": { gmailPollCallback },
     "./github-connect-authorization": githubAuthorization,
     "./index-routes-auth-space-management": { linkGitHubInstallation: () => assert.fail("a refused GitHub Connect cannot link an installation"),
       confirmGitHubInstallations: async (...args) => { confirmations.push(args.slice(1)); } },

@@ -9,6 +9,7 @@ import * as metering from '../src/usage-cost-metering.ts';
 import * as githubAuthorization from '../src/github-connect-authorization.ts';
 import { HUB_ROUTES } from '../../protocol/src/authority-foundation.ts';
 import { stubFetchResponses } from './support/fetch-responses.mjs';
+import { gmailPollCallback } from '../src/connectors/gmail-poll-oauth.ts';
 
 const route = await compileCommonJsSourceModule(new URL('../src/index-routes-connector-oauth.ts', import.meta.url));
 const appId = '123456789012345678', guildId = '223456789012345678', userId = '323456789012345678';
@@ -21,6 +22,7 @@ function fixture() {
       return { connectionVersion: state.version, credentialVersion: 2, connectionGeneration: state.generation }; },
     async put(input) { calls.push(['put', input]); if (state.failSave) throw Object.assign(new Error('private-concurrent-change'), { status: 409 }); return {}; } };
   const imports = {
+    './connectors/gmail-poll-oauth': { gmailPollCallback },
     './github-connect-authorization': githubAuthorization,
     './connectors/sentry-installation': { sentryInstallationClient: () => undefined },
     './connectors/googlechat-native': { googleChatNativeApp: () => undefined },
