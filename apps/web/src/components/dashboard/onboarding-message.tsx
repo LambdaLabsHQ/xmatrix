@@ -64,7 +64,10 @@ function AgentsInMessage({ spaceId, token, userId }: {
     .map((registration) => `@${registration.displayName}`))];
   const actions = useOnboardingActions();
   const ready = enabled.filter((registration) => !signedOut.includes(registration));
-  const writer = ready[0]?.key.harness;
+  // Co-writing waits on every line, so it goes to the fastest to answer: Claude
+  // and Codex reply in seconds where others take minutes (routing page,
+  // measured first replies). The first person who tried it got Grok, and nothing.
+  const writer = [...ready].sort((a, b) => writerRank(a.key.harness) - writerRank(b.key.harness))[0]?.key.harness;
   // Two different agents, for the card that has them talk it over.
   const names = [...new Set(ready.map((registration) => registration.displayName))];
   const pair = names.length >= 2 ? [names[0], names[1]] as const : null;
@@ -103,6 +106,12 @@ function AgentsInMessage({ spaceId, token, userId }: {
       </>}
     </div>
   );
+}
+
+const FAST_WRITERS = ["claude", "codex"];
+function writerRank(harness: string): number {
+  const index = FAST_WRITERS.indexOf(harness);
+  return index < 0 ? FAST_WRITERS.length : index;
 }
 
 /* One thing xMatrix does, on a piece of tinted paper: a title and a line. */

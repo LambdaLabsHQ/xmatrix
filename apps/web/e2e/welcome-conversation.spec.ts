@@ -95,7 +95,8 @@ test.describe("desktop", () => {
   });
 
   test("the first starter makes a page and opens it to be co-written with the agent", async ({ page }) => {
-    const agentsIn = await welcomeWithAgentIn(page, { harness: "claude", login: "signed_in" });
+    // Grok is in too, but co-writing waits on every line: the fast writer is the one asked.
+    const agentsIn = await welcomeWithAgentIn(page, { harness: ["grok", "claude"], login: "signed_in" });
     await fixtureJson(page, "page-create", /\/api\/xmatrix\/spaces\/[^/]+\/pages$/u, { page: { pageId: "p-first",
       title: "What I'm working on", parentPageId: null, position: "a", accessMode: "open", headRevision: 1,
       createdAt: E2E_NOW, updatedAt: E2E_NOW } }, { method: "POST" });
