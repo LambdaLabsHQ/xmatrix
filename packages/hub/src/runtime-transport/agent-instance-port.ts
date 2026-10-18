@@ -392,6 +392,7 @@ export class AgentInstanceRuntimeTransport {
       // the transport facts an Instance needs are added around it.
       const recipient = {
         agentName: session.principal.agentName,
+        instanceId: session.run.instanceId,
         nameIsAmbiguous: (profilesByName.get(session.principal.agentName.trim().toLowerCase())?.size ?? 0) > 1,
         agentId: session.principal.agentId,
         channelInstanceId: session.run.channelInstanceId,

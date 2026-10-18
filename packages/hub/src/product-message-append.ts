@@ -2,6 +2,8 @@ import { messagePublicationEvidence } from "@xmatrix/protocol";
 import { appendChannelMessage, channelMessageResult, committedLiveRouting, publishChannelLiveDelivery } from "./channel-messages";
 import { productMessageSenderPresentation } from "./message-sender-presentation";
 import type { Env } from "./types";
+import { connectorMessageWakeTarget } from "./connector-message-delivery";
+import { wakeRestingInstances } from "./registration-launch-dispatch";
 
 function record(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -62,5 +64,11 @@ export async function dispatchProductMessageAppend(
   const result = await channelMessageResult(() => appendChannelMessage(env, channelId, command));
   if (!result.ok) return result.response;
   await deliverCommittedProductMessage(env, channelId, command, result.payload);
+  const snapshot = record(result.payload.senderSnapshot);
+  const target = connectorMessageWakeTarget({ from: snapshot ?? {},
+    metadata: record(command.residual)?.appMetadata });
+  if (target) await wakeRestingInstances(env, { commandId: `connector-wake:${command.messageId}`.slice(0, 200),
+    channelId, sourceMessageId: String(command.messageId), prompt: String(command.body ?? ""),
+    ...(target.instanceId ? { targetInstanceId: target.instanceId } : {}) });
   return Response.json(result.payload, { headers: { "cache-control": "no-store" } });
 }

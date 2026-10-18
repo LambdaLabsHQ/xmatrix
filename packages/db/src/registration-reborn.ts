@@ -269,20 +269,22 @@ export class PostgresRegistrationRebornRepository extends RegistrationPreparatio
    * one whose wake can never succeed is left `wake_failed` with its reason, so
    * its Channel sees why and later messages do not keep retrying it.
    */
-  async wakeResting(raw: { commandId: string; channelId: string; sourceMessageId: string; prompt?: string }) {
+  async wakeResting(raw: { commandId: string; channelId: string; sourceMessageId: string; targetInstanceId?: string; prompt?: string }) {
     const channelId = text(raw.channelId), sourceMessageId = text(raw.sourceMessageId);
     const prompt = typeof raw.prompt === "string" ? raw.prompt : "";
     const commandId = text(raw.commandId);
+    const targetInstanceId = raw.targetInstanceId === undefined ? null : text(raw.targetInstanceId);
     const candidates = await this.database.transaction({ requestId: commandId, operation: "registration.wake.candidates",
-      placement: this.placement }, tx => tx.query({ name: "registration_wake_resting_candidates_v1", text: `SELECT
+      placement: this.placement }, tx => tx.query({ name: "registration_wake_resting_candidates_v2", text: `SELECT
         i.instance_id,r.owner_user_id FROM data.instances i
         JOIN data.runs r ON r.run_id=i.run_id AND r.channel_id=i.channel_id
-        WHERE i.channel_id=$1 AND i.status='offline' AND i.rest_state IN ('sleeping','interrupted')
+        WHERE i.channel_id=$1 AND ($2::text IS NULL OR i.instance_id=$2)
+          AND i.status='offline' AND i.rest_state IN ('sleeping','interrupted')
           AND r.status IN (${TERMINAL_RUN_STATUS_SQL})
           AND NOT EXISTS (SELECT 1 FROM data.agent_reborn_intents intent
             WHERE intent.source_instance_id=i.instance_id AND intent.state IN ('waiting','prepared'))
         ORDER BY i.updated_at DESC,i.instance_id LIMIT 16`,
-      values: [channelId], maxRows: MAX_WAKES_PER_MESSAGE }));
+      values: [channelId, targetInstanceId], maxRows: MAX_WAKES_PER_MESSAGE }));
     const woken: Array<{ instanceId: string; intentId: string; state: string }> = [];
     const refused: Array<{ instanceId: string; code: string; permanent: boolean }> = [];
     for (const candidate of candidates) {

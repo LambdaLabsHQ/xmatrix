@@ -442,6 +442,8 @@ export function registerChannelMessageRoutes(app: Hono<{ Bindings: Env }>): void
             actorUserId: actorUserId(authUser),
             senderKind: appendPrincipal.kind,
             senderId: appendPrincipal.id,
+            ...(agentInstanceId || attributedAgent?.instanceId
+              ? { senderInstanceId: agentInstanceId || attributedAgent?.instanceId } : {}),
             committedAt: postCommitAt,
             scheduleBackground: (task) => { try { c.executionCtx.waitUntil(task); } catch { /* no ExecutionContext outside Workers */ } },
             ...((principal?.runId || attributedAgent?.runId)

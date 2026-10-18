@@ -62,7 +62,7 @@ test("an Agent's Gmail search and read reply to its message with what they found
     assert.match(h.receipts[0].body, /Gmail (search|read): completed;/u);
     assert.ok(h.receipts[0].body.includes("SYNTHETIC-ALPHA9"), body);
     assert.equal(h.receipts[0].residual.replyToMessageId, "command-1");
-    assert.equal(h.receipts[0].residual.appMetadata.xmatrixProvenance, "system_fact");
+    assert.equal(h.receipts[0].residual.appMetadata.xmatrixConnectorRequesterInstanceId, "instance");
     const finalized = h.persisted.find(p => p.command === "finalize-execution").input;
     assert.equal(finalized.status, "completed");
     assert.ok(finalized.resultSummary.length > 0);
@@ -90,4 +90,5 @@ test("an approved request's receipt replies to the message that asked for it", a
     "read", GMAIL_ACTIONS.read, { target: id, text: "" }));
   assert.equal(h.receipts[0].residual.replyToMessageId, "command-4");
   assert.equal(h.receipts[0].messageId, "system:command-4:approved:gmail");
+  assert.equal(h.receipts[0].residual.appMetadata.xmatrixConnectorRequesterInstanceId, "instance");
 });
