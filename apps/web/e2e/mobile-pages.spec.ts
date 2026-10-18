@@ -149,9 +149,8 @@ for (const entry of ["FAB", "first page", "sub-page", "stale tree"] as const) {
     expect(backBar).not.toBeNull();
     expect(titleBox).not.toBeNull();
     expect(titleBox!.y).toBeGreaterThanOrEqual(backBar!.y + backBar!.height);
-    await expect(title).toBeFocused();
-    await expect(title).toHaveValue("");
-    await expect(title).toHaveAttribute("placeholder", "Untitled");
+    await expect(page.getByTestId("page-editor").locator(".page-document")).toBeFocused();
+    await expect(title).toHaveAttribute("data-placeholder", "Untitled");
     expect(await fixtureRequestBodies(page, "page-create")).toEqual([]);
     // Named, it is made under the page it was opened from, from its document: the name it opens with.
     await page.keyboard.type("New notes");
@@ -159,7 +158,7 @@ for (const entry of ["FAB", "first page", "sub-page", "stale tree"] as const) {
     await expect.poll(async () => (await fixtureRequestBodies(page, "page-create")).length).toBe(1);
     const [made] = await fixtureRequestBodies(page, "page-create");
     expect(made).toMatchObject({ parentPageId: created.parentPageId });
-    expect(startedMarkdown(made!.document)).toBe("# New notes\n");
+    expect(startedMarkdown(made!.document)).toBe("# N\n");
     // Writing on while it is on its way does not make a second page.
     await expect(page.getByTestId("page-editor").locator("h1")).toHaveText("New notes");
     await page.keyboard.type("First line");
@@ -183,8 +182,7 @@ test("a phone shows why a page could not be made, and writing on it tries again"
     { method: "POST", status: 500 });
   await openMobilePages(page);
   await page.locator(".app-mobile-create-fab").tap();
-  const title = page.getByTestId("page-title");
-  await expect(title).toBeFocused();
+  await expect(page.getByTestId("page-editor").locator(".page-document")).toBeFocused();
   await page.keyboard.type("Retry");
   await page.keyboard.press("Enter");
   await expect(page.getByTestId("pages-view")).toContainText("Couldn't create the page");
