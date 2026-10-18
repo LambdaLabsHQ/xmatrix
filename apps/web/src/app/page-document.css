@@ -567,12 +567,19 @@ html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-com
 }
 
 /*
- * What changed since this reader last read the page (§3.1), until they tick it viewed. It is marked as a
- * proofreader marks paper, in ink and never in a tinted box: new words and blocks underlined in brass,
- * words taken out struck through in faint ink where they stood. Brass is the app's
- * one accent, kept for what a person has yet to do; reading a change is that.
+ * What changed since this reader last read the page (§3.1), until they tick it viewed or write on it. It is
+ * marked as a proofreader marks paper, in ink and never in a tinted box: each stretch of changed lines barred
+ * once in the left margin (PageReaderChangeGutter), and inside a line that changed in part, new words
+ * underlined and words taken out struck through in faint ink where they stood. Brass is the app's one
+ * accent, kept for what a person has yet to do; reading a change is that.
  */
-.page-document .page-reader-change {
+.page-reader-bar {
+  position: absolute;
+  width: 3px;
+  border-radius: 3px;
+  background: var(--m-ink-attention, var(--accent));
+}
+.page-document .page-reader-change:not(.is-block) {
   text-decoration-line: underline;
   text-decoration-color: color-mix(in oklab, var(--m-ink-attention, var(--accent)) 85%, transparent);
   text-decoration-thickness: 1.5px;

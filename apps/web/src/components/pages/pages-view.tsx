@@ -29,14 +29,16 @@ import { IdentityAvatar } from "@/components/dashboard/identity-avatar";
 import { MobileInlineActions } from "@/components/dashboard/mobile-inline-actions";
 import { listenForOverlayDismissal } from "@/components/dashboard/use-overlay-dismiss";
 import { pagesViewPath } from "@/components/dashboard/workspace-shell-navigation";
-import type { CursorPresence, Discussion, HeadingActions, PageSectionActions, SectionNote, SuggestionControl } from "./page-editor";
+import type {
+  CursorPresence, Discussion, HeadingActions, PageReading, PageSectionActions, SectionNote, SuggestionControl,
+} from "./page-editor";
 import { PageAttached, type PageScheduleInput } from "./page-attached";
 import {
   ConversationList, DeletePageDialog, PageChangeMark, PageDialog, PageHistory, PagePens, PageOffscreenPeople, PageScrollMarks, PresenceStack, ShareDialog, type OffscreenPerson, type PagePen, type PresentPerson, type PageScrollMark,
 } from "./page-chrome";
 import { PageMargin } from "./page-margin";
 import { PagePhoneDock } from "./page-phone-dock";
-import { PageReaderChangeMark } from "./page-reader-changes-bar";
+import { PageReaderChangeGutter, PageReaderChangeMark } from "./page-reader-changes-bar";
 import type { SuggestionsReport } from "./page-suggestions";
 import { usePageSuggestions } from "./use-page-suggestions";
 import { PageWriteWith } from "./page-write-with";
@@ -591,15 +593,19 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     article.addEventListener("scroll", readViewport, { passive: true });
   }, [readViewport]);
   const [headRevision, setHeadRevision] = useState<number | null>(null);
-  // How far this person has read the page, kept by the Hub on every device of theirs (§3.1): History shows
-  // a dot when the page moved past it, as Google Docs does. `opened` is where it stood as the page opened.
+  // How far this person has read the page, kept by the Hub on every device of theirs (§3.1): the newest
+  // revision they have seen whole, and the page as they have seen it when they saw only part of it past that.
+  // History shows a dot when the page moved past it, as Google Docs does. `opened` is where it stood as the
+  // page opened.
   const [seenRevision, setSeenRevision] = useState<number | null>(null);
-  const [opened, setOpened] = useState<{ pageId: string; revision: number | null } | null>(null);
+  const [opened, setOpened] = useState<{ pageId: string; revision: number | null; seen: string | null } | null>(null);
   // What the page was when this reader last read it, for showing what changed since as a diff.
   const [readerBaseline, setReaderBaseline] = useState<string | null>(null);
   // How many changes that diff shows (null until known), and whether the reader has ticked it viewed.
   const [readerChanges, setReaderChanges] = useState<number | null>(null);
   const [diffViewed, setDiffViewed] = useState(false);
+  // What of the page this reader has last told the Hub they have seen past `seenRevision`.
+  const sentSeen = useRef<string | null>(null);
   useEffect(() => {
     setSeenRevision(null);
     setOpened(null);
@@ -609,53 +615,75 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     if (!spaceId || !pageId || !token) return;
     const controller = new AbortController();
     // Unknown, nothing is marked read and nothing is shown as changed.
-    pageApi.readState(spaceId, pageId, token, controller.signal).then(({ revision }) => {
-      setOpened({ pageId, revision });
+    pageApi.readState(spaceId, pageId, token, controller.signal).then(({ revision, seen = null }) => {
+      setOpened({ pageId, revision, seen });
       setSeenRevision(revision);
+      sentSeen.current = seen;
     }, () => undefined);
     return () => controller.abort();
   }, [spaceId, pageId, token]);
   const seen = useRef<number | null>(null);
   seen.current = seenRevision;
-  const markSeen = useCallback((revision: number) => {
-    if (!spaceId || !pageId || opened?.pageId !== pageId || revision <= (seen.current ?? 0)) return;
-    seen.current = revision;
-    setSeenRevision(revision);
-    void pageApi.markRead(spaceId, pageId, token, revision).catch(() => undefined);
+  /** The page read up to `revision`: seen whole, or as `seenBody` when only part of it was seen past that. */
+  const markSeen = useCallback((revision: number, seenBody: string | null) => {
+    if (!spaceId || !pageId || opened?.pageId !== pageId) return;
+    // Seen in part, it stays read as far as it was seen whole.
+    const at = seenBody === null ? Math.max(revision, seen.current ?? 0) : seen.current ?? revision;
+    if (at === seen.current && seenBody === sentSeen.current) return;
+    seen.current = at;
+    sentSeen.current = seenBody;
+    setSeenRevision(at);
+    void pageApi.markRead(spaceId, pageId, token, at, seenBody).catch(() => undefined);
   }, [opened, pageId, spaceId, token]);
   // The GitHub files the page embeds are read through the Hub, as this reader (pages-live-document.md §6.5).
   const readGitHubFile = useCallback((href: string, signal: AbortSignal) =>
     pageApi.githubFile(spaceId!, pageId!, token, href, signal), [spaceId, pageId, token]);
   const unseen = headRevision !== null && seenRevision !== null && headRevision > seenRevision;
-  // The page on screen in this tab is read at its head once it has been there a moment; a diff of what
-  // changed is read when its reader ticks it viewed.
-  const diffWaits = readerChanges === null || (readerChanges > 0 && !diffViewed);
-  useEffect(() => {
-    if (mode !== "page" || !drawn || headRevision === null || diffWaits) return;
-    let timer: number | undefined;
-    const read = () => {
-      window.clearTimeout(timer);
-      if (window.document.visibilityState === "visible") timer = window.setTimeout(() => markSeen(headRevision), READ_AFTER_MS);
-    };
-    read();
-    window.document.addEventListener("visibilitychange", read);
-    return () => { window.clearTimeout(timer); window.document.removeEventListener("visibilitychange", read); };
-  }, [diffWaits, drawn, headRevision, markSeen, mode]);
-  const baselineFor = useRef<typeof opened>(null);
+  const baselineFor = useRef<typeof opened>(null);  const baselineFor = useRef<typeof opened>(null);
   useEffect(() => {
     if (!opened || opened.pageId !== pageId || headRevision === null || baselineFor.current === opened) return;
     baselineFor.current = opened;
     setReaderBaseline(null);
+    // Seen in part, what changed is what the reader has not seen.
+    if (opened.seen !== null) { setReaderBaseline(opened.seen); return; }
     // A first visit, or a page that has not moved, has nothing to show as changed.
     if (opened.revision === null || opened.revision >= headRevision || !spaceId) { setReaderChanges(0); return; }
     void pageApi.read(spaceId, opened.pageId, token, opened.revision).then((result) => {
       if (baselineFor.current === opened) setReaderBaseline(result.page.body);
     }, () => { if (baselineFor.current === opened) setReaderChanges(0); });
   }, [headRevision, opened, pageId, spaceId, token]);
+  const reading = useRef<PageReading | null>(null);
   const viewDiff = () => {
     setDiffViewed(true);
-    if (headRevision !== null) markSeen(headRevision);
+    reading.current?.seeAll();
+    if (headRevision !== null) markSeen(headRevision, null);
   };
+  // Writing on the page, or calling an Agent to write it, is co-writing: what changes is seen as it happens,
+  // in its writer's ink, so what changed while the reader was away is no longer marked over it. It is still
+  // read only where it has been on their screen.
+  const coWriting = () => {
+    if (readerChanges && !diffViewed) setDiffViewed(true);
+  };
+  // The page as the reader had seen it when it opened: what they see from then on is read (§3.1).
+  const readFrom = readerBaseline !== null ? readerBaseline : readerChanges === 0 ? null : undefined;
+  // What has been on the reader's screen a moment, while the tab is in front, is read as it is then: what an
+  // Agent writes in view is read as it is written, and what it writes out of view is not.
+  useEffect(() => {
+    if (mode !== "page" || !drawn || headRevision === null || readFrom === undefined) return;
+    let timer: number | undefined;
+    const read = () => {
+      window.clearTimeout(timer);
+      if (window.document.visibilityState !== "visible") return;
+      timer = window.setTimeout(() => {
+        const area = articleElement.current?.getBoundingClientRect();
+        const now = area && reading.current?.see({ top: Math.max(area.top, 0), bottom: Math.min(area.bottom, window.innerHeight) });
+        if (now) markSeen(headRevision, now.whole ? null : now.body);
+      }, READ_AFTER_MS);
+    };
+    read();
+    window.document.addEventListener("visibilitychange", read);
+    return () => { window.clearTimeout(timer); window.document.removeEventListener("visibilitychange", read); };
+  }, [drawn, headRevision, markSeen, mode, readFrom, viewport]);
   const readerDiff = useMemo(() => readerBaseline === null || headRevision === null || diffViewed || !drawn ? null
     : { body: readerBaseline, head: headRevision }, [diffViewed, drawn, headRevision, readerBaseline]);
   const queryClient = useQueryClient();
@@ -1165,6 +1193,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   // and the Agent shows at the right edge beside the line it writes.
   const coWrite = async (harness: string, blockId: string | null) => {
     if (!page) return;
+    coWriting();
     writers.choose(harness);
     const section = blockId ? blocks.find((block) => block.id === blockId)?.title ?? null : null;
     try {
@@ -1505,6 +1534,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
                       </button>
                     </PageChangeMark>
                   )}
+                  {drawn && !!readerChanges && !diffViewed && <PageReaderChangeGutter column={docColumn} />}
                   {phone && phoneDiff && !suggestionMark && (
                     <PageReaderChangeMark column={docColumn} article={articleElement} changes={readerChanges ?? 0}
                       onViewed={viewDiff} />
@@ -1529,6 +1559,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
                     {session && <PageEditor key={session.doc.guid} session={session} canEdit={canEdit} writeOn={writeOn}
                       {...(coWriter ? { placeholder: onboardingCopy.coWrite.firstLine(coWriter) } : {})}
                       onReady={() => setEditorReady(true)} readerBaseline={readerDiff} onReaderChanges={setReaderChanges}
+                      onWrite={coWriting} readFrom={readFrom} reading={reading}
                       suggestions={drawn ? waiting.suggestions : null} onSuggestions={setSuggesting}
                       suggestionControl={suggestionControl}
                       actions={sectionActions} headingActions={headingActions} sections={sections}

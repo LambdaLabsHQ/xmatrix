@@ -214,23 +214,30 @@ fact is about.
 - **The scrollbar** marks where others are, where discussions are and which
   sections owe an update.
 - **What changed since this person last read the page** is shown to them as
-  a diff, in place. How far each person has read each page is theirs and kept by the Hub
+  a diff, in place. Read means seen: what has been on their screen a moment
+  (1.5 s, tab in front) is read as it was then, and nothing else is. So what
+  an Agent writes while they watch is read as it arrives, marked only by the
+  Agent's own ink, and what it writes out of view or while they are away is
+  not. How far each person has read each page is theirs and kept by the Hub
   (`data.page_reads`, `GET`/`PUT /api/spaces/:spaceId/pages/:pageId/read`),
-  so it follows them across devices; it is the newest revision they have had
-  on screen, moves only forward, and is set once the page has been in view at
-  a revision for a moment, or, when the page opened on a diff, once they tick
-  that diff *Viewed*. Opening the page diffs the revision they last read
-  against the document now, block by block and then word by word inside
-  changed blocks. It is marked as a proofreader marks paper, in the app's
-  one accent ink and never in a tinted box: new words and wholly new blocks
-  underlined in brass, text taken out struck through
-  in faint ink where it stood. Nothing is animated and nothing fades: the diff
-  stays until its reader ticks *Viewed* above the page, which shows the page
-  as it is; unticking shows the diff again. On a phone the diff is walked from
-  the right edge instead: a mark beside the change in front of the reader
-  counts the changes, steps to the next and says *Viewed*. A diff they have
-  viewed is not shown again: the page opens as it is. A first visit shows
-  nothing as changed. Agents have no read state.
+  so it follows them across devices: the newest revision they have seen whole,
+  which moves only forward, and, when they have seen only part of the page
+  past it, the page as they saw it (`seen_body`): each top-level block that
+  was on screen as it was then, each other block as they had last seen it
+  (`pageSeenDoc`). Opening the page diffs what they saw against the document
+  now, block by block and then word by word inside changed blocks. It is
+  marked as a proofreader marks paper, in the app's one accent ink and never
+  in a tinted box: each stretch of changed lines barred once in the left
+  margin, on one line beside the text and never over a list's markers, with
+  changed lines next to each other one bar and empty lines left out; inside a
+  line that changed in part, new words underlined in brass and text taken out
+  struck through in faint ink where it stood. Nothing is animated and nothing
+  fades: the diff stays for that visit until its reader ticks *Viewed* above
+  the page, which reads all of it and shows the page as it is, or writes on
+  the page, which only stops marking it; unticking shows the diff again. On a
+  phone the diff is walked from the right edge instead: a mark beside the
+  change in front of the reader counts the changes, steps to the next and says
+  *Viewed*. A first visit shows nothing as changed. Agents have no read state.
 - **Opening a page draws it as the editor will.** Until the live session has
   synced, the page shows its prefetched document rendered from the same
   document schema and list item view as the editor, with the margin's room
