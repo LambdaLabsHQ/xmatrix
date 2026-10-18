@@ -15,7 +15,6 @@ import {
 import { Button } from "@/components/ui/button";
 import { noticeClass } from "@/components/ui/status-tone";
 import { useAuth } from "@/lib/auth-context";
-import { isImeKeyDown } from "@/lib/ime-keydown";
 import { xmatrixQueryKeys } from "@/lib/query/query-keys";
 import {
   PageLiveSession, pageApi, pageChildren,
@@ -55,7 +54,6 @@ import { NEW_PAGE_ID, NEW_PAGE_TITLE, type PageCreation } from "./page-creation"
 import { PageTreeRow } from "./page-tree-row";
 import type { PageReferenceTargets } from "./page-reference-chips";
 import { userErrorMessage } from "@/lib/user-facing-error";
-import { nameDocument } from "@/lib/pages/page-markdown-edit";
 
 // The native shell also imports this module for its list screens. The editor
 // (ProseMirror and the page document) belongs to an open document, not to the cold-start list dependency graph.
@@ -1023,28 +1021,11 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     }
   };
 
-  // Naming a page writes its name into the document as the heading it opens with; Enter goes on into the text.
+  // A new page opens on its title, the first line of its document, as in Notion.
   const [writeOn, setWriteOn] = useState(0);
-  const goingOn = useRef(false);
-  const renamePage = async (value: string) => {
-    const title = value.trim();
-    const goOn = goingOn.current;
-    goingOn.current = false;
-    if (!spaceId || !page || !title) return;
-    // A new page names itself in its own document, a write like any other, which makes it.
-    if (pending) {
-      if (session) nameDocument(session.doc, title, "title");
-      if (goOn) setWriteOn((seq) => seq + 1);
-      return;
-    }
-    try {
-      await pageApi.update(spaceId, page.pageId, token, { title });
-      await queryClient.invalidateQueries({ predicate: (query) => query.queryKey.includes("page-tree") });
-      if (goOn) setWriteOn((seq) => seq + 1);
-    } catch (cause) {
-      setNotice(userErrorMessage(cause, "Couldn't rename the page"));
-    }
-  };
+  useEffect(() => {
+    if (pending && editorReady) setWriteOn((seq) => seq + 1);
+  }, [pending, editorReady]);
 
   // A page's name is the top-level heading its document opens with (pages-live-document.md §4.1).
   const opening = openingHeading(blocks, document.data?.body);
@@ -1053,24 +1034,6 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   useEffect(() => {
     if (renamedInDocument) void queryClient.invalidateQueries({ predicate: (query) => query.queryKey.includes("page-tree") });
   }, [headRevision, queryClient, renamedInDocument]);
-
-  // A document that opens without a name offers one above it; what is typed there becomes its opening heading.
-  // Only once the document is read: one still on its way is not unnamed. Plain text: a field well would read as a form.
-  const documentRead = drawn || document.data !== undefined;
-  const titleField = page && documentRead && opening === null ? (canEdit ? (
-    // A new page opens with its title ready to type, as in Notion.
-    <input key={page.pageId} defaultValue="" aria-label="Page title" autoFocus={pending}
-      data-testid="page-title" placeholder={NEW_PAGE_TITLE} onKeyDown={(event) => {
-        if (isImeKeyDown(event.nativeEvent)) return;
-        // The Enter only names it: the text it goes on into does not take it as a new line too.
-        if (event.key === "Enter") { event.preventDefault(); goingOn.current = true; event.currentTarget.blur(); }
-        if (event.key === "Escape") { event.currentTarget.value = ""; event.currentTarget.blur(); }
-      }}
-      onBlur={(event) => void renamePage(event.currentTarget.value)}
-      className="page-title mr-auto min-w-0 flex-1 appearance-none border-0 bg-transparent p-0 text-2xl font-black shadow-none outline-none" />
-  ) : (
-    <h1 className="mr-auto text-2xl font-black text-muted-foreground">{NEW_PAGE_TITLE}</h1>
-  )) : null;
 
   const toggleSuggestOnly = async () => {
     if (!spaceId || !page) return;
@@ -1459,13 +1422,10 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
           : "app-page-article min-h-0 min-w-0 flex-1 overflow-y-auto px-6 py-6 lg:px-12"}>
           <div className={cn("mx-auto max-w-3xl", marginOn && "max-w-[calc(48rem+21.5rem)]")}>
             {phone ? (
-              <>
-                <div className="-mr-2 flex items-center justify-end gap-1 pb-3" data-testid="page-controls">{controls}</div>
-                {titleField && <div className="mb-4 flex">{titleField}</div>}
-              </>
+              <div className="-mr-2 flex items-center justify-end gap-1 pb-3" data-testid="page-controls">{controls}</div>
             ) : (
               <header className="app-band-header mb-4 flex flex-wrap items-center gap-1.5" data-testid="page-controls">
-                {titleField ?? <span className="mr-auto" />}
+                <span className="mr-auto" />
                 <span className="mr-1 text-xs text-muted-foreground" data-testid="page-save-state"
                   title={`Revision ${headRevision ?? page?.headRevision ?? ""}`}>
                   {saveState === "saving" ? "Saving…" : saveState === "saved" ? "All changes saved"

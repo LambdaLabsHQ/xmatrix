@@ -83,7 +83,7 @@ test("the page tree leads with New page, and Ctrl+N there makes a page", async (
   await stubPageCreate(page);
   await page.keyboard.press("Control+n");
   await expect(page).toHaveURL(/page=new/u);
-  await expect(page.getByTestId("page-title")).toBeFocused();
+  await expect(page.getByTestId("page-editor").locator(".page-document")).toBeFocused();
   await expect(page.getByTestId("page-editor")).toBeVisible();
   await expect(page.getByRole("dialog")).toHaveCount(0);
   await expect(page.getByTestId("new-conversation")).toBeHidden();
@@ -94,13 +94,14 @@ test("the page tree leads with New page, and Ctrl+N there makes a page", async (
 
   // Its first write makes it, copy-on-write, from what is written; Enter goes on into its text.
   await page.keyboard.press("Control+n");
-  await expect(page.getByTestId("page-title")).toBeFocused();
+  await expect(page.getByTestId("page-editor").locator(".page-document")).toBeFocused();
+  await expect(page.getByTestId("page-title")).toHaveAttribute("data-placeholder", "Untitled");
   await page.keyboard.type("Plans");
   await page.keyboard.press("Enter");
   await expect.poll(async () => (await fixtureRequestBodies(page, "page-create")).length).toBe(1);
   const [made] = await fixtureRequestBodies(page, "page-create");
   expect(made).toMatchObject({ parentPageId: null });
-  expect(startedMarkdown(made!.document)).toBe("# Plans\n");
+  expect(startedMarkdown(made!.document)).toBe("# P\n");
   await expect(page).toHaveURL(/page=p-new/u);
 });
 
@@ -123,7 +124,7 @@ test("a new page offers Co-write as any page does, and calling an Agent makes it
     { message: {} }, { method: "POST" });
 
   await page.keyboard.press("Control+n");
-  await expect(page.getByTestId("page-title")).toBeFocused();
+  await expect(page.getByTestId("page-editor").locator(".page-document")).toBeFocused();
   // Its header is a page's; what needs a made page (History, Share) comes with the first write.
   const controls = page.getByTestId("page-controls");
   await expect(controls.getByRole("button", { name: "Co-write" })).toBeVisible();
@@ -173,13 +174,12 @@ test("a page row makes a page under it from its own +, shown while the row is ho
 
   await stubPageCreate(page);
   await create.click();
-  await expect(page.getByTestId("page-title")).toBeFocused();
+  await expect(page.getByTestId("page-editor").locator(".page-document")).toBeFocused();
   await expect(page.getByRole("dialog")).toHaveCount(0);
   await page.keyboard.type("Child");
-  await page.getByTestId("page-title").blur();
-  // Named, it is made under that row, from its document.
+  // Named, it is made under that row, from its document as its first letter left it.
   await expect.poll(async () => (await fixtureRequestBodies(page, "page-create")).length).toBe(1);
   const [made] = await fixtureRequestBodies(page, "page-create");
   expect(made).toMatchObject({ parentPageId: "p-home" });
-  expect(startedMarkdown(made!.document)).toBe("# Child\n");
+  expect(startedMarkdown(made!.document)).toBe("# C\n");
 });
