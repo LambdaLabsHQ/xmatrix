@@ -93,6 +93,8 @@ test("hot-path operations retain bounded stage, transaction phase, and SQLSTATE"
     ["message.history", "message_history_page_v1", "postgres.history", "history.sql"],
     ["message.append", "database_phase_commit_v1", "postgres.message", "phase.commit"],
     ["channel.direct-find", "channel_direct_find_v1", "postgres.direct", "direct.sql"],
+    ["account-deletion.pending", "database_phase_begin_v1", "postgres.account-deletion", "phase.begin"],
+    ["account-deletion.claim", "account_deletion_claim_v1", "postgres.account-deletion", "sql"],
     ["runtime.summon_prepare_resolved_batch_v2", "runtime_summon_v2_profiles_exact_v2",
       "postgres.launch", "launch_resolve"],
     ["runtime.summon_prepare_resolved_batch_v2", "runtime_summon_v2_runs_v1",
@@ -187,13 +189,17 @@ test("session points carry every segment of one checkout in fixed slots", () => 
 test("database observers accept any Worker env and stay silent without the binding", () => {
   const { env, written } = sink({ POSTGRES_QUERY_OBSERVABILITY_SAMPLE_RATE: "1" });
   const observers = postgresDatabaseObservers(env);
-  observers.observer({ requestId: "r", operation: "space.get", queryName: "space_get_v1",
+  observers.observer({ requestId: "r", operation: "account-deletion.pending", queryName: "account_deletion_pending_v1",
     shardId: "shard-0", durationMs: 1, rowCount: 1, outcome: "ok", slow: false });
-  observers.sessionObserver({ operation: "space.get", shardId: "shard-0", outcome: "ok",
+  observers.sessionObserver({ operation: "account-deletion.pending", shardId: "shard-0", outcome: "ok",
     wallMs: 3, queueMs: 0, checkoutMs: 0, firstStatementMs: 1, beginMs: 1,
     sqlMs: 1, sqlMaxMs: 1, commitMs: 1, rollbackMs: 0, roundTrips: 4, transactions: 1,
     queries: 1, rows: 1 });
   assert.deepEqual(written.map((point) => point.blobs[0]), ["query", "session"]);
+  assert.deepEqual(written.map((point) => [point.blobs[1], point.blobs[10]]), [
+    ["postgres.account-deletion", "account-deletion.pending"],
+    ["postgres.account-deletion", "account-deletion.pending"],
+  ]);
   assert.doesNotThrow(() => postgresDatabaseObservers({}).observer({ requestId: "r",
     operation: "space.get", queryName: "space_get_v1", shardId: "shard-0", durationMs: 1,
     rowCount: 1, outcome: "error", slow: false }));

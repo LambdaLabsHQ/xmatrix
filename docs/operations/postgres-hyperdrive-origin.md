@@ -88,6 +88,12 @@ minute means the origin connections are held too long; compare with the
 `session` points in the substrate observability dataset
 ([connectivity breaker](postgres-connectivity-breaker.md)).
 
+Account-deletion observations use the `postgres.account-deletion` family and retain
+the code-defined operation in `blob11` (for example `account-deletion.pending`
+or `account-deletion.claim`). Opening failures retain `phase.begin` and
+`database_phase_begin_v1` before any business SQL runs. Query and session
+points use the same family; no account or request identities are labels.
+
 ## Agent lifecycle locks
 
 Agent message preparation, observed-head and receipt reads, content reads and
