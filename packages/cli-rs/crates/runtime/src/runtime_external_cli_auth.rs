@@ -1126,9 +1126,14 @@ async fn run_zcode_app_external(run: ExternalRun<'_>) -> error::Result<()> {
                     continue;
                 }
                 let goal_command = passthrough.as_deref().and_then(parse_goal_command);
-                let payload = goal_command.is_none().then(|| {
-                    let payload = inbound_channel_batch_prompt(&inbound_messages, &agent);
-                    prompt_with_optional_bootstrap(&mut bootstrap, &payload)
+                // An addressed slash command must lead the prompt for ZCode to
+                // run it; the channel preamble would turn it into prose.
+                let payload = goal_command.is_none().then(|| match passthrough {
+                    Some(command) => command,
+                    None => prompt_with_optional_bootstrap(
+                        &mut bootstrap,
+                        &inbound_channel_batch_prompt(&inbound_messages, &agent),
+                    ),
                 });
                 let primary_message_id = primary_inbound_message_id(&inbound_messages);
                 run.publish("busy");

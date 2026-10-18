@@ -20,6 +20,7 @@ include!("tests_codex_capacity_retry.rs");
 include!("tests_trace_history_hub.rs");
 include!("tests_acp_resume.rs");
 include!("tests_harness_parameters.rs");
+include!("tests_harness_command_matrix.rs");
 // The fake Claude is a POSIX shell script.
 #[cfg(unix)]
 include!("tests_claude_stream_cli_turns.rs");
