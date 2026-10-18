@@ -6,6 +6,14 @@ import { gmailPollToken,verifyGmailPollMailbox,gmailInboxFingerprint,gmailCompos
 import { gmailIncomingChanges } from "../src/connectors/gmail-notification-api.ts";
 import { gmailPollCallback,gmailPollState } from "../src/connectors/gmail-poll-oauth.ts";
 import { signGitHubAppState } from "../src/index-shared.ts";
+import { compileCommonJsSourceModule } from "./support/commonjs-source-module.mjs";
+import * as polling from "../src/connectors/gmail-poll-client.ts";
+import * as oauth from "../src/connectors/oauth.ts";
+import * as shared from "../src/index-shared.ts";
+import { appOrigin } from "../src/deployment-origins.ts";
+import { base64UrlEncodeBytes } from "../src/relay-v2-primitives.ts";
+import { lowercaseHex,sha256Hex } from "@xmatrix/protocol";
+import { ProviderRequestError } from "../src/connectors/http.ts";
 
 const env={APP_URL:"https://xmatrix.sh",CONNECTOR_GOOGLE_CLIENT_ID:"google-fixture",CONNECTOR_GOOGLE_CLIENT_SECRET:"google-secret",
   CONNECTOR_GMAIL_CLIENT_ID:"gmail-fixture",CONNECTOR_COMPOSIO_API_KEY:"composio-secret"};
@@ -66,4 +74,25 @@ test("shared Google callback routes only signed notification state and never exc
   assert.equal(await gmailPollState(env,`${state}tampered`),undefined);
   const other=await signGitHubAppState({...claims,kind:"ordinary-connect"},env.CONNECTOR_GOOGLE_CLIENT_SECRET);
   assert.equal(await gmailPollCallback(env,new Request(`${claims.redirectUri}?state=${encodeURIComponent(other)}`)),undefined);
+});
+
+test("notification authorization requests only labels and identity, reusing the registered callback with a secret PKCE proof",async()=>{
+  const load=await compileCommonJsSourceModule(new URL("../src/connectors/gmail-poll-oauth.ts",import.meta.url));
+  let created;
+  const {startGmailPolling}=load(name=>({"@xmatrix/protocol":{lowercaseHex,sha256Hex},"../index-shared":shared,
+    "../deployment-origins":{appOrigin},"./credentials":{gmailRoutingRepository:()=>({create:async input=>{created=input;return "route-1";}})},
+    "./oauth":oauth,"../relay-v2-primitives":{base64UrlEncodeBytes},"./gmail-poll-client":polling,"./http":{ProviderRequestError}})[name]);
+  const configured={...env,HUB_URL:"https://xmatrix-hub.xmatrix.sh"};
+  const url=new URL(await startGmailPolling(configured,new Request(configured.HUB_URL),{
+    spaceId:"space-1",userId:"owner",channelId:"channel-1",credentialVersion:3,generation:"generation",
+    mailbox:{address:"me@example.com",account:"ca_owned",owner:"user:owner"}}));
+  assert.equal(url.searchParams.get("redirect_uri"),`${configured.HUB_URL}/api/connectors/oauth/callback`);
+  assert.deepEqual(url.searchParams.get("scope").split(" ").sort(),[...GMAIL_POLL_SCOPES].sort());
+  assert.equal(url.searchParams.get("include_granted_scopes"),"false");
+  assert.equal(url.searchParams.get("code_challenge_method"),"S256");
+  const expected=Buffer.from(await crypto.subtle.digest("SHA-256",new TextEncoder().encode(created.selection.oauthVerifier))).toString("base64url");
+  assert.equal(url.searchParams.get("code_challenge"),expected);
+  const claims=await gmailPollState(env,url.searchParams.get("state"));
+  assert.equal(claims.userId,"owner");assert.equal(claims.spaceId,"space-1");assert.equal(claims.oauthVerifier,undefined);
+  assert.equal(created.mode,"poll");assert.equal(created.credentialVersion,3);
 });
