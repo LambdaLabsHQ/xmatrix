@@ -1,19 +1,19 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { getXMatrixHubUrl } from "@/lib/xmatrix";
-import { NATIVE_REFRESH_COOKIE } from "@/lib/native-session";
-import { nativeAccountPath } from "@/lib/native-account-proxy";
+import { NATIVE_REFRESH_COOKIE, replaceNativeSessionToken } from "@/lib/native-session";
+import { nativeAccountCall } from "@/lib/native-account-proxy";
 
 /** Sends a native app page's account call on with the app's own session (lib/native-account-proxy.ts). */
 async function forward(request: Request, context: { params: Promise<{ path: string[] }> }): Promise<Response> {
-  const path = nativeAccountPath((await context.params).path ?? []);
-  if (!path) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  const call = nativeAccountCall((await context.params).path ?? [], request.method);
+  if (!call) return NextResponse.json({ error: "Not found" }, { status: 404 });
   // The session rides on a cookie, so a write must come from this site's own pages.
   if (request.method !== "GET" && request.headers.get("origin") !== new URL(request.url).origin) {
     return NextResponse.json({ error: "Cross-site request refused" }, { status: 403 });
   }
   const refreshToken = (await cookies()).get(NATIVE_REFRESH_COOKIE)?.value?.trim();
-  const target = new URL(`/api/auth/${path}`, getXMatrixHubUrl());
+  const target = new URL(`/api/auth/${call.path}`, getXMatrixHubUrl());
   target.search = new URL(request.url).search;
   const response = await fetch(target, {
     method: request.method,
@@ -26,13 +26,20 @@ async function forward(request: Request, context: { params: Promise<{ path: stri
     cache: "no-store",
     redirect: "manual",
   });
-  const headers = new Headers({
-    "content-type": response.headers.get("content-type") ?? "application/json",
-    "cache-control": "no-store",
+  const body = await response.json().catch(() => ({ error: "Account service returned an unreadable response" }));
+  const answer = NextResponse.json(call.response(body, response.ok), {
+    status: response.status, headers: { "cache-control": "no-store" },
   });
-  // A GitHub link keeps its provider state in the browser, as a cookie of the shared parent domain.
-  for (const cookie of response.headers.getSetCookie()) headers.append("set-cookie", cookie);
-  return new NextResponse(response.body, { status: response.status, headers });
+  // Two-factor changes rotate the upstream session. Adopt it on the server,
+  // keeping it out of both the JSON and the readable set-auth-token header.
+  const replacement = response.headers.get("set-auth-token");
+  if (response.ok && replacement) replaceNativeSessionToken(answer.cookies, replacement);
+  // Append after the native cookies: ResponseCookies.set rewrites this header.
+  // A GitHub link keeps its provider state in the browser, on the shared parent domain.
+  for (const cookie of response.headers.getSetCookie()) {
+    if (call.cookie(cookie)) answer.headers.append("set-cookie", cookie);
+  }
+  return answer;
 }
 
 export const GET = forward;

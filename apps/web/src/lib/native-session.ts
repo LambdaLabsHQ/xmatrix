@@ -28,6 +28,14 @@ export function setNativeSessionCookies(cookies: CookieWriter, payload: AuthResp
   cookies.set(NATIVE_PROVIDER_COOKIE, payload.authProvider || "", NATIVE_SESSION_COOKIE_OPTIONS);
 }
 
+/** Better Auth's bearer plugin returns a URI-encoded, signed session cookie after rotation. */
+export function replaceNativeSessionToken(cookies: CookieWriter, signedToken: string): void {
+  const token = decodeURIComponent(signedToken).split(".", 1)[0];
+  if (!token) return;
+  cookies.set(NATIVE_REFRESH_COOKIE, token, NATIVE_SESSION_COOKIE_OPTIONS);
+  cookies.set(NATIVE_ACCESS_COOKIE, "", { ...FIRST_PARTY_COOKIE_OPTIONS, maxAge: 0 });
+}
+
 export function clearNativeSessionCookies(cookies: CookieWriter) {
   for (const name of [NATIVE_ACCESS_COOKIE, NATIVE_REFRESH_COOKIE, NATIVE_PROVIDER_COOKIE]) {
     cookies.set(name, "", { ...FIRST_PARTY_COOKIE_OPTIONS, maxAge: 0 });

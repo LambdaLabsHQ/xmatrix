@@ -56,8 +56,14 @@ A desktop or phone app's 30-day session token stays in its HTTP-only cookie.
 `GET /api/xmatrix/native-session` gives the page only the hour-long access
 token, and the page's account calls (two-step verification, linked GitHub,
 outside apps, sign-out) go through `/api/xmatrix/native-auth/*`. That route
-adds the session from the cookie and forwards only those Better Auth paths. A
-write through it must come from the site's own origin.
+adds the session from the cookie; one capability table defines each permitted
+method, path and response projection. Only the account facts those screens
+consume return to the page, including nested user/session fields; upstream
+session tokens stay out of JSON and readable response headers. Two-factor
+session rotation replaces the native HTTP-only refresh cookie and clears its
+old access cookie, so the next session load refreshes it. Provider-state
+cookies still reach the browser. A write through it must come from the site's
+own origin.
 
 ### Apps signing in in place
 
