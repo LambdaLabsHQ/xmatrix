@@ -43,6 +43,7 @@ const en = {
   /** After a signed-out notice's sign-in: its summon was sent again. */
   signedInResent: "Your message went to it again.",
   resendFailed: "Your message could not be sent again. Send it once more.",
+  sendAgain: "Send your message again to continue.",
   noAgentYet: (machine: string) => `${machine} has no agent yet. Install one there and it shows up here:`,
   tryAgain: "Try again",
   noTerminal: "No terminal?",
@@ -155,6 +156,7 @@ const zh: OnboardingCopy = {
   signIn: "登录",
   signedInResent: "你的消息已重新交给它。",
   resendFailed: "消息没能重新发出，请再发一次。",
+  sendAgain: "再发一次消息就能继续。",
   noAgentYet: (machine) => `${machine} 上还没有 Agent。在那台电脑上装一个，它就会出现在这里：`,
   tryAgain: "重试",
   noTerminal: "没有终端？",

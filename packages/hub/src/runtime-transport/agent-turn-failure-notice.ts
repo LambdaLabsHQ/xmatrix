@@ -1,4 +1,7 @@
 import {
+  AGENT_SIGNED_OUT_LIFECYCLE_REASON,
+  HARNESS_SIGNED_OUT_NOTICE_KIND,
+  type HarnessSignedOut,
   agentTurnFailureNoticeBody,
   isAgentTurnFailureLifecycle,
   boundAgentTurnFailureDetail,
@@ -20,6 +23,8 @@ export function agentTurnFailureAppendCommand(input: {
   /** The host's count of tasks still pending when its provider stream ended. */
   pendingTasks?: number | null;
   reason?: string | null;
+  /** For a turn its program refused as signed out: what to sign in, drawn as the sign-in. */
+  signedOut?: HarnessSignedOut;
   noticeId?: string | null;
   senderSnapshot: Record<string, unknown>;
 }): {
@@ -66,6 +71,8 @@ export function agentTurnFailureAppendCommand(input: {
           xmatrixProvenance: "system_fact",
           xmatrixSystemNotice: true,
           ...(background ? { xmatrixBackgroundTaskInterruption: true } : { xmatrixTurnFailure: true }),
+          ...(input.signedOut && input.reason === AGENT_SIGNED_OUT_LIFECYCLE_REASON
+            ? { kind: HARNESS_SIGNED_OUT_NOTICE_KIND, signedOut: input.signedOut } : {}),
         },
       },
     },

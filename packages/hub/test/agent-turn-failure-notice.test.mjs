@@ -79,3 +79,18 @@ test("Hub words a background interruption from the host's count", () => {
   // An older host sent the sentence itself.
   assert.match(agentTurnFailureAppendCommand({ ...input, detail: "legacy sentence" }).body, /tracking for Claude\. legacy sentence$/u);
 });
+
+test("a turn its program refused as signed out carries what to sign in; any other failure does not", () => {
+  const signedOut = { harness: "claude", program: "Claude Code", machineId: "machine:mac", machineName: "mac-mini" };
+  const failure = (reason) => agentTurnFailureAppendCommand({
+    runId: "run-1", instanceId: "instance-1", executionKey: "exec-1", agentId: "agent-1", agentName: "claude",
+    ownerUserId: "user-1", channelId: "channel-1", reason, signedOut, senderSnapshot: {},
+    detail: "Failed to authenticate: OAuth session expired and could not be refreshed",
+  }).payload.residual.appMetadata;
+  const signedOutNotice = failure("harness_signed_out");
+  assert.equal(signedOutNotice.kind, "xmatrix.harness-signed-out.v1");
+  assert.deepEqual(signedOutNotice.signedOut, signedOut);
+  assert.equal(signedOutNotice.xmatrixTurnFailure, true);
+  assert.equal(failure("turn_failed").kind, undefined);
+  assert.equal(failure("turn_failed").signedOut, undefined);
+});

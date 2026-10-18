@@ -17,3 +17,15 @@ test("routing leaves out a harness its machine reports signed out, naming the pr
   assert.equal(harnessSignedOutOn(reporting("signed_out"), { ...key, harness: "claude" }), undefined,
     "another harness's report says nothing");
 });
+
+test("a start or turn refused as signed out keeps it out until its machine reports again", () => {
+  // The program's own status said signed in, but its token could not refresh.
+  const before = "2026-10-18T06:59:00Z", after = "2026-10-18T07:01:00Z";
+  assert.deepEqual(harnessSignedOutOn(reporting("signed_in"), key, after),
+    { harness: "codex", program: "Codex", machineId: "machine:mac", machineName: "mac-mini" });
+  assert.equal(harnessSignedOutOn(reporting("signed_in"), key, new Date(after)).program, "Codex");
+  // A report after the refusal (a sign-in from the card re-reports) answers it.
+  assert.equal(harnessSignedOutOn(reporting("signed_in"), key, before), undefined);
+  assert.equal(harnessSignedOutOn(reporting(undefined), key, null), undefined);
+  assert.equal(harnessSignedOutOn(reporting("signed_in"), key, "not a time"), undefined);
+});

@@ -85,8 +85,11 @@ test("a launch only a signed-out harness could take names the program and machin
   assert.deepEqual(parseHarnessSignedOut(signedOut), signedOut);
 
   const notice = { kind: HARNESS_SIGNED_OUT_NOTICE_KIND, signedOut, sourceMention: "@auto", sourceMessageId: "m-1" };
-  assert.deepEqual(harnessSignedOutNoticeOf(notice), { signedOut, sourceMention: "@auto", sourceMessageId: "m-1" });
-  assert.equal(harnessSignedOutNoticeOf({ ...notice, sourceMention: "auto" }), null);
+  assert.deepEqual(harnessSignedOutNoticeOf(notice), { signedOut, summon: { sourceMention: "@auto", sourceMessageId: "m-1" } });
+  // A turn failure answers no summon: only the sign-in.
+  assert.deepEqual(harnessSignedOutNoticeOf({ kind: HARNESS_SIGNED_OUT_NOTICE_KIND, signedOut }), { signedOut });
+  assert.deepEqual(harnessSignedOutNoticeOf({ ...notice, sourceMention: "auto" }), { signedOut });
+  assert.equal(harnessSignedOutNoticeOf({ ...notice, signedOut: { ...signedOut, program: "" } }), null);
   assert.equal(harnessSignedOutNoticeOf({ ...notice, kind: "other" }), null);
 });
 

@@ -21,7 +21,7 @@ const NOTICE = { messageId: "notice", channelId: CHANNEL.id, sequence: 2, sentAt
   metadata: { kind: "xmatrix.harness-signed-out.v1", signedOut, sourceMention: "@auto", sourceMessageId: "summon",
     xmatrixSystemNotice: true, xmatrixProvenance: "system_fact" } };
 
-async function openRefusedSummon(page: Parameters<typeof openWorkspaceWithStubs>[0], ownerUserId = "e2e-user") {
+async function openRefusedSummon(page: Parameters<typeof openWorkspaceWithStubs>[0], ownerUserId = "e2e-user", notice = NOTICE) {
   const registrations = [{ key: { spaceId: E2E_SPACE.id, ownerUserId, machineId: MACHINE, harness: "claude" },
     displayName: "claude", ownerName: "E2E Tester", machineName: "mac-mini", version: 1, state: "enabled", models: [],
     routingReady: true, canManageOwnerGrant: true, canConfigureSpace: true, canRemoveFromSpace: true,
@@ -33,7 +33,7 @@ async function openRefusedSummon(page: Parameters<typeof openWorkspaceWithStubs>
       harnesses: { schemaVersion: 1, capturedAt: E2E_NOW,
         items: [{ id: "claude", installed: true, probeStatus: "ok", version: "2.1.292", login: "signed_out" }] } } }];
   await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], registrations, machineDaemons, channels: [CHANNEL] });
-  await fixtureJson(page, "history", `**/api/xmatrix/channels/${CHANNEL.id}/history**`, { messages: [SUMMON, NOTICE], hasMore: false });
+  await fixtureJson(page, "history", `**/api/xmatrix/channels/${CHANNEL.id}/history**`, { messages: [SUMMON, notice], hasMore: false });
   await fixtureJson(page, "launch-anyway", `**/api/xmatrix/channels/${CHANNEL.id}/messages/summon/launch-anyway`,
     { launchIds: ["launch-again"] }, { method: "POST" });
   await fixtureRule(page, { id: "sign-in-issue", pattern: "**/api/xmatrix/machine-daemons/harness-actions", method: "POST",
@@ -43,13 +43,18 @@ async function openRefusedSummon(page: Parameters<typeof openWorkspaceWithStubs>
   return page.getByTestId("harness-signed-out-notice");
 }
 
-test("a summon refused for a signed-out program is signed in from its notice, then sent to it again", async ({ page }) => {
-  const notice = await openRefusedSummon(page);
-  await expect(notice).toContainText("Claude Code on mac-mini is not signed in, so it cannot take work yet.", { timeout: 20_000 });
+/** Claude Code's paste-code sign-in, finished from the notice. */
+async function signInFromNotice(page: Parameters<typeof openWorkspaceWithStubs>[0], notice: ReturnType<typeof page.getByTestId>) {
   await fixtureClaudePasteCodeSignIn(page, START, FINISH);
   await notice.getByRole("button", { name: "Sign in", exact: true }).click();
   await notice.getByRole("textbox", { name: "Sign-in code" }).fill("code-from-browser");
   await notice.getByRole("button", { name: "Finish" }).click();
+}
+
+test("a summon refused for a signed-out program is signed in from its notice, then sent to it again", async ({ page }) => {
+  const notice = await openRefusedSummon(page);
+  await expect(notice).toContainText("Claude Code on mac-mini is not signed in, so it cannot take work yet.", { timeout: 20_000 });
+  await signInFromNotice(page, notice);
   await expect(notice).toContainText("Your message went to it again.");
   // The author's own summon goes again, exactly as written.
   await expect.poll(() => fixtureRequestBodies(page, "launch-anyway"))
@@ -62,4 +67,15 @@ test("someone who cannot sign the program in reads the notice as written", async
   await expect(page.locator('[id="message:notice"]')).toContainText("Claude Code on mac-mini is not signed in, so it can't take work",
     { timeout: 20_000 });
   await expect(page.getByTestId("harness-signed-out-notice")).toHaveCount(0);
+});
+
+test("a turn its program refused as signed out is signed in from its notice, and asked again by the person", async ({ page }) => {
+  // The failure an Agent posts: no summon of its own to send again.
+  const { sourceMention: _mention, sourceMessageId: _source, ...metadata } = NOTICE.metadata;
+  const notice = await openRefusedSummon(page, "e2e-user", { ...NOTICE, metadata: { ...metadata, xmatrixTurnFailure: true },
+    body: "xMatrix could not complete this claude turn: Failed to authenticate: OAuth session expired and could not be refreshed" });
+  await expect(notice).toContainText("Claude Code on mac-mini is not signed in", { timeout: 20_000 });
+  await signInFromNotice(page, notice);
+  await expect(notice).toContainText("Send your message again to continue.");
+  expect(await fixtureRequestBodies(page, "launch-anyway")).toEqual([]);
 });

@@ -302,19 +302,23 @@ export function harnessSignedOutSentence(signedOut: HarnessSignedOut): string {
   return `${signedOut.program}${signedOut.machineName ? ` on ${signedOut.machineName}` : ""} is not signed in, so it can't take work.`;
 }
 
-/** The kind of the Channel notice for a summon refused because its program
- * is signed out. The Web draws it as the sign-in, then sends the summon again. */
+/** The kind of a Channel notice whose program is signed out: a summon refused
+ * for it, or a turn it refused. The Web draws it as the sign-in, then sends
+ * a refused summon again. */
 export const HARNESS_SIGNED_OUT_NOTICE_KIND = "xmatrix.harness-signed-out.v1";
 
-/** A signed-out notice's facts: what to sign in, and the summon it answers. */
+/** A signed-out notice's facts: what to sign in, and the summon to send again
+ * when it answers one (a turn failure answers none). */
 export function harnessSignedOutNoticeOf(metadata: Record<string, unknown> | undefined):
-  { signedOut: HarnessSignedOut; sourceMention: string; sourceMessageId: string } | null {
+  { signedOut: HarnessSignedOut; summon?: { sourceMention: string; sourceMessageId: string } } | null {
   if (!metadata || metadata.kind !== HARNESS_SIGNED_OUT_NOTICE_KIND) return null;
   const signedOut = parseHarnessSignedOut(metadata.signedOut);
+  if (!signedOut) return null;
   const { sourceMention, sourceMessageId } = metadata;
-  if (!signedOut || typeof sourceMention !== "string" || !/^[@＠]/u.test(sourceMention) || sourceMention.length > 4_500 ||
-      typeof sourceMessageId !== "string" || !sourceMessageId || sourceMessageId.length > 300) return null;
-  return { signedOut, sourceMention, sourceMessageId };
+  const summon = typeof sourceMention === "string" && /^[@＠]/u.test(sourceMention) && sourceMention.length <= 4_500 &&
+    typeof sourceMessageId === "string" && sourceMessageId && sourceMessageId.length <= 300
+    ? { sourceMention, sourceMessageId } : undefined;
+  return { signedOut, ...(summon ? { summon } : {}) };
 }
 
 function harnessSignedOutMessage(signedOut: HarnessSignedOut): string {

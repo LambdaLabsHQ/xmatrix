@@ -1453,16 +1453,11 @@ fn write_current_run_error_status(phase: &str, completed: bool, error: &CliError
         return;
     };
     let detail = truncate_chars(&error.to_string(), 2_000);
-    // A start the harness refused because its own account is signed out
-    // carries that as its failure code, so Hub can offer the sign-in.
-    let signed_out = (error.operation_failure().is_none() && crate::harness_signed_out_error(&detail))
-        .then(|| protocol::AgentOperationFailure {
-            code: crate::AGENT_SIGNED_OUT_LIFECYCLE_REASON.to_string(),
-            diagnostic_id: uuid::Uuid::new_v4().to_string(),
-            retryable: false,
-            stage: phase.to_string(),
-            origin_stage: None,
-        });
+    let signed_out = error
+        .operation_failure()
+        .is_none()
+        .then(|| signed_out_start_failure(phase, &detail))
+        .flatten();
     write_daemon_run_status_marker_with_failure(
         &path,
         phase,
@@ -1470,6 +1465,22 @@ fn write_current_run_error_status(phase: &str, completed: bool, error: &CliError
         Some(&detail),
         error.operation_failure().or(signed_out.as_ref()),
     );
+}
+
+/// A start the harness refused because its own account is signed out carries
+/// that as its failure code, so Hub can offer the sign-in. Hub keeps an
+/// operation failure only with a `diag_<uuid>` id (cleanRuntimeOperationFailure).
+pub(crate) fn signed_out_start_failure(
+    phase: &str,
+    detail: &str,
+) -> Option<protocol::AgentOperationFailure> {
+    crate::harness_signed_out_error(detail).then(|| protocol::AgentOperationFailure {
+        code: crate::AGENT_SIGNED_OUT_LIFECYCLE_REASON.to_string(),
+        diagnostic_id: format!("diag_{}", uuid::Uuid::new_v4()),
+        retryable: false,
+        stage: phase.to_string(),
+        origin_stage: None,
+    })
 }
 
 fn write_task_execution_to_path(path: &Path, state: protocol::AgentRuntimeState) {
