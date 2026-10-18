@@ -6,8 +6,10 @@ import type { Context, Hono } from "hono";
 import { authorityFailure, requestPrincipal, runPrincipalOf } from "./run-principal";
 import { requireAuth } from "./index-shared";
 import { publishPreReviewVerdict } from "./github-pre-review";
-import { gitHubFileReferenceHref, gitHubFileReferences, pageLineDiff, parseGitHubFileReference, type PageAwareness,
-  type PageChanges, type PageConversation, type PageLink, type PageLinkAnchor, type PageTreeActivity } from "@xmatrix/protocol";
+import { gitHubFileReferenceHref, gitHubFileReferences, immutableContentObjectKey, pageLineDiff, pageMediaFile,
+  pageMediaReferences, parseGitHubFileReference, spaceVisibilityScope, type PageAwareness,
+  type PageChanges, type PageConversation, type PageLink, type PageLinkAnchor, type PageTreeActivity,
+  type PublicPage } from "@xmatrix/protocol";
 import { canonicalPageMarkdown } from "@xmatrix/protocol/page-document";
 import type { AuthUser } from "./auth";
 import { PAGE_SESSION_HEARTBEAT_PING, PAGE_SESSION_SUBPROTOCOL_PREFIX, pageSessionId } from "./page-session-do";
@@ -25,6 +27,7 @@ import { readGitHubFile, type GitHubFileContent } from "./app-connectors";
 import { findAppConnection } from "./apps";
 import type { Env } from "./types";
 import { platformAdminSpaceId } from "./admin-platform-access";
+import { relayContentRepository } from "./relay-r2-upload-private-api";
 
 /**
  * Pages (docs/design/pages-and-conversations.md): the Space's markdown page
@@ -111,6 +114,44 @@ async function readAsCaller(c: Context<{ Bindings: Env }>) {
   const { page } = await repository(c.env).read({ requestId: crypto.randomUUID(), spaceId, pageId,
     principal: runPrincipalOf(authUser) });
   return { spaceId, pageId, authUser, page };
+}
+
+/**
+ * A file pasted into a page (`xmatrix:page-media/<sha-256>.<ext>`), for a
+ * caller already allowed to read the page: only a file the page's saved text
+ * shows, or one pasted into this very page and not saved yet, and only bytes
+ * the Space holds as page media. A `Range` request is answered in part, so a
+ * video plays from where it is sought.
+ */
+async function pageMediaResponse(c: Context<{ Bindings: Env }>, input: { spaceId: string; pageId: string;
+  body: string; unsaved: boolean; cacheControl: string }): Promise<Response> {
+  const media = pageMediaFile(c.req.param("file") ?? "");
+  if (!media) return c.json({ error: "Not a file pages show", code: "invalid_request" }, 400);
+  const notShown = () => c.json({ error: "The page does not show this file", code: "page_media_not_found" }, 404, NO_STORE);
+  const referenced = pageMediaReferences(input.body).includes(media.file);
+  if (!referenced && !input.unsaved) return notShown();
+  const holding = await relayContentRepository(c.env).pageMediaHolding({ requestId: crypto.randomUUID(),
+    spaceId: input.spaceId, pageId: input.pageId, contentHash: media.contentHash });
+  if (!(referenced ? holding.held : holding.heldForPage)) return notShown();
+  const bucket = c.env.RELAY_PAYLOAD_BUCKET;
+  if (!bucket) throw new ServiceUnavailable("private_storage_unavailable", "Page media is unavailable");
+  const key = immutableContentObjectKey(spaceVisibilityScope(input.spaceId), media.contentHash);
+  const ranged = c.req.raw.headers.has("range");
+  const object = await (ranged ? bucket.get(key, { range: c.req.raw.headers }).catch(() => bucket.get(key))
+    : bucket.get(key));
+  if (!object) return notShown();
+  const headers = new Headers({ "content-type": media.mimeType, "cache-control": input.cacheControl,
+    "x-content-type-options": "nosniff", "accept-ranges": "bytes", etag: object.httpEtag });
+  const range = ranged ? object.range : undefined;
+  if (!range) {
+    headers.set("content-length", String(object.size));
+    return new Response(object.body, { status: 200, headers });
+  }
+  const offset = "suffix" in range ? object.size - range.suffix : range.offset ?? object.size - range.length!;
+  const length = "suffix" in range ? range.suffix : range.length ?? object.size - offset;
+  headers.set("content-length", String(length));
+  headers.set("content-range", `bytes ${offset}-${offset + length - 1}/${object.size}`);
+  return new Response(object.body, { status: 206, headers });
 }
 
 /** A started page's document is at most this much Yjs state. */
@@ -494,22 +535,40 @@ export function registerPageRoutes(app: Hono<{ Bindings: Env }>): void {
     }
   });
 
-  // A public page for anyone, signed in or not, with who is on it right now.
-  // A page that is not public is not found, whatever the reason.
-  app.get("/api/public/spaces/:spaceId/pages/:pageId", async (c) => {
-    try {
-      const spaceId = c.req.param("spaceId");
-      const pageId = c.req.param("pageId");
-      const { page } = await repository(c.env).publicRead({ requestId: crypto.randomUUID(), spaceId, pageId });
-      // Names and what they are doing; never their conversations or where they are.
-      const present = (await sessionPresent(c.env, spaceId, pageId))
-        .map(({ name, color, kind, activity }) => ({ name, color, kind, activity }));
-      return c.json({ page, present }, 200, { "cache-control": "public, max-age=10" });
-    } catch (error) {
-      // Not public, missing, or in no such Space: all the same to a reader.
-      if (error instanceof PageControlError && error.status === 404) {
-        return c.json({ error: "Page not found", code: "page_not_found" }, 404);
+  // A public page for anyone, signed in or not. A page that is not public is not found, whatever the reason.
+  const publicPage = (path: string, answer: (c: Context<{ Bindings: Env }>, page: PublicPage) => Promise<Response>) =>
+    app.get(`/api/public/spaces/:spaceId/pages/:pageId${path}`, async (c) => {
+      try {
+        const { page } = await repository(c.env).publicRead({ requestId: crypto.randomUUID(),
+          spaceId: c.req.param("spaceId")!, pageId: c.req.param("pageId")! });
+        return await answer(c, page);
+      } catch (error) {
+        // Not public, missing, or in no such Space: all the same to a reader.
+        if (error instanceof PageControlError && error.status === 404) {
+          return c.json({ error: "Page not found", code: "page_not_found" }, 404);
+        }
+        return failure(c, error);
       }
+    });
+
+  // The page, with who is on it right now.
+  publicPage("", async (c, page) => {
+    // Names and what they are doing; never their conversations or where they are.
+    const present = (await sessionPresent(c.env, c.req.param("spaceId")!, c.req.param("pageId")!))
+      .map(({ name, color, kind, activity }) => ({ name, color, kind, activity }));
+    return c.json({ page, present }, 200, { "cache-control": "public, max-age=10" });
+  });
+
+  // A file the page shows: only what its saved text shows.
+  publicPage("/media/:file", (c, page) => pageMediaResponse(c, { spaceId: c.req.param("spaceId")!,
+    pageId: c.req.param("pageId")!, body: page.body, unsaved: false, cacheControl: "public, max-age=300" }));
+
+  app.get(`${base}/:pageId/media/:file`, async (c) => {
+    try {
+      const { spaceId, pageId, page } = await readAsCaller(c);
+      return await pageMediaResponse(c, { spaceId, pageId, body: page.body, unsaved: true,
+        cacheControl: "private, max-age=3600" });
+    } catch (error) {
       return failure(c, error);
     }
   });

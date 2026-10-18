@@ -1,5 +1,6 @@
 import { markdownToPageDoc, pageSchema } from "@xmatrix/protocol/page-document";
 import { DOMSerializer, type Node as DocNode } from "prosemirror-model";
+import { pageMediaElement, type PageMediaUrl } from "./page-media";
 import { drawPageReferences, type PageReferenceTargets } from "./page-reference-chips";
 
 /**
@@ -16,7 +17,8 @@ const serializer = new DOMSerializer({
       ["input", { type: "checkbox", tabindex: "-1", ...(node.attrs.checked ? { checked: "" } : {}) }], ["div", 0]],
 }, DOMSerializer.marksFromSchema(pageSchema));
 
-export function renderPageDocument(markdown: string, target: HTMLElement, references?: PageReferenceTargets): void {
+export function renderPageDocument(markdown: string, target: HTMLElement, references?: PageReferenceTargets,
+  mediaUrl?: PageMediaUrl): void {
   const doc = markdownToPageDoc(markdown);
   const fragment = serializer.serializeFragment(doc.content, { document: target.ownerDocument });
   target.replaceChildren(fragment);
@@ -24,6 +26,11 @@ export function renderPageDocument(markdown: string, target: HTMLElement, refere
   for (const block of target.querySelectorAll("p, h1, h2, h3, h4, h5, h6")) {
     if (!block.firstChild) block.append(Object.assign(target.ownerDocument.createElement("br"),
       { className: "ProseMirror-trailingBreak" }));
+  }
+  // A file pasted into the page is drawn as the editor's image view draws it.
+  for (const image of target.querySelectorAll("img")) {
+    const media = pageMediaElement(image.getAttribute("src") ?? "", image.alt, mediaUrl ? { url: mediaUrl } : undefined);
+    if (media) image.replaceWith(media);
   }
   if (references) drawPageReferences(target, references);
 }

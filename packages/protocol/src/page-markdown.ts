@@ -466,3 +466,68 @@ export function gitHubFileReferences(markdown: string): string[] {
   }
   return [...references];
 }
+
+/**
+ * The link scheme of an image or video pasted into a page:
+ * `xmatrix:page-media/<sha-256>.<extension>`, written as a markdown image. The
+ * bytes are the Space's own private content; the page holds only the
+ * reference, which the Hub serves to whoever can read the page.
+ */
+export const PAGE_MEDIA_SCHEME = "xmatrix:page-media/";
+
+/** What a page shows inline, by the extension its reference carries. Never markup (no SVG). */
+export const PAGE_MEDIA_TYPES = {
+  png: "image/png", jpg: "image/jpeg", gif: "image/gif", webp: "image/webp", avif: "image/avif",
+  mp4: "video/mp4", webm: "video/webm", mov: "video/quicktime",
+} as const;
+
+export type PageMediaExtension = keyof typeof PAGE_MEDIA_TYPES;
+
+export interface PageMedia {
+  /** `<sha-256>.<extension>`, what the reference ends with. */
+  file: string;
+  contentHash: string;
+  mimeType: (typeof PAGE_MEDIA_TYPES)[PageMediaExtension];
+  video: boolean;
+}
+
+const PAGE_MEDIA_FILE = /^([0-9a-f]{64})\.([a-z0-9]{2,5})$/u;
+const PAGE_MEDIA_REFERENCE = /xmatrix:page-media\/([0-9a-f]{64}\.[a-z0-9]{2,5})/gu;
+
+/** The media a `<sha-256>.<extension>` file name names; null when the type is not shown in pages. */
+export function pageMediaFile(file: string): PageMedia | null {
+  const match = PAGE_MEDIA_FILE.exec(file);
+  const extension = match?.[2];
+  if (!match || !extension || !Object.hasOwn(PAGE_MEDIA_TYPES, extension)) return null;
+  const mimeType = PAGE_MEDIA_TYPES[extension as PageMediaExtension];
+  return { file, contentHash: match[1]!, mimeType, video: mimeType.startsWith("video/") };
+}
+
+/** The media a page reference (`xmatrix:page-media/…`) names; null for any other source. */
+export function parsePageMedia(src: string): PageMedia | null {
+  return src.startsWith(PAGE_MEDIA_SCHEME) ? pageMediaFile(src.slice(PAGE_MEDIA_SCHEME.length)) : null;
+}
+
+/** The reference for content of a type pages show; null for any other type. */
+export function pageMediaReference(contentHash: string, mimeType: string): string | null {
+  const type = mimeType.split(";", 1)[0]!.trim().toLowerCase();
+  const extension = (Object.keys(PAGE_MEDIA_TYPES) as PageMediaExtension[])
+    .find((key) => PAGE_MEDIA_TYPES[key] === type);
+  return extension && /^[0-9a-f]{64}$/u.test(contentHash) ? `${PAGE_MEDIA_SCHEME}${contentHash}.${extension}` : null;
+}
+
+/** Each media file (`<sha-256>.<extension>`) the page's text references. */
+export function pageMediaReferences(markdown: string): string[] {
+  return [...new Set([...markdown.matchAll(PAGE_MEDIA_REFERENCE)].map((match) => match[1]!))]
+    .filter((file) => pageMediaFile(file) !== null);
+}
+
+/**
+ * The content reference that keeps a pasted file as the page's media: one per
+ * page and file, so pasting the same file again reuses it.
+ */
+export const PAGE_MEDIA_OWNER_KIND = "page_media";
+
+export function pageMediaRefId(pageId: string, contentHash: string): string {
+  return `page-media:${pageId}:${contentHash}`;
+}

@@ -1,5 +1,6 @@
 import {
-  DEFAULT_HUB_URL, PAGE_DOCUMENT_FRAGMENT, WEB_PROXY_ROUTES, normalizeHubUrl,
+  DEFAULT_HUB_URL, PAGE_DOCUMENT_FRAGMENT, PAGE_MEDIA_OWNER_KIND, WEB_PROXY_ROUTES, normalizeHubUrl, pageMediaRefId,
+  spaceVisibilityScope,
   type AutomationTrigger, type PageAutomationAnchorChange, type PageAwareness, type PageClaim, type PageConversation, type PageDocument,
   type PageGitHubFile, type PageLinkAnchor,
   type PageLink, type PageRecentChange, type PageRevision, type PageSummary, type PageTreeActivity, type PageTreeAgent,
@@ -16,6 +17,7 @@ import * as awarenessProtocol from "y-protocols/awareness";
 import * as syncProtocol from "y-protocols/sync";
 import * as Y from "yjs";
 import { xmatrixApiRequest } from "@/lib/query/api-client";
+import { commitBlobRef, prepareMessageAttachmentUpload } from "@/lib/relay-v2/message-attachment-upload-client";
 import { ReconnectingSocket } from "@/lib/connectivity/reconnecting-socket";
 
 /** How an open project is run (docs/design/open-project-governance.md). */
@@ -62,6 +64,16 @@ export const pageApi = {
     xmatrixApiRequest<{ revision: number }>({ url: WEB_PROXY_ROUTES.space_page_read(spaceId, pageId), token,
       method: "PUT", body: { revision, seen } }),
   /** A GitHub file the page embeds, read through from GitHub by the Hub (pages-live-document.md §6.5). */
+  /** Where the page's reader reads an image or video pasted into it; the session cookie authorizes it. */
+  mediaUrl: (spaceId: string, pageId: string, file: string) =>
+    `${WEB_PROXY_ROUTES.space_page(spaceId, pageId)}/media/${encodeURIComponent(file)}`,
+  /** Uploads a pasted file into the Space's private storage and keeps it as the page's media. */
+  uploadMedia: async (spaceId: string, pageId: string, token: string, file: File, onProgress: (percent: number) => void) => {
+    const visibilityScopeId = spaceVisibilityScope(spaceId);
+    const uploaded = await prepareMessageAttachmentUpload({ file, token, visibilityScopeId, mimeType: file.type, onProgress });
+    await commitBlobRef({ token, intentId: uploaded.intentId, refId: pageMediaRefId(pageId, uploaded.contentHash),
+      ownerKind: PAGE_MEDIA_OWNER_KIND, ownerId: pageId, visibilityScopeId });
+  },
   githubFile: (spaceId: string, pageId: string, token: string, href: string, signal?: AbortSignal) =>
     xmatrixApiRequest<PageGitHubFile>({
       url: `${WEB_PROXY_ROUTES.space_page(spaceId, pageId)}/github-file?href=${encodeURIComponent(href)}`, token, signal }),

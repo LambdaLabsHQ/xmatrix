@@ -776,6 +776,34 @@ place without copying it:
   page tree assumed one layout and was removed (parent §3); an embed is one
   file a page chose to show.
 
+### 6.6 Pasted images and videos
+
+Pasting or dropping an image (PNG, JPEG, GIF, WebP, AVIF) or a video (MP4,
+WebM, QuickTime) into the editor puts it in the text as a markdown image,
+`![name](xmatrix:page-media/<sha-256>.<ext>)`, and uploads the file.
+
+- **The bytes are the Space's private content.** The editor uploads through
+  the private content API in the Space's scope and commits a content
+  reference `page-media:<pageId>:<sha-256>` (owner kind `page_media`), so
+  the file is kept while the page holds it. The page text keeps only the
+  reference; the extension names the type, and only these types are served
+  (never markup such as SVG).
+- **The writer sees it at once.** The file is drawn from the writer's own
+  copy while it uploads, with its progress; a file that does not upload
+  leaves the text again and the editor says why.
+- **It is read as the page.** `GET /api/spaces/:spaceId/pages/:pageId/media/:file`
+  serves the file to whoever may read the page, when the page's head text
+  shows it or it was pasted into this page and not saved yet, and only when
+  the Space holds it as page media — a page can never name another Space's
+  file into view by its hash. A `Range` request is answered in part, so a
+  video plays from where it is sought. The web reads it through its proxy
+  with the session cookie, so an image or video element loads it directly.
+- **A published page shows its pasted files**: `GET
+  /api/public/spaces/:spaceId/pages/:pageId/media/:file` serves what the
+  public page's saved text shows, to anyone.
+- **Images show inline; a video as a player** with its own controls, in the
+  editor, the page's preview and the public page alike.
+
 ## 7. Around the page
 
 There is no side panel. What its tabs held is shown where it acts:

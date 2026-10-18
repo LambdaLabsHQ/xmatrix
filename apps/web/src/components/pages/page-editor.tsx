@@ -18,6 +18,7 @@ import { sameValue } from "@/lib/same-value";
 import type { PageLiveSession } from "@/lib/pages/page-client";
 import { automationsKey } from "./page-automation-chips";
 import type { ReadGitHubFile } from "./page-github-file-embeds";
+import type { LocalMedia, PageMediaUrl, UploadPageMedia } from "./page-media";
 import { referencesKey, type PageReferenceTargets } from "./page-reference-chips";
 import {
   addColumnAfter, addRowAfter, anchorOffsets, blockKind, deleteColumn, deleteRow, deleteTable, discussionsKey,
@@ -157,7 +158,7 @@ function ToolButton({ label, active = false, disabled = false, onRun, children }
 export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions, sections, follow, writeOn,
   onOpenConversation, discussions, automations, headingActions, focusedConversationId = null, onFocusConversation,
   onAnchorOffsets, cursorPresence, onReady, readerBaseline = null, onReaderChanges, onWrite, readFrom, reading,
-  suggestions = null, onSuggestions, suggestionControl, readGitHubFile, references, placeholder }: {
+  suggestions = null, onSuggestions, suggestionControl, readGitHubFile, references, placeholder, mediaUrl, uploadMedia }: {
   session: PageLiveSession;
   /** What an empty page asks for instead of its title: someone co-writing it asks for its first line. */
   placeholder?: string;
@@ -213,6 +214,10 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
   readGitHubFile?: ReadGitHubFile;
   /** What `page:<id>` and `channel:<id>` in the text name and open. */
   references?: PageReferenceTargets;
+  /** Where the page reads an image or video pasted into it. */
+  mediaUrl?: PageMediaUrl;
+  /** Uploads an image or video pasted or dropped into the page. */
+  uploadMedia?: UploadPageMedia;
 }) {
   const frame = useRef<HTMLDivElement | null>(null);
   const host = useRef<HTMLDivElement | null>(null);
@@ -243,6 +248,15 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
   readFile.current = readGitHubFile;
   const referenceTargets = useRef(references);
   referenceTargets.current = references;
+  const media = useRef({ url: mediaUrl, upload: uploadMedia });
+  media.current = { url: mediaUrl, upload: uploadMedia };
+  // The files this writer pasted, shown from their own copy; let go with the editor.
+  const [localMedia] = useState(() => new Map<string, LocalMedia>());
+  useEffect(() => () => {
+    for (const local of localMedia.values()) URL.revokeObjectURL(local.url);
+    localMedia.clear();
+  }, [localMedia]);
+  const [mediaFailure, setMediaFailure] = useState<string | null>(null);
   const anchorsChange = useRef(onAnchorOffsets);
   anchorsChange.current = onAnchorOffsets;
   const presenceOf = useRef<CursorPresence>(cursorPresence ?? (() => "active"));
@@ -353,8 +367,12 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
         cursorPresence: () => presenceOf.current,
         readGitHubFile: () => readFile.current,
         references: () => referenceTargets.current,
+        uploadMedia: () => media.current.upload,
+        localMedia,
+        onMediaFailure: setMediaFailure,
       }), pageSuggestions(() => suggestionReport.current)] }),
-      nodeViews,
+      nodeViews: nodeViews(() => media.current.url
+        ? { url: media.current.url, local: (file) => localMedia.get(file) } : undefined),
       editable: () => editable.current,
       attributes: { class: "page-document", spellcheck: "true", "data-editable": editable.current ? "true" : "false" },
       // Called as the view (possibly while it is still being constructed, when the document first syncs).
@@ -616,6 +634,14 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
             <p className="text-xs text-muted-foreground">Paste a file link, like https://github.com/owner/repo/blob/main/README.md</p>
           )}
         </form>
+        </div>
+      )}
+      {mediaFailure !== null && (
+        <div role="alert" data-testid="page-media-failure"
+          className="sticky top-2 z-20 mb-2 flex items-center gap-3 rounded-lg bg-muted px-3 py-2 text-sm">
+          <span className="min-w-0 flex-1">{mediaFailure}</span>
+          <button type="button" className="text-muted-foreground hover:text-foreground hover:underline"
+            onClick={() => setMediaFailure(null)}>Dismiss</button>
         </div>
       )}
       <div ref={host} className="min-h-[50vh]" />

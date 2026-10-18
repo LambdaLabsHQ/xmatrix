@@ -4,7 +4,7 @@ import { requireAgentChannelAccess, type AgentChannelRunProof } from "./agent-ch
 import { initialMessageSource } from "./runtime-initial-input.js";
 import {
   channelVisibilityScope,
-  immutableContentObjectKey, parseRestrictedChannelContentScope, restrictedChannelContentScope,
+  immutableContentObjectKey, PAGE_MEDIA_OWNER_KIND, parseRestrictedChannelContentScope, restrictedChannelContentScope,
   uploadScopeCoversRefScope } from "@xmatrix/protocol";
 import { commandDigest as digest, commandJson as stable } from "./command-digest.js";
 import type { QueryResultRow } from "pg";
@@ -560,6 +560,34 @@ export class PostgresContentRepository {
         "decision_reader_required", 403, "Decision records require the decision evidence endpoint",
       );
       return serializeRef(rows[0]);
+    });
+  }
+
+  /**
+   * Whether the Space holds a file as page media, and whether it holds it for
+   * this page. The caller has already proved it may read the page; this only
+   * says the bytes are the Space's own, so a page can never name another
+   * Space's file into view by its hash.
+   */
+  async pageMediaHolding(input: {
+    requestId: string; spaceId: string; pageId: string; contentHash: string;
+  }): Promise<{ held: boolean; heldForPage: boolean }> {
+    const { requestId, spaceId } = spaceRequest(input);
+    const pageId = text(input.pageId, "pageId");
+    if (!/^[0-9a-f]{64}$/u.test(input.contentHash)) {
+      throw new ContentControlError("invalid_command", 400, "contentHash is invalid");
+    }
+    return this.spaces.transaction(requestId, "content.page-media.read", spaceId, async (tx) => {
+      const rows = await tx.query<QueryResultRow>({
+        name: "content_page_media_holding_v1",
+        text: `SELECT
+            EXISTS (SELECT 1 FROM data.content_refs WHERE space_id=$1 AND child_object_id=$2
+              AND owner_kind=$4 AND generation=0) AS held,
+            EXISTS (SELECT 1 FROM data.content_refs WHERE space_id=$1 AND child_object_id=$2
+              AND owner_kind=$4 AND owner_id=$3 AND generation=0) AS held_for_page`,
+        values: [spaceId, `sha256:${input.contentHash}`, pageId, PAGE_MEDIA_OWNER_KIND], maxRows: 1,
+      });
+      return { held: rows[0]?.held === true, heldForPage: rows[0]?.held_for_page === true };
     });
   }
 

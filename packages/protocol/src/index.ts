@@ -466,12 +466,14 @@ export {
   AUTOMATION_REFERENCE_SCHEME, automationReferenceMarkdown,
   automationReferences, GITHUB_FILE_REFERENCE_SCHEME, gitHubFileReferenceFrom, gitHubFileReferenceHref,
   gitHubFileReferences, gitHubFileUrl, insertAutomationReference, mergePageText, mergePageWords,
+  PAGE_MEDIA_OWNER_KIND, PAGE_MEDIA_SCHEME, PAGE_MEDIA_TYPES, pageMediaFile, pageMediaReference, pageMediaReferences,
+  pageMediaRefId, parsePageMedia,
   pageBlockAt, pageBlocks, pageChangedBlocks, pageChangeGist, pageHeadingSlug, pageLineDiff,
   pageReferencesIn, pageReferenceSpans, pageReferenceToken, pageRemovedSections, parseGitHubFileReference,
   removeAutomationReference, replaceAutomationReference,
 } from "./page-markdown.js";
 export type {
-  GitHubFileReference, PageBlock, PageLineDiff, PageMergeResult, PageReferenceSpan,
+  GitHubFileReference, PageBlock, PageLineDiff, PageMedia, PageMediaExtension, PageMergeResult, PageReferenceSpan,
 } from "./page-markdown.js";
 export {
   channelReferenceSpans, channelReferenceToken, loneMessageReference,
