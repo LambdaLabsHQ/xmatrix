@@ -20,7 +20,7 @@ use xmatrix_cli_core::channel_read_context::{OpenedChannelThread, thread_root_ma
 use xmatrix_cli_core::error::{self, CliError};
 use xmatrix_cli_core::hex::sha256_hex;
 use xmatrix_cli_core::human_connection::{HumanConnectionClient, HumanConnectionEvent};
-use xmatrix_cli_core::media_cache::CachedMedia;
+use xmatrix_cli_core::media_cache::{CachedMedia, LocalCopy};
 use xmatrix_cli_core::protocol::{self, HubRoutes, with_route};
 use xmatrix_cli_core::route_key;
 use xmatrix_cli_core::text_input::{self, TextRoutes, TextSource};
@@ -2880,9 +2880,11 @@ async fn download_message_attachment_product_media(
         expected_size: Some(expected_size),
         content_hash: None,
         mime_type: expected_mime,
-        prefix: "history",
-        id: attachment_id,
-        name,
+        copy: LocalCopy::Named {
+            prefix: "history",
+            id: attachment_id,
+            name,
+        },
     };
     let url = with_route(hub_url, HubRoutes::MESSAGE_ATTACHMENT_PRODUCT_MEDIA);
     let body = serde_json::json!({

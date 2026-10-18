@@ -25,6 +25,7 @@ use xmatrix_cli_core::page_co_write::{
     PAGE_SESSION_HEARTBEAT_PING, PageCoWriteConnector, PageCoWriteEvent, PageCoWriteRequest,
     decode_request, delta_frame, done_frame,
 };
+use xmatrix_cli_core::page_media::{ToPage, refused_images_note};
 use xmatrix_cli_core::protocol::ChannelPageCoWrite;
 
 /// Kept below the idle limits between here and the session.
@@ -40,6 +41,7 @@ const REJOIN_DELAYS: [Duration; 5] = [
 
 /// One conversation co-writing one page.
 struct Bridge {
+    channel_id: String,
     page: (String, String),
     /// Frames for the session, while a socket is open.
     outgoing: Option<mpsc::UnboundedSender<Vec<u8>>>,
@@ -48,6 +50,10 @@ struct Bridge {
     queued: Option<u64>,
     /// The session's turn the harness is answering now.
     answering: Option<u64>,
+    /// The answer's images, each held until it is whole (`page_media`).
+    images: ToPage,
+    /// Where the Agent hears what of its answer did not reach the page.
+    events: Option<mpsc::UnboundedSender<AgentInstanceConnectionEvent>>,
     stop: watch::Sender<bool>,
 }
 
@@ -55,6 +61,29 @@ impl Bridge {
     fn send(&self, frame: Vec<u8>) {
         if let Some(outgoing) = &self.outgoing {
             let _ = outgoing.send(frame);
+        }
+    }
+
+    /// Ends the session's `turn` with the rest of the answer, and tells the
+    /// Agent of any image of a local file left out of it.
+    fn end(&mut self, turn: u64, failed: bool) {
+        let rest = self.images.finish();
+        if !rest.is_empty() {
+            self.send(delta_frame(turn, &rest));
+        }
+        self.send(done_frame(turn, failed));
+        let written = std::mem::take(&mut self.images);
+        if let Some(events) = &self.events
+            && !written.refused().is_empty()
+        {
+            let _ = events.send(AgentInstanceConnectionEvent::PageCoWrite(PageCoWriteEvent::Outcome {
+                channel_id: self.channel_id.clone(),
+                prompt: format!(
+                    "[Page write] Not all you wrote into page:{} reached it: {}.",
+                    self.page.1,
+                    refused_images_note(written.refused())
+                ),
+            }));
         }
     }
 }
@@ -87,10 +116,13 @@ pub(crate) fn follow(
     all.insert(
         channel_id.to_string(),
         Bridge {
+            channel_id: channel_id.to_string(),
             page: page.clone(),
             outgoing: None,
             queued: None,
             answering: None,
+            images: ToPage::default(),
+            events: Some(relay.local_event_sender()),
             stop,
         },
     );
@@ -130,7 +162,7 @@ pub(crate) fn observe_trace(channel_id: &str, phase: &str, payload: &serde_json:
         // A harness that carries on with the same turn says so; that is not a new one.
         "turn_started" if payload.get("continued").and_then(|value| value.as_bool()) != Some(true) => {
             if let Some(turn) = bridge.answering.take() {
-                bridge.send(done_frame(turn, false));
+                bridge.end(turn, false);
             }
             bridge.answering = bridge.queued.take();
         }
@@ -140,14 +172,17 @@ pub(crate) fn observe_trace(channel_id: &str, phase: &str, payload: &serde_json:
                 payload.get("delta").and_then(|value| value.as_str()),
             ) && !text.is_empty()
             {
-                bridge.send(delta_frame(turn, text));
+                let text = bridge.images.push(text);
+                if !text.is_empty() {
+                    bridge.send(delta_frame(turn, &text));
+                }
             }
         }
         // A turn stopped from the conversation (a chat message, a model switch) is cancelled; it ends the
         // page's turn there and then, or the page would wait on it and never ask the Agent again.
         "turn_completed" | "turn_failed" | "turn_interrupted" | "turn_cancelled" => {
             if let Some(turn) = bridge.answering.take() {
-                bridge.send(done_frame(turn, phase == "turn_failed"));
+                bridge.end(turn, phase == "turn_failed");
             }
         }
         _ => {}
@@ -260,10 +295,13 @@ mod tests {
         bridges().insert(
             channel_id.to_string(),
             Bridge {
+                channel_id: channel_id.to_string(),
                 page: ("space".into(), "page".into()),
                 outgoing: Some(outgoing),
                 queued: None,
                 answering: None,
+                images: ToPage::default(),
+                events: None,
                 stop,
             },
         );

@@ -29,6 +29,7 @@ pub mod machine_naming;
 pub mod media_cache;
 pub mod message_interaction;
 pub mod page_co_write;
+pub mod page_media;
 pub mod presentation_barrier;
 pub mod profile;
 pub mod protocol;

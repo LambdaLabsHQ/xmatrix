@@ -803,12 +803,24 @@ WebM, QuickTime) into the editor puts it in the text as a markdown image,
   public page's saved text shows, to anyone.
 - **Images show inline; a video as a player** with its own controls, in the
   editor, the page's preview and the public page alike.
-- **An Agent sees them as it sees Channel images.** `xmatrix page read` saves
-  each image the page shows into the attachment cache, through the same code
-  as `channel history`, and lists it in the header under `media:` with its
-  `local:` path for the harness's own file reader; a video is only named.
-  Nothing is pushed into the Agent's context and the page text is unchanged:
-  a reference costs a line, an image only when the Agent opens it.
+- **An Agent sees them as it sees Channel images, where they stand.**
+  `xmatrix page read` saves each image the page shows on the machine, through
+  the same download and cache as `channel history`, at
+  `…/attachment-cache/page-media/<sha-256>.<ext>`, and names it by that path
+  in the text in place of its reference, so the harness's own file tool opens
+  it. A video, or an image that could not be saved, keeps its reference.
+  Nothing is pushed into the Agent's context: an image costs only when the
+  Agent opens it.
+- **Writing maps it back and refuses local images.** Every way an Agent writes
+  into a page — `page edit`, `page create`, `⟦write⟧` in a reply or a message,
+  live co-writing — passes its text through the CLI's `page_media` mapping:
+  a path ending in `attachment-cache/page-media/<sha-256>.<ext>`, read on any
+  machine, is the page's reference again; an image of any other local file
+  (a path, `~`, a drive, a share, `file:`) is not written. `page edit` and
+  `page create` refuse the whole text, except for images the page already had
+  at the edit's base revision; a stream holds each image until it is whole
+  and leaves a local one out, and the Agent is told. The editor does not take
+  `file:` or `blob:` images from pasted HTML either.
 
 ## 7. Around the page
 

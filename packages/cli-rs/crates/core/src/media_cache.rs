@@ -16,8 +16,19 @@ use crate::http;
 /// The largest body the CLI downloads for an Agent to look at.
 pub const MEDIA_MAX_BYTES: u64 = 25 * 1024 * 1024;
 
-/// One body to download: where it is cached, what it must be, and its named copy,
-/// `<prefix>-<id, up to 12 characters>-<name>.<extension>`.
+/// Where the copy a harness's file tool opens is written.
+pub enum LocalCopy<'a> {
+    /// `<prefix>-<id, up to 12 characters>-<name>.<extension of its type>` in the attachment cache.
+    Named {
+        prefix: &'a str,
+        id: &'a str,
+        name: &'a str,
+    },
+    /// This path.
+    At(PathBuf),
+}
+
+/// One body to download: where it is cached, what it must be, and its copy.
 pub struct CachedMedia<'a> {
     pub stem: String,
     /// The size the authority states; without one, the response's own length is held to the limit.
@@ -25,9 +36,7 @@ pub struct CachedMedia<'a> {
     /// A body named by its SHA-256 is checked against it.
     pub content_hash: Option<&'a str>,
     pub mime_type: &'a str,
-    pub prefix: &'a str,
-    pub id: &'a str,
-    pub name: &'a str,
+    pub copy: LocalCopy<'a>,
 }
 
 impl CachedMedia<'_> {
@@ -47,7 +56,7 @@ impl CachedMedia<'_> {
             ));
         }
         if let Some(bytes) = read_cached_attachment(&self.stem, self.expected_size) {
-            return self.copy(self.mime_type, &bytes);
+            return self.write_copy(self.mime_type, &bytes);
         }
         if attachment_recently_refused(&self.stem) {
             return Err(CliError::Http(
@@ -107,29 +116,33 @@ impl CachedMedia<'_> {
             ));
         }
         let _ = write_cached_attachment(&self.stem, &bytes);
-        self.copy(&mime_type, &bytes)
+        self.write_copy(&mime_type, &bytes)
     }
 
-    fn copy(&self, mime_type: &str, bytes: &[u8]) -> Result<PathBuf> {
-        let safe_name: String = Path::new(self.name)
-            .file_stem()
-            .and_then(|value| value.to_str())
-            .unwrap_or("attachment")
-            .chars()
-            .map(|ch| {
-                if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.') {
-                    ch
-                } else {
-                    '-'
-                }
-            })
-            .collect();
-        let path = attachment_cache_dir().join(format!(
-            "{}-{}-{safe_name}.{}",
-            self.prefix,
-            &self.id[..self.id.len().min(12)],
-            media_extension(mime_type, self.name),
-        ));
+    fn write_copy(&self, mime_type: &str, bytes: &[u8]) -> Result<PathBuf> {
+        let path = match &self.copy {
+            LocalCopy::At(path) => path.clone(),
+            LocalCopy::Named { prefix, id, name } => {
+                let safe_name: String = Path::new(name)
+                    .file_stem()
+                    .and_then(|value| value.to_str())
+                    .unwrap_or("attachment")
+                    .chars()
+                    .map(|ch| {
+                        if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.') {
+                            ch
+                        } else {
+                            '-'
+                        }
+                    })
+                    .collect();
+                attachment_cache_dir().join(format!(
+                    "{prefix}-{}-{safe_name}.{}",
+                    &id[..id.len().min(12)],
+                    media_extension(mime_type, name),
+                ))
+            }
+        };
         copy_cached_attachment_to(&path, bytes)?;
         Ok(path)
     }

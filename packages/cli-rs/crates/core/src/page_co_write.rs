@@ -288,13 +288,15 @@ impl PageCoWriteConnector {
     /// conversation `channel_id` in one turn, as a streamed write would but all
     /// at once, and says what of it did not reach the page; nothing when all of
     /// it did.
+    /// An image of a local file is left out of it, and said to be (`page_media`).
     pub async fn write_once(&self, channel_id: &str, page: &str, body: &str) -> Result<Vec<String>> {
+        let (body, refused) = crate::page_media::to_page(body, Default::default());
         let space = self.page_space(channel_id).await?;
         let socket = self.connect(&space, page, true).await?;
         let (mut sink, mut stream) = socket.split();
         for frame in [
             write_frame(1, true),
-            delta_frame(1, body),
+            delta_frame(1, &body),
             done_frame(1, false),
         ] {
             sink.send(Message::Binary(frame.into()))
@@ -304,8 +306,11 @@ impl PageCoWriteConnector {
         let outcome = tokio::time::timeout(WRITE_OUTCOME_WAIT, async {
             while let Some(frame) = stream.next().await {
                 if let Ok(Message::Binary(data)) = frame
-                    && let Some(PageCoWriteRequest::Outcome { turn: 1, problems }) = decode_request(&data)
+                    && let Some(PageCoWriteRequest::Outcome { turn: 1, mut problems }) = decode_request(&data)
                 {
+                    if !refused.is_empty() {
+                        problems.push(format!("Not written: {}.", crate::page_media::refused_images_note(&refused)));
+                    }
                     return Ok(problems);
                 }
             }
