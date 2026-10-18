@@ -334,7 +334,7 @@ function registrationChannel() {
 test("a registration Run with no Profile still offers its slash commands", () => {
   const channel = registrationChannel();
   const commands = channelSlashCommands(channel, null);
-  assert.deepEqual(commands.map((command) => command.token), ["/compact", "/model"]);
+  assert.deepEqual(commands.map((command) => command.token), ["/compact", "/effort", "/model"]);
   const compact = commands.find((command) => command.token === "/compact");
   assert.deepEqual(compact.targets.map((target) => target.mention).sort(), ["claude:1", "claude:2"]);
 });
@@ -348,4 +348,32 @@ test("a registration Run's `@instance /` stage lists its commands", () => {
     result.candidates.map((candidate) => candidate.mention),
     ["claude:2 /model", "claude:2 /compact"]
   );
+});
+
+test("partial runtime command lists retain controls from live model and effort catalogs", () => {
+  const channel = registrationChannel();
+  const [withCatalog, withoutCatalog] = channelInstances(channel);
+  const custom = { token: "/best-of-n", label: "Best of N", mode: "passthrough" };
+  withCatalog.commands = [custom];
+  withoutCatalog.commands = [custom];
+
+  const palette = resolveSlashCompletion("/model", 6, channel);
+  assert.deepEqual(palette.commands.map(command => command.token), ["/model"]);
+  assert.deepEqual(palette.commands[0].targets.map(target => target.mention), ["claude:1"]);
+  assert.deepEqual(channelSlashCommands(channel).map(command => command.token), ["/best-of-n", "/effort", "/model"]);
+
+  const draft = completeSlashCommandTarget("/model @cl", 10, "/model", "claude:1").value;
+  const models = resolveMentionCompletion(draft, draft.length, channel);
+  assert.equal(models.stage, "agent-model");
+  assert.deepEqual(models.candidates.map(candidate => candidate.mention), ["claude:1 /model claude-opus-5"]);
+
+  const mentionDraft = "@claude:1 /";
+  const mention = resolveMentionCompletion(mentionDraft, mentionDraft.length, channel);
+  assert.deepEqual(mention.candidates.map(candidate => candidate.mention), [
+    "claude:1 /best-of-n", "claude:1 /model", "claude:1 /effort",
+  ]);
+
+  // Withdrawing the catalogs removes inferred controls and keeps custom commands.
+  withCatalog.models = [];
+  assert.deepEqual(channelSlashCommands(channel).map(command => command.token), ["/best-of-n"]);
 });
