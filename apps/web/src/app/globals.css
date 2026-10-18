@@ -3728,15 +3728,11 @@ html[data-app-theme] .xmatrix-app .app-composer-box .composer-textarea:focus-vis
   box-shadow: none !important;
 }
 
-/* The page name is a title, not a form field, so it does not take the recessed well; nor does a new page's text. */
+/* The page name is a title, not a form field, so it does not take the recessed well. */
 html[data-app-theme] .xmatrix-app input.page-title,
 html[data-app-theme] .xmatrix-app input.page-title:hover,
 html[data-app-theme] .xmatrix-app input.page-title:focus,
-html[data-app-theme] .xmatrix-app input.page-title:focus-visible,
-html[data-app-theme] .xmatrix-app textarea.page-draft-text,
-html[data-app-theme] .xmatrix-app textarea.page-draft-text:hover,
-html[data-app-theme] .xmatrix-app textarea.page-draft-text:focus,
-html[data-app-theme] .xmatrix-app textarea.page-draft-text:focus-visible {
+html[data-app-theme] .xmatrix-app input.page-title:focus-visible {
   background: transparent !important;
   background-color: transparent !important;
   border: 0 !important;

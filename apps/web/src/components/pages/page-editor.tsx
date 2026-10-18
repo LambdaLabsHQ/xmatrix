@@ -6,7 +6,7 @@ import {
   BetweenHorizontalEnd, BetweenVerticalEnd, Code2, Columns3, FileCode2, Flag, Rows3, Trash2, Heading1, Heading2, Heading3, Link2,
   List, ListChecks, ListOrdered, MessageSquarePlus, Minus, PenLine, Pilcrow, Quote, Sparkles, Table, Users,
 } from "lucide-react";
-import { EditorState, type Command } from "prosemirror-state";
+import { EditorState, Selection, type Command } from "prosemirror-state";
 import { EditorView } from "prosemirror-view";
 import { yCursorPluginKey } from "y-prosemirror";
 import { gitHubFileReferenceFrom, gitHubFileReferenceHref, type SerializedAutomation } from "@xmatrix/protocol";
@@ -142,7 +142,7 @@ function ToolButton({ label, active = false, disabled = false, onRun, children }
   );
 }
 
-export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions, sections, follow,
+export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions, sections, follow, writeOn,
   onOpenConversation, discussions, automations, headingActions, focusedConversationId = null, onFocusConversation,
   onAnchorOffsets, cursorPresence, onReady, readerBaseline = null, onReaderChanges, suggestions = null, onSuggestions,
   suggestionControl, readGitHubFile, references }: {
@@ -156,6 +156,8 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
   sections?: Map<string, SectionNote>;
   /** A section to bring into view; a new `seq` follows again. */
   follow?: { blockId: string; seq: number } | null;
+  /** Each new value puts the writer's caret at the end of the text, to go on writing there. */
+  writeOn?: number;
   onOpenConversation?: (conversationId: string) => void;
   /** Open discussions anchored in the text. */
   discussions?: Discussion[];
@@ -389,6 +391,12 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
   useEffect(() => {
     if (view.current && follow) scrollToSection(view.current, follow.blockId);
   }, [follow]);
+  useEffect(() => {
+    const current = view.current;
+    if (!current || !writeOn) return;
+    current.dispatch(current.state.tr.setSelection(Selection.atEnd(current.state.doc)).scrollIntoView());
+    current.focus();
+  }, [writeOn]);
 
   const readerChanges = useRef(onReaderChanges);
   readerChanges.current = onReaderChanges;

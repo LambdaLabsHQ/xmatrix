@@ -50,10 +50,11 @@ import { MORE_RECENT_CHANGES, RECENT_CHANGES, pageRecentChangePreview, pageTreeH
 import { discussionDraft, discussionTitle } from "@/components/dashboard/selection-discussion";
 import { refetchUnlessHumanPush } from "@/components/dashboard/workspace-resource-push";
 import { PageMigrationReview, usePageMigration } from "./page-migration-review";
-import { NEW_PAGE_TITLE, type PageCreation } from "./page-creation";
+import { NEW_PAGE_ID, NEW_PAGE_TITLE, type PageCreation } from "./page-creation";
 import { PageTreeRow } from "./page-tree-row";
 import type { PageReferenceTargets } from "./page-reference-chips";
 import { userErrorMessage } from "@/lib/user-facing-error";
+import { nameDocument } from "@/lib/pages/page-markdown-edit";
 
 // The native shell also imports this module for its list screens. The editor
 // (ProseMirror and the page document) belongs to an open document, not to the cold-start list dependency graph.
@@ -339,7 +340,6 @@ export function PageTreePanel({ spaceId, token, selectedPageId, onSelectPage, on
   const inset = "px-[var(--app-list-row-start)]";
   const contents = (
     <>
-      {creation.error && <p className={`${inset} pb-2 text-xs text-destructive`}>{creation.error}</p>}
       <div className="min-h-0 flex-1 overflow-y-auto pb-4">
         {tree.isLoading && <ListSkeleton label="Loading pages" rows={6} />}
         {tree.isError && <p className={`${inset} text-sm text-destructive`}>Pages are unavailable.</p>}
@@ -367,7 +367,7 @@ export function PageTreePanel({ spaceId, token, selectedPageId, onSelectPage, on
         <ul>{roots.map((page) => (
           <TreeNode key={page.pageId} page={page} childrenOf={childrenOf} activity={activity} depth={0}
             selectedPageId={selectedPageId} onSelect={onSelectPage} onPrefetch={prefetch}
-            onCreateChild={creation.creating ? undefined : (pageId) => void creation.create(pageId)} />
+            onCreateChild={(pageId) => void creation.create(pageId)} />
         ))}</ul>
       </div>
     </>
@@ -396,6 +396,12 @@ export function PageTreePanel({ spaceId, token, selectedPageId, onSelectPage, on
 }
 
 /** A page is restricted when it or any ancestor is. */
+/** The new page + opened, as the page list would show it, until its first write makes it. */
+function unmadePage(parentPageId: string | null): PageSummary {
+  return { pageId: NEW_PAGE_ID, parentPageId, title: NEW_PAGE_TITLE, position: "", accessMode: "open", headRevision: 0,
+    agentSuggestOnly: false, canEdit: true, updatedAt: "", publishedAt: null, governance: false };
+}
+
 function effectivelyRestricted(pageId: string, pages: readonly PageSummary[]): boolean {
   const byId = new Map(pages.map((page) => [page.pageId, page]));
   for (let page = byId.get(pageId), depth = 0; page && depth < 64;
@@ -470,9 +476,11 @@ type PageDialogState =
   | { kind: "agent"; key: string };
 
 export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpenSection, onPageDeleted, conversation, activeConversationId = null,
-  renderConversation, onConversationDockChange, onCloseConversation, onExpandConversation, onOpenConversation, onDiscuss, onConnectGitHub, canMigrate, layout = "desktop", focusSection = null }: {
+  renderConversation, onConversationDockChange, onCloseConversation, onExpandConversation, onOpenConversation, onDiscuss, onConnectGitHub, canMigrate, layout = "desktop", focusSection = null,
+  creation }: {
   spaceId: string | null;
   token: string;
+  /** A made page, or NEW_PAGE_ID for the new page + opened, which its first write makes (page-creation.tsx). */
   selectedPageId: string | null;
   onSelectPage: (pageId: string) => void;
   /** Opens a page a reference in the text names, at its section when it names one. */
@@ -502,6 +510,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   layout?: "desktop" | "phone";
   /** A section a reference opened the page at; a new `seq` brings it into view again. */
   focusSection?: { pageId: string; blockId: string; seq: number } | null;
+  creation: PageCreation;
 }) {
   const { user } = useAuth();
   const tree = usePageTree(spaceId, token);
@@ -511,9 +520,14 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   const [reviewing, setReviewing] = useState<string | null>(null);
   const migration = usePageMigration(spaceId ?? "", token, canMigrate && Boolean(spaceId));
   const phone = layout === "phone";
+  // A new page opens as any page does, but is only this document until its first write makes it: until
+  // then it has no id, and nothing that reads a made page asks about it.
+  const pending = selectedPageId === NEW_PAGE_ID;
+  const parentPageId = creation.parentPageId;
+  const newPage = useMemo(() => pending ? unmadePage(parentPageId) : null, [parentPageId, pending]);
   // A desktop opens the first page; a phone starts from the list.
-  const pageId = selectedPageId ?? (phone ? null : pageChildren(pages).get(null)?.[0]?.pageId ?? null);
-  const page = pages.find((item) => item.pageId === pageId) ?? null;
+  const pageId = pending ? null : selectedPageId ?? (phone ? null : pageChildren(pages).get(null)?.[0]?.pageId ?? null);
+  const page = newPage ?? pages.find((item) => item.pageId === pageId) ?? null;
   const [session, setSession] = useState<PageLiveSession | null>(null);
   // Until the live session has synced, the page shows its prefetched document.
   const [synced, setSynced] = useState(false);
@@ -640,8 +654,11 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     if (pageId && pageId !== selectedPageId) onSelectPage(pageId);
   }, [onSelectPage, pageId, selectedPageId]);
 
-  // Another page opens as itself, not in the previous page's history.
+  // Another page opens as itself, not in the previous page's history. The page a new page's first
+  // write made is that same page going on: what is open on it stays open.
+  const madeHere = useRef<string | null>(null);
   useEffect(() => {
+    if (pageId !== null && pageId === madeHere.current) return;
     setMode("page");
     setDialog(null);
     setFocused(null);
@@ -656,25 +673,50 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     if (token) session?.setToken(token);
   }, [session, token]);
 
+  const make = useRef(creation.make);
+  make.current = creation.make;
+  const selectPage = useRef(onSelectPage);
+  selectPage.current = onSelectPage;
+  // The session of a new page its first write made: the page it became opens with this same session.
+  const madeSession = useRef<PageLiveSession | null>(null);
   useEffect(() => {
-    if (!spaceId || !pageId || !userId || !hasToken) return;
+    if (!spaceId || (!pageId && !pending) || !userId || !hasToken) return;
+    const made = madeSession.current;
+    madeSession.current = null;
+    const kept = made && made.pageId === pageId ? made : null;
+    if (made && !kept) made.destroy();
     // One session per page; it must not churn when the auth context re-renders.
-    const live = new PageLiveSession({ spaceId, pageId, token: tokenRef.current,
-      user: { name: userName, color: pageAuthorColor({ kind: "user", id: userId }) } });
-    setSession(live);
-    setNotice(null);
+    const live = kept ?? new PageLiveSession({ spaceId, pageId, token: tokenRef.current,
+      user: { name: userName, color: pageAuthorColor({ kind: "user", id: userId }) },
+      ...(pending ? { make: (document: Uint8Array) => make.current(document) } : {}) });
+    if (!kept) {
+      setSession(live);
+      setNotice(null);
+      // A new page has nothing to sync: it is this document until it is made.
+      if (pending) { setSynced(true); setCanEdit(true); }
+    }
     const off = live.on((event) => {
       if (event.type === "status") {
         setConnected(event.connected);
         connectedRef.current = event.connected;
-        setSaveState((state) => state === "offline" && event.connected ? "saved"
+        setSaveState((state) => (state === "offline" || state === "saving") && event.connected ? "saved"
           : state !== "idle" && !event.connected ? "offline" : state);
       }
       if (event.type === "local-edit") {
-        setSaveState(connectedRef.current ? "saving" : "offline");
+        // Until the page is made and its session first reached, an edit is on its way, not offline.
+        setSaveState(connectedRef.current || live.underway ? "saving" : "offline");
         window.clearTimeout(saveTimer.current);
         // The edit is sent as it is made; the session keeps it as it arrives.
-        saveTimer.current = window.setTimeout(() => setSaveState(connectedRef.current ? "saved" : "offline"), 700);
+        saveTimer.current = window.setTimeout(() => setSaveState(connectedRef.current ? "saved"
+          : live.underway ? "saving" : "offline"), 700);
+      }
+      if (event.type === "made") {
+        madeHere.current = event.pageId;
+        if (event.seeded) madeSession.current = live;
+        selectPage.current(event.pageId);
+      }
+      if (event.type === "error" && event.code === "page_create_failed") {
+        setNotice("Couldn't create the page. Writing on it tries again.");
       }
       if (event.type === "synced") {
         setSynced(true);
@@ -710,9 +752,19 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
         setNotice(PAGE_SERVER_OUTDATED_NOTICE);
       }
     });
-    return () => { off(); live.destroy(); setSession(null); setConnected(false); setSynced(false); setEditorReady(false);
-      setSaveState("idle"); };
-  }, [spaceId, pageId, hasToken, userId, userName, queryClient]);
+    return () => {
+      off();
+      if (madeSession.current === live) return;
+      live.destroy(); setSession(null); setConnected(false); setSynced(false); setEditorReady(false);
+      setSaveState("idle");
+    };
+  }, [spaceId, pageId, pending, hasToken, userId, userName, queryClient]);
+  // Closed before the page it made opened: nothing keeps its session any more.
+  useEffect(() => () => {
+    const made = madeSession.current;
+    madeSession.current = null;
+    made?.destroy();
+  }, []);
 
   // The editor reads the page's sections from its document as it changes. They count for its session only:
   // until the next page's editor reads them, the last page's first heading would put its name in the header.
@@ -948,13 +1000,24 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     }
   };
 
-  // Naming a page writes its name into the document as the heading it opens with.
+  // Naming a page writes its name into the document as the heading it opens with; Enter goes on into the text.
+  const [writeOn, setWriteOn] = useState(0);
+  const goingOn = useRef(false);
   const renamePage = async (value: string) => {
     const title = value.trim();
+    const goOn = goingOn.current;
+    goingOn.current = false;
     if (!spaceId || !page || !title) return;
+    // A new page names itself in its own document, a write like any other, which makes it.
+    if (pending) {
+      if (session) nameDocument(session.doc, title, "title");
+      if (goOn) setWriteOn((seq) => seq + 1);
+      return;
+    }
     try {
       await pageApi.update(spaceId, page.pageId, token, { title });
       await queryClient.invalidateQueries({ predicate: (query) => query.queryKey.includes("page-tree") });
+      if (goOn) setWriteOn((seq) => seq + 1);
     } catch (cause) {
       setNotice(userErrorMessage(cause, "Couldn't rename the page"));
     }
@@ -972,10 +1035,11 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   // Only once the document is read: one still on its way is not unnamed. Plain text: a field well would read as a form.
   const documentRead = drawn || document.data !== undefined;
   const titleField = page && documentRead && opening === null ? (canEdit ? (
-    <input key={page.pageId} defaultValue="" aria-label="Page title"
+    // A new page opens with its title ready to type, as in Notion.
+    <input key={page.pageId} defaultValue="" aria-label="Page title" autoFocus={pending}
       data-testid="page-title" placeholder={NEW_PAGE_TITLE} onKeyDown={(event) => {
         if (isImeKeyDown(event.nativeEvent)) return;
-        if (event.key === "Enter") event.currentTarget.blur();
+        if (event.key === "Enter") { goingOn.current = true; event.currentTarget.blur(); }
         if (event.key === "Escape") { event.currentTarget.value = ""; event.currentTarget.blur(); }
       }}
       onBlur={(event) => void renamePage(event.currentTarget.value)}
@@ -1024,7 +1088,8 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
       </div>
     );
   }
-  const restricted = page ? effectivelyRestricted(page.pageId, pages) : false;
+  // A new page is as restricted as where it goes.
+  const restricted = page ? effectivelyRestricted(pending ? page.parentPageId ?? "" : page.pageId, pages) : false;
   const pageLink = () => `${window.location.origin}${
     pagesViewPath(`/app/${encodeURIComponent(spaceId)}/pages`, page?.pageId ?? null, null)}`;
   // The link a pull request names to pass the `xmatrix/claim` check.
@@ -1074,16 +1139,18 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     if (!page) return;
     writers.choose(harness);
     const section = blockId ? blocks.find((block) => block.id === blockId)?.title ?? null : null;
-    const where = `page:${page.pageId}${blockId ? ` (section #${blockId})` : ""}`;
-    // The page itself tells the Agent what it needs, live, as turns its runtime hands it (§4.2).
-    const firstMessage = `@${harness} launch:force You're co-writing ${where} with me live. The page sends you ` +
-      "what changed as I write, and you answer there, in the page; nothing to do here until it does.";
     try {
-      const conversationId = await onDiscuss({ spaceId, pageId: page.pageId, blockId: blockId ?? "", restricted,
+      // Calling an Agent to write a new page is writing on it: it makes the page.
+      const writing = pending && session ? await session.make() : page.pageId;
+      const where = `page:${writing}${blockId ? ` (section #${blockId})` : ""}`;
+      // The page itself tells the Agent what it needs, live, as turns its runtime hands it (§4.2).
+      const firstMessage = `@${harness} launch:force You're co-writing ${where} with me live. The page sends you ` +
+        "what changed as I write, and you answer there, in the page; nothing to do here until it does.";
+      const conversationId = await onDiscuss({ spaceId, pageId: writing, blockId: blockId ?? "", restricted,
         name: `Co-writing ${section ? `${page.title} › ${section}` : page.title}`, firstMessage, open: false,
         coWrite: true });
       if (typeof conversationId === "string") {
-        setCalled({ pageId: page.pageId, harness, conversationId, blockId, at: Date.now() });
+        setCalled({ pageId: writing, harness, conversationId, blockId, at: Date.now() });
       }
       void links.refetch();
     } catch (cause) {
@@ -1304,22 +1371,27 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
           Co-write
         </Button>
       )}
-      <Button variant="ghost" size="sm" onClick={() => setDialog({ kind: "conversations", blockId: null })}
-        title="Conversations about this page" aria-label={`${conversations.length} conversations about this page`}>
-        <MessageSquare /> {liveCount || conversations.length || ""}
-      </Button>
-      <Button variant="ghost" size="sm" aria-pressed={mode === "history"} title={lastEdit ?? "Version history"}
-        aria-label={`Version history${unseen ? ", changed since you last looked" : ""}`}
-        onClick={() => (mode === "history" ? setMode("page") : openHistory())} className="relative">
-        <History /> History
-        {unseen && <span className="absolute right-1 top-1 size-1.5 rounded-full bg-primary" data-testid="page-history-new" />}
-      </Button>
-      <Button variant="ghost" size="sm" onClick={() => setDialog("share")}>
-        <Share2 /> Share
-      </Button>
-      {canEdit && (
-        <Button variant="ghost" size="sm" title="Delete page" aria-label="Delete page"
-          onClick={() => setDialog("delete")}><Trash2 /></Button>
+      {/* What only a made page has: its conversations, history and sharing. A new page gets them on its first write. */}
+      {!pending && (
+        <>
+          <Button variant="ghost" size="sm" onClick={() => setDialog({ kind: "conversations", blockId: null })}
+            title="Conversations about this page" aria-label={`${conversations.length} conversations about this page`}>
+            <MessageSquare /> {liveCount || conversations.length || ""}
+          </Button>
+          <Button variant="ghost" size="sm" aria-pressed={mode === "history"} title={lastEdit ?? "Version history"}
+            aria-label={`Version history${unseen ? ", changed since you last looked" : ""}`}
+            onClick={() => (mode === "history" ? setMode("page") : openHistory())} className="relative">
+            <History /> History
+            {unseen && <span className="absolute right-1 top-1 size-1.5 rounded-full bg-primary" data-testid="page-history-new" />}
+          </Button>
+          <Button variant="ghost" size="sm" onClick={() => setDialog("share")}>
+            <Share2 /> Share
+          </Button>
+          {canEdit && (
+            <Button variant="ghost" size="sm" title="Delete page" aria-label="Delete page"
+              onClick={() => setDialog("delete")}><Trash2 /></Button>
+          )}
+        </>
       )}
     </>
   );
@@ -1345,7 +1417,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
                   title={`Revision ${headRevision ?? page?.headRevision ?? ""}`}>
                   {saveState === "saving" ? "Saving…" : saveState === "saved" ? "All changes saved"
                     : saveState === "offline" ? "Offline · your changes sync when you reconnect"
-                    : connected ? `r${headRevision ?? page?.headRevision ?? ""}` : "Connecting…"}
+                    : pending ? "" : connected ? `r${headRevision ?? page?.headRevision ?? ""}` : "Connecting…"}
                   {!canEdit && connected ? " · read-only" : ""}
                 </span>
                 {controls}
@@ -1414,7 +1486,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
                     </label>
                   )}
                   <div className={drawn ? undefined : "hidden"}>
-                    {session && <PageEditor key={session.doc.guid} session={session} canEdit={canEdit}
+                    {session && <PageEditor key={session.doc.guid} session={session} canEdit={canEdit} writeOn={writeOn}
                       onReady={() => setEditorReady(true)} readerBaseline={readerDiff} onReaderChanges={setReaderChanges}
                       suggestions={drawn ? waiting.suggestions : null} onSuggestions={setSuggesting}
                       suggestionControl={suggestionControl}

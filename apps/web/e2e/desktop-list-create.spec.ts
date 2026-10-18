@@ -2,6 +2,7 @@ import type { Page } from "@playwright/test";
 
 import { expect, test } from "./fixtures";
 import { fixtureJson, fixtureRequestBodies } from "./in-page-api-fixtures";
+import { startedMarkdown } from "./page-document-fixture";
 import { E2E_CHANNEL, E2E_DESKTOP_CONTEXT, E2E_SPACE, harnessRegistrations, installPageTreeStubs, openWorkspaceWithStubs }
   from "./workspace-fixtures";
 
@@ -78,33 +79,31 @@ test("the page tree leads with New page, and Ctrl+N there makes a page", async (
   expect(headingBox!.y - (createBox!.y + createBox!.height)).toBeCloseTo(0, 0);
   expect(rowBox!.y - (headingBox!.y + headingBox!.height)).toBeCloseTo(0, 0);
 
-  // Ctrl+N opens an untitled page at once, as Notion does; it is named on the page.
+  // Ctrl+N opens an untitled page at once, as Notion does, as any page opens; it is named on the page.
   await stubPageCreate(page);
   await page.keyboard.press("Control+n");
-  await expect(page.getByTestId("page-draft")).toBeVisible();
+  await expect(page).toHaveURL(/page=new/u);
   await expect(page.getByTestId("page-title")).toBeFocused();
+  await expect(page.getByTestId("page-editor")).toBeVisible();
   await expect(page.getByRole("dialog")).toHaveCount(0);
   await expect(page.getByTestId("new-conversation")).toBeHidden();
   // Left with nothing written, it is not kept.
   await page.locator(".app-sidebar").getByText("Home", { exact: true }).click();
-  await expect(page.getByTestId("page-draft")).toBeHidden();
+  await expect(page).not.toHaveURL(/page=new/u);
   expect(await fixtureRequestBodies(page, "page-create")).toEqual([]);
 
-  // It is made once something is written on it and the writer moves on, with what was written.
+  // Its first write makes it, copy-on-write, from what is written; Enter goes on into its text.
   await page.keyboard.press("Control+n");
   await page.keyboard.type("Plans");
   await page.keyboard.press("Enter");
-  await expect(page.getByTestId("page-draft-text")).toBeFocused();
-  await page.keyboard.type("What we do next");
-  expect(await fixtureRequestBodies(page, "page-create")).toEqual([]);
-  await page.getByTestId("page-draft-text").blur();
-  await expect.poll(() => fixtureRequestBodies(page, "page-create")).toEqual([
-    { title: "Plans", parentPageId: null, body: "# Plans\n\nWhat we do next\n" },
-  ]);
+  await expect.poll(async () => (await fixtureRequestBodies(page, "page-create")).length).toBe(1);
+  const [made] = await fixtureRequestBodies(page, "page-create");
+  expect(made).toMatchObject({ parentPageId: null });
+  expect(startedMarkdown(made!.document)).toBe("# Plans\n");
   await expect(page).toHaveURL(/page=p-new/u);
 });
 
-test("a new page offers co-writing before anything is written, and calling an Agent makes it", async ({ page }) => {
+test("a new page offers Co-write as any page does, and calling an Agent makes it", async ({ page }) => {
   await installPageTreeStubs(page, ["Home"]);
   const registrations = harnessRegistrations(["claude", "codex"]);
   await fixtureJson(page, "registration-catalog", "**/agent-registrations", { registrations,
@@ -115,15 +114,19 @@ test("a new page offers co-writing before anything is written, and calling an Ag
   await stubPageCreate(page);
 
   await page.keyboard.press("Control+n");
-  await expect(page.getByTestId("page-draft")).toBeVisible();
-  await page.keyboard.type("Plans");
-  // The draft offers the same Co-write a page does, and picking an Agent does not save it first without one.
-  await page.getByRole("button", { name: "Co-write" }).click();
-  const picker = page.getByTestId("page-write-with");
-  await picker.getByRole("button", { name: "codex" }).click();
-  await expect.poll(() => fixtureRequestBodies(page, "page-create")).toEqual([{ title: "Plans", parentPageId: null }]);
+  await expect(page.getByTestId("page-title")).toBeFocused();
+  // Its header is a page's; what needs a made page (History, Share) comes with the first write.
+  const controls = page.getByTestId("page-controls");
+  await expect(controls.getByRole("button", { name: "Co-write" })).toBeVisible();
+  await expect(controls.getByRole("button", { name: /History/u })).toHaveCount(0);
+  await controls.getByRole("button", { name: "Co-write" }).click();
+  await page.getByTestId("page-write-with").getByRole("button", { name: "codex" }).click();
+  // Calling an Agent to write it is a write: the page is made, empty, for the Agent to write.
+  await expect.poll(async () => (await fixtureRequestBodies(page, "page-create")).length).toBe(1);
+  const [made] = await fixtureRequestBodies(page, "page-create");
+  expect(made).toMatchObject({ parentPageId: null });
+  expect(startedMarkdown(made!.document)).toBe("");
   await expect(page).toHaveURL(/page=p-new/u);
-  // The page it made calls that Agent as it opens (co-write-request.ts), and remembers it as the one to offer.
   expect(await page.evaluate(() => window.localStorage.getItem("xmatrix.page-writer.space-personal"))).toBe("codex");
 });
 

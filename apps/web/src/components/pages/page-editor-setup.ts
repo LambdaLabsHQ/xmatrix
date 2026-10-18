@@ -275,9 +275,12 @@ function placeholder(text: string): Plugin {
   return new Plugin({
     props: {
       decorations(state) {
+        // An empty page, or one with only its name so far, shows what to write in its first line.
         const doc = state.doc;
-        if (doc.childCount !== 1 || doc.firstChild!.type !== nodes.paragraph || doc.firstChild!.content.size) return null;
-        return DecorationSet.create(doc, [Decoration.node(0, doc.firstChild!.nodeSize,
+        const named = doc.childCount === 2 && doc.firstChild!.type === nodes.heading;
+        if ((doc.childCount !== 1 && !named) || doc.lastChild!.type !== nodes.paragraph || doc.lastChild!.content.size) return null;
+        const from = doc.content.size - doc.lastChild!.nodeSize;
+        return DecorationSet.create(doc, [Decoration.node(from, doc.content.size,
           { class: "page-placeholder", "data-placeholder": text })]);
       },
     },

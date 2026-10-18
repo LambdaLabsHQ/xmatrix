@@ -93,3 +93,54 @@ test("an ordinary focus does not redial a working socket", async () => {
   assert.equal(sockets[0].closedWith, null);
   live.destroy();
 });
+
+test("a new page is only its document until the first write makes it, then goes on as the made page's session", async () => {
+  sockets.length = 0;
+  tickets.length = 0;
+  const made = [];
+  const notices = [];
+  const live = new PageLiveSession({ spaceId: "s", pageId: null, token: "t", user: { name: "u", color: "#000" },
+    make: async (document) => { made.push(document); return { pageId: "p-new", seeded: true }; } });
+  live.on((notice) => notices.push(notice.type));
+  await settle();
+  assert.equal(sockets.length, 0, "nothing is asked of the Hub for a page nobody wrote on");
+  assert.equal(live.underway, true);
+
+  live.doc.getText("t").insert(0, "first words");
+  live.doc.getText("t").insert(11, " and more");
+  await settle();
+  assert.equal(made.length, 1, "made once, from the document as it was first written");
+  assert.ok(made[0] instanceof Uint8Array && made[0].length > 0);
+  assert.equal(live.pageId, "p-new");
+  assert.deepEqual(notices.filter((type) => type === "made"), ["made"]);
+  await settle();
+  assert.equal(sockets.length, 1, "the made page's session is joined with the same document");
+  sockets[0].open();
+  assert.equal(live.underway, false);
+  assert.equal(live.doc.getText("t").toString(), "first words and more");
+  live.destroy();
+});
+
+test("a new page whose making fails says so and is made on the next write; one not seeded is not joined", async () => {
+  sockets.length = 0;
+  let attempts = 0;
+  const notices = [];
+  const live = new PageLiveSession({ spaceId: "s", pageId: null, token: "t", user: { name: "u", color: "#000" },
+    make: async () => {
+      attempts += 1;
+      if (attempts === 1) throw new Error("offline");
+      return { pageId: "p-new", seeded: false };
+    } });
+  live.on((notice) => notices.push(notice.type === "error" ? notice.code : notice.type));
+  live.doc.getText("t").insert(0, "a");
+  await settle();
+  assert.ok(notices.includes("page_create_failed"));
+  assert.equal(live.pageId, null);
+  live.doc.getText("t").insert(1, "b");
+  await settle();
+  assert.equal(attempts, 2);
+  assert.equal(live.pageId, "p-new");
+  await settle();
+  assert.equal(sockets.length, 0, "a page made without this document opens afresh instead");
+  live.destroy();
+});
