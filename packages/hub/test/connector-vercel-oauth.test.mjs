@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { gmailPollCallback } from "../src/connectors/gmail-poll-oauth.ts";
 import { test } from "node:test";
 import { exchangeOAuthGrant, oauthAuthorizeUrl, oauthClient, verifyOAuthState } from "../src/connectors/oauth.ts";
 import { vercelApiUrl, vercelCompletionUrl, verifyVercel } from "../src/connectors/vercel-api.ts";
@@ -143,6 +144,7 @@ test("the callback writes credentials only after verified state, provider scope 
     "./github-connect-authorization": githubAuthorization,
     "./index-routes-auth-space-management": { linkGitHubInstallation: () => assert.fail("only GitHub Connect links installations") },
     "./connectors/sentry-installation": { sentryInstallationClient },
+    "./connectors/gmail-poll-oauth": { gmailPollCallback },
     "./connectors/teams-native": { teamsNativeApp: () => undefined },
     "./connectors/googlechat-native": { googleChatNativeApp: () => undefined },
     "./connectors/feishu-native": { feishuNativeApp: () => undefined },

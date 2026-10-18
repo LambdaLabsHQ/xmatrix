@@ -437,14 +437,14 @@ problems by severity), `queries:<host>` (top 50 popular queries by clicks).
 The write `recrawl:<host> <page url>` queues one page of that exact scheme,
 host and port, under the Channel's action policy.
 
-Gmail signs in through Composio rather than the company Google client.
+Gmail content access signs in through Composio rather than the company Google client.
 Composio's managed Google app is approved by Google only for its default
 Gmail scope, the full `https://mail.google.com/` grant; requesting the
 narrower `gmail.readonly` on it is what Google's app-blocked screen refuses
 ([Composio Gmail FAQ](https://docs.composio.dev/toolkits/gmail)). The auth
 config therefore requests `https://mail.google.com/` alone, without the
 default profile and contacts scopes, and the Hub is the boundary the grant
-is not: every Gmail call passes an endpoint list in `actions/gmail.ts`
+is not: every user-invoked Gmail action passes an endpoint list in `actions/gmail.ts`
 (GET profile, message list and one message; POST messages/send) and any
 other endpoint is refused before Composio is called. The only write, POST
 messages/send, belongs to `send` and `reply`, whose manifest
@@ -521,7 +521,7 @@ the link itself. `send:<address> <subject>\n<body>` sends one plain-text
 message to one recipient, and `reply:<message id> <body>` answers the
 message's Reply-To (else From) in its thread with In-Reply-To and References
 set; header values are single-line and non-ASCII ones RFC 2047 encoded. There
-is no label, delete, draft or settings action. Native notifications are described below. Composio is a subprocessor for connected mailboxes.
+is no label, delete, draft or settings action. Notifications are described below. Composio is a subprocessor for connected mailboxes.
 
 Disconnect reads the grant through the credential authority's live Space
 owner/admin check before any provider deletion. Member-visible connection
@@ -534,7 +534,21 @@ use the same authorized read and version comparison. The Hub-only credential
 read remains for independently authorized executions and verified ingress.
 See [Gmail API](https://developers.google.com/workspace/gmail/api/reference/rest).
 
-#### Native Gmail notification signals
+#### Gmail notification signals
+
+The default notification setup uses the existing company Google client and
+registered connector callback, with a separate encrypted `gmail.labels` grant
+plus basic OpenID/email identity access. Google userinfo verifies the selected
+mailbox; existing Composio content tokens are not replaced. Minute cron checks
+four INBOX counts. Changes durably wake confirmation through that same owned
+Composio account's `/history` endpoint, restricted to inbox `messageAdded` IDs.
+The Composio `/profile` endpoint supplies the initial cursor and expired-cursor
+recovery. No message bodies are fetched. An independent incremental check is
+due every 15 minutes after the last completed scan, even if counts stay equal.
+Counter cancellation and provider delays are accepted best-effort limits;
+zero-loss delivery and maximum delay are not promised. A pass claims at most
+20 jobs and processes four concurrently. Cached access tokens remain encrypted
+and are refreshed near expiry; revocation and stop erase them with the grant.
 
 Optional native notifications use a separate Google OAuth client requesting
 only `gmail.metadata`. They do not replace the Composio content grant or its
@@ -548,7 +562,7 @@ checks Google's RS256 signature, issuer, configured audience, verified service
 account and exact subscription before durably recording a wake. Only after an
 event does it query Gmail history for inbox `messageAdded` identities. It never
 queries the inbox on a timer. Daily watch renewal and retries of already accepted
-work use the existing scheduled drain, bounded to four leased jobs per pass.
+work use the same bounded scheduled drain.
 Renewal does not overwrite the consumed history cursor. Google does not provide
 a seconds-level delivery SLA; notification gaps may require a later event, and
 an expired history cursor establishes a fresh baseline and reports the gap.
@@ -572,7 +586,7 @@ subscription. Only Automations whose authority root is the mailbox owner fire.
 The UI exposes the notification ID for that source. Credentials must be supplied
 as an atomic optional group; partial configuration fails closed. Provisioning,
 Google verification and production activation are separate operator steps in
-[Native Gmail notifications](../operations/gmail-notifications.md).
+[Gmail notifications](../operations/gmail-notifications.md).
 
 
 Google Sheets uses the same per-file Google connection and `drive.file` grant.

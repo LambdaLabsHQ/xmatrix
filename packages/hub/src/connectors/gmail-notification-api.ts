@@ -3,10 +3,12 @@ import { ProviderRequestError } from "./http";
 import { record } from "./command-support";
 
 /** The notification reader never fetches message bodies. */
-export async function gmailIncomingChanges(accessToken: string, historyId: string, pageToken?: string) {
+export async function gmailIncomingChanges(accessToken: string, historyId: string, pageToken?: string,
+  read?: (query: Record<string,string>) => Promise<Record<string,unknown>>) {
   if (!/^\d{1,30}$/u.test(historyId) || (pageToken?.length ?? 0)>2000) throw new ProviderRequestError(400,"Invalid Gmail cursor");
-  const result = await nativeGmailGet(accessToken,"/history", { startHistoryId: historyId,
-    historyTypes: "messageAdded", labelId: "INBOX", maxResults: "20", ...(pageToken ? { pageToken } : {}) });
+  const query = { startHistoryId: historyId,
+    historyTypes: "messageAdded", labelId: "INBOX", maxResults: "20", ...(pageToken ? { pageToken } : {}) };
+  const result = await (read ? read(query) : nativeGmailGet(accessToken,"/history",query));
   const messages = new Set<string>();
   for (const change of Array.isArray(result.history) ? result.history : []) {
     const row = record(change);

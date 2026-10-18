@@ -15,6 +15,12 @@ English is the default language for repository documentation, guardrails, releas
 
 ## Current behavior
 
+Gmail notifications default to minute INBOX count polling with a separate
+15-minute Composio incremental-ID check. Our Google grant uses labels plus
+basic mailbox identity, while existing Composio content access stays separate.
+Optional native watch configuration remains independent. See
+[Gmail notifications](../operations/gmail-notifications.md).
+
 The login page supports GitHub, Google and email. GitHub sign-in reuses the
 existing linked Human identity and GitHub App OAuth credentials, independently
 of Space connector installations. See [OAuth recovery](../operations/oauth-callback-recovery.md).
