@@ -12,6 +12,7 @@ import { tellPageAutomationChannels } from "./page-automation-wake";
 import { startPageSummary } from "./page-summary";
 import type { Env } from "./types";
 import { platformAdminSpaceId } from "./admin-platform-access";
+import { base64UrlDecodeBytes } from "./relay-v2-primitives";
 
 /**
  * One Durable Object per page hosts its live session (page-session.ts). It
@@ -220,6 +221,18 @@ export class RelayPageSession extends DurableObject<Env> {
           }
           throw error;
         }
+      }
+      if (request.method === "POST" && url.pathname === "/internal/seed") {
+        // A page just made from the document its author is writing: the session starts from that
+        // document, which their editor goes on syncing. Only a session that never loaded takes one.
+        const body = await request.json() as { spaceId: string; pageId: string; principal: PageSessionPrincipal;
+          document: string };
+        this.bind(body.spaceId, body.pageId);
+        await this.ctx.storage.put("identity", { spaceId: body.spaceId, pageId: body.pageId });
+        await this.ready();
+        if (this.session.loaded || await this.ctx.storage.get("state")) return Response.json({ seeded: false });
+        await this.session.ensureLoaded(body.principal, null, base64UrlDecodeBytes(body.document));
+        return Response.json({ seeded: true });
       }
       if (request.method === "POST" && url.pathname === "/internal/summary-ended") {
         const body = await request.json() as { spaceId: string; pageId: string; requestId: string };

@@ -339,8 +339,13 @@ export class PageSession {
     this.editors.set(principalKey(principal), { principal, seq: ++this.editSeq });
   }
 
-  /** Restores persisted session state, or loads the head for the first reader. */
-  async ensureLoaded(principal: PageSessionPrincipal, persisted?: PageSessionState | null): Promise<void> {
+  /**
+   * Restores persisted session state, or loads the head for the first reader. A page made from a
+   * document someone was already writing starts from that document itself (`seed`), so the editor
+   * they keep typing in merges into the session instead of writing the page a second time.
+   */
+  async ensureLoaded(principal: PageSessionPrincipal, persisted?: PageSessionState | null,
+    seed?: Uint8Array): Promise<void> {
     if (this.base) return;
     await this.serial(async () => {
       if (this.base) return;
@@ -391,7 +396,10 @@ export class PageSession {
         return;
       }
       const head = this.canonical(await this.ports.loadHead(principal));
-      setPageFragmentMarkdown(this.fragment, head.body, "load");
+      // A seeded document is the page as written, down to the empty line its author is typing into;
+      // its markdown, the head, was read from it.
+      if (seed) Y.applyUpdate(this.doc, seed, "load");
+      else setPageFragmentMarkdown(this.fragment, head.body, "load");
       this.setHead(head);
       this.settledVersion = this.version;
       // The document's CRDT identity is kept from its first load, so replicas

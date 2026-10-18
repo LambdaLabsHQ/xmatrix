@@ -785,12 +785,19 @@ and Share and History in the page's top bar.
 Creating a page works as in Notion: the desktop list's + and Ctrl/⌘+N, the
 phone's FAB, the empty list and a parent row's sub-page + each open a new page
 at once, with no dialog or browser prompt, its title field focused, on a phone
-as on a desktop. It exists only on that screen until something is written: the
-page is made, under the chosen parent, when the writer leaves the title or the
-text, or the page, with the name as its document's opening heading and the
-text below it. One opened and left empty is not kept; closing the tab with text
-not yet kept asks first. A failure shows its error on the new page, and leaving
-a field again retries.
+as on a desktop. A new page is an ordinary page on screen, with the same editor
+and header, Co-write included (§4.2), and there is no draft: it is made by its
+first write, like copy-on-write. Until then its live document exists only in
+the browser, and one opened and left empty is not kept anywhere. The first
+write is a keystroke in the text, the title (Enter or leaving the field) or
+calling an Agent. It makes the page under the chosen parent from that document
+as it stands. The Hub keeps the document's markdown as revision 1 and starts
+the page's live session from the same Yjs document, so the editor joins that
+session without reloading and goes on syncing what is typed meanwhile. A name
+typed in the title is the document's opening heading, with an empty line below
+it to write on; without one the page stays unnamed. Until it is made, the header
+shows only Co-write. A failed make says so on the page, and the next write
+tries again.
 
 ## 8. Build order
 

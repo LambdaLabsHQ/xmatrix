@@ -36,9 +36,13 @@ export const pageApi = {
     xmatrixApiRequest<{ page: PageDocument }>({
       url: `${WEB_PROXY_ROUTES.space_page(spaceId, pageId)}${revision ? `?revision=${revision}` : ""}`, token, signal,
     }),
-  create: (spaceId: string, token: string, input: { title: string; parentPageId?: string | null; body?: string;
-    accessMode?: "open" | "restricted" }) =>
-    xmatrixApiRequest<{ page: PageSummary }>({ url: WEB_PROXY_ROUTES.space_pages(spaceId), token,
+  /**
+   * Makes a page from a name and markdown, or from `document`, the Yjs state of a page someone has
+   * started writing (base64); `seeded` says its live session starts from that same document.
+   */
+  create: (spaceId: string, token: string, input: { parentPageId?: string | null;
+    accessMode?: "open" | "restricted" } & ({ title: string; body?: string } | { document: string })) =>
+    xmatrixApiRequest<{ page: PageSummary; seeded?: boolean }>({ url: WEB_PROXY_ROUTES.space_pages(spaceId), token,
       method: "POST", body: input }),
   update: (spaceId: string, pageId: string, token: string, input: { title?: string; parentPageId?: string | null;
     afterPageId?: string | null; accessMode?: "open" | "restricted"; agentSuggestOnly?: boolean }) =>
@@ -186,7 +190,12 @@ export type PageSessionNotice =
   /** The session's document has arrived; the editor shows the live page from here on. */
   | { type: "synced" }
   /** This person changed the document; it reaches the session over the socket, or on reconnect. */
-  | { type: "local-edit" };
+  | { type: "local-edit" }
+  /**
+   * The page this session's document started was made, on this person's first write. When `seeded`,
+   * the page's session holds this same document, and this one goes on as its live session.
+   */
+  | { type: "made"; pageId: string; seeded: boolean };
 
 /** The page session protocol this editor speaks: the page as a document. */
 const PAGE_SESSION_PROTOCOL = "xmatrix-page-v2.";
@@ -216,8 +225,21 @@ const PAGE_SESSION_PING = "ping";
 const PAGE_HEARTBEAT_INTERVAL_MS = 25_000;
 const PAGE_HEARTBEAT_TIMEOUT_MS = 10_000;
 
+/** A new page whose making failed is tried again on a write at least this much later. */
+const PAGE_MAKE_RETRY_MS = 2_000;
+/** A new page left while it is being made has this long to take what was written since. */
+const PAGE_LEAVE_FLUSH_MS = 15_000;
+
 export class PageLiveSession {
   readonly doc = new Y.Doc();
+  /** The page; null while it is a new page nobody has written on yet, which exists only here. */
+  pageId: string | null;
+  private making: Promise<string> | null = null;
+  private retryAt = 0;
+  private reached = false;
+  /** Left while being made: it closes once what was written since has reached the made page. */
+  private leaving = false;
+  private destroyed = false;
   /** The page's document (docs/design/pages-live-document.md §4.1), which the editor binds. */
   readonly fragment = this.doc.getXmlFragment(PAGE_DOCUMENT_FRAGMENT);
   readonly awareness = new awarenessProtocol.Awareness(this.doc);
@@ -229,15 +251,22 @@ export class PageLiveSession {
   private readonly connection: ReconnectingSocket;
   private readonly listeners = new Set<(notice: PageSessionNotice | { type: "status"; connected: boolean }) => void>();
 
-  constructor(private readonly input: { spaceId: string; pageId: string; token: string;
-    user: { name: string; color: string } }) {
+  constructor(private readonly input: { spaceId: string; pageId: string | null; token: string;
+    user: { name: string; color: string };
+    /**
+     * For a new page: makes it from this document as it stands (its Yjs state), when this person
+     * first writes on it. Like copy-on-write, nothing is kept until then.
+     */
+    make?: (document: Uint8Array) => Promise<{ pageId: string; seeded: boolean }> }) {
     this.token = input.token;
+    this.pageId = input.pageId;
     this.awareness.setLocalStateField("user", { ...input.user, kind: "user" });
     this.doc.on("update", (update: Uint8Array, origin: unknown) => {
       if (origin === this) return;
       this.send(encodePageSync(encoder => syncProtocol.writeUpdate(encoder, update)));
       // This person's own edit, for the page's "Saving… / Saved" line.
       this.emit({ type: "local-edit" });
+      if (this.pageId === null && Date.now() >= this.retryAt) void this.make().catch(() => undefined);
     });
     this.awareness.on("update", ({ added, updated, removed }: { added: number[]; updated: number[]; removed: number[] },
       origin: unknown) => {
@@ -248,6 +277,7 @@ export class PageLiveSession {
     this.connection = new ReconnectingSocket({
       open: () => this.open(),
       onOpen: (socket) => {
+        this.reached = true;
         socket.send(encodePageSync(encoder => syncProtocol.writeSyncStep1(encoder, this.doc)));
         socket.send(encodePageAwareness(awarenessProtocol.encodeAwarenessUpdate(this.awareness, [this.doc.clientID])));
         this.emit({ type: "status", connected: true });
@@ -275,7 +305,38 @@ export class PageLiveSession {
       },
       backoff: { baseMs: 500, maxMs: 30_000 },
     });
-    this.connection.start();
+    if (this.pageId !== null) this.connection.start();
+  }
+
+  /**
+   * Edits are on their way, not stuck offline: the page is being made, or its session has not been
+   * reached yet since it was.
+   */
+  get underway(): boolean {
+    return !this.reached;
+  }
+
+  /**
+   * Makes the new page this document is the start of, once, and resolves to its id. After a failure
+   * a write tries again, at most every PAGE_MAKE_RETRY_MS.
+   */
+  make(): Promise<string> {
+    if (this.pageId !== null) return Promise.resolve(this.pageId);
+    if (!this.making) {
+      this.making = this.input.make!(Y.encodeStateAsUpdate(this.doc)).then(({ pageId, seeded }) => {
+        this.pageId = pageId;
+        if (this.destroyed) return pageId;
+        if (!this.leaving) this.emit({ type: "made", pageId, seeded });
+        if (seeded) this.connection.start();
+        else if (this.leaving) this.close();
+        return pageId;
+      }, (cause: unknown) => {
+        this.making = null;
+        this.retryAt = Date.now() + PAGE_MAKE_RETRY_MS;
+        throw cause;
+      });
+    }
+    return this.making;
   }
 
   /**
@@ -303,7 +364,7 @@ export class PageLiveSession {
   private async open(): Promise<WebSocket> {
     const session = await xmatrixApiRequest<{ protocol: string; socketPath: string; canEdit: boolean;
       heartbeat?: string }>({
-      url: WEB_PROXY_ROUTES.space_page_live(this.input.spaceId, this.input.pageId), token: this.token,
+      url: WEB_PROXY_ROUTES.space_page_live(this.input.spaceId, this.pageId!), token: this.token,
       method: "POST", body: { document: PAGE_DOCUMENT_FRAGMENT },
       // A ticket request stuck on a dead connection must not stop every later attempt.
       signal: AbortSignal.timeout(PAGE_TICKET_TIMEOUT_MS),
@@ -334,6 +395,8 @@ export class PageLiveSession {
         this.emit({ type: "synced" });
       }
       if (reply) this.send(reply);
+      // Its answer to the session's first sync message carries what was written here since the page was made.
+      if (this.leaving && kind === syncProtocol.messageYjsSyncStep1) this.close();
     } else if (type === MESSAGE_AWARENESS) {
       awarenessProtocol.applyAwarenessUpdate(this.awareness, decoding.readVarUint8Array(decoder), this);
     } else if (type === MESSAGE_NOTICE) {
@@ -345,6 +408,20 @@ export class PageLiveSession {
   }
 
   destroy(): void {
+    // A new page left while it is being made still takes what was written after its first write.
+    const making = this.pageId === null ? this.making : null;
+    if (making && !this.leaving) {
+      this.leaving = true;
+      setTimeout(() => this.close(), PAGE_LEAVE_FLUSH_MS);
+      making.catch(() => this.close());
+      return;
+    }
+    this.close();
+  }
+
+  private close(): void {
+    if (this.destroyed) return;
+    this.destroyed = true;
     // Tell the others this person left while the socket is still up.
     awarenessProtocol.removeAwarenessStates(this.awareness, [this.doc.clientID], "local");
     this.connection.stop();

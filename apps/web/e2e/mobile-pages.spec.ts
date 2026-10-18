@@ -3,7 +3,7 @@ import * as encoding from "lib0/encoding";
 import * as syncProtocol from "y-protocols/sync";
 
 import { encodePageSync } from "../src/lib/pages/page-sync-codec";
-import { pageDocument } from "./page-document-fixture";
+import { pageDocument, startedMarkdown } from "./page-document-fixture";
 import { paintedMainTop } from "./painted-timeline-frames";
 
 import { E2E_CHANNEL, E2E_MOBILE_CONTEXT, E2E_SPACE, installWorkspaceStubs } from "./workspace-fixtures";
@@ -86,8 +86,8 @@ test("switching dock tabs keeps the Pages list mounted instead of reloading it",
 });
 
 // Like Notion, + opens an untitled page at once with its title focused, so typing
-// names it; the page is made only once something is written. No prompt or form:
-// native shells decline prompts.
+// names it; the page is made on its first write, from what is written (copy-on-write).
+// No prompt or form: native shells decline prompts.
 for (const entry of ["FAB", "first page", "sub-page", "stale tree"] as const) {
   test(`a phone opens an untitled page from the ${entry} and makes it once it is named`, async ({ page }) => {
     const parent = summary("p-lambda", null, "Lambda Labs");
@@ -153,15 +153,16 @@ for (const entry of ["FAB", "first page", "sub-page", "stale tree"] as const) {
     await expect(title).toHaveValue("");
     await expect(title).toHaveAttribute("placeholder", "Untitled");
     expect(await fixtureRequestBodies(page, "page-create")).toEqual([]);
-    // Named and left, it is made under the page it was opened from.
+    // Named, it is made under the page it was opened from, from its document: the name it opens with.
     await page.keyboard.type("New notes");
-    await title.blur();
-    await expect.poll(() => fixtureRequestBodies(page, "page-create")).toEqual([
-      { title: "New notes", parentPageId: created.parentPageId },
-    ]);
-    // Leaving the field again while it is on its way does not make a second page.
-    await title.focus();
-    await title.blur();
+    await page.keyboard.press("Enter");
+    await expect.poll(async () => (await fixtureRequestBodies(page, "page-create")).length).toBe(1);
+    const [made] = await fixtureRequestBodies(page, "page-create");
+    expect(made).toMatchObject({ parentPageId: created.parentPageId });
+    expect(startedMarkdown(made!.document)).toBe("# New notes\n");
+    // Writing on while it is on its way does not make a second page.
+    await expect(page.getByTestId("page-editor").locator("h1")).toHaveText("New notes");
+    await page.keyboard.type("First line");
     await releaseFixture(page, "page-create");
     await expect(page).toHaveURL(/page=p-new/u);
     await expect(page.getByRole("button", { name: "Back to pages", exact: true })).toBeVisible();
@@ -176,7 +177,7 @@ for (const entry of ["FAB", "first page", "sub-page", "stale tree"] as const) {
   });
 }
 
-test("a phone shows why a page could not be made, and leaving the field again tries again", async ({ page }) => {
+test("a phone shows why a page could not be made, and writing on it tries again", async ({ page }) => {
   await installMobilePages(page, [summary("p-lambda", null, "Lambda Labs")]);
   await fixtureJson(page, "failed-create", PAGE_TREE_PATTERN, { error: "Could not create the page" },
     { method: "POST", status: 500 });
@@ -185,14 +186,19 @@ test("a phone shows why a page could not be made, and leaving the field again tr
   const title = page.getByTestId("page-title");
   await expect(title).toBeFocused();
   await page.keyboard.type("Retry");
-  await title.blur();
-  await expect(page.getByTestId("page-draft")).toContainText("Couldn't create the page");
+  await page.keyboard.press("Enter");
+  await expect(page.getByTestId("pages-view")).toContainText("Couldn't create the page");
   await expect(page).toHaveURL(/page=new/u);
   await fixtureJson(page, "retry-create", PAGE_TREE_PATTERN,
     { page: summary("p-retry", null, "Retry") }, { method: "POST" });
-  await title.focus();
-  await title.blur();
+  // What was written stays on the page, and words written a moment later make it (not one try per keystroke).
+  await expect(page.getByTestId("page-editor").locator("h1")).toHaveText("Retry");
+  await page.waitForTimeout(2_100);
+  await page.keyboard.type("Notes");
   await expect(page).toHaveURL(/page=p-retry/u);
   expect(await fixtureRequestBodies(page, "failed-create")).toHaveLength(1);
-  expect(await fixtureRequestBodies(page, "retry-create")).toEqual([{ title: "Retry", parentPageId: null }]);
+  const retried = await fixtureRequestBodies(page, "retry-create");
+  expect(retried).toHaveLength(1);
+  expect(retried[0]).toMatchObject({ parentPageId: null });
+  expect(startedMarkdown(retried[0]!.document)).toMatch(/^# Retry\n\nN/u);
 });
