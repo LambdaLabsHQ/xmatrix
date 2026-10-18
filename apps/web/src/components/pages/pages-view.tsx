@@ -1241,7 +1241,8 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
       conversation: conversationId && name ? { id: conversationId, name } : null };
   };
   const openHistory = () => {
-    if (headRevision !== null) markSeen(headRevision);
+    reading.current?.seeAll();
+    if (headRevision !== null) markSeen(headRevision, null);
     setMode("history");
   };
   const sectionActions: PageSectionActions = { discuss, copyLink, ask, claim, editors, history: openHistory };
