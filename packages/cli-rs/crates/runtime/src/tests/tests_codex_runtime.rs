@@ -2547,6 +2547,7 @@ fn orphan_terminal_status_fixture(
     let dir =
         std::env::temp_dir().join(format!("xmatrix-orphan-terminal-{}", uuid::Uuid::new_v4()));
     fs::create_dir_all(&dir).unwrap();
+    super::set_daemon_private_dir_permissions(&dir);
     let run_id = "channel:instance#execution";
     let label = super::daemon_run_file_label(Some(run_id), None, "codex");
     let status_path = dir.join(format!("{label}.status.json"));
