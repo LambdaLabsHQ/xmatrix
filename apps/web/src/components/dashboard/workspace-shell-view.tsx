@@ -1404,6 +1404,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       spaceName={currentSpace?.name ?? "this Space"}
       channels={channels}
       pages={pageTree.data ?? []}
+      catalogPaging={currentSpaceCatalog}
       searchMessages={messageSearch}
       searchPages={searchPages}
       onChangeRequest={(request) => openSearchResults(searchRequestParams(request).toString())}

@@ -26,7 +26,12 @@ import { cn } from "@/lib/utils";
 import { channelTitle } from "@/components/dashboard/channel-links";
 import { useCatalogSearch } from "./workspace-shell-chrome";
 import { SearchPanel, SearchResultRow } from "./workspace-search-panel";
-import { buildWorkspaceSearchResults, scrollActiveCommandResultIntoView, searchResultIcon } from "./workspace-shell-helpers-extra";
+import {
+  buildWorkspaceSearchResults, scrollActiveCommandResultIntoView, searchMatchingChannels, searchResultIcon,
+} from "./workspace-shell-helpers-extra";
+import {
+  rankSearchResults, searchActivityMs, searchMatchTier, type SearchRank,
+} from "./workspace-search-rank";
 import type { WorkspaceMessageSearch } from "./workspace-shell-helpers";
 import type { SpaceChannelCatalog } from "./use-channel-catalog-paging";
 import type { AppView } from "./workspace-shell-navigation";
@@ -206,6 +211,9 @@ type DialogRow =
 
 type DialogSection = { title?: string; rows: DialogRow[] };
 
+/** Rows under "Search for …"; the results page shows everything. */
+const SEARCH_DIALOG_RESULT_LIMIT = 10;
+
 /** Authors `from:` can name: the Space's people and its Agents. */
 function searchAuthors(space: SerializedSpace | undefined, agents: readonly SerializedAgent[]):
   Array<{ author: SearchAuthor; detail: string; searchable: string }> {
@@ -332,26 +340,28 @@ export const WorkspaceSearchDialog = memo(function WorkspaceSearchDialog({
       return recent.length ? [{ title: "Recent", rows: recent.map((item) => ({
         key: `recent:${searchRequestKey(item)}`, kind: "recent" as const, request: item })) }] : [];
     }
-    const result: DialogSection[] = [{ rows: [{ key: "all", kind: "all" }] }];
-    const goTo: DialogRow[] = [
+    // One list ranked by match and recency (`workspace-search-rank.ts`); the
+    // icon on each row says what kind of thing it is.
+    const pageUpdatedAt = new Map(pages.map((page) => [page.pageId, page.updatedAt]));
+    const ranked = rankSearchResults<{ row: DialogRow; rank: SearchRank }>([
       ...matchingSearchDestinations(searchText).map((destination) => ({
-        key: `view:${destination.view}`, kind: "destination" as const, view: destination.view, label: destination.label })),
-      ...directory.map((item) => ({ key: item.id, kind: "directory" as const, result: item })),
-    ].slice(0, 5);
-    if (goTo.length) result.push({ title: "Go to", rows: goTo });
-    if (messages.hits.length) {
-      result.push({ title: "Messages", rows: messages.hits.slice(0, 5).map((hit) => ({
-        key: `message:${hit.entityId}`, kind: "message" as const, hit })) });
-    }
-    const bodyHits = pageHits.filter((hit) => hit.field === "body").slice(0, 3);
-    if (bodyHits.length) {
-      result.push({ title: "In pages", rows: bodyHits.map((hit) => ({
-        key: `page:${hit.pageId}:${hit.blockId}`, kind: "page" as const, hit })) });
-    }
+        row: { key: `view:${destination.view}`, kind: "destination" as const, view: destination.view,
+          label: destination.label },
+        rank: { tier: searchMatchTier(searchText, destination.label), activityMs: 0 } })),
+      ...directory.map((item) => ({ row: { key: item.id, kind: "directory" as const, result: item },
+        rank: item.rank })),
+      ...messages.hits.map((hit) => ({ row: { key: `message:${hit.entityId}`, kind: "message" as const, hit },
+        rank: { tier: 3 as const, activityMs: searchActivityMs(hit.sentAt) } })),
+      ...pageHits.filter((hit) => hit.field === "body").map((hit) => ({
+        row: { key: `page:${hit.pageId}:${hit.blockId}`, kind: "page" as const, hit },
+        rank: { tier: 3 as const, activityMs: searchActivityMs(pageUpdatedAt.get(hit.pageId)) } })),
+    ], (item) => item.rank).slice(0, SEARCH_DIALOG_RESULT_LIMIT);
+    const result: DialogSection[] = [{ rows: [{ key: "all", kind: "all" }] }];
+    if (ranked.length) result.push({ rows: ranked.map((item) => item.row) });
     return result;
     // `request` is rebuilt every render; its parts are the dependencies.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [agents, channels, directory, filters, messages.hits, pageHits, pending, searchText, space, spaceId]);
+  }, [agents, channels, directory, filters, messages.hits, pageHits, pages, pending, searchText, space, spaceId]);
 
   const rows = sections.flatMap((section) => section.rows);
   useLayoutEffect(() => {
@@ -489,6 +499,7 @@ export function WorkspaceSearchView({
   spaceName,
   channels,
   pages = [],
+  catalogPaging,
   searchMessages,
   searchPages,
   onChangeRequest,
@@ -501,6 +512,8 @@ export function WorkspaceSearchView({
   spaceName: string;
   channels: ChannelSnapshot[];
   pages?: readonly PageSummary[];
+  /** Loads the Hub's title matches, so a conversation not yet paged in is still found. */
+  catalogPaging: SpaceChannelCatalog;
   searchMessages?: WorkspaceMessageSearch;
   searchPages?: (query: string) => Promise<{ results: PageSearchHit[] }>;
   onChangeRequest: (request: SearchRequest) => void;
@@ -513,11 +526,12 @@ export function WorkspaceSearchView({
   const scoped = searchHasFilters(request);
   const messages = useMessageSearch(searchMessages, request, runnable);
   const pageHits = usePageSearch(searchPages, request.text, runnable && !scoped);
+  useCatalogSearch(runnable && !scoped, request.text, catalogPaging);
   const channelById = useMemo(() => new Map(channels.map((channel) => [channel.id, channel])), [channels]);
   const text = request.text.trim();
   const needle = text.toLowerCase();
-  const channelHits = !scoped && needle
-    ? channels.filter((channel) => channelTitle(channel).toLowerCase().includes(needle)).slice(0, 8) : [];
+  const channelHits = useMemo(() => !scoped && text ? searchMatchingChannels(channels, text).slice(0, 8) : [],
+    [channels, scoped, text]);
   const titledPages = !scoped && needle
     ? pages.filter((page) => page.title.toLowerCase().includes(needle)).slice(0, 8) : [];
   const bodyPageHits = pageHits.filter((hit) => hit.field === "body");
