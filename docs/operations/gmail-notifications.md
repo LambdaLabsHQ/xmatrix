@@ -21,6 +21,10 @@ Setup checks Human/Space/mailbox ownership, current credentials, signed state,
 PKCE and a single-use attempt. Google userinfo must return the selected verified
 email; the selected Composio account's Gmail profile independently supplies the
 initial history cursor. These grants are separate from Drive connector tokens.
+The callback opens the Gmail detail in Apps. Space URL normalization preserves
+its completion parameters until that view loads; the view removes the code and
+state from the address before submitting the single-use completion request.
+Declined consent returns to Gmail with a retry notice, without exchanging a code.
 Access and refresh tokens remain encrypted in the notification authority; the
 access token is reused until shortly before expiry and refreshed as needed.
 

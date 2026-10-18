@@ -1188,6 +1188,18 @@ export function AppsView({
     const url = new URL(window.location.href);
     const outcome = url.searchParams.get("oauth");
     const providerId = url.searchParams.get("connector");
+    if (providerId === "gmail" && (url.searchParams.has("gmailWatchState") || url.searchParams.has("gmailWatch"))) {
+      // The mailbox view consumes its single-use code after connection data loads.
+      // Select it without claiming that the notification grant has completed.
+      if (url.searchParams.get("gmailWatch") === "failed") {
+        setSetupNotice({ tone: "warning", message: "Gmail notification authorization did not finish. Enable notifications to try again." });
+        url.searchParams.delete("gmailWatch");
+      }
+      url.searchParams.delete("connector");
+      window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
+      setSelectedConnectorId("gmail");
+      return;
+    }
     if (!outcome || !providerId) return;
     const name = connectors.find((connector) => connector.id === providerId)?.name ?? providerId;
     setSetupNotice(outcome === "connected"
