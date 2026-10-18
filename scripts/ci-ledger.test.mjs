@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { deflateRawSync } from "node:zlib";
+import { parse } from "yaml";
 
 import {
   HUB_SUITE_LEDGER_JOB,
@@ -154,6 +155,26 @@ test("a selector-gated ledgered job is never scheduled for content that already 
     assert.ok(changes.includes(`jobs+=(`) && new RegExp(`jobs\\+=\\([^)]*\\b${job}\\b`, "u").test(changes), `selector looks up ${job}`);
   }
   assert.ok(changes.includes("node scripts/ci-ledger.mjs reused"));
+});
+
+test("CI selects a release ref only after verifying its stamp with triggering-revision code", () => {
+  const ci = parse(readFileSync(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8"));
+  for (const [name, job] of Object.entries(ci.jobs)) {
+    const checkout = job.steps.findIndex((step) => step.uses === "actions/checkout@v6");
+    assert.equal(job.steps[checkout].with.ref, "${{ github.sha }}", name);
+    const select = job.steps.findIndex((step) => step.name === "Select the verified release revision");
+    assert.ok(select > checkout, name);
+    const step = job.steps[select];
+    assert.equal(step.if, "inputs.ref != ''", name);
+    assert.equal(step.env.CI_SOURCE_SHA, "${{ github.sha }}", name);
+    assert.equal(step.env.CI_RELEASE_REF, "${{ inputs.ref }}", name);
+    // The existing release-commit tests own rejection of non-stamp changes.
+    // This workflow boundary must invoke that verifier before switching code.
+    assert.match(step.run, /set -euo pipefail/u);
+    const verify = step.run.indexOf('node scripts/release-commit.mjs verify "$CI_RELEASE_REF" "$CI_SOURCE_SHA"');
+    assert.ok(verify >= 0 && verify < step.run.indexOf('git checkout --detach "$CI_RELEASE_REF"'), name);
+    assert.ok(job.steps.slice(checkout + 1, select).every((entry) => !entry.uses?.startsWith("./")), name);
+  }
 });
 
 test("the recorder runs for every workflow whose runs it accepts", () => {
