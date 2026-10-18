@@ -922,8 +922,16 @@ integration("launch survives a hostname change with stale Workspace metadata and
       await sql(`UPDATE data.runs SET status='exited' WHERE run_id=$1`, [target.runId]);
       await sql(`UPDATE data.instances SET status='offline',rest_state='sleeping' WHERE instance_id=$1`, [target.instanceId]);
     }
-    const woke = await reborn.wakeResting({ commandId: "wake-message", channelId: "channel", sourceMessageId: "message",
-      prompt: "what was the codeword?" });
+    const targeted = await reborn.wakeResting({ commandId: "wake-message", channelId: "channel", sourceMessageId: "message",
+      targetInstanceId: sleeper.instanceId, prompt: "what was the codeword?" });
+    assert.deepEqual(targeted.woken.map(item => item.instanceId), [sleeper.instanceId],
+      "a Connector receipt wakes its caller without waking a sleeping peer");
+    assert.deepEqual((await reborn.wakeResting({ commandId: "wake-replay", channelId: "channel", sourceMessageId: "message",
+      targetInstanceId: sleeper.instanceId })).woken, [], "receipt replay creates no duplicate wake");
+    assert.deepEqual((await reborn.wakeResting({ commandId: "wake-wrong-channel", channelId: "another-channel",
+      sourceMessageId: "message", targetInstanceId: repoSleeper.instanceId })).woken, [], "a target cannot cross Channels");
+    const broadcast = await reborn.wakeResting({ commandId: "wake-event", channelId: "channel", sourceMessageId: "event" });
+    const woke = { woken: [...targeted.woken, ...broadcast.woken], refused: [...targeted.refused, ...broadcast.refused] };
     assert.deepEqual(woke.woken.map(item => item.instanceId).sort(), [sleeper.instanceId, repoSleeper.instanceId].sort());
     assert.deepEqual(woke.refused, [], "a repo Instance wakes whatever its Space's GitHub connection state");
     const repoWake = (await sql(`SELECT * FROM data.agent_reborn_intents WHERE intent_id=$1`,

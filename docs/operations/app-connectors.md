@@ -983,3 +983,15 @@ Result delivery retries at most twelve times with backoff capped at sixty
 seconds. Re-admitting the same executing request resumes recovery/delivery,
 never a provider transfer. Encrypted outcomes are cleared after confirmed
 publication and expire with the request's twenty-four-hour retention window.
+
+### Connector Instance wake
+
+Agent action receipts queue a new turn only for the authenticated calling
+Instance; they never interrupt its active turn. Native subscription events
+queue for existing Channel Instances. The same committed messages resume
+sleeping/interrupted recipients through the existing bounded wake authority;
+stopped Instances stay stopped. Other Instances see action receipts as context.
+Older receipts without a retained caller remain context. To diagnose delivery,
+check the App author, reply reference, Hub-only
+`xmatrixConnectorRequesterInstanceId` metadata, and the recipient's rest state;
+mutable Agent names and provider text are not routing authority.

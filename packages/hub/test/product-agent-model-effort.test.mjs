@@ -14,6 +14,13 @@ import {
   channelMessageDeliveryIntent,
 } from "../src/runtime-transport/channel-message-frame.ts";
 
+function intent(body) {
+  return agentChannelMessageDeliveryIntent({
+    channelId: "channel-1", messageId: "control", sequence: 1, body,
+    from: { kind: "user", label: "Owner" }, sentAt: "2026-10-18T00:00:00Z",
+  }, { agentName: "claude", channelInstanceId: "1" });
+}
+
 function portWith(outcome) {
   const requests = [];
   const notices = [];
@@ -137,8 +144,6 @@ test("non-commands never reach the port", async () => {
 });
 
 test("a control command delivers as context so it cannot burn an instance turn", () => {
-  const recipient = { agentName: "claude", channelInstanceId: "1" };
-  const intent = (body) => agentChannelMessageDeliveryIntent({ body }, recipient);
 
   assert.equal(intent("@claude:1 /model fable"), "context");
   assert.equal(intent("@claude:1 /effort high"), "context");
@@ -185,8 +190,6 @@ test("a statement that is not a command disqualifies the whole message", () => {
 });
 
 test("multi-statement control messages still deliver as context", () => {
-  const recipient = { agentName: "claude", channelInstanceId: "1" };
-  const intent = (body) => agentChannelMessageDeliveryIntent({ body }, recipient);
   assert.equal(intent("@claude:1 /model fable\n@claude:1 /effort high"), "context");
   assert.equal(intent("@claude:1 /model fable\nand then ship it"), "work");
 });

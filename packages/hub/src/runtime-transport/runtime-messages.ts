@@ -97,6 +97,7 @@ export function runtimeMessages(
           actorUserId,
           senderKind,
           senderId,
+          ...(typeof senderSnapshot?.instanceId === "string" ? { senderInstanceId: senderSnapshot.instanceId } : {}),
           committedAt: sentAt,
           ...(scheduleBackground ? { scheduleBackground } : {}),
           ...(context?.senderRunId ? { senderRunId: context.senderRunId } : {}),

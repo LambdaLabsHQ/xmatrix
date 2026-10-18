@@ -1,4 +1,5 @@
 import { plainRecord as protocolRecord } from "@xmatrix/protocol";
+import { connectorMessageWakeTarget } from "../connector-message-delivery";
 /**
  * One committed channel message, framed once for every audience.
  *
@@ -35,7 +36,8 @@ import { parseProductAgentControlCommands } from "../product-agent-model-effort"
  * watching, and it is committed with `xmatrixProvenance: "system_fact"` to say
  * so. Handing one to an Instance as work made it act on the Hub's own
  * commentary, so provenance decides intent here, once, for every audience:
- * a system fact is context and never work. An activity entry is the same:
+ * a system fact is context. Agent-requested App receipts are the scoped
+ * exception resolved for the exact recipient below. An activity entry is the same:
  * a fact a runtime recorded about its own work (conversation-activity.md
  * §3.2), which must never queue a turn for a peer.
  *
@@ -75,8 +77,12 @@ export function channelMessageDeliveryIntent(
  */
 export function agentChannelMessageDeliveryIntent(
   message: ChannelMessage,
-  recipient: { agentName: string; agentId?: string; channelInstanceId?: string; nameIsAmbiguous?: boolean },
+  recipient: { agentName: string; agentId?: string; instanceId?: string; channelInstanceId?: string; nameIsAmbiguous?: boolean },
 ): "work" | "context" {
+  if (message.from.kind === "app") {
+    const target = connectorMessageWakeTarget(message);
+    return target && (!target.instanceId || target.instanceId === recipient.instanceId) ? "work" : "context";
+  }
   const baseIntent = channelMessageDeliveryIntent(message);
   if (baseIntent === "context") return baseIntent;
   // Stop is a control-plane fact committed into the Channel for auditability.
@@ -119,9 +125,10 @@ export function agentChannelMessageDeliveryIntent(
  */
 export function agentChannelMessageRequestsInterrupt(
   message: ChannelMessage,
-  recipient: { agentName: string; agentId?: string; channelInstanceId?: string; nameIsAmbiguous?: boolean },
+  recipient: { agentName: string; agentId?: string; instanceId?: string; channelInstanceId?: string; nameIsAmbiguous?: boolean },
 ): boolean {
   if (agentChannelMessageDeliveryIntent(message, recipient) === "context") return false;
+  if (message.from.kind === "app") return false;
   if (message.from.kind !== "agent") return true;
 
   const ordinal = recipient.channelInstanceId?.trim();
