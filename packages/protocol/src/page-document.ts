@@ -78,8 +78,12 @@ export const pageSchema = new Schema({
     image: {
       group: "inline", inline: true, draggable: true,
       attrs: { src: {}, alt: { default: "" }, title: { default: null } },
-      parseDOM: [{ tag: "img[src]", getAttrs: (dom) => ({ src: (dom as HTMLElement).getAttribute("src"),
-        alt: (dom as HTMLElement).getAttribute("alt") ?? "", title: (dom as HTMLElement).getAttribute("title") }) }],
+      parseDOM: [{ tag: "img[src]", getAttrs: (dom) => {
+        const src = (dom as HTMLElement).getAttribute("src") ?? "";
+        // A file on someone's machine is no image a page can show: images reach a page by being pasted into it.
+        if (/^(?:file|blob):/iu.test(src)) return false;
+        return { src, alt: (dom as HTMLElement).getAttribute("alt") ?? "", title: (dom as HTMLElement).getAttribute("title") };
+      } }],
       toDOM: (node) => ["img", { src: node.attrs.src, alt: node.attrs.alt, title: node.attrs.title }],
     },
     hard_break: { group: "inline", inline: true, selectable: false, parseDOM: [{ tag: "br" }], toDOM: () => ["br"] },
