@@ -42,6 +42,15 @@ test("turn_failed is the lifecycle triple Hub treats as a turn-failure notice", 
     }),
     false,
   );
+  // A harness that failed because its own sign-in expired still gets its notice.
+  assert.equal(
+    isAgentTurnFailureLifecycle({
+      layer: "application",
+      status: "failed",
+      reason: "harness_signed_out",
+    }),
+    true,
+  );
 });
 
 test("turn-failure notice copy is Hub-owned and names the agent", () => {

@@ -120,7 +120,8 @@ use runtime_agent_goal_status::{
 };
 use runtime_claude_messages::claude_is_tool_use_block;
 use runtime_codex_turn_errors::{
-    clear_pending_turn_failure, codex_app_error_is_https_fallback,
+    clear_pending_turn_failure, codex_app_error_is_https_fallback, harness_signed_out_error,
+    AGENT_SIGNED_OUT_LIFECYCLE_REASON,
     codex_app_error_is_transient_transport, codex_app_error_message,
     codex_auth_failure_requires_exit, codex_reconnect_attempts, codex_reconnect_wait_timeout_error,
     codex_turn_error_message, codex_turn_error_requires_restart,

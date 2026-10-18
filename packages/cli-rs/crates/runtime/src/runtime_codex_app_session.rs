@@ -1075,23 +1075,28 @@ impl CodexAppSession {
         let bind = loopback_ws_bind_address("XMATRIX_CODEX_WS_BIND", "codex app-server")?;
         let listen = format!("ws://{bind}");
         let app_args = codex_app_spawn_args(CodexTransportKind::WebSocket, Some(&listen));
-        let AppServerChild {
-            mut child,
-            mut process_tree,
-            stdout,
-            ..
-        } = AppServerChild::spawn(
+        let mut server = AppServerChild::spawn(
             cmd,
             &app_args,
             cwd,
             Stdio::null(),
             "codex app-server WebSocket",
             |command| {
+                // Codex says why it stopped on stderr (signed out, a bad
+                // config): kept for the failure, still echoed to err.log.
+                command.stderr(Stdio::piped());
                 if let Some(agent) = agent {
                     apply_codex_app_agent_env(command, agent);
                 }
             },
         )?;
+        let stderr_tail = server.tee_stderr();
+        let AppServerChild {
+            mut child,
+            mut process_tree,
+            stdout,
+            ..
+        } = server;
 
         // Drain banner logs so the pipe cannot fill; readiness is polled over HTTP.
         config::spawn_profile_task(async move {
@@ -1126,11 +1131,14 @@ impl CodexAppSession {
                     tokio::time::sleep(Duration::from_millis(150)).await;
                 }
             }
-            if child.try_wait().ok().flatten().is_some() {
+            if let Some(status) = child.try_wait().ok().flatten() {
                 let _ = process_tree.terminate();
-                return Err(CliError::Launch(
-                    "codex app-server exited before WebSocket became ready".into(),
-                ));
+                // Its last stderr lines may still be in the pipe.
+                tokio::time::sleep(Duration::from_millis(200)).await;
+                return Err(CliError::Launch(with_stderr_tail(
+                    format!("codex app-server exited ({status}) before WebSocket became ready"),
+                    &stderr_tail,
+                )));
             }
         }
         let Some(ws) = ws_stream else {

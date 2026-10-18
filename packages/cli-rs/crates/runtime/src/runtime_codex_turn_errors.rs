@@ -98,6 +98,33 @@ pub(crate) const AGENT_TURN_FAILURE_LIFECYCLE_REASON: &str = "turn_failed";
 /// A turn failure the provider itself reported as a used-up account (Claude's
 /// `rate_limit_event`). Hub reads usage limits from the error text itself.
 pub(crate) const AGENT_USAGE_LIMIT_LIFECYCLE_REASON: &str = "usage_limited";
+/// A turn or start that failed because the harness's own account is signed
+/// out or its sign-in expired. Hub answers it with a sign-in card naming the
+/// program and Machine, and routing stops choosing it until it signs in.
+pub(crate) const AGENT_SIGNED_OUT_LIFECYCLE_REASON: &str = "harness_signed_out";
+
+/// Whether a harness's error says its own sign-in is missing or expired. The
+/// vendors' wording, as observed: Claude Code's "Failed to authenticate: OAuth
+/// session expired and could not be refreshed" and "Please run /login", Codex's
+/// "Not logged in", API key and 401 refusals.
+pub(crate) fn harness_signed_out_error(detail: &str) -> bool {
+    let text = detail.to_ascii_lowercase();
+    [
+        "failed to authenticate",
+        "oauth session expired",
+        "oauth token has expired",
+        "not logged in",
+        "please run /login",
+        "run `claude /login`",
+        "invalid api key",
+        "authentication_error",
+        "authentication required",
+        "login required",
+        "401 unauthorized",
+    ]
+    .iter()
+    .any(|marker| text.contains(marker))
+}
 
 fn compact_notice_line(value: &str, max_chars: usize) -> String {
     let compact = value
@@ -231,6 +258,8 @@ pub(crate) fn report_turn_failure_with_usage_limit(
         failure_id: uuid::Uuid::new_v4().to_string(),
         reason: if usage_limit.is_some() {
             AGENT_USAGE_LIMIT_LIFECYCLE_REASON
+        } else if harness_signed_out_error(error) {
+            AGENT_SIGNED_OUT_LIFECYCLE_REASON
         } else {
             AGENT_TURN_FAILURE_LIFECYCLE_REASON
         },
