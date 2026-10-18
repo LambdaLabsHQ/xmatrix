@@ -118,7 +118,7 @@ fn every_registered_harness_routes_every_offered_command() {
         // What a live session reports: a model catalog with efforts, plus the
         // commands the provider enumerates itself (ACP `available_commands`,
         // Claude `system/init.slash_commands`).
-        let reported = vec!["/best-of-n".to_string()];
+        let reported = ["/best-of-n".to_string()];
         let overlay: Vec<String> = match backend {
             "claude-print" => [
                 "compact", "context", "clear", "usage", "model", "effort", "goal",
