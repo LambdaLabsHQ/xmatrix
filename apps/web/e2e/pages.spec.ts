@@ -1045,6 +1045,7 @@ test("writing on a page that changed while its reader was away stops marking the
   // Co-writing, what changes is seen as it happens, in its writer's ink: nothing of the diff stays marked.
   await expect(editor.locator(".page-reader-change, .page-reader-removed")).toHaveCount(0);
   await expect(browser.getByTestId("page-reader-gutter")).toHaveCount(0);
+  await expect(browser.getByTestId("page-reader-diff")).toHaveCount(0);
   await expect(editor).toContainText("none yet");
 });
 

@@ -660,9 +660,11 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   };
   // Writing on the page, or calling an Agent to write it, is co-writing: what changes is seen as it happens,
   // in its writer's ink, so what changed while the reader was away is no longer marked over it. It is still
-  // read only where it has been on their screen.
+  // read only where it has been on their screen, so nothing says it was viewed.
   const coWriting = () => {
-    if (readerChanges && !diffViewed) setDiffViewed(true);
+    if (!readerChanges || diffViewed) return;
+    setDiffViewed(true);
+    setReaderChanges(0);
   };
   // The page as the reader had seen it when it opened: what they see from then on is read (§3.1).
   const readFrom = readerBaseline !== null ? readerBaseline : readerChanges === 0 ? null : undefined;
