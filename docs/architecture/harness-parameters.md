@@ -69,6 +69,13 @@ choices disappear. Unavailable choices fail explicitly before submitting
 task text. Ordinary prose and attachment-bearing messages retain the existing
 delivery semantics.
 
+The Web slash and mention menus include `/model` and `/effort` when the live
+Instance catalogs supply their choices, even if an ACP provider such as Cursor
+enumerates only custom commands. Advertised command metadata takes precedence
+for matching tokens; catalog withdrawal removes inferred controls. This is a
+completion fallback for existing runtime snapshots, with execution and
+authorization still owned by the Hub and runtime.
+
 Codex start/resume responses report the thread's `serviceTier`. The installed
 `ClientRequest` schema declares whether immediate settings updates exist, and
 `ThreadSettingsUpdateParams` declares which fields they accept. The runtime binds

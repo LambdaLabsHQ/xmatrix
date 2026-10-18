@@ -786,45 +786,44 @@ export type InstanceCommandOption = {
 };
 
 /**
- * The effective command set of one live instance: what its runtime advertises,
- * or — for runtimes that predate command advertising — the built-in schema
- * narrowed to the controls this instance actually reported support for.
+ * Runtime commands plus model/effort controls supported by its live catalogs.
+ * Providers may enumerate custom commands without listing xMatrix controls.
+ * Advertised tokens retain their metadata; goal keeps its legacy fallback.
  */
 export function instanceCommandOptions(
   agent: SerializedAgent,
   instance: SerializedAgentInstance
 ): InstanceCommandOption[] {
   const advertised = advertisedInstanceCommands(instance);
-  if (advertised.length > 0) {
-    return advertised.map((command) => {
-      const isTypedGoal =
-        command.mode === "typed" && command.token.toLowerCase() === "/goal";
-      return {
-        id: `command-${command.token}`,
-        token: command.token,
-        // `/goal` opens both the freeform set path and the goal-control
-        // palette. Calling this row "Set goal" makes the controls look like
-        // required choices even though typing the objective is the set action.
-        label: isTypedGoal ? "Goal" : command.label || command.token,
-        description: isTypedGoal
-          ? "Type a new goal or choose a goal control command."
-          : command.description,
-        action:
-          command.mode === "typed" && command.argumentSource === "agent-models"
-            ? ("agent-model-switch" as const)
-            : command.mode === "typed" && command.argumentSource === "agent-efforts"
-              ? ("agent-effort-switch" as const)
-              : isTypedGoal
-                ? ("agent-goal-set" as const)
-                : undefined,
-        schemaNodeId: `runtime:${command.token}`,
-      };
-    });
-  }
-  return AGENT_INSTANCE_COMMAND_COMPLETION_SCHEMA.filter((node) => {
+  const options: InstanceCommandOption[] = advertised.map((command) => {
+    const isTypedGoal =
+      command.mode === "typed" && command.token.toLowerCase() === "/goal";
+    return {
+      id: `command-${command.token}`,
+      token: command.token,
+      // `/goal` opens both the freeform set path and the goal-control
+      // palette. Calling this row "Set goal" makes the controls look like
+      // required choices even though typing the objective is the set action.
+      label: isTypedGoal ? "Goal" : command.label || command.token,
+      description: isTypedGoal
+        ? "Type a new goal or choose a goal control command."
+        : command.description,
+      action:
+        command.mode === "typed" && command.argumentSource === "agent-models"
+          ? ("agent-model-switch" as const)
+          : command.mode === "typed" && command.argumentSource === "agent-efforts"
+            ? ("agent-effort-switch" as const)
+            : isTypedGoal
+              ? ("agent-goal-set" as const)
+              : undefined,
+      schemaNodeId: `runtime:${command.token}`,
+    };
+  });
+  const fallback = AGENT_INSTANCE_COMMAND_COMPLETION_SCHEMA.filter((node) => {
+    if (options.some(option => option.token.toLowerCase() === node.token)) return false;
     if (node.id === "model") return (instance.models || []).length > 0;
     if (node.id === "effort") return instanceEffortOptions(instance).length > 0;
-    return node.id !== "goal" || agentSupportsGoalCommand(agent, instance);
+    return advertised.length === 0 && agentSupportsGoalCommand(agent, instance);
   }).map((node) => ({
     id: node.id,
     token: node.token,
@@ -833,6 +832,7 @@ export function instanceCommandOptions(
     action: mentionCandidateAction(node.action),
     schemaNodeId: node.id,
   }));
+  return [...options, ...fallback];
 }
 
 function resolveAgentCommandCompletion(
