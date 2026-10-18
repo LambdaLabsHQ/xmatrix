@@ -1324,45 +1324,58 @@ export class PostgresPageRepository {
   }
 
   /**
-   * The newest revision of a page this person has had on screen, or null before
-   * they first read it. It is a person's own: an Agent Run has none.
+   * The newest revision of a page this person has had on screen whole, or null
+   * before they first read it, and the page as they have seen it when they saw
+   * part of it past that revision (`seen`; null when it is that revision's
+   * text). It is a person's own: an Agent Run has none.
    */
   async readState(input: { requestId: string; spaceId: string; pageId: string; principal: PagePrincipal }):
-    Promise<{ revision: number | null }> {
+    Promise<{ revision: number | null; seen: string | null }> {
     const spaceId = bounded(input.spaceId, "spaceId");
     const pageId = bounded(input.pageId, "pageId");
     if (input.principal.kind !== "user") throw new PageControlError("page_read_state_human_only", 403);
     return this.inSpace(bounded(input.requestId, "requestId"), "page.read_state", spaceId, async (tx) => {
       const actor = await pageActor(tx, spaceId, input.principal, false);
       await this.page(tx, spaceId, actor, pageId, "read");
-      const row = (await tx.query<QueryResultRow & { revision: string }>({ name: "page_read_state_v1",
-        text: "SELECT revision::text FROM data.page_reads WHERE space_id=$1 AND page_id=$2 AND user_id=$3",
+      const row = (await tx.query<QueryResultRow & { revision: string; seen_body: string | null }>({
+        name: "page_read_state_v2",
+        text: "SELECT revision::text, seen_body FROM data.page_reads WHERE space_id=$1 AND page_id=$2 AND user_id=$3",
         values: [spaceId, pageId, actor.userId], maxRows: 1 }))[0];
-      return { revision: row ? Number(row.revision) : null };
+      return { revision: row ? Number(row.revision) : null, seen: row?.seen_body ?? null };
     });
   }
 
-  /** Moves how far this person has read a page forward to a revision the page has; it never moves back. */
+  /**
+   * Moves how far this person has read a page forward to a revision the page has; it never moves back.
+   * `seen` is the page as they have seen it past that revision, or null once they have seen it whole; it
+   * stands unless an older revision is reported.
+   */
   async markRead(input: { requestId: string; spaceId: string; pageId: string; principal: PagePrincipal;
-    revision: number }): Promise<{ revision: number }> {
+    revision: number; seen?: string | null }): Promise<{ revision: number }> {
     const spaceId = bounded(input.spaceId, "spaceId");
     const pageId = bounded(input.pageId, "pageId");
     if (input.principal.kind !== "user") throw new PageControlError("page_read_state_human_only", 403);
     if (!Number.isSafeInteger(input.revision) || input.revision < 1) {
       throw new PageControlError("invalid_request", 400, "revision is invalid");
     }
+    const seen = input.seen === undefined || input.seen === null ? null : pageBody(input.seen);
     return this.inSpace(bounded(input.requestId, "requestId"), "page.mark_read", spaceId, async (tx) => {
       const actor = await pageActor(tx, spaceId, input.principal, false);
       const row = await this.page(tx, spaceId, actor, pageId, "read");
       const revision = Math.min(input.revision, Number(row.head_revision));
-      const stored = (await tx.query<QueryResultRow & { revision: string }>({ name: "page_mark_read_v1",
-        text: `INSERT INTO data.page_reads (space_id,page_id,user_id,revision,updated_at) VALUES ($1,$2,$3,$4,now())
+      const stored = (await tx.query<QueryResultRow & { revision: string }>({ name: "page_mark_read_v2",
+        text: `INSERT INTO data.page_reads (space_id,page_id,user_id,revision,seen_body,updated_at)
+          VALUES ($1,$2,$3,$4,$5,now())
           ON CONFLICT (space_id,page_id,user_id) DO UPDATE
             SET revision=GREATEST(data.page_reads.revision, EXCLUDED.revision),
-              updated_at=CASE WHEN EXCLUDED.revision > data.page_reads.revision THEN EXCLUDED.updated_at
-                ELSE data.page_reads.updated_at END
+              seen_body=CASE WHEN EXCLUDED.revision >= data.page_reads.revision THEN EXCLUDED.seen_body
+                ELSE data.page_reads.seen_body END,
+              updated_at=CASE WHEN EXCLUDED.revision > data.page_reads.revision
+                OR (EXCLUDED.revision = data.page_reads.revision
+                  AND EXCLUDED.seen_body IS DISTINCT FROM data.page_reads.seen_body)
+                THEN EXCLUDED.updated_at ELSE data.page_reads.updated_at END
           RETURNING revision::text`,
-        values: [spaceId, pageId, actor.userId, revision], maxRows: 1 }))[0]!;
+        values: [spaceId, pageId, actor.userId, revision, seen], maxRows: 1 }))[0]!;
       return { revision: Number(stored.revision) };
     });
   }

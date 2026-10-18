@@ -1,14 +1,17 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, type MutableRefObject, type ReactNode } from "react";
-import { pageDocBlockAt, pageDocBlocks, pageSchema, type PageDocBlock } from "@xmatrix/protocol/page-document";
+import {
+  markdownToPageDoc, pageDocBlockAt, pageDocBlocks, pageDocToMarkdown, pageSchema, pageSeenDoc, type PageDocBlock,
+} from "@xmatrix/protocol/page-document";
 import {
   BetweenHorizontalEnd, BetweenVerticalEnd, Code2, Columns3, FileCode2, Flag, Rows3, Trash2, Heading1, Heading2, Heading3, Link2,
   List, ListChecks, ListOrdered, MessageSquarePlus, Minus, PenLine, Pilcrow, Quote, Sparkles, Table, Users,
 } from "lucide-react";
+import type { Node as DocNode } from "prosemirror-model";
 import { EditorState, Selection, type Command } from "prosemirror-state";
 import { EditorView } from "prosemirror-view";
-import { yCursorPluginKey } from "y-prosemirror";
+import { yCursorPluginKey, ySyncPluginKey } from "y-prosemirror";
 import { gitHubFileReferenceFrom, gitHubFileReferenceHref, type SerializedAutomation } from "@xmatrix/protocol";
 import { isImeKeyDown } from "@/lib/ime-keydown";
 import { sameValue } from "@/lib/same-value";
@@ -29,6 +32,15 @@ import {
 
 /** The page's own controls over the suggestions laid over it. */
 export interface SuggestionControl { take(): void; leave(): void; step(by: -1 | 0 | 1): void }
+/**
+ * What of the page its reader has seen (pages-live-document.md §3.1): `see` takes in the blocks within
+ * `area` (screen coordinates) as they are now, and says what the reader has seen of the page, and whether
+ * that is all of it; `seeAll` takes in the whole page.
+ */
+export interface PageReading {
+  see(area: { top: number; bottom: number }): { body: string; whole: boolean } | null;
+  seeAll(): void;
+}
 
 export type { CursorPresence, Discussion, HeadingActions, SectionNote };
 
@@ -144,8 +156,8 @@ function ToolButton({ label, active = false, disabled = false, onRun, children }
 
 export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions, sections, follow, writeOn,
   onOpenConversation, discussions, automations, headingActions, focusedConversationId = null, onFocusConversation,
-  onAnchorOffsets, cursorPresence, onReady, readerBaseline = null, onReaderChanges, suggestions = null, onSuggestions,
-  suggestionControl, readGitHubFile, references, placeholder }: {
+  onAnchorOffsets, cursorPresence, onReady, readerBaseline = null, onReaderChanges, onWrite, readFrom, reading,
+  suggestions = null, onSuggestions, suggestionControl, readGitHubFile, references, placeholder }: {
   session: PageLiveSession;
   /** What an empty page asks for instead of its title: someone co-writing it asks for its first line. */
   placeholder?: string;
@@ -189,6 +201,14 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
   suggestionControl?: MutableRefObject<SuggestionControl | null>;
   /** How many changes that diff shows. */
   onReaderChanges?: (count: number) => void;
+  /** This person changed the text themselves, not someone else's change arriving. */
+  onWrite?: () => void;
+  /**
+   * The page as its reader had seen it when it opened, as markdown; null when they had seen it as it opened.
+   * Undefined until that is known; what they see from then on is taken in through `reading`.
+   */
+  readFrom?: string | null;
+  reading?: MutableRefObject<PageReading | null>;
   /** Reads a GitHub file the page embeds, through the Hub. */
   readGitHubFile?: ReadGitHubFile;
   /** What `page:<id>` and `channel:<id>` in the text name and open. */
@@ -196,6 +216,8 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
 }) {
   const frame = useRef<HTMLDivElement | null>(null);
   const host = useRef<HTMLDivElement | null>(null);
+  const wrote = useRef(onWrite);
+  wrote.current = onWrite;
   const view = useRef<EditorView | null>(null);
   const placeholderText = useRef(placeholder);
   useEffect(() => {
@@ -341,6 +363,8 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
         if (this.isDestroyed) return;
         this.updateState(this.state.apply(tr));
         if (tr.docChanged) readBlocks(this);
+        // What the shared document brings (others' writes, its first sync) carries the sync's meta.
+        if (tr.docChanged && tr.getMeta(ySyncPluginKey) === undefined) wrote.current?.();
         const next = readToolbar(this);
         if (next.slash?.query !== menu.current.slash?.query || Boolean(next.slash) !== Boolean(menu.current.slash)) {
           menu.current.index = 0;
@@ -419,6 +443,36 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
     });
     return () => cancelAnimationFrame(frameId);
   }, [readerBody, readerHead, session]);
+
+  const seenDoc = useRef<DocNode | null>(null);
+  useEffect(() => {
+    if (readFrom === undefined) return;
+    // After the synced document is in the editor, as the diff, so a page seen as it opened is that document.
+    const frameId = requestAnimationFrame(() => {
+      if (view.current) seenDoc.current = readFrom === null ? view.current.state.doc : markdownToPageDoc(readFrom);
+    });
+    return () => cancelAnimationFrame(frameId);
+  }, [readFrom, session]);
+  useEffect(() => {
+    if (!reading) return;
+    reading.current = {
+      see: (area) => {
+        const current = view.current;
+        if (!current || !seenDoc.current) return null;
+        const inView = (pos: number) => {
+          const block = current.nodeDOM(pos);
+          if (!(block instanceof HTMLElement)) return false;
+          const box = block.getBoundingClientRect();
+          return box.height > 0 && box.bottom > area.top && box.top < area.bottom;
+        };
+        seenDoc.current = pageSeenDoc(seenDoc.current, current.state.doc, inView);
+        const body = pageDocToMarkdown(seenDoc.current);
+        return { body, whole: body === pageDocToMarkdown(current.state.doc) };
+      },
+      seeAll: () => { if (view.current && seenDoc.current) seenDoc.current = view.current.state.doc; },
+    };
+    return () => { reading.current = null; };
+  }, [reading, session]);
 
   const suggestionReport = useRef(onSuggestions);
   suggestionReport.current = onSuggestions;

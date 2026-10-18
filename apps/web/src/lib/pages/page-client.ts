@@ -51,13 +51,16 @@ export const pageApi = {
   publish: (spaceId: string, pageId: string, token: string, published: boolean) =>
     xmatrixApiRequest<{ page: PageSummary }>({ url: `${WEB_PROXY_ROUTES.space_page(spaceId, pageId)}/publication`,
       token, method: "PUT", body: { published } }),
-  /** How far this person has read the page: the newest revision they have had on screen. */
+  /**
+   * How far this person has read the page: the newest revision they have had on screen whole, and the page
+   * as they have seen it when they saw part of it past that (null when it is that revision's text).
+   */
   readState: (spaceId: string, pageId: string, token: string, signal?: AbortSignal) =>
-    xmatrixApiRequest<{ revision: number | null }>({ url: WEB_PROXY_ROUTES.space_page_read(spaceId, pageId), token,
-      signal }),
-  markRead: (spaceId: string, pageId: string, token: string, revision: number) =>
+    xmatrixApiRequest<{ revision: number | null; seen?: string | null }>({
+      url: WEB_PROXY_ROUTES.space_page_read(spaceId, pageId), token, signal }),
+  markRead: (spaceId: string, pageId: string, token: string, revision: number, seen: string | null) =>
     xmatrixApiRequest<{ revision: number }>({ url: WEB_PROXY_ROUTES.space_page_read(spaceId, pageId), token,
-      method: "PUT", body: { revision } }),
+      method: "PUT", body: { revision, seen } }),
   /** A GitHub file the page embeds, read through from GitHub by the Hub (pages-live-document.md §6.5). */
   githubFile: (spaceId: string, pageId: string, token: string, href: string, signal?: AbortSignal) =>
     xmatrixApiRequest<PageGitHubFile>({

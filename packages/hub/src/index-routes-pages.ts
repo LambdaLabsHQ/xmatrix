@@ -371,7 +371,8 @@ export function registerPageRoutes(app: Hono<{ Bindings: Env }>): void {
   app.put(`${base}/:pageId/read`, async (c) => run(c, async () => {
     const body = await json(c);
     return repository(c.env).markRead({ requestId: crypto.randomUUID(), spaceId: c.req.param("spaceId"),
-      pageId: c.req.param("pageId"), principal: await principal(c), revision: integer(body.revision) });
+      pageId: c.req.param("pageId"), principal: await principal(c), revision: integer(body.revision),
+      seen: typeof body.seen === "string" ? body.seen : null });
   }));
 
   // Co-writing (docs/design/pages-live-document.md §4.2): a person starts it from the page for a
