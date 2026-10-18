@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
-import pg from "pg";
+import { withReadOnlyShards } from "./read-only-shards.mjs";
 
 // Operational report only: identity classification is explicit, never inferred
 // from email, activity, membership outside the configured team, or names.
@@ -48,17 +48,7 @@ export async function readActivationReport(config, from, to, env = process.env) 
       !Number.isFinite(start) || !Number.isFinite(end) || end <= start || end - start > 90 * 86400000) {
     throw new Error("Supply a UTC registration window of at most 90 days");
   }
-  const clients = [];
-  try {
-    for (const name of ["POSTGRES_RUNTIME_DATABASE_URL", ...config.shardUrlEnvs]) {
-      if (!env[name]) throw new Error(`Missing environment ${name}`);
-      const client = new pg.Client({ connectionString: env[name], connectionTimeoutMillis: 10000 });
-      clients.push(client);
-      await client.connect();
-      await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
-      await client.query("SET LOCAL statement_timeout='15s'");
-      await client.query("SET LOCAL idle_in_transaction_session_timeout='60s'");
-    }
+  return withReadOnlyShards(config.shardUrlEnvs, env, "15s", async (clients) => {
     const control = clients[0];
     const placements = (await control.query(`SELECT space_id,shard_id,state
       FROM control.space_placement ORDER BY space_id LIMIT 10001`)).rows;
@@ -111,9 +101,7 @@ export async function readActivationReport(config, from, to, env = process.env) 
     }
     if (placements.some(row => !visited.has(row.shard_id))) throw new Error("Incomplete shard coverage");
     return { ...summarizeActivation(users, facts, config, from, to), coveredShards: visited.size };
-  } finally {
-    await Promise.allSettled(clients.map(client => client.end()));
-  }
+  });
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

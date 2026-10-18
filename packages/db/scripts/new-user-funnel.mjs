@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { pathToFileURL } from "node:url";
-import pg from "pg";
+import { withReadOnlyShards } from "./read-only-shards.mjs";
 
 /*
  * How far each new account got, step by step, and what stopped it
@@ -70,16 +70,7 @@ export async function readNewUserFunnel(from, to, shardUrlEnvs = [], env = proce
       !Number.isFinite(start) || !Number.isFinite(end) || end <= start || end - start > 31 * 86400000) {
     throw new Error("Supply a UTC registration window of at most 31 days");
   }
-  const clients = [];
-  try {
-    for (const name of ["POSTGRES_RUNTIME_DATABASE_URL", ...shardUrlEnvs]) {
-      if (!env[name]) throw new Error(`Missing environment ${name}`);
-      const client = new pg.Client({ connectionString: env[name], connectionTimeoutMillis: 10000 });
-      clients.push(client);
-      await client.connect();
-      await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
-      await client.query("SET LOCAL statement_timeout='20s'");
-    }
+  return withReadOnlyShards(shardUrlEnvs, env, "20s", async (clients) => {
     const control = clients[0];
     const users = (await control.query(`SELECT u.id, u.created_at,
         (SELECT s.user_agent FROM control.auth_sessions s WHERE s.user_id=u.id AND s.user_agent IS NOT NULL
@@ -153,9 +144,7 @@ export async function readNewUserFunnel(from, to, shardUrlEnvs = [], env = proce
       };
     });
     return { from, to, ...summarizeFunnel(people), peopleDetail: people };
-  } finally {
-    await Promise.allSettled(clients.map(client => client.end()));
-  }
+  });
 }
 
 /** Who keeps using xMatrix, new or not: each person with a message of their
@@ -170,16 +159,7 @@ export async function readActivePeople(to, shardUrlEnvs = [], internalSpaceIds =
   const lastDay = Math.floor((end - 1) / 86400000) * 86400000;
   const since28 = new Date(lastDay - 27 * 86400000).toISOString();
   const since7 = new Date(lastDay - 6 * 86400000).toISOString();
-  const clients = [];
-  try {
-    for (const name of ["POSTGRES_RUNTIME_DATABASE_URL", ...shardUrlEnvs]) {
-      if (!env[name]) throw new Error(`Missing environment ${name}`);
-      const client = new pg.Client({ connectionString: env[name], connectionTimeoutMillis: 10000 });
-      clients.push(client);
-      await client.connect();
-      await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
-      await client.query("SET LOCAL statement_timeout='20s'");
-    }
+  return withReadOnlyShards(shardUrlEnvs, env, "20s", async (clients) => {
     const people = new Map();
     for (const client of clients) {
       const rows = (await client.query(`WITH own AS (
@@ -242,9 +222,7 @@ export async function readActivePeople(to, shardUrlEnvs = [], internalSpaceIds =
       team: list.filter(person => person.team).length,
       people: list,
     };
-  } finally {
-    await Promise.allSettled(clients.map(client => client.end()));
-  }
+  });
 }
 
 /** `<from> <to> [shard env…] [--active] [--internal-space <id>]…` */
