@@ -122,7 +122,12 @@ ships (`Resources/cli`), which also creates the Machine, but nothing on PATH
 can run the daemon. Once signed in, the App installs that seed
 (`xmatrix setup install --from <seed> --daemon`), which registers the
 login-session service (macOS LaunchAgent, Windows scheduled task), and starts
-it. A failed install waits for the person's "Try again" instead of repeating on
+it. Setup names a new Machine after its hostname, as a setup command's login
+does, before it copies anything; an existing name is kept. An earlier install
+that stopped at naming is set up again from the seed once the CLI's session
+import reports the Machine still has no name. A daemon whose connection fails
+before it is online ends the session it exchanged, so its retries leave none
+behind. A failed install waits for the person's "Try again" instead of repeating on
 every keep-alive check.
 
 When a start fails, the daemon status carries where (`cli_install`,

@@ -2105,10 +2105,15 @@ fn current_time_millis() -> Option<u64> {
         .map(|duration| duration.as_millis() as u64)
 }
 
+/// One connection of the daemon. Its own session (exchanged for it) ends with
+/// it, however it ends: a connection that fails before it is online (an
+/// unnamed Machine, a refused registration) is retried by the supervisor, and
+/// each retry exchanges a fresh session, so leaving them open left one live
+/// session per attempt, one a minute for as long as it kept failing.
 async fn cmd_daemon_connected(
     hub_url: &str,
     token_override: Option<&str>,
-    mut supervisor_control: Option<&mut SupervisorControlSession>,
+    supervisor_control: Option<&mut SupervisorControlSession>,
     activation: Option<MachineDaemonActivationConnect>,
     profile_manager: &ProfileManager,
     update_authority: bool,
@@ -2116,6 +2121,35 @@ async fn cmd_daemon_connected(
 ) -> error::Result<ProfileRuntimeExit> {
     let token_override = token_override.map(str::to_string);
     let daemon_session = resolve_daemon_session_state(hub_url, token_override.as_deref()).await?;
+    let result = run_daemon_connection(
+        hub_url,
+        token_override,
+        supervisor_control,
+        activation,
+        profile_manager,
+        update_authority,
+        shutdown,
+        daemon_session.clone(),
+    )
+    .await;
+    if let Some(state) = daemon_session.as_ref() {
+        let ended = state.read().await.session.clone();
+        end_daemon_session(ended).await;
+    }
+    result
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn run_daemon_connection(
+    hub_url: &str,
+    token_override: Option<String>,
+    mut supervisor_control: Option<&mut SupervisorControlSession>,
+    activation: Option<MachineDaemonActivationConnect>,
+    profile_manager: &ProfileManager,
+    update_authority: bool,
+    shutdown: &mut tokio::sync::watch::Receiver<bool>,
+    daemon_session: Option<DaemonSessionState>,
+) -> error::Result<ProfileRuntimeExit> {
     let token =
         current_daemon_access_token(token_override.as_deref(), daemon_session.as_ref()).await?;
     // A Machine id is per owner: the daemon's session names the owner.
@@ -2937,11 +2971,6 @@ async fn cmd_daemon_connected(
         }
     };
 
-    // This connection's own session ends with it; the next connection exchanges a fresh one.
-    if let Some(state) = daemon_session.as_ref() {
-        let ended = state.read().await.session.clone();
-        end_daemon_session(ended).await;
-    }
     Ok(exit)
 }
 

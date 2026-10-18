@@ -166,6 +166,8 @@ let daemonStartInFlight: Promise<DesktopDaemonStatus> | null = null;
 let lastDaemonFailure: DesktopDaemonFailure | null = null;
 /** Installing the seed failed: keep-alive restarts leave it until the person retries. */
 let seedInstallFailure: { message: string; failure: DesktopDaemonFailure } | null = null;
+/** The CLI reported this Machine has no name yet (session import): setup from the seed names it. */
+let machineNameRequired = false;
 let appIsQuitting = false;
 type DesktopLocalProfileSelection =
   | { mode: "follow-default" }
@@ -1811,6 +1813,10 @@ async function importCliSessionPayload(
         : "Update the xMatrix daemon once to enable live session reload.",
     );
   }
+  // A Machine still without a name (an earlier install stopped at naming,
+  // before the CLI named new Machines after their hostname) is set up again
+  // from the seed, which names it, the next time the daemon is started.
+  machineNameRequired = outcome.daemon === "machine-name-required";
   if (requireDaemon && outcome.daemon === "machine-name-required") {
     throw new Error("Name this machine in setup before starting the daemon.");
   }
@@ -2145,7 +2151,7 @@ async function startDaemonBestEffortInner() {
   }
 
   const executable = resolveCliExecutable();
-  if (!executable || !path.isAbsolute(executable)) {
+  if (!executable || !path.isAbsolute(executable) || machineNameRequired) {
     const seeded = await installSeedCliForDaemon();
     if (seeded) return seeded;
   }
@@ -2177,6 +2183,7 @@ async function installSeedCliForDaemon(): Promise<DesktopDaemonStatus | null> {
     seedInstallFailure = { message: result.message, failure: daemonFailure("cli_install", result.message, result.exitCode) };
     return setDaemonStatus("error", seedInstallFailure);
   }
+  machineNameRequired = false;
   return (await startMacDaemonLaunchAgentIfAvailable())
     ?? (await startWindowsDaemonTaskIfAvailable())
     ?? (await findExistingDaemonProcess().then((found) => found ? runningLocalDaemonStatus(found.pid, true) : null))

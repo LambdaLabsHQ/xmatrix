@@ -797,9 +797,14 @@ pub async fn run(mut cli: Cli) -> error::Result<()> {
                     json,
                 },
         }) => {
+            // The name is settled before anything is installed: a setup that
+            // cannot name its Machine leaves no CLI behind for a daemon to run
+            // unnamed.
+            if daemon {
+                ensure_setup_machine_name(&hub_url, machine_name.as_deref()).await?;
+            }
             let installed = install_cli_from_seed(from.as_deref(), into.as_deref())?;
             let service = if daemon {
-                ensure_setup_machine_name(&hub_url, machine_name.as_deref()).await?;
                 Some(install_daemon_service(Some(&installed.path))?)
             } else {
                 None
@@ -1949,8 +1954,13 @@ async fn cmd_attachment(command: AttachmentCommand) -> error::Result<()> {
 async fn ensure_setup_machine_name(hub_url: &str, name: Option<&str>) -> error::Result<()> {
     // Installing a service before login creates no Machine. Its enrollment is
     // separately guarded; once signed in, setup must resolve the required name.
+    // Like a setup command's login, setup names a new Machine after its
+    // hostname instead of asking: it runs without a terminal (the desktop App
+    // installs this way) and its owner asked for this computer to be set up.
+    // A Machine that already has a name keeps it.
     if let Some(session) = config::load_session_for_hub(hub_url).await {
-        xmatrix_cli_core::machine_naming::ensure_machine_name(&session, name, None).await?;
+        let hostname = xmatrix_cli_core::auth::local_hostname();
+        xmatrix_cli_core::machine_naming::ensure_machine_name(&session, name, Some(&hostname)).await?;
     }
     Ok(())
 }
