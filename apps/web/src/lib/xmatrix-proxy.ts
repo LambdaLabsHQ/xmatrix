@@ -129,6 +129,8 @@ export async function proxyXMatrixRequest(input: {
 
 type ForwardOptions = {
   body?: boolean;
+  /** Request headers the Hub route reads, carried from the browser's request. */
+  requestHeaders?: readonly string[];
   streamResponse?: boolean;
   responseHeaders?: readonly string[];
 };
@@ -142,9 +144,16 @@ export async function forwardXMatrixRequest(request: Request, input: {
   route: string;
   method: ProxyMethod;
 } & ForwardOptions): Promise<NextResponse> {
-  const { body = input.method === "POST" || input.method === "PUT" || input.method === "PATCH", ...proxy } = input;
+  const { body = input.method === "POST" || input.method === "PUT" || input.method === "PATCH", requestHeaders = [],
+    ...proxy } = input;
+  const headers: Record<string, string> = {};
+  for (const name of requestHeaders) {
+    const value = request.headers.get(name);
+    if (value) headers[name] = value;
+  }
   return proxyXMatrixRequest({
     ...proxy,
+    headers,
     authorization: request.headers.get("authorization") || undefined,
     ...(body ? { body: await request.text() } : {}),
   });

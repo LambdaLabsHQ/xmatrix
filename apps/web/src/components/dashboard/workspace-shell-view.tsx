@@ -730,13 +730,23 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
   // Both clients lead to the same action; each controls where it is visible.
   // What New conversation's composer opens holding: a welcome card's draft, else nothing.
   const [newConversationDraft, setNewConversationDraft] = useState("");
+  const [newConversationError, setNewConversationError] = useState<string | null>(null);
   const startNewConversation = useStableCallback(() => {
     setNewConversationDraft("");
+    setNewConversationError(null);
     openNewConversation();
   });
+  // It opens with its first message at once; if it could not be made, its composer comes back holding that message.
+  const createConversationFromComposer = useStableCallback((body: string, mode: "open" | "closed") =>
+    createNewConversation(body, mode, (error) => {
+      setNewConversationDraft(body);
+      setNewConversationError(userErrorMessage(error, "Couldn't start the conversation"));
+      openNewConversation();
+    }));
   const onboardingActions = useMemo<OnboardingActions>(() => ({
     startConversation: (draft) => {
       setNewConversationDraft(draft);
+      setNewConversationError(null);
       openNewConversation();
     },
     connectAnotherComputer: () => changeAppViewRef.current("machines"),
@@ -1039,7 +1049,8 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       localContext={localMentionContext}
       // As an opened conversation: a phone raises the keyboard when the field is tapped.
       autoFocus={!isMobileViewport}
-      onCreate={createNewConversation}
+      error={newConversationError}
+      onCreate={createConversationFromComposer}
       onSend={sendNewConversationMessage}
       onCancel={() => setComposingConversation(false)}
       onOpenAppsForSpace={openAppsForSpace}
@@ -1284,9 +1295,9 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       onCloseConversation={closePageConversation}
       onExpandConversation={(conversationId) => navigateToChannel(conversationId)}
       onOpenConversation={(conversationId) => openPageConversation(conversationId)}
-      onDiscuss={({ firstMessage, draft, open, coWrite, ...input }) => startPageConversation(input,
+      onDiscuss={({ firstMessage, draft, open, coWrite, planned, ...input }) => startPageConversation(input,
         { ...(firstMessage ? { firstMessage } : {}), ...(draft ? { draft } : {}), ...(open === false ? { open } : {}),
-          ...(coWrite ? { coWrite } : {}) })}
+          ...(coWrite ? { coWrite } : {}), ...(planned ? { planned } : {}) })}
       onConnectGitHub={async (input) => {
         // The repository's issues and pull requests arrive in a conversation linked to the page.
         await startPageConversation({ spaceId: input.spaceId, pageId: input.pageId, blockId: input.blockId,

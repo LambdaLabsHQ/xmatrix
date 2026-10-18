@@ -7,7 +7,7 @@ import { useDesktopFullScreen } from "@/lib/desktop/use-desktop-full-screen";
 import { reportDesktopDaemonFailure } from "@/lib/desktop-daemon-failure-report";
 import { discussionDraft, discussionTitle } from "./selection-discussion";
 import { pageApi } from "@/lib/pages/page-client";
-import { createConversation } from "./start-conversation";
+import { createConversation, plannedConversation, type ConversationRequest } from "./start-conversation";
 
 import { isMessageSendDeadlineError } from "@/lib/relay-v2/message-send-deadline";
 import { fetchChannelCatalogResolve } from "./channel-catalog-query";
@@ -1471,10 +1471,51 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     await copyTextToClipboard(absoluteChannelUrl(channel, s.spacesRef.current));
   }, [s.spacesRef]);
 
+  /**
+   * Shows a new conversation at once and creates it meanwhile, as a Google Docs
+   * comment appears as it is clicked: its id is the one the Hub will give it.
+   * Its history, its focus and the messages sent to it wait for `created`; a
+   * create that fails takes it away again.
+   */
+  async function beginConversation(request: ConversationRequest):
+    Promise<{ channel: ChannelSnapshot; created: Promise<ChannelSnapshot> }> {
+    const token = s.token;
+    const userId = s.user?.id;
+    if (!token || !userId) throw new UserFacingProblem("Sign in again to start a conversation");
+    const requestKey = crypto.randomUUID();
+    const channel = await plannedConversation({ ...request, userId, requestKey });
+    const show = (next: (current: ChannelSnapshot[]) => ChannelSnapshot[]) => {
+      s.channelsRef.current = next(s.channelsRef.current);
+      setChannels(next);
+    };
+    const settled = () => {
+      s.channelCreationsRef.current.delete(channel.id);
+      s.setCreatingChannelIds((current) => {
+        const next = new Set(current);
+        next.delete(channel.id);
+        return next;
+      });
+    };
+    show((current) => replaceChannel(current, channel));
+    const created = createConversation({ ...request, token, requestKey }).then((committed) => {
+      show((current) => replaceChannel(current, committed));
+      settled();
+      return committed;
+    }, (error: unknown) => {
+      show((current) => current.filter((item) => item.id !== channel.id));
+      if (s.selectedChannelIdRef.current === channel.id) setSelectedChannelId(null);
+      settled();
+      throw error;
+    });
+    s.channelCreationsRef.current.set(channel.id, created);
+    s.setCreatingChannelIds((current) => new Set(current).add(channel.id));
+    return { channel, created };
+  }
+
   const { openPage, closePage, internalPageLink, startPageConversation, openPageConversation,
     closePageConversation } = pageShellActions({
-    token: s.token, user: s.user, view: s.view, selectedPageId: s.selectedPageId, selectedChannelId: s.selectedChannelId, currentSpaceId: s.currentSpaceId, spaces: s.spaces, setView,
-    setSelectedPageId: s.setSelectedPageId, setSelectedChannelId, setChannels, setBrowserPath,
+    token: s.token, user: s.user, view: s.view, beginConversation, selectedPageId: s.selectedPageId, selectedChannelId: s.selectedChannelId, currentSpaceId: s.currentSpaceId, spaces: s.spaces, setView,
+    setSelectedPageId: s.setSelectedPageId, setSelectedChannelId, setBrowserPath,
     focusComposer: () => setComposerAutoFocusRequest((current) => current + 1),
     seedDraft: (conversationId, text) => writeChannelComposerDraft(s.channelComposerDraftsRef.current, conversationId,
       { text, workspaceTarget: null, attachments: [] }),
@@ -1491,26 +1532,29 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     const source = s.channelsRef.current.find((channel) => channel.id === sourceId);
     const token = s.token;
     if (!token || !s.user || !source || !message.messageId) return;
+    const failed = (err: unknown) => setHistoryError(userErrorMessage(err, "Couldn't start the conversation"));
     try {
-      const channel = await createConversation({ token: token, spaceId: source.spaceId,
+      const messageId = message.messageId;
+      const { channel, created } = await beginConversation({ spaceId: source.spaceId,
         memberName: s.user.name || s.user.email || "Human", name: discussionTitle(quote), mode: source.mode,
-        metadata: { fromChannelId: source.id, fromMessageId: message.messageId } });
-      const { links } = await pageApi.links(source.spaceId, token, { conversationId: source.id });
-      const places = new Map(links.filter((link) => !link.resolvedAt)
-        .map((link) => [`${link.pageId}\u0000${link.blockId}`, link] as const));
-      await Promise.all([...places.values()].map((link) => pageApi.link(source.spaceId, token, {
-        conversationId: channel.id, pageId: link.pageId, ...(link.blockId ? { blockId: link.blockId } : {}) })));
-      const href = `${absoluteChannelUrl(source, s.spacesRef.current)}#message:${encodeURIComponent(message.messageId)}`;
+        metadata: { fromChannelId: source.id, fromMessageId: messageId } });
+      const href = `${absoluteChannelUrl(source, s.spacesRef.current)}#message:${encodeURIComponent(messageId)}`;
       writeChannelComposerDraft(s.channelComposerDraftsRef.current, channel.id, {
         text: discussionDraft(quote, { label: `${message.author} in #${channelTitle(source)}`, href }),
         workspaceTarget: null, attachments: [] });
-      setChannels((current) => replaceChannel(current, channel));
-      s.channelsRef.current = replaceChannel(s.channelsRef.current, channel);
       // Beside a page it opens beside the page, as a discussion of the page does.
       if (s.viewRef.current === "pages" && s.selectedPageId) openPageConversation(channel.id, { focus: true });
       else navigateToChannel(channel.id);
+      // It is linked to the pages the conversation it came from is about, once it exists.
+      void Promise.all([created, pageApi.links(source.spaceId, token, { conversationId: source.id })])
+        .then(([, { links }]) => {
+          const places = new Map(links.filter((link) => !link.resolvedAt)
+            .map((link) => [`${link.pageId}\u0000${link.blockId}`, link] as const));
+          return Promise.all([...places.values()].map((link) => pageApi.link(source.spaceId, token, {
+            conversationId: channel.id, pageId: link.pageId, ...(link.blockId ? { blockId: link.blockId } : {}) })));
+        }).catch(failed);
     } catch (err) {
-      setHistoryError(userErrorMessage(err, "Couldn't start the conversation"));
+      failed(err);
     }
   }
 
@@ -1747,10 +1791,16 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     setView("messages");
   }
 
-  async function createNewConversation(body: string, mode: "open" | "closed") {
+  /**
+   * The conversation a first message starts. It opens with that message pending
+   * at once; if it could not be made, `failed` hears why.
+   */
+  async function createNewConversation(body: string, mode: "open" | "closed", failed?: (error: unknown) => void) {
     if (!s.token || !s.user || !s.currentSpaceId) throw new UserFacingProblem("Choose a Space first");
-    return createConversation({ token: s.token, spaceId: s.currentSpaceId,
+    const { channel, created } = await beginConversation({ spaceId: s.currentSpaceId,
       memberName: s.user.name || s.user.email || "Human", body, mode });
+    created.catch((error: unknown) => failed?.(error));
+    return channel;
   }
 
   /* The conversation opens as soon as it exists and its first message shows
@@ -2520,6 +2570,8 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     const { clientMessageId, body, invocationSelections, summonIntents, attachments, replyToMessageId, appMentions, sentAt } = outgoing;
     const channelId = channel.id;
     try {
+      // A conversation still being created takes the message once it exists.
+      await s.channelCreationsRef.current.get(channelId);
       const payload = await appendChannelMessageWithAttachments({
         token,
         channel,

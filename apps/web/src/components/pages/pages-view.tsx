@@ -7,7 +7,7 @@ import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-quer
 import type { PageDocBlock } from "@xmatrix/protocol/page-document";
 import {
   agentPresetAvatarUrl, isLiveAgentStatus, normalizeAgentPresetRuntime, pageAuthorColor, pageAuthorLabel,
-  type SerializedAutomation, type ChannelSnapshot,
+  type SerializedAutomation, type ChannelSnapshot, type PageConversation, type PageLink,
 } from "@xmatrix/protocol";
 import {
   Check, Clock, Files, FileText, History, Lock, MessageSquare, Plus, Share2, Trash2, X,
@@ -513,7 +513,9 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   /** Opens a conversation beside the page (pages-live-document.md §4.4). */
   onOpenConversation: (conversationId: string) => void;
   onDiscuss: (input: { spaceId: string; pageId: string; blockId: string; name: string; restricted: boolean;
-    anchor?: PageLinkAnchor; firstMessage?: string; draft?: string; open?: boolean; coWrite?: boolean }) => Promise<unknown>;
+    anchor?: PageLinkAnchor; firstMessage?: string; draft?: string; open?: boolean; coWrite?: boolean;
+    /** Hears the conversation's id as soon as it is known, before the Hub has made or linked it. */
+    planned?: (conversationId: string) => void }) => Promise<unknown>;
   /** Subscribes a conversation of its own, linked to a section, to a repository's issues and pull requests. */
   onConnectGitHub?: (input: { spaceId: string; pageId: string; blockId: string; repository: string;
     restricted: boolean }) => Promise<void>;
@@ -792,7 +794,21 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     enabled: Boolean(spaceId && pageId), refetchInterval: 30_000,
     queryFn: ({ signal }) => pageApi.links(spaceId!, token, { pageId: pageId! }, signal),
   });
-  const linkList = useMemo(() => links.data?.links ?? [], [links.data]);
+  // Discussions this reader just started, shown where they are before the Hub has linked them.
+  const [startedLinks, setStartedLinks] = useState<PageLink[]>([]);
+  const linkList = useMemo(() => {
+    const listed = links.data?.links ?? [];
+    const started = startedLinks.filter((link) => link.pageId === pageId &&
+      !listed.some((item) => item.conversationId === link.conversationId));
+    return started.length ? [...listed, ...started] : listed;
+  }, [links.data, pageId, startedLinks]);
+  const listedConversations = useMemo<PageConversation[] | undefined>(() => {
+    const listed = links.data?.conversations;
+    if (!listed) return listed;
+    const started = startedLinks.filter((link) => !listed.some((item) => item.conversationId === link.conversationId));
+    return started.length ? [...listed, ...started.map((link) => ({ conversationId: link.conversationId, name: null,
+      activityAt: link.createdAt, headSequence: 0, readSequence: 0, lastMessage: null, agents: [] }))] : listed;
+  }, [links.data, startedLinks]);
   // The page's Automations, drawn as chips where the text references them (pages-live-document.md §6).
   const automations = useQuery({
     queryKey: xmatrixQueryKeys.domain({ userId: user?.id ?? "anonymous" }, "page-automations", [spaceId, pageId, headRevision]),
@@ -835,8 +851,8 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
       ...(channel.readSequence !== undefined ? { readSequence: channel.readSequence } : {}),
     };
   }, [conversation]);
-  const conversations = useMemo(() => marginConversations({ links: linkList, conversations: links.data?.conversations,
-    live: liveConversation, now: Date.now() }), [linkList, links.data?.conversations, liveConversation]);
+  const conversations = useMemo(() => marginConversations({ links: linkList, conversations: listedConversations,
+    live: liveConversation, now: Date.now() }), [linkList, listedConversations, liveConversation]);
   const conversationName = useCallback((conversationId: string) =>
     conversations.find((item) => item.conversationId === conversationId)?.name ?? conversation(conversationId)?.name ?? null,
   [conversation, conversations]);
@@ -1135,9 +1151,17 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     const title = blocks.find((block) => block.id === blockId)?.title;
     // A discussion of a passage is named by the passage, and opens holding it; of a section, by the section.
     const place = title ? `${page.title} › ${title}` : page.title;
+    let started: string | null = null;
+    const planned = (conversationId: string) => {
+      started = conversationId;
+      const now = new Date().toISOString();
+      setStartedLinks((current) => [...current, { linkId: `started:${conversationId}`, conversationId,
+        pageId: page.pageId, blockId, source: "manual", createdAt: now, lastSeenAt: now, anchor: anchor ?? null }]);
+    };
     void onDiscuss({ spaceId, pageId: page.pageId, blockId, name: anchor ? discussionTitle(anchor.quote) : place,
-      restricted, ...(anchor ? { anchor, draft: discussionDraft(anchor.quote, { label: place, href: blockLink(blockId) }) }
-        : {}) }).catch((cause: Error) => setNotice(cause.message));
+      restricted, planned, ...(anchor ? { anchor, draft: discussionDraft(anchor.quote, { label: place, href: blockLink(blockId) }) }
+        : {}) }).then(() => links.refetch(), (cause: Error) => setNotice(cause.message))
+      .finally(() => setStartedLinks((current) => current.filter((link) => link.conversationId !== started)));
   };
   const resolveDiscussion = (linkId: string) => pageApi.resolveLink(spaceId, token, linkId, true)
     .then(() => links.refetch(), (cause: Error) => setNotice(cause.message));
