@@ -165,6 +165,9 @@ type RouteCloseReason =
   | typeof MACHINE_DAEMON_ROUTE_CLOSE.selfHealedDuplicate
   | typeof MACHINE_DAEMON_ROUTE_CLOSE.failedDeliver;
 
+/** A reverse claim outlived its exact socket binding; never a client request. */
+class MachineDaemonDeliveryBindingLost extends Error {}
+
 /**
  * Pure Authority composition for `/ws/machine-daemons`.
  *
@@ -407,9 +410,6 @@ export class MachineDaemonRuntimeTransport {
           return;
         }
         delivered = await this.backend.claimPending(session, async (message) => {
-          if (this.sockets.get(ws) !== session || !isWebSocketOpen(ws)) {
-            throw new Error("Machine Daemon pending-command delivery binding is stale");
-          }
           this.sendForSession(ws, session, message);
         });
         if (delivered > 0) session.lastSeenAt = new Date().toISOString();
@@ -550,12 +550,24 @@ export class MachineDaemonRuntimeTransport {
   ): Promise<void> {
     // Connect already runs inside this socket's ordered frame. Enqueuing the
     // delivery behind that same frame would deadlock it while awaiting itself.
-    await this.backend.connected?.(session, async (message) => this.sendForSession(ws, session, message));
+    try {
+      await this.backend.connected?.(session, async (message) => this.sendForSession(ws, session, message));
+    } catch (error) {
+      if (!(error instanceof MachineDaemonDeliveryBindingLost)) throw error;
+      // The backend has attempted to release the unsent batch. A replaced socket already
+      // lost its route: do not unregister its successor or answer its old
+      // connect frame. A closed current owner must leave presence too.
+      const current = this.sockets.get(ws) === session;
+      if (current) this.evictRouteSocket(ws, MACHINE_DAEMON_ROUTE_CLOSE.failedDeliver);
+      console.warn("Machine Daemon catch-up lost its delivery binding", {
+        reason: current ? "closed" : "replaced",
+      });
+    }
   }
 
   private sendForSession(ws: WebSocket, session: Readonly<MachineDaemonRuntimeSession>, message: MachineDaemonServerMessage): void {
     if (this.sockets.get(ws) !== session || !isWebSocketOpen(ws)) {
-      throw new RuntimeClientOperationError("machine_delivery_binding_stale");
+      throw new MachineDaemonDeliveryBindingLost("Machine Daemon reverse delivery binding was lost");
     }
     this.sockets.send(ws, message);
   }

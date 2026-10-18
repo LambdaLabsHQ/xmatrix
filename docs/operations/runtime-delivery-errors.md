@@ -53,6 +53,17 @@ clears the outstanding probe; explicit read/write failures still reconnect
 immediately. These transport budgets do not extend command admission leases or
 change Run authorization.
 
+Machine Daemon catch-up can lose its socket while the Authority claim is in
+flight. The claim releases the failed frame and every later unsent frame in
+its bounded batch, leaving already-written frames leased. Catch-up retires a
+closed current owner, or leaves an already-installed successor alone, without
+answering the old connect on its stale socket. This is an explicit connection
+transition with a fixed warning; unrelated claim and send failures still report
+errors. If the successor has already advanced the Authority epoch, old lease
+releases stay fenced and those leases recover through their existing expiry.
+The original disconnect or replacement cause needs separate request evidence;
+this recovery does not establish why the connection was lost.
+
 Unclassified socket failures include their error class and at most four filtered
 function names as the scalar `origin` field. The scalar survives Sentry's console
 argument normalization; an array would become `[Array]` before the event title
