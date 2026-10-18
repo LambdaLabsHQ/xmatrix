@@ -1,6 +1,6 @@
 import { E2E_CHANNEL, E2E_DESKTOP_CONTEXT, E2E_SPACE, E2E_USER_SENDER, E2E_NOW, openGeneralChannelWithHistory } from "./workspace-fixtures";
 import { expect, test } from "./fixtures";
-import { fixtureJson, fixtureRequestBodies } from "./in-page-api-fixtures";
+import { CREATED_CHANNEL_ID, fixtureChannelCreate, fixtureJson, fixtureRequestBodies } from "./in-page-api-fixtures";
 
 test.use(E2E_DESKTOP_CONTEXT);
 
@@ -8,9 +8,8 @@ test.use(E2E_DESKTOP_CONTEXT);
 test("selecting a passage of a message starts a conversation holding it, linked to the same pages", async ({ page }) => {
   const message = { messageId: "m-relay", channelId: E2E_CHANNEL.id, sequence: 1, sentAt: E2E_NOW, from: E2E_USER_SENDER,
     body: "The relay stalls when the queue fills. Retries back off too slowly." };
-  const created = { ...E2E_CHANNEL, id: "c-passage", name: "“Retries back off too slowly.”" };
-  await openGeneralChannelWithHistory(page, E2E_CHANNEL, [message], [created]);
-  await fixtureJson(page, "conversation-create", /\/api\/xmatrix\/channels$/u, { channel: created }, { method: "POST" });
+  await openGeneralChannelWithHistory(page, E2E_CHANNEL, [message]);
+  await fixtureChannelCreate(page, "conversation-create", { ...E2E_CHANNEL, name: "“Retries back off too slowly.”" });
   await fixtureJson(page, "source-links", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\?conversationId=channel-general$/u, {
     links: [{ linkId: "l1", conversationId: E2E_CHANNEL.id, pageId: "p-relay", blockId: "status", source: "edit",
       createdAt: E2E_NOW, lastSeenAt: E2E_NOW, anchor: null, resolvedAt: null }] });
@@ -43,9 +42,10 @@ test("selecting a passage of a message starts a conversation holding it, linked 
     spaceId: E2E_SPACE.id, name: "“Retries back off too slowly.”", mode: "open",
     metadata: { createdBy: "web", fromChannelId: E2E_CHANNEL.id, fromMessageId: "m-relay" },
   })]);
+  const createdId = new RegExp(`^${CREATED_CHANNEL_ID}$`, "u");
   await expect.poll(() => fixtureRequestBodies(page, "link-create")).toEqual([
-    { conversationId: "c-passage", pageId: "p-relay", blockId: "status", source: "manual" }]);
-  await expect(page).toHaveURL(/c-passage/u);
+    { conversationId: expect.stringMatching(createdId), pageId: "p-relay", blockId: "status", source: "manual" }]);
+  await expect(page).toHaveURL(new RegExp(`--${CREATED_CHANNEL_ID}`, "u"));
   const composer = page.locator("textarea.composer-textarea").first();
   await expect(composer).toHaveValue(/^> Retries back off too slowly\.\n\n— \[E2E Tester in #general\]\(http:\/\/[^)]+\/channels\/[^)]+#message:m-relay\)\n\n$/u);
   await expect(composer).toBeFocused();

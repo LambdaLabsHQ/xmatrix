@@ -6,7 +6,10 @@ import * as syncProtocol from "y-protocols/sync";
 import * as Y from "yjs";
 
 import { expect, test } from "./fixtures";
-import { fixtureJson, fixtureRequestBodies, fixtureRequestRecords, fixtureRule, releaseFixture } from "./in-page-api-fixtures";
+import {
+  CREATED_CHANNEL_ID, fixtureChannelCreate, fixtureCreatedChannelId, fixtureJson, fixtureRequestBodies, fixtureRequestRecords,
+  fixtureRule, releaseFixture,
+} from "./in-page-api-fixtures";
 import { editPageMarkdown, pageDocument, pageMarkdown, startedMarkdown } from "./page-document-fixture";
 import {
   E2E_CHANNEL, E2E_DESKTOP_CONTEXT, E2E_SPACE, E2E_USER_SENDER, harnessRegistrations, installWorkspaceStubs,
@@ -94,8 +97,8 @@ async function servePageSession(browser: Page, server: Y.Doc,
 }
 
 /** Starting a conversation from a page: the conversation it creates and the link tying it to a section. */
-async function stubPageConversation(browser: Page, channel: typeof E2E_CHANNEL, link: { linkId: string; blockId: string }) {
-  await fixtureJson(browser, "channel-create", /\/api\/xmatrix\/channels$/u, { channel }, { method: "POST" });
+async function stubPageConversation(browser: Page, channel: Record<string, unknown>, link: { linkId: string; blockId: string }) {
+  await fixtureChannelCreate(browser, "channel-create", channel);
   await fixtureJson(browser, "link-create", /\/api\/xmatrix\/spaces\/[^/]+\/page-links$/u, { link: {
     ...link, conversationId: channel.id, pageId: "p-relay", source: "manual", createdAt: NOW, lastSeenAt: NOW,
     anchor: null, resolvedAt: null } }, { method: "POST" });
@@ -148,13 +151,11 @@ async function openRelayOnPhone(browser: Page, session: Y.Doc, on: Parameters<ty
 async function stubCoWriting(browser: Page, blockId: string) {
   await stubPages(browser, [page("p-relay", null, "Relay", "V")]);
   await fixtureJson(browser, "page-links", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\?.*$/u, { links: [] });
-  const writing = { ...E2E_CHANNEL, id: "channel-write", name: "Co-writing Relay" };
-  await stubPageConversation(browser, writing, { linkId: "l-write", blockId });
+  await stubPageConversation(browser, { ...E2E_CHANNEL, name: "Co-writing Relay" }, { linkId: "l-write", blockId });
   await fixtureJson(browser, "co-writing", /\/api\/xmatrix\/spaces\/[^/]+\/pages\/p-relay\/co-writing$/u,
     { startedAt: NOW }, { method: "POST" });
-  await fixtureJson(browser, "write-message", /\/api\/xmatrix\/channels\/channel-write\/messages$/u, { message: {} },
+  await fixtureJson(browser, "write-message", new RegExp(`/api/xmatrix/channels/${CREATED_CHANNEL_ID}/messages$`, "u"), { message: {} },
     { method: "POST" });
-  return writing;
 }
 
 /** Opens Pages on a page whose live session holds `body`, and returns its editor. */
@@ -420,9 +421,12 @@ for (const refused of [false, true]) {
   test(`desktop co-writing acknowledges the selection while its request is pending (${refused ? "refused" : "accepted"})`, async ({ page: browser }) => {
     await stubCoWriting(browser, "");
     await stubWriters(browser, ["claude", "codex"]);
-    await fixtureRule(browser, { id: "writer-create", pattern: /\/api\/xmatrix\/channels$/u, method: "POST",
-      responder: { kind: "deferred", ...(refused ? { status: 403, json: { error: "forbidden" } }
-        : { json: { channel: { ...E2E_CHANNEL, id: "channel-write", name: "Co-writing Relay" } } }) } });
+    if (refused) {
+      await fixtureRule(browser, { id: "writer-create", pattern: /\/api\/xmatrix\/channels$/u, method: "POST",
+        responder: { kind: "deferred", status: 403, json: { error: "forbidden" } } });
+    } else {
+      await fixtureChannelCreate(browser, "writer-create", { ...E2E_CHANNEL, name: "Co-writing Relay" }, { held: true });
+    }
     await openLivePage(browser);
     const controls = browser.getByTestId("page-controls");
     await controls.getByRole("button", { name: /Co-write$/u }).click();
@@ -444,7 +448,7 @@ for (const refused of [false, true]) {
     await expect(feedback).toContainText("Write in the page");
     await expect(browser).not.toHaveURL(/conversation=/u);
     await feedback.getByRole("button", { name: "Conversation", exact: true }).click();
-    await expect(browser).toHaveURL(/conversation=channel-write/u);
+    await expect(browser).toHaveURL(new RegExp(`conversation=${await fixtureCreatedChannelId(browser, "writer-create")}`, "u"));
   });
 }
 
@@ -497,7 +501,7 @@ test.describe("on a phone", () => {
   });
 
   test("co-writing starts with one tap on an Agent's face, and the reader stays on the page", async ({ page: browser }) => {
-    const writing = await stubCoWriting(browser, "");
+    await stubCoWriting(browser, "");
     await stubWriters(browser, ["claude", "codex"]);
     await expect(await openRelayOnPhone(browser, pageDocument(BODY))).toContainText("In progress");
 
@@ -512,9 +516,10 @@ test.describe("on a phone", () => {
 
     await expect.poll(async () => (await fixtureRequestBodies(browser, "write-message"))[0]?.body).toMatch(
       /^@codex launch:force You're co-writing page:p-relay with me live\./u);
-    expect((await fixtureRequestBodies(browser, "link-create"))[0]).toMatchObject({ conversationId: writing.id, pageId: "p-relay" });
+    const writing = await fixtureCreatedChannelId(browser, "channel-create");
+    expect((await fixtureRequestBodies(browser, "link-create"))[0]).toMatchObject({ conversationId: writing, pageId: "p-relay" });
     // The conversation co-writes the page live before its Agent is called, so the Agent joins the page when it starts.
-    expect(await fixtureRequestBodies(browser, "co-writing")).toEqual([{ conversationId: writing.id, live: true }]);
+    expect(await fixtureRequestBodies(browser, "co-writing")).toEqual([{ conversationId: writing, live: true }]);
     await expect(picker).toBeHidden();
     await expect(browser).not.toHaveURL(/conversation=/u);
     await expect(browser.getByRole("status")).toHaveText(/codex is starting/u);
@@ -523,14 +528,15 @@ test.describe("on a phone", () => {
   });
 
   test("a page made to be co-written calls its Agent as it opens, with no tap", async ({ page: browser }) => {
-    const writing = await stubCoWriting(browser, "");
+    await stubCoWriting(browser, "");
     await stubWriters(browser, ["claude", "codex"]);
     // What the welcome's "Write a page with an agent" leaves for the page it made.
     await browser.addInitScript(() => window.sessionStorage.setItem("xmatrix:co-write:p-relay", "codex"));
     await expect(await openRelayOnPhone(browser, pageDocument(BODY))).toContainText("In progress");
     await expect.poll(async () => (await fixtureRequestBodies(browser, "write-message"))[0]?.body).toMatch(
       /^@codex launch:force You're co-writing page:p-relay with me live\./u);
-    expect(await fixtureRequestBodies(browser, "co-writing")).toEqual([{ conversationId: writing.id, live: true }]);
+    expect(await fixtureRequestBodies(browser, "co-writing")).toEqual([{ conversationId: await fixtureCreatedChannelId(browser,
+      "channel-create"), live: true }]);
     // Asked once: opening the page again does not call it again.
     expect(await browser.evaluate(() => window.sessionStorage.getItem("xmatrix:co-write:p-relay"))).toBeNull();
   });
@@ -1034,18 +1040,26 @@ test("selecting a passage starts a discussion anchored to it, drawn beside the t
   await stubPages(browser, [page("p-relay", null, "Relay", "V")]);
   const pageLinks = /\/api\/xmatrix\/spaces\/[^/]+\/page-links\?.*$/u;
   await fixtureJson(browser, "page-links", pageLinks, { links: [] });
-  const discussion = { ...E2E_CHANNEL, id: "channel-discussion", name: "“In progress”" };
+  const discussion = { ...E2E_CHANNEL, name: "“In progress”" };
   await stubPageConversation(browser, discussion, { linkId: "l-discuss", blockId: "status" });
+  // The Hub is slow to create it.
+  await fixtureChannelCreate(browser, "channel-create", discussion, { held: true });
   const editor = await openLivePage(browser);
   await selectLine(browser, "In progress");
   await browser.getByTestId("page-selection-menu").getByRole("button", { name: "Discuss" }).click();
+  // It opens beside the page at once, ready to write in, its passage marked, before the Hub has made it;
+  // the page stays where it was.
+  await expect(browser).toHaveURL(new RegExp(`page=p-relay&conversation=${CREATED_CHANNEL_ID}`, "u"), { timeout: 1_000 });
+  await expect(browser.getByTestId("page-conversation")).toBeVisible({ timeout: 1_000 });
+  await expect(editor.locator(".page-discussion")).toHaveText("In progress", { timeout: 1_000 });
+  expect(await fixtureRequestBodies(browser, "link-create")).toEqual([]);
+  await releaseFixture(browser, "channel-create");
+  const created = await fixtureCreatedChannelId(browser, "channel-create");
+  expect(browser.url()).toContain(`conversation=${created}`);
   await expect.poll(async () => (await fixtureRequestBodies(browser, "link-create"))[0]).toMatchObject({
-    conversationId: discussion.id, pageId: "p-relay", blockId: "status", anchor: { quote: "In progress" } });
-  const created = (await fixtureRequestBodies(browser, "channel-create"))[0];
-  expect(created.name, "a discussion is named by its passage").toBe("“In progress”");
-  // It opens beside the page, ready to write in; the page stays where it was.
-  await expect(browser).toHaveURL(/page=p-relay&conversation=channel-discussion/u);
-  await expect(browser.getByTestId("page-conversation")).toBeVisible();
+    conversationId: created, pageId: "p-relay", blockId: "status", anchor: { quote: "In progress" } });
+  expect((await fixtureRequestBodies(browser, "channel-create"))[0]!.name, "a discussion is named by its passage")
+    .toBe("“In progress”");
   await expect(editor).toContainText("In progress");
   // Its composer holds the passage and where it came from, the context its first message carries.
   await expect(browser.locator("textarea.composer-textarea").first())
@@ -1231,9 +1245,9 @@ test("a page's conversations sit beside what they are about, and one opens there
 test("selecting a passage asks AI about it without leaving the page", async ({ page: browser }) => {
   await stubPages(browser, [page("p-relay", null, "Relay", "V")]);
   await fixtureJson(browser, "page-links", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\?.*$/u, { links: [] });
-  const asked = { ...E2E_CHANNEL, id: "channel-ask", name: "Ask: what is left" };
+  const asked = { ...E2E_CHANNEL, name: "Ask: what is left" };
   await stubPageConversation(browser, asked, { linkId: "l-ask", blockId: "status" });
-  await fixtureJson(browser, "ask-message", /\/api\/xmatrix\/channels\/channel-ask\/messages$/u, { message: {} },
+  await fixtureJson(browser, "ask-message", new RegExp(`/api/xmatrix/channels/${CREATED_CHANNEL_ID}/messages$`, "u"), { message: {} },
     { method: "POST" });
   await openLivePage(browser);
   await selectLine(browser, "In progress");
@@ -1243,12 +1257,13 @@ test("selecting a passage asks AI about it without leaving the page", async ({ p
   await ask.getByLabel("Your question").fill("what is left");
   await browser.screenshot({ path: test.info().outputPath("pages-ask.png") });
   await browser.keyboard.press("Enter");
+  const created = await fixtureCreatedChannelId(browser, "channel-create");
   await expect.poll(async () => (await fixtureRequestBodies(browser, "link-create"))[0]).toMatchObject({
-    conversationId: asked.id, blockId: "status", anchor: { quote: "In progress" } });
+    conversationId: created, blockId: "status", anchor: { quote: "In progress" } });
   const [message] = await fixtureRequestBodies(browser, "ask-message");
   expect(String(message!.body)).toBe("@auto what is left\n\nAbout this passage of page:p-relay (section #status):\n> In progress");
   // The discussion opens beside the page, where the answer arrives.
-  await expect(browser).toHaveURL(/conversation=channel-ask/u);
+  await expect(browser).toHaveURL(new RegExp(`conversation=${created}`, "u"));
   await expect(browser.getByTestId("page-conversation")).toBeVisible();
   await expect(ask).toBeHidden();
 });

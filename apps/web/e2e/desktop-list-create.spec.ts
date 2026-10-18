@@ -1,7 +1,7 @@
 import type { Page } from "@playwright/test";
 
 import { expect, test } from "./fixtures";
-import { fixtureJson, fixtureRequestBodies } from "./in-page-api-fixtures";
+import { CREATED_CHANNEL_ID, fixtureChannelCreate, fixtureCreatedChannelId, fixtureJson, fixtureRequestBodies } from "./in-page-api-fixtures";
 import { startedMarkdown } from "./page-document-fixture";
 import { E2E_CHANNEL, E2E_DESKTOP_CONTEXT, E2E_SPACE, harnessRegistrations, installPageTreeStubs, openWorkspaceWithStubs }
   from "./workspace-fixtures";
@@ -114,13 +114,12 @@ test("a new page offers Co-write as any page does, and calling an Agent makes it
   await page.locator(".app-sidebar").getByText("Home", { exact: true }).click();
   await expect(page.locator(".app-page-article")).toBeVisible();
   await stubPageCreate(page);
-  await fixtureJson(page, "writer-conversation", /\/api\/xmatrix\/channels$/u,
-    { channel: { ...E2E_CHANNEL, id: "channel-write" } }, { method: "POST" });
+  await fixtureChannelCreate(page, "writer-conversation", E2E_CHANNEL);
   await fixtureJson(page, "writer-link", /\/api\/xmatrix\/spaces\/[^/]+\/page-links$/u,
     { link: {} }, { method: "POST" });
   await fixtureJson(page, "co-writing", /\/api\/xmatrix\/spaces\/[^/]+\/pages\/p-new\/co-writing$/u,
     { startedAt: "2026-10-18T00:00:00Z" }, { method: "POST" });
-  await fixtureJson(page, "writer-message", /\/api\/xmatrix\/channels\/channel-write\/messages$/u,
+  await fixtureJson(page, "writer-message", new RegExp(`/api/xmatrix/channels/${CREATED_CHANNEL_ID}/messages$`, "u"),
     { message: {} }, { method: "POST" });
 
   await page.keyboard.press("Control+n");
@@ -139,7 +138,8 @@ test("a new page offers Co-write as any page does, and calling an Agent makes it
   await expect(page).toHaveURL(/page=p-new/u);
   await expect.poll(async () => (await fixtureRequestBodies(page, "writer-message"))[0]?.body)
     .toMatch(/^@codex launch:force You're co-writing page:p-new/u);
-  expect(await fixtureRequestBodies(page, "co-writing")).toEqual([{ conversationId: "channel-write", live: true }]);
+  expect(await fixtureRequestBodies(page, "co-writing")).toEqual([{
+    conversationId: await fixtureCreatedChannelId(page, "writer-conversation"), live: true }]);
   expect(await page.evaluate(() => window.localStorage.getItem("xmatrix.page-writer.space-personal"))).toBe("codex");
 });
 

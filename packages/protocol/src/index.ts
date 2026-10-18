@@ -256,6 +256,7 @@ export type {
   PublicMachineStartupFailure,
 } from "./machine-startup-failure.js";
 export { clientDefectAction } from "./client-defect-actions.js";
+export { CHANNEL_CREATE_KEY_HEADER, channelCreateId } from "./channel-create-id.js";
 export type { ClientDefectAction } from "./client-defect-actions.js";
 export {
   hmacBytes, hmacHex, lowercaseHex, sha256BytesSync, sha256Hex, timingSafeEqual, utf8ByteLength,

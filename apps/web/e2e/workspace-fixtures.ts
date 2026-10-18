@@ -1,7 +1,9 @@
 import { expect, type Page } from "@playwright/test";
 
 import {
+  CREATED_CHANNEL_ID,
   fixtureChannelCatalog,
+  fixtureChannelCreate,
   fixtureJson,
   fixtureRequestBodies,
   fixtureRequests,
@@ -175,10 +177,10 @@ function openedChannel(fixtures: WorkspaceStubFixtures): { id: string; spaceId: 
 
 /** A new conversation's create and first-message endpoints, answering as this Channel;
     read back as "conversation-create" and "conversation-first-message". */
-export async function fixtureConversationCreate(page: Page, channel: { id: string }) {
-  await fixtureJson(page, "conversation-create", /\/api\/xmatrix\/channels$/u, { channel }, { method: "POST" });
+export async function fixtureConversationCreate(page: Page, channel: Record<string, unknown>) {
+  await fixtureChannelCreate(page, "conversation-create", channel);
   await fixtureJson(page, "conversation-first-message",
-    new RegExp(`/api/xmatrix/channels/${channel.id}/messages$`, "u"), { message: { messageId: "m-1" } }, { method: "POST" });
+    new RegExp(`/api/xmatrix/channels/${CREATED_CHANNEL_ID}/messages$`, "u"), { message: { messageId: "m-1" } }, { method: "POST" });
 }
 
 /** Opens the app and starts a new conversation with the conversation list's +; returns the draft. */

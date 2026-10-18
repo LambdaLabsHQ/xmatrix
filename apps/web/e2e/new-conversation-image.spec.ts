@@ -1,13 +1,13 @@
 import type { Page } from "@playwright/test";
 import { E2E_CHANNEL, E2E_DESKTOP_CONTEXT, E2E_SPACE, fixtureConversationCreate, installWorkspaceStubs, startNewConversation } from "./workspace-fixtures";
 import { expect, test } from "./fixtures";
-import { fixtureJson, fixtureRequestBodies, fixtureRequests, fixtureRule } from "./in-page-api-fixtures";
+import { CREATED_CHANNEL_ID, fixtureJson, fixtureRequestBodies, fixtureRequests, fixtureRule } from "./in-page-api-fixtures";
 
 const imageData = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
 
 async function openNewConversation(page: Page, mode: "open" | "closed") {
   await installWorkspaceStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL] });
-  await fixtureConversationCreate(page, { ...E2E_CHANNEL, id: "c-img", name: "look at this", mode });
+  await fixtureConversationCreate(page, { ...E2E_CHANNEL, name: "look at this", mode });
   await fixtureRule(page, { id: "upload-intents", pattern: "**/relay-v2/private-r2/upload-intents", method: "POST", responder: { kind: "relayV2UploadIntent" } });
   await fixtureJson(page, "blob-refs", "**/relay-v2/private-r2/blob-refs", { ok: true }, { method: "POST" });
   await fixtureJson(page, "upload-bytes", "**/relay-v2/private-r2/uploads/**", { ok: true }, { method: "PUT" });
@@ -42,7 +42,8 @@ for (const mode of ["open", "closed"] as const) {
     // Visibility is the reference's: the Channel's scope, open or closed.
     expect(await fixtureRequestBodies(page, "blob-refs")).toEqual([expect.objectContaining({
       ownerKind: "message_attachment",
-      visibilityScopeId: mode === "closed" ? "channel:c-img" : "space:space-personal",
+      visibilityScopeId: mode === "closed" ? expect.stringMatching(new RegExp(`^channel:${CREATED_CHANNEL_ID}$`, "u"))
+        : "space:space-personal",
     })]);
     expect(await fixtureRequests(page, "upload-bytes")).toHaveLength(1);
   });

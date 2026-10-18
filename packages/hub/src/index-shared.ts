@@ -9,7 +9,6 @@ import {
   AGENT_RUN_PERMISSION_CHANNEL_ATTACHMENTS_WRITE,
   HUB_ROUTES,
   isAutomationIntervalMinutes,
-  sha256Hex,
   hmacBytes,
   timingSafeEqual,
   type AgentRunPermission,
@@ -1122,17 +1121,6 @@ export function automationEvalInput(
 // readiness. Replica capability path above remains the verified primary path.
 // Relay V2 migration dual-path control plane is permanently retired.
 // All /api/admin/relay-v2/migration/* methods refuse; Room remains for PITR only.
-
-export async function deterministicChannelCreateId(userId: string, requestKey: string): Promise<string> {
-  const digest = await sha256Hex(`create-channel\0${userId}\0${requestKey.slice(0, 120)}`);
-  return [
-    digest.slice(0, 8),
-    digest.slice(8, 12),
-    digest.slice(12, 16),
-    digest.slice(16, 20),
-    digest.slice(20, 32),
-  ].join("-");
-}
 
 // memory-fabric v0 — generic channel annotations
 // The durable authority phase is the only transport switch. Once Authority is
