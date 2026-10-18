@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { deviceOf, personKey, platformOf, summarizeFunnel, turnFailureClass } from "../scripts/new-user-funnel.mjs";
+import { deviceOf, parseArguments, personKey, platformOf, summarizeFunnel, turnFailureClass } from "../scripts/new-user-funnel.mjs";
 
 test("a first sign-in names the device and platform without keeping the agent string", () => {
   assert.equal(deviceOf("Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) Safari/604.1"), "phone");
@@ -26,4 +26,11 @@ test("the funnel counts each person at every step they reached and where they st
   assert.deepEqual(summary.reached, { registered: 4, space: 3, machine: 2, agents: 2, message: 2, reply: 2, page: 1 });
   assert.equal(summary.stoppedAt.space, 1);
   assert.equal(summary.stoppedAt.reply, 1);
+});
+
+test("the active report is asked for by flag, with the team Spaces named explicitly", () => {
+  assert.deepEqual(parseArguments(["2026-10-17T00:00:00Z", "2026-10-18T00:00:00Z", "POSTGRES_SHARD_1_RUNTIME_DATABASE_URL",
+    "--active", "--internal-space", "space-team"]), { from: "2026-10-17T00:00:00Z", to: "2026-10-18T00:00:00Z",
+    shardUrlEnvs: ["POSTGRES_SHARD_1_RUNTIME_DATABASE_URL"], internalSpaceIds: ["space-team"], active: true });
+  assert.throws(() => parseArguments(["2026-10-17T00:00:00Z", "2026-10-18T00:00:00Z", "--everyone"]), /Unknown argument/u);
 });

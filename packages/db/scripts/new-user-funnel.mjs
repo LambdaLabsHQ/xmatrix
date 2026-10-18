@@ -158,11 +158,116 @@ export async function readNewUserFunnel(from, to, shardUrlEnvs = [], env = proce
   }
 }
 
+/** Who keeps using xMatrix, new or not: each person with a message of their
+ * own in the 28 days before `to`, by the days they used it. Members of the
+ * named team Spaces are marked, so they can be counted apart. */
+export async function readActivePeople(to, shardUrlEnvs = [], internalSpaceIds = [], env = process.env) {
+  const end = Date.parse(to);
+  if (typeof to !== "string" || !/T.*(?:Z|\+00:00)$/u.test(to) || !Number.isFinite(end)) {
+    throw new Error("Supply a UTC end time");
+  }
+  // Whole UTC days, `to`'s own day being the last: at most 7 and 28 of them.
+  const lastDay = Math.floor((end - 1) / 86400000) * 86400000;
+  const since28 = new Date(lastDay - 27 * 86400000).toISOString();
+  const since7 = new Date(lastDay - 6 * 86400000).toISOString();
+  const clients = [];
+  try {
+    for (const name of ["POSTGRES_RUNTIME_DATABASE_URL", ...shardUrlEnvs]) {
+      if (!env[name]) throw new Error(`Missing environment ${name}`);
+      const client = new pg.Client({ connectionString: env[name], connectionTimeoutMillis: 10000 });
+      clients.push(client);
+      await client.connect();
+      await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
+      await client.query("SET LOCAL statement_timeout='20s'");
+    }
+    const people = new Map();
+    for (const client of clients) {
+      const rows = (await client.query(`WITH own AS (
+          SELECT m.author_id, m.space_id, m.channel_id, m.message_id, m.sent_at FROM data.messages m
+          WHERE m.author_kind='user' AND m.message_kind='xmatrix.message.text'
+            AND m.message_id NOT LIKE 'system:%' AND m.message_id NOT LIKE 'scheduled-message:%'
+            AND m.deleted_at IS NULL AND m.sent_at >= $1 AND m.sent_at < $2
+        )
+        SELECT o.author_id AS id,
+          count(DISTINCT date_trunc('day', o.sent_at)) FILTER (WHERE o.sent_at >= $3)::int AS days7,
+          count(DISTINCT date_trunc('day', o.sent_at))::int AS days28,
+          count(*) FILTER (WHERE o.sent_at >= $3)::int AS messages7,
+          count(*)::int AS messages28,
+          count(DISTINCT o.channel_id)::int AS conversations28,
+          max(o.sent_at) AS last_at,
+          (SELECT count(*)::int FROM data.agent_launches l JOIN own x ON x.space_id=l.space_id
+             AND x.channel_id=l.channel_id AND x.message_id=l.trigger_id
+           WHERE x.author_id=o.author_id AND l.first_reply_at IS NOT NULL) AS replied_tasks28,
+          (SELECT coalesce(array_agg(DISTINCT e.agent_name), '{}') FROM data.agent_message_executions e
+             JOIN own x ON x.space_id=e.space_id AND x.message_id=e.source_message_id
+           WHERE x.author_id=o.author_id) AS agents28,
+          EXISTS(SELECT 1 FROM data.space_members s WHERE s.user_id=o.author_id AND s.space_id=ANY($4::text[])) AS team
+        FROM own o GROUP BY o.author_id`, [since28, to, since7, internalSpaceIds])).rows;
+      for (const row of rows) {
+        const person = people.get(row.id) ?? { days7: 0, days28: 0, messages7: 0, messages28: 0, conversations28: 0,
+          repliedTasks28: 0, agents28: new Set(), lastAt: null, team: false };
+        person.days7 = Math.max(person.days7, row.days7);
+        person.days28 = Math.max(person.days28, row.days28);
+        person.messages7 += row.messages7;
+        person.messages28 += row.messages28;
+        person.conversations28 += row.conversations28;
+        person.repliedTasks28 += row.replied_tasks28;
+        for (const agent of row.agents28) person.agents28.add(agent);
+        if (!person.lastAt || row.last_at > person.lastAt) person.lastAt = row.last_at;
+        person.team ||= row.team;
+        people.set(row.id, person);
+      }
+    }
+    const registered = new Map((await clients[0].query(`SELECT id, created_at FROM control.auth_users WHERE id=ANY($1)`,
+      [[...people.keys()]])).rows.map(row => [row.id, row.created_at]));
+    const list = [...people.entries()].map(([id, person]) => ({
+      person: personKey(id),
+      team: person.team,
+      daysRegistered: registered.has(id) ? Math.floor((end - Date.parse(registered.get(id))) / 86400000) : null,
+      activeDays7: person.days7,
+      activeDays28: person.days28,
+      messages7: person.messages7,
+      messages28: person.messages28,
+      conversations28: person.conversations28,
+      repliedTasks28: person.repliedTasks28,
+      agents28: [...person.agents28].sort(),
+      lastActiveAt: new Date(person.lastAt).toISOString(),
+    })).sort((a, b) => b.activeDays28 - a.activeDays28 || b.messages28 - a.messages28);
+    const outside = list.filter(person => !person.team);
+    return {
+      asOf: to,
+      active7: outside.filter(person => person.activeDays7 > 0).length,
+      active28: outside.length,
+      returning: outside.filter(person => person.activeDays28 >= 3).length,
+      team: list.filter(person => person.team).length,
+      people: list,
+    };
+  } finally {
+    await Promise.allSettled(clients.map(client => client.end()));
+  }
+}
+
+/** `<from> <to> [shard env…] [--active] [--internal-space <id>]…` */
+export function parseArguments(args) {
+  const shardUrlEnvs = [], internalSpaceIds = [];
+  let active = false;
+  const [from, to, ...rest] = args;
+  for (let index = 0; index < rest.length; index++) {
+    if (rest[index] === "--active") active = true;
+    else if (rest[index] === "--internal-space" && rest[index + 1]) internalSpaceIds.push(rest[++index]);
+    else if (/^[A-Z][A-Z0-9_]*$/u.test(rest[index])) shardUrlEnvs.push(rest[index]);
+    else throw new Error(`Unknown argument ${rest[index]}`);
+  }
+  if (!from || !to) throw new Error("Usage: new-user-funnel.mjs <from UTC> <to UTC> [shard URL env…] [--active] [--internal-space <id>]…");
+  return { from, to, shardUrlEnvs, internalSpaceIds, active };
+}
+
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   try {
-    const [from, to, ...shardUrlEnvs] = process.argv.slice(2);
-    if (!from || !to) throw new Error("Usage: new-user-funnel.mjs <from UTC> <to UTC> [shard URL env…]");
-    console.log(JSON.stringify(await readNewUserFunnel(from, to, shardUrlEnvs), null, 2));
+    const { from, to, shardUrlEnvs, internalSpaceIds, active } = parseArguments(process.argv.slice(2));
+    const funnel = await readNewUserFunnel(from, to, shardUrlEnvs);
+    console.log(JSON.stringify(active
+      ? { ...funnel, active: await readActivePeople(to, shardUrlEnvs, internalSpaceIds) } : funnel, null, 2));
   } catch {
     // Driver errors may contain credentials, SQL parameters or private IDs.
     console.error("New-user funnel failed; verify the UTC window, shard environments and database access.");

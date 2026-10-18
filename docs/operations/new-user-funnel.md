@@ -30,3 +30,16 @@ the diagnostics dataset; queries are in `docs/architecture/first-space.md`.
 
 Use it for decisions, not for watching individuals: report counts and failure
 codes, and do not look up who a hash is.
+
+## Who keeps using it
+
+Add `--active` (and `--internal-space <id>` for each team Space) to also get
+`active`: everyone, new or not, with a message of their own in the 28 whole UTC
+days ending on `to`'s day. Per person (the same hash): whether they are a member
+of a named team Space (`team`), days since registering, active days in the last
+7 and 28 days, messages, conversations, tasks whose launch got a reply, and the
+agents that worked on their messages. People are sorted by active days. The
+totals count only people outside the team: `active7`, `active28`, and
+`returning` (active on 3 or more of the 28 days). Team membership comes only
+from the Spaces named; nothing is inferred from names or activity, so an
+unlisted team or test account counts as a user.
