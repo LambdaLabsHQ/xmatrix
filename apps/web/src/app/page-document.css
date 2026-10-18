@@ -47,6 +47,32 @@
 .page-document li.page-task[data-checked="true"] > div { color: var(--muted-foreground); text-decoration: line-through; }
 .page-document hr { border: none; border-top: 1px solid var(--border); margin: 1.5em 0; }
 .page-document img { max-width: 100%; border-radius: 6px; }
+/* An image or video pasted into the page (page-media.ts). */
+.page-document .page-media { position: relative; display: inline-block; max-width: 100%; vertical-align: bottom; border-radius: 6px; }
+.page-document .page-media > img, .page-document .page-media > video { display: block; max-width: 100%; max-height: 80vh; border-radius: 6px; }
+.page-document .page-media[data-state="loading"] { min-width: 8em; min-height: 5em; background: var(--muted); }
+.page-document .page-media[data-state="missing"] > * { display: none; }
+.page-document .page-media[data-state="missing"]::before {
+  content: "Not available";
+  display: block;
+  padding: 1.5em 2em;
+  border-radius: 6px;
+  background: var(--muted);
+  color: var(--muted-foreground);
+  font-size: 0.85em;
+}
+.page-document .page-media[data-uploading]::after {
+  content: "Uploading " attr(data-uploading) "%";
+  position: absolute;
+  right: 0.5em;
+  bottom: 0.5em;
+  padding: 0.15em 0.5em;
+  border-radius: 4px;
+  background: rgb(0 0 0 / 0.6);
+  color: white;
+  font-size: 12px;
+}
+.page-document .page-media.ProseMirror-selectednode { outline: 2px solid var(--primary); outline-offset: 2px; }
 .page-document table { border-collapse: collapse; width: 100%; table-layout: fixed; font-size: 0.95em; }
 .page-document th, .page-document td { border: 1px solid var(--border); padding: 0.35em 0.6em; vertical-align: top; }
 .page-document th { background: var(--muted); font-weight: 650; text-align: left; }

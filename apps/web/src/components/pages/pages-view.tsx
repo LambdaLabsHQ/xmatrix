@@ -638,6 +638,11 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   // The GitHub files the page embeds are read through the Hub, as this reader (pages-live-document.md §6.5).
   const readGitHubFile = useCallback((href: string, signal: AbortSignal) =>
     pageApi.githubFile(spaceId!, pageId!, token, href, signal), [spaceId, pageId, token]);
+  // Images and videos pasted into the page are the Space's private files, read and uploaded as this reader.
+  const mediaUrl = useCallback((file: string) => spaceId && pageId ? pageApi.mediaUrl(spaceId, pageId, file) : undefined,
+    [spaceId, pageId]);
+  const uploadMedia = useCallback((file: File, onProgress: (percent: number) => void) =>
+    pageApi.uploadMedia(spaceId!, pageId!, token, file, onProgress), [spaceId, pageId, token]);
   const unseen = headRevision !== null && seenRevision !== null && headRevision > seenRevision;
   const baselineFor = useRef<typeof opened>(null);
   useEffect(() => {
@@ -1553,7 +1558,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
                   {!drawn && document.data && (
                     // Where the editor's host holds its height.
                     <div className="min-h-[50vh]"><PageDocumentStatic body={document.data.body} testId="page-preview"
-                      references={references} /></div>
+                      references={references} mediaUrl={mediaUrl} /></div>
                   )}
                   {drawn && !!readerChanges && !phone && (
                     <label className="mb-3 flex w-fit cursor-pointer items-center gap-2 text-xs text-muted-foreground"
@@ -1578,7 +1583,8 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
                       follow={follow} onOpenConversation={openConversation} discussions={discussions}
                       automations={automationsById} references={references}
                       focusedConversationId={activeConversationId ?? focused} onFocusConversation={setFocused}
-                      onAnchorOffsets={setAnchorTops} cursorPresence={cursorPresence} readGitHubFile={readGitHubFile} />}
+                      onAnchorOffsets={setAnchorTops} cursorPresence={cursorPresence} readGitHubFile={readGitHubFile}
+                      mediaUrl={mediaUrl} uploadMedia={uploadMedia} />}
                   </div>
                 </div>
                 {/* The margin holds its room from the start, so the text does not reflow when the page has synced;

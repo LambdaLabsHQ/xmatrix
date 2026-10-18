@@ -190,18 +190,18 @@ export function hubRouteHandlerFrom<Params extends object = Record<string, never
 /**
  * Handlers for a Space's optional catch-all route: `build` receives the
  * remaining segments, each encoded, as one subpath; `search` carries the query
- * along. A route exports the methods it serves.
+ * along, and `get` how its reads are forwarded. A route exports the methods it serves.
  */
 export function spaceSubpathHandlers(
   build: (spaceId: string, subpath: string) => string,
-  { search = false }: { search?: boolean } = {},
+  { search = false, get }: { search?: boolean; get?: ForwardOptions } = {},
 ) {
   const route = ({ spaceId, path = [] }: { spaceId: string; path?: string[] }, url: URL) => {
     const subpath = path.map((segment) => encodeURIComponent(segment)).join("/");
     return `${build(spaceId, subpath)}${search ? url.search : ""}`;
   };
   return {
-    GET: hubRouteHandlerFrom("GET", route),
+    GET: hubRouteHandlerFrom("GET", route, get),
     POST: hubRouteHandlerFrom("POST", route),
     PUT: hubRouteHandlerFrom("PUT", route),
     PATCH: hubRouteHandlerFrom("PATCH", route),

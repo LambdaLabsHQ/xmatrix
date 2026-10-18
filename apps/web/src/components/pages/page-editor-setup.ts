@@ -24,6 +24,7 @@ import * as Y from "yjs";
 import { automationChips } from "./page-automation-chips";
 import { referenceChips, type PageReferenceTargets } from "./page-reference-chips";
 import { githubFileEmbeds, type ReadGitHubFile } from "./page-github-file-embeds";
+import { imageView, pageMediaPaste, type LocalMedia, type PageMediaSource, type UploadPageMedia } from "./page-media";
 import { markdownShortcuts, syntaxPlugin, typoraKeymap } from "./page-editor-syntax";
 import { mountHeadingMenu, type HeadingMenu } from "./page-heading-menu";
 import { NEW_PAGE_TITLE } from "./page-creation";
@@ -1220,6 +1221,11 @@ export function editorPlugins(input: {
   readGitHubFile: () => ReadGitHubFile | undefined;
   /** What `page:<id>` and `channel:<id>` in the text name and open. */
   references: () => PageReferenceTargets | undefined;
+  /** Uploads an image or video pasted or dropped into the page; without it they are not taken. */
+  uploadMedia: () => UploadPageMedia | undefined;
+  /** The files this writer pasted, drawn from their own copy while they upload. */
+  localMedia: Map<string, LocalMedia>;
+  onMediaFailure: (message: string) => void;
 }): Plugin[] {
   const presenceOf = (clientId: number) => {
     const state = input.awareness.getStates().get(clientId);
@@ -1241,6 +1247,7 @@ export function editorPlugins(input: {
     markdownShortcuts(),
     syntaxPlugin(),
     taskShortcut,
+    pageMediaPaste({ upload: input.uploadMedia, local: input.localMedia, onFailure: input.onMediaFailure }),
     pasteLink,
     editorKeymap(),
     keymap(baseKeymap),
@@ -1260,6 +1267,9 @@ export function editorPlugins(input: {
   ];
 }
 
-export const nodeViews = {
-  list_item: (node: DocNode, view: EditorView, getPos: () => number | undefined) => new ListItemView(node, view, getPos),
-};
+export function nodeViews(media: () => PageMediaSource | undefined) {
+  return {
+    list_item: (node: DocNode, view: EditorView, getPos: () => number | undefined) => new ListItemView(node, view, getPos),
+    image: imageView(media),
+  };
+}
