@@ -21,6 +21,7 @@ use tokio_tungstenite::tungstenite::Message;
 use xmatrix_cli_core::agent_instance_connection::{
     AgentInstanceConnectionClient, AgentInstanceConnectionEvent,
 };
+use xmatrix_cli_core::page_media::{ToPage, refused_images_note};
 use xmatrix_cli_core::page_co_write::{
     PAGE_SESSION_HEARTBEAT_PING, PAGE_WRITE_CLOSE as CLOSE, PAGE_WRITE_OPEN as OPEN,
     PageCoWriteConnector, PageCoWriteEvent, PageCoWriteRequest, decode_request, delta_frame,
@@ -295,6 +296,26 @@ fn tell(
     ));
 }
 
+/// Tells the Agent which images of local files were left out of what it wrote, and starts afresh.
+fn refused_images(
+    events: &mpsc::UnboundedSender<AgentInstanceConnectionEvent>,
+    channel_id: &str,
+    page: &str,
+    images: &mut ToPage,
+) {
+    let written = std::mem::take(images);
+    if !written.refused().is_empty() {
+        tell(
+            events,
+            channel_id,
+            format!(
+                "[Page write] Not all you wrote into page:{page} reached it: {}.",
+                refused_images_note(written.refused())
+            ),
+        );
+    }
+}
+
 fn problems_prompt(page: &str, problems: &[String]) -> String {
     let mut prompt = format!("[Page write] Not all you wrote into page:{page} reached it:\n");
     for problem in problems {
@@ -336,6 +357,8 @@ async fn write_into(
     };
     let (mut sink, mut stream) = socket.split();
     let mut turn = 0u64;
+    // The turn's images, each held until it is whole (`page_media`).
+    let mut images = ToPage::default();
     // The turn being written, and whether the session stopped it.
     let mut open: Option<(u64, bool)> = None;
     // Turns the page has not said the outcome of: it is still taking their words.
@@ -355,19 +378,34 @@ async fn write_into(
                         if let Some((previous, stopped)) = open.take()
                             && !stopped
                         {
+                            let rest = images.finish();
+                            if !rest.is_empty() {
+                                let _ = sink.send(Message::Binary(delta_frame(previous, &rest).into())).await;
+                            }
                             let _ = sink.send(Message::Binary(done_frame(previous, false).into())).await;
                         }
+                        refused_images(&events, &channel_id, &page, &mut images);
                         turn += 1;
                         open = Some((turn, false));
                         unanswered.insert(turn);
                         Some(write_frame(turn, false))
                     }
                     Some(Piece::Text(text)) => match open {
-                        Some((id, false)) => Some(delta_frame(id, &text)),
+                        Some((id, false)) => {
+                            let text = images.push(&text);
+                            (!text.is_empty()).then(|| delta_frame(id, &text))
+                        }
                         _ => None,
                     },
                     Some(Piece::End { failed }) => match open.take() {
-                        Some((id, false)) => Some(done_frame(id, failed)),
+                        Some((id, false)) => {
+                            let rest = images.finish();
+                            if !rest.is_empty() {
+                                let _ = sink.send(Message::Binary(delta_frame(id, &rest).into())).await;
+                            }
+                            refused_images(&events, &channel_id, &page, &mut images);
+                            Some(done_frame(id, failed))
+                        }
                         _ => None,
                     },
                     None => break,
