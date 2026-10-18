@@ -44,3 +44,40 @@ export function rankSearchResults<T>(items: readonly T[], rankOf: (item: T) => S
     .sort((left, right) => compareSearchRank(left.rank, right.rank) || left.index - right.index)
     .map((entry) => entry.item);
 }
+
+/** One result as Jev reads it: what it is, its title and one line about it. */
+export type SearchRerankCandidate = { key: string; kind: string; title: string; detail?: string };
+
+/** How likely each result is what the search is for, and the one most likely. */
+export type SearchRerankReading = { results: Array<{ key: string; probability: number }>; best: string | null };
+
+/** The Space is not on Pro, so its searches are not sent to Jev. */
+export class SearchRerankUnavailable extends Error {
+  constructor() { super("search_rerank_unavailable"); }
+}
+
+/** Below this Jev reads a result as not what the search is for; it moves last but stays. */
+const UNLIKELY = 0.1;
+
+/**
+ * Reorders ranked results by Jev's reading. Whole-title matches keep the top;
+ * then Jev's best, then the rest it read by likelihood, then what it was not
+ * shown, then what it read as unlikely. Nothing is added or removed.
+ */
+export function applySearchRerank<T>(items: readonly T[], keyOf: (item: T) => string,
+  tierOf: (item: T) => SearchMatchTier, reading: SearchRerankReading | null): T[] {
+  if (!reading) return [...items];
+  const probability = new Map(reading.results.map((result) => [result.key, result.probability]));
+  const place = (item: T): [number, number] => {
+    if (tierOf(item) === 0) return [0, 0];
+    const key = keyOf(item);
+    if (key === reading.best) return [1, 0];
+    const likely = probability.get(key);
+    if (likely === undefined) return [3, 0];
+    return likely < UNLIKELY ? [4, -likely] : [2, -likely];
+  };
+  return items
+    .map((item, index) => ({ item, index, place: place(item) }))
+    .sort((left, right) => left.place[0] - right.place[0] || left.place[1] - right.place[1] || left.index - right.index)
+    .map((entry) => entry.item);
+}

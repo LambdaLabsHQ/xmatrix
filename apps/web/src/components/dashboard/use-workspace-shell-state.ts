@@ -84,7 +84,8 @@ import {
   resolveSpaceRouteKey,
   spaceAppPath,
 } from "@/components/dashboard/channel-links";
-import { searchWorkspaceMessages } from "./workspace-message-search";
+import { rerankWorkspaceSearch, searchWorkspaceMessages } from "./workspace-message-search";
+import type { WorkspaceSearchRerank } from "./use-search-rerank";
 import { useWorkspaceShellTailCache } from "./use-workspace-shell-tail-cache";
 import { removeRetiredBrowserReplica } from "@/lib/retired-browser-replica";
 import { maybePushRecipientScopedNativeMessageNotification } from "./recipient-scoped-native-message-notification";
@@ -2866,6 +2867,12 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
       token, spaceId: currentSpaceId, query, resumeToken, ...filters,
     });
   }, [currentSpaceId, token]);
+  const searchRerank = useMemo<WorkspaceSearchRerank | undefined>(() => {
+    if (!token || !currentSpaceId) return undefined;
+    return { spaceId: currentSpaceId, rerank: (query, candidates, signal) => rerankWorkspaceSearch({
+      token, spaceId: currentSpaceId, query, candidates, signal,
+    }) };
+  }, [currentSpaceId, token]);
 
   const persistComposerDraftSnapshot = useCallback((text: string, invocationDraft?: ComposerInvocationDraft) => {
     draftRef.current = text;
@@ -3120,6 +3127,7 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
     agentStatusEvents,
     logoutAndClearDeviceData,
     messageSearch,
+    searchRerank,
     persistComposerDraftSnapshot,
   };
 }

@@ -313,6 +313,7 @@ export const HUB_ROUTES = {
   channels: "/api/channels",
   channel_catalog_page: "/api/channels/page",
   message_search: "/api/messages/search",
+  search_rerank: "/api/search/rerank",
   channel_catalog_resolve: "/api/channels/resolve",
   channel: (channelId: string) =>
     `/api/channels/${encodeURIComponent(channelId)}`,
@@ -538,6 +539,7 @@ export const WEB_PROXY_ROUTES = {
   channels: "/api/xmatrix/channels",
   channel_catalog_page: "/api/xmatrix/channels/page",
   message_search: "/api/xmatrix/messages/search",
+  search_rerank: "/api/xmatrix/search/rerank",
   channel_catalog_resolve: "/api/xmatrix/channels/resolve",
   channel: (channelId: string) =>
     `/api/xmatrix/channels/${encodeURIComponent(channelId)}`,

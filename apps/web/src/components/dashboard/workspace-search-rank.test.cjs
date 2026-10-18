@@ -54,3 +54,18 @@ test("everything found shares one ranking, whatever its kind", () => {
   assert.deepEqual(results.slice(0, 5).map((result) => result.id),
     ["channel:f000", "page:p1", "channel:da24", "channel:2dbd", "member:space:u1"]);
 });
+
+test("Jev's reading reorders below whole-title matches and never adds or drops a result", () => {
+  const { applySearchRerank } = require("./workspace-search-rank.ts");
+  const rows = [
+    { key: "exact", tier: 0 }, { key: "a", tier: 1 }, { key: "b", tier: 1 }, { key: "c", tier: 2 },
+    { key: "unread", tier: 3 }, { key: "d", tier: 3 },
+  ];
+  const order = (reading) => applySearchRerank(rows, (row) => row.key, (row) => row.tier, reading).map((row) => row.key);
+  assert.deepEqual(order(null), ["exact", "a", "b", "c", "unread", "d"]);
+  assert.deepEqual(order({ best: "d", results: [
+    { key: "exact", probability: 0 }, { key: "a", probability: 0.05 }, { key: "b", probability: 0.4 },
+    { key: "c", probability: 0.9 }, { key: "d", probability: 0.8 },
+  ] }), ["exact", "d", "c", "b", "unread", "a"]);
+  assert.deepEqual(order({ best: "exact", results: [] }), ["exact", "a", "b", "c", "unread", "d"]);
+});
