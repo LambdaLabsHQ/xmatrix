@@ -222,8 +222,8 @@ fact is about.
   that diff *Viewed*. Opening the page diffs the revision they last read
   against the document now, block by block and then word by word inside
   changed blocks. It is marked as a proofreader marks paper, in the app's
-  one accent ink and never in a tinted box: new words underlined in brass, a
-  block that is all new barred in the margin, text taken out struck through
+  one accent ink and never in a tinted box: new words and wholly new blocks
+  underlined in brass, text taken out struck through
   in faint ink where it stood. Nothing is animated and nothing fades: the diff
   stays until its reader ticks *Viewed* above the page, which shows the page
   as it is; unticking shows the diff again. On a phone the diff is walked from
@@ -359,7 +359,8 @@ fact is about.
     writes there, then held for five minutes after its last word
     (`PAGE_AGENT_INK_MS`) before it fades. Its presence names what it wrote
     (`wrote`: the changes of the last five minutes, as positions), so the
-    highlight also shows for whoever opens the page meanwhile. It also stays
+    highlight also shows for whoever opens the page meanwhile. The highlight
+    identifies the paragraph without an additional bar in its left margin. It also stays
     after a streaming co-writer leaves, whose caret then rests at its last
     change as any Agent's does. Its edits commit with the
     session's idle commit, as its own, from its conversation.
