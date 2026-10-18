@@ -6,6 +6,7 @@ import { AppControlError, SLACK_WORKSPACE_HELD_SQL, SLACK_WORKSPACE_OWNED_SQL, S
 import { appRequestText as text } from "./app-request-text.js";
 import { decryptSecretValue, encryptSecretValue } from "./secret-value-control.js";
 import { lockDiscordInstallation } from "./discord-installation-lifecycle.js";
+import { reconcileGmailRoutingCredentials } from "./gmail-routing-credential-update.js";
 import { beginSentryAttempt, lockSentryAttempt, consumeSentryAttempt, retireSentryAttempt } from "./sentry-installation-lifecycle.js";
 
 /*
@@ -301,6 +302,7 @@ export class PostgresAppCredentialRepository {
       const generatedOnly = !!bound && entries.every(([name, value]) => value !== null && !!input.policy.generated?.includes(name));
       // Native installation is an explicit replacement, never a fallback to old manual credentials.
       const values = current && !verified && !expected ? await decryptValues(this.material, current) : {};
+      const previousGmailValues = providerId === "gmail" ? { ...values } : undefined;
       // Leaving a provider-bound grant for manual credentials keeps none of that
       // grant's values: a bot only its binding may use must not become manual.
       if (bound && !generatedOnly) {
@@ -317,8 +319,9 @@ export class PostgresAppCredentialRepository {
         else values[name] = value;
       }
       if (providerId === "gmail") {
-        await tx.query({ name: "gmail_notification_grant_retire_v1", text: "DELETE FROM data.app_gmail_routes WHERE connection_id=$1",
-          values: [connectionId], maxRows: 0 });
+        await reconcileGmailRoutingCredentials(tx, this.material, { connectionId,
+          previousVersion: Number(current?.version ?? 0), generation: String(connections[0].search_rank_sequence),
+          before: previousGmailValues!, after: values });
       }
       const names = Object.keys(values).sort();
       if (names.length > MAX_FIELDS) throw new AppControlError("invalid_app_request", 400, "Too many credential fields");

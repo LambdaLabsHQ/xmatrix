@@ -49,9 +49,24 @@ Failures retain the consumed history cursor and pending wake. Polling retries
 after transient failures, including Gmail throttling. Expired history establishes
 a new baseline and posts a visible gap warning rather than replaying old mail.
 Revoked grants require reauthorization and erase stored Google tokens. Stop,
-credential changes, ownership changes, deletion and lost Channel authority fence
-in-flight work using the existing notification lifecycle. Stopping does not
+mailbox reconnection, ownership changes, deletion and lost Channel authority fence
+in-flight work using the existing notification lifecycle. Multiple owned mailboxes
+can listen concurrently, with separate Channels, cursors, ID receipts and Stop
+controls. Adding or changing another mailbox preserves a listener only when its
+Composio account, address, owner and shared credentials are identical before and
+after the authoritative credential update. The update advances its credential
+version atomically and clears the old lease, so an old worker cannot finish or
+disable it. Changed mailboxes, pending attempts and shared credential changes
+retire their grants; notification authorization is never transferred to a new
+account or owner. Adding a content connection leaves an existing configured
+Gmail connection active while the new mailbox is checked. Stopping does not
 revoke the shared Google app globally or affect other Spaces.
+
+If consent completion fails, the error distinguishes an invalid token response,
+missing offline refresh permission and mismatched scopes. Scope diagnostics contain
+only bounded public scope identifiers; tokens and arbitrary provider strings are
+never included. A returned scope set that differs from labels and basic identity
+remains rejected, including a combined grant from the shared Google application.
 
 Acceptance covers labels-only Gmail scopes plus basic identity, wrong-mailbox
 and broad-grant rejection, unchanged counts, changed counts, independent periodic
