@@ -35,7 +35,7 @@ on:
         required: false
         default: false
       ref:
-        description: The commit to test; empty tests the triggering commit.
+        description: The triggering commit or its verified release stamp; empty tests the triggering commit.
         type: string
         required: false
         default: ''
@@ -81,7 +81,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: ${{ inputs.ref }}
+          ref: ${{ github.sha }}
           fetch-depth: 0
 
       # Self-hosted runners may retain sparse-checkout cones that hide new paths
@@ -92,10 +92,25 @@ jobs:
         run: git sparse-checkout disable || true
 
       # The selector only runs dependency-free Node scripts: no PNPM.
-      - uses: actions/setup-node@v6
+      - &setup_node
+        uses: actions/setup-node@v6
         with:
           node-version: 22
           package-manager-cache: false
+
+      # Validate with the triggering revision's code before any target code or
+      # local action can run with this branch's Actions cache scope.
+      - &select_ci_ref
+        name: Select the verified release revision
+        if: inputs.ref != ''
+        shell: bash
+        env:
+          CI_RELEASE_REF: ${{ inputs.ref }}
+          CI_SOURCE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          node scripts/release-commit.mjs verify "$CI_RELEASE_REF" "$CI_SOURCE_SHA"
+          git checkout --detach "$CI_RELEASE_REF"
 
       # A release train already verified its stamped version (release-train.mjs).
       - name: Prevent release version downgrade
@@ -200,18 +215,23 @@ jobs:
       - &checkout_selected_ref
         uses: actions/checkout@v6
         with:
-          ref: ${{ inputs.ref }}
+          ref: ${{ github.sha }}
           fetch-depth: ${{ inputs.ref != '' && '0' || '1' }}
       - name: Disable stale sparse checkout
         shell: bash
         run: |
           git sparse-checkout disable || true
           git clean -ffdx
+      # The ledger is dependency-free. On an identical-content release train,
+      # installing the workspace before this lookup was the gate's serial tail.
+      - *setup_node
+      - *select_ci_ref
       - uses: ./.github/actions/clear-linux-proxy
-      - uses: ./.github/actions/setup-pnpm-node
       - id: ledger
         name: Reuse a passing result for identical content
         run: node scripts/ci-ledger.mjs lookup node-checks
+      - uses: ./.github/actions/setup-pnpm-node
+        if: steps.ledger.outputs.hit != 'true'
       # The repository-wide duplicate scan follows the Node checks in this job
       # instead of taking a hosted job of its own.
       - name: Run shared Node checks
@@ -241,6 +261,8 @@ jobs:
     steps:
       - *checkout_selected_ref
       - *disable_sparse_checkout
+      - *setup_node
+      - *select_ci_ref
       - uses: ./.github/actions/clear-linux-proxy
       - uses: ./.github/actions/setup-pnpm-node
       - id: ledger
@@ -318,6 +340,8 @@ jobs:
     steps:
       - *checkout_selected_ref
       - *disable_sparse_checkout
+      - *setup_node
+      - *select_ci_ref
       - uses: ./.github/actions/setup-pnpm-node
       - id: ledger
         name: Reuse a passing result for identical content
@@ -360,6 +384,8 @@ jobs:
     steps:
       - *checkout_selected_ref
       - *disable_sparse_checkout
+      - *setup_node
+      - *select_ci_ref
       - uses: ./.github/actions/setup-pnpm-node
       - id: ledger
         name: Reuse a passing result for identical content
@@ -375,6 +401,8 @@ jobs:
     steps:
       - *checkout_selected_ref
       - *disable_sparse_checkout
+      - *setup_node
+      - *select_ci_ref
       - uses: ./.github/actions/setup-android-java
       - uses: ./.github/actions/clear-linux-proxy
       - uses: ./.github/actions/setup-pnpm-node
@@ -402,6 +430,8 @@ jobs:
       # not a dirty worktree target tree.
       - *checkout_selected_ref
       - *disable_sparse_checkout
+      - *setup_node
+      - *select_ci_ref
       - uses: ./.github/actions/clear-linux-proxy
       # An ephemeral hosted runner restores kache's store from the Actions
       # cache; a persistent runner keeps its own.
@@ -488,6 +518,8 @@ jobs:
           }
       # Default clean checkout; kache restores compile artifacts across jobs.
       - *checkout_selected_ref
+      - *setup_node
+      - *select_ci_ref
       # An ephemeral hosted runner keeps kache's store on the workspace volume
       # (hard links need one volume) and restores it from the Actions cache.
       # v2 archives only persistent payloads after the cache writer exits;
@@ -597,6 +629,8 @@ jobs:
           git config --local --unset-all core.sparseCheckoutCone || true
           git read-tree -mu HEAD
           test -f .github/scripts/check-ci-partitions.sh
+      - *setup_node
+      - *select_ci_ref
       - name: Check partitioned CI result
         env:
           CHANGES_RESULT: ${{ needs.changes.result }}
