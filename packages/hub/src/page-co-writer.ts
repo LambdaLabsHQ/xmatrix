@@ -27,6 +27,11 @@ import { readingMs, readingStep, type PageReaderPace } from "./page-reader-pace"
 /** People pause this long before the Agent hears what changed. */
 export const CO_WRITER_PAUSE_MS = 1_500;
 /**
+ * Someone who keeps typing is heard at least this often: co-writing is a colleague writing beside you, who
+ * keeps up as you go, not one who waits for you to stop.
+ */
+export const CO_WRITER_KEEP_UP_MS = 4_000;
+/**
  * What the Agent writes reaches the page at most this often while it streams: every write rebuilds the
  * blocks it writes and brings the document to them, and a harness sends its words many times a second.
  */
@@ -162,15 +167,18 @@ const INSTRUCTIONS = [
   "several markers.",
   "",
   "How to work:",
-  "- Most of the time, ⟦pass⟧. Write when there is a clear opening: a heading or list left empty, a TODO, a section",
-  "  that is plainly unfinished, something asked of you on the page, a gap the page's purpose calls for.",
+  "- Keep writing along with them, as a colleague typing beside them would: right after what they just wrote, add",
+  "  the next sentence or point it calls for, and fill a heading or list left empty, a TODO, an unfinished section,",
+  "  anything asked of you. Write a little each time and answer soon: a sentence or two, not a finished piece; you",
+  "  hear again in a few seconds. ⟦pass⟧ only when there is nothing yet to follow (a line still mid-thought).",
   "- Never write in the paragraph someone is typing in (\"Typing now\" says where).",
   "- Your own additions go straight in. Do not reword what others wrote: fix only plain typos, and say anything else",
   "  with ⟦note⟧.",
   "- The page's first line, its top-level heading, is the page's name.",
   "- Write in the page's language and style, briefly, as a good colleague would add to it.",
   "- If someone edits what you are writing, you are stopped there; you hear what changed when they pause.",
-  "You may use your tools to check facts first. A message like this one comes whenever people change the page and pause.",
+  "Answer from the page itself; use a tool only when the page asks you to look something up. A message like this one",
+  "comes whenever people change the page and pause, and every few seconds while they keep typing.",
 ].join("\n");
 
 export interface PageCoWriterOptions {
@@ -192,6 +200,8 @@ export class PageCoWriter {
   /** Others changed the page since the Agent last read it. */
   private changed = false;
   private timer: ReturnType<typeof setTimeout> | null = null;
+  /** When the first change the Agent has not yet heard was made. */
+  private unheardSince: number | null = null;
   /** What became of its last answer, said in its next turn. */
   private outcome: string[] = [];
   /** What of the turn it opened itself did not reach the page, and why: its outcome, when it ends. */
@@ -293,7 +303,10 @@ export class PageCoWriter {
     }
     if (this.options.streams) return;
     if (this.timer) clearTimeout(this.timer);
-    this.timer = setTimeout(() => this.paused(), CO_WRITER_PAUSE_MS);
+    // A pause, or at the latest a few seconds after the first change it has not heard, whichever is sooner.
+    this.unheardSince ??= Date.now();
+    const wait = Math.min(CO_WRITER_PAUSE_MS, Math.max(0, this.unheardSince + CO_WRITER_KEEP_UP_MS - Date.now()));
+    this.timer = setTimeout(() => this.paused(), wait);
   }
 
   /** Someone's caret moved: into what the Agent is writing, and it stops there. */
@@ -442,6 +455,7 @@ export class PageCoWriter {
 
   /** Sends the Agent what it needs to answer now. */
   private ask(): void {
+    this.unheardSince = null;
     const now = this.host.markdown();
     const first = this.readCount === 0;
     const changedIds = first ? [] : pageChangedBlocks(this.seen, now);
