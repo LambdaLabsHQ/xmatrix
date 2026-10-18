@@ -142,11 +142,15 @@ function ToolButton({ label, active = false, disabled = false, onRun, children }
   );
 }
 
+const PAGE_PLACEHOLDER = "Write the current state of this area…";
+
 export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions, sections, follow,
   onOpenConversation, discussions, automations, headingActions, focusedConversationId = null, onFocusConversation,
   onAnchorOffsets, cursorPresence, onReady, readerBaseline = null, onReaderChanges, suggestions = null, onSuggestions,
-  suggestionControl, readGitHubFile, references }: {
+  suggestionControl, readGitHubFile, references, placeholder = PAGE_PLACEHOLDER }: {
   session: PageLiveSession;
+  /** What an empty page asks for: someone co-writing it asks for its first line. */
+  placeholder?: string;
   canEdit: boolean;
   onBlockChange?: (blockId: string) => void;
   /** The page's sections, whenever they change. */
@@ -193,6 +197,12 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
   const frame = useRef<HTMLDivElement | null>(null);
   const host = useRef<HTMLDivElement | null>(null);
   const view = useRef<EditorView | null>(null);
+  const placeholderText = useRef(placeholder);
+  useEffect(() => {
+    placeholderText.current = placeholder;
+    // Decorations are read on a transaction: an empty one draws the new hint.
+    view.current?.dispatch(view.current.state.tr.setMeta("placeholder", placeholder));
+  }, [placeholder]);
   const editable = useRef(canEdit);
   editable.current = canEdit;
   const blockChange = useRef(onBlockChange);
@@ -313,7 +323,7 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
     const editor = new EditorView(host.current, {
       state: EditorState.create({ schema: pageSchema, plugins: [...editorPlugins({
         fragment: session.fragment, awareness: session.awareness, handleKeyDown,
-        placeholder: "Write the current state of this area…",
+        placeholder: () => placeholderText.current,
         onBlockChange: (blockId) => blockChange.current?.(blockId),
         openConversation: (conversationId) => openConversation.current?.(conversationId),
         focusConversation: (conversationId) => focusConversation.current?.(conversationId),
