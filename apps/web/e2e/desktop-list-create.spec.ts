@@ -113,6 +113,14 @@ test("a new page offers Co-write as any page does, and calling an Agent makes it
   await page.locator(".app-sidebar").getByText("Home", { exact: true }).click();
   await expect(page.locator(".app-page-article")).toBeVisible();
   await stubPageCreate(page);
+  await fixtureJson(page, "writer-conversation", /\/api\/xmatrix\/channels$/u,
+    { channel: { ...E2E_CHANNEL, id: "channel-write" } }, { method: "POST" });
+  await fixtureJson(page, "writer-link", /\/api\/xmatrix\/spaces\/[^/]+\/page-links$/u,
+    { link: {} }, { method: "POST" });
+  await fixtureJson(page, "co-writing", /\/api\/xmatrix\/spaces\/[^/]+\/pages\/p-new\/co-writing$/u,
+    { startedAt: "2026-10-18T00:00:00Z" }, { method: "POST" });
+  await fixtureJson(page, "writer-message", /\/api\/xmatrix\/channels\/channel-write\/messages$/u,
+    { message: {} }, { method: "POST" });
 
   await page.keyboard.press("Control+n");
   await expect(page.getByTestId("page-title")).toBeFocused();
@@ -128,6 +136,9 @@ test("a new page offers Co-write as any page does, and calling an Agent makes it
   expect(made).toMatchObject({ parentPageId: null });
   expect(startedMarkdown(made!.document)).toBe("");
   await expect(page).toHaveURL(/page=p-new/u);
+  await expect.poll(async () => (await fixtureRequestBodies(page, "writer-message"))[0]?.body)
+    .toMatch(/^@codex launch:force You're co-writing page:p-new/u);
+  expect(await fixtureRequestBodies(page, "co-writing")).toEqual([{ conversationId: "channel-write", live: true }]);
   expect(await page.evaluate(() => window.localStorage.getItem("xmatrix.page-writer.space-personal"))).toBe("codex");
 });
 
