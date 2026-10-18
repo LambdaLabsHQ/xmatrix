@@ -84,6 +84,7 @@ impl CodexAppSession {
                 CodexTurnRequest {
                     text: &continuation,
                     attachments: None,
+                    native: None,
                     ..request
                 }
             } else {

@@ -20,6 +20,8 @@ struct CodexTurnRequest<'a> {
     interrupt_history_replay: bool,
     runtime_state: Option<&'a AgentRuntimeStateTracker>,
     initial_goal: Option<&'a protocol::AgentGoalStatus>,
+    /// Start the turn with this app-server request instead of `turn/start`.
+    native: Option<&'a CodexNativeTurn>,
 }
 
 impl<'a> CodexTurnRequest<'a> {
@@ -37,6 +39,7 @@ impl<'a> CodexTurnRequest<'a> {
             interrupt_history_replay: false,
             runtime_state: None,
             initial_goal: None,
+            native: None,
         }
     }
 }
@@ -2166,6 +2169,7 @@ impl CodexAppSession {
             trace_channel_id,
             runtime_state,
             initial_goal,
+            native,
             ..
         } = request;
         let trace = TurnTrace {
@@ -2201,6 +2205,15 @@ impl CodexAppSession {
         let recovered_turn_id = codex_active_turn_id_from_events(self.inbox.pending(), &thread_id);
         let turn_id = if let Some(turn_id) = recovered_turn_id.as_deref() {
             Some(turn_id.to_string())
+        } else if let Some(native) = native {
+            // Compaction answers `{}` and names its turn in `turn/started`.
+            let (method, params) = native.request(&thread_id);
+            let result = self.request(method, params).await?;
+            result
+                .get("turn")
+                .and_then(|turn| turn.get("id"))
+                .and_then(Value::as_str)
+                .map(ToString::to_string)
         } else {
             let (local_image_files, image_download_failed) = match materialize_local_image_files(
                 attachments,
