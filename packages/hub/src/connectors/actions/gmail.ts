@@ -31,7 +31,7 @@ const MAX_PARTS = 200;
 const MAX_ADDRESS = 254;
 const ADDRESS = /^[^\s@<>(),;:"\\[\]]+@[^\s@<>(),;:"\\[\]]+\.[^\s@<>(),;:"\\[\]]+$/u;
 
-/* Every Gmail endpoint the Hub calls; anything else the full grant would allow is refused before Composio sees it. */
+/* User-invoked Gmail endpoints. The notification worker separately permits only profile/history ID reads. */
 const GMAIL_CALLS: Record<"GET" | "POST", RegExp> = {
   GET: /^\/(?:profile|messages|messages\/[0-9a-f]{8,32})$/u,
   POST: /^\/messages\/send$/u,
