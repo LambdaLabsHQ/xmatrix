@@ -1256,6 +1256,31 @@ fn claude_failed_result_names_the_error_not_the_narration() {
 }
 
 #[test]
+fn an_expired_claude_sign_in_reads_as_signed_out_without_a_success_prefix() {
+    use crate::runtime_claude_stream_io::claude_result_answer;
+    // What production Claude Code 2.1.150 returned for an expired OAuth session.
+    let (answer, failed) = claude_result_answer(
+        &serde_json::json!({
+            "type": "result",
+            "is_error": true,
+            "subtype": "success",
+            "result": "Failed to authenticate: OAuth session expired and could not be refreshed"
+        }),
+        "",
+    );
+    assert!(failed);
+    assert_eq!(answer, "Failed to authenticate: OAuth session expired and could not be refreshed");
+    assert!(crate::harness_signed_out_error(&answer));
+    assert!(crate::harness_signed_out_error(
+        "codex app-server exited (exit status: 1) before WebSocket became ready; stderr: Error: Not logged in"
+    ));
+    assert!(!crate::harness_signed_out_error("error_during_execution: API Error: 529 overloaded"));
+    assert!(!crate::harness_signed_out_error(
+        "codex app-server exited (exit status: 1) before WebSocket became ready"
+    ));
+}
+
+#[test]
 fn provider_quota_merge_keeps_windows_and_observation_metadata_together() {
     use crate::merge_llm_usage;
     let old = protocol::LlmUsage {

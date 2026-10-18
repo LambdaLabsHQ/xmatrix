@@ -23,11 +23,11 @@ use crate::runtime_channel_activity::{
     publish_effects, publish_intent,
 };
 use crate::runtime_claude_messages::claude_assistant_delta_for_message;
-use crate::runtime_claude_messages::claude_partial_assistant_delta;
 use crate::runtime_claude_messages::claude_assistant_text;
 use crate::runtime_claude_messages::claude_frame_is_subagent;
 use crate::runtime_claude_messages::claude_init_details;
 use crate::runtime_claude_messages::claude_message_id;
+use crate::runtime_claude_messages::claude_partial_assistant_delta;
 use crate::runtime_claude_messages::claude_runtime_notice_payload;
 use crate::runtime_claude_messages::claude_tool_item_key;
 use crate::runtime_claude_messages::claude_tool_name;
@@ -1226,7 +1226,13 @@ pub(crate) fn claude_result_answer(value: &Value, visible_assistant_text: &str) 
         return (answer.to_string(), false);
     }
     let mut parts: Vec<String> = Vec::new();
-    if let Some(subtype) = value.get("subtype").and_then(Value::as_str) {
+    // An error result can still carry subtype "success" (an authentication
+    // failure does): it names nothing, so only another subtype is kept.
+    if let Some(subtype) = value
+        .get("subtype")
+        .and_then(Value::as_str)
+        .filter(|subtype| *subtype != "success")
+    {
         parts.push(subtype.to_string());
     }
     if let Some(errors) = value.get("errors").and_then(Value::as_array) {
