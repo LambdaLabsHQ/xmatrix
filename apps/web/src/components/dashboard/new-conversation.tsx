@@ -16,9 +16,12 @@ import { useAndroidBackDismiss } from "./use-android-back";
  */
 export function NewConversation({
   space, token, workspaces, localContext, autoFocus, onCreate, onSend, onCancel, onOpenAppsForSpace, initialDraft = "",
+  error = null,
 }: {
   /** What the composer opens holding, for the person to send (a welcome card's). */
   initialDraft?: string;
+  /** Why the last conversation started here could not be made. */
+  error?: string | null;
   space: SerializedSpace | null;
   token: string | null;
   workspaces: SerializedWorkspace[];
@@ -81,7 +84,7 @@ export function NewConversation({
         mentionInsertRequest={null}
         autoFocusRequest={autoFocus ? 1 : 0}
         sending={sending}
-        error={null}
+        error={error}
         ariaLabel="What should happen"
         sendTitle="Start conversation"
         onDraftChange={(value) => { draftRef.current = value; }}

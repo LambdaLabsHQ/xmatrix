@@ -11,6 +11,8 @@ import { registerMessageReceiptRoutes } from "./index-routes-message-receipt";
 import { relayRuntimeCellNamed, relayRuntimeOwnerCellName } from "./relay-authority-locator";
 import { RELAY_RUNTIME_CELL_HEADER } from "./runtime-transport/runtime-cell-locator";
 import {
+  CHANNEL_CREATE_KEY_HEADER,
+  channelCreateId,
   HUB_ROUTES,
   sha256Hex,
 } from "@xmatrix/protocol";
@@ -26,7 +28,7 @@ import {
 import { serializedAgentsFromPresence } from "./live-agent-instance-read";
 import { PUBLIC_DOMAIN_SOCKET_PATHS, routeDomainSocket } from "./runtime-transport/domain-socket-route";
 import { stopAgentRunLeavingChannel } from "./product-agent-intervention-authority-adapter";
-import { requireAuth, requireMachineDaemonAuth, actorUserId, getRelayRuntime, productCommandId, privateResponse, hasMeaningfulProductField, deterministicChannelCreateId, jsonErrors, requestErrorResponse } from "./index-shared";
+import { requireAuth, requireMachineDaemonAuth, actorUserId, getRelayRuntime, productCommandId, privateResponse, hasMeaningfulProductField, jsonErrors, requestErrorResponse } from "./index-shared";
 import { spaceInviteAuthorityScope } from "./space-invite-token";
 import {
   acknowledgeChannelMessage,
@@ -363,10 +365,10 @@ export function registerIndexRoutesChannelAgent(app: Hono<{ Bindings: Env }>): v
       const denied = await agentRunDelegationDenied(c.env, run, []);
       if (denied) return denied;
     }
-    const requestKey = c.req.header("x-xmatrix-idempotency-key")?.trim()
+    const requestKey = c.req.header(CHANNEL_CREATE_KEY_HEADER)?.trim()
       || c.req.header("x-request-id")?.trim();
     const channelId = requestKey
-      ? await deterministicChannelCreateId(actingUserId, requestKey)
+      ? await channelCreateId(actingUserId, requestKey)
       : crypto.randomUUID();
     const commandId = productCommandId(c.req.raw, "create-channel", channelId);
     const sessions = beginLiveHumanPresenceRead(c.env, c.req.url);

@@ -728,6 +728,10 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
 
   // A new conversation starts from a composer: what should happen, sent.
   const [composingConversation, setComposingConversation] = useState(false);
+  // Conversations shown and open while the Hub still creates them: their ids
+  // are known before it answers, and what needs them to exist waits on these.
+  const channelCreationsRef = useRef(new Map<string, Promise<ChannelSnapshot>>());
+  const [creatingChannelIds, setCreatingChannelIds] = useState<ReadonlySet<string>>(() => new Set());
   // The draft belongs to Messages: any other destination (rail, route, Back)
   // drops it, so it neither covers that view nor comes back on return.
   useEffect(() => {
@@ -2142,8 +2146,10 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
     };
   }, [queryClient]);
 
+  // One still being created has no history and takes no focus yet; both follow once it exists.
+  const selectedChannelCreating = Boolean(selectedChannelId && creatingChannelIds.has(selectedChannelId));
   useEffect(() => {
-    const focusedChannelId = conversationViewOpen(view) ? selectedChannelId : null;
+    const focusedChannelId = conversationViewOpen(view) && !selectedChannelCreating ? selectedChannelId : null;
     const timer = window.setTimeout(() => {
       const socket = relaySocketRef.current;
       const lastRequest = lastHumanFocusRequestRef.current;
@@ -2158,7 +2164,7 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
       });
     }, HUMAN_FOCUS_STABILITY_MS);
     return () => window.clearTimeout(timer);
-  }, [selectedChannelId, view]);
+  }, [selectedChannelCreating, selectedChannelId, view]);
 
   const workspaceQueriesEnabled = Boolean(token && authenticatedUserId && !mobileListFixture);
   const workspaceRefetchInterval = () => document.hidden ||
@@ -2439,7 +2445,7 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
       setLoadingHistory(false);
       return;
     }
-    if (!selectedChannelKnown) {
+    if (!selectedChannelKnown || selectedChannelCreating) {
       clearChannelHistory(selectedChannelId);
       setHistoryError(null);
       setLoadingHistory(false);
@@ -2665,6 +2671,7 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
     preloadChannelHistory,
     mobileListFixture,
     selectedChannelKnown,
+    selectedChannelCreating,
     historyTailBaseGenerationRef,
     productTailCacheGapRef,
     productTailCacheHydratedStampsRef,
@@ -3063,6 +3070,9 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
     setDeletingAgentId,
     composingConversation,
     setComposingConversation,
+    channelCreationsRef,
+    creatingChannelIds,
+    setCreatingChannelIds,
     channelMoveOpen,
     setChannelMoveOpen,
     channelMoveTargetSpaceId,

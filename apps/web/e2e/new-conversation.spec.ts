@@ -1,6 +1,6 @@
 import { channelHistoryFixture, E2E_CHANNEL, E2E_DESKTOP_CONTEXT, E2E_MOBILE_CONTEXT, E2E_SPACE, fixtureConversationCreate, installWorkspaceStubs, startNewConversation } from "./workspace-fixtures";
 import { expect, test } from "./fixtures";
-import { fixtureJson, fixtureRequestBodies } from "./in-page-api-fixtures";
+import { CREATED_CHANNEL_ID, fixtureChannelCreate, fixtureJson, fixtureRequestBodies, releaseFixture } from "./in-page-api-fixtures";
 
 // A new conversation is an empty conversation with the usual composer: + or Ctrl+N, type, send.
 test.describe("on a desktop", () => {
@@ -35,7 +35,7 @@ test("the empty composer takes turns teaching what typing @, /, [[ and # opens, 
 
 test("+ and Ctrl+N open an empty conversation, and its first message creates it, named from what it asks", async ({ page }) => {
   await installWorkspaceStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL] });
-  const created = { ...E2E_CHANNEL, id: "c-new", name: "fix the flaky login test" };
+  const created = { ...E2E_CHANNEL, name: "fix the flaky login test" };
   await fixtureConversationCreate(page, created);
   await fixtureJson(page, "channel-general-history", "**/api/xmatrix/channels/channel-general/history**",
     { messages: channelHistoryFixture(1, "general"), hasMore: false });
@@ -70,15 +70,14 @@ test("+ and Ctrl+N open an empty conversation, and its first message creates it,
   })]);
   await expect.poll(() => fixtureRequestBodies(page, "conversation-first-message"))
     .toEqual([expect.objectContaining({ body: "@auto fix the flaky login test\nand open a PR" })]);
-  await expect(page).toHaveURL(/c-new/u);
+  await expect(page).toHaveURL(new RegExp(`fix-the-flaky-login-test--${CREATED_CHANNEL_ID}`, "u"));
 });
 
-test("a new conversation opens as soon as it exists, its first message pending while it sends", async ({ page }) => {
+test("a new conversation opens at once, its first message pending while the Hub creates it and takes the message", async ({ page }) => {
   await installWorkspaceStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL] });
-  const created = { ...E2E_CHANNEL, id: "c-new", name: "check the deploy" };
-  await fixtureConversationCreate(page, created);
-  // The first message's append is slow (an Agent launch answers only once it is handed over).
-  await fixtureJson(page, "conversation-first-message", /\/api\/xmatrix\/channels\/c-new\/messages$/u,
+  // The create waits, and the first message's append is slow (an Agent launch answers only once it is handed over).
+  await fixtureChannelCreate(page, "conversation-create", { ...E2E_CHANNEL, name: "check the deploy" }, { held: true });
+  await fixtureJson(page, "conversation-first-message", new RegExp(`/api/xmatrix/channels/${CREATED_CHANNEL_ID}/messages$`, "u"),
     { message: { messageId: "m-1" } }, { method: "POST", delayMs: 5_000 });
 
   const composer = await startNewConversation(page);
@@ -86,8 +85,11 @@ test("a new conversation opens as soon as it exists, its first message pending w
   await composer.getByLabel("What should happen").press("Enter");
 
   await expect(composer).toBeHidden({ timeout: 2_000 });
-  await expect(page).toHaveURL(/c-new/u, { timeout: 2_000 });
+  await expect(page).toHaveURL(new RegExp(`check-the-deploy--${CREATED_CHANNEL_ID}`, "u"), { timeout: 2_000 });
   await expect(page.locator(".app-main").getByText("@auto check the deploy").first()).toBeVisible({ timeout: 2_000 });
+  // The message goes once the conversation exists, and not before.
+  expect(await fixtureRequestBodies(page, "conversation-first-message")).toEqual([]);
+  await releaseFixture(page, "conversation-create");
   await expect.poll(() => fixtureRequestBodies(page, "conversation-first-message"))
     .toEqual([expect.objectContaining({ body: "@auto check the deploy" })]);
 });
@@ -115,10 +117,7 @@ test.describe("on a phone", () => {
   test.use(E2E_MOBILE_CONTEXT);
   test("the + on the Channels list pushes an empty conversation, and sending opens it", async ({ page }) => {
     await installWorkspaceStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL] });
-    await fixtureJson(page, "conversation-create", /\/api\/xmatrix\/channels$/u,
-      { channel: { ...E2E_CHANNEL, id: "c-phone", name: "check the release" } }, { method: "POST" });
-    await fixtureJson(page, "conversation-first-message", /\/api\/xmatrix\/channels\/c-phone\/messages$/u,
-      { message: { messageId: "m-1" } }, { method: "POST" });
+    await fixtureConversationCreate(page, { ...E2E_CHANNEL, name: "check the release" });
 
     await page.goto("/app", { waitUntil: "domcontentloaded" });
     await page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: "Channels" }).tap();
@@ -135,6 +134,6 @@ test.describe("on a phone", () => {
     await expect(composer).toBeHidden();
     await expect.poll(() => fixtureRequestBodies(page, "conversation-create")).toEqual([expect.objectContaining({
       name: "check the release", metadata: { createdBy: "web", autoName: true } })]);
-    await expect(page).toHaveURL(/c-phone/u);
+    await expect(page).toHaveURL(new RegExp(`check-the-release--${CREATED_CHANNEL_ID}`, "u"));
   });
 });

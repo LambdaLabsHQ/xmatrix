@@ -1,4 +1,4 @@
-import { HUB_ROUTES } from "@xmatrix/protocol";
+import { CHANNEL_CREATE_KEY_HEADER, HUB_ROUTES } from "@xmatrix/protocol";
 import { hubRouteHandler, hubRouteHandlerFrom, pickSearchParams, withSearchParams } from "@/lib/xmatrix-proxy";
 
 export const GET = hubRouteHandlerFrom(
@@ -14,4 +14,5 @@ export const GET = hubRouteHandlerFrom(
   { responseHeaders: ["content-type", "cache-control", "retry-after"] },
 );
 
-export const POST = hubRouteHandler("POST", HUB_ROUTES.channels);
+// The browser names the create, so it knows the Channel's id before the Hub answers.
+export const POST = hubRouteHandler("POST", HUB_ROUTES.channels, [], { requestHeaders: [CHANNEL_CREATE_KEY_HEADER] });
