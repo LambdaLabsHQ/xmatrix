@@ -786,6 +786,9 @@ text, or the page, with the name as its document's opening heading and the
 text below it. One opened and left empty is not kept; closing the tab with text
 not yet kept asks first. A failure shows its error on the new page, and leaving
 a field again retries.
+The new page offers Co-write as any page does (§4.2). Calling an Agent from it
+makes the page at once, "Untitled" if nothing is written yet, and opens it with
+that Agent called.
 
 ## 8. Build order
 
