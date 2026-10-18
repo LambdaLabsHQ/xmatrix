@@ -94,6 +94,7 @@ test("the page tree leads with New page, and Ctrl+N there makes a page", async (
 
   // Its first write makes it, copy-on-write, from what is written; Enter goes on into its text.
   await page.keyboard.press("Control+n");
+  await expect(page.getByTestId("page-title")).toBeFocused();
   await page.keyboard.type("Plans");
   await page.keyboard.press("Enter");
   await expect.poll(async () => (await fixtureRequestBodies(page, "page-create")).length).toBe(1);
@@ -165,5 +166,9 @@ test("a page row makes a page under it from its own +, shown while the row is ho
   await expect(page.getByRole("dialog")).toHaveCount(0);
   await page.keyboard.type("Child");
   await page.getByTestId("page-title").blur();
-  await expect.poll(() => fixtureRequestBodies(page, "page-create")).toEqual([{ title: "Child", parentPageId: "p-home" }]);
+  // Named, it is made under that row, from its document.
+  await expect.poll(async () => (await fixtureRequestBodies(page, "page-create")).length).toBe(1);
+  const [made] = await fixtureRequestBodies(page, "page-create");
+  expect(made).toMatchObject({ parentPageId: "p-home" });
+  expect(startedMarkdown(made!.document)).toBe("# Child\n");
 });

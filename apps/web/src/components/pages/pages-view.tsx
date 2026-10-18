@@ -1044,7 +1044,8 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     <input key={page.pageId} defaultValue="" aria-label="Page title" autoFocus={pending}
       data-testid="page-title" placeholder={NEW_PAGE_TITLE} onKeyDown={(event) => {
         if (isImeKeyDown(event.nativeEvent)) return;
-        if (event.key === "Enter") { goingOn.current = true; event.currentTarget.blur(); }
+        // The Enter only names it: the text it goes on into does not take it as a new line too.
+        if (event.key === "Enter") { event.preventDefault(); goingOn.current = true; event.currentTarget.blur(); }
         if (event.key === "Escape") { event.currentTarget.value = ""; event.currentTarget.blur(); }
       }}
       onBlur={(event) => void renamePage(event.currentTarget.value)}
