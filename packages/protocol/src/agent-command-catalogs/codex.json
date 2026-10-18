@@ -41,34 +41,9 @@
     {
       "token": "/review",
       "label": "Review",
-      "description": "Start code review mode.",
+      "description": "Review uncommitted changes, or follow the instructions after /review.",
       "mode": "passthrough",
       "freeform": true
-    },
-    {
-      "token": "/status",
-      "label": "Status",
-      "description": "Show session id, context usage, and rate limits.",
-      "mode": "passthrough"
-    },
-    {
-      "token": "/plan",
-      "label": "Plan mode",
-      "description": "Toggle plan mode for multi-step planning.",
-      "mode": "passthrough",
-      "freeform": true
-    },
-    {
-      "token": "/init",
-      "label": "Init AGENTS.md",
-      "description": "Generate an AGENTS.md scaffold for the project.",
-      "mode": "passthrough"
-    },
-    {
-      "token": "/mcp",
-      "label": "MCP status",
-      "description": "View connected MCP servers.",
-      "mode": "passthrough"
     },
     {
       "token": "/fast",
@@ -77,5 +52,6 @@
       "mode": "typed",
       "freeform": true
     }
-  ]
+  ],
+  "notes": "The app-server ignores slash text in turn input. Keep only commands xMatrix maps to an app-server request: /compact -> thread/compact/start, /review -> review/start."
 }
