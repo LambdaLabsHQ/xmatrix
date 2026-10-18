@@ -142,14 +142,12 @@ function ToolButton({ label, active = false, disabled = false, onRun, children }
   );
 }
 
-const PAGE_PLACEHOLDER = "Write the current state of this area…";
-
 export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions, sections, follow, writeOn,
   onOpenConversation, discussions, automations, headingActions, focusedConversationId = null, onFocusConversation,
   onAnchorOffsets, cursorPresence, onReady, readerBaseline = null, onReaderChanges, suggestions = null, onSuggestions,
-  suggestionControl, readGitHubFile, references, placeholder = PAGE_PLACEHOLDER }: {
+  suggestionControl, readGitHubFile, references, placeholder }: {
   session: PageLiveSession;
-  /** What an empty page asks for: someone co-writing it asks for its first line. */
+  /** What an empty page asks for instead of its title: someone co-writing it asks for its first line. */
   placeholder?: string;
   canEdit: boolean;
   onBlockChange?: (blockId: string) => void;

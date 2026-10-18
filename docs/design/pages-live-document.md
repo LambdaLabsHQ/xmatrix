@@ -157,9 +157,8 @@ fact is about.
 
 - **Header**: the save state, and everyone on the page as a stack of
   avatars. The page's name is the document's opening heading (§4.1), so the
-  header shows none, except an "Untitled" placeholder above a document that
-  opens without one, as plain text, not a field; what is typed there is
-  written into the document as its opening heading. Hovering an
+  header never shows it. A document that opens without one reads "Untitled"
+  in its place, as the editor's own h1; clicking it starts that heading. Hovering an
   avatar says who it is, what they are doing, where and in which
   conversation; clicking one scrolls to them. Idle people are dimmed. Beside
   the avatars: the page's conversation count (§4.4), History and Share. There
@@ -784,18 +783,19 @@ and Share and History in the page's top bar.
 
 Creating a page works as in Notion: the desktop list's + and Ctrl/⌘+N, the
 phone's FAB, the empty list and a parent row's sub-page + each open a new page
-at once, with no dialog or browser prompt, its title field focused, on a phone
-as on a desktop. A new page is an ordinary page on screen, with the same editor
+at once, with no dialog or browser prompt, on its title, on a phone as on a
+desktop. The title is the document's first line, drawn as its h1 with an
+"Untitled" placeholder; there is no title field, so a new page looks exactly
+like any page. A new page is an ordinary page on screen, with the same editor
 and header, Co-write included (§4.2), and there is no draft: it is made by its
 first write, like copy-on-write. Until then its live document exists only in
 the browser, and one opened and left empty is not kept anywhere. The first
-write is a keystroke in the text, the title (Enter or leaving the field) or
-calling an Agent. It makes the page under the chosen parent from that document
+write is a keystroke (letters typed on the first line make it the opening
+heading) or calling an Agent. It makes the page under the chosen parent from that document
 as it stands. The Hub keeps the document's markdown as revision 1 and starts
 the page's live session from the same Yjs document, so the editor joins that
-session without reloading and goes on syncing what is typed meanwhile. A name
-typed in the title is the document's opening heading, with an empty line below
-it to write on; without one the page stays unnamed. Until it is made, the header
+session without reloading and goes on syncing what is typed meanwhile. Enter after
+the name goes on into the text; left without one the page stays unnamed. Until it is made, the header
 shows only Co-write. A failed make says so on the page, and the next write
 tries again.
 

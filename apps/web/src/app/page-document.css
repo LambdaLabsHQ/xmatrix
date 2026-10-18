@@ -83,6 +83,9 @@
   float: left;
   height: 0;
 }
+/* A document without a name reads "Untitled" where its name goes; clicking it names it there. */
+.page-document .page-untitled { color: var(--muted-foreground); cursor: text; user-select: none; }
+.page-document[data-editable="false"] .page-untitled { cursor: default; }
 .page-document .ProseMirror-gapcursor { position: relative; }
 
 /* On a phone the page reads like Notion's or Google Docs' mobile view: 16px
