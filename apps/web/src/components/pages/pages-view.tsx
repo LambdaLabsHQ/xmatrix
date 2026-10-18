@@ -41,6 +41,7 @@ import type { SuggestionsReport } from "./page-suggestions";
 import { usePageSuggestions } from "./use-page-suggestions";
 import { PageWriteWith } from "./page-write-with";
 import { takeCoWriteRequest } from "@/lib/pages/co-write-request";
+import { useOnboardingCopy } from "@/lib/onboarding-locale";
 import { usePageWriters } from "./page-writers";
 import { marginConversations, sectionConversationCounts, withOpenConversation, type LiveConversation } from "./page-margin-model";
 import { formatRelativeAge, mobileChatTimeLabel } from "@/components/dashboard/time-display";
@@ -874,6 +875,8 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   const liveOnPage = useMemo(() => pageAgents.data?.agents.get(pageId ?? "") ?? [], [pageAgents.data, pageId]);
   // Who this person can call to write the page with them, and the one they last called.
   const writers = usePageWriters(spaceId, token, Boolean(page) && canEdit);
+  // An empty page someone is co-writing asks for its first line, naming who writes the next.
+  const onboardingCopy = useOnboardingCopy(spaceId, token, userId ?? undefined);
   // What Agents co-writing the page suggest (§4.2), laid over it change by change.
   const waiting = usePageSuggestions(spaceId, pageId, token, Boolean(page));
   const [suggesting, setSuggesting] = useState<SuggestionsReport>({ count: 0, current: 0, author: null, through: 0 });
@@ -1062,6 +1065,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     return () => onConversationDockChange?.(false);
   }, [spaceId, page, docked, onConversationDockChange]);
 
+  const coWriter = called && called.pageId === page?.pageId ? called.harness : liveOnPage[0]?.name;
   // A page made to be co-written at once calls its Agent as it opens (co-write-request.ts).
   const coWriteRef = useRef<((harness: string, blockId: string | null) => Promise<void>) | null>(null);
   useEffect(() => {
@@ -1487,6 +1491,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
                   )}
                   <div className={drawn ? undefined : "hidden"}>
                     {session && <PageEditor key={session.doc.guid} session={session} canEdit={canEdit} writeOn={writeOn}
+                      {...(coWriter ? { placeholder: onboardingCopy.coWrite.firstLine(coWriter) } : {})}
                       onReady={() => setEditorReady(true)} readerBaseline={readerDiff} onReaderChanges={setReaderChanges}
                       suggestions={drawn ? waiting.suggestions : null} onSuggestions={setSuggesting}
                       suggestionControl={suggestionControl}

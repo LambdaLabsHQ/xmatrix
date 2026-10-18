@@ -503,6 +503,15 @@ test.describe("on a phone", () => {
     expect(await browser.evaluate(() => window.sessionStorage.getItem("xmatrix:co-write:p-relay"))).toBeNull();
   });
 
+  test("an empty page being co-written asks for its first line and names who writes the next", async ({ page: browser }) => {
+    await stubCoWriting(browser, "");
+    await stubWriters(browser, ["claude"]);
+    await browser.addInitScript(() => window.sessionStorage.setItem("xmatrix:co-write:p-relay", "claude"));
+    const editor = await openRelayOnPhone(browser, pageDocument(""));
+    await expect(editor.locator(".page-placeholder")).toHaveAttribute("data-placeholder",
+      "Write the first line here. @claude writes the next.", { timeout: 20_000 });
+  });
+
   test("a heading's actions are named in one menu, and Co-write starts on that section", async ({ page: browser }) => {
     await stubCoWriting(browser, "status");
     await stubWriters(browser, ["claude"]);

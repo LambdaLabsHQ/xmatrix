@@ -271,7 +271,8 @@ class ListItemView implements NodeView {
   }
 }
 
-function placeholder(text: string): Plugin {
+/** The empty page's hint; a function when it can change while the page is open. */
+function placeholder(text: string | (() => string)): Plugin {
   return new Plugin({
     props: {
       decorations(state) {
@@ -281,7 +282,7 @@ function placeholder(text: string): Plugin {
         if ((doc.childCount !== 1 && !named) || doc.lastChild!.type !== nodes.paragraph || doc.lastChild!.content.size) return null;
         const from = doc.content.size - doc.lastChild!.nodeSize;
         return DecorationSet.create(doc, [Decoration.node(from, doc.content.size,
-          { class: "page-placeholder", "data-placeholder": text })]);
+          { class: "page-placeholder", "data-placeholder": typeof text === "function" ? text() : text })]);
       },
     },
   });
@@ -1117,7 +1118,7 @@ function slashMenu(): Plugin<SlashState | null> {
 }
 
 export function editorPlugins(input: {
-  fragment: Y.XmlFragment; awareness: Awareness; placeholder: string;
+  fragment: Y.XmlFragment; awareness: Awareness; placeholder: string | (() => string);
   onBlockChange?: (blockId: string) => void;
   handleKeyDown: (view: EditorView, event: KeyboardEvent) => boolean;
   openConversation: (conversationId: string) => void;

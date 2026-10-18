@@ -327,7 +327,13 @@ integration("launch survives a hostname change with stale Workspace metadata and
     assert.equal(dispatched.selectionCount, 1);
     assert.equal(dispatched.prepared.length, 1);
     const dispatchReplay = await launches.dispatchFromMessage({ commandId: "dispatch", actorUserId: "caller",
-      channelId: "channel", sourceMessageId: "dispatch-source", body }, async () => assert.fail("replay must not select again"));
+      channelId: "channel", sourceMessageId: "dispatch-source", body,
+      // The Hub passes execution context with the message. Recovery must use
+      // the persisted request, never hash services or transient picker input.
+      env: { service: new URL("https://launch.internal") }, database, directory: database,
+      evaluatorFor: () => assert.fail("replay must not evaluate again"),
+      forceMention: "@codex", draftIntents: [{ start: 0, end: 6, mention: "@codex", choice: "summon" }],
+    }, async () => assert.fail("replay must not select again"));
     assert.equal(dispatchReplay.prepared[0].launchId, dispatched.prepared[0].launchId);
     assert.equal(dispatchReplay.prepared[0].reused, true);
     await sql(`UPDATE data.messages SET invocation_input_version=2,

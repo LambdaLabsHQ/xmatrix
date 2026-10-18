@@ -393,7 +393,9 @@ execution binding. A replay restores the committed selection before consulting
 Jev again. Composite launch preparation stores the exact selected request in
 `registration_launch_intents.launch_request_json` (expand migration 0073), without
 copying the message body. Recovery validates the original message hash and revision
-before restoring that request. A preparation interrupted before Run creation
+before restoring that request. Recovery overlays only the command, actor, Channel,
+source message, selection index and body; caller services and transient picker
+state do not enter the stored request's identity. A preparation interrupted before Run creation
 continues with the same identities and parameters; a committed launch is reused.
 Historical intents without a stored request are reported as recovery unavailable
 rather than reconstructed from current configuration. Adding a new tag requires an explicit information source, option
