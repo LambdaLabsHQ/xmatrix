@@ -803,6 +803,12 @@ WebM, QuickTime) into the editor puts it in the text as a markdown image,
   public page's saved text shows, to anyone.
 - **Images show inline; a video as a player** with its own controls, in the
   editor, the page's preview and the public page alike.
+- **An Agent sees them as it sees Channel images.** `xmatrix page read` saves
+  each image the page shows into the attachment cache, through the same code
+  as `channel history`, and lists it in the header under `media:` with its
+  `local:` path for the harness's own file reader; a video is only named.
+  Nothing is pushed into the Agent's context and the page text is unchanged:
+  a reference costs a line, an image only when the Agent opens it.
 
 ## 7. Around the page
 
