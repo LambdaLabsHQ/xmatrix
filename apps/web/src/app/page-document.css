@@ -719,6 +719,27 @@ html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-com
   background: var(--background);
   color: var(--page-pen-color);
 }
+/* Where there is no room for its name, a face that thinks says for how long, and one that went quiet says so,
+   in a small tag of its colour under the face. */
+.page-pen .page-pen-status {
+  position: absolute;
+  /* Below the dots that run under the face while it works. */
+  top: calc(100% + 10px);
+  right: -2px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: var(--page-pen-color);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.25;
+  white-space: nowrap;
+}
+.page-pen .page-pen-status.is-stalled {
+  background: var(--background);
+  color: var(--page-pen-color);
+  box-shadow: 0 0 0 1px var(--page-pen-color);
+}
 /* On a wide window the face carries its name and what it is doing, filled in its colour, so whoever looks
    up from the page sees at once which Agent writes the highlighted line, and that it is writing now. */
 .page-pens.is-named .page-pen {

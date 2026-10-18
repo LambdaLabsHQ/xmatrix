@@ -1336,6 +1336,38 @@ function agentWrites(server: Y.Doc, push: (data: Uint8Array) => void, clock: num
     conversationId: E2E_CHANNEL.id }, activity, block: "notes" }, caret));
 }
 
+test("a co-writer's face says how long it has been thinking, and one that went quiet can be swapped for a faster one", async ({ page: browser }) => {
+  await stubCoWriting(browser, "");
+  await stubWriters(browser, ["grok", "claude"]);
+  await fixtureJson(browser, "page-agents", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\/agents$/u, {
+    pages: [{ pageId: "p-relay", agents: [{ instanceId: "i-grok", name: "grok:1", status: "busy",
+      conversationId: "channel-write", activity: "thinking", blockId: "status" }] }],
+  });
+  const server = pageDocument(BODY);
+  let push: (data: Uint8Array) => void = () => {};
+  await servePageSession(browser, server, { connect: (send) => { push = send; } });
+  await browser.goto("/app", { waitUntil: "domcontentloaded" });
+  await browser.getByRole("button", { name: "Pages", exact: true }).first().click();
+  await expect(browser.getByTestId("page-editor")).toContainText("In progress");
+  const grok = { user: { name: "grok:1", color: "#7c3aed", kind: "agent", conversationId: "channel-write" }, block: "status" };
+  push(awarenessFrom(server, AGENT_CLIENT, 1, { ...grok, activity: "thinking", since: Date.now() - 12_000 }, "In progress"));
+  const pens = browser.getByTestId("page-pens");
+  await expect(pens.getByRole("button", { name: /grok:1/u })).toHaveAttribute("title", /thinking 1[2-9]s/u);
+  await expect(pens.getByText(/thinking 1[2-9]s/u)).toBeVisible();
+  await browser.screenshot({ path: test.info().outputPath("co-writer-thinking.png") });
+
+  // Its answer went quiet and was given up: the page says so, and offers the fastest other writer.
+  push(awarenessFrom(server, AGENT_CLIENT, 2, { ...grok, activity: "watching", since: Date.now(), stalled: true }, "In progress"));
+  await expect(pens.getByRole("button", { name: /grok:1/u })).toHaveAttribute("title", /went quiet/u);
+  await pens.getByRole("button", { name: /grok:1/u }).click();
+  const instead = browser.getByRole("button", { name: "Write with @claude instead" });
+  await expect(pens.getByText("went quiet")).toBeVisible();
+  await browser.screenshot({ path: test.info().outputPath("co-writer-quiet.png") });
+  await instead.click();
+  await expect.poll(async () => (await fixtureRequestBodies(browser, "write-message"))[0]?.body).toMatch(
+    /^@claude launch:force You're co-writing page:p-relay with me live\./u);
+});
+
 test("on a long page, who works out of view shows at its edges, and what an Agent writes is highlighted as its own", async ({ page: browser }) => {
   const { server, editor, push } = await openLongPage(browser, () => fixtureJson(browser, "page-agents",
     /\/api\/xmatrix\/spaces\/[^/]+\/page-links\/agents$/u, {

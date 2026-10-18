@@ -1170,7 +1170,11 @@ test("a co-writing Agent whose answer goes quiet is asked afresh, instead of the
   assert.deepEqual(writer.asked.at(-2), { type: "interrupt", turn: writer.turnId(1) });
   assert.equal(writer.turns().length, 2, "what changed meanwhile is asked about at once");
   assert.match(writer.turns()[1].text, /Your last answer went quiet and was given up\./u);
+  // The people on the page see it went quiet, and since when it is doing what it does now.
+  assert.equal(coWriterOf(ann).stalled, true);
+  assert.equal(typeof coWriterOf(ann).since, "number");
   writer.write(2, "⟦after \"a first\"⟧\n- a second\n");
+  assert.equal(coWriterOf(ann).stalled, undefined, "writing again clears it");
   writer.done(2);
   assert.match(ann.text.toString(), /a second/u, "and it writes again");
 });

@@ -54,6 +54,10 @@ export interface PresentPerson {
   doing?: string;
   /** The conversation an Agent's words come from while it writes, by name. */
   from?: string;
+  /** An Agent co-writing live whose last answer went quiet and was given up: another may write instead. */
+  stalled?: boolean;
+  /** An Agent co-writing live is thinking: its `doing` says for how long. */
+  thinking?: boolean;
 }
 
 /** Everyone on the page, as in Google Docs: hover says who and where, a click goes there. */
@@ -181,10 +185,15 @@ export function PagePens({ pens, room = 0, onJump, onOpen }: {
                 <span className="page-pen-label" aria-hidden="true">
                   {penName(person.name)}
                   {person.doing && person.doing !== "writing" && (
-                    <span className={cn("page-pen-doing", person.doing === "thinking" && "is-thinking")}> {person.doing}</span>
+                    <span className={cn("page-pen-doing", person.thinking && "is-thinking",
+                      person.stalled && "is-stalled")}> {person.doing}</span>
                   )}
                   {person.from && <span className="page-pen-doing"> · {person.from}</span>}
                 </span>
+              )}
+              {/* Without room for its name, a face that thinks or went quiet still says so beneath it. */}
+              {!named && (person.thinking || person.stalled) && person.doing && (
+                <span className={cn("page-pen-status", person.stalled && "is-stalled")} aria-hidden="true">{person.doing}</span>
               )}
               {/* While it writes, its dots run, as a chat shows someone typing. */}
               {person.editing && !person.idle && (

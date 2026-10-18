@@ -70,7 +70,11 @@ export interface PageCoWriterHost {
   write(change: () => void): void;
   /** The Agent's presence on the page: what it is doing, its caret, and whether its last change can be taken back. */
   present(state: { activity: PageCoWriterActivity; cursor?: Y.RelativePosition | null; say?: string | null;
-    undoable: boolean; wrote: PageCoWriterWrote[] }): void;
+    undoable: boolean; wrote: PageCoWriterWrote[];
+    /** When it began what it is doing now (ms): the page says how long it has been thinking. */
+    since: number;
+    /** Its last answer went quiet and was given up, and it has written nothing since. */
+    stalled: boolean }): void;
   /** The people on the page now. */
   people(): PageCoWriterPerson[];
   /** The pace its words reach the page at: a reader's while someone reads it, null when they land as they come. */
@@ -202,6 +206,11 @@ export class PageCoWriter {
   private timer: ReturnType<typeof setTimeout> | null = null;
   /** When the first change the Agent has not yet heard was made. */
   private unheardSince: number | null = null;
+  /** What its presence last said it was doing, and since when. */
+  private shownActivity: PageCoWriterActivity | null = null;
+  private activitySince = Date.now();
+  /** Its last answer went quiet and was given up, and it has not written since. */
+  private stalled = false;
   /** What became of its last answer, said in its next turn. */
   private outcome: string[] = [];
   /** What of the turn it opened itself did not reach the page, and why: its outcome, when it ends. */
@@ -284,6 +293,8 @@ export class PageCoWriter {
       if (this.active !== turn || this.ended) return;
       this.told(this.options.streams ? "Nothing more came for two minutes, so what you were writing ended there."
         : "Your last answer went quiet and was given up.", true);
+      // The people on the page see it went quiet, and may ask someone else to write.
+      this.stalled = true;
       this.host.send({ type: "interrupt", turn: turn.id });
       this.finished(turn);
       this.close();
@@ -718,7 +729,12 @@ export class PageCoWriter {
   private show(state: { activity: PageCoWriterActivity; cursor?: Y.RelativePosition | null }): void {
     const writing = this.active?.action;
     const now = Date.now();
-    this.host.present({ ...state, say: this.note,
+    if (state.activity !== this.shownActivity) {
+      this.shownActivity = state.activity;
+      this.activitySince = now;
+    }
+    if (state.activity === "writing") this.stalled = false;
+    this.host.present({ ...state, say: this.note, since: this.activitySince, stalled: this.stalled,
       undoable: this.last !== null || Boolean(writing && !writing.skipped && writing.kind !== "note" && writing.written.length),
       wrote: this.wrote.filter((entry) => now - entry.at < PAGE_AGENT_INK_MS).map(({ from, to, at }) => ({ from, to, at })) });
   }

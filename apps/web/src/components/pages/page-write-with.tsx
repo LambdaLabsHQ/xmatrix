@@ -19,7 +19,7 @@ export interface WritingAgent { name: string; avatarUrl?: string; doing: string 
  * starting is one tap on the face of the Agent to write with, and the Agent infers the rest from the
  * page. Tapping an Agent already on the page shows what it is doing, and the conversation it works from.
  */
-export function PageWriteWith({ agents, working, onStart, onOpenConversation, onStop, onUndo, onClose }: {
+export function PageWriteWith({ agents, working, onStart, onOpenConversation, onStop, onUndo, onClose, switchTo }: {
   agents: readonly WriteAgent[];
   /** The Agent tapped on the page, or null to choose one to start with. */
   working: WritingAgent | null;
@@ -30,6 +30,8 @@ export function PageWriteWith({ agents, working, onStart, onOpenConversation, on
   /** Takes back its last change, while nobody has changed it since. */
   onUndo?: (() => void) | null;
   onClose: () => void;
+  /** It went quiet: another Agent writes instead. */
+  switchTo?: { label: string; run: () => void };
 }) {
   const panel = useRef<HTMLDivElement>(null);
   useEffect(() => listenForOverlayDismissal((event) => {
@@ -65,8 +67,16 @@ export function PageWriteWith({ agents, working, onStart, onOpenConversation, on
                 Stop
               </button>
             )}
+
           </div>
-        ) : (
+        ) : null}
+        {working && switchTo && (
+          <button type="button" onClick={switchTo.run}
+            className={actionClass({ variant: "primary", size: "md" }, "mt-2.5 w-full justify-center")}>
+            {switchTo.label}
+          </button>
+        )}
+        {working ? null : (
           <>
             <p className="px-1 pb-2 text-[13px] font-medium text-muted-foreground">Co-write with</p>
             <div className="flex gap-2 overflow-x-auto">
