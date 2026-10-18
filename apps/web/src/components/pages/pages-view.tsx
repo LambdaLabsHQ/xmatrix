@@ -639,7 +639,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   const readGitHubFile = useCallback((href: string, signal: AbortSignal) =>
     pageApi.githubFile(spaceId!, pageId!, token, href, signal), [spaceId, pageId, token]);
   const unseen = headRevision !== null && seenRevision !== null && headRevision > seenRevision;
-  const baselineFor = useRef<typeof opened>(null);  const baselineFor = useRef<typeof opened>(null);
+  const baselineFor = useRef<typeof opened>(null);
   useEffect(() => {
     if (!opened || opened.pageId !== pageId || headRevision === null || baselineFor.current === opened) return;
     baselineFor.current = opened;

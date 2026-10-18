@@ -631,7 +631,399 @@ test.describe("on a phone", () => {
   });
 
   test("an Agent writing out of view waits at the right edge, pointing the way, and a tap goes to its line", async ({ page: browser }) => {
-    const filler = Array.from({ length: 40 }, (_, index) => `Filler line ${index + 1}`).join("\n\n");
+    const filler = Array.from({ length: 40 }, (_, index) => `Background paragraph ${index + 1}.`).join("\n\n");
+    const server = pageDocument(`# Relay\n\n## Status\n\nIn progress\n\n${filler}\n\n## Notes\n\nnone\n`);
+    const AGENT = 1_234_567;
+    let push: (data: Uint8Array) => void = () => {};
+    await stubPages(browser, [page("p-relay", null, "Relay", "V")]);
+    await fixtureJson(browser, "page-links", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\?.*$/u, { links: [] });
+    await stubClaudeWritingNotes(browser);
+    const editor = await openRelayOnPhone(browser, server, { connect: (send) => { push = send; } });
+    await expect(editor).toContainText("In progress");
+    const own = server.clientID;
+    server.clientID = AGENT;
+    editPageMarkdown(server, (markdown) => markdown.replace("none", "none yet, shipping Friday"), "agent");
+    server.clientID = own;
+    push(awarenessFrom(server, AGENT, 1, { user: { name: "claude:2", color: "#7c3aed", kind: "agent",
+      conversationId: E2E_CHANNEL.id }, activity: "editing", block: "notes" }, "shipping Friday"));
+
+    // Its face waits at the bottom of the right edge, pointing down to its line.
+    const pens = browser.getByTestId("page-pens");
+    const away = pens.getByRole("button", { name: "claude:2 is writing, below" });
+    await expect(away).toBeInViewport();
+    await expect(away.locator("img")).toHaveAttribute("src", /claude\.svg/u);
+    const face = (await away.boundingBox())!;
+    expect(face.x + face.width, "at the right edge").toBeGreaterThan(393 - 8);
+    // It is not named twice: no edge pill for it, and no button to call another while it writes.
+    await expect(browser.getByTestId("page-people-below")).toHaveCount(0);
+    await expect(browser.getByRole("button", { name: /^Write with/u })).toHaveCount(0);
+    await browser.screenshot({ path: test.info().outputPath("pages-pen-away.png") });
+
+    await away.click();
+    const line = editor.getByText("none yet, shipping Friday");
+    await expect(line).toBeInViewport();
+    // Back beside its line, where it travels with the text.
+    const beside = pens.getByRole("button", { name: "claude:2 is writing", exact: true });
+    await expect.poll(async () => {
+      const [face, text] = [(await beside.boundingBox())!, (await line.boundingBox())!];
+      return Math.abs(face.y + face.height / 2 - (text.y + text.height / 2));
+    }).toBeLessThan(16);
+    await browser.screenshot({ path: test.info().outputPath("pages-pen-beside.png") });
+    // Beside its line, a tap says what it is doing and opens the conversation it works from.
+    await beside.click();
+    const card = browser.getByTestId("page-write-with");
+    await expect(card).toContainText("claude:2");
+    await expect(card).toContainText("Notes");
+    await card.getByRole("button", { name: "Conversation" }).click();
+    await expect(browser).toHaveURL(new RegExp(`conversation=${E2E_CHANNEL.id}`, "u"));
+  });
+});
+
+test("a page: reference in a message is a chip with preview that opens the page", async ({ page: browser }) => {
+  const pageId = "0b7c2a1e-4f3d-4c2b-9a8e-1d2c3b4a5f6e";
+  const relay = page(pageId, null, "Relay", "V");
+  await installWorkspaceStubs(browser, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL] });
+  await fixtureJson(browser, "general-history", "**/api/xmatrix/channels/channel-general/history**", {
+    messages: [{
+      messageId: "m-page-ref", channelId: E2E_CHANNEL.id, sequence: 1,
+      body: `Updated \`page:${pageId} (r6)\` per the plan.`,
+      from: E2E_USER_SENDER, sentAt: NOW,
+    }],
+    hasMore: false,
+  });
+  await fixtureJson(browser, "conversation-links", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\?conversationId=/u, {
+    links: [],
+  });
+  await fixtureJson(browser, "page-doc", new RegExp(`/api/xmatrix/spaces/[^/]+/pages/${pageId}$`, "u"),
+    editedPageDocument(relay, 6));
+  await fixtureJson(browser, "page-tree", /\/api\/xmatrix\/spaces\/[^/]+\/pages(?:\?.*)?$/u, { pages: [relay] });
+  await browser.goto("/app/personal-sspaceperso/channels/general-cchannelgen", { waitUntil: "domcontentloaded" });
+
+  const chip = browser.getByTestId("page-reference-chip");
+  await expect(chip).toContainText("Relay");
+  await expect(chip).toContainText("r6");
+  await chip.hover();
+  const preview = browser.getByTestId("page-reference-preview");
+  await expect(preview).toContainText("In progress");
+  // It portals into the app root, where the theme lives: a styled panel
+  // anchored under the chip, not bare text spread across the page.
+  const panel = await preview.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return { inApp: Boolean(element.closest(".xmatrix-app")), background: style.backgroundColor,
+      border: style.borderTopWidth, radius: style.borderTopLeftRadius };
+  });
+  expect(panel.inApp).toBe(true);
+  expect(panel.background).not.toBe("rgba(0, 0, 0, 0)");
+  expect(panel.border).toBe("1px");
+  expect(panel.radius).toBe("16px");
+  const chipBox = (await chip.boundingBox())!;
+  const previewBox = (await preview.boundingBox())!;
+  expect(previewBox.width).toBeLessThanOrEqual(320);
+  expect(previewBox.y).toBeGreaterThanOrEqual(chipBox.y + chipBox.height);
+  expect(Math.abs(previewBox.x - chipBox.x)).toBeLessThan(40);
+  await chip.click();
+  await expect(browser.getByTestId("pages-view")).toBeVisible();
+  await expect(browser).toHaveURL(new RegExp(`/pages\\?page=${pageId}`, "u"));
+});
+
+test("an owner reviews the drafted pages, adjusts them and applies them", async ({ page: browser }) => {
+  await installWorkspaceStubs(browser, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL] });
+  const pageTree = /\/api\/xmatrix\/spaces\/[^/]+\/pages(?:\?.*)?$/u;
+  await fixtureJson(browser, "page-tree", pageTree, { pages: [] });
+  const draftPage = (key: string, parentKey: string | null, title: string, sources: string[]) => ({
+    key, parentKey, title, body: `# ${title}\n\nWhere ${title} stands.\n`, sources });
+  const proposed = { spaceId: E2E_SPACE.id, state: "proposed", version: 1, report: null,
+    drafter: { kind: "agent", id: "agent-1", label: "claude" },
+    draft: { pages: [draftPage("company", null, "Company", ["c-general"]),
+      draftPage("relay", "company", "Relay", ["c-relay"]), draftPage("standup", "company", "Standup", ["c-standup"])] },
+    sources: [{ conversationId: "c-general", name: "general", closed: false },
+      { conversationId: "c-relay", name: "relay", closed: true },
+      { conversationId: "c-standup", name: "standup", closed: false }] };
+  const report = { pages: 2, links: 2, restrictedPages: 1 };
+  const migrationUrl = /\/api\/xmatrix\/spaces\/[^/]+\/page-migration$/u;
+  await fixtureJson(browser, "migration-read", migrationUrl, proposed, { method: "GET" });
+  await fixtureJson(browser, "migration-revise", /\/page-migration\/draft$/u, { ...proposed, version: 2 },
+    { method: "PATCH" });
+  await fixtureJson(browser, "migration-apply", /\/page-migration\/apply$/u, { ...proposed, state: "applied", version: 3, report },
+    { method: "POST" });
+
+  await browser.goto("/app", { waitUntil: "domcontentloaded" });
+  await browser.getByRole("button", { name: "Pages", exact: true }).first().click();
+  const review = browser.getByTestId("page-migration-review");
+  await expect(review).toContainText("claude drafted these pages");
+  await expect(review).toContainText("3 pages");
+  await expect(review.getByLabel("restricted")).toHaveCount(1);
+  // Dropping a parent shows its children where they will be published: moved up.
+  const company = review.getByRole("listitem").filter({ has: browser.getByLabel("Title of Company") });
+  const relay = review.getByRole("listitem").filter({ has: browser.getByLabel("Title of Relay") });
+  await expect(relay).toHaveCSS("padding-left", "28px");
+  await company.getByRole("checkbox").uncheck();
+  await expect(relay).toHaveCSS("padding-left", "12px");
+  await company.getByRole("checkbox").check();
+  await review.getByRole("listitem").filter({ hasText: "standup" }).getByRole("checkbox").uncheck();
+  await review.getByLabel("Title of Relay").fill("Relay service");
+  await expect(review).toContainText("2 pages");
+  await fixtureJson(browser, "page-tree-moved", pageTree, { pages: [page("p-company", null, "Company", "V")] });
+  await fixtureJson(browser, "migration-applied", migrationUrl, { ...proposed, state: "applied", version: 3, report },
+    { method: "GET" });
+  await review.getByRole("button", { name: "Move to pages" }).click();
+
+  const done = browser.getByTestId("page-migration-report");
+  await expect(done).toContainText("2 pages · 2 conversation links · 1 restricted page");
+  await done.getByRole("button", { name: "Open pages" }).click();
+  await expect(browser.getByTestId("page-tree")).toContainText("Company");
+  expect(await fixtureRequestBodies(browser, "migration-revise"))
+    .toEqual([{ version: 1, drop: ["standup"], titles: { relay: "Relay service" } }]);
+  expect(await fixtureRequestBodies(browser, "migration-apply")).toEqual([{ version: 2 }]);
+});
+
+test("an owner may start a Space's pages from a repository or a first page, and still review the move", async ({ page: browser }) => {
+  await installWorkspaceStubs(browser, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL] });
+  const pageTree = /\/api\/xmatrix\/spaces\/[^/]+\/pages(?:\?.*)?$/u;
+  await fixtureJson(browser, "page-tree", pageTree, { pages: [] });
+  await fixtureJson(browser, "migration-read", /\/api\/xmatrix\/spaces\/[^/]+\/page-migration$/u,
+    { spaceId: E2E_SPACE.id, state: "none", version: 0, drafter: null, draft: { pages: [] }, sources: [], report: null });
+  await fixtureJson(browser, "import-repositories", /\/page-migration\/import\/repositories$/u,
+    { repos: [{ value: "acme/widgets", private: false }], repoStatus: "authorized" });
+  await fixtureJson(browser, "import-start", /\/page-migration\/import$/u, { conversationId: "c-import" },
+    { method: "POST" });
+  await browser.goto("/app", { waitUntil: "domcontentloaded" });
+  await browser.getByRole("button", { name: "Pages", exact: true }).first().click();
+  await expect(browser.getByTestId("page-migration-review")).toContainText("Draft this Space's move to pages.");
+  // Or it starts from one of the Space's GitHub repositories.
+  const importing = browser.getByTestId("page-import");
+  await importing.getByLabel("Repository").click();
+  await importing.getByRole("option", { name: "acme/widgets" }).click();
+  await importing.getByRole("button", { name: "Draft pages" }).click();
+  await expect(importing).toContainText("An Agent is drafting pages from acme/widgets");
+  await expect.poll(() => fixtureRequestBodies(browser, "import-start")).toEqual([{ repository: "acme/widgets" }]);
+
+  await fixtureJson(browser, "page-tree-first", pageTree, { pages: [page("p-first", null, "First document", "V")] });
+  await fixtureJson(browser, "page-create", pageTree, { page: page("p-first", null, "First document", "V") },
+    { method: "POST" });
+  // Its name is the heading its document opens with.
+  await fixtureJson(browser, "first-document", /\/pages\/p-first$/u, { page: { ...page("p-first", null, "First document", "V"),
+    body: "# First document\n", revisionInfo: { revision: 1, kind: "edit", authors: [], conversationIds: [], createdAt: NOW } } },
+  { method: "GET" });
+  await browser.getByRole("button", { name: "Create the first page" }).click();
+  await expect(browser.getByTestId("page-title")).toBeFocused();
+  await browser.keyboard.type("First document");
+  await browser.getByTestId("page-title").blur();
+  await expect.poll(async () => (await fixtureRequestBodies(browser, "page-create")).length).toBe(1);
+  const [made] = await fixtureRequestBodies(browser, "page-create");
+  expect(made).toMatchObject({ parentPageId: null });
+  expect(startedMarkdown(made!.document)).toBe("# First document\n");
+  await expect(browser.getByTestId("page-migration-review")).toBeHidden();
+  await expect(browser.getByTestId("pages-view")).toContainText("First document");
+  // An owner publishes the page for anyone with the link.
+  await fixtureJson(browser, "page-publish", /\/pages\/p-first\/publication$/u,
+    { page: { ...page("p-first", null, "First document", "V"), publishedAt: NOW } }, { method: "PUT" });
+  await browser.getByTestId("pages-view").getByRole("button", { name: "Share" }).click();
+  await browser.getByLabel("Anyone with the link can read this page").click();
+  await expect.poll(async () => fixtureRequestBodies(browser, "page-publish")).toEqual([{ published: true }]);
+  // Once an Agent drafts the move, the page says so until it is applied, however many pages exist.
+  await fixtureJson(browser, "migration-proposed", /\/api\/xmatrix\/spaces\/[^/]+\/page-migration$/u,
+    { spaceId: E2E_SPACE.id, state: "proposed", version: 1, drafter: null, draft: { pages: [] }, sources: [], report: null },
+    { method: "GET" });
+  await browser.reload({ waitUntil: "domcontentloaded" });
+  await browser.getByRole("button", { name: "Pages", exact: true }).first().click();
+  await browser.getByTestId("page-migration-notice").getByRole("button", { name: "Review" }).click();
+  await expect(browser.getByTestId("page-migration-review")).toBeVisible();
+});
+
+const LAMBDA = "# Lambda Labs\n\n公司当前有三条业务线，每条都按“能独立经营”来设计。完整梳理见仓库 `docs/ARCHITECTURE.md`。\n\n| 业务线 | 是什么 |\n|---|---|\n| xMatrix | 人和 Agent 一起工作的协作系统：对话、Pages |\n| xaccelerator.io | AI 原生 3D 游戏世界引擎 |\n\n各业务线的子页面在本页下面，见 [路线图](https://xmatrix.sh/p/a/b)。\n\n## 怎么工作\n- 人只管说话；**Agent 执行**，并把现状写回页面。\n- 所有时间写 UTC 或带时区。\n\n> 引用一段\n\n---\n\n## 待决定\n- 见各业务线页面的“待决定”一节。\n";
+
+test("a page is typed like Typora: the caret's line shows its markers", async ({ page: browser }) => {
+  await stubPages(browser, [page("p-relay", null, "Lambda Labs", "V")]);
+  await fixtureJson(browser, "page-links", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\?.*$/u, { links: [] });
+  const server = pageDocument(LAMBDA);
+  await servePageSession(browser, server);
+  await browser.goto("/app", { waitUntil: "domcontentloaded" });
+  await browser.getByRole("button", { name: "Pages", exact: true }).first().click();
+  const editor = browser.getByTestId("page-editor");
+  await expect(editor).toContainText("怎么工作");
+  const table = editor.locator("table");
+  await expect(table).toBeVisible();
+  await expect(table.locator("th")).toHaveText(["业务线", "是什么"]);
+  await expect(editor).not.toContainText("|---|");
+  await expect(editor.locator("ul > li")).toHaveCount(3);
+  await expect(editor.getByText("路线图")).toBeVisible();
+  await browser.screenshot({ path: test.info().outputPath("pages-preview.png") });
+
+  // The caret's heading shows its marker. A table, a code span and a link elsewhere stay rendered.
+  const title = editor.locator("h1", { hasText: "Lambda Labs" });
+  await title.click();
+  await expect(title.locator(".page-md-syntax")).toHaveText("# ");
+  for (const width of [393, 1280]) {
+    await browser.setViewportSize({ width, height: 852 });
+    const markerFit = await title.evaluate((heading) => {
+      const marker = heading.querySelector(".page-md-syntax");
+      if (!marker) return null;
+      const headingStyle = getComputedStyle(heading);
+      const markerStyle = getComputedStyle(marker);
+      const text = Array.from(heading.childNodes).find((node) =>
+        node.nodeType === Node.TEXT_NODE && node.textContent?.includes("Lambda"));
+      const range = document.createRange();
+      if (text) range.selectNodeContents(text);
+      const textBox = text ? range.getBoundingClientRect() : null;
+      const tools = heading.querySelector(".page-heading-tools")?.getBoundingClientRect() ?? null;
+      const box = heading.getBoundingClientRect();
+      return {
+        sameSize: markerStyle.fontSize === headingStyle.fontSize,
+        sameFamily: markerStyle.fontFamily === headingStyle.fontFamily,
+        toolsClearOfTitle: tools && textBox ? tools.left - textBox.right : null,
+        toolsAtEnd: tools ? box.right - tools.right : null,
+        sameLine: tools && textBox ? Math.abs(tools.top - textBox.top) < 24 : false,
+      };
+    });
+    expect(markerFit?.sameSize, `the # uses the heading's size at ${width}`).toBe(true);
+    expect(markerFit?.sameFamily, `the # uses the heading's font at ${width}`).toBe(true);
+    expect(markerFit?.sameLine, `section actions stay on the title's row at ${width}`).toBe(true);
+    expect(markerFit?.toolsClearOfTitle ?? 0, `section actions sit clear of the title at ${width}`).toBeGreaterThan(16);
+    expect(markerFit?.toolsAtEnd ?? 99, `section actions sit at the row's right edge at ${width}`).toBeLessThan(8);
+    if (width === 1280) await expect(browser.getByTestId("page-title"), "the heading already is the title").toHaveCount(0);
+  }
+  await expect(editor).not.toContainText("|---|");
+  await expect(editor).not.toContainText("`docs/");
+  await expect(editor).not.toContainText("](https://");
+
+  // In a table, that marker is gone and the table stays a table.
+  await table.getByText("AI 原生 3D 游戏世界引擎").click();
+  await expect(title.locator(".page-md-syntax")).toHaveCount(0);
+  await expect(table).toBeVisible();
+  await expect(editor).not.toContainText("|---|");
+
+  const emphasis = editor.locator("li", { hasText: "Agent 执行" });
+  await emphasis.locator("strong").click();
+  await expect(emphasis.locator(".page-md-syntax").first()).toHaveText("**");
+  await editor.getByText("路线图", { exact: true }).click();
+  await expect(editor.locator(".page-md-syntax", { hasText: "](https://xmatrix.sh/p/a/b)" })).toBeVisible();
+  await expect(emphasis.locator(".page-md-syntax")).toHaveCount(0);
+
+  // Markdown typing and the insert menu make structure, and the session gets markdown.
+  await editor.getByText("所有时间写").click({ clickCount: 3 });
+  await expect(editor.locator(".page-document")).toBeFocused();
+  await browser.keyboard.press("ArrowRight");
+  const items = editor.locator("ul").first().locator("li");
+  await browser.keyboard.press("Enter");
+  await expect(items, "Enter starts a new item").toHaveCount(3);
+  await browser.keyboard.press("Enter");
+  await expect(items, "Enter on an empty item leaves the list").toHaveCount(2);
+  await browser.keyboard.type("## Owners");
+  await browser.keyboard.press("Enter");
+  await browser.keyboard.type("/check");
+  await expect(browser.getByTestId("page-insert-menu")).toContainText("Checklist");
+  await browser.screenshot({ path: test.info().outputPath("pages-insert-menu.png") });
+  await browser.keyboard.press("Enter");
+  await browser.keyboard.type("Pick an owner for each line");
+  await expect(editor.locator("h2", { hasText: "Owners" })).toBeVisible();
+  await expect(editor.locator("li.page-task")).toHaveCount(1);
+  await expect.poll(() => pageMarkdown(server)).toContain("## Owners\n\n- [ ] Pick an owner for each line");
+  await browser.screenshot({ path: test.info().outputPath("pages-editing.png") });
+});
+
+test("a page: reference in a page's text is a chip with the page's title that opens it", async ({ page: browser }) => {
+  const planId = "0b7c2a1e-4f3d-4c2b-9a8e-1d2c3b4a5f6e";
+  const unseenId = "11111111-2222-4333-8444-555555555555";
+  await stubPages(browser, [page("p-relay", null, "Relay", "V"), page(planId, null, "Launch plan", "W")]);
+  await fixtureJson(browser, "page-links", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\?.*$/u, { links: [] });
+  await servePageSession(browser, pageDocument(
+    `# Relay\n\nDates are in page:${planId}#status and \`page:${planId}\` names it.\n\nSee page:${unseenId} too.\n`));
+  await browser.goto("/app", { waitUntil: "domcontentloaded" });
+  await browser.getByRole("button", { name: "Pages", exact: true }).first().click();
+  const editor = browser.getByTestId("page-editor");
+  const chip = editor.getByTestId("page-reference-chip");
+  await expect(chip).toHaveText("Launch plan › status");
+  // The id is hidden behind its chip; one in code, or to a page this reader cannot see, stays as typed.
+  await expect(editor.locator(".page-reference-source")).toBeHidden();
+  await expect(editor.locator("code")).toHaveText(`page:${planId}`);
+  await expect(editor).toContainText(`See page:${unseenId} too.`);
+  await chip.click();
+  await expect(browser).toHaveURL(new RegExp(`/pages\\?page=${planId}`, "u"));
+});
+
+test("a page shows its document at once, and the live editor takes over when its session syncs", async ({ page: browser }) => {
+  await stubPages(browser, [page("p-relay", null, "Relay", "V")]);
+  await fixtureJson(browser, "page-links", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\?.*$/u, { links: [] });
+  await fixtureJson(browser, "page-document", /\/api\/xmatrix\/spaces\/[^/]+\/pages\/p-relay$/u, { page: {
+    ...page("p-relay", null, "Relay", "V"), body: "# Relay\n\n| Area | State |\n|---|---|\n| Search | Next |\n",
+    revisionInfo: { revision: 3, kind: "edit", authors: [], conversationIds: [], createdAt: NOW } } });
+  const server = pageDocument("# Relay\n\n| Area | State |\n|---|---|\n| Search | Shipped |\n");
+  await servePageSession(browser, server, { syncAfterMs: 3_000 });
+
+  await browser.goto("/app", { waitUntil: "domcontentloaded" });
+  await browser.getByRole("button", { name: "Pages", exact: true }).first().click();
+  const preview = browser.getByTestId("page-preview");
+  await expect(preview.locator("table")).toContainText("Next");
+  await expect(browser.getByTestId("page-editor")).toBeHidden();
+  // The preview is drawn as the editor draws the page, so nothing moves when the editor takes its place.
+  const boxes = (root: ReturnType<typeof browser.getByTestId>) => Promise.all(["h1", "table"].map((selector) =>
+    root.locator(selector).first().boundingBox()));
+  const before = await boxes(preview);
+
+  await expect(preview).toBeHidden({ timeout: 10_000 });
+  const editor = browser.getByTestId("page-editor");
+  await expect(editor.locator("table")).toContainText("Shipped");
+  const after = await boxes(editor);
+  for (const [index, box] of before.entries()) {
+    expect(Math.abs((after[index]?.y ?? 0) - (box?.y ?? -100)), "the page does not move").toBeLessThanOrEqual(1);
+    expect(Math.abs((after[index]?.height ?? 0) - (box?.height ?? -100))).toBeLessThanOrEqual(1);
+  }
+});
+
+/** Opens a page whose reader last read revision 2, `before`, and that is `after` now: by default, changed in three places. */
+async function openChangedPage(browser: Page, before = "# Relay\n\n## Status\n\nPlanned for next week\n\n## Notes\n\nnone\n",
+  after = "# Relay\n\n## Status\n\nShipped this week\n\nThe second region is next\n\n## Notes\n\nnone\n\n## Risks\n\nLate reviews\n") {
+  await stubPages(browser, [page("p-relay", null, "Relay", "V")]);
+  await fixtureJson(browser, "page-links", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\?.*$/u, { links: [] });
+  await fixtureJson(browser, "page-read", /\/api\/xmatrix\/spaces\/[^/]+\/pages\/p-relay\/read$/u, { revision: 2 },
+    { method: "GET" });
+  await fixtureJson(browser, "page-mark-read", /\/api\/xmatrix\/spaces\/[^/]+\/pages\/p-relay\/read$/u, { revision: 3 },
+    { method: "PUT" });
+  await fixtureJson(browser, "page-revision-2", /\/api\/xmatrix\/spaces\/[^/]+\/pages\/p-relay\?revision=2$/u, { page: {
+    ...page("p-relay", null, "Relay", "V"), body: before,
+    revisionInfo: { revision: 2, kind: "edit", authors: [], conversationIds: [], createdAt: NOW } } });
+  return openLivePage(browser, after);
+}
+
+test("what changed since the reader last read the page stays as a diff until it is ticked viewed, while what is on screen is read", async ({ page: browser }) => {
+  const editor = await openChangedPage(browser);
+  const added = editor.locator(".page-reader-change");
+  await expect(added.filter({ hasText: "Shipped" })).toBeVisible();
+  await expect(added.filter({ hasText: "Late reviews" })).toHaveCount(1);
+  // Lines changed next to each other are barred once in the margin, left of the text: the changed status line
+  // and the new paragraph under it are one bar, the new Risks section another, the unchanged Notes parts them.
+  // A wholly new paragraph is barred, not underlined; words changed inside a line are underlined.
+  const bars = browser.getByTestId("page-reader-gutter").locator(".page-reader-bar");
+  await expect(bars).toHaveCount(2);
+  const newParagraph = added.filter({ hasText: "The second region is next" });
+  await expect(newParagraph).toHaveCSS("text-decoration-line", "none");
+  await expect(added.filter({ hasText: "Shipped" })).toHaveCSS("text-decoration-line", "underline");
+  const [first, shipped, second] = [(await bars.first().boundingBox())!,
+    (await editor.getByText("Shipped this week").boundingBox())!, (await newParagraph.boundingBox())!];
+  expect(first.x + first.width).toBeLessThan(shipped.x);
+  expect(first.y).toBeLessThanOrEqual(shipped.y + shipped.height / 2);
+  expect(first.y + first.height).toBeGreaterThanOrEqual(second.y + second.height / 2);
+  await expect(editor.locator(".page-reader-removed")).toContainText("Planned for next");
+  await browser.screenshot({ path: test.info().outputPath("pages-reader-changes.png") });
+  // The diff does not play out or fade. The page, all of it on screen a moment, is read whole meanwhile.
+  const viewed = browser.getByTestId("page-reader-diff");
+  await expect(viewed).toContainText("since you last read this page");
+  await browser.waitForTimeout(2_500);
+  await expect(added.filter({ hasText: "Shipped" })).toBeVisible();
+  expect(await added.first().evaluate((element) => getComputedStyle(element).animationName)).toBe("none");
+  await expect.poll(async () => await fixtureRequestBodies(browser, "page-mark-read")).toContainEqual({ revision: 3, seen: null });
+  // Ticked viewed, the page is as it is.
+  await viewed.getByRole("checkbox").check();
+  await expect(added).toHaveCount(0);
+  await expect(editor.locator(".page-reader-removed")).toHaveCount(0);
+  await expect(editor).toContainText("Shipped this week");
+  await expect.poll(async () => (await fixtureRequestBodies(browser, "page-mark-read")).map((body) => body.revision))
+    .toContain(3);
+});
+
+test("what the reader has not had on screen stays unread, as they last saw it, to be shown as changed next time", async ({ page: browser }) => {
+  const filler = Array.from({ length: 40 }, (_, index) => `Filler line ${index + 1}`).join("\n\n");
   const editor = await openChangedPage(browser, `# Relay\n\nPlanned\n\n${filler}\n\nOld ending\n`,
     `# Relay\n\nShipped\n\n${filler}\n\nNew ending\n`);
   await expect(editor.locator(".page-reader-change", { hasText: "Shipped" })).toBeVisible();
@@ -644,19 +1036,16 @@ test.describe("on a phone", () => {
     seen: null });
 });
 
-test("writing on a page that changed while its reader was away reads what changed, instead of marking it as they write", async ({ page: browser }) => {
+test("writing on a page that changed while its reader was away stops marking the diff over the writing", async ({ page: browser }) => {
   const editor = await openChangedPage(browser);
   await expect(browser.getByTestId("page-reader-gutter").locator(".page-reader-bar")).toHaveCount(2);
   await editor.getByText("none", { exact: true }).click();
   await browser.keyboard.press("End");
   await browser.keyboard.type(" yet");
-  // Co-writing, what changes is seen as it happens: the diff is read, and nothing of it stays marked.
-  await expect(browser.getByTestId("page-reader-diff")).toHaveCount(0);
+  // Co-writing, what changes is seen as it happens, in its writer's ink: nothing of the diff stays marked.
   await expect(editor.locator(".page-reader-change, .page-reader-removed")).toHaveCount(0);
   await expect(browser.getByTestId("page-reader-gutter")).toHaveCount(0);
   await expect(editor).toContainText("none yet");
-  await expect.poll(async () => (await fixtureRequestBodies(browser, "page-mark-read")).map((body) => body.revision))
-    .toContain(3);
 });
 
 test("an editor that meets a Hub still keeping pages as text waits instead of showing an empty page", async ({ page: browser }) => {
