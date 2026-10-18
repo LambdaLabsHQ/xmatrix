@@ -39,8 +39,12 @@ export function usePageCreation(spaceId: string | null, token: string, openPage:
     openPage(NEW_PAGE_ID);
   }, [openPage, spaceId]);
 
-  /** Makes the draft into a page, and opens it when the draft is still what is open. */
-  const persist = useCallback(async (input: { title: string; body?: string }, stillOpen: () => boolean) => {
+  /**
+   * Makes the draft into a page, and opens it when the draft is still what is open;
+   * `opening` runs just before, for what the opened page should do first.
+   */
+  const persist = useCallback(async (input: { title: string; body?: string }, stillOpen: () => boolean,
+    opening?: (pageId: string) => void) => {
     if (!spaceId || inFlight.current) return false;
     inFlight.current = true;
     setCreating(true);
@@ -50,7 +54,10 @@ export function usePageCreation(spaceId: string | null, token: string, openPage:
         ...(input.body ? { body: input.body } : {}) });
       await queryClient.invalidateQueries({ queryKey: ["xmatrix"], predicate: (query) =>
         query.queryKey.includes("page-tree") });
-      if (currentSpace.current === spaceId && stillOpen()) openPage(page.pageId);
+      if (currentSpace.current === spaceId && stillOpen()) {
+        opening?.(page.pageId);
+        openPage(page.pageId);
+      }
       return true;
     } catch (cause) {
       if (currentSpace.current === spaceId) {
