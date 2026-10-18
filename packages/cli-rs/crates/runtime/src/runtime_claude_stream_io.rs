@@ -1401,8 +1401,11 @@ pub(crate) async fn publish_claude_stream_trace(
         let delta = claude_partial_assistant_delta(state, value);
         state.partial_buffer.push_str(&delta);
     }
-    // A reply writing into a page goes out as it comes, for the page to show it so.
-    let flush_ms = if crate::runtime_page_stream_write::writing(channel_id) {
+    // A reply writing into a page goes out as it comes, for the page to show it so: a `⟦write⟧`
+    // from a conversation, or an answer to the page this Run co-writes live.
+    let flush_ms = if crate::runtime_page_stream_write::writing(channel_id)
+        || crate::runtime_page_co_write::answering(channel_id)
+    {
         CLAUDE_PAGE_WRITE_FLUSH_MS
     } else {
         CLAUDE_PARTIAL_FLUSH_MS

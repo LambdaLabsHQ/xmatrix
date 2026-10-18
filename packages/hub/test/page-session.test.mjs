@@ -13,7 +13,7 @@ import {
   PAGE_DOCUMENT_FRAGMENT, PAGE_MESSAGE_AWARENESS, PAGE_MESSAGE_NOTICE, PAGE_MESSAGE_SYNC, PageSession,
   PageSessionConflict, pageFragmentMarkdown, setPageFragmentMarkdown,
 } from "../src/page-session.ts";
-import { CO_WRITER_PAUSE_MS, CO_WRITER_TURN_MS, CO_WRITER_WRITE_EVERY_MS } from "../src/page-co-writer.ts";
+import { CO_WRITER_KEEP_UP_MS, CO_WRITER_PAUSE_MS, CO_WRITER_TURN_MS, CO_WRITER_WRITE_EVERY_MS } from "../src/page-co-writer.ts";
 import { PAGE_MESSAGE_CO_WRITE } from "@xmatrix/protocol";
 import { canonicalPageMarkdown as canonical, markdownToPageDoc, pageDocToMarkdown, pageSchema } from "@xmatrix/protocol/page-document";
 import { absolutePositionToRelativePosition, initProseMirrorDoc, yXmlFragmentToProseMirrorRootNode } from "y-prosemirror";
@@ -1117,6 +1117,23 @@ test("a co-writing Agent reads the page as it joins, and its words stream into t
   await h.session.commit();
   assert.equal(h.commits.at(-1).principal, agent.id, "its words are its own edit");
   assert.deepEqual(h.commits.at(-1).conversationIds, ["conv-1"], "from the conversation it co-writes from");
+});
+
+test("someone who keeps typing is heard every few seconds, not only when they stop", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  const h = harness();
+  const ann = await annConnected(h);
+  const writer = joinCoWriter(h);
+  writer.write(1, "⟦pass⟧");
+  writer.done(1);
+  // A keystroke every second, never pausing for the 1.5 s the pause waits for.
+  const at = HEAD.indexOf("In progress") + "In progress".length;
+  for (let second = 0; second < CO_WRITER_KEEP_UP_MS / 1000; second++) {
+    ann.text.insert(at + second, "x");
+    t.mock.timers.tick(1000);
+  }
+  assert.equal(writer.turns().length, 2, "heard within the keep-up time while still typing");
+  assert.match(writer.turns()[1].text, /In progressxxxx/u);
 });
 
 test("a co-writing Agent hears what changed when people pause, and stops when someone edits what it writes", async (t) => {
