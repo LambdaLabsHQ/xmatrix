@@ -26,6 +26,7 @@ pub mod instant;
 pub mod local_http_response;
 pub mod machine_daemon_connection;
 pub mod machine_naming;
+pub mod media_cache;
 pub mod message_interaction;
 pub mod page_co_write;
 pub mod presentation_barrier;

@@ -11,7 +11,9 @@ use serde::Deserialize;
 use serde_json::json;
 use xmatrix_cli_args::{PageCommand, PageMigrationCommand};
 use xmatrix_cli_core::error::{self, CliError};
+use xmatrix_cli_core::hex::sha256_hex;
 use xmatrix_cli_core::http;
+use xmatrix_cli_core::media_cache::CachedMedia;
 use xmatrix_cli_core::protocol::{channel_pages_route, with_route};
 use xmatrix_cli_core::text_input::{self, TextRoutes, TextSource};
 
@@ -603,6 +605,104 @@ pub fn render_page_document_with(page: &PageDocument, awareness: Option<&PageAwa
     format!("{header}{}", page.body)
 }
 
+/// A file pasted into a page: `xmatrix:page-media/<sha-256>.<extension>`.
+const PAGE_MEDIA_SCHEME: &str = "xmatrix:page-media/";
+
+/// Each file the page's text references, once, in order: its SHA-256 and extension.
+fn page_media_files(body: &str) -> Vec<(String, String)> {
+    let mut files: Vec<(String, String)> = Vec::new();
+    for (at, _) in body.match_indices(PAGE_MEDIA_SCHEME) {
+        let rest = &body[at + PAGE_MEDIA_SCHEME.len()..];
+        let hash = rest.get(..64).filter(|hash| {
+            hash.bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        });
+        let Some(hash) = hash else { continue };
+        let Some(extension) = rest[64..].strip_prefix('.').map(|tail| {
+            tail.chars()
+                .take_while(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit())
+                .collect::<String>()
+        }) else {
+            continue;
+        };
+        if page_media_type(&extension).is_some()
+            && !files
+                .iter()
+                .any(|(seen, kind)| seen == hash && *kind == extension)
+        {
+            files.push((hash.to_string(), extension));
+        }
+    }
+    files
+}
+
+/// The type a page shows a file as, by its extension (as the Hub serves it).
+fn page_media_type(extension: &str) -> Option<&'static str> {
+    Some(match extension {
+        "png" => "image/png",
+        "jpg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "avif" => "image/avif",
+        "mp4" => "video/mp4",
+        "webm" => "video/webm",
+        "mov" => "video/quicktime",
+        _ => return None,
+    })
+}
+
+/// The images a page shows, saved where the reader's file tool opens them, as
+/// Channel images are; a video is only named. Nothing is put into the text.
+async fn page_media_header(
+    hub_url: &str,
+    token: &str,
+    space: &str,
+    page: &str,
+    body: &str,
+) -> String {
+    let mut out = String::new();
+    for (hash, extension) in page_media_files(body) {
+        let file = format!("{hash}.{extension}");
+        let mime_type = page_media_type(&extension).unwrap_or_default();
+        let line = if mime_type.starts_with("video/") {
+            format!("{mime_type}, not downloaded; watch it on the page")
+        } else {
+            let url = with_route(
+                hub_url,
+                &format!("{}/media/{file}", page_route(space, page)),
+            );
+            let media = CachedMedia {
+                stem: sha256_hex(format!("page-media\0{space}\0{page}\0{file}").as_bytes()),
+                expected_size: None,
+                content_hash: Some(&hash),
+                mime_type,
+                prefix: "page",
+                id: &hash,
+                name: &file,
+            };
+            let fetched = media
+                .fetch(&url, || async {
+                    let request = http::client()?.get(&url).bearer_auth(token);
+                    http::with_access_header(request, &url)?
+                        .send()
+                        .await
+                        .map_err(|err| CliError::Http(format!("page media request failed: {err}")))
+                })
+                .await;
+            match fetched {
+                Ok(path) => format!("local: {}", path.display()),
+                Err(err) => format!("not available: {err}"),
+            }
+        };
+        out.push_str(&format!("  {file}: {line}\n"));
+    }
+    if out.is_empty() {
+        out
+    } else {
+        format!("media:\n{out}")
+    }
+}
+
 /// How a Run writes into the page as it replies, said where it reads the page.
 fn live_write_hint(page_id: &str) -> String {
     format!(
@@ -705,6 +805,16 @@ pub async fn cmd_page(hub_url: &str, token: &str, command: PageCommand) -> error
             let document = render_page_document_with(&response.page, awareness.as_ref());
             // A page's Automations are live references: the header says what each one is now.
             let mut header = crate::page_automation::render_page_automations_header(&automations);
+            header.push_str(
+                &page_media_header(
+                    hub_url,
+                    token,
+                    &space,
+                    &response.page.summary.page_id,
+                    &response.page.body,
+                )
+                .await,
+            );
             // A Run's reply goes into a page as it is written (runtime_page_stream_write).
             if run_conversation().is_some()
                 && response.page.summary.can_edit
@@ -1257,6 +1367,21 @@ fn render_linked_pages(pages: &[PageDocument]) -> String {
 #[cfg(test)]
 mod page_tests {
     use super::*;
+
+    #[test]
+    fn a_page_read_names_each_pasted_file_once_and_only_what_pages_show() {
+        let hash = "a".repeat(64);
+        let other = "b".repeat(64);
+        let body = format!(
+            "![shot.png](xmatrix:page-media/{hash}.png) again ![x](xmatrix:page-media/{hash}.png)\n\
+             ![clip](xmatrix:page-media/{other}.mp4)\n\
+             ![svg](xmatrix:page-media/{other}.svg) ![short](xmatrix:page-media/abc.png)\n"
+        );
+        assert_eq!(
+            page_media_files(&body),
+            vec![(hash, "png".to_string()), (other, "mp4".to_string())]
+        );
+    }
 
     #[test]
     fn edit_reports_removed_sections_and_the_automations_it_moved() {
