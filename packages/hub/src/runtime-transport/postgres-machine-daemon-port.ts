@@ -52,6 +52,7 @@ import type { ScheduledStep } from "../postgres-agent-launch-schedule";
 import { machineDaemonCommand } from "../machines";
 import { machineRunLifecycleReport } from "../machine-run-lifecycle-report";
 import { updateAgentLaunch } from "../runtime";
+import { supersededMachineDaemonConnection } from "./runtime-operation-failure";
 
 type ExecutableMessage = Exclude<
   MachineDaemonClientMessage,
@@ -501,7 +502,12 @@ export class PostgresMachineDaemonPort implements MachineDaemonSocketBackend {
         // Claim already advanced Authority to leased. If the reverse frame cannot be
         // written, release immediately so wake/re-connect/HTTP pull can reclaim
         // instead of waiting out the full lease window on a dead push path.
-        await this.releaseClaimedCommand(session, command);
+        // The whole batch was leased before its first send. Commands after
+        // this one have not reached the socket either; release those too,
+        // while preserving every lease whose frame was already written.
+        for (const pending of commands.slice(delivered)) {
+          await this.releaseClaimedCommand(session, pending);
+        }
         throw error;
       }
     }
@@ -618,6 +624,13 @@ export class PostgresMachineDaemonPort implements MachineDaemonSocketBackend {
         backoffMs: 0,
       });
     } catch (error) {
+      // A replacement may have committed its epoch while this claim was in
+      // flight. Its fence must stay intact; the old leases expire under the
+      // existing bound, rather than turning normal replacement into a fault.
+      if (supersededMachineDaemonConnection(error)) {
+        console.warn("Machine Daemon lease release was fenced by a newer connection");
+        return;
+      }
       console.error("Machine Daemon reverse delivery failed to release lease after send error", {
         ownerUserId: session.principal.ownerUserId,
         machineId: session.principal.machineId,

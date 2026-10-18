@@ -114,6 +114,8 @@ Runtime delivery errors retain the sending cause chain and report the original
 receiving exception before it crosses a Durable Object boundary. Reporting
 preserves rejection and never replays a potentially partial broadcast. See
 [Runtime delivery errors](../operations/runtime-delivery-errors.md).
+Daemon catch-up retires lost socket bindings and attempts to release all unsent
+leases, preserving sent leases, successor connections and Authority epoch fences.
 
 Outside AI applications can read and write a person's Pages and Channels
 through the remote OAuth MCP server, using the person's existing access.
