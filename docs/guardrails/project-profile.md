@@ -126,6 +126,10 @@ preserves rejection and never replays a potentially partial broadcast. See
 [Runtime delivery errors](../operations/runtime-delivery-errors.md).
 Daemon catch-up retires lost socket bindings and attempts to release all unsent
 leases, preserving sent leases, successor connections and Authority epoch fences.
+Orphan terminal reports recover exact identities only from a matching retained
+registry sidecar. Once its receipt cleanup removes that sidecar, retained status
+and log artifacts cannot replay the exit on reconnect. See
+[daemon recovery](../daemon-service-model.md#invocation-progress-evidence).
 
 Outside AI applications can read and write a person's Pages and Channels
 through the remote OAuth MCP server, using the person's existing access.
