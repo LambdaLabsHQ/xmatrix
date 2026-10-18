@@ -381,11 +381,16 @@ fact is about.
     Agent hears at the next pause that it was taken back, and leaves it out
     unless asked again.
   - **When it speaks.** It reads the whole page as it joins. Afterwards, each
-    time people change the page and pause (1.5 s), it hears what changed, the
-    changed sections only (the whole page every eighth time or after more than
-    three sections changed), and where each person's caret is. Most of the time
-    it passes. One turn at a time; changes made while it answers are told once
-    it finishes.
+    time people change the page and pause (1.5 s), and at least every 4 s while
+    someone keeps typing, it hears what changed, the changed sections only (the
+    whole page every eighth time or after more than three sections changed),
+    and where each person's caret is. It keeps writing along with them, a
+    sentence or two at a time right after what they just wrote, as a colleague
+    typing beside them would; it passes only when there is nothing yet to
+    follow, and answers from the page without tools unless the page asks it to
+    look something up. One turn at a time; changes made while it answers are
+    told once it finishes. Claude's words reach the page every 80 ms while it
+    answers.
   - **Manners.** Its own additions go straight in; it does not reword what
     others wrote but leaves a note, fixing only plain typos. It never writes in
     the paragraph a person's caret is in. When someone edits what it is writing,
