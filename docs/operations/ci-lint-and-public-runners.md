@@ -32,6 +32,10 @@ to a JSON runner label or array, for example `'"ubuntu-24.04"'`. These inputs
 select compute only; they do not change the tests or release authorization.
 Hosted jobs use the same content-addressed CI ledger as release gates; a
 missing or unreachable ledger runs the complete selected checks.
+The first-wave Node job queries that dependency-free ledger before bootstrapping
+PNPM or installing workspace dependencies. A hit finishes without installation;
+a miss or unavailable ledger installs dependencies and runs the full Node and
+duplicate checks as usual.
 
 Changes to `packages/db` select Node, Web/browser and Hub validation because
 both products consume the shared database package. Database unit tests alone

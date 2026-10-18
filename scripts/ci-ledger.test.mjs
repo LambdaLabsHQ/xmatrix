@@ -120,6 +120,14 @@ test("every ledgered job gates on its lookup and CI never holds a write token", 
     assert.ok(block.includes(`run: node scripts/ci-ledger.mjs lookup ${job}\n`), job);
     const steps = block.split("\n      - ").slice(1);
     const lookup = steps.findIndex((step) => step.includes("ci-ledger.mjs lookup"));
+    // This first-wave job cannot use the selector's result. Its cache hit
+    // must avoid dependency installation as well as validation; otherwise
+    // the no-op gate still holds a runner and delays the release train.
+    if (job === "node-checks") {
+      const bootstrap = steps.findIndex((step) => step.includes("uses: ./.github/actions/setup-pnpm-node"));
+      assert.ok(bootstrap > lookup, "look up Node evidence before installing dependencies");
+      assert.match(steps[bootstrap], /if: steps\.ledger\.outputs\.hit != 'true'/u);
+    }
     // Every step after the lookup that runs a check is skipped on a hit.
     for (const step of steps.slice(lookup + 1)) {
       if (/\n        run: /u.test(step) || step.startsWith("name:")) {

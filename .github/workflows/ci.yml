@@ -92,7 +92,8 @@ jobs:
         run: git sparse-checkout disable || true
 
       # The selector only runs dependency-free Node scripts: no PNPM.
-      - uses: actions/setup-node@v6
+      - &setup_node
+        uses: actions/setup-node@v6
         with:
           node-version: 22
           package-manager-cache: false
@@ -208,10 +209,14 @@ jobs:
           git sparse-checkout disable || true
           git clean -ffdx
       - uses: ./.github/actions/clear-linux-proxy
-      - uses: ./.github/actions/setup-pnpm-node
+      # The ledger is dependency-free. On an identical-content release train,
+      # installing the workspace before this lookup was the gate's serial tail.
+      - *setup_node
       - id: ledger
         name: Reuse a passing result for identical content
         run: node scripts/ci-ledger.mjs lookup node-checks
+      - uses: ./.github/actions/setup-pnpm-node
+        if: steps.ledger.outputs.hit != 'true'
       # The repository-wide duplicate scan follows the Node checks in this job
       # instead of taking a hosted job of its own.
       - name: Run shared Node checks
