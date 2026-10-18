@@ -349,7 +349,7 @@ export function toolItemPath(viewPath: string, item: string | null): string {
 }
 
 /**
- * Admin/search filters and Settings' provider return parameters live in the
+ * Admin/search filters and Settings/Apps provider return parameters live in the
  * query. Canonicalizing their Space path must preserve those parameters until
  * the owning view consumes them.
  */
