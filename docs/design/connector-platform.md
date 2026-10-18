@@ -670,8 +670,9 @@ its mechanism type and handled/synthetic flags when present. Only these bounded
 diagnostic fields are copied. When mapped frames exist, up to eight terminal
 generated asset locations and line/column positions are retained separately so
 the deployed script can still be identified. URL credentials, query strings,
-fragments and inline script schemes are excluded from these generated locations;
-an empty mapped stack falls back to the raw stack. Arbitrary tags, contexts and mechanism data remain
+fragments and inline script schemes are excluded from these generated locations.
+A missing or empty mapped stack falls back to raw file locations and positions
+with the same filtering. Arbitrary tags, contexts and mechanism data remain
 private. Incomplete exception values
 or frames are omitted. It is fenced as untrusted and capped at 12,000 characters;
 omissions are explicit. Request bodies/headers, local variables, source context,

@@ -86,7 +86,10 @@ function exceptionContext(entries: unknown): { lines: string[]; partial: boolean
       }).slice(-8);
       for (const frame of [...callers, ...frames.slice(-20)]) {
         if (!frame || typeof frame !== "object") continue;
-        const label = [frame.module, frame.function, frame.filename].filter(field => typeof field === "string");
+        const label: string[] = mapped.length
+          ? [frame.module, frame.function, frame.filename].filter(field => typeof field === "string")
+          : [generatedLocation(frame.filename ?? frame.absPath)].filter((field): field is string => field !== undefined);
+        if (!label.length) continue;
         const line = frame.lineNo ?? frame.lineno;
         const column = frame.colNo ?? frame.colno;
         if (Number.isSafeInteger(line)) label.push(`line ${line}`);

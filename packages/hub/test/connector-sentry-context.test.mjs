@@ -228,8 +228,10 @@ test("optional exception type and value still return issue title and confirmed f
       include: [/TypeError: truncated/, /index\.js/], exclude: /private-local/ },
     { values: [{ type: null, value: null, rawStacktrace: { frames: [{ filename: "chunk.js", lineno: 9, colno: 3 }] } }],
       include: [/Exception 1\n/, /chunk\.js · line 9 · column 3/], exclude: /null/ },
-    { values: [{ stacktrace: { frames: [] }, rawStacktrace: { frames: [{ filename: "chunk.js", lineno: 9 }] } }],
-      include: [/Frame: chunk\.js · line 9/], exclude: /Generated frame:/ },
+    { values: [{ stacktrace: { frames: [] }, rawStacktrace: { frames: [{
+      filename: "https://xmatrix.sh/chunk.js?private-query#private-fragment", lineno: 9,
+      module: "private-module", function: "private-function", vars: { token: "private-local" },
+    }] } }], include: [/Frame: https:\/\/xmatrix.sh\/chunk\.js · line 9/], exclude: /Generated frame:|private-/ },
     { values: [{ type: "Error", value: "kept", stacktrace: { frames: [null, frame] } }],
       include: [/Error: kept/, /index\.js/], exclude: /private-local/ },
     { values: [null, { type: "Error", value: "second", stacktrace: { frames: [frame] } }],
