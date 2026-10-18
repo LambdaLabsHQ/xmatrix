@@ -55,6 +55,8 @@ export interface ProductMessagePostCommitInput {
   senderKind: "user" | "agent" | "system";
   senderId: string;
   senderRunId?: string;
+  /** Exact authenticated Instance; senderId is the stable Agent identity. */
+  senderInstanceId?: string;
   committedAt?: string;
   attachments?: ChannelAttachment[];
   sequence?: number;
@@ -343,7 +345,8 @@ export async function dispatchProductMessagePostCommit(
   const connector = input.senderKind === "system" ? undefined : connectorForCommand(input.body);
   if (connector?.commands) {
     tasks.push(
-      connector.commands.run({ ...input, senderKind: input.senderKind === "agent" ? "agent" : "user" }).catch((error) => {
+      connector.commands.run({ ...input, senderKind: input.senderKind === "agent" ? "agent" : "user",
+        senderId: input.senderKind === "agent" ? input.senderInstanceId : input.senderId }).catch((error) => {
         logPostCommitFailure(`Product ${connector.id} connector orchestration failed`, input, error);
       }),
     );

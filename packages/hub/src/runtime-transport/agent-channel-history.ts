@@ -288,6 +288,7 @@ export class AgentChannelHistory implements AgentChannelHistoryPort {
     });
     const recipient = {
       agentName: session.principal.agentName,
+      instanceId: session.run.instanceId,
       agentId: session.principal.agentId,
       channelInstanceId: session.run.channelInstanceId,
     };

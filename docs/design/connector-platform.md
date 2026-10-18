@@ -1055,8 +1055,17 @@ GitHub triggers may use either spelling.
     with an own executor whose read/write effect matches the declaration;
     prototype properties and undeclared executors are unknown actions. GitHub
     keeps its specialized command handler for the same `@github:` commands.
-  - The receipt is a system fact replying to the command's message: context
-    for every Instance, never a turn, so it cannot interrupt the sender's turn.
+  - The receipt replies to the command's message. Hub-only metadata records
+    the authenticated calling Instance, separately from the stable Agent id;
+    approvals and durable execution retain that exact caller. Live delivery
+    and catch-up queue work only for that Instance, without interrupting its
+    active turn. Other Instances and receipts without a retained Agent caller
+    receive context. Older receipts without that metadata remain context.
+  - Subscribed native events queue work for the Channel's existing Instances.
+    App receipt/event text is external data, never mention or lifecycle syntax.
+    After commit the existing bounded wake authority resumes sleeping or
+    interrupted recipients; a receipt restricts that query to its caller.
+    Stopped Instances stay stopped and no new Agent identity is allocated.
 - Staging ask writes one request and a Channel receipt. The approved dispatch
   writes the normal `app_connector_executions` row and a separate terminal receipt.
   Denial clears the encrypted input and its original command reference. Its
