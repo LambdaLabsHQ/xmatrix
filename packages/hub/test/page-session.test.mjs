@@ -1121,11 +1121,7 @@ test("a co-writing Agent reads the page as it joins, and its words stream into t
 
 test("someone who keeps typing is heard every few seconds, not only when they stop", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
-  const h = harness();
-  const ann = await annConnected(h);
-  const writer = joinCoWriter(h);
-  writer.write(1, "⟦pass⟧");
-  writer.done(1);
+  const { ann, writer } = await annAfterAPass();
   // A keystroke every second, never pausing for the 1.5 s the pause waits for.
   const at = HEAD.indexOf("In progress") + "In progress".length;
   for (let second = 0; second < CO_WRITER_KEEP_UP_MS / 1000; second++) {
@@ -1138,11 +1134,7 @@ test("someone who keeps typing is heard every few seconds, not only when they st
 
 test("a co-writing Agent hears what changed when people pause, and stops when someone edits what it writes", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
-  const h = harness();
-  const ann = await annConnected(h);
-  const writer = joinCoWriter(h);
-  writer.write(1, "⟦pass⟧");
-  writer.done(1);
+  const { ann, writer } = await annAfterAPass();
 
   // Typing elsewhere is not news until the person pauses.
   ann.text.insert(HEAD.indexOf("In progress") + "In progress".length, ", blocked on review");
@@ -1188,6 +1180,14 @@ async function annCoWriting() {
   const h = harness();
   const ann = await annConnected(h);
   return { h, ann, writer: joinCoWriter(h) };
+}
+
+/** Ann on the page, with a co-writer that has read it and passed on its first turn. */
+async function annAfterAPass() {
+  const joined = await annCoWriting();
+  joined.writer.write(1, "⟦pass⟧");
+  joined.writer.done(1);
+  return joined;
 }
 
 test("a person takes back what a co-writing Agent last wrote, and the Agent hears so", async (t) => {
