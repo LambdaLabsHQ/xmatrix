@@ -129,3 +129,41 @@ integration("an expired worker cannot disable or finish a live watcher",async()=
     const [next]=await repository.claim();assert.ok(next);assert.notEqual(next.leaseId,job.leaseId);
   });
 });
+
+integration("polling is leased without a push; failed confirmation survives unchanged counts and stop fences cached grants",async()=>{
+  await fixture(async({repository,create,sql,spaceId})=>{
+    const id=await create({mode:"poll"});
+    const pending=await repository.consumeOAuth(id,"owner","nonce-digest");
+    const token={accessToken:"private-cached-token",expiresAt:Date.now()+3600000};
+    await repository.activate(pending,"private-refresh-token","100",undefined,{token,fingerprint:"10,7,8,6"});
+    const [first]=await repository.claim();
+    assert.equal(first.mode,"poll");assert.equal(first.pendingWake,false);
+    assert.equal(first.selection.pollToken.accessToken,token.accessToken);
+    await repository.polled(first,"11,8,9,7");
+    assert.equal(first.pendingWake,true);
+    await repository.finish(first,"retry");
+    await sql("UPDATE data.app_gmail_routes SET available_at=now()-interval '1 second' WHERE route_id=$1",[id]);
+    const [retry]=await repository.claim();
+    await repository.polled(retry,"11,8,9,7");
+    assert.equal(retry.pendingWake,true,"a failed search remains pending even when counts stop changing");
+    await repository.stage(retry,["abcdef1234567890"],"200");
+    await repository.stage(retry,["abcdef1234567890"],"200");
+    assert.deepEqual(await repository.pending(retry),["abcdef1234567890"]);
+    await repository.delivered(retry,"abcdef1234567890");
+    await repository.searched(retry);await repository.finish(retry,"done");
+    assert.equal((await repository.claim()).length,0,"minute scheduling prevents a tight idle loop");
+    await repository.signal("signal-digest");
+    const visible=(await repository.list(spaceId,"owner"))[0];
+    assert.equal(visible.pendingWake,false,"native Pub/Sub cannot wake label pollers");
+    assert.ok(Date.parse(visible.nextSearchAt)>Date.now()+14*60000);
+    await sql("UPDATE data.app_gmail_routes SET next_poll_at=now()-interval '1 second',available_at=now()-interval '1 second',next_search_at=now()-interval '1 second',attempts=8 WHERE route_id=$1",[id]);
+    const [fallback]=await repository.claim();
+    assert.ok(fallback,"polling keeps retrying after the native retry budget is exhausted");
+    assert.ok(Date.parse(fallback.nextSearchAt)<Date.now());
+    await repository.stop(spaceId,"owner",id);
+    await repository.cachePollToken(fallback,{...token,accessToken:"late-token"});
+    await assert.rejects(repository.polled(fallback,"12,8,10,7"));
+    assert.equal(await repository.current(fallback),false);
+    assert.doesNotMatch(JSON.stringify((await sql("SELECT * FROM data.app_gmail_routes WHERE route_id=$1",[id])).rows),/private-cached-token|late-token|private-refresh-token/);
+  });
+});

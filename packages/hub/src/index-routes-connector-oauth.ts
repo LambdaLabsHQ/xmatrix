@@ -22,6 +22,7 @@ import { addConnectedMailbox } from "./connectors/gmail-mailboxes";
 import { connectXAccount } from "./connectors/x-accounts";
 import { connectCloudflareLogin } from "./connectors/cloudflare-api";
 import { upstreamMeter } from "./usage-cost-metering";
+import { gmailPollCallback } from "./connectors/gmail-poll-oauth";
 import { paidCallRepository, paidXCalls } from "./billing-paid-calls";
 import { platformAdminSpaceId } from "./admin-platform-access";
 import { completeGitHubConnectAuthorization, isGitHubConnectState } from "./github-connect-authorization";
@@ -177,6 +178,8 @@ export function registerConnectorOAuthRoutes(app: Hono<{ Bindings: Env }>): void
   // The provider's redirect carries no xMatrix session (the app signs in with
   // bearer tokens), so nothing is exchanged here: the signed-in app finishes it.
   app.get("/api/connectors/oauth/callback", async (c) => {
+    const notification=await gmailPollCallback(c.env,c.req.raw).catch(()=>undefined);
+    if(notification)return notification;
     const state = c.req.query("state") ?? "";
     const verified = state ? await verifyOAuthState(c.env, state) : undefined;
     if (!verified) return c.json({ error: "Invalid or expired connect request" }, 400);

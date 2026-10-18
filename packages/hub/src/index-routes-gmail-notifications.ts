@@ -10,6 +10,8 @@ import { ProviderRequestError } from "./connectors/http";
 import { handleGmailWatchPush } from "./connectors/gmail-watch-ingress";
 import { drainGmailNotifications } from "./connectors/gmail-notification-drain";
 import type { Env } from "./types";
+import { gmailPollConfig,gmailPollIdentity } from "./connectors/gmail-poll-client";
+import { gmailPollState,startGmailPolling,completeGmailPolling } from "./connectors/gmail-poll-oauth";
 
 const CALLBACK="/api/connectors/gmail-watch/callback";
 const PUSH="/api/connectors/gmail-watch/events";
@@ -56,12 +58,14 @@ export function registerGmailNotificationRoutes(app:Hono<{Bindings:Env}>) {
       const repository=gmailRoutingRepository(c.env);
       const mailboxes=parseMailboxes(current.values.mailboxes);
       const config=gmailWatchConfig(c.env);
+      const pollConfig=gmailPollConfig(c.env);
       if(c.req.method==="GET") {
         const rows=await repository.list(spaceId,user.id);
         const identity=config ? await gmailWatchIdentity(c.env):undefined;
-        return c.json({available:!!config,notifications:rows.map(row=>({id:row.id,address:row.selection.address,channelId:row.channelId,
+        const pollIdentity=pollConfig ? await gmailPollIdentity(c.env):undefined;
+        return c.json({available:!!pollConfig || !!config,notifications:rows.map(row=>({id:row.id,address:row.selection.address,channelId:row.channelId,
           enabled:row.enabled && row.credentialVersion===current.version && row.generation===current.connectionGeneration &&
-            row.selection.appIdentity===identity && mailboxes.some(box=>box.account===row.selection.account && box.owner===`user:${user.id}`),
+            row.selection.appIdentity===(row.mode==="poll" ? pollIdentity : identity) && mailboxes.some(box=>box.account===row.selection.account && box.owner===`user:${user.id}`),
           lastSignalAt:row.lastSignalAt,lastVerifiedAt:row.lastVerifiedAt,expiresAt:row.expiresAt,error:row.error}))},200,
         {"cache-control":"private, no-store"});
       }
@@ -76,10 +80,13 @@ export function registerGmailNotificationRoutes(app:Hono<{Bindings:Env}>) {
       if(body.action==="stop" && typeof body.id==="string") {
         await repository.stop(spaceId,user.id,body.id);return c.json({ok:true});
       }
-      if(!config)return c.json({error:"Gmail notifications are not yet configured on this Hub"},503);
+      if(!config && !pollConfig)return c.json({error:"Gmail notifications are not yet configured on this Hub"},503);
       if(body.action==="start" && typeof body.address==="string" && typeof body.channelId==="string") {
         const mailbox=mailboxes.find(box=>box.address===body.address && box.owner===`user:${user.id}`);
         if(!mailbox)throw new ProviderRequestError(403,"Only the mailbox owner enables notifications");
+        if(pollConfig)return c.json({url:await startGmailPolling(c.env,c.req.raw,{spaceId,userId:user.id,channelId:body.channelId,
+          credentialVersion:current.version,generation:current.connectionGeneration,mailbox})},200,{"cache-control":"private, no-store"});
+        if(!config)throw new ProviderRequestError(503,"Gmail notifications are not configured");
         const nonce=crypto.randomUUID(),proof=verifier(),identity=await gmailWatchIdentity(c.env);
         const id=await repository.create({spaceId,userId:user.id,channelId:body.channelId,credentialVersion:current.version,
           generation:current.connectionGeneration,mailboxDigest:await sha256Hex(mailbox.address),
@@ -97,13 +104,20 @@ export function registerGmailNotificationRoutes(app:Hono<{Bindings:Env}>) {
         return c.json({url:url.toString()},200,{"cache-control":"private, no-store"});
       }
       if(body.action==="complete" && typeof body.state==="string" && typeof body.code==="string" && body.code.length<=2048) {
-        const claims=await stateClaims(c.env,body.state);
-        if(claims.spaceId!==spaceId || claims.userId!==user.id || claims.redirectUri!==`${connectorHubOrigin(c.env,c.req.raw)}${CALLBACK}`)
+        const pollClaims=await gmailPollState(c.env,body.state);
+        const claims=pollClaims ?? await stateClaims(c.env,body.state);
+        const expectedCallback=pollClaims ? "/api/connectors/oauth/callback" : CALLBACK;
+        if(claims.spaceId!==spaceId || claims.userId!==user.id || claims.redirectUri!==`${connectorHubOrigin(c.env,c.req.raw)}${expectedCallback}`)
           throw new ProviderRequestError(403,"Notification authorization belongs to another session");
         const job=await repository.consumeOAuth(claims.id,user.id,await sha256Hex(claims.nonce));
         if(job.credentialVersion!==current.version || job.generation!==current.connectionGeneration ||
           !mailboxes.some(box=>box.address===job.selection.address && box.account===job.selection.account && box.owner===`user:${user.id}`))
           throw new ProviderRequestError(409,"Mailbox access changed; restart notification authorization");
+        if(pollClaims) {
+          await completeGmailPolling(c.env,job,body.code,claims.redirectUri);
+          c.executionCtx.waitUntil(drainGmailNotifications(c.env).catch(()=>undefined));
+          return c.json({ok:true});
+        }
         const token=await gmailWatchToken(c.env,{grant_type:"authorization_code",code:body.code,
           redirect_uri:claims.redirectUri,code_verifier:job.selection.oauthVerifier},true);
         const profile=await nativeGmailGet(token.accessToken,"/profile");

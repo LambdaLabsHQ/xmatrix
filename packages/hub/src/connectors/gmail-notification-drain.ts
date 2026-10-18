@@ -7,6 +7,8 @@ import { parseMailboxes } from "./gmail-mailboxes";
 import { gmailWatchIdentity,gmailWatchToken,renewGmailWatch,verifyGmailWatchMailbox } from "./gmail-watch-client";
 import { gmailIncomingChanges } from "./gmail-notification-api";
 import { ProviderRequestError } from "./http";
+import { gmailPollConfig,gmailPollIdentity,gmailPollToken,gmailInboxFingerprint,
+  gmailComposioBaseline,gmailComposioNotificationGet } from "./gmail-poll-client";
 
 /** Reads only IDs, then delivers opaque references. No Gmail content enters messages. */
 async function deliver(env: Env, job: GmailRoutingJob, id: string) {
@@ -30,23 +32,40 @@ async function process(env: Env, job: GmailRoutingJob) {
   const mailbox = grant?.values.mailboxes ? parseMailboxes(grant.values.mailboxes).find(row => row.account === job.selection.account &&
     row.address === job.selection.address && row.owner === job.selection.owner && row.owner === `user:${job.userId}`) : undefined;
   if (!grant || grant.version !== job.credentialVersion || grant.connectionGeneration !== job.generation || !mailbox) return "blocked" as const;
-  if (job.selection.appIdentity!==await gmailWatchIdentity(env) || !job.selection.refreshToken) return "blocked" as const;
-  const token=await gmailWatchToken(env,{grant_type:"refresh_token",refresh_token:job.selection.refreshToken},false);
-  if(job.renewAt && Date.parse(job.renewAt)<=Date.now()) {
-    await verifyGmailWatchMailbox(token.accessToken,job.selection.address);
-    const renewal=await renewGmailWatch(env,token.accessToken);
-    await repository.renewed(job,renewal.expiresAt);
-    // The new watch head never overwrites the last consumed history cursor.
+  if (!job.selection.refreshToken) return "blocked" as const;
+  let accessToken="";
+  if(job.mode==="poll") {
+    if(job.selection.appIdentity!==await gmailPollIdentity(env))return "blocked" as const;
+    let token=job.selection.pollToken;
+    if(!token || token.expiresAt<Date.now()+120000) {
+      const refreshed=await gmailPollToken(env,{grant_type:"refresh_token",refresh_token:job.selection.refreshToken},false);
+      token={accessToken:refreshed.accessToken,expiresAt:refreshed.expiresAt};
+      await repository.cachePollToken(job,token,refreshed.refreshToken);
+    }
+    await repository.polled(job,await gmailInboxFingerprint(token.accessToken));
+    if(!job.pendingWake && !job.pageToken && job.nextSearchAt && Date.parse(job.nextSearchAt)>Date.now())return "done" as const;
+  } else {
+    if(job.selection.appIdentity!==await gmailWatchIdentity(env))return "blocked" as const;
+    const token=await gmailWatchToken(env,{grant_type:"refresh_token",refresh_token:job.selection.refreshToken},false);
+    accessToken=token.accessToken;
+    if(job.renewAt && Date.parse(job.renewAt)<=Date.now()) {
+      await verifyGmailWatchMailbox(accessToken,job.selection.address);
+      const renewal=await renewGmailWatch(env,accessToken);
+      await repository.renewed(job,renewal.expiresAt);
+      // The new watch head never overwrites the last consumed history cursor.
+    }
+    if(!job.pendingWake)return "done" as const;
   }
-  if(!job.pendingWake)return "done" as const;
   for (const id of await repository.pending(job)) await deliver(env,job,id);
   let change: Awaited<ReturnType<typeof gmailIncomingChanges>>;
-  try {change=await gmailIncomingChanges(token.accessToken,job.historyId,job.pageToken);}
+  try {change=await gmailIncomingChanges(accessToken,job.historyId,job.pageToken,job.mode==="poll" ?
+    query=>gmailComposioNotificationGet(env,job.selection.account,job.spaceId,"/history",query) : undefined);}
   catch(error) {
     if(!(error instanceof ProviderRequestError) || error.status!==404)throw error;
     // Expired history cannot safely identify missed mail. Establish a fresh baseline,
     // explicitly disclose the gap, and never replay older emails as new events.
-    const fresh=await renewGmailWatch(env,token.accessToken);
+    const fresh=job.mode==="poll" ? {historyId:await gmailComposioBaseline(env,job.selection.account,job.spaceId,job.selection.address)} :
+      await renewGmailWatch(env,accessToken);
     if(!await repository.current(job))return "blocked" as const;
     const response=await dispatchProductMessageAppend(env,job.channelId,{
       commandId:`product:gmail-gap:${job.id}:${job.historyId}`,messageId:`app:gmail-gap:${job.id}:${job.historyId}`,
@@ -55,21 +74,25 @@ async function process(env: Env, job: GmailRoutingJob) {
     if(!response.ok)throw new ProviderRequestError(503,"Notification recovery receipt failed");
     if(!await repository.current(job))return "blocked" as const;
     await repository.stage(job,[],fresh.historyId);
-    await repository.renewed(job,fresh.expiresAt);
+    if("expiresAt" in fresh)await repository.renewed(job,fresh.expiresAt);
+    else await repository.searched(job);
     return "done" as const;
   }
   if (!await repository.current(job)) return "blocked" as const;
   await repository.stage(job, change.messages, change.historyId, change.pageToken);
   for (const id of await repository.pending(job)) await deliver(env,job,id);
   // Keep paging/retrying durably; do not advance the start cursor until the final page.
-  return change.pageToken || (await repository.pending(job)).length ? "continue" as const : "done" as const;
+  if(change.pageToken || (await repository.pending(job)).length)return "continue" as const;
+  if(job.mode==="poll")await repository.searched(job);
+  return "done" as const;
 }
 /** A bounded pass runs after a receipt, and the existing cron recovers unfinished durable work. */
 export async function drainGmailNotifications(env: Env) {
-  if (!env.GMAIL_WATCH_TOPIC) return;
+  if (!env.GMAIL_WATCH_TOPIC && !gmailPollConfig(env)) return;
   const repository = gmailRoutingRepository(env);
   await repository.cleanup();
-  for (const job of await repository.claim()) {
+  const jobs=await repository.claim();
+  const run=async(job:GmailRoutingJob)=>{
     try { await repository.finish(job, await process(env,job)); }
     catch (error) {
       // 403 may be Gmail quota throttling; lease loss and delivery conflicts also retry.
@@ -80,9 +103,10 @@ export async function drainGmailNotifications(env: Env) {
           commandId:`product:gmail-stopped:${job.id}`,messageId:`app:gmail-stopped:${job.id}`,
           channelId:job.channelId,principal:{kind:"user",id:job.userId},appAuthorId:"gmail",
           body:"Gmail notifications need attention. Authorize notifications again in Apps → Gmail; existing search, read and reply remain available."});
-        if(!response.ok) {await repository.finish(job,"retry");continue;}
+        if(!response.ok) {await repository.finish(job,"retry");return;}
       }
       await repository.finish(job,revoked ? "blocked" : "retry");
     }
-  }
+  };
+  for(let offset=0;offset<jobs.length;offset+=4)await Promise.all(jobs.slice(offset,offset+4).map(run));
 }

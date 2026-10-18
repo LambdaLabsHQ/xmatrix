@@ -8,7 +8,7 @@ import { GlassSelect } from "@/components/ui/glass-select";
 import { xmatrixApiRequest } from "@/lib/query/api-client";
 import { xmatrixQueryKeys } from "@/lib/query/query-keys";
 
-interface Notification { id:string;address:string;channelId:string;enabled:boolean;lastSignalAt?:string;expiresAt?:string;error?:string }
+interface Notification { id:string;address:string;channelId:string;enabled:boolean;lastSignalAt?:string;lastVerifiedAt?:string;expiresAt?:string;error?:string }
 export function GmailNotifications({spaceId,token,userId,mailboxes,channels}:{
   spaceId:string;token:string;userId:string;mailboxes:{address:string;owner:string}[];channels:ChannelSnapshot[];
 }) {
@@ -21,7 +21,7 @@ export function GmailNotifications({spaceId,token,userId,mailboxes,channels}:{
   const [copied,setCopied]=useState<string>();
   const completionStarted=useRef(false);
   const state=useQuery({queryKey,queryFn:({signal})=>xmatrixApiRequest<{available:boolean;notifications:Notification[]}>({url,token,signal}),
-    refetchInterval:query=>completing || query.state.data?.notifications.some(item=>item.enabled && !item.lastSignalAt)?5000:false});
+    refetchInterval:query=>completing || query.state.data?.notifications.some(item=>item.enabled && !item.lastVerifiedAt)?5000:false});
   const update=useMutation({mutationKey:[...queryKey,"write"],mutationFn:(body:Record<string,string>)=>
     xmatrixApiRequest<{url?:string;ok?:boolean}>({url,token,method:"POST",body}),
     onSuccess:result=>{if(result.url)window.location.assign(result.url);else void queryClient.invalidateQueries({queryKey});}});
@@ -43,7 +43,8 @@ export function GmailNotifications({spaceId,token,userId,mailboxes,channels}:{
   return <div className="space-y-3 border-t border-border/60 pt-3">
     <p className="text-sm font-bold">New mail notifications</p>
     <p className="text-xs leading-5 text-muted-foreground">Authorize notifications once. No forwarding setup is needed.
-      Google sends a mailbox change signal; mail is read only when needed. Sending keeps its existing approval policy.</p>
+      Inbox counts are checked every minute, with a separate check every 15 minutes. Notifications may be delayed.
+      Sending keeps its existing approval policy.</p>
     {state.error || update.error?<p role="alert" className="text-sm text-destructive">{(state.error ?? update.error)?.message}</p>:null}
     {!state.data?.available?<p className="text-xs text-muted-foreground">Notifications are not yet available on this Hub.
       Your connected mailboxes can still search, read and reply.</p>:<>

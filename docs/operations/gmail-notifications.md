@@ -1,11 +1,73 @@
-# Native Gmail notifications
+# Gmail notifications
+
+## Inbox count polling
+
+The default notification setup uses the existing company Google connector client
+(`CONNECTOR_GOOGLE_CLIENT_ID` and `CONNECTOR_GOOGLE_CLIENT_SECRET`) and its already
+registered `/api/connectors/oauth/callback` redirect. Gmail API must be enabled
+in that client's project. Existing Composio Gmail content connections remain in
+place. No Pub/Sub resources, new OAuth client or `GMAIL_WATCH_*` configuration
+are needed for polling.
+
+In Apps → Gmail, the mailbox owner chooses a Channel and enables notifications.
+Consent requests `gmail.labels`, `openid` and `userinfo.email`. The Gmail scope
+is non-sensitive; basic identity access confirms that the Google grant belongs
+to the selected mailbox without calling Gmail profile with a restricted scope.
+The labels scope permits label editing, but this implementation only reads
+`labels/INBOX`. It does not request Gmail metadata, read or modify permission
+for our Google client. Ordinary Google app publication requirements still apply.
+
+Setup checks Human/Space/mailbox ownership, current credentials, signed state,
+PKCE and a single-use attempt. Google userinfo must return the selected verified
+email; the selected Composio account's Gmail profile independently supplies the
+initial history cursor. These grants are separate from Drive connector tokens.
+Access and refresh tokens remain encrypted in the notification authority; the
+access token is reused until shortly before expiry and refreshed as needed.
+
+The existing minute cron checks four INBOX counts. A change durably marks work
+pending before a query, then the same Composio account reads Gmail's incremental
+`messageAdded` IDs. Label moves of old mail cannot become new-mail events.
+An independent check is due 15 minutes after the last completed incremental
+scan, even when the counts stay unchanged. Confirmation reads opaque IDs and
+labels, never bodies. Existing ID deduplication and Automation delivery are
+shared with native watches. Sending retains its existing approval policy.
+
+The product target is useful notification for most ordinary inbox arrivals,
+with minute-level detection under normal scheduling. Simultaneous count changes
+can cancel, and the periodic check reduces these misses. These are scheduling
+intervals, not delivery deadlines. A pass claims at most 20 mailboxes, processes
+four concurrently and retains bounded leases, retry delays and durable paging.
+Larger fleets require capacity measurement before promising minute-level coverage.
+Composio confirmation and periodic checks use its existing metered proxy;
+an idle mailbox normally adds four proxy calls per hour, plus setup/recovery.
+
+Failures retain the consumed history cursor and pending wake. Polling retries
+after transient failures, including Gmail throttling. Expired history establishes
+a new baseline and posts a visible gap warning rather than replaying old mail.
+Revoked grants require reauthorization and erase stored Google tokens. Stop,
+credential changes, ownership changes, deletion and lost Channel authority fence
+in-flight work using the existing notification lifecycle. Stopping does not
+revoke the shared Google app globally or affect other Spaces.
+
+Acceptance covers labels-only Gmail scopes plus basic identity, wrong-mailbox
+and broad-grant rejection, unchanged counts, changed counts, independent periodic
+checks, failed confirmation, cursor paging, duplicate IDs, stop and lease loss.
+Live acceptance requires the mailbox owner to complete Google consent, receive
+a dedicated test message, observe one notification/Automation, and stop. Never
+copy tokens or real mail content into evidence.
+
+Sources: [labels.get](https://developers.google.com/workspace/gmail/api/reference/rest/v1/users.labels/get),
+[Gmail scopes](https://developers.google.com/workspace/gmail/api/auth/scopes),
+[Google identity](https://developers.google.com/identity/openid-connect/openid-connect).
+
+## Optional native watch
 
 This optional feature supplies mailbox-change signals, then queries new inbox
 message IDs. Existing Composio search/read/reply remain installed. It requires
 neither forwarding nor periodic inbox searches. It remains unavailable until
 its six configuration fields are installed together through the normal release.
 
-## Provisioning
+### Provisioning
 
 Use a dedicated Google project; do not add restricted Gmail permissions to the
 shared Drive client without reviewing its verification scope. Enable Gmail API
@@ -41,7 +103,7 @@ fails release configuration validation. Configuration changes invalidate previou
 notification grants; users authorize again. Deploy only through Production Release
 Intent. This runbook does not authorize provisioning paid resources.
 
-## User flow and acceptance
+### User flow and acceptance
 
 In Apps → Gmail, choose an owned mailbox and conversation, then Enable
 notifications. Google consent requests metadata notification access separately

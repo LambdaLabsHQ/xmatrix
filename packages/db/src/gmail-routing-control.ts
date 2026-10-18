@@ -7,12 +7,14 @@ import { decryptSecretValue, encryptSecretValue } from "./secret-value-control.j
 export interface GmailRoutingSelection {
   address: string; account: string; owner: string;
   oauthVerifier: string; refreshToken?: string; appIdentity: string;
+  pollToken?: { accessToken: string; expiresAt: number };
 }
 export interface GmailRoutingJob {
   id: string; spaceId: string; connectionId: string; credentialVersion: number; generation: string;
   userId: string; channelId: string; selection: GmailRoutingSelection; historyId: string;
   pageToken?: string; leaseId?: string; wakeVersion: number; pendingWake: boolean; lastSignalAt?: string;
   lastVerifiedAt?: string; error?: string; enabled: boolean; expiresAt?: string; renewAt?: string;
+  mode: "native" | "poll"; nextSearchAt?: string;
 }
 const fail = () => new AppControlError("gmail_routing_unavailable", 409, "Mailbox notification access changed; reconnect notifications");
 
@@ -35,7 +37,8 @@ export class PostgresGmailRoutingRepository {
       leaseId: row.lease_id ? String(row.lease_id) : undefined, wakeVersion: Number(row.wake_version), pendingWake:Number(row.wake_version)>Number(row.processed_version),
       lastSignalAt: date(row.last_signal_at), lastVerifiedAt: date(row.last_verified_at),
       expiresAt: date(row.expires_at), renewAt: date(row.renew_at),
-      error: row.error_code ? String(row.error_code) : undefined, enabled: row.enabled === true };
+      error: row.error_code ? String(row.error_code) : undefined, enabled: row.enabled === true,
+      mode: row.notification_mode === "poll" ? "poll" : "native", nextSearchAt: date(row.next_search_at) };
   }
   private async authorize(tx: DatabaseTransaction, spaceId: string, userId: string, channelId?: string) {
     const roles = await tx.query<QueryResultRow>({ name: "gmail_route_admin_v1", text: `SELECT role FROM data.space_members
@@ -69,7 +72,9 @@ export class PostgresGmailRoutingRepository {
       return job;
     });
   }
-  async activate(job: GmailRoutingJob, refreshToken: string, historyId: string, expiresAt: string) {
+  async activate(job: GmailRoutingJob, refreshToken: string, historyId: string, expiresAt?: string,
+    poll?: { token: NonNullable<GmailRoutingSelection["pollToken"]>; fingerprint: string }) {
+    if((job.mode==="poll")!==!!poll || (job.mode==="native" && !expiresAt))throw fail();
     return this.transaction("activate", async tx => {
       await this.authorize(tx,job.spaceId,job.userId,job.channelId);
       const current = await tx.query<QueryResultRow>({ name: "gmail_route_activation_grant_v1", text: `SELECT c.connection_id
@@ -78,16 +83,19 @@ export class PostgresGmailRoutingRepository {
         FOR SHARE OF c,k`, values: [job.connectionId,job.generation,job.credentialVersion], maxRows: 1 });
       if (!current.length) throw fail();
       const envelope = await encryptSecretValue(this.material,`gmail-route:${job.id}`,"selection",1,
-        JSON.stringify({...job.selection,oauthVerifier:"",refreshToken}));
+        JSON.stringify({...job.selection,oauthVerifier:"",refreshToken,...(poll ? {pollToken:poll.token} : {})}));
       await tx.query({ name: "gmail_route_activate_lock_v1",text:"SELECT pg_advisory_xact_lock(hashtextextended($1,0))",
         values:[job.connectionId],maxRows:1 });
       await tx.query({name:"gmail_route_retire_previous_v1",text:`DELETE FROM data.app_gmail_routes old USING data.app_gmail_routes next
         WHERE next.route_id=$1 AND old.connection_id=next.connection_id AND old.mailbox_digest=next.mailbox_digest
           AND old.route_id<>next.route_id`,values:[job.id],maxRows:0});
       const rows=await tx.query({name:"gmail_route_activate_v1",text:`UPDATE data.app_gmail_routes SET enabled=true,
-        encrypted_value_json=$2::jsonb,history_id=$3,expires_at=$4,renew_at=now()+interval '1 day'
+        encrypted_value_json=$2::jsonb,history_id=$3,expires_at=$4,
+        renew_at=CASE WHEN notification_mode='native' THEN now()+interval '1 day' END,
+        next_poll_at=CASE WHEN notification_mode='poll' THEN now() END,
+        next_search_at=CASE WHEN notification_mode='poll' THEN now()+interval '15 minutes' END,inbox_fingerprint=$5
         WHERE route_id=$1 AND oauth_consumed AND created_at>now()-interval '10 minutes' RETURNING route_id`,
-      values:[job.id,JSON.stringify(envelope),historyId,expiresAt],maxRows:1});
+      values:[job.id,JSON.stringify(envelope),historyId,expiresAt ?? null,poll?.fingerprint ?? null],maxRows:1});
       if(!rows.length)throw fail();
     });
   }
@@ -97,7 +105,8 @@ export class PostgresGmailRoutingRepository {
     values:[job.id,job.leaseId,expiresAt],maxRows:0}));
   }
   async create(input: { spaceId: string; userId: string; channelId: string; credentialVersion: number;
-    generation: string; mailboxDigest: string; tokenDigest: string; nonceDigest: string; selection: GmailRoutingSelection; historyId: string }) {
+    generation: string; mailboxDigest: string; tokenDigest: string; nonceDigest: string; selection: GmailRoutingSelection; historyId: string;
+    mode?: "native" | "poll" }) {
     const id = crypto.randomUUID();
     const envelope = await encryptSecretValue(this.material, `gmail-route:${id}`, "selection", 1, JSON.stringify(input.selection));
     return this.transaction("create", async tx => {
@@ -119,10 +128,10 @@ export class PostgresGmailRoutingRepository {
       if (Number(count[0]?.count) >= 20) throw fail();
       await tx.query({ name: "gmail_route_create_v1", text: `INSERT INTO data.app_gmail_routes
         (route_id,space_id,connection_id,credential_version,connection_generation,created_by,channel_id,
-         mailbox_digest,token_digest,encrypted_value_json,history_id,oauth_nonce_digest)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,$12)`, values: [id, input.spaceId, connectionId,
+         mailbox_digest,token_digest,encrypted_value_json,history_id,oauth_nonce_digest,notification_mode)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,$12,$13)`, values: [id, input.spaceId, connectionId,
       input.credentialVersion, input.generation, input.userId, input.channelId, input.mailboxDigest, input.tokenDigest,
-      JSON.stringify(envelope), input.historyId,input.nonceDigest], maxRows: 0 });
+      JSON.stringify(envelope), input.historyId,input.nonceDigest,input.mode ?? "native"], maxRows: 0 });
       return id;
     });
   }
@@ -139,7 +148,7 @@ export class PostgresGmailRoutingRepository {
     return this.transaction("signal", async tx => {
       await tx.query({ name: "gmail_route_signal_v1", text: `UPDATE data.app_gmail_routes
         SET wake_version=wake_version+1,last_signal_at=now(),attempts=0,error_code=NULL,updated_at=now()
-        WHERE token_digest=$1 AND (enabled OR (oauth_consumed AND expires_at IS NULL AND created_at>now()-interval '10 minutes'))
+        WHERE token_digest=$1 AND notification_mode='native' AND (enabled OR (oauth_consumed AND expires_at IS NULL AND created_at>now()-interval '10 minutes'))
         `, values: [tokenDigest], maxRows: 0 });
     });
   }
@@ -152,11 +161,12 @@ export class PostgresGmailRoutingRepository {
   async claim() {
     return this.transaction("claim", async tx => {
       const rows = await tx.query<QueryResultRow>({ name: "gmail_route_claim_v1", text: `WITH due AS
-        (SELECT route_id FROM data.app_gmail_routes WHERE enabled AND (wake_version>processed_version OR renew_at<=now()) AND (attempts<8 OR renew_at<=now())
+        (SELECT route_id FROM data.app_gmail_routes WHERE enabled AND (wake_version>processed_version OR renew_at<=now() OR next_poll_at<=now())
+          AND (attempts<8 OR renew_at<=now() OR notification_mode='poll')
           AND available_at<=now() AND (lease_until IS NULL OR lease_until<=now())
-          ORDER BY available_at,route_id LIMIT 4 FOR UPDATE SKIP LOCKED)
+          ORDER BY available_at,route_id LIMIT 20 FOR UPDATE SKIP LOCKED)
         UPDATE data.app_gmail_routes r SET lease_id=gen_random_uuid(),lease_until=now()+interval '2 minutes',
-          attempts=attempts+1 FROM due WHERE r.route_id=due.route_id RETURNING r.*`, values: [], maxRows: 4 });
+          attempts=least(attempts+1,8) FROM due WHERE r.route_id=due.route_id RETURNING r.*`, values: [], maxRows: 20 });
       return Promise.all(rows.map(row => this.row(row)));
     });
   }
@@ -182,6 +192,34 @@ export class PostgresGmailRoutingRepository {
       values: [job.id], maxRows: 50 });
       return rows.map(row => String(row.message_id));
     });
+  }
+  async cachePollToken(job: GmailRoutingJob, token: NonNullable<GmailRoutingSelection["pollToken"]>, refreshToken?: string) {
+    const selection={...job.selection,pollToken:token,...(refreshToken ? {refreshToken} : {})};
+    const envelope=await encryptSecretValue(this.material,`gmail-route:${job.id}`,"selection",1,JSON.stringify(selection));
+    await this.transaction("poll-token",tx=>tx.query({name:"gmail_route_poll_token_v1",text:`UPDATE data.app_gmail_routes
+      SET encrypted_value_json=$3::jsonb WHERE route_id=$1 AND enabled AND notification_mode='poll'
+      AND lease_id=$2::uuid AND lease_until>now()`,values:[job.id,job.leaseId,JSON.stringify(envelope)],maxRows:0}));
+    job.selection=selection;
+  }
+  /** Record a wake before querying upstream. A failed search must survive unchanged counters. */
+  async polled(job: GmailRoutingJob, fingerprint: string) {
+    if(!/^\d+(?:,\d+){3}$/u.test(fingerprint) || fingerprint.length>128)throw fail();
+    return this.transaction("polled",async tx=>{
+      const rows=await tx.query<QueryResultRow>({name:"gmail_route_polled_v1",text:`UPDATE data.app_gmail_routes
+        SET wake_version=wake_version+CASE WHEN inbox_fingerprint IS DISTINCT FROM $3 THEN 1 ELSE 0 END,
+          last_signal_at=CASE WHEN inbox_fingerprint IS DISTINCT FROM $3 THEN now() ELSE last_signal_at END,
+          inbox_fingerprint=$3 WHERE route_id=$1 AND enabled AND notification_mode='poll'
+          AND lease_id=$2::uuid AND lease_until>now() RETURNING wake_version,processed_version`,
+      values:[job.id,job.leaseId,fingerprint],maxRows:1});
+      if(!rows[0])throw fail();
+      job.wakeVersion=Number(rows[0].wake_version);
+      job.pendingWake=job.wakeVersion>Number(rows[0].processed_version);
+    });
+  }
+  async searched(job: GmailRoutingJob) {
+    return this.transaction("searched",tx=>tx.query({name:"gmail_route_searched_v1",text:`UPDATE data.app_gmail_routes
+      SET next_search_at=now()+interval '15 minutes' WHERE route_id=$1 AND enabled AND notification_mode='poll'
+        AND lease_id=$2::uuid AND lease_until>now()`,values:[job.id,job.leaseId],maxRows:0}));
   }
   async stage(job: GmailRoutingJob, messages: string[], historyId: string, pageToken?: string) {
     if (messages.length > 100 || messages.some(id => !/^[a-f0-9]{8,32}$/u.test(id))) throw fail();
@@ -210,10 +248,11 @@ export class PostgresGmailRoutingRepository {
   }
   async finish(job: GmailRoutingJob, outcome: "done" | "continue" | "retry" | "blocked") {
     const retired=outcome==="blocked" ? await encryptSecretValue(this.material,`gmail-route:${job.id}`,"selection",1,
-      JSON.stringify({...job.selection,oauthVerifier:"",refreshToken:undefined})) : undefined;
+      JSON.stringify({...job.selection,oauthVerifier:"",refreshToken:undefined,pollToken:undefined})) : undefined;
     return this.transaction("finish", tx => tx.query({ name: "gmail_route_finish_v1", text: `UPDATE data.app_gmail_routes
       SET lease_id=NULL,lease_until=NULL,processed_version=CASE WHEN $3='done' THEN $4 ELSE processed_version END,
         last_verified_at=CASE WHEN $3='done' THEN now() ELSE last_verified_at END,
+        next_poll_at=CASE WHEN notification_mode='poll' AND $3='done' THEN date_trunc('minute',now())+interval '1 minute' ELSE next_poll_at END,
         enabled=CASE WHEN $3='blocked' THEN false ELSE enabled END,
         encrypted_value_json=CASE WHEN $3='blocked' THEN $5::jsonb ELSE encrypted_value_json END,
         attempts=CASE WHEN $3 IN ('done','continue') THEN 0 ELSE attempts END,
