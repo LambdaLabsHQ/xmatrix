@@ -18,6 +18,8 @@ English is the default language for repository documentation, guardrails, releas
 Gmail notifications default to minute INBOX count polling with a separate
 15-minute Composio incremental-ID check. Our Google grant uses labels plus
 basic mailbox identity, while existing Composio content access stays separate.
+Owned mailboxes listen independently; changes to another mailbox preserve an
+unchanged notification grant while atomically advancing its credential fence.
 Optional native watch configuration remains independent. See
 [Gmail notifications](../operations/gmail-notifications.md).
 

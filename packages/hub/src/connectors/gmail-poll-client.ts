@@ -30,10 +30,17 @@ export async function gmailPollToken(env: Env, grant: Record<string,string>, ini
   const validScopes=scopes.length===GMAIL_POLL_SCOPES.length && new Set(scopes).size===scopes.length &&
     scopes.every(scope=>GMAIL_POLL_SCOPES.includes(scope));
   if(typeof value.access_token!=="string" || !value.access_token || value.access_token.length>8192 ||
-    value.token_type!=="Bearer" || !Number.isSafeInteger(value.expires_in) || Number(value.expires_in)<=0 || Number(value.expires_in)>86400 ||
-    ((initial || value.scope!==undefined) && !validScopes) ||
-    (initial && (typeof value.refresh_token!=="string" || !value.refresh_token)))
-    throw new ProviderRequestError(502,"Google did not confirm the labels-only Gmail grant and mailbox identity permission");
+    value.token_type!=="Bearer" || !Number.isSafeInteger(value.expires_in) || Number(value.expires_in)<=0 || Number(value.expires_in)>86400)
+    throw new ProviderRequestError(502,"Google did not confirm the labels-only Gmail grant: invalid expiring token response");
+  if(initial && (typeof value.refresh_token!=="string" || !value.refresh_token))
+    throw new ProviderRequestError(502,"Google did not confirm the labels-only Gmail grant: offline refresh permission was not returned; enable notifications again");
+  if((initial || value.scope!==undefined) && !validScopes) {
+    // Scope identifiers are public diagnostics. Never include the token payload or arbitrary provider strings.
+    const publicScopes=scopes.slice(0,12).map(scope=>/^(?:openid|https:\/\/www\.googleapis\.com\/auth\/[A-Za-z0-9._-]{1,100})$/u.test(scope)
+      ? scope : "unrecognized scope").join(", ") || "none";
+    const missing=GMAIL_POLL_SCOPES.filter(scope=>!scopes.includes(scope)).join(", ") || "none";
+    throw new ProviderRequestError(502,`Google did not confirm the labels-only Gmail grant: missing ${missing}; returned ${publicScopes}. Select Gmail label access when authorizing.`);
+  }
   return {accessToken:value.access_token,expiresAt:Date.now()+Number(value.expires_in)*1000,
     refreshToken:typeof value.refresh_token==="string" ? value.refresh_token : undefined};
 }

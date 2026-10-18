@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { connectorDatabase,integration } from "./postgres-database.fixture.mjs";
 import { erasePrivateAccountRows } from "../dist/account-deletion-cleanup.js";
-import { PostgresGmailRoutingRepository } from "../dist/index.js";
+import { PostgresGmailRoutingRepository, PostgresAppCredentialRepository } from "../dist/index.js";
+import { encryptSecretValue } from "../dist/secret-value-control.js";
 
 async function fixture(run) {
   const {client,database,sql}=await connectorDatabase("gmail-routing-test");
@@ -16,13 +17,20 @@ async function fixture(run) {
     await sql(`INSERT INTO data.app_connector_connections(space_id,connection_id,version,provider_id,provider_name,status,
       auth_mode,scopes_json,secret_refs_json,capabilities_json,channel_ids_json,created_by,search_rank_sequence,created_at,updated_at)
       VALUES($1,$2,1,'gmail','Gmail','configured','oauth','[]','[]','[]','[]','owner',$3,now(),now())`,[spaceId,connectionId,generation]);
+    const mailbox={address:selection.address,account:selection.account,owner:selection.owner};
+    const envelope=await encryptSecretValue("fixture-encryption-key",`app-connection:${connectionId}`,"credentials",1,
+      JSON.stringify({mailboxes:JSON.stringify([mailbox]),composioApiKey:"fixture-api-key"}));
     await sql(`INSERT INTO data.app_connector_credentials(connection_id,space_id,field_names_json,encrypted_value_json,
-      version,updated_by,created_at,updated_at) VALUES($1,$2,'[]','{}',1,'owner',now(),now())`,[connectionId,spaceId]);
+      version,updated_by,created_at,updated_at) VALUES($1,$2,'["mailboxes","composioApiKey"]',$3::jsonb,1,'owner',now(),now())`,
+    [connectionId,spaceId,JSON.stringify(envelope)]);
     const create=(changes={})=>repository.create({spaceId,userId:"owner",channelId,credentialVersion:1,generation,
       mailboxDigest:"mailbox-digest",tokenDigest:"signal-digest",nonceDigest:"nonce-digest",selection,historyId:"0",...changes});
     const activate=async()=>{const id=await create();const job=await repository.consumeOAuth(id,"owner","nonce-digest");
       await repository.activate(job,"private-refresh-token","100",new Date(Date.now()+86400000).toISOString());return id;};
-    await run({repository,database,sql,create,activate,spaceId,channelId,connectionId});
+    const credentials=new PostgresAppCredentialRepository(database,"fixture-encryption-key");
+    const put=fields=>credentials.put({requestId:crypto.randomUUID(),spaceId,providerId:"gmail",actorUserId:"owner",
+      fields,policy:{allowed:["mailboxes","composioApiKey"]},at:new Date().toISOString()});
+    await run({repository,database,sql,create,activate,put,mailbox,spaceId,channelId,connectionId});
   }finally {
     for(const table of ["app_gmail_routes","app_connector_credentials","app_connector_connections","channels","space_members"])
       await sql(`DELETE FROM data.${table} WHERE space_id=$1`,[spaceId]);
@@ -40,6 +48,58 @@ integration("notification authorization is single-use, owner-bound and encrypted
     const rows=(await sql("SELECT * FROM data.app_gmail_routes WHERE space_id=$1",[spaceId])).rows;
     assert.doesNotMatch(JSON.stringify(rows),/private@example|private-refresh-token|private-verifier/);
     await assert.rejects(repository.list(spaceId,"viewer"));
+  });
+});
+
+integration("two pollers keep independent cursors and deduplication; adding a mailbox fences old workers without stopping existing mail",async()=>{
+  await fixture(async({repository,create,put,mailbox,spaceId})=>{
+    const token={accessToken:"cached-access",expiresAt:Date.now()+3600000};
+    const enable=async(box,version,digest)=>{
+      const id=await create({mode:"poll",credentialVersion:version,mailboxDigest:digest,
+        selection:{...box,oauthVerifier:"proof",appIdentity:"fixture-app"}});
+      const attempt=await repository.consumeOAuth(id,"owner","nonce-digest");
+      await repository.activate(attempt,"private-refresh-token","100",undefined,{token,fingerprint:"10,7,8,6"});
+      return id;
+    };
+    const first=await enable(mailbox,1,"mailbox-digest"),[stale]=await repository.claim();
+    const message="abcdef1234567890";
+    await repository.stage(stale,[message],"110","first-page");
+    const other={address:"other@example.com",account:"ca_second",owner:"user:owner"};
+    await put({mailboxes:JSON.stringify([mailbox,other])});
+    const [preserved]=await repository.list(spaceId,"owner");
+    assert.ok(preserved,"adding another mailbox must retain the existing listener");
+    assert.equal(preserved.id,first);assert.equal(preserved.enabled,true);
+    assert.equal(preserved.credentialVersion,2);assert.equal(preserved.historyId,"110");
+    assert.equal(preserved.pageToken,"first-page");assert.equal(preserved.selection.refreshToken,"private-refresh-token");
+    assert.equal(await repository.current(stale),false);
+    await repository.finish(stale,"blocked");
+    assert.equal((await repository.list(spaceId,"owner"))[0].enabled,true,"the stale worker cannot retire the retained grant");
+    const second=await enable(other,2,"second-mailbox-digest");
+    const jobs=await repository.claim(),a=jobs.find(job=>job.id===first),b=jobs.find(job=>job.id===second);
+    assert.ok(a);assert.ok(b);assert.equal(await repository.current(a),true);assert.equal(await repository.current(b),true);
+    await repository.stage(b,[message],"210");
+    assert.deepEqual(await repository.pending(a),[message]);assert.deepEqual(await repository.pending(b),[message]);
+    await repository.stop(spaceId,"owner",second);
+    assert.equal(await repository.current(a),true);assert.equal(await repository.current(b),false);
+    await repository.delivered(a,message);
+    assert.deepEqual(await repository.pending(a),[]);
+  });
+});
+
+integration("mailbox removal, reconnection and ownership changes retire only affected grants; shared credential changes retire all",async()=>{
+  for(const change of ["remove","reconnect","owner","shared-key","malformed"])await fixture(async({repository,create,activate,put,mailbox,spaceId})=>{
+    const first=await activate(),other={address:"other@example.com",account:"ca_second",owner:"user:owner"};
+    await put({mailboxes:JSON.stringify([mailbox,other])});
+    const second=await create({credentialVersion:2,mailboxDigest:"second-mailbox-digest",
+      selection:{...other,oauthVerifier:"proof",appIdentity:"fixture-app"}});
+    await repository.activate(await repository.consumeOAuth(second,"owner","nonce-digest"),"second-refresh","200",new Date(Date.now()+86400000).toISOString());
+    const fields=change==="shared-key" ? {composioApiKey:"replacement-key"} : {mailboxes:change==="malformed" ? "{}" : JSON.stringify([
+      mailbox,...(change==="remove" ? [] : [{...other,...(change==="reconnect" ? {account:"ca_reconnected"} : {owner:"user:viewer"})}]),
+    ])};
+    await put(fields);
+    const alive=(await repository.list(spaceId,"owner")).filter(row=>row.enabled);
+    assert.deepEqual(alive.map(row=>row.id),change==="shared-key" || change==="malformed" ? [] : [first],change);
+    if(alive.length)assert.equal(alive[0].credentialVersion,3);
   });
 });
 integration("signals survive coalescing during leases; renewal and outbox replay never skip the consumed cursor",async()=>{

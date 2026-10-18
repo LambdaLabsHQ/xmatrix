@@ -38,6 +38,21 @@ test("labels grant is bound to the selected verified mailbox without requiring G
     await fetched([{body}],()=>assert.rejects(verifyGmailPollMailbox("private-access","me@example.com"),error=>error.status===403));
 });
 
+test("grant failures distinguish offline consent from missing or combined scopes without exposing credentials",async()=>{
+  for(const [changes,reason] of [
+    [{refresh_token:undefined},/offline refresh permission was not returned/],
+    [{scope:"openid https://www.googleapis.com/auth/userinfo.email"},/missing https:\/\/www.googleapis.com\/auth\/gmail.labels/],
+    [{scope:`${token.scope} https://www.googleapis.com/auth/drive.file`},/missing none; returned .*drive.file/],
+    [{scope:`${token.scope} private-access private-refresh`},/unrecognized scope/],
+  ])await fetched([{body:{...token,...changes}}],async()=>{
+    await assert.rejects(gmailPollToken(env,{code:"private-code"},true),error=>{
+      assert.match(error.message,reason);
+      assert.doesNotMatch(error.message,/private-access|private-refresh|private-code|google-secret/);
+      return error.status===502;
+    });
+  });
+});
+
 test("all four inbox counts participate in the hint; malformed or foreign label counts fail closed",async()=>{
   const counts={id:"INBOX",messagesTotal:10,messagesUnread:7,threadsTotal:8,threadsUnread:6};
   const checked=await fetched([{body:counts}],()=>gmailInboxFingerprint("private-access"));

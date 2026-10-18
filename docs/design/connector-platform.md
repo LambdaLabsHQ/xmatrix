@@ -572,8 +572,13 @@ The primary App authority stores the native refresh token and pending PKCE
 verifier in an encrypted notification envelope bound to the route identity.
 Configuration fingerprints, captured connection generation, credential version,
 mailbox ownership, current Space admin and conversation capability fence work.
-Mailbox credential edits, disconnect, Channel move, account erasure and Space erasure retire the
-notification rows and encrypted grants. Stop clears the local grant immediately;
+Mailbox removal, reconnection or ownership changes retire that mailbox's
+notification rows and encrypted grants. Unchanged account/address/owner tuples
+survive another mailbox's addition or edit only when all shared credentials are
+also unchanged. The credential transaction advances retained rows to the new
+credential version and clears old worker leases, preserving cursors and pending
+IDs. A shared credential replacement, disconnect, Channel move, account erasure
+or Space erasure retires all affected grants. Stop clears one local grant immediately;
 it does not revoke a Google grant another Space might still use. Abandoned
 OAuth attempts expire after ten minutes and bounded maintenance removes them.
 

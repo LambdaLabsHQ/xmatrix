@@ -95,7 +95,7 @@ async function completeOAuthConnect(env: Env, request: Request, verified: Verifi
        Connected until the check below has used the token. */
     if (providerId !== "discord") {
       await upsertAppConnection(env, { commandId: `connector-oauth:${crypto.randomUUID()}`, spaceId: verified.spaceId,
-        providerId, actorUserId: verified.userId, body: { status: "disconnected" } });
+        providerId, actorUserId: verified.userId, body: { status: "disconnected", ...(providerId === "gmail" ? { initializeOnly: true } : {}) } });
     }
     const manifest = getAppConnectorProvider(providerId)!;
     const generated = [...(manifest.credentials ?? []).filter(field => field.generated && !field.managed)
