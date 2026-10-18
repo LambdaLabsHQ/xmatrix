@@ -442,6 +442,18 @@ function pageClaimsKey(userId: string | null, spaceId: string | null | undefined
 }
 
 /** The Agents live in a conversation this client holds, from its member presence. */
+/** The time now, renewed every second while `active`. */
+function useTicking(active: boolean): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!active) return;
+    setNow(Date.now());
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [active]);
+  return now;
+}
+
 function liveAgents(channel: ChannelSnapshot): LiveConversation["agents"] {
   if (!channel.presence) return undefined;
   return channelPresenceInstances(channel.presence).flatMap(instance => isLiveAgentStatus(instance.status)
@@ -867,6 +879,9 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   }, [liveOnPage]);
   const present = useMemo(() => presence.filter(({ state }) => cursorPresence(state) !== null),
     [cursorPresence, presence]);
+  // Ticks each second only while an Agent on the page is thinking, so its time shows.
+  const anyoneThinking = present.some(({ state }) => state.user?.kind === "agent" && state.activity === "thinking");
+  const clock = useTicking(anyoneThinking);
   // An Agent on the page is its face at the right edge, beside its line (§3.2): the conversations
   // they work from, whose Agents a section's heading does not draw again.
   const atEdge = useMemo(() => [...new Set([
@@ -1002,6 +1017,12 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   }, [spaceId, page, docked, onConversationDockChange]);
 
   const coWriter = called && called.pageId === page?.pageId ? called.harness : liveOnPage[0]?.name;
+  // Who writes instead of a co-writer that went quiet: the fastest other one this person can call.
+  const switchWriter = (name: string): string | undefined => {
+    const quiet = name.split(":")[0];
+    return ["claude", "codex", ...writers.agents.map((agent) => agent.harness)]
+      .find((harness) => harness !== quiet && writers.agents.some((agent) => agent.harness === harness));
+  };
   // A page made to be co-written at once calls its Agent as it opens (co-write-request.ts).
   const coWriteRef = useRef<((harness: string, blockId: string | null) => Promise<void>) | null>(null);
   useEffect(() => {
@@ -1132,6 +1153,14 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     return [activity, section, where ? `in ${where}` : null].filter(Boolean).join(" · ");
   };
   const sectionAnchor = (blockId: string) => blockId ? `block:${blockId}` : "page";
+  // A co-writer that thinks says for how long, and one that went quiet says so (§3.2).
+  const coWriterDoing = (state: { activity?: string; since?: unknown; stalled?: unknown }) => {
+    if (state.stalled === true) return onboardingCopy.coWrite.quiet;
+    if (state.activity === "thinking" && typeof state.since === "number") {
+      return onboardingCopy.coWrite.thinkingFor(Math.max(0, Math.round((clock - state.since) / 1000)));
+    }
+    return CO_WRITER_DOING[state.activity ?? ""]!;
+  };
   const people: PresentPerson[] = [
     ...present.map(({ clientId, state }) => ({ key: `client:${clientId}`, name: state.user!.name,
       color: state.user!.color, agent: state.user!.kind === "agent", blockId: state.block ?? "",
@@ -1144,11 +1173,15 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
       // While it writes, its face says which conversation the words come from.
       ...(state.user!.kind === "agent" && state.activity === "writing" && state.user!.conversationId
         && conversationName(state.user!.conversationId) ? { from: conversationName(state.user!.conversationId)! } : {}),
-      ...(state.user!.kind === "agent" && CO_WRITER_DOING[state.activity ?? ""]
-        ? { doing: CO_WRITER_DOING[state.activity ?? ""]! } : {}),
+      ...(state.user!.kind === "agent" && (CO_WRITER_DOING[state.activity ?? ""] || state.stalled === true)
+        ? { doing: coWriterDoing(state) } : {}),
+      ...(state.user!.kind === "agent" && state.activity === "thinking" ? { thinking: true } : {}),
+      ...(state.user!.kind === "agent" && state.stalled === true ? { stalled: true } : {}),
       undoable: state.user!.kind === "agent" && state.undo === true,
       // An Agent co-writing live says what it is doing, and its note to the people on the page.
-      detail: [whereDetail(CO_WRITER_DOING[state.activity ?? ""] ?? state.activity ?? "viewing", state.block ?? "",
+      detail: [whereDetail(state.user!.kind === "agent" && (CO_WRITER_DOING[state.activity ?? ""] || state.stalled === true)
+        ? coWriterDoing(state)
+        : CO_WRITER_DOING[state.activity ?? ""] ?? state.activity ?? "viewing", state.block ?? "",
         state.user!.conversationId), state.say].filter(Boolean).join(" — ") })),
     ...staying.map((agent) => ({ key: `agent:${agent.instanceId}:${agent.conversationId}`, name: agent.name,
       color: pageAuthorColor({ kind: "agent", id: agent.instanceId }), agent: true, avatarUrl: agent.avatarUrl, blockId: agent.blockId,
@@ -1461,6 +1494,12 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
               working={tapped ? { name: tapped.name, ...(tapped.avatarUrl ? { avatarUrl: tapped.avatarUrl } : {}),
                 doing: tapped.detail } : null}
               onStart={(harness) => { setDialog(null); void coWrite(harness, null); }}
+              {...(tapped?.stalled && switchWriter(tapped.name) ? { switchTo: { label: onboardingCopy.coWrite.switchTo(switchWriter(tapped.name)!),
+                run: () => {
+                  setDialog(null);
+                  if (tapped.conversationId && canEdit) void pageApi.endCoWriting(spaceId ?? "", page.pageId, token, tapped.conversationId).catch(() => {});
+                  void coWrite(switchWriter(tapped.name)!, null);
+                } } } : {})}
               onOpenConversation={tapped?.conversationId
                 ? () => { setDialog(null); openConversation(tapped.conversationId!); } : null}
               onStop={tapped?.conversationId && canEdit ? () => {

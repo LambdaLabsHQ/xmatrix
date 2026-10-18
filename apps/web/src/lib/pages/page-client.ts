@@ -172,6 +172,10 @@ export interface PagePresenceState {
   idle?: boolean;
   /** An Agent co-writing live: its last change can still be taken back. */
   undo?: boolean;
+  /** An Agent co-writing live: when it began what it is doing now (ms). */
+  since?: number;
+  /** An Agent co-writing live: its last answer went quiet and was given up. */
+  stalled?: boolean;
 }
 
 export type PageSessionNotice =

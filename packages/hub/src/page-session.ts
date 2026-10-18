@@ -666,10 +666,11 @@ export class PageSession {
         // authorship before persisting the document, including its very first streamed word.
         authoredAs(this.doc, clientId, () => this.doc.transact(change, connection.id));
       },
-      present: ({ activity, cursor, say, undoable, wrote }) => {
+      present: ({ activity, cursor, say, undoable, wrote, since, stalled }) => {
         const at = cursor ? Y.relativePositionToJSON(cursor) : null;
         this.agentAwareness(principal, { user: { name: principal.label, color: pageAuthorColor(principal),
-          kind: principal.kind, conversationId: principal.conversationId ?? null }, activity,
+          kind: principal.kind, conversationId: principal.conversationId ?? null }, activity, since,
+        ...(stalled ? { stalled: true } : {}),
         ...(at ? { cursor: { anchor: at, head: at } } : {}), ...(say ? { say } : {}), ...(undoable ? { undo: true } : {}),
         wrote: wrote.map((change) => ({ from: Y.relativePositionToJSON(change.from), to: Y.relativePositionToJSON(change.to),
           at: change.at })) });
