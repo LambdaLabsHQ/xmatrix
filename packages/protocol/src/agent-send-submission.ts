@@ -9,6 +9,7 @@ export function agentSendSubmissionCanonical(scope: {
   if (Object.keys(body).some(key => ![
     "body", "clientMessageId", "senderAgentId", "senderAgentName", "senderAgentInstanceId",
     "senderRunId", "senderExecutionKey", "attachments", "finalReplyExecutionId", "awaitsResponse",
+    "readThroughSequence",
   ].includes(key)) || typeof body.body !== "string") return null;
   const attachments = body.attachments === undefined ? [] : body.attachments;
   if (!Array.isArray(attachments) || attachments.length > 10) return null;
@@ -26,7 +27,8 @@ export function agentSendSubmissionCanonical(scope: {
   const finalId = body.finalReplyExecutionId;
   if (finalId !== undefined && (typeof finalId !== "string" ||
       !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u.test(finalId))) return null;
-  // A declared wait changes who the message waits on, not what was sent: it is not part of the identity.
+  // A declared wait changes who the message waits on, and how far the sender had read is a
+  // precondition of the send, not what was sent: neither is part of the identity.
   // Keep ordinary sends byte-compatible; final intent is part of v2 identity.
   if (finalId !== undefined) return JSON.stringify(["xmatrix-agent-send-v2", scope.channelId, scope.messageId,
     scope.agentId, scope.runId, scope.instanceId, body.body, bindings, finalId]);

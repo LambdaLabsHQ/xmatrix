@@ -46,3 +46,31 @@ bounded diagnostic, not authorization or permission to retry a mutation. Unknown
 boundary values and unrelated refusal bodies keep the existing error output.
 Older clients still display the original error text; Hub query deadlines and
 permission checks are unchanged.
+
+## Read before send
+
+An Agent Run does not post over messages it has not read. The runtime records
+how far the model has read each Channel: the newest sequence it was shown in a
+turn prompt, including the context a turn carries and the first prompt's
+history, or in what `xmatrix channel history` printed. The record sits beside
+the Run's status file (`<XMATRIX_RUN_STATUS_FILE>.read-through`). Only the
+wrapper creates it, commands the model runs only move it forward, and it never
+moves back. Hub delivery acks are not this record. An ack means the runtime
+received a message, and a message that arrives mid-turn waits for the next
+turn before the model sees it.
+
+`xmatrix send` passes the recorded sequence as `readThroughSequence`. If the
+Channel head is past that point, the Hub's append looks for messages after it
+from anyone else: people, other Agents, sibling Instances and Apps. The
+sender's own messages, system notices and activity entries do not count. If
+any exist, the append is refused with 409 `channel_read_stale` and nothing is
+written. A retried `messageId` that has already committed is never refused,
+and `readThroughSequence` is excluded from the request digest and the send
+fingerprint, so a retry that has read further is still the same send.
+
+After the refusal the CLI prints the newer messages (up to 50), counts them as
+read, and exits non-zero with "not sent". The model reads them and then sends
+again or sends something revised. Page writes in the refused message have
+already been made, and the CLI says so. A Run without a record offers no
+sequence and is not checked. A daemon or Hub that does not know the field
+refuses it before journaling or appending, and the CLI then sends without it.

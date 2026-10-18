@@ -82,6 +82,7 @@ export function registerChannelMessageRoutes(app: Hono<{ Bindings: Env }>): void
         "body",
         "clientMessageId",
         "metadata",
+        "readThroughSequence",
         "replyToMessageId",
         "senderAgentId",
         "senderAgentInstanceId",
@@ -101,6 +102,7 @@ export function registerChannelMessageRoutes(app: Hono<{ Bindings: Env }>): void
       }
       const body = rawBody as {
         awaitsResponse?: unknown;
+        readThroughSequence?: unknown;
         invocationSelections?: unknown;
         finalReplyExecutionId?: string;
         body?: string;
@@ -135,6 +137,10 @@ export function registerChannelMessageRoutes(app: Hono<{ Bindings: Env }>): void
       }
       if (body.awaitsResponse !== undefined && typeof body.awaitsResponse !== "boolean") {
         return c.json({ error: "awaitsResponse must be a boolean" }, 400);
+      }
+      if (body.readThroughSequence !== undefined &&
+          (!Number.isSafeInteger(body.readThroughSequence) || (body.readThroughSequence as number) < 0)) {
+        return c.json({ error: "readThroughSequence must be a non-negative safe integer" }, 400);
       }
       if (body.finalReplyExecutionId !== undefined) {
         if (!principal) return c.json({ error: "Final reply requires an authenticated Agent Run" }, 403);
@@ -310,6 +316,8 @@ export function registerChannelMessageRoutes(app: Hono<{ Bindings: Env }>): void
           ...(body.invocationSelections === undefined ? {} : { invocationSelections: body.invocationSelections }),
           ...(body.finalReplyExecutionId === undefined ? {} : { finalReplyExecutionId: body.finalReplyExecutionId }),
           ...(body.awaitsResponse === true ? { awaitsResponse: true } : {}),
+          ...(body.readThroughSequence === undefined
+            ? {} : { readThroughSequence: body.readThroughSequence as number }),
           principal: appendPrincipal,
           senderSnapshot: principal
             ? trustedAgentSenderPresentation

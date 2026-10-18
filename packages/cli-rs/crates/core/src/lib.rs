@@ -31,6 +31,7 @@ pub mod page_co_write;
 pub mod presentation_barrier;
 pub mod profile;
 pub mod protocol;
+pub mod read_through;
 pub mod route_key;
 pub mod space_ref;
 pub mod text_input;

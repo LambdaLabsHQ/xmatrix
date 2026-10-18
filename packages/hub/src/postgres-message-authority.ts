@@ -456,6 +456,23 @@ export async function postgresMessageAppend(
       runProof,
       ...(dependencies.placement ? { placement: dependencies.placement } : {}),
     });
+    // Read before you write: a sender that says how far it has read is not
+    // appended over anything newer it has not seen. Only a head past that
+    // point costs the second read.
+    const readThrough = command.readThroughSequence;
+    if (readThrough !== undefined && preparedContext.sequence > readThrough) {
+      const { unread, replay } = await messages.unreadSince({
+        requestId: `message-unread:${commandId}`.slice(0, 200),
+        spaceId, channelId, principal: actor, messageId,
+        afterSequence: readThrough, activityMessageKind: CHANNEL_ACTIVITY_MESSAGE_KIND,
+        ...(dependencies.placement ? { placement: dependencies.placement } : {}),
+      });
+      if (unread > 0 && !replay) {
+        throw new MessageAuthorityError("channel_read_stale", 409,
+          `channel_read_stale: ${unread >= 100 ? "100+" : unread} newer message(s) in this Channel ` +
+          `after sequence ${readThrough}, the last one this sender read, are unread. Nothing was sent.`);
+      }
+    }
     durations.prepareMs = performance.now() - phaseStartedAt;
     phaseStartedAt = performance.now();
     const canonicalSenderSnapshot = presentedAuthor
@@ -499,9 +516,12 @@ export async function postgresMessageAppend(
         ? { residual: command.residual! }
         : {}),
     });
+    // How far the sender had read is a precondition, not the message: a
+    // retry that has read further since is still the same append.
     const {
       sealedAttachments: _sealedAttachments,
       resolvedAttentionTargets: _resolvedAttentionTargets,
+      readThroughSequence: _readThroughSequence,
       ...digestCommand
     } = command;
     const requestDigest = await sha256Hex(canonicalJson(JSON.parse(JSON.stringify(

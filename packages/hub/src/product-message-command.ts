@@ -28,6 +28,11 @@ export interface AppendMessageCommand {
   finalReplyExecutionId?: string;
   /** The sender declares it is waiting on the people and Agents this message mentions. */
   awaitsResponse?: boolean;
+  /**
+   * The Channel sequence the sender has read through. The append is refused
+   * while anyone else's message after it is still unread by the sender.
+   */
+  readThroughSequence?: number;
   /** People a Hub-written card waits on though it mentions nobody. Public HTTP parsing omits this field. */
   waitsOnUserIds?: string[];
   principal: AuthorityPrincipal;

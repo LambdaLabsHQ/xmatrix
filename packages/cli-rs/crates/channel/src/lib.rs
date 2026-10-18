@@ -682,11 +682,13 @@ pub async fn cmd_send(
         ));
     }
     // An Agent's message writes into pages as its reply does; a retry of the same send writes nothing again.
-    let message = if has_agent_sender_identity && message_id.is_none() {
+    let written = if has_agent_sender_identity && message_id.is_none() {
         write_message_into_pages(hub_url, token, channel_id, &message).await
     } else {
-        message
+        message.clone()
     };
+    let wrote_into_pages = written != message;
+    let message = written;
     eprintln!("Sending message {client_message_id}");
     let uploaded = upload_channel_file_attachments(
         hub_url,
@@ -719,6 +721,15 @@ pub async fn cmd_send(
         "clientMessageId".into(),
         serde_json::Value::String(client_message_id.clone()),
     );
+    // How far this Run has read the Channel: the Hub sends nothing over a
+    // newer message from someone else that it has not read.
+    let read_through = has_agent_sender_identity
+        .then(|| xmatrix_cli_core::read_through::current(channel_id))
+        .flatten();
+    if let Some(sequence) = read_through {
+        payload.insert("readThroughSequence".into(), sequence.into());
+    }
+    let own_instance_id = sender.instance_id.clone();
     for (key, value) in [
         ("senderAgentId", sender.agent_id),
         ("senderAgentName", sender.agent_name),
@@ -740,16 +751,48 @@ pub async fn cmd_send(
     if has_agent_sender_identity {
         xmatrix_cli_core::presentation_barrier::wait_for_current_presentation().await;
     }
-    let response: SendResponse = http::request_journaled_message(
-        &with_route(
-            hub_url,
-            &format!("/api/channels/{}/messages", urlencoding::encode(channel_id)),
-        ),
+    let append_url = with_route(
+        hub_url,
+        &format!("/api/channels/{}/messages", urlencoding::encode(channel_id)),
+    );
+    let mut sent = http::request_journaled_message::<SendResponse>(
+        &append_url,
         token,
-        serde_json::Value::Object(payload),
+        serde_json::Value::Object(payload.clone()),
         has_agent_sender_identity,
     )
-    .await?;
+    .await;
+    // A daemon or Hub from before the read check refuses the field before
+    // anything is journaled or appended; the same send goes without it.
+    if read_through.is_some()
+        && sent
+            .as_ref()
+            .is_err_and(|error| read_through_field_unsupported(&error.to_string()))
+    {
+        payload.remove("readThroughSequence");
+        sent = http::request_journaled_message::<SendResponse>(
+            &append_url,
+            token,
+            serde_json::Value::Object(payload),
+            has_agent_sender_identity,
+        )
+        .await;
+    }
+    let response = match (sent, read_through) {
+        (Ok(response), _) => response,
+        (Err(error), Some(after)) if error.to_string().contains(UNREAD_REFUSAL_CODE) => {
+            return Err(show_unread_messages(
+                hub_url,
+                token,
+                channel_id,
+                after,
+                own_instance_id.as_deref(),
+                wrote_into_pages,
+            )
+            .await);
+        }
+        (Err(error), _) => return Err(error),
+    };
 
     if response.message.message_id != client_message_id
         || response.message.channel_id != *channel_id
@@ -774,6 +817,79 @@ pub async fn cmd_send(
     }
 
     Ok(())
+}
+
+/// The Hub's refusal of a send over messages its sender has not read.
+const UNREAD_REFUSAL_CODE: &str = "channel_read_stale";
+/// Newer messages one refusal prints; a longer gap is read in turns.
+const UNREAD_MESSAGES_SHOWN: u32 = 50;
+
+fn read_through_field_unsupported(error: &str) -> bool {
+    error.contains("Journaled send contains unsupported fields")
+        || (error.contains("unexpected fields") && error.contains("readThroughSequence"))
+}
+
+/// A send was refused because the Channel moved on after `after`, the last
+/// sequence this Run read: show the model what it has not read, count it as
+/// read, and say that nothing was sent.
+async fn show_unread_messages(
+    hub_url: &str,
+    token: &str,
+    channel_id: &str,
+    after: u64,
+    own_instance_id: Option<&str>,
+    wrote_into_pages: bool,
+) -> CliError {
+    let mut messages = match fetch_channel_chat_history(
+        hub_url,
+        token,
+        channel_id,
+        UNREAD_MESSAGES_SHOWN,
+        Some(after),
+    )
+    .await
+    {
+        Ok(messages) => messages,
+        Err(error) => {
+            return CliError::Relay(format!(
+                "Not sent: this Channel has newer messages than the last one you read, and they \
+                 could not be loaded ({error}). Run `xmatrix channel history {channel_id}`, then \
+                 send again."
+            ));
+        }
+    };
+    messages.sort_by(protocol::compare_channel_messages);
+    let unread: Vec<_> = messages
+        .iter()
+        .filter(|message| {
+            own_instance_id.is_none() || message.from.instance_id.as_deref() != own_instance_id
+        })
+        .collect();
+    println!(
+        "{} newer message(s) arrived in this Channel after the last one you read:\n",
+        unread.len()
+    );
+    for message in &unread {
+        print_history_message_with_local_images(message, &HashMap::new(), &[]);
+    }
+    if let Some(through) = messages.iter().filter_map(|message| message.sequence).max() {
+        xmatrix_cli_core::read_through::advance(channel_id, through);
+    }
+    let more = if messages.len() >= UNREAD_MESSAGES_SHOWN as usize {
+        " More may follow them; the next send shows those."
+    } else {
+        ""
+    };
+    let pages = if wrote_into_pages {
+        " Its page writes were already made, so leave the ⟦write⟧ blocks out if you send it again."
+    } else {
+        ""
+    };
+    CliError::Launch(format!(
+        "Your message was not sent: the Channel moved on after the last message you read. \
+         Read the messages above.{more} If your message still fits, send it again; otherwise \
+         send what fits now.{pages}"
+    ))
 }
 
 #[derive(Debug)]
@@ -2273,6 +2389,10 @@ async fn cmd_channel_history(hub_url: &str, token: &str, channel_id: &str) -> er
     let local_images = materialize_history_image_attachments(hub_url, token, &messages).await;
     for message in &messages {
         print_history_message_with_local_images(message, &local_images, &threads);
+    }
+    // A Run that reads the Channel has read it through what was printed.
+    if let Some(through) = messages.iter().filter_map(|message| message.sequence).max() {
+        xmatrix_cli_core::read_through::advance(channel_id, through);
     }
 
     Ok(())
