@@ -98,7 +98,6 @@ import { ListColumnResizeHandle, ListColumnResizeProvider } from "./list-column-
 import { mobileBackState, DOCK_TAB_VIEWS, MORE_TAB_VIEWS, SPLIT_TOOL_VIEWS, viewForRouteSegment, type AppView } from "./workspace-shell-navigation";
 import { PageTreePanel, PagesView, usePageTree } from "@/components/pages/pages-view";
 import { NEW_PAGE_ID, NEW_PAGE_TITLE, usePageCreation } from "@/components/pages/page-creation";
-import { PageDraft } from "@/components/pages/page-draft";
 import { searchWorkspacePages } from "./workspace-message-search";
 import { channelTitle } from "@/components/dashboard/channel-links";
 import { WorkspaceSearchDialog, WorkspaceSearchView } from "./workspace-search";
@@ -749,11 +748,11 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
   const listCreate = useMemo<CreateAction | null>(() => view === "messages" && canCreateChannel
     ? { label: "New conversation", onCreate: startNewConversation, active: composingConversation }
     : view === "pages"
-      ? { label: "New page", onCreate: createNewPage, disabled: pageCreation.creating || !currentSpaceId }
+      ? { label: "New page", onCreate: createNewPage, disabled: !currentSpaceId }
       : view === "agents" && user
         ? { label: "Manage machines", onCreate: manageMachines }
         : null,
-  [canCreateChannel, composingConversation, createNewPage, currentSpaceId, manageMachines, pageCreation.creating,
+  [canCreateChannel, composingConversation, createNewPage, currentSpaceId, manageMachines,
     startNewConversation, user, view]);
   const mobileCreate = !nativeMobileTabVisible || agentConfigDialog ? null : listCreate;
   const desktopCreate = isMobileViewport || agentConfigDialog ? null : listCreate;
@@ -1273,11 +1272,10 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
   ) : null;
 
   // One Pages document surface, whether read on the desktop, pushed over the
-  // phone's Pages list, or shown while the Space is being moved to pages.
-  const pagesViewSurface = selectedPageId === NEW_PAGE_ID ? (
-    <PageDraft key={currentSpaceId} creation={pageCreation} layout={isMobileViewport ? "phone" : "desktop"} />
-  ) : (
-    <PagesView spaceId={currentSpaceId} token={token ?? ""} selectedPageId={selectedPageId}
+  // phone's Pages list, shown while the Space is being moved to pages, or a new
+  // page not made until it is first written on.
+  const pagesViewSurface = (
+    <PagesView spaceId={currentSpaceId} token={token ?? ""} selectedPageId={selectedPageId} creation={pageCreation}
       onSelectPage={openPage} onOpenSection={openPageAt} onPageDeleted={closePage} conversation={pageConversation} focusSection={pageSectionRequest}
       activeConversationId={selectedPageId ? selectedChannelId : null}
       {...(selectedChannel && selectedPageId ? { renderConversation: (placement: "margin" | "dock") =>

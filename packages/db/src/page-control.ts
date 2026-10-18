@@ -580,11 +580,12 @@ export class PostgresPageRepository {
   }
 
   async create(input: { requestId: string; spaceId: string; principal: PagePrincipal;
-    parentPageId?: string | null; title: string; body?: string; afterPageId?: string | null;
+    parentPageId?: string | null; title?: string; body?: string; afterPageId?: string | null;
     accessMode?: "open" | "restricted" }): Promise<{ page: PageSummary }> {
     const spaceId = bounded(input.spaceId, "spaceId");
     // The name is written into the document, unless the document already opens with one of its own.
-    const newBody = pageBody(namedPageBody(input.body ?? "", input.title));
+    // Without a name the document is as written: a page someone started writing names itself in its text.
+    const newBody = pageBody(input.title === undefined ? input.body ?? "" : namedPageBody(input.body ?? "", input.title));
     const accessMode = input.accessMode ?? "open";
     if (accessMode !== "open" && accessMode !== "restricted") {
       throw new PageControlError("invalid_request", 400, "accessMode is open or restricted");

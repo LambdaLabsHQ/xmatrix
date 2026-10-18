@@ -1,66 +1,49 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { pageApi } from "@/lib/pages/page-client";
-import { userErrorMessage } from "@/lib/user-facing-error";
 
 export type PageCreation = ReturnType<typeof usePageCreation>;
 
 /** What a new page is called until its author names it on the page itself. */
 export const NEW_PAGE_TITLE = "Untitled";
 
-/** Where a page made with + is open until something is written on it: it exists only here until then. */
+/** Where a page opened with + is, until the first write on it makes it. */
 export const NEW_PAGE_ID = "new";
 
+/** A document's Yjs state as base64, a chunk at a time so a long first paste does not overflow the stack. */
+function base64(bytes: Uint8Array): string {
+  let binary = "";
+  for (let index = 0; index < bytes.length; index += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(index, index + 0x8000));
+  }
+  return btoa(binary);
+}
+
 /**
- * Like Notion: + opens an untitled page at once with its title ready to type over.
- * The page is made only when something is written on it, so one left empty is not kept.
- * Shared by the tree, the phone FAB and the desktop shortcut.
+ * Like Notion: + opens a new page at once, as any page opens, its title ready to type. It is made on
+ * the first write on it, copy-on-write, from the document as written so far, so one left empty is not
+ * kept anywhere. Shared by the tree, the phone FAB and the desktop shortcut.
  */
 export function usePageCreation(spaceId: string | null, token: string, openPage: (pageId: string) => void) {
   const queryClient = useQueryClient();
-  const [creating, setCreating] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  // The page the draft goes under once it is made.
-  const [draftParentId, setDraftParentId] = useState<string | null>(null);
-  const inFlight = useRef(false);
-  const currentSpace = useRef(spaceId);
-  useEffect(() => {
-    currentSpace.current = spaceId;
-    setError(null);
-    setDraftParentId(null);
-  }, [spaceId]);
+  // The page a new page goes under once it is made.
+  const [parentPageId, setParentPageId] = useState<string | null>(null);
+  useEffect(() => setParentPageId(null), [spaceId]);
 
-  const create = useCallback((parentPageId: string | null) => {
+  const create = useCallback((parent: string | null) => {
     if (!spaceId) return;
-    setError(null);
-    setDraftParentId(parentPageId);
+    setParentPageId(parent);
     openPage(NEW_PAGE_ID);
   }, [openPage, spaceId]);
 
-  /** Makes the draft into a page, and opens it when the draft is still what is open. */
-  const persist = useCallback(async (input: { title: string; body?: string }, stillOpen: () => boolean) => {
-    if (!spaceId || inFlight.current) return false;
-    inFlight.current = true;
-    setCreating(true);
-    setError(null);
-    try {
-      const { page } = await pageApi.create(spaceId, token, { title: input.title, parentPageId: draftParentId,
-        ...(input.body ? { body: input.body } : {}) });
-      await queryClient.invalidateQueries({ queryKey: ["xmatrix"], predicate: (query) =>
-        query.queryKey.includes("page-tree") });
-      if (currentSpace.current === spaceId && stillOpen()) openPage(page.pageId);
-      return true;
-    } catch (cause) {
-      if (currentSpace.current === spaceId) {
-        setError(userErrorMessage(cause, "Couldn't create the page"));
-      }
-      return false;
-    } finally {
-      inFlight.current = false;
-      setCreating(false);
-    }
-  }, [draftParentId, openPage, queryClient, spaceId, token]);
-  return { create, persist, creating, error };
+  /** Makes the new page from the document written on it so far. */
+  const make = useCallback(async (document: Uint8Array) => {
+    if (!spaceId) throw new Error("No Space to make the page in");
+    const { page, seeded } = await pageApi.create(spaceId, token, { parentPageId, document: base64(document) });
+    await queryClient.invalidateQueries({ queryKey: ["xmatrix"], predicate: (query) => query.queryKey.includes("page-tree") });
+    return { pageId: page.pageId, seeded: seeded === true };
+  }, [parentPageId, queryClient, spaceId, token]);
+  return { create, make, parentPageId };
 }

@@ -12,3 +12,10 @@ export function pageDocument(markdown: string): Y.Doc {
   editPageMarkdown(doc, () => markdown, "server");
   return doc;
 }
+
+/** The markdown of a document a new page was made from: `document` in its create request (base64 Yjs state). */
+export function startedMarkdown(document: unknown): string {
+  const doc = new Y.Doc();
+  Y.applyUpdate(doc, Buffer.from(String(document), "base64"));
+  return pageMarkdown(doc);
+}

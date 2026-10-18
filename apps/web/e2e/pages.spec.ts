@@ -7,7 +7,7 @@ import * as Y from "yjs";
 
 import { expect, test } from "./fixtures";
 import { fixtureJson, fixtureRequestBodies, fixtureRequestRecords } from "./in-page-api-fixtures";
-import { editPageMarkdown, pageDocument, pageMarkdown } from "./page-document-fixture";
+import { editPageMarkdown, pageDocument, pageMarkdown, startedMarkdown } from "./page-document-fixture";
 import {
   E2E_CHANNEL, E2E_DESKTOP_CONTEXT, E2E_SPACE, E2E_USER_SENDER, harnessRegistrations, installWorkspaceStubs,
 } from "./workspace-fixtures";
@@ -775,9 +775,13 @@ test("an owner may start a Space's pages from a repository or a first page, and 
     body: "# First document\n", revisionInfo: { revision: 1, kind: "edit", authors: [], conversationIds: [], createdAt: NOW } } },
   { method: "GET" });
   await browser.getByRole("button", { name: "Create the first page" }).click();
+  await expect(browser.getByTestId("page-title")).toBeFocused();
   await browser.keyboard.type("First document");
   await browser.getByTestId("page-title").blur();
-  await expect.poll(() => fixtureRequestBodies(browser, "page-create")).toEqual([{ title: "First document", parentPageId: null }]);
+  await expect.poll(async () => (await fixtureRequestBodies(browser, "page-create")).length).toBe(1);
+  const [made] = await fixtureRequestBodies(browser, "page-create");
+  expect(made).toMatchObject({ parentPageId: null });
+  expect(startedMarkdown(made!.document)).toBe("# First document\n");
   await expect(browser.getByTestId("page-migration-review")).toBeHidden();
   await expect(browser.getByTestId("pages-view")).toContainText("First document");
   // An owner publishes the page for anyone with the link.

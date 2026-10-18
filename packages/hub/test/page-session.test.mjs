@@ -16,7 +16,7 @@ import {
 import { CO_WRITER_KEEP_UP_MS, CO_WRITER_PAUSE_MS, CO_WRITER_TURN_MS, CO_WRITER_WRITE_EVERY_MS } from "../src/page-co-writer.ts";
 import { PAGE_MESSAGE_CO_WRITE } from "@xmatrix/protocol";
 import { canonicalPageMarkdown as canonical, markdownToPageDoc, pageDocToMarkdown, pageSchema } from "@xmatrix/protocol/page-document";
-import { absolutePositionToRelativePosition, initProseMirrorDoc, yXmlFragmentToProseMirrorRootNode } from "y-prosemirror";
+import { absolutePositionToRelativePosition, initProseMirrorDoc, updateYFragment, yXmlFragmentToProseMirrorRootNode } from "y-prosemirror";
 import { RelayPageSession } from "../src/page-session-do.ts";
 import { PageControlError, PostgresPageRepository } from "@xmatrix/db";
 import { compileCommonJsSourceModule } from "./support/commonjs-source-module.mjs";
@@ -71,8 +71,7 @@ function harness({ head = HEAD, suggestOnly = false, commit } = {}) {
   };
   const session = new PageSession(ports);
   cleanups.push(() => session.destroy());
-  function connect(id, principal, canEdit = true) {
-    const doc = new Y.Doc();
+  function connect(id, principal, canEdit = true, doc = new Y.Doc()) {
     const text = documentText(doc.getXmlFragment(PAGE_DOCUMENT_FRAGMENT));
     const awareness = new awarenessProtocol.Awareness(doc);
     cleanups.push(() => { awareness.destroy(); doc.destroy(); });
@@ -144,6 +143,42 @@ test("co-editors see each other's edits and an idle commit is authored by everyo
   assert.deepEqual(h.commits[0].blockIds.sort(), ["links", "notes"]);
   assert.ok(h.notices.some((n) => n.type === "committed" && n.revision === 2));
   assert.equal(await h.session.commit(), null, "nothing pending, nothing committed");
+});
+
+test("a page made from the document its author is writing starts from it, and their editor merges into it", async () => {
+  // The author's editor, before the page exists: what they wrote first is what the page is made from.
+  const doc = new Y.Doc();
+  const text = documentText(doc.getXmlFragment(PAGE_DOCUMENT_FRAGMENT));
+  text.insert(0, "Plans\n");
+  const started = Y.encodeStateAsUpdate(doc);
+  const h = harness({ head: canonical(text.toString()) });
+  await h.session.ensureLoaded(human("ann"), null, started);
+  // They go on writing while the page is made, then the same editor joins its session.
+  text.insert(text.length, "\nWhat we do next\n");
+  const ann = h.connect("c-ann", human("ann"), true, doc);
+  const bob = h.connect("c-bob", human("bob"));
+  assert.equal(ann.text.toString(), canonical("Plans\n\nWhat we do next\n"), "nothing is written twice");
+  assert.equal(bob.text.toString(), ann.text.toString());
+  const result = await h.session.commit();
+  assert.equal(result.revision, 2);
+  assert.equal(h.commits[0].body, ann.text.toString());
+});
+
+test("words typed under a new page's name while it is being made are kept", async () => {
+  // Named, the page opens with its heading and an empty line to write on; the page is made from that.
+  const doc = new Y.Doc();
+  const fragment = doc.getXmlFragment(PAGE_DOCUMENT_FRAGMENT);
+  const named = markdownToPageDoc("# Plans\n");
+  updateYFragment(doc, fragment, named.copy(named.content.addToEnd(pageSchema.nodes.paragraph.create())),
+    { mapping: new Map(), isOMark: new Map() });
+  const started = Y.encodeStateAsUpdate(doc);
+  const h = harness({ head: canonical(pageFragmentMarkdown(fragment)) });
+  await h.session.ensureLoaded(human("ann"), null, started);
+  // They type on that empty line before their editor reaches the session.
+  documentText(fragment).insert(pageFragmentMarkdown(fragment).length, "\nWhat we do next\n");
+  const ann = h.connect("c-ann", human("ann"), true, doc);
+  assert.equal(ann.text.toString(), canonical("# Plans\n\nWhat we do next\n"));
+  assert.equal(h.connect("c-bob", human("bob")).text.toString(), ann.text.toString());
 });
 
 test("a read-only connection syncs but cannot write", async () => {

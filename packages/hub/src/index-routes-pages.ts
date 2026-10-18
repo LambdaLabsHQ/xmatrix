@@ -11,7 +11,9 @@ import { gitHubFileReferenceHref, gitHubFileReferences, pageLineDiff, parseGitHu
 import { canonicalPageMarkdown } from "@xmatrix/protocol/page-document";
 import type { AuthUser } from "./auth";
 import { PAGE_SESSION_HEARTBEAT_PING, PAGE_SESSION_SUBPROTOCOL_PREFIX, pageSessionId } from "./page-session-do";
-import { PAGE_DOCUMENT_FRAGMENT, type PageSessionPresent, type PageSessionPrincipal } from "./page-session";
+import { PAGE_DOCUMENT_FRAGMENT, pageFragmentMarkdown, type PageSessionPresent, type PageSessionPrincipal } from "./page-session";
+import { base64DecodeBytes, base64UrlEncodeBytes } from "./relay-v2-primitives";
+import * as Y from "yjs";
 import { pageConversation, pageTreeDiscussions, workingBySection } from "./page-conversations";
 import { createPostgresAuthorityDatabase } from "./postgres-authority-fleet";
 import { POSTGRES_MESSAGE_CONNECT_TIMEOUT_MS } from "./postgres-message-database-policy";
@@ -109,6 +111,36 @@ async function readAsCaller(c: Context<{ Bindings: Env }>) {
   const { page } = await repository(c.env).read({ requestId: crypto.randomUUID(), spaceId, pageId,
     principal: runPrincipalOf(authUser) });
   return { spaceId, pageId, authUser, page };
+}
+
+/** A started page's document is at most this much Yjs state. */
+const MAX_STARTED_DOCUMENT_BYTES = 1024 * 1024;
+
+/**
+ * The document a person started writing a new page in, as the page's session will hold it: only the
+ * page's own document, complete, and only what the page schema reads (anything else is dropped).
+ */
+function startedDocument(encoded: string): { update: Uint8Array; markdown: string } {
+  const invalid = () => new PageControlError("invalid_page_document", 400, "document is a page's Yjs document state");
+  let bytes: Uint8Array;
+  try {
+    bytes = base64DecodeBytes(encoded);
+  } catch {
+    throw invalid();
+  }
+  if (bytes.length > MAX_STARTED_DOCUMENT_BYTES) throw invalid();
+  const doc = new Y.Doc();
+  try {
+    Y.applyUpdate(doc, bytes);
+    if (doc.store.pendingStructs || doc.store.pendingDs) throw invalid();
+    if ([...doc.share.keys()].some((name) => name !== PAGE_DOCUMENT_FRAGMENT)) throw invalid();
+    const markdown = pageFragmentMarkdown(doc.getXmlFragment(PAGE_DOCUMENT_FRAGMENT));
+    return { update: Y.encodeStateAsUpdate(doc), markdown };
+  } catch (error) {
+    throw error instanceof PageControlError ? error : invalid();
+  } finally {
+    doc.destroy();
+  }
 }
 
 export function sessionPrincipal(authUser: AuthUser, conversationId?: string): PageSessionPrincipal {
@@ -223,16 +255,33 @@ export function registerPageRoutes(app: Hono<{ Bindings: Env }>): void {
     });
   }));
 
+  // A page is made with a name and markdown, or, when a person starts writing a new page, from the
+  // document they are writing (pages-live-document.md §7): the session starts from that document,
+  // and their editor goes on syncing into it.
   app.post(base, async (c) => run(c, async () => {
     const body = await json(c);
-    return repository(c.env).create({
-      requestId: crypto.randomUUID(), spaceId: c.req.param("spaceId"), principal: await principal(c),
-      title: body.title as string,
+    const spaceId = c.req.param("spaceId");
+    const authUser = await requireAuth(c.req.raw, c.env);
+    const started = typeof body.document === "string" ? startedDocument(body.document) : null;
+    const created = await repository(c.env).create({
+      requestId: crypto.randomUUID(), spaceId, principal: runPrincipalOf(authUser),
+      ...(started ? { body: started.markdown } : {
+        title: body.title as string, ...(typeof body.body === "string" ? { body: body.body } : {}) }),
       ...(body.parentPageId !== undefined ? { parentPageId: body.parentPageId as string | null } : {}),
-      ...(typeof body.body === "string" ? { body: body.body } : {}),
       ...(body.afterPageId !== undefined ? { afterPageId: body.afterPageId as string | null } : {}),
       ...(body.accessMode !== undefined ? { accessMode: body.accessMode as "open" | "restricted" } : {}),
     });
+    if (!started) return created;
+    let seeded = false;
+    try {
+      const response = await sessionCall(c.env, spaceId, created.page.pageId, "/internal/seed", {
+        principal: sessionPrincipal(authUser), document: base64UrlEncodeBytes(started.update),
+      });
+      seeded = response.ok && (await response.json() as { seeded?: boolean }).seeded === true;
+    } catch {
+      // Unseeded, the session loads the page from its markdown, and the editor opens it afresh.
+    }
+    return { ...created, seeded };
   }));
 
   app.get(`${base}/:pageId`, async (c) => run(c, async () => {

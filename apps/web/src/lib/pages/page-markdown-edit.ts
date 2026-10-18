@@ -14,3 +14,15 @@ export function editPageMarkdown(doc: Y.Doc, change: (markdown: string) => strin
   const next = markdownToPageDoc(change(pageMarkdown(doc)));
   doc.transact(() => updateYFragment(doc, fragment, next, { mapping: new Map(), isOMark: new Map() }), origin);
 }
+
+/**
+ * Names a document that opens without a name: it opens with `title` as its heading
+ * (pages-live-document.md §4.1), with room below it to go on writing.
+ */
+export function nameDocument(doc: Y.Doc, title: string, origin: string): void {
+  const fragment = doc.getXmlFragment(PAGE_DOCUMENT_FRAGMENT);
+  const text = pageMarkdown(doc).trim();
+  const named = markdownToPageDoc(`# ${title}\n\n${text}`);
+  const next = text ? named : named.copy(named.content.addToEnd(pageSchema.nodes.paragraph.create()));
+  doc.transact(() => updateYFragment(doc, fragment, next, { mapping: new Map(), isOMark: new Map() }), origin);
+}
