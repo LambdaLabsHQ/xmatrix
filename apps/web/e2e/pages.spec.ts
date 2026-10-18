@@ -480,14 +480,13 @@ test.describe("on a phone", () => {
     const roomBox = (await editor.locator(".page-edge-room.is-reader-change").first().boundingBox())!;
     expect(roomBox.x).toBeLessThanOrEqual(markBox.x);
     expect(roomBox.y + roomBox.height).toBeGreaterThanOrEqual(markBox.y + markBox.height - 2);
-    // A paragraph that is all new is marked in the margin, even beside one whose words changed.
+    // A paragraph that is all new is one change, not each of its words.
     await expect(editor.locator(".page-reader-change.is-block", { hasText: "The second region is next" })).toHaveCount(1);
     await expect(editor.locator(".page-reader-change:not(.is-block)", { hasText: "The second region" })).toHaveCount(0);
     await expect(editor.locator(".page-reader-change:not(.is-block)", { hasText: "Shipped" })).toHaveCount(1);
     await mark.getByRole("button", { name: "Next change" }).click();
     await expect(mark).toContainText("2/4");
     await browser.screenshot({ path: test.info().outputPath("pages-reader-changes-phone.png") });
-    expect(await fixtureRequestBodies(browser, "page-mark-read")).toEqual([]);
 
     await mark.getByRole("button", { name: "Viewed" }).click();
     await expect(mark).toBeHidden();
@@ -972,8 +971,9 @@ test("a page shows its document at once, and the live editor takes over when its
   }
 });
 
-/** Opens a page whose reader last read revision 2, and that has since changed in three places. */
-async function openChangedPage(browser: Page) {
+/** Opens a page whose reader last read revision 2, `before`, and that is `after` now: by default, changed in three places. */
+async function openChangedPage(browser: Page, before = "# Relay\n\n## Status\n\nPlanned for next week\n\n## Notes\n\nnone\n",
+  after = "# Relay\n\n## Status\n\nShipped this week\n\nThe second region is next\n\n## Notes\n\nnone\n\n## Risks\n\nLate reviews\n") {
   await stubPages(browser, [page("p-relay", null, "Relay", "V")]);
   await fixtureJson(browser, "page-links", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\?.*$/u, { links: [] });
   await fixtureJson(browser, "page-read", /\/api\/xmatrix\/spaces\/[^/]+\/pages\/p-relay\/read$/u, { revision: 2 },
@@ -981,26 +981,38 @@ async function openChangedPage(browser: Page) {
   await fixtureJson(browser, "page-mark-read", /\/api\/xmatrix\/spaces\/[^/]+\/pages\/p-relay\/read$/u, { revision: 3 },
     { method: "PUT" });
   await fixtureJson(browser, "page-revision-2", /\/api\/xmatrix\/spaces\/[^/]+\/pages\/p-relay\?revision=2$/u, { page: {
-    ...page("p-relay", null, "Relay", "V"), body: "# Relay\n\n## Status\n\nPlanned for next week\n\n## Notes\n\nnone\n",
+    ...page("p-relay", null, "Relay", "V"), body: before,
     revisionInfo: { revision: 2, kind: "edit", authors: [], conversationIds: [], createdAt: NOW } } });
-  return openLivePage(browser,
-    "# Relay\n\n## Status\n\nShipped this week\n\nThe second region is next\n\n## Notes\n\nnone\n\n## Risks\n\nLate reviews\n");
+  return openLivePage(browser, after);
 }
 
-test("what changed since the reader last read the page stays as a diff until it is ticked viewed, and the page is then read", async ({ page: browser }) => {
+test("what changed since the reader last read the page stays as a diff until it is ticked viewed, while what is on screen is read", async ({ page: browser }) => {
   const editor = await openChangedPage(browser);
   const added = editor.locator(".page-reader-change");
   await expect(added.filter({ hasText: "Shipped" })).toBeVisible();
   await expect(added.filter({ hasText: "Late reviews" })).toHaveCount(1);
+  // Lines changed next to each other are barred once in the margin, left of the text: the changed status line
+  // and the new paragraph under it are one bar, the new Risks section another, the unchanged Notes parts them.
+  // A wholly new paragraph is barred, not underlined; words changed inside a line are underlined.
+  const bars = browser.getByTestId("page-reader-gutter").locator(".page-reader-bar");
+  await expect(bars).toHaveCount(2);
+  const newParagraph = added.filter({ hasText: "The second region is next" });
+  await expect(newParagraph).toHaveCSS("text-decoration-line", "none");
+  await expect(added.filter({ hasText: "Shipped" })).toHaveCSS("text-decoration-line", "underline");
+  const [first, shipped, second] = [(await bars.first().boundingBox())!,
+    (await editor.getByText("Shipped this week").boundingBox())!, (await newParagraph.boundingBox())!];
+  expect(first.x + first.width).toBeLessThan(shipped.x);
+  expect(first.y).toBeLessThanOrEqual(shipped.y + shipped.height / 2);
+  expect(first.y + first.height).toBeGreaterThanOrEqual(second.y + second.height / 2);
   await expect(editor.locator(".page-reader-removed")).toContainText("Planned for next");
   await browser.screenshot({ path: test.info().outputPath("pages-reader-changes.png") });
-  // The diff does not play out or fade, and the page is not read behind its reader's back.
+  // The diff does not play out or fade. The page, all of it on screen a moment, is read whole meanwhile.
   const viewed = browser.getByTestId("page-reader-diff");
   await expect(viewed).toContainText("since you last read this page");
   await browser.waitForTimeout(2_500);
   await expect(added.filter({ hasText: "Shipped" })).toBeVisible();
   expect(await added.first().evaluate((element) => getComputedStyle(element).animationName)).toBe("none");
-  expect(await fixtureRequestBodies(browser, "page-mark-read")).toEqual([]);
+  await expect.poll(async () => await fixtureRequestBodies(browser, "page-mark-read")).toContainEqual({ revision: 3, seen: null });
   // Ticked viewed, the page is as it is.
   await viewed.getByRole("checkbox").check();
   await expect(added).toHaveCount(0);
@@ -1008,6 +1020,33 @@ test("what changed since the reader last read the page stays as a diff until it 
   await expect(editor).toContainText("Shipped this week");
   await expect.poll(async () => (await fixtureRequestBodies(browser, "page-mark-read")).map((body) => body.revision))
     .toContain(3);
+});
+
+test("what the reader has not had on screen stays unread, as they last saw it, to be shown as changed next time", async ({ page: browser }) => {
+  const filler = Array.from({ length: 40 }, (_, index) => `Filler line ${index + 1}`).join("\n\n");
+  const editor = await openChangedPage(browser, `# Relay\n\nPlanned\n\n${filler}\n\nOld ending\n`,
+    `# Relay\n\nShipped\n\n${filler}\n\nNew ending\n`);
+  await expect(editor.locator(".page-reader-change", { hasText: "Shipped" })).toBeVisible();
+  // The top was on screen, so it is read as it is; the ending below the fold is kept as the reader last saw it.
+  await expect.poll(async () => (await fixtureRequestBodies(browser, "page-mark-read")).at(-1)).toEqual({ revision: 2,
+    seen: `# Relay\n\nShipped\n\n${filler}\n\nOld ending\n` });
+  // Scrolled to and dwelt on, the ending is read too, and with it the whole page.
+  await editor.getByText("New ending").scrollIntoViewIfNeeded();
+  await expect.poll(async () => (await fixtureRequestBodies(browser, "page-mark-read")).at(-1)).toEqual({ revision: 3,
+    seen: null });
+});
+
+test("writing on a page that changed while its reader was away stops marking the diff over the writing", async ({ page: browser }) => {
+  const editor = await openChangedPage(browser);
+  await expect(browser.getByTestId("page-reader-gutter").locator(".page-reader-bar")).toHaveCount(2);
+  await editor.getByText("none", { exact: true }).click();
+  await browser.keyboard.press("End");
+  await browser.keyboard.type(" yet");
+  // Co-writing, what changes is seen as it happens, in its writer's ink: nothing of the diff stays marked.
+  await expect(editor.locator(".page-reader-change, .page-reader-removed")).toHaveCount(0);
+  await expect(browser.getByTestId("page-reader-gutter")).toHaveCount(0);
+  await expect(browser.getByTestId("page-reader-diff")).toHaveCount(0);
+  await expect(editor).toContainText("none yet");
 });
 
 test("an editor that meets a Hub still keeping pages as text waits instead of showing an empty page", async ({ page: browser }) => {
@@ -1427,6 +1466,8 @@ test("on a long page, who works out of view shows at its edges, and what an Agen
   await expect(tinted).toContainText(["shipping Friday"]);
   const inked = editor.locator(`.page-agent-ink[data-client="${AGENT_CLIENT}"]`);
   await expect.poll(async () => (await inked.allTextContents()).join("")).toBe("none yet, shipping Friday");
+  // The Agent's ink already identifies its paragraph; no extra margin bar crowds the document.
+  expect(await inked.first().evaluate((element) => getComputedStyle(element.closest("p")!, "::before").content)).toBe("none");
   await browser.screenshot({ path: test.info().outputPath("pages-people-below.png") });
 
   // Its face takes the reader to the Agent's line, beside which it now stands; the one now above is

@@ -671,6 +671,49 @@ export function pageDocChanges(before: DocNode, after: DocNode): PageDocChange[]
   return changes.slice(0, MAX_DOC_CHANGES);
 }
 
+/** A document's top-level blocks, each keyed by its content. */
+function topBlocks(node: DocNode): Array<{ node: DocNode; pos: number; key: string }> {
+  const out: Array<{ node: DocNode; pos: number; key: string }> = [];
+  node.forEach((child, pos) => out.push({ node: child, pos, key: JSON.stringify(child.toJSON()) }));
+  return out;
+}
+
+/**
+ * The page as its reader has seen it (pages-live-document.md §3.1), after they had `now` on screen where
+ * `inView` says: each top-level block of `now` in view is seen as it is, one out of view keeps what they
+ * saw of it in `seen`, and a block taken out is gone for them once where it stood is in view.
+ */
+export function pageSeenDoc(seen: DocNode, now: DocNode, inView: (pos: number, end: number) => boolean): DocNode {
+  const old = topBlocks(seen);
+  const current = topBlocks(now);
+  const out: DocNode[] = [];
+  let kept = 0;
+  const shown = (block: { node: DocNode; pos: number }) => inView(block.pos, block.pos + block.node.nodeSize);
+  for (const hunk of diffIndices(old.map((block) => block.key), current.map((block) => block.key))) {
+    const [removedStart, removedLength] = hunk.buffer1;
+    const [addedStart, addedLength] = hunk.buffer2;
+    for (const block of old.slice(kept, removedStart)) out.push(block.node);
+    kept = removedStart + removedLength;
+    const removed = old.slice(removedStart, kept);
+    const added = current.slice(addedStart, addedStart + addedLength);
+    // Where a block was taken out: the blocks either side of the gap it left.
+    const gap = () => [current[addedStart - 1], current[addedStart]].some((block) => block !== undefined && shown(block));
+    // A block that took another's place is paired with it: seen, it replaces it; unseen, the old one stays.
+    for (let index = 0; index < Math.max(removed.length, added.length); index++) {
+      const was = removed[index];
+      const is = added[index];
+      if (is) {
+        if (shown(is)) out.push(is.node);
+        else if (was) out.push(was.node);
+      } else if (was && !(added.length ? shown(added[added.length - 1]!) : gap())) {
+        out.push(was.node);
+      }
+    }
+  }
+  for (const block of old.slice(kept)) out.push(block.node);
+  return now.type.create(now.attrs, out);
+}
+
 /**
  * A suggestion against the document as it is now, as the changes a person
  * takes or leaves one at a time (pages-live-document.md §4.2). Each replaces a
@@ -691,13 +734,8 @@ export interface PageDocHunk {
 const MAX_DOC_HUNKS = 200;
 
 export function pageDocHunks(doc: DocNode, suggested: DocNode): PageDocHunk[] {
-  const blocks = (node: DocNode) => {
-    const out: Array<{ node: DocNode; pos: number; key: string }> = [];
-    node.forEach((child, pos) => out.push({ node: child, pos, key: JSON.stringify(child.toJSON()) }));
-    return out;
-  };
-  const now = blocks(doc);
-  const next = blocks(suggested);
+  const now = topBlocks(doc);
+  const next = topBlocks(suggested);
   const hunks: PageDocHunk[] = [];
   const offer = (taken: typeof now, put: typeof next, at: number) => {
     const last = taken[taken.length - 1];

@@ -883,8 +883,6 @@ function remoteChangeDecorations(state: EditorState, fragment: Y.XmlFragment, aw
     const style = `--page-change-color: ${color}${at === null ? "" : `; --page-ink-delay: -${Math.max(0, now - at)}ms`}`;
     const state = at === null ? " is-writing" : brief ? " is-brief" : "";
     decorations.push(Decoration.inline(from, to, { class: `page-agent-ink${state}`, "data-client": String(client), style }));
-    // Barred in the margin in its colour too, as a change waiting on the reader is.
-    decorations.push(Decoration.node(from - 1, to + 1, { class: `page-agent-block${state}`, style }));
   }
   return DecorationSet.create(state.doc, decorations);
 }

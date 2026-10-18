@@ -559,43 +559,26 @@ html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-com
   animation: page-agent-words-in 0.6s ease-out both;
   animation-delay: var(--page-words-delay, 0ms);
 }
-/* …and barred in the margin in its colour, as a change waiting on the reader is barred in brass. */
-@keyframes page-agent-bar {
-  0%, 80% { opacity: 1; }
-  100% { opacity: 0; }
-}
-.page-document .page-agent-block { position: relative; }
-.page-document .page-agent-block::before {
-  content: "";
-  position: absolute;
-  top: 0.2em;
-  bottom: 0.2em;
-  left: -14px;
-  width: 3px;
-  border-radius: 3px;
-  background: var(--page-change-color);
-  pointer-events: none;
-  animation: page-agent-bar 300s linear forwards;
-  animation-delay: var(--page-ink-delay, 0ms);
-}
-.page-document .page-agent-block.is-brief::before { animation-duration: 20s; }
-.page-document .page-agent-block.is-writing::before { animation: none; }
-/* A list item has its marker there; its ink alone says whose it is. */
-.page-document li .page-agent-block::before { content: none; }
 @media (prefers-reduced-motion: reduce) {
   .page-document :is(.page-remote-change, .page-agent-ink) { animation-timing-function: steps(1, end); }
-  .page-document .page-agent-block::before { animation-timing-function: steps(1, end); }
   .page-document .page-remote-change[data-agent] { animation: none; }
   .page-document .page-agent-ink.page-remote-change[data-agent] { animation: page-agent-ink 300s steps(1, end) forwards; }
   .page-document .page-agent-ink.is-brief.page-remote-change[data-agent] { animation-duration: 20s; }
 }
 
 /*
- * What changed since this reader last read the page (§3.1), until they tick it viewed. It is marked as a
- * proofreader marks paper, in ink and never in a tinted box: new words underlined in brass, a new block
- * barred in the margin, words taken out struck through in faint ink where they stood. Brass is the app's
- * one accent, kept for what a person has yet to do; reading a change is that.
+ * What changed since this reader last read the page (§3.1), until they tick it viewed or write on it. It is
+ * marked as a proofreader marks paper, in ink and never in a tinted box: each stretch of changed lines barred
+ * once in the left margin (PageReaderChangeGutter), and inside a line that changed in part, new words
+ * underlined and words taken out struck through in faint ink where they stood. Brass is the app's one
+ * accent, kept for what a person has yet to do; reading a change is that.
  */
+.page-reader-bar {
+  position: absolute;
+  width: 3px;
+  border-radius: 3px;
+  background: var(--m-ink-attention, var(--accent));
+}
 .page-document .page-reader-change:not(.is-block) {
   text-decoration-line: underline;
   text-decoration-color: color-mix(in oklab, var(--m-ink-attention, var(--accent)) 85%, transparent);
@@ -603,10 +586,10 @@ html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-com
   text-underline-offset: 0.24em;
   text-decoration-skip-ink: none;
 }
-.page-document :is(.page-reader-change, .page-reader-removed, .page-suggest-in, .page-suggest-out).is-block {
+.page-document :is(.page-suggest-in, .page-suggest-out).is-block {
   position: relative;
 }
-.page-document :is(.page-reader-change, .page-reader-removed, .page-suggest-in, .page-suggest-out).is-block::after {
+.page-document :is(.page-suggest-in, .page-suggest-out).is-block::after {
   content: "";
   position: absolute;
   top: 0.2em;
@@ -617,7 +600,6 @@ html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-com
   background: var(--m-ink-attention, var(--accent));
   pointer-events: none;
 }
-.page-document li:is(.page-reader-change, .page-reader-removed).is-block::after { left: calc(-1.3em - 14px); }
 .page-document .page-reader-removed {
   color: var(--m-ink-secondary, var(--muted-foreground));
   text-decoration: line-through;
