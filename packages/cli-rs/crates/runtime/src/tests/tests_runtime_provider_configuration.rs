@@ -1359,3 +1359,22 @@ fn assert_kimi_fixture_usage(usage: &protocol::LlmUsage) {
     assert_eq!(usage.context_usage_percent, Some(6.25));
     assert_eq!(usage.cost_usd, Some(0.0042));
 }
+
+#[test]
+fn signed_out_start_failure_is_one_hub_keeps() {
+    let failure = crate::signed_out_start_failure(
+        "wrapper_startup_failed",
+        "Failed to authenticate: OAuth session expired and could not be refreshed",
+    )
+    .expect("a signed-out start is marked");
+    assert_eq!(failure.code, "harness_signed_out");
+    assert_eq!(failure.stage, "wrapper_startup_failed");
+    // cleanRuntimeOperationFailure: ^diag_<uuid>$, or Hub drops the failure.
+    let uuid = failure.diagnostic_id.strip_prefix("diag_").expect("diag_ prefix");
+    assert!(uuid::Uuid::parse_str(uuid).is_ok());
+    assert!(crate::signed_out_start_failure(
+        "wrapper_startup_failed",
+        "error_during_execution: API Error: 529 overloaded"
+    )
+    .is_none());
+}

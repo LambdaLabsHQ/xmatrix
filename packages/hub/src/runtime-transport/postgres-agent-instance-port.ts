@@ -9,8 +9,9 @@ import type {
   AgentInstanceConnectMessage,
   AgentInstanceServerMessage,
 } from "@xmatrix/protocol/connections/agent-instance";
-import type { LiveAgentStatus, SerializedAgent } from "@xmatrix/protocol";
+import type { HarnessSignedOut, LiveAgentStatus, SerializedAgent } from "@xmatrix/protocol";
 import {
+  AGENT_SIGNED_OUT_LIFECYCLE_REASON,
   AGENT_TURN_FAILURE_LIFECYCLE_LAYER,
   AGENT_TURN_FAILURE_LIFECYCLE_REASON,
   AGENT_TURN_FAILURE_LIFECYCLE_STATUS,
@@ -146,6 +147,8 @@ export interface PostgresAgentInstancePortDependencies {
   pullRequestOpened?(input: { spaceId: string; channelId: string; ownerUserId: string; repository: string;
     number: number; commandId: string }): Promise<unknown>;
   turnRetry?(session: Readonly<AgentInstanceRuntimeSession>, message: Message<"agent_turn_retry">): Promise<AuthorityOutput>;
+  /** Records a turn its program refused as signed out; the Run's registered program and machine. */
+  recordSignedOut?(session: Readonly<AgentInstanceRuntimeSession>): Promise<HarnessSignedOut | undefined>;
   /** Settle a questionnaire card once (postgresSettleQuestionnaire). */
   settleQuestionnaire?(input: Parameters<typeof postgresSettleQuestionnaire>[1]): ReturnType<typeof postgresSettleQuestionnaire>;
   observeAgentLaunchStage?(stage: string, outcome: "ok" | "error", durationMs: number): void;
@@ -192,6 +195,8 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
         },
       },
       turnRetry: (session, message) => reportAgentTurnRetry(input.env, session, message),
+      recordSignedOut: (session) => runtimeRepository(input.env).recordRunSignedOut({ requestId: crypto.randomUUID(),
+        runId: session.principal.runId, actorUserId: session.principal.ownerUserId }),
       settleQuestionnaire: (settle) => postgresSettleQuestionnaire(input.env, settle),
       history: input.history,
       signals: input.signals,
@@ -693,6 +698,13 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
     noticeId: string | undefined,
   ): Promise<void> {
     if (!shouldPersistAgentTurnFailureNotice(message)) return;
+    // A program that refused the turn as signed out is named with its sign-in.
+    // An unreadable registration still posts the failure, as written.
+    const signedOut = message.reason === AGENT_SIGNED_OUT_LIFECYCLE_REASON && this.dependencies.recordSignedOut
+      ? await this.dependencies.recordSignedOut(session).catch((error: unknown) => {
+        console.error("Signed-out harness could not be read for the turn-failure notice", error);
+        return undefined;
+      }) : undefined;
     const command = agentTurnFailureAppendCommand({
       runId: session.principal.runId,
       instanceId: session.run.instanceId,
@@ -704,6 +716,7 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
       detail: message.detail,
       pendingTasks: message.pendingTasks,
       reason: message.reason,
+      ...(signedOut ? { signedOut } : {}),
       noticeId,
       senderSnapshot: agentMessagePresentation(session.presentation) ?? {},
     });

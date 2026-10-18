@@ -2599,8 +2599,8 @@ export const MessageRow = memo(function MessageRow({
             ) : signedOutNotice ? (
               <HarnessSignedOutNotice signedOut={signedOutNotice.signedOut} spaceId={channel?.spaceId ?? null} token={token}
                 userId={currentUserIdentityId.replace(/^user:/, "")}
-                onSignedIn={onResendSignedOutSummon && (() => onResendSignedOutSummon(signedOutNotice.sourceMessageId,
-                  signedOutNotice.sourceMention))}
+                onSignedIn={signedOutNotice.summon && onResendSignedOutSummon && (() => onResendSignedOutSummon(
+                  signedOutNotice.summon!.sourceMessageId, signedOutNotice.summon!.sourceMention))}
                 notice={<RichMessageContent body={displayBody} components={markdownComponents} />} />
             ) : isMachineRunFailureNotice(message) ? (
               <NamedMachineRunFailureNotice body={displayBody} metadata={message.metadata} spaceId={channel?.spaceId} token={token} />

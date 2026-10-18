@@ -13,7 +13,7 @@ import { queryMessageAgentTargets } from "./message-agent-targets.js";
 import { queryMessageExecutions, selectRunExecutionSources } from "./runtime-message-executions.js";
 import { ACTIVE_RUN_STATUS_SQL, isActiveRunStatus, isRunStatus, isTerminalRunStatus, validRunTransition, type RunStatus, PREPARATION_REJECTION_MESSAGES, REGISTRATION_PREPARATION_REJECTION_CODES, preparationRejectionMessage, parseDecisionAnswerFailure, parseHarnessTooOld, parseHarnessSignedOut,
   parsePresentedRoutingDecision, rebornFailureReason, agentAvatarUrlFromMetadata, isAgentStatus,
-  isLiveAgentStatus, LIVE_AGENT_STATUS_SQL, normalizeAgentPresetRuntime, type AgentStatus, type AgentLaunchState,
+  isLiveAgentStatus, LIVE_AGENT_STATUS_SQL, agentPresetById, type HarnessSignedOut, normalizeAgentPresetRuntime, type AgentStatus, type AgentLaunchState,
   type RuntimeOperationFailure, type SerializedAgentContinuation, type SerializedAgentLaunch, type SerializedAgentInvocationRejection, type SerializedAgentStop, type AgentStopPhase, type AgentInvocationQueryPage, type AgentLaunchActivity, type InvocationDiagnosticsReport } from "@xmatrix/protocol";
 import { commandDigest as digest } from "./command-digest.js";
 
@@ -1639,6 +1639,35 @@ export class PostgresRuntimeRepository {
       return { stopped: rows.map((row) => ({ instanceId: String(row.instance_id),
         mentionTarget: `${String(row.agent_name)}:${Number(row.channel_instance_id)}` })) };
     });
+  }
+
+  /** A Run whose program refused a turn as signed out: recorded on the Run, so
+   * routing passes its registration over until its machine reports a newer
+   * sign-in, and returned as the program and machine its sign-in names.
+   * Undefined for a Run without a registration. */
+  async recordRunSignedOut(input: { requestId: string; runId: string; actorUserId: string }): Promise<HarnessSignedOut | undefined> {
+    const requestId = text(input.requestId, "requestId", 200);
+    const runId = text(input.runId, "runId", 300);
+    const route = await this.entityDirectory.resolve(
+      { requestId, operation: "runtime.run-signed-out.locate" }, "run", runId,
+    );
+    if (!route) return undefined;
+    const placement = await this.spaces.resolve(requestId, "runtime.run-signed-out.placement", route.spaceId);
+    const rows = await this.database.transaction({ requestId, operation: "runtime.run-signed-out",
+      placement: { spaceId: placement.spaceId, shardId: placement.shardId, placementEpoch: placement.placementEpoch } },
+    tx => tx.query<QueryResultRow>({ name: "runtime_run_signed_out_v1", text: `WITH marked AS (
+        UPDATE data.runs SET metadata_json=metadata_json||jsonb_build_object('signedOutAt',statement_timestamp())
+        WHERE run_id=$1 AND owner_user_id=$2 RETURNING run_id)
+      SELECT b.machine_id,b.harness,
+        (SELECT name FROM data.machines m WHERE m.owner_user_id=b.owner_user_id AND m.machine_id=b.machine_id) AS machine_name
+      FROM data.run_agent_registrations b JOIN marked ON marked.run_id=b.run_id WHERE b.owner_user_id=$2 LIMIT 1`,
+    values: [runId, text(input.actorUserId, "actorUserId", 300)], maxRows: 1 }));
+    const row = rows[0];
+    if (!row) return undefined;
+    const harness = String(row.harness);
+    const machineName = typeof row.machine_name === "string" ? row.machine_name.trim() : "";
+    return parseHarnessSignedOut({ harness, program: agentPresetById(harness)?.displayName ?? harness,
+      machineId: String(row.machine_id), ...(machineName ? { machineName } : {}) });
   }
 
   async getRun(input: { requestId: string; runId: string; actorUserId: string; requireExecutionAccess?: boolean }) {
