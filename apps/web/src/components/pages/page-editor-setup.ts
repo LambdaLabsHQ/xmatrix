@@ -26,6 +26,7 @@ import { referenceChips, type PageReferenceTargets } from "./page-reference-chip
 import { githubFileEmbeds, type ReadGitHubFile } from "./page-github-file-embeds";
 import { markdownShortcuts, syntaxPlugin, typoraKeymap } from "./page-editor-syntax";
 import { mountHeadingMenu, type HeadingMenu } from "./page-heading-menu";
+import { NEW_PAGE_TITLE } from "./page-creation";
 import { mountSectionAgents, type SectionAgent } from "./page-section-agents";
 
 /**
@@ -271,21 +272,112 @@ class ListItemView implements NodeView {
   }
 }
 
-/** The empty page's hint; a function when it can change while the page is open. */
-function placeholder(text: string | (() => string)): Plugin {
-  return new Plugin({
+/** Whether a document is still its first line, written into or not: no name and nothing else yet. */
+const titleLineKey = new PluginKey<boolean>("page-title-line");
+
+/** A remote edit (another writer, or the document arriving), as y-prosemirror marks it. */
+function remote(tr: Transaction): boolean {
+  return Boolean((tr.getMeta(ySyncPluginKey) as { isChangeOrigin?: boolean } | undefined)?.isChangeOrigin);
+}
+
+/** The first line written into an empty page becomes its opening heading, the page's name. */
+function nameFirstLine(state: EditorState): Transaction | null {
+  const first = state.doc.firstChild!;
+  if (!titleLineKey.getState(state) || state.doc.childCount !== 1 || first.type !== nodes.paragraph || !first.content.size) {
+    return null;
+  }
+  return state.tr.setNodeMarkup(0, nodes.heading, { level: 1 });
+}
+
+const PAGE_PLACEHOLDER = "Write the current state of this area…";
+
+/**
+ * As in Notion, an empty page opens on its title: its first line is drawn as the page's heading, with
+ * "Untitled" until something is written there, and what is written there is the heading (pages-live-document.md
+ * §4.1). Nothing is written by drawing it, so a page left empty stays unmade. Once named, an empty line below the
+ * name shows what to write. `hint` replaces both while it is set: a page being co-written asks for its first line.
+ */
+function placeholder(hint: () => string | undefined): Plugin {
+  return new Plugin<boolean>({
+    key: titleLineKey,
+    state: {
+      init: (_config, state) => emptyPage(state.doc),
+      apply(tr, titleLine, _old, state) {
+        if (emptyPage(state.doc)) return true;
+        const only = state.doc.childCount === 1 && state.doc.firstChild!.type === nodes.paragraph;
+        return titleLine && only && !(tr.docChanged && remote(tr));
+      },
+    },
+    // Typed letters name the page at once; an IME's text once it is composed (composing in a line redrawn breaks it).
+    appendTransaction(transactions, _old, state) {
+      if (!transactions.some((tr) => tr.docChanged && !remote(tr))) return null;
+      if (transactions.some((tr) => tr.getMeta("composition") !== undefined)) return null;
+      return nameFirstLine(state);
+    },
     props: {
+      handleDOMEvents: {
+        compositionend(view) {
+          // After ProseMirror reads the composed text in.
+          window.setTimeout(() => {
+            const tr = view.composing ? null : nameFirstLine(view.state);
+            if (tr) view.dispatch(tr);
+          }, 30);
+          return false;
+        },
+      },
       decorations(state) {
-        // An empty page, or one with only its name so far, shows what to write in its first line.
         const doc = state.doc;
+        const asked = hint();
+        if (asked !== undefined && emptyPage(doc)) {
+          return DecorationSet.create(doc, [Decoration.node(0, doc.content.size, { class: "page-placeholder", "data-placeholder": asked })]);
+        }
+        if (titleLineKey.getState(state) && doc.childCount === 1 && doc.firstChild!.type === nodes.paragraph) {
+          // The same h1 the page's name is drawn as, around the line; it stays put while the line is typed in.
+          return DecorationSet.create(doc, [Decoration.node(0, doc.content.size, {
+            nodeName: "h1", "data-testid": "page-title", "data-placeholder": NEW_PAGE_TITLE,
+            class: doc.firstChild!.content.size ? "" : "page-placeholder",
+          })]);
+        }
+        const first = doc.firstChild!;
+        if (first.type !== nodes.heading || first.attrs.level !== 1) {
+          // A document that opens with anything else has no name: "Untitled" in its place, named by clicking it.
+          return DecorationSet.create(doc, [Decoration.widget(0, untitled, { side: -1, key: "untitled", stopEvent: () => true })]);
+        }
+        // A name typed and taken back again reads "Untitled" too.
+        if (!first.content.size) {
+          return DecorationSet.create(doc, [Decoration.node(0, first.nodeSize,
+            { class: "page-placeholder", "data-placeholder": NEW_PAGE_TITLE })]);
+        }
+        // A named page with nothing under its name yet shows what to write in the line below.
         const named = doc.childCount === 2 && doc.firstChild!.type === nodes.heading;
-        if ((doc.childCount !== 1 && !named) || doc.lastChild!.type !== nodes.paragraph || doc.lastChild!.content.size) return null;
+        if (!named || doc.lastChild!.type !== nodes.paragraph || doc.lastChild!.content.size) return null;
         const from = doc.content.size - doc.lastChild!.nodeSize;
         return DecorationSet.create(doc, [Decoration.node(from, doc.content.size,
-          { class: "page-placeholder", "data-placeholder": typeof text === "function" ? text() : text })]);
+          { class: "page-placeholder", "data-placeholder": asked ?? PAGE_PLACEHOLDER })]);
       },
     },
   });
+}
+
+/** The name a document without one shows above its text; clicking it starts the heading that names it. */
+function untitled(view: EditorView): HTMLElement {
+  const title = document.createElement("h1");
+  title.className = "page-untitled";
+  title.textContent = NEW_PAGE_TITLE;
+  title.dataset.testid = "page-title";
+  title.contentEditable = "false";
+  title.addEventListener("mousedown", (event) => {
+    if (!view.editable) return;
+    event.preventDefault();
+    const tr = view.state.tr.insert(0, nodes.heading.create({ level: 1 }));
+    view.dispatch(tr.setSelection(TextSelection.create(tr.doc, 1)).scrollIntoView());
+    view.focus();
+  });
+  return title;
+}
+
+function emptyPage(doc: DocNode): boolean {
+  return doc.childCount === 1 && doc.firstChild!.type === nodes.paragraph && !doc.firstChild!.content.size;
 }
 
 /** How long a page sits in a hidden tab before its reader shows as idle. */
@@ -1116,7 +1208,7 @@ function slashMenu(): Plugin<SlashState | null> {
 }
 
 export function editorPlugins(input: {
-  fragment: Y.XmlFragment; awareness: Awareness; placeholder: string | (() => string);
+  fragment: Y.XmlFragment; awareness: Awareness; placeholder: () => string | undefined;
   onBlockChange?: (blockId: string) => void;
   handleKeyDown: (view: EditorView, event: KeyboardEvent) => boolean;
   openConversation: (conversationId: string) => void;

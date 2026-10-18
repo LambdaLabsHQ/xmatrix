@@ -806,13 +806,14 @@ test("an owner may start a Space's pages from a repository or a first page, and 
     body: "# First document\n", revisionInfo: { revision: 1, kind: "edit", authors: [], conversationIds: [], createdAt: NOW } } },
   { method: "GET" });
   await browser.getByRole("button", { name: "Create the first page" }).click();
-  await expect(browser.getByTestId("page-title")).toBeFocused();
+  // It opens on its title, the document's first line; the first letter typed there makes it.
+  await expect(browser.getByTestId("page-title")).toHaveAttribute("data-placeholder", "Untitled");
+  await expect(browser.getByTestId("page-editor").locator(".page-document")).toBeFocused();
   await browser.keyboard.type("First document");
-  await browser.getByTestId("page-title").blur();
   await expect.poll(async () => (await fixtureRequestBodies(browser, "page-create")).length).toBe(1);
   const [made] = await fixtureRequestBodies(browser, "page-create");
   expect(made).toMatchObject({ parentPageId: null });
-  expect(startedMarkdown(made!.document)).toBe("# First document\n");
+  expect(startedMarkdown(made!.document)).toBe("# F\n");
   await expect(browser.getByTestId("page-migration-review")).toBeHidden();
   await expect(browser.getByTestId("pages-view")).toContainText("First document");
   // An owner publishes the page for anyone with the link.
@@ -1549,30 +1550,21 @@ test("typing fast at the top of a busy page while an Agent writes keeps every ke
 
 test("everyday editing works as in Google Docs: rename the page, grow a table, links from typed URLs", async ({ page: browser }) => {
   await browser.setViewportSize({ width: 1280, height: 800 });
-  // A page is named by the heading its document opens with; one that opens without a name offers it above,
-  // as plain text, and what is typed there is written into the document.
+  // A page is named by the heading its document opens with; one that opens without a name reads "Untitled"
+  // in its place, and clicking it starts that heading in the document.
   await stubPages(browser, [page("p-relay", null, "Untitled", "V")]);
   await fixtureJson(browser, "page-links", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\?.*$/u, { links: [] });
-  await fixtureJson(browser, "page-rename", /\/api\/xmatrix\/spaces\/[^/]+\/pages\/p-relay$/u,
-    { page: page("p-relay", null, "Relay service", "V") }, { method: "PATCH" });
   const server = pageDocument("## Relay\n\n| Area | State |\n|---|---|\n| Search | Shipped |\n\nSee the notes.\n");
   const editor = await openLivePage(browser, server);
 
-  // Click, type, Enter. No field well.
-  const title = browser.getByTestId("page-title");
-  await expect(title).toHaveValue("");
-  await expect(title).toHaveAttribute("placeholder", "Untitled");
-  const titleChrome = await title.evaluate((element) => {
-    const style = getComputedStyle(element);
-    return { border: style.borderTopWidth, background: style.backgroundColor, shadow: style.boxShadow, appearance: style.appearance };
-  });
-  expect(titleChrome.border, "the name has no box").toBe("0px");
-  expect(titleChrome.shadow, "the name is not recessed").toBe("none");
-  expect(titleChrome.background, "the name has no fill").toMatch(/transparent|rgba\(0,\s*0,\s*0,\s*0\)/u);
-  expect(titleChrome.appearance, "the name is not a native field").toBe("none");
-  await title.fill("Relay service");
-  await title.press("Enter");
-  await expect.poll(async () => fixtureRequestBodies(browser, "page-rename")).toEqual([{ title: "Relay service" }]);
+  // Click, type. It is the document's own h1, drawn as any page's name.
+  const title = editor.getByTestId("page-title");
+  await expect(title).toHaveText("Untitled");
+  await title.click();
+  await browser.keyboard.type("Relay service");
+  await expect(editor.locator("h1").first()).toHaveText(/^(# )?Relay service$/u);
+  await expect.poll(() => pageMarkdown(server)).toMatch(/^# Relay service\n\n## Relay\n/u);
+  await expect(editor.getByTestId("page-title")).toHaveCount(0);
 
   // In a table, its controls grow rows and columns. The rest of the page has no formatting toolbar.
   await expect(browser.getByTestId("page-toolbar")).toHaveCount(0);
