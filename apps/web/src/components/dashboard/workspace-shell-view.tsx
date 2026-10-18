@@ -246,6 +246,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     canUseSelectedChannel,
     logoutAndClearDeviceData,
     messageSearch,
+    searchRerank,
     persistComposerDraftSnapshot,
     handleTimelineScrollPositionChange,
     handleTimelineScrollGesture,
@@ -1451,6 +1452,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
         pages={pageTree.data ?? NO_PAGES}
         searchMessages={messageSearch}
         searchPages={searchPages}
+        searchRerank={searchRerank}
         catalogPaging={currentSpaceCatalog}
         onOpenResults={openSearchResultsFor}
         onSelectChannel={selectSearchChannel}

@@ -126,6 +126,12 @@ name = "RATE_LIMIT_JEV_EVALUATE"
 namespace_id = "3805"
 simple = { limit = 10, period = 60 }
 
+# Search reorderings, per signed-in Human: one per paused search text.
+[[ratelimits]]
+name = "RATE_LIMIT_SEARCH_RERANK"
+namespace_id = "3806"
+simple = { limit = 30, period = 60 }
+
 # Native deploy identity, so a datapoint can be attributed to an exact version
 # instead of a guessed one. Read-only; never synthesised in code.
 [version_metadata]

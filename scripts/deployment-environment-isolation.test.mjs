@@ -84,7 +84,7 @@ test("production refuses over-limit requests and bounds Jev spend, each limiter 
   const config = hub.production;
   assert.equal(config.vars.RATE_LIMIT_ENFORCED, "true");
   // A missing binding admits everything, so a dropped one silently lifts a spend bound.
-  for (const name of ["RATE_LIMIT_SUMMON_INTENT", "RATE_LIMIT_JEV_EVALUATE"]) {
+  for (const name of ["RATE_LIMIT_SUMMON_INTENT", "RATE_LIMIT_JEV_EVALUATE", "RATE_LIMIT_SEARCH_RERANK"]) {
     assert.ok(binding(config, "ratelimits", name), name);
   }
   const namespaces = config.ratelimits.map((limiter) => limiter.namespace_id);
