@@ -905,6 +905,9 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     void pageApi.reviewSuggestions(spaceId, pageId, token, waiting.through).then(waiting.refetch,
       (cause: Error) => setNotice(cause.message));
   }, [canEdit, pageId, spaceId, suggesting, token, waiting]);
+  // The selection is acknowledged before any network request, including making an empty page.
+  const startingWriter = useRef(false);
+  const [starting, setStarting] = useState<{ pageId: string; harness: string } | null>(null);
   // An Agent just called, from the moment it is asked until it shows on the page.
   const [called, setCalled] = useState<{ pageId: string; harness: string; conversationId: string; blockId: string | null;
     at: number } | null>(null);
@@ -1164,12 +1167,16 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   // message calls the chosen runtime to infer what the page needs and write it. The page stays open,
   // and the Agent shows at the right edge beside the line it writes.
   const coWrite = async (harness: string, blockId: string | null) => {
-    if (!page) return;
-    writers.choose(harness);
+    if (!page || startingWriter.current) return;
+    startingWriter.current = true;
+    setStarting({ pageId: page.pageId, harness });
+    setNotice(null);
     const section = blockId ? blocks.find((block) => block.id === blockId)?.title ?? null : null;
     try {
+      writers.choose(harness);
       // Calling an Agent to write a new page is writing on it: it makes the page.
       const writing = pending && session ? await session.make() : page.pageId;
+      setStarting({ pageId: writing, harness });
       const where = `page:${writing}${blockId ? ` (section #${blockId})` : ""}`;
       // The page itself tells the Agent what it needs, live, as turns its runtime hands it (§4.2).
       const firstMessage = `@${harness} launch:force You're co-writing ${where} with me live. The page sends you ` +
@@ -1183,6 +1190,9 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
       void links.refetch();
     } catch (cause) {
       setNotice(userErrorMessage(cause, "Couldn't start the Agent"));
+    } finally {
+      startingWriter.current = false;
+      setStarting(null);
     }
   };
   coWriteRef.current = coWrite;
@@ -1399,12 +1409,15 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
 
   // On a phone the diff is walked from a floating bar under the thumb instead of a line above the text.
   const phoneDiff = phone && mode === "page" && drawn && !diffViewed && !!readerChanges;
+  const writerStarting = starting?.pageId === page?.pageId ? starting : null;
+  const writerCalled = called?.pageId === page?.pageId ? called : null;
+  const writerFeedback = writerStarting ?? (!phone ? writerCalled : null);
   const controls = (
     <>
       {/* On a phone an Agent is its face in the margin and on the page's button; the stack names the people. */}
       <PresenceStack people={phone ? people.filter((person) => !person.agent) : people} onFollow={jumpTo} />
       {!phone && canEdit && writers.agents[0] && (
-        <Button variant="ghost" size="sm" onClick={() => setDialog({ kind: "write" })}
+        <Button variant="ghost" size="sm" disabled={Boolean(starting)} onClick={() => setDialog({ kind: "write" })}
           title={`Co-write with ${writers.agents[0].harness}`}>
           <IdentityAvatar kind="agent" label={writers.agents[0].harness} imageUrl={writers.agents[0].avatarUrl} size="xs"
             shape="circle" glass={false} className="pointer-events-none rounded-full" />
@@ -1462,6 +1475,17 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
                 </span>
                 {controls}
               </header>
+            )}
+            {writerFeedback && (
+              <div role="status" className="mb-3 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+                <span className="page-writer-dots" aria-hidden="true"><i /><i /><i /></span>
+                <span>{writerFeedback.harness} is starting…{!writerStarting && " Write in the page; your Agent responds here."}</span>
+                {!writerStarting && writerCalled && (
+                  <Button variant="ghost" size="sm" onClick={() => openConversation(writerCalled.conversationId)}>
+                    Conversation
+                  </Button>
+                )}
+              </div>
             )}
             {notice && <p className={noticeClass("attention", "mb-3 rounded-md px-3 py-2 text-sm")}>{notice}</p>}
             {migration.data?.state === "proposed" && (
