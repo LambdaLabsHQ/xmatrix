@@ -795,6 +795,7 @@ export type AgentLifecycleReason =
   | "stopped"
   | "turn_failed"
   | "usage_limited"
+  | "harness_signed_out"
   | "background_tasks_interrupted"
   | "unknown";
 
@@ -804,6 +805,8 @@ export const AGENT_TURN_FAILURE_LIFECYCLE_STATUS: AgentLifecycleStatus = "failed
 export const AGENT_TURN_FAILURE_LIFECYCLE_REASON: AgentLifecycleReason = "turn_failed";
 /** A turn failure because the provider account's usage limit is used up. */
 export const AGENT_USAGE_LIMIT_LIFECYCLE_REASON: AgentLifecycleReason = "usage_limited";
+/** A turn failure because the harness's own sign-in is missing or expired on its Machine. */
+export const AGENT_SIGNED_OUT_LIFECYCLE_REASON: AgentLifecycleReason = "harness_signed_out";
 
 const AGENT_TURN_FAILURE_DETAIL_MAX_CHARS = 600;
 
@@ -814,7 +817,8 @@ export function isAgentTurnFailureLifecycle(message: {
 }): boolean {
   return message.layer === AGENT_TURN_FAILURE_LIFECYCLE_LAYER
     && message.status === AGENT_TURN_FAILURE_LIFECYCLE_STATUS
-    && (message.reason === AGENT_TURN_FAILURE_LIFECYCLE_REASON || message.reason === AGENT_USAGE_LIMIT_LIFECYCLE_REASON);
+    && (message.reason === AGENT_TURN_FAILURE_LIFECYCLE_REASON || message.reason === AGENT_USAGE_LIMIT_LIFECYCLE_REASON
+      || message.reason === AGENT_SIGNED_OUT_LIFECYCLE_REASON);
 }
 
 /** The turn failed because the provider account's usage limit is used up. */
