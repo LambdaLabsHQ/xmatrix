@@ -24,6 +24,8 @@ test("final intent binds an explicit execution without changing ordinary v1 send
 test("raw Agent submission matches the Rust Unicode and attachment golden vector", () => {
   assert.equal(hash(raw), "63d4afbc4c67bcf01c33a37bea66778ed469ccd1bda94980b723bea04811fe15");
   assert.equal(hash({ ...raw, senderExecutionKey: "different-secret", senderAgentName: "new label" }), hash(raw));
+  // A retry that has read further since is the same submission.
+  assert.equal(hash({ ...raw, readThroughSequence: 41 }), hash(raw));
   for (const field of ["attachmentId", "objectKey", "contentHash", "mimeType", "name"]) {
     assert.notEqual(hash({ ...raw, attachments: [{ ...raw.attachments[0], [field]: "changed" }] }), hash(raw));
   }

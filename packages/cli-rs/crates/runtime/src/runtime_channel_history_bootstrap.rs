@@ -147,6 +147,8 @@ pub(crate) async fn prime_channel_history_bootstrap(
             &channel_id,
             through,
         );
+        // The first prompt shows this history: the run has read it.
+        xmatrix_cli_core::read_through::record(&channel_id, through);
     }
     let skip_message_id = std::env::var("XMATRIX_INITIAL_MESSAGE_ID").unwrap_or_default();
     let (context, threads) = match read_context {

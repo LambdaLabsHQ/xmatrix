@@ -982,6 +982,46 @@ export class PostgresMessageRepository {
     });
   }
 
+  /**
+   * How many messages after `afterSequence` the sender has not read: what
+   * people, Agents and Apps wrote there, except the sender's own messages and
+   * the Hub's own facts (system notices, activity entries). `replay` is set
+   * when `messageId` is already committed, so a retried send is answered by
+   * its receipt rather than refused for messages that came after it.
+   */
+  async unreadSince(input: {
+    requestId: string;
+    spaceId: string;
+    channelId: string;
+    principal: MessagePrincipal;
+    messageId: string;
+    afterSequence: number;
+    activityMessageKind: string;
+    placement?: PostgresMessagePlacement;
+  }): Promise<{ unread: number; replay: boolean }> {
+    const { requestId, spaceId, channelId, principal } = messageScope(input);
+    const messageId = bounded(input.messageId, "messageId");
+    const afterSequence = nonnegative(input.afterSequence, "afterSequence");
+    return this.inSpace(requestId, "message.unread-since", spaceId, async (transaction) => {
+      const row = (await transaction.query<QueryResultRow & { unread: string | number; replay: boolean }>({
+        name: "message_unread_since_v1",
+        text: `SELECT EXISTS(SELECT 1 FROM data.messages
+              WHERE space_id=$1 AND channel_id=$2 AND message_id=$3) AS replay,
+            (SELECT COUNT(*) FROM (SELECT 1 FROM data.messages
+              WHERE space_id=$1 AND channel_id=$2 AND timeline_sequence>$4
+                AND deleted_at IS NULL AND recalled_at IS NULL
+                AND author_kind IN ('user','agent','app')
+                AND NOT (author_kind=$5 AND author_id=$6)
+                AND message_kind<>$7
+              LIMIT 100) unread) AS unread`,
+        values: [spaceId, channelId, messageId, afterSequence, principal.kind, principal.id,
+          bounded(input.activityMessageKind, "activityMessageKind")],
+        maxRows: 1,
+      }))[0];
+      return { unread: Number(row?.unread ?? 0), replay: row?.replay === true };
+    }, input.placement);
+  }
+
   async prepareAppend(input: {
     requestId: string;
     spaceId: string;
