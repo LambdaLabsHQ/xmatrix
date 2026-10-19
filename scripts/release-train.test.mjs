@@ -25,17 +25,20 @@ const BETA_COMMIT = "b".repeat(40);
 const ancestry = new Map([[OLD, [MAIN]], [MAIN, [MAIN]]]);
 const isAncestor = (ancestor, descendant) => ancestry.get(ancestor)?.includes(descendant) ?? false;
 
-function train({ refs, tags = [], states = {}, stableTags = [], stables = [] }) {
+function train({ refs, tags = [], states = {}, stables = [] }) {
   return planTrain({
     refs,
     trainSha: MAIN,
     isAncestor,
     tagExists: (tag) => tags.includes(tag),
     productionState: (tag) => states[tag] ?? "none",
-    isStableTag: (tag) => stableTags.includes(tag),
     stables,
   });
 }
+
+// What claimAndShip writes when a train takes a stable intent.
+const stableInflight = (tag, id, scope, candidate = "xmatrix-v1.0.606-beta.2") =>
+  inflightRef(tag, id, scope, { bump: "minor", candidate });
 
 test("a scope is canonical, unique and keeps desktop with its cli", () => {
   assert.deepEqual(normalizeScope("web,hub"), ["hub", "web"]);
@@ -66,6 +69,16 @@ test("intent refs round-trip and reject anything else", () => {
   const inflight = inflightRef("xmatrix-v1.0.606-beta.3", "123", ["hub"]);
   assert.equal(inflight, "refs/release-inflight/xmatrix-v1.0.606-beta.3/123/hub");
   assert.equal(parseIntentRef(inflight, OLD).tag, "xmatrix-v1.0.606-beta.3");
+  // In flight, a stable keeps its suffix, so it stays a stable before any tag exists.
+  const stableFlight = inflightRef("xmatrix-v1.1.0", "124", ["cli", "ios"], { bump: "minor", candidate: "xmatrix-v1.0.606-beta.3" });
+  assert.equal(stableFlight, "refs/release-inflight/xmatrix-v1.1.0/124/cli+ios/minor/xmatrix-v1.0.606-beta.3");
+  assert.deepEqual(parseIntentRef(stableFlight, BETA_COMMIT), {
+    ref: stableFlight, sha: BETA_COMMIT, id: "124", scope: ["cli", "ios"], tag: "xmatrix-v1.1.0", state: "inflight",
+    stable: { bump: "minor", candidate: "xmatrix-v1.0.606-beta.3" },
+  });
+  assert.throws(() => inflightRef("xmatrix-v1.1.0-beta.1", "124", ["cli"], { bump: "minor", candidate: "xmatrix-v1.0.606-beta.3" }),
+    /cannot ship as xmatrix-v1\.1\.0-beta\.1/u);
+  assert.equal(parseIntentRef("refs/release-inflight/xmatrix-v1.1.0-beta.1/124/cli/minor/xmatrix-v1.0.606-beta.3", OLD), null);
   for (const bad of ["refs/release-intents/abc/hub", "refs/release-intents/1/web+hub", "refs/release-intents/1/desktop",
     "refs/release-inflight/v1/1/hub", "refs/heads/main", "refs/release-inflight/xmatrix-v1.0.6-rc.1/1/hub",
     "refs/release-intents/1/hub/minor/xmatrix-v1.0.6-beta.1", "refs/release-intents/1/cli/huge/xmatrix-v1.0.6-beta.1",
@@ -112,13 +125,12 @@ test("in-flight betas close on success, wait while deploying and reopen on failu
 });
 
 test("a stable is never retried by a new train: untagged closes, a failed run waits for its own recovery", () => {
-  const untagged = "refs/release-inflight/xmatrix-v1.1.0/7/cli+android";
-  const failed = "refs/release-inflight/xmatrix-v1.2.0/8/cli+android+ios";
+  const untagged = stableInflight("xmatrix-v1.1.0", "7", ["cli", "android"]);
+  const failed = stableInflight("xmatrix-v1.2.0", "8", ["cli", "android", "ios"]);
   const result = train({
     refs: [{ ref: untagged, sha: BETA_COMMIT }, { ref: failed, sha: BETA_COMMIT }],
     tags: ["xmatrix-v1.2.0"],
     states: { "xmatrix-v1.2.0": "failed" },
-    stableTags: ["xmatrix-v1.1.0", "xmatrix-v1.2.0"],
   });
   assert.deepEqual(result.updates, [{ delete: untagged }], "nothing changed before the tag, so the decision ends");
   assert.deepEqual(result.pending.map((intent) => intent.ref), [failed]);
@@ -127,9 +139,9 @@ test("a stable is never retried by a new train: untagged closes, a failed run wa
 });
 
 test("a failed stable closes only when a later successful stable shipped every component it names", () => {
-  const failed = "refs/release-inflight/xmatrix-v1.2.0/8/cli+android";
+  const failed = stableInflight("xmatrix-v1.2.0", "8", ["cli", "android"]);
   const refs = [{ ref: failed, sha: BETA_COMMIT }];
-  const base = { refs, tags: ["xmatrix-v1.2.0"], states: { "xmatrix-v1.2.0": "failed" }, stableTags: ["xmatrix-v1.2.0"] };
+  const base = { refs, tags: ["xmatrix-v1.2.0"], states: { "xmatrix-v1.2.0": "failed" } };
   const partial = train({ ...base, stables: [{ tag: "xmatrix-v1.3.0", scope: ["cli"] }] });
   assert.deepEqual(partial.pending.map((intent) => intent.ref), [failed], "a CLI-only stable leaves Android pending");
   const older = train({ ...base, stables: [{ tag: "xmatrix-v1.1.0", scope: ["cli", "android"] }] });
@@ -139,7 +151,7 @@ test("a failed stable closes only when a later successful stable shipped every c
   assert.deepEqual(covered.pending, []);
 });
 
-test("a release tag cut before channels existed reconciles like a beta", () => {
+test("an in-flight ref without the stable suffix reconciles like a beta, even under a stable-form tag", () => {
   const legacy = "refs/release-inflight/xmatrix-v1.0.606/9/web";
   const result = train({ refs: [{ ref: legacy, sha: OLD }], tags: ["xmatrix-v1.0.606"],
     states: { "xmatrix-v1.0.606": "failed" } });

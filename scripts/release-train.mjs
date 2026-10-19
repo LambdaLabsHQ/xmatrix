@@ -26,9 +26,13 @@
 //                         rides with betas, never takes newer main content and
 //                         never moves a stable source back.
 //
-//   open beta:   refs/release-intents/<intent-run>/<scope>                   -> main SHA
-//   open stable: refs/release-intents/<intent-run>/<scope>/<bump>/<beta tag> -> beta commit
-//   in flight:   refs/release-inflight/<tag>/<intent-run>/<scope>           -> intent SHA
+//   open beta:   refs/release-intents/<intent-run>/<scope>                         -> main SHA
+//   open stable: refs/release-intents/<intent-run>/<scope>/<bump>/<beta tag>       -> beta commit
+//   in flight:   refs/release-inflight/<tag>/<intent-run>/<scope>[/<bump>/<beta tag>] -> intent SHA
+//
+// An in-flight ref keeps its intent's stable suffix, so a train knows a stable
+// as one before any tag exists; an in-flight ref without it is a beta, or a
+// release cut before channels existed, which reconciles like one.
 //
 // An in-flight intent closes when its tag's Production Release succeeds and
 // waits while that run is active. A beta reopens when its train never tagged
@@ -94,10 +98,12 @@ export function intentRef(runId, scope, stable = null) {
   return `${ref}/${stable.bump}/${stable.candidate}`;
 }
 
-export function inflightRef(tag, runId, scope) {
+export function inflightRef(tag, runId, scope, stable = null) {
   if (!RELEASE_TAG_PATTERN.test(tag)) throw new Error(`Invalid release tag ${tag}`);
-  if (!RUN_ID.test(String(runId))) throw new Error(`Invalid intent run id ${runId}`);
-  return `${INFLIGHT_PREFIX}${tag}/${runId}/${normalizeScope(scope.join(",")).join("+")}`;
+  if (stable && releaseChannel(tag.slice("xmatrix-v".length)) !== "stable") {
+    throw new Error(`Stable intent cannot ship as ${tag}`);
+  }
+  return `${INFLIGHT_PREFIX}${tag}/${intentRef(runId, scope, stable).slice(OPEN_PREFIX.length)}`;
 }
 
 /** An intent from a ref name, or null for anything that is not one. */
@@ -105,13 +111,12 @@ export function parseIntentRef(ref, sha) {
   const inflight = ref.startsWith(INFLIGHT_PREFIX);
   if (!inflight && !ref.startsWith(OPEN_PREFIX)) return null;
   const parts = ref.slice(inflight ? INFLIGHT_PREFIX.length : OPEN_PREFIX.length).split("/");
-  let tag, id, scopeText, bump, candidate;
-  if (inflight && parts.length === 3) [tag, id, scopeText] = parts;
-  else if (!inflight && parts.length === 2) [id, scopeText] = parts;
-  else if (!inflight && parts.length === 4) [id, scopeText, bump, candidate] = parts;
-  else return null;
-  if ((inflight && !RELEASE_TAG_PATTERN.test(tag)) || !RUN_ID.test(id) ||
-      (candidate !== undefined && (!BUMPS.includes(bump) || !isBetaTag(candidate)))) return null;
+  const tag = inflight ? parts.shift() : undefined;
+  if (parts.length !== 2 && parts.length !== 4) return null;
+  const [id, scopeText, bump, candidate] = parts;
+  if ((inflight && (!RELEASE_TAG_PATTERN.test(tag) ||
+      (candidate !== undefined && releaseChannel(tag.slice("xmatrix-v".length)) !== "stable"))) ||
+      !RUN_ID.test(id) || (candidate !== undefined && (!BUMPS.includes(bump) || !isBetaTag(candidate)))) return null;
   let scope;
   try {
     scope = normalizeScope(scopeText.split("+").join(","), candidate === undefined ? "beta" : "stable");
@@ -119,8 +124,10 @@ export function parseIntentRef(ref, sha) {
     return null;
   }
   if (scope.join("+") !== scopeText) return null;
-  if (inflight) return { ref, sha, id, scope, tag, state: "inflight" };
-  return { ref, sha, id, scope, state: "open", ...(candidate === undefined ? {} : { stable: { bump, candidate } }) };
+  return {
+    ref, sha, id, scope, ...(inflight ? { tag, state: "inflight" } : { state: "open" }),
+    ...(candidate === undefined ? {} : { stable: { bump, candidate } }),
+  };
 }
 
 const byId = (left, right) => Number(left.id) - Number(right.id);
@@ -135,16 +142,13 @@ function superseded(stables, intent) {
 /**
  * Pure: reconcile in-flight intents and choose what this train may ship.
  * `productionState(tag)` is "success", "failed", "active" or "none" (no run).
- * `isStableTag(tag)` tells a stable release's tag from a beta's (and from a
- * release cut before channels existed, which reconciles like a beta).
  * `stables` lists successful stable releases as { tag, scope }.
  *
  * Open stable intents come back in `stable`, oldest first: the caller checks
  * each against its evidence (checkStable) and ships the first that holds, alone.
  * Otherwise the train ships `scope`, the union of the `eligible` betas.
  */
-export function planTrain({ refs, trainSha, isAncestor, tagExists, productionState, isStableTag = () => false,
-  stables = [] }) {
+export function planTrain({ refs, trainSha, isAncestor, tagExists, productionState, stables = [] }) {
   const intents = refs.map(({ ref, sha }) => parseIntentRef(ref, sha)).filter(Boolean);
   const inflight = intents.filter((intent) => intent.state === "inflight");
   const inflightIds = new Set(inflight.map((intent) => intent.id));
@@ -162,7 +166,7 @@ export function planTrain({ refs, trainSha, isAncestor, tagExists, productionSta
       updates.push({ delete: intent.ref });
     } else if (state === "active") {
       // Its production run is still deploying; the next train reconciles it.
-    } else if (!isStableTag(intent.tag)) {
+    } else if (!intent.stable) {
       const reopened = intentRef(intent.id, intent.scope);
       updates.push({ delete: intent.ref }, { create: reopened, sha: intent.sha });
       open.push({ ...intent, ref: reopened, state: "open", tag: undefined });
@@ -389,7 +393,7 @@ async function claimAndShip(root, { tag, version, channel, sourceSha, runId, int
     },
   });
   pushUpdates(root, intents.flatMap((intent) => [
-    { create: inflightRef(tag, intent.id, intent.scope), sha: intent.sha },
+    { create: inflightRef(tag, intent.id, intent.scope, intent.stable), sha: intent.sha },
     { delete: intent.ref },
   ]));
   console.log(`Train ${tag} ships ${scope.join(",")} (${channel}) for intents ${intents.map((intent) => intent.id).join(", ")}.`);
@@ -414,16 +418,13 @@ async function plan(root) {
     }
     return productionStates.get(tag);
   };
-  const inflightTags = new Set(refs.map(({ ref, sha }) => parseIntentRef(ref, sha)?.tag).filter(Boolean));
-  const stableTags = new Set();
-  for (const tag of inflightTags) {
-    await productionState(tag);
-    if (tagNames.includes(tag) && tagRecord(root, tag).channel === "stable") stableTags.add(tag);
-  }
+  const inflight = refs.map(({ ref, sha }) => parseIntentRef(ref, sha)).filter((intent) => intent?.state === "inflight");
+  for (const intent of inflight) await productionState(intent.tag);
   // Later successful stables, to settle a failed stable they shipped over.
   const stables = [];
-  const oldestPending = [...stableTags].filter((tag) => !["success", "active"].includes(productionStates.get(tag)))
-    .map((tag) => tag.slice("xmatrix-v".length)).sort(compareSemver)[0];
+  const oldestPending = inflight.filter((intent) => intent.stable && tagNames.includes(intent.tag) &&
+    !["success", "active"].includes(productionStates.get(intent.tag)))
+    .map((intent) => intent.tag.slice("xmatrix-v".length)).sort(compareSemver)[0];
   if (oldestPending) {
     for (const version of releaseVersions(tagNames)) {
       if (!isStable(version) || compareSemver(version, oldestPending) <= 0) continue;
@@ -438,7 +439,6 @@ async function plan(root) {
     isAncestor: isAncestorIn(root),
     tagExists: (tag) => tagNames.includes(tag),
     productionState: (tag) => productionStates.get(tag),
-    isStableTag: (tag) => stableTags.has(tag),
     stables,
   });
   pushUpdates(root, result.updates);
