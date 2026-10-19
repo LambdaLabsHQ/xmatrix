@@ -35,7 +35,8 @@ Immutable Apple purchase ownership and content-free secret-access audits remain.
 
 Each pass deletes at most 100 restricted objects and mutates at most 2,000 rows
 in batches of 500, then commits its progress. Storage failures leave the cursor
-unchanged; a restart retries the same exact keys. Every restricted key is parsed
+unchanged; a restart retries the same exact keys. Failed jobs yield their
+admission slots to pending peers on the next pass. Every restricted key is parsed
 and checked against the deleted Channel before deletion. Content-addressed
 `objects/<sha256>` bytes can be shared with other Channels or Spaces and remain
 under the existing content retention/collection policy. Removing a Channel
