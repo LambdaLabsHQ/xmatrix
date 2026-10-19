@@ -31,7 +31,7 @@ export const CHANNEL_PURGE_STEPS: readonly { table: string; predicate: string }[
   ...[
     "data.agent_launches", "data.agent_message_executions", "data.agent_reborn_intents",
     "data.app_connector_action_requests", "data.app_connector_action_policies",
-    "data.app_connector_executions", "data.app_source_relations", "data.app_gmail_routes",
+    "data.app_connector_executions", "data.app_source_relations",
     "data.registration_launch_intents", "data.registration_stop_intents",
     "data.channel_access", "data.channel_content_counters", "data.channel_message_sequences",
     "data.channel_metadata_revisions", "data.channel_transfer_proposals",
