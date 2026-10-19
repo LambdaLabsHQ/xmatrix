@@ -219,30 +219,88 @@ test('Agent decision evidence derives Human root after exact Run and both Channe
 test('a Space-scope upload is referenced into a Channel of that Space, whose scope the ref carries', async () => {
   const hash = '5'.repeat(64);
   let intentScope = 'space:space-1';
-  const db = database(query => {
-    if (query.name === 'space_placement_resolve_v1') return [activePlacementRow()];
-    if (query.name === 'entity_space_route_placement_fence_v1') return [{ shard_id: 'shard-0', placement_epoch: 1 }];
-    if (query.name === 'channel_space_directory_resolve_v2') return [{ channel_id: 'closed-1', space_id: 'space-1', shard_id: 'shard-0', placement_epoch: 1, entity_version: 1 }];
-    if (query.name.startsWith('channel_capability_content_')) return [{ channel_id: 'closed-1', space_id: 'space-1', mode: 'closed', archived_at: null, space_role: 'member' }];
-    if (query.name === 'content_ref_intent_lock_v1') return [{ status: 'pending', version: 1, scope_id: intentScope,
-      object_key: `objects/${hash}`, checksum: hash, encoded_bytes: 100, expires_at: new Date(Date.now() + 60_000) }];
-    if (query.name === 'content_head_advance_v1') return [{ commit_sequence: 5 }];
-    if (query.name === 'content_entity_route_source_v1') return [{ route_version: 1, updated_at: new Date() }];
-    return [];
-  });
+  const db = database(query => channelBlobRows(query, hash, () => intentScope) ?? (
+    query.name === 'content_ref_insert_v1' ? [{ ref_id: query.values[2] }] : []));
   const repository = new PostgresContentRepository(db, 'shard-0');
-  const commit = (commandId) => repository.commitRef({ requestId: commandId, commandId, intentId: 'intent-1',
-    expectedIntentVersion: 1, refId: `ref-${commandId}`, ownerKind: 'message_attachment', ownerId: 'message-1',
-    scopeId: 'channel:closed-1', objectKey: `objects/${hash}`, checksum: hash, encodedBytes: 100,
-    verifiedAt: new Date().toISOString(), principal: { kind: 'user', id: 'user-1' } });
+  const commit = (commandId) => commitBlob(repository, hash, commandId, `ref-${commandId}`);
   assert.equal((await commit('commit-1')).scopeId, 'channel:closed-1');
   const inserted = db.calls.find(call => call.name === 'content_ref_insert_v1');
   assert.equal(inserted.values[1], 'channel:closed-1');
+  assert.match(inserted.text, /ON CONFLICT DO NOTHING/u);
   for (const scope of ['space:space-2', 'channel:other-1']) {
     intentScope = scope;
     await assert.rejects(commit(`commit-${scope}`), error => error.code === 'blob_object_mismatch');
   }
 });
+
+test('a second ref for the same owner and object reuses the hold instead of inserting', async () => {
+  const hash = '6'.repeat(64);
+  const held = heldOwnerRow('ref-held', hash);
+  let holds = 0;
+  const db = database(query => {
+    if (query.name !== 'content_ref_owner_hold_v1') return channelBlobRows(query, hash) ?? [];
+    holds += 1;
+    assert.deepEqual(query.values.slice(2), ['message_attachment', 'message-1']);
+    return [held];
+  });
+  const repository = new PostgresContentRepository(db, 'shard-0');
+  assert.equal((await commitBlob(repository, hash, 'again', 'ref-new')).refId, 'ref-held');
+  assert.equal(holds, 1);
+  assert.equal(db.calls.some(call => call.name === 'content_ref_insert_v1'), false);
+  assert.equal(db.calls.some(call => call.name === 'content_ref_intent_consume_v1'), false);
+  assert.equal(db.calls.some(call => call.name === 'entity_space_route_publish_v1' && call.values[1] === 'ref-new'), false);
+  held.root_set_id = 'channel:other-1';
+  await assert.rejects(commitBlob(repository, hash, 'other-scope', 'ref-other'), error => error.code === 'blob_ref_conflict');
+});
+
+test('a unique conflict on the owner hold is read back instead of failing the commit', async () => {
+  const hash = '7'.repeat(64);
+  const held = heldOwnerRow('ref-raced', hash);
+  let holds = 0;
+  const db = database(query => query.name === 'content_ref_owner_hold_v1' ? (holds++ === 0 ? [] : [held])
+    : query.name === 'content_ref_insert_v1' ? [] : channelBlobRows(query, hash) ?? []);
+  const result = await commitBlob(new PostgresContentRepository(db, 'shard-0'), hash, 'race', 'ref-loser');
+  assert.equal(result.refId, 'ref-raced');
+  assert.equal(holds, 2);
+  assert.equal(db.calls.some(call => call.name === 'content_ref_intent_consume_v1'), false);
+});
+
+function channelBlobRows(query, hash, intentScope = () => 'space:space-1') {
+  if (query.name === 'space_placement_resolve_v1') return [activePlacementRow()];
+  if (query.name === 'entity_space_route_placement_fence_v1') return [{ shard_id: 'shard-0', placement_epoch: 1 }];
+  if (query.name === 'channel_space_directory_resolve_v2') return [{
+    channel_id: 'closed-1', space_id: 'space-1', shard_id: 'shard-0', placement_epoch: 1, entity_version: 1,
+  }];
+  if (query.name.startsWith('channel_capability_content_')) return [{
+    channel_id: 'closed-1', space_id: 'space-1', mode: 'closed', archived_at: null, space_role: 'member',
+  }];
+  if (query.name === 'content_ref_intent_lock_v1') return [{
+    status: 'pending', version: 1, scope_id: intentScope(), object_key: `objects/${hash}`,
+    checksum: hash, encoded_bytes: 100, expires_at: new Date(Date.now() + 60_000),
+  }];
+  if (query.name === 'content_object_lock_v1') return [{
+    object_kind: 'xmatrix.blob.v1', storage_key: `objects/${hash}`, checksum: hash, byte_length: 100, direct_child_count: 0,
+  }];
+  if (query.name === 'content_head_advance_v1') return [{ commit_sequence: 5 }];
+  if (query.name === 'content_entity_route_source_v1') return [{ route_version: 1, updated_at: new Date() }];
+  return undefined;
+}
+
+function heldOwnerRow(refId, hash) {
+  return {
+    ref_id: refId, root_set_id: 'channel:closed-1', owner_kind: 'message_attachment', owner_id: 'message-1',
+    storage_key: `objects/${hash}`, checksum: hash, byte_length: 100, created_at: new Date('2026-10-19T19:20:12.000Z'),
+  };
+}
+
+function commitBlob(repository, hash, commandId, refId) {
+  return repository.commitRef({
+    requestId: commandId, commandId, intentId: 'intent-1', expectedIntentVersion: 1, refId,
+    ownerKind: 'message_attachment', ownerId: 'message-1', scopeId: 'channel:closed-1',
+    objectKey: `objects/${hash}`, checksum: hash, encodedBytes: 100, verifiedAt: new Date().toISOString(),
+    principal: { kind: 'user', id: 'user-1' },
+  });
+}
 
 function decisionRef(ref_id, root_set_id) {
   return { ref_id, root_set_id, owner_kind: 'summon_decision', owner_id: 'message',

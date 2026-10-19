@@ -1120,21 +1120,32 @@ async fn upload_channel_file_attachments(
             attachment.bytes,
         )
         .await?;
-        let attachment_id = uuid::Uuid::new_v4().to_string();
-        http::request_json::<serde_json::Value>(
+        let requested_id = uuid::Uuid::new_v4().to_string();
+        let committed = http::request_json::<serde_json::Value>(
             &with_route(hub_url, "/api/relay-v2/private-r2/blob-refs"),
             "POST",
             Some(token),
             Some(serde_json::json!({
                 "requestId": uuid::Uuid::new_v4().to_string(),
                 "intentId": intent_id,
-                "refId": attachment_id,
+                "refId": requested_id,
                 "ownerKind": "message_attachment",
                 "ownerId": message_id,
                 "visibilityScopeId": visibility_scope_id,
             })),
         )
         .await?;
+        // The owner already holds these bytes under one ref. A second file of
+        // the same bytes reuses that id; sending it twice would conflict.
+        let attachment_id = committed
+            .get("refId")
+            .and_then(|value| value.as_str())
+            .filter(|value| !value.is_empty() && value.len() <= 300)
+            .unwrap_or(requested_id.as_str())
+            .to_string();
+        if uploaded.iter().any(|item: &UploadedMessageAttachment| item.attachment_id == attachment_id) {
+            continue;
+        }
         uploaded.push(UploadedMessageAttachment {
             attachment_id,
             object_key: format!("objects/{}", attachment.content_hash),
@@ -1325,9 +1336,9 @@ pub fn persisted_daemon_agent_run_ancestor_pid() -> Option<u32> {
     #[cfg(windows)]
     {
         let parents = process_parent_ids()?;
-        return tracked_ancestor_pid(std::process::id(), &tracked_pids, |pid| {
+        tracked_ancestor_pid(std::process::id(), &tracked_pids, |pid| {
             parents.get(&pid).copied()
-        });
+        })
     }
     #[cfg(not(windows))]
     tracked_ancestor_pid(std::process::id(), &tracked_pids, parent_process_id)

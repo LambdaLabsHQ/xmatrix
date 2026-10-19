@@ -400,14 +400,12 @@ async function appendChannelMessageWithAttachments(input: {
     throw new Error("Agent selection does not match the message body");
   }
   const attachmentBindings = messageAttachmentBindings(input.attachments);
-  if (attachmentBindings.length > 0) {
-    await commitMessageAttachmentRefs({
-      token: input.token,
-      messageId: input.clientMessageId,
-      visibilityScopeId: channelVisibilityScope({ mode: input.channel.mode, channelId: input.channel.id, spaceId: input.channel.spaceId }),
-      attachments: attachmentBindings,
-    });
-  }
+  const committedAttachments = attachmentBindings.length > 0 ? await commitMessageAttachmentRefs({
+    token: input.token,
+    messageId: input.clientMessageId,
+    visibilityScopeId: channelVisibilityScope({ mode: input.channel.mode, channelId: input.channel.id, spaceId: input.channel.spaceId }),
+    attachments: attachmentBindings,
+  }) : [];
   const requestBody = JSON.stringify({
     body: input.body,
     clientMessageId: input.clientMessageId,
@@ -415,7 +413,7 @@ async function appendChannelMessageWithAttachments(input: {
     appMentions: input.appMentions.length > 0 ? input.appMentions : undefined,
     invocationSelections: input.invocationSelections,
     summonIntents: input.summonIntents?.length ? input.summonIntents : undefined,
-    attachments: attachmentBindings.length > 0 ? attachmentBindings : undefined,
+    attachments: committedAttachments.length > 0 ? committedAttachments : undefined,
   });
   // The deadline, retry bounding and outcome classification live in
   // `message-send-deadline` so production and its tests run the same code. A
