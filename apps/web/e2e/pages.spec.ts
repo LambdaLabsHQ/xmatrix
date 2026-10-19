@@ -247,7 +247,7 @@ test("a page is co-edited live and shows an Agent working on a section it claime
         encoding.writeVarUint(agent, 1);
         encoding.writeVarUint(agent, 1_234_567);
         encoding.writeVarUint(agent, 1);
-        encoding.writeVarString(agent, JSON.stringify({ user: { name: "claude:2", color: "#7c3aed", kind: "agent",
+        encoding.writeVarString(agent, JSON.stringify({ user: { name: "claude:2", color: "#7a5389", kind: "agent",
           conversationId: E2E_CHANNEL.id }, activity: "editing", block: "status" }));
         const aware = encoding.createEncoder();
         encoding.writeVarUint(aware, 1);
@@ -650,7 +650,7 @@ test.describe("on a phone", () => {
     server.clientID = AGENT;
     editPageMarkdown(server, (markdown) => markdown.replace("none", "none yet, shipping Friday"), "agent");
     server.clientID = own;
-    push(awarenessFrom(server, AGENT, 1, { user: { name: "claude:2", color: "#7c3aed", kind: "agent",
+    push(awarenessFrom(server, AGENT, 1, { user: { name: "claude:2", color: "#7a5389", kind: "agent",
       conversationId: E2E_CHANNEL.id }, activity: "editing", block: "notes" }, "shipping Friday"));
 
     // Its face waits at the bottom of the right edge, pointing down to its line.
@@ -1423,7 +1423,7 @@ function agentWrites(server: Y.Doc, push: (data: Uint8Array) => void, clock: num
   server.clientID = AGENT_CLIENT;
   editPageMarkdown(server, (markdown) => markdown.replace(from, to), "agent");
   server.clientID = own;
-  push(awarenessFrom(server, AGENT_CLIENT, clock, { user: { name: "claude:2", color: "#7c3aed", kind: "agent",
+  push(awarenessFrom(server, AGENT_CLIENT, clock, { user: { name: "claude:2", color: "#7a5389", kind: "agent",
     conversationId: E2E_CHANNEL.id }, activity, block: "notes" }, caret));
 }
 
@@ -1439,7 +1439,7 @@ async function openWithGrokThinking(browser: Page, conversationId: string) {
   await browser.goto("/app", { waitUntil: "domcontentloaded" });
   await browser.getByRole("button", { name: "Pages", exact: true }).first().click();
   await expect(browser.getByTestId("page-editor")).toContainText("In progress");
-  const grok = { user: { name: "grok:1", color: "#7c3aed", kind: "agent", conversationId }, block: "status" };
+  const grok = { user: { name: "grok:1", color: "#7a5389", kind: "agent", conversationId }, block: "status" };
   const push = (data: Uint8Array) => send(data);
   push(awarenessFrom(server, AGENT_CLIENT, 1, { ...grok, activity: "thinking", since: Date.now() - 12_000 }, "In progress"));
   return { grok, push, server };
@@ -1550,7 +1550,7 @@ test("on a long page, who works out of view shows at its edges, and what an Agen
     }));
 
   // Someone reads the Status at the top; an Agent edits the Notes far below, writing as its own client.
-  push(awarenessFrom(server, 7_654_321, 1, { user: { name: "Ada", color: "#0891b2", kind: "user" },
+  push(awarenessFrom(server, 7_654_321, 1, { user: { name: "Ada", color: "#4b6382", kind: "user" },
     activity: "viewing", block: "status" }, "In progress"));
   agentWrites(server, push, 1, "none", "none yet, shipping Friday", "editing", "shipping Friday");
 
