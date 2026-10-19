@@ -18,17 +18,29 @@ export function discussionTitle(quote: string): string {
   return `“${line.length > MAX_DISCUSSION_TITLE_CHARS ? `${line.slice(0, MAX_DISCUSSION_TITLE_CHARS - 1)}…` : line}”`;
 }
 
-/**
- * The draft a discussion opens with: the passage as a Markdown quote, then
- * where it came from. A mention inside the quote stays quoted text; it
- * never summons anyone.
- */
-export function discussionDraft(quote: string, source: { label: string; href: string }): string {
+/** The passage a new conversation was started from, and where it came from. */
+export type DiscussionQuote = { text: string; label: string; href: string };
+
+/** The passage as its conversation carries it: trimmed, and cut to the carried bound. */
+export function discussionQuote(quote: string, source: { label: string; href: string }): DiscussionQuote {
   const text = quote.trim().length > MAX_DISCUSSION_QUOTE_CHARS
     ? `${quote.trim().slice(0, MAX_DISCUSSION_QUOTE_CHARS - 1)}…` : quote.trim();
-  const quoted = text.split(/\r?\n/u).map((line) => (line.trim() ? `> ${line.trimEnd()}` : ">")).join("\n");
-  const label = source.label.trim().replace(/\s+/gu, " ").replace(/[[\]\\]/gu, "\\$&") || "source";
-  return `${quoted}\n\n— [${label}](${source.href})\n\n`;
+  return { text, label: source.label.trim().replace(/\s+/gu, " ") || "source", href: source.href };
+}
+
+/**
+ * The first message of a discussion: the passage as a Markdown quote, where it
+ * came from, then what was typed, with the typed Agent selections moved past
+ * the quote. A mention inside the quote stays quoted text; it never summons
+ * anyone.
+ */
+export function quotedMessage<T extends { start: number; end: number }>(quote: DiscussionQuote,
+  typed: { body: string; selections: T[] }): { body: string; selections: T[] } {
+  const quoted = quote.text.split(/\r?\n/u).map((line) => (line.trim() ? `> ${line.trimEnd()}` : ">")).join("\n");
+  const label = quote.label.replace(/[[\]\\]/gu, "\\$&");
+  const head = `${quoted}\n\n— [${label}](${quote.href})\n\n`;
+  return { body: head + typed.body, selections: typed.selections.map((selection) =>
+    ({ ...selection, start: selection.start + head.length, end: selection.end + head.length })) };
 }
 
 /** The passage selected inside one message's text, and where it sits on screen. */

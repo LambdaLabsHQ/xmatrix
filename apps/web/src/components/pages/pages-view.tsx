@@ -50,7 +50,7 @@ import { formatRelativeAge, mobileChatTimeLabel } from "@/components/dashboard/t
 import { ListSectionHeading } from "@/components/dashboard/list-section-heading";
 import { InlineRowPreview } from "@/components/dashboard/inline-row-preview";
 import { MORE_RECENT_CHANGES, RECENT_CHANGES, pageRecentChangePreview, pageTreeHeadKey } from "./page-recent-changes";
-import { discussionDraft, discussionTitle } from "@/components/dashboard/selection-discussion";
+import { discussionQuote, discussionTitle, type DiscussionQuote } from "@/components/dashboard/selection-discussion";
 import { refetchUnlessHumanPush } from "@/components/dashboard/workspace-resource-push";
 import { PageMigrationReview, usePageMigration } from "./page-migration-review";
 import { NEW_PAGE_ID, NEW_PAGE_TITLE, type PageCreation } from "./page-creation";
@@ -520,7 +520,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   /** Opens a conversation beside the page (pages-live-document.md §4.4). */
   onOpenConversation: (conversationId: string) => void;
   onDiscuss: (input: { spaceId: string; pageId: string; blockId: string; name: string; restricted: boolean;
-    anchor?: PageLinkAnchor; firstMessage?: string; draft?: string; open?: boolean; coWrite?: boolean;
+    anchor?: PageLinkAnchor; firstMessage?: string; quote?: DiscussionQuote; open?: boolean; coWrite?: boolean;
     /** Hears the conversation's id as soon as it is known, before the Hub has made or linked it. */
     planned?: (conversationId: string) => void }) => Promise<unknown>;
   /** Subscribes a conversation of its own, linked to a section, to a repository's issues and pull requests. */
@@ -1164,7 +1164,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
         pageId: page.pageId, blockId, source: "manual", createdAt: now, lastSeenAt: now, anchor: anchor ?? null }]);
     };
     void onDiscuss({ spaceId, pageId: page.pageId, blockId, name: anchor ? discussionTitle(anchor.quote) : place,
-      restricted, planned, ...(anchor ? { anchor, draft: discussionDraft(anchor.quote, { label: place, href: blockLink(blockId) }) }
+      restricted, planned, ...(anchor ? { anchor, quote: discussionQuote(anchor.quote, { label: place, href: blockLink(blockId) }) }
         : {}) }).then(() => links.refetch(), (cause: Error) => setNotice(cause.message))
       .finally(() => setStartedLinks((current) => current.filter((link) => link.conversationId !== started)));
   };

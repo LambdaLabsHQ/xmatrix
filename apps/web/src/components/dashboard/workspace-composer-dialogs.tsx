@@ -171,6 +171,7 @@ import {
   Pause,
   Pencil,
   Play,
+  Quote,
   RefreshCw,
   Reply,
   Trash2,
@@ -274,6 +275,7 @@ export type ComposerMentionInsertRequest =
 
 export type { AgentTraceTarget } from "./workspace-shell-message-model";
 import type { AgentTraceTarget, ComposerSendSnapshot } from "./workspace-shell-message-model";
+import { quotedMessage, type DiscussionQuote } from "./selection-discussion";
 
 export type AgentTraceHistoryPanelState = {
   targetKey: string;
@@ -323,6 +325,7 @@ export const Composer = memo(function Composer({
   invocationDraft,
   selectedWorkspaceId,
   replyTarget,
+  quote = null,
   attachments,
   mentionInsertRequest,
   autoFocusRequest,
@@ -331,6 +334,7 @@ export const Composer = memo(function Composer({
   onDraftChange,
   onWorkspaceSelect,
   onCancelReply,
+  onRemoveQuote,
   onAttachmentsChange,
   onOpenAppsForSpace,
   onSend,
@@ -368,6 +372,8 @@ export const Composer = memo(function Composer({
   invocationDraft?: ComposerInvocationDraft;
   selectedWorkspaceId: string | null;
   replyTarget: TimelineItem | null;
+  /** The passage a discussion is about, which its first message carries (selection-discussion.ts). */
+  quote?: DiscussionQuote | null;
   attachments: ChannelAttachment[];
   mentionInsertRequest: ComposerMentionInsertRequest | null;
   autoFocusRequest: number;
@@ -376,6 +382,7 @@ export const Composer = memo(function Composer({
   onDraftChange: (value: string, invocationDraft?: ComposerInvocationDraft) => void;
   onWorkspaceSelect: (workspaceTarget: string | null) => void;
   onCancelReply: () => void;
+  onRemoveQuote?: () => void;
   onAttachmentsChange: (
     value: ChannelAttachment[] | ((current: ChannelAttachment[]) => ChannelAttachment[])
   ) => void;
@@ -876,9 +883,13 @@ export const Composer = memo(function Composer({
   }
 
   // Jev reads each summon as the author types; the hint shows it and the send carries it.
-  const outgoingDraft = useMemo(() => composerSendDraft(invocationDraftRef.current, localDraft),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [localDraft, invocationDraftRef.current]);
+  // Picked channels and pages are shown by name and sent as their id tokens; a discussion's passage goes first.
+  const sendDraft = () => {
+    const typed = composerSendDraft(invocationDraftRef.current, localDraft);
+    return quote ? quotedMessage(quote, typed) : typed;
+  };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const outgoingDraft = useMemo(sendDraft, [localDraft, invocationDraftRef.current, quote]);
   const draftIntents = useDraftSummonIntents({ token, channelId: startsConversation ? undefined : channel?.id,
     body: outgoingDraft.body, selections: outgoingDraft.selections });
 
@@ -891,8 +902,7 @@ export const Composer = memo(function Composer({
     setAttachmentError(null);
     const sendScope = invocationScope;
     try {
-      // Picked channels and pages are shown by name and sent as their id tokens.
-      const { body, selections } = composerSendDraft(invocationDraftRef.current, localDraft);
+      const { body, selections } = sendDraft();
       const sourceBodyHash = selections.length ? await digestCanonicalCloneCborV1(body) : undefined;
       const invocationSelections = sourceBodyHash ? parseAgentInvocationSelections({ schemaVersion: 1,
         sourceRevision: 1, sourceBodyHash, selections }, {
@@ -1295,6 +1305,27 @@ export const Composer = memo(function Composer({
           }
           boxHeader={
             <>
+              {quote && (
+                <div data-testid="composer-quote"
+                  className="flex items-start gap-2 border-b border-border/70 px-3 py-2 text-xs text-muted-foreground">
+                  <Quote className="mt-0.5 size-3.5 shrink-0" />
+                  <div className="min-w-0 flex-1">
+                    <div className="line-clamp-2 text-foreground [overflow-wrap:anywhere]">{quote.text}</div>
+                    <div className="truncate">{quote.label}</div>
+                  </div>
+                  {onRemoveQuote && (
+                    <button
+                      type="button"
+                      title="Remove quote"
+                      aria-label="Remove quote"
+                      onClick={onRemoveQuote}
+                      className="flex size-7 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
+                    >
+                      <X className="size-3.5" />
+                    </button>
+                  )}
+                </div>
+              )}
               {replyTarget && (
                 <div className="flex items-start gap-2 border-b border-border/70 px-3 py-2 text-xs text-muted-foreground">
                   <Reply className="mt-0.5 size-3.5 shrink-0" />
