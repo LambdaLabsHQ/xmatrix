@@ -1259,7 +1259,7 @@ test("co-writing observations time CRDT text changes, excluding markers and pass
     durationMs: 500, editToTurnMs: CO_WRITER_PAUSE_MS, firstDeltaMs: 300, firstTextMs: 500,
     editToFirstTextMs: CO_WRITER_PAUSE_MS + 500, maxWriteGapMs: null, writes: 1 });
   t.mock.timers.tick(700);
-  writer.write(2, " world");
+  writer.write(2, " world ");
   writer.done(2);
   writer.done(2);
   assert.equal(events.length, 2, "one first-text and one terminal observation, including late duplicate replies");
@@ -1302,6 +1302,18 @@ test("co-writing timings include queued human edits without attributing an earli
   assert.equal(events[1].firstTextMs, 200);
   assert.equal(events[1].editToFirstTextMs, 5200);
   writer.done(3);
+});
+
+test("an empty replacement deletes old words without reporting newly written text", async (t) => {
+  const { ann, writer, events } = await observedCoWriter(t);
+  ann.text.insert(HEAD.indexOf("In progress"), "Still ");
+  t.mock.timers.tick(CO_WRITER_PAUSE_MS);
+  writer.write(2, '⟦replace "none"⟧');
+  writer.done(2);
+  assert.doesNotMatch(ann.text.toString(), /none/u);
+  assert.equal(events.length, 1, "only a terminal observation, no first-text event for deletion");
+  assert.equal(events[0].firstTextMs, null);
+  assert.equal(events[0].writes, 0);
 });
 
 test("another Agent's document update is not measured as a human edit", async (t) => {

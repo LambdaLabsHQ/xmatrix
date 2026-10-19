@@ -120,7 +120,8 @@ ORDER BY device, surface, people DESC
 The page session records `cowrite_first_text` when a session-requested turn
 first changes text in its CRDT, and `cowrite_turn_end` when that turn finishes,
 fails, is interrupted, disconnects, or actually times out (`stalled`). Markers,
-blank structure, notes and pass responses are not text writes. A first-text
+blank structure, notes, pass responses, empty replacements deleting old words
+and trailing whitespace cleanup are not text writes. A first-text
 point does not wait for a revision save or the turn's end. These are Hub clock
 measurements, **not browser paint times**; a person may receive the update later.
 Conversation-initiated streaming writes are outside this metric's population.
