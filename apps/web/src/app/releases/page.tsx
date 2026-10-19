@@ -1,4 +1,5 @@
 import { notFound, redirect } from "next/navigation";
+import Link from "next/link";
 import { releaseNotesPath } from "@xmatrix/protocol";
 
 import { fetchDevRelease, fetchLatestStableAndroidRelease, fetchLatestStableCliRelease, fetchLatestStableDesktopMacRelease } from "@/lib/github-release";
@@ -18,5 +19,5 @@ export default async function DownloadReleaseNotes({ searchParams }: { searchPar
     // A missing feed must not send someone to a different component's notes.
   }
   if (href) redirect(href);
-  return <main className="mx-auto max-w-3xl px-6 py-32"><h1>Release notes</h1><p>Release notes are unavailable right now. Please try again.</p><a href="/download">Back to downloads</a></main>;
+  return <main className="mx-auto max-w-3xl px-6 py-32"><h1>Release notes</h1><p>Release notes are unavailable right now. Please try again.</p><Link href="/download">Back to downloads</Link></main>;
 }
