@@ -17,9 +17,8 @@ import { changeMembership } from "./spaces";
  * §5.6). Naming a block gates nothing: there is no claim to hold and no check
  * to pass (decided 2026-10-19, coordination is lock-free). When one opens or
  * gets new commits and its author is a member of the Space, the Space owner's
- * Agent pre-reviews it on the block it names; once merged, the sections its
- * claims were on owe an update, and a participant author becomes a
- * contributor.
+ * Agent pre-reviews it on the block it names; once merged, the sections it
+ * names owe an update, and a participant author becomes a contributor.
  */
 /** What may change the blocks a pull request names. */
 const CREDITED_ACTIONS = new Set(["opened", "reopened", "edited", "synchronize", "ready_for_review"]);
@@ -103,15 +102,17 @@ export async function onPullRequestNamingBlocks(env: Env, payload: Record<string
       ? await authUserByGitHubId(env, String(authorId)) : null;
     for (const spaceId of spaces) {
       if (!await connectedGitHub(env, spaceId, installationId, owner, repo)) continue;
-      const { completed } = await pages(env).completePullRequestClaims({ requestId: crypto.randomUUID(), spaceId,
-        pullRequestUrl: url });
+      const login = record(pull.user).login;
+      const { completed } = await pages(env).completePullRequestWork({ requestId: crypto.randomUUID(), spaceId,
+        pullRequestUrl: url, ownerUserId: author, authorLabel: typeof login === "string" ? login : "",
+        references: references.filter((reference) => reference.spaceId === spaceId) });
       await askForWriteback(env, { pullRequestUrl: url, completed });
-      // The sections those claims were on now owe an update; their `owed` Automations run.
+      // The sections it named now owe an update; their `owed` Automations run.
       for (const pageId of new Set(completed.map((claim) => claim.pageId))) {
         await fireOwedAutomationTriggers(env, { spaceId, pageId,
           blockIds: completed.filter((claim) => claim.pageId === pageId).map((claim) => claim.blockId),
           event: { id: `owed:${url}:${pageId}`.slice(0, 200), kind: "owed", url,
-            summary: `Pull request ${url} was merged, so the section it claimed owes an update` } })
+            summary: `Pull request ${url} was merged, so the section it names owes an update` } })
           .catch((error: unknown) => console.error("owed Automation triggers failed", error));
       }
       if (author) await promoteContributor(env, { spaceId, userId: author, installationId, pullRequestUrl: url });
@@ -150,7 +151,7 @@ export async function onPullRequestNamingBlocks(env: Env, payload: Record<string
 }
 
 /**
- * The pull request did the work claimed on a section, so the section owes an
+ * The pull request did the work on a section, so the section owes an
  * update (pages-live-document.md §5). The conversation that did the work hears
  * it from GitHub at once: its Run, if still live, writes the section back or
  * says nothing there changed. A section nobody answers for stays marked owed.
@@ -166,7 +167,7 @@ async function askForWriteback(env: Env, input: { pullRequestUrl: string;
   for (const [conversationId, claims] of byConversation) {
     const sections = claims.map((claim) => `- ${claim.pageTitle ?? "a page"}${claim.blockId ? ` › #${claim.blockId}` : ""}` +
       ` — \`xmatrix page read ${claim.pageId}${claim.blockId ? ` --block ${claim.blockId}` : ""}\``);
-    const body = [`${input.pullRequestUrl} is merged. It did the work claimed on:`, ...sections, "",
+    const body = [`${input.pullRequestUrl} is merged. It did the work on:`, ...sections, "",
       "Rewrite these sections to what is true now with `xmatrix page edit` (the pull request keeps the evidence), or run `xmatrix page done -m \"<why>\"` " +
       "if the merge changed nothing there."].join("\n");
     await dispatchProductMessageAppend(env, conversationId, {

@@ -1453,13 +1453,27 @@ export class PostgresPageRepository {
   }
 
   /** A merged pull request completes the claims whose work it did. */
-  async completePullRequestClaims(input: { requestId: string; spaceId: string; pullRequestUrl: string }):
+  /**
+   * A merged pull request did the work on the blocks it names, so each owes an
+   * update (pages-live-document.md §5.2). A claim it was credited with is
+   * completed; a named block nobody claimed gets the same record of finished
+   * work, shown as the author's, so the section owes an update all the same:
+   * naming a block is enough (decided 2026-10-19, coordination is lock-free).
+   * A redelivered merge adds nothing.
+   */
+  async completePullRequestWork(input: { requestId: string; spaceId: string; pullRequestUrl: string;
+    references: Array<{ pageId: string; blockId: string }>; ownerUserId: string | null; authorLabel: string }):
     Promise<{ completed: Array<{ pageId: string; pageTitle: string | null; blockId: string;
       conversationId: string | null; ownerUserId: string }> }> {
     const spaceId = bounded(input.spaceId, "spaceId");
+    const pullRequestUrl = input.pullRequestUrl.slice(0, 500);
+    const references = input.references.slice(0, MAX_LINKS)
+      .map((reference) => ({ pageId: bounded(reference.pageId, "pageId"), blockId: blockId(reference.blockId) }));
+    const label = (input.authorLabel.trim() || "A pull request").slice(0, 200);
     return this.inSpace(bounded(input.requestId, "requestId"), "page.claim.complete", spaceId, async (tx) => {
-      const rows = await tx.query<QueryResultRow & { page_id: string; block_id: string; conversation_id: string | null;
-        owner_user_id: string; title: string | null; present: boolean }>({
+      type Row = QueryResultRow & { page_id: string; block_id: string; conversation_id: string | null;
+        owner_user_id: string; title: string | null; present: boolean };
+      const claimed = await tx.query<Row>({
         name: "page_claims_complete_v3",
         text: `WITH completed AS (
             UPDATE data.page_claims SET state='completed', updated_at=now()
@@ -1468,13 +1482,41 @@ export class PostgresPageRepository {
           SELECT c.page_id, c.block_id, c.conversation_id, c.owner_user_id,
             data.page_name(r.body) AS title, p.page_id IS NOT NULL AS present
           FROM completed c LEFT JOIN data.pages p ON p.space_id=$1 AND p.page_id=c.page_id ${HEAD_REVISION}`,
-        values: [spaceId, input.pullRequestUrl.slice(0, 500)], maxRows: MAX_LINKS,
+        values: [spaceId, pullRequestUrl], maxRows: MAX_LINKS,
       });
-      return { completed: rows.map((row) => ({ pageId: row.page_id,
+      const space = references.length ? await tx.query<QueryResultRow & { owner_user_id: string }>({
+        name: "page_pull_request_work_space_v1", text: "SELECT owner_user_id FROM data.spaces WHERE space_id=$1",
+        values: [spaceId], maxRows: 1 }) : [];
+      // An author with no xMatrix account counts against the Space's owner, as their Agents would.
+      const owner = input.ownerUserId ? bounded(input.ownerUserId, "ownerUserId") : space[0]?.owner_user_id;
+      const named = owner ? await tx.query<Row>({
+        name: "page_pull_request_work_record_v1",
+        text: `WITH named AS (
+            SELECT DISTINCT ON (n.page_id, n.block_id) n.claim_id, n.page_id, n.block_id
+            FROM unnest($3::text[], $4::text[], $5::text[]) AS n(claim_id, page_id, block_id)
+            JOIN data.pages p ON p.space_id=$1 AND p.page_id=n.page_id
+            WHERE NOT EXISTS (SELECT 1 FROM data.page_claims c WHERE c.space_id=$1 AND c.page_id=n.page_id
+              AND c.block_id=n.block_id AND c.pull_request_url=$2)),
+          recorded AS (
+            INSERT INTO data.page_claims (space_id,claim_id,page_id,block_id,holder_kind,holder_id,holder_label,
+                owner_user_id,conversation_id,state,expires_at,created_at,updated_at,pull_request_url)
+            SELECT $1, claim_id, page_id, block_id, 'user', $6, $7, $6, NULL, 'completed', now(), now(), now(), $2
+            FROM named
+            RETURNING page_id, block_id, conversation_id, owner_user_id)
+          SELECT c.page_id, c.block_id, c.conversation_id, c.owner_user_id,
+            data.page_name(r.body) AS title, p.page_id IS NOT NULL AS present
+          FROM recorded c LEFT JOIN data.pages p ON p.space_id=$1 AND p.page_id=c.page_id ${HEAD_REVISION}`,
+        values: [spaceId, pullRequestUrl, references.map(() => crypto.randomUUID()),
+          references.map((reference) => reference.pageId), references.map((reference) => reference.blockId),
+          owner, label],
+        maxRows: MAX_LINKS,
+      }) : [];
+      return { completed: [...claimed, ...named].map((row) => ({ pageId: row.page_id,
         pageTitle: row.present ? row.title ?? UNNAMED_PAGE : null, blockId: row.block_id,
         conversationId: row.conversation_id, ownerUserId: row.owner_user_id })) };
     });
   }
+
 
   private async activeClaims(tx: DatabaseTransaction, spaceId: string, pageId: string, block?: string,
     ownerUserId?: string):
