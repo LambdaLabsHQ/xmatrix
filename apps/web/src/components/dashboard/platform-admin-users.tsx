@@ -13,28 +13,15 @@ import { ChevronLeft } from "lucide-react";
 
 import { AdminTable, type AdminColumn } from "./admin-table";
 import { AdminPaperAction } from "./admin-paper";
-import { useAdminParam, useAdminUserDetail, usePlatformOverview } from "./platform-admin-data";
+import { openAdminSpace, useAdminParam, useAdminUserDetail, usePlatformOverview } from "./platform-admin-data";
 import {
   adminTime,
   adminUserLabel,
-  formatAdminAge,
   formatAdminCount,
 } from "./platform-admin-overview";
+import { TimeCell, adminAge as age, adminUtc as utc } from "./platform-admin-cells";
 import { ToolDetailSection, ToolFact, ToolFacts } from "./tool-split";
 import { AdminDailyBars, AdminQueryView, AdminStatGrid } from "./workspace-platform-admin-view";
-
-function age(value: string | undefined, fallback = "—"): string {
-  return formatAdminAge(value, Date.now()) || fallback;
-}
-
-/** A time cell: one line, the exact UTC time on hover. */
-function TimeCell({ value, fallback }: { value: string | undefined; fallback?: string }) {
-  return <span className="whitespace-nowrap text-xs text-muted-foreground" title={value}>{age(value, fallback).replace(" UTC", "")}</span>;
-}
-
-function utc(value: string | undefined): string {
-  return value ? `${value.slice(0, 16).replace("T", " ")} UTC` : "—";
-}
 
 const USER_COLUMNS: AdminColumn<AdminUserSummary>[] = [
   {
@@ -193,6 +180,7 @@ function UserDetailBody({ detail }: { detail: AdminUserDetail }) {
 
       <ToolDetailSection title={`Spaces (${detail.spaces.length})`}>
         <AdminTable id="us" label="Spaces" rows={detail.spaces} rowKey={(space) => space.spaceId}
+          onRowClick={(space) => openAdminSpace(space.spaceId)}
           defaultSort="joined" empty="Not a member of any Space."
           columns={[
             { key: "name", label: "Space", value: (space) => space.name,

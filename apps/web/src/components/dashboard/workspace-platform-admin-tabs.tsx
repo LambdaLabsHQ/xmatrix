@@ -7,11 +7,13 @@
  * one being read. Everything here is metadata only, and every read is audited.
  */
 
-import { BarChart3, Building, ScrollText, Users } from "lucide-react";
+import { Activity, BarChart3, Building, CreditCard, ScrollText, Users } from "lucide-react";
 
 import { PlatformAdminView } from "./workspace-platform-admin-view";
 import { PlatformAdminAudit, PlatformAdminSpaces } from "./platform-admin-lists";
 import { PlatformAdminUsers } from "./platform-admin-users";
+import { PlatformAdminOperations } from "./platform-admin-operations";
+import { PlatformAdminBilling } from "./platform-admin-billing";
 import { SectionedToolView } from "./tool-split";
 
 export function PlatformAdminTabs({ token }: { token?: string }) {
@@ -24,6 +26,10 @@ export function PlatformAdminTabs({ token }: { token?: string }) {
           content: <PlatformAdminUsers token={token} /> },
         { key: "spaces", wide: true, label: "Spaces", icon: Building, summary: "Every Space and its usage",
           content: <PlatformAdminSpaces token={token} /> },
+        { key: "operations", wide: true, label: "Operations", icon: Activity, summary: "Machines, Runs, Automations, delivery",
+          content: <PlatformAdminOperations token={token} /> },
+        { key: "billing", wide: true, label: "Billing", icon: CreditCard, summary: "Subscriptions and paid calls",
+          content: <PlatformAdminBilling token={token} /> },
         { key: "audit", wide: true, label: "Audit", icon: ScrollText, summary: "What operators read and did",
           description: "Operator access to metadata is recorded here.",
           content: <PlatformAdminAudit token={token} /> },
