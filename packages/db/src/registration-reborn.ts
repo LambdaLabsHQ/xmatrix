@@ -112,19 +112,20 @@ export const HANDOFF_SOURCE_FENCE_SQL = `UPDATE data.runs r SET
     AND NOT r.metadata_json ? 'instanceHandoff' AND NOT r.metadata_json ? 'instanceDeletion'
   RETURNING r.run_id`;
 
-type ContinuationPhysical = { workspace?: QueryResultRow };
+type ContinuationPhysical = { workspace?: QueryResultRow; managed?: { key: string; hostname?: string } };
 type ContinuationSource = { remoteRepo?: string; hostname?: string; hostId?: string; canonicalCwd?: string; managedWorkspaceKey?: string;
   repoPool?: Record<string, string> };
 
-/** The directory the successor is admitted to: the predecessor's repository or registered Workspace. */
-function workspaceReference(source: ContinuationSource, physical: ContinuationPhysical): string {
-  return source.remoteRepo ? `repo:${source.remoteRepo}` : String(physical.workspace!.workspace_id);
+/** Managed directories keep the empty Workspace scope of their original admission. */
+function workspaceReferences(source: ContinuationSource, physical: ContinuationPhysical): string[] {
+  return source.remoteRepo ? [`repo:${source.remoteRepo}`]
+    : physical.managed ? [] : [String(physical.workspace!.workspace_id)];
 }
 
 function continuationHost(source: ContinuationSource, physical: ContinuationPhysical): string {
   // The physical query has already established the exact owner + Machine route.
   // Observation availability is independent of continuation authorization.
-  const observation = source.hostname ?? source.hostId ?? physical.workspace?.hostname;
+  const observation = source.hostname ?? source.hostId ?? physical.workspace?.hostname ?? physical.managed?.hostname;
   return typeof observation === "string" ? observation : "";
 }
 
@@ -146,6 +147,13 @@ async function admitContinuation(tx: DatabaseTransaction, input: ContinuationInp
  * harness session only resumes in that exact directory) or its Workspace. */
 function continuationSpawnWorkspace(source: ContinuationSource, key: SpaceAgentRegistrationKey, hostId: string,
   physical: ContinuationPhysical, at: string) {
+  if (physical.managed) return {
+    managementSpaceId: physical.managed.key,
+    workspace: { managedKey: physical.managed.key, ownerUserId: key.ownerUserId, machineId: key.machineId,
+      hostname: hostId || undefined, hostId, canonicalCwd: source.canonicalCwd, displayName: "xMatrix",
+      metadata: { managedWorkspaceKey: physical.managed.key, syntheticManagedWorkspace: true },
+      visibility: "private", createdAt: at, updatedAt: at, lastSeenAt: at },
+  };
   return {
     ...(source.remoteRepo ? { remoteRepo: source.remoteRepo, runWorktree: true } : {}),
     ...(source.remoteRepo && source.repoPool ? source.repoPool : {}),
@@ -215,7 +223,11 @@ export class PostgresRegistrationRebornRepository extends RegistrationPreparatio
     const { source, displayName } = await this.lockedSource(tx, input, key, located.key, "reborn");
     const model = source.useRuntimeDefaultModel ? "" : source.requestedRuntimeModel ?? "";
     const modelResource = model ? source.modelResource ?? model : undefined;
-    const requested = parseRegistrationResourceLimits({ workspaces: [workspaceReference(source, physical)],
+    if (physical.managed && (source.managedWorkspaceKey !== physical.managed.key
+      || source.canonicalCwd !== `.xmatrix-management/${physical.managed.key}` || source.remoteRepo)) {
+      throw new RegistrationAccessError("reborn_source_changed", 409);
+    }
+    const requested = parseRegistrationResourceLimits({ workspaces: workspaceReferences(source, physical),
       models: modelResource ? [modelResource] : [], capabilities: [] });
     const suffix = (await digestCanonicalCloneCborV1(["reborn", input.sourceMessageId, input.sourceInstanceId])).slice(0, 64);
     // The successor is the next Run of the predecessor's Instance, reserved
@@ -344,7 +356,7 @@ export class PostgresRegistrationRebornRepository extends RegistrationPreparatio
       placement: this.placement }, async tx => {
       const { source, displayName, configuration } = await this.lockedSource(tx, input, key, located.key, "handoff");
       if (source.handedOff) throw new RegistrationAccessError("reborn_source_changed", 409);
-      const requested = parseRegistrationResourceLimits({ workspaces: [workspaceReference(source, physical)], models: [],
+      const requested = parseRegistrationResourceLimits({ workspaces: workspaceReferences(source, physical), models: [],
         capabilities: [] });
       const suffix = (await digestCanonicalCloneCborV1(["handoff", input.sourceMessageId, input.sourceInstanceId,
         key.harness])).slice(0, 64);
@@ -518,7 +530,7 @@ export class PostgresRegistrationRebornRepository extends RegistrationPreparatio
   /** The successor tuple's machine environment and the predecessor's Workspace
    * row; both live in the directory, not in this Space's shard. */
   private physical(input: ContinuationInput, key: SpaceAgentRegistrationKey,
-    located: { hostId?: string; remoteRepo?: string; canonicalCwd?: string }, operation: "reborn" | "handoff",
+    located: { hostId?: string; remoteRepo?: string; canonicalCwd?: string; managedWorkspaceKey?: string }, operation: "reborn" | "handoff",
     runtimeDefaultModel: boolean) {
     return this.directory.transaction({ requestId: input.commandId, operation: `registration.${operation}.physical` },
       async tx => {
@@ -534,6 +546,20 @@ export class PostgresRegistrationRebornRepository extends RegistrationPreparatio
           FROM control.agent_registration_environments WHERE owner_user_id=$1 AND machine_id=$2 AND harness=$3`,
         values: [key.ownerUserId, key.machineId, key.harness], maxRows: 1 });
         if (!environments[0]) throw new RegistrationAccessError("registration_environment_missing", 409);
+        if (operation === "reborn" && !located.remoteRepo && located.managedWorkspaceKey) {
+          const managedKey = located.managedWorkspaceKey;
+          if (managedKey.length > 300 || hasControlCharacter(managedKey) || /[/\\]/u.test(managedKey)
+            || located.canonicalCwd !== `.xmatrix-management/${managedKey}`) {
+            throw new RegistrationAccessError("reborn_source_changed", 409);
+          }
+          const routes = await tx.query({ name: "registration_continuation_managed_route_v1", text: `SELECT hostname
+            FROM data.machine_daemons WHERE owner_user_id=$1 AND machine_id=$2 AND status='online'
+              AND capabilities_json ? 'registration_launch_v3' AND capabilities_json ? 'registration_managed_v1' LIMIT 2`,
+            values: [key.ownerUserId, key.machineId], maxRows: 2 });
+          if (routes.length !== 1) throw await registrationRouteRefusal(tx, "registration_managed_route_unavailable", key);
+          return { environment: parseAgentRegistrationEnvironment(environments[0].declaration_json), workspace: undefined,
+            managed: { key: managedKey, hostname: typeof routes[0]!.hostname === "string" ? routes[0]!.hostname : undefined } };
+        }
         const workspaces = located.remoteRepo ? [] : await tx.query({ name: "registration_continuation_workspace_v3",
           text: `SELECT w.workspace_id,w.canonical_cwd,w.metadata_json,d.hostname FROM data.workspaces w
             JOIN data.machine_daemons d ON d.owner_user_id=w.owner_user_id AND d.machine_id=w.machine_id
@@ -541,7 +567,7 @@ export class PostgresRegistrationRebornRepository extends RegistrationPreparatio
           values: [key.ownerUserId, key.machineId, located.canonicalCwd], maxRows: 2 });
         const workspace = workspaces[0];
         if (!located.remoteRepo && workspaces.length !== 1) throw new RegistrationAccessError("registration_workspace_or_daemon_unavailable", 409);
-        return { environment: parseAgentRegistrationEnvironment(environments[0].declaration_json), workspace };
+        return { environment: parseAgentRegistrationEnvironment(environments[0].declaration_json), workspace, managed: undefined };
       });
   }
 

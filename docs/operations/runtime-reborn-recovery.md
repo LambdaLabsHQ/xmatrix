@@ -77,6 +77,16 @@ key in Run metadata. Replays preserve those keys; different Instances do not
 share a harness-session key. These facts preserve recovery context, but are not
 by themselves a grant to resume a registration or bypass its current admission.
 
+A non-repository managed launch has no registered Workspace row. Its reborn
+retains the exact managed key and canonical directory from the source Run,
+and retains its empty Workspace resource scope. The owning machine must be
+online and advertise both `registration_launch_v3` and `registration_managed_v1`;
+current Channel and registration admission still apply. A directory name alone
+cannot identify a managed launch, and recovery never registers that directory
+or broadens the registration's Workspace grant. Missing or inconsistent keys
+fail before stopping the predecessor. This continuation applies to reborn and
+resting-Instance wake, not cross-harness handoff.
+
 Rejections must be visible, not merely logged. Target lookup failures produce
 a Channel error notice and do not claim that recovery was queued. If that
 refusal notice cannot be published, the caller receives an error.
