@@ -61,15 +61,39 @@ export async function resolveApp(api, bundleId) {
   return apps[0].id;
 }
 
-export async function submitRelease(api, { appId, version, buildNumber, metadata, privateNotes = "", waitFor = wait, attempts = 60 }) {
-  validateMetadata(metadata);
+/**
+ * The exact build once Apple has processed it as VALID, observed at most
+ * `attempts` times 20 seconds apart. An expired, INVALID or FAILED build stops
+ * at once (findBuild); one still processing at the bound fails the release.
+ */
+export async function waitForValidBuild(api, { appId, version, buildNumber, waitFor = wait, attempts = 60 }) {
   let build;
   for (let attempt = 0; attempt < attempts; attempt++) {
     build = await findBuild(api, { appId, version, buildNumber });
-    if (build?.attributes.processingState === "VALID") break;
+    if (build?.attributes.processingState === "VALID") return build;
     if (attempt + 1 < attempts) await waitFor(20_000);
   }
-  if (build?.attributes.processingState !== "VALID") throw new Error("Apple build processing timed out; retry this release to reconcile.");
+  throw new Error("Apple build processing timed out; retry this release to reconcile.");
+}
+
+/**
+ * What a release does at Apple once its build is uploaded. Either channel
+ * ships only an exact build Apple processed as VALID, so a beta that Apple
+ * rejected never counts as delivered; a beta then stays in TestFlight, and
+ * only a stable goes on to App Review. Apple's version is the release's X.Y.Z.
+ */
+export async function releaseToApple(api, { release, appId, buildNumber, metadata, privateNotes = "", waitFor = wait, attempts = 60 }) {
+  const version = releaseCore(release);
+  if (releaseChannel(release) === "beta") {
+    await waitForValidBuild(api, { appId, version, buildNumber, waitFor, attempts });
+    return { outcome: "testflight-only", version, buildNumber };
+  }
+  return submitRelease(api, { appId, version, buildNumber, metadata, privateNotes, waitFor, attempts });
+}
+
+export async function submitRelease(api, { appId, version, buildNumber, metadata, privateNotes = "", waitFor = wait, attempts = 60 }) {
+  validateMetadata(metadata);
+  const build = await waitForValidBuild(api, { appId, version, buildNumber, waitFor, attempts });
 
   const versions = await api.list(`/v1/apps/${appId}/appStoreVersions?${query({ "filter[platform]": "IOS", include: "build", limit: "200" })}`);
   let target = versions.find((row) => row.attributes.versionString === version);
@@ -192,20 +216,15 @@ await runCliMain(import.meta.url, async () => {
   const version = releaseCore(release);
   const api = appleClientFromEnv(env);
   const appId = await resolveApp(api, metadata.bundleId);
-  const args = { appId, version, buildNumber: env.IOS_BUILD_NUMBER };
   if (mode === "check-upload") {
-    const build = await findBuild(api, args);
+    const build = await findBuild(api, { appId, version, buildNumber: env.IOS_BUILD_NUMBER });
     appendFileSync(env.GITHUB_OUTPUT, `upload_required=${!build}\n`);
     console.log(build ? "Exact release build already exists; upload will be reused." : "Exact release build requires upload.");
     return;
   }
-  if (releaseChannel(release) === "beta") {
-    // A beta stays in TestFlight; only a stable goes to App Review.
-    console.log(`Beta ${release} stays in TestFlight; App Review takes stable releases only.`);
-    if (env.GITHUB_STEP_SUMMARY) appendFileSync(env.GITHUB_STEP_SUMMARY, `\nApp Store: **testflight-only** — beta ${release} (${env.IOS_BUILD_NUMBER}).\n`);
-    return;
-  }
-  const result = await submitRelease(api, { ...args, metadata, privateNotes: env.ASC_REVIEW_NOTES ?? "" });
+  const result = await releaseToApple(api, {
+    release, appId, buildNumber: env.IOS_BUILD_NUMBER, metadata, privateNotes: env.ASC_REVIEW_NOTES ?? "",
+  });
   // Only these allowlisted, non-secret fields are persisted publicly.
   console.log(JSON.stringify(result));
   if (env.GITHUB_STEP_SUMMARY) appendFileSync(env.GITHUB_STEP_SUMMARY, `\nApp Store: **${result.outcome}** — ${version} (${env.IOS_BUILD_NUMBER})${result.state ? `, ${result.state}` : ""}.\n`);
