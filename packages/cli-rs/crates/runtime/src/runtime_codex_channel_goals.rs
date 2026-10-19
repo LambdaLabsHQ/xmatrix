@@ -1,3 +1,6 @@
+/// How long a steer waits for Codex to accept it before the message interrupts.
+const CODEX_STEER_RESPONSE_TIMEOUT_SECS: u64 = 10;
+
 async fn submit_codex_turn_interruptible(
     app: &mut CodexAppSession,
     event_rx: &mut mpsc::UnboundedReceiver<agent_instance_connection::AgentInstanceConnectionEvent>,
@@ -100,6 +103,54 @@ async fn submit_codex_turn_interruptible(
                                 crate::runtime_harness_questions::ack_questionnaire_reply(relay, &reply);
                             }
                             continue;
+                        }
+                        // A Human message that does not @-address this Instance
+                        // joins the turn. Only Codex accepting the steer means it
+                        // has the message; otherwise it interrupts as before.
+                        if let Some(message) = active_turn_steer_message(
+                            &other,
+                            trace_channel_id,
+                            agent,
+                            interrupt_history_replay,
+                        ) {
+                            interrupter.cancel_questions().await;
+                            let instruction = runtime_state.and_then(|state| {
+                                inbound_execution_sources(std::slice::from_ref(&message))
+                                    .into_iter()
+                                    .next()
+                                    .and_then(|source| state.join_message_turn_source(source))
+                            });
+                            let input = steered_turn_input(
+                                &message.prompt_text(agent, None),
+                                instruction.as_deref(),
+                            );
+                            let accepted = match interrupter.begin_steer(&input).await {
+                                Ok(Some(accepted)) => {
+                                    tokio::select! {
+                                        biased;
+                                        answer = tokio::time::timeout(
+                                            Duration::from_secs(CODEX_STEER_RESPONSE_TIMEOUT_SECS),
+                                            accepted,
+                                        ) => matches!(answer, Ok(Ok(Ok(())))),
+                                        // The turn ended first: the message is the next one.
+                                        result = &mut turn => {
+                                            pending_events.push_back(other);
+                                            return InterruptibleCodexTurn::Completed(result);
+                                        }
+                                    }
+                                }
+                                Ok(None) => false,
+                                Err(err) => {
+                                    eprintln!("{} codex steer failed: {err}; interrupting instead", "⚠".yellow().bold());
+                                    false
+                                }
+                            };
+                            if accepted {
+                                if let Some(relay) = trace_relay {
+                                    ack_inbound_channel_messages(relay, std::slice::from_ref(&message));
+                                }
+                                continue;
+                            }
                         }
                         if event_requests_active_turn_interrupt_with_replay(
                             &other,
