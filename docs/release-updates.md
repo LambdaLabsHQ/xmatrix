@@ -158,8 +158,9 @@ links a page block needs no claim. A repository that made the check required
 should drop it from its required checks, or its pull requests wait on a check
 that never arrives. A member's pull request (owner, admin or member) that names
 a block is pre-reviewed there, as claimed ones were. A participant's or an
-unlinked author's pull request is left to the maintainers. Merging still
-completes a claim its author held there, so that section owes an update.
+unlinked author's pull request is left to the maintainers. Merging a pull
+request leaves every section it names owing an update, whether or not anyone
+claimed it.
 
 ## Unreleased: Repository tokens are bound to the Run
 

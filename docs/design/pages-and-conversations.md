@@ -421,9 +421,9 @@ shows who took the work.
   next to the block). Naming it gates nothing: there is no `xmatrix/claim`
   check, and nobody has to hold anything to open one (decided 2026-10-19:
   coordination is lock-free, see `pages-live-document.md` §3). The author is
-  identified by the GitHub account they linked in their profile. A claim the
-  author still holds there is credited with the pull request, and merging it
-  completes that claim.
+  identified by the GitHub account they linked in their profile. Merging it
+  leaves each block it names owing an update (`pages-live-document.md` §5.2),
+  claimed or not; a claim the author still held there is completed by it.
 - **Pre-review before a maintainer.** When a pull request a member of the
   Space (owner, admin or member) opens names a block, or gets new commits
   (drafts excepted), it gets its own review conversation on the block. It

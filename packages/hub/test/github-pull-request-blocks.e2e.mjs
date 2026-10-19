@@ -134,3 +134,33 @@ test("a pull request from an installation the Space did not connect neither atta
     assert.equal((await owed())?.reason, "merged");
   });
 });
+
+// Naming a block is enough: a merged pull request that names a section nobody
+// claimed still leaves it owing an update, shown as its author's, and a
+// redelivered merge adds nothing.
+test("a merged pull request naming an unclaimed block leaves it owing an update", async () => {
+  const userId = `owed-unclaimed-${randomUUID()}`;
+  await withGitHubUserScenario({ id: userId, email: "owed-unclaimed@example.com", name: "Owed Unclaimed" }, githubConfiguration(), secret,
+    async ({ worker, auth }) => {
+    const { pages, page, link, space } = await roadmapSpace(worker, { userId, auth });
+    const pullUrl = "https://github.com/acme/widgets/pull/11";
+    const merge = async (deliveryId) => {
+      const body = JSON.stringify({ action: "closed", installation: { id: installationId },
+        repository: { full_name: "acme/widgets" },
+        pull_request: { html_url: pullUrl, body: `Implements ${link}`, user: { id: 4545, login: "bob" },
+          head: { sha: "sha-merged" }, merged: true, draft: false } });
+      const response = await deliverGitHubWebhook(worker, { body, event: "pull_request", deliveryId, secret });
+      assert.equal(response.status, 200, await response.clone().text());
+    };
+    await merge("u-1");
+    const owed = (await json(await worker.fetch(`${pages}/${encodeURIComponent(page.pageId)}/awareness`,
+      { headers: auth }))).blocks.find((block) => block.blockId === "search")?.owed;
+    assert.deepEqual({ reason: owed?.reason, holder: owed?.holder, pullRequestUrl: owed?.pullRequestUrl },
+      { reason: "merged", holder: "bob", pullRequestUrl: pullUrl });
+    await merge("u-2");
+    const [{ count }] = await inWorkerTransaction(worker, (tx) => tx.query({
+      text: "SELECT count(*)::int AS count FROM data.page_claims WHERE space_id=$1 AND pull_request_url=$2",
+      values: [space.id, pullUrl] }));
+    assert.equal(count, 1, "a redelivered merge records the work once");
+  });
+});

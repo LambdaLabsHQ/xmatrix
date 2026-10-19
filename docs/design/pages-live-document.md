@@ -573,7 +573,7 @@ when it was written back.
 
 | Event | Section | Derived from |
 |---|---|---|
-| A pull request that names the section is merged | The section it names | The claim it completed |
+| A pull request that names the section is merged | The section it names | The record of its work, made at the merge whether or not anyone claimed the section |
 | A claim is released or lapses | The claimed section | The claim |
 | An Automation occurrence that starts an Agent ends, or never starts, without the section written | Its section | The claim the occurrence opened (§6.1) |
 | A live reference in the section changes state (§5.4) | That section | The reference |
