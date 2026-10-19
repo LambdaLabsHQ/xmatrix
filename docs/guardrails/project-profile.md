@@ -13,6 +13,15 @@ billing is independent of compute.
 
 English is the default language for repository documentation, guardrails, release docs, and tool instructions. Chinese may be used for existing Chinese design notes or when maintainers explicitly ask for Chinese output.
 
+## Release notes
+
+Release notes are published with each successful train and readable at
+`/releases/<version>` through Desktop, Machine versions, CLI updates and downloads.
+The stable release Agent authors a versioned document in the verified beta's
+source; intent and train refuse missing or mismatched stable notes. Betas use
+their exact tag's generated change list. iOS stable submissions also populate
+App Store What's New. See [release notes](../release-updates.md#release-notes).
+
 ## Current behavior
 
 GitHub repository subscriptions include `code-scanning`: signed alert lifecycle
