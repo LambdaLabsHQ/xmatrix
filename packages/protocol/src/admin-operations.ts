@@ -67,7 +67,8 @@ export interface AdminSpaceBillingDetail {
   plan: string;
   status: string;
   seats: number;
-  provider: string;
+  /** stripe or apple. */
+  provider?: string;
   currentPeriodEnd?: string;
   cancelAtPeriodEnd: boolean;
   graceUntil?: string;
@@ -176,7 +177,8 @@ export interface AdminOperationsSubscription {
   plan: string;
   status: string;
   seats: number;
-  provider: string;
+  /** stripe or apple. */
+  provider?: string;
   currentPeriodEnd?: string;
   cancelAtPeriodEnd: boolean;
   graceUntil?: string;

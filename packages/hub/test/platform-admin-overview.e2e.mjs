@@ -198,6 +198,54 @@ test("platform admin reads one user's metadata-only detail, and every read is au
   }
 });
 
+test("platform admin reads one Space's metadata-only detail and platform operations, audited", async () => {
+  const userId = `platform-admin-space-${randomUUID()}`;
+  const { worker, auth, jsonAuth } = await adminFixture(userId);
+  try {
+    const spaceName = `Admin Space ${randomUUID()}`;
+    const space = await createSpace(worker, spaceName);
+    const channel = await createOpenChannel(worker, jsonAuth, space.id, "space-detail");
+    await postChannelMessage(worker, MOCK_TOKEN, channel.id, "private space message");
+
+    const { detail } = await json(await worker.fetch(
+      `/api/admin/spaces/${encodeURIComponent(space.id)}`, { headers: auth }));
+    assert.equal(detail.space.spaceId, space.id);
+    assert.equal(detail.space.name, spaceName);
+    assert.equal(detail.space.ownerUserId, userId);
+    assert.equal(detail.totals.members, 1);
+    assert.ok(detail.totals.channels >= 1);
+    assert.equal(detail.totals.messages >= 1, true);
+    assert.equal(detail.members[0].userId, userId);
+    assert.equal(detail.members[0].role, "owner");
+    assert.equal(detail.members[0].messages, 1);
+    assert.equal(detail.activity.length, 30);
+    assert.equal(detail.activity.at(-1).humanMessages >= 1, true);
+    assert.deepEqual(detail.truncated, []);
+    const serializedDetail = JSON.stringify(detail);
+    assert.equal(serializedDetail.includes("private space message"), false);
+    assert.equal(serializedDetail.includes(channel.name), false);
+
+    assert.equal((await worker.fetch(
+      `/api/admin/spaces/${encodeURIComponent(`absent-${randomUUID()}`)}`, { headers: auth })).status, 404);
+
+    const { operations } = await json(await worker.fetch("/api/admin/operations", { headers: auth }));
+    assert.equal(operations.days, 30);
+    assert.equal(operations.runs.daily.length, 30);
+    assert.equal(typeof operations.outbox.byStatus, "object");
+    assert.ok(Array.isArray(operations.machines));
+    assert.ok(Array.isArray(operations.billing.subscriptions));
+    assert.equal(JSON.stringify(operations).includes("private space message"), false);
+
+    const { events } = await json(await worker.fetch("/api/admin/audit?limit=20", { headers: auth }));
+    const spaceRead = events.find((event) => event.action === "space.read" && event.targetId === space.id);
+    assert.ok(spaceRead, "the Space read is in the audit trail");
+    assert.equal(spaceRead.targetKind, "space");
+    assert.ok(events.some((event) => event.action === "operations.read"), "the operations read is audited");
+  } finally {
+    await worker.stop();
+  }
+});
+
 test("admin reads fail closed when their audit record cannot be written", async () => {
   const userId = `platform-admin-audit-failure-${randomUUID()}`;
   const { worker, auth } = await adminFixture(userId);
@@ -210,13 +258,15 @@ test("admin reads fail closed when their audit record cannot be written", async 
     try {
       await client.query("ALTER TABLE control.admin_audit_events RENAME TO unavailable_admin_audit_events");
     } finally { await client.end(); }
-    for (const route of ["/api/admin/overview", `/api/admin/users/${userId}`, "/api/admin/audit"]) {
+    for (const route of ["/api/admin/overview", `/api/admin/users/${userId}`, "/api/admin/audit",
+      "/api/admin/spaces/any-space", "/api/admin/operations"]) {
       const response = await worker.fetch(route, { headers: auth });
       assert.equal(response.status, 500, `${route} must refuse an unaudited read`);
       const body = await response.json();
       assert.equal(body.overview, undefined);
       assert.equal(body.detail, undefined);
       assert.equal(body.events, undefined);
+      assert.equal(body.operations, undefined);
     }
   } finally { await worker.stop(); }
 });
@@ -240,6 +290,8 @@ test("a signed-in user off the allowlist cannot read the platform overview", asy
     assert.equal(response.status, 403);
     assert.equal((await worker.fetch(`/api/admin/users/${userId}`, { headers: auth })).status, 403);
     assert.equal((await worker.fetch("/api/admin/audit", { headers: auth })).status, 403);
+    assert.equal((await worker.fetch("/api/admin/spaces/any-space", { headers: auth })).status, 403);
+    assert.equal((await worker.fetch("/api/admin/operations", { headers: auth })).status, 403);
 
     const unauthenticated = await worker.fetch("/api/admin/overview");
     assert.equal(unauthenticated.status, 401);
