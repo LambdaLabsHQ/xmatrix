@@ -68,9 +68,18 @@ mod channel_history_cache_tests {
                 let release_tail = release_tail.clone();
                 tokio::spawn(async move {
                     let mut buffer = vec![0_u8; 16 * 1024];
-                    let Ok(read) = stream.read(&mut buffer).await else {
-                        return;
-                    };
+                    // A TCP read is not a complete HTTP request. Closing while
+                    // unread headers remain can reset the response on Windows.
+                    let mut read = 0;
+                    while !buffer[..read].windows(4).any(|bytes| bytes == b"\r\n\r\n") {
+                        if read == buffer.len() {
+                            return;
+                        }
+                        match stream.read(&mut buffer[read..]).await {
+                            Ok(0) | Err(_) => return,
+                            Ok(count) => read += count,
+                        }
+                    }
                     let request = String::from_utf8_lossy(&buffer[..read]).to_string();
                     let first_line = request.lines().next().unwrap_or_default().to_string();
                     let (status, body) = if request.to_ascii_lowercase().contains("bearer denied") {
@@ -126,6 +135,7 @@ mod channel_history_cache_tests {
                         release_tail.notified().await;
                     }
                     let _ = stream.write_all(response.as_bytes()).await;
+                    let _ = stream.shutdown().await;
                 });
             }
         });

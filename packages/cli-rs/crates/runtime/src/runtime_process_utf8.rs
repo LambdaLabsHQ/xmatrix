@@ -1393,7 +1393,7 @@ fn request_os_managed_daemon_start() -> bool {
         let Ok(executable) = std::env::current_exe() else {
             return false;
         };
-        return std::process::Command::new(executable)
+        std::process::Command::new(executable)
             .args(["machine", "supervisor", "start-daemon"])
             .env_remove("XMATRIX_PROFILE")
             .env_remove("XMATRIX_HUB_URL")
@@ -1402,7 +1402,7 @@ fn request_os_managed_daemon_start() -> bool {
             .stderr(Stdio::null())
             .creation_flags(CREATE_NO_WINDOW)
             .spawn()
-            .is_ok();
+            .is_ok()
     }
     #[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
     false

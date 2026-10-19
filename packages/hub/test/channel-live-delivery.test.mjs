@@ -22,7 +22,9 @@ test("a committed turn failure notice reaches both live audiences (XMATRIX-HUB-7
     assert.ok(delivery, "the authority-accepted notice must be deliverable");
     assert.equal(delivery.messageId, notice.messageId);
     assert.equal(delivery.body, notice.body);
-    assert.deepEqual(delivery.metadata, { xmatrixProvenance: "system_fact", xmatrixSystemNotice: true, xmatrixTurnFailure: true });
+    // Delivery preserves the committed metadata, including additive evidence;
+    // the notice builder owns its schema, not either audience's parser.
+    assert.deepEqual(delivery.metadata, envelope.metadata);
   }
 });
 

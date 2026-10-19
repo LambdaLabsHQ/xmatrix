@@ -43,12 +43,13 @@ pub fn apply_and_verify_owner_only(path: &Path, directory: bool) -> io::Result<(
     } else {
         NO_INHERITANCE
     };
-    let mut trustee = TRUSTEE_W::default();
-    trustee.pMultipleTrustee = ptr::null_mut();
-    trustee.MultipleTrusteeOperation = NO_MULTIPLE_TRUSTEE;
-    trustee.TrusteeForm = TRUSTEE_IS_SID;
-    trustee.TrusteeType = TRUSTEE_IS_USER;
-    trustee.ptstrName = token_user.sid().cast();
+    let trustee = TRUSTEE_W {
+        pMultipleTrustee: ptr::null_mut(),
+        MultipleTrusteeOperation: NO_MULTIPLE_TRUSTEE,
+        TrusteeForm: TRUSTEE_IS_SID,
+        TrusteeType: TRUSTEE_IS_USER,
+        ptstrName: token_user.sid().cast(),
+    };
     let explicit = EXPLICIT_ACCESS_W {
         grfAccessPermissions: FILE_ALL_ACCESS,
         grfAccessMode: SET_ACCESS,
