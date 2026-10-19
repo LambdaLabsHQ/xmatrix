@@ -5,7 +5,7 @@ export function sanitizeMachineFailureDetail(raw: string, maxChars = 2_000): str
     .replace(/-----BEGIN [^-]*PRIVATE KEY-----[\s\S]*?(?:-----END [^-]*PRIVATE KEY-----|$)/gu, "[REDACTED]")
     .replace(/([a-z][a-z0-9+.-]*:\/\/)[^\s/]+@/giu, "$1[REDACTED]@")
     .replace(/([a-z][a-z0-9+.-]*:\/\/[^\s?'"<>#]+)[?#][^\s'"<>]*/giu, "$1?[REDACTED]")
-    .replace(/((?:authorization|proxy-authorization|cookie|set-cookie)\s*:)\s*[^\r\n]+/giu, "$1 [REDACTED]")
+    .replace(/(?:authorization|proxy-authorization|cookie|set-cookie)\s*:\s*[^\r\n]+/giu, "[REDACTED]")
     .replace(/\b(?:bearer|basic)\s+[a-z0-9+/_.=~-]+/giu, "[REDACTED]")
     .replace(/((?:[a-z_]*token|password|passwd|secret|api[_-]?key)["']?\s*[=:]\s*)(?:"[^"]*"|'[^']*'|[^\s&;'")]+)/giu, "$1[REDACTED]")
     .replace(/\b(?:gh[pousr]_[A-Za-z0-9_]+|github_pat_[A-Za-z0-9_]+|sk-[A-Za-z0-9_-]+|eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)/gu, "[REDACTED]")

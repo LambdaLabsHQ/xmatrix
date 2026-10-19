@@ -8,7 +8,7 @@ pub fn sanitize(raw: &str, max_bytes: usize) -> String {
             (r"(?is)-----BEGIN [^-]*PRIVATE KEY-----.*?(?:-----END [^-]*PRIVATE KEY-----|$)", "[REDACTED]"),
             (r"(?i)([a-z][a-z0-9+.-]*://)[^\s/]+@", "${1}***@"),
             (r#"(?i)([a-z][a-z0-9+.-]*://[^\s?'\"<>#]+)[?#][^\s'\"<>]*"#, "${1}?[REDACTED]"),
-            (r"(?i)((?:authorization|proxy-authorization|cookie|set-cookie)\s*:)\s*[^\r\n]+", "${1} [REDACTED]"),
+            (r"(?i)(?:authorization|proxy-authorization|cookie|set-cookie)\s*:\s*[^\r\n]+", "[REDACTED]"),
             (r"(?i)\b(?:bearer|basic)\s+[a-z0-9+/_.=~-]+", "[REDACTED]"),
             (r#"(?i)((?:[a-z_]*token|password|passwd|secret|api[_-]?key)["']?\s*[=:]\s*)(?:\"[^\"]*\"|'[^']*'|[^\s&;'\"]+)"#, "${1}[REDACTED]"),
             (r"\b(?:gh[pousr]_[A-Za-z0-9_]+|github_pat_[A-Za-z0-9_]+|sk-[A-Za-z0-9_-]+|eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)", "[REDACTED]"),

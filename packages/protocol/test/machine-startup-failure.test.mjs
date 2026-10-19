@@ -65,6 +65,15 @@ test("bounds unicode diagnostics while leaving internal service errors to their 
   assert.ok(failure.summary.endsWith("..."));
 });
 
+test("redacted fragments do not swallow independent evidence on another reporting pass", () => {
+  for (const header of ["Authorization: Bearer PRIVATE_HEADER", "Cookie: session=PRIVATE_COOKIE"]) {
+    const fragment = publicMachineStartupFailure(header).summary;
+    const report = publicMachineStartupFailure(fragment + " | HTTP 403; requestId=req-independent").summary;
+    assert.doesNotMatch(report, /PRIVATE_/u);
+    assert.match(report, /HTTP 403; requestId=req-independent/u);
+  }
+});
+
 test("quoted and truncated credentials cannot cross the Channel boundary", () => {
   for (const raw of ['{"token":"JSON_SECRET"}', "-----BEGIN RSA PRIVATE KEY-----\nKEY_SECRET\n", "Bearer HEADER_SECRET"]) {
     assert.doesNotMatch(publicMachineStartupFailure(raw).summary, /JSON_SECRET|KEY_SECRET|HEADER_SECRET/u);
