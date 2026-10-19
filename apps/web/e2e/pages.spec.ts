@@ -1125,15 +1125,23 @@ test("selecting a passage starts a discussion anchored to it, drawn beside the t
   await expect(editor.locator(".page-discussion")).toHaveText("In progress");
   await expect(editor.getByRole("button", { name: `Open the discussion ${E2E_CHANNEL.name}` })).toBeVisible();
   await browser.screenshot({ path: test.info().outputPath("pages-discussion.png") });
-  // Opened again, its thread shows what was written: the passage heads it and is not quoted again in it.
+  // Opened again where the margin has no room, it is docked and nothing heads it: its first message opens
+  // with the passage and its link back.
   await fixtureJson(browser, "discussion-history", `**/api/xmatrix/channels/${E2E_CHANNEL.id}/history**`, {
     messages: [{ messageId: "m-asked", channelId: E2E_CHANNEL.id, sequence: 1, body: String(sent!.body), sentAt: NOW,
       reactions: [], annotations: [], attachments: [], from: E2E_USER_SENDER }], hasMore: false, historyHeadSequence: 1 });
   await editor.getByRole("button", { name: `Open the discussion ${E2E_CHANNEL.name}` }).click();
   const thread = browser.getByTestId("page-conversation");
-  await expect(thread.locator("[data-message-body='m-asked']")).toHaveText("Is this still accurate?");
+  const opening = thread.locator("[data-message-body='m-asked']");
+  await expect(opening.locator("blockquote")).toHaveText("In progress");
+  await expect(opening).toContainText("Is this still accurate?");
+  await browser.screenshot({ path: test.info().outputPath("pages-discussion-docked.png") });
+  // With room in the margin, the passage heads its thread there and is not quoted again in it.
+  await browser.setViewportSize({ width: 1600, height: 900 });
+  await expect(opening).toHaveText("Is this still accurate?");
   await expect(thread.locator("blockquote")).toHaveCount(0);
   await browser.screenshot({ path: test.info().outputPath("pages-discussion-thread.png") });
+  await browser.setViewportSize(E2E_DESKTOP_CONTEXT.viewport);
   await browser.getByRole("button", { name: "Close the conversation" }).click();
   await expect(browser.getByTestId("page-conversation")).toBeHidden();
   // The section's conversations list it, and resolve it once its outcome is in the page.
@@ -1142,11 +1150,6 @@ test("selecting a passage starts a discussion anchored to it, drawn beside the t
   await expect(list).toContainText("In progress");
   await list.getByRole("button", { name: "Resolve" }).click();
   await expect.poll(async () => fixtureRequestBodies(browser, "link-resolve")).toEqual([{ resolved: true }]);
-  // In Conversations nothing heads the thread: its first message opens with the passage and its link back.
-  await browser.goto("/app", { waitUntil: "domcontentloaded" });
-  const opening = browser.locator("[data-message-body='m-asked']");
-  await expect(opening.locator("blockquote")).toHaveText("In progress");
-  await expect(opening).toContainText("Is this still accurate?");
 });
 
 test("a page's Automations are chips in their sections, listed from its menu and attached from a heading", async ({ page: browser }) => {
