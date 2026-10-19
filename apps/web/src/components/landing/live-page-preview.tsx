@@ -15,11 +15,11 @@ import { editPageMarkdown } from "@/lib/pages/page-markdown-edit";
 
 interface Writer { id: number; name: string; color: string; avatarUrl?: string; kind: "agent" | "user"; block: string }
 
-const PERSON: Writer = { id: 41_001, name: "Daniel", color: "#0891b2", kind: "user", block: "decided" };
+const PERSON: Writer = { id: 41_001, name: "Daniel", color: "#4b6382", kind: "user", block: "decided" };
 const AGENTS: Writer[] = [
-  { id: 41_101, name: "claude:1", color: "#ea580c", avatarUrl: "/agent-vendors/claude.svg", kind: "agent", block: "where-it-stands" },
-  { id: 41_202, name: "codex:1", color: "#2563eb", avatarUrl: "/agent-vendors/openai.svg", kind: "agent", block: "workstreams" },
-  { id: 41_303, name: "cursor:1", color: "#16a34a", avatarUrl: "/agent-vendors/cursor.png", kind: "agent", block: "workstreams" },
+  { id: 41_101, name: "claude:1", color: "#b85a3b", avatarUrl: "/agent-vendors/claude.svg", kind: "agent", block: "where-it-stands" },
+  { id: 41_202, name: "codex:1", color: "#2f6f5e", avatarUrl: "/agent-vendors/openai.svg", kind: "agent", block: "workstreams" },
+  { id: 41_303, name: "cursor:1", color: "#7a5389", avatarUrl: "/agent-vendors/cursor.png", kind: "agent", block: "workstreams" },
 ];
 const [CLAUDE, CODEX, CURSOR] = AGENTS as [Writer, Writer, Writer];
 

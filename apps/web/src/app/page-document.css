@@ -236,14 +236,14 @@ a.page-section-claim:hover { text-decoration: underline; }
 
 /* A discussion anchored in the text (§4.3): the passage, and a bubble that opens its conversation. */
 .page-discussion {
-  background: color-mix(in oklab, #f59e0b 22%, transparent);
-  border-bottom: 2px solid color-mix(in oklab, #f59e0b 70%, transparent);
+  background: color-mix(in oklab, #f2b632 26%, transparent);
+  border-bottom: 2px solid color-mix(in oklab, #f2b632 75%, transparent);
   border-radius: 2px;
   transition: background 0.12s;
 }
-.page-discussion-focus { background: color-mix(in oklab, #f59e0b 45%, transparent); }
+.page-discussion-focus { background: color-mix(in oklab, #f2b632 50%, transparent); }
 /* Marks along the page's scrollbar (§3.2), in the colors the page uses for them. */
-.page-scroll-mark-discussion { background: color-mix(in oklab, #f59e0b 80%, transparent); }
+.page-scroll-mark-discussion { background: color-mix(in oklab, #f2b632 85%, transparent); }
 .page-scroll-mark-owed { background: #b45309; }
 .page-discussion-bubble {
   display: inline-flex;
@@ -274,7 +274,7 @@ a.page-section-claim:hover { text-decoration: underline; }
   box-shadow: 0 1px 2px oklch(0.3 0.02 60 / 0.18), 0 1px 3px 1px oklch(0.3 0.02 60 / 0.1);
 }
 /* A conversation about the page is a comment: its card, and the line under an Agent at work, start with its icon. */
-.page-comment-icon { flex: none; fill: color-mix(in oklab, #f59e0b 88%, white); }
+.page-comment-icon { flex: none; fill: #f2b632; }
 .page-margin-open {
   background: var(--card);
   box-shadow: 0 1px 3px oklch(0.3 0.02 60 / 0.22), 0 4px 10px 3px oklch(0.3 0.02 60 / 0.12);

@@ -37,11 +37,15 @@ export function pageAuthorLabel(author: Pick<PageAuthor, "label" | "application"
   return author.label + (application ? ` via ${application.name}` : "");
 }
 
-const PAGE_AUTHOR_COLORS = ["#2563eb", "#db2777", "#16a34a", "#ea580c", "#7c3aed", "#0891b2", "#ca8a04"];
+/**
+ * Muted inks that sit on the page's paper: terracotta, green, slate blue, plum, rose, olive and umber. Each carries
+ * white text at 4.5:1 or more, as an Agent's pill needs, and none is yellow, which is the comments' colour.
+ */
+const PAGE_AUTHOR_COLORS = ["#b85a3b", "#2f6f5e", "#4b6382", "#7a5389", "#a54960", "#5c6a2e", "#8a5a2b"];
 
 /**
  * One colour per person or Agent wherever a page shows them: their caret,
- * the ring on their avatar, and their changes in History.
+ * the ring on their avatar, their pill, and their changes in History.
  */
 export function pageAuthorColor(author: { kind: "user" | "agent"; id: string }): string {
   let hash = 0;
