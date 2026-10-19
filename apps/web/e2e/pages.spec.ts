@@ -1142,6 +1142,11 @@ test("selecting a passage starts a discussion anchored to it, drawn beside the t
   await expect(list).toContainText("In progress");
   await list.getByRole("button", { name: "Resolve" }).click();
   await expect.poll(async () => fixtureRequestBodies(browser, "link-resolve")).toEqual([{ resolved: true }]);
+  // In Conversations nothing heads the thread: its first message opens with the passage and its link back.
+  await browser.goto("/app", { waitUntil: "domcontentloaded" });
+  const opening = browser.locator("[data-message-body='m-asked']");
+  await expect(opening.locator("blockquote")).toHaveText("In progress");
+  await expect(opening).toContainText("Is this still accurate?");
 });
 
 test("a page's Automations are chips in their sections, listed from its menu and attached from a heading", async ({ page: browser }) => {
