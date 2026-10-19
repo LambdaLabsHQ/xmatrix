@@ -81,7 +81,7 @@ pub use xmatrix_cli_update::{
     release_version_is_newer, update_hint_lines,
 };
 use xmatrix_cli_update::{
-    CliUpdateCheck, DEFAULT_CLI_RELEASE_API_URL, UpdateHintTarget, check_cli_update, cmd_update,
+    CliUpdateCheck, UpdateHintTarget, check_cli_update, cmd_update, default_cli_release_api_url,
     print_update_hint,
 };
 use xmatrix_cli_update::{InstalledCliUpdate, install_cli_update_for_daemon_restart};
@@ -785,7 +785,11 @@ pub async fn run(mut cli: Cli) -> error::Result<()> {
         Some(Commands::Update {
             release_api_url,
             force,
-        }) => cmd_update(&release_api_url, force, &hub_url).await,
+        }) => {
+            let release_api_url =
+                release_api_url.unwrap_or_else(|| default_cli_release_api_url().to_string());
+            cmd_update(&release_api_url, force, &hub_url).await
+        }
         Some(Commands::UpdateSelf) => cmd_update_self().await,
         Some(Commands::Setup {
             machine_name,

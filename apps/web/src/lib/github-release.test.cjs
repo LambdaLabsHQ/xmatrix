@@ -261,3 +261,29 @@ test("release asset ranges reject multipart and unsatisfiable requests", () => {
   assert.throws(() => parseReleaseAssetRange("bytes=10000-", 10_000));
   assert.throws(() => parseReleaseAssetRange("bytes=-0", 10_000));
 });
+
+test("a channel pointer is read by its version: stable refuses a beta, dev may name either", () => {
+  const pointer = (channel, releaseTag) => ({
+    schemaVersion: 1,
+    component: "cli",
+    channel,
+    releaseTag,
+    prefix: `releases/${releaseTag}`,
+    files: [{ name: "xmatrix-linux-x64", key: `releases/${releaseTag}/xmatrix-linux-x64`, size: 42, sha256: "a".repeat(64) }],
+  });
+  assert.throws(() => releaseFromR2ChannelPointer(pointer("stable", "cli-v1.0.606-beta.3"), "cli", "stable"),
+    /stable channel names beta cli-v1\.0\.606-beta\.3/u);
+  assert.equal(releaseFromR2ChannelPointer(pointer("dev", "cli-v1.0.606-beta.3"), "cli", "dev").prerelease, true);
+  // A dev pointer from before betas had their own versions still resolves.
+  assert.equal(releaseFromR2ChannelPointer(pointer("dev", "cli-v1.0.602"), "cli", "dev").prerelease, false);
+  assert.equal(releaseFromR2ChannelPointer(pointer("stable", "cli-v1.1.0"), "cli", "stable").prerelease, false);
+  assert.throws(() => releaseFromR2ChannelPointer(pointer("stable", "cli-vlatest"), "cli", "stable"), /Invalid R2 cli stable/u);
+});
+
+test("the stable GitHub fallback never picks a beta, even one published without the prerelease flag", () => {
+  const selected = selectLatestPublishedGitHubReleaseByTagPrefix(
+    [release("cli-v1.0.606-beta.3"), release("cli-v1.0.605"), release("cli-v1.0.606-beta.2", { prerelease: true })],
+    "cli-v"
+  );
+  assert.equal(selected.tag_name, "cli-v1.0.605");
+});

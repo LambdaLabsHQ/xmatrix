@@ -2259,7 +2259,7 @@ enum DaemonSelfUpdateOutcome {
 
 fn daemon_self_update_release_api_url() -> String {
     std::env::var("XMATRIX_RELEASE_API_URL")
-        .unwrap_or_else(|_| DEFAULT_CLI_RELEASE_API_URL.to_string())
+        .unwrap_or_else(|_| default_cli_release_api_url().to_string())
 }
 
 fn daemon_self_update_interval() -> Duration {

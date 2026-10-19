@@ -269,16 +269,12 @@ pub enum Commands {
         #[arg(long)]
         json: bool,
     },
-    /// Update this xMatrix CLI binary from the latest release
+    /// Update this xMatrix CLI binary from the latest release of its channel
     Update {
-        /// Release metadata URL
-        #[arg(
-            long,
-            env = "XMATRIX_RELEASE_API_URL",
-            default_value = "https://xmatrix.sh/api/cli/releases/latest"
-        )]
-        release_api_url: String,
-        /// Reinstall even when the latest version matches this binary
+        /// Release metadata URL (default: the dev feed for a beta, the stable feed otherwise)
+        #[arg(long, env = "XMATRIX_RELEASE_API_URL")]
+        release_api_url: Option<String>,
+        /// Reinstall when the latest release is this binary's own version
         #[arg(long)]
         force: bool,
     },

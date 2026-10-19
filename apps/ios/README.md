@@ -23,8 +23,9 @@ When running on a physical device, use the Mac LAN IP instead of `localhost`.
 ## App Store continuous delivery
 
 Production Release Intent with `release_components=ios` runs the existing immutable
-release train, simulator gate, signing, and TestFlight upload, followed by App Store
-version metadata and review submission. The app icon is bundled by Xcode; selecting
+release train, simulator gate, signing, and TestFlight upload. A beta stops at
+TestFlight; a stable continues with App Store version metadata and review
+submission. Both use the release's `X.Y.Z` as the store version and the run ID as the build number. The app icon is bundled by Xcode; selecting
 the exact uploaded build updates the store icon as part of that version.
 
 Public listing text lives in `app-store/metadata.json`. Contact information, review

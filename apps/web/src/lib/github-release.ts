@@ -126,6 +126,14 @@ function isReleaseObjectKey(key: string | undefined, prefix: string, name: strin
   return RELEASE_PART_PATTERN.test(key.slice(prefix.length + 1, key.length - name.length - 1));
 }
 
+/**
+ * Whether a release is a beta: the version alone says so (`X.Y.Z-beta.N`), not
+ * the GitHub prerelease flag or the channel that names it.
+ */
+function isPrereleaseVersion(version: string) {
+  return version.split("+", 1)[0].includes("-");
+}
+
 export function releaseFromR2ChannelPointer(
   pointer: R2ChannelPointer,
   component: ReleaseComponent,
@@ -136,11 +144,18 @@ export function releaseFromR2ChannelPointer(
     pointer.component !== component ||
     pointer.channel !== channel ||
     !pointer.releaseTag?.startsWith(`${component}-v`) ||
+    !parseReleaseVersion(releaseVersionFromTag(pointer.releaseTag)) ||
     !pointer.prefix?.startsWith("releases/") ||
     !Array.isArray(pointer.files) ||
     pointer.files.length === 0
   ) {
     throw new Error(`Invalid R2 ${component} ${channel} channel pointer`);
+  }
+  // Stable people never get a beta, whatever a pointer says. Dev may still name
+  // a release from before betas had their own versions.
+  const prerelease = isPrereleaseVersion(releaseVersionFromTag(pointer.releaseTag));
+  if (channel === "stable" && prerelease) {
+    throw new Error(`R2 ${component} stable channel names beta ${pointer.releaseTag}`);
   }
   const names = new Set<string>();
   const assets = pointer.files.map((file) => {
@@ -169,7 +184,7 @@ export function releaseFromR2ChannelPointer(
   return {
     tag_name: pointer.releaseTag,
     draft: false,
-    prerelease: false,
+    prerelease,
     assets,
     commitSha: pointer.commitSha,
     runId: pointer.runId,
@@ -186,7 +201,7 @@ async function fetchR2ChannelRelease(component: ReleaseComponent, channel: Relea
   return releaseFromR2ChannelPointer(pointer, component, channel);
 }
 
-/** The release a train published to the dev channel, before anyone promoted it to stable. */
+/** The beta a train published to the dev channel. */
 export function fetchDevRelease(component: ReleaseComponent) {
   return fetchR2ChannelRelease(component, "dev");
 }
@@ -223,6 +238,7 @@ export function selectLatestPublishedGitHubReleaseByTagPrefix(
         candidate.tag_name.startsWith(tagPrefix) &&
         !candidate.draft &&
         !candidate.prerelease &&
+        !isPrereleaseVersion(releaseVersionFromTag(candidate.tag_name)) &&
         isEligibleRelease(candidate)
     )
     .sort((left, right) =>
@@ -270,12 +286,27 @@ function compareReleaseVersions(left: string, right: string) {
 
   if (parsedLeft.prerelease && !parsedRight.prerelease) return -1;
   if (!parsedLeft.prerelease && parsedRight.prerelease) return 1;
-  return (parsedLeft.prerelease || "").localeCompare(parsedRight.prerelease || "");
+  // SemVer identifiers: beta.10 follows beta.2.
+  const leftIds = (parsedLeft.prerelease || "").split(".");
+  const rightIds = (parsedRight.prerelease || "").split(".");
+  for (let index = 0; index < Math.min(leftIds.length, rightIds.length); index += 1) {
+    const leftId = leftIds[index] ?? "";
+    const rightId = rightIds[index] ?? "";
+    if (leftId === rightId) continue;
+    const leftNumeric = /^\d+$/.test(leftId);
+    const rightNumeric = /^\d+$/.test(rightId);
+    if (leftNumeric && rightNumeric) return Number(leftId) - Number(rightId);
+    if (leftNumeric !== rightNumeric) return leftNumeric ? -1 : 1;
+    return leftId < rightId ? -1 : 1;
+  }
+  return leftIds.length - rightIds.length;
 }
 
 function parseReleaseVersion(version: string) {
   const [withoutBuild] = version.split("+", 1);
-  const [authority, prerelease] = withoutBuild.split("-", 2);
+  const dash = withoutBuild.indexOf("-");
+  const authority = dash < 0 ? withoutBuild : withoutBuild.slice(0, dash);
+  const prerelease = dash < 0 ? undefined : withoutBuild.slice(dash + 1);
   const parts = authority.split(".").map((part) => {
     if (!/^\d+$/.test(part)) return undefined;
     return Number(part);
