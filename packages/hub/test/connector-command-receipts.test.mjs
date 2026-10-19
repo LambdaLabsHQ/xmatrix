@@ -4,6 +4,7 @@ import * as protocol from "@xmatrix/protocol";
 import { GMAIL_ACTIONS } from "../src/connectors/actions/gmail.ts";
 import { parseActionCommand } from "../src/connectors/action-parse.ts";
 import { connectorActionCatalog } from "../src/connectors/action-catalog.ts";
+import * as subscriptionParse from "../src/connectors/subscription-parse.ts";
 import { loadCommonJsSourceModule } from "./support/commonjs-source-module.mjs";
 import { withProviderResponses } from "./support/fetch-responses.mjs";
 import { ProviderRequestError } from "../src/connectors/http.ts";
@@ -36,6 +37,7 @@ async function harness(credentials = { mailboxes: JSON.stringify([mailbox]), com
     "./command-support": support,
     "./action-parse": { parseActionCommand },
     "./action-catalog": { connectorActionCatalog },
+    "./subscription-parse": subscriptionParse,
     "./connection-credentials": { connectionCredentials: async () => credentials },
     "./credentials": { connectorActionPolicyRepository: () => ({ mode: async () => "allow" }) },
     "./agent-caller": { agentRegistrationOf: async () => ({ ownerUserId: "owner", machineId: "machine", harnessId: "codex" }) },
