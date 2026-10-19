@@ -256,8 +256,9 @@ goose and openclaw sign in only inside an interactive terminal; pi, vibe, junie
 and qwen have no official headless sign-in (API keys or their TUI). auggie and
 commandcode accept only a localhost browser callback (commandcode also takes a
 pasted API key), dimcode prints no link even in a terminal, and codebuddy,
-droid, prime, trae, antigravity, autohand, amp and reasonix have no CLI sign-in
-(in-app, ACP `authenticate`, API keys or enterprise tokens).
+droid, prime, trae, antigravity, autohand, amp, reasonix and deepseek have no CLI sign-in
+(in-app, ACP `authenticate`, API keys or enterprise tokens; DeepSeek Harness
+reads `DEEPSEEK_API_KEY`).
 
 See [Machines and CLI management](harness-management-cli.md) for user commands and confirmation behavior.
 
