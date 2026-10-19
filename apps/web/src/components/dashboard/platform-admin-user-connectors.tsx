@@ -21,13 +21,20 @@ export function AdminUserConnectors({ connectors, spaceName }: {
   spaceName: (id: string) => string;
 }) {
   return <>
-    <p className="mb-3 text-xs text-muted-foreground">
+    <p className="text-xs text-muted-foreground">
       Connections added by this user. Activity covers all callers in each Space, including Agents.
-      Requests are recorded executions, including blocked and planned work, not provider HTTP calls.
-      Events count retained standard webhook/event posts once per destination Channel; retries of the
-      same post count once. Raw HTTP attempts and events without a Channel post are unavailable.
-      Totals cover retained history; 30d is the last 30 days.
+      Counts show the last 30 days / retained total.
     </p>
+    <details className="mb-3 mt-2 text-xs text-muted-foreground">
+      <summary className="cursor-pointer">How requests and events are counted</summary>
+      <p className="mt-2">
+        Requests include queued, completed, failed, blocked and planned executions;
+        each may make several provider HTTP calls or none.
+        Events count retained standard webhook/event posts once per destination Channel;
+        retries of the same post count once. Raw incoming HTTP requests and events
+        without a Channel post are unavailable.
+      </p>
+    </details>
     <AdminTable id="uc" label="Connectors" rows={connectors}
       rowKey={(connector) => `${connector.spaceId}:${connector.providerId}`}
       defaultSort="created" empty="No connector added."
