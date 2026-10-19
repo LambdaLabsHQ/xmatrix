@@ -3,7 +3,7 @@ import { E2E_CHANNEL, E2E_SPACE, E2E_DESKTOP_CONTEXT, E2E_MOBILE_CONTEXT,
   openGeneralChannelWithHistory, fixtureRule, fixtureRequestBodies } from "./workspace-fixtures";
 
 for (const layout of ["desktop", "mobile"] as const) {
-  test(`${layout} Channel deletion requires a name and acknowledgement and retains a failed confirmation`, async ({ page }) => {
+  test(`${layout} Channel deletion is one confirmation and keeps the dialog open on a refusal`, async ({ page }) => {
     await page.setViewportSize((layout === "desktop" ? E2E_DESKTOP_CONTEXT : E2E_MOBILE_CONTEXT).viewport);
     await openGeneralChannelWithHistory(page, E2E_CHANNEL, []);
     await fixtureRule(page, { id: "channel-delete", method: "POST",
@@ -13,17 +13,17 @@ for (const layout of ["desktop", "mobile"] as const) {
         { status: 202, json: { state: "purging" } },
       ] } });
     if (layout === "desktop") {
+      // The title icon is the only delete control on a desktop.
+      await expect(page.getByRole("button", { name: "Delete Channel…", exact: true })).toHaveCount(0);
       await page.locator(".app-panel-header").getByRole("button", { name: `Delete #${E2E_CHANNEL.name}…` }).click();
     } else {
       await page.getByRole("button", { name: "More", exact: true }).click();
       await page.getByRole("button", { name: "Delete Channel…" }).click();
     }
-    const dialog = page.getByRole("dialog", { name: "Delete Channel", exact: true });
-    const submit = dialog.getByRole("button", { name: "Delete Channel", exact: true });
-    await expect(submit).toBeDisabled();
-    await dialog.getByRole("textbox").fill(E2E_CHANNEL.name!);
-    await expect(submit).toBeDisabled();
-    await dialog.getByRole("checkbox").check();
+    const dialog = page.getByRole("dialog", { name: `Delete #${E2E_CHANNEL.name}?`, exact: true });
+    const submit = dialog.getByRole("button", { name: "Delete", exact: true });
+    await expect(dialog.getByRole("textbox")).toHaveCount(0);
+    await expect(dialog.getByRole("checkbox")).toHaveCount(0);
     await submit.click();
     await expect(dialog.getByRole("alert")).toContainText("Stop the Agents");
     await expect(dialog).toBeVisible();
