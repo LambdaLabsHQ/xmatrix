@@ -19,7 +19,7 @@ import { useAuth } from "@/lib/auth-context";
 import { xmatrixQueryKeys } from "@/lib/query/query-keys";
 import {
   PageLiveSession, pageApi, pageChildren,
-  type PageClaim, type PageLinkAnchor, type PagePresenceState, type PageRecentChange, type PageSummary, type PageTreeActivity, type PageTreeAgent,
+  type PageLinkAnchor, type PagePresenceState, type PageRecentChange, type PageSummary, type PageTreeActivity, type PageTreeAgent,
 } from "@/lib/pages/page-client";
 import { cn } from "@/lib/utils";
 import { ListSkeleton } from "@/components/dashboard/content-skeleton";
@@ -471,10 +471,6 @@ function usePresence(session: PageLiveSession | null): Array<{ clientId: number;
 }
 
 
-function pageClaimsKey(userId: string | null, spaceId: string | null | undefined, pageId: string | null) {
-  return xmatrixQueryKeys.domain({ userId: userId ?? "anonymous" }, "page-claims", [spaceId, pageId]);
-}
-
 /** The Agents live in a conversation this client holds, from its member presence. */
 /** The time now, renewed every second while `active`. */
 function useTicking(active: boolean): number {
@@ -839,10 +835,6 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
       }
       // A co-writing Agent's suggestion is laid over the page as it arrives.
       if (event.type === "suggestion") waitingRefetch.current();
-      if (event.type === "claims") {
-        queryClient.setQueryData<{ claims: PageClaim[]; competitiveBlocks: string[] }>(pageClaimsKey(userId, spaceId, pageId),
-          (current) => ({ competitiveBlocks: current?.competitiveBlocks ?? [], claims: event.claims }));
-      }
       if (event.type === "error" && event.code === "page_body_too_large") setNotice("This page is over 256 KiB.");
       if (event.type === "error" && event.code === "credits_exhausted") {
         setNotice("This Space has used this month's Agent credits; an Agent's edit is saved once someone edits the page or credits return.");
@@ -1044,16 +1036,6 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     ...staying.map((agent) => agent.conversationId),
   ])].sort().join("\n"), [present, staying]);
 
-  // Claims arrive live from the session; the interval lets lapsed ones go.
-  const claims = useQuery({
-    queryKey: pageClaimsKey(userId, spaceId, pageId), enabled: Boolean(spaceId && pageId && token), refetchInterval: 60_000,
-    queryFn: ({ signal }) => pageApi.claims(spaceId!, pageId!, token, signal),
-  });
-  const claimBlock = (blockId: string) => pageApi.claim(spaceId!, pageId!, token, blockId)
-    .then(() => claims.refetch(), (cause: Error) => setNotice(cause.message));
-  const releaseClaim = (claimId: string) => pageApi.releaseClaim(spaceId!, pageId!, token, claimId)
-    .then(() => claims.refetch(), (cause: Error) => setNotice(cause.message));
-
   const sections = useMemo(() => {
     const notes = new Map<string, SectionNote>();
     const note = (blockId: string) => {
@@ -1086,13 +1068,8 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
       }
     }
     for (const [blockId, count] of sectionConversationCounts(conversations)) note(blockId).conversations = count;
-    for (const claim of claims.data?.claims ?? []) {
-      if (note(claim.blockId).claim) continue;
-      note(claim.blockId).claim = { label: claim.holder.label, pullRequestUrl: claim.pullRequestUrl ?? null,
-        claimId: claim.claimId, mine: claim.ownerUserId === userId };
-    }
     return notes;
-  }, [atEdge, awareness.data, claims.data, conversationName, conversations, userId]);
+  }, [atEdge, awareness.data, conversationName, conversations]);
 
   const document = useQuery({
     ...pageDocumentQuery(user?.id ?? null, spaceId ?? "", pageId ?? "", token),
@@ -1188,11 +1165,6 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     pagesViewPath(`/app/${encodeURIComponent(spaceId)}/pages`, page?.pageId ?? null, null)}`;
   // The link a pull request names to pass the `xmatrix/claim` check.
   const blockLink = (blockId: string) => `${pageLink()}#${blockId}`;
-  const claimsOn = (blockId: string) => (claims.data?.claims ?? []).filter((claim) => claim.blockId === blockId);
-  // Free, or open for competition and not already yours.
-  const claimable = (blockId: string) => claimsOn(blockId).length === 0 ||
-    (Boolean(claims.data?.competitiveBlocks.includes(blockId)) &&
-      !claimsOn(blockId).some((claim) => claim.holder.kind === "user" && claim.holder.id === userId));
   // A discussion is where people and Agents meet alike: asking an Agent is mentioning it there.
   const discuss: NonNullable<PageSectionActions["discuss"]> = (blockId, anchor) => {
     if (!page) return;
@@ -1250,8 +1222,6 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     }
   };
   coWriteRef.current = coWrite;
-  const claim = (blockId: string) => (claimable(blockId) ? void claimBlock(blockId)
-    : setNotice("Someone is already on this section."));
   const openHistory = () => {
     reading.current?.seeAll();
     if (headRevision !== null) markSeen(headRevision, null);
@@ -1264,8 +1234,6 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     canEdit,
     discuss: (blockId) => discuss(blockId),
     copyLink,
-    claim,
-    release: (claimId) => void releaseClaim(claimId),
     attach: (blockId: string) => setDialog({ kind: "attach", blockId }),
     showConversations: (blockId) => setDialog({ kind: "conversations", blockId }),
     phone,
