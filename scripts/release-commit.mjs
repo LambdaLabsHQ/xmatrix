@@ -20,7 +20,7 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
-import { assertSemver } from "./release-version-order.mjs";
+import { assertSemver, releaseChannel } from "./release-version-order.mjs";
 import { stampVersionText, versionedPaths } from "./version.mjs";
 
 const FULL_SHA = /^[0-9a-f]{40}$/u;
@@ -132,16 +132,33 @@ export function verifyReleaseCut(root, deploySha, mainSha) {
   verifyReleaseCommit(root, deploySha, parents[0]);
 }
 
+/**
+ * Throws unless `deploySha` is a release a train may cut while `mainSha` is
+ * main, by the version it carries: a beta (or a release from before channels
+ * existed) is `mainSha` or its release commit; a stable is the release commit
+ * of a verified beta's source, which `mainSha` contains.
+ */
+export function verifyRelease(root, deploySha, mainSha) {
+  if (!FULL_SHA.test(deploySha ?? "") || !FULL_SHA.test(mainSha ?? "")) {
+    throw new Error("release and main must be full commit SHAs");
+  }
+  if (!hasCommit(root, deploySha)) git(root, ["fetch", "--no-tags", "origin", deploySha]);
+  const version = JSON.parse(gitRaw(root, ["show", `${deploySha}:version.json`])).version;
+  if (deploySha !== mainSha && releaseChannel(version) === "stable") verifyReleaseCut(root, deploySha, mainSha);
+  else verifyReleaseCommit(root, deploySha, mainSha);
+}
+
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const [command, deploySha, sourceSha] = process.argv.slice(2);
-  if (!["verify", "verify-cut"].includes(command) || !deploySha || !sourceSha) {
-    console.error("Usage: node scripts/release-commit.mjs <verify <deploy-sha> <source-sha>|verify-cut <deploy-sha> <main-sha>>");
+  if (!["verify", "verify-cut", "verify-release"].includes(command) || !deploySha || !sourceSha) {
+    console.error("Usage: node scripts/release-commit.mjs <verify <deploy-sha> <source-sha>|" +
+      "verify-cut <deploy-sha> <main-sha>|verify-release <deploy-sha> <main-sha>>");
     process.exit(2);
   }
   try {
-    if (command === "verify-cut") {
-      verifyReleaseCut(process.cwd(), deploySha, sourceSha);
-      console.log(`${deploySha} is the release commit of a revision ${sourceSha} contains.`);
+    if (command === "verify-cut" || command === "verify-release") {
+      (command === "verify-cut" ? verifyReleaseCut : verifyRelease)(process.cwd(), deploySha, sourceSha);
+      console.log(`${deploySha} is a release ${sourceSha} may ship.`);
       process.exit(0);
     }
     verifyReleaseCommit(process.cwd(), deploySha, sourceSha);

@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-import { releaseCommitProblem, verifyReleaseCommit, verifyReleaseCut } from "./release-commit.mjs";
+import { releaseCommitProblem, verifyRelease, verifyReleaseCommit, verifyReleaseCut } from "./release-commit.mjs";
 import { isReleaseCommitOfMain } from "./production-release-policy.mjs";
 import { stampVersionText, versionedPaths } from "./version.mjs";
 
@@ -137,4 +137,32 @@ test("a release stamps every manifest with its version, and iOS with the three n
   assert.ok(marketing.length > 0);
   assert.deepEqual([...new Set(marketing)], ["1.0.606"]);
   assert.equal(JSON.parse(stampVersionText("version.json", '{"version":"1.0.0"}', "1.0.606-beta.3")).version, "1.0.606-beta.3");
+});
+
+test("CI accepts a beta only as the stamp of its main revision, a stable as the stamp of a revision main contains", () => {
+  const repo = fixtureRepository();
+  try {
+    const verified = repo.source;
+    const main = repo.commit("later main", () => writeFileSync(path.join(repo.root, "source.txt"), "later\n"));
+    const beta = repo.commit("Release 99.0.1-beta.2", repo.stamp("99.0.1-beta.2"));
+    verifyRelease(repo.root, beta, main);
+    verifyRelease(repo.root, main, main);
+    repo.git("checkout", "--quiet", "--detach", verified);
+    const stable = repo.commit("Release 99.1.0", repo.stamp("99.1.0"));
+    verifyRelease(repo.root, stable, main);
+    // A beta is never a cut of an older revision, and a stable never carries more than its stamp.
+    repo.git("checkout", "--quiet", "--detach", verified);
+    const oldBeta = repo.commit("Release 99.0.1-beta.1", repo.stamp("99.0.1-beta.1"));
+    assert.throws(() => verifyRelease(repo.root, oldBeta, main), /not a release commit/u);
+    repo.git("checkout", "--quiet", "--detach", verified);
+    const carried = repo.commit("Release 99.1.1", () => {
+      repo.stamp("99.1.1")();
+      writeFileSync(path.join(repo.root, "source.txt"), "later\n");
+    });
+    assert.throws(() => verifyRelease(repo.root, carried, main), /changes more than the release version/u);
+    const offMain = repo.commit("Release 99.2.0", repo.stamp("99.2.0"));
+    assert.throws(() => verifyRelease(repo.root, offMain, main), /does not contain/u);
+  } finally {
+    rmSync(repo.root, { recursive: true, force: true });
+  }
 });
