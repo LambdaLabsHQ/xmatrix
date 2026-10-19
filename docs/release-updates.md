@@ -86,7 +86,10 @@ unchanged-beta-source contract: notes on newer main cannot be attached later.
 The production receipt publishes the authored stable notes, or GitHub's exact
 tag change list for a beta, before its deployment evidence on the GitHub Release.
 Users open `/releases/<version>` from Desktop updates, Machine versions or the
-CLI's update output. Manifests add an optional `releaseNotesUrl`; existing
+CLI's update output, and download cards resolve their component and channel to
+the same exact-version page. iOS stable submissions populate App Store What's
+New from the authored notes, with a bounded preview and link to the full text.
+Manifests add an optional `releaseNotesUrl`; existing
 consumers can ignore it and the native IPC shape stays unchanged. After release,
 verify that the exact version's public page and update links work. Old releases
 without user-facing notes show an explicit unavailable message.

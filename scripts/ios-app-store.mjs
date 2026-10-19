@@ -2,6 +2,8 @@ import { appendFileSync, readFileSync } from "node:fs";
 import { appleClientFromEnv, AppleApiError } from "./app-store-connect.mjs";
 import { runCliMain } from "./cli-entrypoint.mjs";
 import { releaseChannel, releaseCore } from "./release-version-order.mjs";
+import { appStoreReleaseNotes } from "./release-notes.mjs";
+import { fileURLToPath } from "node:url";
 
 const EDITABLE = new Set(["PREPARE_FOR_SUBMISSION", "REJECTED", "METADATA_REJECTED", "DEVELOPER_REJECTED", "READY_FOR_REVIEW"]);
 const SUBMITTED = new Set(["WAITING_FOR_REVIEW", "IN_REVIEW", "PENDING_DEVELOPER_RELEASE", "PENDING_APPLE_RELEASE", "PROCESSING_FOR_APP_STORE", "READY_FOR_SALE", "READY_FOR_DISTRIBUTION"]);
@@ -82,17 +84,20 @@ export async function waitForValidBuild(api, { appId, version, buildNumber, wait
  * rejected never counts as delivered; a beta then stays in TestFlight, and
  * only a stable goes on to App Review. Apple's version is the release's X.Y.Z.
  */
-export async function releaseToApple(api, { release, appId, buildNumber, metadata, privateNotes = "", waitFor = wait, attempts = 60 }) {
+export async function releaseToApple(api, { release, appId, buildNumber, metadata, releaseNotes, privateNotes = "", waitFor = wait, attempts = 60 }) {
   const version = releaseCore(release);
   if (releaseChannel(release) === "beta") {
     await waitForValidBuild(api, { appId, version, buildNumber, waitFor, attempts });
     return { outcome: "testflight-only", version, buildNumber };
   }
-  return submitRelease(api, { appId, version, buildNumber, metadata, privateNotes, waitFor, attempts });
+  return submitRelease(api, { appId, version, buildNumber, metadata, releaseNotes, privateNotes, waitFor, attempts });
 }
 
-export async function submitRelease(api, { appId, version, buildNumber, metadata, privateNotes = "", waitFor = wait, attempts = 60 }) {
+export async function submitRelease(api, { appId, version, buildNumber, metadata, releaseNotes, privateNotes = "", waitFor = wait, attempts = 60 }) {
   validateMetadata(metadata);
+  if (releaseNotes !== undefined && (typeof releaseNotes !== "string" || !releaseNotes.trim() || [...releaseNotes].length > 4_000)) {
+    throw new Error("App Store release notes must contain at most 4,000 characters.");
+  }
   const build = await waitForValidBuild(api, { appId, version, buildNumber, waitFor, attempts });
 
   const versions = await api.list(`/v1/apps/${appId}/appStoreVersions?${query({ "filter[platform]": "IOS", include: "build", limit: "200" })}`);
@@ -155,6 +160,7 @@ export async function submitRelease(api, { appId, version, buildNumber, metadata
   for (const entry of metadata.localizations) {
     const existing = localizations.find((row) => row.attributes.locale === entry.locale);
     const attributes = { ...entry };
+    if (releaseNotes && entry.locale === "en-US") attributes.whatsNew = releaseNotes;
     if (existing) {
       delete attributes.locale;
       await api.request(`/v1/appStoreVersionLocalizations/${existing.id}`, "PATCH", { type: "appStoreVersionLocalizations", id: existing.id, attributes });
@@ -224,6 +230,7 @@ await runCliMain(import.meta.url, async () => {
   }
   const result = await releaseToApple(api, {
     release, appId, buildNumber: env.IOS_BUILD_NUMBER, metadata, privateNotes: env.ASC_REVIEW_NOTES ?? "",
+    ...(releaseChannel(release) === "stable" ? { releaseNotes: appStoreReleaseNotes(fileURLToPath(new URL("..", import.meta.url)), release) } : {}),
   });
   // Only these allowlisted, non-secret fields are persisted publicly.
   console.log(JSON.stringify(result));

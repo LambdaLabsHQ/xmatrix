@@ -68,6 +68,15 @@ export function composeReleaseNotes({ notes, receipt }) {
   return `${NOTES_MARKER}\n${notes.trim()}\n\n## Deployment receipt\n\n${receipt.trim()}`;
 }
 
+/** Apple's What's New field is plain text, bounded to 4,000 characters. */
+export function appStoreReleaseNotes(root, version) {
+  const notes = authoredReleaseNotes(root, version).replace(/^#{1,6}\s+/gmu, "");
+  const link = `\n\nFull release notes: https://xmatrix.sh/releases/${version}`;
+  const characters = [...notes];
+  const available = 4_000 - [...link].length;
+  return (characters.length > available ? `${characters.slice(0, available - 1).join("")}…` : notes) + link;
+}
+
 async function publish(root) {
   const version = process.env.RELEASE_TAG?.replace(/^xmatrix-v/u, "");
   assertSemver(version);

@@ -52,6 +52,7 @@ export function DesktopDownload() {
                     </p>
                     <h3 className="mt-3 text-2xl font-semibold tracking-tight">{channel.title}</h3>
                     <p className="mt-2 text-sm leading-6 text-muted-foreground">{channel.description}</p>
+                    <a className="mt-2 inline-block text-sm text-primary underline" href={`/releases?component=desktop&channel=${channel.title === "Dev" ? "dev" : "stable"}`}>Release notes</a>
                   </div>
                   <LiquidGlassCard className="flex size-11 items-center justify-center">
                     <Download className="size-5 text-primary" />
@@ -98,6 +99,7 @@ export function DesktopDownload() {
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-[0.2em] text-primary">Windows</p>
                   <h3 className="mt-2 text-2xl font-semibold tracking-tight">Desktop App</h3>
+                  <p className="mt-2 flex gap-3 text-sm text-primary underline"><a href="/releases?component=desktop&channel=stable">Stable release notes</a><a href="/releases?component=desktop&channel=dev">Dev release notes</a></p>
                   <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
                     Stay connected to agent work from the native Windows app.
                   </p>
@@ -133,6 +135,7 @@ export function DesktopDownload() {
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-[0.2em] text-primary">Android</p>
                   <h3 className="mt-2 text-2xl font-semibold tracking-tight">APK</h3>
+                  <a className="mt-2 inline-block text-sm text-primary underline" href="/releases?component=android&channel=stable">Release notes</a>
                   <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
                     Stay connected to agent work from Android.
                   </p>

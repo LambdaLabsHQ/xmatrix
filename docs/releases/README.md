@@ -24,6 +24,12 @@ version's notes. Before the final receipt exists, stable pages can already read
 the authored document from that exact immutable tag. Beta notes become available
 with the receipt. Verify the notes after the entire release succeeds.
 
+Download cards resolve the selected component's stable/dev feed before opening
+its exact notes. iOS stable submissions also populate the English App Store
+What's New field from the same document, with a link to the full notes. A long
+document gets a clearly abbreviated 4,000-character store preview; the public
+document remains complete. Beta uploads stay TestFlight-only.
+
 After publication, verify the GitHub Release, the exact public page, and the
 update entry point before reporting completion. Recover receipt failures by
 re-running the same release's failed jobs; never modify an immutable tag or
