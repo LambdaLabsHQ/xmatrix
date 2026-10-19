@@ -220,7 +220,7 @@ import { PageReferenceScopeProvider } from "@/components/dashboard/page-referenc
 
 import type { SerializedAgentInvocationRejection, SerializedAgentStop, AgentInvocationQueryPage, InteractionDecisionWindow,
   InteractionLaunchOption } from "@xmatrix/protocol";
-import { firstMessageDecisionWindow, harnessLaunchOption, hasOperationalAgentInvocation, isAutoHandoffSuccessor, isHandoffSuccessorName, parseAgentStopInvocation, parseAutoLaunchMentions } from "@xmatrix/protocol";
+import { firstMessageDecisionWindow, harnessLaunchOption, hasOperationalAgentInvocation, isAutoHandoffSuccessor, isHandoffSuccessorName, parseAgentStopInvocation, parseAutoLaunchMentions, parseConnectorInvocation } from "@xmatrix/protocol";
 import { UnpublishedTurnState } from "./unpublished-turn-status";
 import { FirstMessageLaunchChoice } from "./first-message-launch-choice";
 import { launchChoiceOffered, launchChoicePollInterval, launchChoiceView } from "./first-message-launch-choice-state";
@@ -1797,11 +1797,15 @@ export const MessageRow = memo(function MessageRow({
   );
   // Mention chips compare the mentioned member's cursor against this one
   // message. Server-sent statuses stay authoritative where the Hub sent them.
+  // The Hub runs a connector command once, on send; an edit or a quote of it runs nothing.
+  const connectorInvocation = useMemo(() => contextOnly || message.editedAt ? undefined : parseConnectorInvocation(displayBody),
+    [contextOnly, message.editedAt, displayBody]);
   const mentionReadMessageScope = useMemo<MentionReadMessageScope>(() => ({
     launches: contextOnly || message.editedAt ? [] : agentLaunches,
     // A thread root is a quote of the command. An edit no longer matches the fenced body.
     ...(contextOnly || message.editedAt ? {} : { stops: agentStops, stopReceiptsLoaded }),
     rejections: contextOnly ? [] : invocationRejections,
+    ...(connectorInvocation ? { connector: connectorInvocation } : {}),
     continuations: contextOnly || message.editedAt ? [] : continuationInvocations,
     executions: contextOnly || message.editedAt ? [] : messageTargetEvidence?.executions,
     sourceBody: displayBody,
@@ -1813,7 +1817,7 @@ export const MessageRow = memo(function MessageRow({
     ...(!contextOnly && !message.editedAt ? { sentAt: message.sentAt } : {}),
     ...(message.sequence ? { sequence: message.sequence } : {}),
     ...(message.mentionReadStatuses?.length ? { statuses: message.mentionReadStatuses } : {}),
-  }), [message.mentionReadStatuses, message.sequence, agentLaunches, agentStops, stopReceiptsLoaded, invocationRejections, continuationInvocations, messageTargetEvidence, launchStatusUnavailable, onRetryAgentLaunch, onLaunchAnyway, contextOnly, displayBody, nonOperationalRanges, message.editedAt, message.own, message.messageId, message.body, message.sentAt]);
+  }), [message.mentionReadStatuses, message.sequence, agentLaunches, agentStops, stopReceiptsLoaded, invocationRejections, connectorInvocation, continuationInvocations, messageTargetEvidence, launchStatusUnavailable, onRetryAgentLaunch, onLaunchAnyway, contextOnly, displayBody, nonOperationalRanges, message.editedAt, message.own, message.messageId, message.body, message.sentAt]);
   const questionnaire = questionnaireMetadata(message.metadata);
   const onboardingStage = onboardingStageOf(message.metadata);
   const signedOutNotice = harnessSignedOutNoticeOf(message.metadata);

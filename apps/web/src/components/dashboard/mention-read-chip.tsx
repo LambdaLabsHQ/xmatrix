@@ -20,7 +20,7 @@ import { createContext, Fragment, memo, useContext, useEffect, useMemo, useRef, 
 import { Check } from "lucide-react";
 import { LoadingImage } from "@/components/dashboard/content-skeleton";
 
-import { parseAgentStopInvocation, type ChannelMentionReadStatus, type SerializedAgentLaunch, type SerializedAgentInvocationRejection, type SerializedAgentStop } from "@xmatrix/protocol";
+import { parseAgentStopInvocation, type ChannelMentionReadStatus, type ConnectorInvocation, type SerializedAgentLaunch, type SerializedAgentInvocationRejection, type SerializedAgentStop } from "@xmatrix/protocol";
 import { avatarImageSrc } from "./identity-avatar";
 import {
   mentionChipLabel,
@@ -59,6 +59,8 @@ export type MentionReadMessageScope = {
   /** False while the invocation query has not answered. Absent hides the stop chip. */
   stopReceiptsLoaded?: boolean;
   rejections?: readonly SerializedAgentInvocationRejection[];
+  /** The connector command this message is. Absent on a quote of it. */
+  connector?: ConnectorInvocation;
   continuations?: readonly import("@xmatrix/protocol").SerializedAgentContinuation[];
   executions?: readonly import("@xmatrix/protocol").SerializedAgentMessageExecution[];
   sourceBody?: string;
@@ -208,11 +210,12 @@ export const MentionRichText = memo(function MentionRichText({ text, rawMarkdown
     return segmentMessageInteraction<MentionReadTarget>(text, {
       continuations: scope?.continuations, rejections: scope?.rejections, launches,
       ...(stop ? { stop } : {}),
+      ...(scope?.connector ? { connector: scope.connector } : {}),
       launchStatusUnavailable: scope?.launchStatusUnavailable,
       mentions: run => splitMentionSegments(run, index ? index(run) : null),
     }, allowed);
   }, [text, allowed, base, scope?.continuations, scope?.rejections, scope?.launches,
-    scope?.stops, scope?.stopReceiptsLoaded, scope?.sourceBody, scope?.launchStatusUnavailable]);
+    scope?.stops, scope?.stopReceiptsLoaded, scope?.connector, scope?.sourceBody, scope?.launchStatusUnavailable]);
   if (!operational) return <PageReferenceRichText text={text} />;
   return <>{segments.map((segment, index) =>
     <InteractionSegmentView key={index} segment={segment} scope={scope} reading={reading} />)}</>;
@@ -267,6 +270,8 @@ function InteractionSegmentView({ segment, scope, reading }: {
         unavailable={scope?.launchStatusUnavailable} />;
     case "mention.v1":
       return <MentionReadChip target={segment.target} text={segment.text} token={segment.token} />;
+    case "connector.v1":
+      return <ConnectorCommandChip invocation={segment.invocation} text={segment.text} />;
     default:
       // A contract this client does not know stays the text it was written as.
       return <PageReferenceRichText text={(segment as { text: string }).text} />;
@@ -404,6 +409,34 @@ export function MentionReadChip({
         </span>
       </span>
       <span className="app-mention-chip-label">@{label}</span>
+    </span>
+  );
+}
+
+/**
+ * A connector command, highlighted whole like the `@` it is: the connector's
+ * mark, then the command and its arguments exactly as written, with the
+ * target marked where it sits, the way a summon's conditions are. Its result
+ * is the connector's reply.
+ */
+function ConnectorCommandChip({ invocation, text }: { invocation: ConnectorInvocation; text: string }) {
+  const at = (offset: number) => Math.min(text.length, offset - invocation.start);
+  const target = invocation.target;
+  return (
+    <span className="app-mention-chip app-connector-command-chip" data-connector={invocation.provider}>
+      <span className="app-mention-chip-avatar" aria-hidden="true">
+        <span className="app-mention-chip-avatar-face">
+          <LoadingImage src={`/app-connectors/${invocation.provider}.svg`} alt="" announce={false} retain draggable={false}
+            className="size-full object-contain"
+            fallback={<span className="app-mention-chip-initial">{mentionInitial(invocation.provider)}</span>} />
+        </span>
+      </span>
+      <span className="app-mention-chip-label">
+        {text.slice(0, at(target?.start ?? invocation.commandEnd))}
+        {target ? <span className="app-summon-condition">{text.slice(at(target.start), at(target.end))}</span> : null}
+        {at(invocation.commandEnd) < text.length
+          ? <span className="app-connector-command-arguments">{text.slice(at(invocation.commandEnd))}</span> : null}
+      </span>
     </span>
   );
 }
