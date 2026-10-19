@@ -144,7 +144,6 @@ Used only by the operators of the hosted xMatrix deployment. Leave unset.
 | Name | Kind | What it does |
 | --- | --- | --- |
 | `CONTROL_PLANE_OPERATOR_TOKEN` | secret | Machine credential for control-plane partition operator routes. |
-| `TEST_ENVIRONMENT_ACCESS_SPACE_ID` | var | Space whose members may switch to the hosted Test deployment; leave unset. |
 | `XMATRIX_ADMIN_TOKEN` | secret | Legacy internal admin bearer. |
 
 ## Local and test deployments

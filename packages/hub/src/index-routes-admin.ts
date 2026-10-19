@@ -30,7 +30,6 @@ import { operatorTokenAuthorizes } from "./admin-operator-token";
 import { RelayPostgresAgentLaunchCoordinatorService } from "./postgres-agent-launch-coordinator";
 import { wakeAgentLaunchChannel } from "./agent-launch-coordinator-wake";
 import { handOverAutomationChannels } from "./channel-automation-work";
-import { resolveTestEnvironmentAccess } from "./test-environment-access";
 import { backfillHumanHandles } from "./human-handle-mint";
 import {
   PermissionFailure,
@@ -66,15 +65,6 @@ export async function platformAdminForRequest(
   env: Env,
 ): Promise<boolean> {
   return resolvePlatformAdmin(authUser, env, (spaceId, userId) =>
-    deploymentSpaceMemberForRequest(env, spaceId, userId));
-}
-
-/** Resolve Test-app access through the deployment-pinned founding-team Space. */
-export async function testEnvironmentForRequest(
-  authUser: Parameters<typeof resolveTestEnvironmentAccess>[0],
-  env: Env,
-): Promise<boolean> {
-  return resolveTestEnvironmentAccess(authUser, env, (spaceId, userId) =>
     deploymentSpaceMemberForRequest(env, spaceId, userId));
 }
 

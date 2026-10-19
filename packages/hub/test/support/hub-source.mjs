@@ -26,7 +26,7 @@ export function* hubTypeScriptFiles(directory) {
 
 /** Deployment contracts run against every Hub Wrangler environment. */
 export function* hubWranglerSources() {
-  for (const file of ["wrangler.toml", "wrangler.test.toml", "wrangler.test-deploy.toml"]) {
+  for (const file of ["wrangler.toml", "wrangler.test.toml"]) {
     yield { file, source: readHubSource(file) };
   }
 }

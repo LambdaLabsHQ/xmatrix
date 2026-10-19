@@ -200,7 +200,6 @@ export interface Env {
    * Production Space whose signed-in members may enter the hosted Test app.
    * The deployment pins the id; clients and Spaces cannot widen this grant.
    */
-  TEST_ENVIRONMENT_ACCESS_SPACE_ID?: string;
   XMATRIX_MOCK_AUTH_TOKEN?: string;
   /** Runtime cell routing: exactly "dual" activates candidate cells; default shadow. */
   XMATRIX_RUNTIME_CELL_MODE?: string;

@@ -1052,14 +1052,6 @@
       "failures": 1,
       "timeouts": 0
     },
-    "test/test-environment-access.test.mjs": {
-      "durationMs": 133,
-      "peakRssBytes": 83770834,
-      "peakFdCount": 19,
-      "samples": 50,
-      "failures": 0,
-      "timeouts": 0
-    },
     "test/trace-authorization-batch.test.mjs": {
       "durationMs": 133,
       "peakRssBytes": 83730236,
