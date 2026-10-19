@@ -150,6 +150,11 @@ function blocksOf(markdown: string): DocNode[] {
   return nodes;
 }
 
+/** Rendered words only: finishing a streamed action may merely trim its trailing whitespace. */
+function writtenText(nodes: DocNode[]): string {
+  return nodes.map((node) => node.textContent).join("").trim();
+}
+
 function shortened(text: string): string {
   const line = text.replace(/\s+/gu, " ").trim();
   return line.length > QUOTE_CONTEXT ? `${line.slice(0, QUOTE_CONTEXT)}…` : line;
@@ -707,7 +712,7 @@ export class PageCoWriter {
     if (!children.length) children.push(pageSchema.nodes.paragraph!.create());
     const intended = pageSchema.topNodeType.create(live.doc.attrs, Fragment.fromArray(children));
     this.host.write(() => updateYFragment(this.host.doc, this.host.fragment, intended, live.meta));
-    if (intended.textContent !== live.doc.textContent) turn.timing?.wrote();
+    if (text.trim() && writtenText(nodes) !== writtenText(action.written)) turn.timing?.wrote();
     action.written = nodes;
     const end = region.from + nodes.length;
     this.remember(action, intended, region.from, end, live.meta.mapping);
