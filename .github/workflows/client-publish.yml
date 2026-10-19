@@ -1,12 +1,11 @@
 name: Client Publish
 
-# Each build machine has already uploaded its verified files straight into
-# releases/<tag> as run-attempt parts. Publishing moves no artifact: it seals
-# the release manifest that names the newest complete part of each build, then
-# points the caller's channels at it. Desktop and Android move dev and stable
-# together; the CLI moves dev only, because every daemon self-updates from
-# stable, and release-promote.yml points stable at the same sealed release once
-# it has been confirmed on dev.
+# Each build machine has already verified its files on its own platform and
+# uploaded them straight into releases/<tag> as run-attempt parts. Publishing
+# moves no artifact: it seals the release manifest that names the newest
+# complete part of each build, then points the release's channel at it. The
+# version says the channel: a beta X.Y.Z-beta.N goes to dev, a stable X.Y.Z to
+# stable (scripts/r2-release-store.mjs refuses any other pairing).
 on:
   workflow_call:
     inputs:
@@ -21,11 +20,6 @@ on:
       parts:
         description: Comma-separated release parts the build machines uploaded
         required: true
-        type: string
-      channels:
-        description: Channels to point at the sealed release, dev first (dev, or dev,stable)
-        required: false
-        default: dev
         type: string
       checksums:
         description: Publish a checksums.txt over every part's files
@@ -69,19 +63,13 @@ jobs:
         env:
           RELEASE_COMPONENT: ${{ inputs.component }}
           RELEASE_TAG: ${{ inputs.tag }}
-          RELEASE_CHANNELS: ${{ inputs.channels }}
         run: |
           node --input-type=module <<'SCRIPT'
           const component = process.env.RELEASE_COMPONENT;
           if (!['cli', 'desktop', 'android'].includes(component)) throw new Error('Unsupported release component');
-          if (!new RegExp(`^${component}-v\\d+\\.\\d+\\.\\d+$`).test(process.env.RELEASE_TAG || '')) {
+          const release = '(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)(?:-beta\\.[1-9]\\d*)?';
+          if (!new RegExp(`^${component}-v${release}$`).test(process.env.RELEASE_TAG || '')) {
             throw new Error(`${component} publication requires its immutable release tag`);
-          }
-          if (!['dev', 'dev,stable'].includes(process.env.RELEASE_CHANNELS)) {
-            throw new Error('A release is published to dev, or to dev and stable');
-          }
-          if (component === 'cli' && process.env.RELEASE_CHANNELS !== 'dev') {
-            throw new Error('The CLI reaches stable only through Release Promote');
           }
           SCRIPT
 
@@ -94,8 +82,6 @@ jobs:
           R2_RELEASE_SECRET_ACCESS_KEY: ${{ secrets.R2_RELEASE_SECRET_ACCESS_KEY }}
           XMATRIX_RELEASE_TAG: ${{ inputs.tag }}
           XMATRIX_RELEASE_COMPONENT: ${{ inputs.component }}
-          XMATRIX_RELEASE_CHANNEL: dev
-          RELEASE_CHANNELS: ${{ inputs.channels }}
           XMATRIX_RELEASE_SHA: ${{ github.sha }}
           RELEASE_PARTS: ${{ inputs.parts }}
           RELEASE_CHECKSUMS: ${{ inputs.checksums && '--checksums' || '' }}
@@ -106,10 +92,11 @@ jobs:
             --prefix "releases/$XMATRIX_RELEASE_TAG" \
             --parts "$RELEASE_PARTS" \
             $RELEASE_CHECKSUMS
-          for channel in ${RELEASE_CHANNELS//,/ }; do
-            node scripts/r2-release-store.mjs publish-channel \
-              --bucket xmatrix-release-assets \
-              --component "$XMATRIX_RELEASE_COMPONENT" \
-              --channel "$channel" \
-              --prefix "releases/$XMATRIX_RELEASE_TAG"
-          done
+          # The version says the channel; r2-release-store.mjs refuses any other.
+          channel=stable
+          if [[ "$XMATRIX_RELEASE_TAG" == *-beta.* ]]; then channel=dev; fi
+          node scripts/r2-release-store.mjs publish-channel \
+            --bucket xmatrix-release-assets \
+            --component "$XMATRIX_RELEASE_COMPONENT" \
+            --channel "$channel" \
+            --prefix "releases/$XMATRIX_RELEASE_TAG"

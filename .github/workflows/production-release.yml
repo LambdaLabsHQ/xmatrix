@@ -36,6 +36,7 @@ jobs:
       version: ${{ steps.identity.outputs.version }}
       tag: ${{ steps.identity.outputs.tag }}
       scope: ${{ steps.identity.outputs.scope }}
+      channel: ${{ steps.identity.outputs.channel }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -59,20 +60,31 @@ jobs:
         with:
           install-deps: "false"
 
+      # The version alone says the channel: X.Y.Z-beta.N is a beta, whose
+      # clients go to dev and TestFlight; X.Y.Z is a stable, which ships clients
+      # only, to their stable channel and App Review.
       - name: Resolve exact immutable release identity
         id: identity
+        env:
+          RELEASE_SCOPE: ${{ inputs.release_scope }}
         run: |
           set -euo pipefail
           git fetch --force origin refs/heads/main:refs/remotes/origin/main
           sha="$(git rev-parse HEAD)"
           tag="$GITHUB_REF_NAME"
           version="$(node -p "require('./version.json').version")"
+          channel="$(node --input-type=module -e 'import { releaseChannel } from "./scripts/release-version-order.mjs"; console.log(releaseChannel(process.argv[1]));' "$version")"
           test "$(git rev-parse "$tag^{commit}")" = "$sha"
           test -z "$(git status --porcelain)"
+          if [[ "$channel" == stable && ",$RELEASE_SCOPE," =~ ,(hub|web), ]]; then
+            echo "Stable $tag cannot ship $RELEASE_SCOPE: Hub and Web ship with every beta." >&2
+            exit 1
+          fi
           echo "deploy_sha=$sha" >> "$GITHUB_OUTPUT"
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          echo "scope=${{ inputs.release_scope }}" >> "$GITHUB_OUTPUT"
+          echo "scope=$RELEASE_SCOPE" >> "$GITHUB_OUTPUT"
+          echo "channel=$channel" >> "$GITHUB_OUTPUT"
 
       - name: Resolve production version floor
         id: floor
@@ -92,12 +104,16 @@ jobs:
               core.setFailed(`Production receipt ${process.env.CURRENT_TAG} already exists; use its authoritative run`);
               return;
             }
-            const versions = releases
-              .filter((release) => !release.draft && /^xmatrix-v\d+\.\d+\.\d+$/.test(release.tag_name))
-              .map((release) => release.tag_name.slice("xmatrix-v".length).split(".").map(Number))
-              .sort((a, b) => b[0] - a[0] || b[1] - a[1] || b[2] - a[2]);
-            const latest = versions[0]?.join(".") || "0.16.2";
-            core.setOutput("latest_version", latest);
+            // Betas and stables share one ascending line: X.Y.Z-beta.N < X.Y.Z.
+            const order = (tag) => {
+              const match = /^xmatrix-v(\d+)\.(\d+)\.(\d+)(?:-beta\.(\d+))?$/.exec(tag);
+              return match && [match[1], match[2], match[3], match[4] ?? Infinity].map(Number);
+            };
+            const latest = releases
+              .filter((release) => !release.draft && order(release.tag_name))
+              .map((release) => ({ version: release.tag_name.slice("xmatrix-v".length), key: order(release.tag_name) }))
+              .sort((a, b) => b.key[0] - a.key[0] || b.key[1] - a.key[1] || b.key[2] - a.key[2] || b.key[3] - a.key[3])[0];
+            core.setOutput("latest_version", latest?.version || "0.16.2");
 
       - name: Validate tag, versions, ancestry, cleanliness, and monotonicity
         env:
@@ -112,6 +128,7 @@ jobs:
           DEPLOY_SHA: ${{ steps.identity.outputs.deploy_sha }}
           REQUEST_RUN_ID: ${{ inputs.request_run_id }}
           RELEASE_SCOPE: ${{ inputs.release_scope }}
+          RELEASE_CHANNEL: ${{ steps.identity.outputs.channel }}
         with:
           # A runner-side "fetch failed" is retried rather than failing the job.
           retries: 3
@@ -153,20 +170,23 @@ jobs:
               core.setFailed("Production request does not authorize this exact main revision");
               return;
             }
-            // The request tested either this exact main revision or its release
-            // commit (that revision plus the stamped release version).
+            // A beta request tested either this exact main revision or its
+            // release commit (that revision plus the stamped release version). A
+            // stable request tested the release commit of a verified beta's
+            // source, which the request's main revision contains.
             try {
               require("child_process").execFileSync("node",
-                ["scripts/release-commit.mjs", "verify", process.env.DEPLOY_SHA, requestRun.head_sha],
+                ["scripts/release-commit.mjs", process.env.RELEASE_CHANNEL === "stable" ? "verify-cut" : "verify",
+                  process.env.DEPLOY_SHA, requestRun.head_sha],
                 { stdio: "inherit" });
             } catch {
               core.setFailed("Production request does not authorize this exact main revision");
               return;
             }
-            // Scope is durable job evidence, not optional step metadata. The
-            // dispatcher cannot run until this exact authorization succeeds.
-            // Re-read boundedly while GitHub publishes the job conclusion.
-            const authorityName = `authorize ${scope} production`;
+            // Scope and tag are durable job evidence, not optional step
+            // metadata. The dispatcher cannot run until this exact authorization
+            // succeeds. Re-read boundedly while GitHub publishes the conclusion.
+            const authorityName = `authorize ${scope} production ${context.ref.replace("refs/tags/", "")}`;
             let jobs = [];
             let authorities = [];
             for (let attempt = 0; attempt < 12; attempt += 1) {
@@ -534,6 +554,7 @@ jobs:
           RELEASE_TAG: ${{ needs.preflight.outputs.tag }}
           RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
           RELEASE_SCOPE: ${{ needs.preflight.outputs.scope }}
+          RELEASE_CHANNEL: ${{ needs.preflight.outputs.channel }}
         with:
           # A runner-side "fetch failed" is retried rather than failing the job.
           retries: 3
@@ -548,6 +569,7 @@ jobs:
               components: process.env.RELEASE_SCOPE.split(","),
               releaseTag: process.env.RELEASE_TAG,
               version: process.env.RELEASE_VERSION,
+              channel: process.env.RELEASE_CHANNEL,
               deploySha: process.env.DEPLOY_SHA,
               ...(process.env.RELEASE_SCOPE.split(",").includes("hub") ? { hubUrl: origins.XMATRIX_HUB_ORIGIN } : {}),
               ...(process.env.RELEASE_SCOPE.split(",").includes("web") ? { webUrl: origins.XMATRIX_APP_ORIGIN } : {}),
@@ -563,13 +585,14 @@ jobs:
               .addHeading(`Production deployment completed: ${receipt.releaseTag}`)
               .addTable([
                 [{ data: "Surface", header: true }, { data: "Result", header: true }],
+                ["Channel", receipt.channel],
                 ["Scope", receipt.scope],
                 ...(receipt.hubUrl ? [["Hub", receipt.hubUrl]] : []),
                 ...(receipt.webUrl ? [["Web", receipt.webUrl]] : []),
                 ...receipt.components.filter((component) => !["hub", "web"].includes(component))
-                  .map((component) => [component, component === "cli"
-                    ? "published to dev; stable moves with Release Promote"
-                    : "published"]),
+                  .map((component) => [component, component === "ios"
+                    ? (receipt.channel === "stable" ? "TestFlight build, submitted to App Review when Apple allows" : "TestFlight build")
+                    : `published to the ${receipt.channel === "stable" ? "stable" : "dev"} channel`]),
                 ["SHA", receipt.deploySha],
               ])
               .write();
@@ -615,14 +638,14 @@ jobs:
           RELEASE_TAG: ${{ needs.preflight.outputs.tag }}
           RELEASE_TITLE: xMatrix v${{ needs.preflight.outputs.version }}
           RELEASE_NOTES: |
-            Production ${{ needs.preflight.outputs.scope }} release completed from `${{ needs.preflight.outputs.deploy_sha }}`.
+            Production ${{ needs.preflight.outputs.channel }} ${{ needs.preflight.outputs.scope }} release completed from `${{ needs.preflight.outputs.deploy_sha }}`.
 
             - Scope: `${{ needs.preflight.outputs.scope }}` (only selected components were published)
             - Components: `${{ needs.preflight.outputs.scope }}`
             - Deployment receipt: R2 `xmatrix-release-receipts/production/${{ needs.preflight.outputs.tag }}/deployment`
             - Authoritative run: `${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}`
           RELEASE_DRAFT: "false"
-          RELEASE_PRERELEASE: "false"
+          RELEASE_PRERELEASE: ${{ needs.preflight.outputs.channel == 'beta' && 'true' || 'false' }}
           RELEASE_FORCE_TAG: "false"
           RELEASE_ALLOW_EMPTY_ASSETS: "true"
           RELEASE_KEEP_STALE_ASSETS: "true"

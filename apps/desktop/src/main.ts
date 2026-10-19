@@ -70,6 +70,7 @@ import {
   type DesktopNotificationPayload,
 } from "./notifications";
 import { readableUpdateErrorMessage, shouldShowUpdateRecovery } from "./update-errors";
+import { desktopUpdateFeedUrl } from "./update-feed";
 import { daemonFailureNeedsLogin, redactDaemonDetail } from "./daemon-failure";
 import { DEFAULT_SHELL_BACKGROUND_COLOR, desktopTitleBarOptions } from "./window-chrome";
 import { planWindowOpen } from "./window-navigation";
@@ -1343,6 +1344,8 @@ function showUpdateNotification(payload?: DesktopNotificationPayload) {
 function configureAutoUpdates() {
   autoUpdater.autoDownload = true;
   autoUpdater.autoInstallOnAppQuit = true;
+  // The packaged app-update.yml names the stable feed; a beta build follows dev.
+  autoUpdater.setFeedURL({ provider: "generic", url: desktopUpdateFeedUrl(app.getVersion()) });
 
   autoUpdater.on("checking-for-update", () => {
     checkingForUpdates = true;

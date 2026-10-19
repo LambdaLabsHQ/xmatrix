@@ -19,7 +19,29 @@ pub use daemon_service::{
     launchd_plist_path, systemd_unit, systemd_unit_path, windows_daemon_scheduled_task_script,
 };
 
-pub const DEFAULT_CLI_RELEASE_API_URL: &str = "https://xmatrix.sh/api/cli/releases/latest";
+pub const STABLE_CLI_RELEASE_API_URL: &str = "https://xmatrix.sh/api/cli/releases/latest";
+pub const DEV_CLI_RELEASE_API_URL: &str = "https://xmatrix.sh/api/cli/releases/dev";
+
+/// The release feed a CLI of `version` follows: a beta `X.Y.Z-beta.N` follows
+/// the dev channel, a stable `X.Y.Z` the stable one, so each build updates only
+/// along the channel it was published to.
+pub fn cli_release_api_url_for(version: &str) -> &'static str {
+    let prerelease = version
+        .split_once('+')
+        .map_or(version, |(value, _)| value)
+        .contains('-');
+    if prerelease {
+        DEV_CLI_RELEASE_API_URL
+    } else {
+        STABLE_CLI_RELEASE_API_URL
+    }
+}
+
+/// The release feed this CLI follows unless `XMATRIX_RELEASE_API_URL` or
+/// `--release-api-url` names another.
+pub fn default_cli_release_api_url() -> &'static str {
+    cli_release_api_url_for(xmatrix_cli_core::version::current())
+}
 
 const WINDOWS_DAEMON_LAUNCHER: &str = r#"Option Explicit
 
@@ -320,7 +342,7 @@ pub async fn stage_windows_daemon_candidate(
         false,
     )
     .map_err(|error| CliError::Launch(error.to_string()))?;
-    validate_downloaded_binary(&artifact.executable_path)?;
+    validate_downloaded_binary(&artifact.executable_path, &update.latest_version)?;
     Ok(WindowsStagedDaemonCandidate {
         previous_version: update.current_version,
         latest_version: update.latest_version.clone(),
@@ -402,19 +424,24 @@ pub async fn cmd_update(release_api_url: &str, force: bool, hub_url: &str) -> er
             current_version,
             latest_version,
         } => {
-            if latest_version == current_version {
-                println!(
+            match release_version_cmp(&latest_version, &current_version) {
+                Some(std::cmp::Ordering::Equal) => println!(
                     "{} xMatrix CLI is already up to date ({})",
                     "✓".green().bold(),
                     current_version
-                );
-            } else {
-                println!(
-                    "{} xMatrix CLI is newer than the latest release ({} > {})",
+                ),
+                Some(std::cmp::Ordering::Less) => println!(
+                    "{} xMatrix CLI is newer than the latest release ({} > {}); it never moves back",
                     "✓".green().bold(),
                     current_version,
                     latest_version
-                );
+                ),
+                _ => println!(
+                    "{} The release feed names '{}', which is not a release version; xMatrix CLI stays at {}",
+                    "⚠".yellow().bold(),
+                    latest_version,
+                    current_version
+                ),
             }
             return Ok(());
         }
@@ -450,7 +477,7 @@ pub async fn check_cli_update(release_api_url: &str, force: bool) -> error::Resu
         http::request_json(release_api_url, "GET", None, None).await?;
     let latest_version = latest_release_manifest_version(&manifest);
 
-    if !force && !release_version_is_newer(&latest_version, &current_version) {
+    if !update_installs(&latest_version, &current_version, force) {
         return Ok(CliUpdateCheck::UpToDate {
             current_version,
             latest_version,
@@ -517,7 +544,7 @@ pub async fn install_cli_update(
 ) -> error::Result<InstalledCliUpdate> {
     download_verified_cli_asset(&update.asset, &update.temp_path).await?;
     make_executable(&update.temp_path)?;
-    validate_downloaded_binary(&update.temp_path)?;
+    validate_downloaded_binary(&update.temp_path, &update.latest_version)?;
 
     schedule_downloaded_host_update(
         &update.temp_path,
@@ -540,7 +567,7 @@ pub async fn install_cli_update_for_daemon_restart(
 ) -> error::Result<InstalledCliUpdate> {
     download_verified_cli_asset(&update.asset, &update.temp_path).await?;
     make_executable(&update.temp_path)?;
-    validate_downloaded_binary(&update.temp_path)?;
+    validate_downloaded_binary(&update.temp_path, &update.latest_version)?;
 
     #[cfg(windows)]
     {
@@ -580,45 +607,24 @@ pub async fn install_cli_update_for_daemon_restart(
     }
 }
 
+/// Whether `latest` is a newer release than `current` by SemVer precedence. A
+/// version either side cannot read is never newer.
 pub fn release_version_is_newer(latest_version: &str, current_version: &str) -> bool {
-    match release_version_cmp(latest_version, current_version) {
-        Some(std::cmp::Ordering::Greater) => true,
-        Some(_) => false,
-        None => latest_version != current_version,
-    }
+    release_version_cmp(latest_version, current_version) == Some(std::cmp::Ordering::Greater)
 }
 
 pub fn release_version_cmp(left: &str, right: &str) -> Option<std::cmp::Ordering> {
-    let left_parts = parse_release_version(left)?;
-    let right_parts = parse_release_version(right)?;
-    let len = left_parts.len().max(right_parts.len());
-
-    for index in 0..len {
-        let left_part = left_parts.get(index).copied().unwrap_or(0);
-        let right_part = right_parts.get(index).copied().unwrap_or(0);
-        match left_part.cmp(&right_part) {
-            std::cmp::Ordering::Equal => {}
-            ordering => return Some(ordering),
-        }
-    }
-
-    Some(std::cmp::Ordering::Equal)
+    xmatrix_windows_continuity::release_version_precedence(left, right)
 }
 
-fn parse_release_version(version: &str) -> Option<Vec<u64>> {
-    let core = version
-        .split_once('-')
-        .map(|(core, _)| core)
-        .unwrap_or(version)
-        .split_once('+')
-        .map(|(core, _)| core)
-        .unwrap_or(version);
-    let parts = core
-        .split('.')
-        .map(|part| part.parse::<u64>().ok())
-        .collect::<Option<Vec<_>>>()?;
-
-    if parts.is_empty() { None } else { Some(parts) }
+/// Whether an update to `latest` installs: a newer release always, the same
+/// release only when forced (a reinstall), an older or unreadable one never.
+pub fn update_installs(latest_version: &str, current_version: &str, force: bool) -> bool {
+    match release_version_cmp(latest_version, current_version) {
+        Some(std::cmp::Ordering::Greater) => true,
+        Some(std::cmp::Ordering::Equal) => force,
+        _ => false,
+    }
 }
 
 fn current_platform_asset_name() -> error::Result<String> {
@@ -1109,7 +1115,10 @@ fn make_executable(_path: &Path) -> error::Result<()> {
     Ok(())
 }
 
-fn validate_downloaded_binary(path: &Path) -> error::Result<()> {
+/// The downloaded binary must run, and run as exactly the release version
+/// the feed named: the version decides whether it is an upgrade and which
+/// channel it follows next, so a feed cannot pass off older bytes as newer.
+fn validate_downloaded_binary(path: &Path, version: &str) -> error::Result<()> {
     let mut command = std::process::Command::new(path);
     configure_background_command(&mut command);
     let output = command
@@ -1117,11 +1126,17 @@ fn validate_downloaded_binary(path: &Path) -> error::Result<()> {
         .output()
         .map_err(|e| CliError::Launch(format!("Downloaded binary failed to start: {e}")))?;
 
-    if !output.status.success() {
+    if !output.status.success()
+        || xmatrix_windows_continuity::verify_reported_version(
+            &String::from_utf8_lossy(&output.stdout),
+            version,
+        )
+        .is_err()
+    {
         let _ = std::fs::remove_file(path);
-        return Err(CliError::Launch(
-            "Downloaded release asset failed validation".into(),
-        ));
+        return Err(CliError::Launch(format!(
+            "Downloaded release asset failed validation: it does not run as {version}"
+        )));
     }
 
     Ok(())
@@ -2585,16 +2600,17 @@ mod tests {
     use super::{
         CliReleaseManifest, UpdateHintTarget, WINDOWS_ATOMIC_UPDATE_HELPERS_PS,
         WINDOWS_DAEMON_LAUNCHER, WINDOWS_DAEMON_TASK_PATH_RESOLUTION_PS, WindowsUpdateHandoff,
-        is_safe_windows_daemon_generation_name, latest_release_manifest_version,
-        observe_update_handoff_child, reconcile_windows_daemon_generations,
-        reconcile_windows_daemon_launcher_if_installed, release_version_cmp,
-        release_version_is_newer, update_hint_lines, windows_cli_ping_path, windows_cli_pong_path,
-        windows_daemon_generation_path, windows_daemon_launcher_matches,
-        windows_daemon_launcher_path, windows_daemon_launcher_reconciliation_ps,
-        windows_daemon_ping_path, windows_daemon_pong_path, windows_host_cli_path,
-        windows_host_cli_path_with_default, windows_next_cli_slot_path,
-        windows_next_daemon_slot_path, windows_update_handoff_creation_flags,
-        windows_update_handoff_schedule_ps, windows_update_handoff_script,
+        cli_release_api_url_for, is_safe_windows_daemon_generation_name,
+        latest_release_manifest_version, observe_update_handoff_child,
+        reconcile_windows_daemon_generations, reconcile_windows_daemon_launcher_if_installed,
+        release_version_cmp, release_version_is_newer, update_hint_lines, update_installs,
+        windows_cli_ping_path, windows_cli_pong_path, windows_daemon_generation_path,
+        windows_daemon_launcher_matches, windows_daemon_launcher_path,
+        windows_daemon_launcher_reconciliation_ps, windows_daemon_ping_path,
+        windows_daemon_pong_path, windows_host_cli_path, windows_host_cli_path_with_default,
+        windows_next_cli_slot_path, windows_next_daemon_slot_path,
+        windows_update_handoff_creation_flags, windows_update_handoff_schedule_ps,
+        windows_update_handoff_script,
     };
     use std::path::PathBuf;
 
@@ -3432,6 +3448,48 @@ mod tests {
         assert_eq!(
             release_version_cmp("1.2", "1.2.0"),
             Some(std::cmp::Ordering::Equal)
+        );
+        // Betas order by SemVer: never a lower beta, never back from a stable to its betas.
+        assert!(release_version_is_newer("0.17.0-beta.10", "0.17.0-beta.2"));
+        assert!(!release_version_is_newer("0.17.0-beta.2", "0.17.0-beta.10"));
+        assert!(!release_version_is_newer("0.17.0-beta.1", "0.17.0"));
+        assert!(release_version_is_newer("0.17.0", "0.17.0-beta.10"));
+        assert!(release_version_is_newer("0.17.1-beta.1", "0.17.0"));
+        // A version the feed garbles is never an upgrade.
+        assert!(!release_version_is_newer("latest", "0.17.0"));
+    }
+
+    #[test]
+    fn force_reinstalls_the_same_release_and_never_installs_an_older_one() {
+        assert!(update_installs("0.17.0-beta.3", "0.17.0-beta.2", false));
+        assert!(!update_installs("0.17.0-beta.2", "0.17.0-beta.2", false));
+        assert!(update_installs("0.17.0-beta.2", "0.17.0-beta.2", true));
+        for (latest, current) in [
+            ("0.17.0-beta.2", "0.17.0-beta.10"),
+            ("0.17.0-beta.1", "0.17.0"),
+            ("0.16.9", "0.17.0"),
+            ("garbled", "0.17.0"),
+        ] {
+            assert!(
+                !update_installs(latest, current, true),
+                "{latest} over {current}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_cli_follows_the_channel_its_own_version_names() {
+        assert_eq!(
+            cli_release_api_url_for("1.0.606-beta.3"),
+            "https://xmatrix.sh/api/cli/releases/dev"
+        );
+        assert_eq!(
+            cli_release_api_url_for("1.1.0"),
+            "https://xmatrix.sh/api/cli/releases/latest"
+        );
+        assert_eq!(
+            cli_release_api_url_for("1.1.0+build.7"),
+            "https://xmatrix.sh/api/cli/releases/latest"
         );
     }
 

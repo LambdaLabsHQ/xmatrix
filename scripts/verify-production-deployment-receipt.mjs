@@ -4,11 +4,12 @@ import fs from "node:fs";
 import process from "node:process";
 
 import { runCliMain } from "./cli-entrypoint.mjs";
+import { RELEASE_TAG_PATTERN } from "./release-version-order.mjs";
 
 export function verifyProductionDeploymentReceipt(receipt, expected) {
   const { scope, sha, tag, runId, runAttempt } = expected;
   const components = scope.split(",");
-  if (!/^[0-9a-f]{40}$/u.test(sha) || !/^xmatrix-v\d+\.\d+\.\d+$/u.test(tag) ||
+  if (!/^[0-9a-f]{40}$/u.test(sha) || !RELEASE_TAG_PATTERN.test(tag) ||
       !Number.isSafeInteger(runId) || runId < 1 ||
       !Number.isSafeInteger(runAttempt) || runAttempt < 1) {
     throw new Error("Invalid expected production receipt identity");

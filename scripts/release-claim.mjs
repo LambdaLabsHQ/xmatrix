@@ -18,10 +18,10 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
-const TAG = /^xmatrix-v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/u;
+import { RELEASE_TAG_PATTERN } from "./release-version-order.mjs";
 
 export function claimRef(tag) {
-  if (!TAG.test(tag)) throw new Error(`Invalid release tag ${tag}`);
+  if (!RELEASE_TAG_PATTERN.test(tag)) throw new Error(`Invalid release tag ${tag}`);
   return `refs/release-claims/${tag}`;
 }
 

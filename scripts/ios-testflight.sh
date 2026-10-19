@@ -29,6 +29,9 @@ fi
 TEAM_ID="${IOS_DEVELOPMENT_TEAM:-}"
 CONFIGURATION="${IOS_CONFIGURATION:-Release}"
 ROOT_PACKAGE_VERSION="$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' "$ROOT_DIR/version.json" | head -n 1)"
+# Apple's version is three numbers: a beta X.Y.Z-beta.N ships as X.Y.Z, its
+# build number telling it apart from the stable X.Y.Z build.
+ROOT_PACKAGE_VERSION="${ROOT_PACKAGE_VERSION%%-*}"
 MARKETING_VERSION="${IOS_MARKETING_VERSION:-$ROOT_PACKAGE_VERSION}"
 BUILD_NUMBER="${IOS_BUILD_NUMBER:-$(date +%Y%m%d%H%M)}"
 ARCHIVE_PATH="${IOS_ARCHIVE_PATH:-$ROOT_DIR/build/ios/xMatrix.xcarchive}"

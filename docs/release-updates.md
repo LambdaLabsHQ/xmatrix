@@ -19,6 +19,56 @@ syncs the package manifests, Rust crate metadata, and native release metadata)
 is what the request runs; use it on a branch only to make local builds report a
 specific version.
 
+## Beta and stable channels
+
+A release is a beta `X.Y.Z-beta.N` or a stable `X.Y.Z`, and the version alone
+decides its channel (`releaseChannel` in `scripts/release-version-order.mjs`).
+All releases form one ascending SemVer line:
+`X.Y.Z-beta.1 < … < X.Y.Z-beta.N < X.Y.Z < X.Y.(Z+1)-beta.1`.
+
+- **Beta.** Any Agent requests one after merging, as before:
+  `gh workflow run production-release-intent.yml --ref main -f release_components=<list>`.
+  The train freezes `main`, ships the union of the open betas it contains, and
+  versions the release as a beta of the patch after the last stable (or of a
+  higher `X.Y.Z` that `main`'s `version.json` or an earlier beta already names).
+  Hub and Web deploy to production; CLI, Desktop and Android publish to their
+  dev channel; iOS goes to TestFlight only. Its GitHub Release is a prerelease.
+- **Stable.** Only the stable release Agent requests one, naming a beta it
+  verified and the bump its changes call for:
+  `gh workflow run production-release-intent.yml --ref main -f channel=stable -f candidate=xmatrix-vX.Y.Z-beta.N -f bump=patch|minor|major -f release_components=cli,desktop,android,ios`.
+  The version is the last stable raised by `bump`; it must reach the
+  candidate's `X.Y.Z` and exceed every release. The intent and the train check
+  that the candidate is an immutable beta tag whose Production Release
+  succeeded and shipped every component asked for, and that its source contains
+  the last stable's source, so no stable moves back. The train then rebuilds
+  exactly that source at the stable version and publishes the named clients to
+  their stable channel; iOS is also submitted to App Review. Hub and Web are not
+  part of a stable: they run every beta. A stable train ships alone, and wakes
+  the train again for the betas it left open.
+- **Failure.** A beta whose gates or production run failed reopens for the next
+  train. A stable that failed before tagging closes: nothing changed. A stable
+  whose production run failed stays in flight under
+  `refs/release-inflight/<tag>/`, pending recovery by re-running that run's
+  failed jobs, until it succeeds or a later successful stable ships every
+  component it names. No train retries a stable on its own.
+- **Evidence.** Each tag's annotation records the `scope`, `source` and
+  `channel` later trains read back. The request's authorization job is named
+  `authorize <scope> production <tag>`, and stable preflight accepts only the
+  release commit of a revision the request's `main` contains
+  (`release-commit.mjs verify-cut`).
+- **Clients.** Every build machine checks the artifact it built runs as exactly
+  the release version before uploading it: the CLI's `--version` on each
+  platform, the Desktop app's `app.asar` (`scripts/desktop-app-version.mjs`),
+  the Android APK through `aapt2`. A CLI or Desktop build picks its update feed
+  from its own version, so a beta follows dev and a stable follows stable. The
+  CLI installs only a newer release (`--force` reinstalls the same version), and
+  refuses a download that does not report the version its feed named; the
+  Windows Supervisor runs a verified candidate to prove its version and never
+  stages one that precedes the committed release. R2 refuses a beta on stable
+  and a stable on dev, and the Web download API refuses a stable pointer or
+  GitHub fallback that names a beta. iOS ships `X.Y.Z` with the Production
+  Release run ID as its build number.
+
 ## Scope evidence without job step metadata
 
 Production request authorization is the completed successful job named
@@ -64,7 +114,7 @@ smoke requires the live health metadata to report that exact SHA and a nonempty
 provider version ID, alongside the existing health and compatibility checks.
 Missing or mismatched revision evidence fails the release gate.
 
-CLI, Desktop and Android build machines upload their verified files straight into the immutable R2 release `releases/<component>-v<version>/parts/<part>/<run>-<attempt>/`. `client-publish.yml` moves no artifact: it seals the release manifest that names the newest complete attempt of each part and points the caller's channels at it. Desktop and Android move `channels/<component>/dev.json` and `stable.json` together in the train: installed Apps update from stable and new people download it, so nothing waits on a later step. The CLI moves dev only, because every daemon self-updates from stable; after the build is confirmed from the dev downloads (`/api/cli/releases/dev`), the `Release Promote` workflow points `channels/cli/stable.json` at the same sealed release, so daemons get exactly the checked bytes. `Release Promote` also takes `desktop` and `android` for a re-promotion. A channel never moves back to an older release. Hub and Web still deploy to production in the train; verify Hub and Web changes on the test environment first.
+CLI, Desktop and Android build machines upload their verified files straight into the immutable R2 release `releases/<component>-v<version>/parts/<part>/<run>-<attempt>/`. `client-publish.yml` moves no artifact: it seals the release manifest that names the newest complete attempt of each part and points the channel its version names at it: `channels/<component>/dev.json` for a beta, `stable.json` for a stable (see "Beta and stable channels"). A channel never moves back to an older release. Hub and Web deploy to production with every beta.
 
 Migration evidence: before consolidation, the effective YAML definitions were saved and compared with the selected shared jobs. Every original step, environment, runner selector, timeout, credential binding, and component lock matched; release-policy tests validate the new caller bindings and authorization order. Historical immutable tags continue to contain and use their previous workflow definitions. Android's new nested publication evidence is `android / release / release`; archival accepts that name or historical `android / release`, rejects multiple matching records, and still verifies exact train SHA, attempt, scope marker, PostgreSQL readiness, and finalizer outcome.
 

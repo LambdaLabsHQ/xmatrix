@@ -55,12 +55,15 @@ jobs:
               uncached: String(context.runId), headers: { "cache-control": "no-cache" },
             });
             // The list order is not a recency guarantee: it has returned old
-            // releases first. Choose exactly as the executor's policy does --
-            // the highest successful release run id -- or it refuses the tag.
-            const production = runs
-              .filter((run) => run.conclusion === "success" && run.event === "workflow_dispatch" &&
-                /^xmatrix-v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/.test(run.head_branch))
-              .sort((left, right) => right.id - left.id)[0];
+            // releases first. Choose exactly as the executor's policy does
+            // (latestMaintenanceRelease) -- the highest successful run id of
+            // the newest betas, which deploy the Hub, or of every release
+            // before the first beta -- or it refuses the tag. A stable ships
+            // an older beta's source to clients only, so it is never chosen.
+            const successful = runs.filter((run) => run.conclusion === "success" && run.event === "workflow_dispatch" &&
+              /^xmatrix-v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-beta\.[1-9]\d*)?$/.test(run.head_branch));
+            const betas = successful.filter((run) => run.head_branch.includes("-beta."));
+            const production = (betas.length ? betas : successful).sort((left, right) => right.id - left.id)[0];
             if (!production) throw new Error("no successful production release tag is available");
             core.info(`Saw ${runs.length} successful releases; newest ${production.head_branch} (run ${production.id})`);
             const tagRef = (await github.rest.git.getRef({

@@ -92,6 +92,20 @@ jobs:
         if: env.SKIP_ANDROID_RELEASE != '1'
         run: node scripts/android-release-assets.mjs
 
+      # The APK people install must run as exactly the release version, which
+      # its channel and the Hub's compatibility check follow.
+      - name: Verify the APK runs as the release version
+        if: env.SKIP_ANDROID_RELEASE != '1'
+        env:
+          STAGE_DIR: ${{ steps.release_assets.outputs.stage_dir }}
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./version.json').version")"
+          badging="$("$ANDROID_HOME/build-tools/36.1.0/aapt2" dump badging "$STAGE_DIR/xMatrix-Android-$version.apk" | head -n 1)"
+          if [[ "$badging" != *" versionName='$version'"* ]]; then
+            echo "The staged APK does not run as $version: $badging" >&2
+            exit 1
+          fi
       - name: Resolve Android release tag
         id: release_tag
         if: env.SKIP_ANDROID_RELEASE != '1'
@@ -123,6 +137,4 @@ jobs:
       component: android
       tag: ${{ needs.build.outputs.tag }}
       parts: assets
-      # The download page serves stable: the train moves it, as it moves dev.
-      channels: dev,stable
     secrets: inherit

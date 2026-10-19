@@ -83,7 +83,6 @@ const releasePolicyPaths = [
   "scripts/web-release-handoff.mjs",
   ".github/workflows/cli-build.yml",
   ".github/workflows/client-publish.yml",
-  ".github/workflows/release-promote.yml",
   ".github/workflows/desktop-release.yml",
   ".github/workflows/android-deploy.yml",
   ".github/workflows/ios-testflight.yml"];
