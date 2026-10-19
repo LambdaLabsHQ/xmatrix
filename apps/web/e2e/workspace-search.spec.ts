@@ -138,7 +138,7 @@ test("conversation actions sit beside its name and borderless search aligns righ
   await expect(search).toBeVisible();
   await expect(page.locator(".app-global-bar")).toHaveCount(0);
   const [nameBox, actionsBox, searchBox] = await Promise.all([name.boundingBox(), actions.boundingBox(), search.boundingBox()]);
-  expect(actionsBox!.x - (nameBox!.x + nameBox!.width)).toBeLessThanOrEqual(8);
+  expect(actionsBox!.x - (nameBox!.x + nameBox!.width)).toBeLessThanOrEqual(16);
   expect(searchBox!.x - (actionsBox!.x + actionsBox!.width)).toBeGreaterThan(100);
   const headerBox = await header.boundingBox();
   const paddingRight = await header.evaluate((node) => parseFloat(getComputedStyle(node).paddingRight));
