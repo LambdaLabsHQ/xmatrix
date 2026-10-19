@@ -7,6 +7,9 @@ import { isSentryInstallationGrant, sentryOrganization, validateSentryInstallati
 
 const SHORT_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,60}$/u;
 const GROUP_ID = /^[1-9][0-9]{0,31}$/u;
+const PROJECT_SLUG = /^[a-z0-9][a-z0-9_-]{0,99}$/u;
+const SEARCH = /^[^\p{Cc}]{1,300}$/u;
+const LIST_LIMIT = 25;
 
 function api(credentials: Readonly<Record<string, string>>, path: string): URL {
   if (isSentryInstallationGrant(credentials)) validateSentryInstallationCredentials(credentials);
@@ -147,6 +150,62 @@ const READ_ISSUE: ConnectorAction = {
   },
 };
 
+/** One issue as Sentry summarizes it: its own fields only, never event payloads, users or request data. */
+function issueLine(issue: unknown): string | undefined {
+  if (!issue || typeof issue !== "object" || Array.isArray(issue)) return undefined;
+  const field = (name: string) => {
+    const value = (issue as Record<string, unknown>)[name];
+    return typeof value === "string" ? value.replace(/\s+/gu, " ").trim() : undefined;
+  };
+  const shortId = field("shortId");
+  const title = field("title");
+  if (!shortId || !SHORT_ID.test(shortId) || !title) return undefined;
+  const count = field("count");
+  const users = (issue as Record<string, unknown>).userCount;
+  return [
+    `${shortId}: ${title.slice(0, 200)}`,
+    field("level"),
+    field("status"),
+    count && /^\d+$/u.test(count) ? `${count} events` : undefined,
+    Number.isSafeInteger(users) ? `${users} users` : undefined,
+    field("firstSeen") ? `first seen ${field("firstSeen")}` : undefined,
+    field("lastSeen") ? `last seen ${field("lastSeen")}` : undefined,
+  ].filter(Boolean).join(" · ");
+}
+
+/**
+ * The most frequent issues of one project (or the whole organization, `*`)
+ * matching a Sentry search, such as everything first seen in a release
+ * (`firstRelease:xmatrix-v1.2.3`) or since an hour (`firstSeen:-24h`).
+ */
+const LIST_ISSUES: ConnectorAction = {
+  effect: "read",
+  requires: ["authToken|oauthToken", "organization|oauthOrganization"],
+  parse(statement) {
+    const project = statement.target.toLowerCase();
+    const search = statement.text.trim();
+    return (project === "*" || PROJECT_SLUG.test(project)) && SEARCH.test(search)
+      ? { project, search }
+      : "name a project (or *) and one line of Sentry search: @sentry:list_issues:web firstRelease:xmatrix-v1.2.3";
+  },
+  async execute({ credentials }, input) {
+    const organization = encodeURIComponent(sentryOrganization(credentials));
+    const path = input.project === "*" ? `api/0/organizations/${organization}/issues/`
+      : `api/0/projects/${organization}/${encodeURIComponent(input.project!)}/issues/`;
+    const url = api(credentials, path);
+    url.search = new URLSearchParams({ query: input.search!, sort: "freq", limit: String(LIST_LIMIT + 1),
+      statsPeriod: "14d" }).toString();
+    // providerJson returns a top-level JSON array as `items`.
+    const issues = (await providerJson(url, { headers: headers(credentials) })).items;
+    if (!Array.isArray(issues)) throw new ProviderRequestError(502, "Sentry did not return an issue list");
+    const lines = issues.slice(0, LIST_LIMIT).map(issueLine).filter((line): line is string => line !== undefined);
+    const scope = input.project === "*" ? "all projects" : input.project;
+    if (!lines.length) return { summary: `No Sentry issue in ${scope} matches \`${input.search}\` (last 14 days).` };
+    return { summary: [`Sentry issues in ${scope} matching \`${input.search}\` (last 14 days, most frequent first` +
+      `${issues.length > LIST_LIMIT ? `, first ${LIST_LIMIT}` : ""}):`, ...lines.map(line => `- ${line}`)].join("\n") };
+  },
+};
+
 function statusAction(status: "resolved" | "unresolved" | "ignored", verb: string): ConnectorAction {
   return {
     effect: "write",
@@ -167,6 +226,7 @@ function statusAction(status: "resolved" | "unresolved" | "ignored", verb: strin
 
 export const SENTRY_ACTIONS: Record<string, ConnectorAction> = {
   read_issue: READ_ISSUE,
+  list_issues: LIST_ISSUES,
   resolve: statusAction("resolved", "resolve"),
   unresolve: statusAction("unresolved", "unresolve"),
   ignore: statusAction("ignored", "ignore"),
