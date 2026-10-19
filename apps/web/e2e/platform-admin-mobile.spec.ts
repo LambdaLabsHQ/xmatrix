@@ -69,6 +69,11 @@ test("a phone shares a filtered user list, opens a user, and Back restores the f
   const machines = page.getByRole("region", { name: "Machines (1)" });
   await machines.scrollIntoViewIfNeeded();
   await expect(machines.getByText("online", { exact: true })).toBeVisible();
+  const connectors = page.getByRole("region", { name: "Connectors added (1)" });
+  await connectors.scrollIntoViewIfNeeded();
+  await expect(connectors.getByText("17 / 24", { exact: true })).toBeVisible();
+  await expect(connectors.getByText("31 / 48", { exact: true })).toBeVisible();
+  await expectPaperFits(page);
   await page.screenshot({ path: testInfo.outputPath("mobile-user-lists.png") });
   await page.goBack();
   await expect(users.getByRole("textbox")).toHaveValue("owner");

@@ -248,8 +248,25 @@ export interface AdminUserMachine {
   updatedAt: string;
 }
 
+/** Retained connection activity across the Space, including every caller. */
+export interface AdminConnectorUsage {
+  requests: number;
+  requestsLast30d: number;
+  /** Execution records, not provider HTTP calls; includes blocked/planned work. */
+  byStatus: Record<"queued" | "completed" | "failed" | "blocked" | "planned", number>;
+  lastRequestAt?: string;
+  /** Retained standard webhook/event posts, counted once per destination Channel. */
+  eventDeliveries: number;
+  eventDeliveriesLast30d: number;
+  lastEventAt?: string;
+  subscribedChannels: number;
+  subscriptions: number;
+}
+
 export interface AdminUserConnector {
   spaceId: string;
+  /** Absent on an older Hub; clients must show unknown rather than zero. */
+  usage?: AdminConnectorUsage;
   providerId: string;
   providerName: string;
   status: string;

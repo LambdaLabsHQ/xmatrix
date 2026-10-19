@@ -124,7 +124,7 @@ export type {
 export type {
   AdminActivityPoint, AdminPlatformOverview, AdminPlatformTotals, AdminSpaceSummary,
   AdminStorageCategory, AdminUserAccessSummary, AdminUserSummary, AdminAuditAction,
-  AdminAuditEvent, AdminSpaceBilling, AdminUserAgentRegistration, AdminUserConnector,
+  AdminAuditEvent, AdminConnectorUsage, AdminSpaceBilling, AdminUserAgentRegistration, AdminUserConnector,
   AdminUserDetail, AdminUserMachine, AdminUserMessageSummary, AdminUserRunSummary,
   AdminUserSession, AdminUserSpaceMembership,
 } from "./admin-overview.js";
