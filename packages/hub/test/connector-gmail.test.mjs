@@ -5,7 +5,7 @@ import { GMAIL_ACTIONS as ACTIONS, verifyGmail } from "../src/connectors/actions
 import { parseActionCommand } from "../src/connectors/action-parse.ts";
 import { exchangeOAuthGrant, oauthAuthorizeUrl, oauthClient } from "../src/connectors/oauth.ts";
 import { deleteComposioAccount } from "../src/connectors/composio.ts";
-import { agentMailboxOwner, mayUseMailbox, parseMailboxes } from "../src/connectors/gmail-mailboxes.ts";
+import { agentMailboxOwner, GMAIL_SUBSCRIPTIONS, mayUseMailbox, parseMailboxes } from "../src/connectors/gmail-mailboxes.ts";
 import { grantFieldsForgottenOnDisconnect } from "../src/connectors/oauth.ts";
 import { compileCommonJsSourceModule } from "./support/commonjs-source-module.mjs";
 import { getAppConnectorProvider } from "../src/app-connectors.ts";
@@ -368,4 +368,19 @@ test("approval freezes reply headers before any send and revalidates the mailbox
   const revoked = await fetched([], () => assert.rejects(ACTIONS.reply.execute({ ...ctx,
     authorizeWrite: async () => { throw new Error("disallowed now"); } }, frozen), /disallowed now/));
   assert.deepEqual(revoked.calls, []);
+});
+
+test("only a mailbox's member subscribes a Channel to its notifications", async () => {
+  const credentials = { mailboxes: JSON.stringify([
+    { account: "ca_owner", address: "owner@example.com", owner: "user:owner" },
+    { account: "ca_agent", address: "agent@example.com", owner: "agent:owner/machine/claude" },
+  ]) };
+  const sync = (source, actorUserId, subscribed = true) =>
+    GMAIL_SUBSCRIPTIONS.sync({ env: {}, spaceId: "space-1", credentials, source, subscribed, actorUserId });
+  assert.equal(await sync("owner@example.com", "owner"), undefined);
+  assert.equal(await sync("*", "owner"), undefined);
+  assert.match(await sync("owner@example.com", "someone-else"), /only a mailbox's own member/);
+  assert.match(await sync("*", "someone-else"), /only a mailbox's own member/);
+  assert.match(await sync("agent@example.com", "owner"), /only a mailbox's own member/);
+  assert.equal(await sync("owner@example.com", "someone-else", false), undefined);
 });

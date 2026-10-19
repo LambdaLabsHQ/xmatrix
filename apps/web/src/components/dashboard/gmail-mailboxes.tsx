@@ -4,7 +4,7 @@ import { GmailNotifications } from "./gmail-notifications";
 import { AnimatedIcon } from "@/components/ui/animated-icon";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2, Plus, Trash2 } from "lucide-react";
-import { WEB_PROXY_ROUTES, type SpaceMember, type ChannelSnapshot } from "@xmatrix/protocol";
+import { WEB_PROXY_ROUTES, type SpaceMember } from "@xmatrix/protocol";
 import { Button } from "@/components/ui/button";
 import { GlassSelect } from "@/components/ui/glass-select";
 import { xmatrixApiRequest } from "@/lib/query/api-client";
@@ -21,12 +21,11 @@ function agentOwner(key: { ownerUserId: string; machineId: string; harness: stri
   return `agent:${[key.ownerUserId, key.machineId, key.harness].map(encodeURIComponent).join("/")}`;
 }
 
-export function GmailMailboxes({ spaceId, token, userId, members, channels, adding, onAdd }: {
+export function GmailMailboxes({ spaceId, token, userId, members, adding, onAdd }: {
   spaceId: string;
   token: string;
   userId: string;
   members: SpaceMember[];
-  channels: ChannelSnapshot[];
   adding: boolean;
   onAdd: () => void;
 }) {
@@ -75,7 +74,7 @@ export function GmailMailboxes({ spaceId, token, userId, members, channels, addi
         ))}
         {mailboxes.data?.length === 0 ? <li className="py-2 text-muted-foreground">No mailbox is connected.</li> : null}
       </ul>
-      <GmailNotifications spaceId={spaceId} token={token} userId={userId} mailboxes={mailboxes.data ?? []} channels={channels} />
+      <GmailNotifications spaceId={spaceId} token={token} userId={userId} mailboxes={mailboxes.data ?? []} />
       <Button size="sm" type="button" disabled={adding} onClick={onAdd}>
         {adding ? <AnimatedIcon icon={Loader2} className="animate-spin" /> : <Plus />} Add mailbox
       </Button>

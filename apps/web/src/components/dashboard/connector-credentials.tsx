@@ -25,8 +25,13 @@ interface CredentialView {
 
 const INGRESS_KEY_FIELD = "ingressKey";
 
+/** Whether a provider posts its events to an ingress URL; Hub-produced events have none. */
+function takesIngress(connector: AppConnectorManifest): boolean {
+  return Boolean(connector.events && connector.events.ingress !== false);
+}
+
 export function connectorTakesCredentials(connector: AppConnectorManifest): boolean {
-  return Boolean(connector.events || connector.credentials?.some(field => !field.managed));
+  return Boolean(takesIngress(connector) || connector.credentials?.some(field => !field.managed));
 }
 
 /** Fields an admin types, as opposed to ones the Hub mints or OAuth fills in. */
@@ -36,7 +41,7 @@ export function connectorWritableCredentials(connector: AppConnectorManifest) {
 
 /** Whether the Hub mints values (an ingress URL or a secret) for this app. */
 export function connectorGeneratesCredentials(connector: AppConnectorManifest): boolean {
-  return Boolean(connector.events || connector.credentials?.some((field) => field.generated && !field.managed));
+  return Boolean(takesIngress(connector) || connector.credentials?.some((field) => field.generated && !field.managed));
 }
 
 function CopyValue({ label, value, secret }: { label: string; value: string; secret?: boolean }) {
@@ -110,7 +115,8 @@ export function ConnectorCredentials({ connector, connection, connected, spaceId
   const writable = connectorWritableCredentials(connector);
   const generated = (connector.credentials ?? []).filter((field) => field.generated && !field.managed);
   const stored = new Set(view.data?.credentialFields ?? connection?.credentialFields ?? []);
-  const missingIngress = connector.events && !view.data?.ingressUrl;
+  const ingress = takesIngress(connector);
+  const missingIngress = ingress && !view.data?.ingressUrl;
   const pending = save.isPending || view.isFetching || signIn.isPending;
   const error = userErrorMessage(save.error, "Couldn't save the credentials") ??
     userErrorMessage(signIn.error, "Couldn't sign in to the service") ??
@@ -119,7 +125,7 @@ export function ConnectorCredentials({ connector, connection, connected, spaceId
   return (
     <div className="space-y-4">
       {error ? <p className="text-sm font-medium text-destructive">{error}</p> : null}
-      {connector.events ? (
+      {ingress ? (
         view.data?.ingressUrl ? (
           <div className="space-y-2">
             <CopyValue label="Ingress URL" value={view.data.ingressUrl} secret />
@@ -179,12 +185,12 @@ export function ConnectorCredentials({ connector, connection, connected, spaceId
           </Button>
         </form>
       ) : null}
-      {connector.events || generated.length > 0 ? (
+      {ingress || generated.length > 0 ? (
         <Button size="sm" variant="outline" type="button" disabled={pending}
           onClick={() => {
             if (missingIngress) return save.mutate({});
             if (!window.confirm(`Rotate the ${connector.name} ingress URL and secrets? The provider stops delivering until you paste the new values.`)) return;
-            save.mutate({ regenerate: [...(connector.events ? [INGRESS_KEY_FIELD] : []), ...generated.map((field) => field.id)] });
+            save.mutate({ regenerate: [...(ingress ? [INGRESS_KEY_FIELD] : []), ...generated.map((field) => field.id)] });
           }}>
           {save.isPending ? <AnimatedIcon icon={Loader2} className="animate-spin" /> : <RefreshCw />}
           {missingIngress ? "Generate ingress URL" : "Rotate URL and secrets"}

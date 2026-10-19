@@ -6,14 +6,12 @@ import { encryptSecretValue } from "../dist/secret-value-control.js";
 
 async function fixture(run) {
   const {client,database,sql}=await connectorDatabase("gmail-routing-test");
-  const spaceId=`gmail-test-${crypto.randomUUID()}`,connectionId=`${spaceId}:gmail`,channelId=crypto.randomUUID();
+  const spaceId=`gmail-test-${crypto.randomUUID()}`,connectionId=`${spaceId}:gmail`;
   const generation=crypto.randomUUID(),repository=new PostgresGmailRoutingRepository(database,"fixture-encryption-key");
   const selection={address:"private@example.com",account:"ca_fixture",owner:"user:owner",oauthVerifier:"private-verifier",appIdentity:"fixture-app"};
   try {
     await sql(`INSERT INTO data.space_members(space_id,user_id,role,version,created_at,updated_at)
       VALUES($1,'owner','owner',1,now(),now()),($1,'viewer','viewer',1,now(),now())`,[spaceId]);
-    await sql(`INSERT INTO data.channels(channel_id,space_id,name,name_key,mode,search_rank_sequence,version,metadata_json,created_at,updated_at)
-      VALUES($1,$2,'Gmail test','gmail test','open',$1,1,'{}',now(),now())`,[channelId,spaceId]);
     await sql(`INSERT INTO data.app_connector_connections(space_id,connection_id,version,provider_id,provider_name,status,
       auth_mode,scopes_json,secret_refs_json,capabilities_json,channel_ids_json,created_by,search_rank_sequence,created_at,updated_at)
       VALUES($1,$2,1,'gmail','Gmail','configured','oauth','[]','[]','[]','[]','owner',$3,now(),now())`,[spaceId,connectionId,generation]);
@@ -23,16 +21,16 @@ async function fixture(run) {
     await sql(`INSERT INTO data.app_connector_credentials(connection_id,space_id,field_names_json,encrypted_value_json,
       version,updated_by,created_at,updated_at) VALUES($1,$2,'["mailboxes","composioApiKey"]',$3::jsonb,1,'owner',now(),now())`,
     [connectionId,spaceId,JSON.stringify(envelope)]);
-    const create=(changes={})=>repository.create({spaceId,userId:"owner",channelId,credentialVersion:1,generation,
+    const create=(changes={})=>repository.create({spaceId,userId:"owner",credentialVersion:1,generation,
       mailboxDigest:"mailbox-digest",tokenDigest:"signal-digest",nonceDigest:"nonce-digest",selection,historyId:"0",...changes});
     const activate=async()=>{const id=await create();const job=await repository.consumeOAuth(id,"owner","nonce-digest");
       await repository.activate(job,"private-refresh-token","100",new Date(Date.now()+86400000).toISOString());return id;};
     const credentials=new PostgresAppCredentialRepository(database,"fixture-encryption-key");
     const put=fields=>credentials.put({requestId:crypto.randomUUID(),spaceId,providerId:"gmail",actorUserId:"owner",
       fields,policy:{allowed:["mailboxes","composioApiKey"]},at:new Date().toISOString()});
-    await run({repository,database,sql,create,activate,put,mailbox,spaceId,channelId,connectionId});
+    await run({repository,database,sql,create,activate,put,mailbox,spaceId,connectionId});
   }finally {
-    for(const table of ["app_gmail_routes","app_connector_credentials","app_connector_connections","channels","space_members"])
+    for(const table of ["app_gmail_routes","app_connector_credentials","app_connector_connections","space_members"])
       await sql(`DELETE FROM data.${table} WHERE space_id=$1`,[spaceId]);
     await database.close?.();await client.end();
   }

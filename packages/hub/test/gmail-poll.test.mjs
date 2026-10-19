@@ -99,7 +99,7 @@ test("notification authorization requests only labels and identity, reusing the 
     "./oauth":oauth,"../relay-v2-primitives":{base64UrlEncodeBytes},"./gmail-poll-client":polling,"./http":{ProviderRequestError}})[name]);
   const configured={...env,HUB_URL:"https://xmatrix-hub.xmatrix.sh"};
   const url=new URL(await startGmailPolling(configured,new Request(configured.HUB_URL),{
-    spaceId:"space-1",userId:"owner",channelId:"channel-1",credentialVersion:3,generation:"generation",
+    spaceId:"space-1",userId:"owner",credentialVersion:3,generation:"generation",
     mailbox:{address:"me@example.com",account:"ca_owned",owner:"user:owner"}}));
   assert.equal(url.searchParams.get("redirect_uri"),`${configured.HUB_URL}/api/connectors/oauth/callback`);
   assert.deepEqual(url.searchParams.get("scope").split(" ").sort(),[...GMAIL_POLL_SCOPES].sort());
