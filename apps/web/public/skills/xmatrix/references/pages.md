@@ -95,5 +95,6 @@ xmatrix page release <page-id> --block <section-slug>
 xmatrix page claims <page-id>
 ```
 
-A pull request that names a claimed section by its link passes the
-`xmatrix/claim` check for its author.
+A pull request names the section it works on by its link. Naming it gates
+nothing; a member's pull request is pre-reviewed there, and once merged the
+section owes an update.

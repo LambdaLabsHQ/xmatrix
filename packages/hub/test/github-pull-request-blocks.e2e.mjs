@@ -11,7 +11,7 @@ import { connectGitHubInstallation, inWorkerTransaction } from "./registration-l
 const installationId = "claim-installation";
 const secret = "claim-webhook-secret";
 
-/** GitHub's API as the claim check uses it: the repository's installation, a token, and check runs. */
+/** GitHub's API as the webhook path uses it: the repository's installation, a token, and any check runs. */
 function githubConfiguration() {
   return { installationId, repository: "acme/widgets", permissions: { metadata: "read", checks: "write" } };
 }
@@ -36,10 +36,10 @@ function linkGitHubAccount(worker, { userId, name, email, githubId }) {
   });
 }
 
-// The claim check end to end: a pull request that links a page block passes
-// only when its author, through their linked GitHub account, holds a claim on
-// it, and merging it completes the claim.
-test("a pull request passes xmatrix/claim when its author holds the claim, and merging completes it", async () => {
+// A pull request that links a page block gates nothing: no check is published
+// whether or not its author is linked or holds a claim. A claim the author
+// still holds there is credited with it, and merging it completes the claim.
+test("a pull request naming a block gets no check, and merging completes a claim its author holds there", async () => {
   const userId = `claim-check-${randomUUID()}`;
   await withGitHubUserScenario({ id: userId, email: "claim-check@example.com", name: "Claim Check" }, githubConfiguration(), secret,
     async ({ worker, github, auth }) => {
@@ -51,31 +51,21 @@ test("a pull request passes xmatrix/claim when its author holds the claim, and m
       const body = JSON.stringify({ action, installation: { id: installationId },
         repository: { full_name: "acme/widgets" },
         pull_request: { html_url: pullUrl, body: `Implements ${link}`, user: { id: 4242, login: "alice" },
-          head: { sha: `sha-${delivery}` }, merged: false, ...pull } });
+          head: { sha: `sha-${delivery}` }, merged: false, draft: true, ...pull } });
       const response = await deliverGitHubWebhook(worker, { body, event: "pull_request", deliveryId: `d-${++delivery}`, secret });
       assert.equal(response.status, 200, await response.clone().text());
-      return github.checkRuns.at(-1);
     };
 
-    const unlinked = await deliver("opened");
-    assert.equal(unlinked.name, "xmatrix/claim");
-    assert.equal(unlinked.conclusion, "failure");
-    assert.equal(unlinked.output.title, "GitHub account not linked to xMatrix");
-
-    // The author links their GitHub account; they have not claimed the block yet.
+    await deliver("opened");
+    // The author links their GitHub account; they have not claimed the block.
     await linkGitHubAccount(worker, { userId, name: "Claim Check", email: "claim-check@example.com", githubId: "4242" });
-    const unclaimed = await deliver("synchronize");
-    assert.equal(unclaimed.conclusion, "failure");
-    assert.equal(unclaimed.output.title, "No claim on the referenced block");
-    assert.equal(unclaimed.head_sha, "sha-1");
+    await deliver("synchronize");
 
     const claims = `${pages}/${encodeURIComponent(page.pageId)}/claims`;
     const { claim } = await json(await worker.fetch(claims, { method: "POST", headers: auth,
       body: JSON.stringify({ blockId: "search" }) }));
-    const passed = await deliver("edited");
-    assert.equal(passed.conclusion, "success");
-    assert.equal(passed.output.title, "Claim Check holds Roadmap › #search");
-    assert.match(passed.details_url, new RegExp(`page=${page.pageId}#search$`, "u"));
+    await deliver("edited");
+    assert.equal(github.checkRuns.length, 0, "naming a block publishes no check, linked, claimed or not");
     const listed = await json(await worker.fetch(claims, { headers: auth }));
     assert.equal(listed.claims[0].pullRequestUrl, pullUrl, "the claim records the pull request doing its work");
 
@@ -90,10 +80,6 @@ test("a pull request passes xmatrix/claim when its author holds the claim, and m
       { headers: auth }));
     assert.deepEqual((({ reason, pullRequestUrl }) => ({ reason, pullRequestUrl }))(
       awareness.blocks.find((block) => block.blockId === "search").owed), { reason: "merged", pullRequestUrl: pullUrl });
-
-    const before = github.checkRuns.length;
-    await deliver("opened", { body: "No page link here" });
-    assert.equal(github.checkRuns.length, before, "a pull request that names no block gets no check");
   });
 });
 
@@ -116,7 +102,7 @@ test("a pull request from an installation the Space did not connect neither atta
       const body = JSON.stringify({ action, ...(installation === undefined ? {} : { installation: { id: installation } }),
         repository: { full_name: repository },
         pull_request: { html_url: pullUrl, body: `Implements ${link}`, user: { id: 4343, login: "mallory" },
-          head: { sha: `sha-${delivery}` }, merged: false, ...pull } });
+          head: { sha: `sha-${delivery}` }, merged: false, draft: true, ...pull } });
       const response = await deliverGitHubWebhook(worker, { body, event: "pull_request", deliveryId: `f-${++delivery}`, secret });
       assert.equal(response.status, 200, await response.clone().text());
     };
@@ -130,13 +116,12 @@ test("a pull request from an installation the Space did not connect neither atta
     const foreignUrl = "https://github.com/mallory/elsewhere/pull/1";
     await deliver("opened", { installation: "foreign-installation", repository: "mallory/elsewhere", pullUrl: foreignUrl });
     await deliver("opened", { installation: undefined, repository: "mallory/elsewhere", pullUrl: foreignUrl });
-    assert.equal(github.checkRuns.length, 0, "no claim check is published for another installation's pull request");
+    assert.equal(github.checkRuns.length, 0, "no check is published for any pull request");
     assert.deepEqual({ ...await state() }, { state: "active", pull_request_url: null }, "the claim does not attach");
 
     // Once the Space's own pull request attached, a merge another installation reports still completes nothing.
     const pullUrl = "https://github.com/acme/widgets/pull/9";
     await deliver("opened", { installation: installationId, pullUrl });
-    assert.equal(github.checkRuns.at(-1).conclusion, "success");
     assert.deepEqual({ ...await state() }, { state: "active", pull_request_url: pullUrl });
     await deliver("closed", { installation: "foreign-installation", pullUrl, merged: true });
     await deliver("closed", { installation: undefined, pullUrl, merged: true });

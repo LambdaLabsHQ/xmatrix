@@ -582,9 +582,9 @@ deployment profile (`deploy/profiles/production.json` → `hub.vars`) and ships
 with each release. Connect answers 503 and names every `GITHUB_APP_*` value a
 deployment left unset; it does not look any of them up at runtime.
 
-The page claim check (`xmatrix/claim`, see
+Pull requests that name page blocks (pre-review and owed updates, see
 [`pages-and-conversations.md`](../design/pages-and-conversations.md) §5.6)
-needs these GitHub App settings:
+need these GitHub App settings:
 - the **Checks: write** and **Pull requests: read** repository permissions
   (pre-review reads the change and posts `xmatrix/pre-review`);
 - the **Email addresses: read** account permission;

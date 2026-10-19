@@ -1,6 +1,6 @@
 import { plainRecord } from "@xmatrix/protocol";
 import { PostgresGovernanceRepository, PostgresPageRepository } from "@xmatrix/db";
-import { githubConnectionInstallationIds, githubRepositoryDelegated, publishGitHubCheckRun,
+import { githubConnectionInstallationIds, githubRepositoryDelegated,
   type AppConnectorConnectionView } from "./app-connectors";
 import { authUserByGitHubId } from "./auth-authority";
 import { startPreReview } from "./github-pre-review";
@@ -13,16 +13,20 @@ import { findAppConnection } from "./apps";
 import { changeMembership } from "./spaces";
 
 /**
- * The `xmatrix/claim` check (docs/design/pages-and-conversations.md §5.6): a
- * pull request names the page block it works on with the block's link, and
- * passes when its author, through their linked GitHub account, holds a claim
- * on that block. A merged pull request completes the claim. A pull request
- * that names no block gets no check, so a required check keeps it out.
+ * Pull requests that name page blocks (docs/design/pages-and-conversations.md
+ * §5.6). Naming a block gates nothing: there is no claim to hold and no check
+ * to pass (decided 2026-10-19, coordination is lock-free). When one opens or
+ * gets new commits and its author is a member of the Space, the Space owner's
+ * Agent pre-reviews it on the block it names; once merged, the sections its
+ * claims were on owe an update, and a participant author becomes a
+ * contributor.
  */
-export const CLAIM_CHECK_NAME = "xmatrix/claim";
-const CHECKED_ACTIONS = new Set(["opened", "reopened", "edited", "synchronize", "ready_for_review"]);
+/** What may change the blocks a pull request names. */
+const CREDITED_ACTIONS = new Set(["opened", "reopened", "edited", "synchronize", "ready_for_review"]);
 /** A new change to review; an edited description is not one. */
 const REVIEWED_ACTIONS = new Set(["opened", "reopened", "synchronize", "ready_for_review"]);
+/** Who may have the Space owner's Agent review their pull request: whoever may edit its pages. */
+const REVIEWED_ROLES = new Set(["owner", "admin", "member"]);
 const MAX_REFERENCES = 5;
 
 export interface PageReference { spaceId: string; pageId: string; blockId: string }
@@ -81,7 +85,7 @@ async function connectedGitHub(env: Env, spaceId: string, installationId: string
     await githubRepositoryDelegated(env, connection, installationId, owner, repo) ? connection : null;
 }
 
-export async function checkPullRequestClaims(env: Env, payload: Record<string, unknown>): Promise<void> {
+export async function onPullRequestNamingBlocks(env: Env, payload: Record<string, unknown>): Promise<void> {
   const pull = record(payload.pull_request);
   const action = String(payload.action ?? "");
   const url = typeof pull.html_url === "string" ? pull.html_url : "";
@@ -114,49 +118,33 @@ export async function checkPullRequestClaims(env: Env, payload: Record<string, u
     }
     return;
   }
-  if (!CHECKED_ACTIONS.has(action)) return;
-  const headSha = String(record(pull.head).sha ?? "");
+  if (!CREDITED_ACTIONS.has(action)) return;
   const authorId = record(pull.user).id;
-  if (!headSha || (typeof authorId !== "number" && typeof authorId !== "string")) return;
+  if (typeof authorId !== "number" && typeof authorId !== "string") return;
   const userId = await authUserByGitHubId(env, String(authorId));
+  if (!userId) return;
+  const login = typeof record(pull.user).login === "string" ? String(record(pull.user).login) : "its author";
+  const number = Number(pull.number);
+  const reviewed = REVIEWED_ACTIONS.has(action) && pull.draft !== true && Number.isInteger(number);
 
   for (const spaceId of spaces) {
-    // Only a pull request from the Space's own installation may attach to its claims.
+    // Only a pull request from the Space's own installation counts in it.
     const connection = await connectedGitHub(env, spaceId, installationId, owner, repo);
     if (!connection) continue;
-    const results = [];
+    // A pre-review spends the Space owner's Agent, so it is for the Space's own members, not anyone who opens a pull request.
+    const role = await governance(env).roleOf({ requestId: crypto.randomUUID(), spaceId, userId }).catch(() => null);
+    let review = reviewed && role !== null && REVIEWED_ROLES.has(role);
     for (const reference of references.filter((item) => item.spaceId === spaceId)) {
-      const result = await pages(env).pullRequestClaim({ requestId: crypto.randomUUID(), spaceId,
+      // A claim the author still holds there is credited with the pull request, so merging it settles that claim.
+      const named = await pages(env).pullRequestClaim({ requestId: crypto.randomUUID(), spaceId,
         pageId: reference.pageId, blockId: reference.blockId, ownerUserId: userId, pullRequestUrl: url });
-      if (result) results.push({ reference, ...result });
-    }
-    const first = results[0];
-    if (!first) continue;
-    const link = (reference: PageReference) => `${appOrigin(env)}/app/${encodeURIComponent(spaceId)}/pages?page=${
-      encodeURIComponent(reference.pageId)}${reference.blockId ? `#${reference.blockId}` : ""}`;
-    const held = results.find((result) => result.claim);
-    const where = (result: typeof first) =>
-      `${result.pageTitle ?? "a missing page"}${result.reference.blockId ? ` › #${result.reference.blockId}` : ""}`;
-    await publishGitHubCheckRun(env, connection, { owner, repo }, held ? {
-      name: CLAIM_CHECK_NAME, headSha, conclusion: "success", detailsUrl: link(held.reference),
-      title: `${held.claim!.holder.label} holds ${where(held)}`,
-      summary: `This pull request does the work claimed on [${where(held)}](${link(held.reference)}). ` +
-        "Merging it completes the claim.",
-    } : {
-      name: CLAIM_CHECK_NAME, headSha, conclusion: "failure", detailsUrl: link(first.reference),
-      title: userId ? "No claim on the referenced block" : "GitHub account not linked to xMatrix",
-      summary: userId
-        ? `Claim ${results.map((result) => `[${where(result)}](${link(result.reference)})`).join(", ")} ` +
-          "first — with Claim on the page, or `xmatrix page claim <page-id> --block <heading>` for your Agent — " +
-          "then push or edit this pull request to check again."
-        : "Link your GitHub account in xMatrix (Settings → Profile → GitHub) so this pull request counts as your " +
-          "claimed work, then push or edit it to check again.",
-    });
-    const number = Number(pull.number);
-    if (held && REVIEWED_ACTIONS.has(action) && pull.draft !== true && Number.isInteger(number)) {
-      await startPreReview(env, { spaceId, spaceOwnerUserId: first.spaceOwnerUserId, connection,
-        pull: { url, owner, repo, number }, pageId: held.reference.pageId, blockId: held.reference.blockId,
-        restricted: held.restricted, holder: held.claim!.holder.label, blockLink: link(held.reference) });
+      if (!review || !named?.pageTitle) continue;
+      review = false;
+      const blockLink = `${appOrigin(env)}/app/${encodeURIComponent(spaceId)}/pages?page=${
+        encodeURIComponent(reference.pageId)}${reference.blockId ? `#${reference.blockId}` : ""}`;
+      await startPreReview(env, { spaceId, spaceOwnerUserId: named.spaceOwnerUserId, connection,
+        pull: { url, owner, repo, number }, pageId: reference.pageId, blockId: reference.blockId,
+        restricted: named.restricted, author: named.claim?.holder.label ?? login, blockLink });
     }
   }
 }

@@ -1163,7 +1163,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   const restricted = page ? effectivelyRestricted(pending ? page.parentPageId ?? "" : page.pageId, pages) : false;
   const pageLink = () => `${window.location.origin}${
     pagesViewPath(`/app/${encodeURIComponent(spaceId)}/pages`, page?.pageId ?? null, null)}`;
-  // The link a pull request names to pass the `xmatrix/claim` check.
+  // The link a pull request names for the block it works on.
   const blockLink = (blockId: string) => `${pageLink()}#${blockId}`;
   // A discussion is where people and Agents meet alike: asking an Agent is mentioning it there.
   const discuss: NonNullable<PageSectionActions["discuss"]> = (blockId, anchor) => {
