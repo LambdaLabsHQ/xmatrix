@@ -133,7 +133,9 @@ The production x-matrix Space on 2026-09-26:
   text, and the head of its thread), so neither its composer nor its first
   message shows it again; one from a message is as open as its source
   conversation and linked to the same pages, and its composer shows the quote
-  until it is sent.
+  until it is sent. Its first sent message uses the same automatic summon and
+  author choice window as New conversation, despite its preset title; the
+  quoted passage and source link remain part of the message Jev reads.
 
 ### 3.3 Link
 
