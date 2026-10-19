@@ -10,6 +10,8 @@ import { ProviderRequestError } from "./http";
 import { gmailPollConfig,gmailPollIdentity,gmailPollToken,gmailInboxFingerprint,
   gmailComposioBaseline,gmailComposioNotificationGet } from "./gmail-poll-client";
 
+/** Notices for the people watching; an Automation, not every live Agent, acts on new mail. */
+const GMAIL_NOTICE={residual:{appMetadata:{xmatrixProvenance:"system_fact"}}} as const;
 /** Reads only IDs, then delivers opaque references. No Gmail content enters messages. */
 async function deliver(env: Env, job: GmailRoutingJob, id: string) {
   const repository = gmailRoutingRepository(env);
@@ -19,7 +21,7 @@ async function deliver(env: Env, job: GmailRoutingJob, id: string) {
     summary: "A new Gmail message is available", body: `A new Gmail message is available. Read it with @gmail:read:${id}.` };
   const response = await dispatchProductMessageAppend(env, job.channelId, { commandId: `product:gmail:${eventId}`,
     messageId: `app:gmail:${eventId}`, channelId: job.channelId, body: event.body,
-    principal: { kind: "user", id: job.userId }, appAuthorId: "gmail" });
+    principal: { kind: "user", id: job.userId }, appAuthorId: "gmail", ...GMAIL_NOTICE });
   if (!response.ok) throw new ProviderRequestError(503,"Notification delivery failed");
   if (!await repository.current(job)) throw new ProviderRequestError(409,"Mailbox access changed");
   await fireConnectorAutomationTriggers(env, { spaceId: job.spaceId, provider: "gmail", event, authorizedUserId: job.userId });
@@ -69,7 +71,7 @@ async function process(env: Env, job: GmailRoutingJob) {
     if(!await repository.current(job))return "blocked" as const;
     const response=await dispatchProductMessageAppend(env,job.channelId,{
       commandId:`product:gmail-gap:${job.id}:${job.historyId}`,messageId:`app:gmail-gap:${job.id}:${job.historyId}`,
-      channelId:job.channelId,principal:{kind:"user",id:job.userId},appAuthorId:"gmail",
+      channelId:job.channelId,principal:{kind:"user",id:job.userId},appAuthorId:"gmail",...GMAIL_NOTICE,
       body:"Gmail notification history expired. Listening has resumed; some emails during the gap may not have triggered a notification. Search the mailbox to review them."});
     if(!response.ok)throw new ProviderRequestError(503,"Notification recovery receipt failed");
     if(!await repository.current(job))return "blocked" as const;
@@ -101,7 +103,7 @@ export async function drainGmailNotifications(env: Env) {
       if(revoked && await repository.current(job)) {
         const response=await dispatchProductMessageAppend(env,job.channelId,{
           commandId:`product:gmail-stopped:${job.id}`,messageId:`app:gmail-stopped:${job.id}`,
-          channelId:job.channelId,principal:{kind:"user",id:job.userId},appAuthorId:"gmail",
+          channelId:job.channelId,principal:{kind:"user",id:job.userId},appAuthorId:"gmail",...GMAIL_NOTICE,
           body:"Gmail notifications need attention. Authorize notifications again in Apps → Gmail; existing search, read and reply remain available."});
         if(!response.ok) {await repository.finish(job,"retry");return;}
       }
