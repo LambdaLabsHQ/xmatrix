@@ -446,18 +446,15 @@ fn take_bootstrap_turn(bootstrap: &mut Option<String>) -> Option<String> {
 
 /// Fold the one-time bootstrap and read-only Channel history into the first
 /// real runtime turn. Submitting the bootstrap as its own turn gives the model
-/// a tool-capable execution window before the current assignment is visible;
-/// an old mention in history can therefore be acted on despite the read-only
-/// marker. Keeping both in one turn makes the current input the only live
-/// assignment while preserving the same context.
+/// a tool-capable execution window before the current input is visible; an
+/// old mention in history can therefore be acted on before the model sees
+/// what came after it. In one turn the model reads the history and the
+/// current input together, with nothing set apart as its assignment.
 fn codex_turn_with_bootstrap(bootstrap: &mut Option<String>, current_input: &str) -> String {
     let Some(bootstrap) = take_bootstrap_turn(bootstrap) else {
         return current_input.to_string();
     };
-    format!(
-        "{bootstrap}\n\nCurrent xMatrix input — this is the only live assignment in this turn:\n\
-         {current_input}"
-    )
+    format!("{bootstrap}\n\n{current_input}")
 }
 
 fn validate_codex_app_cwd(cwd: Option<&str>) -> error::Result<()> {
