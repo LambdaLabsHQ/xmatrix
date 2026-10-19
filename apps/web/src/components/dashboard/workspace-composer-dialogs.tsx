@@ -1653,8 +1653,6 @@ export const ChannelDetails = memo(function ChannelDetails({
   const detailsBody = (
       <div className="app-material-scroll-viewport min-h-0 flex-1 overflow-y-auto">
         <div className="app-material-scroll-content min-h-full space-y-4 p-4">
-          {onDeleteChannel && <button type="button" onClick={onDeleteChannel}
-            className="text-sm font-medium text-destructive hover:underline">Delete Channel…</button>}
           {(channel.summary || aboutSummaryBusy || aboutSummaryError) && (
           <DetailBlock
             title="Summary"
@@ -1961,6 +1959,8 @@ export const ChannelDetails = memo(function ChannelDetails({
             </div>
           </DetailBlock>
           )}
+          {onDeleteChannel && <button type="button" onClick={onDeleteChannel}
+            className="text-sm font-medium text-destructive hover:underline">Delete Channel…</button>}
         </div>
       </div>
   );
