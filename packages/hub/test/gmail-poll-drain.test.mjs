@@ -13,24 +13,30 @@ const env={CONNECTOR_GOOGLE_CLIENT_ID:"fixture-google",CONNECTOR_GOOGLE_CLIENT_S
 const counts={id:"INBOX",messagesTotal:10,messagesUnread:7,threadsTotal:8,threadsUnread:6};
 async function drainer() {
   const job={id:"route-1",spaceId:"space-1",connectionId:"space-1:gmail",credentialVersion:1,generation:"generation",
-    userId:"owner",channelId:"channel-1",mode:"poll",historyId:"100",pendingWake:false,
+    userId:"owner",mode:"poll",historyId:"100",pendingWake:false,
     nextSearchAt:new Date(Date.now()+900000).toISOString(),selection:{address:"me@example.com",account:"ca_owned",owner:"user:owner",
       refreshToken:"private-refresh",appIdentity:await polling.gmailPollIdentity(env),pollToken:{accessToken:"private-access",expiresAt:Date.now()+3600000}}};
   const calls={finish:[],stage:[],append:[],automation:[],cached:[],searched:0};
+  // The owner's subscription to this mailbox; tests add others.
+  const routes={"gmail:me@example.com":[{channelId:"channel-1",authorityRootUserId:"owner",features:["message.received"]}],"gmail:*":[]};
   let pending=[];
   const state={current:true};
   const repository={cleanup:async()=>{},claim:async()=>[job],current:async()=>state.current,polled:async()=>{},
     pending:async()=>pending,stage:async(_job,ids,historyId,pageToken)=>{calls.stage.push({ids,historyId,pageToken});pending=[...ids];},
     delivered:async(_job,id)=>{pending=pending.filter(item=>item!==id);},searched:async()=>{calls.searched++;},
     cachePollToken:async(_job,token)=>{calls.cached.push(token);},finish:async(_job,outcome)=>{calls.finish.push(outcome);}};
-  const imports={"./credentials":{gmailRoutingRepository:()=>repository,connectorCredentialRepository:()=>({resolve:async()=>({
+  const imports={"./credentials":{gmailRoutingRepository:()=>repository,
+    connectorAppRepository:()=>({connectorEventRoutes:async({sourceRef})=>routes[sourceRef] ?? []}),
+    connectorCredentialRepository:()=>({resolve:async()=>({
     version:1,connectionGeneration:"generation",values:{mailboxes:JSON.stringify([job.selection])}})})},
     "./gmail-mailboxes":{parseMailboxes},"./gmail-poll-client":polling,"./gmail-notification-api":{gmailIncomingChanges},
     "./gmail-watch-client":{},"./http":{ProviderRequestError},
+    "./event-ingress":{appendToRoutes:async(_env,append,_provider,event,targets)=>{
+      for(const route of targets)await append(_env,route.channelId,{channelId:route.channelId,body:event.body});}},
     "../product-message-append":{dispatchProductMessageAppend:async(_env,_channel,message)=>{calls.append.push(message);return new Response();}},
     "../automation-triggers":{fireConnectorAutomationTriggers:async(_env,event)=>{calls.automation.push(event);}}};
   const {drainGmailNotifications}=load(name=>imports[name]);
-  return {job,state,calls,run:()=>drainGmailNotifications(env)};
+  return {job,state,calls,routes,run:()=>drainGmailNotifications(env)};
 }
 
 test("unchanged counts reuse the cached grant and avoid Composio until the independent check is due",async()=>{
@@ -44,7 +50,20 @@ test("unchanged counts reuse the cached grant and avoid Composio until the indep
     {message:{id:"abcdef1234567890",labelIds:["INBOX"]}}]}]}}}],due.run);
   assert.equal(due.calls.searched,1);assert.equal(due.calls.append.length,1);assert.equal(due.calls.automation.length,1);
   assert.deepEqual(due.calls.stage,[{ids:["abcdef1234567890"],historyId:"200",pageToken:undefined}]);
-  assert.doesNotMatch(JSON.stringify(due.calls.append),/private-refresh|private-access|me@example/);
+  assert.doesNotMatch(JSON.stringify(due.calls.append),/private-refresh|private-access/);
+});
+
+test("a notification reaches only the Channels its owner subscribed to the mailbox or to every own mailbox",async()=>{
+  const due=await drainer();due.job.pendingWake=true;
+  due.routes["gmail:me@example.com"].push({channelId:"channel-other",authorityRootUserId:"someone-else",features:["message.received"]},
+    {channelId:"channel-muted",authorityRootUserId:"owner",features:[]});
+  due.routes["gmail:*"].push({channelId:"channel-all",authorityRootUserId:"owner",features:["message.received"]},
+    {channelId:"channel-1",authorityRootUserId:"owner",features:["message.received"]});
+  await fetched([{body:counts},{body:{status:200,data:{historyId:"200",history:[{messagesAdded:[
+    {message:{id:"abcdef1234567890",labelIds:["INBOX"]}}]}]}}}],due.run);
+  assert.deepEqual(due.calls.append.map(message=>message.channelId),["channel-1","channel-all"]);
+  assert.equal(due.calls.automation[0].event.sourceRef,"gmail:me@example.com");
+  assert.deepEqual(due.calls.finish,["done"]);
 });
 
 test("pending changes, transient confirmation failure and lost authority retain the right outcome",async()=>{

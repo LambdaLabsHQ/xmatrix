@@ -27,6 +27,7 @@ import { GOOGLE_ADS_ACTIONS, verifyGoogleAds } from "./actions/google-ads";
 import { GOOGLE_BUSINESS_PROFILE_ACTIONS, verifyGoogleBusinessProfile } from "./actions/google-business-profile";
 import { PAGESPEED_ACTIONS, verifyPageSpeed } from "./actions/pagespeed";
 import { GMAIL_ACTIONS, verifyGmail } from "./actions/gmail";
+import { GMAIL_SUBSCRIPTIONS } from "./gmail-mailboxes";
 import { X_ACTIONS } from "./actions/x";
 import { OPENCONNECTOR_ACTIONS, verifyOpenConnector } from "./actions/openconnector";
 import { YANDEX_WEBMASTER_ACTIONS, verifyYandexWebmaster } from "./actions/yandex-webmaster";
@@ -91,7 +92,7 @@ const PROVIDERS: Record<string, {
   googleads: { actions: GOOGLE_ADS_ACTIONS, verify: verifyGoogleAds },
   googlebusinessprofile: { actions: GOOGLE_BUSINESS_PROFILE_ACTIONS, verify: verifyGoogleBusinessProfile },
   pagespeed: { actions: PAGESPEED_ACTIONS, verify: verifyPageSpeed },
-  gmail: { actions: GMAIL_ACTIONS, verify: verifyGmail },
+  gmail: { actions: GMAIL_ACTIONS, verify: verifyGmail, subscriptions: GMAIL_SUBSCRIPTIONS },
   x: { actions: X_ACTIONS },
   bitbucket: { receive: receiveBitbucketDelivery, actions: BITBUCKET_ACTIONS, verify: verifyBitbucket },
   circleci: { receive: receiveCircleCiDelivery },

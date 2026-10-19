@@ -9,7 +9,10 @@ in that client's project. Existing Composio Gmail content connections remain in
 place. No Pub/Sub resources, new OAuth client or `GMAIL_WATCH_*` configuration
 are needed for polling.
 
-In Apps → Gmail, the mailbox owner chooses a Channel and enables notifications.
+In Apps → Gmail, the mailbox owner turns notifications on for the mailbox. A
+Channel receives them by subscribing, as with any connector event:
+`@gmail:subscribe:<mailbox>` (or `*` for all of the owner's mailboxes); only the
+owner and their Agents may subscribe a mailbox.
 Consent requests `gmail.labels`, `openid` and `userinfo.email`. The Gmail scope
 is non-sensitive; basic identity access confirms that the Google grant belongs
 to the selected mailbox without calling Gmail profile with a restricted scope.
@@ -49,10 +52,10 @@ Failures retain the consumed history cursor and pending wake. Polling retries
 after transient failures, including Gmail throttling. Expired history establishes
 a new baseline and posts a visible gap warning rather than replaying old mail.
 Revoked grants require reauthorization and erase stored Google tokens. Stop,
-mailbox reconnection, ownership changes, deletion and lost Channel authority fence
-in-flight work using the existing notification lifecycle. Multiple owned mailboxes
-can listen concurrently, with separate Channels, cursors, ID receipts and Stop
-controls. Adding or changing another mailbox preserves a listener only when its
+mailbox reconnection, ownership changes and deletion fence in-flight work using
+the existing notification lifecycle; gap and reauthorization notices go to the
+mailbox's subscribed Channels. Multiple owned mailboxes can listen concurrently,
+each with its own subscriptions, cursor, ID receipts and Stop control. Adding or changing another mailbox preserves a listener only when its
 Composio account, address, owner and shared credentials are identical before and
 after the authoritative credential update. The update advances its credential
 version atomically and clears the old lease, so an old worker cannot finish or
@@ -124,12 +127,13 @@ Intent. This runbook does not authorize provisioning paid resources.
 
 ### User flow and acceptance
 
-In Apps → Gmail, choose an owned mailbox and conversation, then Enable
-notifications. Google consent requests metadata notification access separately
+In Apps → Gmail, Turn on an owned mailbox's notifications, then run
+`@gmail:subscribe:<mailbox>` in each conversation that should receive them.
+Google consent requests metadata notification access separately
 from the existing content connection. The callback verifies the same Human,
 Space, mailbox, PKCE proof and single-use attempt; no forwarding setup is needed.
-The Hub renews watch daily. Copy the notification ID to configure an event Page
-Automation with `--on gmail:message.received:<notification-id>`.
+The Hub renews watch daily. An event Page Automation uses
+`--on gmail:message.received:<mailbox>`.
 
 Before public activation, probe the deployed push endpoint: no native configuration
 returns 503; configured ingress without a Bearer token returns 401. A generic

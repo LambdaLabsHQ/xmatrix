@@ -1,7 +1,6 @@
 import type { QueryResultRow } from "pg";
 import type { AuthorityDatabase, DatabaseTransaction } from "./contracts.js";
 import { AppControlError } from "./app-control.js";
-import { requireChannelCapability } from "./channel-capability-policy.js";
 import { decryptSecretValue, encryptSecretValue } from "./secret-value-control.js";
 
 export interface GmailRoutingSelection {
@@ -11,7 +10,7 @@ export interface GmailRoutingSelection {
 }
 export interface GmailRoutingJob {
   id: string; spaceId: string; connectionId: string; credentialVersion: number; generation: string;
-  userId: string; channelId: string; selection: GmailRoutingSelection; historyId: string;
+  userId: string; selection: GmailRoutingSelection; historyId: string;
   pageToken?: string; leaseId?: string; wakeVersion: number; pendingWake: boolean; lastSignalAt?: string;
   lastVerifiedAt?: string; error?: string; enabled: boolean; expiresAt?: string; renewAt?: string;
   mode: "native" | "poll"; nextSearchAt?: string;
@@ -32,7 +31,7 @@ export class PostgresGmailRoutingRepository {
     const date = (value: unknown) => value ? new Date(value as string).toISOString() : undefined;
     return { id: String(row.route_id), spaceId: String(row.space_id), connectionId: String(row.connection_id),
       credentialVersion: Number(row.credential_version), generation: String(row.connection_generation),
-      userId: String(row.created_by), channelId: String(row.channel_id), selection,
+      userId: String(row.created_by), selection,
       historyId: String(row.history_id), pageToken: row.page_token ? String(row.page_token) : undefined,
       leaseId: row.lease_id ? String(row.lease_id) : undefined, wakeVersion: Number(row.wake_version), pendingWake:Number(row.wake_version)>Number(row.processed_version),
       lastSignalAt: date(row.last_signal_at), lastVerifiedAt: date(row.last_verified_at),
@@ -40,17 +39,12 @@ export class PostgresGmailRoutingRepository {
       error: row.error_code ? String(row.error_code) : undefined, enabled: row.enabled === true,
       mode: row.notification_mode === "poll" ? "poll" : "native", nextSearchAt: date(row.next_search_at) };
   }
-  private async authorize(tx: DatabaseTransaction, spaceId: string, userId: string, channelId?: string) {
+  private async authorize(tx: DatabaseTransaction, spaceId: string, userId: string) {
     const roles = await tx.query<QueryResultRow>({ name: "gmail_route_admin_v1", text: `SELECT role FROM data.space_members
       WHERE space_id=$1 AND user_id=$2 AND NOT EXISTS (SELECT 1 FROM data.space_deletions WHERE space_id=$1)
       AND NOT EXISTS (SELECT 1 FROM data.account_deletion_fences WHERE user_id=$2 AND (committed OR expires_at>clock_timestamp()))
       LIMIT 1 FOR SHARE`, values: [spaceId, userId], maxRows: 1 });
     if (!["owner", "admin"].includes(String(roles[0]?.role))) throw fail();
-    if (channelId) {
-      const grant = await requireChannelCapability(tx, { channelId, principal: { kind: "user", id: userId },
-        capability: "app_new_work", error: failure => new AppControlError(failure.code, failure.status, failure.message) });
-      if (grant.spaceId !== spaceId) throw fail();
-    }
   }
   async list(spaceId: string, userId: string) {
     return this.transaction("list", async tx => {
@@ -68,7 +62,7 @@ export class PostgresGmailRoutingRepository {
       values: [id,userId,nonceDigest], maxRows: 1 });
       if (!rows[0]) throw fail();
       const job = await this.row(rows[0]);
-      await this.authorize(tx,job.spaceId,userId,job.channelId);
+      await this.authorize(tx,job.spaceId,userId);
       return job;
     });
   }
@@ -76,7 +70,7 @@ export class PostgresGmailRoutingRepository {
     poll?: { token: NonNullable<GmailRoutingSelection["pollToken"]>; fingerprint: string }) {
     if((job.mode==="poll")!==!!poll || (job.mode==="native" && !expiresAt))throw fail();
     return this.transaction("activate", async tx => {
-      await this.authorize(tx,job.spaceId,job.userId,job.channelId);
+      await this.authorize(tx,job.spaceId,job.userId);
       const current = await tx.query<QueryResultRow>({ name: "gmail_route_activation_grant_v1", text: `SELECT c.connection_id
         FROM data.app_connector_connections c JOIN data.app_connector_credentials k USING(connection_id,space_id)
         WHERE c.connection_id=$1 AND c.status='configured' AND c.search_rank_sequence=$2 AND k.version=$3
@@ -104,13 +98,13 @@ export class PostgresGmailRoutingRepository {
       SET expires_at=$3,renew_at=now()+interval '1 day' WHERE route_id=$1 AND enabled AND lease_id=$2::uuid`,
     values:[job.id,job.leaseId,expiresAt],maxRows:0}));
   }
-  async create(input: { spaceId: string; userId: string; channelId: string; credentialVersion: number;
+  async create(input: { spaceId: string; userId: string; credentialVersion: number;
     generation: string; mailboxDigest: string; tokenDigest: string; nonceDigest: string; selection: GmailRoutingSelection; historyId: string;
     mode?: "native" | "poll" }) {
     const id = crypto.randomUUID();
     const envelope = await encryptSecretValue(this.material, `gmail-route:${id}`, "selection", 1, JSON.stringify(input.selection));
     return this.transaction("create", async tx => {
-      await this.authorize(tx, input.spaceId, input.userId, input.channelId);
+      await this.authorize(tx, input.spaceId, input.userId);
       const connectionId = `${input.spaceId}:gmail`;
       const rows = await tx.query<QueryResultRow>({ name: "gmail_route_grant_v1", text: `SELECT c.connection_id
         FROM data.app_connector_connections c JOIN data.app_connector_credentials k USING(connection_id,space_id)
@@ -126,11 +120,11 @@ export class PostgresGmailRoutingRepository {
       const count = await tx.query<QueryResultRow>({ name: "gmail_route_count_v1", text: `SELECT count(*) AS count FROM
         (SELECT 1 FROM data.app_gmail_routes WHERE connection_id=$1 LIMIT 20) r`, values: [connectionId], maxRows: 1 });
       if (Number(count[0]?.count) >= 20) throw fail();
-      await tx.query({ name: "gmail_route_create_v1", text: `INSERT INTO data.app_gmail_routes
-        (route_id,space_id,connection_id,credential_version,connection_generation,created_by,channel_id,
+      await tx.query({ name: "gmail_route_create_v2", text: `INSERT INTO data.app_gmail_routes
+        (route_id,space_id,connection_id,credential_version,connection_generation,created_by,
          mailbox_digest,token_digest,encrypted_value_json,history_id,oauth_nonce_digest,notification_mode)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,$12,$13)`, values: [id, input.spaceId, connectionId,
-      input.credentialVersion, input.generation, input.userId, input.channelId, input.mailboxDigest, input.tokenDigest,
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10,$11,$12)`, values: [id, input.spaceId, connectionId,
+      input.credentialVersion, input.generation, input.userId, input.mailboxDigest, input.tokenDigest,
       JSON.stringify(envelope), input.historyId,input.nonceDigest,input.mode ?? "native"], maxRows: 0 });
       return id;
     });
@@ -172,7 +166,7 @@ export class PostgresGmailRoutingRepository {
   }
   async current(job: GmailRoutingJob) {
     return this.transaction("current", async tx => {
-      try { await this.authorize(tx, job.spaceId, job.userId, job.channelId); } catch (error) {
+      try { await this.authorize(tx, job.spaceId, job.userId); } catch (error) {
         if (error instanceof AppControlError && [403,404,409].includes(error.status)) return false;
         throw error;
       }
