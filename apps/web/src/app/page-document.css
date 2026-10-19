@@ -172,18 +172,6 @@
   user-select: none;
 }
 .page-section-present:empty { display: none; }
-/* Who has taken the section: its holder, and the pull request doing the work. */
-.page-section-claim {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  padding: 0 6px;
-  border-radius: 9999px;
-  background: color-mix(in oklab, var(--primary) 12%, transparent);
-  color: var(--foreground);
-  text-decoration: none;
-}
-a.page-section-claim:hover { text-decoration: underline; }
 /* The Agents working in conversations about the section, on the page or not: idle ones dimmed. */
 .page-section-agents { display: inline-flex; align-items: center; gap: 3px; }
 .page-section-working { opacity: 0.55; }

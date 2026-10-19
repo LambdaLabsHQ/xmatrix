@@ -210,12 +210,14 @@ fact is about.
   right holds the face of the Agent this person co-writes with (§4.2).
 - **Headings** carry who is on the section: the people and Agents in it, and
   the Agents working in a conversation linked to it even when they do not
-  have the page open, each with its state; the claim flag with its holder and
-  pull request; *Update owed* where claimed work ended and nobody wrote it
-  back (§5.3); its conversation count (§4.4); and the freshness mark (§5.4).
-  Hovering a heading, or
-  editing in its section, offers Discuss, Copy link, Claim (Release on your
-  own claim) and Attach at the heading's right edge (§6). A phone has no hover:
+  have the page open, each with its state; *Update owed* where work ended
+  and nobody wrote it back (§5.3); its conversation count (§4.4); and the
+  freshness mark (§5.4). Who has taken a section is the Agents' to know
+  (`page read`) and is not drawn for people, and a person neither claims nor
+  releases (decided 2026-10-19: coordination is lock-free, and what an Agent
+  intends is felt only through what it writes). Hovering a heading, or
+  editing in its section, offers Discuss, Copy link and Attach at the
+  heading's right edge (§6). A phone has no hover:
   the heading of the section the reader is in carries one ⋯ whose menu names
   each action, *Co-write with ‹Agent›* first.
 - **No change log in the text.** As in Google Docs, who changed a section

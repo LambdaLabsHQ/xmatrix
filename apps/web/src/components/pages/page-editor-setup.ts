@@ -424,8 +424,8 @@ function presence(awareness: Awareness, onBlockChange?: (blockId: string) => voi
 }
 
 /**
- * What the page shows beside a section's heading (§3.2): who is on it, who has
- * taken it and what it owes. As in Google Docs the text itself carries nothing
+ * What the page shows beside a section's heading (§3.2): who is on it and what
+ * it owes. Who has taken it is the Agents' to know, not drawn for people. As in Google Docs the text itself carries nothing
  * else; who changed it and when is in History.
  */
 export interface SectionNote {
@@ -433,8 +433,6 @@ export interface SectionNote {
   owed?: { text: string; conversation: { id: string; name: string } | null };
   /** Agents live in a conversation linked to the section, whether or not they have the page open. */
   working?: SectionAgent[];
-  /** Who has taken the section. */
-  claim?: { label: string; pullRequestUrl: string | null; claimId: string; mine: boolean } | null;
   /** Conversations about the section, the quiet ones too (§4.4). */
   conversations?: { total: number; quiet: number };
 }
@@ -444,8 +442,6 @@ export interface HeadingActions {
   canEdit: boolean;
   discuss?: (blockId: string) => void;
   copyLink?: (blockId: string) => void;
-  claim?: (blockId: string) => void;
-  release?: (claimId: string) => void;
   attach?: (blockId: string) => void;
   /** Lists the section's conversations, the quiet ones too. */
   showConversations?: (blockId: string) => void;
@@ -493,15 +489,12 @@ const unmountAgents = new WeakMap<Element, () => void>();
 const unmountMenus = new WeakMap<Element, () => void>();
 
 /** A phone's heading tools: one "⋯" that opens them as a menu of named actions. */
-function phoneHeadingTools(tools: HTMLElement, blockId: string, title: string, current: HeadingActions,
-  claim: SectionNote["claim"] | null): HTMLElement {
+function phoneHeadingTools(tools: HTMLElement, blockId: string, title: string, current: HeadingActions): HTMLElement {
   tools.classList.add("is-phone");
   const menu: HeadingMenu = {};
   if (current.canEdit && current.write) menu.write = { label: current.write.label, run: () => current.write!.run(blockId) };
   if (current.discuss) menu.discuss = () => current.discuss!(blockId);
   if (current.copyLink) menu.copyLink = () => current.copyLink!(blockId);
-  if (current.canEdit && claim?.mine && current.release) menu.claim = { label: "Release", run: () => current.release!(claim.claimId) };
-  else if (current.canEdit && !claim && current.claim) menu.claim = { label: "Claim", run: () => current.claim!(blockId) };
   if (current.canEdit && current.attach) menu.attach = () => current.attach!(blockId);
   const holder = document.createElement("span");
   const close = () => {
@@ -529,29 +522,14 @@ function sectionDecorations(doc: DocNode, notes: Map<string, SectionNote>,
     const end = block.pos + heading.nodeSize - 1;
     const note = notes.get(block.id) ?? {};
     const working = note.working ?? [];
-    const claim = note.claim ?? null;
     const owed = note.owed ?? null;
     const total = note.conversations?.total ?? 0;
     decorations.push(Decoration.widget(end, () => {
       const holder = document.createElement("span");
       holder.className = "page-section-present";
       holder.contentEditable = "false";
-      if (claim) {
-        const flag = document.createElement(claim.pullRequestUrl ? "a" : "span");
-        flag.className = "page-section-claim";
-        flag.dataset.testid = "page-claim";
-        flag.title = `${claim.label} is on this`;
-        flag.innerHTML = icon("flag", 12);
-        flag.append(claim.label);
-        if (flag instanceof HTMLAnchorElement) {
-          flag.href = claim.pullRequestUrl!;
-          flag.target = "_blank";
-          flag.rel = "noreferrer";
-        }
-        holder.append(flag);
-      }
-      // Where the claim was, once its work ended and nobody wrote it back; it opens the conversation that did it.
-      if (owed && !claim) {
+      // Where work ended and nobody wrote it back; it opens the conversation that did it.
+      if (owed) {
         const conversation = owed.conversation;
         const flag = control("page-section-owed", conversation ? `${owed.text} · open ${conversation.name}` : owed.text,
           () => { if (conversation) openConversation(conversation.id); }, icon("flag", 12), "Update owed");
@@ -571,7 +549,7 @@ function sectionDecorations(doc: DocNode, notes: Map<string, SectionNote>,
           () => actions().showConversations?.(block.id), icon("talk", 12), String(total)));
       }
       return holder;
-    }, { side: 1, ignoreSelection: true, key: `present:${block.id}:${JSON.stringify([working, claim, owed, total])}`,
+    }, { side: 1, ignoreSelection: true, key: `present:${block.id}:${JSON.stringify([working, owed, total])}`,
       destroy: (node) => {
         const agents = (node as HTMLElement).querySelector(".page-section-agents");
         if (agents) unmountAgents.get(agents)?.();
@@ -581,22 +559,16 @@ function sectionDecorations(doc: DocNode, notes: Map<string, SectionNote>,
       const tools = document.createElement("span");
       tools.className = "page-heading-tools";
       tools.contentEditable = "false";
-      if (current.phone) return phoneHeadingTools(tools, block.id, block.title, current, claim);
+      if (current.phone) return phoneHeadingTools(tools, block.id, block.title, current);
       if (current.discuss) tools.append(control("", "Discuss this section", () => current.discuss!(block.id), icon("discuss")));
       if (current.copyLink) tools.append(control("", "Copy a link to this section", () => current.copyLink!(block.id), icon("link")));
-      if (current.canEdit && claim?.mine && current.release) {
-        tools.append(control("", "Release your claim", () => current.release!(claim.claimId), icon("flag"), "Release"));
-      } else if (current.canEdit && !claim && current.claim) {
-        tools.append(control("", "Claim: tell everyone you are working on this section", () => current.claim!(block.id),
-          icon("flag")));
-      }
       if (current.canEdit && current.attach) {
         tools.append(control("", "Attach a schedule or a repository to this section", () => current.attach!(block.id),
           icon("schedule")));
       }
       return tools;
     }, { side: 2, ignoreSelection: true,
-      key: `tools:${block.id}:${claim?.claimId ?? ""}:${String(claim?.mine)}:${String(actions().canEdit)}:${String(actions().phone)}:${actions().write?.label ?? ""}`,
+      key: `tools:${block.id}:${String(actions().canEdit)}:${String(actions().phone)}:${actions().write?.label ?? ""}`,
       destroy: (node) => {
         for (const holder of (node as HTMLElement).querySelectorAll(":scope > span")) unmountMenus.get(holder)?.();
       } }));

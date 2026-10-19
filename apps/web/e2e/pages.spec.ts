@@ -253,7 +253,7 @@ test("a page is co-edited live and shows an Agent working on a section it claime
         encoding.writeVarUint(aware, 1);
         encoding.writeVarUint8Array(aware, encoding.toUint8Array(agent));
         send(encoding.toUint8Array(aware));
-        // It claims the section, and everyone on the page sees it at once.
+        // It claims the section, which is for the Agents: the page draws nothing of it for people.
         const claims = encoding.createEncoder();
         encoding.writeVarUint(claims, 2);
         encoding.writeVarString(claims, JSON.stringify({ type: "claims", claims: [{ claimId: "c1", pageId: "p-relay",
@@ -286,12 +286,12 @@ test("a page is co-edited live and shows an Agent working on a section it claime
 
   const editor = browser.getByTestId("page-editor");
   await expect(editor).toContainText("Shipped");
-  // Who has taken a section and what is said about it are on its heading, not in a list beside it.
+  // What is said about a section is on its heading, not in a list beside it. Who has taken it is the
+  // Agents' to know: a person is offered no claim and sees no claim's flag.
   const status = editor.locator("h2", { hasText: "Status" });
-  await expect(status.getByTestId("page-claim")).toHaveText("claude:2");
   await expect(status.getByRole("button", { name: "1 conversation about this section" })).toBeVisible();
-  await expect(status.getByRole("button", { name: /^Claim/u }), "a claimed section is not offered to claim").toHaveCount(0);
-  await expect(editor.locator("h2", { hasText: "Notes" }).getByRole("button", { name: /^Claim/u })).toHaveCount(1);
+  await expect(status.getByTestId("page-claim")).toHaveCount(0);
+  await expect(editor.getByRole("button", { name: /^(Claim|Release)/u })).toHaveCount(0);
   await expect(browser.getByTestId("page-outline"), "there is no side panel").toHaveCount(0);
 
   // Who is on the page, and where, is in its header; a click follows them.
@@ -553,7 +553,7 @@ test.describe("on a phone", () => {
     await expect(status.getByRole("button", { name: "Copy a link to this section" })).toHaveCount(0);
     await status.getByRole("button", { name: "Actions for Status" }).click();
     const menu = browser.getByRole("menu", { name: "Actions for Status" });
-    await expect(menu.getByRole("menuitem")).toHaveText(["Co-write with claude", "Discuss", "Copy link", "Claim", "Schedule"]);
+    await expect(menu.getByRole("menuitem")).toHaveText(["Co-write with claude", "Discuss", "Copy link", "Schedule"]);
     await browser.screenshot({ path: test.info().outputPath("pages-heading-menu-phone.png") });
 
     await menu.getByRole("menuitem", { name: "Co-write with claude" }).click();

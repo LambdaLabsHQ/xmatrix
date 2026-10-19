@@ -79,16 +79,6 @@ export const pageApi = {
       url: `${WEB_PROXY_ROUTES.space_page(spaceId, pageId)}/github-file?href=${encodeURIComponent(href)}`, token, signal }),
   awareness: (spaceId: string, pageId: string, token: string, signal?: AbortSignal) =>
     xmatrixApiRequest<PageAwareness>({ url: `${WEB_PROXY_ROUTES.space_page(spaceId, pageId)}/awareness`, token, signal }),
-  claims: (spaceId: string, pageId: string, token: string, signal?: AbortSignal) =>
-    xmatrixApiRequest<{ claims: PageClaim[]; competitiveBlocks: string[] }>({
-      url: `${WEB_PROXY_ROUTES.space_page(spaceId, pageId)}/claims`, token, signal }),
-  claim: (spaceId: string, pageId: string, token: string, blockId: string) =>
-    xmatrixApiRequest<{ claim: PageClaim }>({ url: `${WEB_PROXY_ROUTES.space_page(spaceId, pageId)}/claims`,
-      token, method: "POST", body: { blockId } }),
-  releaseClaim: (spaceId: string, pageId: string, token: string, claimId: string) =>
-    xmatrixApiRequest<{ released: boolean }>({
-      url: `${WEB_PROXY_ROUTES.space_page(spaceId, pageId)}/claims/${encodeURIComponent(claimId)}`,
-      token, method: "DELETE" }),
   governance: (spaceId: string, token: string, signal?: AbortSignal) =>
     xmatrixApiRequest<SpaceGovernance>({ url: WEB_PROXY_ROUTES.space_governance(spaceId), token, signal }),
   setGovernance: (spaceId: string, token: string, change: Partial<SpaceGovernance>) =>

@@ -3,7 +3,7 @@
 import { useEffect, useRef, type ComponentType } from "react";
 import { createPortal } from "react-dom";
 import { createRoot } from "react-dom/client";
-import { CalendarClock, Flag, Link2, MessageSquarePlus, PenLine } from "lucide-react";
+import { CalendarClock, Link2, MessageSquarePlus, PenLine } from "lucide-react";
 import { listenForOverlayDismissal } from "@/components/dashboard/use-overlay-dismiss";
 import { PaperPopover } from "@/components/ui/material-surfaces";
 
@@ -12,7 +12,6 @@ export interface HeadingMenu {
   write?: { label: string; run: () => void };
   discuss?: () => void;
   copyLink?: () => void;
-  claim?: { label: string; run: () => void };
   attach?: () => void;
 }
 
@@ -26,7 +25,6 @@ function items(menu: HeadingMenu): Item[] {
   if (menu.write) list.push({ key: "write", label: menu.write.label, icon: PenLine, run: menu.write.run });
   if (menu.discuss) list.push({ key: "discuss", label: "Discuss", icon: MessageSquarePlus, run: menu.discuss });
   if (menu.copyLink) list.push({ key: "link", label: "Copy link", icon: Link2, run: menu.copyLink });
-  if (menu.claim) list.push({ key: "claim", label: menu.claim.label, icon: Flag, run: menu.claim.run });
   if (menu.attach) list.push({ key: "attach", label: "Schedule", icon: CalendarClock, run: menu.attach });
   return list;
 }
