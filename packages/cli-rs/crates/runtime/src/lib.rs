@@ -85,7 +85,6 @@ mod runtime_star;
 #[cfg(windows)]
 mod windows_acl;
 include!("runtime_management_trust.rs");
-include!("runtime_daemon_access_proxy.rs");
 include!("runtime_daemon_secret_trace.rs");
 include!("runtime_git_branch.rs");
 include!("runtime_daemon_command_lease.rs");

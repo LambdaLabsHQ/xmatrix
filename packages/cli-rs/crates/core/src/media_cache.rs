@@ -42,7 +42,7 @@ pub struct CachedMedia<'a> {
 impl CachedMedia<'_> {
     /// The named copy of the cached body, or of what `send` answers. A body the
     /// Hub refused is not asked for again until the refusal expires.
-    pub async fn fetch<F, S>(&self, url: &str, send: S) -> Result<PathBuf>
+    pub async fn fetch<F, S>(&self, send: S) -> Result<PathBuf>
     where
         S: FnOnce() -> F,
         F: Future<Output = Result<reqwest::Response>>,
@@ -70,7 +70,7 @@ impl CachedMedia<'_> {
         ) {
             let _ = remember_refused_attachment(&self.stem);
         }
-        let response = http::require_success(response, url).await?;
+        let response = http::require_success(response).await?;
         let length = response.content_length();
         if self
             .expected_size

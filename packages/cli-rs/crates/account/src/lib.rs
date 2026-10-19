@@ -339,8 +339,6 @@ fn environment_label(hub_url: &str) -> &'static str {
     let origin = config::normalized_hub_origin(hub_url);
     if origin == protocol::DEFAULT_HUB_URL {
         "production"
-    } else if origin == protocol::TEST_HUB_URL {
-        "test"
     } else {
         "custom"
     }

@@ -626,7 +626,10 @@ async fn page_text_for_agent(
         else {
             continue;
         };
-        let url = with_route(hub_url, &format!("{}/media/{file}", page_route(space, page)));
+        let url = with_route(
+            hub_url,
+            &format!("{}/media/{file}", page_route(space, page)),
+        );
         let media = CachedMedia {
             stem: sha256_hex(format!("page-media\0{space}\0{page}\0{file}").as_bytes()),
             expected_size: None,
@@ -635,9 +638,10 @@ async fn page_text_for_agent(
             copy: LocalCopy::At(page_media::local_page_media_path(&file)),
         };
         let fetched = media
-            .fetch(&url, || async {
-                let request = http::client()?.get(&url).bearer_auth(token);
-                http::with_access_header(request, &url)?
+            .fetch(|| async {
+                http::client()?
+                    .get(&url)
+                    .bearer_auth(token)
                     .send()
                     .await
                     .map_err(|err| CliError::Http(format!("page image request failed: {err}")))
@@ -671,9 +675,14 @@ async fn page_text_from_agent(
     let Some((page, revision)) = base.filter(|_| !refused.is_empty()) else {
         return refused_or(written, &refused);
     };
-    let url = with_route(hub_url, &format!("{}?revision={revision}", page_route(space, page)));
+    let url = with_route(
+        hub_url,
+        &format!("{}?revision={revision}", page_route(space, page)),
+    );
     let response: PageResponse = http::request_json(&url, "GET", Some(token), None).await?;
-    let existing = page_media::image_destinations(&response.page.body).into_iter().collect();
+    let existing = page_media::image_destinations(&response.page.body)
+        .into_iter()
+        .collect();
     let (written, refused) = page_media::to_page(text, existing);
     refused_or(written, &refused)
 }
@@ -907,7 +916,8 @@ pub async fn cmd_page(hub_url: &str, token: &str, command: PageCommand) -> error
             let mut request = json!({ "title": title });
             if body.is_some() || file.is_some() || stdin {
                 let text = read_body(body, file, stdin)?;
-                request["body"] = json!(page_text_from_agent(hub_url, token, &space, None, &text).await?);
+                request["body"] =
+                    json!(page_text_from_agent(hub_url, token, &space, None, &text).await?);
             }
             if let Some(parent) = parent {
                 request["parentPageId"] = json!(parent);
