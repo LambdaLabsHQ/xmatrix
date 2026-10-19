@@ -1427,24 +1427,32 @@ function agentWrites(server: Y.Doc, push: (data: Uint8Array) => void, clock: num
     conversationId: E2E_CHANNEL.id }, activity, block: "notes" }, caret));
 }
 
-test("a co-writer's face says how long it has been thinking, and one that went quiet can be swapped for a faster one", async ({ page: browser }) => {
-  await stubCoWriting(browser, "");
-  await stubWriters(browser, ["grok", "claude"]);
+/** Relay open live with grok:1 thinking in Status for 12s, writing from `conversationId`. */
+async function openWithGrokThinking(browser: Page, conversationId: string) {
   await fixtureJson(browser, "page-agents", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\/agents$/u, {
     pages: [{ pageId: "p-relay", agents: [{ instanceId: "i-grok", name: "grok:1", status: "busy",
-      conversationId: "channel-write", activity: "thinking", blockId: "status" }] }],
+      conversationId, activity: "thinking", blockId: "status" }] }],
   });
   const server = pageDocument(BODY);
-  let push: (data: Uint8Array) => void = () => {};
-  await servePageSession(browser, server, { connect: (send) => { push = send; } });
+  let send: (data: Uint8Array) => void = () => {};
+  await servePageSession(browser, server, { connect: (connected) => { send = connected; } });
   await browser.goto("/app", { waitUntil: "domcontentloaded" });
   await browser.getByRole("button", { name: "Pages", exact: true }).first().click();
   await expect(browser.getByTestId("page-editor")).toContainText("In progress");
-  const grok = { user: { name: "grok:1", color: "#7c3aed", kind: "agent", conversationId: "channel-write" }, block: "status" };
+  const grok = { user: { name: "grok:1", color: "#7c3aed", kind: "agent", conversationId }, block: "status" };
+  const push = (data: Uint8Array) => send(data);
   push(awarenessFrom(server, AGENT_CLIENT, 1, { ...grok, activity: "thinking", since: Date.now() - 12_000 }, "In progress"));
+  return { grok, push, server };
+}
+
+test("a co-writer's face says how long it has been thinking, and one that went quiet can be swapped for a faster one", async ({ page: browser }) => {
+  await stubCoWriting(browser, "");
+  await stubWriters(browser, ["grok", "claude"]);
+  const { grok, push, server } = await openWithGrokThinking(browser, "channel-write");
   const pens = browser.getByTestId("page-pens");
   await expect(pens.getByRole("button", { name: /grok:1/u })).toHaveAttribute("title", /thinking 1[2-9]s/u);
-  await expect(pens.getByText(/thinking 1[2-9]s/u)).toBeVisible();
+  // Without room for its name beside it, the face says it briefly under it, no wider than itself.
+  await expect(pens.locator(".page-pen-status")).toHaveText(/^1[2-9]s$/u);
   await browser.screenshot({ path: test.info().outputPath("co-writer-thinking.png") });
 
   // Its answer went quiet and was given up: the page says so, and offers the fastest other writer.
@@ -1452,11 +1460,44 @@ test("a co-writer's face says how long it has been thinking, and one that went q
   await expect(pens.getByRole("button", { name: /grok:1/u })).toHaveAttribute("title", /went quiet/u);
   await pens.getByRole("button", { name: /grok:1/u }).click();
   const instead = browser.getByRole("button", { name: "Write with @claude instead" });
-  await expect(pens.getByText("went quiet")).toBeVisible();
+  await expect(pens.locator(".page-pen-status.is-stalled")).toBeVisible();
   await browser.screenshot({ path: test.info().outputPath("co-writer-quiet.png") });
   await instead.click();
   await expect.poll(async () => (await fixtureRequestBodies(browser, "write-message"))[0]?.body).toMatch(
     /^@claude launch:force You're co-writing page:p-relay with me live\./u);
+});
+
+test("an Agent writing from a conversation in the margin shows once, in its card, and no face covers a card", async ({ page: browser }) => {
+  await browser.setViewportSize({ width: 1600, height: 900 });
+  // Named when the page was still called "Rely": beside the page the card does not repeat the stale title.
+  const write = { ...E2E_CHANNEL, id: "channel-write", name: "Co-writing Rely" };
+  await stubPages(browser, [page("p-relay", null, "Relay", "V")], [E2E_CHANNEL, write]);
+  const recent = new Date(Date.now() - 60_000).toISOString();
+  await fixtureJson(browser, "page-links", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\?.*$/u, {
+    links: [{ linkId: "l-write", conversationId: write.id, pageId: "p-relay", blockId: "status", source: "edit",
+      createdAt: NOW, lastSeenAt: recent }],
+    conversations: [{ conversationId: write.id, name: write.name, activityAt: recent, headSequence: 1, readSequence: 1,
+      lastMessage: { from: { kind: "agent", label: "grok:1" }, bodyPreview: "Merged; requesting the release.", sentAt: recent },
+      agents: [{ instanceId: "i-grok", name: "grok:1", status: "busy" }] }],
+  });
+  await openWithGrokThinking(browser, write.id);
+
+  const card = browser.getByTestId("page-margin").getByTestId("page-margin-card");
+  await expect(card.getByTestId("page-margin-writer")).toContainText(/grok:1 · thinking 1[2-9]s/u);
+  await expect(card).toContainText("Co-writing");
+  await expect(card).not.toContainText("Rely");
+  await expect(browser.getByTestId("page-pens")).toHaveCount(0);
+  await browser.screenshot({ path: test.info().outputPath("writer-in-card.png") });
+
+  // On a phone there is no margin: the face stands at the edge, and its tag is no wider than the face.
+  await browser.setViewportSize({ width: 393, height: 852 });
+  const status = browser.getByTestId("page-pens").locator(".page-pen-status");
+  await expect(status).toHaveText(/^1[2-9]s$/u);
+  const face = browser.getByTestId("page-pens").getByRole("button", { name: /grok:1/u });
+  await expect(face).toHaveAttribute("title", /thinking 1[2-9]s/u);
+  const [tag, pen] = [(await status.boundingBox())!, (await face.boundingBox())!];
+  expect(tag.x, "the tag reaches no further left than the face").toBeGreaterThanOrEqual(pen.x - 4);
+  await browser.screenshot({ path: test.info().outputPath("writer-on-phone.png") });
 });
 
 test("on a long page, who works out of view shows at its edges, and what an Agent writes is highlighted as its own", async ({ page: browser }) => {

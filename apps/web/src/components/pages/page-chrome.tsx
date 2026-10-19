@@ -58,6 +58,8 @@ export interface PresentPerson {
   stalled?: boolean;
   /** An Agent co-writing live is thinking: its `doing` says for how long. */
   thinking?: boolean;
+  /** How long it has thought, as briefly as a face's tag can say it: "19s", "2m". */
+  brief?: string;
 }
 
 /** Everyone on the page, as in Google Docs: hover says who and where, a click goes there. */
@@ -145,6 +147,14 @@ function penName(name: string): string {
   return base.charAt(0).toUpperCase() + base.slice(1);
 }
 
+/**
+ * What a face without its name says under it, no wider than the face, so it never covers the text beside it:
+ * how long it has thought ("19s"), or that it went quiet. Its title still says it in full.
+ */
+function penStatus(person: PresentPerson): string {
+  return person.stalled ? "!" : person.brief ?? "…";
+}
+
 /** An Agent on the page, by the line it is at: its top in the document column, and whether that is out of view. */
 export interface PagePen { person: PresentPerson; top: number; away: "above" | "below" | null }
 
@@ -193,7 +203,9 @@ export function PagePens({ pens, room = 0, onJump, onOpen }: {
               )}
               {/* Without room for its name, a face that thinks or went quiet still says so beneath it. */}
               {!named && (person.thinking || person.stalled) && person.doing && (
-                <span className={cn("page-pen-status", person.stalled && "is-stalled")} aria-hidden="true">{person.doing}</span>
+                <span className={cn("page-pen-status", person.stalled && "is-stalled")} aria-hidden="true">
+                  {penStatus(person)}
+                </span>
               )}
               {/* While it writes, its dots run, as a chat shows someone typing. */}
               {person.editing && !person.idle && (
