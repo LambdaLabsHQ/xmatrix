@@ -285,3 +285,54 @@ test("resolve uses the same pinned OAuth origin and cannot write after malformed
     assert.equal(malformed.calls.length, 1);
   } finally { malformed.restore(); }
 });
+
+const list = SENTRY_ACTIONS.list_issues;
+
+async function listIssues(responses, target, text) {
+  const stub = stubFetchResponses(responses);
+  try {
+    const input = list.parse({ target, text });
+    const result = await list.execute({ credentials: { authToken: "test-token", organization: "made-by-robot" } }, input);
+    return { result, calls: stub.calls };
+  } finally { stub.restore(); }
+}
+
+test("a release's new issues are listed from Sentry's own fields, most frequent first and bounded", async () => {
+  const row = (n, extra = {}) => ({ id: String(n), shortId: `HUB-${n}`, title: `Failure ${n}`, level: "error",
+    status: "unresolved", count: String(100 - n), userCount: 3, firstSeen: "2026-10-19T13:20:00Z",
+    lastSeen: "2026-10-19T13:50:00Z", culprit: "private-culprit", metadata: { value: "private-metadata" }, ...extra });
+  const { result, calls } = await listIssues([{ body: [row(1, { title: "Hub\nwedged   on\tstartup" }),
+    { shortId: "../x", title: "private-malformed" }, row(2, { count: "7 private-count", userCount: "private" })] }],
+  "xmatrix-hub", "firstRelease:xmatrix-v1.0.611-beta.1");
+  const url = new URL(calls[0].url);
+  assert.equal(url.origin + url.pathname, "https://sentry.io/api/0/projects/made-by-robot/xmatrix-hub/issues/");
+  assert.deepEqual(Object.fromEntries(url.searchParams), { query: "firstRelease:xmatrix-v1.0.611-beta.1", sort: "freq",
+    limit: "26", statsPeriod: "14d" });
+  assert.equal(calls[0].method, "GET");
+  assert.equal(result.summary, [
+    "Sentry issues in xmatrix-hub matching `firstRelease:xmatrix-v1.0.611-beta.1` (last 14 days, most frequent first):",
+    "- HUB-1: Hub wedged on startup · error · unresolved · 99 events · 3 users · first seen 2026-10-19T13:20:00Z · last seen 2026-10-19T13:50:00Z",
+    "- HUB-2: Failure 2 · error · unresolved · first seen 2026-10-19T13:20:00Z · last seen 2026-10-19T13:50:00Z",
+  ].join("\n"));
+  assert.doesNotMatch(result.summary, /private-/);
+
+  const many = await listIssues([{ body: Array.from({ length: 26 }, (_, n) => row(n + 1)) }], "*", "firstSeen:-24h");
+  assert.match(many.calls[0].url, /^https:\/\/sentry\.io\/api\/0\/organizations\/made-by-robot\/issues\/\?/u);
+  assert.match(many.result.summary, /^Sentry issues in all projects matching `firstSeen:-24h` \(last 14 days, most frequent first, first 25\):/u);
+  assert.equal(many.result.summary.split("\n").length, 26);
+  const none = await listIssues([{ body: [] }], "xmatrix-web", "firstRelease:xmatrix-v1.0.611-beta.1");
+  assert.equal(none.result.summary, "No Sentry issue in xmatrix-web matches `firstRelease:xmatrix-v1.0.611-beta.1` (last 14 days).");
+});
+
+test("a listing names one project or * and one line of search, and is a read under channel policy", async () => {
+  for (const [target, text] of [["../hub", "is:unresolved"], ["", "is:unresolved"], ["hub", ""], ["hub", "a\nb"],
+    ["hub", "x".repeat(301)], ["hub proj", "is:unresolved"]]) {
+    assert.equal(typeof list.parse({ target, text }), "string", JSON.stringify([target, text]));
+  }
+  assert.deepEqual(list.parse({ target: "XMatrix-Web", text: " is:unresolved " }), { project: "xmatrix-web", search: "is:unresolved" });
+  await assert.rejects(listIssues([{ body: { detail: "not a list" } }], "hub", "is:unresolved"), /did not return an issue list/u);
+  const manifest = APP_CONNECTOR_PROVIDER_MANIFESTS.find(provider => provider.id === "sentry");
+  assert.equal(manifest.actions.find(action => action.id === "list_issues").effect, "read");
+  assert.match(actionRefusal({ providerId: "sentry", actionId: "list_issues", effect: "read", mode: "deny",
+    senderKind: "agent" }), /denied/);
+});
