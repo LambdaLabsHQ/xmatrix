@@ -21,6 +21,7 @@ const packages: Readonly<Record<string, readonly string[]>> = {
   autohand: ["autohand-cli", "@autohandai/autohand-acp"],
   reasonix: ["reasonix"],
   dimcode: ["dimcode"],
+  deepseek: ["@deepseek-ai/dsh"],
 };
 
 export function agentPresetInstallCommand(presetId: unknown, platform: string) {

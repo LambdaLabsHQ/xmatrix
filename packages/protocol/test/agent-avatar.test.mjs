@@ -94,6 +94,7 @@ test("ACP-native harnesses are registry entries with a launcher, ACP argv and ic
     amp: ["amp-acp", []],
     reasonix: ["reasonix", ["acp"]],
     dimcode: ["dimcode", ["acp"]],
+    deepseek: ["dsh", ["--profile", "acp"]],
   };
   for (const [id, [runtime, acpArgs]] of Object.entries(expected)) {
     const preset = agentPresetById(id);

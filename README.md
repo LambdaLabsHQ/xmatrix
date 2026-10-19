@@ -116,6 +116,7 @@ separately. See [network measurement](docs/architecture/space-agent-routing.md#m
 | `@trae` | TraeCode CLI | `@antigravity` | Google Antigravity |
 | `@autohand` | Autohand Code | `@amp` | Amp |
 | `@reasonix` | Reasonix | `@dimcode` | DimCode |
+| `@deepseek` | DeepSeek Harness | | |
 | `custom` | Any CLI you register | | |
 
 `xmatrix harness list` shows which ones are installed on a machine, and `xmatrix harness install <name>` installs one with its official recipe. The presets live in [`packages/protocol/src/agent-presets.json`](packages/protocol/src/agent-presets.json).

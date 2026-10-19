@@ -2186,6 +2186,67 @@
     }
   },
   {
+    "id": "deepseek",
+    "displayName": "DeepSeek Harness",
+    "description": "DeepSeek's official harness through the generic ACP backend (`dsh --profile acp`, the vendor's native ACP server).",
+    "runtime": "dsh",
+    "avatarUrl": "/agent-vendors/deepseek.svg",
+    "defaultArgs": [],
+    "backend": "acp",
+    "acpArgs": ["--profile", "acp"],
+    "launcherNames": ["dsh", "dsh.exe", "dsh.cmd", "dsh.bat"],
+    "classicConfigDirs": ["~/.dsh"],
+    "installHint": "npm install -g @deepseek-ai/dsh",
+    "management": {
+      "version": {
+        "command": "dsh",
+        "args": ["--version"],
+        "regex": "([0-9]+(?:\\.[0-9]+){1,3}(?:[-+][0-9A-Za-z.-]+)?)"
+      },
+      "install": {
+        "unix": {
+          "command": "npm",
+          "args": ["install", "-g", "@deepseek-ai/dsh@latest"]
+        },
+        "windows": {
+          "command": "npm",
+          "args": ["install", "-g", "@deepseek-ai/dsh@latest"]
+        }
+      },
+      "update": {
+        "unix": {
+          "command": "npm",
+          "args": ["install", "-g", "@deepseek-ai/dsh@latest"]
+        },
+        "windows": {
+          "command": "npm",
+          "args": ["install", "-g", "@deepseek-ai/dsh@latest"]
+        }
+      },
+      "uninstall": {
+        "unix": {
+          "command": "npm",
+          "args": ["uninstall", "-g", "@deepseek-ai/dsh"]
+        },
+        "windows": {
+          "command": "npm",
+          "args": ["uninstall", "-g", "@deepseek-ai/dsh"]
+        }
+      },
+      "autoUpdate": {
+        "behavior": "unknown",
+        "controls": [],
+        "notes": "Package-manager install: update through the same package manager. No verified automatic-install switch."
+      },
+      "latest": {
+        "kind": "npm",
+        "package": "@deepseek-ai/dsh"
+      },
+      "sources": ["https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/acp/acp/README.md", "https://www.npmjs.com/package/@deepseek-ai/dsh", "https://docs.npmjs.com/cli/commands/npm-uninstall"],
+      "checkedAt": "2026-10-19"
+    }
+  },
+  {
     "id": "custom",
     "displayName": "Custom",
     "description": "A custom terminal agent runtime.",

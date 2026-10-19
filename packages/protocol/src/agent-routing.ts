@@ -185,7 +185,7 @@ const HARNESS_LABEL: Record<string, string> = {
   qoder: "Qoder", codebuddy: "CodeBuddy", omp: "Oh My Pi", auggie: "Auggie", cline: "Cline", kilo: "Kilo",
   droid: "Droid", devin: "Devin", commandcode: "Command Code", jcode: "jcode", prime: "Prime Agent",
   trae: "TraeCode", antigravity: "Antigravity", autohand: "Autohand", amp: "Amp", reasonix: "Reasonix",
-  dimcode: "DimCode",
+  dimcode: "DimCode", deepseek: "DeepSeek",
 };
 
 export function boundedRoutingLabel(value: unknown): string | undefined {

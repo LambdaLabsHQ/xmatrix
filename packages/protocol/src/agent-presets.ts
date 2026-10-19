@@ -41,6 +41,7 @@ export type AgentPresetId =
   | "amp"
   | "reasonix"
   | "dimcode"
+  | "deepseek"
   | "custom";
 export type AgentPresetBackend =
   | "codex-app"
