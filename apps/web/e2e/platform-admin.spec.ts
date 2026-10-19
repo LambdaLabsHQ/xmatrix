@@ -137,3 +137,65 @@ test("changing the activity range keeps the overview visible while the new read 
   }
   await expect(page.getByRole("img", { name: "Daily message volume for the last 30 days, peaking at 130" })).toBeVisible();
 });
+
+test("a Space opens from the list with billing, members, and usage, and a member opens their user", async ({ page }, testInfo) => {
+  await openWorkspaceAs(page, true);
+  await page.goto("/app/personal-sspaceperso/admin?item=spaces");
+  await page.getByRole("region", { name: "Spaces" }).getByText("Lambda Labs").click();
+  await expect(page).toHaveURL(/space=space%3Alambda/);
+
+  await expect(page.getByRole("heading", { name: "Lambda Labs" })).toBeVisible();
+  const usage = page.getByRole("region", { name: "Usage", exact: true });
+  await expect(usage.getByText("70%", { exact: true })).toBeVisible();
+  await expect(usage.getByText("1 open invites · 2 join requests")).toBeVisible();
+  const billing = page.getByRole("region", { name: "Billing", exact: true });
+  await expect(billing.getByText("past_due")).toBeVisible();
+  await expect(billing.getByText("2026-08-11 00:00 UTC")).toBeVisible();
+  await expect(page.getByRole("region", { name: "Connectors (1)" }).getByText("GitHub")).toBeVisible();
+  await expect(page.getByRole("region", { name: "Paid calls", exact: true }).getByText("jev_turn")).toBeVisible();
+  await expect(page.getByText("Occurrences by status: dispatched 36 · failed 4")).toBeVisible();
+  await expect(page.getByRole("img", { name: /This Space's daily messages/ })).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath("desktop-space-detail.png"), fullPage: true });
+
+  await page.getByRole("region", { name: "Members (2)" }).getByText("member@example.com").click();
+  await expect(page).toHaveURL(/item=users/);
+  await expect(page).toHaveURL(/user=user%3A3/);
+  await expect(page).not.toHaveURL(/space=/);
+  await expect(page.getByRole("heading", { name: "Owner" })).toBeVisible();
+
+  // The user's Spaces lead back to the Space detail.
+  await page.getByRole("region", { name: "Spaces (1)" }).getByText("Lambda Labs").click();
+  await expect(page).toHaveURL(/item=spaces/);
+  await expect(page.getByRole("heading", { name: "Lambda Labs" })).toBeVisible();
+  await page.getByRole("button", { name: "Spaces", exact: true }).first().click();
+  await expect(page).not.toHaveURL(/space=/);
+  await expect(page.getByRole("region", { name: "Spaces" }).getByText("Solo Space")).toBeVisible();
+});
+
+test("Operations shows Machines, runtimes, Runs, and a stalled delivery notice", async ({ page }, testInfo) => {
+  await openWorkspaceAs(page, true);
+  await page.goto("/app/personal-sspaceperso/admin?item=operations");
+  await expect(page.getByRole("heading", { name: "Operations" })).toBeVisible();
+  await expect(page.getByRole("status").getByText(/Event delivery is behind/)).toBeVisible();
+  const machines = page.getByRole("region", { name: "Machines", exact: true });
+  await expect(machines.getByText("machine:1")).toBeVisible();
+  await expect(machines.getByText("offline 1 · online 1")).toBeVisible();
+  await expect(page.getByRole("region", { name: "Agent runtimes" }).getByText("codex")).toBeVisible();
+  await expect(page.getByText("9% of started")).toBeVisible();
+  await expect(page.getByRole("img", { name: /Runs started per day/ })).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath("desktop-operations.png"), fullPage: true });
+});
+
+test("Billing lists subscriptions, webhooks, and platform paid calls", async ({ page }, testInfo) => {
+  await openWorkspaceAs(page, true);
+  await page.goto("/app/personal-sspaceperso/admin?item=billing");
+  await expect(page.getByRole("status").getByText("1 Space is in a payment grace period.")).toBeVisible();
+  const subscriptions = page.getByRole("region", { name: "Subscriptions", exact: true }).getByRole("region", { name: "Subscriptions" });
+  await expect(subscriptions.getByText("Lambda Labs")).toBeVisible();
+  await expect(page.getByRole("region", { name: "Billing webhooks" }).getByText("customer.subscription.updated")).toBeVisible();
+  await expect(page.getByRole("region", { name: "Paid calls" }).getByText("ok 296 · uncertain 4")).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath("desktop-billing.png"), fullPage: true });
+  await subscriptions.getByText("Lambda Labs").click();
+  await expect(page).toHaveURL(/item=spaces/);
+  await expect(page.getByRole("heading", { name: "Lambda Labs" })).toBeVisible();
+});

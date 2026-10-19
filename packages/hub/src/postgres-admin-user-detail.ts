@@ -22,13 +22,19 @@ import type { QueryResultRow } from "pg";
 import { POSTGRES_ADMIN_MESSAGE_FACTS_QUERY } from "./postgres-admin-message-facts";
 import { adminActivityUtcWindow } from "./admin-overview-merge";
 import {
+  adminCount as count,
+  adminIso as iso,
+  adminListBound,
+  adminOptionalIso as optionalIso,
+  type AdminCountValue as Count,
+  type AdminTimeValue as Time,
+} from "./postgres-admin-values";
+import {
   createPostgresAuthorityFleet,
   type PostgresAuthorityFleet,
 } from "./postgres-authority-fleet";
 import type { Env } from "./types";
 
-type Count = string | number;
-type Time = Date | string;
 
 interface MembershipRow extends QueryResultRow {
   space_id: string; name: string; role: string; owner_user_id: string; joined_at: Time;
@@ -62,22 +68,6 @@ interface MessageRow extends QueryResultRow {
 interface ActivityRow extends QueryResultRow { day: string; messages: Count }
 
 const ACTIVE_RUN_STATUSES = new Set(["starting", "running"]);
-
-function count(value: Count | null | undefined): number {
-  const parsed = Number(value ?? 0);
-  if (!Number.isSafeInteger(parsed) || parsed < 0) {
-    throw new Error("PostgreSQL admin user detail returned an invalid count");
-  }
-  return parsed;
-}
-
-function iso(value: Time): string {
-  return (value instanceof Date ? value : new Date(value)).toISOString();
-}
-
-function optionalIso(value: Time | null | undefined): string | undefined {
-  return value == null ? undefined : iso(value);
-}
 
 /** The shard-local part of one user's detail, before identity is joined in. */
 export type AdminUserShardDetail = Omit<AdminUserDetail, "generatedAt" | "user" | "sessions">;
@@ -182,11 +172,7 @@ async function readShard(
       maxRows: 1,
     }))[0];
 
-    const truncated: string[] = [];
-    const cut = <T>(rows: readonly T[], key: string): T[] => {
-      if (rows.length > bound) truncated.push(key);
-      return rows.slice(0, bound);
-    };
+    const { truncated, cut } = adminListBound(bound);
     const byStatus: Record<string, number> = {};
     let lastRunAt: string | undefined;
     for (const row of runs) {

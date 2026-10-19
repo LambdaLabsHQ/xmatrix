@@ -11,7 +11,9 @@ import type { Hono } from "hono";
 import {
   ADMIN_AUDIT_HUB_ROUTE,
   ADMIN_HUMAN_HANDLE_BACKFILL_HUB_ROUTE,
+  ADMIN_OPERATIONS_HUB_ROUTE,
   ADMIN_OVERVIEW_HUB_ROUTE,
+  ADMIN_SPACE_DETAIL_HUB_ROUTE,
   ADMIN_USER_DETAIL_HUB_ROUTE,
   adminAuditLimit,
   adminHandleBackfillLimit,
@@ -45,6 +47,8 @@ import {
 } from "./channel-messages";
 import { getSpace } from "./spaces";
 import { readPostgresAdminOverview } from "./postgres-admin-overview";
+import { readPostgresAdminSpaceDetail } from "./postgres-admin-space-detail";
+import { readPostgresAdminOperations } from "./postgres-admin-operations";
 
 /** Bounded label lookup so one operator read cannot scan the whole directory. */
 const MAX_DIRECTORY_LOOKUPS = 200;
@@ -217,6 +221,24 @@ export function registerIndexRoutesAdmin(app: Hono<{ Bindings: Env }>): void {
       ...shards,
     };
     return c.json({ detail }, 200, { "cache-control": "private, no-store" });
+  }));
+
+  app.get(ADMIN_SPACE_DETAIL_HUB_ROUTE, (c) => jsonErrors(c, async () => {
+    const spaceId = c.req.param("spaceId");
+    await auditedPlatformAdmin(c.req.raw, c.env, "space.read", { kind: "space", id: spaceId });
+    const detail = await readPostgresAdminSpaceDetail(c.env, spaceId, new Date().toISOString());
+    if (!detail) return c.json({ error: "Space not found" }, 404);
+    if (!detail.space.ownerEmail) {
+      const ownerEmail = (await directoryEmails([detail.space.ownerUserId], c.env)).get(detail.space.ownerUserId);
+      if (ownerEmail) detail.space.ownerEmail = ownerEmail;
+    }
+    return c.json({ detail }, 200, { "cache-control": "private, no-store" });
+  }));
+
+  app.get(ADMIN_OPERATIONS_HUB_ROUTE, (c) => jsonErrors(c, async () => {
+    await auditedPlatformAdmin(c.req.raw, c.env, "operations.read");
+    const operations = await readPostgresAdminOperations(c.env, new Date().toISOString());
+    return c.json({ operations }, 200, { "cache-control": "private, no-store" });
   }));
 
   app.get(ADMIN_AUDIT_HUB_ROUTE, (c) => jsonErrors(c, async () => {

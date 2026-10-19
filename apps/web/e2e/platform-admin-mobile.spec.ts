@@ -138,3 +138,24 @@ test("320px paper fits storage, long identities, user sublists, and the audit tr
   await expectPaperFits(page);
   await page.screenshot({ path: testInfo.outputPath("mobile-audit.png") });
 });
+
+test("320px paper fits a Space detail, Operations, and Billing", async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 320, height: 800 });
+  await openWorkspaceAs(page, true);
+  await page.goto(`${ADMIN}?item=spaces&space=space%3Alambda`);
+  await expect(page.getByRole("heading", { name: "Lambda Labs" })).toBeVisible();
+  await expectPaperFits(page);
+  await page.screenshot({ path: testInfo.outputPath("mobile-space-detail.png"), fullPage: true });
+  await page.getByRole("region", { name: "Members (2)" }).getByRole("button", { name: /member@example.com/ }).click();
+  await expect(page).toHaveURL(/user=user%3A3/);
+
+  await page.goto(`${ADMIN}?item=operations`);
+  await expect(page.getByRole("region", { name: "Machines", exact: true }).getByText("machine:1")).toBeVisible();
+  await expectPaperFits(page);
+  await page.screenshot({ path: testInfo.outputPath("mobile-operations.png"), fullPage: true });
+
+  await page.goto(`${ADMIN}?item=billing`);
+  await expect(page.getByText("1 Space is in a payment grace period.")).toBeVisible();
+  await expectPaperFits(page);
+  await page.screenshot({ path: testInfo.outputPath("mobile-billing.png"), fullPage: true });
+});

@@ -3,14 +3,7 @@ import test from "node:test";
 
 import { readPostgresAdminUserDetailFromFleet } from "../src/postgres-admin-user-detail.ts";
 import { listAdminAudit, recordAdminAudit } from "../src/admin-audit.ts";
-import { adminQueryDatabase } from "./support/admin-query-database.mjs";
-
-/* Columns that hold user content or private detail. No operator query may name them. */
-const CONTENT_COLUMNS = [
-  /\bbody\b/u, /\bmetadata_json\b/u, /\bconfiguration_json\b/u, /\bsecret_refs_json\b/u,
-  /\bencrypted_value_json\b/u, /\bcapabilities_json\b/u, /\berror\b/u, /\bhostname\b/u,
-  /\bip_address\b/u, /\buser_agent\b/u, /\btitle\b/u, /\btoken\b/u,
-];
+import { ADMIN_CONTENT_COLUMNS as CONTENT_COLUMNS, adminQueryDatabase } from "./support/admin-query-database.mjs";
 
 function assertMetadataOnly(query) {
   for (const column of CONTENT_COLUMNS) {

@@ -301,6 +301,8 @@ export const ADMIN_AUDIT_MAX_ROWS = 500;
 export type AdminAuditAction =
   | "overview.read"
   | "user.read"
+  | "space.read"
+  | "operations.read"
   | "audit.read"
   | "handles.backfill"
   | "agent-senders.repair";
