@@ -20,6 +20,7 @@ import { adminActivityUtcWindow } from "./admin-overview-merge";
 import {
   adminCount as count,
   adminIso as iso,
+  adminListBound,
   adminOptionalIso as optionalIso,
   adminPaidCallKinds,
   type AdminCountValue as Count,
@@ -244,11 +245,7 @@ async function readShard(
       maxRows: ADMIN_SPACE_DETAIL_DAYS,
     });
 
-    const truncated: string[] = [];
-    const cut = <T>(rows: readonly T[], key: string): T[] => {
-      if (rows.length > bound) truncated.push(key);
-      return rows.slice(0, bound);
-    };
+    const { truncated, cut } = adminListBound(bound);
     const byStatus = (rows: readonly StatusRow[]) =>
       Object.fromEntries(rows.map((row) => [row.status, count(row.total)]));
     const daily = new Map(activity.map((row) => [row.day, row]));

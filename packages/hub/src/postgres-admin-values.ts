@@ -22,6 +22,24 @@ export function adminOptionalIso(value: AdminTimeValue | null | undefined): stri
   return value == null ? undefined : adminIso(value);
 }
 
+/**
+ * Cut each list at `bound`, remembering which lists were cut, so a list at its
+ * bound says so instead of growing.
+ */
+export function adminListBound(bound: number): {
+  truncated: string[];
+  cut: <T>(rows: readonly T[], key: string) => T[];
+} {
+  const truncated: string[] = [];
+  return {
+    truncated,
+    cut: (rows, key) => {
+      if (rows.length > bound) truncated.push(key);
+      return rows.slice(0, bound);
+    },
+  };
+}
+
 /** Paid-call receipts grouped by kind, status and outcome. */
 export interface AdminPaidCallRow extends QueryResultRow {
   kind: string;

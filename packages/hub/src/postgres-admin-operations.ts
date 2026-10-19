@@ -23,13 +23,13 @@ import type { QueryResultRow } from "pg";
 import { adminActivityUtcWindow } from "./admin-overview-merge";
 import {
   addAdminCounts,
-  adminCount as count,
-  adminIso as iso,
-  adminOptionalIso as optionalIso,
+  adminCount,
+  adminIso,
+  adminOptionalIso,
   adminPaidCallKinds,
-  type AdminCountValue as Count,
+  type AdminCountValue,
   type AdminPaidCallRow,
-  type AdminTimeValue as Time,
+  type AdminTimeValue,
 } from "./postgres-admin-values";
 import {
   createPostgresAuthorityFleet,
@@ -44,38 +44,38 @@ const HARNESS_OWNER_ROWS = 10_000;
 
 interface MachineRow extends QueryResultRow {
   machine_id: string; owner_user_id: string; owner_email: string; status: string;
-  created_at: Time; updated_at: Time;
+  created_at: AdminTimeValue; updated_at: AdminTimeValue;
 }
 
-interface StatusRow extends QueryResultRow { status: string; total: Count }
+interface StatusRow extends QueryResultRow { status: string; total: AdminCountValue }
 
-interface HarnessRow extends QueryResultRow { harness: string; owner_user_id: string; agents: Count }
+interface HarnessRow extends QueryResultRow { harness: string; owner_user_id: string; agents: AdminCountValue }
 
-interface HarnessSpacesRow extends QueryResultRow { harness: string; spaces: Count }
+interface HarnessSpacesRow extends QueryResultRow { harness: string; spaces: AdminCountValue }
 
-interface RunTotalsRow extends QueryResultRow { active: Count }
+interface RunTotalsRow extends QueryResultRow { active: AdminCountValue }
 
-interface RunDayRow extends QueryResultRow { day: string; started: Count; failed: Count }
+interface RunDayRow extends QueryResultRow { day: string; started: AdminCountValue; failed: AdminCountValue }
 
-interface AutomationRow extends QueryResultRow { total: Count; enabled: Count; with_error: Count }
+interface AutomationRow extends QueryResultRow { total: AdminCountValue; enabled: AdminCountValue; with_error: AdminCountValue }
 
-interface OverdueRow extends QueryResultRow { overdue: Count }
+interface OverdueRow extends QueryResultRow { overdue: AdminCountValue }
 
 interface OutboxRow extends QueryResultRow {
-  status: string; total: Count; oldest_pending_at: Time | null; max_attempts: Count | null;
+  status: string; total: AdminCountValue; oldest_pending_at: AdminTimeValue | null; max_attempts: AdminCountValue | null;
 }
 
 interface SubscriptionRow extends QueryResultRow {
   space_id: string; space_name: string | null; plan: string; status: string; seat_quantity: number;
-  billing_provider: string | null; current_period_end: Time | null; cancel_at_period_end: boolean;
-  grace_until: Time | null; updated_at: Time;
+  billing_provider: string | null; current_period_end: AdminTimeValue | null; cancel_at_period_end: boolean;
+  grace_until: AdminTimeValue | null; updated_at: AdminTimeValue;
 }
 
 interface WebhookRow extends QueryResultRow {
-  space_id: string; event_type: string; outcome: string; processed_at: Time;
+  space_id: string; event_type: string; outcome: string; processed_at: AdminTimeValue;
 }
 
-interface MachineCountRow extends QueryResultRow { machine_id: string; total: Count }
+interface MachineCountRow extends QueryResultRow { machine_id: string; total: AdminCountValue }
 
 interface ShardPart {
   machines: readonly MachineRow[];
@@ -96,7 +96,7 @@ interface ShardPart {
 }
 
 function statusCounts(rows: readonly StatusRow[]): Record<string, number> {
-  return Object.fromEntries(rows.map((row) => [row.status, count(row.total)]));
+  return Object.fromEntries(rows.map((row) => [row.status, adminCount(row.total)]));
 }
 
 async function readShard(
@@ -246,20 +246,20 @@ async function readShard(
       machinesByStatus: statusCounts(machineStatuses),
       harnesses,
       harnessSpaces,
-      activeRuns: count(runTotals?.active),
+      activeRuns: adminCount(runTotals?.active),
       runsByStatus: statusCounts(runStatuses),
       runDays,
       automations: {
-        total: count(automations?.total),
-        enabled: count(automations?.enabled),
-        withError: count(automations?.with_error),
-        overdue: count(overdue?.overdue),
+        total: adminCount(automations?.total),
+        enabled: adminCount(automations?.enabled),
+        withError: adminCount(automations?.with_error),
+        overdue: adminCount(overdue?.overdue),
       },
       occurrencesByStatus: statusCounts(occurrences),
       outbox,
       subscriptions: subscriptions.slice(0, bound).map((row) => {
-        const currentPeriodEnd = optionalIso(row.current_period_end);
-        const graceUntil = optionalIso(row.grace_until);
+        const currentPeriodEnd = adminOptionalIso(row.current_period_end);
+        const graceUntil = adminOptionalIso(row.grace_until);
         return {
           spaceId: row.space_id,
           spaceName: row.space_name ?? row.space_id,
@@ -270,14 +270,14 @@ async function readShard(
           ...(currentPeriodEnd ? { currentPeriodEnd } : {}),
           cancelAtPeriodEnd: row.cancel_at_period_end === true,
           ...(graceUntil ? { graceUntil } : {}),
-          updatedAt: iso(row.updated_at),
+          updatedAt: adminIso(row.updated_at),
         };
       }),
       webhookEvents: webhooks.map((row) => ({
         spaceId: row.space_id,
         eventType: row.event_type,
         outcome: row.outcome,
-        processedAt: iso(row.processed_at),
+        processedAt: adminIso(row.processed_at),
       })),
       webhooksByOutcome: statusCounts(webhookOutcomes),
       paidCalls,
@@ -331,24 +331,24 @@ export async function readPostgresAdminOperationsFromFleet(
   const runsByMachine = new Map<string, number>();
   for (const shard of machineCounts) {
     for (const row of shard.agents) {
-      agentsByMachine.set(row.machine_id, (agentsByMachine.get(row.machine_id) ?? 0) + count(row.total));
+      agentsByMachine.set(row.machine_id, (agentsByMachine.get(row.machine_id) ?? 0) + adminCount(row.total));
     }
     for (const row of shard.runs) {
-      runsByMachine.set(row.machine_id, (runsByMachine.get(row.machine_id) ?? 0) + count(row.total));
+      runsByMachine.set(row.machine_id, (runsByMachine.get(row.machine_id) ?? 0) + adminCount(row.total));
     }
   }
 
   const harnesses = new Map<string, { agents: number; spaces: number; owners: Set<string> }>();
   for (const row of parts.flatMap((part) => part.harnesses)) {
     const current = harnesses.get(row.harness) ?? { agents: 0, spaces: 0, owners: new Set<string>() };
-    current.agents += count(row.agents);
+    current.agents += adminCount(row.agents);
     current.owners.add(row.owner_user_id);
     harnesses.set(row.harness, current);
   }
   // A Space lives on one shard, so per-shard distinct Spaces add up exactly.
   for (const row of parts.flatMap((part) => part.harnessSpaces)) {
     const current = harnesses.get(row.harness);
-    if (current) current.spaces += count(row.spaces);
+    if (current) current.spaces += adminCount(row.spaces);
   }
 
   const window = adminActivityUtcWindow(nowDate.getTime(), ADMIN_OPERATIONS_DAYS);
@@ -359,15 +359,15 @@ export async function readPostgresAdminOperationsFromFleet(
   for (const row of parts.flatMap((part) => part.runDays)) {
     const current = runDays.get(row.day);
     if (!current) continue;
-    current.started += count(row.started);
-    current.failed += count(row.failed);
+    current.started += adminCount(row.started);
+    current.failed += adminCount(row.failed);
   }
 
   const outbox: AdminOperations["outbox"] = { byStatus: {}, maxAttempts: 0 };
   for (const row of parts.flatMap((part) => part.outbox)) {
-    outbox.byStatus[row.status] = (outbox.byStatus[row.status] ?? 0) + count(row.total);
-    outbox.maxAttempts = Math.max(outbox.maxAttempts, count(row.max_attempts));
-    const oldest = optionalIso(row.oldest_pending_at);
+    outbox.byStatus[row.status] = (outbox.byStatus[row.status] ?? 0) + adminCount(row.total);
+    outbox.maxAttempts = Math.max(outbox.maxAttempts, adminCount(row.max_attempts));
+    const oldest = adminOptionalIso(row.oldest_pending_at);
     if (oldest && (!outbox.oldestPendingAt || oldest < outbox.oldestPendingAt)) outbox.oldestPendingAt = oldest;
   }
 
@@ -381,8 +381,8 @@ export async function readPostgresAdminOperationsFromFleet(
       status: row.status,
       agents: agentsByMachine.get(row.machine_id) ?? 0,
       activeRuns: runsByMachine.get(row.machine_id) ?? 0,
-      enrolledAt: iso(row.created_at),
-      lastSeenAt: iso(row.updated_at),
+      enrolledAt: adminIso(row.created_at),
+      lastSeenAt: adminIso(row.updated_at),
     })),
     machinesByStatus: {},
     harnesses: [...harnesses].map(([harness, value]) => ({

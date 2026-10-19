@@ -171,18 +171,9 @@ export interface AdminOperationsRunDay {
   failed: number;
 }
 
-export interface AdminOperationsSubscription {
+export interface AdminOperationsSubscription extends AdminSpaceBillingDetail {
   spaceId: string;
   spaceName: string;
-  plan: string;
-  status: string;
-  seats: number;
-  /** stripe or apple. */
-  provider?: string;
-  currentPeriodEnd?: string;
-  cancelAtPeriodEnd: boolean;
-  graceUntil?: string;
-  updatedAt: string;
 }
 
 export interface AdminOperations {

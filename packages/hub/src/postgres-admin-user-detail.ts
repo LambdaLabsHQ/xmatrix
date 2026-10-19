@@ -24,6 +24,7 @@ import { adminActivityUtcWindow } from "./admin-overview-merge";
 import {
   adminCount as count,
   adminIso as iso,
+  adminListBound,
   adminOptionalIso as optionalIso,
   type AdminCountValue as Count,
   type AdminTimeValue as Time,
@@ -171,11 +172,7 @@ async function readShard(
       maxRows: 1,
     }))[0];
 
-    const truncated: string[] = [];
-    const cut = <T>(rows: readonly T[], key: string): T[] => {
-      if (rows.length > bound) truncated.push(key);
-      return rows.slice(0, bound);
-    };
+    const { truncated, cut } = adminListBound(bound);
     const byStatus: Record<string, number> = {};
     let lastRunAt: string | undefined;
     for (const row of runs) {

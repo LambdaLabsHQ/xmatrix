@@ -3,16 +3,14 @@ import test from "node:test";
 
 import { readPostgresAdminOperationsFromFleet } from "../src/postgres-admin-operations.ts";
 import { readPostgresAdminSpaceDetailFromFleet } from "../src/postgres-admin-space-detail.ts";
-import { adminQueryDatabase } from "./support/admin-query-database.mjs";
+import { ADMIN_CONTENT_COLUMNS, adminQueryDatabase } from "./support/admin-query-database.mjs";
 
-/* Columns that hold user content or private detail. No operator query may name them. */
+/* Beyond the shared content columns: payloads, provider ids, digests, and error text. */
 const CONTENT_COLUMNS = [
-  /\bbody\b/u, /\bmetadata_json\b/u, /\bconfiguration_json\b/u, /\bsecret_refs_json\b/u,
-  /\bencrypted_value_json\b/u, /\bcapabilities_json\b/u, /\berror\b/u, /\berror_message\b/u,
-  /\bhostname\b/u, /\bdisplay_name FROM data\.machine_daemons/u, /\bpayload_json\b/u,
-  /\bpayload_digest\b/u, /\bprovider_customer_id\b/u, /\bprovider_subscription_id\b/u,
-  /\btoken_hash\b/u, /\bscopes_json\b/u, /\brequest_digest\b/u, /\ballocation_json\b/u,
-  /\bnotice_json\b/u, /\blast_error\b(?! IS NOT NULL)/u, /\bip_address\b/u, /\buser_agent\b/u,
+  ...ADMIN_CONTENT_COLUMNS, /\berror_message\b/u, /\bpayload_json\b/u, /\bpayload_digest\b/u,
+  /\bprovider_customer_id\b/u, /\bprovider_subscription_id\b/u, /\btoken_hash\b/u, /\bscopes_json\b/u,
+  /\brequest_digest\b/u, /\ballocation_json\b/u, /\bnotice_json\b/u, /\blast_error\b(?! IS NOT NULL)/u,
+  /\bdisplay_name FROM data\.machine_daemons/u,
 ];
 
 function database(resultByQuery, seen = []) {
