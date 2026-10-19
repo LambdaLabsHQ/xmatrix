@@ -298,13 +298,12 @@ fact is about.
   by a space becomes a link.
   Clicking a link's visible destination edits the address.
 - **Table controls** appear only while the cursor is in a table.
-- **Selection menu**: *Discuss*, *Ask AI*, *Claim*, *Show editors*,
-  *Copy link*.
+- **Selection menu**: *Discuss*, *Claim*, *Show editors*, *Copy link*.
   - *Discuss* starts a conversation anchored to the selection (§4.3).
-  - *Ask AI* starts the same discussion with its composer already addressed
-    to xMatrix (`@auto`), which picks the Agent. The question is written
-    there, beside the page (§4.4), where the answer arrives; asking for a
-    change is asking in words, and the Agent edits the page as the page lets
+    People and Agents meet in it alike, so there is no separate *Ask AI*
+    (removed 2026-10-19): asking an Agent, or asking it for a change, is
+    mentioning it there (`@auto` lets xMatrix pick), beside the page (§4.4)
+    where the answer arrives, and the Agent edits the page as the page lets
     it. There is no second input over the page.
 - **`/` insert**: heading, list, task list, table, page reference, live
   reference, mention.
@@ -527,8 +526,8 @@ or joining one never leaves the page.
   count open the list of every
   conversation linked to the page, grouped by section, including resolved
   discussions and sunk conversations; open discussions resolve from it too.
-- **Starting one.** *Discuss* on a selection or a heading, and *Ask AI*,
-  create the conversation already linked there and open it beside the page
+- **Starting one.** *Discuss* on a selection or a heading creates the
+  conversation already linked there and opens it beside the page
   with its composer focused.
 - **Narrow windows** have no margin: when the page has no room for a full
   document column beside it, passages stay highlighted with a bubble and
@@ -904,8 +903,8 @@ Shipped:
 2. Awareness: per-block aggregation, `page read` front matter; Now bar,
    heading avatars, follow, section footer (v0.16.467); `page read --since`
    (v0.16.470).
-3. Anchored discussions with resolve, and Ask AI on a selection
-   (v0.16.470; Ask AI opens the discussion itself since 2026-10-19).
+3. Anchored discussions with resolve (v0.16.470; Ask AI on a selection
+   was folded into Discuss on 2026-10-19).
 4. Owed updates derived from ended claims, GitHub's write-back request on a
    merged pull request, the Focus scan treating owed sections first
    (v0.16.470).

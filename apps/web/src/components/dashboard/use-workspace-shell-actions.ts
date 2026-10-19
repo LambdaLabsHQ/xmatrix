@@ -53,7 +53,6 @@ import {
 } from "@/components/dashboard/mention-complete";
 import {
   clearChannelComposerDraft,
-  writeChannelComposerDraft,
 } from "@/components/dashboard/channel-composer-drafts";
 import { useAgentTraceHistorySync } from "@/components/dashboard/use-agent-trace-history-sync";
 import {
@@ -1524,15 +1523,9 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     s.setDiscussionQuotes((current) => new Map(current).set(conversationId, quote));
   }
 
-  /**
-   * A new conversation's composer, ready before it opens. Ask AI's starts with
-   * `@auto` written out, which the Hub routes to an enabled harness as it does
-   * any typed `@auto`.
-   */
-  function seedComposer(conversationId: string, seed: { quote?: DiscussionQuote; askAi?: boolean }) {
+  /** A new conversation's composer, ready before it opens with the passage it discusses. */
+  function seedComposer(conversationId: string, seed: { quote?: DiscussionQuote }) {
     if (seed.quote) seedQuote(conversationId, seed.quote);
-    if (seed.askAi) writeChannelComposerDraft(s.channelComposerDraftsRef.current, conversationId,
-      { text: "@auto ", workspaceTarget: null, attachments: [] });
   }
 
   function dropDiscussionQuote(conversationId: string) {

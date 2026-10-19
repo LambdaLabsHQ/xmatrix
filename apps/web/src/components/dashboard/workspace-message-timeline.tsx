@@ -1400,8 +1400,8 @@ function MessagePassageDiscuss({ rootRef, onDiscuss }: {
     <div className={cn("fixed z-50", !below && "-translate-y-full")}
       style={{ left: Math.max(8, Math.min(passage.rect.left, window.innerWidth - 128)),
         top: below ? passage.rect.bottom + 6 : passage.rect.top - 6 }}>
-      <PaperPopover role="toolbar" aria-label="Selection" data-testid="message-selection-menu"
-        className="flex items-center gap-0.5 p-1">
+      <PaperPopover tone="ink" role="toolbar" aria-label="Selection" data-testid="message-selection-menu"
+        className="flex items-center gap-px p-0.5">
         <button type="button" onMouseDown={(event) => event.preventDefault()}
           onClick={() => {
             onDiscuss(passage.messageId, passage.quote);

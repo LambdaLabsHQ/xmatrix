@@ -6,7 +6,7 @@ import {
 } from "@xmatrix/protocol/page-document";
 import {
   BetweenHorizontalEnd, BetweenVerticalEnd, Code2, Columns3, FileCode2, Flag, Rows3, Trash2, Heading1, Heading2, Heading3, Link2,
-  List, ListChecks, ListOrdered, MessageSquarePlus, Minus, Pilcrow, Quote, Sparkles, Table, Users,
+  List, ListChecks, ListOrdered, MessageSquarePlus, Minus, Pilcrow, Quote, Table, Users,
 } from "lucide-react";
 import type { Node as DocNode } from "prosemirror-model";
 import { EditorState, Selection, type Command } from "prosemirror-state";
@@ -66,7 +66,7 @@ export interface PageSectionActions {
    * Asking AI is the same discussion, its composer already addressed to xMatrix,
    * which picks the Agent: the question, and any change asked for, is written there.
    */
-  discuss?: (blockId: string, anchor?: { quote: string; from: unknown; to: unknown }, options?: { askAi?: boolean }) => void;
+  discuss?: (blockId: string, anchor?: { quote: string; from: unknown; to: unknown }) => void;
   copyLink?: (blockId: string) => void;
   claim?: (blockId: string) => void;
   /** Who last changed the section the selection is in; null when it is not in recent history. */
@@ -639,8 +639,8 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
       {selectionMenu && (
         <div className="absolute z-20 -translate-y-full"
           style={{ left: Math.max(0, selectionMenu.left - 8), top: selectionMenu.top - 6 }}>
-        <PaperPopover role="toolbar" aria-label="Selection" data-testid="page-selection-menu"
-          className="flex items-center gap-0.5 p-1">
+        <PaperPopover tone="ink" role="toolbar" aria-label="Selection" data-testid="page-selection-menu"
+          className="flex items-center gap-px p-0.5">
           {actions?.discuss && (
             <button type="button" onMouseDown={(event) => event.preventDefault()}
               onClick={() => actions.discuss!(section, current ? selectionAnchor(current.state, session.fragment) ?? undefined
@@ -649,22 +649,13 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
               <MessageSquarePlus /> Discuss
             </button>
           )}
-          {actions?.discuss && (
-            <button type="button" onMouseDown={(event) => event.preventDefault()}
-              onClick={() => {
-                const anchor = current ? selectionAnchor(current.state, session.fragment) : null;
-                if (anchor) actions.discuss!(section, anchor, { askAi: true });
-              }}
-              className="flex h-8 items-center gap-1.5 rounded-md px-2 text-sm [&_svg]:size-4">
-              <Sparkles /> Ask AI
-            </button>
-          )}
           {actions?.claim && canEdit && (
             <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => actions.claim!(section)}
               className="flex h-8 items-center gap-1.5 rounded-md px-2 text-sm [&_svg]:size-4">
               <Flag /> Claim
             </button>
           )}
+          {(actions?.editors || actions?.copyLink) && <span aria-hidden className="app-paper-popover-rule" />}
           {actions?.editors && (
             <ToolButton label="Show editors" onRun={() => setEditorsShown({ blockId: section, left: selectionMenu.left,
               top: selectionMenu.top })}><Users /></ToolButton>

@@ -8375,6 +8375,63 @@ html[data-app-theme] .xmatrix-app.xmatrix-app .app-paper-card .app-tool-lines in
   background: color-mix(in oklch, var(--foreground) 6%, transparent);
 }
 
+/* The actions over a selected passage are written in the paper's ink, the one
+   thing on paper that stands off it without a frame (user 2026-10-19: 完全重新
+   设计): a short solid stroke of the warm ink with the paper's own colour for
+   its words, set close, its icons a shade softer, a hairline of paper between
+   what a passage starts and what it opens, and only the ink's own shade under
+   it. */
+.app-material-paper-popover[data-tone="ink"] {
+  --app-paper-popover-ink: var(--app-panel-ink, oklch(0.24 0.03 60));
+  --app-paper-popover-paper: var(--app-panel-paper, oklch(0.976 0.005 85));
+  background: var(--app-paper-popover-ink);
+  color: var(--app-paper-popover-paper);
+  border-radius: 8px;
+  box-shadow: 0 3px 10px -4px color-mix(in oklch, var(--app-paper-popover-ink) 45%, transparent);
+}
+
+.app-material-paper-popover[data-tone="ink"] > button {
+  height: 1.875rem;
+  padding-inline: 0.5rem;
+  border-radius: 6px;
+  color: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.005em;
+}
+
+/* An icon action (it names itself in a title) is square. */
+.app-material-paper-popover[data-tone="ink"] > button[title] {
+  width: 1.875rem;
+  padding-inline: 0;
+}
+
+.app-material-paper-popover[data-tone="ink"] > button svg {
+  width: 15px;
+  height: 15px;
+  opacity: 0.72;
+}
+
+.app-material-paper-popover[data-tone="ink"] > button:is(:hover:not(:disabled), :active, [aria-pressed="true"]) {
+  background: color-mix(in oklch, var(--app-paper-popover-paper) 14%, transparent);
+}
+
+.app-material-paper-popover[data-tone="ink"] > button:is(:hover:not(:disabled), :active, [aria-pressed="true"]) svg {
+  opacity: 1;
+}
+
+.app-material-paper-popover[data-tone="ink"] > button:focus-visible {
+  outline: 2px solid color-mix(in oklch, var(--app-paper-popover-paper) 60%, transparent);
+  outline-offset: -2px;
+}
+
+.app-paper-popover-rule {
+  align-self: stretch;
+  width: 1px;
+  margin: 6px 3px;
+  background: color-mix(in oklch, currentColor 22%, transparent);
+}
+
 /* Notices on the paper: plain white with the tone's rail, not glass. */
 html[data-app-theme] .xmatrix-app.xmatrix-app .app-tool-detail .app-notice {
   background: oklch(0.995 0.002 85) !important;
