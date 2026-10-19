@@ -7,6 +7,7 @@ import { createAuthorityDatabase } from "../dist/index.js";
 
 import { PostgresPageRepository, pageNameFrom, pagePositionBetween } from "../dist/page-control.js";
 import { describePageConversations } from "../dist/page-conversations.js";
+import { keepSectionChanges, walkSectionChanges } from "../dist/page-section-changes.js";
 
 
 
@@ -628,6 +629,87 @@ integration("page awareness finishes its database snapshot before comparing a la
     assert.equal(result.updates.get("inventory").revision, 2);
     assert.equal(result.updates.get("status").revision, 1);
     assert.deepEqual([...result.owed], []);
+  } finally {
+    await cleanup(client, ids);
+    await client.end();
+  }
+});
+
+/** A page written as `bodies`, one revision each, by the Space's owner. */
+async function writtenPage(fixture, bodies) {
+  const { ids, pages, owner } = fixture;
+  const base = { spaceId: ids.space, principal: owner };
+  const { page } = await pages.create({ requestId: crypto.randomUUID(), ...base, title: "Launch", body: bodies[0] });
+  for (const [index, body] of bodies.slice(1).entries()) {
+    await pages.edit({ requestId: crypto.randomUUID(), ...base, pageId: page.pageId, baseRevision: index + 1, body });
+  }
+  return page;
+}
+
+integration("a section's last change reads the same once its revisions' changes are kept, and a purge forgets them", async () => {
+  const fixture = await pageTest("section-changes");
+  const { client, ids, pages, owner } = fixture;
+  try {
+    const r = () => crypto.randomUUID();
+    const base = { spaceId: ids.space, principal: owner };
+    const page = await writtenPage(fixture, [
+      "# Launch\n\n## Secret plan\n\nShip in May.\n\n## Notes\n\n* none\n",
+      "# Launch\n\n## Secret plan\n\nShip in June.\n\n## Notes\n\n* none\n",
+      // Markdown style alone is no change: the list marker differs, the document does not.
+      "# Launch\n\n## Secret plan\n\nShip in June.\n\n## Notes\n\n- none\n",
+      "# Launch\n\n## Secret plan\n\nShip in June.\n\n## Notes\n\n- none\n- more\n",
+    ]);
+    const read = async () => {
+      const result = await pages.blockUpdates({ requestId: r(), ...base, pageId: page.pageId });
+      return { order: result.order, updated: Object.fromEntries([...result.updates].map(([id, update]) => [id, update.revision])) };
+    };
+    const kept = async () => (await client.query(`SELECT revision, changed_blocks FROM data.page_revisions
+      WHERE space_id=$1 AND page_id=$2 ORDER BY revision`, [ids.space, page.pageId])).rows
+      .map((row) => [Number(row.revision), row.changed_blocks]);
+    const expected = { order: ["launch", "secret-plan", "notes"], updated: { "notes": 4, "secret-plan": 2, "launch": 1 } };
+    assert.deepEqual(await read(), expected, "derived from the bodies");
+    assert.deepEqual(await kept(), [[1, null], [2, ["secret-plan"]], [3, []], [4, ["notes"]]],
+      "what each revision changed against the one before it is kept");
+    assert.deepEqual(await read(), expected, "read again from what was kept");
+
+    await pages.purge({ requestId: r(), ...base, pageId: page.pageId, needle: "Secret plan", replacement: "Plan" });
+    assert.deepEqual(await kept(), [[1, null], [2, null], [3, null], [4, null]],
+      "a purge forgets every derivation, which may name the removed text's headings");
+    assert.deepEqual(await read(), { order: ["launch", "plan", "notes"], updated: { "notes": 4, "plan": 2, "launch": 1 } },
+      "derived again from the redacted bodies");
+    assert.ok((await kept()).every(([, changed]) => !changed?.includes("secret-plan")));
+  } finally {
+    await cleanup(client, ids);
+    await client.end();
+  }
+});
+
+integration("a section change derived from a body that changed before it was kept is not kept", async () => {
+  const fixture = await pageTest("section-changes-race");
+  const { client, ids } = fixture;
+  try {
+    const r = () => crypto.randomUUID();
+    const page = await writtenPage(fixture, ["# Launch\n\n## Plan\n\nShip in May.\n", "# Launch\n\n## Plan\n\nShip in June.\n"]);
+    const rows = [{ revision: 2, changed_blocks: null }, { revision: 1, changed_blocks: null }];
+    const bodies = new Map();
+    const { derived } = await walkSectionChanges(rows, ["launch", "plan"], async (revisions) => {
+      const read = await client.query(`SELECT revision, body FROM data.page_revisions
+        WHERE space_id=$1 AND page_id=$2 AND revision = ANY($3::bigint[])`, [ids.space, page.pageId, revisions]);
+      for (const row of read.rows) bodies.set(Number(row.revision), row.body);
+      return bodies;
+    });
+    assert.deepEqual(derived, [{ revision: 2, previous: 1, changed: ["plan"] }]);
+    // A purge rewrites the earlier body between the read and the keep.
+    await client.query(`UPDATE data.page_revisions SET body=replace(body, 'May', '[redacted]')
+      WHERE space_id=$1 AND page_id=$2 AND revision=1`, [ids.space, page.pageId]);
+    const db = database(client);
+    const keep = () => db.transaction({ requestId: r(), operation: "test.keep" }, (tx) =>
+      keepSectionChanges(tx, ids.space, page.pageId, derived, bodies));
+    assert.equal(await keep(), 0, "a derivation from a body since rewritten is not kept");
+    bodies.set(1, (await client.query(`SELECT body FROM data.page_revisions WHERE space_id=$1 AND page_id=$2
+      AND revision=1`, [ids.space, page.pageId])).rows[0].body);
+    assert.equal(await keep(), 1, "from the bodies as they are now, it is");
+    assert.equal(await keep(), 0, "and kept once");
   } finally {
     await cleanup(client, ids);
     await client.end();

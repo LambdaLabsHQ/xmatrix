@@ -104,10 +104,18 @@ Each block's awareness has four layers.
 | Intent | Who has taken this? | Claims, with their conversation and pull request |
 
 Revision attribution reads the authorized head, bounded revision history and
-owed claims before releasing its database transaction. It then compares the
-immutable documents, yielding between uncached section parses so large pages
-do not hold a PostgreSQL connection or block other requests for the whole
-comparison. Markdown style alone remains no document change.
+owed claims before releasing its database transaction. What each revision
+changed against the one before it is derived from the two immutable documents
+once and kept on the revision (`page_revisions.changed_blocks`), so a read
+compares only revisions not derived yet. A derivation reads its bodies outside
+the attribution transaction and yields between uncached section parses, so
+large pages do not hold a PostgreSQL connection or block other requests for the
+whole comparison; it is kept only while both bodies are still the ones
+compared. A purge rewrites bodies and so forgets every derivation on the page,
+which could name the removed text's headings. Markdown style alone remains no
+document change. The Web reads a page's sections alone
+(`GET …/awareness?scope=sections`): claims, discussions and presence reach it
+live on their own.
 
 - **Intent line.** An Agent on a block publishes one line of what it is
   doing: the note on its claim, or else the title of the conversation its Run

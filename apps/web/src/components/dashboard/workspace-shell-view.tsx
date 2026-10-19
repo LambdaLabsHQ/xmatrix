@@ -585,6 +585,18 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     (conversationId: string) => channels.find((channel) => channel.id === conversationId) ?? null,
     [channels],
   );
+  // A page's conversation the loaded catalog has not got is resolved while the reader rests on it, so opening
+  // it beside the page does not wait on that read; once asked, it is not asked again on this page view.
+  const pageConversationLookup = useRef({ pageConversation, paging: channelCatalogPaging, spaceId: currentSpaceId });
+  pageConversationLookup.current = { pageConversation, paging: channelCatalogPaging, spaceId: currentSpaceId };
+  const askedPageConversations = useRef(new Set<string>());
+  const resolvePageConversation = useCallback((conversationId: string) => {
+    const { pageConversation: known, paging, spaceId } = pageConversationLookup.current;
+    if (!spaceId || known(conversationId) || askedPageConversations.current.has(conversationId)) return;
+    askedPageConversations.current.add(conversationId);
+    void paging.forSpace(spaceId).resolve([conversationId])
+      .catch(() => askedPageConversations.current.delete(conversationId));
+  }, []);
   // A phone's page is a pushed screen like a conversation: its back bar
   // replaces the dock, and its details are one more screen.
   const phonePageOpen = isMobileViewport && view === "pages" && Boolean(selectedPageId);
@@ -1298,6 +1310,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       onCloseConversation={closePageConversation}
       onExpandConversation={(conversationId) => navigateToChannel(conversationId)}
       onOpenConversation={(conversationId) => openPageConversation(conversationId)}
+      onConversationIntent={resolvePageConversation}
       onDiscuss={({ firstMessage, quote, open, coWrite, planned, ...input }) => startPageConversation(input,
         { ...(firstMessage ? { firstMessage } : {}), ...(quote ? { quote } : {}),
           ...(open === false ? { open } : {}), ...(coWrite ? { coWrite } : {}), ...(planned ? { planned } : {}) })}

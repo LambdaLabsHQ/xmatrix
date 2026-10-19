@@ -90,6 +90,13 @@ test("each section says which revision last changed it, who has claimed it and w
     const owing = await json(await worker.fetch(`${at}/awareness`, { headers: auth }));
     assert.equal(owing.blocks.find((entry) => entry.blockId === "status").owed.reason, "released");
     assert.equal(owing.blocks.find((entry) => entry.blockId === "relay").owed, null);
+    // A page in the Web asks for the sections alone: the same changes and owed updates, nothing it reads live.
+    const sections = await json(await worker.fetch(`${at}/awareness?scope=sections`, { headers: auth }));
+    assert.deepEqual(sections.blocks.map(({ blockId, updated, owed }) => ({ blockId, revision: updated?.revision, owed: owed?.reason })),
+      owing.blocks.filter((entry) => entry.updated || entry.owed).map(({ blockId, updated, owed }) =>
+        ({ blockId, revision: updated?.revision, owed: owed?.reason })));
+    assert.ok(sections.blocks.every((entry) => entry.claims.length === 0 && entry.present.length === 0
+      && entry.discussions.length === 0 && entry.working.length === 0));
     await edit(third, (body) => body.replace("Shipped", "Shipped and verified"));
     const written = await json(await worker.fetch(`${at}/awareness`, { headers: auth }));
     assert.equal(written.blocks.find((entry) => entry.blockId === "status").owed, null, "writing it back settles it");
@@ -100,6 +107,9 @@ test("each section says which revision last changed it, who has claimed it and w
 
     const stranger = await worker.fetch(`/api/spaces/${randomUUID()}/pages/${page.pageId}/awareness`, { headers: auth });
     assert.notEqual(stranger.status, 200, "awareness is read as the page is");
+    const strangerSections = await worker.fetch(`/api/spaces/${randomUUID()}/pages/${page.pageId}/awareness?scope=sections`,
+      { headers: auth });
+    assert.notEqual(strangerSections.status, 200, "so are its sections alone");
   } finally {
     await worker.stop();
   }

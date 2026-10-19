@@ -66,10 +66,12 @@ async function editablePage(env: Env, spaceId: string, pageId: string, authUser:
 }
 
 /** The page's Automations, each with the section its reference is in now (none when detached). */
-async function pageAutomations(env: Env, spaceId: string, pageId: string, userId: string): Promise<AutomationRecord[]> {
+async function pageAutomations(env: Env, spaceId: string, pageId: string, userId: string,
+  /** The page's text, when the caller has already read it. */
+  read?: Promise<{ page: PageDocument }>): Promise<AutomationRecord[]> {
   const [{ tasks }, { page }] = await Promise.all([
     new PostgresAutomationRepository(database(env)).listPage({ requestId: crypto.randomUUID(), spaceId, pageId, userId }),
-    new PostgresPageRepository(database(env)).read({ requestId: crypto.randomUUID(), spaceId, pageId,
+    read ?? new PostgresPageRepository(database(env)).read({ requestId: crypto.randomUUID(), spaceId, pageId,
       principal: { kind: "user", id: userId } }),
   ]);
   const sections = automationReferences(page.body);
@@ -366,10 +368,11 @@ export function registerPageAutomationRoutes(app: Hono<{ Bindings: Env }>): void
 
   app.get(base, (c) => run(c, async (authUser) => {
     const [spaceId, pageId] = ids(c);
-    // Reading the page as the caller is the access check; the list is then read as its Human.
-    await new PostgresPageRepository(database(c.env)).read({ requestId: crypto.randomUUID(), spaceId, pageId,
+    // Reading the page as the caller is the access check, and its text says where each Automation is; the list,
+    // read as its Human alongside, is answered only once that read has passed.
+    const read = new PostgresPageRepository(database(c.env)).read({ requestId: crypto.randomUUID(), spaceId, pageId,
       principal: runPrincipalOf(authUser) });
-    return { automations: await pageAutomations(c.env, spaceId, pageId, humanOf(authUser)) };
+    return { automations: await pageAutomations(c.env, spaceId, pageId, humanOf(authUser), read) };
   }));
   app.post(base, (c) => run(c, async (authUser, body) => ({
     automation: await createPageAutomation(c.env, c.req.raw, authUser, ...ids(c), body) }), 201));
