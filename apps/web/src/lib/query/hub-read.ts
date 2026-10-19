@@ -41,6 +41,9 @@ export async function hubReadResponse(input: { hubPath: string; webUrl: string; 
         ...init,
         headers: { Authorization: `Bearer ${input.token}`, ...json, ...clientCompatibilityHeaders(identity) },
         credentials: "omit",
+        // A mode that skips the HTTP cache makes Chrome skip its preflight cache too and ask again before every
+        // request, a second trip to the Hub. The Hub marks every direct answer no-store, so none is kept.
+        cache: "default",
       });
       if (response.status !== 401 && response.status !== 426) return response;
     } catch (cause) {

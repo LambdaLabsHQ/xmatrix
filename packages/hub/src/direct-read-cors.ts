@@ -67,6 +67,9 @@ export function registerDirectReadCors(app: Hono<{ Bindings: Env }>): void {
     const response = new Response(context.res.body, context.res);
     response.headers.set("access-control-allow-origin", origin);
     appendVary(response.headers, "Origin");
+    // The app asks with the browser's default cache mode, which keeps the preflight's answer (a mode that skips
+    // the cache makes Chrome repeat the preflight for every request): no direct answer may be kept instead.
+    if (!response.headers.has("cache-control")) response.headers.set("cache-control", "no-store");
     context.res = response;
   });
 }

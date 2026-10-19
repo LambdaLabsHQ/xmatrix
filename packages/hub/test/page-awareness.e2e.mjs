@@ -131,11 +131,16 @@ test("each section says which revision last changed it, who has claimed it and w
     const direct = await worker.fetch(`${at}/awareness?scope=sections`, { headers: { ...auth, origin: app } });
     assert.equal(direct.status, 200);
     assert.equal(direct.headers.get("access-control-allow-origin"), app);
+    assert.match(direct.headers.get("cache-control") ?? "", /no-store/u, "nothing the app reads straight is kept");
     assert.deepEqual(await direct.json(), await json(await worker.fetch(`${at}/awareness?scope=sections`, { headers: auth })),
       "the same answer as without an origin");
     const history = await worker.fetch(`/api/channels/${encodeURIComponent(channel.id)}/history?limit=10`, {
       method: "OPTIONS", headers: { origin: app, "access-control-request-method": "GET" } });
     assert.equal(history.headers.get("access-control-allow-origin"), app, "and a conversation's history");
+    const historyRead = await worker.fetch(`/api/channels/${encodeURIComponent(channel.id)}/history?limit=10`,
+      { headers: { ...auth, origin: app } });
+    assert.equal(historyRead.status, 200, await historyRead.clone().text());
+    assert.match(historyRead.headers.get("cache-control") ?? "", /no-store/u);
     const write = await worker.fetch(at, { method: "PUT", headers: { ...auth, origin: app },
       body: JSON.stringify({ baseRevision: 0, body: "" }) });
     assert.equal(write.headers.get("access-control-allow-origin"), null);

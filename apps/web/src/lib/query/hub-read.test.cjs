@@ -18,7 +18,7 @@ function serve(t, answer) {
   t.after(() => { globalThis.fetch = original; });
   const requests = [];
   globalThis.fetch = async (url, init = {}) => {
-    requests.push({ url: String(url), headers: new Headers(init.headers) });
+    requests.push({ url: String(url), headers: new Headers(init.headers), cache: init.cache });
     return answer(String(url), init);
   };
   return requests;
@@ -46,6 +46,8 @@ test("the admitted app reads from the Hub straight, with its bearer and identity
   assert.equal(requests[0].url, `${HUB}/api/spaces/s1/pages`);
   assert.equal(requests[0].headers.get("authorization"), "Bearer token-1");
   assert.equal(requests[0].headers.get("x-xmatrix-client-version"), "1.1.1");
+  // A cache mode that skips the cache would make Chrome ask the preflight again before every read.
+  assert.equal(requests[0].cache, "default");
 
   // A token the Hub no longer takes, a refused identity, or no answer across origins: the Web answers.
   for (const refuse of [() => new Response("{}", { status: 401 }), () => new Response("{}", { status: 426 }),

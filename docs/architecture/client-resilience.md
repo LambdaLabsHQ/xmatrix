@@ -196,7 +196,10 @@ admission, at any other origin (an app shell's), on no answer across origins,
 on `401` (the Web renews the token from the session) and on `426`. The ticket
 a page's live session opens with is asked for the same way (`POST …/live`), as
 the session's socket already goes to the Hub. Other writes keep going through
-the Web. A build with `NEXT_PUBLIC_XMATRIX_DIRECT_HUB_READS=0` sends everything
+the Web. Direct requests use the browser's default cache mode: a mode that
+skips the HTTP cache makes Chrome skip its preflight cache too, and ask again
+before every request. The Hub marks every direct answer `no-store`, so no answer
+is kept, while the preflight's is, for two hours. A build with `NEXT_PUBLIC_XMATRIX_DIRECT_HUB_READS=0` sends everything
 through the Web.
 
 ## Coming back: one connectivity signal
