@@ -548,7 +548,7 @@ export class PostgresRegistrationRebornRepository extends RegistrationPreparatio
         if (!environments[0]) throw new RegistrationAccessError("registration_environment_missing", 409);
         if (operation === "reborn" && !located.remoteRepo && located.managedWorkspaceKey) {
           const managedKey = located.managedWorkspaceKey;
-          if (managedKey.length > 300 || hasControlCharacter(managedKey) || /[/\\]/u.test(managedKey)
+          if (!/^[A-Za-z0-9_:-]{1,128}$/u.test(managedKey)
             || located.canonicalCwd !== `.xmatrix-management/${managedKey}`) {
             throw new RegistrationAccessError("reborn_source_changed", 409);
           }

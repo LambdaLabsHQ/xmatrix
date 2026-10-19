@@ -666,6 +666,12 @@ integration("launch survives a hostname change with stale Workspace metadata and
         error => error.code === code, `managed recovery must reject ${name}`);
       await sql(restore, name.endsWith("key") ? [inputPayload.workspace.managedKey] : []);
     }
+    await sql(`UPDATE data.runs SET metadata_json=jsonb_set(metadata_json,'{managedWorkspaceKey}','"bad.key"'),
+      workspace_canonical_cwd='.xmatrix-management/bad.key' WHERE run_id=$1`, [managed.runId]);
+    await assert.rejects(reborn.prepare({ ...managedResumeInput, commandId: "managed-invalid-key" }),
+      error => error.code === "reborn_source_changed", "reject a key the daemon cannot materialize before stopping");
+    await sql(`UPDATE data.runs SET metadata_json=jsonb_set(metadata_json,'{managedWorkspaceKey}',to_jsonb($2::text)),
+      workspace_canonical_cwd=$3 WHERE run_id=$1`, [managed.runId, inputPayload.workspace.managedKey, inputPayload.workspace.canonicalCwd]);
     const managedResume = await reborn.prepare(managedResumeInput);
     const resumedManaged = await reborn.advance({ intentId: managedResume.intentId, actorUserId: "caller", channelId: "channel" });
     assert.equal(resumedManaged.state, "prepared");
