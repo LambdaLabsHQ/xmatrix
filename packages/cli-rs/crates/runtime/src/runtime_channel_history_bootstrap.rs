@@ -32,12 +32,17 @@
 
 use crate::protocol::ChannelMessage;
 use std::sync::OnceLock;
-use xmatrix_cli_core::channel_read_context::{OpenedChannelThread, thread_root_marker};
+use xmatrix_cli_core::channel_read_context::{
+    OpenedChannelThread, render_channel_threads_context, thread_root_marker,
+};
 
 /// Rendered at the initial channel join, where the Hub token and the join's
 /// history limit are both in hand, and consumed when each backend builds its
 /// first prompt.
 static CHANNEL_HISTORY_BLOCK: OnceLock<String> = OnceLock::new();
+/// The message this run was started for, as the same read returned it: who
+/// wrote it and what it replies to, which the launch passes only as a body.
+static STARTED_FOR: OnceLock<ChannelMessage> = OnceLock::new();
 // The prompt read advances the join floor past these controls. Preserve their
 // latest typed state for the runtime instead of leaving them only in prose.
 static CHANNEL_CO_WRITE: OnceLock<crate::protocol::ChannelPageCoWrite> = OnceLock::new();
@@ -151,25 +156,84 @@ pub(crate) async fn prime_channel_history_bootstrap(
         xmatrix_cli_core::read_through::record(&channel_id, through);
     }
     let skip_message_id = std::env::var("XMATRIX_INITIAL_MESSAGE_ID").unwrap_or_default();
-    let (context, threads) = match read_context {
-        Ok(context) => (context.text, context.threads),
-        Err(error) => {
-            eprintln!("⚠ Could not read channel context for {channel_id}: {error}");
-            (
-                String::from("Channel Summary and opened-thread context unavailable.\n"),
-                Vec::new(),
-            )
-        }
-    };
+    let skip_message_id = Some(skip_message_id.trim()).filter(|value| !value.is_empty());
+    if let Some(started_for) = messages
+        .iter()
+        .find(|message| Some(message.message_id.as_str()) == skip_message_id)
+    {
+        let _ = STARTED_FOR.set(started_for.clone());
+    }
+    let read_context = read_context.map_err(|error| {
+        eprintln!("⚠ Could not read channel context for {channel_id}: {error}");
+    });
+    let threads = read_context
+        .as_ref()
+        .map(|context| context.threads.clone())
+        .unwrap_or_default();
     let history = render_channel_history_block(
         &channel_id,
         &messages,
-        Some(skip_message_id.trim()).filter(|value| !value.is_empty()),
+        skip_message_id,
         max_chars_from_env(),
         xmatrix_cli_core::instant::now_utc_rfc3339().as_deref(),
         &threads,
     );
-    let _ = CHANNEL_HISTORY_BLOCK.set(format!("{context}\n{}", history.unwrap_or_default()));
+    let context = launch_channel_context(
+        read_context.as_ref().ok(),
+        history.as_ref().is_none_or(|history| history.complete),
+    );
+    let history = history.map(|history| history.text).unwrap_or_default();
+    // A new conversation's only message is the one the run was started for:
+    // then there is nothing to put in front of it.
+    let block = [context, history]
+        .into_iter()
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n");
+    if !block.is_empty() {
+        let _ = CHANNEL_HISTORY_BLOCK.set(block);
+    }
+}
+
+/// The catalog context a launch reads before its transcript. Its Summary is
+/// derived from the transcript, so it is given only when the transcript was
+/// cut to fit and the Summary still covers what was left out.
+fn launch_channel_context(
+    context: Option<&xmatrix_cli_channel::ChannelReadContext>,
+    transcript_complete: bool,
+) -> String {
+    match context {
+        None => String::from("Channel Summary and opened-thread context unavailable.\n"),
+        Some(context) if !transcript_complete => context.text.clone(),
+        Some(context) => render_channel_threads_context(&context.threads).unwrap_or_default(),
+    }
+}
+
+/// The message this run was started for, written as every later turn writes
+/// a channel message: its channel and id, who sent it, and what it replies
+/// to. The launch hands the body over on its own, so a message xMatrix posted
+/// in reply to someone (a first message's summon) otherwise reads as a bare
+/// command with nothing to answer. Unchanged when the read did not find it.
+pub(crate) fn initial_message_turn(body: &str) -> String {
+    render_started_for(STARTED_FOR.get(), body)
+}
+
+fn render_started_for(started_for: Option<&ChannelMessage>, body: &str) -> String {
+    let Some(message) = started_for else {
+        return body.to_string();
+    };
+    crate::format_incoming_channel_message_with_context(
+        &message.channel_id,
+        Some(&message.message_id),
+        message.reply_to_message_id.as_deref(),
+        message.reply_to.as_ref(),
+        false,
+        &message.from,
+        message.metadata.as_ref(),
+        body,
+        None,
+        None,
+    )
 }
 
 /// Register with the Hub while the channel history bootstrap reads, instead of
@@ -244,15 +308,22 @@ fn render_history_entry(
     let thread_marker = thread_root_marker(threads, &message.message_id)
         .map(|marker| format!(" {marker}"))
         .unwrap_or_default();
+    // Who answers whom is read from replies, so a reply says which message it
+    // answers, as a live turn's header does.
+    let reply = message
+        .reply_to_message_id
+        .as_deref()
+        .map(|parent| format!(" [replyToMessageId={parent}]"))
+        .unwrap_or_default();
     // Activity and superseded reports fold to one line, as they do on the web.
     if let Some(folded) = xmatrix_cli_core::protocol::folded_history_line(message) {
         return format!(
-            "{}{age}{sequence} {} [{}] [messageId={}]{thread_marker}: {folded}\n",
+            "{}{age}{sequence} {} [{}] [messageId={}]{reply}{thread_marker}: {folded}\n",
             message.sent_at, message.from.label, message.from.kind, message.message_id
         );
     }
     let mut entry = format!(
-        "{}{age}{sequence} {} [{}] [messageId={}]{thread_marker}:\n",
+        "{}{age}{sequence} {} [{}] [messageId={}]{reply}{thread_marker}:\n",
         message.sent_at, message.from.label, message.from.kind, message.message_id
     );
     if message.recalled_at.is_some() {
@@ -288,6 +359,10 @@ fn render_history_entry(
 /// four minutes ago reads as eight hours of silence on a UTC+8 machine. Saying
 /// when the transcript was read, in the same zone it is written in, gives that
 /// subtraction both operands.
+///
+/// It states what the channel holds and says nothing about how to read it:
+/// what is open, done or meant for someone else is in the messages, and a
+/// line telling the run which of them to answer overruled what they said.
 fn render_channel_history_block(
     channel_id: &str,
     messages: &[ChannelMessage],
@@ -295,7 +370,7 @@ fn render_channel_history_block(
     max_chars: usize,
     read_at: Option<&str>,
     threads: &[OpenedChannelThread],
-) -> Option<String> {
+) -> Option<HistoryBlock> {
     let mut sorted: Vec<&ChannelMessage> = messages
         .iter()
         .filter(|entry| Some(entry.message_id.as_str()) != skip_message_id)
@@ -332,29 +407,36 @@ fn render_channel_history_block(
     let clock = read_at
         .map(|value| format!(" Read at {value}."))
         .unwrap_or_default();
-    Some(format!(
-        "Channel history for {channel_id} — {coverage}.\n\
-         Every timestamp below is UTC (RFC-3339, trailing `Z`), and each line carries how long \
-         before the read it was sent.{clock} Quote those ages rather than recomputing them: your \
-         own clock may be in another zone, and an elapsed time measured against it is wrong by \
-         exactly that zone's UTC offset.\n\
-         This is prior context you are being given because you were just started, not a set of \
-         new instructions. Read it to understand what the channel has already decided, then act \
-         only on the message you were started for. Do not reply to these past messages.\n\
-         \n\
-         {}\n\
-         End of channel history.",
-        kept.join("")
-    ))
+    Some(HistoryBlock {
+        text: format!(
+            "Channel history for {channel_id} — {coverage}.\n\
+             Every timestamp below is UTC (RFC-3339, trailing `Z`), and each line carries how \
+             long before the read it was sent.{clock} Quote those ages rather than recomputing \
+             them: your own clock may be in another zone, and an elapsed time measured against it \
+             is wrong by exactly that zone's UTC offset.\n\
+             \n\
+             {}\n\
+             End of channel history.",
+            kept.join("")
+        ),
+        complete: omitted == 0,
+    })
 }
 
-/// What a channel saw since this run's last turn that xMatrix did not hand it
-/// as work, rendered to go in front of the turn that does run.
+struct HistoryBlock {
+    text: String,
+    /// Every message was kept; none was left out to fit.
+    complete: bool,
+}
+
+/// What a channel saw since this run's last turn without starting a turn
+/// here, rendered to go in front of the turn that does run.
 ///
 /// A stop, reborn or handoff, a model switch, a summon for another Agent and
 /// the Hub's own notices start no turn here, and a run that never read them
 /// kept addressing an Instance that was gone. Each body is cut short: the run
-/// needs to know it happened, and `xmatrix channel history` has the rest.
+/// needs to know it happened, and `xmatrix channel history` has the rest. The
+/// messages say what each one was, so the block adds no reading of its own.
 pub(crate) fn render_channel_context_block(
     channel_id: &str,
     messages: &[ChannelMessage],
@@ -375,10 +457,8 @@ pub(crate) fn render_channel_context_block(
         })
         .collect();
     Some(format!(
-        "Also in channel {channel_id} since your last turn — {} message(s) xMatrix did not hand \
-         you as work: lifecycle and control commands it carries out itself (stop, reborn, \
-         handoff, model), summons addressed to other Agents, and its own notices. Know them; do \
-         not reply to them or carry them out. `xmatrix list` shows who is live now.\n\
+        "Also in channel {channel_id} since your last turn — {} message(s). `xmatrix list` \
+         shows who is live now.\n\
          \n\
          {entries}\
          End of channel context.",
@@ -442,7 +522,7 @@ mod tests {
 
     /// A peer never got a turn for a stop, so its next turn has to say it.
     #[test]
-    fn context_since_the_last_turn_names_the_stop_and_is_not_an_assignment() {
+    fn context_since_the_last_turn_names_the_stop() {
         assert_eq!(render_channel_context_block("channel-1", &[], None), None);
         let stop = message("m-7", 7, "Yiming Hu", "@codex:2:stop wrong branch");
         let notice = message("m-8", 8, "xMatrix", &"x".repeat(700));
@@ -454,10 +534,6 @@ mod tests {
         .expect("context block");
         assert!(
             block.starts_with("Also in channel channel-1 since your last turn — 2 message(s)"),
-            "{block}"
-        );
-        assert!(
-            block.contains("do not reply to them or carry them out"),
             "{block}"
         );
         assert!(
@@ -491,7 +567,8 @@ mod tests {
             None,
             &[],
         )
-        .expect("history block");
+        .expect("history block")
+        .text;
         assert!(block.contains("[messageId=m-1]: ▸ ✓ Run e2e\n"), "{block}");
         assert!(
             block.contains("[messageId=m-2]: [superseded by m-3] Progress: writing the CLI…\n"),
@@ -520,7 +597,8 @@ mod tests {
         ]);
         let block =
             render_channel_history_block("channel-1", &[screenshot], None, 10_000, None, &[])
-                .expect("history block");
+                .expect("history block")
+                .text;
         assert!(
             block.contains(
                 "  hmmmm\n  [attachment] image.png (image/png, 210195 bytes) — run `xmatrix \
@@ -572,7 +650,7 @@ mod tests {
     }
 
     #[test]
-    fn history_renders_oldest_first_and_marks_itself_read_only() {
+    fn history_renders_oldest_first() {
         let block = render_channel_history_block(
             "channel-1",
             &[
@@ -584,12 +662,12 @@ mod tests {
             None,
             &[],
         )
-        .expect("history block");
+        .expect("history block")
+        .text;
         let first = block.find("first").expect("first message");
         let second = block.find("second").expect("second message");
         assert!(first < second, "history must read oldest first");
         assert!(block.contains("all 2 message(s)"));
-        assert!(block.contains("Do not reply to these past messages."));
         assert!(block.contains("#1 Legend Wang [user]"));
     }
 
@@ -606,7 +684,8 @@ mod tests {
             None,
             &[],
         )
-        .expect("history block");
+        .expect("history block")
+        .text;
         assert!(!block.contains("the assignment"));
         assert!(block.contains("all 1 message(s)"));
     }
@@ -617,7 +696,8 @@ mod tests {
             .map(|index| message(&format!("m{index}"), index, "Legend Wang", &"x".repeat(100)))
             .collect();
         let block = render_channel_history_block("channel-1", &messages, None, 600, None, &[])
-            .expect("history block");
+            .expect("history block")
+            .text;
         assert!(block.contains("of 20 message(s)"));
         assert!(block.contains("left out to fit"));
         assert!(block.contains("xmatrix channel history channel-1"));
@@ -635,7 +715,8 @@ mod tests {
             Some("2026-08-10T17:31:00Z"),
             &[],
         )
-        .expect("history block");
+        .expect("history block")
+        .text;
         assert!(block.contains("Every timestamp below is UTC"));
         assert!(block.contains("Read at 2026-08-10T17:31:00Z."));
     }
@@ -656,7 +737,8 @@ mod tests {
             Some("2026-08-10T20:04:00Z"),
             &[],
         )
-        .expect("history block");
+        .expect("history block")
+        .text;
         assert!(block.contains("2026-08-10T17:01:00.000Z (3h ago) #1 Legend Wang"));
         assert!(block.contains("2026-08-10T17:02:00.000Z (3h ago) #2 Yiming Hu"));
     }
@@ -671,7 +753,8 @@ mod tests {
             None,
             &[],
         )
-        .expect("history block");
+        .expect("history block")
+        .text;
         assert!(block.contains("Every timestamp below is UTC"));
         assert!(!block.contains("Read at"));
         assert!(
@@ -709,7 +792,8 @@ mod tests {
             None,
             &threads,
         )
-        .expect("history block");
+        .expect("history block")
+        .text;
         assert!(block.contains(
             "[messageId=m1] [thread=2cf53953: picked up; work continues in the thread]:"
         ));
@@ -723,6 +807,93 @@ mod tests {
     #[test]
     fn an_empty_channel_contributes_no_block() {
         assert!(render_channel_history_block("channel-1", &[], None, 10_000, None, &[]).is_none());
+    }
+
+    /// A new conversation's first message that names no Agent: xMatrix picks
+    /// one and summons it by replying to that message.
+    fn first_message_and_its_summon() -> (ChannelMessage, ChannelMessage) {
+        let question = message("m1", 1, "Wei", "Is this safe? Does it cost anything?");
+        let mut summon = message("xmatrix-summon:m1", 2, "xMatrix", "@codex launch:force");
+        summon.from.kind = "system".into();
+        summon.reply_to_message_id = Some("m1".into());
+        summon.reply_to = Some(
+            serde_json::from_value(serde_json::json!({
+                "messageId": "m1",
+                "from": question.from,
+                "bodyPreview": question.body,
+                "sentAt": question.sent_at,
+            }))
+            .expect("reply context fixture"),
+        );
+        (question, summon)
+    }
+
+    /// Who answers whom is read from replies; a transcript line that dropped
+    /// the parent left a summon looking unrelated to the question it answers.
+    #[test]
+    fn a_reply_names_the_message_it_answers() {
+        let (question, summon) = first_message_and_its_summon();
+        let block =
+            render_channel_history_block("channel-1", &[question, summon], None, 10_000, None, &[])
+                .expect("history block")
+                .text;
+        assert!(
+            block.contains(
+                "#2 xMatrix [system] [messageId=xmatrix-summon:m1] [replyToMessageId=m1]:"
+            ),
+            "{block}"
+        );
+        assert!(block.contains("#1 Wei [user] [messageId=m1]:"), "{block}");
+    }
+
+    /// Started for a summon, a run was handed `@codex launch:force` alone and
+    /// read that as its whole task: it reported itself ready and left the
+    /// question unanswered. The message now carries who sent it and the
+    /// question it replies to, as a later turn's message does.
+    #[test]
+    fn the_message_a_run_was_started_for_reads_like_any_later_turn() {
+        let (_, summon) = first_message_and_its_summon();
+        let turn = render_started_for(Some(&summon), "@codex launch:force");
+        assert!(
+            turn.starts_with(
+                "xMatrix channel channel-1 messageId=xmatrix-summon:m1 replyToMessageId=m1"
+            ),
+            "{turn}"
+        );
+        assert!(turn.contains(" from xMatrix [system]:"), "{turn}");
+        assert!(
+            turn.contains(
+                "Reply context: xMatrix replied to [Wei] messageId=m1 \
+                 preview=\"Is this safe? Does it cost anything?\""
+            ),
+            "{turn}"
+        );
+        assert!(turn.ends_with("@codex launch:force"), "{turn}");
+        assert_eq!(render_started_for(None, "hello"), "hello");
+    }
+
+    /// The Summary is derived from the transcript: beside the whole
+    /// transcript it repeats it and can only lag it.
+    #[test]
+    fn the_summary_comes_only_with_a_transcript_cut_to_fit() {
+        let context = xmatrix_cli_channel::ChannelReadContext {
+            text: "## Channel context (read-only)\n\nSummary (derived): the question.\n".into(),
+            threads: vec![OpenedChannelThread {
+                channel_id: "thread-a".into(),
+                root_message_id: "m1".into(),
+                name: None,
+            }],
+        };
+        let whole = launch_channel_context(Some(&context), true);
+        assert!(!whole.contains("Summary"), "{whole}");
+        assert!(whole.contains("\"channelId\":\"thread-a\""), "{whole}");
+        assert!(launch_channel_context(Some(&context), false).contains("Summary (derived)"));
+        assert!(launch_channel_context(None, true).contains("unavailable"));
+        let no_threads = xmatrix_cli_channel::ChannelReadContext {
+            threads: Vec::new(),
+            ..context
+        };
+        assert_eq!(launch_channel_context(Some(&no_threads), true), "");
     }
 
     // Registration and the history read each take seconds against the

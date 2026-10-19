@@ -1059,7 +1059,7 @@ async fn run_zcode_app_external(run: ExternalRun<'_>) -> error::Result<()> {
 
     if let Some(initial_message) = initial_message {
         let initial_prompt =
-            format!("Message from xMatrix chat:\n{initial_message}\n{initial_attachment_lines}");
+            format!("{initial_message}\n{initial_attachment_lines}");
         let payload = prompt_with_optional_bootstrap(&mut bootstrap, &initial_prompt);
         write_current_run_status("turn_running", false, None);
         let trace = TurnTrace {
@@ -1449,9 +1449,9 @@ impl InitialMessageLaunch {
     pub(crate) fn take_first_prompt(&mut self) -> Option<String> {
         let attachment_lines = &self.initial_attachment_lines;
         match (self.bootstrap.take(), self.initial_message.take()) {
-            (Some(prompt), Some(message)) => Some(format!(
-                "{prompt}\n\nMessage from xMatrix chat:\n{message}\n{attachment_lines}"
-            )),
+            (Some(prompt), Some(message)) => {
+                Some(format!("{prompt}\n\n{message}\n{attachment_lines}"))
+            }
             (Some(prompt), None) => Some(prompt),
             (None, Some(message)) => Some(format!("{message}\n{attachment_lines}")),
             (None, None) => None,
@@ -2154,7 +2154,7 @@ async fn run_acp_app_external(config: AcpVendorConfig, run: ExternalRun<'_>) -> 
     }
     if let Some(initial_message) = initial_message {
         let initial_prompt =
-            format!("Message from xMatrix chat:\n{initial_message}\n{initial_attachment_lines}");
+            format!("{initial_message}\n{initial_attachment_lines}");
         let initial_prompt =
             match runtime_state.final_reply_instruction(auto_join_channel_id.as_deref()) {
                 Some(instruction) => format!("{initial_prompt}\n\n{instruction}"),

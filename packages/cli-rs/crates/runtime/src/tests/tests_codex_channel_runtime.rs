@@ -541,10 +541,8 @@ fn render_initial_message_attachment_lines_includes_paths() {
 fn shared_bootstrap_is_folded_once_into_the_first_runtime_input() {
     let mut bootstrap = Some("shared bootstrap".to_string());
 
-    let first = codex_turn_with_bootstrap(&mut bootstrap, "current assignment");
-    assert!(first.contains("shared bootstrap"));
-    assert!(first.contains("only live assignment"));
-    assert!(first.ends_with("current assignment"));
+    let first = codex_turn_with_bootstrap(&mut bootstrap, "current input");
+    assert_eq!(first, "shared bootstrap\n\ncurrent input");
     assert!(bootstrap.is_none());
     assert_eq!(
         codex_turn_with_bootstrap(&mut bootstrap, "next input"),
