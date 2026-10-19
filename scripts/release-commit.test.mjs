@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-import { releaseCommitProblem, verifyReleaseCommit, verifyReleaseCut } from "./release-commit.mjs";
+import { releaseCommitProblem, verifyRelease, verifyReleaseCommit, verifyReleaseCut } from "./release-commit.mjs";
 import { isReleaseCommitOfMain } from "./production-release-policy.mjs";
 import { stampVersionText, versionedPaths } from "./version.mjs";
 
@@ -63,7 +63,15 @@ function fixtureRepository() {
       writeFileSync(target, stampVersionText(file, readFileSync(target, "utf8"), next));
     }
   };
-  return { root, git, commit, stamp, source: git("rev-parse", "HEAD") };
+  // A release cut from `base`: its version stamp, plus newer main content when `carry` is set.
+  const cut = (base, next, { carry = false } = {}) => {
+    git("checkout", "--quiet", "--detach", base);
+    return commit(`Release ${next}`, () => {
+      stamp(next)();
+      if (carry) writeFileSync(path.join(root, "source.txt"), "later\n");
+    });
+  };
+  return { root, git, commit, stamp, cut, source: git("rev-parse", "HEAD") };
 }
 
 test("verification accepts the stamped release commit and nothing more", () => {
@@ -112,19 +120,14 @@ test("a stable cut is the stamped release commit of a revision main contains, at
   try {
     const verified = repo.source;
     const later = repo.commit("later main", () => writeFileSync(path.join(repo.root, "source.txt"), "later\n"));
-    repo.git("checkout", "--quiet", "--detach", verified);
-    const stable = repo.commit("Release 99.1.0", repo.stamp("99.1.0"));
+    const stable = repo.cut(verified, "99.1.0");
     verifyReleaseCut(repo.root, stable, later);
     const beta = repo.commit("Release 99.2.0-beta.1", repo.stamp("99.2.0-beta.1"));
     assert.throws(() => verifyReleaseCut(repo.root, beta, later), /which [0-9a-f]{40} does not contain/u,
       "a grandchild's parent is not on main");
     // Newer main content is not a stamp of the verified source.
-    repo.git("checkout", "--quiet", "--detach", verified);
-    const carried = repo.commit("Release 99.1.1", () => {
-      repo.stamp("99.1.1")();
-      writeFileSync(path.join(repo.root, "source.txt"), "later\n");
-    });
-    assert.throws(() => verifyReleaseCut(repo.root, carried, later), /changes more than the release version/u);
+    assert.throws(() => verifyReleaseCut(repo.root, repo.cut(verified, "99.1.1", { carry: true }), later),
+      /changes more than the release version/u);
   } finally {
     rmSync(repo.root, { recursive: true, force: true });
   }
@@ -137,4 +140,24 @@ test("a release stamps every manifest with its version, and iOS with the three n
   assert.ok(marketing.length > 0);
   assert.deepEqual([...new Set(marketing)], ["1.0.606"]);
   assert.equal(JSON.parse(stampVersionText("version.json", '{"version":"1.0.0"}', "1.0.606-beta.3")).version, "1.0.606-beta.3");
+});
+
+test("CI accepts a beta only as the stamp of its main revision, a stable as the stamp of a revision main contains", () => {
+  const repo = fixtureRepository();
+  try {
+    const verified = repo.source;
+    const main = repo.commit("later main", () => writeFileSync(path.join(repo.root, "source.txt"), "later\n"));
+    const beta = repo.commit("Release 99.0.1-beta.2", repo.stamp("99.0.1-beta.2"));
+    verifyRelease(repo.root, beta, main);
+    verifyRelease(repo.root, main, main);
+    verifyRelease(repo.root, repo.cut(verified, "99.1.0"), main);
+    // A beta is never a cut of an older revision, and a stable never carries more than its stamp.
+    assert.throws(() => verifyRelease(repo.root, repo.cut(verified, "99.0.1-beta.1"), main), /not a release commit/u);
+    const carried = repo.cut(verified, "99.1.1", { carry: true });
+    assert.throws(() => verifyRelease(repo.root, carried, main), /changes more than the release version/u);
+    const offMain = repo.commit("Release 99.2.0", repo.stamp("99.2.0"));
+    assert.throws(() => verifyRelease(repo.root, offMain, main), /does not contain/u);
+  } finally {
+    rmSync(repo.root, { recursive: true, force: true });
+  }
 });

@@ -99,7 +99,9 @@ jobs:
           package-manager-cache: false
 
       # Validate with the triggering revision's code before any target code or
-      # local action can run with this branch's Actions cache scope.
+      # local action can run with this branch's Actions cache scope. A beta is
+      # the stamp of the triggering main revision; a stable is the stamp of a
+      # verified beta's source, which that revision contains.
       - &select_ci_ref
         name: Select the verified release revision
         if: inputs.ref != ''
@@ -109,7 +111,7 @@ jobs:
           CI_SOURCE_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
-          node scripts/release-commit.mjs verify "$CI_RELEASE_REF" "$CI_SOURCE_SHA"
+          node scripts/release-commit.mjs verify-release "$CI_RELEASE_REF" "$CI_SOURCE_SHA"
           git checkout --detach "$CI_RELEASE_REF"
 
       # A release train already verified its stamped version (release-train.mjs).
