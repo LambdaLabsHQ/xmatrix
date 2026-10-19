@@ -672,6 +672,7 @@ mod tests {
                     client_message_id: None,
                     ack_required: None,
                     interrupt_requested: Some(true),
+                    steer_allowed: None,
                     delivery_intent: None,
                 },
             )

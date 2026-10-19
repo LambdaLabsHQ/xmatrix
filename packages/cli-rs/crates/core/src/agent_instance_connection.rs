@@ -3944,6 +3944,7 @@ pub(crate) mod tests {
             client_message_id: None,
             ack_required: Some(true),
             interrupt_requested: Some(true),
+            steer_allowed: None,
             delivery_intent: None,
         };
 

@@ -22,6 +22,7 @@ import {
   filterOperationalMentions,
   messagePublicationEvidence,
   parseAutoLaunchMentions,
+  MENTION_BROADCAST_NAMES,
   type ChannelMessage,
 } from "@xmatrix/protocol";
 import { parseProductAgentStopCommand } from "../product-agent-intervention";
@@ -137,6 +138,43 @@ export function agentChannelMessageRequestsInterrupt(
   const tokens = mentionAddressTokens([...(recipient.nameIsAmbiguous ? [] : [`${agentName}:${ordinal}`]),
     ...(recipient.agentId ? [`${recipient.agentId}:${ordinal}`] : [])]);
   return filterOperationalMentions(message.body, scanMentionAddresses(message.body, tokens)).length > 0;
+}
+
+/**
+ * Whether an interrupting delivery may instead be steered into the turn the
+ * recipient is running.
+ *
+ * A Human's ordinary message steers: it joins the active turn at the next tool
+ * boundary, so work already in flight is kept. Only a Human message that
+ * @-addresses this Instance (its name, `name:N`, its Profile ID, or a broadcast
+ * name) cancels the turn outright. An Agent only ever interrupts by exact
+ * `@agent:N` address, which is deliberate, so its deliveries never steer. A
+ * runtime that cannot steer treats the delivery as the interrupt it carries.
+ */
+export function agentChannelMessageMaySteer(
+  message: ChannelMessage,
+  recipient: { agentName: string; agentId?: string; instanceId?: string; channelInstanceId?: string; nameIsAmbiguous?: boolean },
+): boolean {
+  if (!agentChannelMessageRequestsInterrupt(message, recipient)) return false;
+  if (message.from.kind === "agent") return false;
+  return !humanMessageAddressesRecipient(message.body, recipient);
+}
+
+function humanMessageAddressesRecipient(
+  body: string,
+  recipient: { agentName: string; agentId?: string; channelInstanceId?: string },
+): boolean {
+  const ordinal = recipient.channelInstanceId?.trim();
+  const names = [recipient.agentName?.trim() ?? "", recipient.agentId?.trim() ?? ""].filter(Boolean);
+  const exact = ordinal ? names.map((name) => `${name}:${ordinal}`) : [];
+  const tokens = mentionAddressTokens([...exact, ...names, ...MENTION_BROADCAST_NAMES]);
+  const exactTokens = new Set(mentionAddressTokens(exact));
+  return filterOperationalMentions(body, scanMentionAddresses(body, tokens)).some((match) => {
+    if (exactTokens.has(match.token)) return true;
+    // `@claude:2` is matched by the bare name too; it addresses another
+    // Instance, which the longer exact token would otherwise have caught.
+    return !/^[:：]\d/u.test(body.slice(match.start + 1 + match.token.length));
+  });
 }
 
 export type ChannelMessageFrameInput = {

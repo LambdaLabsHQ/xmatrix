@@ -369,6 +369,41 @@ impl ClaudeStreamInterrupter {
         }
     }
 
+    /// Join `text` to the running turn: Claude reads it at its next tool
+    /// boundary, or answers it right after the turn's own result. False with
+    /// no turn running, or one already being interrupted.
+    pub(crate) async fn steer_active_turn(&self, text: &str) -> error::Result<bool> {
+        let stdin = {
+            let mut active = self.active.lock().await;
+            let Some(turn) = active.as_mut().filter(|turn| !turn.interrupt_requested) else {
+                return Ok(false);
+            };
+            let Some(stdin) = self
+                .stdin
+                .lock()
+                .unwrap_or_else(|poison| poison.into_inner())
+                .clone()
+            else {
+                return Ok(false);
+            };
+            // Counted before the write so the turn cannot close on a result
+            // that comes before Claude takes this input.
+            turn.inputs_steered += 1;
+            stdin
+        };
+        let bytes = serde_json::to_vec(&claude_stream_user_message(vec![serde_json::json!({
+            "type": "text",
+            "text": text,
+        })]))?;
+        if let Err(err) = write_json_line(&stdin, bytes, "Claude stream steer").await {
+            if let Some(turn) = self.active.lock().await.as_mut() {
+                turn.inputs_steered = turn.inputs_steered.saturating_sub(1);
+            }
+            return Err(CliError::Launch(err));
+        }
+        Ok(true)
+    }
+
     pub(crate) async fn interrupt_active_turn(&self) -> error::Result<bool> {
         {
             let mut active = self.active.lock().await;
@@ -434,6 +469,11 @@ pub(crate) struct ActiveStreamTurn {
     pub(crate) interrupt_requested: bool,
     /// Claude echoed this turn's input back (`isReplay`), so it has consumed it.
     pub(crate) input_replayed: bool,
+    /// Inputs Claude has echoed back this turn: the submitted one, then each
+    /// steered one as Claude takes it.
+    pub(crate) inputs_replayed: u32,
+    /// Messages steered into this turn after it was submitted.
+    pub(crate) inputs_steered: u32,
     /// The result reported `terminal_reason: prompt_too_long`.
     pub(crate) context_exhausted: bool,
     /// A `rate_limit_event` rejected this turn on a used-up usage window.

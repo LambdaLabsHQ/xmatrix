@@ -7,8 +7,8 @@
 //! resume of that conversation, so every backend runs it as it runs any turn.
 //! The harness's text, which every backend already reports as `assistant_delta`
 //! traces, streams back to the session with the turn's end. A new turn from the
-//! session, or its interrupt, stops a turn still running (see
-//! `event_requests_active_turn_interrupt_with_replay`).
+//! session, or its interrupt, stops a turn still answering the page; any other
+//! work it waits behind (see `event_requests_active_turn_interrupt_with_replay`).
 
 use std::collections::HashMap;
 use std::sync::{LazyLock, Mutex};
@@ -367,5 +367,41 @@ mod tests {
             );
             bridges().remove(&channel);
         }
+    }
+
+    #[test]
+    fn the_page_stops_only_a_turn_answering_it() {
+        let channel = "c-co-write-other-work";
+        let _frames = bridge_for_test(channel);
+        let asks = AgentInstanceConnectionEvent::PageCoWrite(PageCoWriteEvent::Turn {
+            channel_id: channel.to_string(),
+            turn: 7,
+            prompt: "the page changed".to_string(),
+        });
+        let edited = AgentInstanceConnectionEvent::PageCoWrite(PageCoWriteEvent::Interrupt {
+            channel_id: channel.to_string(),
+            turn: 7,
+        });
+        // The conversation's own work is running: the page waits for it.
+        observe_trace(channel, "turn_started", &serde_json::json!({}));
+        for event in [&asks, &edited] {
+            assert!(!crate::event_requests_active_turn_interrupt(
+                event,
+                Some(channel),
+                None
+            ));
+        }
+        // A turn answering the page is stopped by its next ask, or an edit.
+        observe_trace(channel, "turn_completed", &serde_json::json!({}));
+        turn_queued(channel, 7);
+        observe_trace(channel, "turn_started", &serde_json::json!({}));
+        for event in [&asks, &edited] {
+            assert!(crate::event_requests_active_turn_interrupt(
+                event,
+                Some(channel),
+                None
+            ));
+        }
+        bridges().remove(channel);
     }
 }

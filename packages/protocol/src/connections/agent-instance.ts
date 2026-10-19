@@ -297,6 +297,12 @@ type AgentLiveChannelDelivery = AgentChannelDelivery & {
   type: "channel_message_received";
   /** Fresh live delivery may cancel the provider's active turn. */
   interruptRequested?: boolean;
+  /**
+   * With `interruptRequested`: a runtime that can steer joins this delivery to
+   * the active turn instead of cancelling it. A runtime that cannot, or that
+   * predates the field, interrupts as before.
+   */
+  steerAllowed?: boolean;
 };
 
 type AgentReplayChannelDelivery = AgentChannelDelivery & {
@@ -307,6 +313,8 @@ type AgentReplayChannelDelivery = AgentChannelDelivery & {
    * it; a runtime keeps its own older rule only when it is absent.
    */
   interruptRequested?: boolean;
+  /** As for live delivery: the interrupt may steer the active turn instead. */
+  steerAllowed?: boolean;
 };
 
 /** Channel-local deliveries and typed controls accepted by one running Instance. */

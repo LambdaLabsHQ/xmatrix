@@ -269,6 +269,7 @@ fn inbound_drain_ignores_attachment_bearing_slash_messages() {
             client_message_id: None,
             ack_required,
             interrupt_requested,
+            steer_allowed: None,
             delivery_intent: None,
         },
     ))

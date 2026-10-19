@@ -3,7 +3,12 @@ import type {
   AgentInstanceServerMessage,
 } from "@xmatrix/protocol/connections/agent-instance";
 import { crossChannelReplyRelay, type ChannelMessage, type SerializedAgent, utf8ByteLength } from "@xmatrix/protocol";
-import { agentChannelMessageDeliveryIntent, agentChannelMessageRequestsInterrupt, channelMessage } from "./channel-message-frame";
+import {
+  agentChannelMessageDeliveryIntent,
+  agentChannelMessageMaySteer,
+  agentChannelMessageRequestsInterrupt,
+  channelMessage,
+} from "./channel-message-frame";
 import type { AgentInstanceRuntimeSession } from "./agent-instance-port";
 import type { AgentChannelHistoryPort } from "./postgres-agent-instance-port";
 
@@ -327,6 +332,9 @@ export class AgentChannelHistory implements AgentChannelHistoryPort {
         ...(deliveryIntent === "context" ? { deliveryIntent } : {}),
         ...(metric.mode === "join_birth" ? {} : {
           interruptRequested: deliveryIntent !== "context" && agentChannelMessageRequestsInterrupt(message, recipient),
+          ...(deliveryIntent !== "context" && agentChannelMessageMaySteer(message, recipient)
+            ? { steerAllowed: true as const }
+            : {}),
         }),
       }];
     });

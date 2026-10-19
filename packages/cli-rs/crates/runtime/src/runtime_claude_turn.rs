@@ -17,12 +17,13 @@ use crate::runtime_claude_stream_session::ClaudeStreamSession;
 use crate::runtime_claude_stream_session::ClaudeTurnStatus;
 use crate::runtime_harness_questions::{ack_questionnaire_reply, questionnaire_reply};
 use crate::{
-    GoalCommand, ImageBlockShape, LocalImageFiles, PresencePatch, agent_instance_connection,
-    await_turn_with_events, clean_run_effort, clean_run_model, config, error,
-    event_requests_active_turn_interrupt_with_replay, materialize_local_image_files,
-    merge_llm_usage, prompt_content_blocks, protocol, read_claude_oauth_rate_limit_usage,
+    GoalCommand, ImageBlockShape, LocalImageFiles, PresencePatch, ack_inbound_channel_messages,
+    active_turn_steer_message, agent_instance_connection, await_turn_with_events, clean_run_effort,
+    clean_run_model, config, error, event_requests_active_turn_interrupt_with_replay,
+    inbound_execution_sources, materialize_local_image_files, merge_llm_usage,
+    prompt_content_blocks, protocol, read_claude_oauth_rate_limit_usage,
     reassert_busy_on_reconnect, resume_session_path, send_llm_trace_with_source, send_presence,
-    trace_attachment_summaries,
+    steered_turn_input, trace_attachment_summaries,
 };
 
 /// Prefixed to the turn after an interrupt. Claude answers the cancelled tool
@@ -165,6 +166,32 @@ pub(crate) async fn run_claude_stream_turn(
             {
                 ack_questionnaire_reply(relay, &reply);
                 return true;
+            }
+            // A Human message that does not @-address this Instance joins the
+            // turn instead of cutting it short; if Claude cannot take it now
+            // it interrupts, as every message once did.
+            if let Some(message) =
+                active_turn_steer_message(event, Some(&channel_id), agent, interrupt_history_replay)
+            {
+                // A question card Claude waits on is superseded by the message.
+                interrupter.cancel_questions().await;
+                let instruction = inbound_execution_sources(std::slice::from_ref(&message))
+                    .into_iter()
+                    .next()
+                    .and_then(|source| runtime_state.join_message_turn_source(source));
+                let input =
+                    steered_turn_input(&message.prompt_text(agent, None), instruction.as_deref());
+                match interrupter.steer_active_turn(&input).await {
+                    Ok(true) => {
+                        ack_inbound_channel_messages(relay, std::slice::from_ref(&message));
+                        return true;
+                    }
+                    Ok(false) => {}
+                    Err(err) => eprintln!(
+                        "{} claude stream steer failed: {err}; interrupting instead",
+                        "⚠".yellow().bold()
+                    ),
+                }
             }
             if event_requests_active_turn_interrupt_with_replay(
                 event,
