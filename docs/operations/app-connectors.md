@@ -319,6 +319,14 @@ Unicode code points; the action's full bounded context remains in the Channel
 receipt. Multibyte issue titles and stack metadata therefore
 do not prevent an otherwise successful read from finalizing.
 
+`@sentry:list_issues:<project slug or *> <Sentry search>` lists up to 25 of the
+most frequent issues seen in the last 14 days that match one line of Sentry
+search, such as everything first seen in a release
+(`firstRelease:xmatrix-v1.2.3`, the tag every Hub and Web event carries) or
+since an hour ago (`firstSeen:-24h`). Each line keeps Sentry's own issue fields
+(short id, title, level, status, event and user counts, first and last seen),
+never event payloads, users or request data.
+
 Sentry issue reads include the latest event's terminal twenty exception frames
 and up to eight earlier `src/` callers outside `node_modules`, in stack order.
 This keeps application entry points visible when dependency frames fill the
