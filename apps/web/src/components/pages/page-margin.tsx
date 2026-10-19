@@ -2,7 +2,7 @@
 
 import { AnimatedIcon } from "@/components/ui/animated-icon";
 
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { Check, Maximize2, Sparkles, X } from "lucide-react";
 import { IdentityAvatar } from "@/components/dashboard/identity-avatar";
 import { formatRelativeAge } from "@/components/dashboard/time-display";
@@ -10,6 +10,7 @@ import { avatarInitials } from "@/components/dashboard/completion-option-button"
 import { cn } from "@/lib/utils";
 import { sameValue } from "@/lib/same-value";
 import { anchorTop, layoutMargin, type MarginConversation } from "./page-margin-model";
+import type { PresentPerson } from "./page-chrome";
 
 /** A card's height before it is measured. */
 const ESTIMATED_CARD_HEIGHT = 76;
@@ -17,6 +18,17 @@ const ESTIMATED_CARD_HEIGHT = 76;
 /** How an Agent's state reads on a card: working on a turn, or there and idle. */
 export function agentState(status: MarginConversation["agents"][number]["status"]): string {
   return status === "busy" ? "Working" : "Idle";
+}
+
+/**
+ * A conversation's name as its card says it. A co-writing conversation is named after the page it was started
+ * on; beside that page the title says nothing, and goes stale when the page is renamed, so only its section stays.
+ */
+function cardName(name: string | null): string {
+  if (!name) return "Conversation";
+  if (!name.startsWith("Co-writing ")) return name;
+  const section = name.lastIndexOf(" › ");
+  return section >= 0 ? `Co-writing › ${name.slice(section + 3)}` : "Co-writing";
 }
 
 /** What a card is about: a discussion's passage, or the conversation's name. */
@@ -27,7 +39,7 @@ function CardContext({ conversation }: { conversation: MarginConversation }) {
     </span>
   ) : (
     <span className="block truncate text-[13px] font-semibold leading-5 text-foreground">
-      {conversation.name ?? "Conversation"}
+      {cardName(conversation.name)}
     </span>
   );
 }
@@ -47,8 +59,25 @@ function WorkingLine({ agents, className }: { agents: MarginConversation["agents
   );
 }
 
-function ConversationCard({ conversation, focused, canResolve, onOpen, onResolve, onFocus }: {
+/** The Agent writing the page from this conversation: its face and what it does, where the card says who works. */
+function WriterLine({ writer, className }: { writer: PresentPerson; className?: string }) {
+  const doing = writer.doing && writer.doing !== "writing" ? writer.doing : writer.editing ? "writing" : "on the page";
+  return (
+    <span className={cn("page-margin-working page-margin-writer flex items-center gap-1.5 text-[12px] text-muted-foreground", className)}
+      style={{ "--page-pen-color": writer.color } as CSSProperties} data-testid="page-margin-writer">
+      <IdentityAvatar kind="agent" label={writer.name} imageUrl={writer.avatarUrl}
+        initials={writer.avatarUrl ? avatarInitials(writer.name) : undefined} size="xs" shape="circle" className="shrink-0" />
+      <span className="truncate">
+        {writer.name} · <span className={cn(writer.thinking && "page-margin-writer-thinking", writer.stalled && "text-destructive")}>{doing}</span>
+      </span>
+      {writer.editing && !writer.idle && <span className="page-writer-dots" aria-hidden="true"><i /><i /><i /></span>}
+    </span>
+  );
+}
+
+function ConversationCard({ conversation, writer, focused, canResolve, onOpen, onResolve, onFocus }: {
   conversation: MarginConversation;
+  writer?: PresentPerson | undefined;
   focused: boolean;
   canResolve: boolean;
   onOpen: () => void;
@@ -89,7 +118,7 @@ function ConversationCard({ conversation, focused, canResolve, onOpen, onResolve
             {formatRelativeAge(conversation.activityAt) ?? ""}
           </span>
         )}
-        <WorkingLine agents={agents} className="mt-2" />
+        {writer ? <WriterLine writer={writer} className="mt-2" /> : <WorkingLine agents={agents} className="mt-2" />}
       </button>
       {canResolve && conversation.linkId && (
         <button type="button" onClick={onResolve} title="Resolve: its outcome is in the page"
@@ -112,8 +141,9 @@ const threadAction = "flex size-7 shrink-0 items-center justify-center rounded-f
  * above the other cards and nudged toward the text, with what it is about,
  * then the conversation itself, sized to what it says.
  */
-function OpenConversationCard({ conversation, canResolve, children, onResolve, onExpand, onClose, onFocus }: {
+function OpenConversationCard({ conversation, writer, canResolve, children, onResolve, onExpand, onClose, onFocus }: {
   conversation: MarginConversation;
+  writer?: PresentPerson | undefined;
   canResolve: boolean;
   children: ReactNode;
   onResolve: () => void;
@@ -164,7 +194,8 @@ function OpenConversationCard({ conversation, canResolve, children, onResolve, o
           {conversation.quote && conversation.name && (
             <span className="mt-0.5 block truncate text-[12px] text-muted-foreground">{conversation.name}</span>
           )}
-          <WorkingLine agents={conversation.agents} className="mt-1" />
+          {writer ? <WriterLine writer={writer} className="mt-1" />
+            : <WorkingLine agents={conversation.agents} className="mt-1" />}
         </span>
         {canResolve && conversation.linkId && (
           <button type="button" onClick={onResolve} title="Resolve: its outcome is in the page"
@@ -197,8 +228,10 @@ function OpenConversationCard({ conversation, canResolve, children, onResolve, o
  * and the other cards make room above and below it.
  */
 export function PageMargin({ conversations, tops, focusedId, openId = null, renderOpen, canResolve, onOpen, onResolve,
-  onExpand, onClose, onFocus }: {
+  onExpand, onClose, onFocus, writers }: {
   conversations: MarginConversation[];
+  /** The Agent writing the page from a conversation, by conversation: its card shows it instead of a face over it. */
+  writers?: ReadonlyMap<string, PresentPerson>;
   tops: ReadonlyMap<string, number>;
   focusedId: string | null;
   /** The conversation open in the margin, and the conversation itself to show there. */
@@ -254,7 +287,7 @@ export function PageMargin({ conversations, tops, focusedId, openId = null, rend
           style={{ top: positions.get(card.conversationId) ?? 0 }}
           ref={(node) => { if (node) nodes.current.set(card.conversationId, node); else nodes.current.delete(card.conversationId); }}>
           {card.conversationId === openId && renderOpen ? (
-            <OpenConversationCard conversation={card} canResolve={canResolve}
+            <OpenConversationCard conversation={card} writer={writers?.get(card.conversationId)} canResolve={canResolve}
               onResolve={() => card.linkId && onResolve(card.linkId)}
               {...(onExpand ? { onExpand: () => onExpand(card.conversationId) } : {})}
               {...(onClose ? { onClose } : {})}
@@ -262,7 +295,8 @@ export function PageMargin({ conversations, tops, focusedId, openId = null, rend
               {renderOpen()}
             </OpenConversationCard>
           ) : (
-            <ConversationCard conversation={card} focused={card.conversationId === focusedId} canResolve={canResolve}
+            <ConversationCard conversation={card} writer={writers?.get(card.conversationId)}
+              focused={card.conversationId === focusedId} canResolve={canResolve}
               onOpen={() => onOpen(card.conversationId)}
               onResolve={() => card.linkId && onResolve(card.linkId)}
               onFocus={(focused) => onFocus(focused ? card.conversationId : null)} />

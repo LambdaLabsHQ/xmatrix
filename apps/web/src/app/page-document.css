@@ -731,13 +731,14 @@ html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-com
   color: var(--page-pen-color);
 }
 /* Where there is no room for its name, a face that thinks says for how long, and one that went quiet says so,
-   in a small tag of its colour under the face. */
+   in a small tag of its colour centred under the face and no wider than it, so the text beside stays clear. */
 .page-pen .page-pen-status {
   position: absolute;
   /* Below the dots that run under the face while it works. */
   top: calc(100% + 10px);
-  right: -2px;
-  padding: 2px 6px;
+  right: 50%;
+  transform: translateX(50%);
+  padding: 2px 5px;
   border-radius: 999px;
   background: var(--page-pen-color);
   color: #fff;

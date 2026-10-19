@@ -469,6 +469,12 @@ function liveAgents(channel: ChannelSnapshot): LiveConversation["agents"] {
 /** What an Agent co-writing live is doing, as its face at the edge says it (page-co-writer.ts). */
 const CO_WRITER_DOING: Partial<Record<string, string>> = { thinking: "thinking", writing: "writing", waiting: "waiting for you" };
 
+/** A duration as a face's tag says it: "19s", "2m". */
+function briefDuration(milliseconds: number): string {
+  const seconds = Math.max(0, Math.round(milliseconds / 1000));
+  return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m`;
+}
+
 /** Room at the bottom of a phone's page that its button and capsule cover, so a line there counts as out of view. */
 const PEN_BOTTOM_ROOM = 110;
 /** On a desktop only a face waiting at the bottom edge covers it. */
@@ -1279,7 +1285,8 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
         && conversationName(state.user!.conversationId) ? { from: conversationName(state.user!.conversationId)! } : {}),
       ...(state.user!.kind === "agent" && (CO_WRITER_DOING[state.activity ?? ""] || state.stalled === true)
         ? { doing: coWriterDoing(state) } : {}),
-      ...(state.user!.kind === "agent" && state.activity === "thinking" ? { thinking: true } : {}),
+      ...(state.user!.kind === "agent" && state.activity === "thinking" ? { thinking: true,
+        ...(typeof state.since === "number" ? { brief: briefDuration(clock - state.since) } : {}) } : {}),
       ...(state.user!.kind === "agent" && state.stalled === true ? { stalled: true } : {}),
       undoable: state.user!.kind === "agent" && state.undo === true,
       // An Agent co-writing live says what it is doing, and its note to the people on the page.
@@ -1356,6 +1363,12 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     });
   })();
   const penned = new Set(pens.map((pen) => pen.person.key));
+  // An Agent whose conversation has its card in the margin is shown in that card, once, not as a second face
+  // over it; the others keep to the narrow lane beside the text, face alone, so no face lands on a card.
+  const carded = new Set(marginOn && (drawn || openInMargin)
+    ? marginCards.filter((card) => card.live).map((card) => card.conversationId) : []);
+  const inCard = (pen: PagePen) => Boolean(pen.person.conversationId && carded.has(pen.person.conversationId));
+  const cardWriters = new Map(pens.filter(inCard).map((pen) => [pen.person.conversationId!, pen.person] as const));
   // Room beside the text column for a face to carry its name: from the column's edge to the article's.
   const penRoom = ((): number => {
     const article = articleElement.current;
@@ -1528,7 +1541,8 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
               <div className="flex gap-6">
                 <div ref={docColumn} className={cn("relative min-w-0 max-w-3xl flex-1",
                   phone && phoneDiff && !suggestionMark && "has-reader-mark")}>
-                  <PagePens pens={pens} room={penRoom} onJump={jumpTo} onOpen={(person) => setDialog({ kind: "agent", key: person.key })} />
+                  <PagePens pens={pens.filter((pen) => !inCard(pen))} room={carded.size > 0 ? 0 : penRoom} onJump={jumpTo}
+                    onOpen={(person) => setDialog({ kind: "agent", key: person.key })} />
                   {suggestionMark && suggestedBy && (
                     <PageChangeMark top={suggestionMark.top} away={suggestionMark.away} testId="page-suggestions"
                       label={`${suggestedBy} suggests this change, ${suggesting.current + 1} of ${suggesting.count}`}>
@@ -1592,6 +1606,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
                 {marginOn && (
                   <aside className="w-80 shrink-0">
                     {(drawn || openInMargin) && <PageMargin conversations={marginCards} tops={anchorTops} focusedId={focused} canResolve={canEdit}
+                      writers={cardWriters}
                       openId={openInMargin ? activeConversationId : null}
                       {...(renderConversation ? { renderOpen: () => renderConversation("margin") } : {})}
                       {...(onCloseConversation ? { onClose: onCloseConversation } : {})}
