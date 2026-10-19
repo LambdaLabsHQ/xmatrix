@@ -21,6 +21,8 @@ extracts evidence before shortening displayed prose, and persists a versioned
 fields are retained; arbitrary headers, bodies, prompts and stacks are excluded
 from structured provider errors. Provider request identifiers and the failure
 reference correlate the notice with the owner's local harness diagnostics.
+Credential header labels are removed with their values, so later reporting
+passes cannot mistake independently appended evidence for another header value.
 An error's HTTP evidence describes that error, not another nearby log request.
 
 Notices remain authenticated Agent-attributed `system_fact` messages, not new

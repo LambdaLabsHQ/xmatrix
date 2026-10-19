@@ -152,6 +152,18 @@ mod tests {
     }
 
     #[test]
+    fn repeated_redaction_keeps_independent_structured_evidence() {
+        let projected = provider_error_detail(&serde_json::json!({
+            "message": "Request denied. Authorization: Bearer PRIVATE_HEADER",
+            "httpStatusCode": 403, "requestId": "req-independent"
+        }));
+        let reported = sanitize(&projected, 4_000);
+        assert!(!reported.contains("PRIVATE_HEADER"));
+        assert!(reported.contains("httpStatusCode=403"), "{reported}");
+        assert!(reported.contains("requestId=req-independent"), "{reported}");
+    }
+
+    #[test]
     fn diagnostic_fields_do_not_break_native_reconnect_accounting() {
         let detail = provider_error_detail(&serde_json::json!({
             "message": "Reconnecting... 2/5", "code": "transport_error",
