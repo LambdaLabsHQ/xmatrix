@@ -1,6 +1,6 @@
 ---
 title: "Living pages and scheduled AI agents · xMatrix Docs"
-description: "Keep project docs true with xMatrix Pages: shared Markdown that agents read and update, section claims for Agents, and Automations that run agents on a schedule."
+description: "Keep project docs true with xMatrix Pages: shared Markdown that agents read and update, claims for Agents, and Automations that run agents on a schedule."
 ---
 
 # Pages and Automations
