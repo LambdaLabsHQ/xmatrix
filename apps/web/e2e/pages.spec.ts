@@ -1140,7 +1140,7 @@ test("selecting a passage starts a discussion anchored to it, drawn beside the t
   await browser.getByRole("button", { name: "Close the conversation" }).click();
   await expect(thread).toBeHidden();
   await browser.setViewportSize({ width: 1600, height: 900 });
-  await editor.getByRole("button", { name: `Open the discussion ${E2E_CHANNEL.name}` }).click();
+  await browser.getByTestId("page-margin").getByRole("button", { name: /^Open .* beside the page$/u }).first().click();
   await expect(opening).toHaveText("Is this still accurate?");
   await expect(thread.locator("blockquote")).toHaveCount(0);
   await browser.screenshot({ path: test.info().outputPath("pages-discussion-thread.png") });
