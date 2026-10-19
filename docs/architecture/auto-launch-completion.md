@@ -106,10 +106,14 @@ and it launches as the first message's author: the launch authority accepts a
 for the author of that message's recorded `start` decision. The message goes
 through the same post-commit pipeline as any summon: Jev chooses the model,
 directory and machine, the launch is prepared and delivered, and the reply
-shows the launch status and any refusal. There is no separate first-message
-launch path. `conversation`, missing Jev configuration and every refusal start
-nothing and post nothing, because the author never asked for an Agent;
-refusals other than `start_intent_declined` go to the Worker diagnostic log. A
+shows the launch status and any refusal. A preparation refusal also posts an
+idempotent Channel notice whose source is the system summon, without replying
+to that system message: only Human and Agent messages are reply targets.
+Once that notice commits, reconciliation can finish the summon. There is no
+separate first-message launch path. Before a harness is decided, `conversation`,
+missing Jev configuration and decision refusals start nothing and post nothing,
+because the author never asked for an Agent; decision refusals other than
+`start_intent_declined` go to the Worker diagnostic log. A
 first message with a mention or picker selection keeps the ordinary summon
 path, an ordinary named Channel is never asked, and later messages are never asked.
 Discussions keep their page or passage title: the recorded `fromPageId`, or
