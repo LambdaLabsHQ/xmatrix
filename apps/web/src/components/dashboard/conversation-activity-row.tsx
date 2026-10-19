@@ -99,19 +99,20 @@ export const FoldedActivityRow = memo(function FoldedActivityRow({
   // The newest facts are what a reader looks for; the rest open with the row.
   const shown = summary.segments.slice(-4);
   return (
-    <div className="app-activity-row group flex items-start gap-3 px-5 py-0.5 text-[13px] text-muted-foreground"
+    <div className="app-activity-row group px-5 py-0.5 text-[13px] text-muted-foreground"
       data-activity-row="">
-      {/* Aligned with message text: the avatar column stays empty. */}
-      <div className="w-9 shrink-0" aria-hidden="true" />
-      <div className="min-w-0 flex-1">
-        <button
-          type="button"
-          onClick={() => onToggle(row.id)}
-          aria-expanded={expanded}
-          className="flex w-full min-w-0 items-center gap-1.5 rounded text-left transition hover:text-foreground"
-        >
-          <ChevronRight className={cn("size-3.5 shrink-0 transition-transform", expanded && "rotate-90")}
-            aria-hidden="true" />
+      <button
+        type="button"
+        onClick={() => onToggle(row.id)}
+        aria-expanded={expanded}
+        className="flex w-full min-w-0 items-center gap-(--app-message-avatar-gap) rounded text-left transition hover:text-foreground"
+      >
+        {/* The disclosure sits in the avatar column, so the name starts where a message's name does.
+            A fixed 2.25rem gutter (the main timeline's avatar) shoved this row right in a comment card. */}
+        <span className="flex w-(--app-message-avatar-size) shrink-0 justify-center" aria-hidden="true">
+          <ChevronRight className={cn("size-3.5 shrink-0 transition-transform", expanded && "rotate-90")} />
+        </span>
+        <span className="flex min-w-0 flex-1 items-center gap-1.5">
           <span className="shrink-0 font-bold text-foreground/80">{row.author}</span>
           <span className="min-w-0 truncate">{shown.join(" · ")}</span>
           {summary.inProgress && (
@@ -121,18 +122,18 @@ export const FoldedActivityRow = memo(function FoldedActivityRow({
             {items.length > 1 && <span>{items.length} updates ·</span>}
             <Time value={last.sentAt} />
           </span>
-        </button>
-        {expanded && (
-          <ol className="mt-1 mb-1 space-y-1 border-l border-border pl-3">
+        </span>
+      </button>
+      {expanded && (
+        <ol className="mt-1 mb-1 ml-[calc(var(--app-message-avatar-size)+var(--app-message-avatar-gap))] space-y-1 border-l border-border pl-3">
             {items.map((item) => (
               <li key={item.id} id={entryAnchorId(item)} className="flex min-w-0 items-start gap-2">
                 <Time value={item.sentAt} className="w-16 shrink-0 pt-px text-[11px]" />
                 <FoldedEntry item={item} />
               </li>
             ))}
-          </ol>
-        )}
-      </div>
+        </ol>
+      )}
     </div>
   );
 });
