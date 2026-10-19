@@ -298,14 +298,14 @@ fact is about.
   by a space becomes a link.
   Clicking a link's visible destination edits the address.
 - **Table controls** appear only while the cursor is in a table.
-- **Selection menu**: *Ask AI*, *Ask an Agent to change*, *Discuss*, *Claim*,
+- **Selection menu**: *Discuss*, *Ask AI*, *Claim*, *Show editors*,
   *Copy link*.
-  - *Ask AI* starts a discussion on the selection addressed to xMatrix and
-    opens it beside the page (§4.4), where the answer arrives; it changes
-    nothing in the text.
-  - *Ask an Agent to change* takes one instruction; the edit arrives as a
-    suggestion on the selection to accept or reject.
   - *Discuss* starts a conversation anchored to the selection (§4.3).
+  - *Ask AI* starts the same discussion with its composer already addressed
+    to xMatrix (`@auto`), which picks the Agent. The question is written
+    there, beside the page (§4.4), where the answer arrives; asking for a
+    change is asking in words, and the Agent edits the page as the page lets
+    it. There is no second input over the page.
 - **`/` insert**: heading, list, task list, table, page reference, live
   reference, mention.
 - **Co-writing is live, as with a person** (decided 2026-10-15). A person
@@ -505,9 +505,13 @@ or joining one never leaves the page.
   level with what it is about, on the same edges as the other cards, with
   one avatar size and text indent throughout, and as tall as what it says up
   to a cap, past which its
-  messages scroll. Messages read as comments (a small avatar, name and time
-  on one line, the text below) and a one-line reply box closes it; the
-  card's head carries resolve, *Open in Conversations* and close. The other
+  messages scroll. Its head shows the passage once (the conversation's name
+  too, only once it says something else); the messages are only what people
+  and Agents wrote, so a discussion's first message does not quote the
+  passage again. Messages read as comments (a small avatar, name and time
+  on one line, the text below) and a one-line reply box closes it; a thread
+  with nothing said yet is just its head and that box, as a new comment is.
+  The card's head carries resolve, *Open in Conversations* and close. The other
   cards stay beside the page and make room above and below it, and it
   scrolls with the document. One conversation is open at a time; closing it
   brings its card back. A conversation the page does not link yet opens
@@ -900,8 +904,8 @@ Shipped:
 2. Awareness: per-block aggregation, `page read` front matter; Now bar,
    heading avatars, follow, section footer (v0.16.467); `page read --since`
    (v0.16.470).
-3. Anchored discussions with resolve, and Ask AI / Ask to change on a
-   selection (v0.16.470).
+3. Anchored discussions with resolve, and Ask AI on a selection
+   (v0.16.470; Ask AI opens the discussion itself since 2026-10-19).
 4. Owed updates derived from ended claims, GitHub's write-back request on a
    merged pull request, the Focus scan treating owed sections first
    (v0.16.470).

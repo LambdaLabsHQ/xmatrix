@@ -349,6 +349,11 @@ html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .rich-me
 html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open :is(.app-empty-conversation-mark, .app-empty-conversation-title) {
   display: none;
 }
+/* A comment thread with nothing said yet is its passage and its composer, as a new comment is in Google Docs;
+   and a thread this short needs no line marking where reading stopped. */
+html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open :is(.app-empty-conversation[data-nothing-said], .app-since-divider) {
+  display: none;
+}
 html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-empty-conversation {
   height: auto;
   align-items: flex-start;

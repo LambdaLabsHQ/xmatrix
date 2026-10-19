@@ -12,6 +12,7 @@ import { sameValue } from "@/lib/same-value";
 import { anchorTop, layoutMargin, type MarginConversation } from "./page-margin-model";
 import type { PresentPerson } from "./page-chrome";
 import { MarginPen } from "./page-pen";
+import { discussionTitle } from "@/components/dashboard/selection-discussion";
 
 /** A card's height before it is measured. */
 const ESTIMATED_CARD_HEIGHT = 76;
@@ -59,14 +60,17 @@ function CommentIcon() {
 
 /**
  * What a card is about, after the comment icon: a discussion's passage, or the conversation's name. The icon
- * takes the avatars' column, so the words start where the names under them do.
+ * takes the avatars' column, so the words start where the names under them do. An open card has room for
+ * more of the passage.
  */
-function CardContext({ conversation }: { conversation: MarginConversation }) {
+function CardContext({ conversation, open = false }: { conversation: MarginConversation; open?: boolean }) {
   return (
-    <span className="flex min-w-0 items-center gap-2">
-      <span className="grid w-6 shrink-0 place-items-center"><CommentIcon /></span>
+    <span className={cn("flex min-w-0 gap-2", open ? "items-start" : "items-center")}>
+      <span className="grid h-5 w-6 shrink-0 place-items-center"><CommentIcon /></span>
       {conversation.quote ? (
-        <span className="truncate text-[12px] leading-5 text-muted-foreground">“{conversation.quote}”</span>
+        <span className={cn("text-[12px] leading-5 text-muted-foreground", open ? "line-clamp-3 [overflow-wrap:anywhere]" : "truncate")}>
+          “{conversation.quote}”
+        </span>
       ) : (
         <span className="truncate text-[13px] font-semibold leading-5 text-foreground">{cardName(conversation.name)}</span>
       )}
@@ -146,6 +150,8 @@ function ConversationCard({ conversation, focused, canResolve, onOpen, onResolve
 
 /** The tallest an open thread grows before its messages scroll. */
 const OPEN_MAX_HEIGHT = "min(34rem, calc(100dvh - 8rem))";
+/** Room between an empty thread's note and its composer. */
+const EMPTY_THREAD_GAP = 12;
 
 const threadAction = "flex size-7 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-foreground/10 hover:text-foreground";
 
@@ -170,25 +176,39 @@ function OpenConversationCard({ conversation, quietAgents = false, canResolve, c
   const [height, setHeight] = useState<number | null>(null);
   // A thread is as tall as what it says, up to a cap. The message list scrolls
   // inside a box of known height, so the card adds up the list's rows (its
-  // header, messages and footer) and sets its own height from them.
+  // header, messages and footer) and sets its own height from them. A thread
+  // with nothing in it yet is its header and its composer, and any note the
+  // empty conversation still shows, such as why it could not load.
   useLayoutEffect(() => {
     const body = bodyRef.current;
     if (!body) return;
     let list: Element | null = null;
+    let empty: Element | null = null;
+    let composer: HTMLElement | null = null;
     const measure = () => {
+      const header = headerRef.current?.offsetHeight ?? 0;
       const rows = list ? [...list.children].reduce((sum, row) => sum + row.getBoundingClientRect().height, 0) : 0;
-      const next = rows > 0 ? Math.ceil((headerRef.current?.offsetHeight ?? 0) + rows) : null;
+      const bottom = empty ? Math.max(0, ...[...empty.children].map((child) => child.getBoundingClientRect().bottom)) : 0;
+      const note = empty && bottom > 0 ? bottom - empty.getBoundingClientRect().top : 0;
+      const next = rows > 0 ? Math.ceil(header + rows)
+        : empty && composer ? Math.ceil(header + (note > 0 ? note + EMPTY_THREAD_GAP : 0) + composer.offsetHeight) : null;
       setHeight((current) => current === next ? current : next);
     };
     const sizes = new ResizeObserver(measure);
     const attach = () => {
       const viewport = body.querySelector(".app-message-timeline > div > div");
       const found = viewport?.querySelector(":scope > [data-timeline-rise-content]") ?? viewport;
-      if (found !== list) {
+      const foundEmpty = body.querySelector(".app-empty-conversation");
+      const foundComposer = body.querySelector<HTMLElement>(".app-composer");
+      if (found !== list || foundEmpty !== empty || foundComposer !== composer) {
         list = found;
+        empty = foundEmpty;
+        composer = foundComposer;
         sizes.disconnect();
       }
       if (list) for (const row of list.children) sizes.observe(row);
+      if (empty) sizes.observe(empty);
+      if (composer) sizes.observe(composer);
       measure();
     };
     attach();
@@ -204,8 +224,9 @@ function OpenConversationCard({ conversation, quietAgents = false, canResolve, c
       className="page-margin-open flex min-h-0 flex-col overflow-hidden rounded-xl">
       <header ref={headerRef} className="flex shrink-0 items-start gap-1 pt-2.5 pr-2 pl-3">
         <span className="min-w-0 flex-1 pt-1">
-          <CardContext conversation={conversation} />
-          {conversation.quote && conversation.name && (
+          <CardContext conversation={conversation} open />
+          {/* A discussion is named by its passage until its content names it otherwise. */}
+          {conversation.quote && conversation.name && conversation.name !== discussionTitle(conversation.quote) && (
             <span className="mt-0.5 block truncate text-[12px] text-muted-foreground">{conversation.name}</span>
           )}
           {!quietAgents && <WorkingLine agents={conversation.agents} className="mt-1" />}

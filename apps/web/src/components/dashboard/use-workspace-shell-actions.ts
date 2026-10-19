@@ -5,7 +5,7 @@ import type { ObservabilityEvent } from "@xmatrix/protocol";
 import { pageShellActions } from "./page-shell-actions";
 import { useDesktopFullScreen } from "@/lib/desktop/use-desktop-full-screen";
 import { reportDesktopDaemonFailure } from "@/lib/desktop-daemon-failure-report";
-import { discussionDraft, discussionTitle } from "./selection-discussion";
+import { discussionQuote, discussionTitle, type DiscussionQuote } from "./selection-discussion";
 import { pageApi } from "@/lib/pages/page-client";
 import { createConversation, plannedConversation, type ConversationRequest } from "./start-conversation";
 
@@ -1517,13 +1517,36 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     token: s.token, user: s.user, view: s.view, beginConversation, selectedPageId: s.selectedPageId, selectedChannelId: s.selectedChannelId, currentSpaceId: s.currentSpaceId, spaces: s.spaces, setView,
     setSelectedPageId: s.setSelectedPageId, setSelectedChannelId, setBrowserPath,
     focusComposer: () => setComposerAutoFocusRequest((current) => current + 1),
-    seedDraft: (conversationId, text) => writeChannelComposerDraft(s.channelComposerDraftsRef.current, conversationId,
-      { text, workspaceTarget: null, attachments: [] }),
+    seedComposer,
   });
+
+  function seedQuote(conversationId: string, quote: DiscussionQuote) {
+    s.setDiscussionQuotes((current) => new Map(current).set(conversationId, quote));
+  }
+
+  /**
+   * A new conversation's composer, ready before it opens. Ask AI's starts with
+   * `@auto` written out, which the Hub routes to an enabled harness as it does
+   * any typed `@auto`.
+   */
+  function seedComposer(conversationId: string, seed: { quote?: DiscussionQuote; askAi?: boolean }) {
+    if (seed.quote) seedQuote(conversationId, seed.quote);
+    if (seed.askAi) writeChannelComposerDraft(s.channelComposerDraftsRef.current, conversationId,
+      { text: "@auto ", workspaceTarget: null, attachments: [] });
+  }
+
+  function dropDiscussionQuote(conversationId: string) {
+    s.setDiscussionQuotes((current) => {
+      if (!current.has(conversationId)) return current;
+      const next = new Map(current);
+      next.delete(conversationId);
+      return next;
+    });
+  }
 
   /**
    * A conversation started from a passage of a message (selection-discussion.ts).
-   * It opens holding the quote and a link back to the message, is as open as
+   * It opens holding the passage and a link back to the message, is as open as
    * the conversation it came from, and is linked to the same pages, so it
    * inherits their context as that conversation does.
    */
@@ -1539,9 +1562,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
         memberName: s.user.name || s.user.email || "Human", name: discussionTitle(quote), mode: source.mode,
         metadata: { fromChannelId: source.id, fromMessageId: messageId } });
       const href = `${absoluteChannelUrl(source, s.spacesRef.current)}#message:${encodeURIComponent(messageId)}`;
-      writeChannelComposerDraft(s.channelComposerDraftsRef.current, channel.id, {
-        text: discussionDraft(quote, { label: `${message.author} in #${channelTitle(source)}`, href }),
-        workspaceTarget: null, attachments: [] });
+      seedQuote(channel.id, discussionQuote(quote, { label: `${message.author} in #${channelTitle(source)}`, href }, false));
       // Beside a page it opens beside the page, as a discussion of the page does.
       if (s.viewRef.current === "pages" && s.selectedPageId) openPageConversation(channel.id, { focus: true });
       else navigateToChannel(channel.id);
@@ -2497,6 +2518,8 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     if (!body.trim() && attachments.length === 0) {
       return;
     }
+    const channel = s.selectedChannel;
+    const channelId = channel.id;
 
     const invocationSelections = fromComposer ? composerSnapshot?.invocationSelections : undefined;
     const summonIntents = fromComposer ? composerSnapshot?.summonIntents : undefined;
@@ -2510,9 +2533,9 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
           ...replyPreviewSequence(replySnapshot.sequence),
         }
       : undefined;
-    const channel = s.selectedChannel;
-    const channelId = channel.id;
     if (fromComposer) {
+      // The composer wrote the discussion's passage into this message.
+      dropDiscussionQuote(channelId);
       clearChannelComposerDraft(s.channelComposerDraftsRef.current, channelId);
       s.draftWorkspaceTargetValueRef.current = null;
       s.draftAttachmentsRef.current = [];
@@ -2925,6 +2948,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     openPage,
     closePage,
     openPageConversation,
+    dropDiscussionQuote,
     closePageConversation,
     updateSpaceMemberPermissions,
     updateSpacePreferredLanguage,

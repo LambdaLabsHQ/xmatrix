@@ -25,3 +25,9 @@ test("a message from before previews still shows its legacy body; a recalled one
     payloadBundleBase64: null, legacyBody: null });
   assert.equal(recalled.bodyPreview, "Message recalled");
 });
+
+test("a discussion's first message previews as what was written, not the passage it quotes", () => {
+  const preview = channelHeadPreview({ ...head, preview: null, payloadBundleBase64: null,
+    legacyBody: "> In progress\n\n— [Relay › Status](https://xmatrix.sh/app/s/pages?page=p#status)\n\nIs this still\n accurate?" });
+  assert.equal(preview.bodyPreview, "Is this still accurate?");
+});

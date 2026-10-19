@@ -7,6 +7,7 @@ import {
 const PAGE_CONVERSATION_STATE_KEY = "__xmatrixPageConversation";
 import { pageApi, type PageLinkAnchor } from "@/lib/pages/page-client";
 import type { ConversationRequest } from "@/components/dashboard/start-conversation";
+import type { DiscussionQuote } from "@/components/dashboard/selection-discussion";
 import { xmatrixRawResponse } from "@/lib/query/api-client";
 import { UserFacingProblem } from "@/lib/user-facing-error";
 
@@ -30,8 +31,11 @@ export function pageShellActions(input: {
   setBrowserPath: (path: string) => void;
   /** Puts the cursor in the conversation's composer. */
   focusComposer: () => void;
-  /** Leaves `text` in a conversation's composer, for when it opens. */
-  seedDraft: (conversationId: string, text: string) => void;
+  /**
+   * Readies a new conversation's composer, for when it opens: the passage it
+   * discusses, which its first message carries, and for Ask AI an address to @auto.
+   */
+  seedComposer: (conversationId: string, seed: { quote?: DiscussionQuote; askAi?: boolean }) => void;
 }) {
   const pagesPath = (pageId: string | null, conversationId: string | null) =>
     pagesViewPath(appViewPath(null, "pages", input.currentSpaceId, input.spaces), pageId, conversationId);
@@ -103,7 +107,7 @@ export function pageShellActions(input: {
   /**
    * "Discuss" on a page section: a new conversation, linked to that section
    * from the start so the page shows it and the conversation shows the page.
-   * It opens at once, holding its draft, as a Google Docs comment does; the
+   * It opens at once, holding its passage, as a Google Docs comment does; the
    * Hub creates and links it meanwhile (`planned` hears its id first, so the
    * page can show the discussion before the link lands), and the answer
    * settles when both are done.
@@ -112,7 +116,8 @@ export function pageShellActions(input: {
   async function startPageConversation(page: {
     spaceId: string; pageId: string; blockId: string; name: string; restricted: boolean; anchor?: PageLinkAnchor;
   }, options: {
-    open?: boolean; firstMessage?: string; draft?: string; coWrite?: boolean; planned?: (conversationId: string) => void;
+    open?: boolean; firstMessage?: string; quote?: DiscussionQuote; askAi?: boolean; coWrite?: boolean;
+    planned?: (conversationId: string) => void;
   } = {}): Promise<string | null> {
     const { token, user } = input;
     if (!token || !user) return null;
@@ -120,7 +125,7 @@ export function pageShellActions(input: {
       memberName: user.name || user.email || "Human", name: page.name, mode: page.restricted ? "closed" : "open",
       metadata: { fromPageId: page.pageId } });
     options.planned?.(channel.id);
-    if (options.draft) input.seedDraft(channel.id, options.draft);
+    if (options.quote || options.askAi) input.seedComposer(channel.id, { quote: options.quote, askAi: options.askAi });
     // A discussion opens beside the page it is about, ready to write in, before it exists.
     // Machinery attached to a page lives in its own conversation; the page stays open.
     const opened = options.open !== false && !options.firstMessage;

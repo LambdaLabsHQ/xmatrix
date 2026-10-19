@@ -6,14 +6,13 @@ import {
 } from "@xmatrix/protocol/page-document";
 import {
   BetweenHorizontalEnd, BetweenVerticalEnd, Code2, Columns3, FileCode2, Flag, Rows3, Trash2, Heading1, Heading2, Heading3, Link2,
-  List, ListChecks, ListOrdered, MessageSquarePlus, Minus, PenLine, Pilcrow, Quote, Sparkles, Table, Users,
+  List, ListChecks, ListOrdered, MessageSquarePlus, Minus, Pilcrow, Quote, Sparkles, Table, Users,
 } from "lucide-react";
 import type { Node as DocNode } from "prosemirror-model";
 import { EditorState, Selection, type Command } from "prosemirror-state";
 import { EditorView } from "prosemirror-view";
 import { yCursorPluginKey, ySyncPluginKey } from "y-prosemirror";
 import { gitHubFileReferenceFrom, gitHubFileReferenceHref, type SerializedAutomation } from "@xmatrix/protocol";
-import { isImeKeyDown } from "@/lib/ime-keydown";
 import { sameValue } from "@/lib/same-value";
 import type { PageLiveSession } from "@/lib/pages/page-client";
 import { automationsKey } from "./page-automation-chips";
@@ -61,16 +60,14 @@ export interface SectionEditors {
 
 /** What a section offers from the selection menu; the page view owns the actions. */
 export interface PageSectionActions {
-  /** A conversation about the section; from a selection, anchored to that text. */
-  discuss?: (blockId: string, anchor?: { quote: string; from: unknown; to: unknown }) => void;
+  /**
+   * A conversation about the section; from a selection, anchored to that text.
+   * Asking AI is the same discussion, its composer already addressed to xMatrix,
+   * which picks the Agent: the question, and any change asked for, is written there.
+   */
+  discuss?: (blockId: string, anchor?: { quote: string; from: unknown; to: unknown }, options?: { askAi?: boolean }) => void;
   copyLink?: (blockId: string) => void;
   claim?: (blockId: string) => void;
-  /**
-   * Ask about the passage, or ask an Agent to change it: a discussion anchored
-   * to it whose first message addresses xMatrix, which picks the Agent.
-   */
-  ask?: (blockId: string, anchor: { quote: string; from: unknown; to: unknown },
-    request: { mode: "ask" | "change"; prompt: string }) => Promise<void>;
   /** Who last changed the section the selection is in; null when it is not in recent history. */
   editors?: (blockId: string) => SectionEditors | null;
   /** Opens the page's History, where each change is shown in its author's colour. */
@@ -294,11 +291,6 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
   // A GitHub file link being pasted to embed, and why the last one was not a file.
   const [fileDraft, setFileDraft] = useState<string | null>(null);
   const [fileDraftError, setFileDraftError] = useState(false);
-  // The passage being asked about, kept while the question is typed (the editor loses its selection).
-  const [asking, setAsking] = useState<{ mode: "ask" | "change"; blockId: string; left: number; top: number;
-    anchor: { quote: string; from: unknown; to: unknown } } | null>(null);
-  const [askText, setAskText] = useState("");
-  const [askBusy, setAskBusy] = useState(false);
   const [editorsShown, setEditorsShown] = useState<{ blockId: string; left: number; top: number } | null>(null);
   const menu = useRef({ slash: null as SlashState | null, index: 0 });
 
@@ -567,7 +559,7 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
     return { left: at.left - box.left, top: at.top - box.top, bottom: at.bottom - box.top };
   };
   const section = current ? pageDocBlockAt(current.state.doc, current.state.selection.from) : "";
-  const selectionActions = Boolean(actions?.discuss || actions?.ask || (actions?.claim && canEdit) || actions?.copyLink);
+  const selectionActions = Boolean(actions?.discuss || (actions?.claim && canEdit) || actions?.copyLink);
   const selectionMenu = toolbar && !toolbar.empty && toolbar.focused && current && toolbar.kind !== "code" && selectionActions
     ? place(current.state.selection.from) : null;
   const linkAtPos = linkDraft !== null && current ? place(current.state.selection.from) : null;
@@ -658,18 +650,16 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
               <MessageSquarePlus /> Discuss
             </button>
           )}
-          {actions?.ask && (["ask", "change"] as const).filter((mode) => mode === "ask" || canEdit).map((mode) => (
-            <button key={mode} type="button" onMouseDown={(event) => event.preventDefault()}
+          {actions?.discuss && (
+            <button type="button" onMouseDown={(event) => event.preventDefault()}
               onClick={() => {
                 const anchor = current ? selectionAnchor(current.state, session.fragment) : null;
-                if (!anchor || !selectionMenu) return;
-                setAskText("");
-                setAsking({ mode, blockId: section, anchor, left: selectionMenu.left, top: selectionMenu.top });
+                if (anchor) actions.discuss!(section, anchor, { askAi: true });
               }}
               className="flex h-8 items-center gap-1.5 rounded-md px-2 text-sm hover:bg-accent [&_svg]:size-4">
-              {mode === "ask" ? <><Sparkles /> Ask AI</> : <><PenLine /> Ask to change</>}
+              <Sparkles /> Ask AI
             </button>
-          ))}
+          )}
           {actions?.claim && canEdit && (
             <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => actions.claim!(section)}
               className="flex h-8 items-center gap-1.5 rounded-md px-2 text-sm hover:bg-accent [&_svg]:size-4">
@@ -691,41 +681,6 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
           onOpenConversation={(conversationId) => { setEditorsShown(null); openConversation.current?.(conversationId); }}
           onHistory={actions.history ? () => { setEditorsShown(null); actions.history!(); } : undefined}
           onClose={() => setEditorsShown(null)} />
-      )}
-      {asking && actions?.ask && (
-        <div className="absolute z-30 w-[min(28rem,100%)] -translate-y-full"
-          style={{ left: Math.max(0, asking.left - 8), top: asking.top - 6 }}>
-          <form className="space-y-2 rounded-lg border border-border bg-popover p-2 text-popover-foreground"
-            data-testid="page-ask" onSubmit={(event) => {
-              event.preventDefault();
-              if (!askText.trim() || askBusy) return;
-              setAskBusy(true);
-              void actions.ask!(asking.blockId, asking.anchor, { mode: asking.mode, prompt: askText.trim() })
-                .then(() => setAsking(null), () => undefined).finally(() => setAskBusy(false));
-            }}>
-            <p className="line-clamp-2 border-l-2 border-border pl-2 text-xs italic text-muted-foreground">
-              {asking.anchor.quote}
-            </p>
-            <textarea autoFocus rows={2} value={askText} onChange={(event) => setAskText(event.target.value)}
-              aria-label={asking.mode === "ask" ? "Your question" : "What to change"}
-              placeholder={asking.mode === "ask" ? "Ask about this passage…" : "Say how it should change…"}
-              onKeyDown={(event) => {
-                if (isImeKeyDown(event.nativeEvent)) return;
-                if (event.key === "Escape") setAsking(null);
-                if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); }
-              }}
-              className="block w-full resize-none bg-transparent text-sm focus:outline-none" />
-            <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
-              <span>{asking.mode === "ask" ? "An Agent answers in a discussion on this passage."
-                : "An Agent edits the page; you see its cursor."}</span>
-              <span className="flex gap-2">
-                <button type="button" onClick={() => setAsking(null)} className="hover:underline">Cancel</button>
-                <button type="submit" disabled={!askText.trim() || askBusy}
-                  className="font-semibold text-foreground disabled:opacity-40">{asking.mode === "ask" ? "Ask" : "Send"}</button>
-              </span>
-            </div>
-          </form>
-        </div>
       )}
       {slash && slashAt && (
         <div className="absolute z-20 w-64" style={{ left: slashAt.left, top: slashAt.bottom + 4 }}>
