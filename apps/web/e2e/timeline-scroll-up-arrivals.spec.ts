@@ -1,3 +1,4 @@
+import { IPHONE_USER_AGENT, recordListCorrections } from "./list-corrections";
 import { expect, test } from "./fixtures";
 import { E2E_CHANNEL, E2E_MOBILE_CONTEXT } from "./workspace-fixtures";
 import { channelHistory, openWorkingAgentsSpace, workingAgentsSpace } from "./working-agents-fixtures";
@@ -13,41 +14,13 @@ import { channelHistory, openWorkingAgentsSpace, workingAgentsSpace } from "./wo
 
 test.use({
   ...E2E_MOBILE_CONTEXT,
-  // Virtuoso holds its correction in the margin only under this UA test.
-  userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148",
+  userAgent: IPHONE_USER_AGENT,
 });
 
 const HISTORY = 40;
 
 test("messages arriving below a reader scrolling up move nothing above them", async ({ page }) => {
-  await page.addInitScript(() => {
-    const probe = window as unknown as { listCorrections: string[]; readerScrolling: boolean };
-    probe.listCorrections = [];
-    probe.readerScrolling = false;
-    const scrollTop = Object.getOwnPropertyDescriptor(Element.prototype, "scrollTop")!;
-    Object.defineProperty(Element.prototype, "scrollTop", {
-      ...scrollTop,
-      set(value: number) {
-        if (!probe.readerScrolling) probe.listCorrections.push(`scrollTop=${value}`);
-        scrollTop.set!.call(this, value);
-      },
-    });
-    for (const method of ["scrollBy", "scrollTo"] as const) {
-      const original = Element.prototype[method] as (...args: unknown[]) => void;
-      Element.prototype[method] = function (this: Element, ...args: unknown[]) {
-        probe.listCorrections.push(`${method}(${JSON.stringify(args)})`);
-        original.apply(this, args);
-      } as typeof original;
-    }
-    new MutationObserver((records) => {
-      for (const { target } of records) {
-        const list = target as HTMLElement;
-        if (list.dataset?.testid === "virtuoso-item-list" && parseFloat(list.style.marginTop || "0") !== 0) {
-          probe.listCorrections.push(`margin-top: ${list.style.marginTop}`);
-        }
-      }
-    }).observe(document, { subtree: true, attributes: true, attributeFilter: ["style"] });
-  });
+  await recordListCorrections(page);
   const space = workingAgentsSpace(2, "arrivals", { focusedInstances: 2 });
   // Rows of one height, so the list's estimate is right for every row above
   // the reader and only the arrivals, much shorter, are measured off it.

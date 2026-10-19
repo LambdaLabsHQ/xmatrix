@@ -1,3 +1,4 @@
+import { IPHONE_USER_AGENT, recordListCorrections } from "./list-corrections";
 import { fixtureChannelCatalog } from "./in-page-api-fixtures";
 import { expect, test } from "./fixtures";
 import { E2E_CHANNEL, E2E_MOBILE_CONTEXT, E2E_NOW, E2E_SPACE, installWorkspaceStubs } from "./workspace-fixtures";
@@ -12,8 +13,7 @@ import { E2E_CHANNEL, E2E_MOBILE_CONTEXT, E2E_NOW, E2E_SPACE, installWorkspaceSt
 
 test.use({
   ...E2E_MOBILE_CONTEXT,
-  // Virtuoso holds its correction in the margin only under this UA test.
-  userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148",
+  userAgent: IPHONE_USER_AGENT,
 });
 
 const CHANNELS = Array.from({ length: 60 }, (_, index) => ({
@@ -25,34 +25,7 @@ const CHANNELS = Array.from({ length: 60 }, (_, index) => ({
 }));
 
 test("scrolling up after conversations move into Needs you writes no correction", async ({ page }) => {
-  await page.addInitScript(() => {
-    const probe = window as unknown as { listCorrections: string[]; readerScrolling: boolean };
-    probe.listCorrections = [];
-    probe.readerScrolling = false;
-    const scrollTop = Object.getOwnPropertyDescriptor(Element.prototype, "scrollTop")!;
-    Object.defineProperty(Element.prototype, "scrollTop", {
-      ...scrollTop,
-      set(value: number) {
-        if (!probe.readerScrolling) probe.listCorrections.push(`scrollTop=${value}`);
-        scrollTop.set!.call(this, value);
-      },
-    });
-    for (const method of ["scrollBy", "scrollTo"] as const) {
-      const original = Element.prototype[method] as (...args: unknown[]) => void;
-      Element.prototype[method] = function (this: Element, ...args: unknown[]) {
-        probe.listCorrections.push(`${method}(${JSON.stringify(args)})`);
-        original.apply(this, args);
-      } as typeof original;
-    }
-    new MutationObserver((records) => {
-      for (const { target } of records) {
-        const list = target as HTMLElement;
-        if (list.dataset?.testid === "virtuoso-item-list" && parseFloat(list.style.marginTop || "0") !== 0) {
-          probe.listCorrections.push(`margin-top: ${list.style.marginTop}`);
-        }
-      }
-    }).observe(document, { subtree: true, attributes: true, attributeFilter: ["style"] });
-  });
+  await recordListCorrections(page);
   await installWorkspaceStubs(page, { spaces: [E2E_SPACE], channels: CHANNELS });
   await page.goto("/app/personal-sspaceperso/channels", { waitUntil: "domcontentloaded" });
   const pane = page.locator(".app-mobile-channel-list-pane");
