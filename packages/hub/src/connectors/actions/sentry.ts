@@ -198,7 +198,12 @@ const LIST_ISSUES: ConnectorAction = {
     // providerJson returns a top-level JSON array as `items`.
     const issues = (await providerJson(url, { headers: headers(credentials) })).items;
     if (!Array.isArray(issues)) throw new ProviderRequestError(502, "Sentry did not return an issue list");
-    const lines = issues.slice(0, LIST_LIMIT).map(issueLine).filter((line): line is string => line !== undefined);
+    const shown = issues.slice(0, LIST_LIMIT);
+    const lines = shown.map(issueLine).filter((line): line is string => line !== undefined);
+    // An answer it cannot read is no evidence that nothing matched: refuse it whole.
+    if (lines.length !== shown.length) {
+      throw new ProviderRequestError(502, `Sentry returned ${shown.length - lines.length} unreadable issue(s) of ${shown.length}`);
+    }
     const scope = input.project === "*" ? "all projects" : input.project;
     if (!lines.length) return { summary: `No Sentry issue in ${scope} matches \`${input.search}\` (last 14 days).` };
     return { summary: [`Sentry issues in ${scope} matching \`${input.search}\` (last 14 days, most frequent first` +

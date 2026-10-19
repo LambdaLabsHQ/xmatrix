@@ -302,7 +302,7 @@ test("a release's new issues are listed from Sentry's own fields, most frequent 
     status: "unresolved", count: String(100 - n), userCount: 3, firstSeen: "2026-10-19T13:20:00Z",
     lastSeen: "2026-10-19T13:50:00Z", culprit: "private-culprit", metadata: { value: "private-metadata" }, ...extra });
   const { result, calls } = await listIssues([{ body: [row(1, { title: "Hub\nwedged   on\tstartup" }),
-    { shortId: "../x", title: "private-malformed" }, row(2, { count: "7 private-count", userCount: "private" })] }],
+    row(2, { count: "7 private-count", userCount: "private" })] }],
   "xmatrix-hub", "firstRelease:xmatrix-v1.0.611-beta.1");
   const url = new URL(calls[0].url);
   assert.equal(url.origin + url.pathname, "https://sentry.io/api/0/projects/made-by-robot/xmatrix-hub/issues/");
@@ -335,4 +335,12 @@ test("a listing names one project or * and one line of search, and is a read und
   assert.equal(manifest.actions.find(action => action.id === "list_issues").effect, "read");
   assert.match(actionRefusal({ providerId: "sentry", actionId: "list_issues", effect: "read", mode: "deny",
     senderKind: "agent" }), /denied/);
+});
+
+test("an issue list Sentry answered but that cannot be read is refused, never reported as no issue", async () => {
+  const good = { shortId: "HUB-1", title: "Failure", level: "error" };
+  for (const body of [[{ shortId: "../x", title: "An actual matching issue" }], [{ shortId: "HUB-2" }],
+    [good, { shortId: "HUB-3", title: 7 }]]) {
+    await assert.rejects(listIssues([{ body }], "*", "firstRelease:xmatrix-v1.1.0"), /unreadable issue/u, JSON.stringify(body));
+  }
 });
