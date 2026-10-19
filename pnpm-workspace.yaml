@@ -55,3 +55,6 @@ patchedDependencies:
   # electron-updater@6.8.3 declares builder-util-runtime 9.5.1 exactly.
   # electron-builder matches that declaration, so the 9.7.0 override is not found until this matches.
   "electron-updater@6.8.3": "patches/electron-updater+6.8.3.patch"
+  # Virtuoso's upward-scroll compensation counted rows below the viewport (a new
+  # row measured, a live row growing) and on iPhone held it as a blank top margin.
+  "react-virtuoso@4.18.11": "patches/react-virtuoso+4.18.11.patch"
