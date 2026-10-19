@@ -95,6 +95,8 @@ test("hot-path operations retain bounded stage, transaction phase, and SQLSTATE"
     ["channel.direct-find", "channel_direct_find_v1", "postgres.direct", "direct.sql"],
     ["account-deletion.pending", "database_phase_begin_v1", "postgres.account-deletion", "phase.begin"],
     ["account-deletion.claim", "account_deletion_claim_v1", "postgres.account-deletion", "sql"],
+    ["auth.account-revocation", "database_phase_pool_checkout_v1", "postgres.auth", "phase.pool_checkout"],
+    ["auth.account-revocation", "account_identity_revoked_v1", "postgres.auth", "sql"],
     ["runtime.summon_prepare_resolved_batch_v2", "runtime_summon_v2_profiles_exact_v2",
       "postgres.launch", "launch_resolve"],
     ["runtime.summon_prepare_resolved_batch_v2", "runtime_summon_v2_runs_v1",
@@ -111,6 +113,7 @@ test("hot-path operations retain bounded stage, transaction phase, and SQLSTATE"
   assert.deepEqual(written.map((point) => point.blobs.slice(1, 6)), cases.map((entry) => [
     entry[2], entry[3], "shard-0", "error", "40001",
   ]));
+  assert.deepEqual(written.map((point) => point.blobs[10]), cases.map((entry) => entry[0]));
 });
 
 test("operations outside the hot paths are grouped by their code-defined family", () => {
@@ -199,6 +202,14 @@ test("database observers accept any Worker env and stay silent without the bindi
   assert.deepEqual(written.map((point) => [point.blobs[1], point.blobs[10]]), [
     ["postgres.account-deletion", "account-deletion.pending"],
     ["postgres.account-deletion", "account-deletion.pending"],
+  ]);
+  observers.sessionObserver({ operation: "auth.account-revocation", shardId: "shard-0", outcome: "error",
+    errorCode: "CONNECT_TIMEOUT", wallMs: 3_000, queueMs: 0, checkoutMs: 3_000, firstStatementMs: 0,
+    beginMs: 0, sqlMs: 0, sqlMaxMs: 0, commitMs: 0, rollbackMs: 0, roundTrips: 0,
+    transactions: 0, queries: 0, rows: 0 });
+  assert.deepEqual(written.at(-1).blobs, [
+    "session", "postgres.auth", "session", "shard-0", "error", "CONNECT_TIMEOUT", "version-1",
+    "cache_disabled", "none", "error", "auth.account-revocation",
   ]);
   assert.doesNotThrow(() => postgresDatabaseObservers({}).observer({ requestId: "r",
     operation: "space.get", queryName: "space_get_v1", shardId: "shard-0", durationMs: 1,

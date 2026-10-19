@@ -88,6 +88,13 @@ minute means the origin connections are held too long; compare with the
 `session` points in the substrate observability dataset
 ([connectivity breaker](postgres-connectivity-breaker.md)).
 
+Authentication database operations use the `postgres.auth` family and retain
+their code-defined operation in `blob11`, including `auth.account-revocation`.
+Use `database_phase_pool_checkout_v1` and the session's checkout duration to
+distinguish connection failures before SQL from a slow revocation query.
+Older deployments grouped these operations as `other`; their operation cannot
+be recovered from that label alone.
+
 Account-deletion observations use the `postgres.account-deletion` family and retain
 the code-defined operation in `blob11` (for example `account-deletion.pending`
 or `account-deletion.claim`). Opening failures retain `phase.begin` and
