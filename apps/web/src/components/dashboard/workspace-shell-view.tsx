@@ -1131,7 +1131,8 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       )}
       {selectedChannel && token && placement !== "page-margin" && (
         <ConversationPageCards spaceId={selectedChannel.spaceId} conversationId={selectedChannel.id} token={token}
-          onOpenPage={openPage} excludePageId={placement === "beside-page" ? selectedPageId : null} />
+          conversationName={selectedChannel.name ?? null} onOpenPage={openPage}
+          excludePageId={placement === "beside-page" ? selectedPageId : null} />
       )}
       {showSpaceAgentSetup && !showMobileAgentSetup && renderSpaceAgentSetup(false)}
       {showSpaceFirstTask && (
@@ -1318,9 +1319,9 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       onCloseConversation={closePageConversation}
       onExpandConversation={(conversationId) => navigateToChannel(conversationId)}
       onOpenConversation={(conversationId) => openPageConversation(conversationId)}
-      onDiscuss={({ firstMessage, quote, open, coWrite, planned, ...input }) => startPageConversation(input,
-        { ...(firstMessage ? { firstMessage } : {}), ...(quote ? { quote } : {}), ...(open === false ? { open } : {}),
-          ...(coWrite ? { coWrite } : {}), ...(planned ? { planned } : {}) })}
+      onDiscuss={({ firstMessage, quote, askAi, open, coWrite, planned, ...input }) => startPageConversation(input,
+        { ...(firstMessage ? { firstMessage } : {}), ...(quote ? { quote } : {}), ...(askAi ? { askAi } : {}),
+          ...(open === false ? { open } : {}), ...(coWrite ? { coWrite } : {}), ...(planned ? { planned } : {}) })}
       onConnectGitHub={async (input) => {
         // The repository's issues and pull requests arrive in a conversation linked to the page.
         await startPageConversation({ spaceId: input.spaceId, pageId: input.pageId, blockId: input.blockId,

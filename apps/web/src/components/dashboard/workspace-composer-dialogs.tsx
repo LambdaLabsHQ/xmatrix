@@ -275,7 +275,7 @@ export type ComposerMentionInsertRequest =
 
 export type { AgentTraceTarget } from "./workspace-shell-message-model";
 import type { AgentTraceTarget, ComposerSendSnapshot } from "./workspace-shell-message-model";
-import { quotedMessage, type DiscussionQuote } from "./selection-discussion";
+import { foldedDiscussionBody, quotedMessage, type DiscussionQuote } from "./selection-discussion";
 
 export type AgentTraceHistoryPanelState = {
   targetKey: string;
@@ -372,7 +372,10 @@ export const Composer = memo(function Composer({
   invocationDraft?: ComposerInvocationDraft;
   selectedWorkspaceId: string | null;
   replyTarget: TimelineItem | null;
-  /** The passage a discussion is about, which its first message carries (selection-discussion.ts). */
+  /**
+   * The passage a discussion is about, which its first message carries
+   * (selection-discussion.ts); shown here unless its thread shows it.
+   */
   quote?: DiscussionQuote | null;
   attachments: ChannelAttachment[];
   mentionInsertRequest: ComposerMentionInsertRequest | null;
@@ -1305,7 +1308,7 @@ export const Composer = memo(function Composer({
           }
           boxHeader={
             <>
-              {quote && (
+              {quote && !quote.anchored && (
                 <div data-testid="composer-quote"
                   className="flex items-start gap-2 border-b border-border/70 px-3 py-2 text-xs text-muted-foreground">
                   <Quote className="mt-0.5 size-3.5 shrink-0" />
@@ -1334,7 +1337,7 @@ export const Composer = memo(function Composer({
                       Replying to {replyTarget.author}
                     </div>
                     <div className="line-clamp-2 [overflow-wrap:anywhere]">
-                      {replyTarget.body || "Attachment"}
+                      {foldedDiscussionBody(replyTarget.body) || "Attachment"}
                     </div>
                     {replyTarget.linkOrigin?.kind === "link" && (
                       <div className="mt-1 font-medium">

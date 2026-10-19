@@ -1100,13 +1100,19 @@ test("selecting a passage starts a discussion anchored to it, drawn beside the t
   expect((await fixtureRequestBodies(browser, "channel-create"))[0]!.name, "a discussion is named by its passage")
     .toBe("“In progress”");
   await expect(editor).toContainText("In progress");
-  // Its composer holds the passage and where it came from as a quote, the context its first message carries;
-  // what is typed starts empty.
-  await expect(browser.locator("textarea.composer-textarea").first()).toHaveValue(/^\u200B?$/u);
-  const quote = browser.getByTestId("composer-quote");
-  await expect(quote).toContainText("In progress");
-  await expect(quote).toContainText("Relay › Status");
+  // Its composer opens empty: the passage is the thread's anchor, marked in the text and heading the thread,
+  // and its first message carries it, with a link back, for the Agents that read the conversation.
+  const composer = browser.locator("textarea.composer-textarea").first();
+  await expect(composer).toHaveValue(/^\u200B?$/u);
+  await expect(browser.getByTestId("composer-quote")).toHaveCount(0);
   await browser.screenshot({ path: test.info().outputPath("pages-discussion-open.png") });
+  await fixtureJson(browser, "discuss-message", new RegExp(`/api/xmatrix/channels/${created}/messages$`, "u"),
+    { message: {} }, { method: "POST" });
+  await composer.fill("Is this still accurate?");
+  await composer.press("Enter");
+  await expect.poll(async () => (await fixtureRequestBodies(browser, "discuss-message"))[0]?.body)
+    .toMatch(/^> In progress\n\n— \[Relay › Status\]\([^)]*page=p-relay#status\)\n\nIs this still accurate\?$/u);
+  const [sent] = await fixtureRequestBodies(browser, "discuss-message");
 
   // Closed again, the passage is marked and its bubble opens the discussion.
   const anchor = (await fixtureRequestBodies(browser, "link-create"))[0]!.anchor;
@@ -1119,6 +1125,17 @@ test("selecting a passage starts a discussion anchored to it, drawn beside the t
   await expect(editor.locator(".page-discussion")).toHaveText("In progress");
   await expect(editor.getByRole("button", { name: `Open the discussion ${E2E_CHANNEL.name}` })).toBeVisible();
   await browser.screenshot({ path: test.info().outputPath("pages-discussion.png") });
+  // Opened again, its thread shows what was written: the passage heads it and is not quoted again in it.
+  await fixtureJson(browser, "discussion-history", `**/api/xmatrix/channels/${E2E_CHANNEL.id}/history**`, {
+    messages: [{ messageId: "m-asked", channelId: E2E_CHANNEL.id, sequence: 1, body: String(sent!.body), sentAt: NOW,
+      reactions: [], annotations: [], attachments: [], from: E2E_USER_SENDER }], hasMore: false, historyHeadSequence: 1 });
+  await editor.getByRole("button", { name: `Open the discussion ${E2E_CHANNEL.name}` }).click();
+  const thread = browser.getByTestId("page-conversation");
+  await expect(thread.locator("[data-message-body='m-asked']")).toHaveText("Is this still accurate?");
+  await expect(thread.locator("blockquote")).toHaveCount(0);
+  await browser.screenshot({ path: test.info().outputPath("pages-discussion-thread.png") });
+  await browser.getByRole("button", { name: "Close the conversation" }).click();
+  await expect(browser.getByTestId("page-conversation")).toBeHidden();
   // The section's conversations list it, and resolve it once its outcome is in the page.
   await editor.locator("h2", { hasText: "Status" }).getByRole("button", { name: "1 conversation about this section" }).click();
   const list = browser.getByTestId("page-conversations");
@@ -1285,30 +1302,37 @@ test("a page's conversations sit beside what they are about, and one opens there
   await expect(browser).toHaveURL(/page=p-relay$/u);
 });
 
-test("selecting a passage asks AI about it without leaving the page", async ({ page: browser }) => {
+test("Ask AI on a passage opens its discussion addressed to xMatrix, where the question is written and answered", async ({ page: browser }) => {
   await stubPages(browser, [page("p-relay", null, "Relay", "V")]);
   await fixtureJson(browser, "page-links", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\?.*$/u, { links: [] });
-  const asked = { ...E2E_CHANNEL, name: "Ask: what is left" };
-  await stubPageConversation(browser, asked, { linkId: "l-ask", blockId: "status" });
+  await stubPageConversation(browser, { ...E2E_CHANNEL, name: "“In progress”" }, { linkId: "l-ask", blockId: "status" });
   await fixtureJson(browser, "ask-message", new RegExp(`/api/xmatrix/channels/${CREATED_CHANNEL_ID}/messages$`, "u"), { message: {} },
     { method: "POST" });
   await openLivePage(browser);
   await selectLine(browser, "In progress");
-  await browser.getByTestId("page-selection-menu").getByRole("button", { name: "Ask AI" }).click();
-  const ask = browser.getByTestId("page-ask");
-  await expect(ask).toContainText("In progress");
-  await ask.getByLabel("Your question").fill("what is left");
-  await browser.screenshot({ path: test.info().outputPath("pages-ask.png") });
-  await browser.keyboard.press("Enter");
+  const menu = browser.getByTestId("page-selection-menu");
+  // One way to discuss a passage and one to ask about it; asking for a change is asking in words.
+  await expect(menu.getByRole("button", { name: "Discuss" })).toBeVisible();
+  await expect(menu.getByRole("button", { name: /change/iu })).toHaveCount(0);
+  await menu.getByRole("button", { name: "Ask AI" }).click();
   const created = await fixtureCreatedChannelId(browser, "channel-create");
   await expect.poll(async () => (await fixtureRequestBodies(browser, "link-create"))[0]).toMatchObject({
     conversationId: created, blockId: "status", anchor: { quote: "In progress" } });
-  const [message] = await fixtureRequestBodies(browser, "ask-message");
-  expect(String(message!.body)).toBe("@auto what is left\n\nAbout this passage of page:p-relay (section #status):\n> In progress");
-  // The discussion opens beside the page, where the answer arrives.
+  expect((await fixtureRequestBodies(browser, "channel-create"))[0]!.name, "it is named by its passage, as any discussion")
+    .toBe("“In progress”");
+  // It opens beside the page with its composer addressed to xMatrix: no second input over the page.
   await expect(browser).toHaveURL(new RegExp(`conversation=${created}`, "u"));
   await expect(browser.getByTestId("page-conversation")).toBeVisible();
-  await expect(ask).toBeHidden();
+  const composer = browser.locator("textarea.composer-textarea").first();
+  await expect(composer).toHaveValue("@auto ");
+  await expect(composer).toBeFocused();
+  await composer.press("End");
+  await composer.pressSequentially("what is left");
+  await browser.screenshot({ path: test.info().outputPath("pages-ask.png") });
+  await composer.press("Enter");
+  // Its first message carries the passage for the Agent, and only the person's words besides.
+  await expect.poll(async () => (await fixtureRequestBodies(browser, "ask-message"))[0]?.body)
+    .toMatch(/^> In progress\n\n— \[Relay › Status\]\([^)]*page=p-relay#status\)\n\n@auto what is left$/u);
 });
 
 test("a page's history shows what each revision changed, colored, and the conversation it came from", async ({ page: browser }) => {

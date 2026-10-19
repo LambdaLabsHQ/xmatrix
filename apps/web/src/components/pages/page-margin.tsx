@@ -177,7 +177,8 @@ function OpenConversationCard({ conversation, quietAgents = false, canResolve, c
   // A thread is as tall as what it says, up to a cap. The message list scrolls
   // inside a box of known height, so the card adds up the list's rows (its
   // header, messages and footer) and sets its own height from them. A thread
-  // with nothing said yet is its note and its composer.
+  // with nothing in it yet is its header and its composer, and any note the
+  // empty conversation still shows, such as why it could not load.
   useLayoutEffect(() => {
     const body = bodyRef.current;
     if (!body) return;
@@ -187,11 +188,10 @@ function OpenConversationCard({ conversation, quietAgents = false, canResolve, c
     const measure = () => {
       const header = headerRef.current?.offsetHeight ?? 0;
       const rows = list ? [...list.children].reduce((sum, row) => sum + row.getBoundingClientRect().height, 0) : 0;
-      const note = empty && composer
-        ? Math.max(0, ...[...empty.children].map((child) => child.getBoundingClientRect().bottom)) - empty.getBoundingClientRect().top
-        : 0;
+      const bottom = empty ? Math.max(0, ...[...empty.children].map((child) => child.getBoundingClientRect().bottom)) : 0;
+      const note = empty && bottom > 0 ? bottom - empty.getBoundingClientRect().top : 0;
       const next = rows > 0 ? Math.ceil(header + rows)
-        : note > 0 && composer ? Math.ceil(header + note + EMPTY_THREAD_GAP + composer.offsetHeight) : null;
+        : empty && composer ? Math.ceil(header + (note > 0 ? note + EMPTY_THREAD_GAP : 0) + composer.offsetHeight) : null;
       setHeight((current) => current === next ? current : next);
     };
     const sizes = new ResizeObserver(measure);

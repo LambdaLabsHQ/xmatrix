@@ -125,12 +125,15 @@ The production x-matrix Space on 2026-09-26:
 - Anyone starts one from anywhere: the conversation list, a page block
   ("Discuss"), a mention, an Automation or Focus.
 - **"Discuss" on any selected passage**, of a page or of a message, starts a
-  new conversation named by the passage. Its composer opens holding the
-  passage as a quote and a link back to where it came from, so the first
-  message carries that context to every Agent in it; a mention inside the
-  quote stays quoted text. One from a page is linked to the passage; one from
-  a message is as open as its source conversation and linked to the same
-  pages.
+  new conversation named by the passage. Its first message opens with the
+  passage as a quote and a link back to where it came from, so every Agent in
+  it reads that context; a mention inside the quote stays quoted text, and
+  previews show what was written after it. People see the passage once: one
+  from a page is linked to the passage, which is its anchor (marked in the
+  text, and the head of its thread), so neither its composer nor its first
+  message shows it again; one from a message is as open as its source
+  conversation and linked to the same pages, and its composer shows the quote
+  until it is sent.
 
 ### 3.3 Link
 

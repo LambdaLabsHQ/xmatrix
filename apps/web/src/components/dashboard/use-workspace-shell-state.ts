@@ -658,10 +658,6 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
 
   replyTargetRef.current = replyTarget;
 
-  const discussionQuotesRef = useRef(discussionQuotes);
-
-  discussionQuotesRef.current = discussionQuotes;
-
   const seedComposerDraftText = useCallback((text: string) => {
     draftRef.current = text;
     setDraft(text);
@@ -3064,7 +3060,6 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
     replyTarget,
     setReplyTarget,
     discussionQuotes,
-    discussionQuotesRef,
     setDiscussionQuotes,
     draftRef,
     draftAttachmentsRef,

@@ -521,6 +521,8 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   onOpenConversation: (conversationId: string) => void;
   onDiscuss: (input: { spaceId: string; pageId: string; blockId: string; name: string; restricted: boolean;
     anchor?: PageLinkAnchor; firstMessage?: string; quote?: DiscussionQuote; open?: boolean; coWrite?: boolean;
+    /** Its composer opens addressed to @auto, as Ask AI does. */
+    askAi?: boolean;
     /** Hears the conversation's id as soon as it is known, before the Hub has made or linked it. */
     planned?: (conversationId: string) => void }) => Promise<unknown>;
   /** Subscribes a conversation of its own, linked to a section, to a repository's issues and pull requests. */
@@ -1151,10 +1153,12 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   const claimable = (blockId: string) => claimsOn(blockId).length === 0 ||
     (Boolean(claims.data?.competitiveBlocks.includes(blockId)) &&
       !claimsOn(blockId).some((claim) => claim.holder.kind === "user" && claim.holder.id === userId));
-  const discuss = (blockId: string, anchor?: PageLinkAnchor) => {
+  // Asking AI about a passage is the same discussion, its composer addressed to @auto, which routes to an
+  // enabled harness: the question, or the change asked for, is written there, where the answer arrives.
+  const discuss: NonNullable<PageSectionActions["discuss"]> = (blockId, anchor, options) => {
     if (!page) return;
     const title = blocks.find((block) => block.id === blockId)?.title;
-    // A discussion of a passage is named by the passage, and opens holding it; of a section, by the section.
+    // A discussion of a passage is named by the passage, which its first message carries; of a section, by the section.
     const place = title ? `${page.title} › ${title}` : page.title;
     let started: string | null = null;
     const planned = (conversationId: string) => {
@@ -1164,8 +1168,9 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
         pageId: page.pageId, blockId, source: "manual", createdAt: now, lastSeenAt: now, anchor: anchor ?? null }]);
     };
     void onDiscuss({ spaceId, pageId: page.pageId, blockId, name: anchor ? discussionTitle(anchor.quote) : place,
-      restricted, planned, ...(anchor ? { anchor, quote: discussionQuote(anchor.quote, { label: place, href: blockLink(blockId) }) }
-        : {}) }).then(() => links.refetch(), (cause: Error) => setNotice(cause.message))
+      restricted, planned, ...(anchor ? { anchor,
+        quote: discussionQuote(anchor.quote, { label: place, href: blockLink(blockId) }, true) } : {}),
+      ...(options?.askAi ? { askAi: true } : {}) }).then(() => links.refetch(), (cause: Error) => setNotice(cause.message))
       .finally(() => setStartedLinks((current) => current.filter((link) => link.conversationId !== started)));
   };
   const resolveDiscussion = (linkId: string) => pageApi.resolveLink(spaceId, token, linkId, true)
@@ -1173,25 +1178,6 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   const copy = (text: string) => void navigator.clipboard.writeText(text)
     .then(() => setNotice("Link copied."), (cause: Error) => setNotice(cause.message));
   const copyLink = (blockId: string) => copy(blockLink(blockId));
-  // Asking about a passage, or asking for it to change, is a discussion on it whose first message
-  // addresses @auto, which routes to an enabled harness; it opens beside the page, where the answer arrives.
-  const ask: NonNullable<PageSectionActions["ask"]> = async (blockId, anchor, request) => {
-    if (!page) return;
-    const quote = anchor.quote.split("\n").map((line) => `> ${line}`).join("\n");
-    const where = `page:${page.pageId}${blockId ? ` (section #${blockId})` : ""}`;
-    const firstMessage = request.mode === "ask"
-      ? `@auto ${request.prompt}\n\nAbout this passage of ${where}:\n${quote}`
-      : `@auto ${request.prompt}\n\nChange this passage of ${where} with \`xmatrix page edit\`, then resolve this ` +
-        `discussion with \`xmatrix page resolve\` (its link id is under \`discussion:\` in \`xmatrix page read\`):\n${quote}`;
-    try {
-      await onDiscuss({ spaceId, pageId: page.pageId, blockId, restricted,
-        name: `${request.mode === "ask" ? "Ask" : "Change"}: ${request.prompt.slice(0, 60)}`, anchor, firstMessage });
-      void links.refetch();
-    } catch (cause) {
-      setNotice(userErrorMessage(cause, "Couldn't send the question"));
-      throw cause;
-    }
-  };
   // Co-writing with an Agent: a conversation of its own, linked to the page or a section, whose first
   // message calls the chosen runtime to infer what the page needs and write it. The page stays open,
   // and the Agent shows at the right edge beside the line it writes.
@@ -1244,7 +1230,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     if (headRevision !== null) markSeen(headRevision, null);
     setMode("history");
   };
-  const sectionActions: PageSectionActions = { discuss, copyLink, ask, claim, editors, history: openHistory };
+  const sectionActions: PageSectionActions = { discuss, copyLink, claim, editors, history: openHistory };
   // What a heading offers, beside it (§3.2).
   const headingActions: HeadingActions = {
     canEdit,

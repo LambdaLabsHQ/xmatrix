@@ -31,6 +31,8 @@ export {
 } from "./text-task.js";
 export type { TextTaskRequest, TextTaskResult, TextTaskStatus } from "./text-task.js";
 export { PAGE_AGENT_INK_MS, PAGE_MESSAGE_CO_WRITE, PageCoWriteParser, parsePageCoWriteReply } from "./page-co-writing.js";
+export { discussionHead, splitDiscussionHead } from "./discussion-head.js";
+export type { DiscussionHead, DiscussionSource } from "./discussion-head.js";
 export type {
   PageCoWriteAction, PageCoWriteEvent, PageCoWriteReply, PageCoWriteRequest,
 } from "./page-co-writing.js";

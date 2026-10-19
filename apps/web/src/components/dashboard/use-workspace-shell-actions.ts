@@ -53,6 +53,7 @@ import {
 } from "@/components/dashboard/mention-complete";
 import {
   clearChannelComposerDraft,
+  writeChannelComposerDraft,
 } from "@/components/dashboard/channel-composer-drafts";
 import { useAgentTraceHistorySync } from "@/components/dashboard/use-agent-trace-history-sync";
 import {
@@ -1516,11 +1517,22 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     token: s.token, user: s.user, view: s.view, beginConversation, selectedPageId: s.selectedPageId, selectedChannelId: s.selectedChannelId, currentSpaceId: s.currentSpaceId, spaces: s.spaces, setView,
     setSelectedPageId: s.setSelectedPageId, setSelectedChannelId, setBrowserPath,
     focusComposer: () => setComposerAutoFocusRequest((current) => current + 1),
-    seedQuote,
+    seedComposer,
   });
 
   function seedQuote(conversationId: string, quote: DiscussionQuote) {
     s.setDiscussionQuotes((current) => new Map(current).set(conversationId, quote));
+  }
+
+  /**
+   * A new conversation's composer, ready before it opens. Ask AI's starts with
+   * `@auto` written out, which the Hub routes to an enabled harness as it does
+   * any typed `@auto`.
+   */
+  function seedComposer(conversationId: string, seed: { quote?: DiscussionQuote; askAi?: boolean }) {
+    if (seed.quote) seedQuote(conversationId, seed.quote);
+    if (seed.askAi) writeChannelComposerDraft(s.channelComposerDraftsRef.current, conversationId,
+      { text: "@auto ", workspaceTarget: null, attachments: [] });
   }
 
   function dropDiscussionQuote(conversationId: string) {
@@ -1550,7 +1562,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
         memberName: s.user.name || s.user.email || "Human", name: discussionTitle(quote), mode: source.mode,
         metadata: { fromChannelId: source.id, fromMessageId: messageId } });
       const href = `${absoluteChannelUrl(source, s.spacesRef.current)}#message:${encodeURIComponent(messageId)}`;
-      seedQuote(channel.id, discussionQuote(quote, { label: `${message.author} in #${channelTitle(source)}`, href }));
+      seedQuote(channel.id, discussionQuote(quote, { label: `${message.author} in #${channelTitle(source)}`, href }, false));
       // Beside a page it opens beside the page, as a discussion of the page does.
       if (s.viewRef.current === "pages" && s.selectedPageId) openPageConversation(channel.id, { focus: true });
       else navigateToChannel(channel.id);

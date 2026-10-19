@@ -154,7 +154,7 @@ import { markdownRemarkPlugins } from "@/lib/markdown-plugins";
 
 
 import { MessageUnsentNotice } from "./message-unsent-notice";
-import { MESSAGE_BODY_ATTRIBUTE, selectedMessagePassage, type MessagePassageSelection } from "./selection-discussion";
+import { foldedDiscussionBody, MESSAGE_BODY_ATTRIBUTE, selectedMessagePassage, type MessagePassageSelection } from "./selection-discussion";
 
 import {
   AlertTriangle,
@@ -1263,6 +1263,7 @@ export const MessageTimeline = memo(function MessageTimeline({
               ? error
               : "No messages yet."
           }
+          nothingSaid={!error}
         />
       )}
 
@@ -1508,9 +1509,14 @@ function SinceDivider({ digest }: { digest: SinceDigest }) {
   );
 }
 
-export function EmptyConversation({ title, body }: { title: string; body: string }) {
+export function EmptyConversation({ title, body, nothingSaid = false }: {
+  title: string; body: string;
+  /** Only that nothing has been said yet, which a comment thread shows by its empty composer instead. */
+  nothingSaid?: boolean;
+}) {
   return (
-    <div className="app-empty-conversation flex h-full flex-col items-center justify-center px-6 text-center">
+    <div className="app-empty-conversation flex h-full flex-col items-center justify-center px-6 text-center"
+      {...(nothingSaid ? { "data-nothing-said": "" } : {})}>
       <div className="app-empty-conversation-mark flex size-14 items-center justify-center rounded-xl bg-muted">
         <Hash className="size-7 text-muted-foreground" />
       </div>
@@ -1789,7 +1795,8 @@ export const MessageRow = memo(function MessageRow({
   const humanSenderUserId = message.senderKind === "user" && message.senderId
     ? message.senderId.replace(/^user:/, "")
     : null;
-  const displayBody = normalizeMessageBodyForDisplay(message.body, message.senderKind);
+  // A page discussion's first message shows what was written; its passage is the thread's anchor.
+  const displayBody = normalizeMessageBodyForDisplay(foldedDiscussionBody(message.body), message.senderKind);
   const nonOperationalRanges = useMemo(() => /[@＠]/u.test(displayBody) ? nonOperationalMentionRanges(displayBody) : [], [displayBody]);
   const markdownComponents = useMemo(
     () => createMessageMarkdownComponents(onOpenInternalAppLink),
@@ -3225,7 +3232,7 @@ export function ReplyPreview({
       <span className="min-w-0">
         <span className="block truncate font-bold text-foreground">{reply.author}</span>
         <span className="line-clamp-2 [overflow-wrap:anywhere]">
-          {reply.body || "Attachment"}
+          {foldedDiscussionBody(reply.body) || "Attachment"}
         </span>
       </span>
     </a>
