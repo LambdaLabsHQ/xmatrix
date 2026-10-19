@@ -345,8 +345,9 @@ html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .rich-me
   font-size: 0.8125rem;
   line-height: 1.45;
 }
-/* The card already names the conversation; an empty one just says so. */
-html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open :is(.app-empty-conversation-mark, .app-empty-conversation-title) {
+/* Beside its page, a conversation's head already names it (the card in the margin, the header docked, the
+   sign on a phone), and for a discussion that name is its passage: an empty one just says so. */
+html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .app-page-conversation :is(.app-empty-conversation-mark, .app-empty-conversation-title) {
   display: none;
 }
 /* A comment thread with nothing said yet is its passage and its composer, as a new comment is in Google Docs;
