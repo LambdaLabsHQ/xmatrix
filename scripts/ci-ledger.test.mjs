@@ -171,7 +171,7 @@ test("CI selects a release ref only after verifying its stamp with triggering-re
     // The existing release-commit tests own rejection of non-stamp changes.
     // This workflow boundary must invoke that verifier before switching code.
     assert.match(step.run, /set -euo pipefail/u);
-    const verify = step.run.indexOf('node scripts/release-commit.mjs verify "$CI_RELEASE_REF" "$CI_SOURCE_SHA"');
+    const verify = step.run.indexOf('node scripts/release-commit.mjs verify-release "$CI_RELEASE_REF" "$CI_SOURCE_SHA"');
     assert.ok(verify >= 0 && verify < step.run.indexOf('git checkout --detach "$CI_RELEASE_REF"'), name);
     assert.ok(job.steps.slice(checkout + 1, select).every((entry) => !entry.uses?.startsWith("./")), name);
   }
