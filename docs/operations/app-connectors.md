@@ -655,7 +655,10 @@ fixed, or closed by a user). The GitHub App must have **Code scanning alerts:
 read** (`security_events`) and subscribe to **Code scanning alert**; existing
 installations must accept the permission upgrade on GitHub. The subscription
 requires the installation's effective permission, not a retained connection
-capability. Alert messages contain only the alert reference and lifecycle action;
+capability. Each delivery rechecks that exact installation with a token narrowed
+to the repository and `security_events:read`; revoked or unconfirmed access
+blocks the message and Agent wake, even if another linked installation has access.
+Alert messages contain only the alert reference and lifecycle action;
 the Agent fetches details through its current repository grant. Security alerts
 reach only Channels allowed to carry private content, including for public
 repositories. Delivery uses the existing idempotent append and wakes resting

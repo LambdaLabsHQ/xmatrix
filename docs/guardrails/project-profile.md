@@ -26,8 +26,9 @@ App Store What's New. See [release notes](../release-updates.md#release-notes).
 
 GitHub repository subscriptions include `code-scanning`: signed alert lifecycle
 events reach a subscribed private-content Channel and wake its resting Agent,
-without periodic polling. The App's effective Code scanning alerts read grant is
-required; see [App connectors](../operations/app-connectors.md).
+without periodic polling. The exact installation's effective Code scanning alerts
+read grant is checked on subscription and again before every delivery; see
+[App connectors](../operations/app-connectors.md).
 
 Page discussions and conversations started from selected message passages use
 the ordinary first-message automatic summon and author choice window while
