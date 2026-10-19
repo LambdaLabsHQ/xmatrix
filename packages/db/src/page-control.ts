@@ -1192,7 +1192,7 @@ export class PostgresPageRepository {
   async claim(input: { requestId: string; spaceId: string; pageId: string; blockId?: string;
     principal: PagePrincipal; minutes?: number; conversationId?: string;
     /** Whose work the claim is shown as, when not the caller's own name: an Automation's. */
-    holderLabel?: string }): Promise<{ claim: PageClaim }> {
+    holderLabel?: string }): Promise<{ claim: PageClaim; others: PageClaim[] }> {
     const spaceId = bounded(input.spaceId, "spaceId");
     const pageId = bounded(input.pageId, "pageId");
     const block = blockId(input.blockId);
@@ -1224,17 +1224,12 @@ export class PostgresPageRepository {
               owner_user_id=$7, conversation_id=$8, updated_at=now() WHERE space_id=$1 AND claim_id=$2`,
           values: [spaceId, mine.claimId, expiresAt, holder.kind, holder.id, holder.label, actor.userId,
             conversationId], maxRows: 0 });
-        return { claim: { ...mine, holder, ownerUserId: actor.userId, conversationId, expiresAt } };
+        return { claim: { ...mine, holder, ownerUserId: actor.userId, conversationId, expiresAt },
+          others: active.filter((claim) => claim.claimId !== mine.claimId) };
       }
-      if (active.length) {
-        const competitive = await tx.query({ name: "page_block_competitive_v1",
-          text: "SELECT 1 FROM data.page_block_competitions WHERE space_id=$1 AND page_id=$2 AND block_id=$3",
-          values: [spaceId, pageId, block], maxRows: 1 });
-        if (!competitive.length) {
-          throw new PageControlError("page_block_claimed", 409, `${active[0]!.holder.label} is on this`,
-            { claim: active[0] });
-        }
-      }
+      /* A claim says who is on a section; it locks nothing (decided 2026-10-19,
+         coordination is lock-free). Whoever else is on it is told back, so
+         they can talk, pick other work or carry on side by side. */
       const claim: PageClaim = {
         claimId: crypto.randomUUID(), pageId, blockId: block,
         holder, ownerUserId: actor.userId, conversationId: input.conversationId ?? null, pullRequestUrl: null, expiresAt,
@@ -1246,7 +1241,7 @@ export class PostgresPageRepository {
           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'active',$10,$11,$11)`,
         values: [spaceId, claim.claimId, pageId, block, claim.holder.kind, claim.holder.id, claim.holder.label,
           claim.ownerUserId, claim.conversationId, expiresAt, claim.createdAt], maxRows: 0 });
-      return { claim };
+      return { claim, others: active };
     });
   }
 

@@ -1,6 +1,6 @@
 ---
 title: "Living pages and scheduled AI agents · xMatrix Docs"
-description: "Keep project docs true with xMatrix Pages: shared Markdown that agents read and update, section claims, and Automations that run agents on a schedule."
+description: "Keep project docs true with xMatrix Pages: shared Markdown that agents read and update, claims for Agents, and Automations that run agents on a schedule."
 ---
 
 # Pages and Automations
@@ -57,7 +57,7 @@ Select a passage in a page and start a discussion: a conversation anchored to th
 
 ### Claims
 
-Before starting work a section describes, claim the section so others see it is taken:
+Agents claim a section before starting the work it describes, so other Agents see who is on what:
 
 ```sh
 xmatrix page claim <page-id> --block open-work
@@ -65,7 +65,7 @@ xmatrix page claims <page-id>
 xmatrix page release <page-id> <claim-id>
 ```
 
-A claim lasts two hours unless renewed, and anyone can see who holds it. If someone else holds a section, talk to them or work on something else.
+A claim lasts two hours unless renewed. It locks nothing: if others are already on the section, the claim still succeeds, and every conversation on the section is told who else is there. Talk to them, pick other work, or carry on side by side. Claims are for Agents; people don't claim, and pages don't show claims to them.
 
 ## Automations
 

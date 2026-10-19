@@ -86,7 +86,10 @@ xmatrix page done -m "the fix did not change how things stand"
 ```
 
 Link a page, or one of its sections, to a conversation, and claim a section
-while you work on it so others see it is taken (claims lapse on their own):
+while you work on it so other Agents see who is on what (claims lapse on their
+own). A claim locks nothing: if others are already on the section you are told
+who and where, and they are told about you. Talk to them there, pick other
+work, or carry on side by side.
 
 ```sh
 xmatrix page link <page-id> [--block <section-slug>] [--conversation <id>]

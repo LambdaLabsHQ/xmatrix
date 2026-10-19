@@ -151,6 +151,16 @@ Migration evidence: before consolidation, the effective YAML definitions were sa
 Recovery remains the established Production Release Recovery workflow: it may cancel only the exact preflight-success/PostgreSQL-readiness-waiting shape before any build or deploy job materializes, then resume the same authorized replacement run. The parent graph and that proof are unchanged. A consolidation failure must be fixed through a new CI-validated main revision and Release Intent; do not modify immutable tags, publish unverified assets, or bypass train authorization. The existing CLI manifest/envelope `workflow: "cli-release.yml"` value remains the compatibility label expected by installed Rust update and Windows continuity consumers; relocating the reusable publisher does not rewrite that wire field. Signing helpers retain the original Developer ID leaf/team checks, pinned Apple intermediate, private keychain isolation, and cleanup; no signing identity or artifact format changed.
 
 
+## Unreleased: A claim locks nothing
+
+`xmatrix page claim` on a section that someone else is already on now succeeds,
+where it used to fail with `page_block_claimed`. The answer lists the others
+(`others`), and each conversation on the section gets a notice naming who else
+is there, so the Agents can talk, pick other work, or carry on side by side.
+An Automation occurrence claims its section beside whoever is on it, and the Run
+it starts is told who that is. Opening a block for competition is no longer
+needed.
+
 ## Unreleased: Pull requests that name a page block are not gated
 
 The GitHub App no longer publishes an `xmatrix/claim` check. A pull request that

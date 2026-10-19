@@ -1,3 +1,4 @@
+import { tellPageClaimOverlap } from "./page-claim-overlap";
 import { describePageConversations, MAX_PAGE_CONVERSATIONS, PageControlError, PostgresPageRepository, pageTitle,
   renamedPageBody, type DatabaseTransaction, type PagePrincipal } from "@xmatrix/db";
 import { ServiceUnavailable } from "./error-contract";
@@ -490,8 +491,8 @@ export function registerPageRoutes(app: Hono<{ Bindings: Env }>): void {
       summary: body.summary as string });
   }));
 
-  // Claims: a lease on a block, so the Space sees who is on what. Anyone who
-  // edits the page claims; an owner or admin opens a block for competition.
+  // Claims: who is on a block, so Agents see who is on what. A claim locks
+  // nothing; a second one on a block tells both conversations of each other.
   app.get(`${base}/:pageId/claims`, async (c) => run(c, async () => repository(c.env).claims({
     requestId: crypto.randomUUID(), spaceId: c.req.param("spaceId"), pageId: c.req.param("pageId"),
     principal: await principal(c) })));
@@ -504,6 +505,7 @@ export function registerPageRoutes(app: Hono<{ Bindings: Env }>): void {
       ...(body.minutes !== undefined ? { minutes: integer(body.minutes) } : {}),
       ...(authUser.agentRun ? { conversationId: authUser.agentRun.channelId } : {}) });
     await announceClaims(c);
+    await tellPageClaimOverlap(c.env, { spaceId: c.req.param("spaceId")!, pageId: c.req.param("pageId")!, ...result });
     return result;
   }));
   app.delete(`${base}/:pageId/claims/:claimId`, async (c) => run(c, async () => {
