@@ -232,7 +232,10 @@ export async function dispatchProductMessageLaunches(input: ProductMessagePostCo
         ? { kind: HARNESS_SIGNED_OUT_NOTICE_KIND, signedOut, sourceMention: item.sourceMention } : undefined);
     }
     for (const [body, metadata] of notices) {
-      await notice({ ...input, sourceMessageId: input.messageId, replyToMessageId: input.messageId, body,
+      // xMatrix's first-message summon is a system message, which is not a
+      // Human/Agent reply target. Keep it as the idempotent receipt's source.
+      await notice({ ...input, sourceMessageId: input.messageId, body,
+        ...(input.senderKind !== "system" ? { replyToMessageId: input.messageId } : {}),
         ...(metadata ? { metadata } : {}),
       }).catch(error => {
         logPostCommitFailure("Launch rejection notice failed", input, error);
