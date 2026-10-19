@@ -99,7 +99,7 @@ export function AgentConfigPage({
       className="app-form-page app-message-surface app-message-surface-space-setup app-material-scroll-content relative flex min-w-0 flex-1 flex-col overflow-hidden"
       aria-labelledby="agent-config-title"
     >
-      <div className="app-space-setup-canvas min-h-0 flex-1 overflow-y-auto">
+      <div className="app-space-setup-canvas app-below-band min-h-0 flex-1 overflow-y-auto">
         <SetupCardShell>
           <SetupCardHeader
             title="New agent"

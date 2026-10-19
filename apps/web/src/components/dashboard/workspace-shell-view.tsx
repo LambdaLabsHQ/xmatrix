@@ -1003,7 +1003,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     (installedFleet.ready && installedFleet.candidates.length > 0) ||
     (spaceAgentSetup.kind === "no-local-machine" && spaceChannelCount === 0));
   const renderSpaceAgentSetup = (phone: boolean) => (
-        <div className="app-tool-paper app-tool-detail min-h-0 flex-1 overflow-y-auto">
+        <div className="app-tool-paper app-tool-detail app-below-band min-h-0 flex-1 overflow-y-auto">
           <SpaceAgentSetupCard
             phone={phone}
             state={spaceAgentSetup}
@@ -1136,7 +1136,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       )}
       {showSpaceAgentSetup && !showMobileAgentSetup && renderSpaceAgentSetup(false)}
       {showSpaceFirstTask && (
-        <div className="app-tool-paper app-tool-detail min-h-0 flex-1 overflow-y-auto">
+        <div className="app-tool-paper app-tool-detail app-below-band min-h-0 flex-1 overflow-y-auto">
           <SpaceFirstTaskCard
             state={spaceFirstTask}
             spaceName={currentSpace?.name}

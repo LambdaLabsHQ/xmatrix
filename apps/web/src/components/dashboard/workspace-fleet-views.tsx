@@ -274,8 +274,8 @@ export function MoreView({
   /* Settings' list on its paper: section headings over plain list rows, no
      cards, boards or glass. You are the first row, as Slack's "You" is. */
   return (
-    <div className="app-tool-detail-scroll min-h-0 flex-1 overflow-y-auto">
-      <div className="mx-auto max-w-3xl md:pt-6">
+    <div className="app-tool-detail-scroll app-below-band min-h-0 flex-1 overflow-y-auto">
+      <div className="mx-auto max-w-3xl">
         {groups.map((group) => (
           <section key={group.label} aria-label={group.label}>
             <ListSectionHeading label={group.label} />
