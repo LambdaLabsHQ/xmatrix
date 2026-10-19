@@ -546,7 +546,7 @@ fn proxy_request(mut client: TcpStream, control: &ProxyControl) -> error::Result
         .map_err(|_| CliError::Launch("Run broker proxy state is poisoned".into()))?
         .clone();
     let target = &snapshot.broker;
-    validate_broker_target(&target)?;
+    validate_broker_target(target)?;
     let stable = control.stable_capability.as_bytes();
     let replacement = target.capability.as_bytes();
     let mut rewritten = Vec::with_capacity(header.len());
@@ -628,6 +628,107 @@ fn write_frame(stream: &mut TcpStream, value: &impl Serialize) -> error::Result<
     stream.write_all(&bytes)?;
     stream.flush()?;
     Ok(())
+}
+
+fn read_frame<T: for<'de> Deserialize<'de>>(stream: &mut TcpStream) -> error::Result<T> {
+    let mut header = [0u8; 4];
+    stream.read_exact(&mut header)?;
+    let size = u32::from_be_bytes(header) as usize;
+    if size > MAX_ADOPTION_FRAME_BYTES {
+        return Err(CliError::Launch("Run adoption frame is oversized".into()));
+    }
+    let mut bytes = vec![0u8; size];
+    stream.read_exact(&mut bytes)?;
+    Ok(serde_json::from_slice(&bytes)?)
+}
+
+fn sidecar_path(status_path: &Path) -> error::Result<PathBuf> {
+    let name = status_path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .ok_or_else(|| CliError::Launch("Run status path has no safe name".into()))?;
+    Ok(status_path.with_file_name(format!("{name}.adoption-v2.json")))
+}
+
+fn required_env(name: &str) -> error::Result<String> {
+    std::env::var(name)
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| CliError::Launch(format!("{name} is required for Run bootstrap")))
+}
+
+fn clear_bootstrap_environment() {
+    for name in [
+        BOOTSTRAP_NONCE_ENV,
+        JOB_NAME_ENV,
+        xmatrix_windows_continuity::CONTROL_PROTOCOL_ENV,
+        xmatrix_windows_continuity::CONTROL_READ_HANDLE_ENV,
+        xmatrix_windows_continuity::CONTROL_WRITE_HANDLE_ENV,
+    ] {
+        unsafe { std::env::remove_var(name) };
+    }
+}
+
+fn process_handle(pid: u32) -> error::Result<OwnedHandle> {
+    let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
+    if handle.is_null() {
+        Err(CliError::Io(std::io::Error::last_os_error()))
+    } else {
+        Ok(unsafe { OwnedHandle::from_raw_handle(handle as RawHandle) })
+    }
+}
+
+pub(super) fn process_birth_id(pid: u32) -> error::Result<u64> {
+    let handle = process_handle(pid)?;
+    xmatrix_process_tree::process_file_times(&handle)
+        .map(|(creation, _)| creation)
+        .map_err(CliError::Io)
+}
+
+fn process_executable(pid: u32) -> error::Result<PathBuf> {
+    let handle = process_handle(pid)?;
+    let mut buffer = vec![0u16; 32_768];
+    let mut size = buffer.len() as u32;
+    if unsafe {
+        QueryFullProcessImageNameW(
+            handle.as_raw_handle() as HANDLE,
+            0,
+            buffer.as_mut_ptr(),
+            &mut size,
+        )
+    } == 0
+    {
+        return Err(CliError::Io(std::io::Error::last_os_error()));
+    }
+    buffer.truncate(size as usize);
+    Ok(PathBuf::from(String::from_utf16(&buffer).map_err(
+        |_| CliError::Launch("Run wrapper executable path is invalid UTF-16".into()),
+    )?))
+}
+
+fn process_in_named_job(pid: u32, job_name: &str) -> error::Result<bool> {
+    let process = process_handle(pid)?;
+    let mut wide = std::ffi::OsStr::new(job_name)
+        .encode_wide()
+        .collect::<Vec<_>>();
+    wide.push(0);
+    let job = unsafe { OpenJobObjectW(JOB_OBJECT_QUERY, 0, wide.as_ptr()) };
+    if job.is_null() {
+        return Err(CliError::Io(std::io::Error::last_os_error()));
+    }
+    let job = unsafe { OwnedHandle::from_raw_handle(job as RawHandle) };
+    let mut member = 0;
+    if unsafe {
+        IsProcessInJob(
+            process.as_raw_handle() as HANDLE,
+            job.as_raw_handle() as HANDLE,
+            &mut member,
+        )
+    } == 0
+    {
+        return Err(CliError::Io(std::io::Error::last_os_error()));
+    }
+    Ok(member != 0)
 }
 
 #[cfg(test)]
@@ -805,105 +906,4 @@ mod proxy_reconnect_tests {
         assert!(!current.discover_profile_broker);
         std::fs::remove_file(state_path).unwrap();
     }
-}
-
-fn read_frame<T: for<'de> Deserialize<'de>>(stream: &mut TcpStream) -> error::Result<T> {
-    let mut header = [0u8; 4];
-    stream.read_exact(&mut header)?;
-    let size = u32::from_be_bytes(header) as usize;
-    if size > MAX_ADOPTION_FRAME_BYTES {
-        return Err(CliError::Launch("Run adoption frame is oversized".into()));
-    }
-    let mut bytes = vec![0u8; size];
-    stream.read_exact(&mut bytes)?;
-    Ok(serde_json::from_slice(&bytes)?)
-}
-
-fn sidecar_path(status_path: &Path) -> error::Result<PathBuf> {
-    let name = status_path
-        .file_name()
-        .and_then(|value| value.to_str())
-        .ok_or_else(|| CliError::Launch("Run status path has no safe name".into()))?;
-    Ok(status_path.with_file_name(format!("{name}.adoption-v2.json")))
-}
-
-fn required_env(name: &str) -> error::Result<String> {
-    std::env::var(name)
-        .ok()
-        .filter(|value| !value.trim().is_empty())
-        .ok_or_else(|| CliError::Launch(format!("{name} is required for Run bootstrap")))
-}
-
-fn clear_bootstrap_environment() {
-    for name in [
-        BOOTSTRAP_NONCE_ENV,
-        JOB_NAME_ENV,
-        xmatrix_windows_continuity::CONTROL_PROTOCOL_ENV,
-        xmatrix_windows_continuity::CONTROL_READ_HANDLE_ENV,
-        xmatrix_windows_continuity::CONTROL_WRITE_HANDLE_ENV,
-    ] {
-        unsafe { std::env::remove_var(name) };
-    }
-}
-
-fn process_handle(pid: u32) -> error::Result<OwnedHandle> {
-    let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
-    if handle.is_null() {
-        Err(CliError::Io(std::io::Error::last_os_error()))
-    } else {
-        Ok(unsafe { OwnedHandle::from_raw_handle(handle as RawHandle) })
-    }
-}
-
-pub(super) fn process_birth_id(pid: u32) -> error::Result<u64> {
-    let handle = process_handle(pid)?;
-    xmatrix_process_tree::process_file_times(&handle)
-        .map(|(creation, _)| creation)
-        .map_err(CliError::Io)
-}
-
-fn process_executable(pid: u32) -> error::Result<PathBuf> {
-    let handle = process_handle(pid)?;
-    let mut buffer = vec![0u16; 32_768];
-    let mut size = buffer.len() as u32;
-    if unsafe {
-        QueryFullProcessImageNameW(
-            handle.as_raw_handle() as HANDLE,
-            0,
-            buffer.as_mut_ptr(),
-            &mut size,
-        )
-    } == 0
-    {
-        return Err(CliError::Io(std::io::Error::last_os_error()));
-    }
-    buffer.truncate(size as usize);
-    Ok(PathBuf::from(String::from_utf16(&buffer).map_err(
-        |_| CliError::Launch("Run wrapper executable path is invalid UTF-16".into()),
-    )?))
-}
-
-fn process_in_named_job(pid: u32, job_name: &str) -> error::Result<bool> {
-    let process = process_handle(pid)?;
-    let mut wide = std::ffi::OsStr::new(job_name)
-        .encode_wide()
-        .collect::<Vec<_>>();
-    wide.push(0);
-    let job = unsafe { OpenJobObjectW(JOB_OBJECT_QUERY, 0, wide.as_ptr()) };
-    if job.is_null() {
-        return Err(CliError::Io(std::io::Error::last_os_error()));
-    }
-    let job = unsafe { OwnedHandle::from_raw_handle(job as RawHandle) };
-    let mut member = 0;
-    if unsafe {
-        IsProcessInJob(
-            process.as_raw_handle() as HANDLE,
-            job.as_raw_handle() as HANDLE,
-            &mut member,
-        )
-    } == 0
-    {
-        return Err(CliError::Io(std::io::Error::last_os_error()));
-    }
-    Ok(member != 0)
 }

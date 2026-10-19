@@ -1054,10 +1054,9 @@ async fn finished_daemon_child_terminates_owned_job_before_reporting_exit() {
     let descendant = {
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
         loop {
-            if let Ok(value) = std::fs::read_to_string(&pid_file) {
-                if let Ok(pid) = value.trim().parse::<u32>() {
-                    break pid;
-                }
+            if let Ok(value) = std::fs::read_to_string(&pid_file)
+                && let Ok(pid) = value.trim().parse::<u32>() {
+                break pid;
             }
             assert!(
                 std::time::Instant::now() < deadline,
