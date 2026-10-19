@@ -258,10 +258,9 @@ async function runGitHubConnectorStatement(
   }
 
   const requestedFeatures = githubRepositoryFeaturesFromCommand(input.body);
-  const capabilities = new Set([
-    ...result.capabilities,
-    ...(connection.capabilities || []),
-  ]);
+  // Subscription features require the installation's effective permissions,
+  // never a capability retained on the connection before a permission change.
+  const capabilities = new Set(result.capabilities);
   const missing = action === "subscribe"
     ? githubRequiredCapabilities(requestedFeatures).filter((capability) => !capabilities.has(capability))
     : [];

@@ -116,3 +116,14 @@ test("a repository's events still reach Channels that may carry them", () => ass
   ["private repository, closed Channel", { private: true }, reader({ mode: "closed" })],
   ["private repository, members-only Space", { private: true }, reader({ openParticipation: false })],
 ]));
+
+test("code scanning remains restricted content even when the repository is public", async () => {
+  for (const [exposure, expected] of [[reader(), 0], [reader({ mode: "closed" }), 1]]) {
+    const harness = webhookHarness(exposure);
+    const payload = { ...pushPayload({ private: false, visibility: "public" }), action: "created", alert: { number: 97 } };
+    const result = await dispatchProductGitHubWebhook({ env: {}, event: "code_scanning_alert", delivery: "alert-97",
+      payload }, { ...harness.dependencies, wake: async () => {} });
+    assert.equal(result.delivered, expected);
+    assert.equal(harness.appended.length, expected);
+  }
+});
