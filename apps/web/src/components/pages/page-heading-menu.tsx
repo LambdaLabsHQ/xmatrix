@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import { createRoot } from "react-dom/client";
 import { CalendarClock, Flag, Link2, MessageSquarePlus, PenLine } from "lucide-react";
 import { listenForOverlayDismissal } from "@/components/dashboard/use-overlay-dismiss";
+import { PaperPopover } from "@/components/ui/material-surfaces";
 
 /** What a heading offers on a phone, each said in words. */
 export interface HeadingMenu {
@@ -51,18 +52,18 @@ function HeadingMenuPopup({ anchor, title, menu, onClose }: {
   const height = list.length * ITEM_HEIGHT + 14;
   const below = place.bottom + 6 + height <= (window.visualViewport?.height ?? window.innerHeight) - 12;
   return createPortal(
-    <div ref={popup} role="menu" aria-label={`Actions for ${title}`}
-      className="xmatrix-app page-heading-menu fixed z-[var(--z-popover)] w-56 rounded-lg border border-border bg-popover p-1.5 text-popover-foreground shadow-xl"
+    <PaperPopover ref={popup} role="menu" aria-label={`Actions for ${title}`}
+      className="xmatrix-app page-heading-menu fixed z-[var(--z-popover)] w-56 p-1.5"
       style={{ ...(below ? { top: place.bottom + 6 } : { bottom: window.innerHeight - place.top + 6 }),
         right: Math.max(12, window.innerWidth - place.right) }}>
       {list.map(({ key, label, icon: Icon, run }) => (
         <button key={key} type="button" role="menuitem" onClick={() => { onClose(); run(); }}
-          className="flex min-h-11 w-full items-center gap-3 rounded-md px-3 text-left text-[15px] font-medium text-popover-foreground active:bg-muted">
+          className="flex min-h-11 w-full items-center gap-3 rounded-md px-3 text-left text-[15px] font-medium active:bg-foreground/5">
           <Icon className="size-[18px] shrink-0 text-muted-foreground" />
           <span>{label}</span>
         </button>
       ))}
-    </div>,
+    </PaperPopover>,
     anchor.ownerDocument.body,
   );
 }

@@ -8351,6 +8351,23 @@ html[data-app-theme] .xmatrix-app.xmatrix-app .app-paper-card .app-tool-lines in
   box-shadow: none !important;
 }
 
+/* A menu or small form floating over the paper (a page's selection menu, `/`
+   insert, a link being typed, Show editors, the table tools; Discuss on a
+   passage selected in a message) is a slip of that same paper laid over it,
+   not glass (user 2026-10-19: 这个风格不符合纸面风格):
+   opaque paper so the text under it never shows through, the paper controls'
+   fine warm ink ring, corners like theirs, and a short soft shadow that lifts
+   it just enough to stand off the text it covers. */
+.app-material-paper-popover {
+  background: var(--app-panel-paper, oklch(0.976 0.005 85));
+  color: var(--app-panel-ink, var(--foreground));
+  border-radius: 8px;
+  box-shadow:
+    0 0 0 1px oklch(0.35 0.07 60 / 0.16),
+    0 2px 4px oklch(0 0 0 / 0.04),
+    0 6px 16px -4px oklch(0.35 0.07 60 / 0.14);
+}
+
 /* Notices on the paper: plain white with the tone's rail, not glass. */
 html[data-app-theme] .xmatrix-app.xmatrix-app .app-tool-detail .app-notice {
   background: oklch(0.995 0.002 85) !important;
