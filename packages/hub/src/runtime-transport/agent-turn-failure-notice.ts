@@ -5,6 +5,7 @@ import {
   agentTurnFailureNoticeBody,
   isAgentTurnFailureLifecycle,
   boundAgentTurnFailureDetail,
+  safeAgentFailureDetail,
   agentFailureEvidence,
 } from "@xmatrix/protocol";
 
@@ -91,7 +92,7 @@ export function shouldPersistAgentTurnFailureNotice(message: Parameters<typeof i
 /** Hub words the interruption from the host's count; an older host sent the sentence. */
 function backgroundInterruptionDetail(input: { pendingTasks?: number | null; detail?: string | null }): string {
   const count = input.pendingTasks;
-  if (typeof count !== "number" || !Number.isSafeInteger(count) || count < 0) return boundAgentTurnFailureDetail(input.detail);
+  if (typeof count !== "number" || !Number.isSafeInteger(count) || count < 0) return boundAgentTurnFailureDetail(safeAgentFailureDetail(input.detail));
   return `The provider stream ended with ${count} ${count === 1 ? "task" : "tasks"} still pending. ` +
     "Their outcome is unknown; verify external operations before continuing.";
 }

@@ -857,7 +857,7 @@ export function agentUsageLimitFromError(error: string | undefined | null): { re
 }
 
 export function boundAgentTurnFailureDetail(detail: string | undefined | null): string {
-  const compact = safeAgentFailureDetail(detail).replace(/\s+/gu, " ").trim();
+  const compact = (detail ?? "").replace(/\s+/gu, " ").trim();
   if (!compact) return "";
   return Array.from(compact).slice(0, AGENT_TURN_FAILURE_DETAIL_MAX_CHARS).join("");
 }
@@ -867,7 +867,7 @@ export function agentTurnFailureNoticeBody(input: {
   detail?: string | null;
 }): string {
   const name = input.agentName.trim() || "agent";
-  const detail = boundAgentTurnFailureDetail(input.detail);
+  const detail = boundAgentTurnFailureDetail(safeAgentFailureDetail(input.detail));
   const cause = detail
     ? `xMatrix could not complete this ${name} turn: ${detail}`
     : `xMatrix could not complete this ${name} turn.`;

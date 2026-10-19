@@ -1,4 +1,4 @@
-import { boundAgentTurnFailureDetail } from "@xmatrix/protocol";
+import { boundAgentTurnFailureDetail, safeAgentFailureDetail } from "@xmatrix/protocol";
 import type { AgentInstanceTurnRetryMessage } from "@xmatrix/protocol/connections/agent-instance";
 
 // Product policy lives only on the Hub. Hosts report outcomes, never budgets
@@ -79,7 +79,7 @@ export function turnRetryNotice(state: HubTurnRetry): string {
   if (["waiting", "issued", "completed"].includes(state.state)) return prefix + outcome;
   // The host stays silent for these outcomes, so this notice is the only
   // place its original error appears. Mention sigils cannot summon anyone.
-  const error = boundAgentTurnFailureDetail(state.errorMessage).replace(/[@＠]/gu, "﹫");
+  const error = boundAgentTurnFailureDetail(safeAgentFailureDetail(state.errorMessage));
   return prefix + outcome + (error ? ` Error: ${error}` : "");
 }
 
