@@ -321,6 +321,7 @@ export {
 } from "./push-devices.js";
 
 export { PostgresAccountDeletionRepository, AccountDeletionError, accountIdentityRevoked } from "./account-deletion.js";
+export { CHANNEL_PURGE_STEPS, channelPurgeObjects, purgeChannelRows, recordChannelPurgeObjects } from "./channel-deletion.js";
 export type { AccountMessageProfileRow, PrepareErasedMessageProfile } from "./account-message-profile-erasure.js";
 export type { AccountDeletionBlocker, AccountDeletionState } from "./account-deletion.js";
 export type { AccountSpaceClosureAuthorization } from "./account-space-closure-authorization.js";

@@ -271,6 +271,8 @@ export const SPACE_PURGE_STEPS: readonly { table: string; predicate: string }[] 
   { table: "data.automation_occurrences", predicate:
     `automation_id IN (SELECT automation_id FROM data.automations WHERE channel_id IN ${SPACE_CHANNELS})` },
   { table: "data.automations", predicate: `channel_id IN ${SPACE_CHANNELS}` },
+  ...["data.run_agent_registrations", "data.registration_stop_intents"]
+    .map((table) => ({ table, predicate: "space_id=$1" })),
   ...[
     "data.instances", "data.runs", "data.natural_key_counters", "data.natural_key_reservations",
     "data.machine_run_routes", "data.machine_run_snapshot_heads", "data.machine_run_terminal_reports",
@@ -282,7 +284,11 @@ export const SPACE_PURGE_STEPS: readonly { table: string; predicate: string }[] 
   ...[
     "data.agent_launches", "data.agent_message_executions", "data.agent_reborn_intents",
     "data.agent_registration_commands",
-    "data.app_gmail_routes", "data.app_connector_action_requests", "data.app_connector_action_policies", "data.app_connector_connections",
+    "data.app_gmail_routes", "data.app_connector_action_requests", "data.app_connector_action_policies",
+    "data.app_sentry_event_jobs", "data.app_dingtalk_inbound_jobs", "data.app_dingtalk_inbound_scopes",
+    "data.app_dingtalk_inbound_attempts", "data.app_dingtalk_company_attempts", "data.app_dingtalk_company_grants",
+    "data.app_feishu_link_attempts", "data.app_feishu_room_bindings",
+    "data.app_telegram_link_attempts", "data.app_telegram_room_bindings", "data.app_connector_connections",
     "data.app_connector_credentials", "data.app_connector_oauth_installations", "data.app_github_installation_links",
     "data.app_wecom_install_attempts", "data.app_wecom_installations",
     "data.app_teams_link_attempts", "data.app_teams_room_bindings",
@@ -298,8 +304,7 @@ export const SPACE_PURGE_STEPS: readonly { table: string; predicate: string }[] 
     "data.message_sequence_reservations", "data.messages", "data.page_access", "data.page_block_competitions",
     "data.page_claims", "data.page_co_writing", "data.page_links", "data.page_migrations", "data.page_reads",
     "data.page_revisions", "data.pages", "data.registration_access_changes",
-    "data.registration_launch_intents", "data.registration_stop_intents",
-    "data.run_agent_registrations", "data.space_action_claims",
+    "data.registration_launch_intents", "data.space_action_claims",
     "data.space_agent_registration_access", "data.space_agent_registrations",
     "data.space_billing_checkout_intents", "data.space_harness_profiles",
     "data.space_billing_subscriptions", "data.space_billing_usage", "data.space_billing_webhook_events",
@@ -330,6 +335,10 @@ export const SPACE_PURGE_EXCLUDED_TABLES: Readonly<Record<string, string>> = Obj
   "data.space_control_heads": "removed by the finalizing transaction",
   "control.space_placement": "removed by the finalizing transaction",
   "data.space_deletions": "the audit record of the deletion itself",
+  "data.channel_deletions": "minimal Channel retirement records prevent identity reuse",
+  "control.apple_account_tokens": "immutable purchase ownership must prevent rebinding after Space deletion",
+  "control.apple_seat_groups": "immutable organization purchase ownership must prevent rebinding",
+  "data.secret_grant_audit": "content-free credential-access audit survives Space deletion",
   "data.app_slack_workspace_claims": "the workspace's bot stays in its channels until Slack uninstalls it",
 });
 
@@ -348,6 +357,7 @@ export type SpacePurgeStep =
   | { status: "absent" }
   | { status: "completed"; deletion: Record<string, unknown> }
   | { status: "restorable"; purgeAfter: string }
+  | { status: "waiting"; retryAt: string }
   | { status: "objects"; objectKeys: string[]; cursor: string; exhausted: boolean }
   | { status: "rows"; purgedRows: number }
   | { status: "finalize" };
@@ -378,6 +388,10 @@ export async function nextSpacePurgeStep(
   const deletion = await lockSpaceDeletion(transaction, input.spaceId);
   if (!deletion) return { status: "absent" };
   if (deletion.state === "completed") return { status: "completed", deletion: serializeSpaceDeletion(deletion) };
+  const pendingChannels = await transaction.query({ name: "space_purge_pending_channels_v1",
+    text: "SELECT 1 FROM data.channel_deletions WHERE space_id=$1 AND state='purging' LIMIT 1",
+    values: [input.spaceId], maxRows: 1 });
+  if (pendingChannels.length) return { status: "waiting", retryAt: new Date(Date.parse(input.now) + 60_000).toISOString() };
   if (deletion.state === "scheduled") {
     if (Date.parse(iso(deletion.purge_after)) > Date.parse(input.now)) {
       return { status: "restorable", purgeAfter: iso(deletion.purge_after) };
@@ -388,7 +402,10 @@ export async function nextSpacePurgeStep(
     return spacePurgeObjects(transaction, input.spaceId, deletion.purge_cursor ?? "");
   }
   if (deletion.purge_step === "finalize") return { status: "finalize" };
-  let index = stepIndex(deletion.purge_step);
+  // Validate the retained marker, but revisit the bounded plan from its start:
+  // dependencies added before an old cursor must also be erased after upgrade.
+  stepIndex(deletion.purge_step);
+  let index = 0;
   let purgedRows = 0;
   while (index < SPACE_PURGE_STEPS.length && purgedRows < PURGE_STEP_ROW_BUDGET) {
     const { table, predicate } = SPACE_PURGE_STEPS[index]!;
