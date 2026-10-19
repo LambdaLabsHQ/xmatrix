@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::config::{self, replace_file_atomically, unique_temporary_path};
 use crate::error::{CliError, Result};
-use crate::protocol::{DEFAULT_HUB_URL, TEST_HUB_URL};
+use crate::protocol::DEFAULT_HUB_URL;
 
 pub const PROFILE_REGISTRY_SCHEMA_VERSION: u32 = 1;
 
@@ -531,7 +531,9 @@ impl ProfileStore {
 
     fn bootstrap_registry(&self) -> Result<ProfileRegistry> {
         let legacy_path = self.installation.as_path().join("config.json");
-        let legacy_config = match std::fs::read_to_string(&legacy_path) {
+        // A legacy root is adopted as the production profile, but only when its
+        // config is still readable.
+        match std::fs::read_to_string(&legacy_path) {
             Ok(raw) => {
                 let parsed =
                     serde_json::from_str::<serde_json::Value>(raw.trim_start_matches('\u{feff}'))
@@ -547,33 +549,10 @@ impl ProfileStore {
                         legacy_path.display()
                     )));
                 }
-                Some(parsed)
             }
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => None,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
             Err(err) => return Err(CliError::Io(err)),
-        };
-        let active_environment = match legacy_config
-            .as_ref()
-            .and_then(|config| config.get("activeEnvironment"))
-        {
-            None => "production",
-            Some(serde_json::Value::String(value))
-                if matches!(value.as_str(), "production" | "test") =>
-            {
-                value.as_str()
-            }
-            Some(_) => {
-                return Err(CliError::Auth(format!(
-                    "Cannot bootstrap profiles because activeEnvironment in {} is invalid",
-                    legacy_path.display()
-                )));
-            }
-        };
-        let hub_url = if active_environment == "test" {
-            TEST_HUB_URL
-        } else {
-            DEFAULT_HUB_URL
-        };
+        }
         let id = ProfileId::new();
         let now = unix_now_string();
         Ok(ProfileRegistry {
@@ -582,8 +561,8 @@ impl ProfileStore {
             default_profile_id: id.clone(),
             profiles: vec![ProfileRecord {
                 id,
-                name: active_environment.to_string(),
-                hub_url: normalize_profile_hub_origin(hub_url)?,
+                name: "production".to_string(),
+                hub_url: normalize_profile_hub_origin(DEFAULT_HUB_URL)?,
                 enabled: true,
                 state_kind: ProfileStateKind::LegacyRoot,
                 created_at: now.clone(),
@@ -1103,17 +1082,17 @@ mod tests {
     }
 
     #[test]
-    fn bootstrap_preserves_the_legacy_environment_and_root() {
+    fn bootstrap_adopts_the_legacy_root_as_production() {
         let (root, store) = store("bootstrap");
         std::fs::create_dir_all(&root).unwrap();
-        std::fs::write(root.join("config.json"), r#"{"activeEnvironment":"test"}"#).unwrap();
+        std::fs::write(root.join("config.json"), r#"{"machineSeed":"seed"}"#).unwrap();
 
         let registry = store.load_or_bootstrap().unwrap();
         let context = store.context_for_default(&registry).unwrap();
 
         assert_eq!(registry.revision, 1);
-        assert_eq!(context.name, "test");
-        assert_eq!(context.hub_origin, TEST_HUB_URL);
+        assert_eq!(context.name, "production");
+        assert_eq!(context.hub_origin, DEFAULT_HUB_URL);
         assert_eq!(context.state_kind, ProfileStateKind::LegacyRoot);
         assert_eq!(context.state_root.as_path(), root);
         let _ = std::fs::remove_dir_all(root);

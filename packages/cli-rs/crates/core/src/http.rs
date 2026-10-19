@@ -268,21 +268,10 @@ fn rate_limit_wait(response: &reqwest::Response) -> Option<Duration> {
     Some(wait.map_or(MAX_RATE_LIMIT_WAIT, |wait| wait.min(MAX_RATE_LIMIT_WAIT)))
 }
 
-pub fn with_access_header(
-    request: reqwest::RequestBuilder,
-    url: &str,
-) -> Result<reqwest::RequestBuilder> {
-    Ok(match crate::access::cached_token_for_url(url)? {
-        Some(token) => request.header(crate::access::ACCESS_TOKEN_HEADER, token),
-        None => request,
-    })
-}
-
 pub async fn websocket_request(
     url: &str,
     component: ClientComponent,
 ) -> Result<tokio_tungstenite::tungstenite::http::Request<()>> {
-    crate::access::refresh_for_url(url).await?;
     let mut request = url.into_client_request()?;
     let headers = request.headers_mut();
     headers.insert(
@@ -310,19 +299,10 @@ pub async fn websocket_request(
             .parse()
             .map_err(|error| CliError::Relay(format!("Invalid client platform header: {error}")))?,
     );
-    if let Some(token) = crate::access::cached_token_for_url(url)? {
-        headers.insert(
-            crate::access::ACCESS_TOKEN_HEADER,
-            token.parse().map_err(|_| {
-                CliError::Auth("Cloudflare Access returned an invalid header value".into())
-            })?,
-        );
-    }
     Ok(request)
 }
 
 pub fn websocket_connect_error(
-    url: &str,
     context: &str,
     error: tokio_tungstenite::tungstenite::Error,
 ) -> CliError {
@@ -344,17 +324,6 @@ pub fn websocket_connect_error(
                     .to_string()
             });
         return CliError::UpgradeRequired(message);
-    }
-    if let tokio_tungstenite::tungstenite::Error::Http(response) = &error
-        && crate::access::requires_access(url)
-        && matches!(
-            response.status().as_u16(),
-            301 | 302 | 303 | 307 | 308 | 401 | 403
-        )
-    {
-        return CliError::Auth(crate::access::access_denial_message(
-            response.status().as_u16(),
-        ));
     }
     // A handshake the Hub answered with a client error is its refusal; any
     // other failure — no route, a dropped TLS handshake, a 5xx from a
@@ -505,12 +474,6 @@ pub async fn request_json<T: DeserializeOwned>(
     token: Option<&str>,
     body: Option<serde_json::Value>,
 ) -> Result<T> {
-    if crate::access::requires_access(url)
-        && let Some((broker_url, capability)) = crate::access::daemon_request_broker()
-    {
-        return request_json_via_daemon(&broker_url, &capability, url, method, token, body, false)
-            .await;
-    }
     match request_json_direct(url, method, token, body).await? {
         JsonReply::Accepted(value) => Ok(value),
         JsonReply::Refused { error, .. } => Err(error),
@@ -552,8 +515,6 @@ pub async fn request_json_direct<T: DeserializeOwned>(
 
     req = req.header(CONTENT_TYPE, "application/json");
 
-    req = with_access_header(req, url)?;
-
     if let Some(t) = token {
         req = req.header(AUTHORIZATION, format!("Bearer {t}"));
     }
@@ -566,7 +527,7 @@ pub async fn request_json_direct<T: DeserializeOwned>(
     let status = response.status();
 
     if status.is_redirection() || status.is_client_error() || status.is_server_error() {
-        let error = response_rejection_error(response, url).await?;
+        let error = response_rejection_error(response).await;
         return Ok(JsonReply::Refused {
             status: status.as_u16(),
             error,
@@ -869,110 +830,35 @@ pub async fn put_bytes<T: DeserializeOwned>(
     checksum_sha256: &str,
     body: Vec<u8>,
 ) -> Result<T> {
-    if crate::access::requires_access(url)
-        && let Some((broker_url, capability)) = crate::access::daemon_request_broker()
-    {
-        return put_bytes_via_daemon(
-            &broker_url,
-            &capability,
-            url,
-            token,
-            content_type,
-            checksum_sha256,
-            body,
-        )
-        .await;
-    }
-    let mut request = client()?
+    let request = client()?
         .put(url)
         .header(AUTHORIZATION, format!("Bearer {token}"))
         .header(CONTENT_TYPE, content_type)
         .header("x-xmatrix-content-sha256", checksum_sha256)
         .body(body);
-    request = with_access_header(request, url)?;
     let response = send_with_retry(request).await?;
     let status = response.status();
     if status.is_redirection() || status.is_client_error() || status.is_server_error() {
-        let error = response_rejection_error(response, url).await?;
-        return Err(error);
+        return Err(response_rejection_error(response).await);
     }
     Ok(response.json::<T>().await?)
 }
 
-async fn put_bytes_via_daemon<T: DeserializeOwned>(
-    broker_url: &str,
-    capability: &str,
-    url: &str,
-    token: &str,
-    content_type: &str,
-    checksum_sha256: &str,
-    body: Vec<u8>,
-) -> Result<T> {
-    #[derive(serde::Deserialize)]
-    struct BrokerResponse {
-        #[serde(default)]
-        value: Option<serde_json::Value>,
-        #[serde(default)]
-        error: Option<String>,
-    }
-
-    let response = reqwest::Client::new()
-        .post(format!(
-            "{broker_url}/request/hub-bytes?url={}",
-            urlencoding::encode(url)
-        ))
-        .header("x-xmatrix-request-capability", capability)
-        .header("x-xmatrix-hub-token", token)
-        .header("x-xmatrix-content-type", content_type)
-        .header("x-xmatrix-content-sha256", checksum_sha256)
-        .body(body)
-        .send()
-        .await
-        .map_err(|err| CliError::Auth(format!("Local daemon Hub broker unavailable: {err}")))?;
-    let status = response.status();
-    let payload: BrokerResponse = response.json().await.map_err(|err| {
-        CliError::Auth(format!("Invalid local daemon Hub broker response: {err}"))
-    })?;
-    if !status.is_success() || payload.error.is_some() {
-        return Err(CliError::Http(payload.error.unwrap_or_else(|| {
-            format!("Local daemon Hub broker failed with {status}")
-        })));
-    }
-    serde_json::from_value(
-        payload
-            .value
-            .ok_or_else(|| CliError::Http("Local daemon Hub broker returned no value".into()))?,
-    )
-    .map_err(CliError::Json)
-}
-
 /// Accept only a successful status before callers consume a media body.
-pub async fn require_success(response: reqwest::Response, url: &str) -> Result<reqwest::Response> {
+pub async fn require_success(response: reqwest::Response) -> Result<reqwest::Response> {
     let status = response.status();
     if !status.is_success() {
-        if let Some(error) = access_status_error(url, status) {
-            return Err(error);
-        }
         let text = response.text().await.unwrap_or_default();
         return Err(response_status_error(status, &text));
     }
     Ok(response)
 }
 
-/// JSON endpoints read the refusal body before applying access-denial policy.
-async fn response_rejection_error(response: reqwest::Response, url: &str) -> Result<CliError> {
+/// JSON endpoints read the refusal body into the error.
+async fn response_rejection_error(response: reqwest::Response) -> CliError {
     let status = response.status();
     let text = response.text().await.unwrap_or_default();
-    if let Some(error) = access_status_error(url, status) {
-        return Err(error);
-    }
-    Ok(response_status_error(status, &text))
-}
-
-pub fn access_status_error(url: &str, status: reqwest::StatusCode) -> Option<CliError> {
-    (crate::access::requires_access(url)
-        && matches!(status.as_u16(), 301 | 302 | 303 | 307 | 308 | 401 | 403))
-    .then(|| CliError::Auth(crate::access::access_denial_message(status.as_u16())))
+    response_status_error(status, &text)
 }
 
 pub fn response_status_error(status: reqwest::StatusCode, body: &str) -> CliError {
@@ -1142,7 +1028,6 @@ mod tests {
             ))
             .expect("valid response");
         let error = websocket_connect_error(
-            "wss://xmatrix-hub.test.xmatrix.sh/ws",
             "WebSocket handshake failed",
             tokio_tungstenite::tungstenite::Error::Http(Box::new(response)),
         );
@@ -1153,29 +1038,16 @@ mod tests {
     }
 
     #[test]
-    fn websocket_access_denial_is_scoped_to_the_test_origin() {
-        let denied = || {
-            tokio_tungstenite::tungstenite::Error::Http(Box::new(
-                tokio_tungstenite::tungstenite::http::Response::builder()
-                    .status(tokio_tungstenite::tungstenite::http::StatusCode::FORBIDDEN)
-                    .body(None)
-                    .unwrap(),
-            ))
-        };
-        let test_error = websocket_connect_error(
-            "wss://xmatrix-hub.test.xmatrix.sh/ws",
-            "WebSocket handshake failed",
-            denied(),
-        );
-        assert!(matches!(test_error, CliError::Auth(_)));
-
-        let production_error = websocket_connect_error(
-            "wss://xmatrix-hub.xmatrix.sh/ws",
-            "WebSocket handshake failed",
-            denied(),
-        );
-        assert!(matches!(production_error, CliError::Relay(_)));
-        assert!(!production_error.is_transient());
+    fn a_websocket_handshake_the_hub_refused_is_not_transient() {
+        let denied = tokio_tungstenite::tungstenite::Error::Http(Box::new(
+            tokio_tungstenite::tungstenite::http::Response::builder()
+                .status(tokio_tungstenite::tungstenite::http::StatusCode::FORBIDDEN)
+                .body(None)
+                .unwrap(),
+        ));
+        let error = websocket_connect_error("WebSocket handshake failed", denied);
+        assert!(matches!(error, CliError::Relay(_)));
+        assert!(!error.is_transient());
     }
 
     #[test]
@@ -1186,14 +1058,9 @@ mod tests {
                 .body(None)
                 .unwrap(),
         ));
-        let error = websocket_connect_error(
-            "wss://xmatrix-hub.xmatrix.sh/ws",
-            "WebSocket handshake failed",
-            unavailable,
-        );
+        let error = websocket_connect_error("WebSocket handshake failed", unavailable);
         assert!(error.is_transient(), "{error:?}");
         let dropped = websocket_connect_error(
-            "wss://xmatrix-hub.xmatrix.sh/ws",
             "WebSocket handshake failed",
             tokio_tungstenite::tungstenite::Error::ConnectionClosed,
         );

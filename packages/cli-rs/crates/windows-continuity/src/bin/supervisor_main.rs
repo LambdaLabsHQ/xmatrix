@@ -171,7 +171,6 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             .env("XMATRIX_SUPERVISOR_PARENT", "1")
             .env("XMATRIX_HUB_URL", &hub_url)
             .env("XMATRIX_SUPERVISOR_TRANSACTION_NONCE", &control_nonce)
-            .env_remove("XMATRIX_ENVIRONMENT")
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null());

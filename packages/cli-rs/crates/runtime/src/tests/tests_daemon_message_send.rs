@@ -33,7 +33,6 @@ impl SendBrokerFixture {
         let request = super::DaemonLocalHttpRequest {
             method: "POST".into(),
             path: "/request/hub-json".into(),
-            query: HashMap::new(),
             body: vec![],
             headers: HashMap::from([(
                 "x-xmatrix-request-capability".into(),

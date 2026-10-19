@@ -51,9 +51,8 @@ Never request passwords, OTPs, tokens, or API keys in chat. Do not replace a run
 Agent's scoped authentication with a human login.
 
 Use `xmatrix spaces` and `xmatrix channels` to select context. Ask for a channel
-only if necessary and not already supplied. `xmatrix env --help` and
-`xmatrix profile --help` describe connection profiles and production/test selection;
-a connection profile is unrelated to an Agent.
+only if necessary and not already supplied. `xmatrix profile --help` describes
+connection profiles; a connection profile is unrelated to an Agent.
 
 ```sh
 xmatrix agent discover

@@ -322,3 +322,10 @@ registration when available. Missing or erased ownership stays unattributed.
 Last access remains a separate session metric; daemon presence does not advance
 Last message. Existing message counts and daily user charts remain user-authored
 message counts.
+
+Platform admin user details show the Space connections each user added, with
+retained and 30-day execution counts, status totals, standard webhook/event
+Channel deliveries, last activity and subscriptions. Activity includes every
+caller in that Space; delivery counts are per Channel and do not claim raw
+webhook HTTP attempts. Reads remain audited and metadata only. Older Hubs leave
+usage unknown. See [platform admin](../operations/platform-admin-overview.md#connector-activity-in-user-details).

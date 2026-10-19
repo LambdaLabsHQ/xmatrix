@@ -23,9 +23,7 @@ pub async fn connect(
         return tokio_tungstenite::connect_async(request)
             .await
             .map(|value| value.0)
-            .map_err(|error| {
-                http::websocket_connect_error(&url, "WebSocket handshake failed", error)
-            });
+            .map_err(|error| http::websocket_connect_error("WebSocket handshake failed", error));
     };
     let proxy = proxy_for(
         &host,
@@ -67,7 +65,7 @@ pub async fn connect(
     tokio_tungstenite::client_async_tls(request, stream)
         .await
         .map(|value| value.0)
-        .map_err(|error| http::websocket_connect_error(&url, "WebSocket handshake failed", error))
+        .map_err(|error| http::websocket_connect_error("WebSocket handshake failed", error))
 }
 
 pub(crate) async fn connect_endpoint(

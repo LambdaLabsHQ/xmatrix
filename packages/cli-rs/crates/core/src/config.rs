@@ -5,7 +5,7 @@ use crate::error::{CliError, Result};
 use crate::hex::sha256_hex;
 use crate::human_connection::derive_connection_url as derive_human_connection_url;
 use crate::profile::ProfileContext;
-use crate::protocol::{AuthUser, DEFAULT_HUB_URL, TEST_HUB_URL, normalize_hub_url};
+use crate::protocol::{AuthUser, DEFAULT_HUB_URL, normalize_hub_url};
 
 /// A configured text value, with surrounding whitespace removed and blanks absent.
 pub fn non_empty_env(name: &str) -> Option<String> {
@@ -94,18 +94,6 @@ pub struct CliConfig {
         default
     )]
     pub machine_seed: Option<String>,
-    #[serde(
-        rename = "activeEnvironment",
-        skip_serializing_if = "Option::is_none",
-        default
-    )]
-    pub active_environment: Option<String>,
-    #[serde(
-        rename = "cloudflaredPath",
-        skip_serializing_if = "Option::is_none",
-        default
-    )]
-    pub cloudflared_path: Option<String>,
 }
 
 pub fn config_dir() -> PathBuf {
@@ -339,8 +327,6 @@ pub fn session_path_for_hub(hub_url: &str) -> PathBuf {
     let hub = normalized_hub_origin(hub_url);
     let file_name = if hub == DEFAULT_HUB_URL {
         "production.json".to_string()
-    } else if hub == TEST_HUB_URL {
-        "test.json".to_string()
     } else {
         format!("custom-{}.json", sha256_hex(hub.as_bytes()))
     };
@@ -417,17 +403,6 @@ pub async fn load_config() -> CliConfig {
     }
 }
 
-pub async fn active_environment() -> String {
-    if let Some(context) = active_profile_context() {
-        return context.name;
-    }
-    load_config()
-        .await
-        .active_environment
-        .filter(|value| matches!(value.as_str(), "production" | "test"))
-        .unwrap_or_else(|| "production".to_string())
-}
-
 pub async fn active_hub_url() -> String {
     if let Some(hub) = agent_cli_hub() {
         return hub.to_string();
@@ -435,20 +410,7 @@ pub async fn active_hub_url() -> String {
     if let Some(context) = active_profile_context() {
         return context.hub_origin;
     }
-    match active_environment().await.as_str() {
-        "test" => TEST_HUB_URL.to_string(),
-        _ => DEFAULT_HUB_URL.to_string(),
-    }
-}
-
-pub async fn saved_cloudflared_path() -> Option<PathBuf> {
-    load_config().await.cloudflared_path.map(PathBuf::from)
-}
-
-pub async fn save_cloudflared_path(path: &Path) -> Result<()> {
-    let mut config = load_config().await;
-    config.cloudflared_path = Some(path.to_string_lossy().to_string());
-    write_config(&config).await
+    DEFAULT_HUB_URL.to_string()
 }
 
 pub async fn load_session() -> Option<CliSession> {
@@ -1392,11 +1354,11 @@ mod tests {
         .await
         .unwrap();
         save_session(
-            "test-token".to_string(),
+            "custom-token".to_string(),
             None,
             user,
-            "https://xmatrix-hub.test.xmatrix.sh".to_string(),
-            "wss://xmatrix-hub.test.xmatrix.sh/ws".to_string(),
+            "https://hub.example".to_string(),
+            "wss://hub.example/ws".to_string(),
             None,
         )
         .await
@@ -1410,21 +1372,21 @@ mod tests {
             "production-token"
         );
         assert_eq!(
-            load_session_for_hub("https://xmatrix-hub.test.xmatrix.sh")
+            load_session_for_hub("https://hub.example")
                 .await
                 .unwrap()
                 .token,
-            "test-token"
+            "custom-token"
         );
         assert_eq!(
-            load_session_for_hub("https://xmatrix-hub.test.xmatrix.sh/api/ignored")
+            load_session_for_hub("https://hub.example/api/ignored")
                 .await
                 .unwrap()
                 .token,
-            "test-token"
+            "custom-token"
         );
         assert!(
-            load_session_for_hub("https://xmatrix-hub.test.xmatrix.sh:8443")
+            load_session_for_hub("https://hub.example:8443")
                 .await
                 .is_none()
         );

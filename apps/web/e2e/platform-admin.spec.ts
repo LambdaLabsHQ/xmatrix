@@ -1,6 +1,6 @@
 import { expect, test } from "./fixtures";
 import { fixtureRequests, fixtureRule, releaseFixture } from "./in-page-api-fixtures";
-import { OVERVIEW, openWorkspaceAs } from "./platform-admin-fixtures";
+import { OVERVIEW, USER_DETAIL, openWorkspaceAs } from "./platform-admin-fixtures";
 import { fixtureJson } from "./workspace-fixtures";
 
 // The operator rail entry is desktop-only (md:flex), so this spec runs wide.
@@ -89,6 +89,12 @@ test("opening a user shows their metadata-only detail, and Back returns to the l
   await expect(page.getByRole("region", { name: "Agents (1)" }).getByText("claude-reviewer")).toBeVisible();
   await expect(page.getByRole("region", { name: "Machines (1)" }).getByText("online", { exact: true })).toBeVisible();
   await expect(page.getByRole("region", { name: "Connectors added (1)" }).getByText("GitHub")).toBeVisible();
+  const connectors = page.getByRole("region", { name: "Connectors added (1)" });
+  await expect(connectors.getByText("17 / 24", { exact: true })).toBeVisible();
+  await expect(connectors.getByText("31 / 48", { exact: true })).toBeVisible();
+  await expect(connectors.getByText(/19 completed/)).toBeVisible();
+  await expect(connectors.getByText(/2 failed/)).toBeVisible();
+  await expect(connectors.getByText(/Activity covers all callers/)).toBeVisible();
   await expect(page.getByRole("region", { name: "Sessions (1)" }).getByText("active", { exact: true })).toBeVisible();
   await expect(page.getByText("Session addresses and devices are not shown to operators.")).toBeVisible();
   await expect(page.getByRole("img", { name: /This user's daily messages/ })).toBeVisible();
@@ -104,6 +110,20 @@ test("the audit trail lists operator reads", async ({ page }) => {
   const audit = page.getByRole("region", { name: "Audit trail" });
   await expect(audit.getByText("Opened a user")).toBeVisible();
   await expect(audit.getByText("user:user:1")).toBeVisible();
+});
+
+test("connector activity stays unknown with an older Hub", async ({ page }) => {
+  await openWorkspaceAs(page, true);
+  await fixtureJson(page, "admin-user", /\/api\/xmatrix\/admin\/users\/[^/?]+(?:\?.*)?$/, {
+    detail: { ...USER_DETAIL, connectors: USER_DETAIL.connectors.map((connector) => ({
+      ...connector, usage: undefined,
+    })) },
+  });
+  await page.goto("/app/personal-sspaceperso/admin?item=users&user=user%3A1");
+  const connectors = page.getByRole("region", { name: "Connectors added (1)" });
+  await expect(connectors.getByText("GitHub")).toBeVisible();
+  await expect(connectors.getByText("—", { exact: true })).toHaveCount(5);
+  await expect(connectors.getByText("0 / 0", { exact: true })).toHaveCount(0);
 });
 
 test("a non-admin account is offered no operator entry and the view fails closed", async ({ page }) => {

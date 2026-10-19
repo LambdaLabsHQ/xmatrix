@@ -55,6 +55,11 @@ interface MachineRow extends QueryResultRow {
 interface ConnectorRow extends QueryResultRow {
   space_id: string; provider_id: string; provider_name: string; status: string;
   created_at: Time; last_checked_at: Time | null;
+  requests: Count; requests_last_30d: Count;
+  queued: Count; completed: Count; failed: Count; blocked: Count; planned: Count;
+  last_request_at: Time | null;
+  event_deliveries: Count; event_deliveries_last_30d: Count; last_event_at: Time | null;
+  subscribed_channels: Count; subscriptions: Count;
 }
 
 interface RunRow extends QueryResultRow {
@@ -124,11 +129,42 @@ async function readShard(
     }) : [];
 
     const connectors = await transaction.query<ConnectorRow>({
-      name: "postgres_admin_user_connectors_v1",
-      text: `SELECT space_id, provider_id, provider_name, status, created_at, last_checked_at
-        FROM data.app_connector_connections WHERE created_by = $1
-        ORDER BY created_at DESC, connection_id LIMIT $2`,
-      values: [userId, bound + 1],
+      name: "postgres_admin_user_connectors_v2",
+      text: `WITH connections AS MATERIALIZED (
+          SELECT connection_id, space_id, provider_id, provider_name, status, created_at, last_checked_at
+          FROM data.app_connector_connections WHERE created_by = $1
+          ORDER BY created_at DESC, connection_id LIMIT $2
+        )
+        SELECT c.space_id, c.provider_id, c.provider_name, c.status, c.created_at, c.last_checked_at,
+          executions.*, events.*,
+          (SELECT COUNT(DISTINCT relation.channel_id) FROM data.app_source_relations relation
+            WHERE relation.connection_id = c.connection_id AND relation.space_id = c.space_id) AS subscribed_channels,
+          (SELECT COUNT(*) FROM data.app_source_relations relation
+            WHERE relation.connection_id = c.connection_id AND relation.space_id = c.space_id) AS subscriptions
+        FROM connections c
+        CROSS JOIN LATERAL (
+          SELECT COUNT(*) AS requests, COUNT(*) FILTER (WHERE created_at >= $3) AS requests_last_30d,
+            COUNT(*) FILTER (WHERE status = 'queued') AS queued,
+            COUNT(*) FILTER (WHERE status = 'completed') AS completed,
+            COUNT(*) FILTER (WHERE status = 'failed') AS failed,
+            COUNT(*) FILTER (WHERE status = 'blocked') AS blocked,
+            COUNT(*) FILTER (WHERE status = 'planned') AS planned,
+            MAX(created_at) AS last_request_at
+          FROM data.app_connector_executions execution
+          WHERE execution.space_id = c.space_id AND execution.provider_id = c.provider_id
+            AND execution.connection_id = c.connection_id
+        ) executions
+        CROSS JOIN LATERAL (
+          SELECT COUNT(*) AS event_deliveries,
+            COUNT(*) FILTER (WHERE created_at >= $3) AS event_deliveries_last_30d,
+            MAX(created_at) AS last_event_at
+          FROM data.messages message
+          WHERE message.space_id = c.space_id AND message.author_kind = 'app'
+            AND message.author_id = c.provider_id AND message.deleted_at IS NULL
+            AND starts_with(message.message_id, 'app:' || c.provider_id || ':')
+        ) events
+        ORDER BY c.created_at DESC, c.connection_id`,
+      values: [userId, bound + 1, since30d],
       maxRows: bound + 1,
     });
 
@@ -219,6 +255,20 @@ async function readShard(
         spaceId: row.space_id,
         providerId: row.provider_id,
         providerName: row.provider_name,
+        usage: {
+          requests: count(row.requests),
+          requestsLast30d: count(row.requests_last_30d),
+          byStatus: {
+            queued: count(row.queued), completed: count(row.completed), failed: count(row.failed),
+            blocked: count(row.blocked), planned: count(row.planned),
+          },
+          ...(optionalIso(row.last_request_at) ? { lastRequestAt: optionalIso(row.last_request_at) } : {}),
+          eventDeliveries: count(row.event_deliveries),
+          eventDeliveriesLast30d: count(row.event_deliveries_last_30d),
+          ...(optionalIso(row.last_event_at) ? { lastEventAt: optionalIso(row.last_event_at) } : {}),
+          subscribedChannels: count(row.subscribed_channels),
+          subscriptions: count(row.subscriptions),
+        },
         status: row.status,
         createdAt: iso(row.created_at),
         ...(optionalIso(row.last_checked_at) ? { lastCheckedAt: optionalIso(row.last_checked_at) } : {}),

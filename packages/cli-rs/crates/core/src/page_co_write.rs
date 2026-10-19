@@ -40,9 +40,12 @@ pub fn page_write_target(raw: &str) -> Option<String> {
     let id = raw.trim().trim_matches(['"', '\'', '`']).trim();
     let groups: Vec<&str> = id.split('-').collect();
     let shaped = groups.len() == 5
-        && groups.iter().zip([8usize, 4, 4, 4, 12]).all(|(group, length)| {
-            group.len() == length && group.chars().all(|c| c.is_ascii_hexdigit())
-        });
+        && groups
+            .iter()
+            .zip([8usize, 4, 4, 4, 12])
+            .all(|(group, length)| {
+                group.len() == length && group.chars().all(|c| c.is_ascii_hexdigit())
+            });
     shaped.then(|| id.to_ascii_lowercase())
 }
 
@@ -51,7 +54,10 @@ pub fn page_write_target(raw: &str) -> Option<String> {
 pub enum PageWritePart {
     Text(String),
     /// What stood between `⟦write page:<page>⟧` and `⟦/write⟧`, or the text's end.
-    Write { page: String, body: String },
+    Write {
+        page: String,
+        body: String,
+    },
 }
 
 /// Splits `text` at each `⟦write page:<id>⟧ … ⟦/write⟧`. A marker that names no
@@ -62,10 +68,9 @@ pub fn page_write_parts(text: &str) -> Vec<PageWritePart> {
     let mut rest = text;
     while let Some(at) = rest.find(PAGE_WRITE_OPEN) {
         let after = &rest[at + PAGE_WRITE_OPEN.len()..];
-        let Some((page, body)) = after
-            .find('⟧')
-            .and_then(|end| page_write_target(&after[..end]).map(|page| (page, &after[end + '⟧'.len_utf8()..])))
-        else {
+        let Some((page, body)) = after.find('⟧').and_then(|end| {
+            page_write_target(&after[..end]).map(|page| (page, &after[end + '⟧'.len_utf8()..]))
+        }) else {
             plain.push_str(&rest[..at + PAGE_WRITE_OPEN.len()]);
             rest = after;
             continue;
@@ -78,7 +83,10 @@ pub fn page_write_parts(text: &str) -> Vec<PageWritePart> {
             Some(close) => (&body[..close], &body[close + PAGE_WRITE_CLOSE.len()..]),
             None => (body, ""),
         };
-        parts.push(PageWritePart::Write { page, body: inner.to_string() });
+        parts.push(PageWritePart::Write {
+            page,
+            body: inner.to_string(),
+        });
         rest = next;
     }
     plain.push_str(rest);
@@ -275,7 +283,8 @@ impl PageCoWriteConnector {
             if secure { "wss" } else { "ws" },
             ticket.socket_path
         );
-        let mut request = http::websocket_request(&socket, http::process_client_component()).await?;
+        let mut request =
+            http::websocket_request(&socket, http::process_client_component()).await?;
         request.headers_mut().insert(
             "sec-websocket-protocol",
             HeaderValue::from_str(&ticket.protocol)
@@ -289,7 +298,12 @@ impl PageCoWriteConnector {
     /// at once, and says what of it did not reach the page; nothing when all of
     /// it did.
     /// An image of a local file is left out of it, and said to be (`page_media`).
-    pub async fn write_once(&self, channel_id: &str, page: &str, body: &str) -> Result<Vec<String>> {
+    pub async fn write_once(
+        &self,
+        channel_id: &str,
+        page: &str,
+        body: &str,
+    ) -> Result<Vec<String>> {
         let (body, refused) = crate::page_media::to_page(body, Default::default());
         let space = self.page_space(channel_id).await?;
         let socket = self.connect(&space, page, true).await?;
@@ -306,19 +320,28 @@ impl PageCoWriteConnector {
         let outcome = tokio::time::timeout(WRITE_OUTCOME_WAIT, async {
             while let Some(frame) = stream.next().await {
                 if let Ok(Message::Binary(data)) = frame
-                    && let Some(PageCoWriteRequest::Outcome { turn: 1, mut problems }) = decode_request(&data)
+                    && let Some(PageCoWriteRequest::Outcome {
+                        turn: 1,
+                        mut problems,
+                    }) = decode_request(&data)
                 {
                     if !refused.is_empty() {
-                        problems.push(format!("Not written: {}.", crate::page_media::refused_images_note(&refused)));
+                        problems.push(format!(
+                            "Not written: {}.",
+                            crate::page_media::refused_images_note(&refused)
+                        ));
                     }
                     return Ok(problems);
                 }
             }
-            Err(CliError::Relay("The page session closed before saying what was written".into()))
+            Err(CliError::Relay(
+                "The page session closed before saying what was written".into(),
+            ))
         })
         .await;
         let _ = sink.close().await;
-        outcome.map_err(|_| CliError::Relay("The page session did not say what was written".into()))?
+        outcome
+            .map_err(|_| CliError::Relay("The page session did not say what was written".into()))?
     }
 }
 
@@ -336,7 +359,10 @@ mod tests {
 
     #[test]
     fn reads_the_sessions_requests_and_nothing_else() {
-        let long = format!(r#"{{"type":"turn","turn":2,"text":"{}"}}"#, "页".repeat(100));
+        let long = format!(
+            r#"{{"type":"turn","turn":2,"text":"{}"}}"#,
+            "页".repeat(100)
+        );
         assert_eq!(
             decode_request(&session_frame(&long)),
             Some(PageCoWriteRequest::Turn {
@@ -369,24 +395,37 @@ mod tests {
     fn splits_a_text_into_what_it_says_and_what_it_writes_into_pages() {
         let page = "3f2a9c1e-5b7d-4e8f-9a0b-1c2d3e4f5a6b";
         assert_eq!(
-            page_write_parts(&format!("Done.\n⟦write page:\"{page}\"⟧\n⟦after \"x\"⟧\nhi\n⟦/write⟧\nThanks")),
+            page_write_parts(&format!(
+                "Done.\n⟦write page:\"{page}\"⟧\n⟦after \"x\"⟧\nhi\n⟦/write⟧\nThanks"
+            )),
             vec![
                 PageWritePart::Text("Done.\n".into()),
-                PageWritePart::Write { page: page.into(), body: "\n⟦after \"x\"⟧\nhi\n".into() },
+                PageWritePart::Write {
+                    page: page.into(),
+                    body: "\n⟦after \"x\"⟧\nhi\n".into()
+                },
                 PageWritePart::Text("\nThanks".into()),
             ]
         );
         assert_eq!(
             page_write_parts(&format!("⟦write page:{page}⟧ to the end")),
-            vec![PageWritePart::Write { page: page.into(), body: " to the end".into() }],
+            vec![PageWritePart::Write {
+                page: page.into(),
+                body: " to the end".into()
+            }],
             "an unclosed write runs to the text's end"
         );
         assert_eq!(
             page_write_parts("Use ⟦write page:<id>⟧ … ⟦/write⟧ in a reply."),
-            vec![PageWritePart::Text("Use ⟦write page:<id>⟧ … ⟦/write⟧ in a reply.".into())],
+            vec![PageWritePart::Text(
+                "Use ⟦write page:<id>⟧ … ⟦/write⟧ in a reply.".into()
+            )],
             "a marker naming no page is text"
         );
-        assert_eq!(page_write_target(" 3F2A9C1E-5B7D-4E8F-9A0B-1C2D3E4F5A6B "), Some(page.into()));
+        assert_eq!(
+            page_write_target(" 3F2A9C1E-5B7D-4E8F-9A0B-1C2D3E4F5A6B "),
+            Some(page.into())
+        );
         assert_eq!(page_write_target("page-1"), None);
     }
 
