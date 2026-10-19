@@ -46,6 +46,11 @@ keeping human typing. Choosing a page co-writer immediately acknowledges the
 selection; desktop feedback offers its conversation and explains to continue
 writing in the page. See [live documents](../design/pages-live-document.md).
 
+Live co-writing records bounded, content-free diagnostics for first CRDT text
+and turn outcomes, including quiet-turn timeouts. Hub clock timings distinguish
+pending edits, runtime deltas and actual text changes; they do not measure browser
+paint. See [co-writing measurements](../architecture/first-space.md#measuring-live-co-writing).
+
 
 Channel presence uses the protocol's read-only Instance-ID map, separate from
 Human devices. One reducer owns identity checks, lifecycle merges and removal;

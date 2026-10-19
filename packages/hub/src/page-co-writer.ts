@@ -10,6 +10,7 @@ import {
 } from "y-prosemirror";
 import * as Y from "yjs";
 import { readingMs, readingStep, type PageReaderPace } from "./page-reader-pace";
+import { PageCoWriteTiming, type PageCoWriteObservation } from "./page-co-write-timing";
 
 /**
  * An Agent co-writing a page live (docs/design/pages-live-document.md §4.2),
@@ -81,6 +82,7 @@ export interface PageCoWriterHost {
   pace(): PageReaderPace | null;
   /** To the Agent's runtime. */
   send(request: PageCoWriteRequest): void;
+  observe?(event: PageCoWriteObservation): void;
 }
 
 /** The live document as ProseMirror reads it, with the mapping between its nodes and the CRDT's. */
@@ -108,6 +110,7 @@ type Written = Pick<Action, "before" | "written" | "replaced">;
 
 interface Turn {
   id: number;
+  timing?: PageCoWriteTiming;
   parser: PageCoWriteParser;
   action: Action | null;
   /** Someone edited what it was writing, so the rest of its answer is not written. */
@@ -206,6 +209,8 @@ export class PageCoWriter {
   private timer: ReturnType<typeof setTimeout> | null = null;
   /** When the first change the Agent has not yet heard was made. */
   private unheardSince: number | null = null;
+  /** Only authenticated human edits count toward human-response timing; other Agents also change the page. */
+  private unheardHumanSince: number | null = null;
   /** What its presence last said it was doing, and since when. */
   private shownActivity: PageCoWriterActivity | null = null;
   private activitySince = Date.now();
@@ -262,6 +267,7 @@ export class PageCoWriter {
   }
 
   stop(): void {
+    this.active?.timing?.end("disconnected");
     this.ended = true;
     this.waiting = [];
     if (this.timer) clearTimeout(this.timer);
@@ -295,6 +301,7 @@ export class PageCoWriter {
         : "Your last answer went quiet and was given up.", true);
       // The people on the page see it went quiet, and may ask someone else to write.
       this.stalled = true;
+      turn.timing?.end("stalled");
       this.host.send({ type: "interrupt", turn: turn.id });
       this.finished(turn);
       this.close();
@@ -306,8 +313,9 @@ export class PageCoWriter {
   }
 
   /** Someone else changed the page. If it touched what the Agent is writing, the Agent stops there. */
-  othersEdited(): void {
+  othersEdited(human = false): void {
     if (this.ended || !this.writable) return;
+    if (human) this.unheardHumanSince ??= Date.now();
     this.changed = true;
     if (this.active?.action && !this.active.action.skipped && !this.intact(this.active.action)) {
       this.yieldTurn("someone edited what you were writing");
@@ -345,6 +353,7 @@ export class PageCoWriter {
     const turn = this.active?.id === reply.turn ? this.active : this.waiting.find((item) => item.id === reply.turn);
     if (this.ended || !this.writable || !turn || turn.stopped || turn.sent) return;
     if (reply.type === "delta") {
+      turn.timing?.delta();
       if (turn === this.active) this.awaitTurn(turn);
       enqueue(turn, turn.parser.push(reply.text));
     } else {
@@ -392,6 +401,7 @@ export class PageCoWriter {
 
   /** The Agent's turn has reached the page whole: it ends, and the next one it opened goes on. */
   private complete(turn: Turn): void {
+    turn.timing?.end(turn.sent?.failed ? "failed" : "done");
     if (turn.sent?.failed) this.told(`Your last answer failed${turn.sent.reason ? `: ${turn.sent.reason}` : ""}.`);
     this.finished(turn);
     this.close();
@@ -466,6 +476,8 @@ export class PageCoWriter {
 
   /** Sends the Agent what it needs to answer now. */
   private ask(): void {
+    const edited = this.unheardHumanSince;
+    this.unheardHumanSince = null;
     this.unheardSince = null;
     const now = this.host.markdown();
     const first = this.readCount === 0;
@@ -497,6 +509,7 @@ export class PageCoWriter {
     this.readCount++;
     this.changed = false;
     const turn = newTurn(++this.turns);
+    turn.timing = new PageCoWriteTiming(turn.id, edited, (event) => this.host.observe?.(event));
     this.active = turn;
     this.awaitTurn(turn);
     this.show({ activity: "thinking" });
@@ -694,6 +707,7 @@ export class PageCoWriter {
     if (!children.length) children.push(pageSchema.nodes.paragraph!.create());
     const intended = pageSchema.topNodeType.create(live.doc.attrs, Fragment.fromArray(children));
     this.host.write(() => updateYFragment(this.host.doc, this.host.fragment, intended, live.meta));
+    if (intended.textContent !== live.doc.textContent) turn.timing?.wrote();
     action.written = nodes;
     const end = region.from + nodes.length;
     this.remember(action, intended, region.from, end, live.meta.mapping);
@@ -750,6 +764,7 @@ export class PageCoWriter {
     const turn = this.active;
     if (!turn || turn.stopped) return false;
     turn.stopped = true;
+    turn.timing?.end("interrupted");
     turn.action = null;
     // Its turn ends here: what it still sends for it is not written, and the next pause asks again.
     this.close();

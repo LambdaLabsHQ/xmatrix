@@ -115,6 +115,66 @@ GROUP BY device, surface, step
 ORDER BY device, surface, people DESC
 ```
 
+## Measuring live co-writing
+
+The page session records `cowrite_first_text` when a session-requested turn
+first changes text in its CRDT, and `cowrite_turn_end` when that turn finishes,
+fails, is interrupted, disconnects, or actually times out (`stalled`). Markers,
+blank structure, notes and pass responses are not text writes. A first-text
+point does not wait for a revision save or the turn's end. These are Hub clock
+measurements, **not browser paint times**; a person may receive the update later.
+Conversation-initiated streaming writes are outside this metric's population.
+
+Each point uses `blob1=pages`, `blob2=hub`, `blob3` the event, `blob4` its
+outcome, and `blob5=session_clock`. `index1` is the authenticated Agent owner's
+keyed hash, `blob6` the Agent's keyed hash, `blob9` the turn's keyed hash and
+`blob11` the page/conversation pair's keyed hash (session). No text, name, raw
+page, conversation, Run id or execution credential is recorded. Missing owner
+or conversation evidence stays `unknown`; do not count it as a known person
+or session. An absent diagnostics binding disables this best-effort observation;
+sink failures never block writing. There are at most two points per turn.
+
+| Number | Meaning (milliseconds unless stated) |
+| --- | --- |
+| `double1` | event count (1) |
+| `double2` | elapsed since the session asked this turn |
+| `double3` | earliest pending human edit received by Hub → turn requested, including waiting on an earlier turn |
+| `double4` | turn requested → first runtime delta (may contain only markers) |
+| `double5` | turn requested → first actual text change |
+| `double6` | that pending human edit → this turn's first actual text change |
+| `double7` | largest gap between actual text changes in this turn |
+| `double8` | number of actual text changes in this turn |
+
+An unobserved duration is **-1**, not zero: joining has no preceding human
+edit, a pass or stalled answer may have no text, and one write has no gap.
+Changes made while a turn is answering belong to the *next* request; an
+existing answer's text must not be attributed to edits it has not read.
+The largest gap excludes silence before the first or after the final write.
+Reconnection starts new timing evidence; these events are not a durable audit
+log and cannot reconstruct turns lost to process failure. Missing events are
+unknown, not proof that a turn never stalled.
+
+Read the two populations separately, then group by turn/session hash locally.
+First-text points measure successful text latencies; terminal points include
+answers that never wrote, and support counts of observed stalled turns and
+distinct sessions with a stalled turn. Do not count both events as two turns,
+or average -1 into latency. Check `_sample_interval` before calling counts exact.
+For a bounded daily window, read metadata only:
+
+```sql
+SELECT timestamp, index1, blob3, blob4, blob9, blob11,
+  double2, double3, double4, double5, double6, double7, double8, _sample_interval
+FROM xmatrix_diagnostics
+WHERE blob1 = 'pages' AND blob5 = 'session_clock'
+  AND timestamp >= '2026-10-19 00:00:00' AND timestamp < '2026-10-20 00:00:00'
+LIMIT 10000
+```
+
+Use the requested UTC endpoints, check truncation, and keep revision proxies
+separate. A historical report cannot fill these fields before this observation
+was deployed. Actual on-screen first text and interruption durations still
+require a browser interaction measurement.
+
 ## When the App's background service does not start
 
 A fresh desktop App has no installed CLI. It signs in through the CLI seed it
