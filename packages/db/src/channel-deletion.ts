@@ -1,7 +1,7 @@
 import type { QueryResultRow } from "pg";
 import type { DatabaseTransaction } from "./contracts.js";
 import { SpaceControlError } from "./space-control.js";
-import { parseRestrictedChannelContentScope } from "@xmatrix/protocol";
+import { ACTIVE_RUN_STATUS_SQL, parseRestrictedChannelContentScope } from "@xmatrix/protocol";
 
 const RUNS = "(SELECT run_id FROM data.runs WHERE channel_id=$2)";
 const INSTANCES = "(SELECT instance_id FROM data.instances WHERE channel_id=$2)";
@@ -69,7 +69,7 @@ export async function retireChannel(tx: DatabaseTransaction, input: {
   if (channel.name !== input.name)
     throw new SpaceControlError("channel_deletion_changed", 409, "The Channel changed. Reload it and confirm its current name.");
   const busy = await tx.query({ name: "channel_deletion_busy_v1", text: `SELECT 1 WHERE $1::text IS NOT NULL AND (EXISTS (
-      SELECT 1 FROM data.runs WHERE channel_id=$2 AND status IN ('starting','running','stopping'))
+      SELECT 1 FROM data.runs WHERE channel_id=$2 AND status IN (${ACTIVE_RUN_STATUS_SQL}))
       OR EXISTS (SELECT 1 FROM control.registration_execution_allocations WHERE run_id IN ${RUNS} AND state<>'released')
       OR EXISTS (SELECT 1 FROM data.agent_launches WHERE channel_id=$2 AND state IN ('prepared','queued','admitted','spawned')))`,
     values: [input.spaceId, input.channelId], maxRows: 1 });
