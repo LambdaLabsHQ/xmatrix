@@ -59,10 +59,11 @@ jobs:
           exit 1
       # A stable intent reads the candidate's release commit and the last
       # stable's source, so it needs the history; a beta needs only scripts.
+      # (`x && 0 || 1` would always be 1: 0 is falsy in expressions.)
       - uses: actions/checkout@v6
         with:
           ref: ${{ github.sha }}
-          fetch-depth: ${{ inputs.channel == 'stable' && 0 || 1 }}
+          fetch-depth: ${{ inputs.channel == 'stable' && '0' || '1' }}
           persist-credentials: false
       - uses: ./.github/actions/setup-pnpm-node
         with:
