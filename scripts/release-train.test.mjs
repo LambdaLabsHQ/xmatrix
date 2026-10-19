@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -263,6 +263,8 @@ test("a stable ships only a delivered beta that covers its clients and moves no 
   t.after(() => rmSync(repo.directory, { recursive: true, force: true }));
   const first = repo.commitMain("first");
   repo.release(first, "1.0.605", {});
+  mkdirSync(path.join(repo.root, "docs/releases"), { recursive: true });
+  writeFileSync(path.join(repo.root, "docs/releases/1.1.0.md"), "# xMatrix 1.1.0\n\nNew user-facing features.\n");
   const second = repo.commitMain("second");
   const oldBeta = repo.release(first, "1.0.606-beta.1", { scope: "hub,web,cli", source: first });
   const beta = repo.release(second, "1.0.606-beta.2", { scope: "hub,web,cli,android", source: second });
@@ -274,6 +276,8 @@ test("a stable ships only a delivered beta that covers its clients and moves no 
 
   assert.deepEqual(await check({ candidate: "xmatrix-v1.0.606-beta.2", sha: beta }),
     { version: "1.1.0", tag: "xmatrix-v1.1.0", sourceSha: second, commit: beta });
+  // Newer main's notes cannot authorize a candidate cut before they existed.
+  await assert.rejects(check({ candidate: "xmatrix-v1.0.606-beta.1" }), /Missing release notes/u);
   await assert.rejects(check({ candidate: "xmatrix-v1.0.606-beta.2", scope: ["cli", "ios"] }),
     /did not ship ios; verify a beta that did/u);
   await assert.rejects(check({ candidate: "xmatrix-v1.0.606-beta.2", sha: oldBeta }), /no longer points at/u);

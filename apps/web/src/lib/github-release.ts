@@ -1,5 +1,6 @@
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { NextResponse } from "next/server";
+import { publishedReleaseNotes, releaseNotesPath } from "@xmatrix/protocol";
 import canonicalVersion from "../../../../version.json";
 
 type GitHubReleaseAsset = {
@@ -59,7 +60,7 @@ type R2ChannelPointer = {
   publishedAt?: string;
 };
 
-const DEFAULT_RELEASE_REPO = "madebyrobot/xmatrix";
+const DEFAULT_RELEASE_REPO = "LambdaLabsHQ/xmatrix";
 const XMATRIX_VERSION = canonicalVersion.version;
 
 function getReleaseRepo() {
@@ -253,6 +254,7 @@ export function getLatestReleaseManifest(release: GitHubRelease, origin: string,
     trainVersion: XMATRIX_VERSION,
     releaseVersion,
     tag_name: release.tag_name,
+    releaseNotesUrl: releaseNotesPath(releaseVersion) ? `${origin}${releaseNotesPath(releaseVersion)}` : undefined,
     assets: release.assets.map((asset) => ({
       name: asset.name,
       browser_download_url: `${origin}${downloadBasePath}/${encodeURIComponent(asset.name)}`,
@@ -266,6 +268,21 @@ export function getLatestReleaseManifest(release: GitHubRelease, origin: string,
       publishedAt: release.publishedAt,
     } : undefined,
   };
+}
+
+/** Read only the exact published train; never substitute the newest release. */
+export async function fetchPublishedReleaseNotes(version: string) {
+  if (!releaseNotesPath(version)) return undefined;
+  const response = await fetch(`https://api.github.com/repos/${getReleaseRepo()}/releases/tags/xmatrix-v${version}`, {
+    headers: getGitHubHeaders(),
+    cache: "no-store",
+    signal: AbortSignal.timeout(8_000),
+  });
+  if (response.status === 404) return undefined;
+  if (!response.ok) throw new Error(`GitHub release notes returned ${response.status}`);
+  const release = await response.json() as { tag_name?: string; draft?: boolean; body?: string };
+  if (release.tag_name !== `xmatrix-v${version}` || release.draft) return undefined;
+  return publishedReleaseNotes(release.body);
 }
 
 function releaseVersionFromTag(tagName: string) {

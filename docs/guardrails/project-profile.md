@@ -15,6 +15,12 @@ English is the default language for repository documentation, guardrails, releas
 
 ## Current behavior
 
+Release notes are published with each successful train and readable at
+`/releases/<version>` through Desktop, Machine version and CLI update links.
+The stable release Agent authors a versioned document in the verified beta's
+source; intent and train refuse missing or mismatched stable notes. Betas use
+their exact tag's generated change list. See [release notes](../release-updates.md#release-notes).
+
 Page discussions and conversations started from selected message passages use
 the ordinary first-message automatic summon and author choice window while
 retaining their preset titles. See [automatic invocation](../architecture/auto-launch-completion.md#a-new-conversations-first-message).
