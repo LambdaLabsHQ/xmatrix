@@ -69,6 +69,11 @@ All releases form one ascending SemVer line:
   GitHub fallback that names a beta. iOS ships `X.Y.Z` with the Production
   Release run ID as its build number.
 
+The synthetic Human reconnect smoke carries the exact source `version.json`
+version in its WebSocket URL and handshake. Its assertions compare those wire
+values with that manifest for both beta and stable builds, rather than requiring
+a stable-only version shape.
+
 ## Scope evidence without job step metadata
 
 Production request authorization is the completed successful job named
