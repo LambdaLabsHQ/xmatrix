@@ -110,8 +110,9 @@ fn observed_auto_update(
     }
     let state = |enabled| if enabled { "enabled" } else { "disabled" };
     let recorded = policy.auto_update(&preset.id);
-    if schedules_updates(management) && auto.controls.is_empty() {
-        // The daemon's schedule runs only while the recorded policy is on.
+    if schedules_updates(management) && (auto.controls.is_empty() || recorded.is_some()) {
+        // The daemon's schedule runs only while the recorded policy is on;
+        // once recorded, that policy also sets any switch the harness has.
         return state(recorded == Some(true));
     }
     let file_env: BTreeMap<String, String> = auto
@@ -553,6 +554,12 @@ mod tests {
         assert_eq!(observed("codex", &policy), "enabled");
         assert_eq!(observed("claude", &policy), "disabled");
         assert_eq!(observed("kiro", &policy), "disabled");
+        // A daemon-scheduled harness with its own switch follows the policy.
+        assert_eq!(observed("grok", &empty), "unknown");
+        policy.0.insert("grok".into(), true);
+        assert_eq!(observed("grok", &policy), "enabled");
+        policy.0.insert("grok".into(), false);
+        assert_eq!(observed("grok", &policy), "disabled");
         let AutoUpdateControl::Json(control) = &preset("gemini")
             .management
             .as_ref()
