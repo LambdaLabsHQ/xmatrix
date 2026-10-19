@@ -1100,19 +1100,7 @@ fn print_windows_continuity_doctor() {
 
 fn print_daemon_session_doctor() {
     let config_path = config::config_path();
-    let configured = std::fs::read_to_string(&config_path)
-        .ok()
-        .and_then(|raw| serde_json::from_str::<config::CliConfig>(&raw).ok());
-    let hub_url = if configured
-        .as_ref()
-        .and_then(|value| value.active_environment.as_deref())
-        == Some("test")
-    {
-        protocol::TEST_HUB_URL
-    } else {
-        protocol::DEFAULT_HUB_URL
-    };
-    let session_path = config::session_path_for_hub(hub_url);
+    let session_path = config::session_path_for_hub(protocol::DEFAULT_HUB_URL);
     println!("cli session: {}", session_path.display());
     println!("cli config: {}", config_path.display());
     let session = match std::fs::read_to_string(&session_path) {

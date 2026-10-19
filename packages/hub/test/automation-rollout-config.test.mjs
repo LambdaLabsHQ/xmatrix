@@ -19,16 +19,13 @@ function scheduledRunTimeout(source) {
 }
 
 test("production enables Automation execution while test environments fail closed", async () => {
-  const [production, testConfig, testDeployConfig] = await Promise.all([
+  const [production, testConfig] = await Promise.all([
     readFile(new URL("../wrangler.toml", import.meta.url), "utf8"),
     readFile(new URL("../wrangler.test.toml", import.meta.url), "utf8"),
-    readFile(new URL("../wrangler.test-deploy.toml", import.meta.url), "utf8"),
   ]);
 
   assert.equal(scheduledExecutionFlag(production), "true");
   assert.equal(scheduledExecutionFlag(testConfig), "false");
-  assert.equal(scheduledExecutionFlag(testDeployConfig), "false");
   assert.equal(scheduledRunTimeout(production), 30 * 60_000);
   assert.equal(scheduledRunTimeout(testConfig), 30 * 60_000);
-  assert.equal(scheduledRunTimeout(testDeployConfig), 30 * 60_000);
 });

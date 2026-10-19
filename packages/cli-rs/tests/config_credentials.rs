@@ -27,8 +27,6 @@ fn config_redacts_whole_session_and_individual_credentials_without_changing_stor
     ] {
         let mut command = Command::new(env!("CARGO_BIN_EXE_xmatrix"));
         command
-            .arg("--environment")
-            .arg("production")
             .arg("config")
             .env("XMATRIX_CONFIG_DIR", &dir)
             .env_remove("XMATRIX_PROFILE")

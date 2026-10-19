@@ -60,13 +60,6 @@ import {
 import type { SpaceJoinRequest } from "@/components/dashboard/space-join-requests";
 import { HumanProfileSummary } from "@/components/dashboard/human-profile-summary";
 import {
-  XMATRIX_CLIENT_ENVIRONMENTS,
-  clientAppUrl,
-  clientEnvironmentForHostname,
-  type XMatrixClientEnvironment,
-} from "@/lib/client-environment";
-import { useAuthCapability } from "@/components/dashboard/use-platform-admin-capability";
-import {
 } from "@/components/dashboard/human-profile-editor";
 import {
   canInviteToSpace,
@@ -117,7 +110,6 @@ import {
   CreditCard,
   Trash2,
   UserRound,
-  Globe,
   Monitor,
   X,
   Bell,
@@ -171,7 +163,6 @@ import {
 } from "@/components/dashboard/secret-catalog";
 
 import {
-  getDesktopBridge,
   type DesktopContext,
   type DesktopDaemonStatus,
   type DesktopUpdateStatus,
@@ -297,7 +288,6 @@ export function SettingsView({
     error: string | null;
   } | null>(null);
   const [confirmingSecretRef, setConfirmingSecretRef] = useState<string | null>(null);
-  const [clientEnvironment, setClientEnvironment] = useState<XMatrixClientEnvironment>("production");
   // A browser tab has no native notifications: it can be pushed to instead.
   const [pushState, setPushState] = useState<BrowserPushState | null>(null);
   useEffect(() => {
@@ -306,9 +296,6 @@ export function SettingsView({
     void browserPushState(token).then((state) => { if (current) setPushState(state); }).catch(() => undefined);
     return () => { current = false; };
   }, [desktopAvailable, token]);
-  const [environmentSwitchError, setEnvironmentSwitchError] = useState<string | null>(null);
-  const [environmentSwitching, setEnvironmentSwitching] = useState(false);
-  const testEnvironmentAllowed = useAuthCapability("testEnvironment", token);
   const secretKey = xmatrixQueryKeys.domain({ userId: user.id }, "space-secrets", [space?.id ?? ""]);
   const secretQuery = useQuery({
     queryKey: secretKey,
@@ -338,29 +325,6 @@ export function SettingsView({
   const secretSaving = secretMutation.isPending && secretMutation.variables?.kind === "save";
   const deletingSecretRef = secretMutation.isPending && secretMutation.variables?.kind === "delete"
     ? secretMutation.variables.secretRef ?? null : null;
-
-  useEffect(() => {
-    setClientEnvironment(clientEnvironmentForHostname(window.location.hostname));
-  }, []);
-
-  async function switchEnvironment(environment: XMatrixClientEnvironment) {
-    if (environment === clientEnvironment || environmentSwitching) return;
-    if (environment === "test" && !testEnvironmentAllowed) return;
-    const confirmed = window.confirm(
-      `Switch to ${XMATRIX_CLIENT_ENVIRONMENTS[environment].label}? This opens a separate account and data environment.`,
-    );
-    if (!confirmed) return;
-
-    setEnvironmentSwitchError(null);
-    setEnvironmentSwitching(true);
-    try {
-      await getDesktopBridge()?.switchEnvironment?.(environment);
-      window.location.assign(clientAppUrl(environment));
-    } catch (error) {
-      setEnvironmentSwitchError(userErrorMessage(error, "Couldn't switch environments"));
-      setEnvironmentSwitching(false);
-    }
-  }
 
   useEffect(() => {
     setProfile((current) => {
@@ -486,39 +450,6 @@ export function SettingsView({
           </ToolDetailSection>
         </div>
       ) },
-    ...(testEnvironmentAllowed || clientEnvironment === "test" ? [{
-      key: "environment", label: "Environment", icon: Globe,
-      summary: XMATRIX_CLIENT_ENVIRONMENTS[clientEnvironment].label, content: (
-        <div className="app-settings-section min-w-0">
-          <ToolDetailSection title="Environment">
-            {(Object.keys(XMATRIX_CLIENT_ENVIRONMENTS) as XMatrixClientEnvironment[]).map((environment) => (
-              <ToolSettingRow
-                key={environment}
-                title={XMATRIX_CLIENT_ENVIRONMENTS[environment].label}
-                description={environment === "test"
-                  ? "Isolated from Production, with its own accounts, sessions and data. May require Cloudflare Access."
-                  : "Your real accounts, sessions and data."}
-                control={clientEnvironment === environment ? (
-                  <span className={tagClass()}>In use</span>
-                ) : (
-                  <button
-                    type="button"
-                    disabled={environmentSwitching || (environment === "test" && !testEnvironmentAllowed)}
-                    onClick={() => void switchEnvironment(environment)}
-                    className={actionClass({ variant: "secondary" })}
-                  >
-                    {environmentSwitching ? "Switching…" : `Switch to ${XMATRIX_CLIENT_ENVIRONMENTS[environment].label}`}
-                  </button>
-                )}
-              />
-            ))}
-            {environmentSwitchError ? (
-              <p className="mt-3 text-sm text-destructive">{environmentSwitchError}</p>
-            ) : null}
-          </ToolDetailSection>
-        </div>
-      ),
-    }] : []),
     { key: "secrets", label: "Secrets", icon: Key,
       summary: secretCatalogLoaded ? `${secretCatalogEntries.length} in ${space?.name ?? "this Space"}` : "Stored values are never shown", content: (
         <div className="app-settings-section min-w-0">

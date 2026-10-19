@@ -83,7 +83,8 @@ export async function dispatchProductGitHubWebhook(input: {
   if (!installationId || !repository || !feature) return { ok: true, delivered: 0 };
   /* A private repository's events reach only Channels people outside the
      Space cannot read; unstated privacy counts as private. */
-  const repositoryPublic = githubRepositoryIsPublic(input.payload.repository);
+  // Security alerts remain restricted content even for a public repository.
+  const repositoryPublic = input.event !== "code_scanning_alert" && githubRepositoryIsPublic(input.payload.repository);
   const repositoryName = `${repository.owner}/${repository.repo}`;
   const issues = new Map(githubWebhookIssueNumbers(input.event, input.payload)
     .map((number) => [githubIssueSourceRef(repositoryName, number), number]));

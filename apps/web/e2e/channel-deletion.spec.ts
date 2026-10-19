@@ -13,8 +13,7 @@ for (const layout of ["desktop", "mobile"] as const) {
         { status: 202, json: { state: "purging" } },
       ] } });
     if (layout === "desktop") {
-      await page.getByRole("button", { name: `Actions for #${E2E_CHANNEL.name}` }).click();
-      await page.getByRole("menuitem", { name: "Delete Channel…" }).click();
+      await page.locator(".app-panel-header").getByRole("button", { name: `Delete #${E2E_CHANNEL.name}…` }).click();
     } else {
       await page.getByRole("button", { name: "More", exact: true }).click();
       await page.getByRole("button", { name: "Delete Channel…" }).click();

@@ -15,6 +15,11 @@ English is the default language for repository documentation, guardrails, releas
 
 ## Current behavior
 
+GitHub repository subscriptions include `code-scanning`: signed alert lifecycle
+events reach a subscribed private-content Channel and wake its resting Agent,
+without periodic polling. The App's effective Code scanning alerts read grant is
+required; see [App connectors](../operations/app-connectors.md).
+
 Page discussions and conversations started from selected message passages use
 the ordinary first-message automatic summon and author choice window while
 retaining their preset titles. See [automatic invocation](../architecture/auto-launch-completion.md#a-new-conversations-first-message).
@@ -317,3 +322,10 @@ registration when available. Missing or erased ownership stays unattributed.
 Last access remains a separate session metric; daemon presence does not advance
 Last message. Existing message counts and daily user charts remain user-authored
 message counts.
+
+Platform admin user details show the Space connections each user added, with
+retained and 30-day execution counts, status totals, standard webhook/event
+Channel deliveries, last activity and subscriptions. Activity includes every
+caller in that Space; delivery counts are per Channel and do not claim raw
+webhook HTTP attempts. Reads remain audited and metadata only. Older Hubs leave
+usage unknown. See [platform admin](../operations/platform-admin-overview.md#connector-activity-in-user-details).

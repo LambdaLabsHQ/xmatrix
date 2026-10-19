@@ -386,7 +386,10 @@ mod tests {
         let old_root = git(&["rev-parse", "HEAD"]);
         assert!(holds_commit(&old_root, &dir));
         // A fresh clone of the published repository has none of the old commits.
-        assert!(!holds_commit("858e515ebaf0b4acc64a08b8364c7e69dd0d6e8b", &dir));
+        assert!(!holds_commit(
+            "858e515ebaf0b4acc64a08b8364c7e69dd0d6e8b",
+            &dir
+        ));
         assert!(!holds_retired_history("LambdaLabsHQ/xmatrix", &dir));
         assert!(!holds_retired_history("other/repo", &dir));
         std::fs::remove_dir_all(&dir).unwrap();

@@ -22,7 +22,6 @@ const SESSION_REFRESH_LOCK_RETRY_DELAY: Duration = Duration::from_millis(100);
 const SESSION_REFRESH_LOCK_STALE_SECS: u64 = 120;
 
 pub async fn login_with_browser(hub_url: &str) -> Result<AuthResponse> {
-    crate::access::prepare_for_hub(hub_url, true).await?;
     match start_device_login(hub_url).await {
         Ok(device_login) => login_with_browser_device_flow(hub_url, &device_login).await,
         Err(error) => {
@@ -75,7 +74,6 @@ pub async fn start_device_login(hub_url: &str) -> Result<DeviceLoginStartRespons
 /// setup intent; the owner approves it on the page that showed the command, so
 /// no browser is opened here and there is no localhost fallback.
 pub async fn login_for_setup_intent(hub_url: &str, setup_intent: &str) -> Result<AuthResponse> {
-    crate::access::prepare_for_hub(hub_url, true).await?;
     let url = with_route(hub_url, HubRoutes::DEVICE_START);
     let body = serde_json::json!({
         "setupIntentId": setup_intent.trim(),

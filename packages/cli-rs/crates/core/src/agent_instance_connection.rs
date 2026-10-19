@@ -1403,7 +1403,7 @@ impl AgentInstanceConnectionClient {
                     "messageId": message_id,
                     "attachmentId": attachment_id,
                 }));
-            let response = http::with_access_header(request, &url)?.send().await?;
+            let response = request.send().await?;
             if response.status() != reqwest::StatusCode::NOT_FOUND
                 || not_found_attempt >= CHANNEL_ATTACHMENT_PRODUCT_MEDIA_NOT_FOUND_RETRY_MS.len()
             {
@@ -1421,7 +1421,7 @@ impl AgentInstanceConnectionClient {
         ) {
             let _ = crate::attachment_cache::remember_refused_attachment(&stem);
         }
-        let response = http::require_success(response, &url).await?;
+        let response = http::require_success(response).await?;
         if response.content_length() != Some(expected_size) {
             return Err(CliError::Relay(
                 "Channel image attachment length does not match authority".into(),

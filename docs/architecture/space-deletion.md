@@ -13,9 +13,8 @@ restore window, the purge progress and the final audit record.
 
 - Only the Space owner may delete, and only a Human session; Agent Runs are
   refused by the Run route allowlist and again by the route itself. Personal
-  (`private`) Spaces and the Spaces pinned by
-  deployment configuration (`PLATFORM_ADMIN_SPACE_ID`,
-  `TEST_ENVIRONMENT_ACCESS_SPACE_ID`) cannot be deleted.
+  (`private`) Spaces and the Space pinned by
+  deployment configuration (`PLATFORM_ADMIN_SPACE_ID`) cannot be deleted.
 - A live Space subscription or open checkout still blocks deletion, because the
   Hub cannot cancel a provider subscription.
 - Every membership is removed and kept as restore evidence, together with the

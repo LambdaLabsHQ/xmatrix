@@ -309,9 +309,11 @@ export function MyAgentsView({
     /* A browser cannot find anything on a machine, so with nothing installed
        anywhere yet this shows where agents come from. */
     detail = (
-      <SetupCardShell>
-        <BringAgentsIn spaceId={spaceId} token={token} userId={currentUserId} surface="agents" />
-      </SetupCardShell>
+      <div className="app-below-band min-h-0 flex-1 overflow-y-auto">
+        <SetupCardShell>
+          <BringAgentsIn spaceId={spaceId} token={token} userId={currentUserId} surface="agents" />
+        </SetupCardShell>
+      </div>
     );
   } else if (catalog.data && rows.length === 0) {
     detail = (

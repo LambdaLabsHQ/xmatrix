@@ -41,7 +41,9 @@ pub fn page_media_type(extension: &str) -> Option<&'static str> {
 fn page_media_file_name(file: &str) -> Option<&str> {
     let (hash, extension) = file.split_once('.')?;
     (hash.len() == 64
-        && hash.bytes().all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
+        && hash
+            .bytes()
+            .all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
         && page_media_type(extension).is_some())
     .then_some(file)
 }
@@ -64,7 +66,8 @@ fn reference_for_local(destination: &str) -> Option<String> {
     if at > 0 && !path[..at].ends_with('/') {
         return None;
     }
-    page_media_file_name(&path[at + marker.len()..]).map(|file| format!("{PAGE_MEDIA_SCHEME}{file}"))
+    page_media_file_name(&path[at + marker.len()..])
+        .map(|file| format!("{PAGE_MEDIA_SCHEME}{file}"))
 }
 
 /// Whether an image's destination is a file on some machine, not something a page can show:
@@ -82,9 +85,9 @@ fn local_file(destination: &str) -> bool {
         Some(colon)
             if colon > 1
                 && destination.as_bytes()[0].is_ascii_alphabetic()
-                && destination[..colon]
-                    .bytes()
-                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'+' | b'.' | b'-')) =>
+                && destination[..colon].bytes().all(|byte| {
+                    byte.is_ascii_alphanumeric() || matches!(byte, b'+' | b'.' | b'-')
+                }) =>
         {
             destination[..colon].eq_ignore_ascii_case("file")
         }
@@ -336,11 +339,15 @@ mod tests {
         );
         assert_eq!(page_media_images(&page), vec![image.clone(), video.clone()]);
         // Joined as this platform joins paths: on Windows, its last separator is a backslash.
-        let local = PathBuf::from("/home/me/.config/xmatrix/attachment-cache/page-media").join(&image);
+        let local =
+            PathBuf::from("/home/me/.config/xmatrix/attachment-cache/page-media").join(&image);
         let saved = HashMap::from([(image.clone(), local.clone())]);
         let read = to_local(&page, &saved);
         assert!(read.contains(&format!("![shot.png]({} \"Before\")", local.display())));
-        assert!(read.contains(&format!("![clip](xmatrix:page-media/{video})")), "a video stays on the page");
+        assert!(
+            read.contains(&format!("![clip](xmatrix:page-media/{video})")),
+            "a video stays on the page"
+        );
         assert_eq!(to_page(&read, HashSet::new()), (page, Vec::new()));
     }
 
@@ -367,7 +374,13 @@ mod tests {
         );
         assert_eq!(
             refused,
-            ["/tmp/chart.png", "~/me.jpg", "C:\\x.png", "./diagram.png", "file:///tmp/a.png"]
+            [
+                "/tmp/chart.png",
+                "~/me.jpg",
+                "C:\\x.png",
+                "./diagram.png",
+                "file:///tmp/a.png"
+            ]
         );
         let existing = HashSet::from(["./diagram.png".to_string()]);
         assert_eq!(
@@ -381,8 +394,10 @@ mod tests {
     fn written_in_pieces_an_image_is_held_until_it_is_whole() {
         let image = format!("{}.gif", hash('d'));
         let local = format!("/x/attachment-cache/page-media/{image}");
-        let text = format!("one ![a]({local}) two ![b](/tmp/b.png) three! ![c](https://e.com/c.png)");
-        let expected = format!("one ![a](xmatrix:page-media/{image}) two  three! ![c](https://e.com/c.png)");
+        let text =
+            format!("one ![a]({local}) two ![b](/tmp/b.png) three! ![c](https://e.com/c.png)");
+        let expected =
+            format!("one ![a](xmatrix:page-media/{image}) two  three! ![c](https://e.com/c.png)");
         for size in 1..text.len() {
             let mut writing = ToPage::default();
             let mut out = String::new();
@@ -402,6 +417,10 @@ mod tests {
         let mut writing = ToPage::default();
         assert_eq!(writing.push("words and ![an"), "words and ");
         assert_eq!(writing.push(" unfinished image"), "");
-        assert_eq!(writing.finish(), "![an unfinished image", "an image never closed is text");
+        assert_eq!(
+            writing.finish(),
+            "![an unfinished image",
+            "an image never closed is text"
+        );
     }
 }

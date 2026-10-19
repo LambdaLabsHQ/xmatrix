@@ -44,7 +44,6 @@ import {
   useRef,
   useState,
 } from "react";
-import { useQueryClient } from "@tanstack/react-query";
 import { useXMatrixQueryFetch } from "@/lib/query/use-query-fetch";
 
 import {
@@ -181,7 +180,6 @@ import { SCROLLING_MOVES_NO_ROWS, timelineScrollRest } from "./timeline-scroll-r
 const NO_TIMELINE_EVENTS: readonly ObservabilityEvent[] = [];
 
 export function useWorkspaceShellActions(s: WorkspaceShellState) {
-  const queryClient = useQueryClient();
   const fetch = useXMatrixQueryFetch(s.authenticatedUserId);
   const { profileUserId, setProfileUserId } = useHumanProfileViewState();
   const {
@@ -241,10 +239,6 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     setSavingAgentConfig,
     setDeletingAgentId,
     setComposingConversation,
-    setChannelMoveOpen,
-    setChannelMoveTargetSpaceId,
-    setMovingChannelId,
-    setChannelMoveError,
     setWorkspaceSearchOpen,
     setRenamingSpaceId,
     setNewSpaceName,
@@ -1894,42 +1888,6 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     }
   }
 
-  function openChannelMove(channel: ChannelSnapshot) {
-    setChannelMoveTargetSpaceId(channel.spaceId || s.currentSpaceId || "");
-    setChannelMoveError(null);
-    setChannelMoveOpen(true);
-  }
-
-  async function moveChannel(channel: ChannelSnapshot) {
-    if (!s.token || s.movingChannelId) return;
-    const targetSpaceId = s.channelMoveTargetSpaceId.trim();
-    if (!targetSpaceId) {
-      setChannelMoveError("Select a target workspace");
-      return;
-    }
-
-    if (targetSpaceId === channel.spaceId) {
-      setChannelMoveOpen(false);
-      return;
-    }
-    setMovingChannelId(channel.id);
-    setChannelMoveError(null);
-    try {
-      const response = await fetch(WEB_PROXY_ROUTES.channel_transfer_proposals(channel.id), {
-        method: "POST", headers: { Authorization: `Bearer ${s.token}`, "content-type": "application/json" },
-        body: JSON.stringify({ spaceId: targetSpaceId }),
-        cache: "no-store",
-      });
-      await requireResponseOk(response);
-      await queryClient.invalidateQueries({ queryKey: ["channel-transfers"] });
-      setChannelMoveOpen(false);
-    } catch (err) {
-      setChannelMoveError(userErrorMessage(err, "Couldn't propose the move"));
-    } finally {
-      setMovingChannelId(null);
-    }
-  }
-
   async function createSpace(nameOverride?: string, options?: { select?: boolean }) {
     if (!s.token || s.creatingSpace) return;
     const name = (nameOverride ?? s.newSpaceName).trim();
@@ -2952,8 +2910,6 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     createNewConversation,
     sendNewConversationMessage,
     updateChannelVisibility,
-    openChannelMove,
-    moveChannel,
     createSpace,
     createSpaceInviteCode,
     inviteSpaceMembers,

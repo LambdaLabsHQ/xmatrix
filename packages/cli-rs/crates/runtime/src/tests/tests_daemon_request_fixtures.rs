@@ -67,7 +67,7 @@ fn test_daemon_run_child(request: &TestRunRequest, pid: u32) -> super::DaemonRun
 #[tokio::test]
 async fn daemon_request_hub_routes_authorize_before_reporting_missing_hub() {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
-    for route in ["hub-bytes", "hub-json", "channel-history"] {
+    for route in ["hub-json", "channel-history"] {
         for authorized in [false, true] {
             let broker = test_daemon_request_broker(Vec::new());
             if authorized {

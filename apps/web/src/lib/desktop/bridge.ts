@@ -103,7 +103,6 @@ export type DesktopBridge = {
     machineId?: string;
     updatedAt: string;
   }>;
-  switchEnvironment?: (environment: "production" | "test") => Promise<{ environment: "production" | "test" }>;
   openCliInstall: () => Promise<void>;
   /** Install the CLI from the App's bundled seed and register the daemon. */
   installCli?: () => Promise<DesktopCliInstallResult>;

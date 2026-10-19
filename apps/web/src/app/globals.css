@@ -4308,8 +4308,11 @@ html[data-app-theme="wood"] .xmatrix-app .app-rail button.bg-primary {
     padding-bottom: 0;
   }
 
-  .xmatrix-app .app-page-article {
-    padding-top: 0;
+  /* Nothing scrolls under the band, where the window's search floats: a
+     paper beside a list scrolls below it, as a page scrolls below its
+     controls, and its first line starts level with the list's first row. */
+  .xmatrix-app .app-below-band {
+    margin-top: var(--app-band);
   }
 
   /* The details column's planks start below the band, level with the
@@ -4405,7 +4408,7 @@ html[data-app-theme="wood"] .xmatrix-app .app-rail button.bg-primary {
     padding-right: var(--xmatrix-windows-caption-clearance);
   }
 
-  .xmatrix-app.xmatrix-desktop-windows .app-page-article {
+  .xmatrix-app.xmatrix-desktop-windows .app-page-band {
     padding-top: max(1.5rem, var(--xmatrix-windows-caption-height));
   }
 

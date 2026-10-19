@@ -95,6 +95,7 @@ export function githubFeatureForWebhookEvent(
   if (event === "pull_request_review") return "reviews";
   if (event === "check_run" || event === "check_suite") return "checks";
   if (event === "release") return "releases";
+  if (event === "code_scanning_alert") return "code-scanning";
   if (["status", "workflow_run", "deployment", "deployment_status"].includes(event)) return "status";
   if (event === "create" || event === "delete") {
     return text(payload.ref_type) === "repository" ? undefined : "commits";
@@ -174,6 +175,17 @@ export function githubWebhookMessageBody(
   payload: Record<string, unknown>,
   repository: { owner: string; repo: string; url: string },
 ): string {
+  if (event === "code_scanning_alert") {
+    const number = record(payload.alert).number;
+    const action = text(payload.action);
+    if (!Number.isSafeInteger(number) || Number(number) < 1 || ![
+      "created", "reopened", "reopened_by_user", "appeared_in_branch", "fixed", "closed_by_user",
+    ].includes(action)) return "";
+    // The alert reference is enough to retrieve its details with the reader's
+    // own grant; SARIF messages, rule text and source snippets stay on GitHub.
+    const url = `${repository.url}/security/code-scanning/${number}`;
+    return `GitHub code scanning alert [${repository.owner}/${repository.repo}#${number}](${url}): ${action}.`;
+  }
   if (event === "push") return pushLine(payload, repository);
   if (["issues", "pull_request", "issue_comment", "pull_request_review",
     "pull_request_review_comment"].includes(event)) {

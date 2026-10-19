@@ -1,7 +1,7 @@
 # Deployment profiles
 
 The committed Wrangler configs (`packages/hub/wrangler.toml`,
-`packages/hub/wrangler.test-deploy.toml`, `apps/web/wrangler.jsonc`) describe
+`apps/web/wrangler.jsonc`) describe
 the product: bindings, Durable Object classes and migrations, product flags,
 and default resource names. A profile in `profiles/` describes one deployment.
 `scripts/deploy-config.mjs` merges the two:
@@ -25,16 +25,15 @@ environment at render time and rendering fails if it is unset.
 | `hub.placementRegion` | Optional Smart Placement region, normally the database's region. |
 | `hub.workersDev`, `hub.previewUrls`, `web.workersDev`, `web.previewUrls` | Optional `workers.dev` and preview URL switches. |
 | `hub.hyperdrive` | Hyperdrive config id for every `[[hyperdrive]]` binding the deployment keeps. A single-database deployment binds only `RELAY_POSTGRES` and omits `RELAY_POSTGRES_SHARD_1`. |
-| `hub.d1` | `{ "<binding>": { "databaseId": … } }` for every D1 binding (the hosted test Hub only). |
-| `hub.vars` | Deployment-owned Hub vars: `AUTH_COOKIE_DOMAIN`, `AUTH_COOKIE_PREFIX`, `XMATRIX_EMAIL_FROM`, `PLATFORM_ADMIN_EMAILS`, `PLATFORM_ADMIN_SPACE_ID`, `TEST_ENVIRONMENT_ACCESS_SPACE_ID`, and `RELAY_POSTGRES_SHARD_<n>_ID` for each extra database shard binding. A var may live in the committed config or the profile, never both. |
+| `hub.vars` | Deployment-owned Hub vars: `AUTH_COOKIE_DOMAIN`, `AUTH_COOKIE_PREFIX`, `XMATRIX_EMAIL_FROM`, `PLATFORM_ADMIN_EMAILS`, `PLATFORM_ADMIN_SPACE_ID`, and `RELAY_POSTGRES_SHARD_<n>_ID` for each extra database shard binding. A var may live in the committed config or the profile, never both. |
 | `hub.omitBindings`, `web.omitBindings` | Optional bindings this deployment does not provision (for example `RELAY_POSTGRES_SHARD_1`, `RELEASE_ASSETS`). |
 
-`production.json` and `test.json` are the official xMatrix deployments and are
-used by the release workflows. Their identity — account, Hyperdrive ids,
+`production.json` is the official xMatrix deployment and is
+used by the release workflows. Its identity — account, Hyperdrive ids,
 operator emails and Space ids — is read through env references from the
 release environments' secrets (`CLOUDFLARE_ACCOUNT_ID`, `XMATRIX_HYPERDRIVE_ID`,
 `XMATRIX_HYPERDRIVE_SHARD_1_ID`, `XMATRIX_PLATFORM_ADMIN_EMAILS`,
-`XMATRIX_PLATFORM_ADMIN_SPACE_ID`), so the profiles ship in the public source
+`XMATRIX_PLATFORM_ADMIN_SPACE_ID`), so the profile ships in the public source
 and the values do not. `node scripts/deploy-config.mjs origin <profile> hub|web`
 prints one public origin without reading those secrets. `ci.json` holds placeholder values for the CI bundle check, and
 `example.json` shows the profile shape.
