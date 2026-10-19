@@ -130,7 +130,9 @@ The production x-matrix Space on 2026-09-26:
   message carries that context to every Agent in it; a mention inside the
   quote stays quoted text. One from a page is linked to the passage; one from
   a message is as open as its source conversation and linked to the same
-  pages.
+  pages. Its first sent message uses the same automatic summon and author
+  choice window as New conversation, despite its preset title; the quoted
+  passage and source link remain part of the message Jev reads.
 
 ### 3.3 Link
 

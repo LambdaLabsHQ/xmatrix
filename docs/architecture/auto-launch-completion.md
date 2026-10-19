@@ -92,7 +92,8 @@ it is not a mention, so it reads as the prose it looks like and starts nothing.
 ## A new conversation's first message
 
 A new conversation (a Channel still automatically named: the web's New
-conversation, or `xmatrix channel create` without a name) needs no mention to
+conversation, or `xmatrix channel create` without a name), or a discussion
+started from a page or selected message passage, needs no mention to
 start an Agent. People and Agents are treated alike: when its first message,
 whoever wrote it, summons nobody, the Hub asks Jev whether the author wants an
 Agent to start now (`START_INTENT_CATEGORIES`: `summon` or `conversation`) in
@@ -110,7 +111,10 @@ launch path. `conversation`, missing Jev configuration and every refusal start
 nothing and post nothing, because the author never asked for an Agent;
 refusals other than `start_intent_declined` go to the Worker diagnostic log. A
 first message with a mention or picker selection keeps the ordinary summon
-path, a named Channel is never asked, and later messages are never asked. The
+path, an ordinary named Channel is never asked, and later messages are never asked.
+Discussions keep their page or passage title: the recorded `fromPageId`, or
+`fromChannelId` together with `fromMessageId`, includes them in this same flow
+without enabling automatic renaming. The
 send answers first; Jev reads the message in the post-commit background work,
 so the author never waits on a judgement they did not ask for.
 
