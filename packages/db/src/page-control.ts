@@ -325,24 +325,23 @@ type TreeRow = PageRow & AccessView & { governance: boolean };
 
 /** Every page in the Space with the actor's effective access, parents first. */
 async function accessibleTree(tx: DatabaseTransaction, spaceId: string, actor: Actor): Promise<TreeRow[]> {
-  const rows = await tx.query<PageRow>({
-    name: "page_tree_v4",
+  // One statement: each page with the actor's own grant on it and whether it is the Space's governance page.
+  // Every page request checks access through here, so its round trips are paid on every one.
+  const rows = await tx.query<PageRow & { actor_access: "read" | "edit" | null; is_governance: boolean }>({
+    name: "page_tree_access_v1",
     text: `SELECT p.page_id,p.parent_page_id,data.page_name(r.body) AS title,p.position,p.access_mode,
         p.head_revision,p.agent_suggest_only,p.updated_at,p.version,p.published_at,p.summary,p.summary_revision,
-        p.summary_at
+        p.summary_at,
+        (SELECT a.access FROM data.page_access a WHERE a.space_id=p.space_id AND a.page_id=p.page_id
+          AND a.subject_kind='user' AND a.subject_id=$2) AS actor_access,
+        COALESCE(p.page_id=(SELECT s.metadata_json->>'governancePageId' FROM data.spaces s WHERE s.space_id=$1),
+          false) AS is_governance
       FROM data.pages p ${HEAD_REVISION}
       WHERE p.space_id=$1 ORDER BY p.parent_page_id NULLS FIRST, p.position, p.page_id
       LIMIT ${MAX_PAGES + 1}`,
-    values: [spaceId], maxRows: MAX_PAGES + 1,
+    values: [spaceId, actor.userId], maxRows: MAX_PAGES + 1,
   });
   if (rows.length > MAX_PAGES) throw new PageControlError("page_tree_too_large", 409);
-  const grants = await tx.query<QueryResultRow & { page_id: string; access: "read" | "edit" }>({
-    name: "page_access_for_user_v1",
-    text: `SELECT page_id, access FROM data.page_access
-      WHERE space_id=$1 AND subject_kind='user' AND subject_id=$2 LIMIT ${MAX_PAGES}`,
-    values: [spaceId, actor.userId], maxRows: MAX_PAGES,
-  });
-  const grant = new Map(grants.map((row) => [row.page_id, row.access]));
   const byId = new Map(rows.map((row) => [row.page_id, row]));
   const admin = actor.role === "owner" || actor.role === "admin";
   const memo = new Map<string, AccessView>();
@@ -353,7 +352,7 @@ async function accessibleTree(tx: DatabaseTransaction, spaceId: string, actor: A
     let view: AccessView;
     if (!row || depth > MAX_DEPTH) view = { canRead: false, canEdit: false };
     else if (row.access_mode === "restricted") {
-      const own = grant.get(pageId);
+      const own = row.actor_access ?? undefined;
       view = { canRead: admin || own !== undefined, canEdit: admin || own === "edit" };
     } else if (row.parent_page_id) view = resolve(row.parent_page_id, depth + 1);
     else view = { canRead: true, canEdit: !readsOnly(actor.role) };
@@ -361,14 +360,8 @@ async function accessibleTree(tx: DatabaseTransaction, spaceId: string, actor: A
     return view;
   };
   // The Space's governance page is its maintainers' to edit (open-project-governance.md §4).
-  const governancePageId = (await tx.query<QueryResultRow & { page_id: string | null }>({
-    name: "page_governance_page_v1",
-    text: "SELECT metadata_json->>'governancePageId' AS page_id FROM data.spaces WHERE space_id=$1",
-    values: [spaceId], maxRows: 1,
-  }))[0]?.page_id ?? null;
-  return rows.map((row) => {
+  return rows.map(({ actor_access: _access, is_governance: governance, ...row }) => {
     const view = resolve(row.page_id);
-    const governance = row.page_id === governancePageId;
     return { ...row, ...view, governance, canEdit: view.canEdit && (admin || !governance) };
   }).filter((row) => row.canRead);
 }

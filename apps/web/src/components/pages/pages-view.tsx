@@ -287,6 +287,29 @@ export function pageDocumentQuery(userId: string | null, spaceId: string, pageId
   };
 }
 
+/**
+ * A page's discussions with the conversations they name (its margin), its section awareness and its
+ * Automations. Their keys do not carry the page's revision: the live session's commits invalidate them,
+ * so a page opens on what was read ahead and keeps it on screen while it is read again.
+ */
+function pageLinksQuery(userId: string | null, spaceId: string, pageId: string, token: string) {
+  return {
+    queryKey: xmatrixQueryKeys.domain({ userId: userId ?? "anonymous" }, "page-links", [spaceId, pageId]),
+    staleTime: 10_000,
+    queryFn: ({ signal }: { signal: AbortSignal }) => pageApi.links(spaceId, token, { pageId }, signal),
+  };
+}
+
+const PAGE_REVISION_QUERIES = ["page-links", "page-automations", "page-awareness"];
+// Co-writing commits arrive many a second; what they move beside the page is read again once they settle.
+const REVISION_REFRESH_MS = 1_000;
+
+// The editor and the preview are read ahead, so a page's first opening waits on neither.
+function preloadPageChunks() {
+  void import("./page-editor");
+  void import("./page-document-static");
+}
+
 const PREFETCHED_PAGES = 40;
 
 export function PageTreePanel({ spaceId, token, selectedPageId, onSelectPage, onOpenSection, creation,
@@ -309,7 +332,11 @@ export function PageTreePanel({ spaceId, token, selectedPageId, onSelectPage, on
   const { user } = useAuth();
   const userId = user?.id ?? null;
   const prefetch = useCallback((pageId: string) => {
-    if (spaceId) void queryClient.prefetchQuery(pageDocumentQuery(userId, spaceId, pageId, token));
+    preloadPageChunks();
+    if (!spaceId) return;
+    void queryClient.prefetchQuery(pageDocumentQuery(userId, spaceId, pageId, token));
+    // About to be opened: its margin is read with it.
+    void queryClient.prefetchQuery(pageLinksQuery(userId, spaceId, pageId, token));
   }, [queryClient, spaceId, token, userId]);
   // The Space's pages are read ahead, a few at a time, so opening one does not wait on the network.
   useEffect(() => {
@@ -572,6 +599,8 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   // The conversation whose card is being read, so its passage is marked (§4.4).
   const [focused, setFocused] = useState<string | null>(null);
   const [anchorTops, setAnchorTops] = useState<ReadonlyMap<string, number>>(new Map());
+  // Where the preview's sections stand, so the margin's cards stand beside them before the editor is drawn.
+  const [previewTops, setPreviewTops] = useState<ReadonlyMap<string, number>>(new Map());
   // The margin needs room beside a full document column; narrower pages show bubbles instead (§4.4).
   const [articleWidth, setArticleWidth] = useState(0);
   const observer = useRef<ResizeObserver | null>(null);
@@ -705,6 +734,19 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   const queryClient = useQueryClient();
   const userId = user?.id ?? null;
   const userName = user?.name || user?.email || "";
+  useEffect(preloadPageChunks, []);
+  // What a commit moves beside the page is read again once commits settle; the page's opening revision
+  // is what it was read at, so the session reporting it reads nothing again.
+  const refreshedAt = useRef<{ pageId: string | null; revision: number | null }>({ pageId: null, revision: null });
+  useEffect(() => {
+    const last = refreshedAt.current;
+    refreshedAt.current = { pageId, revision: headRevision };
+    if (!spaceId || !pageId || headRevision === null || last.pageId !== pageId || last.revision === null
+      || last.revision === headRevision) return;
+    const timer = window.setTimeout(() => void queryClient.invalidateQueries({ predicate: ({ queryKey }) =>
+      PAGE_REVISION_QUERIES.some((name) => queryKey.includes(name)) && queryKey.includes(pageId) }), REVISION_REFRESH_MS);
+    return () => window.clearTimeout(timer);
+  }, [headRevision, pageId, queryClient, spaceId]);
 
   // With no page named, the first top-level page opens, and the URL names it.
   useEffect(() => {
@@ -832,9 +874,8 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     [editorBlocks, session]);
   const presence = usePresence(session);
   const links = useQuery({
-    queryKey: xmatrixQueryKeys.domain({ userId: user?.id ?? "anonymous" }, "page-links", [spaceId, pageId, headRevision]),
+    ...pageLinksQuery(userId, spaceId ?? "", pageId ?? "", token),
     enabled: Boolean(spaceId && pageId), refetchInterval: 30_000,
-    queryFn: ({ signal }) => pageApi.links(spaceId!, token, { pageId: pageId! }, signal),
   });
   // Discussions this reader just started, shown where they are before the Hub has linked them.
   const [startedLinks, setStartedLinks] = useState<PageLink[]>([]);
@@ -853,7 +894,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   }, [links.data, startedLinks]);
   // The page's Automations, drawn as chips where the text references them (pages-live-document.md §6).
   const automations = useQuery({
-    queryKey: xmatrixQueryKeys.domain({ userId: user?.id ?? "anonymous" }, "page-automations", [spaceId, pageId, headRevision]),
+    queryKey: xmatrixQueryKeys.domain({ userId: user?.id ?? "anonymous" }, "page-automations", [spaceId, pageId]),
     enabled: Boolean(spaceId && pageId), refetchInterval: () => refetchUnlessHumanPush(30_000),
     queryFn: ({ signal }) => pageApi.automations(spaceId!, pageId!, token, signal).then((result) => result.automations),
   });
@@ -917,7 +958,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
 
   // When each section last changed, and by whom where; refreshed as revisions land.
   const awareness = useQuery({
-    queryKey: xmatrixQueryKeys.domain({ userId: user?.id ?? "anonymous" }, "page-awareness", [spaceId, pageId, headRevision]),
+    queryKey: xmatrixQueryKeys.domain({ userId: user?.id ?? "anonymous" }, "page-awareness", [spaceId, pageId]),
     enabled: Boolean(spaceId && pageId && token), refetchInterval: 30_000,
     queryFn: ({ signal }) => pageApi.awareness(spaceId!, pageId!, token, signal),
   });
@@ -1598,7 +1639,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
                     {!drawn && document.data && (
                       // Where the editor's host holds its height.
                       <div className="min-h-[50vh]"><PageDocumentStatic body={document.data.body} testId="page-preview"
-                        references={references} mediaUrl={mediaUrl} /></div>
+                        references={references} mediaUrl={mediaUrl} onAnchorOffsets={setPreviewTops} /></div>
                     )}
                     {drawn && !!readerChanges && !phone && (
                       <label className="mb-3 flex w-fit cursor-pointer items-center gap-2 text-xs text-muted-foreground"
@@ -1628,10 +1669,12 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
                     </div>
                   </div>
                   {/* The margin holds its room from the start, so the text does not reflow when the page has synced;
-                      an open conversation shows from the start, and moves to its anchor once the page is drawn. */}
+                      its cards and an open conversation show beside the preview's sections, and move to their
+                      anchors in the text once the page is drawn. */}
                   {marginOn && (
                     <aside className="w-80 shrink-0">
-                      {(drawn || openInMargin) && <PageMargin conversations={marginCards} tops={anchorTops} focusedId={focused} canResolve={canEdit}
+                      {(drawn || openInMargin || (document.data && links.data)) && <PageMargin conversations={marginCards}
+                        tops={drawn ? anchorTops : previewTops} focusedId={focused} canResolve={canEdit}
                         writers={marginWriters}
                         onWriter={(writer) => setDialog({ kind: "agent", key: writer.key })}
                         writerActions={(person) => {
