@@ -63,7 +63,7 @@ export function registerGmailNotificationRoutes(app:Hono<{Bindings:Env}>) {
         const rows=await repository.list(spaceId,user.id);
         const identity=config ? await gmailWatchIdentity(c.env):undefined;
         const pollIdentity=pollConfig ? await gmailPollIdentity(c.env):undefined;
-        return c.json({available:!!pollConfig || !!config,notifications:rows.map(row=>({id:row.id,address:row.selection.address,channelId:row.channelId,
+        return c.json({available:!!pollConfig || !!config,notifications:rows.map(row=>({id:row.id,address:row.selection.address,
           enabled:row.enabled && row.credentialVersion===current.version && row.generation===current.connectionGeneration &&
             row.selection.appIdentity===(row.mode==="poll" ? pollIdentity : identity) && mailboxes.some(box=>box.account===row.selection.account && box.owner===`user:${user.id}`),
           lastSignalAt:row.lastSignalAt,lastVerifiedAt:row.lastVerifiedAt,expiresAt:row.expiresAt,error:row.error}))},200,
@@ -81,14 +81,14 @@ export function registerGmailNotificationRoutes(app:Hono<{Bindings:Env}>) {
         await repository.stop(spaceId,user.id,body.id);return c.json({ok:true});
       }
       if(!config && !pollConfig)return c.json({error:"Gmail notifications are not yet configured on this Hub"},503);
-      if(body.action==="start" && typeof body.address==="string" && typeof body.channelId==="string") {
+      if(body.action==="start" && typeof body.address==="string") {
         const mailbox=mailboxes.find(box=>box.address===body.address && box.owner===`user:${user.id}`);
         if(!mailbox)throw new ProviderRequestError(403,"Only the mailbox owner enables notifications");
-        if(pollConfig)return c.json({url:await startGmailPolling(c.env,c.req.raw,{spaceId,userId:user.id,channelId:body.channelId,
+        if(pollConfig)return c.json({url:await startGmailPolling(c.env,c.req.raw,{spaceId,userId:user.id,
           credentialVersion:current.version,generation:current.connectionGeneration,mailbox})},200,{"cache-control":"private, no-store"});
         if(!config)throw new ProviderRequestError(503,"Gmail notifications are not configured");
         const nonce=crypto.randomUUID(),proof=verifier(),identity=await gmailWatchIdentity(c.env);
-        const id=await repository.create({spaceId,userId:user.id,channelId:body.channelId,credentialVersion:current.version,
+        const id=await repository.create({spaceId,userId:user.id,credentialVersion:current.version,
           generation:current.connectionGeneration,mailboxDigest:await sha256Hex(mailbox.address),
           tokenDigest:await sha256Hex(JSON.stringify([identity,mailbox.address])),nonceDigest:await sha256Hex(nonce),
           selection:{...mailbox,oauthVerifier:proof,appIdentity:identity},historyId:"0"});

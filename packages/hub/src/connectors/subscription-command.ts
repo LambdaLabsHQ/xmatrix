@@ -38,7 +38,7 @@ export async function runSubscriptionStatement(
     const next = nextSubscriptionFeatures(manifest, currentFeatures, statement);
     const sync = subscriptions && (async (subscribed: boolean) => subscriptions.sync({ env: input.env,
       spaceId: scope.spaceId, credentials: await connectionCredentials(input.env, scope.spaceId, manifest.id),
-      source: statement.source, subscribed }).catch((error: unknown) => {
+      source: statement.source, subscribed, actorUserId: input.actorUserId }).catch((error: unknown) => {
       if (error instanceof ProviderRequestError) return `${manifest.name} refused the change: ${error.message}`;
       throw error;
     }));

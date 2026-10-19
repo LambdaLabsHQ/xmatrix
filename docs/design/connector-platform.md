@@ -553,8 +553,14 @@ and are refreshed near expiry; revocation and stop erase them with the grant.
 Optional native notifications use a separate Google OAuth client requesting
 only `gmail.metadata`. They do not replace the Composio content grant or its
 send/reply approval contract. Apps → Gmail lets a Human mailbox owner who is
-also a Space admin choose a destination conversation and authorize notification
-access. Agent-owned mailboxes are not supported by this first notification flow.
+also a Space admin turn notifications on for each of their mailboxes, which
+authorizes notification access; it does not pick a destination. Like any
+connector event, a conversation receives a mailbox's notifications after it runs
+`@gmail:subscribe:<mailbox>` (or `*` for all of the member's mailboxes). Only the
+mailbox's member and their Agents may subscribe it, and delivery takes only
+subscriptions whose authority root is that member. Gmail events are produced by
+the Hub, so the manifest declares `events.ingress: false` and no ingress URL is
+minted. Agent-owned mailboxes are not supported by this first notification flow.
 No Gmail forwarding configuration is needed.
 
 Google watch publishes an email address and history ID to Pub/Sub; the Hub
@@ -571,13 +577,15 @@ Old mail is not replayed as new work.
 The primary App authority stores the native refresh token and pending PKCE
 verifier in an encrypted notification envelope bound to the route identity.
 Configuration fingerprints, captured connection generation, credential version,
-mailbox ownership, current Space admin and conversation capability fence work.
+mailbox ownership and current Space admin fence work; each append is checked
+against its subscribing member's conversation capability.
 Mailbox removal, reconnection or ownership changes retire that mailbox's
 notification rows and encrypted grants. Unchanged account/address/owner tuples
 survive another mailbox's addition or edit only when all shared credentials are
 also unchanged. The credential transaction advances retained rows to the new
 credential version and clears old worker leases, preserving cursors and pending
-IDs. A shared credential replacement, disconnect, Channel move, account erasure
+IDs. A Channel move removes its subscriptions like any other source relation.
+A shared credential replacement, disconnect, account erasure
 or Space erasure retires all affected grants. Stop clears one local grant immediately;
 it does not revoke a Google grant another Space might still use. Abandoned
 OAuth attempts expire after ten minutes and bounded maintenance removes them.
@@ -585,10 +593,8 @@ OAuth attempts expire after ten minutes and bounded maintenance removes them.
 Durable Gmail-ID receipts coalesce duplicate signals and make conversation
 append idempotent. Notifications contain only a mail ID reference, never sender,
 subject, snippet or body. Reading one is an ordinary `@gmail:read:<id>` command.
-The private `automationEvents` manifest allows `gmail:message.received:<id>`
-Page Automations without exposing the private source as a generic Channel
-subscription. Only Automations whose authority root is the mailbox owner fire.
-The UI exposes the notification ID for that source. Credentials must be supplied
+Page Automations use `gmail:message.received:<mailbox>`; only Automations whose
+authority root is the mailbox owner fire. Credentials must be supplied
 as an atomic optional group; partial configuration fails closed. Provisioning,
 Google verification and production activation are separate operator steps in
 [Gmail notifications](../operations/gmail-notifications.md).

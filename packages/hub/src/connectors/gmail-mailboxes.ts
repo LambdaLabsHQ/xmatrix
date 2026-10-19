@@ -1,6 +1,7 @@
 import type { Env } from "../types";
 import { upstreamMeter, type UpstreamMeter } from "../usage-cost-metering";
 import type { AgentRegistrationIdentity } from "./agent-caller";
+import type { ConnectorSubscriptionSync } from "./provider";
 import { composioGet, deleteComposioAccount } from "./composio";
 import { parseAccountList, serializeAccountList, type AccountListField } from "./account-list";
 import { connectorCredentialRepository } from "./credentials";
@@ -56,6 +57,21 @@ export function mayUseMailbox(mailbox: GmailMailbox, caller: GmailCaller): boole
   if (mailbox.owner.startsWith("user:")) return caller.userId === mailbox.owner.slice("user:".length);
   return caller.agent !== undefined && agentMailboxOwner(caller.agent) === mailbox.owner;
 }
+
+/**
+ * New-mail notifications reach a Channel the way any connector event does: the
+ * Channel subscribes `@gmail:subscribe:<mailbox>`. A mailbox is private to its
+ * member, so only that member (or their Agents' Runs) subscribes it; `*` means
+ * every mailbox the member owns. Delivery applies the same rule to each route.
+ */
+export const GMAIL_SUBSCRIPTIONS: ConnectorSubscriptionSync = {
+  async sync({ credentials, source, subscribed, actorUserId }) {
+    if (!subscribed) return undefined;
+    const owned = parseMailboxes(credentials.mailboxes).filter((mailbox) => mailbox.owner === `user:${actorUserId}`);
+    return owned.some((mailbox) => source === "*" || mailbox.address === source) ? undefined
+      : "only a mailbox's own member and their Agents subscribe its notifications";
+  },
+};
 
 /** One mailbox's credentials for a proxied call. */
 export function mailboxCredentials(credentials: Readonly<Record<string, string>>, mailbox: GmailMailbox): Record<string, string> {

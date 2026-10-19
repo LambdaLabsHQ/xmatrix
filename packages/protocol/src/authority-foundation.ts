@@ -1041,7 +1041,7 @@ const TRIGGER_TEXT = /^[^\s][^\n]{0,199}$/u;
 function connectorEventTrigger(trigger: Record<string, unknown>): AutomationTrigger {
   const providerId = typeof trigger.provider === "string" ? trigger.provider.trim().toLowerCase() : "";
   const manifest = APP_CONNECTOR_PROVIDER_MANIFESTS.find((candidate) => candidate.id === providerId);
-  const events = manifest?.events ?? manifest?.automationEvents;
+  const events = manifest?.events;
   if (!manifest || !events) throw new Error("an event trigger names a connector that delivers events");
   const source = typeof trigger.source === "string" && trigger.source.trim() ? trigger.source.trim().toLowerCase() : "*";
   if (source !== "*" && !new RegExp(events.source.pattern, "u").test(source)) {

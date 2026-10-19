@@ -1193,7 +1193,7 @@ export function AppsView({
       // The mailbox view consumes its single-use code after connection data loads.
       // Select it without claiming that the notification grant has completed.
       if (url.searchParams.get("gmailWatch") === "failed") {
-        setSetupNotice({ tone: "warning", message: "Gmail notification authorization did not finish. Enable notifications to try again." });
+        setSetupNotice({ tone: "warning", message: "Gmail notification authorization did not finish. Turn notifications on to try again." });
         url.searchParams.delete("gmailWatch");
       }
       url.searchParams.delete("connector");
@@ -1614,7 +1614,7 @@ export function AppsView({
       {connector.id === "gmail" && state.configured && token && currentSpace && user?.id ? (
         <ToolDetailSection title="Gmail mailboxes">
           <GmailMailboxes key={currentSpace.id} spaceId={currentSpace.id} token={token} userId={user.id}
-            members={currentSpace.members} channels={channels} adding={updatingProviderId === connector.id}
+            members={currentSpace.members} adding={updatingProviderId === connector.id}
             onAdd={() => void configureConnector(connector)} />
         </ToolDetailSection>
       ) : null}

@@ -95,9 +95,9 @@ export interface AppConnectorProviderManifest {
    * `@<provider>:subscribe:<source> <feature…|all>`; each delivery is routed to
    * the Channels subscribed to its source and feature.
    */
-  /** Private, owner-bound event sources that may fire Automations but do not support general Channel subscriptions. */
-  automationEvents?: NonNullable<AppConnectorProviderManifest["events"]>;
   events?: {
+    /** False when the Hub produces the events itself, so there is no ingress URL to paste into the provider. */
+    ingress?: false;
     source: { label: string; description: string; pattern: string; placeholder: string };
     features: Array<{ id: string; label: string; description: string }>;
     defaultFeatures: string[];
