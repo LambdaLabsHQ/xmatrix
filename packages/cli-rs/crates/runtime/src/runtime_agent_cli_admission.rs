@@ -8,7 +8,6 @@ fn admit_agent_cli_hub(cli: &Cli) -> error::Result<String> {
         inherited.as_deref(),
         pinned.as_deref(),
         cli.profile.as_deref(),
-        cli.environment,
         cli.hub_url.as_deref(),
     )?;
     config::install_agent_cli_hub(hub.clone())?;
@@ -19,7 +18,6 @@ fn validate_agent_cli_target(
     inherited_hub: Option<&str>,
     pinned_profile: Option<&str>,
     selected_profile: Option<&str>,
-    environment: Option<CliEnvironmentArg>,
     hub_override: Option<&str>,
 ) -> error::Result<String> {
     let inherited = inherited_hub
@@ -27,7 +25,7 @@ fn validate_agent_cli_target(
         .ok_or_else(|| {
             CliError::Auth("Agent command is missing its inherited Hub binding".into())
         })?;
-    let hub = resolve_target_hub_choice(None, Some(inherited), "production")?;
+    let hub = resolve_target_hub(inherited)?;
     if let Some(pinned) = pinned_profile {
         xmatrix_cli_core::profile::ProfileId::parse(pinned)?;
     }
@@ -36,18 +34,9 @@ fn validate_agent_cli_target(
             "Agent command cannot select another installation profile".into(),
         ));
     }
-    let mut requested = Vec::new();
-    if let Some(environment) = environment {
-        requested.push(resolve_target_hub_choice(
-            Some(environment),
-            None,
-            "production",
-        )?);
-    }
-    if let Some(url) = hub_override {
-        requested.push(resolve_target_hub_choice(None, Some(url), "production")?);
-    }
-    if requested.iter().any(|requested| requested != &hub) {
+    if let Some(url) = hub_override
+        && resolve_target_hub(url)? != hub
+    {
         return Err(CliError::Auth(
             "Agent command cannot override its inherited Hub".into(),
         ));
@@ -60,52 +49,32 @@ mod agent_cli_admission_tests {
     use super::*;
     const PROFILE: &str = "profile:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 
+    const CUSTOM_HUB: &str = "https://hub.example";
+
     #[test]
     fn run_routing_cannot_select_a_sibling_profile_or_hub() {
         assert_eq!(
-            validate_agent_cli_target(Some(TEST_HUB_URL), Some(PROFILE), Some(PROFILE), None, None)
+            validate_agent_cli_target(Some(CUSTOM_HUB), Some(PROFILE), Some(PROFILE), None)
                 .unwrap(),
-            TEST_HUB_URL
+            CUSTOM_HUB
+        );
+        assert_eq!(
+            validate_agent_cli_target(Some(CUSTOM_HUB), Some(PROFILE), None, Some(CUSTOM_HUB))
+                .unwrap(),
+            CUSTOM_HUB
         );
         assert!(
             validate_agent_cli_target(
-                Some(TEST_HUB_URL),
+                Some(CUSTOM_HUB),
                 Some(PROFILE),
                 Some("profile:bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"),
-                None,
                 None
             )
             .is_err()
         );
         assert!(
-            validate_agent_cli_target(
-                Some(TEST_HUB_URL),
-                Some(PROFILE),
-                None,
-                None,
-                Some(DEFAULT_HUB_URL)
-            )
-            .is_err()
-        );
-        assert!(
-            validate_agent_cli_target(
-                Some(TEST_HUB_URL),
-                Some(PROFILE),
-                None,
-                Some(CliEnvironmentArg::Production),
-                None
-            )
-            .is_err()
-        );
-        assert!(
-            validate_agent_cli_target(
-                Some(TEST_HUB_URL),
-                Some(PROFILE),
-                None,
-                Some(CliEnvironmentArg::Test),
-                Some(DEFAULT_HUB_URL)
-            )
-            .is_err()
+            validate_agent_cli_target(Some(CUSTOM_HUB), Some(PROFILE), None, Some(DEFAULT_HUB_URL))
+                .is_err()
         );
     }
 
@@ -117,18 +86,17 @@ mod agent_cli_admission_tests {
             Some("https://hub.invalid/path"),
             Some("https://secret@hub.invalid"),
         ] {
-            assert!(validate_agent_cli_target(hub, Some(PROFILE), None, None, None).is_err());
+            assert!(validate_agent_cli_target(hub, Some(PROFILE), None, None).is_err());
         }
         assert!(
-            validate_agent_cli_target(Some(DEFAULT_HUB_URL), Some("bad-profile"), None, None, None)
+            validate_agent_cli_target(Some(DEFAULT_HUB_URL), Some("bad-profile"), None, None)
                 .is_err()
         );
         assert!(
-            validate_agent_cli_target(Some(DEFAULT_HUB_URL), None, Some(PROFILE), None, None)
-                .is_err()
+            validate_agent_cli_target(Some(DEFAULT_HUB_URL), None, Some(PROFILE), None).is_err()
         );
         assert_eq!(
-            validate_agent_cli_target(Some(DEFAULT_HUB_URL), None, None, None, None).unwrap(),
+            validate_agent_cli_target(Some(DEFAULT_HUB_URL), None, None, None).unwrap(),
             DEFAULT_HUB_URL
         );
     }
@@ -146,8 +114,9 @@ mod agent_cli_seatbelt_tests {
             return;
         };
         let _ = rustls::crypto::ring::default_provider().install_default();
+        // With no subcommand the CLI admits its Hub and prints help.
         let args = if case == "route" {
-            vec!["xmatrix", "env", "current"]
+            vec!["xmatrix"]
         } else {
             vec![
                 "xmatrix",

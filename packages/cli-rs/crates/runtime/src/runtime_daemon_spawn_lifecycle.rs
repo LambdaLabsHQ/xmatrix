@@ -1251,9 +1251,7 @@ async fn renew_daemon_command_lease_http(
             "requestId": request_id,
             "relayLease": relay_lease,
         }));
-    let request = http::with_access_header(request, &url)
-        .map_err(|error| DaemonCommandLeaseRenewalError::FenceLost(error.to_string()))?
-        .send();
+    let request = request.send();
     let response = tokio::time::timeout(
         Duration::from_secs(DAEMON_COMMAND_LEASE_RENEW_REQUEST_TIMEOUT_SECS),
         request,
@@ -1529,8 +1527,7 @@ async fn report_daemon_control_result_http(
     let mut retry = 0;
     loop {
         let client = http::client()?;
-        let request =
-            http::with_access_header(client.post(&url).bearer_auth(token).json(&body), &url)?;
+        let request = client.post(&url).bearer_auth(token).json(&body);
         let response = match tokio::time::timeout(
             Duration::from_secs(DAEMON_CONTROL_RESULT_REQUEST_TIMEOUT_SECS),
             request.send(),
@@ -2256,7 +2253,6 @@ async fn spawn_headless_agent(
         .args(&runtime_args)
         .current_dir(&workspace.canonical_cwd)
         .env("XMATRIX_HUB_URL", hub_url)
-        .env_remove("XMATRIX_ENVIRONMENT")
         .env("XMATRIX_HEADLESS", "1")
         .env("XMATRIX_AGENT_NAME_OVERRIDE", agent_name)
         .env("XMATRIX_AGENT_NAME", agent_name)

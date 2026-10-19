@@ -539,10 +539,18 @@ pub async fn cmd_recover_send(
 
 /// What an Agent's message writes into pages (`⟦write page:<id>⟧ … ⟦/write⟧`) goes into those pages now,
 /// as its reply's words would, and the message keeps a note of where each went instead of the words.
-async fn write_message_into_pages(hub_url: &str, token: &str, channel_id: &str, message: &str) -> String {
+async fn write_message_into_pages(
+    hub_url: &str,
+    token: &str,
+    channel_id: &str,
+    message: &str,
+) -> String {
     use xmatrix_cli_core::page_co_write::{PageCoWriteConnector, PageWritePart, page_write_parts};
     let parts = page_write_parts(message);
-    if !parts.iter().any(|part| matches!(part, PageWritePart::Write { .. })) {
+    if !parts
+        .iter()
+        .any(|part| matches!(part, PageWritePart::Write { .. }))
+    {
         return message.to_string();
     }
     let connector = PageCoWriteConnector::new(
@@ -2892,33 +2900,17 @@ async fn download_message_attachment_product_media(
         "messageId": message_id,
         "attachmentId": attachment_id,
     });
-    let broker = xmatrix_cli_core::access::requires_access(&url)
-        .then(xmatrix_cli_core::access::daemon_request_broker)
-        .flatten();
     media
-        .fetch(&url, || async {
-            let sent = if let Some((broker_url, capability)) = broker {
-                reqwest::Client::new()
-                    .post(format!("{broker_url}/request/hub-product-media"))
-                    .header("x-xmatrix-request-capability", capability)
-                    .json(&serde_json::json!({
-                        "url": url,
-                        "token": token,
-                        "expectedSize": expected_size,
-                        "body": body,
-                    }))
-                    .send()
-                    .await
-            } else {
-                let request = http::client()?
-                    .post(&url)
-                    .bearer_auth(token)
-                    .header(reqwest::header::CONTENT_TYPE, "application/json")
-                    .header(reqwest::header::CACHE_CONTROL, "no-store")
-                    .json(&body);
-                http::with_access_header(request, &url)?.send().await
-            };
-            sent.map_err(|err| CliError::Http(format!("product-media request failed: {err}")))
+        .fetch(|| async {
+            http::client()?
+                .post(&url)
+                .bearer_auth(token)
+                .header(reqwest::header::CONTENT_TYPE, "application/json")
+                .header(reqwest::header::CACHE_CONTROL, "no-store")
+                .json(&body)
+                .send()
+                .await
+                .map_err(|err| CliError::Http(format!("product-media request failed: {err}")))
         })
         .await
 }

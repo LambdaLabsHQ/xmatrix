@@ -5,7 +5,6 @@ use std::collections::HashMap;
 
 pub const DEFAULT_HUB_URL: &str = "https://xmatrix-hub.xmatrix.sh";
 pub const DEFAULT_WEB_URL: &str = "https://xmatrix.sh";
-pub const TEST_HUB_URL: &str = "https://xmatrix-hub.test.xmatrix.sh";
 pub struct HubRoutes;
 impl HubRoutes {
     pub const LOGIN: &str = "/api/auth/cli/login";
