@@ -164,6 +164,65 @@ test("platform admin reads one user's metadata-only detail, and every read is au
     const channel = await createOpenChannel(worker, jsonAuth, space.id, "detail");
     await postChannelMessage(worker, MOCK_TOKEN, channel.id, "private detail message");
 
+    // The owning read must aggregate real execution/message metadata without
+    // mixing Spaces/providers or counting action receipts as incoming events.
+    const otherSpace = await createSpace(worker, `Other ${randomUUID()}`);
+    const client = new Client({ connectionString: worker.postgresUrl });
+    await client.connect();
+    const recent = new Date().toISOString();
+    const old = new Date(Date.now() - 31 * 86_400_000).toISOString();
+    try {
+      for (const [sid, provider, creator] of [
+        [space.id, "github", userId], [space.id, "notion", userId], [space.id, "slack", "other-user"],
+        [otherSpace.id, "github", "other-user"],
+      ]) {
+        await client.query(`INSERT INTO data.app_connector_connections
+          (connection_id, space_id, provider_id, provider_name, status, auth_mode,
+           scopes_json, secret_refs_json, capabilities_json, channel_ids_json,
+           created_by, metadata_json, search_rank_sequence, version, created_at, updated_at)
+          VALUES ($1,$2,$3,$3,'configured','oauth','[]','[]','[]','[]',$4,
+            '{"private":"connector-private"}',$1,1,$5,$5)`,
+        [`${sid}:${provider}`, sid, provider, creator, recent]);
+      }
+      const cases = [
+        [space.id, "github", "completed", old],
+        ...["queued", "completed", "failed", "blocked", "planned"].map(status => [space.id, "github", status, recent]),
+        [space.id, "slack", "completed", recent], [otherSpace.id, "github", "completed", recent],
+      ];
+      for (const [sid, provider, status, at] of cases) {
+        await client.query(`INSERT INTO data.app_connector_executions
+          (execution_id,space_id,channel_id,message_id,provider_id,provider_name,status,
+           connection_id,requested_by,reason,result_summary,version,created_at,updated_at)
+          VALUES ($1,$2,$3,$1,$4,$4,$5,$6,'another-caller','private-error','private-result',1,$7,$7)`,
+        [randomUUID(), sid, channel.id, provider, status, `${sid}:${provider}`, at]);
+      }
+      await client.query(`INSERT INTO data.app_source_relations
+        (relation_id,connection_id,space_id,channel_id,source_kind,source_ref,features_json,version,created_by,created_at,updated_at)
+        VALUES ($1,$2,$3,$4,'repository','github:private/repo','[]',1,$5,$6,$6)`,
+      [randomUUID(), `${space.id}:github`, space.id, channel.id, userId, recent]);
+      for (const [index, [sid, provider, id, at, deleted]] of [
+        [space.id, "github", "app:github:old", old, false],
+        [space.id, "github", "app:github:delivery:one", recent, false],
+        [space.id, "github", "app:github:delivery:two", recent, false],
+        [space.id, "github", "app:github:deleted", recent, true],
+        [space.id, "github", "system:command:github", recent, false],
+        [space.id, "slack", "app:slack:delivery", recent, false],
+        [otherSpace.id, "github", "app:github:foreign", recent, false],
+      ].entries()) {
+        const insert = `INSERT INTO data.messages SELECT (jsonb_populate_record(
+          NULL::data.messages, to_jsonb(source) || jsonb_build_object(
+            'space_id', $2::text, 'message_id', $3::text, 'author_kind', 'app', 'author_id', $4::text,
+            'timeline_sequence', $5::bigint, 'search_rank_sequence', $3::text,
+            'created_at', $6::timestamptz, 'updated_at', $6::timestamptz, 'sent_at', $6::timestamptz,
+            'deleted_at', CASE WHEN $7::boolean THEN $6::timestamptz ELSE NULL END))).*
+          FROM data.messages source WHERE channel_id = $1 AND author_kind = 'user' LIMIT 1
+          ON CONFLICT DO NOTHING`;
+        const values = [channel.id, sid, id, provider, 20_000 + index, at, deleted];
+        await client.query(insert, values);
+        await client.query(insert, values); // Provider retry cannot inflate the retained delivery count.
+      }
+    } finally { await client.end(); }
+
     const { detail } = await json(await worker.fetch(
       `/api/admin/users/${encodeURIComponent(userId)}`,
       { headers: auth },
@@ -176,11 +235,27 @@ test("platform admin reads one user's metadata-only detail, and every read is au
     assert.ok(detail.messages.total >= 1);
     assert.equal(detail.activity.length, 30);
     assert.equal(detail.activity.at(-1).messages >= 1, true);
+    assert.deepEqual(detail.connectors.map(c => c.providerId), ["github", "notion"],
+      "only this user's added connections appear, including an idle connection");
+    assert.deepEqual(detail.connectors[0].usage, {
+      requests: 6, requestsLast30d: 5,
+      byStatus: { queued: 1, completed: 2, failed: 1, blocked: 1, planned: 1 },
+      lastRequestAt: recent, eventDeliveries: 3, eventDeliveriesLast30d: 2,
+      lastEventAt: recent, subscribedChannels: 1, subscriptions: 1,
+    });
+    assert.deepEqual(detail.connectors[1].usage, {
+      requests: 0, requestsLast30d: 0,
+      byStatus: { queued: 0, completed: 0, failed: 0, blocked: 0, planned: 0 },
+      eventDeliveries: 0, eventDeliveriesLast30d: 0, subscribedChannels: 0, subscriptions: 0,
+    });
 
     // Metadata only: no message text, no Channel name.
     const serialized = JSON.stringify(detail);
     assert.equal(serialized.includes("private detail message"), false);
     assert.equal(serialized.includes(channel.name), false);
+    for (const content of ["connector-private", "private-error", "private-result", "github:private/repo"]) {
+      assert.equal(serialized.includes(content), false, "connector content must stay private");
+    }
 
     assert.equal((await worker.fetch(
       `/api/admin/users/${encodeURIComponent(`absent-${randomUUID()}`)}`,

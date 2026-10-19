@@ -12,6 +12,7 @@ import type { AdminUserDetail, AdminUserSummary } from "@xmatrix/protocol";
 import { ChevronLeft } from "lucide-react";
 
 import { AdminTable, type AdminColumn } from "./admin-table";
+import { AdminUserConnectors } from "./platform-admin-user-connectors";
 import { AdminPaperAction } from "./admin-paper";
 import { openAdminSpace, useAdminParam, useAdminUserDetail, usePlatformOverview } from "./platform-admin-data";
 import {
@@ -222,19 +223,7 @@ function UserDetailBody({ detail }: { detail: AdminUserDetail }) {
       </ToolDetailSection>
 
       <ToolDetailSection title={`Connectors added (${detail.connectors.length})`}>
-        <AdminTable id="uc" label="Connectors" rows={detail.connectors}
-          rowKey={(connector) => `${connector.spaceId}:${connector.providerId}`}
-          defaultSort="created" empty="No connector added."
-          columns={[
-            { key: "provider", label: "Connector", value: (connector) => connector.providerName,
-              render: (connector) => <span className="font-bold">{connector.providerName}</span> },
-            { key: "space", label: "Space", value: (connector) => spaceName(connector.spaceId),
-              render: (connector) => <span className="block truncate">{spaceName(connector.spaceId)}</span> },
-            { key: "status", label: "Status", value: (connector) => connector.status,
-              render: (connector) => <span className="text-xs">{connector.status}</span> },
-            { key: "created", label: "Added", numeric: true, value: (connector) => adminTime(connector.createdAt),
-              render: (connector) => <TimeCell value={connector.createdAt} /> },
-          ]} />
+        <AdminUserConnectors connectors={detail.connectors} spaceName={spaceName} />
       </ToolDetailSection>
 
       <ToolDetailSection title={`Sessions (${detail.sessions.length})`}>
