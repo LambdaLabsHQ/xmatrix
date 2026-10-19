@@ -1275,7 +1275,7 @@ export const ChannelHeader = memo(function ChannelHeader({
               {channelHeading}
             </span>
             {channel && (
-              <div className="flex shrink-0 items-center font-normal">
+              <div className="ml-2 flex shrink-0 items-center gap-1.5 font-normal">
                 <ChannelTitleActions
                   channel={channel}
                   shareUrl={absoluteChannelUrl(channel, spaces)}
