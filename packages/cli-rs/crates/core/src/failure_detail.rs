@@ -1,8 +1,8 @@
-//! Redact secrets without replacing the underlying Git diagnostic.
+//! Redact secrets before a machine diagnostic crosses into a shared Channel.
 use regex::Regex;
 use std::sync::LazyLock;
 
-pub(super) fn sanitize(raw: &str, max_bytes: usize) -> String {
+pub fn sanitize(raw: &str, max_bytes: usize) -> String {
     static RULES: LazyLock<Vec<(Regex, &str)>> = LazyLock::new(|| {
         [
             (r"(?is)-----BEGIN [^-]*PRIVATE KEY-----.*?(?:-----END [^-]*PRIVATE KEY-----|$)", "[REDACTED]"),
