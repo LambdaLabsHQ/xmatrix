@@ -676,6 +676,7 @@ fn codex_app_error_message_prefers_human_readable_fields() {
     let direct = serde_json::json!({
         "message": "Network failed",
         "code": "network_error",
+        "data": {"httpStatusCode": 403, "requestId": "req-safe"},
     });
     let nested = serde_json::json!({
         "error": {
@@ -684,8 +685,9 @@ fn codex_app_error_message_prefers_human_readable_fields() {
         }
     });
 
-    assert_eq!(codex_app_error_message(&direct), "Network failed");
-    assert_eq!(codex_app_error_message(&nested), "Connection reset by peer");
+    assert_eq!(codex_app_error_message(&direct),
+        "Network failed | code=network_error | httpStatusCode=403 | requestId=req-safe");
+    assert_eq!(codex_app_error_message(&nested), "Connection reset by peer | type=api_error");
 }
 
 #[test]
@@ -711,7 +713,7 @@ fn zcode_app_helpers_accept_interrupt_session_events_and_errors() {
             "message": "Model unavailable",
             "code": "model_error",
         })),
-        "Model unavailable"
+        "Model unavailable | code=model_error"
     );
 }
 
@@ -833,9 +835,9 @@ fn codex_runtime_trace_payload_classifies_transient_reconnect_errors() {
     assert_eq!(payload["status"], "retrying");
     assert_eq!(
         payload["summary"],
-        "connection retrying: Reconnecting... 2/5"
+        "connection retrying: Reconnecting... 2/5 | request timed out"
     );
-    assert_eq!(payload["message"], "Reconnecting... 2/5");
+    assert_eq!(payload["message"], "Reconnecting... 2/5 | request timed out");
 }
 
 #[test]
