@@ -277,7 +277,7 @@ export function ToolDetail({ onBack, backLabel, context, title, titleAccessory, 
 /** The paper's scroll and text column; a view that draws its own header (Profile) uses it directly. */
 export function ToolPaperScroll({ wide, children }: { wide?: boolean; children: ReactNode }) {
   return (
-    <div className="app-tool-detail-scroll min-h-0 flex-1 overflow-y-auto">
+    <div className="app-tool-detail-scroll app-below-band min-h-0 flex-1 overflow-y-auto">
       {/* On a phone the paper's text keeps to the plank's content line. */}
       <article className={cn("mx-auto px-[var(--mobile-content-inset,1rem)] pt-3 pb-[calc(env(safe-area-inset-bottom)+2rem)] md:px-8 md:pt-0",
         wide ? "max-w-6xl" : "max-w-3xl")}>

@@ -4311,7 +4311,7 @@ html[data-app-theme="wood"] .xmatrix-app .app-rail button.bg-primary {
   /* Nothing scrolls under the band, where the window's search floats: a
      paper beside a list scrolls below it, as a page scrolls below its
      controls, and its first line starts level with the list's first row. */
-  .xmatrix-app :is(.app-tool-detail-scroll, .app-tool-paper.app-tool-detail.overflow-y-auto) {
+  .xmatrix-app .app-below-band {
     margin-top: var(--app-band);
   }
 
