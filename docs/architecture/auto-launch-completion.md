@@ -110,7 +110,9 @@ shows the launch status and any refusal. A preparation refusal also posts an
 idempotent Channel notice whose source is the system summon, without replying
 to that system message: only Human and Agent messages are reply targets.
 Once that notice commits, reconciliation can finish the summon. There is no
-separate first-message launch path. Before a harness is decided, `conversation`,
+separate first-message launch path. Committed notices also use the ordinary
+live Channel delivery path; a delivery failure does not undo the durable
+receipt or replay launch preparation. Before a harness is decided, `conversation`,
 missing Jev configuration and decision refusals start nothing and post nothing,
 because the author never asked for an Agent; decision refusals other than
 `start_intent_declined` go to the Worker diagnostic log. A
