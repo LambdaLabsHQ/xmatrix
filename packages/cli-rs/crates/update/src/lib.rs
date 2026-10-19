@@ -394,11 +394,13 @@ pub fn update_hint_lines(
         UpdateHintTarget::Cli => vec![
             format!("xMatrix CLI update available: {current_version} -> {latest_version}"),
             "Update CLI: xmatrix update".to_string(),
+            format!("Release notes: https://xmatrix.sh/releases/{latest_version}"),
         ],
         UpdateHintTarget::Daemon => vec![
             format!("xMatrix daemon update available: {current_version} -> {latest_version}"),
             "Update daemon: xmatrix update".to_string(),
             "Restart daemon: xmatrix daemon".to_string(),
+            format!("Release notes: https://xmatrix.sh/releases/{latest_version}"),
         ],
     }
 }
@@ -447,6 +449,10 @@ pub async fn cmd_update(release_api_url: &str, force: bool, hub_url: &str) -> er
         }
     };
 
+    println!(
+        "  Release notes: https://xmatrix.sh/releases/{}",
+        update.latest_version
+    );
     println!(
         "{} Downloading {} ({})",
         "○".cyan().bold(),
@@ -2646,6 +2652,7 @@ mod tests {
             vec![
                 "xMatrix CLI update available: 0.9.9 -> 0.9.10".to_string(),
                 "Update CLI: xmatrix update".to_string(),
+                "Release notes: https://xmatrix.sh/releases/0.9.10".to_string(),
             ]
         );
         assert_eq!(
@@ -2654,6 +2661,7 @@ mod tests {
                 "xMatrix daemon update available: 0.9.9 -> 0.9.10".to_string(),
                 "Update daemon: xmatrix update".to_string(),
                 "Restart daemon: xmatrix daemon".to_string(),
+                "Release notes: https://xmatrix.sh/releases/0.9.10".to_string(),
             ]
         );
     }

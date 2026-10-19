@@ -75,6 +75,16 @@ test("submits exact build, preserves private review fields and unrelated localiz
   assert.equal(writes.some((row) => row.data?.attributes?.canceled), false);
 });
 
+test("stable What's New uses the authored public notes and preserves private review details", async () => {
+  const { api, writes } = fixture();
+  const notes = "Read what changed.\n\nFull release notes: https://xmatrix.sh/releases/1.0.200";
+  await releaseToApple(api, { ...args, release: "1.0.200", releaseNotes: notes, privateNotes: "SENSITIVE_TEST_SENTINEL" });
+  const localization = writes.find((row) => row.path.startsWith("/v1/appStoreVersionLocalizations/") && row.method === "PATCH");
+  assert.equal(localization.data.attributes.whatsNew, notes);
+  assert.equal(JSON.stringify(localization).includes("SENSITIVE"), false);
+  await assert.rejects(submitRelease(fixture().api, { ...args, releaseNotes: "x".repeat(4001) }), /4,000/u);
+});
+
 test("rerun verifies same submitted version's build and does no writes", async () => {
   const { api, writes } = fixture({ version: { versionString: "1.0.200", appVersionState: "WAITING_FOR_REVIEW" } });
   assert.equal((await submitRelease(api, args)).outcome, "already-submitted");

@@ -651,7 +651,7 @@ jobs:
           RELEASE_KEEP_STALE_ASSETS: "true"
           RELEASE_IMMUTABLE_VERSION: "true"
           RELEASE_TRANSACTION_ID: ${{ github.run_id }}:${{ github.run_attempt }}
-        run: node scripts/publish-github-release.mjs
+        run: node scripts/release-notes.mjs
 
   # Apple sends a sandbox TEST notification to the deployed Hub and reports its
   # answer (docs/operations/ios-app-store-subscriptions.md). It runs after the

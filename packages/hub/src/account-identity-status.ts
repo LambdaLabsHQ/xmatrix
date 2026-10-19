@@ -6,7 +6,9 @@ import type { Env } from "./types";
 export async function accountIdentityRevoked(env: Env, userId: string): Promise<boolean> {
   if (authAuthority(env) !== "postgres") return false; // This deployment cannot accept deletion requests.
   try {
-    return await authPostgresTransaction(env, "auth.account-revocation", (tx) => revokedOnDirectory(tx, userId));
+    // Every authenticated request asks this, so it is one lock-free read, not BEGIN, read and COMMIT.
+    return await authPostgresTransaction(env, "auth.account-revocation", (tx) => revokedOnDirectory(tx, userId),
+      { statement: "single_read" });
   } catch {
     throw new ControlError("auth_verification_unavailable", 503, "Sign-in could not be checked right now. Try again.", true);
   }

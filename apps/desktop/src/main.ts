@@ -1,5 +1,6 @@
 import { execFile, spawn, type ChildProcess } from "node:child_process";
 import fs from "node:fs";
+import { releaseNotesPath } from "@xmatrix/protocol";
 import { installAgentPreset } from "./agent-preset-install";
 import os from "node:os";
 import path from "node:path";
@@ -1363,7 +1364,10 @@ function configureAutoUpdates() {
         type: "info",
         message: "xMatrix update found",
         detail: `Version ${info.version} is downloading in the background.`,
-        buttons: ["OK"],
+        buttons: ["OK", "Release notes"],
+      }).then((response) => {
+        const notesPath = releaseNotesPath(info.version);
+        if (response.response === 1 && notesPath) openExternalUrl(`https://xmatrix.sh${notesPath}`);
       });
     }
     manualUpdateCheck = false;
@@ -1408,12 +1412,15 @@ function configureAutoUpdates() {
         type: "info",
         message: "xMatrix update is ready",
         detail: `Version ${info.version} has been downloaded. Restart xMatrix to install it now.`,
-        buttons: ["Restart", "Later"],
+        buttons: ["Restart", "Later", "Release notes"],
         defaultId: 0,
         cancelId: 1,
       }).then((response) => {
         if (response.response === 0) {
           installDownloadedUpdate();
+        } else if (response.response === 2) {
+          const notesPath = releaseNotesPath(info.version);
+          if (notesPath) openExternalUrl(`https://xmatrix.sh${notesPath}`);
         }
       });
     }

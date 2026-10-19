@@ -378,16 +378,17 @@ export function registerPageRoutes(app: Hono<{ Bindings: Env }>): void {
     const spaceId = c.req.param("spaceId");
     const pageId = c.req.param("pageId");
     const caller = await principal(c);
-    // Reading the updates checks the caller may read the page; the rest follows it.
-    const { headRevision, order, updates, owed } = await repository(c.env).blockUpdates({ requestId: crypto.randomUUID(),
-      spaceId, pageId, principal: caller });
-    const [{ claims }, present, { links }] = await Promise.all([
+    // Each read checks on its own that the caller may read the page, so they run side by side; the page's
+    // live session is asked who is on it only once the updates' check has passed.
+    const [[{ headRevision, order, updates, owed }, present], { claims }, [links, conversations]] = await Promise.all([
+      repository(c.env).blockUpdates({ requestId: crypto.randomUUID(), spaceId, pageId, principal: caller })
+        .then((read) => Promise.all([read, sessionPresent(c.env, spaceId, pageId)] as const)),
       repository(c.env).claims({ requestId: crypto.randomUUID(), spaceId, pageId, principal: caller }),
-      sessionPresent(c.env, spaceId, pageId),
-      repository(c.env).links({ requestId: crypto.randomUUID(), spaceId, pageId, principal: caller }),
+      repository(c.env).links({ requestId: crypto.randomUUID(), spaceId, pageId, principal: caller })
+        .then(({ links }) => Promise.all([links, linkedConversations(c.env, spaceId, caller, links)] as const)),
     ]);
     const discussions = links.filter((link) => link.anchor && !link.resolvedAt);
-    const working = workingBySection(links, await linkedConversations(c.env, spaceId, caller, links));
+    const working = workingBySection(links, conversations);
     // In the page's order; a claim or a person on a section that is gone comes last.
     const blockIds = new Set([...order, ...claims.map((claim) => claim.blockId),
       ...discussions.map((link) => link.blockId), ...owed.keys(),
