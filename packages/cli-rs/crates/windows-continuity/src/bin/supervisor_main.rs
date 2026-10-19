@@ -622,7 +622,7 @@ fn reported_version(candidate: &std::path::Path) -> Result<String, Box<dyn std::
         std::thread::sleep(std::time::Duration::from_millis(50));
     };
     let mut output = String::new();
-    if let Some(mut stdout) = child.stdout.take() {
+    if let Some(stdout) = child.stdout.take() {
         stdout.take(4096).read_to_string(&mut output)?;
     }
     if !status.success() {
