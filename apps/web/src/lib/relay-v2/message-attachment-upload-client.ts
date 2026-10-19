@@ -324,12 +324,23 @@ export async function commitMessageAttachmentRefs(input: {
   attachments: readonly PreparedMessageAttachmentUpload[];
   /** Overridden by tests; defaults to `UPLOAD_CONTROL_DEADLINE_MS`. */
   controlDeadlineMs?: number;
-}): Promise<void> {
-  await Promise.all(input.attachments.map((attachment) => commitBlobRef({
-    token: input.token, intentId: attachment.intentId, refId: attachment.attachmentId,
-    ownerKind: "message_attachment", ownerId: input.messageId, visibilityScopeId: input.visibilityScopeId,
-    controlDeadlineMs: input.controlDeadlineMs,
-  })));
+}): Promise<MessageAttachmentBinding[]> {
+  const committed = await Promise.all(input.attachments.map(async (attachment) => {
+    const { refId } = await commitBlobRef({
+      token: input.token, intentId: attachment.intentId, refId: attachment.attachmentId,
+      ownerKind: "message_attachment", ownerId: input.messageId, visibilityScopeId: input.visibilityScopeId,
+      controlDeadlineMs: input.controlDeadlineMs,
+    });
+    // The owner already holds these bytes under one ref. Keep that id; a second
+    // slot with the same bytes is the same attachment.
+    return { ...attachment, attachmentId: refId };
+  }));
+  const seen = new Set<string>();
+  return committed.filter((attachment) => {
+    if (seen.has(attachment.attachmentId)) return false;
+    seen.add(attachment.attachmentId);
+    return true;
+  });
 }
 
 /** Makes an uploaded object part of what its owner holds, visible in `visibilityScopeId`. */
@@ -341,7 +352,7 @@ export async function commitBlobRef(input: {
   ownerId: string;
   visibilityScopeId: string;
   controlDeadlineMs?: number;
-}): Promise<void> {
+}): Promise<{ refId: string }> {
   const deadline = deadlineSignal(input.controlDeadlineMs ?? UPLOAD_CONTROL_DEADLINE_MS);
   try {
     // Armed across the body read too — see the intent hop above.
@@ -353,7 +364,7 @@ export async function commitBlobRef(input: {
       ownerId: input.ownerId,
       visibilityScopeId: input.visibilityScopeId,
     });
-    await replayTransient(async () => jsonResponse(
+    const committed = await replayTransient(async () => jsonResponse(
       await xmatrixRawResponse(webProxyPath(RELAY_V2_BLOB_REF_PATH), {
         method: "POST",
         headers: {
@@ -367,6 +378,9 @@ export async function commitBlobRef(input: {
       "Failed to commit attachment",
       deadline.signal,
     ), deadline.signal);
+    const refId = typeof committed.refId === "string" && committed.refId.length > 0
+      ? committed.refId : input.refId;
+    return { refId };
   } catch (error) {
     throw deadlineError(error, "Committing the attachment");
   } finally {

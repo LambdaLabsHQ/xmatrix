@@ -95,6 +95,25 @@ function serializeRef(row: QueryResultRow): Record<string, unknown> {
   };
 }
 
+/**
+ * The row the owner already holds for this object, or a conflict when that hold
+ * is not the object this commit verified. `content_refs_owner_object_idx` allows
+ * one generation-0 ref per owner and object, so a second ref id must reuse it.
+ */
+function heldOwnerRef(rows: readonly QueryResultRow[], expected: {
+  scopeId: string; objectKey: string; checksum: string; encodedBytes: number;
+}): Record<string, unknown> {
+  if (rows.length !== 1) throw new ContentControlError(
+    "blob_ref_conflict", 409, rows.length ? "owner already holds this object more than once" : "blob reference changed during commit",
+  );
+  const row = rows[0]!;
+  if (row.root_set_id !== expected.scopeId || row.storage_key !== expected.objectKey ||
+      row.checksum !== expected.checksum || Number(row.byte_length) !== expected.encodedBytes) {
+    throw new ContentControlError("blob_ref_conflict", 409, "owner already holds this object differently");
+  }
+  return serializeRef(row);
+}
+
 export class PostgresContentRepository {
   private readonly spaces: WritableSpacePlacements;
   private readonly channelDirectory: PostgresChannelSpaceDirectory;
@@ -474,37 +493,64 @@ export class PostgresContentRepository {
             EMPTY_CHILDREN_DIGEST, now, new Date(Date.parse(now) + GC_SAFETY_MS).toISOString()],
           maxRows: 0,
         });
-        await tx.query({
-          name: "content_ref_insert_v1",
-          text: `INSERT INTO data.content_refs
-            (space_id,root_set_id,generation,ref_id,owner_kind,owner_id,parent_object_id,
-             child_object_id,edge_ordinal,edge_key,parent_manifest_digest,child_checksum,
-             child_bytes,logical_bytes,owner_descriptor,created_at)
-            VALUES ($1,$2,0,$3,$4,$5,NULL,$6,NULL,NULL,NULL,$7,$8,$8,NULL,$9)`,
-          values: [scope.spaceId, scopeId, refId, ownerKind, ownerId, objectId,
-            checksum, encodedBytes, now], maxRows: 0,
+        const expected = { scopeId, objectKey: input.objectKey, checksum, encodedBytes };
+        const hold = () => tx.query<QueryResultRow>({
+          name: "content_ref_owner_hold_v1",
+          text: `SELECT r.*,o.storage_key,o.checksum,o.byte_length FROM data.content_refs r
+            JOIN data.content_objects o ON o.space_id = r.space_id AND o.object_id = r.child_object_id
+            WHERE r.space_id = $1 AND r.generation = 0 AND r.child_object_id = $2
+              AND r.owner_kind = $3 AND r.owner_id = $4
+            LIMIT 2 FOR UPDATE OF r`,
+          values: [scope.spaceId, objectId, ownerKind, ownerId], maxRows: 2,
         });
-        await tx.query({
-          name: "content_ref_intent_consume_v1",
-          text: "DELETE FROM data.blob_upload_intents WHERE space_id = $1 AND intent_id = $2",
-          values: [scope.spaceId, intentId], maxRows: 0,
-        });
-        await tx.query({
-          name: "content_ref_gc_cancel_v1",
-          text: "DELETE FROM data.content_gc_candidates WHERE space_id = $1 AND object_id = $2",
-          values: [scope.spaceId, objectId], maxRows: 0,
-        });
-        result = { refId, scopeId, ownerKind, ownerId, contentHash: checksum,
-          objectKey: input.objectKey, encodedBytes, checksum, version: 1, createdAt: now };
+        // The unique index is one generation-0 ref per owner and object. A second
+        // attachment of the same bytes uses a new ref id; inserting it is the
+        // unhandled content_refs_owner_object_idx violation (XMATRIX-HUB-8W).
+        const held = await hold();
+        if (held.length > 0) {
+          result = heldOwnerRef(held, expected);
+        } else {
+          const inserted = await tx.query<QueryResultRow>({
+            name: "content_ref_insert_v1",
+            text: `INSERT INTO data.content_refs
+              (space_id,root_set_id,generation,ref_id,owner_kind,owner_id,parent_object_id,
+               child_object_id,edge_ordinal,edge_key,parent_manifest_digest,child_checksum,
+               child_bytes,logical_bytes,owner_descriptor,created_at)
+              VALUES ($1,$2,0,$3,$4,$5,NULL,$6,NULL,NULL,NULL,$7,$8,$8,NULL,$9)
+              ON CONFLICT DO NOTHING RETURNING ref_id`,
+            values: [scope.spaceId, scopeId, refId, ownerKind, ownerId, objectId,
+              checksum, encodedBytes, now], maxRows: 1,
+          });
+          if (inserted.length === 1) {
+            await tx.query({
+              name: "content_ref_intent_consume_v1",
+              text: "DELETE FROM data.blob_upload_intents WHERE space_id = $1 AND intent_id = $2",
+              values: [scope.spaceId, intentId], maxRows: 0,
+            });
+            await tx.query({
+              name: "content_ref_gc_cancel_v1",
+              text: "DELETE FROM data.content_gc_candidates WHERE space_id = $1 AND object_id = $2",
+              values: [scope.spaceId, objectId], maxRows: 0,
+            });
+            result = { refId, scopeId, ownerKind, ownerId, contentHash: checksum,
+              objectKey: input.objectKey, encodedBytes, checksum, version: 1, createdAt: now };
+          } else {
+            result = heldOwnerRef(await hold(), expected);
+          }
+        }
       }
       await this.commit(tx, { spaceId: scope.spaceId, commandId, kind: "commit-blob-ref",
-        requestDigest, aggregateId: refId, result, now });
+        requestDigest, aggregateId: String(result.refId), result, now });
       return result;
     });
     await this.publishEntityRoute(
       requestId, placement, "content-intent", intentId, "deleted", input.expectedIntentVersion + 1,
     );
-    await this.publishEntityRoute(requestId, placement, "content-ref", refId, "active", 1);
+    // A reused owner hold already has its route. Publishing the caller's new
+    // ref id would name a reference that was never inserted.
+    if (String(result.refId) === refId) {
+      await this.publishEntityRoute(requestId, placement, "content-ref", refId, "active", 1);
+    }
     return result;
   }
 

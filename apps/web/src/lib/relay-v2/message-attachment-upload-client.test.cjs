@@ -367,6 +367,19 @@ test("a brief storage outage while committing is replayed under the same request
   assert.equal(bodies[0], bodies[1], "a replay must carry the same requestId");
 });
 
+test("a commit adopts the owner's existing ref and keeps one slot for the same bytes", async () => {
+  fetchImpl = async () => Response.json({ refId: "ref-held" });
+  const committed = await commitMessageAttachmentRefs({
+    token: "human-token",
+    messageId: "message-1",
+    visibilityScopeId: "channel:closed-1",
+    attachments: [attachment, { ...attachment, attachmentId: "attachment-2", intentId: "intent-2", name: "copy.png" }],
+  });
+  assert.equal(committed.length, 1);
+  assert.equal(committed[0].attachmentId, "ref-held");
+  assert.equal(committed[0].name, "image.png");
+});
+
 test("a refused commit is not replayed", async () => {
   let calls = 0;
   fetchImpl = async () => {
