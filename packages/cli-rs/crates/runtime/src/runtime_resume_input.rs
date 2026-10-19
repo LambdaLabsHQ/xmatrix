@@ -12,6 +12,8 @@ pub(crate) fn initial_runtime_message() -> Option<String> {
             .ok()
             .is_some_and(|value| !value.trim().is_empty()),
     )
+    // A resumed session reads no history, so it finds no message to frame.
+    .map(|message| crate::runtime_channel_history_bootstrap::initial_message_turn(&message))
 }
 
 fn resumed_runtime_message(
