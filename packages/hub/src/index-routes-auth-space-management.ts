@@ -13,7 +13,7 @@ import { githubConnectAuthorizeUrl, githubConnectReturnUrl, githubGrant, githubG
 import { startChannelAbout, type ChannelAboutStart } from "./channel-about";
 import { dispatchProductGitHubWebhook } from "./product-github-webhook-authority-adapter";
 import { fireGitHubAutomationTriggers } from "./automation-triggers";
-import { checkPullRequestClaims } from "./github-claim-check";
+import { onPullRequestNamingBlocks } from "./github-pull-request-blocks";
 import { MAX_INVITE_EMAILS_PER_REQUEST, InviteEmailRequest, AdminInviteEmailRequest, normalizeInviteEmails, signGitHubAppState, verifyGitHubAppState, sendSpaceInviteEmails, requireAuth, requireHumanAuth, requireAdmin, productCommandId, jsonErrors, spaceResponse } from "./index-shared";
 import { appOrigin } from "./deployment-origins";
 import { forgetConnectionGrant } from "./connectors/forget-grant";
@@ -311,13 +311,12 @@ export function registerIndexRoutesAuthSpaceManagement(app: Hono<{ Bindings: Env
       return c.json({ error: "Invalid GitHub webhook payload" }, 400);
     }
     if (event === "pull_request") {
-      // The claim check is the Space's own verdict on its pull requests; a
+      // What a pull request naming page blocks starts (pre-review, owed updates); a
       // failure here must not lose the delivery to subscribed conversations.
-      await checkPullRequestClaims(c.env, payload as Record<string, unknown>)
-        .catch((error: unknown) => console.error("claim check failed", error));
+      await onPullRequestNamingBlocks(c.env, payload as Record<string, unknown>)
+        .catch((error: unknown) => console.error("pull request block handling failed", error));
     }
-    // Page Automations this event fires (pages-live-document.md §6.2); like the
-    // claim check, a failure must not lose the delivery to conversations.
+    // Page Automations this event fires (pages-live-document.md §6.2); likewise, a failure must not lose the delivery to conversations.
     await fireGitHubAutomationTriggers(c.env, event, payload as Record<string, unknown>)
       .catch((error: unknown) => console.error("Automation triggers failed", error));
     return c.json(await dispatchProductGitHubWebhook({

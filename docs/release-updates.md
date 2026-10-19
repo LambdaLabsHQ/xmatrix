@@ -151,6 +151,16 @@ Migration evidence: before consolidation, the effective YAML definitions were sa
 Recovery remains the established Production Release Recovery workflow: it may cancel only the exact preflight-success/PostgreSQL-readiness-waiting shape before any build or deploy job materializes, then resume the same authorized replacement run. The parent graph and that proof are unchanged. A consolidation failure must be fixed through a new CI-validated main revision and Release Intent; do not modify immutable tags, publish unverified assets, or bypass train authorization. The existing CLI manifest/envelope `workflow: "cli-release.yml"` value remains the compatibility label expected by installed Rust update and Windows continuity consumers; relocating the reusable publisher does not rewrite that wire field. Signing helpers retain the original Developer ID leaf/team checks, pinned Apple intermediate, private keychain isolation, and cleanup; no signing identity or artifact format changed.
 
 
+## Unreleased: Pull requests that name a page block are not gated
+
+The GitHub App no longer publishes an `xmatrix/claim` check. A pull request that
+links a page block needs no claim. A repository that made the check required
+should drop it from its required checks, or its pull requests wait on a check
+that never arrives. A member's pull request (owner, admin or member) that names
+a block is pre-reviewed there, as claimed ones were. A participant's or an
+unlinked author's pull request is left to the maintainers. Merging still
+completes a claim its author held there, so that section owes an update.
+
 ## Unreleased: Repository tokens are bound to the Run
 
 The Hub mints an Agent's GitHub repository token only for the repository the

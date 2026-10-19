@@ -417,17 +417,18 @@ shows who took the work.
 - **Live.** Everyone on the page sees claims appear and go under "Who is on
   what" as they change. Agents use `xmatrix page claim`, `page claims` and
   `page release`.
-- **Pull requests do claimed work.** A pull request names the block it works on
-  with the block's link (Link, next to the block). The GitHub App publishes an
-  `xmatrix/claim` check on it: it passes when the author holds a claim on that
-  block, directly or through one of their Agents. The author is identified by
-  the GitHub account they linked in their profile. Otherwise it fails and says
-  how to claim. Maintainers can make the check required. A pull request that
-  names no block gets no check, so a required check keeps it out. Merging the
-  pull request completes the claim.
-- **Pre-review before a maintainer.** When a claimed pull request opens or
-  gets new commits (drafts excepted), it gets its own review conversation on
-  the block. An Agent of the Space owner's reviews it there. The Hub hands it
+- **Pull requests name the block they work on** with the block's link (Link,
+  next to the block). Naming it gates nothing: there is no `xmatrix/claim`
+  check, and nobody has to hold anything to open one (decided 2026-10-19:
+  coordination is lock-free, see `pages-live-document.md` §3). The author is
+  identified by the GitHub account they linked in their profile. A claim the
+  author still holds there is credited with the pull request, and merging it
+  completes that claim.
+- **Pre-review before a maintainer.** When a pull request a member of the
+  Space (owner, admin or member) opens names a block, or gets new commits
+  (drafts excepted), it gets its own review conversation on the block. It
+  spends the Space owner's Agent, so a participant's or a stranger's pull
+  request is left to the maintainers. An Agent of the Space owner's reviews it there. The Hub hands it
   the change, the checks on its head commit and the repository's other open
   pull requests. It checks four things: the change matches the block's scope,
   tests pass, it duplicates no other pull request, and it follows the Space's

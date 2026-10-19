@@ -342,7 +342,7 @@ surface:
 - import onboarding from GitHub, Slack, Notion and Feishu, which generates an
   initial page tree;
 - the GitHub App for open-source projects: project page generation, an
-  `xmatrix/claim` status check and pre-review;
+  pre-review of pull requests that name a block;
 - open-source governance: trust levels, the intake queue, claims as leases and
   cross-project reputation.
 

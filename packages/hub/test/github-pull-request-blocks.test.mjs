@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { pageReferences } from "../src/github-claim-check.ts";
+import { pageReferences } from "../src/github-pull-request-blocks.ts";
 
 test("a pull request names page blocks by their links, in the app or public", () => {
   assert.deepEqual(pageReferences([
