@@ -1,4 +1,5 @@
 import type { QueryResultRow } from "pg";
+import { sha256Hex } from "@xmatrix/protocol";
 import { canonicalPageMarkdown, pageChangedDocBlocksAsync } from "@xmatrix/protocol/page-document";
 import type { DatabaseTransaction } from "./contracts.js";
 
@@ -121,9 +122,4 @@ export async function keepSectionChanges(tx: DatabaseTransaction, spaceId: strin
     maxRows: 0,
   });
   return kept.length;
-}
-
-async function sha256Hex(text: string): Promise<string> {
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
-  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
