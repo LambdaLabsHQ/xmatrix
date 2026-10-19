@@ -48,9 +48,9 @@ export async function cleanSupersededCodeql({ repository, pullNumber, request, l
           await request("POST", `${prefix}/actions/runs/${run.id}/cancel`);
         } catch (error) {
           if (error.status !== 409) throw error;
-          const finished = await request("GET", `${prefix}/actions/runs/${run.id}`);
-          if (finished.status !== "completed") throw error;
-          log(`CodeQL run ${run.id} finished before cancellation`);
+          // Default-setup run listings can lag behind the cancellation API.
+          // A conflict grants no cancellation and proves no freed capacity.
+          log(`GitHub declined cancellation of CodeQL run ${run.id} (409); left unchanged`);
           continue;
         }
         cancelled.push(run.id);

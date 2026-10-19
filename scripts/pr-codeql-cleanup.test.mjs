@@ -18,7 +18,7 @@ const ancestor = { status: "ahead", base_commit: { sha: old }, merge_base_commit
 
 // Responses represent GitHub's API boundary; the real cleanup decides what
 // to compare and cancel. No pre-existing test owns this cancellation authority.
-function fixture({ pull = pr, runs = [scan], comparison = ancestor, refreshed = pull, listPage, cancelError, finished } = {}) {
+function fixture({ pull = pr, runs = [scan], comparison = ancestor, refreshed = pull, listPage, cancelError } = {}) {
   const calls = [];
   let reads = 0;
   return {
@@ -33,7 +33,6 @@ function fixture({ pull = pr, runs = [scan], comparison = ancestor, refreshed = 
         }
         if (route.endsWith("/pulls/12")) return reads++ ? refreshed : pull;
         if (route.includes("/compare/")) return comparison;
-        if (route.endsWith("/actions/runs/10")) return finished;
         const url = new URL(route, "https://api.github.com");
         assert.equal(url.pathname, `/repos/${repository}/actions/runs`);
         assert.equal(url.searchParams.get("branch"), "refs/pull/12/head");
@@ -120,10 +119,11 @@ test("a GitHub evidence failure never proceeds to cancellation", async () => {
   assert.equal(cancelled, false);
 });
 
-test("a cancellation race is benign only after GitHub confirms completion", async () => {
+test("cancellation conflicts retain scans without reporting reclaimed capacity", async () => {
   const cancelError = Object.assign(new Error("conflict"), { status: 409 });
-  assert.deepEqual(await fixture({ cancelError, finished: { status: "completed" } }).execute(), []);
-  await assert.rejects(fixture({ cancelError, finished: { status: "in_progress" } }).execute(), /conflict/u);
+  const f = fixture({ cancelError });
+  assert.deepEqual(await f.execute(), []);
+  assert.equal(f.calls.filter(({ method }) => method === "POST").length, 1);
   await assert.rejects(fixture({ cancelError: new Error("forbidden") }).execute(), /forbidden/u);
 });
 

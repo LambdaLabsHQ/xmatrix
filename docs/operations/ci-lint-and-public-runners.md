@@ -80,6 +80,8 @@ dispatch on main accepts an open PR number for recovery of an existing backlog.
 Each request has a 20-second deadline; listing is bounded to three pages per
 status, and the job has a five-minute timeout. Cleanup never authorizes CI or
 release reuse; the current commit still runs its normal required checks.
+If GitHub refuses a cancellation with a conflict, cleanup leaves that scan
+unchanged and does not count it as reclaimed capacity.
 
 CLI release builds run both macOS architectures in parallel on isolated hosted
 VMs. When `XMATRIX_RUNNER_FLEET=self-hosted`, macOS builds remain serialized
