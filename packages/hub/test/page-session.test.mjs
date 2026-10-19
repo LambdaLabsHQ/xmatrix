@@ -1229,6 +1229,108 @@ async function annAfterAPass() {
   return joined;
 }
 
+// Revision saves and awareness were the only historical signals; neither times actual text delivery.
+test("co-writing observations time CRDT text changes, excluding markers and pass, without waiting for a revision", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: 1_000_000 });
+  const h = harness();
+  const events = [];
+  h.ports.observeCoWriting = (principal, event) => {
+    assert.equal(principal.id, agent.id);
+    events.push(event);
+  };
+  const ann = await annConnected(h);
+  const writer = joinCoWriter(h);
+  writer.write(1, "⟦pass⟧");
+  writer.done(1);
+  assert.equal(events.length, 1);
+  assert.equal(events[0].firstTextMs, null);
+  assert.equal(events[0].editToTurnMs, null, "joining is not a human edit");
+  events.length = 0;
+  ann.text.insert(HEAD.indexOf("In progress"), "Still ");
+  t.mock.timers.tick(CO_WRITER_PAUSE_MS);
+  t.mock.timers.tick(300);
+  writer.write(2, '⟦after "none"⟧');
+  assert.equal(events.length, 0, "the marker and blank paragraph are not text");
+  t.mock.timers.tick(200);
+  writer.write(2, "Hello");
+  assert.match(ann.text.toString(), /Hello/u, "the client received text before the observation");
+  assert.equal(h.commits.length, 0, "no revision has been saved");
+  assert.deepEqual(events[0], { event: "first_text", outcome: "writing", turn: writer.turnId(2),
+    durationMs: 500, editToTurnMs: CO_WRITER_PAUSE_MS, firstDeltaMs: 300, firstTextMs: 500,
+    editToFirstTextMs: CO_WRITER_PAUSE_MS + 500, maxWriteGapMs: null, writes: 1 });
+  t.mock.timers.tick(700);
+  writer.write(2, " world");
+  writer.done(2);
+  writer.done(2);
+  assert.equal(events.length, 2, "one first-text and one terminal observation, including late duplicate replies");
+  assert.deepEqual(events[1], { ...events[0], event: "turn_end", outcome: "done", durationMs: 1200,
+    maxWriteGapMs: 700, writes: 2 });
+  // A failed sink must not change whether the person's next edit is heard or the Agent writes.
+  h.ports.observeCoWriting = () => { throw new Error("sink unavailable"); };
+  ann.text.insert(HEAD.indexOf("In progress"), "Again ");
+  t.mock.timers.tick(CO_WRITER_PAUSE_MS);
+  writer.write(3, '⟦after "none"⟧More text');
+  writer.done(3);
+  assert.match(ann.text.toString(), /More text/u);
+});
+
+async function observedCoWriter(t) {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: 1_000_000 });
+  const joined = await annAfterAPass();
+  const events = [];
+  joined.h.ports.observeCoWriting = (_principal, event) => events.push(event);
+  return { ...joined, events };
+}
+
+test("co-writing timings include queued human edits without attributing an earlier answer to them", async (t) => {
+  const { ann, writer, events } = await observedCoWriter(t);
+  const at = HEAD.indexOf("In progress");
+  ann.text.insert(at, "First ");
+  t.mock.timers.tick(CO_WRITER_PAUSE_MS);
+  t.mock.timers.tick(500);
+  ann.text.insert(at, "Second ");
+  t.mock.timers.tick(5000);
+  assert.equal(writer.turns().length, 2, "the previous turn is still answering");
+  writer.write(2, "⟦pass⟧");
+  writer.done(2);
+  assert.equal(events.length, 1);
+  assert.equal(events[0].firstTextMs, null);
+  assert.equal(writer.turns().length, 3);
+  t.mock.timers.tick(200);
+  writer.write(3, '⟦after "none"⟧The next answer');
+  assert.equal(events[1].editToTurnMs, 5000);
+  assert.equal(events[1].firstTextMs, 200);
+  assert.equal(events[1].editToFirstTextMs, 5200);
+  writer.done(3);
+});
+
+test("another Agent's document update is not measured as a human edit", async (t) => {
+  const { h, writer, events } = await observedCoWriter(t);
+  const other = h.connect("c-other", { ...agent, id: "other-agent" });
+  other.text.insert(HEAD.indexOf("In progress"), "Also ");
+  t.mock.timers.tick(CO_WRITER_PAUSE_MS);
+  writer.write(2, '⟦after "none"⟧A response to another Agent');
+  writer.done(2);
+  assert.equal(events.length, 2);
+  assert.equal(events[0].editToTurnMs, null);
+  assert.equal(events[0].editToFirstTextMs, null);
+});
+
+test("a quiet co-writing turn reports stalled once with missing text timings, and ignores its late output", async (t) => {
+  const { ann, writer, events } = await observedCoWriter(t);
+  ann.text.insert(HEAD.indexOf("In progress"), "Still ");
+  t.mock.timers.tick(CO_WRITER_PAUSE_MS);
+  t.mock.timers.tick(CO_WRITER_TURN_MS);
+  assert.deepEqual(events, [{ event: "turn_end", outcome: "stalled", turn: writer.turnId(2),
+    durationMs: CO_WRITER_TURN_MS, editToTurnMs: CO_WRITER_PAUSE_MS, firstDeltaMs: null,
+    firstTextMs: null, editToFirstTextMs: null, maxWriteGapMs: null, writes: 0 }]);
+  const before = ann.text.toString();
+  writer.write(2, '⟦after "none"⟧Too late');
+  writer.done(2);
+  assert.equal(ann.text.toString(), before);
+  assert.equal(events.length, 1);
+});
+
 test("a person takes back what a co-writing Agent last wrote, and the Agent hears so", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
   const { h, ann, writer } = await annCoWriting();

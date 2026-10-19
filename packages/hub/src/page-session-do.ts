@@ -13,6 +13,7 @@ import { startPageSummary } from "./page-summary";
 import type { Env } from "./types";
 import { platformAdminSpaceId } from "./admin-platform-access";
 import { base64UrlDecodeBytes } from "./relay-v2-primitives";
+import { pageCoWriteDataPoint } from "./page-co-write-diagnostics";
 
 /**
  * One Durable Object per page hosts its live session (page-session.ts). It
@@ -87,6 +88,13 @@ export class RelayPageSession extends DurableObject<Env> {
 
   private newSession(): PageSession {
     const ports: PageSessionPorts = {
+      observeCoWriting: (principal, event) => {
+        const sink = this.env.DIAGNOSTICS_AE;
+        if (!sink) return;
+        this.later(pageCoWriteDataPoint(principal, this.need("page"), event,
+          this.env.DIAGNOSTICS_HASH_SECRET || this.env.BETTER_AUTH_SECRET)
+          .then((point) => sink.writeDataPoint(point)).catch(() => { /* never block the page on diagnostics */ }));
+      },
       loadHead: async (principal) => {
         const { page } = await pages(this.env).read({ requestId: crypto.randomUUID(), spaceId: this.need("space"),
           pageId: this.need("page"), principal: pagePrincipalFromSession(principal) });

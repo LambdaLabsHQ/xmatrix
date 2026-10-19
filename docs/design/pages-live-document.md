@@ -341,6 +341,11 @@ fact is about.
     sockets. Losing either interrupts its turn and pauses new turns; late replies
     cannot change the document. Restoring permission sends a fresh turn with the
     changes it missed, under a new turn id.
+    The session observes first CRDT text and turn outcomes without waiting for
+    revision saves, including the actual quiet-turn timeout. Timings distinguish
+    pending human edits, the request, runtime deltas and actual text changes;
+    they are Hub observations, not browser paint. See
+    [co-writing measurements](../architecture/first-space.md#measuring-live-co-writing).
   - **Writing from a conversation** (decided 2026-10-16). Any Agent in a
     conversation writes into a page the same way, as its model writes, without
     being asked: in its reply, `⟦write page:<id>⟧`, the markers below, then

@@ -15,6 +15,7 @@ import * as awarenessProtocol from "y-protocols/awareness";
 import * as syncProtocol from "y-protocols/sync";
 import * as Y from "yjs";
 import { PageCoWriter, type PageCoWriterHost, type PageCoWriterPerson } from "./page-co-writer";
+import type { PageCoWriteObservation } from "./page-co-write-timing";
 import { readingMs, type PageReaderPace } from "./page-reader-pace";
 import { PageTyping, type PageTypingState } from "./page-typing";
 
@@ -100,6 +101,8 @@ export interface PageSessionState {
 export interface RestingAgent { clientId: number; state: Record<string, unknown>; at: number }
 
 export interface PageSessionPorts {
+  /** Metadata from session-initiated co-writing turns; never text or browser paint measurements. */
+  observeCoWriting?(principal: PageSessionPrincipal, event: PageCoWriteObservation): void;
   loadHead(principal: PageSessionPrincipal): Promise<PageHead>;
   loadRevision(principal: PageSessionPrincipal, revision: number): Promise<string>;
   /** Commits a revision; returns the committed revision, the page head, and the Automations it moved. */
@@ -263,7 +266,8 @@ export class PageSession {
         const connection = this.connections.get(origin);
         if (connection) this.noteEditor(connection.principal);
       }
-      for (const [id, writer] of this.coWriters) if (origin !== id) writer.othersEdited();
+      const human = typeof origin === "string" && this.connections.get(origin)?.principal.kind === "user";
+      for (const [id, writer] of this.coWriters) if (origin !== id) writer.othersEdited(human);
       // A typed word is not stored on its own: the stored typing still holds it, and a restart types it in.
       if (origin !== TYPING) void this.persist();
     });
@@ -686,6 +690,7 @@ export class PageSession {
       people: () => this.people(),
       pace: () => this.readerPace(),
       send: (request) => this.ports.send(connection.id, encodeCoWrite(request)),
+      observe: (event) => this.ports.observeCoWriting?.(principal, event),
     };
   }
 
