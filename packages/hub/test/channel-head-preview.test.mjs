@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { channelHeadPreview } from "../src/channel-head-preview.ts";
+import { pageConversation } from "../src/page-conversations.ts";
 
 const head = {
   messageId: "m-1", sequence: 7, authorKind: "agent", authorId: "agent-1",
@@ -30,4 +31,16 @@ test("a discussion's first message previews as what was written, not the passage
   const preview = channelHeadPreview({ ...head, preview: null, payloadBundleBase64: null,
     legacyBody: "> In progress\n\n— [Relay › Status](https://xmatrix.sh/app/s/pages?page=p#status)\n\nIs this still\n accurate?" });
   assert.equal(preview.bodyPreview, "Is this still accurate?");
+});
+
+test("a page's conversation preview keeps the face its newest message carried", () => {
+  const conversation = { conversationId: "c-1", name: "Upkeep", activityAt: head.sentAt, headSequence: 7,
+    readSequence: 7, agents: [] };
+  const withFace = pageConversation({ ...conversation, head: { ...head, payloadBundleBase64: null, legacyBody: null,
+    preview: { bodyPreview: "Done", senderSnapshot: { label: "grok:1", agentName: "grok",
+      avatarUrl: "/agent-vendors/grok.svg" } } } });
+  assert.deepEqual(withFace.lastMessage.from, { kind: "agent", label: "grok:1", avatarUrl: "/agent-vendors/grok.svg" });
+  const withoutFace = pageConversation({ ...conversation, head: { ...head, payloadBundleBase64: null, legacyBody: "hi",
+    preview: null } });
+  assert.deepEqual(withoutFace.lastMessage.from, { kind: "agent", label: "agent-1" });
 });

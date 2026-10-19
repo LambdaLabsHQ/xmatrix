@@ -14,7 +14,9 @@ export function pageConversation(record: PageConversationRecord): PageConversati
   const authorKind: string = from.kind;
   const kind = authorKind === "agent" || authorKind === "app" || authorKind === "system"
     ? authorKind : "user";
-  return { ...conversation, lastMessage: { from: { kind, label: String(from.label) }, bodyPreview, sentAt } };
+  const avatarUrl = typeof from.avatarUrl === "string" && from.avatarUrl ? from.avatarUrl : undefined;
+  return { ...conversation, lastMessage: { from: { kind, label: String(from.label), ...(avatarUrl ? { avatarUrl } : {}) },
+    bodyPreview, sentAt } };
 }
 
 /**
