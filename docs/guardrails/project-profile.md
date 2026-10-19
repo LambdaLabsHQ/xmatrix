@@ -15,6 +15,10 @@ English is the default language for repository documentation, guardrails, releas
 
 ## Current behavior
 
+Page discussions and conversations started from selected message passages use
+the ordinary first-message automatic summon and author choice window while
+retaining their preset titles. See [automatic invocation](../architecture/auto-launch-completion.md#a-new-conversations-first-message).
+
 Human Space owners/admins can confirm Channel deletion in its actions or
 details. Retirement revokes access immediately; a durable job erases the exact
 Channel closure in bounded, retryable passes while keeping linked Pages and

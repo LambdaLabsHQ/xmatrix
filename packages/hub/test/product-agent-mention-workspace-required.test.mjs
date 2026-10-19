@@ -368,3 +368,34 @@ test("a new conversation's first message asks Jev which harness to summon and a 
   assert.deepEqual(await orchestrateProductNewConversationStart({ ...input, port: port(true, "registration_not_found") }), {});
   assert.deepEqual(diagnostics.map(value => value.error), ["registration_not_found"]);
 });
+
+test("page and message discussions use the first-message choice despite their passage title", async () => {
+  const body = "> Fill Pantry\n\n— [Fill Pantry › Fill Pantry](https://xmatrix.sh/app/space/pages?page=page-1)\n\n这个项目是怎么决策要做的";
+  const decisions = [];
+  for (const metadata of [
+    { fromPageId: "page-1" },
+    { fromChannelId: "source-channel", fromMessageId: "source-message" },
+  ]) {
+    const port = {
+      async getChannel(id) { return { id, name: "“Fill Pantry”", metadata }; },
+      async decideFirstMessageLaunch(input) { decisions.push(input); return { claimed: true, harness: "codex" }; },
+    };
+    assert.deepEqual(await orchestrateProductNewConversationStart({ channelId: "discussion", messageId: "first",
+      body, authorKind: "user", port }), { harness: "codex" });
+    assert.deepEqual(decisions.at(-1), { channelId: "discussion", messageId: "first", body, window: true });
+  }
+  assert.equal(decisions.length, 2);
+
+  // A title alone, malformed origin, archived Channel, or empty draft is not a discussion launch.
+  for (const channel of [null, { metadata: {} }, { metadata: { fromPageId: true } },
+    { metadata: { fromPageId: " " } }, { metadata: { fromMessageId: "source-message" } },
+    { metadata: { fromChannelId: "source-channel" } },
+    { archivedAt: "2026-10-19T00:00:00Z", metadata: { fromPageId: "page-1" } }]) {
+    assert.deepEqual(await orchestrateProductNewConversationStart({ channelId: "discussion", messageId: "first",
+      body, authorKind: "user", port: { async getChannel() { return channel; },
+        async decideFirstMessageLaunch() { assert.fail("ineligible Channel must not ask Jev"); } } }), {});
+  }
+  assert.deepEqual(await orchestrateProductNewConversationStart({ channelId: "discussion", messageId: "first",
+    body: " \n ", authorKind: "user", port: { async getChannel() { return { metadata: { fromPageId: "page-1" } }; },
+      async decideFirstMessageLaunch() { assert.fail("empty draft must not ask Jev"); } } }), {});
+});

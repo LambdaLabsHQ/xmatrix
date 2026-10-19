@@ -189,7 +189,8 @@ export async function orchestrateProductAgentMentions(
 /**
  * A new conversation's first message that summons nobody: Jev reads whether
  * its author wants an Agent to start on it now, and which harness. Only a
- * conversation nobody has named yet (the web's New conversation) is asked;
+ * conversation nobody has named yet (the web's New conversation), or a
+ * discussion named from its page or selected message passage, is asked;
  * Jev's "no" and every refusal start nothing and say nothing, because the
  * author never asked for an Agent. A Human author sees the harnesses and
  * "none" for a few seconds; a choice there is the decision, and Jev's reading
@@ -202,7 +203,10 @@ export async function orchestrateProductNewConversationStart(input: {
   authorKind?: "user" | "agent";
 }): Promise<{ harness?: string }> {
   const channel = await input.port.getChannel(input.channelId);
-  if (!channel || channel.archivedAt || channel.metadata?.autoName !== true || !input.body.trim()) return {};
+  if (!channel || channel.archivedAt || !input.body.trim()) return {};
+  const discussion = metadataString(channel.metadata, "fromPageId") ||
+    (metadataString(channel.metadata, "fromChannelId") && metadataString(channel.metadata, "fromMessageId"));
+  if (channel.metadata?.autoName !== true && !discussion) return {};
   try {
     const { harness } = await input.port.decideFirstMessageLaunch({ channelId: channel.id, messageId: input.messageId,
       body: input.body, window: input.authorKind === "user" });

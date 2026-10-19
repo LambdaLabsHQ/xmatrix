@@ -241,7 +241,7 @@ export async function dispatchProductMessageLaunches(input: ProductMessagePostCo
     }
     if (selectionCount > 0 || directMention) return selectionCount > 0;
     // Nobody was summoned by the first message of a conversation: Jev reads
-    // whether its author wants an Agent to start (only a new, unnamed one).
+    // whether its author wants an Agent to start (an unnamed one or a discussion).
     if (input.sequence === 1) await (dispatch.newConversation ?? startNewConversation)(input);
     return false;
   } catch (error) {
