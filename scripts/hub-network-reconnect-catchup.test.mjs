@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
@@ -15,6 +16,7 @@ import {
 
 const immediateRetries = { retryDelayMs: 1, delayImpl: async () => {} };
 const syntheticChannel = { hubUrl: "https://hub.example.com", token: "token", channelId: "channel-1" };
+const sourceVersion = JSON.parse(readFileSync(new URL("../version.json", import.meta.url), "utf8")).version;
 
 function catalogResponse(empty, channelName) {
   return Response.json({
@@ -46,7 +48,7 @@ test("synthetic Human client uses the canonical Human WebSocket endpoint", () =>
     assert.equal(url.origin, expectedOrigin);
     assert.equal(url.pathname, "/ws/humans");
     assert.equal(url.searchParams.get("x-xmatrix-client-component"), "cli");
-    assert.match(url.searchParams.get("x-xmatrix-client-version"), /^\d+\.\d+\.\d+$/u);
+    assert.equal(url.searchParams.get("x-xmatrix-client-version"), sourceVersion);
     assert.equal(url.searchParams.get("x-xmatrix-client-protocol"), "2");
   }
 });
@@ -56,7 +58,7 @@ test("synthetic Human client uses the current handshake and live message envelop
   assert.equal(connect.type, "human_connect");
   assert.equal(connect.token, "test-token");
   assert.equal(connect.device.client, "cli");
-  assert.match(connect.device.version, /^\d+\.\d+\.\d+$/u);
+  assert.equal(connect.device.version, sourceVersion);
   assert.equal(Number.isSafeInteger(connect.device.protocolVersion), true);
   const message = {
     messageId: "message-1",
