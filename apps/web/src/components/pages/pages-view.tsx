@@ -887,7 +887,8 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     return {
       name: channel.name ?? null,
       lastMessage: last ? { from: { kind: last.from.kind === "agent" || last.from.kind === "app" ? last.from.kind : "user",
-        label: last.from.label }, bodyPreview: last.bodyPreview, sentAt: last.sentAt } : null,
+        label: last.from.label, ...(last.from.avatarUrl ? { avatarUrl: last.from.avatarUrl } : {}) },
+        bodyPreview: last.bodyPreview, sentAt: last.sentAt } : null,
       agents: liveAgents(channel),
       ...(channel.historyHeadSequence !== undefined ? { headSequence: channel.historyHeadSequence } : {}),
       ...(channel.readSequence !== undefined ? { readSequence: channel.readSequence } : {}),
