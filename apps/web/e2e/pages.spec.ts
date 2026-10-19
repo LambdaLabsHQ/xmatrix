@@ -1136,8 +1136,11 @@ test("selecting a passage starts a discussion anchored to it, drawn beside the t
   await expect(opening.locator("blockquote")).toHaveText("In progress");
   await expect(opening).toContainText("Is this still accurate?");
   await browser.screenshot({ path: test.info().outputPath("pages-discussion-docked.png") });
-  // With room in the margin, the passage heads its thread there and is not quoted again in it.
+  // Opened with room in the margin, the passage heads its thread there and is not quoted again in it.
+  await browser.getByRole("button", { name: "Close the conversation" }).click();
+  await expect(thread).toBeHidden();
   await browser.setViewportSize({ width: 1600, height: 900 });
+  await editor.getByRole("button", { name: `Open the discussion ${E2E_CHANNEL.name}` }).click();
   await expect(opening).toHaveText("Is this still accurate?");
   await expect(thread.locator("blockquote")).toHaveCount(0);
   await browser.screenshot({ path: test.info().outputPath("pages-discussion-thread.png") });
