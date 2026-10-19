@@ -142,7 +142,9 @@ test("code scanning delivery requires its own installation's current read grant,
     return {};
   });
   const payload = { ...pushPayload({ private: false, visibility: "public" }), action: "created", alert: { number: 97 } };
-  for (const [index, [permission, expected]] of [["read", 1], [undefined, 0], ["write", 1], ["unknown", 0]].entries()) {
+  const cases = [["code_scanning_alert", "read", 1], ["code_scanning_alert", undefined, 0],
+    ["code_scanning_alert", "write", 1], ["code_scanning_alert", "unknown", 0], ["push", undefined, 1]];
+  for (const [index, [event, permission, expected]] of cases.entries()) {
     const github = stubGitHubFetch(call => {
       const installation = call.url.match(/\/app\/installations\/(42|777)\/access_tokens$/u)?.[1];
       if (!installation) return jsonResponse({}, 404);
@@ -155,10 +157,10 @@ test("code scanning delivery requires its own installation's current read grant,
     try {
       const harness = webhookHarness(reader({ mode: "closed" }));
       const wakes = [];
-      const result = await dispatchProductGitHubWebhook({ env, event: "code_scanning_alert",
+      const result = await dispatchProductGitHubWebhook({ env, event,
         delivery: `grant-${index}`, payload }, { ...harness.dependencies, delegated: githubSpaceRepositoryDelegated,
         wake: async (_env, input) => { wakes.push(input); } });
-      assert.equal(result.delivered, expected, `permission=${permission}`);
+      assert.equal(result.delivered, expected, `${event}, permission=${permission}`);
       assert.equal(harness.appended.length, expected);
       assert.equal(wakes.length, expected);
     } finally { github.restore(); }
