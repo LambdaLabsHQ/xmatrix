@@ -179,6 +179,24 @@ The web Worker's hop to the Hub (`src/lib/xmatrix-proxy.ts`) answers a dropped
 Hub connection as a retryable `503`. A hop timeout and a failed session refresh
 are not retryable: repeating them only adds load or delays the real error.
 
+### Reads straight from the Hub
+
+The hop through the web Worker costs more than the Hub's own work on a page's
+reads (in production at HKG, about 199 ms median and 615 ms p90 a request,
+against the Hub's 52 ms and 256 ms). So the app, when it runs at its own origin
+(`NEXT_PUBLIC_APP_URL`) and the compatibility gate has admitted it, reads a
+page's tree, text, margin, sections, read position, suggestions and
+Automations, and a conversation's history, from the Hub straight
+(`src/lib/query/hub-read.ts`), as it already opens live sessions and signs in.
+It sends its bearer token and client identity, never a cookie; the Hub answers
+those GET routes, and their preflight, to the app's origin alone
+(`packages/hub/src/direct-read-cors.ts`), and authorizes them as it does
+through the Web. The Web answers the read when the Hub does not: before
+admission, at any other origin (an app shell's), on no answer across origins,
+on `401` (the Web renews the token from the session) and on `426`. Writes keep
+going through the Web. A build with `NEXT_PUBLIC_XMATRIX_DIRECT_HUB_READS=0`
+reads everything through the Web.
+
 ## Coming back: one connectivity signal
 
 `apps/web/src/lib/connectivity/connectivity.ts` is the only place that listens

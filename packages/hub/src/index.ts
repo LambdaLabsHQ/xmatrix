@@ -87,6 +87,7 @@ import { registerIndexRoutesBilling } from "./index-routes-billing";
 import { registerIndexRoutesJev } from "./index-routes-jev";
 import { registerSearchRerankRoutes } from "./index-routes-search-rerank";
 import { registerClientCompatibilityGate } from "./client-compatibility-gate";
+import { registerDirectReadCors } from "./direct-read-cors";
 import { registerRequestBodyLimit } from "./request-body-limit";
 import { registerRequestRateLimit } from "./request-rate-limit";
 import { registerIndexRoutesPostgresReadiness } from "./postgres-readiness";
@@ -98,6 +99,8 @@ const app = new Hono<{ Bindings: Env }>();
 app.onError((error, c) => error instanceof HTTPException ? error.getResponse() : requestErrorResponse(c, error));
 registerRequestRateLimit(app);
 registerRequestBodyLimit(app);
+// Before the compatibility gate, so its refusal of a direct read reaches the app too.
+registerDirectReadCors(app);
 registerClientCompatibilityGate(app);
 registerIndexRoutesPostgresReadiness(app);
 registerIndexRoutesAdmin(app);
