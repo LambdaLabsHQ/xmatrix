@@ -7033,6 +7033,16 @@ html .xmatrix-app.xmatrix-app.app-hint-tooltip {
   color: var(--primary-foreground);
 }
 
+/* A connector's mark is its own artwork: it sits on the card, not a tint. */
+.xmatrix-app .app-connector-command-chip .app-mention-chip-avatar-face {
+  background: var(--card);
+}
+
+/* The arguments are prose the command carries: highlighted with it, read at body weight. */
+.xmatrix-app .app-connector-command-arguments {
+  font-weight: 400;
+}
+
 .xmatrix-app .app-mention-chip[data-read-state="unread"] .app-mention-chip-avatar-face {
   box-shadow: 0 0 0 1.25px color-mix(in oklab, oklch(0.64 0.12 235) 70%, transparent);
 }

@@ -1,6 +1,6 @@
 import { agentAvatarUrlFromMetadata, agentPresetForLauncher, cleanRuntimeOperationFailure, handoffInstanceMentionScanner, mentionAddressTokens, parseHandoffInstanceTarget, parseAutoLaunchMentions, parsePresentedRoutingDecision, rebornFailureReason, scanMentionAddresses, summarizeStopReceipts, type PresentedRoutingDecision, type SerializedAgentLaunch, type SerializedAgentStop,
   type SerializedAgentMessageExecution, type SerializedAgentInvocationRejection, type SerializedAgentContinuation, type AgentLaunchActivity, type AgentStopInvocation,
-  type AutoLaunchMention } from "@xmatrix/protocol";
+  type AutoLaunchMention, type ConnectorInvocation } from "@xmatrix/protocol";
 
 export type InvocationTone = "active" | "waiting" | "error" | "success" | "neutral";
 /** The whole chip vocabulary. A chip exists only for an invocation that starts
@@ -390,6 +390,7 @@ export type InteractionSegment<Target = unknown> =
   | { presentationRef: "launch.v1"; text: string; mention?: AutoLaunchMention;
     launch?: SerializedAgentLaunch; rejection?: SerializedAgentInvocationRejection }
   | { presentationRef: "stop.v1"; text: string; invocation: AgentStopInvocation; receipts: readonly SerializedAgentStop[] }
+  | { presentationRef: "connector.v1"; text: string; invocation: ConnectorInvocation }
   | { presentationRef: "mention.v1"; text: string; target: Target; token?: string };
 
 export interface InteractionRecords<Target> {
@@ -398,6 +399,8 @@ export interface InteractionRecords<Target> {
   launches?: readonly SerializedAgentLaunch[];
   /** The message's own stop command, when this run is that command's text. */
   stop?: { invocation: AgentStopInvocation; receipts: readonly SerializedAgentStop[] };
+  /** The message's own connector command, when this run is that command's text. */
+  connector?: ConnectorInvocation;
   /** Without launch status access, a written handoff stays the prose it was written as. */
   launchStatusUnavailable?: boolean;
   /** Read-state mentions in a run of plain text, from the Channel's member index. */
@@ -427,17 +430,28 @@ export function segmentMessageInteraction<Target>(text: string, records: Interac
   };
   const plain = (value: string): Segment => ({ presentationRef: null, text: value });
   let segments: Segment[] = text ? [plain(text)] : [];
-  const stop = records.stop;
-  if (stop && text.includes(stop.invocation.text)) {
+  // A whole-message command claims its own written span, once.
+  const claim = (command: string, segment: Segment) => {
+    let claimed = false;
     segments = refine(segments, (run, offset) => {
-      const at = run.indexOf(stop.invocation.text);
+      const at = claimed ? -1 : run.indexOf(command);
       if (at < 0 || !allowed(at + offset)) return [plain(run)];
+      claimed = true;
       const out: Segment[] = [];
       if (at > 0) out.push(plain(run.slice(0, at)));
-      out.push({ presentationRef: "stop.v1", text: stop.invocation.text, invocation: stop.invocation, receipts: stop.receipts });
-      if (at + stop.invocation.text.length < run.length) out.push(plain(run.slice(at + stop.invocation.text.length)));
+      out.push(segment);
+      if (at + command.length < run.length) out.push(plain(run.slice(at + command.length)));
       return out;
     });
+  };
+  const { stop, connector } = records;
+  if (stop) claim(stop.invocation.text, { presentationRef: "stop.v1", text: stop.invocation.text,
+    invocation: stop.invocation, receipts: stop.receipts });
+  if (connector) {
+    // Markdown inside the statement splits it across runs; the command itself still lights up.
+    const command = connector.text.slice(0, connector.commandEnd - connector.start);
+    const whole = connector.text !== command && text.includes(connector.text);
+    claim(whole ? connector.text : command, { presentationRef: "connector.v1", text: whole ? connector.text : command, invocation: connector });
   }
   segments = refine(segments, (run, offset) => splitMentionContinuations(run, records.continuations ?? [],
     start => allowed(start + offset)).map(part => part.kind === "continuation"

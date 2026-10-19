@@ -541,10 +541,10 @@ export {
   agentInteractionTarget, connectorInteractionTarget, humanInteractionTarget, interactionRegistry,
   } from "./message-interaction-targets.js";
 export {
-  parseConnectorActionCommand,
+  connectorOperationIds, parseConnectorActionCommand, parseConnectorInvocation,
 } from "./connector-command.js";
 export type {
-  ParsedConnectorActionCommand,
+  ConnectorInvocation, ParsedConnectorActionCommand,
 } from "./connector-command.js";
 export {
   isUnlistedParameterTag, PARAMETER_TAG_PREFIX, PARAMETER_TAG_RULES, parameterTagRule,

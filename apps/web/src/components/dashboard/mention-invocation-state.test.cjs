@@ -320,3 +320,16 @@ test("the segmenter keeps non-operational addresses and unreadable handoffs as p
     [[null, undefined, undefined], ["launch.v1", undefined, undefined]]);
   assert.deepEqual(segmentMessageInteraction("", {}), []);
 });
+
+test("a connector command is one connector.v1 segment, whole or by its command", () => {
+  const { parseConnectorInvocation } = require("@xmatrix/protocol");
+  const body = "@github:comment:o/r#7 ship it";
+  const connector = parseConnectorInvocation(body);
+  assert.deepEqual(segmentMessageInteraction(body, { connector }).map(part => [part.presentationRef, part.text]),
+    [["connector.v1", body]]);
+  // Markdown split the statement: the command still lights up, the rest stays prose.
+  assert.deepEqual(segmentMessageInteraction("@github:comment:o/r#7 ship ", { connector })
+    .map(part => [part.presentationRef, part.text]),
+  [["connector.v1", "@github:comment:o/r#7"], [null, " ship "]]);
+  assert.deepEqual(segmentMessageInteraction(body, {}).map(part => part.presentationRef), [null]);
+});

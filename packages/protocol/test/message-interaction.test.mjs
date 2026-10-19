@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import { matchInteractionGrammar, parseMessageInteraction, MessageInteractionRegistry,
-  parseConnectorActionCommand, parseAgentControlCommands, parseAgentStopCommand, parseAgentStopInvocation,
+  parseConnectorActionCommand, parseConnectorInvocation, parseAgentControlCommands, parseAgentStopCommand, parseAgentStopInvocation,
   summarizeStopReceipts, agentInteractionTarget, connectorInteractionTarget,
   humanInteractionTarget, interactionRegistry } from "../dist/index.js";
 
@@ -91,6 +91,25 @@ test("catalog copies cannot mutate the resolver or smuggle regular expressions",
   assert.equal(parseConnectorActionCommand(".*", "@github:comment:x hi"), undefined);
   assert.deepEqual(parseConnectorActionCommand("github", "@github:comment:x hello\nworld"), {
     actionId: "comment", statement: { target: "x", text: "hello\nworld" } });
+});
+
+test("a connector invocation spans its whole first-line statement", () => {
+  const body = "  @github:comment:LambdaLabsHQ/xmatrix#737 Decision: steer\nsecond line";
+  const invocation = parseConnectorInvocation(body);
+  assert.equal(invocation.text, "@github:comment:LambdaLabsHQ/xmatrix#737 Decision: steer");
+  assert.equal(invocation.start, 2);
+  assert.equal(body.slice(invocation.start, invocation.commandEnd), "@github:comment:LambdaLabsHQ/xmatrix#737");
+  assert.equal(body.slice(invocation.target.start, invocation.target.end), "LambdaLabsHQ/xmatrix#737");
+  assert.deepEqual([invocation.provider, invocation.action], ["github", "comment"]);
+  const bare = parseConnectorInvocation("@GitHub:Policy");
+  assert.equal(bare.text, "@GitHub:Policy");
+  assert.equal(bare.commandEnd, bare.end);
+  assert.equal(bare.target, undefined);
+  // Unknown connectors and actions, later lines and quotes are not commands.
+  assert.equal(parseConnectorInvocation("@nope:comment:x hi"), undefined);
+  assert.equal(parseConnectorInvocation("@github:dance:x"), undefined);
+  assert.equal(parseConnectorInvocation("hello\n@github:comment:x hi"), undefined);
+  assert.equal(parseConnectorInvocation("> @github:comment:x hi"), undefined);
 });
 
 test("a stop invocation is the command span the chip hangs on", () => {
