@@ -273,7 +273,8 @@ a.page-section-claim:hover { text-decoration: underline; }
   background: var(--card);
   box-shadow: 0 1px 2px oklch(0.3 0.02 60 / 0.18), 0 1px 3px 1px oklch(0.3 0.02 60 / 0.1);
 }
-.page-margin-quote { border-left: 2px solid color-mix(in oklab, #f59e0b 70%, transparent); }
+/* A conversation about the page is a comment: its card, and the line under an Agent at work, start with its icon. */
+.page-comment-icon { flex: none; fill: color-mix(in oklab, #f59e0b 88%, white); }
 .page-margin-open {
   background: var(--card);
   box-shadow: 0 1px 3px oklch(0.3 0.02 60 / 0.22), 0 4px 10px 3px oklch(0.3 0.02 60 / 0.12);
@@ -435,11 +436,10 @@ html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-com
   background: currentColor;
   pointer-events: none;
 }
-/* An Agent's caret, a little bolder than a person's: while it thinks or writes it carries its name, steady,
-   and its line blinks, so the page says who is writing where; at rest it is the caret alone, its name on
-   hover. Its face at the right edge says what it is doing, and its note to the people opens from there. */
+/* An Agent's caret, a little bolder than a person's: while it thinks or writes its line blinks, so the page says
+   where it is writing; its name never sits on the text, only on hover. Its pill beside the line says who it is
+   and what it is doing, and its channel opens from there. */
 .ProseMirror-yjs-cursor[data-agent] > div { display: none; }
-.ProseMirror-yjs-cursor[data-agent][data-live] > div { display: block; opacity: 1; animation: none; }
 .ProseMirror-yjs-cursor[data-agent]:hover > div { display: block; }
 .ProseMirror-yjs-cursor[data-agent] { border-left-width: 2px; margin-left: -1px; }
 @keyframes page-agent-caret {
@@ -731,13 +731,14 @@ html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-com
   color: var(--page-pen-color);
 }
 /* Where there is no room for its name, a face that thinks says for how long, and one that went quiet says so,
-   in a small tag of its colour under the face. */
+   in a small tag of its colour centred under the face and no wider than it, so the text beside stays clear. */
 .page-pen .page-pen-status {
   position: absolute;
   /* Below the dots that run under the face while it works. */
   top: calc(100% + 10px);
-  right: -2px;
-  padding: 2px 6px;
+  right: 50%;
+  transform: translateX(50%);
+  padding: 2px 5px;
   border-radius: 999px;
   background: var(--page-pen-color);
   color: #fff;
@@ -804,6 +805,23 @@ html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-com
   color: #fff;
 }
 .page-pens.is-named .page-pen-way { left: 15px; }
+/* In the margin (§4.4) an Agent at work is the same pill, standing in the column with the cards on their left
+   edge, level with its line, rather than sticky at the right edge. */
+.page-pens.page-margin-pen .page-pen { position: static; margin-top: 0; }
+/* Under it, the channel it works for, on the pill's own columns: the comment icon under its face (centre 16),
+   the words under its name (3 + 26 + 6 = 35). */
+.page-margin-writer-channel {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
+  column-gap: 3px;
+  align-items: center;
+  width: 100%;
+  margin-top: 6px;
+  font-size: 12.5px;
+  line-height: 18px;
+  text-align: left;
+}
+.page-margin-writer-channel .page-comment-icon { justify-self: center; }
 .page-pen-way {
   position: absolute;
   left: 50%;

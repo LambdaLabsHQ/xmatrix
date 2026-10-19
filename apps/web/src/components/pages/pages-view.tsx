@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { noticeClass } from "@/components/ui/status-tone";
+import { actionClass } from "@/components/ui/action-tone";
 import { useAuth } from "@/lib/auth-context";
 import { xmatrixQueryKeys } from "@/lib/query/query-keys";
 import {
@@ -35,7 +36,7 @@ import { PageAttached, type PageScheduleInput } from "./page-attached";
 import {
   ConversationList, DeletePageDialog, PageChangeMark, PageDialog, PageHistory, PagePens, PageOffscreenPeople, PageScrollMarks, PresenceStack, ShareDialog, type OffscreenPerson, type PagePen, type PresentPerson, type PageScrollMark,
 } from "./page-chrome";
-import { PageMargin } from "./page-margin";
+import { PageMargin, type MarginWriter } from "./page-margin";
 import { PagePhoneDock } from "./page-phone-dock";
 import { PageReaderChangeGutter, PageReaderChangeMark } from "./page-reader-changes-bar";
 import type { SuggestionsReport } from "./page-suggestions";
@@ -468,6 +469,12 @@ function liveAgents(channel: ChannelSnapshot): LiveConversation["agents"] {
 
 /** What an Agent co-writing live is doing, as its face at the edge says it (page-co-writer.ts). */
 const CO_WRITER_DOING: Partial<Record<string, string>> = { thinking: "thinking", writing: "writing", waiting: "waiting for you" };
+
+/** A duration as a face's tag says it: "19s", "2m". */
+function briefDuration(milliseconds: number): string {
+  const seconds = Math.max(0, Math.round(milliseconds / 1000));
+  return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m`;
+}
 
 /** Room at the bottom of a phone's page that its button and capsule cover, so a line there counts as out of view. */
 const PEN_BOTTOM_ROOM = 110;
@@ -1279,7 +1286,8 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
         && conversationName(state.user!.conversationId) ? { from: conversationName(state.user!.conversationId)! } : {}),
       ...(state.user!.kind === "agent" && (CO_WRITER_DOING[state.activity ?? ""] || state.stalled === true)
         ? { doing: coWriterDoing(state) } : {}),
-      ...(state.user!.kind === "agent" && state.activity === "thinking" ? { thinking: true } : {}),
+      ...(state.user!.kind === "agent" && state.activity === "thinking" ? { thinking: true,
+        ...(typeof state.since === "number" ? { brief: briefDuration(clock - state.since) } : {}) } : {}),
       ...(state.user!.kind === "agent" && state.stalled === true ? { stalled: true } : {}),
       undoable: state.user!.kind === "agent" && state.undo === true,
       // An Agent co-writing live says what it is doing, and its note to the people on the page.
@@ -1355,7 +1363,17 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
       return [{ person, top: top + 2, away }];
     });
   })();
-  const penned = new Set(pens.map((pen) => pen.person.key));
+  // With a margin beside the page, each Agent at work stands in it, beside the line it writes, its channel under
+  // it, and the cards make room (§4.4); an idle one leaves it, and its channel is a card again. Without one, each
+  // Agent on the page is its face at the right edge (§3.2).
+  const writersInMargin = marginOn && (drawn || openInMargin);
+  const marginWriters: MarginWriter[] = writersInMargin ? pens.filter((pen) => !pen.person.idle).map(({ person }) => ({
+    key: person.key, person, anchor: person.anchor,
+    conversation: marginCards.find((card) => card.conversationId === person.conversationId) ?? null,
+    channel: person.conversationId ? conversationName(person.conversationId) : null,
+  })) : [];
+  const edgePens = writersInMargin ? [] : pens;
+  const penned = new Set(edgePens.map((pen) => pen.person.key));
   // Room beside the text column for a face to carry its name: from the column's edge to the article's.
   const penRoom = ((): number => {
     const article = articleElement.current;
@@ -1377,6 +1395,33 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   })();
   const tapped = dialog && typeof dialog === "object" && dialog.kind === "agent"
     ? people.find((person) => person.key === dialog.key) ?? null : null;
+  // What may be done to an Agent at work on the page, from its face or its pill: end its co-writing, take back
+  // its last change while nobody changed it since, or, once it went quiet, have another Agent write instead.
+  const agentControls = (person: PresentPerson) => {
+    const conversationId = person.conversationId;
+    const instead = person.stalled ? switchWriter(person.name) : undefined;
+    return {
+      stop: page && conversationId && canEdit ? () => {
+        setDialog(null);
+        void pageApi.endCoWriting(spaceId ?? "", page.pageId, token, conversationId)
+          .catch((cause: unknown) => setNotice(userErrorMessage(cause, "Couldn't stop the Agent")));
+      } : null,
+      undo: page && conversationId && person.undoable && canEdit ? () => {
+        setDialog(null);
+        void pageApi.undoCoWriting(spaceId ?? "", page.pageId, token, conversationId)
+          .then(({ outcome }) => {
+            if (outcome === "changed") setNotice("Someone changed it since, so it stays");
+          })
+          .catch((cause: unknown) => setNotice(userErrorMessage(cause, "Couldn't undo the Agent's change")));
+      } : null,
+      switchTo: page && instead ? { label: onboardingCopy.coWrite.switchTo(instead), run: () => {
+        setDialog(null);
+        if (conversationId && canEdit) void pageApi.endCoWriting(spaceId ?? "", page.pageId, token, conversationId).catch(() => {});
+        void coWrite(instead, null);
+      } } : null,
+    };
+  };
+  const tappedControls = tapped ? agentControls(tapped) : null;
   const offscreen = ((): { above: OffscreenPerson[]; below: OffscreenPerson[] } => {
     const above: OffscreenPerson[] = [];
     const below: OffscreenPerson[] = [];
@@ -1528,7 +1573,8 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
               <div className="flex gap-6">
                 <div ref={docColumn} className={cn("relative min-w-0 max-w-3xl flex-1",
                   phone && phoneDiff && !suggestionMark && "has-reader-mark")}>
-                  <PagePens pens={pens} room={penRoom} onJump={jumpTo} onOpen={(person) => setDialog({ kind: "agent", key: person.key })} />
+                  <PagePens pens={edgePens} room={penRoom} onJump={jumpTo}
+                    onOpen={(person) => setDialog({ kind: "agent", key: person.key })} />
                   {suggestionMark && suggestedBy && (
                     <PageChangeMark top={suggestionMark.top} away={suggestionMark.away} testId="page-suggestions"
                       label={`${suggestedBy} suggests this change, ${suggesting.current + 1} of ${suggesting.count}`}>
@@ -1592,6 +1638,27 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
                 {marginOn && (
                   <aside className="w-80 shrink-0">
                     {(drawn || openInMargin) && <PageMargin conversations={marginCards} tops={anchorTops} focusedId={focused} canResolve={canEdit}
+                      writers={marginWriters}
+                      onWriter={(writer) => setDialog({ kind: "agent", key: writer.key })}
+                      writerActions={(person) => {
+                        const controls = agentControls(person);
+                        return (
+                          <>
+                            {controls.switchTo && (
+                              <button type="button" onClick={controls.switchTo.run}
+                                className={actionClass({ variant: "primary", size: "sm" })}>{controls.switchTo.label}</button>
+                            )}
+                            {controls.undo && (
+                              <button type="button" onClick={controls.undo}
+                                className={actionClass({ variant: "secondary", size: "sm" })}>Undo</button>
+                            )}
+                            {controls.stop && (
+                              <button type="button" onClick={controls.stop}
+                                className={actionClass({ variant: "secondary", size: "sm" })}>Stop</button>
+                            )}
+                          </>
+                        );
+                      }}
                       openId={openInMargin ? activeConversationId : null}
                       {...(renderConversation ? { renderOpen: () => renderConversation("margin") } : {})}
                       {...(onCloseConversation ? { onClose: onCloseConversation } : {})}
@@ -1617,27 +1684,10 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
               working={tapped ? { name: tapped.name, ...(tapped.avatarUrl ? { avatarUrl: tapped.avatarUrl } : {}),
                 doing: tapped.detail } : null}
               onStart={(harness) => { setDialog(null); void coWrite(harness, null); }}
-              {...(tapped?.stalled && switchWriter(tapped.name) ? { switchTo: { label: onboardingCopy.coWrite.switchTo(switchWriter(tapped.name)!),
-                run: () => {
-                  setDialog(null);
-                  if (tapped.conversationId && canEdit) void pageApi.endCoWriting(spaceId ?? "", page.pageId, token, tapped.conversationId).catch(() => {});
-                  void coWrite(switchWriter(tapped.name)!, null);
-                } } } : {})}
+              {...(tappedControls?.switchTo ? { switchTo: tappedControls.switchTo } : {})}
               onOpenConversation={tapped?.conversationId
                 ? () => { setDialog(null); openConversation(tapped.conversationId!); } : null}
-              onStop={tapped?.conversationId && canEdit ? () => {
-                setDialog(null);
-                void pageApi.endCoWriting(spaceId ?? "", page.pageId, token, tapped.conversationId!)
-                  .catch((cause: unknown) => setNotice(userErrorMessage(cause, "Couldn't stop the Agent")));
-              } : null}
-              onUndo={tapped?.conversationId && tapped.undoable && canEdit ? () => {
-                setDialog(null);
-                void pageApi.undoCoWriting(spaceId ?? "", page.pageId, token, tapped.conversationId!)
-                  .then(({ outcome }) => {
-                    if (outcome === "changed") setNotice("Someone changed it since, so it stays");
-                  })
-                  .catch((cause: unknown) => setNotice(userErrorMessage(cause, "Couldn't undo the Agent's change")));
-              } : null} />
+              onStop={tappedControls?.stop ?? null} onUndo={tappedControls?.undo ?? null} />
           )}
           <DeletePageDialog open={dialog === "delete"} title={page.title} hasChildren={hasChildren}
             onClose={() => setDialog(null)} onDelete={removePage} />

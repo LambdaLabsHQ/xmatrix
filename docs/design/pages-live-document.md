@@ -168,8 +168,9 @@ fact is about.
 - **Cursors**, as in Google Docs: a line in the person's colour with their
   name above it. The name shows while they move or type and hides about five
   seconds later, leaving a square at the caret's top; hovering the caret
-  shows it again. Clicking an Agent's label opens its conversation beside the
-  page (§4.4).
+  shows it again. An Agent's caret never carries its name on the text, even
+  while it writes: the text holds only its colour and its blinking caret, and
+  its pill beside the line (below, and §4.4) says who it is.
 - **A cursor stays while its owner is on the page**, and goes when they
   leave; there is no linger timer. A person is on the page while it is open,
   and idle (dimmed) after ten minutes in a hidden tab. An Agent is on the
@@ -187,8 +188,21 @@ fact is about.
   or below, placed by their cursor where they have one and by their section
   otherwise: "claude:2 is editing below". Clicking scrolls to the nearest of
   them; clicking an avatar in the header does the same.
-- **On a phone, Agents are at the right edge.** Each Agent on the page is its
-  face beside the line it is at, travelling with the text as the page scrolls
+- **Beside a wide page, an Agent at work stands in the margin** (decided
+  2026-10-19): its pill, solid in its colour with its face, its name and what
+  it is doing (its dots, or *thinking 12s*), level with the line it writes and
+  on the cards' left edge, so the margin holds Agents and comments in one
+  column that never overlaps. Under the pill is the channel it works for, on
+  the pill's own columns: the comment icon under its face, the channel's name
+  and newest message under its name. That channel's card is not drawn again
+  while one of its Agents is at work on the page: each Agent shows once, and
+  the edit it makes, not the channel, is what stands beside the text. Pressing
+  the pill opens the channel right under it, on the same left edge, the pill
+  staying put, with what may be done to the Agent (stop, undo, write with
+  another) beside the pill. An idle Agent leaves the margin and its channel is
+  a card again (§4.4). Only a solid pill means an Agent at work.
+- **On a phone, and beside a page without room for the margin, Agents are at
+  the right edge.** Each Agent on the page is its face beside the line it is at, travelling with the text as the page scrolls
   and waiting at the top or bottom of the edge, a chevron pointing to the
   line, while the line is out of view; a tap goes back to it, or, beside its
   line, says what it is doing and opens its conversation. The header's avatar
@@ -466,6 +480,10 @@ A page and the conversations about it are read together. Each conversation
 linked to the page appears beside what it is about and opens there; reading
 or joining one never leaves the page.
 
+- **An Agent at work comes first.** While one of a conversation's Agents is
+  at work on the page, the conversation hangs under that Agent's pill beside
+  the line it writes (§3.2) instead of sitting at its own anchor, and opens
+  there; when the Agent goes idle, it is a card at its anchor again.
 - **Where it sits.** A discussion sits beside its passage. A conversation
   linked to a section sits beside the section's heading, and one linked to
   the whole page beside the title.
@@ -475,8 +493,8 @@ or joining one never leaves the page.
   the heading's conversation count includes them, and the conversation list
   shows them.
 - **A card per conversation**, drawn as a comment is in Google Docs: the
-  quoted passage of a discussion (or the title of a conversation about a
-  section), the last message with its author's avatar, name and age, the
+  comment icon, then the quoted passage of a discussion (or the title of a
+  conversation about a section), the last message with its author's avatar, name and age, the
   Agents live in it with their state, and the reader's unread count. A card
   at rest is flat, a tint off the page; the one being read lifts. Cards
   beside one section stack; the card being read lines up with its anchor
