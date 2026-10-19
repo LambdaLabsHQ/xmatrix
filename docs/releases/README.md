@@ -20,8 +20,9 @@ only the user-facing notes. Deployment evidence remains on GitHub. Update
 manifests, Desktop settings and dialogs, Machine version rows, and CLI update
 output link to that exact version. Older releases without notes explicitly say
 they are unavailable. A GitHub outage offers retry instead of showing a different
-version's notes. Publishing clients can precede the receipt briefly; verify the
-notes after the entire release succeeds.
+version's notes. Before the final receipt exists, stable pages can already read
+the authored document from that exact immutable tag. Beta notes become available
+with the receipt. Verify the notes after the entire release succeeds.
 
 After publication, verify the GitHub Release, the exact public page, and the
 update entry point before reporting completion. Recover receipt failures by

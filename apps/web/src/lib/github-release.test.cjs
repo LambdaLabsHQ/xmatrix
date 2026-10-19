@@ -36,6 +36,12 @@ test("public notes resolve an exact published tag, excluding drafts, receipts an
   assert.equal(await fetchPublishedReleaseNotes("1.2.0"), undefined);
   global.fetch = async () => new Response(null, { status: 404 });
   assert.equal(await fetchPublishedReleaseNotes("1.2.0"), undefined);
+  global.fetch = async (url) => {
+    if (url.endsWith("/releases/tags/xmatrix-v1.2.0")) return new Response(null, { status: 404 });
+    assert.match(url, /\/contents\/docs\/releases\/1\.2\.0\.md\?ref=xmatrix-v1\.2\.0$/u);
+    return new Response("# xMatrix 1.2.0\n\nRead these notes before the final receipt.");
+  };
+  assert.equal(await fetchPublishedReleaseNotes("1.2.0"), "Read these notes before the final receipt.");
   global.fetch = async () => new Response(null, { status: 503 });
   await assert.rejects(fetchPublishedReleaseNotes("1.2.0"), /503/u);
 });

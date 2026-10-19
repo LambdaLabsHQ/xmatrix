@@ -278,6 +278,20 @@ export async function fetchPublishedReleaseNotes(version: string) {
     cache: "no-store",
     signal: AbortSignal.timeout(8_000),
   });
+  if (response.status === 404 && !version.includes("-")) {
+    // Stable feeds can advance before the final receipt. Its authored notes
+    // already exist in the immutable tag; let people read them before updating.
+    const source = await fetch(`https://api.github.com/repos/${getReleaseRepo()}/contents/docs/releases/${version}.md?ref=xmatrix-v${version}`, {
+      headers: getGitHubHeaders({ Accept: "application/vnd.github.raw+json" }),
+      cache: "no-store",
+      signal: AbortSignal.timeout(8_000),
+    });
+    if (source.status === 404) return undefined;
+    if (!source.ok) throw new Error(`GitHub release notes returned ${source.status}`);
+    const text = (await source.text()).replace(/\r\n/gu, "\n");
+    const heading = `# xMatrix ${version}\n`;
+    return text.startsWith(heading) && text.length <= 32_768 ? text.slice(heading.length).trim() || undefined : undefined;
+  }
   if (response.status === 404) return undefined;
   if (!response.ok) throw new Error(`GitHub release notes returned ${response.status}`);
   const release = await response.json() as { tag_name?: string; draft?: boolean; body?: string };
