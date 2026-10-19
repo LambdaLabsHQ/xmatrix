@@ -5,7 +5,7 @@
  * The committed Wrangler configs (`packages/hub/wrangler*.toml`,
  * `apps/web/wrangler.jsonc`) describe the product: bindings, Durable Object
  * classes and migrations, and product flags. Everything that identifies one
- * deployment (Cloudflare account, domains, Hyperdrive and D1 ids, operator
+ * deployment (Cloudflare account, domains, Hyperdrive ids, operator
  * emails and Space ids, cookie and mail identity) lives in a profile under
  * `deploy/profiles/<name>.json`. `render` merges the two into the config that
  * `wrangler deploy --config` uses; nothing deploys from the committed config
@@ -30,7 +30,7 @@ const PROFILE_KEYS = new Set(["schemaVersion", "name", "cloudflare", "billing", 
 const CLOUDFLARE_KEYS = new Set(["accountId"]);
 const HUB_KEYS = new Set([
   "config", "workerName", "origin", "placementRegion", "workersDev", "previewUrls",
-  "omitBindings", "hyperdrive", "d1", "vars",
+  "omitBindings", "hyperdrive", "vars",
 ]);
 const WEB_KEYS = new Set([
   "config", "workerName", "origin", "workersDev", "previewUrls", "omitBindings",
@@ -137,15 +137,6 @@ export function resolveProfile(profile, env = process.env) {
   for (const key of Object.keys(hubVars)) {
     if (DERIVED_HUB_VARS.has(key)) fail(`hub.vars.${key} is derived from the origins; remove it`);
   }
-  const d1 = {};
-  for (const [binding, entry] of Object.entries(profile.hub.d1 ?? {})) {
-    assertKnownKeys(entry, new Set(["databaseId"]), `hub.d1.${binding}`);
-    const databaseId = resolveValue(entry.databaseId, `hub.d1.${binding}.databaseId`, env);
-    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(databaseId)) {
-      fail(`hub.d1.${binding}.databaseId must be one D1 UUID`);
-    }
-    d1[binding] = { databaseId };
-  }
   const placementRegion = profile.hub.placementRegion === undefined
     ? undefined
     : resolveValue(profile.hub.placementRegion, "hub.placementRegion", env);
@@ -176,7 +167,6 @@ export function resolveProfile(profile, env = process.env) {
       previewUrls: profile.hub.previewUrls,
       omitBindings: profile.hub.omitBindings ?? [],
       hyperdrive: resolveMap(profile.hub.hyperdrive, "hub.hyperdrive", env, hex32),
-      d1,
       vars: hubVars,
     },
     web: {
@@ -243,16 +233,6 @@ export function renderHubConfig(base, resolved) {
     unusedHyperdrive.delete(entry.binding);
   }
   if (unusedHyperdrive.size) fail(`hub.hyperdrive has unknown bindings ${[...unusedHyperdrive].join(", ")}`);
-
-  const unusedD1 = new Set(Object.keys(hub.d1));
-  for (const entry of rendered.d1_databases ?? []) {
-    const database = hub.d1[entry.binding];
-    if (!database) fail(`hub.d1.${entry.binding} is required`);
-    entry.database_id = database.databaseId;
-    if (entry.migrations_dir) entry.migrations_dir = resolve(REPO_ROOT, dirname(hub.config), entry.migrations_dir);
-    unusedD1.delete(entry.binding);
-  }
-  if (unusedD1.size) fail(`hub.d1 has unknown bindings ${[...unusedD1].join(", ")}`);
 
   rendered.vars = {
     ...config.vars,

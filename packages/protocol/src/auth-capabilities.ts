@@ -12,8 +12,6 @@ import type { AuthUser } from "./authority.js";
 export interface AuthCapabilities {
   /** Operator on the Hub platform-admin allowlist. */
   platformAdmin: boolean;
-  /** Signed-in member of the deployment-pinned Test access Space. */
-  testEnvironment?: boolean;
 }
 
 export interface MeResponse {

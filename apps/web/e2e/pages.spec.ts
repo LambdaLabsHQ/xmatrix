@@ -1646,6 +1646,36 @@ test("on a long page, who works out of view shows at its edges, and what an Agen
   await expect(browser.getByTestId("page-now").getByRole("button", { name: /^claude:2/u })).toHaveCount(0);
 });
 
+test("an Agent writing above what the reader sees waits under the page's controls, clear of the window's search", async ({ page: browser }) => {
+  await browser.setViewportSize({ width: 1100, height: 760 });
+  const { server, editor, push } = await openLongPage(browser, () => fixtureJson(browser, "page-agents",
+    /\/api\/xmatrix\/spaces\/[^/]+\/page-links\/agents$/u, {
+      pages: [{ pageId: "p-relay", agents: [{ instanceId: "i-claude", name: "claude:2", status: "busy",
+        conversationId: E2E_CHANNEL.id, activity: "editing", blockId: "status" }] }],
+    }));
+  const own = server.clientID;
+  server.clientID = AGENT_CLIENT;
+  editPageMarkdown(server, (markdown) => markdown.replace("In progress", "In progress, moving the relay"), "agent");
+  server.clientID = own;
+  push(awarenessFrom(server, AGENT_CLIENT, 1, { user: { name: "claude:2", color: "#7a5389", kind: "agent",
+    conversationId: E2E_CHANNEL.id }, activity: "editing", block: "status" }, "moving the relay"));
+  await expect(editor).toContainText("moving the relay");
+  const controls = browser.getByTestId("page-controls");
+  const band = (await controls.boundingBox())!;
+
+  // The reader scrolls past the Agent's line: the page moves under the band, the controls do not.
+  await browser.locator(".app-page-article").evaluate((article) => { article.scrollTop = 600; });
+  const above = browser.getByTestId("page-pens").getByRole("button", { name: "claude:2 is writing, above" });
+  await expect(above).toBeVisible();
+  expect(await controls.boundingBox()).toEqual(band);
+  // Its face waits at the top of the page, below the band and the window's search in it.
+  const face = (await above.boundingBox())!;
+  const search = (await browser.locator(".app-global-bar").getByRole("button", { name: "Search" }).boundingBox())!;
+  expect(face.y).toBeGreaterThanOrEqual(band.y + band.height);
+  expect(face.y).toBeGreaterThanOrEqual(search.y + search.height);
+  await browser.screenshot({ path: test.info().outputPath("pages-pen-above-band.png") });
+});
+
 test("typing fast at the top of a busy page while an Agent writes keeps every key and the Agent's words", async ({ page: browser }) => {
   // React #185 in production: on a slow device, every key and the page state derived from it (outline,
   // presence, anchor offsets) queued commit after commit until React gave up, and the editor then fell

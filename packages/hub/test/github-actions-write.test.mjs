@@ -5,11 +5,25 @@ import {
   executeAppConnectorProviderAction,
 } from "../src/app-connectors.ts";
 import { isGitHubConnectorCommand } from "../src/connectors/github-command.ts";
+import { githubRequiredCapabilities } from "../src/github-subscription-domain.ts";
 import {
   githubProviderManifest, stubGitHubInstallation, githubActionContext, githubAppEnv, githubConnection, jsonResponse,
 } from "./support/github-app.mjs";
 
 const GITHUB_APP_ENV = await githubAppEnv();
+
+test("code scanning subscriptions expose the live installation's read permission", async () => {
+  assert.deepEqual(githubRequiredCapabilities(["code-scanning"]), ["github.code_scanning.read"]);
+  for (const [permissions, allowed] of [[{ metadata: "read", security_events: "read" }, true], [{ metadata: "read" }, false]]) {
+    const github = stubGitHub(permissions);
+    try {
+      const result = await executeAppConnectorProviderAction(actionContext("subscribe",
+        "@github:subscribe:LambdaLabsHQ/xmatrix code-scanning", githubConnection({ capabilities: ["github.code_scanning.read"] })));
+      assert.equal(result.type, "github_subscribe_repository");
+      assert.equal(result.capabilities.includes("github.code_scanning.read"), allowed);
+    } finally { github.restore(); }
+  }
+});
 
 function connection(overrides = {}) {
   return githubConnection({

@@ -65,10 +65,6 @@ test("fails closed on missing or conflicting deployment identity", () => {
   assert.throws(() => resolveProfile(profile({ top: { extra: 1 } }), env), /unknown key profile.extra/u);
   assert.throws(() => resolveProfile(profile({ hub: { origin: "http://hub.acme.example" } }), env), /bare https origin/u);
   assert.throws(() => resolveProfile(profile({ hub: { vars: { APP_URL: "x" } } }), env), /derived from the origins/u);
-  assert.throws(
-    () => resolveProfile(profile({ hub: { d1: { AUTH_DB: { databaseId: "not-a-uuid" } } } }), env),
-    /one D1 UUID/u,
-  );
 
   const resolved = resolveProfile(profile(), env);
   assert.throws(() => renderHubConfig({ ...hubBase, account_id: "a" }, resolved), /must not set account_id/u);

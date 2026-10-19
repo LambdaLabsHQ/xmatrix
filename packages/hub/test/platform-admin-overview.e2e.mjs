@@ -330,7 +330,6 @@ function twoUserWorkerVars(adminUserId, memberUserId, adminSpaceId) {
       "outsider-token": { id: memberUserId, email: "outsider@example.com", name: "Outsider" },
     }),
     ...(adminSpaceId === null ? {} : { PLATFORM_ADMIN_SPACE_ID: adminSpaceId }),
-    ...(adminSpaceId === null ? {} : { TEST_ENVIRONMENT_ACCESS_SPACE_ID: adminSpaceId }),
   };
 }
 
@@ -357,14 +356,12 @@ test("membership of the pinned admin Space grants the platform overview", async 
 
     const adminMe = await json(await worker.fetch("/api/auth/me", { headers: adminAuth }));
     assert.equal(adminMe.capabilities.platformAdmin, true);
-    assert.equal(adminMe.capabilities.testEnvironment, true);
     const { overview } = await json(await worker.fetch("/api/admin/overview", { headers: adminAuth }));
     assert.ok(overview.totals.users >= 2, "both principals are counted");
 
     // Membership of some other Space is not membership of the admin Space.
     const outsiderMe = await json(await worker.fetch("/api/auth/me", { headers: outsiderAuth }));
     assert.equal(outsiderMe.capabilities.platformAdmin, false);
-    assert.equal(outsiderMe.capabilities.testEnvironment, false);
     assert.equal((await worker.fetch("/api/admin/overview", { headers: outsiderAuth })).status, 403);
   } finally {
     await worker.stop();
@@ -383,7 +380,6 @@ test("a pinned admin Space that does not exist grants nothing", async () => {
 
     const me = await json(await worker.fetch("/api/auth/me", { headers: adminAuth }));
     assert.equal(me.capabilities.platformAdmin, false);
-    assert.equal(me.capabilities.testEnvironment, false);
     assert.equal((await worker.fetch("/api/admin/overview", { headers: adminAuth })).status, 403);
   } finally {
     await worker.stop();

@@ -636,8 +636,8 @@ to the Space's GitHub App installation. Repository names are loaded only for the
 selected owner and only when the connector is enabled for the current channel.
 
 Repository subscriptions support `issues`, `pulls`, `comments`, `reviews`,
-`commits`, `checks`, `status`, and `releases`. The `all` shorthand expands to
-all eight features for both
+`commits`, `checks`, `status`, `releases`, and `code-scanning`. The `all` shorthand expands to
+all features for both
 `subscribe` and `unsubscribe`; use the individual names when only some event
 types are wanted.
 `comments` follows the selected source kinds: with `issues` it includes Issue
@@ -648,6 +648,21 @@ backward-compatible `issues comments` default. Repository subscriptions do not
 backfill existing items or commits; they deliver future matching webhook events.
 The `commits` feature summarizes each GitHub `push` delivery with its branch or
 tag, pusher, commit range, compare URL, and up to 8 commit SHA/message entries.
+
+`@github:subscribe:OWNER/REPO code-scanning` delivers signed GitHub
+`code_scanning_alert` webhooks (created, reopened, appeared in another branch,
+fixed, or closed by a user). The GitHub App must have **Code scanning alerts:
+read** (`security_events`) and subscribe to **Code scanning alert**; existing
+installations must accept the permission upgrade on GitHub. The subscription
+requires the installation's effective permission, not a retained connection
+capability. Alert messages contain only the alert reference and lifecycle action;
+the Agent fetches details through its current repository grant. Security alerts
+reach only Channels allowed to carry private content, including for public
+repositories. Delivery uses the existing idempotent append and wakes resting
+Instances; stopped Instances remain stopped. A Channel can therefore handle
+alerts as events without a cadence or polling Automation. Its linked Page holds
+the standing handling instructions and outstanding alert-to-PR work. Existing
+alerts need a one-time initial audit because subscriptions do not backfill.
 
 The product model follows a Slack-style feature subscription approach: users
 choose which channel features such as commits, issues, pulls, comments, reviews, checks,
