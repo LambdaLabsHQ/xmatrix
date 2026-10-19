@@ -12,14 +12,13 @@ public final class AppConfigurationTest {
   public void productionBridgeOriginsAreExactAndHttpsOnly() {
     Set<String> rules = AppConfiguration.trustedBridgeOriginRules(false);
 
-    assertEquals(Set.of("https://xmatrix.sh", "https://www.xmatrix.sh", "https://test.xmatrix.sh"), rules);
+    assertEquals(Set.of("https://xmatrix.sh", "https://www.xmatrix.sh"), rules);
     assertTrue(AppConfiguration.isTrustedBridgeOrigin("https", "xmatrix.sh", -1, false));
     assertTrue(AppConfiguration.isTrustedBridgeOrigin("https", "www.xmatrix.sh", 443, false));
-    assertTrue(AppConfiguration.isTrustedBridgeOrigin("https", "test.xmatrix.sh", 443, false));
+    assertFalse(AppConfiguration.isTrustedBridgeOrigin("https", "test.xmatrix.sh", 443, false));
     assertFalse(AppConfiguration.isTrustedBridgeOrigin("http", "xmatrix.sh", -1, false));
     assertFalse(AppConfiguration.isTrustedBridgeOrigin("https", "xmatrix.sh", 8443, false));
     assertFalse(AppConfiguration.isTrustedBridgeOrigin("https", "auth.xmatrix.sh", -1, false));
-    assertFalse(AppConfiguration.isTrustedBridgeOrigin("https", "evil.test.xmatrix.sh", -1, false));
   }
 
   @Test

@@ -11,7 +11,7 @@ import { cn } from "@/lib/utils";
 
 export function SetupCardShell({ children }: { children: React.ReactNode }) {
   return (
-    <div className="app-space-setup-frame mx-auto w-full max-w-2xl px-5 py-10">
+    <div className="app-space-setup-frame mx-auto w-full max-w-2xl px-5 py-10 md:pt-0">
       <section className="app-space-setup-card p-6 sm:p-7">{children}</section>
     </div>
   );

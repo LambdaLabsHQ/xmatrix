@@ -85,7 +85,6 @@ import {
   LogOut,
   MessageSquareText,
   MoreHorizontal,
-  MoveRight,
   Pencil,
   FileText,
   PlugZap,
@@ -95,8 +94,8 @@ import {
   Share2,
   Shield,
   Star,
+  Trash2,
   Users,
-  X,
 } from "lucide-react";
 import { SearchGlyph } from "@/components/ui/search-glyph";
 import { useConversationPages } from "@/components/pages/conversation-page-cards";
@@ -124,7 +123,6 @@ import {
 } from "@/lib/desktop/bridge";
 
 import { cn } from "@/lib/utils";
-import { GlassSelect } from "@/components/ui/glass-select";
 
 import type {
   ChannelMemberPresence,
@@ -964,37 +962,55 @@ export const DesktopUpdateRestartDialog = memo(function DesktopUpdateRestartDial
   );
 });
 
-export function ChannelActionsMenu({
+const channelTitleIconClassName = "flex size-7 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-50";
+
+/** The channel's own glyph: # when public, a lock when private. Whoever may
+ * change visibility clicks it to switch; everyone else reads it. */
+export function ChannelVisibilityGlyph({
   channel,
-  shareUrl,
-  moving,
   canManageVisibility,
   updatingVisibility,
-  onMove,
-  onDelete,
   onVisibilityChange,
 }: {
   channel: ChannelSnapshot;
-  shareUrl: string;
-  moving: boolean;
   canManageVisibility: boolean;
   updatingVisibility: boolean;
-  /** Moves the conversation to another Space. */
-  onMove: () => void;
-  onDelete?: () => void;
   onVisibilityChange: (mode: ChannelCreateMode) => void;
 }) {
-  const [open, setOpen] = useState(false);
-  const [copied, setCopied] = useState(false);
-  const [pos, setPos] = useState<{ right: number; top: number } | null>(null);
-  const buttonRef = useRef<HTMLButtonElement | null>(null);
-  const menuRef = useRef<HTMLDivElement | null>(null);
   const title = channelTitle(channel);
-  const busy = moving;
+  const isPublic = channel.mode === "open";
+  const Glyph = isPublic ? Hash : Lock;
+  const glyph = updatingVisibility
+    ? <AnimatedIcon icon={Loader2} className="size-5 animate-spin" />
+    : <Glyph className="size-5" />;
+  if (!canManageVisibility) {
+    return (
+      <span title={isPublic ? "Public" : "Private"} aria-label={`#${title} is ${isPublic ? "public" : "private"}`}
+        className="flex shrink-0 items-center text-muted-foreground">{glyph}</span>
+    );
+  }
+  const label = isPublic ? `Make #${title} private` : `Make #${title} public`;
+  return (
+    <button type="button" title={label} aria-label={label} disabled={updatingVisibility}
+      onClick={() => onVisibilityChange(isPublic ? "closed" : "open")}
+      className={cn(channelTitleIconClassName, "-ml-1")}>
+      {glyph}
+    </button>
+  );
+}
 
-  useEffect(() => {
-    setOpen(false);
-  }, [channel.id]);
+/** Copy link and delete, as icons right after the channel's name. */
+export function ChannelTitleActions({
+  channel,
+  shareUrl,
+  onDelete,
+}: {
+  channel: ChannelSnapshot;
+  shareUrl: string;
+  onDelete?: () => void;
+}) {
+  const [copied, setCopied] = useState(false);
+  const title = channelTitle(channel);
 
   useEffect(() => {
     if (!copied) return;
@@ -1002,267 +1018,31 @@ export function ChannelActionsMenu({
     return () => window.clearTimeout(timeout);
   }, [copied]);
 
-  useLayoutEffect(() => {
-    if (!open) return;
-    const rect = buttonRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    const menuHeight = canManageVisibility ? 292 : 196;
-    const below = rect.bottom + 8;
-    setPos({
-      right: Math.max(12, Math.min(window.innerWidth - 224 - 12, window.innerWidth - rect.right)),
-      top: below + menuHeight <= window.innerHeight
-        ? below
-        : Math.max(12, rect.top - menuHeight - 8),
-    });
-  }, [open, canManageVisibility]);
-
-  useEffect(() => {
-    if (!open) return;
-    const closeOnOutside = (event: PointerEvent) => {
-      const target = event.target instanceof Node ? event.target : null;
-      if (!target) return;
-      if (buttonRef.current?.contains(target) || menuRef.current?.contains(target)) return;
-      setOpen(false);
-    };
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setOpen(false);
-    };
-    window.addEventListener("pointerdown", closeOnOutside, true);
-    window.addEventListener("keydown", closeOnEscape);
-    return () => {
-      window.removeEventListener("pointerdown", closeOnOutside, true);
-      window.removeEventListener("keydown", closeOnEscape);
-    };
-  }, [open]);
-
   async function handleCopy() {
     try {
       await copyTextToClipboard(shareUrl);
       setCopied(true);
-      setOpen(false);
     } catch {
       /* clipboard unavailable; leave label unchanged */
     }
   }
 
-  function runAction(action: () => void) {
-    setOpen(false);
-    action();
-  }
-
-  function selectVisibility(mode: ChannelCreateMode) {
-    setOpen(false);
-    if (mode !== channel.mode) onVisibilityChange(mode);
-  }
-
-  const itemClassName = "flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-sm font-medium text-popover-foreground hover:bg-muted disabled:pointer-events-none disabled:opacity-50";
-
+  const copyLabel = copied ? "Copied link" : "Copy channel link";
   return (
     <>
-      <button
-        ref={buttonRef}
-        type="button"
-        title={`Actions for #${title}`}
-        aria-label={`Actions for #${title}`}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        onClick={() => setOpen((next) => !next)}
-        className="flex size-8 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
-      >
-        {updatingVisibility ? <AnimatedIcon icon={Loader2} className="size-5 animate-spin" /> : <MoreHorizontal className="size-5" />}
+      <button type="button" title={copyLabel} aria-label={copyLabel} aria-live="polite"
+        onClick={() => void handleCopy()} className={channelTitleIconClassName}>
+        {copied ? <Check className="size-4 text-primary" /> : <Share2 className="size-4" />}
       </button>
-      {open && typeof document !== "undefined" && pos &&
-        createPortal(
-          <div className="pointer-events-none fixed inset-0 z-[var(--z-popover)]">
-            <div
-              ref={menuRef}
-              role="menu"
-              aria-label={`Actions for #${title}`}
-              className="xmatrix-app pointer-events-auto fixed w-56 rounded-lg border border-border bg-popover p-1.5 text-popover-foreground shadow-xl"
-              style={{ right: pos.right, top: pos.top }}
-            >
-              <button
-                type="button"
-                role="menuitem"
-                disabled={busy}
-                onClick={() => runAction(onMove)}
-                className={itemClassName}
-              >
-                {moving ? <AnimatedIcon icon={Loader2} className="size-4 shrink-0 animate-spin" /> : <MoveRight className="size-4 shrink-0 text-muted-foreground" />}
-                <span>Move to another Space</span>
-              </button>
-              <button
-                type="button"
-                role="menuitem"
-                disabled={busy}
-                onClick={() => void handleCopy()}
-                className={itemClassName}
-              >
-                {copied ? <Check className="size-4 shrink-0 text-primary" /> : <Share2 className="size-4 shrink-0 text-muted-foreground" />}
-                <span>{copied ? "Copied link" : "Copy channel link"}</span>
-              </button>
-              {onDelete && <button type="button" role="menuitem" disabled={busy}
-                onClick={() => runAction(onDelete)} className={cn(itemClassName, "text-destructive")}
-              >Delete Channel…</button>}
-              <div className="my-1 border-t border-border" role="separator" />
-              <div className="px-2.5 pb-1 pt-0.5 text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
-                Visibility
-              </div>
-              {canManageVisibility ? (
-                <>
-                  <button
-                    type="button"
-                    role="menuitemradio"
-                    aria-checked={channel.mode === "open"}
-                    disabled={busy || updatingVisibility}
-                    onClick={() => selectVisibility("open")}
-                    className={cn(itemClassName, channel.mode === "open" && "bg-muted")}
-                  >
-                    {updatingVisibility && channel.mode === "open" ? (
-                      <AnimatedIcon icon={Loader2} className="size-4 shrink-0 animate-spin" />
-                    ) : (
-                      <Hash className="size-4 shrink-0 text-muted-foreground" />
-                    )}
-                    <span>Public</span>
-                    {channel.mode === "open" && <Check className="ml-auto size-4 text-primary" />}
-                  </button>
-                  <button
-                    type="button"
-                    role="menuitemradio"
-                    aria-checked={channel.mode === "closed"}
-                    disabled={busy || updatingVisibility}
-                    onClick={() => selectVisibility("closed")}
-                    className={cn(itemClassName, channel.mode === "closed" && "bg-muted")}
-                  >
-                    {updatingVisibility && channel.mode === "closed" ? (
-                      <AnimatedIcon icon={Loader2} className="size-4 shrink-0 animate-spin" />
-                    ) : (
-                      <Lock className="size-4 shrink-0 text-muted-foreground" />
-                    )}
-                    <span>Private</span>
-                    {channel.mode === "closed" && <Check className="ml-auto size-4 text-primary" />}
-                  </button>
-                </>
-              ) : (
-                <div className="flex items-center gap-2 px-2.5 py-2 text-sm font-medium text-popover-foreground">
-                  {channel.mode === "open" ? (
-                    <Hash className="size-4 shrink-0 text-muted-foreground" />
-                  ) : (
-                    <Lock className="size-4 shrink-0 text-muted-foreground" />
-                  )}
-                  <span>{channel.mode === "open" ? "Public" : "Private"}</span>
-                </div>
-              )}
-            </div>
-          </div>,
-          document.body
-        )}
-      {copied && typeof document !== "undefined" &&
-        createPortal(
-          <div
-            aria-live="polite"
-            className="xmatrix-app pointer-events-none fixed bottom-5 right-5 z-[var(--z-toast)] rounded-md border border-border bg-popover px-3 py-2 text-sm font-medium text-popover-foreground shadow-xl"
-          >
-            Copied link
-          </div>,
-          document.body
-        )}
+      {onDelete && (
+        <button type="button" title="Delete Channel…" aria-label={`Delete #${title}…`}
+          onClick={onDelete} className={cn(channelTitleIconClassName, "hover:text-destructive")}>
+          <Trash2 className="size-4" />
+        </button>
+      )}
     </>
   );
 }
-
-export const ChannelMoveDialog = memo(function ChannelMoveDialog({
-  open,
-  channel,
-  spaces,
-  targetSpaceId,
-  busy,
-  error,
-  onTargetSpaceChange,
-  onSubmit,
-  onCancel,
-}: {
-  open: boolean;
-  channel: ChannelSnapshot | null;
-  spaces: SerializedSpace[];
-  targetSpaceId: string;
-  busy: boolean;
-  error: string | null;
-  onTargetSpaceChange: (spaceId: string) => void;
-  onSubmit: () => void;
-  onCancel: () => void;
-}) {
-  useAndroidBackDismiss(open && Boolean(channel), onCancel, busy);
-
-  if (!open || !channel) return null;
-
-  return createPortal(
-    <div className="fixed inset-0 z-[var(--z-overlay)] flex items-center justify-center bg-background/55 p-4 backdrop-blur-sm">
-      <div className="w-full max-w-md rounded-lg border border-border bg-card p-4 shadow-xl">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <h2 className="truncate text-base font-bold">Move #{channelTitle(channel)}</h2>
-            <p className="mt-1 text-sm text-muted-foreground">Move this conversation to another workspace.</p>
-          </div>
-          <button
-            type="button"
-            title="Close"
-            onClick={onCancel}
-            disabled={busy}
-            className="flex size-8 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
-          >
-            <X className="size-4" />
-          </button>
-        </div>
-
-        <div className="mt-4 space-y-3">
-          <label className="block text-sm font-semibold">
-            <span className="mb-1 block">Workspace</span>
-            <GlassSelect
-              value={targetSpaceId}
-              onChange={onTargetSpaceChange}
-              disabled={busy}
-              aria-label="Workspace"
-              className="rounded px-2 font-normal"
-              options={spaces.map((space) => ({ value: space.id, label: space.name || "Workspace" }))}
-            />
-          </label>
-
-          <p className="rounded border border-border bg-muted/45 px-3 py-2 text-xs leading-relaxed text-muted-foreground">
-            A move creates a proposal. Source and destination admins must separately confirm outbound and inbound, even when one person holds both roles. Review access changes on the confirmation card.
-          </p>
-
-          {error && (
-            <p className="rounded border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-              {error}
-            </p>
-          )}
-        </div>
-
-        <div className="mt-4 flex justify-end gap-2">
-          <button
-            type="button"
-            onClick={onCancel}
-            disabled={busy}
-            className="h-9 rounded border border-border px-3 text-sm font-semibold text-muted-foreground hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            onClick={onSubmit}
-            disabled={busy || !targetSpaceId}
-            className="flex h-9 items-center gap-2 rounded bg-primary px-3 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50"
-          >
-            {busy ? <AnimatedIcon icon={Loader2} className="size-4 animate-spin" /> : <MoveRight className="size-4" />}
-            {targetSpaceId !== channel.spaceId ? "Create transfer proposal" : "Move"}
-          </button>
-        </div>
-      </div>
-    </div>,
-    document.body
-  );
-});
 
 export const ChannelHeader = memo(function ChannelHeader({
   channel: catalogChannel,
@@ -1270,11 +1050,9 @@ export const ChannelHeader = memo(function ChannelHeader({
   currentUserId,
   onRename,
   onVisibilityChange,
-  onMove,
   onDelete,
   renaming,
   updatingVisibility,
-  moving,
   onToggleMembers,
   onOpenSearch,
   actions,
@@ -1284,11 +1062,9 @@ export const ChannelHeader = memo(function ChannelHeader({
   currentUserId: string;
   onRename: (name: string) => void;
   onVisibilityChange: (mode: ChannelCreateMode) => void;
-  onMove: () => void;
   onDelete?: () => void;
   renaming: boolean;
   updatingVisibility: boolean;
-  moving: boolean;
   onToggleMembers: () => void;
   onOpenSearch: () => void;
   /** Controls of where the conversation is shown, such as closing it beside a page. */
@@ -1373,21 +1149,25 @@ export const ChannelHeader = memo(function ChannelHeader({
           </form>
         ) : (
           <div className="group flex max-w-full items-center gap-1 text-[18px] font-black leading-none md:text-[18px]">
-            <Hash className="size-5 shrink-0 text-muted-foreground" />
+            {channel ? (
+              <ChannelVisibilityGlyph
+                channel={channel}
+                canManageVisibility={canManageVisibility}
+                updatingVisibility={updatingVisibility}
+                onVisibilityChange={onVisibilityChange}
+              />
+            ) : (
+              <Hash className="size-5 shrink-0 text-muted-foreground" />
+            )}
             <span className="truncate">
               {channelHeading}
             </span>
             {channel && (
-              <div className="flex shrink-0 items-center gap-1 font-normal">
-                <ChannelActionsMenu
+              <div className="ml-2 flex shrink-0 items-center gap-1.5 font-normal">
+                <ChannelTitleActions
                   channel={channel}
                   shareUrl={absoluteChannelUrl(channel, spaces)}
-                  moving={moving}
-                  canManageVisibility={canManageVisibility}
-                  updatingVisibility={updatingVisibility}
-                  onMove={onMove}
                   onDelete={onDelete}
-                  onVisibilityChange={onVisibilityChange}
                 />
               </div>
             )}
@@ -1399,7 +1179,7 @@ export const ChannelHeader = memo(function ChannelHeader({
                   setDraftName(channelTitle(channel));
                   setEditingName(true);
                 }}
-                disabled={renaming || moving}
+                disabled={renaming}
                 className="flex size-7 shrink-0 items-center justify-center rounded text-muted-foreground opacity-100 hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-50 md:opacity-0 md:group-hover:opacity-100"
               >
                 {renaming ? <AnimatedIcon icon={Loader2} className="size-4 animate-spin" /> : <Pencil className="size-4" />}

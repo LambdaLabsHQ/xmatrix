@@ -117,6 +117,10 @@ export const USER_DETAIL = {
   }],
   connectors: [{
     spaceId: "space:lambda", providerId: "github", providerName: "GitHub", status: "configured",
+    usage: { requests: 24, requestsLast30d: 17,
+      byStatus: { queued: 1, completed: 19, failed: 2, blocked: 1, planned: 1 },
+      eventDeliveries: 48, eventDeliveriesLast30d: 31, subscribedChannels: 3, subscriptions: 4,
+      lastRequestAt: "2026-08-04T10:00:00.000Z", lastEventAt: "2026-08-04T11:00:00.000Z" },
     createdAt: "2026-07-03T00:00:00.000Z",
   }],
   runs: { total: 30, active: 1, last30d: 12, byStatus: { finished: 29, running: 1 } },

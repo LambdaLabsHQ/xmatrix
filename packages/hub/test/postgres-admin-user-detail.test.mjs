@@ -25,7 +25,7 @@ function shardResults(overrides = {}) {
     postgres_admin_user_spaces_v1: [],
     postgres_admin_user_agents_v1: [],
     postgres_admin_user_machines_v1: [],
-    postgres_admin_user_connectors_v1: [],
+    postgres_admin_user_connectors_v2: [],
     postgres_admin_user_runs_v1: [],
     postgres_admin_user_messages_v1: [{ total: 0, last_7d: 0, last_30d: 0, last_message_at: null }],
     postgres_admin_user_activity_v1: [],
@@ -65,7 +65,7 @@ test("admin user detail merges shards, reads Machines once, and fills a 30-day s
       plan: null, billing_status: null, seat_quantity: null,
       current_period_end: null, cancel_at_period_end: null, grace_until: null,
     }],
-    postgres_admin_user_connectors_v1: [{
+    postgres_admin_user_connectors_v2: [{
       space_id: "space-1", provider_id: "github", provider_name: "GitHub", status: "configured",
       created_at: "2026-09-02T00:00:00.000Z", last_checked_at: null,
     }],

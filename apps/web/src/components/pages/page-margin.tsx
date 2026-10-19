@@ -120,7 +120,8 @@ function ConversationCard({ conversation, focused, canResolve, onOpen, onResolve
         {lastMessage ? (
           <span className="mt-2 flex gap-2">
             <IdentityAvatar kind={lastMessage.from.kind === "user" ? "human" : lastMessage.from.kind}
-              label={lastMessage.from.label} initials={avatarInitials(lastMessage.from.label)} size="xs" shape="circle"
+              label={lastMessage.from.label} imageUrl={lastMessage.from.avatarUrl}
+              initials={avatarInitials(lastMessage.from.label)} size="xs" shape="circle"
               className="mt-px" />
             <span className="min-w-0 flex-1">
               <span className="flex items-baseline gap-1.5">

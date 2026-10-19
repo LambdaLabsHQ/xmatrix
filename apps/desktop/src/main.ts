@@ -240,8 +240,7 @@ function isTrustedAppUrl(value: string): boolean {
 function isTrustedWebOrigin(url: URL): boolean {
   return url.protocol === "https:" && (
     url.hostname === "xmatrix.sh" ||
-    url.hostname === "www.xmatrix.sh" ||
-    url.hostname === "test.xmatrix.sh"
+    url.hostname === "www.xmatrix.sh"
   );
 }
 
@@ -1656,26 +1655,6 @@ async function installCliFromDesktopSeed(): Promise<DesktopCliInstallResult> {
   return result;
 }
 
-function switchClientEnvironment(environment: unknown): Promise<{ environment: "production" | "test" }> {
-  if (environment !== "production" && environment !== "test") {
-    return Promise.reject(new Error("Unknown xMatrix environment."));
-  }
-  const executable = resolveCliExecutable();
-  if (!executable) {
-    return Promise.reject(new Error("Install or update the xMatrix CLI before switching environments."));
-  }
-  return new Promise((resolve, reject) => {
-    execFile(executable, ["environment", "use", environment], { timeout: 15_000 }, (error, stdout, stderr) => {
-      if (error) {
-        reject(new Error((stderr || stdout || error.message).trim()));
-        return;
-      }
-      void publishDefaultProfileChanged();
-      resolve({ environment });
-    });
-  });
-}
-
 function augmentPath(value?: string) {
   return augmentCliPath(value, {
     platform: process.platform,
@@ -2960,9 +2939,6 @@ function registerIpcHandlers() {
   ipcMain.handle("desktop:start-daemon", secureIpc(() => retryDaemonStart()));
   ipcMain.handle("desktop:stop-daemon", secureIpc(() => stopDaemon()));
   ipcMain.handle("desktop:restart-daemon", secureIpc(() => restartDaemon()));
-  ipcMain.handle("desktop:switch-environment", secureIpc((_event, environment: unknown) =>
-    switchClientEnvironment(environment)
-  ));
   ipcMain.handle("desktop:get-setup-status", secureIpc(() => getDesktopSetupStatus()));
   ipcMain.handle("desktop:save-setup-status", secureIpc((_event, status: DesktopSetupStatus) =>
     saveDesktopSetupStatus(status)

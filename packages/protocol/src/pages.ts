@@ -174,7 +174,8 @@ export interface PageConversation {
   headSequence: number;
   readSequence: number;
   lastMessage: {
-    from: { kind: "user" | "agent" | "app" | "system"; label: string };
+    /** `avatarUrl` is the one its message carried, so the preview shows the face the conversation does. */
+    from: { kind: "user" | "agent" | "app" | "system"; label: string; avatarUrl?: string };
     bodyPreview: string;
     sentAt: string;
   } | null;

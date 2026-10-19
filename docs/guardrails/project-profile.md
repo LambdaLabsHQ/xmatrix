@@ -13,13 +13,21 @@ billing is independent of compute.
 
 English is the default language for repository documentation, guardrails, release docs, and tool instructions. Chinese may be used for existing Chinese design notes or when maintainers explicitly ask for Chinese output.
 
-## Current behavior
+## Release notes
 
 Release notes are published with each successful train and readable at
-`/releases/<version>` through Desktop, Machine version and CLI update links.
+`/releases/<version>` through Desktop, Machine versions, CLI updates and downloads.
 The stable release Agent authors a versioned document in the verified beta's
 source; intent and train refuse missing or mismatched stable notes. Betas use
-their exact tag's generated change list. See [release notes](../release-updates.md#release-notes).
+their exact tag's generated change list. iOS stable submissions also populate
+App Store What's New. See [release notes](../release-updates.md#release-notes).
+
+## Current behavior
+
+GitHub repository subscriptions include `code-scanning`: signed alert lifecycle
+events reach a subscribed private-content Channel and wake its resting Agent,
+without periodic polling. The App's effective Code scanning alerts read grant is
+required; see [App connectors](../operations/app-connectors.md).
 
 Page discussions and conversations started from selected message passages use
 the ordinary first-message automatic summon and author choice window while
@@ -323,3 +331,10 @@ registration when available. Missing or erased ownership stays unattributed.
 Last access remains a separate session metric; daemon presence does not advance
 Last message. Existing message counts and daily user charts remain user-authored
 message counts.
+
+Platform admin user details show the Space connections each user added, with
+retained and 30-day execution counts, status totals, standard webhook/event
+Channel deliveries, last activity and subscriptions. Activity includes every
+caller in that Space; delivery counts are per Channel and do not claim raw
+webhook HTTP attempts. Reads remain audited and metadata only. Older Hubs leave
+usage unknown. See [platform admin](../operations/platform-admin-overview.md#connector-activity-in-user-details).

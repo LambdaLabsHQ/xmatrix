@@ -138,7 +138,6 @@ export const HUB_ENVIRONMENT = {
   XMATRIX_INVITE_EMAIL_FROM: { kind: "var", scope: "deployment", summary: "Sender address for invites; defaults to XMATRIX_EMAIL_FROM." },
   PLATFORM_ADMIN_EMAILS: { kind: "var", scope: "deployment", summary: "Operator emails allowed to read the platform overview." },
   PLATFORM_ADMIN_SPACE_ID: { kind: "var", scope: "deployment", summary: "Space whose members are platform admins. Optional." },
-  TEST_ENVIRONMENT_ACCESS_SPACE_ID: operator("var", "Space whose members may switch to the hosted Test deployment; leave unset."),
 
   // Authentication.
   BETTER_AUTH_SECRET: { kind: "secret", scope: "required", summary: "Signs sessions and tokens. Unset: the Hub cannot authenticate anyone." },
