@@ -15,11 +15,11 @@ import { ChevronLeft } from "lucide-react";
 import { AdminTable } from "./admin-table";
 import { AdminPaperAction } from "./admin-paper";
 import { PaidCallsTable, WebhookEventsTable } from "./platform-admin-billing";
-import { TimeCell, adminAge, adminPercent, adminStatusLine, adminSum, adminUtc } from "./platform-admin-cells";
+import { AdminDetailHeader, TimeCell, adminTimeColumn, adminAge, adminAutomationStats, adminPercent, adminStatusLine, adminSum, adminUtc } from "./platform-admin-cells";
 import { openAdminUser, useAdminSpaceDetail } from "./platform-admin-data";
 import { adminTime, formatAdminBytes, formatAdminCount } from "./platform-admin-overview";
 import { ToolDetailSection, ToolFact, ToolFacts } from "./tool-split";
-import { AdminDailyBars, AdminQueryView, AdminStatGrid } from "./workspace-platform-admin-view";
+import { AdminMessageBars, AdminQueryView, AdminStatGrid } from "./workspace-platform-admin-view";
 
 export function AdminSpaceDetailView({ token, spaceId, onBack }: { token?: string; spaceId: string; onBack: () => void }) {
   return (
@@ -41,22 +41,13 @@ function SpaceDetailBody({ detail }: { detail: AdminSpaceDetail }) {
   const person = (userId: string | undefined) => (userId && emails.get(userId)) || userId || "—";
   const agentShare = adminPercent(totals.agentMessages, totals.humanMessages + totals.agentMessages);
   const occurrences = adminSum(automations.occurrencesByStatus);
-  const failedOccurrences = automations.occurrencesByStatus.failed ?? 0;
   const failedRuns = runs.byStatus.failed ?? 0;
   return (
     <>
-      <header>
-        <h2 className="text-2xl font-semibold leading-tight [overflow-wrap:anywhere]">{space.name}</h2>
-        <p className="mt-1 text-sm text-muted-foreground [overflow-wrap:anywhere]">
+      <AdminDetailHeader title={space.name} truncated={detail.truncated}>
           Owner {space.ownerEmail || space.ownerUserId} · created {adminUtc(space.createdAt)}
           {space.lastMessageAt && ` · last message ${adminAge(space.lastMessageAt)}`}
-        </p>
-        {detail.truncated.length > 0 && (
-          <p className="mt-2 text-xs text-muted-foreground">
-            Lists cut at their bound: {detail.truncated.join(", ")}.
-          </p>
-        )}
-      </header>
+      </AdminDetailHeader>
 
       <ToolDetailSection title="Usage">
         <AdminStatGrid stats={[
@@ -76,11 +67,7 @@ function SpaceDetailBody({ detail }: { detail: AdminSpaceDetail }) {
       </ToolDetailSection>
 
       <ToolDetailSection title={`Messages per day, last ${detail.activity.length} days`}>
-        <AdminDailyBars label="This Space's daily messages" points={detail.activity.map((point) => ({
-          date: point.date,
-          messages: point.messages,
-          title: `${point.date}: ${point.messages} messages (${point.humanMessages} human, ${point.agentMessages} agent)`,
-        }))} />
+        <AdminMessageBars label="This Space's daily messages" activity={detail.activity} />
       </ToolDetailSection>
 
       <ToolDetailSection title="Billing">
@@ -136,8 +123,7 @@ function SpaceDetailBody({ detail }: { detail: AdminSpaceDetail }) {
               render: (agent) => <span className="block truncate text-xs text-muted-foreground">{person(agent.ownerUserId)}</span> },
             { key: "machine", mobile: false, label: "Machine", value: (agent) => agent.machineId,
               render: (agent) => <span className="block truncate font-mono text-xs">{agent.machineId}</span> },
-            { key: "updated", label: "Updated", numeric: true, value: (agent) => adminTime(agent.updatedAt),
-              render: (agent) => <TimeCell value={agent.updatedAt} /> },
+            adminTimeColumn("updated", "Updated", (agent: { updatedAt: string }) => agent.updatedAt),
           ]} />
       </ToolDetailSection>
 
@@ -163,11 +149,7 @@ function SpaceDetailBody({ detail }: { detail: AdminSpaceDetail }) {
 
       <ToolDetailSection title="Automations and Runs">
         <AdminStatGrid stats={[
-          { label: "Automations", value: formatAdminCount(automations.total),
-            hint: `${formatAdminCount(automations.enabled)} enabled` },
-          { label: "Last run errored", value: formatAdminCount(automations.withError) },
-          { label: "Occurrences, 30d", value: formatAdminCount(occurrences),
-            hint: occurrences > 0 ? `${adminPercent(failedOccurrences, occurrences)}% failed` : undefined },
+          ...adminAutomationStats(automations, 30),
           { label: "Automation runs", value: formatAdminCount(automations.runCount),
             hint: automations.lastRunAt ? `last ${adminAge(automations.lastRunAt)}` : undefined },
         ]} />

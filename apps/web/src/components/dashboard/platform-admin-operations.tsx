@@ -11,7 +11,7 @@ import type { AdminOperations, AdminOperationsHarness, AdminOperationsMachine } 
 
 import { noticeClass } from "@/components/ui/status-tone";
 import { AdminTable, type AdminColumn } from "./admin-table";
-import { TimeCell, adminAge, adminPercent, adminStatusLine, adminSum } from "./platform-admin-cells";
+import { TimeCell, adminAge, adminAutomationStats, adminPercent, adminStatusLine, adminSum } from "./platform-admin-cells";
 import { openAdminUser, useAdminOperations } from "./platform-admin-data";
 import { adminTime, formatAdminCount } from "./platform-admin-overview";
 import { ToolDetailSection } from "./tool-split";
@@ -64,7 +64,6 @@ function OperationsBody({ operations }: { operations: AdminOperations }) {
   const started = adminSum(runs.byStatus);
   const failedRuns = runs.byStatus.failed ?? 0;
   const occurrences = adminSum(automations.occurrencesByStatus);
-  const failedOccurrences = automations.occurrencesByStatus.failed ?? 0;
   const failedEvents = outbox.byStatus.failed ?? 0;
   const undelivered = (outbox.byStatus.pending ?? 0) + (outbox.byStatus.leased ?? 0);
   const stalled = outbox.oldestPendingAt !== undefined &&
@@ -124,11 +123,7 @@ function OperationsBody({ operations }: { operations: AdminOperations }) {
 
       <ToolDetailSection title="Automations">
         <AdminStatGrid stats={[
-          { label: "Automations", value: formatAdminCount(automations.total),
-            hint: `${formatAdminCount(automations.enabled)} enabled` },
-          { label: "Last run errored", value: formatAdminCount(automations.withError) },
-          { label: `Occurrences, ${operations.days}d`, value: formatAdminCount(occurrences),
-            hint: occurrences > 0 ? `${adminPercent(failedOccurrences, occurrences)}% failed` : undefined },
+          ...adminAutomationStats(automations, operations.days),
           { label: "Overdue", value: formatAdminCount(automations.overdue), hint: "Pending past their time" },
         ]} />
         {occurrences > 0 && (

@@ -19,7 +19,7 @@ import {
   adminUserLabel,
   formatAdminCount,
 } from "./platform-admin-overview";
-import { TimeCell, adminAge as age, adminUtc as utc } from "./platform-admin-cells";
+import { AdminDetailHeader, TimeCell, adminTimeColumn, adminAge as age, adminUtc as utc } from "./platform-admin-cells";
 import { ToolDetailSection, ToolFact, ToolFacts } from "./tool-split";
 import { AdminDailyBars, AdminQueryView, AdminStatGrid } from "./workspace-platform-admin-view";
 
@@ -129,17 +129,9 @@ function UserDetailBody({ detail }: { detail: AdminUserDetail }) {
   const spaceName = (spaceId: string) => spaceNames.get(spaceId) ?? spaceId;
   return (
     <>
-      <header>
-        <h2 className="text-2xl font-semibold leading-tight [overflow-wrap:anywhere]">{adminUserLabel(user)}</h2>
-        <p className="mt-1 text-sm text-muted-foreground [overflow-wrap:anywhere]">
+      <AdminDetailHeader title={adminUserLabel(user)} truncated={detail.truncated}>
           {[user.email, user.handle ? `@${user.handle}` : undefined].filter(Boolean).join(" · ")}
-        </p>
-        {detail.truncated.length > 0 && (
-          <p className="mt-2 text-xs text-muted-foreground">
-            Lists cut at their bound: {detail.truncated.join(", ")}.
-          </p>
-        )}
-      </header>
+      </AdminDetailHeader>
 
       <ToolDetailSection title="Account">
         <div className="app-admin-account">
@@ -210,8 +202,7 @@ function UserDetailBody({ detail }: { detail: AdminUserDetail }) {
             { key: "harness", label: "Runtime", value: (agent) => agent.harness, render: (agent) => agent.harness },
             { key: "space", label: "Space", value: (agent) => spaceName(agent.spaceId),
               render: (agent) => <span className="block truncate">{spaceName(agent.spaceId)}</span> },
-            { key: "updated", label: "Updated", numeric: true, value: (agent) => adminTime(agent.updatedAt),
-              render: (agent) => <TimeCell value={agent.updatedAt} /> },
+            adminTimeColumn("updated", "Updated", (agent: { updatedAt: string }) => agent.updatedAt),
           ]} />
       </ToolDetailSection>
 
