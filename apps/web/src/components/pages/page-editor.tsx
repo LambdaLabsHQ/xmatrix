@@ -5,14 +5,15 @@ import {
   markdownToPageDoc, pageDocBlockAt, pageDocBlocks, pageDocToMarkdown, pageSchema, pageSeenDoc, type PageDocBlock,
 } from "@xmatrix/protocol/page-document";
 import {
-  BetweenHorizontalEnd, BetweenVerticalEnd, Code2, Columns3, FileCode2, Flag, Rows3, Trash2, Heading1, Heading2, Heading3, Link2,
-  List, ListChecks, ListOrdered, MessageSquarePlus, Minus, Pilcrow, Quote, Sparkles, Table, Users,
+  BetweenHorizontalEnd, BetweenVerticalEnd, Code2, Columns3, FileCode2, Rows3, Trash2, Heading1, Heading2, Heading3, Link2,
+  List, ListChecks, ListOrdered, MessageSquarePlus, Minus, Pilcrow, Quote, Table,
 } from "lucide-react";
 import type { Node as DocNode } from "prosemirror-model";
 import { EditorState, Selection, type Command } from "prosemirror-state";
 import { EditorView } from "prosemirror-view";
 import { yCursorPluginKey, ySyncPluginKey } from "y-prosemirror";
 import { gitHubFileReferenceFrom, gitHubFileReferenceHref, type SerializedAutomation } from "@xmatrix/protocol";
+import { PaperPopover } from "@/components/ui/material-surfaces";
 import { sameValue } from "@/lib/same-value";
 import type { PageLiveSession } from "@/lib/pages/page-client";
 import { automationsKey } from "./page-automation-chips";
@@ -44,13 +45,6 @@ export interface PageReading {
 
 export type { CursorPresence, Discussion, HeadingActions, SectionNote };
 
-/** Who last changed a section and when, as Google Docs' Show editors tells it for a selection. */
-export interface SectionEditors {
-  people: Array<{ name: string; color: string }>;
-  when: string;
-  conversation: { id: string; name: string } | null;
-}
-
 /**
  * The page, edited as a document (docs/design/pages-live-document.md §4):
  * markdown is typed, and the caret's line shows its markers. People and
@@ -58,20 +52,14 @@ export interface SectionEditors {
  * markdown for Agents, revisions and git.
  */
 
-/** What a section offers from the selection menu; the page view owns the actions. */
+/**
+ * What a selected passage offers; the page view owns the action. Only Discuss: what acts on the whole
+ * section (copying its link, who changed it) is the heading's, and asking an Agent is mentioning it in
+ * the discussion.
+ */
 export interface PageSectionActions {
-  /**
-   * A conversation about the section; from a selection, anchored to that text.
-   * Asking AI is the same discussion, its composer already addressed to xMatrix,
-   * which picks the Agent: the question, and any change asked for, is written there.
-   */
-  discuss?: (blockId: string, anchor?: { quote: string; from: unknown; to: unknown }, options?: { askAi?: boolean }) => void;
-  copyLink?: (blockId: string) => void;
-  claim?: (blockId: string) => void;
-  /** Who last changed the section the selection is in; null when it is not in recent history. */
-  editors?: (blockId: string) => SectionEditors | null;
-  /** Opens the page's History, where each change is shown in its author's colour. */
-  history?: () => void;
+  /** A conversation about the section; from a selection, anchored to that text. */
+  discuss?: (blockId: string, anchor?: { quote: string; from: unknown; to: unknown }) => void;
 }
 
 interface Toolbar {
@@ -146,7 +134,7 @@ function ToolButton({ label, active = false, disabled = false, onRun, children }
       // Keep the editor's selection: the button acts on it.
       onMouseDown={(event) => event.preventDefault()} onClick={onRun}
       className={`flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors
-        hover:bg-accent hover:text-foreground disabled:opacity-40 [&_svg]:size-4 ${active ? "bg-accent text-foreground" : ""}`}>
+        hover:text-foreground disabled:opacity-40 [&_svg]:size-4 ${active ? "text-foreground" : ""}`}>
       {children}
     </button>
   );
@@ -291,7 +279,6 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
   // A GitHub file link being pasted to embed, and why the last one was not a file.
   const [fileDraft, setFileDraft] = useState<string | null>(null);
   const [fileDraftError, setFileDraftError] = useState(false);
-  const [editorsShown, setEditorsShown] = useState<{ blockId: string; left: number; top: number } | null>(null);
   const menu = useRef({ slash: null as SlashState | null, index: 0 });
 
   const run = useCallback((command: Command) => {
@@ -559,7 +546,7 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
     return { left: at.left - box.left, top: at.top - box.top, bottom: at.bottom - box.top };
   };
   const section = current ? pageDocBlockAt(current.state.doc, current.state.selection.from) : "";
-  const selectionActions = Boolean(actions?.discuss || (actions?.claim && canEdit) || actions?.copyLink);
+  const selectionActions = Boolean(actions?.discuss);
   const selectionMenu = toolbar && !toolbar.empty && toolbar.focused && current && toolbar.kind !== "code" && selectionActions
     ? place(current.state.selection.from) : null;
   const linkAtPos = linkDraft !== null && current ? place(current.state.selection.from) : null;
@@ -570,25 +557,23 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
 
   return (
     <div ref={frame} className="relative" data-testid="page-editor">
-      {/* Surfaces take their material from the theme, which also sets their position;
-          the wrappers place them. */}
+      {/* Surfaces are slips of the page's paper (PaperPopover); the wrappers place them. */}
       {canEdit && toolbar?.inTable && (
         <div className="sticky top-0 z-10 mb-2 w-fit">
-        <div role="toolbar" aria-label="Table"
-          className="flex items-center gap-0.5 rounded-lg border border-border bg-popover px-1.5 py-1"
+        <PaperPopover role="toolbar" aria-label="Table" className="flex items-center gap-0.5 px-1.5 py-1"
           data-testid="page-table-tools">
           <ToolButton label="Add a row below" onRun={() => run(addRowAfter)}><BetweenHorizontalEnd /></ToolButton>
           <ToolButton label="Add a column to the right" onRun={() => run(addColumnAfter)}><BetweenVerticalEnd /></ToolButton>
           <ToolButton label="Delete this row" onRun={() => run(deleteRow)}><Rows3 /></ToolButton>
           <ToolButton label="Delete this column" onRun={() => run(deleteColumn)}><Columns3 /></ToolButton>
           <ToolButton label="Delete the table" onRun={() => run(deleteTable)}><Trash2 /></ToolButton>
-        </div>
+        </PaperPopover>
         </div>
       )}
       {linkDraft !== null && (
         <div className={linkAtPos ? "absolute z-30" : "mb-2"}
           style={linkAtPos ? { left: Math.max(0, linkAtPos.left - 8), top: linkAtPos.top - 6, transform: "translateY(-100%)" } : undefined}>
-        <form className="flex items-center gap-2 rounded-lg border border-border bg-popover p-2"
+        <PaperPopover as="form" className="flex items-center gap-2 p-2"
           onSubmit={(event) => { event.preventDefault(); run(setLink(linkDraft)); setLinkDraft(null); }}>
           <Link2 className="size-4 shrink-0 text-muted-foreground" />
           <input autoFocus value={linkDraft} onChange={(event) => setLinkDraft(event.target.value)} placeholder="Paste a link"
@@ -599,13 +584,13 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
             <button type="button" className="text-sm text-muted-foreground"
               onClick={() => { run(setLink("")); setLinkDraft(null); }}>Remove</button>
           )}
-        </form>
+        </PaperPopover>
         </div>
       )}
       {fileDraft !== null && (
         <div className={fileAtPos ? "absolute z-30" : "mb-2"}
           style={fileAtPos ? { left: Math.max(0, fileAtPos.left - 8), top: fileAtPos.top - 6, transform: "translateY(-100%)" } : undefined}>
-        <form className="flex w-[min(32rem,80vw)] flex-col gap-1 rounded-lg border border-border bg-popover p-2"
+        <PaperPopover as="form" className="flex w-[min(32rem,80vw)] flex-col gap-1 p-2"
           data-testid="page-embed-github-file"
           onSubmit={(event) => {
             event.preventDefault();
@@ -625,7 +610,7 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
           {fileDraftError && (
             <p className="text-xs text-muted-foreground">Paste a file link, like https://github.com/owner/repo/blob/main/README.md</p>
           )}
-        </form>
+        </PaperPopover>
         </div>
       )}
       {mediaFailure !== null && (
@@ -640,111 +625,37 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
       {selectionMenu && (
         <div className="absolute z-20 -translate-y-full"
           style={{ left: Math.max(0, selectionMenu.left - 8), top: selectionMenu.top - 6 }}>
-        <div role="toolbar" aria-label="Selection" data-testid="page-selection-menu"
-          className="flex items-center gap-0.5 rounded-lg border border-border bg-popover p-1 text-popover-foreground">
+        <PaperPopover role="toolbar" aria-label="Selection" data-testid="page-selection-menu"
+          className="flex items-center p-1">
           {actions?.discuss && (
             <button type="button" onMouseDown={(event) => event.preventDefault()}
               onClick={() => actions.discuss!(section, current ? selectionAnchor(current.state, session.fragment) ?? undefined
                 : undefined)}
-              className="flex h-8 items-center gap-1.5 rounded-md px-2 text-sm hover:bg-accent [&_svg]:size-4">
+              className="flex h-8 items-center gap-1.5 rounded-md px-2 text-sm [&_svg]:size-4">
               <MessageSquarePlus /> Discuss
             </button>
           )}
-          {actions?.discuss && (
-            <button type="button" onMouseDown={(event) => event.preventDefault()}
-              onClick={() => {
-                const anchor = current ? selectionAnchor(current.state, session.fragment) : null;
-                if (anchor) actions.discuss!(section, anchor, { askAi: true });
-              }}
-              className="flex h-8 items-center gap-1.5 rounded-md px-2 text-sm hover:bg-accent [&_svg]:size-4">
-              <Sparkles /> Ask AI
-            </button>
-          )}
-          {actions?.claim && canEdit && (
-            <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => actions.claim!(section)}
-              className="flex h-8 items-center gap-1.5 rounded-md px-2 text-sm hover:bg-accent [&_svg]:size-4">
-              <Flag /> Claim
-            </button>
-          )}
-          {actions?.editors && (
-            <ToolButton label="Show editors" onRun={() => setEditorsShown({ blockId: section, left: selectionMenu.left,
-              top: selectionMenu.top })}><Users /></ToolButton>
-          )}
-          {actions?.copyLink && (
-            <ToolButton label="Copy a link to this section" onRun={() => actions.copyLink!(section)}><Link2 /></ToolButton>
-          )}
+        </PaperPopover>
         </div>
-        </div>
-      )}
-      {editorsShown && actions?.editors && (
-        <EditorsPopover at={editorsShown} editors={actions.editors(editorsShown.blockId)}
-          onOpenConversation={(conversationId) => { setEditorsShown(null); openConversation.current?.(conversationId); }}
-          onHistory={actions.history ? () => { setEditorsShown(null); actions.history!(); } : undefined}
-          onClose={() => setEditorsShown(null)} />
       )}
       {slash && slashAt && (
         <div className="absolute z-20 w-64" style={{ left: slashAt.left, top: slashAt.bottom + 4 }}>
-        <div role="listbox" aria-label="Insert" data-testid="page-insert-menu"
-          className="max-h-80 overflow-y-auto rounded-lg border border-border bg-popover p-1 text-popover-foreground">
+        <PaperPopover role="listbox" aria-label="Insert" data-testid="page-insert-menu"
+          className="max-h-80 overflow-y-auto p-1">
           {slashItems.map((item, index) => (
             <button key={item.label} type="button" role="option" aria-selected={index === slashIndex}
               onMouseDown={(event) => event.preventDefault()} onClick={() => applyInsert(item)}
               onMouseEnter={() => { menu.current.index = index; setSlashIndex(index); }}
               className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm [&_svg]:size-4
-                [&_svg]:text-muted-foreground ${index === slashIndex ? "bg-accent" : ""}`}>
+                [&_svg]:text-muted-foreground`}>
               {item.icon}
               <span className="flex-1">{item.label}</span>
               <span className="text-xs text-muted-foreground">{item.hint}</span>
             </button>
           ))}
-        </div>
+        </PaperPopover>
         </div>
       )}
-    </div>
-  );
-}
-
-/** Who changed the selected passage's section and when, with its conversation and History a click away. */
-function EditorsPopover({ at, editors, onOpenConversation, onHistory, onClose }: {
-  at: { left: number; top: number };
-  editors: SectionEditors | null;
-  onOpenConversation: (conversationId: string) => void;
-  onHistory?: () => void;
-  onClose: () => void;
-}) {
-  useEffect(() => {
-    const close = (event: KeyboardEvent) => { if (event.key === "Escape") onClose(); };
-    window.addEventListener("keydown", close);
-    return () => window.removeEventListener("keydown", close);
-  }, [onClose]);
-  return (
-    <div className="absolute z-30 w-72 -translate-y-full" style={{ left: Math.max(0, at.left - 8), top: at.top - 6 }}
-      onMouseDown={(event) => event.preventDefault()}>
-      <div role="dialog" aria-label="Editors" data-testid="page-editors"
-        className="space-y-1.5 rounded-lg border border-border bg-popover p-2.5 text-sm text-popover-foreground">
-        {editors ? (
-          <>
-            {editors.people.map((person) => (
-              <div key={person.name} className="flex items-center gap-2">
-                <span className="size-2 shrink-0 rounded-full" style={{ backgroundColor: person.color }} />
-                <span className="truncate font-medium">{person.name}</span>
-              </div>
-            ))}
-            <div className="text-xs text-muted-foreground">
-              {editors.when}
-              {editors.conversation && (
-                <> · <button type="button" className="hover:text-foreground hover:underline"
-                  onClick={() => onOpenConversation(editors.conversation!.id)}>{editors.conversation.name}</button></>
-              )}
-            </div>
-          </>
-        ) : <div className="text-xs text-muted-foreground">No recent changes here.</div>}
-        <div className="flex justify-between gap-2 pt-1 text-xs">
-          {onHistory ? <button type="button" className="font-semibold hover:underline" onClick={onHistory}>
-            See version history</button> : <span />}
-          <button type="button" className="text-muted-foreground hover:underline" onClick={onClose}>Close</button>
-        </div>
-      </div>
     </div>
   );
 }
