@@ -7,7 +7,7 @@ import { createAuthorityDatabase, PostgresSpaceControlRepository, PostgresPageRe
 import { requireChannelCapability } from "../../db/src/channel-capability-policy.ts";
 import { signAgentRunToken } from "../src/auth.ts";
 import { registerChannelDeletionRoutes } from "../src/index-routes-channel-deletion.ts";
-import { advanceChannelPurge } from "../src/channel-deletion-maintenance.ts";
+import { advanceChannelPurge, maintainChannelDeletions } from "../src/channel-deletion-maintenance.ts";
 
 // This is the owning HTTP/SQL boundary: confirmation, revocation, exact cleanup
 // scope and interrupted storage work cannot be proved by a mocked repository.
@@ -104,21 +104,28 @@ integration("confirmed Channel deletion revokes access, resumes bounded erasure 
     const bucket = { delete: async keys => { if (fail) throw new Error("Storage interrupted"); deleted.push(...keys); } };
     const target = { spaceId: "space", channelId: "doomed", shardId: "shard-0", placementEpoch: 1 };
     await assert.rejects(advanceChannelPurge(f.session, bucket, target), /Storage interrupted/);
-    assert.equal((await f.run("SELECT object_cursor FROM data.channel_deletions"))[0].object_cursor, "");
+    assert.equal((await f.run("SELECT object_cursor FROM data.channel_deletions WHERE channel_id='doomed'"))[0].object_cursor, "");
     assert.equal((await f.run("SELECT count(*)::int AS n FROM data.messages"))[0].n, 2503);
+    await repo.createChannel({ requestId: randomUUID(), commandId: randomUUID(), channelId: "parallel", spaceId: "other-space",
+      name: "parallel", mode: "open", principal: { kind: "user", id: "owner" } });
+    await repo.deleteChannel({ requestId: randomUUID(), spaceId: "other-space", channelId: "parallel", actorUserId: "owner",
+      name: "parallel", at: new Date().toISOString() });
+    await assert.rejects(maintainChannelDeletions({ ...env, RELAY_PAYLOAD_BUCKET: bucket }), /requires retry/);
+    assert.equal((await f.run("SELECT state FROM data.channel_deletions WHERE channel_id='parallel'"))[0].state, "completed",
+      "one failing storage job cannot prevent another Channel's erasure");
     fail = false;
     await advanceChannelPurge(f.session, bucket, target);
     assert.deepEqual(deleted, [privateKey], "neither shared bytes nor a foreign scoped pointer can be deleted");
-    let previous = (await f.run("SELECT purged_rows FROM data.channel_deletions"))[0].purged_rows;
+    let previous = (await f.run("SELECT purged_rows FROM data.channel_deletions WHERE channel_id='doomed'"))[0].purged_rows;
     assert.ok(Number(previous) <= 2000);
     for (let attempt = 0; attempt < 8; attempt++) {
       await advanceChannelPurge(f.session, bucket, target);
-      const [job] = await f.run("SELECT state,purged_rows FROM data.channel_deletions");
+      const [job] = await f.run("SELECT state,purged_rows FROM data.channel_deletions WHERE channel_id='doomed'");
       assert.ok(Number(job.purged_rows) - Number(previous) <= 2000);
       previous = job.purged_rows;
       if (job.state === "completed") break;
     }
-    assert.equal((await f.run("SELECT state FROM data.channel_deletions"))[0].state, "completed");
+    assert.equal((await f.run("SELECT state FROM data.channel_deletions WHERE channel_id='doomed'"))[0].state, "completed");
     assert.deepEqual(await f.run("SELECT channel_id,legacy_body FROM data.messages ORDER BY channel_id"), [
       { channel_id: "foreign", legacy_body: "body for foreign" }, { channel_id: "kept", legacy_body: "body for kept" },
     ]);

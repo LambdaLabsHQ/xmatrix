@@ -7,6 +7,7 @@ import type { Env } from "./types";
 export async function maintainChannelDeletions(env: Env): Promise<void> {
   if (!env.RELAY_PAYLOAD_BUCKET) throw new Error("Channel purge storage is unavailable");
   const fleet = createPostgresAuthorityFleet(env, { applicationName: "xmatrix-channel-purge", ...POSTGRES_AUTHORITY_TIMEOUTS });
+  const errors: unknown[] = [];
   for (const shard of fleet.physicalShards) {
     const session = shard.database.openSession();
     try {
@@ -16,10 +17,15 @@ export async function maintainChannelDeletions(env: Env): Promise<void> {
             JOIN control.space_placement p ON p.space_id=d.space_id
             WHERE d.state='purging' AND p.state='active' AND p.target_shard_id IS NULL AND p.shard_id=$1
             ORDER BY d.updated_at,d.channel_id LIMIT 2`, values: [shard.shardId], maxRows: 2 }));
-      for (const job of jobs) await advanceChannelPurge(session, env.RELAY_PAYLOAD_BUCKET,
-        { spaceId: job.space_id, channelId: job.channel_id, shardId: shard.shardId, placementEpoch: Number(job.placement_epoch) });
+      for (const job of jobs) {
+        try { await advanceChannelPurge(session, env.RELAY_PAYLOAD_BUCKET,
+          { spaceId: job.space_id, channelId: job.channel_id, shardId: shard.shardId, placementEpoch: Number(job.placement_epoch) }); }
+        catch (error) { errors.push(error); }
+      }
+    } catch (error) { errors.push(error);
     } finally { await session.close(); }
   }
+  if (errors.length) throw new AggregateError(errors, "Channel deletion maintenance requires retry");
 }
 
 export async function advanceChannelPurge(database: AuthorityDatabase, bucket: Pick<R2Bucket, "delete">, input: {
