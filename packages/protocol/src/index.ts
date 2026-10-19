@@ -107,6 +107,18 @@ export {
   ADMIN_USER_DETAIL_MAX_ROWS, ADMIN_USER_DETAIL_WEB_ROUTE, adminUserDetailHubRoute,
   adminUserDetailWebRoute,
 } from "./admin-overview.js";
+export {
+  ADMIN_OPERATIONS_DAYS, ADMIN_OPERATIONS_HUB_ROUTE, ADMIN_OPERATIONS_MAX_ROWS,
+  ADMIN_OPERATIONS_WEB_ROUTE, ADMIN_SPACE_DETAIL_DAYS, ADMIN_SPACE_DETAIL_HUB_ROUTE,
+  ADMIN_SPACE_DETAIL_MAX_ROWS, ADMIN_SPACE_DETAIL_WEB_ROUTE, adminSpaceDetailHubRoute,
+  adminSpaceDetailWebRoute,
+} from "./admin-operations.js";
+export type {
+  AdminBillingWebhookEvent, AdminOperations, AdminOperationsHarness, AdminOperationsMachine,
+  AdminOperationsRunDay, AdminOperationsSubscription, AdminPaidCallKind, AdminSpaceAgent,
+  AdminSpaceAutomationSummary, AdminSpaceBillingDetail, AdminSpaceConnector, AdminSpaceDetail,
+  AdminSpaceMember,
+} from "./admin-operations.js";
 export type {
   AdminActivityPoint, AdminPlatformOverview, AdminPlatformTotals, AdminSpaceSummary,
   AdminStorageCategory, AdminUserAccessSummary, AdminUserSummary, AdminAuditAction,
