@@ -14,15 +14,15 @@ async function roadmap(worker, pages, auth) {
   return { page, claims: `${pages}/${encodeURIComponent(page.pageId)}/claims` };
 }
 
-// Claims end to end: a launched Agent Run claims a block as itself, the block
-// is busy for others until an owner opens it for competition, and the Run
-// releases its claim when done.
-test("a launched Agent Run claims a block, holds it against others and releases it", async () => {
+// Claims end to end: a launched Agent Run claims a block as itself; a claim
+// locks nothing, so a second one on the block is taken too and is told who is
+// already there; the Run releases its claim when done.
+test("a launched Agent Run claims a block, a second claim is taken beside it, and the Run releases its own", async () => {
   const userId = `page-claims-${randomUUID()}`;
   await withPageAgentRun({ id: userId, email: "page-claims@example.com", name: "Page Claims" },
     { slug: "claims", displayName: "claimer", mention: "@codex take the search section" },
     async ({ worker, auth, asRun, pages, channel }) => {
-    const { page, claims } = await roadmap(worker, pages, auth);
+    const { claims } = await roadmap(worker, pages, auth);
     const claim = (headers, body) => worker.fetch(claims, { method: "POST", headers, body: JSON.stringify(body) });
 
     const taken = await claim(asRun, { blockId: "search", minutes: 30 });
@@ -32,17 +32,12 @@ test("a launched Agent Run claims a block, holds it against others and releases 
     assert.equal(held.ownerUserId, userId, "the Agent's claim counts against its owner");
     assert.equal(held.conversationId, channel.id, "the claim points at the conversation doing the work");
 
-    const busy = await claim(auth, { blockId: "search" });
-    assert.equal(busy.status, 409);
-    assert.equal((await busy.json()).code, "page_block_claimed");
+    const beside = await claim(auth, { blockId: "search" });
+    assert.equal(beside.status, 200, await beside.clone().text());
+    const second = await beside.json();
+    assert.deepEqual(second.others.map((c) => c.claimId), [held.claimId], "it is told who is already there");
     const listed = await json(await worker.fetch(claims, { headers: auth }));
-    assert.deepEqual(listed.claims.map((c) => c.claimId), [held.claimId]);
-    assert.deepEqual(listed.competitiveBlocks, []);
-
-    const opened = await worker.fetch(`${pages}/${encodeURIComponent(page.pageId)}/competition`, {
-      method: "PUT", headers: auth, body: JSON.stringify({ blockId: "search", open: true }) });
-    assert.equal(opened.status, 200, await opened.clone().text());
-    assert.equal((await claim(auth, { blockId: "search" })).status, 200, "an open block takes a second claim");
+    assert.deepEqual(listed.claims.map((c) => c.claimId).sort(), [held.claimId, second.claim.claimId].sort());
 
     const released = await worker.fetch(`${claims}/${encodeURIComponent(held.claimId)}`, { method: "DELETE", headers: asRun });
     assert.deepEqual(await json(released), { released: true });

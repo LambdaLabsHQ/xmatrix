@@ -523,7 +523,7 @@ integration("public pages: an owner publishes a page every member reads, and any
   }
 });
 
-integration("claims: one holder per block, renewed by its holder, open for competition on an owner's word", async () => {
+integration("claims: they lock nothing, each told of the others, renewed by their holder", async () => {
   const { client, ids, pages, owner, member, viewer, agent } = await pageTest("claims");
   try {
     const r = () => crypto.randomUUID();
@@ -536,8 +536,8 @@ integration("claims: one holder per block, renewed by its holder, open for compe
     const first = (await claim(agent, { minutes: 30 })).claim;
     assert.deepEqual(first.holder, { kind: "agent", id: ids.instance, label: "claude:1" });
     assert.equal(first.ownerUserId, ids.member, "an Agent's claim counts against its owner");
-    await assert.rejects(claim(owner), (error) => error.code === "page_block_claimed"
-      && error.message === "claude:1 is on this");
+    const beside = await claim(owner);
+    assert.deepEqual(beside.others.map((c) => c.claimId), [first.claimId], "a second claim is taken, told who is there");
     await assert.rejects(claim(viewer), code("page_edit_forbidden"));
     await assert.rejects(claim(agent, { minutes: 1 }), code("invalid_request"));
     assert.equal((await claim(owner, { blockId: "" })).claim.blockId, "", "the whole page is its own block");
@@ -550,6 +550,7 @@ integration("claims: one holder per block, renewed by its holder, open for compe
       code("page_competition_admin_only"));
     await pages.setCompetition({ requestId: r(), ...base, principal: owner, blockId: "search", open: true });
     const rival = (await claim(owner)).claim;
+    assert.equal(rival.claimId, beside.claim.claimId, "its holder renews it");
     assert.deepEqual((await list()).competitiveBlocks, ["search"]);
     assert.deepEqual((await list()).claims.map((c) => c.claimId).sort(),
       [first.claimId, rival.claimId, (await list()).claims.find((c) => c.blockId === "").claimId].sort());
@@ -699,9 +700,10 @@ integration("an Automation occurrence's claim passes to the Run in its conversat
 
     const held = (await opened("search")).claim;
     assert.deepEqual(held.holder, { kind: "user", id: ids.owner, label: "Daily audit" });
-    await assert.rejects(pages.claim(call({ principal: t.agent, blockId: "search", conversationId: ids.closed })),
-      (error) => error.code === "page_block_claimed" && error.message === "Daily audit is on this",
-      "a Run elsewhere stands down for it");
+    const elsewhere = await pages.claim(call({ principal: t.agent, blockId: "search", conversationId: ids.closed }));
+    assert.deepEqual(elsewhere.others.map((c) => c.holder.label), ["Daily audit"],
+      "a Run elsewhere is not refused, and is told the occurrence is there");
+    await pages.releaseClaim(call({ principal: t.agent, claimId: elsewhere.claim.claimId }));
     const taken = (await pages.claim(call({ principal: t.agent, blockId: "search", conversationId: ids.open }))).claim;
     assert.equal(taken.claimId, held.claimId, "the Run in its conversation takes the same claim over");
     assert.deepEqual(taken.holder, { kind: "agent", id: ids.instance, label: "claude:1" });

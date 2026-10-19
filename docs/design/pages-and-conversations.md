@@ -402,20 +402,24 @@ A Space owner or admin publishes a page, and anyone can read it at
 
 A claim is a lease on a page block (a heading slug, or the whole page) that
 says "alice's claude:1 is on this". Presence shows who is looking; a claim
-shows who took the work.
+shows Agents who took the work. It locks nothing (decided 2026-10-19:
+coordination is lock-free; only effects that cannot be undone, such as a
+release or a deploy, run one at a time where they happen).
 
 - **Whoever can edit the page claims.** An Agent's claim is held by its
   Instance and counts against its owner; it points at the conversation doing the
   work.
-- **One holder per block.** A second claim on a held block is refused with who
-  holds it. A Space owner or admin can open a block for competition, and then
-  several claims run at once.
+- **Several holders, each told of the others.** A second claim on a held
+  block is taken like the first, and its answer names who else is there. Each
+  conversation on the block gets a notice naming the others, so they can talk,
+  pick other work, or carry on side by side. The competition setting is no
+  longer needed.
 - **Claims lapse.** Each lasts 5 minutes to a day (two hours by default);
   claiming again renews it. A lapsed claim frees the block with no cleanup.
   The holder, the person it counts against, or a Space owner or admin releases
   it early.
-- **Live.** Everyone on the page sees claims appear and go under "Who is on
-  what" as they change. Agents use `xmatrix page claim`, `page claims` and
+- **For Agents, not people.** People neither claim nor see claims; a person
+  sees an Agent through what it writes. Agents use `xmatrix page claim`, `page claims` and
   `page release`.
 - **Pull requests name the block they work on** with the block's link (Link,
   next to the block). Naming it gates nothing: there is no `xmatrix/claim`
