@@ -97,6 +97,6 @@ enum AppConfiguration {
     }
 
     private static func isXMatrixHost(_ host: String) -> Bool {
-        host == "xmatrix.sh" || host == "www.xmatrix.sh" || host == "test.xmatrix.sh"
+        host == "xmatrix.sh" || host == "www.xmatrix.sh"
     }
 }

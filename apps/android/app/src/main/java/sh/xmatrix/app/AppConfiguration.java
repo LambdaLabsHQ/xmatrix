@@ -9,7 +9,6 @@ final class AppConfiguration {
   private static final int[] DEBUG_BRIDGE_PORTS = { 3000, 3001 };
   static final String APP_SCHEME = "xmatrix";
   static final String WEB_HOST = "xmatrix.sh";
-  static final String TEST_WEB_HOST = "test.xmatrix.sh";
   static final String START_URL = "https://xmatrix.sh/app";
   static final String CLI_INSTALL_URL = "https://xmatrix.sh/api/cli/install";
 
@@ -62,7 +61,6 @@ final class AppConfiguration {
     LinkedHashSet<String> origins = new LinkedHashSet<>();
     origins.add("https://xmatrix.sh");
     origins.add("https://www.xmatrix.sh");
-    origins.add("https://test.xmatrix.sh");
     if (debug) {
       for (int port : DEBUG_BRIDGE_PORTS) {
         origins.add("http://localhost:" + port);
@@ -80,8 +78,7 @@ final class AppConfiguration {
 
   private static boolean isXMatrixHost(String host) {
     return WEB_HOST.equalsIgnoreCase(host)
-      || "www.xmatrix.sh".equalsIgnoreCase(host)
-      || TEST_WEB_HOST.equalsIgnoreCase(host);
+      || "www.xmatrix.sh".equalsIgnoreCase(host);
   }
 
   private static boolean isLoopbackHost(String host) {

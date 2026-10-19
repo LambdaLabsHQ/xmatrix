@@ -60,12 +60,9 @@ The Android WebView loads the live `https://xmatrix.sh/app` experience by defaul
 
 The Android native bridge is registered before application JavaScript runs. AndroidX WebKit exposes it only to the trusted xMatrix origins, and native calls are accepted only from the main frame. Devices with an Android System WebView too old for the document-start message bridge show an update-required screen instead of falling back to a broader JavaScript interface.
 
-`main` runs change-selected Android validation. Test Release runs the heavier
-Android candidate check only for a version freeze (apart from the closed
-one-time `0.16.4` bootstrap); ordinary same-version main pushes do not rebuild
-Android. Neither path publishes a stable APK/AAB or uploads to Play.
-Development testing should use local builds or the candidate evidence from a
-candidate Test Release.
+`main` runs change-selected Android validation, which publishes no APK/AAB
+and uploads nothing to Play. Development testing uses local builds or a beta
+release.
 
 Android release binaries are retained only as GitHub Release assets. The workflow does not upload Actions artifacts.
 
