@@ -551,15 +551,16 @@ mod tests {
         policy.0.insert("codex".into(), true);
         policy.0.insert("claude".into(), false);
         policy.0.insert("kiro".into(), false);
+        policy.0.insert("grok".into(), true);
+        let mut grok_off = empty.clone();
+        grok_off.0.insert("grok".into(), false);
         assert_eq!(observed("codex", &policy), "enabled");
         assert_eq!(observed("claude", &policy), "disabled");
         assert_eq!(observed("kiro", &policy), "disabled");
         // A daemon-scheduled harness with its own switch follows the policy.
         assert_eq!(observed("grok", &empty), "unknown");
-        policy.0.insert("grok".into(), true);
         assert_eq!(observed("grok", &policy), "enabled");
-        policy.0.insert("grok".into(), false);
-        assert_eq!(observed("grok", &policy), "disabled");
+        assert_eq!(observed("grok", &grok_off), "disabled");
         let AutoUpdateControl::Json(control) = &preset("gemini")
             .management
             .as_ref()

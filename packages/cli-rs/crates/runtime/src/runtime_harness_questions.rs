@@ -276,7 +276,9 @@ impl<T> PendingQuestions<T> {
                 .filter(|(_, (native, _))| matches(native))
                 .map(|(key, _)| key.clone())
                 .collect();
-            keys.into_iter().filter_map(|key| parked.remove(&key)).collect()
+            keys.into_iter()
+                .filter_map(|key| parked.remove(&key))
+                .collect()
         };
         for (_, card) in forgotten {
             card.withdraw();

@@ -151,9 +151,13 @@ async fn help_text(program: &Path, args: &[&str]) -> Option<String> {
     let read = async {
         let mut out = Vec::new();
         let (read, _) = tokio::join!(stdout.read_to_end(&mut out), child.wait());
-        read.ok().map(|_| String::from_utf8_lossy(&out).into_owned())
+        read.ok()
+            .map(|_| String::from_utf8_lossy(&out).into_owned())
     };
-    tokio::time::timeout(HELP_TIMEOUT, read).await.ok().flatten()
+    tokio::time::timeout(HELP_TIMEOUT, read)
+        .await
+        .ok()
+        .flatten()
 }
 
 /// What the harness reads: the instruction, then the text, fenced so the text
@@ -312,7 +316,11 @@ mod tests {
         let claude_help = "  --no-session-persistence   Disable session persistence\n  --safe-mode   Start with all customizations disabled\n  --strict-mcp-config\n";
         assert_eq!(
             listed_flags(stateless_flags("claude"), claude_help),
-            vec!["--no-session-persistence", "--safe-mode", "--strict-mcp-config"]
+            vec![
+                "--no-session-persistence",
+                "--safe-mode",
+                "--strict-mcp-config"
+            ]
         );
         // An older harness gets only the flags it has; a flag named inside another's text is not one.
         assert_eq!(

@@ -21,12 +21,12 @@ use tokio_tungstenite::tungstenite::Message;
 use xmatrix_cli_core::agent_instance_connection::{
     AgentInstanceConnectionClient, AgentInstanceConnectionEvent,
 };
-use xmatrix_cli_core::page_media::{ToPage, refused_images_note};
 use xmatrix_cli_core::page_co_write::{
     PAGE_SESSION_HEARTBEAT_PING, PAGE_WRITE_CLOSE as CLOSE, PAGE_WRITE_OPEN as OPEN,
     PageCoWriteConnector, PageCoWriteEvent, PageCoWriteRequest, decode_request, delta_frame,
     done_frame, page_write_target, write_frame,
 };
+use xmatrix_cli_core::page_media::{ToPage, refused_images_note};
 
 const MARK_END: char = '⟧';
 /// Longer than any page id between `⟦write page:` and `⟧`, quoted and spaced.
