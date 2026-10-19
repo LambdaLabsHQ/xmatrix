@@ -150,6 +150,8 @@ function ConversationCard({ conversation, focused, canResolve, onOpen, onResolve
 
 /** The tallest an open thread grows before its messages scroll. */
 const OPEN_MAX_HEIGHT = "min(34rem, calc(100dvh - 8rem))";
+/** Room between an empty thread's note and its composer. */
+const EMPTY_THREAD_GAP = 12;
 
 const threadAction = "flex size-7 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-foreground/10 hover:text-foreground";
 
@@ -174,25 +176,39 @@ function OpenConversationCard({ conversation, quietAgents = false, canResolve, c
   const [height, setHeight] = useState<number | null>(null);
   // A thread is as tall as what it says, up to a cap. The message list scrolls
   // inside a box of known height, so the card adds up the list's rows (its
-  // header, messages and footer) and sets its own height from them.
+  // header, messages and footer) and sets its own height from them. A thread
+  // with nothing said yet is its note and its composer.
   useLayoutEffect(() => {
     const body = bodyRef.current;
     if (!body) return;
     let list: Element | null = null;
+    let empty: Element | null = null;
+    let composer: HTMLElement | null = null;
     const measure = () => {
+      const header = headerRef.current?.offsetHeight ?? 0;
       const rows = list ? [...list.children].reduce((sum, row) => sum + row.getBoundingClientRect().height, 0) : 0;
-      const next = rows > 0 ? Math.ceil((headerRef.current?.offsetHeight ?? 0) + rows) : null;
+      const note = empty && composer
+        ? Math.max(0, ...[...empty.children].map((child) => child.getBoundingClientRect().bottom)) - empty.getBoundingClientRect().top
+        : 0;
+      const next = rows > 0 ? Math.ceil(header + rows)
+        : note > 0 && composer ? Math.ceil(header + note + EMPTY_THREAD_GAP + composer.offsetHeight) : null;
       setHeight((current) => current === next ? current : next);
     };
     const sizes = new ResizeObserver(measure);
     const attach = () => {
       const viewport = body.querySelector(".app-message-timeline > div > div");
       const found = viewport?.querySelector(":scope > [data-timeline-rise-content]") ?? viewport;
-      if (found !== list) {
+      const foundEmpty = body.querySelector(".app-empty-conversation");
+      const foundComposer = body.querySelector<HTMLElement>(".app-composer");
+      if (found !== list || foundEmpty !== empty || foundComposer !== composer) {
         list = found;
+        empty = foundEmpty;
+        composer = foundComposer;
         sizes.disconnect();
       }
       if (list) for (const row of list.children) sizes.observe(row);
+      if (empty) sizes.observe(empty);
+      if (composer) sizes.observe(composer);
       measure();
     };
     attach();

@@ -1306,7 +1306,8 @@ export const Composer = memo(function Composer({
           boxHeader={
             <>
               {quote && (
-                <div className="flex items-start gap-2 border-b border-border/70 px-3 py-2 text-xs text-muted-foreground">
+                <div data-testid="composer-quote"
+                  className="flex items-start gap-2 border-b border-border/70 px-3 py-2 text-xs text-muted-foreground">
                   <Quote className="mt-0.5 size-3.5 shrink-0" />
                   <div className="min-w-0 flex-1">
                     <div className="line-clamp-2 text-foreground [overflow-wrap:anywhere]">{quote.text}</div>

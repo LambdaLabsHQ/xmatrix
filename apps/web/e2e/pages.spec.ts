@@ -1100,9 +1100,13 @@ test("selecting a passage starts a discussion anchored to it, drawn beside the t
   expect((await fixtureRequestBodies(browser, "channel-create"))[0]!.name, "a discussion is named by its passage")
     .toBe("“In progress”");
   await expect(editor).toContainText("In progress");
-  // Its composer holds the passage and where it came from, the context its first message carries.
-  await expect(browser.locator("textarea.composer-textarea").first())
-    .toHaveValue(/^> In progress\n\n— \[Relay › Status\]\([^)]*#status\)\n\n$/u);
+  // Its composer holds the passage and where it came from as a quote, the context its first message carries;
+  // what is typed starts empty.
+  await expect(browser.locator("textarea.composer-textarea").first()).toHaveValue(/^\u200B?$/u);
+  const quote = browser.getByTestId("composer-quote");
+  await expect(quote).toContainText("In progress");
+  await expect(quote).toContainText("Relay › Status");
+  await browser.screenshot({ path: test.info().outputPath("pages-discussion-open.png") });
 
   // Closed again, the passage is marked and its bubble opens the discussion.
   const anchor = (await fixtureRequestBodies(browser, "link-create"))[0]!.anchor;
