@@ -32,7 +32,7 @@ import { RealtimeMessageAvatar } from "./realtime-message-avatar";
 import { RealtimeChannelsContext, RealtimeEventsContext, useRealtimeChannelSelection } from "./realtime-channels";
 import { createAgentWorkSelection, agentWorkCanReborn, type AgentWorkView } from "./agent-work-view";
 
-import { LiquidGlassPill } from "@/components/ui/material-surfaces";
+import { LiquidGlassPill, PaperPopover } from "@/components/ui/material-surfaces";
 import { statusInkClass } from "@/components/ui/status-tone";
 
 import {
@@ -1400,17 +1400,17 @@ function MessagePassageDiscuss({ rootRef, onDiscuss }: {
     <div className={cn("fixed z-50", !below && "-translate-y-full")}
       style={{ left: Math.max(8, Math.min(passage.rect.left, window.innerWidth - 128)),
         top: below ? passage.rect.bottom + 6 : passage.rect.top - 6 }}>
-      <div role="toolbar" aria-label="Selection" data-testid="message-selection-menu"
-        className="flex items-center gap-0.5 rounded-lg border border-border bg-popover p-1 text-popover-foreground">
+      <PaperPopover role="toolbar" aria-label="Selection" data-testid="message-selection-menu"
+        className="flex items-center gap-0.5 p-1">
         <button type="button" onMouseDown={(event) => event.preventDefault()}
           onClick={() => {
             onDiscuss(passage.messageId, passage.quote);
             document.getSelection()?.removeAllRanges();
           }}
-          className="flex h-8 items-center gap-1.5 rounded-md px-2 text-sm hover:bg-accent [&_svg]:size-4">
+          className="flex h-8 items-center gap-1.5 rounded-md px-2 text-sm hover:bg-foreground/5 [&_svg]:size-4">
           <MessageSquarePlus /> Discuss
         </button>
-      </div>
+      </PaperPopover>
     </div>,
     document.body,
   );
