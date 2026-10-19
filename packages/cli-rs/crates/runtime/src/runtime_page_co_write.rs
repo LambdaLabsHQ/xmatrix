@@ -76,14 +76,16 @@ impl Bridge {
         if let Some(events) = &self.events
             && !written.refused().is_empty()
         {
-            let _ = events.send(AgentInstanceConnectionEvent::PageCoWrite(PageCoWriteEvent::Outcome {
-                channel_id: self.channel_id.clone(),
-                prompt: format!(
-                    "[Page write] Not all you wrote into page:{} reached it: {}.",
-                    self.page.1,
-                    refused_images_note(written.refused())
-                ),
-            }));
+            let _ = events.send(AgentInstanceConnectionEvent::PageCoWrite(
+                PageCoWriteEvent::Outcome {
+                    channel_id: self.channel_id.clone(),
+                    prompt: format!(
+                        "[Page write] Not all you wrote into page:{} reached it: {}.",
+                        self.page.1,
+                        refused_images_note(written.refused())
+                    ),
+                },
+            ));
         }
     }
 }
@@ -91,7 +93,9 @@ impl Bridge {
 static BRIDGES: LazyLock<Mutex<HashMap<String, Bridge>>> = LazyLock::new(Default::default);
 
 fn bridges() -> std::sync::MutexGuard<'static, HashMap<String, Bridge>> {
-    BRIDGES.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    BRIDGES
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 /// Starts or ends co-writing as the Hub's instruction in `channel_id` says.
@@ -160,7 +164,9 @@ pub(crate) fn observe_trace(channel_id: &str, phase: &str, payload: &serde_json:
     };
     match phase {
         // A harness that carries on with the same turn says so; that is not a new one.
-        "turn_started" if payload.get("continued").and_then(|value| value.as_bool()) != Some(true) => {
+        "turn_started"
+            if payload.get("continued").and_then(|value| value.as_bool()) != Some(true) =>
+        {
             if let Some(turn) = bridge.answering.take() {
                 bridge.end(turn, false);
             }
@@ -317,15 +323,41 @@ mod tests {
         let channel = "c-co-write-stream";
         let mut frames = bridge_for_test(channel);
         // Text before the session's turn starts belongs to no turn of the page's.
-        observe_trace(channel, "assistant_delta", &serde_json::json!({ "delta": "earlier" }));
+        observe_trace(
+            channel,
+            "assistant_delta",
+            &serde_json::json!({ "delta": "earlier" }),
+        );
         turn_queued(channel, 3);
-        observe_trace(channel, "turn_started", &serde_json::json!({ "input": "…" }));
-        observe_trace(channel, "assistant_delta", &serde_json::json!({ "delta": "⟦after \"x\"⟧" }));
-        observe_trace(channel, "turn_started", &serde_json::json!({ "continued": true }));
-        observe_trace(channel, "assistant_delta", &serde_json::json!({ "delta": "more" }));
+        observe_trace(
+            channel,
+            "turn_started",
+            &serde_json::json!({ "input": "…" }),
+        );
+        observe_trace(
+            channel,
+            "assistant_delta",
+            &serde_json::json!({ "delta": "⟦after \"x\"⟧" }),
+        );
+        observe_trace(
+            channel,
+            "turn_started",
+            &serde_json::json!({ "continued": true }),
+        );
+        observe_trace(
+            channel,
+            "assistant_delta",
+            &serde_json::json!({ "delta": "more" }),
+        );
         observe_trace(channel, "turn_completed", &serde_json::json!({}));
-        observe_trace(channel, "assistant_delta", &serde_json::json!({ "delta": "after the end" }));
-        let sent: Vec<_> = std::iter::from_fn(|| frames.try_recv().ok()).map(body).collect();
+        observe_trace(
+            channel,
+            "assistant_delta",
+            &serde_json::json!({ "delta": "after the end" }),
+        );
+        let sent: Vec<_> = std::iter::from_fn(|| frames.try_recv().ok())
+            .map(body)
+            .collect();
         assert_eq!(
             sent,
             vec![
@@ -345,9 +377,15 @@ mod tests {
         observe_trace(channel, "turn_started", &serde_json::json!({}));
         // A person's message in the conversation is the next turn; it is not the page's.
         observe_trace(channel, "turn_started", &serde_json::json!({}));
-        observe_trace(channel, "assistant_delta", &serde_json::json!({ "delta": "a reply in chat" }));
+        observe_trace(
+            channel,
+            "assistant_delta",
+            &serde_json::json!({ "delta": "a reply in chat" }),
+        );
         observe_trace(channel, "turn_failed", &serde_json::json!({}));
-        let sent: Vec<_> = std::iter::from_fn(|| frames.try_recv().ok()).map(body).collect();
+        let sent: Vec<_> = std::iter::from_fn(|| frames.try_recv().ok())
+            .map(body)
+            .collect();
         assert_eq!(sent, vec![serde_json::json!({ "type": "done", "turn": 4 })]);
         bridges().remove(channel);
     }

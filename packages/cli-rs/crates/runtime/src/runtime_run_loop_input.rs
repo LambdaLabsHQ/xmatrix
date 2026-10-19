@@ -192,11 +192,19 @@ impl<'a> RunLoopEvents<'a> {
             message.channel_id.clone(),
             message.sequence,
         );
-        let owed = self.awaiting_continuation.as_ref().is_some_and(|(channel_id, switches)| {
-            channel_id == &message.channel_id
-                && switches.iter().any(|id| instruction.request_ids.contains(id))
-        });
-        let superseded = self.pending.iter().any(is_channel_delivery_connection_event);
+        let owed = self
+            .awaiting_continuation
+            .as_ref()
+            .is_some_and(|(channel_id, switches)| {
+                channel_id == &message.channel_id
+                    && switches
+                        .iter()
+                        .any(|id| instruction.request_ids.contains(id))
+            });
+        let superseded = self
+            .pending
+            .iter()
+            .any(is_channel_delivery_connection_event);
         if !owed || superseded {
             return Some(None);
         }
@@ -339,7 +347,10 @@ impl<'a> RunLoopEvents<'a> {
                     &messages[0].message_id,
                     &requested,
                     &runtime.parameter_catalog(),
-                    requested.as_ref().ok().and_then(|(id, _)| runtime.pending_parameter_selection(id)),
+                    requested
+                        .as_ref()
+                        .ok()
+                        .and_then(|(id, _)| runtime.pending_parameter_selection(id)),
                     outcome,
                 )
                 .await;

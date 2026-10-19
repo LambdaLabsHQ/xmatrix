@@ -46,9 +46,9 @@ mod runtime_daemon_harness_inventory;
 mod runtime_daemon_harness_login;
 mod runtime_daemon_harness_policy;
 mod runtime_daemon_host;
-mod runtime_machine_network;
 mod runtime_daemon_idle_sleep;
 mod runtime_daemon_lease_retry;
+mod runtime_machine_network;
 use runtime_daemon_host::{
     DaemonHostControlServer, DaemonHostProfileCommand, ProfileManager, ProfileRuntimeLifecycleState,
 };
@@ -108,9 +108,9 @@ mod runtime_codex_turn_errors;
 mod runtime_connector;
 mod runtime_harness_questions;
 mod runtime_headless_runs;
-mod runtime_presence_updates;
 mod runtime_page_co_write;
 mod runtime_page_stream_write;
+mod runtime_presence_updates;
 mod runtime_trusted_role_prompt;
 mod runtime_usage_limit;
 mod runtime_wake_metrics;
@@ -120,15 +120,15 @@ use runtime_agent_goal_status::{
 };
 use runtime_claude_messages::claude_is_tool_use_block;
 use runtime_codex_turn_errors::{
-    clear_pending_turn_failure, codex_app_error_is_https_fallback, harness_signed_out_error,
-    AGENT_SIGNED_OUT_LIFECYCLE_REASON,
-    codex_app_error_is_transient_transport, codex_app_error_message,
-    codex_auth_failure_requires_exit, codex_reconnect_attempts, codex_reconnect_wait_timeout_error,
-    codex_turn_error_message, codex_turn_error_requires_restart,
-    codex_turn_error_retryable_before_start, goal_updated_at, report_turn_failure,
-    report_turn_failure_with_usage_limit, resend_pending_turn_failure,
-    send_codex_turn_failed_trace, zcode_app_error_message, zcode_goal_active_input_id,
-    zcode_goal_state_from_value, zcode_is_session_event, zcode_message_id_matches,
+    AGENT_SIGNED_OUT_LIFECYCLE_REASON, clear_pending_turn_failure,
+    codex_app_error_is_https_fallback, codex_app_error_is_transient_transport,
+    codex_app_error_message, codex_auth_failure_requires_exit, codex_reconnect_attempts,
+    codex_reconnect_wait_timeout_error, codex_turn_error_message,
+    codex_turn_error_requires_restart, codex_turn_error_retryable_before_start, goal_updated_at,
+    harness_signed_out_error, report_turn_failure, report_turn_failure_with_usage_limit,
+    resend_pending_turn_failure, send_codex_turn_failed_trace, zcode_app_error_message,
+    zcode_goal_active_input_id, zcode_goal_state_from_value, zcode_is_session_event,
+    zcode_message_id_matches,
 };
 use runtime_headless_runs::{run_claude_print_external, run_headless_external};
 use runtime_presence_updates::{TurnTrace, send_llm_trace, send_llm_trace_with_source};
