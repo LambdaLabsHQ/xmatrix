@@ -47,6 +47,75 @@ fn effort_switch_event(effort: &str) -> AgentInstanceConnectionEvent {
     })
 }
 
+#[tokio::test]
+async fn a_control_write_keeps_polling_the_turn_holding_the_writer() {
+    let writer = tokio::sync::Mutex::new(());
+    let controlled = tokio::sync::Notify::new();
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let mut pending = std::collections::VecDeque::new();
+    let turn = async {
+        let guard = writer.lock().await;
+        tx.send(model_switch_event("sonnet")).unwrap();
+        // A Windows stdin write yields while its turn still owns the writer.
+        tokio::task::yield_now().await;
+        drop(guard);
+        controlled.notified().await;
+        7
+    };
+    let result = tokio::time::timeout(
+        Duration::from_secs(1),
+        crate::await_turn_with_events(turn, &mut rx, &mut pending, async |_| {
+            let _guard = writer.lock().await;
+            controlled.notify_one();
+            false
+        }),
+    )
+    .await
+    .expect("the control must not stop polling the turn that releases its writer");
+    assert_eq!(result, 7);
+    assert!(matches!(
+        pending.pop_front(),
+        Some(AgentInstanceConnectionEvent::Server(
+            AgentInstanceServerMessage::AgentModelSwitchRequested { model, .. }
+        )) if model == "sonnet"
+    ));
+    assert!(pending.is_empty());
+}
+
+#[tokio::test]
+async fn a_completed_turn_finishes_its_control_before_leaving_later_events_queued() {
+    let ended = tokio::sync::Notify::new();
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let mut pending = std::collections::VecDeque::new();
+    let mut handled = 0;
+    let turn = async {
+        tx.send(model_switch_event("opus")).unwrap();
+        tx.send(effort_switch_event("high")).unwrap();
+        tokio::task::yield_now().await;
+        ended.notify_one();
+        "finished"
+    };
+    let result = tokio::time::timeout(
+        Duration::from_secs(1),
+        crate::await_turn_with_events(turn, &mut rx, &mut pending, async |_| {
+            ended.notified().await;
+            handled += 1;
+            true
+        }),
+    )
+    .await
+    .expect("a completed turn must settle its in-flight control");
+    assert_eq!(result, "finished");
+    assert_eq!(handled, 1);
+    assert!(pending.is_empty());
+    assert!(matches!(
+        rx.try_recv(),
+        Ok(AgentInstanceConnectionEvent::Server(
+            AgentInstanceServerMessage::AgentEffortSwitchRequested { effort, .. }
+        )) if effort == "high"
+    ));
+}
+
 /// The first two inputs a run loop takes once its last turn ended the given
 /// way with `queued` waiting; `None` where it would wait for more input.
 async fn run_loop_inputs_after_turn(

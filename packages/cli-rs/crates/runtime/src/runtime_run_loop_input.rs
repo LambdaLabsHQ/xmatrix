@@ -459,7 +459,8 @@ async fn answer_switch_request<R: ChannelControlledRuntime>(
 /// Await a turn while relay events keep arriving. Each event goes to
 /// `on_event` first, which may act on it at once (interrupting the turn, say);
 /// unless it reports the event consumed, the event stays queued for the run
-/// loop.
+/// loop. Keep polling the turn while the handler waits: an interrupt can need
+/// the stdin writer still held by the turn's pending write.
 pub(crate) async fn await_turn_with_events<T>(
     turn: impl Future<Output = T>,
     event_rx: &mut mpsc::UnboundedReceiver<ConnectionEvent>,
@@ -474,8 +475,20 @@ pub(crate) async fn await_turn_with_events<T>(
             result = &mut turn => return result,
             event = event_rx.recv(), if relay_events_open => match event {
                 Some(event) => {
-                    if !on_event(&event).await {
+                    let (consumed, completed) = {
+                        let handling = on_event(&event);
+                        tokio::pin!(handling);
+                        tokio::select! {
+                            biased;
+                            consumed = &mut handling => (consumed, None),
+                            result = &mut turn => (handling.await, Some(result)),
+                        }
+                    };
+                    if !consumed {
                         pending_events.push_back(event);
+                    }
+                    if let Some(result) = completed {
+                        return result;
                     }
                 }
                 None => relay_events_open = false,
