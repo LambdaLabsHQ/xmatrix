@@ -21,6 +21,7 @@ import { xmatrixQueryKeys } from "@/lib/query/query-keys";
 import { pageApi, type PageRevision } from "@/lib/pages/page-client";
 import { cn } from "@/lib/utils";
 import { agentState } from "./page-margin";
+import { PenContent } from "./page-pen";
 import type { MarginConversation } from "./page-margin-model";
 import { userErrorMessage } from "@/lib/user-facing-error";
 
@@ -58,6 +59,8 @@ export interface PresentPerson {
   stalled?: boolean;
   /** An Agent co-writing live is thinking: its `doing` says for how long. */
   thinking?: boolean;
+  /** How long it has thought, as briefly as a face's tag can say it: "19s", "2m". */
+  brief?: string;
 }
 
 /** Everyone on the page, as in Google Docs: hover says who and where, a click goes there. */
@@ -139,12 +142,6 @@ export function PageOffscreenPeople({ above, below, onJump }: {
 /** Room a face needs to carry its name beside it. */
 const NAMED_PEN_ROOM = 110;
 
-/** An Agent's name as its face says it: "claude:2" is Claude. */
-function penName(name: string): string {
-  const base = name.split(":")[0] ?? name;
-  return base.charAt(0).toUpperCase() + base.slice(1);
-}
-
 /** An Agent on the page, by the line it is at: its top in the document column, and whether that is out of view. */
 export interface PagePen { person: PresentPerson; top: number; away: "above" | "below" | null }
 
@@ -178,27 +175,7 @@ export function PagePens({ pens, room = 0, onJump, onOpen }: {
               style={{ "--page-pen-color": person.color } as CSSProperties}
               aria-label={`${person.name} is ${person.editing ? "writing" : "here"}${away ? `, ${away}` : ""}`}
               title={`${person.name} · ${person.detail}`}>
-              <IdentityAvatar kind="agent" label={person.name} imageUrl={person.avatarUrl}
-                initials={person.avatarUrl ? avatarInitials(person.name) : undefined} size="sm" shape="circle"
-                className="page-pen-face pointer-events-none rounded-full" />
-              {named && (
-                <span className="page-pen-label" aria-hidden="true">
-                  {penName(person.name)}
-                  {person.doing && person.doing !== "writing" && (
-                    <span className={cn("page-pen-doing", person.thinking && "is-thinking",
-                      person.stalled && "is-stalled")}> {person.doing}</span>
-                  )}
-                  {person.from && <span className="page-pen-doing"> · {person.from}</span>}
-                </span>
-              )}
-              {/* Without room for its name, a face that thinks or went quiet still says so beneath it. */}
-              {!named && (person.thinking || person.stalled) && person.doing && (
-                <span className={cn("page-pen-status", person.stalled && "is-stalled")} aria-hidden="true">{person.doing}</span>
-              )}
-              {/* While it writes, its dots run, as a chat shows someone typing. */}
-              {person.editing && !person.idle && (
-                <span className="page-writer-dots page-pen-dots" aria-hidden="true"><i /><i /><i /></span>
-              )}
+              <PenContent person={person} named={named} />
               {away && <Chevron className="page-pen-way" aria-hidden="true" strokeWidth={2.5} />}
             </button>
           </div>

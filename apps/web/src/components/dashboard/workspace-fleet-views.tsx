@@ -133,7 +133,7 @@ import {
   type DesktopWorkspaceCandidate,
 } from "@/lib/desktop/bridge";
 
-import { type AppConnectorManifest } from "@/lib/app-connectors";
+import { orderConnectorsForList, type AppConnectorManifest } from "@/lib/app-connectors";
 import { ConnectorCredentials, connectorGeneratesCredentials, connectorTakesCredentials, connectorWritableCredentials } from "./connector-credentials";
 import { ConnectorPolicy, connectorWriteActions } from "./connector-policy";
 import { GmailMailboxes } from "./gmail-mailboxes";
@@ -1083,7 +1083,7 @@ const NO_CONNECTIONS: SerializedAppConnectorConnection[] = [];
 const NO_EXECUTIONS: SerializedAppConnectorExecution[] = [];
 
 export function AppsView({
-  connectors,
+  connectors: catalog,
   currentSpace,
   token,
   channels,
@@ -1097,7 +1097,6 @@ export function AppsView({
   const queryClient = useQueryClient();
   // The connector open beside the list is named in the address, like every rail destination's item.
   const [connectorItem, selectConnector] = useToolItem();
-  const selectedConnectorId = connectorItem ?? connectors[0]?.id ?? "";
   const setSelectedConnectorId = (id: string) => selectConnector(id, { replace: true });
   const [connectionActionError, setConnectionsError] = useState<string | null>(null);
   const [setupNotice, setSetupNotice] = useState<{ tone: "success" | "warning"; message: string } | null>(null);
@@ -1157,6 +1156,8 @@ export function AppsView({
       }),
   });
   const connections = connectionsQuery.data ?? NO_CONNECTIONS;
+  const connectors = useMemo(() => orderConnectorsForList(catalog, connections), [catalog, connections]);
+  const selectedConnectorId = connectorItem ?? connectors[0]?.id ?? "";
   const executions = executionsQuery.data ?? NO_EXECUTIONS;
   const connectionsError = connectionActionError ?? userErrorMessage(connectionsQuery.error, "Couldn't load app connections");
   const executionsError = executionActionError ?? userErrorMessage(executionsQuery.error, "Couldn't load app actions");
