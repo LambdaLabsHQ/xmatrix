@@ -50,6 +50,10 @@ Live co-writing records bounded, content-free diagnostics for first CRDT text
 and turn outcomes, including quiet-turn timeouts. Hub clock timings distinguish
 pending edits, runtime deltas and actual text changes; they do not measure browser
 paint. See [co-writing measurements](../architecture/first-space.md#measuring-live-co-writing).
+New human input can refresh a page answer that has not written text after four
+seconds, once consecutively. A replacement gets to finish, and ongoing text is
+not interrupted by this refresh. Full instructions travel again so queued
+requests can be retired safely.
 
 
 Channel presence uses the protocol's read-only Instance-ID map, separate from
