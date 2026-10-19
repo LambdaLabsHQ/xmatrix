@@ -263,3 +263,22 @@ async fn the_hubs_continuation_reaches_the_run_loop_over_the_socket() {
     };
     assert_eq!(prompt, "[xMatrix] Hub-worded continuation");
 }
+
+#[tokio::test]
+async fn a_page_that_asked_again_behind_other_work_is_answered_once() {
+    let ask = |turn: u64| {
+        AgentInstanceConnectionEvent::PageCoWrite(
+            xmatrix_cli_core::page_co_write::PageCoWriteEvent::Turn {
+                channel_id: "channel".to_string(),
+                turn,
+                prompt: format!("the page at turn {turn}"),
+            },
+        )
+    };
+    let [first, second] = run_loop_inputs_after_turn(false, vec![ask(3), ask(4), ask(5)]).await;
+    let Some(crate::RunLoopInput::Resume { prompt, .. }) = first else {
+        panic!("expected the page's turn");
+    };
+    assert_eq!(prompt, "the page at turn 5");
+    assert!(second.is_none(), "stale asks were answered too");
+}

@@ -3070,6 +3070,7 @@ fn inbound_event_backfills_attachment_channel_and_message_id() {
             client_message_id: None,
             ack_required: Some(true),
             interrupt_requested: None,
+            steer_allowed: None,
             delivery_intent: None,
         });
 

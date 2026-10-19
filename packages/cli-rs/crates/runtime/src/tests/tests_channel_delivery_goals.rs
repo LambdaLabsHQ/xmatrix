@@ -46,6 +46,7 @@ fn channel_message_event(
         client_message_id: None,
         ack_required: Some(true),
         interrupt_requested: None,
+        steer_allowed: None,
         delivery_intent: None,
     })
 }
@@ -68,6 +69,7 @@ fn interrupting_channel_message_event(
         client_message_id: None,
         ack_required,
         interrupt_requested: Some(true),
+        steer_allowed: None,
         delivery_intent: None,
     })
 }
@@ -132,6 +134,7 @@ fn active_turn_interrupt_covers_marked_live_messages_and_catch_up() {
             ack_required: Some(true),
             delivery_intent: None,
             interrupt_requested: None,
+            steer_allowed: None,
         });
     let foreign_replay =
         AgentInstanceConnectionEvent::Server(AgentInstanceServerMessage::ChannelHistoryReplay {
@@ -139,6 +142,7 @@ fn active_turn_interrupt_covers_marked_live_messages_and_catch_up() {
             ack_required: Some(true),
             delivery_intent: None,
             interrupt_requested: None,
+            steer_allowed: None,
         });
     let own_replay =
         AgentInstanceConnectionEvent::Server(AgentInstanceServerMessage::ChannelHistoryReplay {
@@ -146,6 +150,7 @@ fn active_turn_interrupt_covers_marked_live_messages_and_catch_up() {
             ack_required: Some(true),
             delivery_intent: None,
             interrupt_requested: None,
+            steer_allowed: None,
         });
 
     assert!(event_requests_active_turn_interrupt(
@@ -224,6 +229,7 @@ fn hub_verdict_decides_whether_catch_up_interrupts() {
             ack_required: Some(true),
             delivery_intent: None,
             interrupt_requested: Some(interrupt_requested),
+            steer_allowed: None,
         })
     };
     // A person's message the Hub judged not to steer (say, a stop it already

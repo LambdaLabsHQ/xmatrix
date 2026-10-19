@@ -421,6 +421,7 @@ pub(crate) mod tests {
             client_message_id: None,
             ack_required: Some(true),
             interrupt_requested: Some(true),
+            steer_allowed: None,
             delivery_intent: None,
         }
     }
@@ -436,6 +437,7 @@ pub(crate) mod tests {
             ack_required: Some(true),
             delivery_intent: delivery_intent.map(str::to_string),
             interrupt_requested: None,
+            steer_allowed: None,
         }
     }
 
@@ -520,6 +522,7 @@ pub(crate) mod tests {
                 client_message_id: None,
                 ack_required: Some(true),
                 interrupt_requested: Some(true),
+                steer_allowed: None,
                 delivery_intent: None,
             };
         assert!(delivery_is_acknowledged_and_dropped(
@@ -733,6 +736,7 @@ pub(crate) mod tests {
             client_message_id: None,
             ack_required: Some(true),
             interrupt_requested: Some(true),
+            steer_allowed: None,
             delivery_intent: Some("context".into()),
         };
         assert!(delivery_is_context_only(&live_notice));
@@ -798,6 +802,7 @@ pub(crate) mod tests {
             client_message_id: None,
             ack_required: Some(true),
             interrupt_requested: None,
+            steer_allowed: None,
             delivery_intent: Some("context".into()),
         }
     }
@@ -959,6 +964,7 @@ pub(crate) mod tests {
                 client_message_id: None,
                 ack_required: Some(true),
                 interrupt_requested: Some(true),
+                steer_allowed: None,
                 delivery_intent: None,
             },
             Some(&registered_author("agent:1", "instance-1")),

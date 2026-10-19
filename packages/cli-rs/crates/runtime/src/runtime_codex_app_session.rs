@@ -729,6 +729,30 @@ impl AgentRuntimeStateTracker {
         ))
     }
 
+    /// A message steered into the running turn becomes one of its sources, so
+    /// the turn's execution answers for it too. Returns the final-reply line
+    /// that message's input carries, or `None` with no execution running.
+    fn join_message_turn_source(
+        &self,
+        source: protocol::AgentRuntimeMessageSource,
+    ) -> Option<String> {
+        let channel_id = source.channel_id.clone();
+        {
+            let mut inner = self.inner.lock().ok()?;
+            let now = unix_millis_now();
+            let execution = inner.execution.as_mut()?;
+            if execution.sources.len() < 100 {
+                execution.sources.push(source);
+            }
+            execution.source_count = execution.source_count.saturating_add(1).min(100);
+            execution.revision += 1;
+            execution.updated_at_millis = now.max(execution.started_at_millis);
+            inner.updated_at_millis = now;
+        }
+        self.persist();
+        self.final_reply_instruction(Some(&channel_id))
+    }
+
     fn begin_turn(
         &self,
         active_channel_id: Option<&str>,

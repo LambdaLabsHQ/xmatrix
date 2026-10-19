@@ -333,7 +333,9 @@ fact is about.
     it as any turn; the harness's text, which every backend reports as
     `assistant_delta` traces (Claude with `--include-partial-messages`, in
     pieces as Codex's are), streams back with the turn's end; a new turn or the
-    session's interrupt stops a turn still running.
+    session's interrupt stops a turn still answering the page. Any other turn of
+    the conversation is not the page's to stop: the page's request waits for it
+    to end, so people typing never cut short the Agent's other work.
     Live write permission follows the connection's current edit access and the
     page's current suggestion policy throughout its lifetime, including resumed
     sockets. Losing either interrupts its turn and pauses new turns; late replies

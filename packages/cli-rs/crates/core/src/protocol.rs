@@ -1726,6 +1726,11 @@ pub enum AgentInstanceServerMessage {
         ack_required: Option<bool>,
         #[serde(default)]
         interrupt_requested: Option<bool>,
+        /// With `interrupt_requested`: a runtime that can steer joins this
+        /// delivery to its active turn instead of cancelling it. Absent from an
+        /// older Hub, whose interrupts stay interrupts.
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        steer_allowed: Option<bool>,
         /// Work or orientation. Absent means work: a hub that predates the
         /// field must never have its deliveries silently dropped.
         #[serde(skip_serializing_if = "Option::is_none", default)]
@@ -1741,6 +1746,9 @@ pub enum AgentInstanceServerMessage {
         /// decided exactly as for live delivery. Absent from an older Hub.
         #[serde(skip_serializing_if = "Option::is_none", default)]
         interrupt_requested: Option<bool>,
+        /// As for live delivery: the interrupt may steer the active turn instead.
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        steer_allowed: Option<bool>,
     },
     ChannelMessageUpdated {
         channel_id: String,

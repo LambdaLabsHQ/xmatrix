@@ -40,6 +40,7 @@ import {
 import {
   agentChannelMessageDeliveryIntent,
   agentChannelMessageRequestsInterrupt,
+  agentChannelMessageMaySteer,
   channelMessage,
 } from "./channel-message-frame";
 import {
@@ -399,12 +400,14 @@ export class AgentInstanceRuntimeTransport {
       };
       const deliveryIntent = answerIsAnothers ? "context" : agentChannelMessageDeliveryIntent(message, recipient);
       const interruptRequested = !answerIsAnothers && agentChannelMessageRequestsInterrupt(message, recipient);
+      const steerAllowed = interruptRequested && agentChannelMessageMaySteer(message, recipient);
       const outbound: Extract<AgentInstanceServerMessage, { type: "channel_message_received" }> = {
         type: "channel_message_received",
         message,
         ackRequired: true,
         ...(deliveryIntent === "context" ? { deliveryIntent } : {}),
         ...(interruptRequested ? { interruptRequested: true as const } : {}),
+        ...(steerAllowed ? { steerAllowed: true as const } : {}),
       };
       try {
         this.sockets.send(socket, outbound);

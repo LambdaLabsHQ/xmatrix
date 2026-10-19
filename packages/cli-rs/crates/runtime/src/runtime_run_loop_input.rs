@@ -263,6 +263,15 @@ impl<'a> RunLoopEvents<'a> {
                     turn,
                     prompt,
                 }) => {
+                    // The page asked again while other work ran: only its newest ask is
+                    // answered, since each one says how the page is now.
+                    if self.pending.iter().any(|event| {
+                        matches!(event, ConnectionEvent::PageCoWrite(PageCoWriteEvent::Turn {
+                            channel_id: newer, ..
+                        }) if *newer == channel_id)
+                    }) {
+                        continue;
+                    }
                     crate::runtime_page_co_write::turn_queued(&channel_id, turn);
                     return Some(RunLoopInput::Resume { channel_id, prompt });
                 }

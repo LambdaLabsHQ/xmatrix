@@ -789,6 +789,7 @@ pub(crate) async fn claude_stream_reader(
             && value.get("isReplay").and_then(Value::as_bool) == Some(true)
         {
             turn.input_replayed = true;
+            turn.inputs_replayed += 1;
         }
         if cli_originated_result {
             set_cli_turn_channel(&cli_turn_channel, None);
@@ -870,6 +871,18 @@ pub(crate) async fn claude_stream_reader(
                     turn.tool_seen = true;
                     turn.output_started = true;
                 }
+            }
+            // A message steered in after Claude's last tool call waits behind
+            // this result and gets one of its own: the turn goes on until
+            // Claude has taken every input it was given.
+            Some("result")
+                if !turn.interrupt_requested
+                    && turn.input_replayed
+                    && turn.inputs_replayed < 1 + turn.inputs_steered =>
+            {
+                let (answer, _) = claude_result_answer(&value, &trace.visible_assistant_text);
+                turn.answer = Some(answer);
+                continue;
             }
             Some("result") => {
                 // Settled before the submitter wakes: its `idle` report
