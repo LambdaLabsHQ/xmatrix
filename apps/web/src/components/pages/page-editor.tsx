@@ -13,6 +13,7 @@ import { EditorState, Selection, type Command } from "prosemirror-state";
 import { EditorView } from "prosemirror-view";
 import { yCursorPluginKey, ySyncPluginKey } from "y-prosemirror";
 import { gitHubFileReferenceFrom, gitHubFileReferenceHref, type SerializedAutomation } from "@xmatrix/protocol";
+import { PaperPopover } from "@/components/ui/material-surfaces";
 import { sameValue } from "@/lib/same-value";
 import type { PageLiveSession } from "@/lib/pages/page-client";
 import { automationsKey } from "./page-automation-chips";
@@ -146,7 +147,7 @@ function ToolButton({ label, active = false, disabled = false, onRun, children }
       // Keep the editor's selection: the button acts on it.
       onMouseDown={(event) => event.preventDefault()} onClick={onRun}
       className={`flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors
-        hover:bg-accent hover:text-foreground disabled:opacity-40 [&_svg]:size-4 ${active ? "bg-accent text-foreground" : ""}`}>
+        hover:text-foreground disabled:opacity-40 [&_svg]:size-4 ${active ? "text-foreground" : ""}`}>
       {children}
     </button>
   );
@@ -570,25 +571,23 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
 
   return (
     <div ref={frame} className="relative" data-testid="page-editor">
-      {/* Surfaces take their material from the theme, which also sets their position;
-          the wrappers place them. */}
+      {/* Surfaces are slips of the page's paper (PaperPopover); the wrappers place them. */}
       {canEdit && toolbar?.inTable && (
         <div className="sticky top-0 z-10 mb-2 w-fit">
-        <div role="toolbar" aria-label="Table"
-          className="flex items-center gap-0.5 rounded-lg border border-border bg-popover px-1.5 py-1"
+        <PaperPopover role="toolbar" aria-label="Table" className="flex items-center gap-0.5 px-1.5 py-1"
           data-testid="page-table-tools">
           <ToolButton label="Add a row below" onRun={() => run(addRowAfter)}><BetweenHorizontalEnd /></ToolButton>
           <ToolButton label="Add a column to the right" onRun={() => run(addColumnAfter)}><BetweenVerticalEnd /></ToolButton>
           <ToolButton label="Delete this row" onRun={() => run(deleteRow)}><Rows3 /></ToolButton>
           <ToolButton label="Delete this column" onRun={() => run(deleteColumn)}><Columns3 /></ToolButton>
           <ToolButton label="Delete the table" onRun={() => run(deleteTable)}><Trash2 /></ToolButton>
-        </div>
+        </PaperPopover>
         </div>
       )}
       {linkDraft !== null && (
         <div className={linkAtPos ? "absolute z-30" : "mb-2"}
           style={linkAtPos ? { left: Math.max(0, linkAtPos.left - 8), top: linkAtPos.top - 6, transform: "translateY(-100%)" } : undefined}>
-        <form className="flex items-center gap-2 rounded-lg border border-border bg-popover p-2"
+        <PaperPopover as="form" className="flex items-center gap-2 p-2"
           onSubmit={(event) => { event.preventDefault(); run(setLink(linkDraft)); setLinkDraft(null); }}>
           <Link2 className="size-4 shrink-0 text-muted-foreground" />
           <input autoFocus value={linkDraft} onChange={(event) => setLinkDraft(event.target.value)} placeholder="Paste a link"
@@ -599,13 +598,13 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
             <button type="button" className="text-sm text-muted-foreground"
               onClick={() => { run(setLink("")); setLinkDraft(null); }}>Remove</button>
           )}
-        </form>
+        </PaperPopover>
         </div>
       )}
       {fileDraft !== null && (
         <div className={fileAtPos ? "absolute z-30" : "mb-2"}
           style={fileAtPos ? { left: Math.max(0, fileAtPos.left - 8), top: fileAtPos.top - 6, transform: "translateY(-100%)" } : undefined}>
-        <form className="flex w-[min(32rem,80vw)] flex-col gap-1 rounded-lg border border-border bg-popover p-2"
+        <PaperPopover as="form" className="flex w-[min(32rem,80vw)] flex-col gap-1 p-2"
           data-testid="page-embed-github-file"
           onSubmit={(event) => {
             event.preventDefault();
@@ -625,7 +624,7 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
           {fileDraftError && (
             <p className="text-xs text-muted-foreground">Paste a file link, like https://github.com/owner/repo/blob/main/README.md</p>
           )}
-        </form>
+        </PaperPopover>
         </div>
       )}
       {mediaFailure !== null && (
@@ -640,13 +639,13 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
       {selectionMenu && (
         <div className="absolute z-20 -translate-y-full"
           style={{ left: Math.max(0, selectionMenu.left - 8), top: selectionMenu.top - 6 }}>
-        <div role="toolbar" aria-label="Selection" data-testid="page-selection-menu"
-          className="flex items-center gap-0.5 rounded-lg border border-border bg-popover p-1 text-popover-foreground">
+        <PaperPopover role="toolbar" aria-label="Selection" data-testid="page-selection-menu"
+          className="flex items-center gap-0.5 p-1">
           {actions?.discuss && (
             <button type="button" onMouseDown={(event) => event.preventDefault()}
               onClick={() => actions.discuss!(section, current ? selectionAnchor(current.state, session.fragment) ?? undefined
                 : undefined)}
-              className="flex h-8 items-center gap-1.5 rounded-md px-2 text-sm hover:bg-accent [&_svg]:size-4">
+              className="flex h-8 items-center gap-1.5 rounded-md px-2 text-sm [&_svg]:size-4">
               <MessageSquarePlus /> Discuss
             </button>
           )}
@@ -656,13 +655,13 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
                 const anchor = current ? selectionAnchor(current.state, session.fragment) : null;
                 if (anchor) actions.discuss!(section, anchor, { askAi: true });
               }}
-              className="flex h-8 items-center gap-1.5 rounded-md px-2 text-sm hover:bg-accent [&_svg]:size-4">
+              className="flex h-8 items-center gap-1.5 rounded-md px-2 text-sm [&_svg]:size-4">
               <Sparkles /> Ask AI
             </button>
           )}
           {actions?.claim && canEdit && (
             <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => actions.claim!(section)}
-              className="flex h-8 items-center gap-1.5 rounded-md px-2 text-sm hover:bg-accent [&_svg]:size-4">
+              className="flex h-8 items-center gap-1.5 rounded-md px-2 text-sm [&_svg]:size-4">
               <Flag /> Claim
             </button>
           )}
@@ -673,7 +672,7 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
           {actions?.copyLink && (
             <ToolButton label="Copy a link to this section" onRun={() => actions.copyLink!(section)}><Link2 /></ToolButton>
           )}
-        </div>
+        </PaperPopover>
         </div>
       )}
       {editorsShown && actions?.editors && (
@@ -684,20 +683,20 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
       )}
       {slash && slashAt && (
         <div className="absolute z-20 w-64" style={{ left: slashAt.left, top: slashAt.bottom + 4 }}>
-        <div role="listbox" aria-label="Insert" data-testid="page-insert-menu"
-          className="max-h-80 overflow-y-auto rounded-lg border border-border bg-popover p-1 text-popover-foreground">
+        <PaperPopover role="listbox" aria-label="Insert" data-testid="page-insert-menu"
+          className="max-h-80 overflow-y-auto p-1">
           {slashItems.map((item, index) => (
             <button key={item.label} type="button" role="option" aria-selected={index === slashIndex}
               onMouseDown={(event) => event.preventDefault()} onClick={() => applyInsert(item)}
               onMouseEnter={() => { menu.current.index = index; setSlashIndex(index); }}
               className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm [&_svg]:size-4
-                [&_svg]:text-muted-foreground ${index === slashIndex ? "bg-accent" : ""}`}>
+                [&_svg]:text-muted-foreground`}>
               {item.icon}
               <span className="flex-1">{item.label}</span>
               <span className="text-xs text-muted-foreground">{item.hint}</span>
             </button>
           ))}
-        </div>
+        </PaperPopover>
         </div>
       )}
     </div>
@@ -720,8 +719,7 @@ function EditorsPopover({ at, editors, onOpenConversation, onHistory, onClose }:
   return (
     <div className="absolute z-30 w-72 -translate-y-full" style={{ left: Math.max(0, at.left - 8), top: at.top - 6 }}
       onMouseDown={(event) => event.preventDefault()}>
-      <div role="dialog" aria-label="Editors" data-testid="page-editors"
-        className="space-y-1.5 rounded-lg border border-border bg-popover p-2.5 text-sm text-popover-foreground">
+      <PaperPopover role="dialog" aria-label="Editors" data-testid="page-editors" className="space-y-1.5 p-2.5 text-sm">
         {editors ? (
           <>
             {editors.people.map((person) => (
@@ -744,7 +742,7 @@ function EditorsPopover({ at, editors, onOpenConversation, onHistory, onClose }:
             See version history</button> : <span />}
           <button type="button" className="text-muted-foreground hover:underline" onClick={onClose}>Close</button>
         </div>
-      </div>
+      </PaperPopover>
     </div>
   );
 }
