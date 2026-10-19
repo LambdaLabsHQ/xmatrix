@@ -1,4 +1,5 @@
 import { APP_CONNECTOR_PROVIDER_MANIFESTS } from "./app-connector-manifests.js";
+import { agentFailureEvidence, agentFailureStatusLines, safeAgentFailureDetail } from "./agent-failure-detail.js";
 export const DEFAULT_HUB_URL = "https://xmatrix-hub.xmatrix.sh";
 
 export * from "./agent-status-tags.js";
@@ -866,11 +867,12 @@ export function agentTurnFailureNoticeBody(input: {
   detail?: string | null;
 }): string {
   const name = input.agentName.trim() || "agent";
-  const detail = boundAgentTurnFailureDetail(input.detail);
-  if (!detail) {
-    return `xMatrix could not complete this ${name} turn.`;
-  }
-  return `xMatrix could not complete this ${name} turn: ${detail}`;
+  const detail = boundAgentTurnFailureDetail(safeAgentFailureDetail(input.detail));
+  const cause = detail
+    ? `xMatrix could not complete this ${name} turn: ${detail}`
+    : `xMatrix could not complete this ${name} turn.`;
+  return [cause, ...(!detail ? ["The harness supplied no error detail."] : []),
+    ...agentFailureStatusLines(agentFailureEvidence(input.detail))].join("\n");
 }
 
 export interface AgentLifecycleSnapshot {

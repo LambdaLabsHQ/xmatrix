@@ -18,6 +18,7 @@ import {
   AGENT_USAGE_LIMIT_LIFECYCLE_REASON,
   agentUsageLimitFromError,
   boundAgentTurnFailureDetail,
+  safeAgentFailureDetail,
   callerMessageMetadata,
   ChannelActivityInvalid,
   CHANNEL_ACTIVITY_MESSAGE_KIND,
@@ -1204,6 +1205,9 @@ function requiredNonnegativeInteger(value: unknown, field: string): number {
 
 /** Hub reads a usage limit from the original error, whatever the host said. */
 function classifiedTurnFailure(message: Message<"agent_lifecycle">): Message<"agent_lifecycle"> {
+  if (shouldPersistAgentTurnFailureNotice(message)) {
+    message = { ...message, detail: safeAgentFailureDetail(message.detail) };
+  }
   if (message.layer !== AGENT_TURN_FAILURE_LIFECYCLE_LAYER || message.status !== AGENT_TURN_FAILURE_LIFECYCLE_STATUS ||
       message.reason !== AGENT_TURN_FAILURE_LIFECYCLE_REASON) return message;
   const limit = agentUsageLimitFromError(message.detail);
@@ -1214,7 +1218,7 @@ function classifiedTurnFailure(message: Message<"agent_lifecycle">): Message<"ag
 function turnFailureLifecycle(channelId: string, error: string): Message<"agent_lifecycle"> {
   return classifiedTurnFailure({ type: "agent_lifecycle", channelId,
     layer: AGENT_TURN_FAILURE_LIFECYCLE_LAYER, status: AGENT_TURN_FAILURE_LIFECYCLE_STATUS,
-    reason: AGENT_TURN_FAILURE_LIFECYCLE_REASON, detail: boundAgentTurnFailureDetail(error),
+    reason: AGENT_TURN_FAILURE_LIFECYCLE_REASON, detail: safeAgentFailureDetail(error),
     snapshot: { run: "failed", process: "online" } });
 }
 

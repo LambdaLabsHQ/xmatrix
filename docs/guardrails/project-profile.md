@@ -164,6 +164,11 @@ Runtime delivery errors retain the sending cause chain and report the original
 receiving exception before it crosses a Durable Object boundary. Reporting
 preserves rejection and never replays a potentially partial broadcast. See
 [Runtime delivery errors](../operations/runtime-delivery-errors.md).
+
+Agent turn failures share one reconnect-safe lifecycle reporter across native,
+ACP, stream and headless adapters. Channel notices retain credential-redacted
+HTTP, upstream, WebSocket and process evidence when exposed, and explicitly mark
+missing HTTP evidence. See [Agent turn failures](../operations/agent-turn-failures.md).
 Daemon catch-up retires lost socket bindings and attempts to release all unsent
 leases, preserving sent leases, successor connections and Authority epoch fences.
 Orphan terminal reports recover exact identities only from a matching retained

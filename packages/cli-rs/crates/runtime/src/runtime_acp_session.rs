@@ -983,13 +983,7 @@ fn acp_message_id_matches(value: Option<&Value>, expected: u64) -> bool {
 }
 
 fn acp_error_message(error: &Value) -> String {
-    if let Some(message) = error.get("message").and_then(Value::as_str) {
-        if let Some(data) = error.get("data") {
-            return format!("{message}: {data}");
-        }
-        return message.to_string();
-    }
-    error.to_string()
+    crate::runtime_failure_detail::provider_error_detail(error)
 }
 
 fn acp_turn_cancellation_detail(display_name: &str, result: &Value) -> Option<String> {

@@ -1325,9 +1325,9 @@ pub fn persisted_daemon_agent_run_ancestor_pid() -> Option<u32> {
     #[cfg(windows)]
     {
         let parents = process_parent_ids()?;
-        return tracked_ancestor_pid(std::process::id(), &tracked_pids, |pid| {
+        tracked_ancestor_pid(std::process::id(), &tracked_pids, |pid| {
             parents.get(&pid).copied()
-        });
+        })
     }
     #[cfg(not(windows))]
     tracked_ancestor_pid(std::process::id(), &tracked_pids, parent_process_id)

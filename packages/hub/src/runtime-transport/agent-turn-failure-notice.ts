@@ -5,6 +5,8 @@ import {
   agentTurnFailureNoticeBody,
   isAgentTurnFailureLifecycle,
   boundAgentTurnFailureDetail,
+  safeAgentFailureDetail,
+  agentFailureEvidence,
 } from "@xmatrix/protocol";
 
 import { runtimeCommandId } from "./runtime-messages";
@@ -41,13 +43,15 @@ export function agentTurnFailureAppendCommand(input: {
   if (input.noticeId ? !/^[a-zA-Z0-9_-]{1,120}$/.test(input.noticeId) : background) return null;
   const body = background
     ? `xMatrix lost background-task tracking for ${input.agentName.trim() || "agent"}. ${backgroundInterruptionDetail(input)}`.trim()
-    : agentTurnFailureNoticeBody({
-    agentName: input.agentName,
-    detail: input.detail,
-  });
+    : [agentTurnFailureNoticeBody({
+      agentName: input.agentName,
+      detail: input.detail,
+    }), ...(input.noticeId ? ["Failure reference: " + input.noticeId] : [])].join("\n");
   const identity = [
     input.instanceId.trim() || input.runId.trim(),
-    ...(input.noticeId ? [channelId, input.noticeId] : [body.replace(/\s+/gu, " ").slice(0, TURN_FAILURE_NOTICE_IDENTITY_MAX)]),
+    // Legacy hosts keyed only the original cause line. Added evidence must
+    // not create another notice when that old failure reconnects after rollout.
+    ...(input.noticeId ? [channelId, input.noticeId] : [body.split("\n")[0]!.replace(/\s+/gu, " ").slice(0, TURN_FAILURE_NOTICE_IDENTITY_MAX)]),
   ].join(":");
   const messageId = runtimeCommandId("turn-failure", identity);
   return {
@@ -71,6 +75,7 @@ export function agentTurnFailureAppendCommand(input: {
           xmatrixProvenance: "system_fact",
           xmatrixSystemNotice: true,
           ...(background ? { xmatrixBackgroundTaskInterruption: true } : { xmatrixTurnFailure: true }),
+          ...(!background ? { xmatrixFailureEvidence: { version: 1, ...agentFailureEvidence(input.detail) } } : {}),
           ...(input.signedOut && input.reason === AGENT_SIGNED_OUT_LIFECYCLE_REASON
             ? { kind: HARNESS_SIGNED_OUT_NOTICE_KIND, signedOut: input.signedOut } : {}),
         },
@@ -87,7 +92,7 @@ export function shouldPersistAgentTurnFailureNotice(message: Parameters<typeof i
 /** Hub words the interruption from the host's count; an older host sent the sentence. */
 function backgroundInterruptionDetail(input: { pendingTasks?: number | null; detail?: string | null }): string {
   const count = input.pendingTasks;
-  if (typeof count !== "number" || !Number.isSafeInteger(count) || count < 0) return boundAgentTurnFailureDetail(input.detail);
+  if (typeof count !== "number" || !Number.isSafeInteger(count) || count < 0) return boundAgentTurnFailureDetail(safeAgentFailureDetail(input.detail));
   return `The provider stream ended with ${count} ${count === 1 ? "task" : "tasks"} still pending. ` +
     "Their outcome is unknown; verify external operations before continuing.";
 }

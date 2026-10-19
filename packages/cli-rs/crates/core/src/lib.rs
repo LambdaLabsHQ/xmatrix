@@ -17,6 +17,7 @@ pub mod daemon_auth;
 pub mod daemon_host;
 pub mod daemon_record;
 pub mod error;
+pub mod failure_detail;
 pub mod fs;
 pub mod git_credential;
 pub mod hex;
