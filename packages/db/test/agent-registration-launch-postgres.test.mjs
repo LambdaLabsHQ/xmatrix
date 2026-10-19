@@ -642,6 +642,48 @@ integration("launch survives a hostname change with stale Workspace metadata and
     assert.equal(registeredTarget.machineId, "machine");
     assert.equal(registeredTarget.hostId, "renamed-host");
     const reborn = new PostgresRegistrationRebornRepository(database, database, placement);
+    // A managed launch has no registered Workspace row to look up on reborn.
+    await sql(`UPDATE data.runs SET status='failed' WHERE run_id=$1`, [managed.runId]);
+    const managedResumeInput = { commandId: "managed-reborn", actorUserId: "caller", channelId: "channel",
+      sourceMessageId: "managed-reborn-message", sourceInstanceId: managed.instanceId, prompt: "resume the page" };
+    for (const [name, disable, restore, code] of [
+      ["capability", `UPDATE data.machine_daemons SET capabilities_json=capabilities_json-'registration_managed_v1'`,
+        `UPDATE data.machine_daemons SET capabilities_json=capabilities_json||'["registration_managed_v1"]'::jsonb`,
+        "registration_managed_route_unavailable"],
+      ["offline", `UPDATE data.machine_daemons SET status='offline'`,
+        `UPDATE data.machine_daemons SET status='online'`, "registration_daemon_offline"],
+      ["revoked", `UPDATE data.space_agent_registration_access SET grant_state='revoked'`,
+        `UPDATE data.space_agent_registration_access SET grant_state='active'`, "registration_revoked"],
+      ["missing-key", `UPDATE data.runs SET metadata_json=metadata_json-'managedWorkspaceKey' WHERE run_id='run:space-input'`,
+        `UPDATE data.runs SET metadata_json=jsonb_set(metadata_json,'{managedWorkspaceKey}',to_jsonb($1::text)) WHERE run_id='run:space-input'`,
+        "registration_workspace_or_daemon_unavailable"],
+      ["changed-key", `UPDATE data.runs SET metadata_json=jsonb_set(metadata_json,'{managedWorkspaceKey}','"another-directory"') WHERE run_id='run:space-input'`,
+        `UPDATE data.runs SET metadata_json=jsonb_set(metadata_json,'{managedWorkspaceKey}',to_jsonb($1::text)) WHERE run_id='run:space-input'`,
+        "reborn_source_changed"],
+    ]) {
+      await sql(disable);
+      await assert.rejects(reborn.prepare({ ...managedResumeInput, commandId: `managed-${name}` }),
+        error => error.code === code, `managed recovery must reject ${name}`);
+      await sql(restore, name.endsWith("key") ? [inputPayload.workspace.managedKey] : []);
+    }
+    await sql(`UPDATE data.runs SET metadata_json=jsonb_set(metadata_json,'{managedWorkspaceKey}','"bad.key"'),
+      workspace_canonical_cwd='.xmatrix-management/bad.key' WHERE run_id=$1`, [managed.runId]);
+    await assert.rejects(reborn.prepare({ ...managedResumeInput, commandId: "managed-invalid-key" }),
+      error => error.code === "reborn_source_changed", "reject a key the daemon cannot materialize before stopping");
+    await sql(`UPDATE data.runs SET metadata_json=jsonb_set(metadata_json,'{managedWorkspaceKey}',to_jsonb($2::text)),
+      workspace_canonical_cwd=$3 WHERE run_id=$1`, [managed.runId, inputPayload.workspace.managedKey, inputPayload.workspace.canonicalCwd]);
+    const managedResume = await reborn.prepare(managedResumeInput);
+    const resumedManaged = await reborn.advance({ intentId: managedResume.intentId, actorUserId: "caller", channelId: "channel" });
+    assert.equal(resumedManaged.state, "prepared");
+    assert.equal(resumedManaged.instanceId, managed.instanceId);
+    assert.equal(resumedManaged.spawnPayload.managementSpaceId, inputPayload.managementSpaceId);
+    assert.equal(resumedManaged.spawnPayload.workspace.managedKey, inputPayload.workspace.managedKey);
+    assert.equal(resumedManaged.spawnPayload.workspace.canonicalCwd, inputPayload.workspace.canonicalCwd);
+    assert.equal(resumedManaged.spawnPayload.resumeSessionKey, inputPayload.resumeSessionKey);
+    assert.equal(resumedManaged.spawnPayload.workspace.metadata.syntheticManagedWorkspace, true);
+    assert.deepEqual(resumedManaged.spawnPayload.registration.resources.workspaces, []);
+    assert.equal((await sql(`SELECT count(*)::int AS count FROM data.workspaces WHERE canonical_cwd=$1`,
+      [inputPayload.workspace.canonicalCwd])).rows[0].count, 0, "reborn does not register the private managed directory");
     const before = (await sql(`SELECT instance_id,channel_instance_id FROM data.instances WHERE instance_id=$1`, [replay.instanceId])).rows[0];
     const prepared = await reborn.prepare({ commandId: "reborn", actorUserId: "caller", channelId: "channel",
       sourceMessageId: "message", sourceInstanceId: replay.instanceId, prompt: "continue" });
