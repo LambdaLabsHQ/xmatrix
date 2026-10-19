@@ -506,6 +506,7 @@ export const MessageTimeline = memo(function MessageTimeline({
   highlightMessageId,
   threadRootMessage,
   threadRootChannel,
+  foldsDiscussionHead = false,
 }: {
   channel: ChannelSnapshot | null;
   space: SerializedSpace | null;
@@ -540,6 +541,8 @@ export const MessageTimeline = memo(function MessageTimeline({
   highlightMessageId?: string;
   threadRootMessage?: TimelineItem;
   threadRootChannel?: ChannelSnapshot;
+  /** The thread's head shows a page discussion's passage, so its first message need not (selection-discussion.ts). */
+  foldsDiscussionHead?: boolean;
 } & Pick<MessageRowProps,
   "onReact" | "onEdit" | "onRecall" | "onUnsentAction" | "onReply" | "onOpenThread" | "onMentionSender" |
   "onRebornSender" | "onQuestionnaireAnswer" | "onOpenInternalAppLink" | "onJumpToMessage"
@@ -1169,6 +1172,7 @@ export const MessageTimeline = memo(function MessageTimeline({
                   launchOptions={launchOptions}
                   onLaunchChoice={chooseFirstLaunch}
                   initiallyExpanded={isThread && _index < (threadRootMessage ? 1 : 2)}
+                  foldsDiscussionHead={foldsDiscussionHead}
                   currentUserIdentityId={currentUserIdentityId}
                   channel={rowChannel}
                   token={token}
@@ -1702,6 +1706,7 @@ export const MessageRow = memo(function MessageRow({
   onLaunchChoice,
   contextOnly = false,
   initiallyExpanded = false,
+  foldsDiscussionHead = false,
   currentUserIdentityId,
   channel,
   token,
@@ -1748,6 +1753,8 @@ export const MessageRow = memo(function MessageRow({
   contextOnly?: boolean;
   /** Keep the opening context of a thread readable before folding later long messages. */
   initiallyExpanded?: boolean;
+  /** Its thread's head already shows a page discussion's passage. */
+  foldsDiscussionHead?: boolean;
   /** Opens the Profile view for a human sender. Slack: the avatar is a link. */
   onOpenHumanProfile: (userId: string) => void;
 } & MessageRowProps) {
@@ -1795,8 +1802,10 @@ export const MessageRow = memo(function MessageRow({
   const humanSenderUserId = message.senderKind === "user" && message.senderId
     ? message.senderId.replace(/^user:/, "")
     : null;
-  // A page discussion's first message shows what was written; its passage is the thread's anchor.
-  const displayBody = normalizeMessageBodyForDisplay(foldedDiscussionBody(message.body), message.senderKind);
+  // A page discussion's first message shows only what was written where its thread's head shows the
+  // passage; anywhere else the passage and its link back open the conversation.
+  const displayBody = normalizeMessageBodyForDisplay(
+    foldsDiscussionHead ? foldedDiscussionBody(message.body) : message.body, message.senderKind);
   const nonOperationalRanges = useMemo(() => /[@＠]/u.test(displayBody) ? nonOperationalMentionRanges(displayBody) : [], [displayBody]);
   const markdownComponents = useMemo(
     () => createMessageMarkdownComponents(onOpenInternalAppLink),
