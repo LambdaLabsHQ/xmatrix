@@ -12,6 +12,22 @@ They do not queue behind that recipient's inbound handler: concurrent A-to-B
 and B-to-A presence updates must not create a circular wait. A callback retained
 across close/reconnect fails its exact session check.
 
+## ACP output stalls
+
+An ACP prompt write and its cancellation share the provider's serialized stdin
+writer. The run loop must keep polling the active turn while its control handler
+waits for that writer: the turn may still own the lock across pending I/O. Pausing
+the turn there creates a circular wait, fills the bounded provider inbox, and
+eventually blocks the provider on stdout even though its process is still alive.
+If the turn completes during control handling, retain its result until the
+handler finishes and keep any unconsumed event queued for the next input.
+
+For a stalled instance, preserve its provider session and runtime logs before
+recovery. Install a released CLI with this polling behavior before reborn;
+restarting on the same affected runtime can repeat the stall. A reborn rejection
+is a separate admission failure and must be resolved through the registration's
+owner rather than bypassed with a local registry change.
+
 ## Durable reborn
 
 Migration `0058_expand_reborn_intents` introduces Space-owned
@@ -60,6 +76,16 @@ the daemon spawn payload. Managed launches also retain their materialization
 key in Run metadata. Replays preserve those keys; different Instances do not
 share a harness-session key. These facts preserve recovery context, but are not
 by themselves a grant to resume a registration or bypass its current admission.
+
+A non-repository managed launch has no registered Workspace row. Its reborn
+retains the exact managed key and canonical directory from the source Run,
+and retains its empty Workspace resource scope. The owning machine must be
+online and advertise both `registration_launch_v3` and `registration_managed_v1`;
+current Channel and registration admission still apply. A directory name alone
+cannot identify a managed launch, and recovery never registers that directory
+or broadens the registration's Workspace grant. Missing or inconsistent keys
+fail before stopping the predecessor. This continuation applies to reborn and
+resting-Instance wake, not cross-harness handoff.
 
 Rejections must be visible, not merely logged. Target lookup failures produce
 a Channel error notice and do not claim that recovery was queued. If that

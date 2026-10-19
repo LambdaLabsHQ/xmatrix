@@ -1282,26 +1282,66 @@ async function observedCoWriter(t) {
   return { ...joined, events };
 }
 
-test("co-writing timings include queued human edits without attributing an earlier answer to them", async (t) => {
-  const { ann, writer, events } = await observedCoWriter(t);
+async function afterFirstHumanEdit(t) {
+  const joined = await observedCoWriter(t);
   const at = HEAD.indexOf("In progress");
-  ann.text.insert(at, "First ");
+  joined.ann.text.insert(at, "First ");
   t.mock.timers.tick(CO_WRITER_PAUSE_MS);
+  return { ...joined, at };
+}
+
+test("co-writing timings include queued human edits without attributing an earlier answer to them", async (t) => {
+  const { ann, writer, events, at } = await afterFirstHumanEdit(t);
+  writer.write(2, '⟦after "none"⟧Already writing');
   t.mock.timers.tick(500);
   ann.text.insert(at, "Second ");
   t.mock.timers.tick(5000);
   assert.equal(writer.turns().length, 2, "the previous turn is still answering");
-  writer.write(2, "⟦pass⟧");
   writer.done(2);
-  assert.equal(events.length, 1);
-  assert.equal(events[0].firstTextMs, null);
+  assert.equal(events.length, 2);
+  assert.equal(events[0].editToFirstTextMs, CO_WRITER_PAUSE_MS, "the existing text precedes the second edit");
   assert.equal(writer.turns().length, 3);
   t.mock.timers.tick(200);
   writer.write(3, '⟦after "none"⟧The next answer');
-  assert.equal(events[1].editToTurnMs, 5000);
-  assert.equal(events[1].firstTextMs, 200);
-  assert.equal(events[1].editToFirstTextMs, 5200);
+  assert.equal(events[2].editToTurnMs, 5000);
+  assert.equal(events[2].firstTextMs, 200);
+  assert.equal(events[2].editToFirstTextMs, 5200);
   writer.done(3);
+});
+
+test("new human input refreshes an unwritten answer once, with full current instructions, and retires late replies", async (t) => {
+  const { ann, writer, events, at } = await afterFirstHumanEdit(t);
+  t.mock.timers.tick(500);
+  ann.text.insert(at, "Second ");
+  t.mock.timers.tick(CO_WRITER_KEEP_UP_MS - 501);
+  assert.equal(writer.turns().length, 2, "a young answer has time to start writing");
+  t.mock.timers.tick(1);
+  assert.equal(writer.turns().length, 3, "new input does not wait for the unwritten answer to finish");
+  assert.ok(writer.asked.some((frame) => frame.type === "interrupt" && frame.turn === writer.turnId(2)));
+  assert.match(writer.turns()[2].text, /Second First In progress/u);
+  assert.match(writer.turns()[2].text, /Only what you write inside these markers reaches the page/u,
+    "the retired request may never have reached the harness, so instructions must travel again");
+  assert.equal(events[0].outcome, "interrupted");
+  assert.equal(events[0].durationMs, CO_WRITER_KEEP_UP_MS);
+  writer.write(2, '⟦after "none"⟧An obsolete answer');
+  writer.done(2);
+  assert.doesNotMatch(ann.text.toString(), /obsolete/u);
+  ann.text.insert(at, "Third ");
+  t.mock.timers.tick(CO_WRITER_KEEP_UP_MS + 1000);
+  assert.equal(writer.turns().length, 3, "the replacement gets to finish even while people continue typing");
+  writer.write(3, '⟦after "none"⟧The current answer');
+  writer.done(3);
+  assert.match(ann.text.toString(), /current answer/u);
+});
+
+test("an initial unwritten page answer can be refreshed without losing its startup instructions", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: 1_000_000 });
+  const { ann, writer } = await annCoWriting();
+  ann.text.insert(HEAD.indexOf("In progress"), "First edit ");
+  t.mock.timers.tick(CO_WRITER_KEEP_UP_MS);
+  assert.equal(writer.turns().length, 2);
+  assert.match(writer.turns()[1].text, /First edit In progress/u);
+  assert.match(writer.turns()[1].text, /Only what you write inside these markers reaches the page/u);
 });
 
 test("an empty replacement deletes old words without reporting newly written text", async (t) => {
@@ -1326,6 +1366,13 @@ test("another Agent's document update is not measured as a human edit", async (t
   assert.equal(events.length, 2);
   assert.equal(events[0].editToTurnMs, null);
   assert.equal(events[0].editToFirstTextMs, null);
+  other.text.insert(HEAD.indexOf("In progress"), "Next ");
+  t.mock.timers.tick(CO_WRITER_PAUSE_MS);
+  t.mock.timers.tick(500);
+  other.text.insert(HEAD.indexOf("In progress"), "More ");
+  t.mock.timers.tick(CO_WRITER_KEEP_UP_MS + 1000);
+  assert.equal(writer.turns().length, 3, "another Agent's changes do not refresh the open answer");
+  writer.done(3);
 });
 
 test("a quiet co-writing turn reports stalled once with missing text timings, and ignores its late output", async (t) => {

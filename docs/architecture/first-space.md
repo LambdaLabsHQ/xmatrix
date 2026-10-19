@@ -167,12 +167,14 @@ SELECT timestamp, index1, blob3, blob4, blob9, blob11,
   double2, double3, double4, double5, double6, double7, double8, _sample_interval
 FROM xmatrix_diagnostics
 WHERE blob1 = 'pages' AND blob5 = 'session_clock'
-  AND timestamp >= '2026-10-19 00:00:00' AND timestamp < '2026-10-20 00:00:00'
+  AND timestamp >= toDateTime('2026-10-19 00:00:00')
+  AND timestamp < toDateTime('2026-10-20 00:00:00')
 LIMIT 10000
 ```
 
-Use the requested UTC endpoints, check truncation, and keep revision proxies
-separate. A historical report cannot fill these fields before this observation
+Analytics Engine requires DateTime operands: use `toDateTime` for the UTC
+endpoint strings ([reference](https://developers.cloudflare.com/analytics/analytics-engine/sql-reference/date-time-functions/)).
+Use the requested endpoints, check truncation, and keep revision proxies separate. A historical report cannot fill these fields before this observation
 was deployed. Actual on-screen first text and interruption durations still
 require a browser interaction measurement.
 

@@ -401,16 +401,21 @@ fact is about.
     Agent hears at the next pause that it was taken back, and leaves it out
     unless asked again.
   - **When it speaks.** It reads the whole page as it joins. Afterwards, each
-    time people change the page and pause (1.5 s), and at least every 4 s while
-    someone keeps typing, it hears what changed, the changed sections only (the
+    time people change the page and pause (1.5 s), or after 4 s of continuous
+    typing, their changes become ready to send. If an older page answer has
+    still written no text after 4 s, new human input may retire it and send the
+    current page and full instructions afresh. Only one consecutive refresh is
+    allowed: its replacement gets to finish, and an answer already writing text
+    is never refreshed this way. This limits waiting on an outdated answer without
+    repeatedly cancelling a slow model as people type. Deferred changes follow
+    the open answer. Ordinarily it hears the changed sections only (the
     whole page every eighth time or after more than three sections changed),
     and where each person's caret is. It keeps writing along with them, a
     sentence or two at a time right after what they just wrote, as a colleague
     typing beside them would; it passes only when there is nothing yet to
     follow, and answers from the page without tools unless the page asks it to
-    look something up. One turn at a time; changes made while it answers are
-    told once it finishes. Claude's words reach the page every 80 ms while it
-    answers.
+    look something up. Only one answer writes at a time. Claude's words reach
+    the page every 80 ms while it answers.
   - **Manners.** Its own additions go straight in; it does not reword what
     others wrote but leaves a note, fixing only plain typos. It never writes in
     the paragraph a person's caret is in. When someone edits what it is writing,
