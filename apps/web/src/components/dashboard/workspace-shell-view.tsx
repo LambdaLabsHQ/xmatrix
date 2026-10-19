@@ -206,6 +206,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     setDraftAttachments,
     replyTarget,
     setReplyTarget,
+    discussionQuotes,
     draftRef,
     draftAttachmentsRef,
     replyTargetRef,
@@ -315,6 +316,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     openPage,
     closePage,
     openPageConversation,
+    dropDiscussionQuote,
     closePageConversation,
     updateSpaceMemberPermissions,
     updateSpacePreferredLanguage,
@@ -851,6 +853,9 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     void rebornAgentInstance(...args));
   const handoffDockInstance = useStableCallback((...args: Parameters<typeof handoffAgentInstance>) =>
     void handoffAgentInstance(...args));
+  const removeComposerQuote = useStableCallback(() => {
+    if (selectedChannel) dropDiscussionQuote(selectedChannel.id);
+  });
   const cancelComposerReply = useStableCallback(() => {
     replyTargetRef.current = null;
     replyTargetHistoryRevisionRef.current = -1;
@@ -1256,6 +1261,8 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
           onDraftChange={persistComposerDraftSnapshot}
           onWorkspaceSelect={setDraftWorkspaceTarget}
           onCancelReply={cancelComposerReply}
+          quote={discussionQuotes.get(selectedChannel.id) ?? null}
+          onRemoveQuote={removeComposerQuote}
           onAttachmentsChange={changeDraftAttachments}
           onSend={sendComposerMessage}
           onOpenAppsForSpace={openComposerApps}
@@ -1311,8 +1318,8 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       onCloseConversation={closePageConversation}
       onExpandConversation={(conversationId) => navigateToChannel(conversationId)}
       onOpenConversation={(conversationId) => openPageConversation(conversationId)}
-      onDiscuss={({ firstMessage, draft, open, coWrite, planned, ...input }) => startPageConversation(input,
-        { ...(firstMessage ? { firstMessage } : {}), ...(draft ? { draft } : {}), ...(open === false ? { open } : {}),
+      onDiscuss={({ firstMessage, quote, open, coWrite, planned, ...input }) => startPageConversation(input,
+        { ...(firstMessage ? { firstMessage } : {}), ...(quote ? { quote } : {}), ...(open === false ? { open } : {}),
           ...(coWrite ? { coWrite } : {}), ...(planned ? { planned } : {}) })}
       onConnectGitHub={async (input) => {
         // The repository's issues and pull requests arrive in a conversation linked to the page.

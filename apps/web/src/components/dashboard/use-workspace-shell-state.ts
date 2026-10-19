@@ -69,6 +69,7 @@ import {
   writeChannelComposerDraft,
   type ChannelComposerDraft,
 } from "@/components/dashboard/channel-composer-drafts";
+import type { DiscussionQuote } from "@/components/dashboard/selection-discussion";
 import {
   purgeAgentTraceReplicas,
   purgeThirdPartyAgentTraceReplicas,
@@ -640,6 +641,9 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
 
   const [replyTarget, setReplyTarget] = useState<TimelineItem | null>(null);
 
+  // The passage each discussion's composer holds until its first message carries it (selection-discussion.ts).
+  const [discussionQuotes, setDiscussionQuotes] = useState<ReadonlyMap<string, DiscussionQuote>>(() => new Map());
+
   const draftRef = useRef(draft);
 
   const draftAttachmentsRef = useRef(draftAttachments);
@@ -653,6 +657,10 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
   draftAttachmentsRef.current = draftAttachments;
 
   replyTargetRef.current = replyTarget;
+
+  const discussionQuotesRef = useRef(discussionQuotes);
+
+  discussionQuotesRef.current = discussionQuotes;
 
   const seedComposerDraftText = useCallback((text: string) => {
     draftRef.current = text;
@@ -3055,6 +3063,9 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
     setDraftAttachments,
     replyTarget,
     setReplyTarget,
+    discussionQuotes,
+    discussionQuotesRef,
+    setDiscussionQuotes,
     draftRef,
     draftAttachmentsRef,
     replyTargetRef,
