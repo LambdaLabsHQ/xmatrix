@@ -521,8 +521,6 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   onOpenConversation: (conversationId: string) => void;
   onDiscuss: (input: { spaceId: string; pageId: string; blockId: string; name: string; restricted: boolean;
     anchor?: PageLinkAnchor; firstMessage?: string; quote?: DiscussionQuote; open?: boolean; coWrite?: boolean;
-    /** Its composer opens addressed to @auto, as Ask AI does. */
-    askAi?: boolean;
     /** Hears the conversation's id as soon as it is known, before the Hub has made or linked it. */
     planned?: (conversationId: string) => void }) => Promise<unknown>;
   /** Subscribes a conversation of its own, linked to a section, to a repository's issues and pull requests. */
@@ -1154,9 +1152,8 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   const claimable = (blockId: string) => claimsOn(blockId).length === 0 ||
     (Boolean(claims.data?.competitiveBlocks.includes(blockId)) &&
       !claimsOn(blockId).some((claim) => claim.holder.kind === "user" && claim.holder.id === userId));
-  // Asking AI about a passage is the same discussion, its composer addressed to @auto, which routes to an
-  // enabled harness: the question, or the change asked for, is written there, where the answer arrives.
-  const discuss: NonNullable<PageSectionActions["discuss"]> = (blockId, anchor, options) => {
+  // A discussion is where people and Agents meet alike: asking an Agent is mentioning it there.
+  const discuss: NonNullable<PageSectionActions["discuss"]> = (blockId, anchor) => {
     if (!page) return;
     const title = blocks.find((block) => block.id === blockId)?.title;
     // A discussion of a passage is named by the passage, which its first message carries; of a section, by the section.
@@ -1170,8 +1167,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     };
     void onDiscuss({ spaceId, pageId: page.pageId, blockId, name: anchor ? discussionTitle(anchor.quote) : place,
       restricted, planned, ...(anchor ? { anchor,
-        quote: discussionQuote(anchor.quote, { label: place, href: blockLink(blockId) }, true) } : {}),
-      ...(options?.askAi ? { askAi: true } : {}) }).then(() => links.refetch(), (cause: Error) => setNotice(cause.message))
+        quote: discussionQuote(anchor.quote, { label: place, href: blockLink(blockId) }, true) } : {}) }).then(() => links.refetch(), (cause: Error) => setNotice(cause.message))
       .finally(() => setStartedLinks((current) => current.filter((link) => link.conversationId !== started)));
   };
   const resolveDiscussion = (linkId: string) => pageApi.resolveLink(spaceId, token, linkId, true)
@@ -1215,23 +1211,13 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   coWriteRef.current = coWrite;
   const claim = (blockId: string) => (claimable(blockId) ? void claimBlock(blockId)
     : setNotice("Someone is already on this section."));
-  // What selecting text offers, for the section the selection is in.
-  // Who last changed the section, as Show editors tells it in Google Docs (§3.2).
-  const editors = (blockId: string) => {
-    const updated = awareness.data?.blocks.find((block) => block.blockId === blockId)?.updated;
-    if (!updated) return null;
-    const conversationId = updated.conversationIds[0];
-    const name = conversationId ? conversationName(conversationId) : null;
-    return { people: updated.authors.map((author) => ({ name: author.label, color: pageAuthorColor(author) })),
-      when: formatRelativeAge(updated.createdAt) ?? new Date(updated.createdAt).toLocaleString(),
-      conversation: conversationId && name ? { id: conversationId, name } : null };
-  };
   const openHistory = () => {
     reading.current?.seeAll();
     if (headRevision !== null) markSeen(headRevision, null);
     setMode("history");
   };
-  const sectionActions: PageSectionActions = { discuss, copyLink, claim, editors, history: openHistory };
+  // What selecting text offers, for the section the selection is in.
+  const sectionActions: PageSectionActions = { discuss };
   // What a heading offers, beside it (§3.2).
   const headingActions: HeadingActions = {
     canEdit,

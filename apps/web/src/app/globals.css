@@ -8354,6 +8354,32 @@ html[data-app-theme] .xmatrix-app.xmatrix-app .app-paper-card .app-tool-lines in
   box-shadow: none !important;
 }
 
+/* A menu or small form floating over the paper (a page's selection menu, `/`
+   insert, a link being typed, the table tools and heading menu; Discuss on a
+   passage selected in a message) is a card of whiter paper laid on the page,
+   not glass and not a tinted slip (user 2026-10-19: 不要边框; chose A among
+   four, after a tint and an ink bar read as ugly): no edge, a little brighter
+   than the page so it stands off the text it covers, and a soft warm shadow
+   that lifts it, as Notion's and Linear's menus do. */
+.app-material-paper-popover {
+  background: oklch(0.997 0.002 85);
+  color: var(--app-panel-ink, var(--foreground));
+  border-radius: 8px;
+  box-shadow:
+    0 1px 2px oklch(0.35 0.07 60 / 0.06),
+    0 8px 24px -6px oklch(0.35 0.07 60 / 0.18);
+}
+
+/* Its items are lines of the card: a little ink under the pointer, or while
+   chosen from the keyboard or pressed, and nothing at rest. */
+.app-material-paper-popover:is([role="toolbar"], [role="listbox"], [role="menu"]) > button {
+  background: transparent;
+}
+
+.app-material-paper-popover:is([role="toolbar"], [role="listbox"], [role="menu"]) > button:is(:hover:not(:disabled), :active, [aria-selected="true"], [aria-pressed="true"]) {
+  background: color-mix(in oklch, var(--foreground) 6%, transparent);
+}
+
 /* Notices on the paper: plain white with the tone's rail, not glass. */
 html[data-app-theme] .xmatrix-app.xmatrix-app .app-tool-detail .app-notice {
   background: oklch(0.995 0.002 85) !important;

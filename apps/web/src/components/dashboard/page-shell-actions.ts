@@ -33,9 +33,9 @@ export function pageShellActions(input: {
   focusComposer: () => void;
   /**
    * Readies a new conversation's composer, for when it opens: the passage it
-   * discusses, which its first message carries, and for Ask AI an address to @auto.
+   * discusses, which its first message carries.
    */
-  seedComposer: (conversationId: string, seed: { quote?: DiscussionQuote; askAi?: boolean }) => void;
+  seedComposer: (conversationId: string, seed: { quote?: DiscussionQuote }) => void;
 }) {
   const pagesPath = (pageId: string | null, conversationId: string | null) =>
     pagesViewPath(appViewPath(null, "pages", input.currentSpaceId, input.spaces), pageId, conversationId);
@@ -116,7 +116,7 @@ export function pageShellActions(input: {
   async function startPageConversation(page: {
     spaceId: string; pageId: string; blockId: string; name: string; restricted: boolean; anchor?: PageLinkAnchor;
   }, options: {
-    open?: boolean; firstMessage?: string; quote?: DiscussionQuote; askAi?: boolean; coWrite?: boolean;
+    open?: boolean; firstMessage?: string; quote?: DiscussionQuote; coWrite?: boolean;
     planned?: (conversationId: string) => void;
   } = {}): Promise<string | null> {
     const { token, user } = input;
@@ -125,7 +125,7 @@ export function pageShellActions(input: {
       memberName: user.name || user.email || "Human", name: page.name, mode: page.restricted ? "closed" : "open",
       metadata: { fromPageId: page.pageId } });
     options.planned?.(channel.id);
-    if (options.quote || options.askAi) input.seedComposer(channel.id, { quote: options.quote, askAi: options.askAi });
+    if (options.quote) input.seedComposer(channel.id, { quote: options.quote });
     // A discussion opens beside the page it is about, ready to write in, before it exists.
     // Machinery attached to a page lives in its own conversation; the page stays open.
     const opened = options.open !== false && !options.firstMessage;
