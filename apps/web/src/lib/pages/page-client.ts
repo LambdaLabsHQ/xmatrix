@@ -77,8 +77,13 @@ export const pageApi = {
   githubFile: (spaceId: string, pageId: string, token: string, href: string, signal?: AbortSignal) =>
     xmatrixApiRequest<PageGitHubFile>({
       url: `${WEB_PROXY_ROUTES.space_page(spaceId, pageId)}/github-file?href=${encodeURIComponent(href)}`, token, signal }),
+  /**
+   * When and where each section last changed and what it owes. The page reads its claims, discussions and who
+   * is on it on their own, live, so this asks the Hub for the sections alone.
+   */
   awareness: (spaceId: string, pageId: string, token: string, signal?: AbortSignal) =>
-    xmatrixApiRequest<PageAwareness>({ url: `${WEB_PROXY_ROUTES.space_page(spaceId, pageId)}/awareness`, token, signal }),
+    xmatrixApiRequest<PageAwareness>({ url: `${WEB_PROXY_ROUTES.space_page(spaceId, pageId)}/awareness?scope=sections`,
+      token, signal }),
   governance: (spaceId: string, token: string, signal?: AbortSignal) =>
     xmatrixApiRequest<SpaceGovernance>({ url: WEB_PROXY_ROUTES.space_governance(spaceId), token, signal }),
   setGovernance: (spaceId: string, token: string, change: Partial<SpaceGovernance>) =>

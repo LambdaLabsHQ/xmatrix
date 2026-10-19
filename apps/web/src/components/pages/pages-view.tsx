@@ -519,7 +519,8 @@ type PageDialogState =
   | { kind: "agent"; key: string };
 
 export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpenSection, onPageDeleted, conversation, activeConversationId = null,
-  renderConversation, onConversationDockChange, onCloseConversation, onExpandConversation, onOpenConversation, onDiscuss, onConnectGitHub, canMigrate, layout = "desktop", focusSection = null,
+  renderConversation, onConversationDockChange, onCloseConversation, onExpandConversation, onOpenConversation,
+  onConversationIntent, onDiscuss, onConnectGitHub, canMigrate, layout = "desktop", focusSection = null,
   creation }: {
   spaceId: string | null;
   token: string;
@@ -542,6 +543,8 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   onExpandConversation?: (conversationId: string) => void;
   /** Opens a conversation beside the page (pages-live-document.md §4.4). */
   onOpenConversation: (conversationId: string) => void;
+  /** The reader rests on one of the page's conversations, which may be opened next. */
+  onConversationIntent?: (conversationId: string) => void;
   onDiscuss: (input: { spaceId: string; pageId: string; blockId: string; name: string; restricted: boolean;
     anchor?: PageLinkAnchor; firstMessage?: string; quote?: DiscussionQuote; open?: boolean; coWrite?: boolean;
     /** Hears the conversation's id as soon as it is known, before the Hub has made or linked it. */
@@ -592,6 +595,12 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   const [dialog, setDialog] = useState<PageDialogState | null>(null);
   // The conversation whose card is being read, so its passage is marked (§4.4).
   const [focused, setFocused] = useState<string | null>(null);
+  // A conversation being read is about to be opened: what opening it needs is read now.
+  const conversationIntent = useRef(onConversationIntent);
+  conversationIntent.current = onConversationIntent;
+  useEffect(() => {
+    if (focused) conversationIntent.current?.(focused);
+  }, [focused]);
   const [anchorTops, setAnchorTops] = useState<ReadonlyMap<string, number>>(new Map());
   // Where the preview's sections stand, so the margin's cards stand beside them before the editor is drawn.
   const [previewTops, setPreviewTops] = useState<ReadonlyMap<string, number>>(new Map());

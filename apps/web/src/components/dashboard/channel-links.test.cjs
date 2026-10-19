@@ -9,6 +9,7 @@ const {
   parseInternalChannelLink,
   resolveChannelRouteKey,
   resolveSpaceRouteKey,
+  routeChannelTarget,
 } = require("./channel-links.ts");
 
 const spaces = [
@@ -101,4 +102,15 @@ test("external web links are not classified as internal channel links", () => {
     ),
     null
   );
+});
+
+test("a route's channel key names a channel by its id, and only a legacy key is a route token", () => {
+  // A page names its conversation by id; an id whose last group starts with "c" is still an id.
+  assert.deepEqual(routeChannelTarget("6f1d2a3b-4c5d-4e6f-8a9b-c0d1e2f3a4b5"),
+    { channelId: "6f1d2a3b-4c5d-4e6f-8a9b-c0d1e2f3a4b5", routeToken: null });
+  assert.deepEqual(routeChannelTarget("design-launch--channel%3ADesign%2FLaunch%20387"),
+    { channelId: "channel:Design/Launch 387", routeToken: null });
+  assert.deepEqual(routeChannelTarget("design-launch-c1a2b3c4d5"), { channelId: null, routeToken: "c1a2b3c4d5" });
+  assert.deepEqual(routeChannelTarget("general"), { channelId: "general", routeToken: null });
+  assert.equal(routeChannelTarget("  "), null);
 });

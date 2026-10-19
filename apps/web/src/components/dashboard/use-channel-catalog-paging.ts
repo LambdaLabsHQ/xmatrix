@@ -46,7 +46,7 @@ import {
   shareCatalogRows,
   type ChannelCatalogChangeDetail,
 } from "./channel-catalog-refresh";
-import { exactChannelIdFromRouteKey, routeEntityTokenFromKey } from "./channel-links";
+import { routeChannelTarget } from "./channel-links";
 import { readAskedNow } from "./channel-message-summary";
 import { mergeChannelListHydratedFields } from "./workspace-admin-views";
 import { listenForForegroundRefresh } from "./foreground-refresh";
@@ -482,11 +482,9 @@ export function useChannelCatalogPaging(input: {
 
   useEffect(() => {
     const routeKey = routeChannelKey?.trim() || "";
-    const exactRouteChannelId = exactChannelIdFromRouteKey(routeKey);
-    const routeToken = routeChannelId || exactRouteChannelId
-      ? null : routeEntityTokenFromKey(routeKey, "c");
-    const requestedChannelId = routeChannelId?.trim() || exactRouteChannelId ||
-      (routeToken ? null : routeKey);
+    const target = routeChannelTarget(routeKey);
+    const routeToken = routeChannelId?.trim() ? null : target?.routeToken ?? null;
+    const requestedChannelId = routeChannelId?.trim() || target?.channelId || null;
     if ((!requestedChannelId && !routeToken) || !token || !userId || !routeSpaceId) return;
     const resolveKey = `${userId}\u0000${routeSpaceId}\u0000${routeKey}`;
     if (resolvedRouteKeyRef.current === resolveKey) return;

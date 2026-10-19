@@ -36,7 +36,7 @@ async function stubPages(browser: Page, pages: ReturnType<typeof page>[], channe
   await fixtureJson(browser, "page-claims", /\/api\/xmatrix\/spaces\/[^/]+\/pages\/[^/]+\/claims$/u, {
     claims: [], competitiveBlocks: [],
   });
-  await fixtureJson(browser, "page-awareness", /\/api\/xmatrix\/spaces\/[^/]+\/pages\/[^/]+\/awareness$/u, {
+  await fixtureJson(browser, "page-awareness", /\/api\/xmatrix\/spaces\/[^/]+\/pages\/[^/]+\/awareness(?:\?.*)?$/u, {
     pageId: "p-relay", headRevision: 3, blocks: [],
   });
   await fixtureJson(browser, "page-automations", /\/api\/xmatrix\/spaces\/[^/]+\/pages\/[^/]+\/automations$/u, {
@@ -216,7 +216,7 @@ test("a page is co-edited live and shows an Agent working on a section it claime
     links: [{ linkId: "l1", conversationId: E2E_CHANNEL.id, pageId: "p-relay", blockId: "status", source: "edit",
       createdAt: NOW, lastSeenAt: NOW }],
   });
-  await fixtureJson(browser, "page-awareness", /\/api\/xmatrix\/spaces\/[^/]+\/pages\/[^/]+\/awareness$/u, {
+  await fixtureJson(browser, "page-awareness", /\/api\/xmatrix\/spaces\/[^/]+\/pages\/[^/]+\/awareness(?:\?.*)?$/u, {
     pageId: "p-relay", headRevision: 3, blocks: [{ blockId: "notes", claims: [], present: [], updated: {
       revision: 2, authors: [{ kind: "agent", id: "a1", label: "claude:1" }], conversationIds: [E2E_CHANNEL.id],
       createdAt: new Date(Date.now() - 2 * 3_600_000).toISOString() },
@@ -350,7 +350,7 @@ async function openChannelTouchingRelay(browser: import("@playwright/test").Page
   });
   await fixtureJson(browser, "page-relay", /\/api\/xmatrix\/spaces\/[^/]+\/pages\/p-relay$/u, editedPageDocument(relay, 3));
   await fixtureJson(browser, "page-tree", /\/api\/xmatrix\/spaces\/[^/]+\/pages(?:\?.*)?$/u, { pages: [relay] });
-  await fixtureJson(browser, "page-awareness", /\/api\/xmatrix\/spaces\/[^/]+\/pages\/[^/]+\/awareness$/u, {
+  await fixtureJson(browser, "page-awareness", /\/api\/xmatrix\/spaces\/[^/]+\/pages\/[^/]+\/awareness(?:\?.*)?$/u, {
     pageId: "p-relay", headRevision: 3, blocks: [],
   });
   await stubs?.();
@@ -392,7 +392,7 @@ test("a page bookmark preserves and renders leading bold in its status and hover
 test("a bookmark says in small type what the last change to its section did", async ({ page: browser }) => {
   await openChannelTouchingRelay(browser, undefined, async () => {
     // claude's revision 3 turned the section's "Planned" into "In progress".
-    await fixtureJson(browser, "page-awareness", /\/api\/xmatrix\/spaces\/[^/]+\/pages\/p-relay\/awareness$/u, {
+    await fixtureJson(browser, "page-awareness", /\/api\/xmatrix\/spaces\/[^/]+\/pages\/p-relay\/awareness(?:\?.*)?$/u, {
       pageId: "p-relay", headRevision: 3, blocks: [{ blockId: "status", claims: [], present: [], discussions: [],
         owed: null, updated: { revision: 3, authors: [{ kind: "agent", id: "a1", label: "claude" }],
           conversationIds: [E2E_CHANNEL.id], createdAt: new Date(Date.now() - 2 * 3_600_000).toISOString() } }],
@@ -1309,6 +1309,46 @@ test("a page's conversations sit beside what they are about, and one opens there
   await expect(open).toBeHidden();
   await expect(cards).toHaveCount(2);
   await expect(browser).toHaveURL(/page=p-relay$/u);
+});
+
+test("a page's conversation missing from the loaded list is read while its card is rested on, and opens beside the page", async ({ page: browser }) => {
+  await browser.setViewportSize({ width: 1600, height: 900 });
+  // An older conversation: not among the conversations loaded, and its id's last group starts with "c".
+  const older = { ...E2E_CHANNEL, id: "6f1d2a3b-4c5d-4e6f-8a9b-c0d1e2f3a4b5", name: "Older notes" };
+  await stubPages(browser, [page("p-relay", null, "Relay", "V")], [E2E_CHANNEL]);
+  await fixtureRule(browser, { id: "older-resolve", pattern: /\/api\/xmatrix\/channels\/resolve(?:\?.*)?$/u, method: "POST",
+    responder: { kind: "channelCatalog", channels: [E2E_CHANNEL, older], held: true } });
+  const recent = new Date(Date.now() - 5 * 60_000).toISOString();
+  await fixtureJson(browser, "page-links", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\?.*$/u, {
+    links: [{ linkId: "l-older", conversationId: older.id, pageId: "p-relay", blockId: "status", source: "edit",
+      createdAt: NOW, lastSeenAt: recent }],
+    conversations: [{ conversationId: older.id, name: older.name, activityAt: recent, headSequence: 1, readSequence: 1,
+      lastMessage: { from: { kind: "user", label: "Yiming Hu" }, bodyPreview: "Keep the old plan.", sentAt: recent },
+      agents: [] }],
+  });
+  await fixtureJson(browser, "older-history", `**/api/xmatrix/channels/${older.id}/history**`, {
+    messages: [{ messageId: "older-1", channelId: older.id, sequence: 1, body: "Keep the old plan.", sentAt: recent,
+      reactions: [], annotations: [], attachments: [], from: E2E_USER_SENDER }],
+    hasMore: false, historyHeadSequence: 1 });
+  await openLivePage(browser);
+  const card = browser.getByTestId("page-margin").getByTestId("page-margin-card");
+  await expect(card).toContainText("Keep the old plan.");
+
+  // Resting on the card reads the conversation, before it is opened.
+  await card.hover();
+  await expect.poll(async () => (await fixtureRequestRecords(browser, "older-resolve"))
+    .some((record) => record.body?.includes(older.id)), { message: "the conversation is read ahead" }).toBe(true);
+  await releaseFixture(browser, "older-resolve");
+  await card.click();
+  const open = browser.getByTestId("page-margin").getByTestId("page-margin-open");
+  await expect(open.getByTestId("page-conversation")).toContainText("Keep the old plan.");
+
+  // Its link opens it beside the page from a cold start too: the id names it.
+  await expect(browser).toHaveURL(new RegExp(`conversation=${older.id}`, "u"));
+  await browser.goto(browser.url(), { waitUntil: "domcontentloaded" });
+  await releaseFixture(browser, "older-resolve");
+  await expect(browser.getByTestId("page-margin").getByTestId("page-margin-open").getByTestId("page-conversation"))
+    .toContainText("Keep the old plan.");
 });
 
 test("a page's conversations stand beside its sections while the live session is still syncing", async ({ page: browser }) => {

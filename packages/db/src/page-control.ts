@@ -1,6 +1,6 @@
 import type { QueryResultRow } from "pg";
 import { LIVE_AGENT_STATUS_SQL, isLiveAgentStatus, pageBlockAt, pageBlocks, pageChangeGist, utf8ByteLength } from "@xmatrix/protocol";
-import { canonicalPageMarkdown, pageChangedDocBlocks, pageChangedDocBlocksAsync } from "@xmatrix/protocol/page-document";
+import { canonicalPageMarkdown, pageChangedDocBlocks } from "@xmatrix/protocol/page-document";
 import { spaceBilling } from "@xmatrix/billing";
 import { readsOnly } from "./space-roles.js";
 import { MessageAuthorityError } from "./message-authority-error.js";
@@ -11,6 +11,7 @@ import { loadChannelAgentPresence } from "./channel-agent-presence.js";
 import { requireAgentChannelAccess, type AgentChannelRunProof } from "./agent-channel-access.js";
 import { PostgresChannelSpaceDirectory, PostgresSpacePlacementDirectory } from "./placement.js";
 import { reconcilePageAutomations, removePageAutomations } from "./automation-page-anchor.js";
+import { keepSectionChanges, readRevisionBodies, walkSectionChanges, type SectionRevisionRow } from "./page-section-changes.js";
 import type {
   PageAuthor, PageAutomationAnchorChange, PageBlockAwareness, PageClaim, PageDocument, PageLink, PageLinkAnchor, PageOwedUpdate, PageRecentChange, PageRevision, PageSearchHit, PageSummary, PageTreeAgent, PublicPage,
 } from "@xmatrix/protocol";
@@ -545,6 +546,18 @@ export class PostgresPageRepository {
     });
   }
 
+  /** Whether a principal may read a page and edit it, and its head, without its text: what a live ticket needs. */
+  async access(input: { requestId: string; spaceId: string; pageId: string; principal: PagePrincipal }):
+    Promise<{ canEdit: boolean; agentSuggestOnly: boolean; headRevision: number }> {
+    const spaceId = bounded(input.spaceId, "spaceId");
+    const pageId = bounded(input.pageId, "pageId");
+    return this.inSpace(bounded(input.requestId, "requestId"), "page.access", spaceId, async (tx) => {
+      const actor = await pageActor(tx, spaceId, input.principal, false);
+      const row = await this.page(tx, spaceId, actor, pageId, "read");
+      return { canEdit: row.canEdit, agentSuggestOnly: row.agent_suggest_only, headRevision: Number(row.head_revision) };
+    });
+  }
+
   async read(input: { requestId: string; spaceId: string; pageId: string; principal: PagePrincipal;
     revision?: number; conversationId?: string; blockId?: string }): Promise<{ page: PageDocument }> {
     const spaceId = bounded(input.spaceId, "spaceId");
@@ -931,13 +944,17 @@ export class PostgresPageRepository {
       owed: Map<string, PageOwedUpdate> }> {
     const spaceId = bounded(input.spaceId, "spaceId");
     const pageId = bounded(input.pageId, "pageId");
-    const { rows, ended, headRevision } = await this.inSpace(bounded(input.requestId, "requestId"), "page.block-updates", spaceId, async (tx) => {
+    const requestId = bounded(input.requestId, "requestId");
+    const { rows, ended, headRevision } = await this.inSpace(requestId, "page.block-updates", spaceId, async (tx) => {
       const actor = await pageActor(tx, spaceId, input.principal, false);
       const row = await this.page(tx, spaceId, actor, pageId, "read");
       const headRevision = Number(row.head_revision);
-      const rows = await tx.query<RevisionRow>({
-        name: "page_block_updates_v1",
-        text: `SELECT revision,kind,body,authors_json,conversation_ids,based_on_revision,created_at
+      // Newest first, with what each revision changed once that is derived (page-section-changes.ts); the
+      // newest revision's body gives the page's sections and their order.
+      const rows = await tx.query<RevisionRow & SectionRevisionRow & { newest_body: string | null }>({
+        name: "page_block_updates_v2",
+        text: `SELECT revision,kind,authors_json,conversation_ids,based_on_revision,created_at,changed_blocks,
+            CASE WHEN row_number() OVER (ORDER BY revision DESC) = 1 THEN body END AS newest_body
           FROM data.page_revisions WHERE space_id=$1 AND page_id=$2 AND revision <= $3
             AND kind NOT IN ('suggestion','purge')
           ORDER BY revision DESC LIMIT ${BLOCK_UPDATE_REVISIONS}`,
@@ -960,36 +977,21 @@ export class PostgresPageRepository {
       return { headRevision, rows, ended };
     });
     // Document parsing must not hold a checkout or exhaust the transaction
-    // before the small owed-claim read (XMATRIX-HUB-82).
+    // before the small owed-claim read (XMATRIX-HUB-82); bodies a derivation
+    // still needs are read in a transaction of their own.
+    const order = pageBlocks(rows[0]?.newest_body ?? "").map((block) => block.id);
+    const { updates: changedBy, derived, bodies } = await walkSectionChanges(rows, order, (revisions) =>
+      this.inSpace(requestId, "page.block-updates.bodies", spaceId, (tx) =>
+        readRevisionBodies(tx, spaceId, pageId, revisions)));
+    // What this read derived is kept for the next one; a reader is answered whether or not it could be.
+    if (derived.length > 0) {
+      await this.inSpace(requestId, "page.block-updates.keep", spaceId, (tx) =>
+        keepSectionChanges(tx, spaceId, pageId, derived, bodies)).catch(() => undefined);
+    }
     const updates = new Map<string, PageBlockAwareness["updated"]>();
-    // Compared as documents, so a change of markdown style is no change. Only
-    // sections whose text differs are put in canonical form: the whole of a
-    // long page's recent revisions is seconds of CPU, which stalls every
-    // request sharing the isolate (XMATRIX-HUB-68, XMATRIX-HUB-69).
-    const bodies = rows.map((revision) => revision.body ?? "");
-    const canonicalSections = new Map<string, string>();
-    const canonical = async (section: string) => {
-      let form = canonicalSections.get(section);
-      if (form === undefined) {
-        // Let other requests and their pending database responses progress.
-        await new Promise<void>((resolve) => setTimeout(resolve, 0));
-        canonicalSections.set(section, form = canonicalPageMarkdown(section));
-      }
-      return form;
-    };
-    const order = pageBlocks(bodies[0] ?? "").map((block) => block.id);
-    const open = new Set(order);
-    for (let index = 0; index < rows.length && open.size; index++) {
-      const newer = rows[index]!;
-      const older = rows[index + 1];
-      // The first revision in reach wrote whatever is left, if it is the page's first.
-      const changed = older ? await pageChangedDocBlocksAsync(bodies[index + 1]!, bodies[index]!, canonical, open)
-        : Number(newer.revision) === 1 ? [...open] : [];
-      for (const blockId of changed) {
-        if (!open.delete(blockId)) continue;
-        const { revision, authors, conversationIds, createdAt } = revisionOf(newer);
-        updates.set(blockId, { revision, authors, conversationIds, createdAt });
-      }
+    for (const [blockId, row] of changedBy) {
+      const { revision, authors, conversationIds, createdAt } = revisionOf(row);
+      updates.set(blockId, { revision, authors, conversationIds, createdAt });
     }
     const owed = new Map<string, PageOwedUpdate>();
     const sections = new Set(order);
@@ -1668,6 +1670,14 @@ export class PostgresPageRepository {
         text: `WITH redacted AS (UPDATE data.page_revisions SET body=replace(body,$3,$4)
           WHERE space_id=$1 AND page_id=$2 AND strpos(body,$3) > 0 RETURNING 1) SELECT count(*)::int AS n FROM redacted`,
         values: [spaceId, pageId, needle, replacement], maxRows: 1,
+      });
+      // What the page's revisions changed was derived from bodies this may have rewritten, and can name
+      // the removed text's headings: it is derived again from the redacted bodies (page-section-changes.ts).
+      await tx.query({
+        name: "page_purge_forget_section_changes_v1",
+        text: `UPDATE data.page_revisions SET changed_blocks=NULL
+          WHERE space_id=$1 AND page_id=$2 AND changed_blocks IS NOT NULL`,
+        values: [spaceId, pageId], maxRows: 0,
       });
       return { redactedRevisions: Number(rows[0]?.n ?? 0) };
     });

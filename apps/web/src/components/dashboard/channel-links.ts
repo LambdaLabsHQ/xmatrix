@@ -43,6 +43,24 @@ export function exactChannelIdFromRouteKey(key: string): string | null {
   return decoded.slice(separator + 2).trim() || null;
 }
 
+// A Channel's own id, as a page names its conversation (`?conversation=<id>`).
+const CHANNEL_ID_SHAPE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
+
+/**
+ * What a route's channel key asks for: a Channel by its id, or a legacy route token to resolve. A bare id
+ * whose last group starts with "c" is an id, not a token.
+ */
+export function routeChannelTarget(key: string): { channelId: string; routeToken: null }
+  | { channelId: null; routeToken: string } | null {
+  const trimmed = key.trim();
+  if (!trimmed) return null;
+  const exact = exactChannelIdFromRouteKey(trimmed);
+  if (exact) return { channelId: exact, routeToken: null };
+  if (CHANNEL_ID_SHAPE.test(trimmed)) return { channelId: trimmed, routeToken: null };
+  const routeToken = routeEntityTokenFromKey(trimmed, "c");
+  return routeToken ? { channelId: null, routeToken } : { channelId: trimmed, routeToken: null };
+}
+
 export function routeEntityTokenFromKey(key: string, prefix: "s" | "c"): string | null {
   const match = key.match(new RegExp(`(?:^|-)${prefix}([a-z0-9]{8,12})$`));
   return match ? `${prefix}${match[1]}` : null;

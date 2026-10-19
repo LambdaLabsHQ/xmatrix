@@ -108,6 +108,16 @@ function cachedGitHubFile(key: string, read: () => Promise<GitHubFileContent>): 
 }
 
 /** The page named by the route, read as the caller, which is also its access check. */
+/** The caller's access to the page and its head, without its text. */
+async function accessAsCaller(c: Context<{ Bindings: Env }>) {
+  const spaceId = c.req.param("spaceId")!;
+  const pageId = c.req.param("pageId")!;
+  const authUser = await requireAuth(c.req.raw, c.env);
+  const page = await repository(c.env).access({ requestId: crypto.randomUUID(), spaceId, pageId,
+    principal: runPrincipalOf(authUser) });
+  return { spaceId, pageId, authUser, page };
+}
+
 async function readAsCaller(c: Context<{ Bindings: Env }>) {
   const spaceId = c.req.param("spaceId")!;
   const pageId = c.req.param("pageId")!;
@@ -353,9 +363,9 @@ export function registerPageRoutes(app: Hono<{ Bindings: Env }>): void {
   // commits it. Co-authors come only from the session, never from a client.
   app.put(`${base}/:pageId`, async (c) => sessionResponse(c, async () => {
     const body = await json(c);
-    // Reading the page as the caller authorizes them before the session
+    // The caller's access to the page authorizes them before the session
     // shows them anything, including the current text of a conflict.
-    const { spaceId, pageId, authUser } = await readAsCaller(c);
+    const { spaceId, pageId, authUser } = await accessAsCaller(c);
     const conversationIds = stringList(body.conversationIds);
     return sessionCall(c.env, spaceId, pageId, "/internal/edit", {
       principal: sessionPrincipal(authUser, conversationIds[0]), baseRevision: integer(body.baseRevision),
@@ -379,6 +389,15 @@ export function registerPageRoutes(app: Hono<{ Bindings: Env }>): void {
     const spaceId = c.req.param("spaceId");
     const pageId = c.req.param("pageId");
     const caller = await principal(c);
+    // `?scope=sections` is when and where each section last changed and what it owes, alone: a page in the
+    // Web reads its claims, discussions and who is on it on their own, live.
+    if (c.req.query("scope") === "sections") {
+      const { headRevision, order, updates, owed } = await repository(c.env).blockUpdates({
+        requestId: crypto.randomUUID(), spaceId, pageId, principal: caller });
+      return { pageId, headRevision, blocks: [...new Set([...order, ...owed.keys()])].map((blockId) => ({
+        blockId, updated: updates.get(blockId) ?? null, claims: [], present: [], discussions: [],
+        owed: owed.get(blockId) ?? null, working: [] })) };
+    }
     // Each read checks on its own that the caller may read the page, so they run side by side; the page's
     // live session is asked who is on it only once the updates' check has passed.
     const [[{ headRevision, order, updates, owed }, present], { claims }, [links, conversations]] = await Promise.all([
@@ -444,7 +463,7 @@ export function registerPageRoutes(app: Hono<{ Bindings: Env }>): void {
   // A person takes back what an Agent co-writing the page live last wrote (page-co-writer.ts).
   app.post(`${base}/:pageId/co-writing/:conversationId/undo`, async (c) => {
     try {
-      const { spaceId, pageId, authUser, page } = await readAsCaller(c);
+      const { spaceId, pageId, authUser, page } = await accessAsCaller(c);
       if (authUser.agentRun || !page.canEdit) {
         throw new PageControlError("page_co_writing_human_only", 403, "Only a person who may edit the page takes back an Agent's change");
       }
@@ -586,7 +605,8 @@ export function registerPageRoutes(app: Hono<{ Bindings: Env }>): void {
         return c.json({ error: "This page editor is out of date; reload to keep editing", code: "page_client_outdated" },
           409, NO_STORE);
       }
-      const { spaceId, pageId, authUser, page } = await readAsCaller(c);
+      // The session reads the text itself when it loads: the ticket needs the caller's access alone.
+      const { spaceId, pageId, authUser, page } = await accessAsCaller(c);
       // An Agent's runtime joins to co-write the page live (page-co-writer.ts): its Run writes, so it must
       // be able to edit, and a page that takes Agent edits only as suggestions is not written live.
       const coWriter = request.coWrite === true;
