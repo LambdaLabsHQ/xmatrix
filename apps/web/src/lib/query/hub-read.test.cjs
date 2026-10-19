@@ -76,4 +76,24 @@ test("the admitted app reads from the Hub straight, with its bearer and identity
   requests.length = 0;
   assert.deepEqual(await read(), { pages: ["from the Web"] });
   assert.deepEqual(requests.map((request) => request.url), ["/api/xmatrix/spaces/s1/pages"]);
+
+  // The ticket a live session opens with is asked for the same way, its body as JSON.
+  globalThis.window.location.origin = "https://xmatrix.sh";
+  hub = () => Response.json({ protocol: "ticket" });
+  const posted = [];
+  serve(t, async (url, init) => {
+    posted.push({ url, method: init.method, body: init.body, type: new Headers(init.headers).get("content-type") });
+    return toHub(url) ? hub(url, init) : Response.json({ protocol: "web" });
+  });
+  assert.deepEqual(await xmatrixHubRead({ hubPath: "/api/spaces/s1/pages/p1/live", webUrl: "/api/xmatrix/spaces/s1/pages/p1/live",
+    token: "token-1", method: "POST", body: { document: "prosemirror" } }), { protocol: "ticket" });
+  assert.deepEqual(posted, [{ url: `${HUB}/api/spaces/s1/pages/p1/live`, method: "POST",
+    body: JSON.stringify({ document: "prosemirror" }), type: "application/json" }]);
+  hub = () => new Response("{}", { status: 401 });
+  posted.length = 0;
+  assert.deepEqual(await xmatrixHubRead({ hubPath: "/api/spaces/s1/pages/p1/live", webUrl: "/api/xmatrix/spaces/s1/pages/p1/live",
+    token: "token-1", method: "POST", body: { document: "prosemirror" } }), { protocol: "web" });
+  assert.deepEqual(posted.map((request) => [request.url, request.method, request.type]), [
+    [`${HUB}/api/spaces/s1/pages/p1/live`, "POST", "application/json"],
+    ["/api/xmatrix/spaces/s1/pages/p1/live", "POST", "application/json"]]);
 });

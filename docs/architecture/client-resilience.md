@@ -193,9 +193,11 @@ those GET routes, and their preflight, to the app's origin alone
 (`packages/hub/src/direct-read-cors.ts`), and authorizes them as it does
 through the Web. The Web answers the read when the Hub does not: before
 admission, at any other origin (an app shell's), on no answer across origins,
-on `401` (the Web renews the token from the session) and on `426`. Writes keep
-going through the Web. A build with `NEXT_PUBLIC_XMATRIX_DIRECT_HUB_READS=0`
-reads everything through the Web.
+on `401` (the Web renews the token from the session) and on `426`. The ticket
+a page's live session opens with is asked for the same way (`POST …/live`), as
+the session's socket already goes to the Hub. Other writes keep going through
+the Web. A build with `NEXT_PUBLIC_XMATRIX_DIRECT_HUB_READS=0` sends everything
+through the Web.
 
 ## Coming back: one connectivity signal
 

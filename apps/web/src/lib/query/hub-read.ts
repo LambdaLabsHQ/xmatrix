@@ -24,20 +24,23 @@ function admittedIdentity() {
 }
 
 /**
- * A read the Hub answers straight to this page, skipping the Web's Worker. The Web answers it when the Hub will
- * not from here: no admitted client identity yet, no answer across origins, a token the Hub no longer takes
- * (the Web renews it from the session), or a client identity it refuses (the Web carries the admitted one).
- * Either way the Hub authorizes the same bearer on the same route.
+ * A request the Hub answers straight to this page, skipping the Web's Worker: a read, or the ticket a page's live
+ * session opens with. The Web answers it when the Hub will not from here: no admitted client identity yet, no answer
+ * across origins, a token the Hub no longer takes (the Web renews it from the session), or a client identity it
+ * refuses (the Web carries the admitted one). Either way the Hub authorizes the same bearer on the same route.
  */
 export async function hubReadResponse(input: { hubPath: string; webUrl: string; token: string;
-  signal?: AbortSignal }): Promise<Response> {
+  signal?: AbortSignal; method?: "GET" | "POST"; body?: unknown }): Promise<Response> {
+  const json: Record<string, string> = input.body === undefined ? {} : { "content-type": "application/json" };
+  const init = { method: input.method ?? "GET", signal: input.signal,
+    ...(input.body === undefined ? {} : { body: JSON.stringify(input.body) }) };
   const identity = readsFromHub() && input.token ? admittedIdentity() : null;
   if (identity) {
     try {
       const response = await xmatrixRawResponse(`${xmatrixHubOrigin()}${input.hubPath}`, {
-        headers: { Authorization: `Bearer ${input.token}`, ...clientCompatibilityHeaders(identity) },
+        ...init,
+        headers: { Authorization: `Bearer ${input.token}`, ...json, ...clientCompatibilityHeaders(identity) },
         credentials: "omit",
-        signal: input.signal,
       });
       if (response.status !== 401 && response.status !== 426) return response;
     } catch (cause) {
@@ -45,13 +48,13 @@ export async function hubReadResponse(input: { hubPath: string; webUrl: string; 
     }
   }
   return xmatrixRawResponse(input.webUrl, {
-    headers: input.token ? { Authorization: `Bearer ${input.token}` } : {},
-    signal: input.signal,
+    ...init,
+    headers: { ...json, ...(input.token ? { Authorization: `Bearer ${input.token}` } : {}) },
   });
 }
 
-/** A read's JSON, from the Hub straight when it answers this page (`hubReadResponse`). */
+/** A request's JSON, from the Hub straight when it answers this page (`hubReadResponse`). */
 export async function xmatrixHubRead<T>(input: { hubPath: string; webUrl: string; token: string;
-  signal?: AbortSignal }): Promise<T> {
+  signal?: AbortSignal; method?: "GET" | "POST"; body?: unknown }): Promise<T> {
   return requireJson<T>(await hubReadResponse(input), input.signal);
 }

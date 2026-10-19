@@ -122,6 +122,12 @@ test("each section says which revision last changed it, who has claimed it and w
     assert.equal(allowed.headers.get("access-control-allow-credentials"), null, "a bearer, never a cookie");
     assert.equal((await preflight("https://elsewhere.test")).headers.get("access-control-allow-origin"), null);
     assert.equal((await preflight(app, "PUT")).headers.get("access-control-allow-origin"), null, "writes go through the Web");
+    // The ticket a live session opens with is asked for straight, as the session itself is.
+    const ticket = await worker.fetch(`${at}/live`, { method: "OPTIONS", headers: { origin: app,
+      "access-control-request-method": "POST", "access-control-request-headers": "authorization, content-type" } });
+    assert.equal(ticket.status, 204);
+    assert.equal(ticket.headers.get("access-control-allow-origin"), app);
+    assert.equal(ticket.headers.get("access-control-allow-methods"), "POST");
     const direct = await worker.fetch(`${at}/awareness?scope=sections`, { headers: { ...auth, origin: app } });
     assert.equal(direct.status, 200);
     assert.equal(direct.headers.get("access-control-allow-origin"), app);

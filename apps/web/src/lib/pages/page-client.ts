@@ -385,9 +385,11 @@ export class PageLiveSession {
   }
 
   private async open(): Promise<WebSocket> {
-    const session = await xmatrixApiRequest<{ protocol: string; socketPath: string; canEdit: boolean;
+    // From the Hub straight when it answers this page, as the socket itself is (lib/query/hub-read.ts).
+    const session = await xmatrixHubRead<{ protocol: string; socketPath: string; canEdit: boolean;
       heartbeat?: string }>({
-      url: WEB_PROXY_ROUTES.space_page_live(this.input.spaceId, this.pageId!), token: this.token,
+      hubPath: hubPage(this.input.spaceId, this.pageId!, "live"),
+      webUrl: WEB_PROXY_ROUTES.space_page_live(this.input.spaceId, this.pageId!), token: this.token,
       method: "POST", body: { document: PAGE_DOCUMENT_FRAGMENT },
       // A ticket request stuck on a dead connection must not stop every later attempt.
       signal: AbortSignal.timeout(PAGE_TICKET_TIMEOUT_MS),
