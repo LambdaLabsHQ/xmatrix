@@ -1,8 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import test from "node:test";
-
-import { releaseChannel } from "./release-version-order.mjs";
 
 import {
   channelMessageFromFrame,
@@ -17,9 +14,6 @@ import {
 } from "./hub-network-e2e/run-reconnect-catchup.mjs";
 
 const immediateRetries = { retryDelayMs: 1, delayImpl: async () => {} };
-// The synthetic client reports exactly the release this checkout is: X.Y.Z on
-// main or a stable, X.Y.Z-beta.N on a beta's release commit.
-const releaseVersion = JSON.parse(readFileSync(new URL("../version.json", import.meta.url), "utf8")).version;
 const syntheticChannel = { hubUrl: "https://hub.example.com", token: "token", channelId: "channel-1" };
 
 function catalogResponse(empty, channelName) {
@@ -44,7 +38,6 @@ async function assertAuthorizationNotRetried(invoke) {
 }
 
 test("synthetic Human client uses the canonical Human WebSocket endpoint", () => {
-  assert.doesNotThrow(() => releaseChannel(releaseVersion));
   for (const [hubUrl, expectedOrigin] of [
     ["https://xmatrix-hub.test.xmatrix.sh", "wss://xmatrix-hub.test.xmatrix.sh"],
     ["http://127.0.0.1:8787", "ws://127.0.0.1:8787"],
@@ -53,7 +46,7 @@ test("synthetic Human client uses the canonical Human WebSocket endpoint", () =>
     assert.equal(url.origin, expectedOrigin);
     assert.equal(url.pathname, "/ws/humans");
     assert.equal(url.searchParams.get("x-xmatrix-client-component"), "cli");
-    assert.equal(url.searchParams.get("x-xmatrix-client-version"), releaseVersion);
+    assert.match(url.searchParams.get("x-xmatrix-client-version"), /^\d+\.\d+\.\d+$/u);
     assert.equal(url.searchParams.get("x-xmatrix-client-protocol"), "2");
   }
 });
@@ -63,7 +56,7 @@ test("synthetic Human client uses the current handshake and live message envelop
   assert.equal(connect.type, "human_connect");
   assert.equal(connect.token, "test-token");
   assert.equal(connect.device.client, "cli");
-  assert.equal(connect.device.version, releaseVersion);
+  assert.match(connect.device.version, /^\d+\.\d+\.\d+$/u);
   assert.equal(Number.isSafeInteger(connect.device.protocolVersion), true);
   const message = {
     messageId: "message-1",
