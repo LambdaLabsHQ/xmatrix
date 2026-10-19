@@ -219,9 +219,8 @@ fact is about.
   the heading of the section the reader is in carries one ⋯ whose menu names
   each action, *Co-write with ‹Agent›* first.
 - **No change log in the text.** As in Google Docs, who changed a section
-  and when is not written under it. *Show editors* on a selection says who
-  last changed that section, when and in which conversation, with a link to
-  History (parent §4.2).
+  and when is not written under it. History says who changed each part,
+  when and in which conversation (parent §4.2).
 - **Margin**: the conversations about the page, each beside what it is about
   (§4.4).
 - **The scrollbar** marks where others are, where discussions are and which
@@ -298,10 +297,13 @@ fact is about.
   by a space becomes a link.
   Clicking a link's visible destination edits the address.
 - **Table controls** appear only while the cursor is in a table.
-- **Selection menu**: *Discuss*, *Claim*, *Show editors*, *Copy link*.
+- **Selection menu**: *Discuss*, and nothing else (decided 2026-10-19).
+  What acts on the whole section (copying its link) is the heading's, not a
+  passage's; *Show editors* gave way to History, and *Claim* is not a
+  person's to make.
   - *Discuss* starts a conversation anchored to the selection (§4.3).
-    People and Agents meet in it alike, so there is no separate *Ask AI*
-    (removed 2026-10-19): asking an Agent, or asking it for a change, is
+    People and Agents meet in it alike, so there is no separate *Ask AI*:
+    asking an Agent, or asking it for a change, is
     mentioning it there (`@auto` lets xMatrix pick), beside the page (§4.4)
     where the answer arrives, and the Agent edits the page as the page lets
     it. There is no second input over the page.

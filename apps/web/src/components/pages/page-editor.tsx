@@ -5,8 +5,8 @@ import {
   markdownToPageDoc, pageDocBlockAt, pageDocBlocks, pageDocToMarkdown, pageSchema, pageSeenDoc, type PageDocBlock,
 } from "@xmatrix/protocol/page-document";
 import {
-  BetweenHorizontalEnd, BetweenVerticalEnd, Code2, Columns3, FileCode2, Flag, Rows3, Trash2, Heading1, Heading2, Heading3, Link2,
-  List, ListChecks, ListOrdered, MessageSquarePlus, Minus, Pilcrow, Quote, Table, Users,
+  BetweenHorizontalEnd, BetweenVerticalEnd, Code2, Columns3, FileCode2, Rows3, Trash2, Heading1, Heading2, Heading3, Link2,
+  List, ListChecks, ListOrdered, MessageSquarePlus, Minus, Pilcrow, Quote, Table,
 } from "lucide-react";
 import type { Node as DocNode } from "prosemirror-model";
 import { EditorState, Selection, type Command } from "prosemirror-state";
@@ -45,13 +45,6 @@ export interface PageReading {
 
 export type { CursorPresence, Discussion, HeadingActions, SectionNote };
 
-/** Who last changed a section and when, as Google Docs' Show editors tells it for a selection. */
-export interface SectionEditors {
-  people: Array<{ name: string; color: string }>;
-  when: string;
-  conversation: { id: string; name: string } | null;
-}
-
 /**
  * The page, edited as a document (docs/design/pages-live-document.md §4):
  * markdown is typed, and the caret's line shows its markers. People and
@@ -59,20 +52,14 @@ export interface SectionEditors {
  * markdown for Agents, revisions and git.
  */
 
-/** What a section offers from the selection menu; the page view owns the actions. */
+/**
+ * What a selected passage offers; the page view owns the action. Only Discuss: what acts on the whole
+ * section (copying its link, who changed it) is the heading's, and asking an Agent is mentioning it in
+ * the discussion.
+ */
 export interface PageSectionActions {
-  /**
-   * A conversation about the section; from a selection, anchored to that text.
-   * Asking AI is the same discussion, its composer already addressed to xMatrix,
-   * which picks the Agent: the question, and any change asked for, is written there.
-   */
+  /** A conversation about the section; from a selection, anchored to that text. */
   discuss?: (blockId: string, anchor?: { quote: string; from: unknown; to: unknown }) => void;
-  copyLink?: (blockId: string) => void;
-  claim?: (blockId: string) => void;
-  /** Who last changed the section the selection is in; null when it is not in recent history. */
-  editors?: (blockId: string) => SectionEditors | null;
-  /** Opens the page's History, where each change is shown in its author's colour. */
-  history?: () => void;
 }
 
 interface Toolbar {
@@ -292,7 +279,6 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
   // A GitHub file link being pasted to embed, and why the last one was not a file.
   const [fileDraft, setFileDraft] = useState<string | null>(null);
   const [fileDraftError, setFileDraftError] = useState(false);
-  const [editorsShown, setEditorsShown] = useState<{ blockId: string; left: number; top: number } | null>(null);
   const menu = useRef({ slash: null as SlashState | null, index: 0 });
 
   const run = useCallback((command: Command) => {
@@ -560,7 +546,7 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
     return { left: at.left - box.left, top: at.top - box.top, bottom: at.bottom - box.top };
   };
   const section = current ? pageDocBlockAt(current.state.doc, current.state.selection.from) : "";
-  const selectionActions = Boolean(actions?.discuss || (actions?.claim && canEdit) || actions?.copyLink);
+  const selectionActions = Boolean(actions?.discuss);
   const selectionMenu = toolbar && !toolbar.empty && toolbar.focused && current && toolbar.kind !== "code" && selectionActions
     ? place(current.state.selection.from) : null;
   const linkAtPos = linkDraft !== null && current ? place(current.state.selection.from) : null;
@@ -639,8 +625,8 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
       {selectionMenu && (
         <div className="absolute z-20 -translate-y-full"
           style={{ left: Math.max(0, selectionMenu.left - 8), top: selectionMenu.top - 6 }}>
-        <PaperPopover tone="ink" role="toolbar" aria-label="Selection" data-testid="page-selection-menu"
-          className="flex items-center gap-px p-0.5">
+        <PaperPopover role="toolbar" aria-label="Selection" data-testid="page-selection-menu"
+          className="flex items-center p-1">
           {actions?.discuss && (
             <button type="button" onMouseDown={(event) => event.preventDefault()}
               onClick={() => actions.discuss!(section, current ? selectionAnchor(current.state, session.fragment) ?? undefined
@@ -649,28 +635,8 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
               <MessageSquarePlus /> Discuss
             </button>
           )}
-          {actions?.claim && canEdit && (
-            <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => actions.claim!(section)}
-              className="flex h-8 items-center gap-1.5 rounded-md px-2 text-sm [&_svg]:size-4">
-              <Flag /> Claim
-            </button>
-          )}
-          {(actions?.editors || actions?.copyLink) && <span aria-hidden className="app-paper-popover-rule" />}
-          {actions?.editors && (
-            <ToolButton label="Show editors" onRun={() => setEditorsShown({ blockId: section, left: selectionMenu.left,
-              top: selectionMenu.top })}><Users /></ToolButton>
-          )}
-          {actions?.copyLink && (
-            <ToolButton label="Copy a link to this section" onRun={() => actions.copyLink!(section)}><Link2 /></ToolButton>
-          )}
         </PaperPopover>
         </div>
-      )}
-      {editorsShown && actions?.editors && (
-        <EditorsPopover at={editorsShown} editors={actions.editors(editorsShown.blockId)}
-          onOpenConversation={(conversationId) => { setEditorsShown(null); openConversation.current?.(conversationId); }}
-          onHistory={actions.history ? () => { setEditorsShown(null); actions.history!(); } : undefined}
-          onClose={() => setEditorsShown(null)} />
       )}
       {slash && slashAt && (
         <div className="absolute z-20 w-64" style={{ left: slashAt.left, top: slashAt.bottom + 4 }}>
@@ -690,50 +656,6 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
         </PaperPopover>
         </div>
       )}
-    </div>
-  );
-}
-
-/** Who changed the selected passage's section and when, with its conversation and History a click away. */
-function EditorsPopover({ at, editors, onOpenConversation, onHistory, onClose }: {
-  at: { left: number; top: number };
-  editors: SectionEditors | null;
-  onOpenConversation: (conversationId: string) => void;
-  onHistory?: () => void;
-  onClose: () => void;
-}) {
-  useEffect(() => {
-    const close = (event: KeyboardEvent) => { if (event.key === "Escape") onClose(); };
-    window.addEventListener("keydown", close);
-    return () => window.removeEventListener("keydown", close);
-  }, [onClose]);
-  return (
-    <div className="absolute z-30 w-72 -translate-y-full" style={{ left: Math.max(0, at.left - 8), top: at.top - 6 }}
-      onMouseDown={(event) => event.preventDefault()}>
-      <PaperPopover role="dialog" aria-label="Editors" data-testid="page-editors" className="space-y-1.5 p-2.5 text-sm">
-        {editors ? (
-          <>
-            {editors.people.map((person) => (
-              <div key={person.name} className="flex items-center gap-2">
-                <span className="size-2 shrink-0 rounded-full" style={{ backgroundColor: person.color }} />
-                <span className="truncate font-medium">{person.name}</span>
-              </div>
-            ))}
-            <div className="text-xs text-muted-foreground">
-              {editors.when}
-              {editors.conversation && (
-                <> · <button type="button" className="hover:text-foreground hover:underline"
-                  onClick={() => onOpenConversation(editors.conversation!.id)}>{editors.conversation.name}</button></>
-              )}
-            </div>
-          </>
-        ) : <div className="text-xs text-muted-foreground">No recent changes here.</div>}
-        <div className="flex justify-between gap-2 pt-1 text-xs">
-          {onHistory ? <button type="button" className="font-semibold hover:underline" onClick={onHistory}>
-            See version history</button> : <span />}
-          <button type="button" className="text-muted-foreground hover:underline" onClick={onClose}>Close</button>
-        </div>
-      </PaperPopover>
     </div>
   );
 }

@@ -1210,23 +1210,13 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   coWriteRef.current = coWrite;
   const claim = (blockId: string) => (claimable(blockId) ? void claimBlock(blockId)
     : setNotice("Someone is already on this section."));
-  // What selecting text offers, for the section the selection is in.
-  // Who last changed the section, as Show editors tells it in Google Docs (§3.2).
-  const editors = (blockId: string) => {
-    const updated = awareness.data?.blocks.find((block) => block.blockId === blockId)?.updated;
-    if (!updated) return null;
-    const conversationId = updated.conversationIds[0];
-    const name = conversationId ? conversationName(conversationId) : null;
-    return { people: updated.authors.map((author) => ({ name: author.label, color: pageAuthorColor(author) })),
-      when: formatRelativeAge(updated.createdAt) ?? new Date(updated.createdAt).toLocaleString(),
-      conversation: conversationId && name ? { id: conversationId, name } : null };
-  };
   const openHistory = () => {
     reading.current?.seeAll();
     if (headRevision !== null) markSeen(headRevision, null);
     setMode("history");
   };
-  const sectionActions: PageSectionActions = { discuss, copyLink, claim, editors, history: openHistory };
+  // What selecting text offers, for the section the selection is in.
+  const sectionActions: PageSectionActions = { discuss };
   // What a heading offers, beside it (§3.2).
   const headingActions: HeadingActions = {
     canEdit,

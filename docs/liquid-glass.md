@@ -119,10 +119,10 @@ Page code must choose material and geometry explicitly through
 - `MaterialChip` is a small solid/tinted label. It is deliberately not liquid
   glass, so it can safely appear inside a glass card or pill.
 - `PaperPopover` is a menu or small form floating over the paper: a page's
-  selection menu, `/` insert, link and file fields, Show editors, table tools
-  and heading menu, and Discuss on a passage selected in a message. It is the
-  ask card's tinted paper, opaque, with no edge and only a faint soft shadow,
-  never glass: what floats over a document reads as part of it.
+  selection menu, `/` insert, link and file fields, table tools and heading
+  menu, and Discuss on a passage selected in a message. It is a card of
+  whiter paper with no edge and a soft warm shadow, never glass: what floats
+  over a document reads as part of it.
 
 Reuse these components; do not respell their classes. Tags (`Tag`), avatar
 discs (`IdentityAvatar`) and the selected rail button render through

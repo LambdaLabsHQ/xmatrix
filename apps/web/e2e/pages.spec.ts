@@ -319,22 +319,14 @@ test("a page is co-edited live and shows an Agent working on a section it claime
   await browser.keyboard.press("Shift+Home");
   const selection = browser.getByTestId("page-selection-menu");
   await expect(selection.getByRole("button", { name: "Discuss" })).toBeVisible();
-  // Asking an Agent is mentioning it in the discussion, so there is no separate Ask AI.
-  await expect(selection.getByRole("button", { name: "Ask AI" })).toHaveCount(0);
+  // Discuss is all a passage offers: asking an Agent is mentioning it in the discussion, and what acts
+  // on the whole section is the heading's.
+  await expect(selection.getByRole("button")).toHaveText(["Discuss"]);
   await expect(browser.getByRole("button", { name: "Bold" })).toHaveCount(0);
   await expect(browser.getByTestId("page-toolbar")).toHaveCount(0);
   await browser.screenshot({ path: test.info().outputPath("pages-selection-menu.png") });
   await browser.keyboard.press("ControlOrMeta+b");
   await expect.poll(() => pageMarkdown(server)).toContain("**Shipped and verified**");
-  // Who changed a passage is asked of the passage, as Show editors does in Google Docs.
-  await selectLine(browser, "none");
-  await selection.getByRole("button", { name: "Show editors" }).click();
-  const editors = browser.getByTestId("page-editors");
-  await expect(editors).toContainText("claude:1");
-  await expect(editors).toContainText("2h ago");
-  await expect(editors.getByRole("button", { name: E2E_CHANNEL.name })).toBeVisible();
-  await expect(editors.getByRole("button", { name: "See version history" })).toBeVisible();
-  await browser.keyboard.press("Escape");
   expect(clientUpdates.length).toBeGreaterThan(0);
   expect(connections, "the page keeps one live session while it is open").toBe(1);
   await browser.screenshot({ path: test.info().outputPath("pages-live.png") });

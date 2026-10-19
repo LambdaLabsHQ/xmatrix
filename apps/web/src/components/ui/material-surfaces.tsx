@@ -76,14 +76,9 @@ export const LiquidGlassPill = React.forwardRef<HTMLElement, LiquidPillProps>(
 );
 
 
-type PaperPopoverProps = MaterialElementProps & {
-  /** `ink` writes the surface in the paper's ink: the bar of actions over a selected passage. */
-  tone?: "paper" | "ink";
-};
-
-/** A menu or small form floating over the paper: a slip of the same paper, or a stroke of its ink, never glass. */
-export const PaperPopover = React.forwardRef<HTMLElement, PaperPopoverProps>(function PaperPopover(
-  { as, className, tone = "paper", ...props },
+/** A menu or small form floating over the paper: a card of white paper laid on it, never glass. */
+export const PaperPopover = React.forwardRef<HTMLElement, MaterialElementProps>(function PaperPopover(
+  { as, className, ...props },
   ref
 ) {
   const Component = as || "div";
@@ -92,7 +87,6 @@ export const PaperPopover = React.forwardRef<HTMLElement, PaperPopoverProps>(fun
     <Component
       ref={ref}
       data-material="paper-popover"
-      data-tone={tone}
       className={cn("app-material-paper-popover", className)}
       {...props}
     />

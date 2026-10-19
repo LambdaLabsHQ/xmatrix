@@ -8352,84 +8352,29 @@ html[data-app-theme] .xmatrix-app.xmatrix-app .app-paper-card .app-tool-lines in
 }
 
 /* A menu or small form floating over the paper (a page's selection menu, `/`
-   insert, a link being typed, Show editors, the table tools; Discuss on a
-   passage selected in a message) is a slip of tinted paper laid over it, as
-   an ask card is, not glass (user 2026-10-19: 这个风格不符合纸面风格; 不要边框):
-   one opaque block of the paper with a little ink mixed in, so the text under
-   it never shows through, no edge, its corners rounded like a card's, and only
-   a faint soft shadow to part it from the text it covers. */
+   insert, a link being typed, the table tools and heading menu; Discuss on a
+   passage selected in a message) is a card of whiter paper laid on the page,
+   not glass and not a tinted slip (user 2026-10-19: 不要边框; chose A among
+   four, after a tint and an ink bar read as ugly): no edge, a little brighter
+   than the page so it stands off the text it covers, and a soft warm shadow
+   that lifts it, as Notion's and Linear's menus do. */
 .app-material-paper-popover {
-  background: color-mix(in oklch, var(--foreground) 5%, var(--app-panel-paper, oklch(0.976 0.005 85)));
+  background: oklch(0.997 0.002 85);
   color: var(--app-panel-ink, var(--foreground));
-  border-radius: 10px;
-  box-shadow: 0 4px 14px -6px oklch(0.35 0.07 60 / 0.18);
+  border-radius: 8px;
+  box-shadow:
+    0 1px 2px oklch(0.35 0.07 60 / 0.06),
+    0 8px 24px -6px oklch(0.35 0.07 60 / 0.18);
 }
 
-/* Its items are lines of the slip: a little more ink under the pointer, or
-   while chosen from the keyboard or pressed, and nothing at rest. */
+/* Its items are lines of the card: a little ink under the pointer, or while
+   chosen from the keyboard or pressed, and nothing at rest. */
 .app-material-paper-popover:is([role="toolbar"], [role="listbox"], [role="menu"]) > button {
   background: transparent;
 }
 
 .app-material-paper-popover:is([role="toolbar"], [role="listbox"], [role="menu"]) > button:is(:hover:not(:disabled), :active, [aria-selected="true"], [aria-pressed="true"]) {
   background: color-mix(in oklch, var(--foreground) 6%, transparent);
-}
-
-/* The actions over a selected passage are written in the paper's ink, the one
-   thing on paper that stands off it without a frame (user 2026-10-19: 完全重新
-   设计): a short solid stroke of the warm ink with the paper's own colour for
-   its words, set close, its icons a shade softer, a hairline of paper between
-   what a passage starts and what it opens, and only the ink's own shade under
-   it. */
-.app-material-paper-popover[data-tone="ink"] {
-  --app-paper-popover-ink: var(--app-panel-ink, oklch(0.24 0.03 60));
-  --app-paper-popover-paper: var(--app-panel-paper, oklch(0.976 0.005 85));
-  background: var(--app-paper-popover-ink);
-  color: var(--app-paper-popover-paper);
-  border-radius: 8px;
-  box-shadow: 0 3px 10px -4px color-mix(in oklch, var(--app-paper-popover-ink) 45%, transparent);
-}
-
-.app-material-paper-popover[data-tone="ink"] > button {
-  height: 1.875rem;
-  padding-inline: 0.5rem;
-  border-radius: 6px;
-  color: inherit;
-  font-size: 13px;
-  font-weight: 500;
-  letter-spacing: 0.005em;
-}
-
-/* An icon action (it names itself in a title) is square. */
-.app-material-paper-popover[data-tone="ink"] > button[title] {
-  width: 1.875rem;
-  padding-inline: 0;
-}
-
-.app-material-paper-popover[data-tone="ink"] > button svg {
-  width: 15px;
-  height: 15px;
-  opacity: 0.72;
-}
-
-.app-material-paper-popover[data-tone="ink"] > button:is(:hover:not(:disabled), :active, [aria-pressed="true"]) {
-  background: color-mix(in oklch, var(--app-paper-popover-paper) 14%, transparent);
-}
-
-.app-material-paper-popover[data-tone="ink"] > button:is(:hover:not(:disabled), :active, [aria-pressed="true"]) svg {
-  opacity: 1;
-}
-
-.app-material-paper-popover[data-tone="ink"] > button:focus-visible {
-  outline: 2px solid color-mix(in oklch, var(--app-paper-popover-paper) 60%, transparent);
-  outline-offset: -2px;
-}
-
-.app-paper-popover-rule {
-  align-self: stretch;
-  width: 1px;
-  margin: 6px 3px;
-  background: color-mix(in oklch, currentColor 22%, transparent);
 }
 
 /* Notices on the paper: plain white with the tone's rail, not glass. */
