@@ -49,6 +49,7 @@ import { fileURLToPath } from "node:url";
 
 import { claimRelease } from "./release-claim.mjs";
 import { releaseCommitProblemAt } from "./release-commit.mjs";
+import { authoredReleaseNotes } from "./release-notes.mjs";
 import {
   compareSemver,
   parseSemver,
@@ -367,6 +368,7 @@ export async function checkStable(root, { candidate, bump, scope, sha }, { tagNa
         `stable ${previous}; a stable never moves back`);
     }
   }
+  authoredReleaseNotes(root, version, sourceSha);
   return { version, tag: `xmatrix-v${version}`, sourceSha, commit: record.commit };
 }
 
