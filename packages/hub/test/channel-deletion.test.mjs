@@ -72,9 +72,12 @@ integration("confirmed Channel deletion revokes access, resumes bounded erasure 
     const privateKey = `restricted/${encodeURIComponent(scope)}/objects/${"a".repeat(64)}`;
     const foreignKey = `restricted/${encodeURIComponent(foreignScope)}/objects/${"b".repeat(64)}`;
     const sharedKey = `objects/${"c".repeat(64)}`;
+    const insertAttachment = (id, key, channelId = "doomed", spaceId = "space") => f.run(`INSERT INTO data.message_attachments
+      (space_id,attachment_id,message_id,channel_id,object_key,content_hash,encoded_bytes,mime_type,name,version,created_at,updated_at)
+      VALUES($1,$2,$3,$4,$5,'hash',1,'text/plain','a',1,now(),now())`,
+      [spaceId, id, channelId === "doomed" ? "doomed-message-1" : null, channelId, key]);
     for (const [id, key] of [["private", privateKey], ["foreign-pointer", foreignKey], ["shared", sharedKey]])
-      await f.run(`INSERT INTO data.message_attachments(space_id,attachment_id,message_id,channel_id,object_key,content_hash,
-        encoded_bytes,mime_type,name,version,created_at,updated_at) VALUES('space',$1,'doomed-message-1','doomed',$2,'hash',1,'text/plain','a',1,now(),now())`, [id, key]);
+      await insertAttachment(id, key);
     const requested = await send();
     assert.equal(requested.status, 202, await requested.clone().text());
     assert.deepEqual(await requested.json(), { state: "purging", channelId: "doomed", spaceId: "space" });
@@ -106,16 +109,22 @@ integration("confirmed Channel deletion revokes access, resumes bounded erasure 
     await assert.rejects(advanceChannelPurge(f.session, bucket, target), /Storage interrupted/);
     assert.equal((await f.run("SELECT object_cursor FROM data.channel_deletions WHERE channel_id='doomed'"))[0].object_cursor, "");
     assert.equal((await f.run("SELECT count(*)::int AS n FROM data.messages"))[0].n, 2503);
-    await repo.createChannel({ requestId: randomUUID(), commandId: randomUUID(), channelId: "parallel", spaceId: "other-space",
-      name: "parallel", mode: "open", principal: { kind: "user", id: "owner" } });
-    await repo.deleteChannel({ requestId: randomUUID(), spaceId: "other-space", channelId: "parallel", actorUserId: "owner",
-      name: "parallel", at: new Date().toISOString() });
-    await assert.rejects(maintainChannelDeletions({ ...env, RELAY_PAYLOAD_BUCKET: bucket }), /requires retry/);
-    assert.equal((await f.run("SELECT state FROM data.channel_deletions WHERE channel_id='parallel'"))[0].state, "completed",
-      "one failing storage job cannot prevent another Channel's erasure");
+    for (const channelId of ["parallel", "ready"]) await repo.createChannel({ requestId: randomUUID(), commandId: randomUUID(),
+      channelId, spaceId: "other-space", name: channelId, mode: "open", principal: { kind: "user", id: "owner" } });
+    const parallelKey = `restricted/${encodeURIComponent("channel-user:parallel:owner")}/objects/${"d".repeat(64)}`;
+    await insertAttachment("parallel-private", parallelKey, "parallel", "other-space");
+    for (const channelId of ["parallel", "ready"]) await repo.deleteChannel({ requestId: randomUUID(), spaceId: "other-space",
+      channelId, actorUserId: "owner", name: channelId, at: new Date().toISOString() });
+    const maintain = () => maintainChannelDeletions({ ...env, RELAY_PAYLOAD_BUCKET: bucket });
+    await assert.rejects(maintain(), /requires retry/);
+    assert.equal((await f.run("SELECT state FROM data.channel_deletions WHERE channel_id='ready'"))[0].state, "purging");
+    await assert.rejects(maintain(), /requires retry/);
+    assert.equal((await f.run("SELECT state FROM data.channel_deletions WHERE channel_id='ready'"))[0].state, "completed",
+      "two failing storage jobs must yield the next pass to another Channel's erasure");
     fail = false;
-    await advanceChannelPurge(f.session, bucket, target);
-    assert.deepEqual(deleted, [privateKey], "neither shared bytes nor a foreign scoped pointer can be deleted");
+    await maintain();
+    assert.equal((await f.run("SELECT state FROM data.channel_deletions WHERE channel_id='parallel'"))[0].state, "completed");
+    assert.deepEqual([...deleted].sort(), [privateKey, parallelKey].sort(), "only each confirmed Channel's private bytes are deleted");
     let previous = (await f.run("SELECT purged_rows FROM data.channel_deletions WHERE channel_id='doomed'"))[0].purged_rows;
     assert.ok(Number(previous) <= 2000);
     for (let attempt = 0; attempt < 8; attempt++) {

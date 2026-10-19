@@ -18,9 +18,20 @@ export async function maintainChannelDeletions(env: Env): Promise<void> {
             WHERE d.state='purging' AND p.state='active' AND p.target_shard_id IS NULL AND p.shard_id=$1
             ORDER BY d.updated_at,d.channel_id LIMIT 2`, values: [shard.shardId], maxRows: 2 }));
       for (const job of jobs) {
+        const placement = { spaceId: job.space_id, shardId: shard.shardId, placementEpoch: Number(job.placement_epoch) };
         try { await advanceChannelPurge(session, env.RELAY_PAYLOAD_BUCKET,
-          { spaceId: job.space_id, channelId: job.channel_id, shardId: shard.shardId, placementEpoch: Number(job.placement_epoch) }); }
-        catch (error) { errors.push(error); }
+          { ...placement, channelId: job.channel_id }); }
+        catch (error) {
+          errors.push(error);
+          try {
+            // A failed batch keeps its cursor, but yields its place to older
+            // pending peers. Two poison jobs must not own both admission slots.
+            await session.transaction({ requestId: crypto.randomUUID(), operation: "channel-purge.retry", placement },
+              tx => tx.query({ name: "channel_purge_retry_v1", text: `UPDATE data.channel_deletions
+                SET updated_at=clock_timestamp() WHERE space_id=$1 AND channel_id=$2 AND state='purging'`,
+                values: [job.space_id, job.channel_id], maxRows: 0 }));
+          } catch (retryError) { errors.push(retryError); }
+        }
       }
     } catch (error) { errors.push(error);
     } finally { await session.close(); }
