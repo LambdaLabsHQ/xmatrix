@@ -6,7 +6,7 @@ import { Client } from "pg";
 import { createAuthorityDatabase } from "../dist/index.js";
 
 import { PostgresPageRepository, pageNameFrom, pagePositionBetween } from "../dist/page-control.js";
-import { readPageConversations } from "../dist/page-conversations.js";
+import { describePageConversations } from "../dist/page-conversations.js";
 
 
 
@@ -736,11 +736,14 @@ integration("an Automation occurrence's claim passes to the Run in its conversat
 });
 
 integration("a page's conversations are described to readers only, with their newest message and live Agents", async () => {
-  const { client, ids } = await pageTest("page-conversations");
+  const { client, ids, pages, owner } = await pageTest("page-conversations");
   try {
-    const db = database(client);
-    const read = (userId, conversationIds) => readPageConversations(db, { requestId: crypto.randomUUID(),
-      spaceId: ids.space, principal: { kind: "user", id: userId }, conversationIds });
+    const { page } = await pages.create({ requestId: crypto.randomUUID(), spaceId: ids.space, principal: owner,
+      title: "Margin" });
+    // As a page's margin reads them: with its links, as the reader the links' transaction found.
+    const read = async (userId, conversationIds) => (await pages.links({ requestId: crypto.randomUUID(),
+      spaceId: ids.space, principal: { kind: "user", id: userId }, pageId: page.pageId,
+      describe: (tx, reader) => describePageConversations(tx, ids.space, reader, conversationIds) })).described;
     for (const [sequence, body] of [[1, "First"], [2, "Ship it"]]) {
       await client.query(`INSERT INTO data.messages
         (space_id,channel_id,message_id,timeline_sequence,entity_version,author_kind,author_id,

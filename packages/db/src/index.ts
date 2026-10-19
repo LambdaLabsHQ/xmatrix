@@ -253,7 +253,7 @@ export type {
   PageSummary, PublicPage,
 } from "./page-control.js";
 export {
-  MAX_PAGE_CONVERSATIONS, readPageConversations,
+  describePageConversations, MAX_PAGE_CONVERSATIONS,
 } from "./page-conversations.js";
 export type {
   PageConversationRecord,

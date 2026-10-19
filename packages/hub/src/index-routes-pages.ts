@@ -1,5 +1,5 @@
-import { MAX_PAGE_CONVERSATIONS, PageControlError, PostgresPageRepository, pageTitle, readPageConversations,
-  renamedPageBody, type PagePrincipal } from "@xmatrix/db";
+import { describePageConversations, MAX_PAGE_CONVERSATIONS, PageControlError, PostgresPageRepository, pageTitle,
+  renamedPageBody, type DatabaseTransaction, type PagePrincipal } from "@xmatrix/db";
 import { ServiceUnavailable } from "./error-contract";
 import { relayResponse } from "./private-response";
 import type { Context, Hono } from "hono";
@@ -59,11 +59,12 @@ function repository(env: Env): PostgresPageRepository {
  * The conversations a page's links name, as the caller sees them beside the
  * page (pages-live-document.md §4.4); the most recently linked first.
  */
-async function linkedConversations(env: Env, spaceId: string, caller: PagePrincipal,
-  links: readonly PageLink[]): Promise<PageConversation[]> {
-  const conversationIds = [...new Set(links.map((link) => link.conversationId))].slice(0, MAX_PAGE_CONVERSATIONS);
-  return (await readPageConversations(database(env), { requestId: crypto.randomUUID(), spaceId,
-    principal: caller, conversationIds })).map(pageConversation);
+function linkedConversations(spaceId: string) {
+  return async (tx: DatabaseTransaction, userId: string, links: readonly PageLink[]): Promise<PageConversation[]> => {
+    const conversationIds = [...new Set(links.map((link) => link.conversationId))].slice(0, MAX_PAGE_CONVERSATIONS);
+    // Read in the links' own transaction, as the reader it found.
+    return (await describePageConversations(tx, spaceId, userId, conversationIds)).map(pageConversation);
+  };
 }
 
 const principal = requestPrincipal;
@@ -384,8 +385,8 @@ export function registerPageRoutes(app: Hono<{ Bindings: Env }>): void {
       repository(c.env).blockUpdates({ requestId: crypto.randomUUID(), spaceId, pageId, principal: caller })
         .then((read) => Promise.all([read, sessionPresent(c.env, spaceId, pageId)] as const)),
       repository(c.env).claims({ requestId: crypto.randomUUID(), spaceId, pageId, principal: caller }),
-      repository(c.env).links({ requestId: crypto.randomUUID(), spaceId, pageId, principal: caller })
-        .then(({ links }) => Promise.all([links, linkedConversations(c.env, spaceId, caller, links)] as const)),
+      repository(c.env).links({ requestId: crypto.randomUUID(), spaceId, pageId, principal: caller,
+        describe: linkedConversations(spaceId) }).then(({ links, described }) => [links, described ?? []] as const),
     ]);
     const discussions = links.filter((link) => link.anchor && !link.resolvedAt);
     const working = workingBySection(links, conversations);
@@ -759,13 +760,13 @@ export function registerPageRoutes(app: Hono<{ Bindings: Env }>): void {
     const conversationId = c.req.query("conversationId");
     const spaceId = c.req.param("spaceId");
     const caller = await principal(c);
-    const result = await repository(c.env).links({
-      requestId: crypto.randomUUID(), spaceId, principal: caller,
-      ...(pageId ? { pageId } : {}), ...(conversationId ? { conversationId } : {}),
-    });
     // A page's links come with what the page shows beside each conversation.
-    return pageId ? { ...result, conversations: await linkedConversations(c.env, spaceId, caller, result.links) }
-      : result;
+    const { links, described } = await repository(c.env).links({
+      requestId: crypto.randomUUID(), spaceId, principal: caller,
+      ...(pageId ? { pageId, describe: linkedConversations(spaceId) } : {}),
+      ...(conversationId ? { conversationId } : {}),
+    });
+    return pageId ? { links, conversations: described ?? [] } : { links };
   }));
 
   // The page tree's activity: who is reading or editing each page from a live
@@ -773,12 +774,11 @@ export function registerPageRoutes(app: Hono<{ Bindings: Env }>): void {
   app.get("/api/spaces/:spaceId/page-links/agents", async (c) => run(c, async () => {
     const spaceId = c.req.param("spaceId");
     const caller = await principal(c);
-    const { pages } = await repository(c.env).agentsOnPages({ requestId: crypto.randomUUID(), spaceId, principal: caller });
     // Newest first, so a Space with more open discussions than are read describes the recent ones.
-    const conversationIds = [...new Set(pages.flatMap((page) => page.discussions))].slice(0, MAX_PAGE_CONVERSATIONS);
-    const conversations = new Map((conversationIds.length === 0 ? [] : await readPageConversations(database(c.env), {
-      requestId: crypto.randomUUID(), spaceId, principal: caller, conversationIds,
-    })).map((record) => [record.conversationId, pageConversation(record)]));
+    const { pages, described } = await repository(c.env).agentsOnPages({ requestId: crypto.randomUUID(), spaceId,
+      principal: caller, describe: (tx, userId, discussions) =>
+        describePageConversations(tx, spaceId, userId, discussions.slice(0, MAX_PAGE_CONVERSATIONS)) });
+    const conversations = new Map((described ?? []).map((record) => [record.conversationId, pageConversation(record)]));
     return { pages: pages.map(({ discussions, ...page }): PageTreeActivity =>
       ({ ...page, discussions: pageTreeDiscussions(discussions, conversations) })) };
   }));

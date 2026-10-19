@@ -1789,8 +1789,14 @@ export class PostgresPageRepository {
   }
 
   /** Links of one page (for its presence gutter) or of one conversation (for its header). */
-  async links(input: { requestId: string; spaceId: string; principal: PagePrincipal;
-    pageId?: string; conversationId?: string }): Promise<{ links: PageLink[] }> {
+  /**
+   * `describe` reads more about the links in the same transaction, as the reader it found: a page's
+   * margin reads its conversations with them (`describePageConversations`).
+   */
+  async links<Described = never>(input: { requestId: string; spaceId: string; principal: PagePrincipal;
+    pageId?: string; conversationId?: string;
+    describe?: (tx: DatabaseTransaction, userId: string, links: PageLink[]) => Promise<Described> }):
+    Promise<{ links: PageLink[]; described?: Described }> {
     const spaceId = bounded(input.spaceId, "spaceId");
     if (!input.pageId === !input.conversationId) {
       throw new PageControlError("invalid_request", 400, "name exactly one of pageId or conversationId");
@@ -1819,7 +1825,7 @@ export class PostgresPageRepository {
       const out: PageLink[] = rows
         .filter((row) => readable.has(row.page_id) && visible.has(row.conversation_id))
         .map(linkOf);
-      return { links: out };
+      return input.describe ? { links: out, described: await input.describe(tx, actor.userId, out) } : { links: out };
     });
   }
 
@@ -1831,8 +1837,10 @@ export class PostgresPageRepository {
    * never stored; only pages and conversations this reader may open are
    * described.
    */
-  async agentsOnPages(input: { requestId: string; spaceId: string; principal: PagePrincipal }):
-    Promise<{ pages: Array<{ pageId: string; agents: PageTreeAgent[]; discussions: string[] }> }> {
+  async agentsOnPages<Described = never>(input: { requestId: string; spaceId: string; principal: PagePrincipal;
+    /** Reads more about the open discussions, newest first, in the same transaction (as `links` does). */
+    describe?: (tx: DatabaseTransaction, userId: string, discussions: string[]) => Promise<Described> }):
+    Promise<{ pages: Array<{ pageId: string; agents: PageTreeAgent[]; discussions: string[] }>; described?: Described }> {
     const spaceId = bounded(input.spaceId, "spaceId");
     return this.inSpace(bounded(input.requestId, "requestId"), "page.agents", spaceId, async (tx) => {
       const actor = await pageActor(tx, spaceId, input.principal, false);
@@ -1924,8 +1932,10 @@ export class PostgresPageRepository {
         }
       }
       const pageIds = new Set([...byPage.keys(), ...discussionsOf.keys()]);
-      return { pages: [...pageIds].map((pageId) => ({ pageId, agents: byPage.get(pageId) ?? [],
-        discussions: discussionsOf.get(pageId) ?? [] })) };
+      const pages = [...pageIds].map((pageId) => ({ pageId, agents: byPage.get(pageId) ?? [],
+        discussions: discussionsOf.get(pageId) ?? [] }));
+      return input.describe ? { pages, described: await input.describe(tx, actor.userId,
+        [...new Set(pages.flatMap((page) => page.discussions))]) } : { pages };
     });
   }
 }
