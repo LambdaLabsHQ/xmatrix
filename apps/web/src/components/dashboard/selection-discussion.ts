@@ -4,8 +4,9 @@
  * by the passage, and its first message opens with the passage and a link back
  * to where it came from (`discussionHead` in @xmatrix/protocol), the context
  * every Agent in the conversation reads, in the conversation itself. People see
- * the passage once: a page's passage is its discussion's anchor, which the
- * thread shows; a message's passage shows above the composer until it is sent.
+ * the passage once: a page's passage is its discussion's anchor, which its
+ * margin thread shows as its head, and which opens its first message anywhere
+ * else; a message's passage shows above the composer until it is sent.
  */
 import { discussionHead, splitDiscussionHead } from "@xmatrix/protocol";
 
@@ -58,9 +59,10 @@ export function quotedMessage<T extends { start: number; end: number }>(quote: D
 const PAGE_LINK = /\/pages\?(?:[^#]*&)?page=/u;
 
 /**
- * A message as the thread shows it. A page discussion's first message shows
- * only what was written: its passage is the thread's anchor, already shown
- * above it, and its link back leads to the page the thread sits beside.
+ * A message as a page's margin thread or a preview shows it. A page
+ * discussion's first message shows only what was written: its passage is the
+ * thread's anchor, already shown above it, and its link back leads to the page
+ * the thread sits beside.
  */
 export function foldedDiscussionBody(body: string): string {
   const head = splitDiscussionHead(body);

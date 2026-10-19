@@ -130,8 +130,10 @@ The production x-matrix Space on 2026-09-26:
   it reads that context; a mention inside the quote stays quoted text, and
   previews show what was written after it. People see the passage once: one
   from a page is linked to the passage, which is its anchor (marked in the
-  text, and the head of its thread), so neither its composer nor its first
-  message shows it again; one from a message is as open as its source
+  text, and the head of its margin thread), so neither its composer nor its
+  first message in that thread shows it again, while the conversation opened
+  anywhere else (Conversations, docked beside the page) shows its first
+  message whole, passage and link back included; one from a message is as open as its source
   conversation and linked to the same pages, and its composer shows the quote
   until it is sent. Its first sent message uses the same automatic summon and
   author choice window as New conversation, despite its preset title; the
