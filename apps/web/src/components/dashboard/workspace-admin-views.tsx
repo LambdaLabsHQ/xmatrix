@@ -25,6 +25,7 @@ import { type AppView } from "./workspace-shell-navigation";
 
 import { WORKING_SPACE_KV_KEY } from "./workspace-shell-constants";
 import { useLatestComponentRelease, type ReleaseComponent } from "./latest-component-releases";
+import { releaseNotesPath } from "@xmatrix/protocol";
 
 import {
   accountQuotaUsageFromCandidates,
@@ -759,6 +760,7 @@ export function SettingsView({
                 />
               ) : null}
             />
+            <ReleaseNotesLink version={desktopUpdateStatus?.version || desktopContext?.version} />
           </ToolDetailSection>
           <ToolDetailSection title="Local daemon">
             <ToolSettingRow
@@ -1520,8 +1522,16 @@ export function MachineVersionValue({ version, component, className }: {
           Update
         </span>
       )}
+      <ReleaseNotesLink version={status === "outdated" ? latestVersion : version} />
     </span>
   );
+}
+
+function ReleaseNotesLink({ version }: { version?: string }) {
+  const href = releaseNotesPath(version);
+  return href ? <a href={href} target="_blank" rel="noreferrer" className="text-xs text-primary underline underline-offset-2">
+    Release notes{version ? ` ${version}` : ""}
+  </a> : null;
 }
 
 export type FetchedChannelCatalog = {

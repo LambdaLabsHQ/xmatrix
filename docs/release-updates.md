@@ -74,6 +74,28 @@ version in its WebSocket URL and handshake. Its assertions compare those wire
 values with that manifest for both beta and stable builds, rather than requiring
 a stable-only version shape.
 
+## Release notes
+
+The stable release Agent also authors the release's user-facing changes since
+the previous stable, following [Authoring release notes](releases/README.md).
+Commit `docs/releases/<version>.md` through a PR before building and verifying
+the final beta candidate. The stable intent and train reject a candidate whose
+source lacks valid notes for the resulting stable version. This preserves the
+unchanged-beta-source contract: notes on newer main cannot be attached later.
+
+The production receipt publishes the authored stable notes, or GitHub's exact
+tag change list for a beta, before its deployment evidence on the GitHub Release.
+Users open `/releases/<version>` from Desktop updates, Machine versions or the
+CLI's update output. Manifests add an optional `releaseNotesUrl`; existing
+consumers can ignore it and the native IPC shape stays unchanged. After release,
+verify that the exact version's public page and update links work. Old releases
+without user-facing notes show an explicit unavailable message.
+
+Migration: existing immutable releases are untouched. New stable candidates
+must include notes in their source, so an older beta must be superseded by a
+newly verified one containing the document. Receipt failures retain the existing
+same-run recovery path; no version, tag, signing or update-feed authority changes.
+
 ## Scope evidence without job step metadata
 
 Production request authorization is the completed successful job named
