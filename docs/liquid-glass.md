@@ -121,8 +121,8 @@ Page code must choose material and geometry explicitly through
 - `PaperPopover` is a menu or small form floating over the paper: a page's
   selection menu, `/` insert, link and file fields, Show editors, table tools
   and heading menu, and Discuss on a passage selected in a message. It is the
-  paper itself, opaque, with the paper controls' warm ink ring and a short
-  soft shadow, never glass: what floats over a document reads as part of it.
+  ask card's tinted paper, opaque, with no edge and only a faint soft shadow,
+  never glass: what floats over a document reads as part of it.
 
 Reuse these components; do not respell their classes. Tags (`Tag`), avatar
 discs (`IdentityAvatar`) and the selected rail button render through
