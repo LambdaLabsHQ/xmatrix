@@ -6,6 +6,7 @@ import * as polling from "../src/connectors/gmail-poll-client.ts";
 import { gmailIncomingChanges } from "../src/connectors/gmail-notification-api.ts";
 import { parseMailboxes } from "../src/connectors/gmail-mailboxes.ts";
 import { ProviderRequestError } from "../src/connectors/http.ts";
+import { connectorMessageWakeTarget } from "../src/connector-message-delivery.ts";
 
 const load=await compileCommonJsSourceModule(new URL("../src/connectors/gmail-notification-drain.ts",import.meta.url));
 const env={CONNECTOR_GOOGLE_CLIENT_ID:"fixture-google",CONNECTOR_GOOGLE_CLIENT_SECRET:"fixture-secret",
@@ -45,6 +46,8 @@ test("unchanged counts reuse the cached grant and avoid Composio until the indep
   assert.equal(due.calls.searched,1);assert.equal(due.calls.append.length,1);assert.equal(due.calls.automation.length,1);
   assert.deepEqual(due.calls.stage,[{ids:["abcdef1234567890"],historyId:"200",pageToken:undefined}]);
   assert.doesNotMatch(JSON.stringify(due.calls.append),/private-refresh|private-access|me@example/);
+  // New mail reaches Automations through their trigger; the Channel notice wakes no live Agent.
+  assert.equal(connectorMessageWakeTarget({from:{kind:"app"},metadata:due.calls.append[0].residual.appMetadata}),false);
 });
 
 test("pending changes, transient confirmation failure and lost authority retain the right outcome",async()=>{
@@ -65,6 +68,7 @@ test("refreshes are encrypted by the repository; history expiry discloses a gap 
   await fetched([{body:counts},{body:{status:404,data:{}}},
     {body:{status:200,data:{emailAddress:"me@example.com",historyId:"300"}}}],gap.run);
   assert.deepEqual(gap.calls.stage,[{ids:[],historyId:"300",pageToken:undefined}]);
-  assert.match(gap.calls.append[0].body,/history expired/);assert.equal(gap.calls.automation.length,0);
+  assert.match(gap.calls.append[0].body,/history expired/);
+  assert.equal(connectorMessageWakeTarget({from:{kind:"app"},metadata:gap.calls.append[0].residual.appMetadata}),false);assert.equal(gap.calls.automation.length,0);
   assert.deepEqual(gap.calls.finish,["done"]);
 });
