@@ -414,8 +414,10 @@ release or a deploy, run one at a time where they happen).
   conversation on the block gets a notice naming the others, so they can talk,
   pick other work, or carry on side by side. The competition setting is no
   longer needed.
-- **Claims lapse.** Each lasts 5 minutes to a day (two hours by default);
-  claiming again renews it. A lapsed claim frees the block with no cleanup.
+- **Claims live as long as their Run.** When an Agent's Instance ends, its
+  claims in its conversation end with it, so nobody has to release them. Each
+  also lasts 5 minutes to a day (two hours by default) as a backstop; claiming
+  again renews it. A lapsed claim frees the block with no cleanup.
   The holder, the person it counts against, or a Space owner or admin releases
   it early.
 - **For Agents, not people.** People neither claim nor see claims; a person

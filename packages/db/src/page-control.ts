@@ -1762,6 +1762,34 @@ export class PostgresPageRepository {
    * done`): the sections its conversation's ended claims left owing an
    * update no longer owe one (pages-live-document.md §5).
    */
+  /**
+   * The Instances ended, so they are on nothing any more: their claims in the
+   * conversation end now instead of running out their lease, and a section left
+   * unwritten owes an update as a lapsed claim's does (decided 2026-10-19: a
+   * claim lives as long as the Run behind it). Idempotent.
+   */
+  async endInstanceClaims(input: { requestId: string; conversationId: string; instanceIds: string[] }):
+    Promise<{ ended: number }> {
+    const conversationId = bounded(input.conversationId, "conversationId");
+    const requestId = bounded(input.requestId, "requestId");
+    const instanceIds = input.instanceIds.slice(0, MAX_LINKS).map((id) => bounded(id, "instanceId"));
+    if (instanceIds.length === 0) return { ended: 0 };
+    const route = await new PostgresChannelSpaceDirectory(this.database).resolve(
+      { requestId, operation: "page.claim.end_instances.resolve" }, conversationId);
+    if (!route) return { ended: 0 };
+    return this.inSpace(requestId, "page.claim.end_instances", route.spaceId, async (tx) => {
+      const rows = await tx.query<QueryResultRow & { claim_id: string }>({
+        name: "page_claims_end_instances_v1",
+        text: `UPDATE data.page_claims SET expires_at=now(), updated_at=now()
+          WHERE space_id=$1 AND conversation_id=$2 AND holder_kind='agent' AND holder_id = ANY($3::text[])
+            AND state='active' AND expires_at > now()
+          RETURNING claim_id`,
+        values: [route.spaceId, conversationId, instanceIds], maxRows: MAX_LINKS,
+      });
+      return { ended: rows.length };
+    });
+  }
+
   async settleWriteback(input: { requestId: string; conversationId: string; principal: PagePrincipal }):
     Promise<{ settled: number }> {
     const conversationId = bounded(input.conversationId, "conversationId");

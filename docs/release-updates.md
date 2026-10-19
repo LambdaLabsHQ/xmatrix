@@ -151,6 +151,12 @@ Migration evidence: before consolidation, the effective YAML definitions were sa
 Recovery remains the established Production Release Recovery workflow: it may cancel only the exact preflight-success/PostgreSQL-readiness-waiting shape before any build or deploy job materializes, then resume the same authorized replacement run. The parent graph and that proof are unchanged. A consolidation failure must be fixed through a new CI-validated main revision and Release Intent; do not modify immutable tags, publish unverified assets, or bypass train authorization. The existing CLI manifest/envelope `workflow: "cli-release.yml"` value remains the compatibility label expected by installed Rust update and Windows continuity consumers; relocating the reusable publisher does not rewrite that wire field. Signing helpers retain the original Developer ID leaf/team checks, pinned Apple intermediate, private keychain isolation, and cleanup; no signing identity or artifact format changed.
 
 
+## Unreleased: An Agent's claims end with its Run
+
+When an Agent's Instance ends, the page claims it held in its conversation end
+at once rather than running out their lease. A section it left unwritten owes
+an update immediately.
+
 ## Unreleased: A claim locks nothing
 
 `xmatrix page claim` on a section that someone else is already on now succeeds,
