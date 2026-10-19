@@ -30,7 +30,7 @@ test.describe("desktop", () => {
     await expect(header.getByText("Public", { exact: true })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Actions for #general" })).toHaveCount(0);
     await expect(header.getByRole("button", { name: "Copy channel link" })).toBeVisible();
-    await expect(header.getByRole("button", { name: "Move #general to another Space" })).toBeVisible();
+    await expect(header.getByRole("button", { name: /Move #general/u })).toHaveCount(0);
 
     page.once("dialog", (dialog) => {
       expect(dialog.message()).toContain("private");

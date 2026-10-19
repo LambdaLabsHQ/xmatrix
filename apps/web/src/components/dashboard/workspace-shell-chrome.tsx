@@ -85,7 +85,6 @@ import {
   LogOut,
   MessageSquareText,
   MoreHorizontal,
-  MoveRight,
   Pencil,
   FileText,
   PlugZap,
@@ -97,7 +96,6 @@ import {
   Star,
   Trash2,
   Users,
-  X,
 } from "lucide-react";
 import { SearchGlyph } from "@/components/ui/search-glyph";
 import { useConversationPages } from "@/components/pages/conversation-page-cards";
@@ -125,7 +123,6 @@ import {
 } from "@/lib/desktop/bridge";
 
 import { cn } from "@/lib/utils";
-import { GlassSelect } from "@/components/ui/glass-select";
 
 import type {
   ChannelMemberPresence,
@@ -973,13 +970,11 @@ export function ChannelVisibilityGlyph({
   channel,
   canManageVisibility,
   updatingVisibility,
-  disabled,
   onVisibilityChange,
 }: {
   channel: ChannelSnapshot;
   canManageVisibility: boolean;
   updatingVisibility: boolean;
-  disabled: boolean;
   onVisibilityChange: (mode: ChannelCreateMode) => void;
 }) {
   const title = channelTitle(channel);
@@ -996,7 +991,7 @@ export function ChannelVisibilityGlyph({
   }
   const label = isPublic ? `Make #${title} private` : `Make #${title} public`;
   return (
-    <button type="button" title={label} aria-label={label} disabled={disabled || updatingVisibility}
+    <button type="button" title={label} aria-label={label} disabled={updatingVisibility}
       onClick={() => onVisibilityChange(isPublic ? "closed" : "open")}
       className={cn(channelTitleIconClassName, "-ml-1")}>
       {glyph}
@@ -1004,19 +999,14 @@ export function ChannelVisibilityGlyph({
   );
 }
 
-/** Copy link, move and delete, as icons right after the channel's name. */
+/** Copy link and delete, as icons right after the channel's name. */
 export function ChannelTitleActions({
   channel,
   shareUrl,
-  moving,
-  onMove,
   onDelete,
 }: {
   channel: ChannelSnapshot;
   shareUrl: string;
-  moving: boolean;
-  /** Moves the conversation to another Space. */
-  onMove: () => void;
   onDelete?: () => void;
 }) {
   const [copied, setCopied] = useState(false);
@@ -1044,13 +1034,9 @@ export function ChannelTitleActions({
         onClick={() => void handleCopy()} className={channelTitleIconClassName}>
         {copied ? <Check className="size-4 text-primary" /> : <Share2 className="size-4" />}
       </button>
-      <button type="button" title="Move to another Space" aria-label={`Move #${title} to another Space`}
-        disabled={moving} onClick={onMove} className={channelTitleIconClassName}>
-        {moving ? <AnimatedIcon icon={Loader2} className="size-4 animate-spin" /> : <MoveRight className="size-4" />}
-      </button>
       {onDelete && (
         <button type="button" title="Delete Channel…" aria-label={`Delete #${title}…`}
-          disabled={moving} onClick={onDelete} className={cn(channelTitleIconClassName, "hover:text-destructive")}>
+          onClick={onDelete} className={cn(channelTitleIconClassName, "hover:text-destructive")}>
           <Trash2 className="size-4" />
         </button>
       )}
@@ -1058,110 +1044,15 @@ export function ChannelTitleActions({
   );
 }
 
-export const ChannelMoveDialog = memo(function ChannelMoveDialog({
-  open,
-  channel,
-  spaces,
-  targetSpaceId,
-  busy,
-  error,
-  onTargetSpaceChange,
-  onSubmit,
-  onCancel,
-}: {
-  open: boolean;
-  channel: ChannelSnapshot | null;
-  spaces: SerializedSpace[];
-  targetSpaceId: string;
-  busy: boolean;
-  error: string | null;
-  onTargetSpaceChange: (spaceId: string) => void;
-  onSubmit: () => void;
-  onCancel: () => void;
-}) {
-  useAndroidBackDismiss(open && Boolean(channel), onCancel, busy);
-
-  if (!open || !channel) return null;
-
-  return createPortal(
-    <div className="fixed inset-0 z-[var(--z-overlay)] flex items-center justify-center bg-background/55 p-4 backdrop-blur-sm">
-      <div className="w-full max-w-md rounded-lg border border-border bg-card p-4 shadow-xl">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <h2 className="truncate text-base font-bold">Move #{channelTitle(channel)}</h2>
-            <p className="mt-1 text-sm text-muted-foreground">Move this conversation to another workspace.</p>
-          </div>
-          <button
-            type="button"
-            title="Close"
-            onClick={onCancel}
-            disabled={busy}
-            className="flex size-8 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
-          >
-            <X className="size-4" />
-          </button>
-        </div>
-
-        <div className="mt-4 space-y-3">
-          <label className="block text-sm font-semibold">
-            <span className="mb-1 block">Workspace</span>
-            <GlassSelect
-              value={targetSpaceId}
-              onChange={onTargetSpaceChange}
-              disabled={busy}
-              aria-label="Workspace"
-              className="rounded px-2 font-normal"
-              options={spaces.map((space) => ({ value: space.id, label: space.name || "Workspace" }))}
-            />
-          </label>
-
-          <p className="rounded border border-border bg-muted/45 px-3 py-2 text-xs leading-relaxed text-muted-foreground">
-            A move creates a proposal. Source and destination admins must separately confirm outbound and inbound, even when one person holds both roles. Review access changes on the confirmation card.
-          </p>
-
-          {error && (
-            <p className="rounded border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-              {error}
-            </p>
-          )}
-        </div>
-
-        <div className="mt-4 flex justify-end gap-2">
-          <button
-            type="button"
-            onClick={onCancel}
-            disabled={busy}
-            className="h-9 rounded border border-border px-3 text-sm font-semibold text-muted-foreground hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            onClick={onSubmit}
-            disabled={busy || !targetSpaceId}
-            className="flex h-9 items-center gap-2 rounded bg-primary px-3 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50"
-          >
-            {busy ? <AnimatedIcon icon={Loader2} className="size-4 animate-spin" /> : <MoveRight className="size-4" />}
-            {targetSpaceId !== channel.spaceId ? "Create transfer proposal" : "Move"}
-          </button>
-        </div>
-      </div>
-    </div>,
-    document.body
-  );
-});
-
 export const ChannelHeader = memo(function ChannelHeader({
   channel: catalogChannel,
   spaces,
   currentUserId,
   onRename,
   onVisibilityChange,
-  onMove,
   onDelete,
   renaming,
   updatingVisibility,
-  moving,
   onToggleMembers,
   onOpenSearch,
   actions,
@@ -1171,11 +1062,9 @@ export const ChannelHeader = memo(function ChannelHeader({
   currentUserId: string;
   onRename: (name: string) => void;
   onVisibilityChange: (mode: ChannelCreateMode) => void;
-  onMove: () => void;
   onDelete?: () => void;
   renaming: boolean;
   updatingVisibility: boolean;
-  moving: boolean;
   onToggleMembers: () => void;
   onOpenSearch: () => void;
   /** Controls of where the conversation is shown, such as closing it beside a page. */
@@ -1265,7 +1154,6 @@ export const ChannelHeader = memo(function ChannelHeader({
                 channel={channel}
                 canManageVisibility={canManageVisibility}
                 updatingVisibility={updatingVisibility}
-                disabled={moving}
                 onVisibilityChange={onVisibilityChange}
               />
             ) : (
@@ -1279,8 +1167,6 @@ export const ChannelHeader = memo(function ChannelHeader({
                 <ChannelTitleActions
                   channel={channel}
                   shareUrl={absoluteChannelUrl(channel, spaces)}
-                  moving={moving}
-                  onMove={onMove}
                   onDelete={onDelete}
                 />
               </div>
@@ -1293,7 +1179,7 @@ export const ChannelHeader = memo(function ChannelHeader({
                   setDraftName(channelTitle(channel));
                   setEditingName(true);
                 }}
-                disabled={renaming || moving}
+                disabled={renaming}
                 className="flex size-7 shrink-0 items-center justify-center rounded text-muted-foreground opacity-100 hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-50 md:opacity-0 md:group-hover:opacity-100"
               >
                 {renaming ? <AnimatedIcon icon={Loader2} className="size-4 animate-spin" /> : <Pencil className="size-4" />}
