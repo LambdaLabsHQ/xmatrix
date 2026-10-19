@@ -174,11 +174,12 @@ import { cn } from "@/lib/utils";
 
 import { tagClass } from "./status-tag";
 import { errorFromResponse, xmatrixApiRequest, requireResponseOk, xmatrixRawResponse, unexpectedResponse, requireField, requireJson } from "@/lib/query/api-client";
+import { hubReadResponse } from "@/lib/query/hub-read";
 import { userErrorMessage } from "@/lib/user-facing-error";
 import { xmatrixQueryKeys } from "@/lib/query/query-keys";
 
 import { recordOnboardingStep } from "@/lib/onboarding-funnel";
-import { ChannelPresenceConflict, decodeChannelSnapshot, emptyChannelPresence, presenceInstanceId, reduceChannelPresence, WEB_PROXY_ROUTES, type AgentInstancePresence, type ChannelPresence, type SerializedChannel } from "@xmatrix/protocol";
+import { ChannelPresenceConflict, decodeChannelSnapshot, emptyChannelPresence, HUB_ROUTES, presenceInstanceId, reduceChannelPresence, WEB_PROXY_ROUTES, type AgentInstancePresence, type ChannelPresence, type SerializedChannel } from "@xmatrix/protocol";
 
 import type {
   ChannelAttentionSnapshot,
@@ -1803,9 +1804,11 @@ export async function fetchChannelHistory(
   if (options.afterSequence !== undefined) {
     params.set("afterSequence", String(options.afterSequence));
   }
-  const res = await xmatrixRawResponse(`${WEB_PROXY_ROUTES.channel_history(channelId)}?${params.toString()}`, {
-    headers: { Authorization: `Bearer ${token}` },
-    cache: "no-store",
+  // From the Hub straight when it answers this page (lib/query/hub-read.ts), else through the Web.
+  const res = await hubReadResponse({
+    hubPath: `${HUB_ROUTES.channel_history(channelId)}?${params.toString()}`,
+    webUrl: `${WEB_PROXY_ROUTES.channel_history(channelId)}?${params.toString()}`,
+    token,
     signal: options.signal
       ? AbortSignal.any([options.signal, AbortSignal.timeout(CHANNEL_HISTORY_FETCH_TIMEOUT_MS)])
       : AbortSignal.timeout(CHANNEL_HISTORY_FETCH_TIMEOUT_MS),

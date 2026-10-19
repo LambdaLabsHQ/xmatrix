@@ -110,6 +110,29 @@ test("each section says which revision last changed it, who has claimed it and w
     const strangerSections = await worker.fetch(`/api/spaces/${randomUUID()}/pages/${page.pageId}/awareness?scope=sections`,
       { headers: auth });
     assert.notEqual(strangerSections.status, 200, "so are its sections alone");
+
+    // The app reads a page straight from the Hub, from its own origin only, and only reads.
+    const app = "https://xmatrix.test";
+    const preflight = (origin, method = "GET") => worker.fetch(`${at}/awareness?scope=sections`, { method: "OPTIONS",
+      headers: { origin, "access-control-request-method": method, "access-control-request-headers": "authorization" } });
+    const allowed = await preflight(app);
+    assert.equal(allowed.status, 204);
+    assert.equal(allowed.headers.get("access-control-allow-origin"), app);
+    assert.match(allowed.headers.get("access-control-allow-headers") ?? "", /authorization/u);
+    assert.equal(allowed.headers.get("access-control-allow-credentials"), null, "a bearer, never a cookie");
+    assert.equal((await preflight("https://elsewhere.test")).headers.get("access-control-allow-origin"), null);
+    assert.equal((await preflight(app, "PUT")).headers.get("access-control-allow-origin"), null, "writes go through the Web");
+    const direct = await worker.fetch(`${at}/awareness?scope=sections`, { headers: { ...auth, origin: app } });
+    assert.equal(direct.status, 200);
+    assert.equal(direct.headers.get("access-control-allow-origin"), app);
+    assert.deepEqual(await direct.json(), await json(await worker.fetch(`${at}/awareness?scope=sections`, { headers: auth })),
+      "the same answer as without an origin");
+    const history = await worker.fetch(`/api/channels/${encodeURIComponent(channel.id)}/history?limit=10`, {
+      method: "OPTIONS", headers: { origin: app, "access-control-request-method": "GET" } });
+    assert.equal(history.headers.get("access-control-allow-origin"), app, "and a conversation's history");
+    const write = await worker.fetch(at, { method: "PUT", headers: { ...auth, origin: app },
+      body: JSON.stringify({ baseRevision: 0, body: "" }) });
+    assert.equal(write.headers.get("access-control-allow-origin"), null);
   } finally {
     await worker.stop();
   }
