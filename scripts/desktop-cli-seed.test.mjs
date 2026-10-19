@@ -3,7 +3,6 @@ const read = readRepoFile;
 
 const desktopRelease = read(".github/workflows/desktop-release.yml");
 const productionRelease = read(".github/workflows/production-release.yml");
-const productionIntent = read(".github/workflows/production-release-intent.yml");
 const desktopPackage = JSON.parse(read("apps/desktop/package.json"));
 const desktopIgnore = read("apps/desktop/.gitignore");
 
@@ -15,8 +14,8 @@ function job(workflow, name, nextName) {
   return workflow.slice(start, end);
 }
 
+// An intent's desktop-needs-cli rule is release-train.mjs normalizeScope (release-train.test.mjs).
 test("an on-demand Desktop release requires its exact-version CLI seed", () => {
-  assert.match(productionIntent, /requested\.includes\("desktop"\) && !requested\.includes\("cli"\)/u);
   assert.match(productionRelease, /selected\.includes\("desktop"\) && !selected\.includes\("cli"\)/u);
   const desktop = job(productionRelease, "desktop", "android");
   assert.match(desktop, /needs: \[preflight, cli\]/u);

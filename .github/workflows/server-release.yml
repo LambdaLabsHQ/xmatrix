@@ -153,7 +153,7 @@ jobs:
                 return;
               }
             }
-            const authorities = jobs.filter(job => job.name === `authorize ${scope} production`);
+            const authorities = jobs.filter(job => job.name === `authorize ${scope} production ${context.ref.replace("refs/tags/", "")}`);
             if (authorities.length !== 1 || authorities[0].status !== "completed" || authorities[0].conclusion !== "success") {
               core.setFailed("Hub gate reuse is missing the exact-scope authorization job");
             }
@@ -753,7 +753,7 @@ jobs:
                 return;
               }
             }
-            const authorities = jobs.filter(job => job.name === `authorize ${scope} production`);
+            const authorities = jobs.filter(job => job.name === `authorize ${scope} production ${context.ref.replace("refs/tags/", "")}`);
             if (authorities.length !== 1 || authorities[0].status !== "completed" || authorities[0].conclusion !== "success") {
               core.setFailed("Web gate reuse is missing the exact-scope authorization job");
             }

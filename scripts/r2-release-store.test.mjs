@@ -31,7 +31,6 @@ function captureReleaseEnv(extra = {}) {
   return { ...extra, ...Object.fromEntries([
     "XMATRIX_RELEASE_TAG",
     "XMATRIX_RELEASE_COMPONENT",
-    "XMATRIX_RELEASE_CHANNEL",
     "XMATRIX_RELEASE_SHA",
     "GITHUB_RUN_ID",
     "GITHUB_RUN_ATTEMPT",
@@ -314,7 +313,6 @@ test("release manifests are deterministic, recursive, and bind provenance", asyn
     Object.assign(process.env, {
       XMATRIX_RELEASE_TAG: "cli-v1.2.3",
       XMATRIX_RELEASE_COMPONENT: "cli",
-      XMATRIX_RELEASE_CHANNEL: "stable",
       XMATRIX_RELEASE_SHA: "a".repeat(40),
       GITHUB_RUN_ID: "123",
       GITHUB_RUN_ATTEMPT: "2",
@@ -388,7 +386,6 @@ if (operation === "get") {
       R2_RELEASE_SECRET_ACCESS_KEY: "",
       XMATRIX_RELEASE_TAG: "cli-v1.2.3",
       XMATRIX_RELEASE_COMPONENT: "cli",
-      XMATRIX_RELEASE_CHANNEL: "stable",
       XMATRIX_RELEASE_SHA: "b".repeat(40),
       GITHUB_RUN_ID: "456",
       GITHUB_RUN_ATTEMPT: "1",
@@ -533,10 +530,10 @@ test("build machines publish release parts directly and sealing names the newest
     assert.deepEqual(await sealRelease({ bucket, prefix, parts: "macos-arm64,windows-x64" }, uploadOptions), sealed);
   }));
 
-test("trains publish to dev, promotion points stable at the same sealed release, and channels never move back", () =>
+test("the version picks the channel: betas to dev, stables to stable, and neither ever moves back", () =>
   withLocalR2(async ({ root, objectRoot, uploadOptions }) => {
     const bucket = "xmatrix-release-assets";
-    for (const version of ["1.2.3", "1.2.4"]) {
+    for (const version of ["1.2.3", "1.2.4", "1.2.5-beta.2", "1.2.5-beta.10", "1.2.5"]) {
       const directory = path.join(root, version);
       await mkdir(directory, { recursive: true });
       await writeFile(path.join(directory, "xmatrix-linux-x64"), `cli ${version}\n`);
@@ -548,15 +545,21 @@ test("trains publish to dev, promotion points stable at the same sealed release,
     const publish = (channel, version) =>
       publishChannel({ bucket, component: "cli", channel, prefix: `releases/cli-v${version}` }, uploadOptions);
 
-    await publish("dev", "1.2.4");
-    await assert.rejects(readFile(path.join(objectRoot, bucket, "channels", "cli", "stable.json")), /ENOENT/u);
     await publish("stable", "1.2.4");
-    const [dev, stable] = [await pointer("dev"), await pointer("stable")];
-    assert.equal(stable.prefix, dev.prefix);
-    assert.deepEqual(stable.files, dev.files);
-    await publish("dev", "1.2.4");
-    await assert.rejects(publish("dev", "1.2.3"), /already names cli-v1\.2\.4; refusing to move it back to cli-v1\.2\.3/u);
-    assert.equal((await pointer("dev")).releaseTag, "cli-v1.2.4");
+    await assert.rejects(publish("stable", "1.2.5-beta.10"), /cli-v1\.2\.5-beta\.10 belongs on the dev channel, not stable/u);
+    await assert.rejects(publish("dev", "1.2.5"), /cli-v1\.2\.5 belongs on the stable channel, not dev/u);
+    await assert.rejects(publish("stable", "1.2.3"), /already names cli-v1\.2\.4; refusing to move it back to cli-v1\.2\.3/u);
+
+    // A dev pointer from before channels had their own versions moves on with the first beta.
+    const legacy = path.join(objectRoot, bucket, "channels", "cli", "dev.json");
+    await writeFile(legacy, JSON.stringify({ ...(await pointer("stable")), channel: "dev" }));
+    await publish("dev", "1.2.5-beta.2");
+    await publish("dev", "1.2.5-beta.10");
+    await assert.rejects(publish("dev", "1.2.5-beta.2"),
+      /already names cli-v1\.2\.5-beta\.10; refusing to move it back to cli-v1\.2\.5-beta\.2/u);
+    await publish("stable", "1.2.5");
+    assert.deepEqual([(await pointer("dev")).releaseTag, (await pointer("stable")).releaseTag],
+      ["cli-v1.2.5-beta.10", "cli-v1.2.5"]);
   }));
 
 test("probe and readback timeouts keep their phase and drop credential evidence", async () => {
@@ -607,7 +610,6 @@ test("probe and readback timeouts keep their phase and drop credential evidence"
       R2_RELEASE_SECRET_ACCESS_KEY: secret,
       XMATRIX_RELEASE_TAG: "cli-v1.2.3",
       XMATRIX_RELEASE_COMPONENT: "cli-handoff",
-      XMATRIX_RELEASE_CHANNEL: "stable",
       XMATRIX_RELEASE_SHA: "c".repeat(40),
       GITHUB_RUN_ID: "456",
     });

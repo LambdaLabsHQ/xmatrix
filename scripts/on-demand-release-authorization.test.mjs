@@ -22,45 +22,51 @@ const server = await readFile(new URL("../.github/workflows/server-release.yml",
 const hub = scriptFrom(server, "Reverify exact selected request before reusing its test result");
 const web = scriptFrom(server, "Reverify exact selected request before reusing the Web test result");
 
-async function runIntent(releaseComponents) {
+async function runIntent(env) {
   const failures = [];
   const created = [];
   const dispatched = [];
   const summary = { addHeading: () => summary, addRaw: () => summary, write: async () => {} };
   const github = {
     rest: {
-      git: { createRef: async (input) => { created.push(input.ref); } },
+      git: { createRef: async (input) => { created.push([input.ref, input.sha]); } },
       actions: { createWorkflowDispatch: async (input) => { dispatched.push(input.workflow_id); } },
     },
   };
   await record(github, {
     ref: "refs/heads/main", payload: { repository: { default_branch: "main" } }, sha, runId: 77, repo: {},
   }, { setFailed: (message) => failures.push(message), notice: () => {}, summary },
-  { env: { RELEASE_COMPONENTS: releaseComponents, RELEASE_TOKEN: "token" } });
+  { env: { RELEASE_TOKEN: "token", ...env } });
   return { failures, created, dispatched };
 }
 
-test("intent scope is canonical, nonempty, and preserves the Desktop CLI dependency", async () => {
-  assert.deepEqual((await runIntent("web,hub")).created, ["refs/release-intents/77/hub+web"]);
-  assert.deepEqual((await runIntent("web,hub")).dispatched, ["production-release-request.yml"]);
-  assert.deepEqual((await runIntent("all")).created, ["refs/release-intents/77/hub+web+cli+desktop+android+ios"]);
-  for (const invalid of ["", "web,web", "unknown", "web,unknown", "desktop", "cli,desktop,cli", " web"]) {
-    const result = await runIntent(invalid);
-    assert.deepEqual(result.created, [], invalid);
-    assert.deepEqual(result.dispatched, [], invalid);
-    assert.equal(result.failures.length, 1, invalid);
+// scripts/release-train.mjs checks the intent and names its ref
+// (release-train.test.mjs); this step records exactly that and wakes the train.
+test("the intent step records the checked intent and wakes the train, or nothing", async () => {
+  const stable = "refs/release-intents/77/cli+ios/minor/xmatrix-v1.0.606-beta.3";
+  assert.deepEqual(await runIntent({ INTENT_REF: stable, INTENT_SHA: sha }),
+    { failures: [], created: [[stable, sha]], dispatched: ["production-release-request.yml"] });
+  for (const env of [{}, { INTENT_REF: "", INTENT_SHA: sha }, { INTENT_REF: "refs/heads/main", INTENT_SHA: sha },
+    { INTENT_REF: stable, INTENT_SHA: "short" }, { INTENT_REF: stable, INTENT_SHA: sha, RELEASE_TOKEN: "" }]) {
+    const result = await runIntent(env);
+    assert.deepEqual([result.created, result.dispatched, result.failures.length], [[], [], 1], JSON.stringify(env));
   }
 });
 
 // Stands in for scripts/release-commit.mjs: the deploy SHA is authorized when it
 // is the request's SHA or a known release commit of it.
 const releaseCommits = new Map([["c".repeat(40), sha]]);
+// A stable is the release commit of a verified beta's source that the
+// request's main revision contains (`verify-cut`).
+const stableCuts = new Map([["d".repeat(40), sha]]);
 const fakeRequire = (name) => {
   assert.equal(name, "child_process");
   return {
     execFileSync: (command, [script, verb, deploySha, sourceSha]) => {
-      assert.deepEqual([command, script, verb], ["node", "scripts/release-commit.mjs", "verify"]);
-      if (deploySha !== sourceSha && releaseCommits.get(deploySha) !== sourceSha) {
+      assert.deepEqual([command, script], ["node", "scripts/release-commit.mjs"]);
+      const commits = { verify: releaseCommits, "verify-cut": stableCuts }[verb];
+      assert.ok(commits, verb);
+      if ((verb === "verify-cut" || deploySha !== sourceSha) && commits.get(deploySha) !== sourceSha) {
         throw new Error("not a release commit");
       }
     },
@@ -68,13 +74,15 @@ const fakeRequire = (name) => {
 };
 
 async function runAuthorization({ scope = "web", overrides = {}, authorityScope = scope, authorityConclusion = "success",
-  authorityStatus = "completed", authorityCount = 1, requestSha = sha, deploySha = sha, lagging = 0, reader = authorize } = {}) {
+  authorityStatus = "completed", authorityCount = 1, requestSha = sha, deploySha = sha, lagging = 0, reader = authorize,
+  tag = "xmatrix-v0.16.339", authorityTag = tag, channel = "beta" } = {}) {
   const failures = [];
   // The request's own `gates` job stands for every gate its scope selected;
   // ci.yml's job names (`ci / hub (1/6)`, ...) are not part of the evidence.
   const jobs = ["plan", "ci / changes", "ci / hub (1/6)", "ci / web", "gates"]
     .map((name) => ({ name, conclusion: overrides[name] ?? "success" }));
-  const authority = { name: `authorize ${authorityScope} production`, status: authorityStatus, conclusion: authorityConclusion, steps: [] };
+  const authority = { name: `authorize ${authorityScope} production ${authorityTag}`, status: authorityStatus,
+    conclusion: authorityConclusion, steps: [] };
   jobs.push(...Array.from({ length: authorityCount }, () => authority));
   jobs.push({ name: "authorize-and-dispatch", status: "completed", conclusion: "success", steps: [] });
   let reads = 0;
@@ -103,9 +111,9 @@ async function runAuthorization({ scope = "web", overrides = {}, authorityScope 
     },
   };
   await reader(github, {
-    repo: { owner: "LambdaLabsHQ", repo: "xmatrix" }, ref: "refs/tags/xmatrix-v0.16.339", runId: 456,
+    repo: { owner: "LambdaLabsHQ", repo: "xmatrix" }, ref: `refs/tags/${tag}`, runId: 456,
   }, { setFailed: (message) => failures.push(message) }, {
-    env: { DEPLOY_SHA: deploySha, REQUEST_RUN_ID: "123", RELEASE_SCOPE: scope },
+    env: { DEPLOY_SHA: deploySha, REQUEST_RUN_ID: "123", RELEASE_SCOPE: scope, RELEASE_CHANNEL: channel },
   }, fakeRequire, (resolve) => { resolve(); });
   return failures;
 }
@@ -126,6 +134,17 @@ test("tagged preflight accepts only the tested exact scope and its passed gates"
   // The request's release commit (its SHA plus the stamped version) is the same authorization.
   assert.deepEqual(await runAuthorization({ deploySha: "c".repeat(40) }), []);
   assert.notDeepEqual(await runAuthorization({ deploySha: "c".repeat(40), requestSha: "b".repeat(40) }), []);
+  // The authorization names the tag it gated; another tag's passed gates do not count.
+  assert.notDeepEqual(await runAuthorization({ authorityTag: "xmatrix-v0.16.338" }), []);
+});
+
+test("a stable preflight accepts the cut of a revision its request contains, never a beta's authorization", async () => {
+  const stable = { tag: "xmatrix-v1.1.0", channel: "stable", scope: "cli,ios", deploySha: "d".repeat(40) };
+  assert.deepEqual(await runAuthorization(stable), []);
+  assert.notDeepEqual(await runAuthorization({ ...stable, deploySha: "c".repeat(40) }), [],
+    "a beta release commit is not a stable cut");
+  assert.notDeepEqual(await runAuthorization({ ...stable, requestSha: "b".repeat(40) }), []);
+  assert.notDeepEqual(await runAuthorization({ ...stable, authorityTag: "xmatrix-v1.0.606-beta.3" }), []);
 });
 
 test("tagged preflight re-reads exact authorization whose conclusion is not yet reported", async () => {
@@ -148,7 +167,7 @@ test("exact-scope job authorization works without steps and never accepts failed
 
 test("scope authority is a passed-gates job that the dispatcher must await", () => {
   const jobs = parse(awaitedRequest).jobs;
-  assert.equal(jobs.authorization.name, "authorize ${{ needs.plan.outputs.scope }} production");
+  assert.equal(jobs.authorization.name, "authorize ${{ needs.plan.outputs.scope }} production ${{ needs.plan.outputs.tag }}");
   assert.deepEqual(jobs.authorization.needs, ["plan", "gates"]);
   assert.ok(jobs["authorize-and-dispatch"].needs.includes("authorization"));
   for (const [job, prerequisites] of [[jobs.authorization, ["plan", "gates"]],

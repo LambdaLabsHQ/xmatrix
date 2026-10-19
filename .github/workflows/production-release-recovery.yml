@@ -55,7 +55,7 @@ jobs:
           # A runner-side "fetch failed" is retried rather than failing the job.
           retries: 3
           script: |
-            const stableTag = /^xmatrix-v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/;
+            const releaseTag = /^xmatrix-v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-beta\.[1-9]\d*)?$/;
             const parseRunId = (name, value) => {
               if (!/^[1-9]\d*$/.test(value)) {
                 throw new Error(`${name} must be a positive workflow run id`);
@@ -66,12 +66,13 @@ jobs:
               }
               return parsed;
             };
-            const parseVersion = (tag) => tag
-              .slice("xmatrix-v".length)
-              .split(".")
-              .map(Number);
+            // Betas and stables share one ascending line: X.Y.Z-beta.N < X.Y.Z.
+            const parseVersion = (tag) => {
+              const [core, beta] = tag.slice("xmatrix-v".length).split("-beta.");
+              return [...core.split(".").map(Number), beta === undefined ? Infinity : Number(beta)];
+            };
             const compareVersion = (left, right) =>
-              left[0] - right[0] || left[1] - right[1] || left[2] - right[2];
+              left[0] - right[0] || left[1] - right[1] || left[2] - right[2] || left[3] - right[3];
             const getRun = async (runId) => (await github.rest.actions.getWorkflowRun({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -141,8 +142,8 @@ jobs:
             }
             const blockedTag = process.env.BLOCKED_VERSION_TAG;
             const replacementTag = process.env.REPLACEMENT_VERSION_TAG;
-            if (!stableTag.test(blockedTag) || !stableTag.test(replacementTag)) {
-              throw new Error("both version tags must be stable xmatrix-vMAJOR.MINOR.PATCH tags");
+            if (!releaseTag.test(blockedTag) || !releaseTag.test(replacementTag)) {
+              throw new Error("both version tags must be xmatrix-vMAJOR.MINOR.PATCH or xmatrix-vMAJOR.MINOR.PATCH-beta.N release tags");
             }
             if (compareVersion(parseVersion(replacementTag), parseVersion(blockedTag)) <= 0) {
               throw new Error("replacement version must be newer than the blocked version");

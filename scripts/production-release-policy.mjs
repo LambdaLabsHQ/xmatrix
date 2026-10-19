@@ -6,20 +6,19 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { compareSemver } from "./release-version-order.mjs";
+import { compareSemver, RELEASE_TAG_PATTERN } from "./release-version-order.mjs";
 import { verifyReleaseCommit } from "./release-commit.mjs";
 
 export const PRODUCTION_BASELINE_VERSION = "0.16.2";
-const TAG_PATTERN = /^xmatrix-v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/u;
 
 export function productionVersionFromTag(tag) {
-  const match = TAG_PATTERN.exec(tag ?? "");
-  if (!match) {
+  if (!RELEASE_TAG_PATTERN.test(tag ?? "")) {
     throw new Error(
-      `Invalid production tag '${tag ?? ""}'. Expected xmatrix-vMAJOR.MINOR.PATCH without prerelease or build metadata.`,
+      `Invalid production tag '${tag ?? ""}'. Expected xmatrix-vMAJOR.MINOR.PATCH (stable) or ` +
+        "xmatrix-vMAJOR.MINOR.PATCH-beta.N (beta), without build metadata.",
     );
   }
-  return `${match[1]}.${match[2]}.${match[3]}`;
+  return tag.slice("xmatrix-v".length);
 }
 
 export function productionTagFromVersion(version) {

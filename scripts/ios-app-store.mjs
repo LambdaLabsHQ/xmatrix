@@ -1,6 +1,7 @@
 import { appendFileSync, readFileSync } from "node:fs";
 import { appleClientFromEnv, AppleApiError } from "./app-store-connect.mjs";
 import { runCliMain } from "./cli-entrypoint.mjs";
+import { releaseChannel, releaseCore } from "./release-version-order.mjs";
 
 const EDITABLE = new Set(["PREPARE_FOR_SUBMISSION", "REJECTED", "METADATA_REJECTED", "DEVELOPER_REJECTED", "READY_FOR_REVIEW"]);
 const SUBMITTED = new Set(["WAITING_FOR_REVIEW", "IN_REVIEW", "PENDING_DEVELOPER_RELEASE", "PENDING_APPLE_RELEASE", "PROCESSING_FOR_APP_STORE", "READY_FOR_SALE", "READY_FOR_DISTRIBUTION"]);
@@ -182,10 +183,13 @@ await runCliMain(import.meta.url, async () => {
   const mode = process.argv[2];
   if (mode === "validate") { console.log("Public App Store metadata is valid."); return; }
   const env = process.env;
-  const version = JSON.parse(readFileSync(new URL("../version.json", import.meta.url), "utf8")).version;
-  if (!["check-upload", "submit"].includes(mode) || env.GITHUB_ACTIONS !== "true" || env.GITHUB_REF !== `refs/tags/xmatrix-v${version}` || !/^[a-f0-9]{40}$/.test(env.GITHUB_SHA ?? "") || !/^\d{1,18}$/.test(env.IOS_BUILD_NUMBER ?? "")) {
+  const release = JSON.parse(readFileSync(new URL("../version.json", import.meta.url), "utf8")).version;
+  if (!["check-upload", "submit"].includes(mode) || env.GITHUB_ACTIONS !== "true" || env.GITHUB_REF !== `refs/tags/xmatrix-v${release}` || !/^[a-f0-9]{40}$/.test(env.GITHUB_SHA ?? "") || !/^\d{1,18}$/.test(env.IOS_BUILD_NUMBER ?? "")) {
     throw new Error("App Store automation requires an immutable production release context.");
   }
+  // Apple's store version is the release's X.Y.Z (three numbers only); the build
+  // number tells a beta's build from its stable's.
+  const version = releaseCore(release);
   const api = appleClientFromEnv(env);
   const appId = await resolveApp(api, metadata.bundleId);
   const args = { appId, version, buildNumber: env.IOS_BUILD_NUMBER };
@@ -193,6 +197,12 @@ await runCliMain(import.meta.url, async () => {
     const build = await findBuild(api, args);
     appendFileSync(env.GITHUB_OUTPUT, `upload_required=${!build}\n`);
     console.log(build ? "Exact release build already exists; upload will be reused." : "Exact release build requires upload.");
+    return;
+  }
+  if (releaseChannel(release) === "beta") {
+    // A beta stays in TestFlight; only a stable goes to App Review.
+    console.log(`Beta ${release} stays in TestFlight; App Review takes stable releases only.`);
+    if (env.GITHUB_STEP_SUMMARY) appendFileSync(env.GITHUB_STEP_SUMMARY, `\nApp Store: **testflight-only** — beta ${release} (${env.IOS_BUILD_NUMBER}).\n`);
     return;
   }
   const result = await submitRelease(api, { ...args, metadata, privateNotes: env.ASC_REVIEW_NOTES ?? "" });

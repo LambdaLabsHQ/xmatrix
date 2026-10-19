@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-import { releaseCommitProblem, verifyReleaseCommit } from "./release-commit.mjs";
+import { releaseCommitProblem, verifyReleaseCommit, verifyReleaseCut } from "./release-commit.mjs";
 import { isReleaseCommitOfMain } from "./production-release-policy.mjs";
 import { stampVersionText, versionedPaths } from "./version.mjs";
 
@@ -105,4 +105,36 @@ test("main history admits a release commit whose parent is on main", () => {
   } finally {
     rmSync(repo.root, { recursive: true, force: true });
   }
+});
+
+test("a stable cut is the stamped release commit of a revision main contains, at a beta or stable version", () => {
+  const repo = fixtureRepository();
+  try {
+    const verified = repo.source;
+    const later = repo.commit("later main", () => writeFileSync(path.join(repo.root, "source.txt"), "later\n"));
+    repo.git("checkout", "--quiet", "--detach", verified);
+    const stable = repo.commit("Release 99.1.0", repo.stamp("99.1.0"));
+    verifyReleaseCut(repo.root, stable, later);
+    const beta = repo.commit("Release 99.2.0-beta.1", repo.stamp("99.2.0-beta.1"));
+    assert.throws(() => verifyReleaseCut(repo.root, beta, later), /which [0-9a-f]{40} does not contain/u,
+      "a grandchild's parent is not on main");
+    // Newer main content is not a stamp of the verified source.
+    repo.git("checkout", "--quiet", "--detach", verified);
+    const carried = repo.commit("Release 99.1.1", () => {
+      repo.stamp("99.1.1")();
+      writeFileSync(path.join(repo.root, "source.txt"), "later\n");
+    });
+    assert.throws(() => verifyReleaseCut(repo.root, carried, later), /changes more than the release version/u);
+  } finally {
+    rmSync(repo.root, { recursive: true, force: true });
+  }
+});
+
+test("a release stamps every manifest with its version, and iOS with the three numbers Apple takes", () => {
+  const project = readFileSync(path.join(repoRoot, "apps/ios/xMatrix.xcodeproj/project.pbxproj"), "utf8");
+  const stamped = stampVersionText("apps/ios/xMatrix.xcodeproj/project.pbxproj", project, "1.0.606-beta.3");
+  const marketing = [...stamped.matchAll(/MARKETING_VERSION = ([^;]+);/gu)].map((match) => match[1]);
+  assert.ok(marketing.length > 0);
+  assert.deepEqual([...new Set(marketing)], ["1.0.606"]);
+  assert.equal(JSON.parse(stampVersionText("version.json", '{"version":"1.0.0"}', "1.0.606-beta.3")).version, "1.0.606-beta.3");
 });

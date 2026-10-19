@@ -11,6 +11,15 @@ import {
   validateReleaseVersionOrder,
 } from "./release-version-order.mjs";
 
+/**
+ * Apple takes three numbers for an app's version, so iOS carries the X.Y.Z a
+ * release is or precedes; its build number tells a beta's build from the
+ * stable's.
+ */
+function iosMarketingVersion(version) {
+  return version.split(/[-+]/u)[0];
+}
+
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const canonicalVersionPath = "version.json";
 const packageJsonPaths = [
@@ -103,7 +112,7 @@ export function stampVersionText(relativePath, text, version) {
     return cargoLock;
   }
   if (relativePath === iosProjectPath) {
-    return text.replace(/MARKETING_VERSION = [^;]+;/g, `MARKETING_VERSION = ${version};`);
+    return text.replace(/MARKETING_VERSION = [^;]+;/g, `MARKETING_VERSION = ${iosMarketingVersion(version)};`);
   }
   throw new Error(`${relativePath} is not a versioned file.`);
 }
@@ -144,7 +153,7 @@ function collectMismatches(expectedVersion) {
     (match) => match[1],
   );
   for (const actualVersion of iosVersions) {
-    if (actualVersion !== expectedVersion) {
+    if (actualVersion !== iosMarketingVersion(expectedVersion)) {
       mismatches.push(`${iosProjectPath}: MARKETING_VERSION ${actualVersion}`);
     }
   }

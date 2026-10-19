@@ -59,7 +59,7 @@ jobs:
             // the highest successful release run id -- or it refuses the tag.
             const production = runs
               .filter((run) => run.conclusion === "success" && run.event === "workflow_dispatch" &&
-                /^xmatrix-v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/.test(run.head_branch))
+                /^xmatrix-v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-beta\.[1-9]\d*)?$/.test(run.head_branch))
               .sort((left, right) => right.id - left.id)[0];
             if (!production) throw new Error("no successful production release tag is available");
             core.info(`Saw ${runs.length} successful releases; newest ${production.head_branch} (run ${production.id})`);
