@@ -1993,7 +1993,8 @@ export const ChannelDetails = memo(function ChannelDetails({
             </div>
           </DetailBlock>
           )}
-          {onDeleteChannel && <button type="button" onClick={onDeleteChannel}
+          {/* The desktop title carries delete; the phone has no title icons. */}
+          {onDeleteChannel && mobileOverlayOpen && <button type="button" onClick={onDeleteChannel}
             className="text-sm font-medium text-destructive hover:underline">Delete Channel…</button>}
         </div>
       </div>
