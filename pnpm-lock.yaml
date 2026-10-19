@@ -31,6 +31,7 @@ patchedDependencies:
   electron-updater@6.8.3: f59866458d4a1e10d3392883da221dea149dbb3520c42377b67238577ca62540
   knip@6.12.2: f322b5d46c210284d9500b4033b48eb1b06225eeea6faa86c1feb28ce085b3d0
   kysely@0.29.2: 1b860e5867e14a115d0f57c23e0e48b586ddb9a275f99db98918404fc7a2d566
+  react-virtuoso@4.18.11: a4ca0186c2c4d08ab7a92154c7b3f066920e79fd79299c9bf76782f0af97c67b
   wrangler@4.79.0: 8a9cf0b639075cd40bda130b2c94712dcd4921aa5d6948e8f6f9274531bf216b
 
 importers:
@@ -193,7 +194,7 @@ importers:
         version: 10.1.0(@types/react@19.2.14)(react@19.2.4)
       react-virtuoso:
         specifier: 4.18.11
-        version: 4.18.11(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
+        version: 4.18.11(patch_hash=a4ca0186c2c4d08ab7a92154c7b3f066920e79fd79299c9bf76782f0af97c67b)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
       remark-gfm:
         specifier: 4.0.1
         version: 4.0.1
@@ -13578,7 +13579,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  react-virtuoso@4.18.11(react-dom@19.2.4(react@19.2.4))(react@19.2.4):
+  react-virtuoso@4.18.11(patch_hash=a4ca0186c2c4d08ab7a92154c7b3f066920e79fd79299c9bf76782f0af97c67b)(react-dom@19.2.4(react@19.2.4))(react@19.2.4):
     dependencies:
       react: 19.2.4
       react-dom: 19.2.4(react@19.2.4)
