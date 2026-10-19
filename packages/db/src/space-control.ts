@@ -1,5 +1,6 @@
 import { appendMetadataRevision, metadataRevision, type AboutTaskAuthor } from "./channel-metadata-revisions.js";
 import { DetailedControlError } from "./control-error.js";
+import { retireChannel } from "./channel-deletion.js";
 import type { DatabaseRequestContext } from "./context.js";
 import { readsOnly } from "./space-roles.js";
 import { lockTransfer, requireTransferAdmin, transferSnapshot, transferView, validateTransfer, type TransferRole, type TransferRow } from "./channel-transfer.js";
@@ -2893,6 +2894,23 @@ export class PostgresSpaceControlRepository {
       ...(stopTargets.length > 0 ? { stopTargets } : {}) };
   }
 
+  /** Human confirmation is checked at the HTTP boundary; PostgreSQL owns admission and retirement. */
+  async deleteChannel(input: { requestId: string; spaceId: string; channelId: string;
+    actorUserId: string; name: string; at: string }): Promise<Record<string, unknown>> {
+    const requestId = bounded(input.requestId, "requestId", 200);
+    const spaceId = bounded(input.spaceId, "spaceId");
+    const channelId = bounded(input.channelId, "channelId");
+    const actorUserId = bounded(input.actorUserId, "actorUserId");
+    const at = iso(input.at);
+    return this.inSpace(requestId, "channel.delete", spaceId, async tx => {
+      await requireSpaceAdmin(tx, "channel_deletion_admin_v1", spaceId, actorUserId);
+      const result = await retireChannel(tx, { ...input, spaceId, channelId, actorUserId, at });
+      // An idempotent repeat still advances the catalog, recovering a lost invalidation.
+      await requiredControlHead(tx, { name: "channel_deletion_head_v1", spaceId, at });
+      return { ...result, channelId, spaceId };
+    });
+  }
+
   async mutateChannel(
     input: PostgresChannelMutation,
     transfer?: { sourceSpaceId: string; proposalId: string },
@@ -2947,7 +2965,7 @@ export class PostgresSpaceControlRepository {
         values: [channelId], maxRows: 1,
       });
       const root = roots[0];
-      if (!root) throw new SpaceControlError("not_found", 404, "channel not found");
+      if (!root || root.mode === "deleted") throw new SpaceControlError("not_found", 404, "channel not found");
       const expectedVersion = input.expectedVersion ?? Number(root.version);
       if (Number(root.version) !== expectedVersion) {
         throw new SpaceControlError("conflict", 409, "channel version conflict");

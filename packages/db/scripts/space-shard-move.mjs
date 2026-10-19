@@ -18,6 +18,7 @@ export const MOVABLE_SPACE_TABLES = Object.freeze([
   "blob_upload_intents",
   "channel_access",
   "channel_content_counters",
+  "channel_deletions",
   "channel_message_sequences",
   "channels",
   "channel_metadata_revisions",

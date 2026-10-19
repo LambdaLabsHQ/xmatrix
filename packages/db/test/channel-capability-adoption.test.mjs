@@ -56,6 +56,9 @@ const exactOrLifecycleOwnerAuthorities = [
   // Space deletion runs after the owner check, or in the purge worker once the
   // Space has no members. It reads Channels only to locate its own Space's rows.
   "space-deletion.ts",
+  // Human owner/admin retirement is admitted by Space control. Its cleanup
+  // reads only the exact durably retired identity, never an access capability.
+  "channel-deletion.ts",
 ];
 
 test("every PostgreSQL Channel reader is shared-policy backed or an explicit exact boundary", () => {

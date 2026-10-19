@@ -62,7 +62,7 @@ export async function transferSnapshot(tx: DatabaseTransaction, source: string, 
     values: [channelId], maxRows: 1,
   });
   const root = tree.find((row) => row.channel_id === channelId);
-  if (!root || root.space_id !== source) throw new SpaceControlError("channel_not_found", 404, "Channel not found");
+  if (!root || root.mode === "deleted" || root.space_id !== source) throw new SpaceControlError("channel_not_found", 404, "Channel not found");
   const members = await tx.query<MemberRow>({
     name: "transfer_members_snapshot_v1", text: `SELECT space_id, user_id, role, version, display_name
       FROM data.space_members WHERE space_id = ANY($1::text[])

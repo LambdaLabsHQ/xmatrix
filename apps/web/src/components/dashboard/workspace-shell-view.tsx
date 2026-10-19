@@ -2,6 +2,7 @@
 
 import { AnimatedIcon } from "@/components/ui/animated-icon";
 import { AnimationActivityScope } from "@/components/ui/decoration-animation";
+import { ChannelDeletionDialog } from "./channel-deletion-dialog";
 import { ChannelTransferQueue } from "./channel-transfer-queue";
 import { spaceRoleFor as transferSpaceRole } from "./workspace-shell-recovered";
 
@@ -120,6 +121,7 @@ function dockTabOf(view: AppView): AppView {
 const NO_PAGES: NonNullable<ReturnType<typeof usePageTree>["data"]> = [];
 
 export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
+  const [deletingChannel, setDeletingChannel] = useState<typeof model.selectedChannel>(null);
   const [desktopUpdateConfirmOpen, setDesktopUpdateConfirmOpen] = useState(false);
   const [pageConversationDocked, setPageConversationDocked] = useState(false);
   const {
@@ -878,6 +880,17 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
   const changeSelectedVisibility = useStableCallback((mode: Parameters<typeof updateChannelVisibility>[1]) => {
     if (selectedChannel) void updateChannelVisibility(selectedChannel, mode);
   });
+  const openSelectedChannelDeletion = useStableCallback(() => {
+    if (selectedChannel) { closeMobileChannelDetails(); setDeletingChannel(selectedChannel); }
+  });
+  const channelDeleted = useStableCallback((id: string) => {
+    setDeletingChannel(null);
+    setChannels(current => current.filter(channel => channel.id !== id));
+    if (selectedChannelId === id) setSelectedChannelId(null);
+    window.dispatchEvent(new CustomEvent("xmatrix:channel-catalog-change", { detail: { kind: "structure" } }));
+  });
+  const canDeleteSelectedChannel = Boolean(selectedChannel && spaces.some(space => space.id === selectedChannel.spaceId &&
+    ["owner", "admin"].includes(transferSpaceRole(space, user?.id ?? "") ?? "")));
   const moveSelectedChannel = useStableCallback(() => {
     if (selectedChannel) openChannelMove(selectedChannel);
   });
@@ -1090,6 +1103,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
           onRename={renameSelectedChannel}
           onVisibilityChange={changeSelectedVisibility}
           onMove={moveSelectedChannel}
+          onDelete={canDeleteSelectedChannel ? openSelectedChannelDeletion : undefined}
           renaming={renamingChannelId === selectedChannel.id}
           updatingVisibility={updatingChannelVisibilityId === selectedChannel.id}
           moving={movingChannelId === selectedChannel.id}
@@ -1260,6 +1274,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       onOpenAgentTrace={openAgentTrace}
       onRunChannelCommand={canUseSelectedChannel ? runSelectedChannelCommand : undefined}
       onManageApps={manageSelectedApps}
+      onDeleteChannel={canDeleteSelectedChannel ? openSelectedChannelDeletion : undefined}
       automations={automations}
       automationExecutionEnabled={automationExecutionEnabled}
       automationBusy={automationBusy}
@@ -1427,6 +1442,8 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     // Files are accepted by the whole window, not by the composer element, so
     // the drop surface has to sit above the app's isolate stacking context.
     <AttachmentDropZoneProvider>
+    {deletingChannel && <ChannelDeletionDialog key={deletingChannel.id} channel={deletingChannel}
+      onCancel={() => setDeletingChannel(null)} onDeleted={channelDeleted} />}
     <OnboardingActionsContext.Provider value={onboardingActions}>
     <RealtimeChannelsContext.Provider value={model.realtimeChannels}>
     <RealtimeEventsContext.Provider value={model.realtimeEventViews}>

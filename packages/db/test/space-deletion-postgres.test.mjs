@@ -59,6 +59,18 @@ async function fixture(client, repository, id) {
   await client.query(`INSERT INTO data.instances
     (instance_id,run_id,channel_id,channel_instance_id,status,version,created_at,updated_at)
     VALUES ($1,$2,$3,1,'online',1,now(),now())`, [ids.instance, ids.run, ids.general]);
+  // A live execution has a registration binding. An unregistered Run is not
+  // evidence of a process the Space deletion may target.
+  await client.query(`INSERT INTO data.agent_registrations
+    (owner_user_id,machine_id,harness,version,created_at,updated_at)
+    VALUES ($1,'machine-1','codex',1,now(),now())`, [ids.owner]);
+  await client.query(`INSERT INTO data.space_agent_registrations
+    (space_id,owner_user_id,machine_id,harness,display_name,configuration_json,version,created_at,updated_at)
+    VALUES ($1,$2,'machine-1','codex','Codex','{}',1,now(),now())`, [ids.space, ids.owner]);
+  await client.query(`INSERT INTO data.run_agent_registrations
+    (run_id,space_id,owner_user_id,machine_id,harness,actor_user_id,allocation_id,authorization_digest,
+     grant_revision,grant_execution_revision,policy_revision,policy_execution_revision,requested_json)
+    VALUES ($1,$2,$3,'machine-1','codex',$3,$1,repeat('a',64),1,1,1,1,'{}')`, [ids.run, ids.space, ids.owner]);
   await client.query(`INSERT INTO data.automations
     (automation_id,owner_user_id,channel_id,next_run_at,enabled,version,payload_json,created_at,updated_at)
     VALUES ($1,$2,$3,now(),true,1,'{}',now(),now())`, [ids.automation, ids.owner, ids.general]);
@@ -192,6 +204,11 @@ integration("an owner deletes a Space, may restore it, and the purge removes exa
       assert.equal(await repository.recordSpacePurgeObjects({ requestId: crypto.randomUUID(),
         spaceId: ids.space, cursor: step.cursor, exhausted: step.exhausted, deleted: step.objectKeys.length,
         now: due }), true);
+      if (step.exhausted) {
+        // Resume an older release's marker: newly ordered registration dependencies
+        // must still be erased before its next attempt to remove the Run.
+        await client.query("UPDATE data.space_deletions SET purge_step='rows:data.runs' WHERE space_id=$1", [ids.space]);
+      }
       continue;
     }
     if (step.status !== "rows") break;
