@@ -40,7 +40,8 @@ test("the admitted app reads from the Hub straight, with its bearer and identity
   await admitAppCompatibility(identity);
 
   let hub = () => Response.json({ pages: ["from the Hub"] });
-  const requests = serve(t, (url, init) => url.startsWith(HUB) ? hub(url, init) : Response.json({ pages: ["from the Web"] }));
+  const toHub = (url) => new URL(url, "https://xmatrix.sh").origin === HUB;
+  const requests = serve(t, (url, init) => toHub(url) ? hub(url, init) : Response.json({ pages: ["from the Web"] }));
   assert.deepEqual(await read(), { pages: ["from the Hub"] });
   assert.equal(requests[0].url, `${HUB}/api/spaces/s1/pages`);
   assert.equal(requests[0].headers.get("authorization"), "Bearer token-1");
