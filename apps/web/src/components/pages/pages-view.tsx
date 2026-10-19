@@ -1504,159 +1504,167 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     </>
   );
 
+  // The page's column, with room for the margin beside it when there is one.
+  const column = cn("mx-auto max-w-3xl", marginOn && "max-w-[calc(48rem+21.5rem)]");
   return (
     <div className={cn("relative flex min-h-0 min-w-0 flex-1 overflow-hidden", marginOn && "pages-margin-on")}
       data-testid="pages-view">
-      <PageScrollMarks marks={scrollMarks} />
-      <div className="relative flex min-h-0 min-w-0 flex-1">
-        <PageOffscreenPeople above={offscreen.above} below={offscreen.below} onJump={jumpTo} />
-        <article ref={measureArticle} className={phone ? "app-mobile-page-article min-h-0 min-w-0 flex-1 overflow-y-auto px-6"
-          : "app-page-article min-h-0 min-w-0 flex-1 overflow-y-auto px-6 py-6 lg:px-12"}>
-          <div className={cn("mx-auto max-w-3xl", marginOn && "max-w-[calc(48rem+21.5rem)]")}>
-            {phone ? (
-              <div className="-mr-2 flex items-center justify-end gap-1 pb-3" data-testid="page-controls">{controls}</div>
-            ) : (
-              <header className="app-band-header mb-4 flex flex-wrap items-center gap-1.5" data-testid="page-controls">
-                <span className="mr-auto" />
-                <span className="mr-1 text-xs text-muted-foreground" data-testid="page-save-state"
-                  title={`Revision ${headRevision ?? page?.headRevision ?? ""}`}>
-                  {saveState === "saving" ? "Saving…" : saveState === "saved" ? "All changes saved"
-                    : saveState === "offline" ? "Offline · your changes sync when you reconnect"
-                    : pending ? "" : connected ? `r${headRevision ?? page?.headRevision ?? ""}` : "Connecting…"}
-                  {!canEdit && connected ? " · read-only" : ""}
-                </span>
-                {controls}
-              </header>
-            )}
-            {writerFeedback && (
-              <div role="status" className="mb-3 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-                <span className="page-writer-dots" aria-hidden="true"><i /><i /><i /></span>
-                <span>{writerFeedback.harness} is starting…{!writerStarting && " Write in the page; your Agent responds here."}</span>
-                {!writerStarting && writerCalled && (
-                  <Button variant="ghost" size="sm" onClick={() => openConversation(writerCalled.conversationId)}>
-                    Conversation
-                  </Button>
-                )}
-              </div>
-            )}
-            {notice && <p className={noticeClass("attention", "mb-3 rounded-md px-3 py-2 text-sm")}>{notice}</p>}
-            {migration.data?.state === "proposed" && (
-              // An Agent drafted the move; it waits for an owner or admin, however many pages exist.
-              <p className={noticeClass("secondary", "mb-3 flex items-center gap-2 rounded-md px-3 py-2 text-sm")}
-                data-testid="page-migration-notice">
-                <span className="min-w-0 flex-1">A draft moves this Space&apos;s conversations to pages.</span>
-                <Button size="xs" variant="outline" onClick={() => setReviewing(spaceId)}>Review</Button>
-              </p>
-            )}
-            {mode === "history" && page ? (
-              <PageHistory spaceId={spaceId} pageId={page.pageId} token={token}
-                headRevision={headRevision ?? page.headRevision} canEdit={canEdit}
-                conversationName={conversationName} onOpenConversation={openConversation}
-                onClose={() => setMode("page")}
-                onPromoted={() => void queryClient.invalidateQueries({ predicate: (query) =>
-                  query.queryKey.includes("page-tree") })} />
-            ) : (
-              <div className="flex gap-6">
-                <div ref={docColumn} className={cn("relative min-w-0 max-w-3xl flex-1",
-                  phone && phoneDiff && !suggestionMark && "has-reader-mark")}>
-                  <PagePens pens={edgePens} room={penRoom} onJump={jumpTo}
-                    onOpen={(person) => setDialog({ kind: "agent", key: person.key })} />
-                  {suggestionMark && suggestedBy && (
-                    <PageChangeMark top={suggestionMark.top} away={suggestionMark.away} testId="page-suggestions"
-                      label={`${suggestedBy} suggests this change, ${suggesting.current + 1} of ${suggesting.count}`}>
-                      {/* Its face rides its pen in the line; here it says who waits, while the line is out of view. */}
-                      {suggestionMark.away && <button type="button" className="page-change-face" aria-label={`${suggestedBy}, show its change`}
-                        title={`${suggestedBy} suggests · ${suggesting.current + 1} of ${suggesting.count}`}
-                        onClick={() => suggestionControl.current?.step(0)}>
-                        <IdentityAvatar kind="agent" label={suggestedBy} imageUrl={suggesterAvatar} size="sm" shape="circle"
-                          glass={false} initials={suggesterAvatar ? avatarInitials(suggestedBy) : undefined}
-                          className="pointer-events-none rounded-full" />
-                      </button>}
-                      <button type="button" onClick={() => suggestionControl.current?.take()} aria-label="Take this change"
-                        title={phone ? "Accept" : "Accept (Tab)"} className="page-change-button is-primary">
-                        <Check className="size-4" />
-                      </button>
-                      <button type="button" onClick={() => suggestionControl.current?.leave()} aria-label="Leave this change"
-                        title={phone ? "Skip" : "Skip (Esc)"} className="page-change-button">
-                        <X className="size-4" />
-                      </button>
-                    </PageChangeMark>
-                  )}
-                  {drawn && !!readerChanges && !diffViewed && <PageReaderChangeGutter column={docColumn} />}
-                  {phone && phoneDiff && !suggestionMark && (
-                    <PageReaderChangeMark column={docColumn} article={articleElement} changes={readerChanges ?? 0}
-                      onViewed={viewDiff} />
-                  )}
-                  {!drawn && document.data && (
-                    // Where the editor's host holds its height.
-                    <div className="min-h-[50vh]"><PageDocumentStatic body={document.data.body} testId="page-preview"
-                      references={references} mediaUrl={mediaUrl} /></div>
-                  )}
-                  {drawn && !!readerChanges && !phone && (
-                    <label className="mb-3 flex w-fit cursor-pointer items-center gap-2 text-xs text-muted-foreground"
-                      data-testid="page-reader-diff">
-                      <input type="checkbox" checked={diffViewed} onChange={(event) => {
-                        if (event.target.checked) viewDiff();
-                        else setDiffViewed(false);
-                      }} />
-                      <span className="text-foreground">Viewed</span>
-                      <span>{readerChanges === 1 ? "1 change" : `${readerChanges} changes`} since you last read this page</span>
-                    </label>
-                  )}
-                  <div className={drawn ? undefined : "hidden"}>
-                    {session && <PageEditor key={session.doc.guid} session={session} canEdit={canEdit} writeOn={writeOn}
-                      {...(coWriter ? { placeholder: onboardingCopy.coWrite.firstLine(coWriter) } : {})}
-                      onReady={() => setEditorReady(true)} readerBaseline={readerDiff} onReaderChanges={setReaderChanges}
-                      onWrite={coWriting} readFrom={readFrom} reading={reading}
-                      suggestions={drawn ? waiting.suggestions : null} onSuggestions={setSuggesting}
-                      suggestionControl={suggestionControl}
-                      actions={sectionActions} headingActions={headingActions} sections={sections}
-                      onBlocks={(next) => startTransition(() => setEditorBlocks({ session, blocks: next }))}
-                      follow={follow} onOpenConversation={openConversation} discussions={discussions}
-                      automations={automationsById} references={references}
-                      focusedConversationId={activeConversationId ?? focused} onFocusConversation={setFocused}
-                      onAnchorOffsets={setAnchorTops} cursorPresence={cursorPresence} readGitHubFile={readGitHubFile}
-                      mediaUrl={mediaUrl} uploadMedia={uploadMedia} />}
-                  </div>
-                </div>
-                {/* The margin holds its room from the start, so the text does not reflow when the page has synced;
-                    an open conversation shows from the start, and moves to its anchor once the page is drawn. */}
-                {marginOn && (
-                  <aside className="w-80 shrink-0">
-                    {(drawn || openInMargin) && <PageMargin conversations={marginCards} tops={anchorTops} focusedId={focused} canResolve={canEdit}
-                      writers={marginWriters}
-                      onWriter={(writer) => setDialog({ kind: "agent", key: writer.key })}
-                      writerActions={(person) => {
-                        const controls = agentControls(person);
-                        return (
-                          <>
-                            {controls.switchTo && (
-                              <button type="button" onClick={controls.switchTo.run}
-                                className={actionClass({ variant: "primary", size: "sm" })}>{controls.switchTo.label}</button>
-                            )}
-                            {controls.undo && (
-                              <button type="button" onClick={controls.undo}
-                                className={actionClass({ variant: "secondary", size: "sm" })}>Undo</button>
-                            )}
-                            {controls.stop && (
-                              <button type="button" onClick={controls.stop}
-                                className={actionClass({ variant: "secondary", size: "sm" })}>Stop</button>
-                            )}
-                          </>
-                        );
-                      }}
-                      openId={openInMargin ? activeConversationId : null}
-                      {...(renderConversation ? { renderOpen: () => renderConversation("margin") } : {})}
-                      {...(onCloseConversation ? { onClose: onCloseConversation } : {})}
-                      {...(onExpandConversation ? { onExpand: onExpandConversation } : {})}
-                      onOpen={openConversation} onResolve={(linkId) => void resolveDiscussion(linkId)}
-                      onFocus={setFocused} />}
-                  </aside>
-                )}
-              </div>
-            )}
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        {/* On a desktop the page's controls hold the band at the top, and the page scrolls below it: nothing
+            passes under the band, and whatever waits at the page's top edge waits below it, clear of the
+            window's search there. */}
+        {!phone && (
+          <div className="app-page-band shrink-0 px-6 lg:px-12">
+            <header className={cn(column, "app-band-header flex flex-wrap items-center gap-1.5")} data-testid="page-controls">
+              <span className="mr-auto" />
+              <span className="mr-1 text-xs text-muted-foreground" data-testid="page-save-state"
+                title={`Revision ${headRevision ?? page?.headRevision ?? ""}`}>
+                {saveState === "saving" ? "Saving…" : saveState === "saved" ? "All changes saved"
+                  : saveState === "offline" ? "Offline · your changes sync when you reconnect"
+                  : pending ? "" : connected ? `r${headRevision ?? page?.headRevision ?? ""}` : "Connecting…"}
+                {!canEdit && connected ? " · read-only" : ""}
+              </span>
+              {controls}
+            </header>
           </div>
-        </article>
+        )}
+        <div className="relative flex min-h-0 min-w-0 flex-1">
+          <PageScrollMarks marks={scrollMarks} />
+          <PageOffscreenPeople above={offscreen.above} below={offscreen.below} onJump={jumpTo} />
+          <article ref={measureArticle} className={phone ? "app-mobile-page-article min-h-0 min-w-0 flex-1 overflow-y-auto px-6"
+            : "app-page-article min-h-0 min-w-0 flex-1 overflow-y-auto px-6 pt-4 pb-6 lg:px-12"}>
+            <div className={column}>
+              {phone && <div className="-mr-2 flex items-center justify-end gap-1 pb-3" data-testid="page-controls">{controls}</div>}
+              {writerFeedback && (
+                <div role="status" className="mb-3 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+                  <span className="page-writer-dots" aria-hidden="true"><i /><i /><i /></span>
+                  <span>{writerFeedback.harness} is starting…{!writerStarting && " Write in the page; your Agent responds here."}</span>
+                  {!writerStarting && writerCalled && (
+                    <Button variant="ghost" size="sm" onClick={() => openConversation(writerCalled.conversationId)}>
+                      Conversation
+                    </Button>
+                  )}
+                </div>
+              )}
+              {notice && <p className={noticeClass("attention", "mb-3 rounded-md px-3 py-2 text-sm")}>{notice}</p>}
+              {migration.data?.state === "proposed" && (
+                // An Agent drafted the move; it waits for an owner or admin, however many pages exist.
+                <p className={noticeClass("secondary", "mb-3 flex items-center gap-2 rounded-md px-3 py-2 text-sm")}
+                  data-testid="page-migration-notice">
+                  <span className="min-w-0 flex-1">A draft moves this Space&apos;s conversations to pages.</span>
+                  <Button size="xs" variant="outline" onClick={() => setReviewing(spaceId)}>Review</Button>
+                </p>
+              )}
+              {mode === "history" && page ? (
+                <PageHistory spaceId={spaceId} pageId={page.pageId} token={token}
+                  headRevision={headRevision ?? page.headRevision} canEdit={canEdit}
+                  conversationName={conversationName} onOpenConversation={openConversation}
+                  onClose={() => setMode("page")}
+                  onPromoted={() => void queryClient.invalidateQueries({ predicate: (query) =>
+                    query.queryKey.includes("page-tree") })} />
+              ) : (
+                <div className="flex gap-6">
+                  <div ref={docColumn} className={cn("relative min-w-0 max-w-3xl flex-1",
+                    phone && phoneDiff && !suggestionMark && "has-reader-mark")}>
+                    <PagePens pens={edgePens} room={penRoom} onJump={jumpTo}
+                      onOpen={(person) => setDialog({ kind: "agent", key: person.key })} />
+                    {suggestionMark && suggestedBy && (
+                      <PageChangeMark top={suggestionMark.top} away={suggestionMark.away} testId="page-suggestions"
+                        label={`${suggestedBy} suggests this change, ${suggesting.current + 1} of ${suggesting.count}`}>
+                        {/* Its face rides its pen in the line; here it says who waits, while the line is out of view. */}
+                        {suggestionMark.away && <button type="button" className="page-change-face" aria-label={`${suggestedBy}, show its change`}
+                          title={`${suggestedBy} suggests · ${suggesting.current + 1} of ${suggesting.count}`}
+                          onClick={() => suggestionControl.current?.step(0)}>
+                          <IdentityAvatar kind="agent" label={suggestedBy} imageUrl={suggesterAvatar} size="sm" shape="circle"
+                            glass={false} initials={suggesterAvatar ? avatarInitials(suggestedBy) : undefined}
+                            className="pointer-events-none rounded-full" />
+                        </button>}
+                        <button type="button" onClick={() => suggestionControl.current?.take()} aria-label="Take this change"
+                          title={phone ? "Accept" : "Accept (Tab)"} className="page-change-button is-primary">
+                          <Check className="size-4" />
+                        </button>
+                        <button type="button" onClick={() => suggestionControl.current?.leave()} aria-label="Leave this change"
+                          title={phone ? "Skip" : "Skip (Esc)"} className="page-change-button">
+                          <X className="size-4" />
+                        </button>
+                      </PageChangeMark>
+                    )}
+                    {drawn && !!readerChanges && !diffViewed && <PageReaderChangeGutter column={docColumn} />}
+                    {phone && phoneDiff && !suggestionMark && (
+                      <PageReaderChangeMark column={docColumn} article={articleElement} changes={readerChanges ?? 0}
+                        onViewed={viewDiff} />
+                    )}
+                    {!drawn && document.data && (
+                      // Where the editor's host holds its height.
+                      <div className="min-h-[50vh]"><PageDocumentStatic body={document.data.body} testId="page-preview"
+                        references={references} mediaUrl={mediaUrl} /></div>
+                    )}
+                    {drawn && !!readerChanges && !phone && (
+                      <label className="mb-3 flex w-fit cursor-pointer items-center gap-2 text-xs text-muted-foreground"
+                        data-testid="page-reader-diff">
+                        <input type="checkbox" checked={diffViewed} onChange={(event) => {
+                          if (event.target.checked) viewDiff();
+                          else setDiffViewed(false);
+                        }} />
+                        <span className="text-foreground">Viewed</span>
+                        <span>{readerChanges === 1 ? "1 change" : `${readerChanges} changes`} since you last read this page</span>
+                      </label>
+                    )}
+                    <div className={drawn ? undefined : "hidden"}>
+                      {session && <PageEditor key={session.doc.guid} session={session} canEdit={canEdit} writeOn={writeOn}
+                        {...(coWriter ? { placeholder: onboardingCopy.coWrite.firstLine(coWriter) } : {})}
+                        onReady={() => setEditorReady(true)} readerBaseline={readerDiff} onReaderChanges={setReaderChanges}
+                        onWrite={coWriting} readFrom={readFrom} reading={reading}
+                        suggestions={drawn ? waiting.suggestions : null} onSuggestions={setSuggesting}
+                        suggestionControl={suggestionControl}
+                        actions={sectionActions} headingActions={headingActions} sections={sections}
+                        onBlocks={(next) => startTransition(() => setEditorBlocks({ session, blocks: next }))}
+                        follow={follow} onOpenConversation={openConversation} discussions={discussions}
+                        automations={automationsById} references={references}
+                        focusedConversationId={activeConversationId ?? focused} onFocusConversation={setFocused}
+                        onAnchorOffsets={setAnchorTops} cursorPresence={cursorPresence} readGitHubFile={readGitHubFile}
+                        mediaUrl={mediaUrl} uploadMedia={uploadMedia} />}
+                    </div>
+                  </div>
+                  {/* The margin holds its room from the start, so the text does not reflow when the page has synced;
+                      an open conversation shows from the start, and moves to its anchor once the page is drawn. */}
+                  {marginOn && (
+                    <aside className="w-80 shrink-0">
+                      {(drawn || openInMargin) && <PageMargin conversations={marginCards} tops={anchorTops} focusedId={focused} canResolve={canEdit}
+                        writers={marginWriters}
+                        onWriter={(writer) => setDialog({ kind: "agent", key: writer.key })}
+                        writerActions={(person) => {
+                          const controls = agentControls(person);
+                          return (
+                            <>
+                              {controls.switchTo && (
+                                <button type="button" onClick={controls.switchTo.run}
+                                  className={actionClass({ variant: "primary", size: "sm" })}>{controls.switchTo.label}</button>
+                              )}
+                              {controls.undo && (
+                                <button type="button" onClick={controls.undo}
+                                  className={actionClass({ variant: "secondary", size: "sm" })}>Undo</button>
+                              )}
+                              {controls.stop && (
+                                <button type="button" onClick={controls.stop}
+                                  className={actionClass({ variant: "secondary", size: "sm" })}>Stop</button>
+                              )}
+                            </>
+                          );
+                        }}
+                        openId={openInMargin ? activeConversationId : null}
+                        {...(renderConversation ? { renderOpen: () => renderConversation("margin") } : {})}
+                        {...(onCloseConversation ? { onClose: onCloseConversation } : {})}
+                        {...(onExpandConversation ? { onExpand: onExpandConversation } : {})}
+                        onOpen={openConversation} onResolve={(linkId) => void resolveDiscussion(linkId)}
+                        onFocus={setFocused} />}
+                    </aside>
+                  )}
+                </div>
+              )}
+            </div>
+          </article>
+        </div>
       </div>
       {phone && mode === "page" && drawn && (
         <PagePhoneDock caller={caller?.agent ?? null} starting={caller?.starting ?? false}

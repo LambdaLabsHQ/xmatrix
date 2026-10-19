@@ -167,6 +167,37 @@ test("a page's controls end before the search icon", async ({ page }) => {
   expect(share!.x + share!.width).toBeLessThanOrEqual(icon!.x);
 });
 
+test("nothing scrolls under the window's search: a page scrolls below its controls, a paper below the band", async ({ page }) => {
+  await page.setViewportSize({ width: 1100, height: 760 });
+  await installPageTreeStubs(page, ["Home"]);
+  await page.goto(`/app/${encodeURIComponent(E2E_SPACE.id)}/pages`, { waitUntil: "domcontentloaded" });
+  await page.locator(".app-sidebar").getByText("Home", { exact: true }).click();
+  const icon = page.locator(".app-global-bar").getByRole("button", { name: "Search" });
+  /** What scrolls in the window and reaches under its search icon. */
+  const scrollingUnderIcon = () => icon.evaluate((node) => {
+    const box = node.getBoundingClientRect();
+    return Array.from(document.querySelectorAll<HTMLElement>(".xmatrix-app *")).filter((element) => {
+      if (!/auto|scroll/u.test(getComputedStyle(element).overflowY)) return false;
+      const rect = element.getBoundingClientRect();
+      return rect.width > 0 && rect.top < box.bottom && rect.bottom > box.top && rect.left < box.right && rect.right > box.left;
+    }).map((element) => String(element.className).split(" ")[0]);
+  });
+  const controls = page.getByTestId("page-controls");
+  await expect(controls.getByRole("button", { name: /Share/u })).toBeVisible();
+  expect(await scrollingUnderIcon(), "pages").toEqual([]);
+  // The page's controls hold the band; the page starts below them.
+  const band = (await controls.boundingBox())!;
+  const article = (await page.locator(".app-page-article").boundingBox())!;
+  expect(article.y).toBeGreaterThanOrEqual(band.y + band.height);
+
+  for (const path of ["status", "apps", "team", "settings", "profile"]) {
+    await page.goto(`/app/${encodeURIComponent(E2E_SPACE.id)}/${path}`, { waitUntil: "domcontentloaded" });
+    await expect(page.locator(".app-tool-detail-scroll").first(), path).toBeVisible();
+    await expect(icon).toBeVisible();
+    expect(await scrollingUnderIcon(), path).toEqual([]);
+  }
+});
+
 test("a long conversation name keeps its search and actions visible without a details column", async ({ page }) => {
   await page.setViewportSize({ width: 1100, height: 800 });
   const channel = { ...E2E_CHANNEL, name: "a-very-long-conversation-name-".repeat(3) + "end" };
