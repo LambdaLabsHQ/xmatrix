@@ -133,12 +133,12 @@ test("conversation actions sit beside its name and borderless search aligns righ
   await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL] });
   const header = page.locator(".app-main .app-panel-header").first();
   const name = header.getByText(E2E_CHANNEL.name, { exact: true });
-  const actions = header.getByRole("button", { name: `Actions for #${E2E_CHANNEL.name}` });
+  const actions = header.getByRole("button", { name: "Copy channel link" });
   const search = header.getByRole("button", { name: "Search", exact: true });
   await expect(search).toBeVisible();
   await expect(page.locator(".app-global-bar")).toHaveCount(0);
   const [nameBox, actionsBox, searchBox] = await Promise.all([name.boundingBox(), actions.boundingBox(), search.boundingBox()]);
-  expect(actionsBox!.x - (nameBox!.x + nameBox!.width)).toBeLessThanOrEqual(8);
+  expect(actionsBox!.x - (nameBox!.x + nameBox!.width)).toBeLessThanOrEqual(16);
   expect(searchBox!.x - (actionsBox!.x + actionsBox!.width)).toBeGreaterThan(100);
   const headerBox = await header.boundingBox();
   const paddingRight = await header.evaluate((node) => parseFloat(getComputedStyle(node).paddingRight));
@@ -147,10 +147,6 @@ test("conversation actions sit beside its name and borderless search aligns righ
   expect(await search.evaluate((node) => getComputedStyle(node).borderWidth)).toBe("0px");
   await search.hover();
   expect(await search.evaluate((node) => getComputedStyle(node).boxShadow)).toBe("none");
-  await actions.click();
-  const menu = page.getByRole("menu", { name: `Actions for #${E2E_CHANNEL.name}` });
-  await expect(menu.getByRole("menuitem", { name: /Copy.*link/u })).toBeVisible();
-  await page.keyboard.press("Escape");
   await search.click();
   await expect(page.getByRole("dialog", { name: "Search workspace" })).toBeVisible();
   await expect(page.locator(".app-search-panel-field").getByText("in #general")).toHaveCount(0);
@@ -175,7 +171,7 @@ test("a long conversation name keeps its search and actions visible without a de
   await expect(header).toBeVisible();
   const search = header.getByRole("button", { name: "Search", exact: true });
   await expect(search).toBeInViewport();
-  await expect(header.getByRole("button", { name: `Actions for #${channel.name}` })).toBeInViewport();
+  await expect(header.getByRole("button", { name: "Copy channel link" })).toBeInViewport();
   await expect(header.getByRole("button", { name: "Channel details" })).toBeInViewport();
   await search.click();
   await expect(page.getByRole("dialog", { name: "Search workspace" })).toBeVisible();

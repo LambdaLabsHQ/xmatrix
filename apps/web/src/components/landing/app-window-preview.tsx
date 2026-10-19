@@ -224,10 +224,8 @@ export function AppWindowPreview() {
                 currentUserId={viewer.id}
                 onRename={noop}
                 onVisibilityChange={noop}
-                onMove={noop}
                 renaming={false}
                 updatingVisibility={false}
-                moving={false}
                 onToggleMembers={noop}
                 onOpenSearch={noop}
               />
