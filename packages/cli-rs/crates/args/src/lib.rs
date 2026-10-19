@@ -2198,7 +2198,7 @@ pub enum PageCommand {
         #[arg(long)]
         conversation: Option<String>,
     },
-    /// Claim a section you are working on, so others see it is taken; claiming again renews it
+    /// Say you are on a section, so other Agents see who is on what (it locks nothing); claiming again renews it
     Claim {
         /// Page ID
         page: String,
