@@ -3,6 +3,7 @@
 import type { ChannelAttachment } from "@xmatrix/protocol";
 import type { HubAuthorityEnv } from "./postgres-authority-fleet";
 import { appendChannelMessage } from "./channel-messages";
+import { deliverCommittedProductMessage } from "./product-message-append";
 import type { Env } from "./types";
 import { decideNewConversationLaunch,
   prepareRegistrationReborn } from "./registration-launch-dispatch";
@@ -104,7 +105,8 @@ export async function dispatchProductAgentSystemNotice(input: {
     },
   };
   try {
-    await (input.append ?? appendChannelMessage)(input.env as Env, input.channelId, noticeCommand);
+    const committed = await (input.append ?? appendChannelMessage)(input.env as Env, input.channelId, noticeCommand);
+    await deliverCommittedProductMessage(input.env as Env, input.channelId, noticeCommand, committed);
   } catch (error) {
     // Carry the authority's code so a caller can tell a Channel that can never
     // take the notice (archived, gone) from a transient outage.
