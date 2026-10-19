@@ -246,6 +246,10 @@
 .pages-margin-on .page-discussion-bubble,
 .pages-margin-on .page-section-talk,
 .pages-margin-on .page-section-agents { display: none; }
+/* The chip is centered on the scrollport. With the margin open the column is
+   the text plus gap-6 and a w-80 aside (21.5rem), so that center sits on the
+   text's right half and covers the paragraph. Shift onto the text. */
+.pages-margin-on .page-offscreen-edge { transform: translateX(-10.75rem); }
 /*
  * The margin reads as comments do in Google Docs (§4.4). A card at rest is flat
  * and tinted a step off the page; the one being read lifts. The open one is
@@ -288,6 +292,13 @@ html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-mes
   gap: 0.5rem !important;
   padding: 0.5rem 0.75rem 0.25rem !important;
   background: transparent !important;
+}
+/* Same inset and avatar column as a comment in this card. Set on the row only: the card's composer
+   also reads these tokens, and a smaller size there pulls its caret out of the capsule. */
+html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-activity-row {
+  padding: 0.5rem 0.75rem 0.25rem !important;
+  --app-message-avatar-size: 1.5rem;
+  --app-message-avatar-gap: 0.5rem;
 }
 html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .message-author-avatar {
   width: 1.5rem !important;

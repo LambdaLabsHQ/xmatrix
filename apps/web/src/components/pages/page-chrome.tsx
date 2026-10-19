@@ -108,11 +108,15 @@ export function PageOffscreenPeople({ above, below, onJump }: {
     const people = sorted.map((entry) => entry.person);
     const nearest = people[0]!;
     const verb = nearest.editing ? "editing" : "reading";
+    const others = people.length - 1;
+    // One person keeps the verb ("Ada is reading above"). Several drop it:
+    // they are not all doing the nearest person's thing, and "and 1 other above"
+    // does not read as a sentence.
     const label = people.length === 1 ? `${nearest.name} is ${verb} ${side}`
-      : `${nearest.name} and ${people.length - 1} ${people.length === 2 ? "other" : "others"} ${side}`;
+      : `${nearest.name} and ${others} ${others === 1 ? "other" : "others"} are ${side}`;
     const Arrow = side === "above" ? ArrowUp : ArrowDown;
     return (
-      <div className={cn("pointer-events-none absolute inset-x-0 z-20 flex justify-center",
+      <div className={cn("page-offscreen-edge pointer-events-none absolute inset-x-0 z-20 flex justify-center",
         side === "above" ? "top-2" : "bottom-3")}>
         <button type="button" onClick={() => onJump(nearest)} data-testid={`page-people-${side}`}
           title={people.map((person) => `${person.name} · ${person.detail}`).join("\n")}
