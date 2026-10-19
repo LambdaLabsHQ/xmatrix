@@ -12,6 +12,22 @@ They do not queue behind that recipient's inbound handler: concurrent A-to-B
 and B-to-A presence updates must not create a circular wait. A callback retained
 across close/reconnect fails its exact session check.
 
+## ACP output stalls
+
+An ACP prompt write and its cancellation share the provider's serialized stdin
+writer. The run loop must keep polling the active turn while its control handler
+waits for that writer: the turn may still own the lock across pending I/O. Pausing
+the turn there creates a circular wait, fills the bounded provider inbox, and
+eventually blocks the provider on stdout even though its process is still alive.
+If the turn completes during control handling, retain its result until the
+handler finishes and keep any unconsumed event queued for the next input.
+
+For a stalled instance, preserve its provider session and runtime logs before
+recovery. Install a released CLI with this polling behavior before reborn;
+restarting on the same affected runtime can repeat the stall. A reborn rejection
+is a separate admission failure and must be resolved through the registration's
+owner rather than bypassed with a local registry change.
+
 ## Durable reborn
 
 Migration `0058_expand_reborn_intents` introduces Space-owned
