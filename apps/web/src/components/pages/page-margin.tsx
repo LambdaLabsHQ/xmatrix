@@ -103,7 +103,9 @@ function ConversationCard({ conversation, focused, canResolve, onOpen, onResolve
 }) {
   const { lastMessage, agents, unread } = conversation;
   return (
-    <div className="group relative" onMouseEnter={() => onFocus(true)} onMouseLeave={() => onFocus(false)}>
+    // As on a Channel row, resting on the card reads the conversation ahead of its opening.
+    <div className="group relative" onMouseEnter={() => onFocus(true)} onMouseLeave={() => onFocus(false)}
+      data-channel-row-id={conversation.conversationId}>
       <button type="button" onClick={onOpen} data-testid="page-margin-card"
         aria-label={`Open ${conversation.name ?? "the conversation"} beside the page`}
         className={cn("page-margin-card block w-full rounded-xl px-3 py-2.5 text-left transition-[background-color,box-shadow]",

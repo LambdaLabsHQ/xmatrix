@@ -949,18 +949,22 @@ test("a page: reference in a page's text is a chip with the page's title that op
   await expect(browser).toHaveURL(new RegExp(`/pages\\?page=${planId}`, "u"));
 });
 
+/** Opens the page p-relay read over HTTP as `read`, whose live session syncs `live` only after `syncAfterMs`. */
+async function openSyncingPage(browser: Page, read: string, live: string, syncAfterMs: number) {
+  await fixtureJson(browser, "page-document", /\/api\/xmatrix\/spaces\/[^/]+\/pages\/p-relay$/u, { page: {
+    ...page("p-relay", null, "Relay", "V"), body: read,
+    revisionInfo: { revision: 3, kind: "edit", authors: [], conversationIds: [], createdAt: NOW } } });
+  await servePageSession(browser, pageDocument(live), { syncAfterMs });
+  await browser.goto("/app", { waitUntil: "domcontentloaded" });
+  await browser.getByRole("button", { name: "Pages", exact: true }).first().click();
+  return browser.getByTestId("page-preview");
+}
+
 test("a page shows its document at once, and the live editor takes over when its session syncs", async ({ page: browser }) => {
   await stubPages(browser, [page("p-relay", null, "Relay", "V")]);
   await fixtureJson(browser, "page-links", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\?.*$/u, { links: [] });
-  await fixtureJson(browser, "page-document", /\/api\/xmatrix\/spaces\/[^/]+\/pages\/p-relay$/u, { page: {
-    ...page("p-relay", null, "Relay", "V"), body: "# Relay\n\n| Area | State |\n|---|---|\n| Search | Next |\n",
-    revisionInfo: { revision: 3, kind: "edit", authors: [], conversationIds: [], createdAt: NOW } } });
-  const server = pageDocument("# Relay\n\n| Area | State |\n|---|---|\n| Search | Shipped |\n");
-  await servePageSession(browser, server, { syncAfterMs: 3_000 });
-
-  await browser.goto("/app", { waitUntil: "domcontentloaded" });
-  await browser.getByRole("button", { name: "Pages", exact: true }).first().click();
-  const preview = browser.getByTestId("page-preview");
+  const preview = await openSyncingPage(browser, "# Relay\n\n| Area | State |\n|---|---|\n| Search | Next |\n",
+    "# Relay\n\n| Area | State |\n|---|---|\n| Search | Shipped |\n", 3_000);
   await expect(preview.locator("table")).toContainText("Next");
   await expect(browser.getByTestId("page-editor")).toBeHidden();
   // The preview is drawn as the editor draws the page, so nothing moves when the editor takes its place.
@@ -1300,6 +1304,33 @@ test("a page's conversations sit beside what they are about, and one opens there
   await expect(open).toBeHidden();
   await expect(cards).toHaveCount(2);
   await expect(browser).toHaveURL(/page=p-relay$/u);
+});
+
+test("a page's conversations stand beside its sections while the live session is still syncing", async ({ page: browser }) => {
+  await browser.setViewportSize({ width: 1600, height: 900 });
+  const release = { ...E2E_CHANNEL, id: "channel-release", name: "Release notes" };
+  await stubPages(browser, [page("p-relay", null, "Relay", "V")], [E2E_CHANNEL, release]);
+  const recent = new Date(Date.now() - 5 * 60_000).toISOString();
+  await fixtureJson(browser, "page-links", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\?.*$/u, {
+    links: [{ linkId: "l-release", conversationId: release.id, pageId: "p-relay", blockId: "notes", source: "edit",
+      createdAt: NOW, lastSeenAt: recent }],
+    conversations: [{ conversationId: release.id, name: release.name, activityAt: recent, headSequence: 4, readSequence: 4,
+      lastMessage: { from: { kind: "user", label: "Yiming Hu" }, bodyPreview: "Notes go out with the release.", sentAt: recent },
+      agents: [] }],
+  });
+  const preview = await openSyncingPage(browser, BODY, BODY, 5_000);
+  const card = browser.getByTestId("page-margin").getByTestId("page-margin-card");
+  // The discussion is read with the page, not after its editor: it is beside the preview's section.
+  await expect(card).toContainText("Notes go out with the release.");
+  await expect(browser.getByTestId("page-editor")).toBeHidden();
+  const notes = preview.locator("h2", { hasText: "Notes" });
+  await expect.poll(async () => Math.abs((await card.boundingBox())!.y - (await notes.boundingBox())!.y),
+    { message: "the card is level with its section's heading in the preview" }).toBeLessThan(4);
+  // The editor takes over without moving it.
+  await expect(preview).toBeHidden({ timeout: 10_000 });
+  const heading = browser.getByTestId("page-editor").locator("h2", { hasText: "Notes" });
+  await expect.poll(async () => Math.abs((await card.boundingBox())!.y - (await heading.boundingBox())!.y),
+    { message: "the card stays level with its section in the editor" }).toBeLessThan(4);
 });
 
 test("Ask AI on a passage opens its discussion addressed to xMatrix, where the question is written and answered", async ({ page: browser }) => {
