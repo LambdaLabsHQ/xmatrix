@@ -743,14 +743,6 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
     if (view !== "messages") setComposingConversation(false);
   }, [view]);
 
-  const [channelMoveOpen, setChannelMoveOpen] = useState(false);
-
-  const [channelMoveTargetSpaceId, setChannelMoveTargetSpaceId] = useState("");
-
-  const [movingChannelId, setMovingChannelId] = useState<string | null>(null);
-
-  const [channelMoveError, setChannelMoveError] = useState<string | null>(null);
-
   const isMobileViewport = useIsMobileViewport();
 
   const {
@@ -3086,14 +3078,6 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
     channelCreationsRef,
     creatingChannelIds,
     setCreatingChannelIds,
-    channelMoveOpen,
-    setChannelMoveOpen,
-    channelMoveTargetSpaceId,
-    setChannelMoveTargetSpaceId,
-    movingChannelId,
-    setMovingChannelId,
-    channelMoveError,
-    setChannelMoveError,
     workspaceSearchOpen,
     workspaceSearchHere,
     setWorkspaceSearchOpen,

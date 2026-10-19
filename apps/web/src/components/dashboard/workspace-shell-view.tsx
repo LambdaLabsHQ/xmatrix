@@ -48,7 +48,6 @@ import {
   AgentWorkDetailsDock,
   ChannelDetails,
   ChannelHeader,
-  ChannelMoveDialog,
   ChannelSidebar,
   Composer,
   GlobalSearchBar,
@@ -220,13 +219,6 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     savingAgentConfig,
     composingConversation,
     setComposingConversation,
-    channelMoveOpen,
-    setChannelMoveOpen,
-    channelMoveTargetSpaceId,
-    setChannelMoveTargetSpaceId,
-    movingChannelId,
-    channelMoveError,
-    setChannelMoveError,
     workspaceSearchOpen,
     workspaceSearchHere,
     setWorkspaceSearchOpen,
@@ -327,8 +319,6 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     createNewConversation,
     sendNewConversationMessage,
     updateChannelVisibility,
-    openChannelMove,
-    moveChannel,
     createSpace,
     createSpaceInviteCode,
     inviteSpaceMembers,
@@ -896,9 +886,6 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
   });
   const canDeleteSelectedChannel = Boolean(selectedChannel && spaces.some(space => space.id === selectedChannel.spaceId &&
     ["owner", "admin"].includes(transferSpaceRole(space, user?.id ?? "") ?? "")));
-  const moveSelectedChannel = useStableCallback(() => {
-    if (selectedChannel) openChannelMove(selectedChannel);
-  });
   const toggleSelectedMembers = useStableCallback(() => {
     if (mobileChannelDetailsOpen) closeMobileChannelDetails();
     else openMobileChannelDetails();
@@ -959,13 +946,6 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     startResize: startDesktopSidebarResize,
     onKeyDown: handleDesktopSidebarResizeKey,
   }), [desktopSidebarWidth, handleDesktopSidebarResizeKey, resizingDesktopSidebar, startDesktopSidebarResize]);
-  const submitChannelMove = useStableCallback(() => {
-    if (selectedChannel) void moveChannel(selectedChannel);
-  });
-  const cancelChannelMove = useStableCallback(() => {
-    setChannelMoveOpen(false);
-    setChannelMoveError(null);
-  });
   const ownMember = user ? currentSpace?.members.find((member) => member.userId === user.id) : undefined;
   const railProfile = useMemo(() => user ? humanProfileFromSpaceMember(user, ownMember) : null, [ownMember, user]);
   const railUpdateControl = useMemo(() => desktopBridge ? (
@@ -1107,11 +1087,9 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
           onOpenSearch={openWorkspaceSearch}
           onRename={renameSelectedChannel}
           onVisibilityChange={changeSelectedVisibility}
-          onMove={moveSelectedChannel}
           onDelete={canDeleteSelectedChannel ? openSelectedChannelDeletion : undefined}
           renaming={renamingChannelId === selectedChannel.id}
           updatingVisibility={updatingChannelVisibilityId === selectedChannel.id}
-          moving={movingChannelId === selectedChannel.id}
           onToggleMembers={toggleSelectedMembers}
           actions={placement === "beside-page" ? (
             <>
@@ -1486,17 +1464,6 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
         onSelectMember={selectSearchMember}
         onChangeView={changeSearchView}
         onCancel={cancelSearch}
-      />
-      <ChannelMoveDialog
-        open={channelMoveOpen}
-        channel={selectedChannel}
-        spaces={spaces}
-        targetSpaceId={channelMoveTargetSpaceId}
-        busy={Boolean(movingChannelId)}
-        error={channelMoveError}
-        onTargetSpaceChange={setChannelMoveTargetSpaceId}
-        onSubmit={submitChannelMove}
-        onCancel={cancelChannelMove}
       />
       <div
         className={cn(
