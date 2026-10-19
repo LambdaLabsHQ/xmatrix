@@ -8365,6 +8365,16 @@ html[data-app-theme] .xmatrix-app.xmatrix-app .app-paper-card .app-tool-lines in
   box-shadow: 0 4px 14px -6px oklch(0.35 0.07 60 / 0.18);
 }
 
+/* Its items are lines of the slip: a little more ink under the pointer, or
+   while chosen from the keyboard or pressed, and nothing at rest. */
+.app-material-paper-popover:is([role="toolbar"], [role="listbox"], [role="menu"]) > button {
+  background: transparent;
+}
+
+.app-material-paper-popover:is([role="toolbar"], [role="listbox"], [role="menu"]) > button:is(:hover:not(:disabled), :active, [aria-selected="true"], [aria-pressed="true"]) {
+  background: color-mix(in oklch, var(--foreground) 6%, transparent);
+}
+
 /* Notices on the paper: plain white with the tone's rail, not glass. */
 html[data-app-theme] .xmatrix-app.xmatrix-app .app-tool-detail .app-notice {
   background: oklch(0.995 0.002 85) !important;

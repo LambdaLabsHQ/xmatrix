@@ -58,7 +58,7 @@ function HeadingMenuPopup({ anchor, title, menu, onClose }: {
         right: Math.max(12, window.innerWidth - place.right) }}>
       {list.map(({ key, label, icon: Icon, run }) => (
         <button key={key} type="button" role="menuitem" onClick={() => { onClose(); run(); }}
-          className="flex min-h-11 w-full items-center gap-3 rounded-md px-3 text-left text-[15px] font-medium active:bg-foreground/5">
+          className="flex min-h-11 w-full items-center gap-3 rounded-md px-3 text-left text-[15px] font-medium">
           <Icon className="size-[18px] shrink-0 text-muted-foreground" />
           <span>{label}</span>
         </button>

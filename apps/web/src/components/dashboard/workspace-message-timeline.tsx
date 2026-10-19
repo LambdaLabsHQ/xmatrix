@@ -1407,7 +1407,7 @@ function MessagePassageDiscuss({ rootRef, onDiscuss }: {
             onDiscuss(passage.messageId, passage.quote);
             document.getSelection()?.removeAllRanges();
           }}
-          className="flex h-8 items-center gap-1.5 rounded-md px-2 text-sm hover:bg-foreground/5 [&_svg]:size-4">
+          className="flex h-8 items-center gap-1.5 rounded-md px-2 text-sm [&_svg]:size-4">
           <MessageSquarePlus /> Discuss
         </button>
       </PaperPopover>

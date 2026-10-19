@@ -147,7 +147,7 @@ function ToolButton({ label, active = false, disabled = false, onRun, children }
       // Keep the editor's selection: the button acts on it.
       onMouseDown={(event) => event.preventDefault()} onClick={onRun}
       className={`flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors
-        hover:bg-foreground/5 hover:text-foreground disabled:opacity-40 [&_svg]:size-4 ${active ? "bg-foreground/5 text-foreground" : ""}`}>
+        hover:text-foreground disabled:opacity-40 [&_svg]:size-4 ${active ? "text-foreground" : ""}`}>
       {children}
     </button>
   );
@@ -645,7 +645,7 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
             <button type="button" onMouseDown={(event) => event.preventDefault()}
               onClick={() => actions.discuss!(section, current ? selectionAnchor(current.state, session.fragment) ?? undefined
                 : undefined)}
-              className="flex h-8 items-center gap-1.5 rounded-md px-2 text-sm hover:bg-foreground/5 [&_svg]:size-4">
+              className="flex h-8 items-center gap-1.5 rounded-md px-2 text-sm [&_svg]:size-4">
               <MessageSquarePlus /> Discuss
             </button>
           )}
@@ -655,13 +655,13 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
                 const anchor = current ? selectionAnchor(current.state, session.fragment) : null;
                 if (anchor) actions.discuss!(section, anchor, { askAi: true });
               }}
-              className="flex h-8 items-center gap-1.5 rounded-md px-2 text-sm hover:bg-foreground/5 [&_svg]:size-4">
+              className="flex h-8 items-center gap-1.5 rounded-md px-2 text-sm [&_svg]:size-4">
               <Sparkles /> Ask AI
             </button>
           )}
           {actions?.claim && canEdit && (
             <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => actions.claim!(section)}
-              className="flex h-8 items-center gap-1.5 rounded-md px-2 text-sm hover:bg-foreground/5 [&_svg]:size-4">
+              className="flex h-8 items-center gap-1.5 rounded-md px-2 text-sm [&_svg]:size-4">
               <Flag /> Claim
             </button>
           )}
@@ -690,7 +690,7 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
               onMouseDown={(event) => event.preventDefault()} onClick={() => applyInsert(item)}
               onMouseEnter={() => { menu.current.index = index; setSlashIndex(index); }}
               className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm [&_svg]:size-4
-                [&_svg]:text-muted-foreground ${index === slashIndex ? "bg-foreground/5" : ""}`}>
+                [&_svg]:text-muted-foreground`}>
               {item.icon}
               <span className="flex-1">{item.label}</span>
               <span className="text-xs text-muted-foreground">{item.hint}</span>
