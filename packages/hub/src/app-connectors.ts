@@ -536,11 +536,14 @@ async function githubDelegatedRepositories(env: AppConnectorEnv, connection: App
  * administrator still administers the repository. Any failure answers no.
  */
 export async function githubRepositoryDelegated(env: AppConnectorEnv, connection: AppConnectorConnectionView,
-  installationId: string, owner: string, repo: string): Promise<boolean> {
+  installationId: string, owner: string, repo: string, readScope?: "code-scanning"): Promise<boolean> {
   if (!githubConnectionHasInstallation(connection, installationId)) return false;
   try {
+    const permissions: GitHubPermissionRequest = { metadata: "read" };
+    if (readScope === "code-scanning") permissions.security_events = "read";
     const auth = await githubInstallationAuthForId(env, installationId, { repositories: [repo],
-      permissions: { metadata: "read" } });
+      permissions });
+    if (readScope === "code-scanning" && !auth.capabilities.includes("github.code_scanning.read")) return false;
     return await githubLinkerAdministers(env, connection, installationId, owner, repo, auth.token);
   } catch {
     return false;
