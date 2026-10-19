@@ -1513,6 +1513,7 @@ export const ChannelDetails = memo(function ChannelDetails({
   onOpenAgentTrace,
   onRunChannelCommand,
   onManageApps,
+  onDeleteChannel,
   automations,
   automationExecutionEnabled,
   automationBusy,
@@ -1541,6 +1542,7 @@ export const ChannelDetails = memo(function ChannelDetails({
    */
   onRunChannelCommand?: (body: string) => void;
   onManageApps: () => void;
+  onDeleteChannel?: () => void;
   automations: SerializedAutomation[];
   automationExecutionEnabled: boolean | null;
   automationBusy: string | null;
@@ -1957,6 +1959,8 @@ export const ChannelDetails = memo(function ChannelDetails({
             </div>
           </DetailBlock>
           )}
+          {onDeleteChannel && <button type="button" onClick={onDeleteChannel}
+            className="text-sm font-medium text-destructive hover:underline">Delete Channel…</button>}
         </div>
       </div>
   );

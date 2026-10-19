@@ -15,6 +15,13 @@ English is the default language for repository documentation, guardrails, releas
 
 ## Current behavior
 
+Human Space owners/admins can confirm Channel deletion in its actions or
+details. Retirement revokes access immediately; a durable job erases the exact
+Channel closure in bounded, retryable passes while keeping linked Pages and
+other Channels. Account deletion remains separately available in Settings.
+See [Channel deletion](../operations/channel-deletion.md) and
+[account deletion](../operations/account-deletion.md) for recovery and retained-data limits.
+
 Connector action receipts resume only the exact authenticated calling Instance,
 queueing behind an active turn; subscribed App events reach existing Channel
 Instances and resume sleeping/interrupted ones through the bounded wake

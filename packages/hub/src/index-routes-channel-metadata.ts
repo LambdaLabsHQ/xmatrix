@@ -3,8 +3,10 @@ import type { Env } from "./types";
 import { channelMetadataHistory, configureChannel } from "./spaces";
 import { requireAuth, jsonErrors, productCommandId } from "./index-shared";
 import { agentRunDelegationDenied } from "./agent-run-channel-delegation";
+import { registerChannelDeletionRoutes } from "./index-routes-channel-deletion";
 
 export function registerChannelMetadataRoutes(app: Hono<{ Bindings: Env }>): void {
+  registerChannelDeletionRoutes(app);
   app.get("/api/channels/:channelId/metadata-history", (c) => jsonErrors(c, async () => {
     const user = await requireAuth(c.req.raw, c.env);
     const run = user.agentRun;

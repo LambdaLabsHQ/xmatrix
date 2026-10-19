@@ -173,6 +173,8 @@ export const HUB_ROUTES = {
   me_session_revoke: "/api/me/sessions/revoke",
   me_sessions_revoke_others: "/api/me/sessions/revoke-others",
   account_deletion: "/api/account-deletion",
+  channel_deletion: (spaceId: string, channelId: string) =>
+    `/api/spaces/${encodeURIComponent(spaceId)}/channels/${encodeURIComponent(channelId)}/deletion`,
   account_deletion_status: "/api/account-deletion/status",
   account_deletion_cancel: "/api/account-deletion/cancel",
   account_deletion_leave: "/api/account-deletion/leave-space",
@@ -414,6 +416,8 @@ export const WEB_PROXY_ROUTES = {
   me_session_revoke: "/api/xmatrix/me/sessions/revoke",
   me_sessions_revoke_others: "/api/xmatrix/me/sessions/revoke-others",
   account_deletion: "/api/xmatrix/account-deletion",
+  channel_deletion: (spaceId: string, channelId: string) =>
+    `/api/xmatrix/spaces/${encodeURIComponent(spaceId)}/channels/${encodeURIComponent(channelId)}/deletion`,
   account_deletion_status: "/api/xmatrix/account-deletion/status",
   account_deletion_cancel: "/api/xmatrix/account-deletion/cancel",
   account_deletion_leave: "/api/xmatrix/account-deletion/leave-space",

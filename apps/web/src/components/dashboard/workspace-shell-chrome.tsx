@@ -971,6 +971,7 @@ export function ChannelActionsMenu({
   canManageVisibility,
   updatingVisibility,
   onMove,
+  onDelete,
   onVisibilityChange,
 }: {
   channel: ChannelSnapshot;
@@ -980,6 +981,7 @@ export function ChannelActionsMenu({
   updatingVisibility: boolean;
   /** Moves the conversation to another Space. */
   onMove: () => void;
+  onDelete?: () => void;
   onVisibilityChange: (mode: ChannelCreateMode) => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -1004,7 +1006,7 @@ export function ChannelActionsMenu({
     if (!open) return;
     const rect = buttonRef.current?.getBoundingClientRect();
     if (!rect) return;
-    const menuHeight = canManageVisibility ? 248 : 196;
+    const menuHeight = canManageVisibility ? 292 : 196;
     const below = rect.bottom + 8;
     setPos({
       right: Math.max(12, Math.min(window.innerWidth - 224 - 12, window.innerWidth - rect.right)),
@@ -1099,6 +1101,9 @@ export function ChannelActionsMenu({
                 {copied ? <Check className="size-4 shrink-0 text-primary" /> : <Share2 className="size-4 shrink-0 text-muted-foreground" />}
                 <span>{copied ? "Copied link" : "Copy channel link"}</span>
               </button>
+              {onDelete && <button type="button" role="menuitem" disabled={busy}
+                onClick={() => runAction(onDelete)} className={cn(itemClassName, "text-destructive")}
+              >Delete Channel…</button>}
               <div className="my-1 border-t border-border" role="separator" />
               <div className="px-2.5 pb-1 pt-0.5 text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
                 Visibility
@@ -1266,6 +1271,7 @@ export const ChannelHeader = memo(function ChannelHeader({
   onRename,
   onVisibilityChange,
   onMove,
+  onDelete,
   renaming,
   updatingVisibility,
   moving,
@@ -1279,6 +1285,7 @@ export const ChannelHeader = memo(function ChannelHeader({
   onRename: (name: string) => void;
   onVisibilityChange: (mode: ChannelCreateMode) => void;
   onMove: () => void;
+  onDelete?: () => void;
   renaming: boolean;
   updatingVisibility: boolean;
   moving: boolean;
@@ -1379,6 +1386,7 @@ export const ChannelHeader = memo(function ChannelHeader({
                   canManageVisibility={canManageVisibility}
                   updatingVisibility={updatingVisibility}
                   onMove={onMove}
+                  onDelete={onDelete}
                   onVisibilityChange={onVisibilityChange}
                 />
               </div>

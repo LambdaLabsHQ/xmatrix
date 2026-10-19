@@ -451,6 +451,12 @@ export function PrivacyPolicyContent() {
 
       <LegalSection id="account-deletion" title="17. Account and Space deletion">
         <p>
+          Space owners and admins can delete a Channel from its actions or details after confirming
+          its current name and the consequences for all members. Access ends immediately and
+          interrupted data cleanup resumes automatically. Linked Pages remain separate documents;
+          shared content-addressed bytes follow the existing retention policy.
+        </p>
+        <p>
           You can start account deletion in Settings → Account or at the{' '}
           <Link href="/account/delete">account deletion page</Link>. A recent sign-in, your account
           email, and explicit confirmation are required. Close owned Spaces, leave other Spaces,

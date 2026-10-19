@@ -2,6 +2,7 @@
 import "./error-reporting";
 import { drainGmailNotifications } from "./connectors/gmail-notification-drain";
 import { registerAccountDeletionRoutes, maintainAccountDeletions } from "./index-routes-account-deletion";
+import { maintainChannelDeletions } from "./channel-deletion-maintenance";
 import { reportError, sendErrorReports } from "@xmatrix/protocol/error-reporting";
 import { drainSentryEvents } from "./connectors/sentry-event-drain";
 import { watchHarnessReleasesBesidePostgres } from "./harness-release-watch";
@@ -153,6 +154,7 @@ export default {
     const run = (name: string, work: () => Promise<unknown>) => executionCtx.waitUntil(
       Promise.resolve().then(work).catch((error: unknown) => scheduledTaskFailed(name, error)).finally(sendErrorReports));
     run("Account deletion maintenance", () => maintainAccountDeletions(env));
+    run("Channel deletion maintenance", () => maintainChannelDeletions(env));
     run("Sentry event recovery", () => drainSentryEvents(env));
     run("Gmail notification recovery and renewal", () => drainGmailNotifications(env));
     run("Harness release watch", () => watchHarnessReleasesBesidePostgres(env));

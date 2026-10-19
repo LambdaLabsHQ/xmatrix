@@ -103,6 +103,8 @@ try {
   // Staged registration launches are rechecked while other launch work runs in
   // their Channel; only a real database interleaves the recheck with a commit.
   if (hubSuitePackages) run("node", ["--test", "packages/db/test/page-migration-postgres.test.mjs",
+    // Exercise deletion against the current schema, including registered Run dependencies.
+    "packages/db/test/space-deletion-postgres.test.mjs",
     "packages/db/test/automation-run-links-postgres.test.mjs",
     "packages/db/test/postgres-fixture-lifecycle.test.mjs",
     "packages/db/test/client-postgres.test.mjs",
