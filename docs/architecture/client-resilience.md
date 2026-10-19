@@ -140,7 +140,9 @@ the reason comes from the failure's class, never from raw exception text:
 - ESLint forbids rendering `error.message`, `(error as Error).message` and
   `new Error(payload.error || …)` in components and routes.
 - A deduplicated read follows only Query's signal; a caller that stops waiting
-  uses `untilCallerAborts`, so it never aborts the request others share.
+  uses `untilCallerAborts`, so it never aborts the request others share. An
+  already-cancelled caller still observes its shared promise's eventual
+  rejection, while receiving its own cancellation immediately.
 
 The Hub's messages for transient failures name no internal component
 (`postgres_unavailable` says "xMatrix is briefly unavailable; try again").

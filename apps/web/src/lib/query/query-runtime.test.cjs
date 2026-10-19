@@ -1,5 +1,6 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
+const { spawnSync } = require("node:child_process");
 
 const { QueryClient } = require("@tanstack/react-query");
 const { installTypeScriptRequire } = require("../../components/dashboard/typescript-require.cjs");
@@ -246,4 +247,54 @@ test("an aborted caller stops waiting without failing the shared query for other
   assert.equal(await right, "proposals");
   assert.equal(sharedSignal.aborted, false);
   client.clear();
+});
+
+test("an already-aborted caller still observes its shared query's eventual rejection", () => {
+  // Node's test runner treats every unhandled rejection as a test failure,
+  // including ones with an observer. Isolate the process-level observation.
+  const result = spawnSync(process.execPath, ["-e", String.raw`
+    const assert = require("node:assert/strict");
+    const { setImmediate } = require("node:timers/promises");
+    const { QueryClient, isCancelledError } = require("@tanstack/react-query");
+    require("../../components/dashboard/typescript-require.cjs").installTypeScriptRequire();
+    const { untilCallerAborts } = require("./caller-abort.ts");
+    const unhandled = [];
+    process.on("unhandledRejection", (error) => unhandled.push(error));
+    (async () => {
+      for (const outcome of ["success", "failure", "cancel"]) {
+        const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+        const caller = new AbortController();
+        caller.abort();
+        const failure = new Error("shared query failed");
+        let finish, fail, sharedSignal, calls = 0;
+        const options = {
+          queryKey: [outcome],
+          queryFn: ({ signal }) => {
+            calls++;
+            sharedSignal = signal;
+            return new Promise((resolve, reject) => { finish = resolve; fail = reject; });
+          },
+        };
+        const leaving = untilCallerAborts(client.fetchQuery(options), caller.signal);
+        const remaining = client.fetchQuery(options);
+        await assert.rejects(leaving, (error) => error === caller.signal.reason);
+        assert.equal(sharedSignal.aborted, false);
+        assert.equal(calls, 1);
+        if (outcome === "success") {
+          finish("ready");
+          assert.equal(await remaining, "ready");
+        } else {
+          const checked = assert.rejects(remaining, outcome === "failure"
+            ? (error) => error === failure : isCancelledError);
+          if (outcome === "failure") fail(failure);
+          else await client.cancelQueries();
+          await checked;
+        }
+        await setImmediate();
+        assert.deepEqual(unhandled, [], outcome + " must have no abandoned query rejection");
+        client.clear();
+      }
+    })().catch((error) => { console.error(error); process.exitCode = 1; });
+  `], { cwd: __dirname, encoding: "utf8", timeout: 10_000 });
+  assert.equal(result.status, 0, result.stderr || result.error?.message);
 });
