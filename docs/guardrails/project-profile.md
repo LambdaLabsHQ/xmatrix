@@ -15,6 +15,11 @@ English is the default language for repository documentation, guardrails, releas
 
 ## Current behavior
 
+GitHub repository subscriptions include `code-scanning`: signed alert lifecycle
+events reach a subscribed private-content Channel and wake its resting Agent,
+without periodic polling. The App's effective Code scanning alerts read grant is
+required; see [App connectors](../operations/app-connectors.md).
+
 Page discussions and conversations started from selected message passages use
 the ordinary first-message automatic summon and author choice window while
 retaining their preset titles. See [automatic invocation](../architecture/auto-launch-completion.md#a-new-conversations-first-message).

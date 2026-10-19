@@ -1590,9 +1590,7 @@ async function fetchGitHubRepositoryCapabilities(
   ref: GitHubRepositoryRef
 ): Promise<string[]> {
   const auth = await githubInstallationAuthForRepository(env, connection, ref.owner, ref.repo);
-  if (!githubAuthHasCapability(auth, connection, "github.issues.read")) {
-    throw new Error("missing_capabilities:github.issues.read");
-  }
+  // The subscription's selected features decide which permissions it needs.
   return auth.capabilities;
 }
 
@@ -2240,6 +2238,7 @@ function githubInstallationCapabilities(payload: unknown): string[] {
   if (githubPermissionAllowsWrite(permissions.pull_requests)) capabilities.push("github.pull_requests.write");
   if (githubPermissionAllowsRead(permissions.checks)) capabilities.push("github.checks.read");
   if (githubPermissionAllowsWrite(permissions.checks)) capabilities.push("github.checks.write");
+  if (githubPermissionAllowsRead(permissions.security_events)) capabilities.push("github.code_scanning.read");
   if (githubPermissionAllowsWrite(permissions.actions)) capabilities.push("github.actions.write");
   // GitHub exposes `workflows` as write-only: there is no read level to derive.
   if (githubPermissionAllowsWrite(permissions.workflows)) capabilities.push("github.workflows.write");
