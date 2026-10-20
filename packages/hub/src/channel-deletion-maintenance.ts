@@ -1,17 +1,22 @@
 import { channelPurgeObjects, purgeChannelRows, recordChannelPurgeObjects, type AuthorityDatabase } from "@xmatrix/db";
-import { createPostgresAuthorityFleet } from "./postgres-authority-fleet";
+import { createPostgresAuthorityFleet, type PostgresAuthorityFleetDependencies } from "./postgres-authority-fleet";
 import { POSTGRES_AUTHORITY_TIMEOUTS } from "./postgres-authority-http";
 import type { Env } from "./types";
 
 /** Each physical shard advances at most two exact jobs; placement fences exclude moving Spaces. */
-export async function maintainChannelDeletions(env: Env): Promise<void> {
+export async function maintainChannelDeletions(env: Env, dependencies?: PostgresAuthorityFleetDependencies): Promise<void> {
   if (!env.RELAY_PAYLOAD_BUCKET) throw new Error("Channel purge storage is unavailable");
-  const fleet = createPostgresAuthorityFleet(env, { applicationName: "xmatrix-channel-purge", ...POSTGRES_AUTHORITY_TIMEOUTS });
+  const fleet = createPostgresAuthorityFleet(env, { applicationName: "xmatrix-channel-purge", ...POSTGRES_AUTHORITY_TIMEOUTS }, dependencies);
   const errors: unknown[] = [];
   for (const shard of fleet.physicalShards) {
     const session = shard.database.openSession();
     try {
-      const jobs = await session.transaction({ requestId: crypto.randomUUID(), operation: "channel-purge.pending" },
+      // Lock-free admission lookup. Hyperdrive can stall one round trip; the
+      // single-read path retries that lost response once. A second timeout,
+      // or any answered failure, still fails this pass.
+      const jobs = await session.transaction({
+        requestId: crypto.randomUUID(), operation: "channel-purge.pending", statement: "single_read",
+      },
         tx => tx.query<{ space_id: string; channel_id: string; placement_epoch: number }>({ name: "channel_purge_pending_v1",
           text: `SELECT d.space_id,d.channel_id,p.placement_epoch FROM data.channel_deletions d
             JOIN control.space_placement p ON p.space_id=d.space_id
