@@ -166,13 +166,13 @@ test("a page's Automation is anchored by its reference and managed by whoever ca
   }
 });
 
-test("an Agent Run manages a page's Automations as its owner, from any conversation", async () => {
+test("an Agent Run manages a private page's Automations from its own authorized conversation", async () => {
   const userId = `page-automation-agent-${randomUUID()}`;
   await withPageAgentRun({ id: userId, email: "page-automation-agent@example.com", name: "Agent Owner" },
     { slug: "page-automation", displayName: "auditor", mention: "@codex set up the audit" },
     async ({ worker, auth, asRun, pages, channel }) => {
     const page = (await ok(await worker.fetch(pages, { method: "POST", headers: auth,
-      body: JSON.stringify({ title: "Goals", body: GOALS }) }))).page;
+      body: JSON.stringify({ title: "Goals", body: GOALS, accessMode: "restricted" }) }))).page;
     const automations = `${pages}/${encodeURIComponent(page.pageId)}/automations`;
 
     const created = (await ok(await worker.fetch(automations, { method: "POST", headers: asRun, body: JSON.stringify({
@@ -183,6 +183,10 @@ test("an Agent Run manages a page's Automations as its owner, from any conversat
     assert.notEqual(created.channelId, channel.id, "it works in a conversation of its own");
     const revisions = (await ok(await worker.fetch(`${pages}/${page.pageId}/history`, { headers: auth }))).revisions;
     assert.equal(revisions[0].authors[0].kind, "agent", "the reference is the Agent's edit");
+    assert.deepEqual(revisions[0].conversationIds, [channel.id], "the edit belongs to the Run doing the work");
+    await ok(await worker.fetch(`/api/channels/${created.channelId}/history`, { headers: auth }));
+    const hiddenConversation = await worker.fetch(`/api/channels/${created.channelId}/history`, { headers: asRun });
+    assert.equal(hiddenConversation.status, 404, "authoring never grants the Agent access to the private timer conversation");
 
     const listed = (await ok(await worker.fetch(automations, { headers: asRun }))).automations;
     assert.deepEqual(listed.map((item) => [item.id, item.capabilities.update]), [[created.id, true]]);
@@ -200,5 +204,56 @@ test("an Agent Run manages a page's Automations as its owner, from any conversat
       body: JSON.stringify({ expectedVersion: paused.version }) });
     assert.equal(refused.status, 403);
     assert.equal((await refused.json()).code, "page_automation_needs_person");
+    await ok(await worker.fetch(`${pages}/${page.pageId}`, { method: "PATCH", headers: auth,
+      body: JSON.stringify({ agentSuggestOnly: false }) }));
+
+    // A Run cannot use the owner's membership in another Space.
+    const elsewhere = (await ok(await worker.fetch("/api/spaces", { method: "POST", headers: auth,
+      body: JSON.stringify({ name: "Elsewhere" }) }))).space;
+    const wrongSpace = await worker.fetch(`/api/spaces/${elsewhere.id}/pages/${page.pageId}/automations`, {
+      method: "POST", headers: asRun, body: JSON.stringify({ name: "Wrong Space", instruction: "Sweep", intervalMinutes: 60 }) });
+    assert.equal(wrongSpace.status, 403);
+    assert.equal((await wrongSpace.json()).code, "agent_run_forbidden");
+
+    // Arrange an ordinary member's explicit edit grant, then revoke it after
+    // the live page session has already accepted an edit from this Run.
+    const spaceId = decodeURIComponent(pages.split("/")[3]);
+    await inTestTransaction(async (tx) => {
+      await tx.query({ text: "UPDATE data.space_members SET role='member' WHERE space_id=$1 AND user_id=$2",
+        values: [spaceId, userId] });
+      await tx.query({ text: `INSERT INTO data.page_access (space_id,page_id,subject_kind,subject_id,access,created_at)
+        VALUES ($1,$2,'user',$3,'edit',now()) ON CONFLICT (space_id,page_id,subject_kind,subject_id) DO UPDATE SET access='edit'`,
+        values: [spaceId, page.pageId, userId] });
+    });
+    const head = (await ok(await worker.fetch(`${pages}/${page.pageId}`, { headers: asRun }))).page;
+    await ok(await worker.fetch(`${pages}/${page.pageId}`, { method: "PUT", headers: asRun,
+      body: JSON.stringify({ baseRevision: head.headRevision, body: GOALS, conversationIds: [channel.id] }) }));
+    const attached = (await ok(await worker.fetch(`${automations}/${created.id}/reference`, { method: "POST",
+      headers: asRun, body: JSON.stringify({ blockId: "ui" }) }))).automation;
+    assert.equal(attached.detachedAt, undefined, "an authorized member's Agent reattaches through its own conversation");
+    assert.equal(attached.blockId, "ui");
+    await inTestTransaction(tx => tx.query({ text: "UPDATE data.page_access SET access='read' WHERE space_id=$1 AND page_id=$2",
+      values: [spaceId, page.pageId] }));
+    const readOnly = await worker.fetch(`${automations}/${created.id}?expectedVersion=${attached.version}`, {
+      method: "DELETE", headers: asRun });
+    assert.equal(readOnly.status, 403);
+    assert.equal((await readOnly.json()).code, "page_edit_forbidden");
+    await inTestTransaction(tx => tx.query({ text: "DELETE FROM data.page_access WHERE space_id=$1 AND page_id=$2",
+      values: [spaceId, page.pageId] }));
+    const revoked = await worker.fetch(`${automations}/${created.id}/reference`, { method: "POST", headers: asRun,
+      body: JSON.stringify({ blockId: "architecture" }) });
+    assert.equal(revoked.status, 404);
+    assert.equal((await revoked.json()).code, "page_not_found");
+    const persisted = await inTestTransaction(tx => tx.query({ text: `SELECT version,enabled FROM data.automations
+      WHERE page_id=$1 AND automation_id=$2`, values: [page.pageId, created.id] }));
+    assert.deepEqual(persisted.map(row => [Number(row.version), row.enabled]), [[attached.version, attached.enabled]],
+      "refused writes never remove or change the Automation");
+    await inTestTransaction(tx => tx.query({ text: `INSERT INTO data.page_access
+      (space_id,page_id,subject_kind,subject_id,access,created_at) VALUES ($1,$2,'user',$3,'edit',now())`,
+      values: [spaceId, page.pageId, userId] }));
+    await ok(await worker.fetch(`${automations}/${created.id}?expectedVersion=${attached.version}`, {
+      method: "DELETE", headers: asRun }));
+    const cleaned = (await ok(await worker.fetch(`${pages}/${page.pageId}`, { headers: asRun }))).page;
+    assert.equal(cleaned.body.includes(reference(created.id)), false, "deletion removes the private page's reference");
   });
 });

@@ -757,7 +757,9 @@ Access follows the page, for people and Agents alike:
   whose author is the editor (an Agent's author is its owner), and the
   reference in the body is rewritten to the new id in the same page revision.
   Every change is a page revision, so History shows who changed which
-  Automation, in which conversation.
+  Automation, in which conversation. An Agent's reference edits are attributed
+  to its actual Run conversation. The Automation's timer conversation remains
+  independently private; authoring does not grant the Agent access to it.
 
 Agents use `xmatrix page automation list|create|edit|pause|resume|delete
 <page-id>`, with `--block <heading-slug>` choosing the section for create and
