@@ -173,6 +173,16 @@ An answer is for a person and a machine; a report is for whoever debugs it.
   defects per page at most; cancellations and transient failures are never
   sent.
 
+### Email login recovery
+
+An unanswered email-code check is retried at most twice. After an unanswered
+attempt, a later refusal or exhaustion of those retries may be recovered only
+by an authenticated session whose email matches the requested account,
+ignoring case and surrounding whitespace. A different account's session, no
+session or an unavailable session check preserves the refusal or uncertainty.
+Both recovery paths use the same account check in `auth-client.ts`; a refused
+first attempt never consults an existing session.
+
 ### Web proxy
 
 The web Worker's hop to the Hub (`src/lib/xmatrix-proxy.ts`) answers a dropped
