@@ -100,14 +100,17 @@ async function command(env: Env, request: Request, stableId: string, body: Recor
  */
 async function editPageText(env: Env, page: PageDocument & { spaceId: string }, authUser: AuthUser,
   conversationId: string, change: (body: string) => string): Promise<void> {
+  // The timer's private conversation is not a grant to this Agent. Attribute
+  // its page edit to the actual Run's conversation, just like an ordinary edit.
+  const editConversationId = authUser.agentRun?.channelId ?? conversationId;
   let baseRevision = page.headRevision;
   let body = page.body;
   for (let attempt = 0; attempt < 3; attempt++) {
     const next = change(body);
     if (next === body) return;
     const response = await sessionCall(env, page.spaceId, page.pageId, "/internal/edit", {
-      principal: sessionPrincipal(authUser, conversationId), baseRevision, body: next,
-      conversationIds: [conversationId] });
+      principal: sessionPrincipal(authUser, editConversationId), baseRevision, body: next,
+      conversationIds: [editConversationId] });
     const payload = await response.json().catch(() => ({})) as {
       kind?: string; code?: string; error?: string; detail?: { headRevision?: number; body?: string } };
     if (response.ok) return;
