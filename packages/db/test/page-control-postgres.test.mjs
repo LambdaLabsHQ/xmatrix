@@ -524,13 +524,18 @@ integration("public pages: an owner publishes a page every member reads, and any
   }
 });
 
+/** A Roadmap page with a Search section, and what every call on it shares. */
+async function searchRoadmap(pages, ids, owner) {
+  const r = () => crypto.randomUUID();
+  const { page } = await pages.create({ requestId: r(), spaceId: ids.space, principal: owner,
+    title: "Roadmap", body: "# Roadmap\n\n## Search\n\nNext.\n" });
+  return { r, base: { spaceId: ids.space, pageId: page.pageId } };
+}
+
 integration("claims: they lock nothing, each told of the others, renewed by their holder", async () => {
   const { client, ids, pages, owner, member, viewer, agent } = await pageTest("claims");
   try {
-    const r = () => crypto.randomUUID();
-    const { page } = await pages.create({ requestId: r(), spaceId: ids.space, principal: owner,
-      title: "Roadmap", body: "# Roadmap\n\n## Search\n\nNext.\n" });
-    const base = { spaceId: ids.space, pageId: page.pageId };
+    const { r, base } = await searchRoadmap(pages, ids, owner);
     const claim = (principal, extra = {}) => pages.claim({ requestId: r(), ...base, principal, blockId: "search", ...extra });
     const list = () => pages.claims({ requestId: r(), ...base, principal: member });
 
@@ -574,10 +579,7 @@ integration("claims: they lock nothing, each told of the others, renewed by thei
 integration("claims: an ended Instance's claims in its conversation end with it, and leave the unwritten section owed", async () => {
   const { client, ids, pages, owner, agent } = await pageTest("claims-end");
   try {
-    const r = () => crypto.randomUUID();
-    const { page } = await pages.create({ requestId: r(), spaceId: ids.space, principal: owner,
-      title: "Roadmap", body: "# Roadmap\n\n## Search\n\nNext.\n" });
-    const base = { spaceId: ids.space, pageId: page.pageId };
+    const { r, base } = await searchRoadmap(pages, ids, owner);
     await pages.claim({ requestId: r(), ...base, principal: agent, blockId: "search", conversationId: ids.open });
     const end = () => pages.endInstanceClaims({ requestId: r(), conversationId: ids.open, instanceIds: [ids.instance] });
     assert.deepEqual(await pages.endInstanceClaims({ requestId: r(), conversationId: ids.closed,
