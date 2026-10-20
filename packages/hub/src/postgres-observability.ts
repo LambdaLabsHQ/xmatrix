@@ -31,7 +31,7 @@ const OPERATION_NAME = /^[a-z][a-z0-9_.:-]{0,119}$/u;
 /** Leading segments of code-defined operation names; anything else is "other". */
 const OPERATION_FAMILIES = new Set([
   "account-deletion", "admin", "agent", "agent-profile", "app", "assistant-memory", "auth", "automation", "billing",
-  "billing-checkout", "channel", "channel-catalog", "content", "cross-space-read", "decision",
+  "billing-checkout", "channel", "channel-catalog", "channel-purge", "content", "cross-space-read", "decision",
   "governance", "human-profile", "launch", "machine",
   "machine-control", "machine-lifecycle", "machine-request",
   "membership", "message", "page", "postgres", "preference-canary",

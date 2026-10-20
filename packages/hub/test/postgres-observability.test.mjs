@@ -94,6 +94,7 @@ test("hot-path operations retain bounded stage, transaction phase, and SQLSTATE"
     ["message.append", "database_phase_commit_v1", "postgres.message", "phase.commit"],
     ["channel.direct-find", "channel_direct_find_v1", "postgres.direct", "direct.sql"],
     ["account-deletion.pending", "database_phase_begin_v1", "postgres.account-deletion", "phase.begin"],
+    ["channel-purge.pending", "channel_purge_pending_v1", "postgres.channel-purge", "sql"],
     ["account-deletion.claim", "account_deletion_claim_v1", "postgres.account-deletion", "sql"],
     ["auth.account-revocation", "database_phase_pool_checkout_v1", "postgres.auth", "phase.pool_checkout"],
     ["auth.account-revocation", "account_identity_revoked_v1", "postgres.auth", "sql"],
