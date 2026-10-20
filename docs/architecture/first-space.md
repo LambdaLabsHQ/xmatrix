@@ -42,7 +42,11 @@ is how to connect one.
   account snapshot. This remains true after command replay retention expires;
   a concurrent append conflict is accepted only after the exact step is read
   back as written:
-  - `bring-agents`, at once;
+  - `bring-agents`, at once. Connection and enablement determine its setup
+    progress; harness sign-in remains actionable separately, even after all
+    setup rows are complete. An enabled owned agent reported signed out is
+    named with its program and machine and offered the existing harness
+    sign-in here, before any agent can answer;
   - `agents-in`, once the Space has an enabled agent that can answer; the Web
     asks again when it sees one, and the Hub checks the fact before writing.
     An agent of the person's own whose machine reports its program signed out
