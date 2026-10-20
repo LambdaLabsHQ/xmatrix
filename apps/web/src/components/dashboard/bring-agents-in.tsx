@@ -136,10 +136,6 @@ export function BringAgentsIn({ spaceId, token, userId, surface, phone: phoneShe
               ))}
             </div>
           )}
-          {stage === 4 && (
-            <SignedOutAgents registrations={signedOutRegistrations(enabled, userId, fleet.daemons.data)}
-              token={token} userId={userId} copy={copy} />
-          )}
           {stage === 3 && !found && step?.kind === "found" && (
             <p role="status">{copy.found(listNames(step.harnesses.map((harness) => harness.name)))}</p>
           )}
@@ -152,6 +148,9 @@ export function BringAgentsIn({ spaceId, token, userId, surface, phone: phoneShe
           )}
         </SetupRow>
       </ol>
+
+      <SignedOutAgents registrations={signedOutRegistrations(enabled, userId, fleet.daemons.data)}
+        token={token} userId={userId} copy={copy} />
 
       {intent.error && <p role="alert" className="mt-2 text-[13px] leading-5 text-destructive">{intent.error}{" "}
         <button type="button" disabled={intent.busy || intent.retrying} onClick={intent.retry}
