@@ -497,7 +497,7 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
     update: () => void
   ) => {
     const transitionDocument = document as Document & {
-      startViewTransition?: (callback: () => void) => { finished: Promise<void> };
+      startViewTransition?: (callback: () => void) => { ready: Promise<void>; finished: Promise<void> };
     };
     const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     if (!isMobileViewportRef.current || reduceMotion || !transitionDocument.startViewTransition) {
@@ -511,6 +511,12 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
     try {
       const transition = transitionDocument.startViewTransition(() => {
         flushSync(update);
+      });
+      // Superseding an animation rejects ready even when its DOM update
+      // succeeds. Observe that promise separately from finished; update
+      // failures still surface through the native updateCallbackDone promise.
+      void transition.ready.catch((error: unknown) => {
+        if (!(error instanceof DOMException && error.name === "AbortError")) throw error;
       });
       void transition.finished.finally(() => {
         if (mobileViewTransitionTokenRef.current === token) {
