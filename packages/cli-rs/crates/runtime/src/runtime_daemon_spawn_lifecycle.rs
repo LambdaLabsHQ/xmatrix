@@ -765,6 +765,7 @@ async fn handle_daemon_spawn_request(
             resume_instance_id: intent.resume_instance_id.as_deref(),
             resume_session_key: intent.resume_session_key.as_deref(),
             handoff_source_resume_session_key: intent.handoff_source_resume_session_key.as_deref(),
+            handoff_context: intent.handoff_context.as_ref(),
             goal: intent.goal.as_ref(),
             initial_message_source: intent.initial_message_source.as_ref(),
             requested_model: intent.requested_model.as_deref(),
@@ -2020,6 +2021,7 @@ struct HeadlessAgentSpawn<'a> {
     resume_instance_id: Option<&'a str>,
     resume_session_key: Option<&'a str>,
     handoff_source_resume_session_key: Option<&'a str>,
+    handoff_context: Option<&'a MachineHandoffContext>,
     goal: Option<&'a protocol::AgentGoalStatus>,
     initial_message_source: Option<&'a protocol::AgentRuntimeMessageSource>,
     requested_model: Option<&'a str>,
@@ -2068,6 +2070,7 @@ async fn spawn_headless_agent(
         resume_instance_id,
         resume_session_key,
         handoff_source_resume_session_key,
+        handoff_context,
         goal,
         initial_message_source,
         requested_model,
@@ -2312,10 +2315,15 @@ async fn spawn_headless_agent(
     if let Some(resume_session_key) = resume_session_key {
         command.env("XMATRIX_RESUME_SESSION_KEY", resume_session_key);
     }
-    if let Some(source_session_key) = handoff_source_resume_session_key
-        && let Some(dir) = materialize_handoff_session_snapshot(source_session_key) {
-            command.env("XMATRIX_HANDOFF_SESSION_DIR", dir.display().to_string());
-        }
+    // A cross-machine handoff carries the predecessor's conversation; the
+    // same-machine path still points at its session files.
+    if let Some(dir) = handoff_context
+        .and_then(|context| runtime_handoff_context::materialize_handoff_context(
+            context, run_id.or(execution_key).unwrap_or(agent_name)))
+        .or_else(|| handoff_source_resume_session_key.and_then(materialize_handoff_session_snapshot))
+    {
+        command.env("XMATRIX_HANDOFF_SESSION_DIR", dir.display().to_string());
+    }
     if goal.is_some()
         || initial_message_source.is_some()
         || requested_model.is_some()

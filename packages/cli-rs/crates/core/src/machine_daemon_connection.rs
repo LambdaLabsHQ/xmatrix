@@ -399,6 +399,49 @@ pub struct MachineHandoffExportResult {
     pub error: Option<String>,
 }
 
+/// A handoff stop's request for the source's conversation, so a successor
+/// of any harness or model can read what the predecessor saw and did.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MachineHandoffContextRequest {
+    /// The most text the exported entries may carry, summed over entries.
+    pub max_chars: usize,
+}
+
+/// One turn of a predecessor's conversation in a harness-neutral form: the
+/// vendor's tool-call blocks, reasoning and signatures are not carried.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MachineHandoffContextEntry {
+    /// `user`, `assistant`, `tool_call` or `tool_result`.
+    pub role: String,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub tool: Option<String>,
+    pub text: String,
+}
+
+/// The predecessor's conversation as its machine exported it on a handoff
+/// stop; the Hub hands it to the successor's spawn unchanged.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MachineHandoffContext {
+    /// `xmatrix.handoff-context.v1`.
+    pub format: String,
+    /// `claude`, `codex` or `grok`; absent when no session was found.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub harness: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub session_id: Option<String>,
+    #[serde(default)]
+    pub entries: Vec<MachineHandoffContextEntry>,
+    /// Entries left out to stay within the request's size.
+    #[serde(default)]
+    pub omitted_entries: usize,
+    /// Why there is no conversation, when there is none.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub error: Option<String>,
+}
+
 impl MachineWorktreeDisposition {
     pub fn as_str(self) -> &'static str {
         match self {
@@ -519,6 +562,10 @@ pub enum MachineDaemonCommand {
         handoff_source_instance_id: Option<String>,
         #[serde(default)]
         handoff_source_resume_session_key: Option<String>,
+        /// The predecessor's conversation, exported by its machine as it
+        /// stopped for this handoff.
+        #[serde(default)]
+        handoff_context: Option<MachineHandoffContext>,
         #[serde(default)]
         context: Option<MachineSpawnContext>,
         #[serde(default)]
@@ -566,6 +613,8 @@ pub enum MachineDaemonCommand {
         worktree_disposition: Option<MachineWorktreeDisposition>,
         #[serde(default)]
         handoff_export: Option<MachineHandoffExport>,
+        #[serde(default)]
+        handoff_context: Option<MachineHandoffContextRequest>,
         #[serde(default)]
         relay_lease: Option<MachineDaemonCommandLease>,
     },
@@ -925,6 +974,8 @@ pub enum MachineDaemonReport {
         error: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none", default)]
         handoff_export: Option<MachineHandoffExportResult>,
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        handoff_context: Option<MachineHandoffContext>,
         #[serde(skip_serializing_if = "Option::is_none", default)]
         relay_lease: Option<MachineDaemonCommandLease>,
     },
@@ -4005,6 +4056,7 @@ mod tests {
             cleanup_reason: Some("process_terminated".to_string()),
             error: None,
             handoff_export: None,
+            handoff_context: None,
             relay_lease: None,
         };
         let value = serde_json::to_value(report).expect("serialize stop result");
@@ -4057,12 +4109,63 @@ mod tests {
                 dirty: true,
                 error: None,
             }),
+            handoff_context: None,
             relay_lease: None,
         };
         let value = serde_json::to_value(report).expect("serialize stop result");
         assert_eq!(value["handoffExport"]["state"], "pushed");
         assert_eq!(value["handoffExport"]["dirty"], true);
         assert_eq!(value["handoffExport"]["commit"], "c".repeat(40));
+    }
+
+    #[test]
+    fn a_handoff_stop_asks_for_and_returns_the_conversation_and_a_spawn_carries_it() {
+        let command: MachineDaemonCommand = serde_json::from_value(serde_json::json!({
+            "type": "machine_stop_agent", "requestId": "stop-1", "runId": "run-1",
+            "resumeSessionKey": "resume:a", "handoffContext": { "maxChars": 60000 },
+        }))
+        .expect("parse stop with a context request");
+        let MachineDaemonCommand::MachineStopAgent {
+            handoff_context, ..
+        } = command
+        else {
+            panic!("not a stop");
+        };
+        assert_eq!(
+            handoff_context,
+            Some(MachineHandoffContextRequest { max_chars: 60_000 })
+        );
+        let context = MachineHandoffContext {
+            format: "xmatrix.handoff-context.v1".to_string(),
+            harness: Some("claude".to_string()),
+            session_id: Some("s-1".to_string()),
+            entries: vec![MachineHandoffContextEntry {
+                role: "tool_call".to_string(),
+                tool: Some("Bash".to_string()),
+                text: "ls".to_string(),
+            }],
+            omitted_entries: 2,
+            error: None,
+        };
+        let value = serde_json::to_value(&context).expect("serialize context");
+        assert_eq!(value["omittedEntries"], 2);
+        assert_eq!(value["sessionId"], "s-1");
+        assert_eq!(value["entries"][0]["tool"], "Bash");
+        let spawn: MachineDaemonCommand = serde_json::from_value(serde_json::json!({
+            "type": "machine_spawn_agent", "requestId": "spawn-1", "spaceId": "space-1", "channelId": "channel-1",
+            "runtime": "grok", "agentName": "grok", "prompt": "continue",
+            "workspace": { "ownerUserId": "u", "machineId": "m", "hostId": "h", "canonicalCwd": "/tmp/w",
+                "displayName": "w", "visibility": "private", "createdAt": "t", "updatedAt": "t", "lastSeenAt": "t" },
+            "handoffContext": value,
+        }))
+        .expect("parse spawn with a context");
+        let MachineDaemonCommand::MachineSpawnAgent {
+            handoff_context, ..
+        } = spawn
+        else {
+            panic!("not a spawn");
+        };
+        assert_eq!(handoff_context, Some(context));
     }
 
     #[test]

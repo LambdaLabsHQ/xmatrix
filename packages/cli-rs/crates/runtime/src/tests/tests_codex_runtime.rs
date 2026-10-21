@@ -1526,6 +1526,7 @@ fn daemon_test_spawn_request() -> super::DaemonSpawnRequest {
         handoff_transfer: false,
         handoff_source_instance_id: None,
         handoff_source_resume_session_key: None,
+        handoff_context: None,
         goal: None,
         run_worktree: false,
         remote_repo: None,
