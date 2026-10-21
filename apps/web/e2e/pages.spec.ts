@@ -2075,8 +2075,8 @@ test("on a keyboard, Tab takes the suggested change in front of the reader and E
   await expect.poll(async () => fixtureRequestBodies(browser, "suggestion-review")).toEqual([{ through: 5 }]);
 });
 
-test("a discussion near the page's end opens there without lengthening the page under it", async ({ page: browser }) => {
-  const passage = "Background paragraph 59.";
+test("a discussion near the page's end opens at its passage without lengthening the page, its thread scrolling", async ({ page: browser }) => {
+  const passage = "Background paragraph 52.";
   const { editor, article } = await openLongPageWithClaudeWriting(browser, (server) => ({ blockId: "status",
     anchor: { quote: passage, from: positionAt(server, passage, false), to: positionAt(server, passage, true) } }));
   const margin = browser.getByTestId("page-margin");
@@ -2086,12 +2086,19 @@ test("a discussion near the page's end opens there without lengthening the page 
   await margin.getByRole("button", { name: `Open ${E2E_CHANNEL.name} beside the page` }).click();
   const open = margin.getByTestId("page-margin-open");
   await expect(open).toBeInViewport();
-  await expect(editor.getByText(passage, { exact: true })).toBeInViewport();
-  // The open thread and the Agent's pill after it rise to end with the text: no blank stretch below the page.
+  // It stays level with its passage, no taller than the room left, its messages scrolling inside; the Agent's pill after
+  // it fits before the text's end or waits until it closes. The page is as long as before, with no blank stretch below.
+  await expect.poll(async () => Math.abs((await open.boundingBox())!.y
+    - (await editor.getByText(passage, { exact: true }).boundingBox())!.y)).toBeLessThan(24);
   await expect.poll(async () => {
     const [column, text] = [(await margin.boundingBox())!, (await editor.locator(".page-document").boundingBox())!];
     return column.y + column.height - (text.y + text.height);
   }).toBeLessThanOrEqual(1);
+  expect((await open.boundingBox())!.height).toBeLessThan(34 * 16);
   expect(await length()).toBeLessThanOrEqual(before + 1);
   await browser.screenshot({ path: test.info().outputPath("margin-open-at-end.png") });
+  // Closed, the pill is back beside its line.
+  await open.getByRole("button", { name: "Close the conversation" }).click();
+  await expect(browser.getByTestId("page-margin").getByRole("button", { name: /^claude:2 is writing/u })).toBeVisible();
+  expect(await length()).toBeLessThanOrEqual(before + 1);
 });

@@ -163,6 +163,8 @@ function ConversationCard({ conversation, writer, focused, canResolve, onOpen, o
 
 /** The tallest an open thread grows before its messages scroll. */
 const OPEN_MAX_HEIGHT = "min(34rem, calc(100dvh - 8rem))";
+/** The least an open thread shrinks to near the page's end; with less room than this, it rises instead. */
+const OPEN_MIN_ROOM = 192;
 /** Room between an empty thread's note and its composer. */
 const EMPTY_THREAD_GAP = 12;
 
@@ -173,8 +175,11 @@ const threadAction = "flex size-7 shrink-0 items-center justify-center rounded-f
  * above the other cards and nudged toward the text, with what it is about,
  * then the conversation itself, sized to what it says.
  */
-function OpenConversationCard({ conversation, quietAgents = false, canResolve, children, onResolve, onExpand, onClose, onFocus }: {
+function OpenConversationCard({ conversation, quietAgents = false, room = null, canResolve, children, onResolve, onExpand, onClose,
+  onFocus }: {
   conversation: MarginConversation;
+  /** The room left down to the page's end: the thread is no taller, and its messages scroll inside it. */
+  room?: number | null;
   /** Opened from an Agent's pill, which already says who works in it. */
   quietAgents?: boolean;
   canResolve: boolean;
@@ -233,7 +238,7 @@ function OpenConversationCard({ conversation, quietAgents = false, canResolve, c
     <section data-testid="page-margin-open" aria-label={conversation.name ?? "Conversation"}
       onMouseEnter={() => onFocus(true)} onMouseLeave={() => onFocus(false)}
       onKeyDown={(event) => { if (event.key === "Escape" && onClose) onClose(); }}
-      style={{ height: height ? `min(${height}px, ${OPEN_MAX_HEIGHT})` : OPEN_MAX_HEIGHT }}
+      style={{ height: `min(${[height && `${height}px`, room !== null && `${room}px`, OPEN_MAX_HEIGHT].filter(Boolean).join(", ")})` }}
       className="page-margin-open flex min-h-0 flex-col overflow-hidden rounded-xl">
       <header ref={headerRef} className="flex shrink-0 items-start gap-1 pt-2.5 pr-2 pl-3">
         <span className="min-w-0 flex-1 pt-1">
@@ -460,14 +465,22 @@ export function PageMargin({ conversations, writers = [], editors = [], view = n
     return () => window.cancelAnimationFrame(frame);
   }, [openId]);
 
+  // The margin fits the page and never lengthens it. Near the page's end, an open thread stays at its passage, only
+  // as tall as the room left under it, its messages scrolling inside; with too little room, it rises.
+  const openRoom = ((): number | null => {
+    const opened = items.find((item) => item.id === openItem);
+    if (end === null || !opened) return null;
+    return Math.max(OPEN_MIN_ROOM, end - opened.top - (holder ? ESTIMATED_WRITER_HEIGHT : 0));
+  })();
   // Only the open conversation moves the column. A hovered card only lights up:
   // moving it would slide another card under the pointer, which then moves in turn.
-  // An open card near the page's end rises rather than lengthening the page under it.
+  // A card with no place beside the open one waits, unseen but measured, until it closes.
   const positions = layoutMargin(items.map((item) => ({ id: item.id, top: item.top,
     height: heights.get(item.id) ?? item.estimate })), openItem, end);
-  const bottom = Math.max(0, ...items.map((item) => (positions.get(item.id) ?? 0) + (heights.get(item.id) ?? item.estimate)));
+  const shown = items.filter((item) => positions.has(item.id));
+  const bottom = Math.max(0, ...shown.map((item) => positions.get(item.id)! + (heights.get(item.id) ?? item.estimate)));
   const openCard = (conversation: MarginConversation, quietAgents: boolean) => renderOpen && (
-    <OpenConversationCard conversation={conversation} quietAgents={quietAgents} canResolve={canResolve}
+    <OpenConversationCard conversation={conversation} quietAgents={quietAgents} room={openRoom} canResolve={canResolve}
       onResolve={() => conversation.linkId && onResolve(conversation.linkId)}
       {...(onExpand ? { onExpand: () => onExpand(conversation.conversationId) } : {})}
       {...(onClose ? { onClose } : {})}
@@ -476,7 +489,8 @@ export function PageMargin({ conversations, writers = [], editors = [], view = n
     </OpenConversationCard>
   );
   const place = (id: string, child: ReactNode) => (
-    <div key={id} className="absolute inset-x-0 transition-[top] duration-150" style={{ top: positions.get(id) ?? 0 }}
+    <div key={id} className={cn("absolute inset-x-0 transition-[top] duration-150", !positions.has(id) && "invisible")}
+      style={{ top: positions.get(id) ?? 0 }}
       ref={(node) => { if (node) nodes.current.set(id, node); else nodes.current.delete(id); }}>
       {child}
     </div>
@@ -491,9 +505,9 @@ export function PageMargin({ conversations, writers = [], editors = [], view = n
       if (entry.top + height < view.top + EDGE_ROOM / 2) above.push(entry);
       else if (entry.top > view.top + view.height - EDGE_ROOM) below.push(entry);
     };
-    for (const item of items) {
+    for (const item of shown) {
       if (item.id === HEAD) continue;
-      const top = positions.get(item.id) ?? item.top;
+      const top = positions.get(item.id)!;
       const height = heights.get(item.id) ?? item.estimate;
       const card = cards.find((conversation) => conversation.conversationId === item.id);
       const writer = card ? null : writers.find((entry) => writerId(entry) === item.id);

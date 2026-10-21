@@ -154,40 +154,45 @@ export function anchorTop(tops: ReadonlyMap<string, number>, conversation: Pick<
 /**
  * Card positions in the margin, as comments in Google Docs: each card as close
  * to its anchor as the cards before it allow. A focused card sits exactly at
- * its anchor, and the cards before it move up to make room. Given where the
- * text ends, the cards that would run past it move up instead, so the margin
- * does not make the page longer than its text.
+ * its anchor, and the cards before it move up to make room.
+ *
+ * Given where the page ends, the margin fits the page and never lengthens it:
+ * cards that would run past the end move up, a focused card rises only as far
+ * as it must to end there, and a card that still does not fit beside an open
+ * one is left out until it closes.
  */
 export function layoutMargin(cards: ReadonlyArray<{ id: string; top: number; height: number }>,
   focusedId: string | null = null, end: number | null = null): Map<string, number> {
   const placed = [...cards].sort((a, b) => a.top - b.top || a.id.localeCompare(b.id));
   const out = new Map<string, number>();
   const pivot = focusedId ? placed.findIndex((card) => card.id === focusedId) : -1;
-  const start = Math.max(pivot, 0);
-  if (pivot >= 0) out.set(placed[pivot]!.id, placed[pivot]!.top);
-  let bottom = pivot >= 0 ? placed[pivot]!.top + placed[pivot]!.height : Number.NEGATIVE_INFINITY;
-  for (const card of placed.slice(pivot >= 0 ? pivot + 1 : 0)) {
+  const focused = pivot >= 0 ? placed[pivot]! : null;
+  if (focused) out.set(focused.id, end === null ? focused.top : Math.max(0, Math.min(focused.top, end - focused.height)));
+  let bottom = focused ? out.get(focused.id)! + focused.height : Number.NEGATIVE_INFINITY;
+  for (const card of placed.slice(pivot + 1)) {
     const top = Math.max(card.top, bottom + MARGIN_GAP);
     out.set(card.id, top);
     bottom = top + card.height;
   }
-  // Past the text's end, the cards from the focused one on rise until the last ends with the text.
-  if (end !== null && bottom > end) {
+  // With nothing open, the cards past the end move up until the last ends with the page.
+  if (!focused && end !== null && bottom > end) {
     let floor = end;
-    for (const card of placed.slice(start).reverse()) {
+    for (const card of [...placed].reverse()) {
       const top = Math.min(out.get(card.id)!, floor - card.height);
       out.set(card.id, top);
       floor = top - MARGIN_GAP;
     }
   }
-  let ceiling = pivot >= 0 ? out.get(placed[pivot]!.id)! : Number.POSITIVE_INFINITY;
-  for (const card of placed.slice(0, start).reverse()) {
+  let ceiling = focused ? out.get(focused.id)! : Math.min(0, ...out.values());
+  for (const card of placed.slice(0, Math.max(pivot, 0)).reverse()) {
     const top = Math.min(card.top, ceiling - MARGIN_GAP - card.height);
     out.set(card.id, top);
     ceiling = top;
   }
   // Nothing goes above the page: the whole column moves down instead.
-  ceiling = Math.min(0, ...out.values());
   if (ceiling < 0) for (const [id, top] of out) out.set(id, top - ceiling);
+  if (end !== null) {
+    for (const card of placed) if (card !== focused && out.get(card.id)! + card.height > end) out.delete(card.id);
+  }
   return out;
 }
