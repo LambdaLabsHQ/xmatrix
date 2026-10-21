@@ -353,6 +353,7 @@ struct DaemonSpawnRequest {
     handoff_transfer: bool,
     handoff_source_instance_id: Option<String>,
     handoff_source_resume_session_key: Option<String>,
+    handoff_context: Option<MachineHandoffContext>,
     goal: Option<protocol::AgentGoalStatus>,
     run_worktree: bool,
     remote_repo: Option<String>,
@@ -406,6 +407,7 @@ impl DaemonSpawnRequest {
             handoff_transfer,
             handoff_source_instance_id,
             handoff_source_resume_session_key,
+            handoff_context,
             context,
             goal,
             run_worktree,
@@ -455,6 +457,7 @@ impl DaemonSpawnRequest {
             handoff_transfer: handoff_transfer.unwrap_or(false),
             handoff_source_instance_id,
             handoff_source_resume_session_key,
+            handoff_context,
             initial_message_source: context
                 .as_ref()
                 .and_then(|value| value.initial_message_source.clone()),

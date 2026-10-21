@@ -112,6 +112,17 @@ test("a connector invocation spans its whole first-line statement", () => {
   assert.equal(parseConnectorInvocation("> @github:comment:x hi"), undefined);
 });
 
+test("a zero-width escape after the @ is the command the Hub runs, so it is highlighted too", () => {
+  const body = "@\u200Bcloudflare:query_database:acct/nomadcafe-d1 SELECT 1\nLIMIT 3";
+  assert.deepEqual(parseConnectorActionCommand("cloudflare", body), {
+    actionId: "query_database", statement: { target: "acct/nomadcafe-d1", text: "SELECT 1\nLIMIT 3" } });
+  const invocation = parseConnectorInvocation(body);
+  assert.equal(invocation.text, "@\u200Bcloudflare:query_database:acct/nomadcafe-d1 SELECT 1");
+  assert.equal(body.slice(invocation.start, invocation.commandEnd), "@\u200Bcloudflare:query_database:acct/nomadcafe-d1");
+  assert.equal(body.slice(invocation.target.start, invocation.target.end), "acct/nomadcafe-d1");
+  assert.equal(parseConnectorInvocation("\u200B ＠\u200B\u200DGitHub:Policy").text, "＠\u200B\u200DGitHub:Policy");
+});
+
 test("a stop invocation is the command span the chip hangs on", () => {
   const exact = parseAgentStopInvocation("@claude:1:stop");
   assert.equal(exact.start, 0);

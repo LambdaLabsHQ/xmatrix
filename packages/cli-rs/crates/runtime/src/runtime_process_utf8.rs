@@ -65,7 +65,8 @@ use error::CliError;
 use machine_daemon_connection::{
     MachineDaemonActivationConnect, MachineDaemonCommand, MachineDaemonCommandLease,
     MachineDaemonConnectionClient, MachineDaemonConnectionEvent, MachineDaemonReport,
-    MachineHandoffExport, MachineHandoffExportResult, MachineRunSnapshotItem,
+    MachineHandoffContext, MachineHandoffContextRequest, MachineHandoffExport,
+    MachineHandoffExportResult, MachineRunSnapshotItem,
     MachineWorktreeDisposition, SerializedMachineDaemon,
 };
 #[cfg(windows)]

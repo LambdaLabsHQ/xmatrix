@@ -1,5 +1,5 @@
 name: Production PostgreSQL Lifecycle Maintenance Request
-run-name: PostgreSQL lifecycle request ${{ github.event_name == 'schedule' && 'false-100000' || format('{0}-{1}', inputs.dry_run, inputs.max_rows) }}
+run-name: PostgreSQL lifecycle request ${{ github.event_name == 'schedule' && 'false-1000000' || format('{0}-{1}', inputs.dry_run, inputs.max_rows) }}
 
 on:
   schedule:
@@ -12,11 +12,11 @@ on:
         default: true
         type: boolean
       max_rows:
-        description: Maximum expired idempotency rows per database
+        description: Maximum rows deleted per relation per database
         required: true
         default: "10000"
         type: choice
-        options: ["10000", "100000"]
+        options: ["10000", "100000", "1000000"]
 
 permissions:
   actions: write
@@ -43,9 +43,9 @@ jobs:
           retries: 3
           script: |
             const dryRun = context.eventName === "schedule" ? "false" : process.env.REQUEST_DRY_RUN;
-            const maxRows = context.eventName === "schedule" ? "100000" : process.env.REQUEST_MAX_ROWS;
+            const maxRows = context.eventName === "schedule" ? "1000000" : process.env.REQUEST_MAX_ROWS;
             if (!/^(?:true|false)$/.test(dryRun)) throw new Error("invalid dry_run");
-            if (!/^(?:10000|100000)$/.test(maxRows)) throw new Error("invalid max_rows");
+            if (!/^(?:10000|100000|1000000)$/.test(maxRows)) throw new Error("invalid max_rows");
             // Self-hosted runners have been served run lists days out of date
             // (they dispatched 0.16.316 and 0.16.336 after 0.16.347 shipped).
             // Ask for an uncached list and log what was seen.

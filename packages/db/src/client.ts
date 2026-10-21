@@ -474,8 +474,10 @@ class PgSingleReadTransaction extends PgDatabaseTransaction {
     const first = values.length + 1;
     const rows = await super.query<QueryResultRow>({
       ...query,
-      // One extra row: the fence-only row an empty read still returns.
-      maxRows: query.maxRows + 1,
+      // The outer join returns one fence-only row only when the read is
+      // empty, never an extra row beside nonempty results. Preserve the
+      // public upper bound (10,000) while allowing an empty maxRows=0 read.
+      maxRows: Math.max(1, query.maxRows),
       text: `SELECT fence.shard_id AS "${FENCE_SHARD}",fence.placement_epoch AS "${FENCE_EPOCH}",
           fence.state AS "${FENCE_STATE}",fence.target_shard_id AS "${FENCE_TARGET}",single_read.*
         FROM (${transactionSettingsSql(placeholderFrom(first))}) settings

@@ -90,6 +90,11 @@ interface LaunchRequest {
   parameterEvidence?: LaunchParameterEvidence;
   /** Owner's name for the Machine headroom routing bound. A hostname is not a name. */
   machineName?: string;
+  /** A handoff predecessor's conversation, exported by its machine as it
+   * stopped. Handed to the spawn as is; not part of the request identity and
+   * not persisted, so a retry staged before the export arrived still matches,
+   * and a recovered launch starts without it. */
+  handoffContext?: Record<string, unknown>;
 }
 
 export interface RegistrationLaunchCandidate {
@@ -287,7 +292,7 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
     // adds nothing to the request identity; a launch staged before it was
     // recorded still replays. Where the launch is drawn is the same kind of
     // fact: a handoff staged before that link existed still recovers.
-    const { runMetadata: callerMetadata, presentationMessageId: _shownOn, ...identity } = input;
+    const { runMetadata: callerMetadata, presentationMessageId: _shownOn, handoffContext: _carried, ...identity } = input;
     const { sourceMention: _summon, ...runMetadata } = callerMetadata ?? {};
     const requestDigest = await digestCanonicalCloneCborV1({ ...identity, body: bodyHash,
       ...(Object.keys(runMetadata).length ? { runMetadata } : {}) });
@@ -335,7 +340,7 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
         identities[0] = text(input.runId, 200);
         if (input.instanceId !== undefined) identities[1] = text(input.instanceId, 200);
       }
-      const { body: _body, ...persistedRequest } = input;
+      const { body: _body, handoffContext: _context, ...persistedRequest } = input;
       const created = await tx.query({ name: "registration_launch_stage_v2", text: `INSERT INTO data.registration_launch_intents
         (actor_user_id,command_id,request_digest,space_id,owner_user_id,machine_id,harness,channel_id,source_message_id,
          selection_index,source_body_hash,source_revision,run_id,instance_id,launch_id,execution_key,control_id,
@@ -545,6 +550,7 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
       const payload = withInitialMessageSource({ type: "machine_spawn_agent", requestId: row.control_id, spaceId: input.key.spaceId,
         channelId: input.channelId, runId: row.run_id, instanceId: row.instance_id, launchId: row.launch_id,
         executionKey: row.execution_key, registration: registrationLaunchBindingForDaemon(binding), identityId: row.instance_id, resumeSessionKey,
+        ...(input.handoffContext ? { handoffContext: input.handoffContext } : {}),
         ...registrationLaunchSpawnFields(launch, input.key.harness),
         agentName: row.display_name, prompt: input.body,
         // The daemon places a non-repository managed directory by this key.
@@ -780,6 +786,8 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
     tags?: AutoLaunchTags;
     /** Capabilities the work needs; those a daemon can prove gate where it runs. */
     requiredCapabilities?: readonly string[];
+    /** A handoff predecessor's conversation for the successor's spawn. */
+    handoffContext?: Record<string, unknown>;
   }, choose: RegistrationLaunchChooser) {
     if (Object.hasOwn(input, "oneshot") || Object.keys(input.tags ?? {}).some(key =>
         !AUTO_LAUNCH_FIELDS.includes(key as typeof AUTO_LAUNCH_FIELDS[number]))) {
@@ -852,6 +860,7 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
       ...(input.initialMessageId !== undefined ? { initialMessageId: text(input.initialMessageId) } : {}),
       ...(input.presentationMessageId !== undefined ? { presentationMessageId: text(input.presentationMessageId) } : {}),
       ...(candidate.machineName ? { machineName: candidate.machineName } : {}),
+      ...(input.handoffContext ? { handoffContext: input.handoffContext } : {}),
       ...selectedParameters(selected, candidate.key.harness) };
     return this.withHost(commandId, await this.prepare(request));
   }

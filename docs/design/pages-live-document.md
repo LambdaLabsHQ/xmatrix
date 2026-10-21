@@ -192,11 +192,16 @@ fact is about.
   arrive as well as a person's typing. The session writes an Agent's edit
   under the Agent's awareness id, which is how the editor knows whose text it
   is.
-- **The top and bottom of the right edge** of a long page name who is out of
-  view above or below (decided 2026-10-21: everything about people at work
-  stands on the right, never centred over the text), placed by their cursor where they have one and by their section
-  otherwise: "claude:2 is editing below". Clicking scrolls to the nearest of
-  them; clicking an avatar in the header does the same.
+- **The top and bottom of the margin** tell what it holds out of view above
+  or below (decided 2026-10-21: one source with the margin, in its style).
+  Only what the margin draws and who is editing count, by where each card and
+  pill is drawn: a card in the cards' style says "2 conversations below", its
+  working line "claude:2 · Working", and "Ada · Editing" for a person editing
+  there. Someone only reading is in the header's presence stack, and an Agent
+  at rest is its card's "Idle" line; neither is told at the edges. Without a
+  margin, the same card at the right edge tells of people editing out of view,
+  since each Agent is its own face there. Clicking scrolls to the nearest;
+  clicking an avatar in the header goes to that person.
 - **Beside a wide page, an Agent at work stands in the margin** (decided
   2026-10-19): its pill, solid in its colour with its face, its name and what
   it is doing (its dots, or *thinking 12s*), level with the line it writes and

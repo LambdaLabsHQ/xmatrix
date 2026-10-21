@@ -13,10 +13,10 @@ on:
         required: true
         type: boolean
       max_rows:
-        description: Maximum expired idempotency rows per database
+        description: Maximum rows deleted per relation per database
         required: true
         type: choice
-        options: ["10000", "100000"]
+        options: ["10000", "100000", "1000000"]
 
 permissions:
   actions: read
@@ -156,8 +156,8 @@ jobs:
         run: |
           set -euo pipefail
           [[ "$DISPATCH_DRY_RUN" == true || "$DISPATCH_DRY_RUN" == false ]]
-          [[ "$DISPATCH_MAX_ROWS" == 10000 || "$DISPATCH_MAX_ROWS" == 100000 ]]
-          args=(--batch-size=1000 "--max-rows=$DISPATCH_MAX_ROWS" --budget-ms=30000)
+          [[ "$DISPATCH_MAX_ROWS" == 10000 || "$DISPATCH_MAX_ROWS" == 100000 || "$DISPATCH_MAX_ROWS" == 1000000 ]]
+          args=(--batch-size=1000 "--max-rows=$DISPATCH_MAX_ROWS" --budget-ms=240000)
           [[ "$DISPATCH_DRY_RUN" == true ]] && args+=(--dry-run)
           for database in primary shard-1; do
             if [[ "$database" == primary ]]; then

@@ -1763,6 +1763,7 @@ struct DaemonStopRequest {
     reason: Option<String>,
     worktree_disposition: Option<MachineWorktreeDisposition>,
     handoff_export: Option<MachineHandoffExport>,
+    handoff_context: Option<MachineHandoffContextRequest>,
     relay_lease: Option<MachineDaemonCommandLease>,
 }
 
@@ -1783,6 +1784,7 @@ impl DaemonStopRequest {
             preserve_instance_for_reborn: _,
             worktree_disposition,
             handoff_export,
+            handoff_context,
             relay_lease,
         } = command
         else {
@@ -1802,6 +1804,7 @@ impl DaemonStopRequest {
             reason,
             worktree_disposition,
             handoff_export,
+            handoff_context,
             relay_lease,
         })
     }
@@ -1856,6 +1859,13 @@ impl DaemonStopRequest {
         result: error::Result<DaemonStopOutcome>,
         handoff_export: Option<MachineHandoffExportResult>,
     ) -> MachineDaemonReport {
+        // The conversation is read once the process is gone, so it is whole.
+        let handoff_context = self.handoff_context.as_ref().filter(|_| result.is_ok()).map(|request| {
+            runtime_handoff_context::export_handoff_context(
+                self.resume_session_key.as_deref(),
+                request.max_chars,
+            )
+        });
         let (ok, stopped_pid, cleanup_reason, error) = match result {
             Ok((pid, reason)) => (true, pid, Some(reason.to_string()), None),
             Err(error) => (false, self.pid, None, Some(error.to_string())),
@@ -1876,6 +1886,7 @@ impl DaemonStopRequest {
             cleanup_reason,
             error,
             handoff_export,
+            handoff_context,
             relay_lease: self.relay_lease,
         }
     }

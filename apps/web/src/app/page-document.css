@@ -263,6 +263,13 @@
 }
 /* A conversation about the page is a comment: its card, and the line under an Agent at work, start with its icon. */
 .page-comment-icon { flex: none; fill: #f2b632; }
+/* What the margin holds out of view, at its top or bottom edge: a card in the cards' tint, floating over the ones
+   under it as the card being read is lifted, so the cards scroll under it. */
+.page-margin-edge,
+.page-margin-edge:hover {
+  background: var(--card);
+  box-shadow: 0 1px 3px oklch(0.3 0.02 60 / 0.18), 0 2px 8px 2px oklch(0.3 0.02 60 / 0.1);
+}
 .page-margin-open {
   background: var(--card);
   box-shadow: 0 1px 3px oklch(0.3 0.02 60 / 0.22), 0 4px 10px 3px oklch(0.3 0.02 60 / 0.12);
@@ -649,17 +656,6 @@ html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-comment-box .app-com
 }
 .page-document .page-reader-removed.is-block { display: block; }
 .page-document .page-reader-removed:not(.is-block) + .page-reader-change:not(.is-block) { margin-left: 0.25em; }
-
-/* Someone out of view (§3.2): the dot beside their name pulses while they write. */
-@keyframes page-offscreen-typing {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.35; }
-}
-.page-offscreen-typing { animation: page-offscreen-typing 1.2s ease-in-out infinite; }
-@media (prefers-reduced-motion: reduce) {
-  .page-offscreen-typing { animation: none; }
-}
-
 
 /* The Agent a page is written with, on a phone: its own face on its glass disc, floating at the right
    edge where Agents on the page show; the small ink "+" says a tap calls it. */

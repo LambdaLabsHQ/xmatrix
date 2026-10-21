@@ -1,4 +1,4 @@
-import type { MachineHandoffExport, MachineHandoffExportResult } from "../handoff-export.js";
+import type { MachineHandoffContext, MachineHandoffContextRequest, MachineHandoffExport, MachineHandoffExportResult } from "../handoff-export.js";
 import type { AgentWorkingMode } from "../agent-registration-configuration.js";
 import type { AgentHarnessSpec, AgentRuntimeExecutionEvidence } from "../authority-foundation.js";
 import type { RoutingQuotaProbeRequest, RoutingQuotaProbeResponse } from "../agent-routing-quota-probe.js";
@@ -205,6 +205,8 @@ export interface MachineDaemonSpawnCommand {
   handoffTransfer?: boolean;
   handoffSourceInstanceId?: string;
   handoffSourceResumeSessionKey?: string;
+  /** A handoff predecessor's conversation; the daemon writes it out for the successor. */
+  handoffContext?: MachineHandoffContext;
   context?: MachineDaemonSpawnContext;
   /** @deprecated use context.goal. */
   goal?: AgentGoalStatus;
@@ -336,6 +338,8 @@ export interface MachineDaemonStopCommand {
   worktreeDisposition?: MachineWorktreeDisposition;
   /** Push the checkout to a handoff branch after the stop (`retain` only). */
   handoffExport?: MachineHandoffExport;
+  /** Export the stopped Run's conversation for a handoff successor. */
+  handoffContext?: MachineHandoffContextRequest;
   relayLease?: MachineDaemonCommandLease;
 }
 
@@ -359,6 +363,8 @@ export interface MachineDaemonStopResultReport {
   error?: string;
   /** What became of the stop's `handoffExport`; omitted by daemons that predate it. */
   handoffExport?: MachineHandoffExportResult;
+  /** The conversation a stop's `handoffContext` asked for; omitted by daemons that predate it. */
+  handoffContext?: MachineHandoffContext;
   relayLease?: MachineDaemonCommandLease;
 }
 

@@ -42,6 +42,15 @@ test("lifecycle execution accepts one exact production-tag broker receipt", () =
   });
 });
 
+test("the daily schedule's million-row ceiling is an accepted parameter", () => {
+  const scheduled = { ...broker, event: "schedule", display_title: lifecycleRequestTitle("false", "1000000") };
+  assert.deepEqual(requireLifecycleExecutionAuthority(valid({
+    broker: scheduled, dryRun: "false", maxRows: "1000000",
+    sameTagRuns: [{ id: 42, display_title: lifecycleExecutionTitle(41, "false", "1000000") }],
+    currentDisplayTitle: lifecycleExecutionTitle(41, "false", "1000000"),
+  })), { brokerRunId: "41", dryRun: false, maxRows: 1000000 });
+});
+
 test("lifecycle execution rejects authority, parameter, and replay drift", () => {
   for (const input of [
     valid({ tagCommitSha: "b".repeat(40) }),
