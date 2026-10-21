@@ -16,12 +16,13 @@ import {
 export { addColumnAfter, addRowAfter, deleteColumn, deleteRow, deleteTable, isInTable };
 import { Decoration, DecorationSet, type EditorView, type NodeView } from "prosemirror-view";
 import {
-  absolutePositionToRelativePosition, redo, relativePositionToAbsolutePosition, undo, yCursorPlugin, ySyncPlugin,
-  ySyncPluginKey, yUndoPlugin,
+  absolutePositionToRelativePosition, defaultDeleteFilter, defaultProtectedNodes, redo, relativePositionToAbsolutePosition,
+  undo, yCursorPlugin, ySyncPlugin, ySyncPluginKey, yUndoPlugin,
 } from "y-prosemirror";
 import type { Awareness } from "y-protocols/awareness";
 import * as Y from "yjs";
 import { automationChips } from "./page-automation-chips";
+import { PageSessionChanges, type PageChangeItems, type PageChangeWriter } from "./page-session-changes";
 import { referenceChips, type PageReferenceTargets } from "./page-reference-chips";
 import { githubFileEmbeds, type ReadGitHubFile } from "./page-github-file-embeds";
 import { imageView, pageMediaPaste, type LocalMedia, type PageMediaSource, type UploadPageMedia } from "./page-media";
@@ -202,6 +203,70 @@ const taskShortcut = new Plugin({
       .setNodeMarkup($from.before($from.depth - 1), undefined, { ...item.attrs, checked: match[1] === "x" });
   },
 });
+
+/** The page's live session as undo sees it: the origin of the writes it brings in, and when the page it opened is in. */
+export interface PageWrites {
+  readonly synced: boolean;
+  on(listener: (notice: { type: string }) => void): () => void;
+}
+
+/**
+ * Ctrl+Z steps back through everyone's writes on the page, this person's and the others' alike, but
+ * no further than the page as this person opened it: the others' writes count from the session's
+ * first sync, which brings that page in. Each writer's run of writes is its own step.
+ */
+export function pageUndo(fragment: Y.XmlFragment, session: PageWrites, awareness: Awareness,
+  onChanges?: (changes: PageSessionChanges | null) => void): Plugin[] {
+  const undoManager = new Y.UndoManager(fragment, {
+    trackedOrigins: new Set<unknown>([ySyncPluginKey]),
+    deleteFilter: (item) => defaultDeleteFilter(item, defaultProtectedNodes),
+    captureTransaction: (tr) => tr.meta.get("addToHistory") !== false,
+  });
+  const opened = () => undoManager.addTrackedOrigin(session);
+  // This person's write is theirs; another's is named by the presence of the client that wrote it.
+  const writerOf = (origin: unknown, insertions: PageChangeItems): PageChangeWriter | null => {
+    if (origin !== session) {
+      const user = awareness.getLocalState()?.user as { color?: string } | undefined;
+      return { name: "You", color: user?.color ?? null, kind: "user", self: true };
+    }
+    for (const client of insertions.clients.keys()) {
+      const user = awareness.getStates().get(client)?.user as { name?: string; color?: string; kind?: string } | undefined;
+      if (user?.name) return { name: user.name, color: user.color ?? null, kind: user.kind === "agent" ? "agent" : "user", self: false };
+    }
+    return null;
+  };
+  let last: unknown = null;
+  const writer = (tr: Y.Transaction) => {
+    if (!undoManager.trackedOrigins.has(tr.origin)) return;
+    if (tr.origin !== last) undoManager.stopCapturing();
+    last = tr.origin;
+  };
+  return [
+    yUndoPlugin({ undoManager }),
+    new Plugin({
+      view: () => {
+        let stop = () => {};
+        if (session.synced) opened();
+        else stop = session.on((notice) => {
+          if (notice.type !== "synced") return;
+          opened();
+          stop();
+        });
+        fragment.doc!.on("beforeTransaction", writer);
+        const changes = new PageSessionChanges(undoManager, writerOf);
+        onChanges?.(changes);
+        return {
+          destroy: () => {
+            stop();
+            fragment.doc!.off("beforeTransaction", writer);
+            changes.destroy();
+            onChanges?.(null);
+          },
+        };
+      },
+    }),
+  ];
+}
 
 function editorKeymap(): Plugin {
   const hardBreak: Command = chainCommands(exitCode, (state, dispatch) => {
@@ -1186,7 +1251,12 @@ export function showReaderChanges(view: EditorView, fragment: Y.XmlFragment, bas
 }
 
 export function editorPlugins(input: {
-  fragment: Y.XmlFragment; awareness: Awareness; placeholder: () => string | undefined;
+  fragment: Y.XmlFragment; awareness: Awareness;
+  /** The live session: Ctrl+Z steps back through its writes too, as far as the page as it opened. */
+  session: PageWrites;
+  /** The changes Ctrl+Z steps back through, for the page's list of them; null once the editor is gone. */
+  onChanges?: (changes: PageSessionChanges | null) => void;
+  placeholder: () => string | undefined;
   onBlockChange?: (blockId: string) => void;
   handleKeyDown: (view: EditorView, event: KeyboardEvent) => boolean;
   openConversation: (conversationId: string) => void;
@@ -1217,7 +1287,7 @@ export function editorPlugins(input: {
     cursorActivity(input.awareness),
     cursorIdle(presenceOf),
     cursorStatus(input.awareness),
-    yUndoPlugin(),
+    ...pageUndo(input.fragment, input.session, input.awareness, input.onChanges),
     new Plugin({ props: { handleKeyDown: input.handleKeyDown } }),
     typoraKeymap(),
     pageTriggers(),

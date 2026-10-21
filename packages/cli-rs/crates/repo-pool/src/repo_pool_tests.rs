@@ -3063,6 +3063,141 @@ mod tests {
         cleanup_test_dirs(&[&base, &remote, &pools]);
     }
 
+    /// `git worktree remove --force` with a process still writing into the
+    /// tree deletes git's admin directory, stops on the files, and fails. The
+    /// tree then has nothing left to relock, so eviction finishes the delete.
+    #[tokio::test]
+    async fn an_eviction_git_unregistered_but_could_not_finish_completes_and_its_session_wakes() {
+        if !git_available() {
+            return;
+        }
+        let _floors = NoIdleFloors::enter();
+        let identity_url = "https://github.com/acme/evict-half-removed";
+        let (base, remote) = setup_base_with_local_fetch(identity_url);
+        let pools = unique_temp("eh");
+        let layout = layout_for(identity_url, &pools);
+        let (lease, head) = resting_session_with_commit(&layout, &base, identity_url, "eh1").await;
+        let tree = lease.worktree_path.clone();
+        let slot = lease.slot_id.as_str().to_string();
+        let admin = read_linked_worktree_admin_pointer(&tree).unwrap();
+
+        TEST_UNREGISTER_THEN_FAIL_WORKTREE_REMOVE.with(|c| c.set(true));
+        let outcome = reclaim_pool_slots_at(&pools, &PoolLiveness::default(), 8).await;
+        TEST_UNREGISTER_THEN_FAIL_WORKTREE_REMOVE.with(|c| c.set(false));
+        assert!(!admin.exists(), "the failpoint dropped git's registration");
+        assert_evicted_tree(&outcome, &slot, &tree);
+        let manifest = load_manifest_at(layout.pool_root()).unwrap().unwrap();
+        assert!(!manifest.slots.contains_key(&slot));
+        assert!(manifest.bindings.iter().all(|b| b.session_key != "eh1"));
+
+        // The wake, in the daemon's order: nothing lost to record, no binding
+        // to rebind, and the eviction's record rebuilds the checkout.
+        assert!(
+            !record_lost_retained_checkout_at(&layout, &base, "eh1")
+                .await
+                .unwrap()
+        );
+        assert!(retained_binding_for_session_at(&layout, "eh1").await.is_err());
+        let record = rehydrate_record_for_session_at(&layout, "eh1")
+            .await
+            .unwrap()
+            .expect("the evicted session is recorded");
+        assert_eq!(record.head_oid, head);
+        rehydrate_at_original_path(&layout, &base, &record, &tree).await;
+
+        cleanup_test_dirs(&[&base, &remote, &pools]);
+    }
+
+    /// What an older daemon left behind after that failure: the eviction's
+    /// record, a bound slot, and a tree whose `.git` names a dropped admin dir.
+    #[tokio::test]
+    async fn a_bound_tree_git_unregistered_wakes_from_its_eviction_record() {
+        if !git_available() {
+            return;
+        }
+        let identity_url = "https://github.com/acme/half-removed-wake";
+        let (base, remote) = setup_base_with_local_fetch(identity_url);
+        let pools = unique_temp("hw");
+        let layout = layout_for(identity_url, &pools);
+        let (lease, head) = resting_session_with_commit(&layout, &base, identity_url, "hw1").await;
+        let tree = lease.worktree_path.clone();
+        let manifest = load_manifest_at(layout.pool_root()).unwrap().unwrap();
+        let binding = manifest
+            .bindings
+            .iter()
+            .find(|b| b.session_key == "hw1")
+            .cloned()
+            .unwrap();
+        let slot = manifest.slots.get(lease.slot_id.as_str()).unwrap();
+        let record = capture_rehydrate_record(&tree, &binding, slot, SnapshotOutcome::default())
+            .await
+            .unwrap();
+        std::fs::remove_dir_all(read_linked_worktree_admin_pointer(&tree).unwrap()).unwrap();
+        std::fs::write(tree.join("stray.txt"), "residue\n").unwrap();
+
+        // Nothing says these files were preserved: they are kept, loudly.
+        let error = record_lost_retained_checkout_at(&layout, &base, "hw1")
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, PoolErrorCode::WorktreeCleanupFailed);
+        assert!(tree.join("stray.txt").is_file());
+
+        save_rehydrate_records(&layout, &[record]).unwrap();
+        assert!(
+            record_lost_retained_checkout_at(&layout, &base, "hw1")
+                .await
+                .unwrap()
+        );
+        assert!(!tree.exists(), "the half-removed tree is cleared");
+        let record = rehydrate_record_for_session_at(&layout, "hw1")
+            .await
+            .unwrap()
+            .expect("the eviction's record is kept, not replaced");
+        assert_eq!(record.head_oid, head);
+        rehydrate_at_original_path(&layout, &base, &record, &tree).await;
+
+        cleanup_test_dirs(&[&base, &remote, &pools]);
+    }
+
+    #[tokio::test]
+    async fn one_slot_that_cannot_be_evicted_does_not_stop_the_sweep() {
+        if !git_available() {
+            return;
+        }
+        let _floors = NoIdleFloors::enter();
+        let identity_url = "https://github.com/acme/evict-one-fails";
+        let (base, remote) = setup_base_with_local_fetch(identity_url);
+        let pools = unique_temp("ef");
+        let layout = layout_for(identity_url, &pools);
+        let mut leases = Vec::new();
+        for session in ["ef1", "ef2"] {
+            let lease = lease_available_or_create_at(&layout, &base, identity_url, &req(session))
+                .await
+                .unwrap();
+            mark_retained_at(&layout, &req(session)).await.unwrap();
+            leases.push(lease);
+        }
+        let (stuck, free) = (&leases[0], &leases[1]);
+        let stuck_arg = stuck.worktree_path.display().to_string();
+        run_git(&base, &["worktree", "unlock", &stuck_arg]);
+        run_git(&base, &["worktree", "lock", "--reason", "someone else", &stuck_arg]);
+
+        let outcome = reclaim_pool_slots_at(&pools, &PoolLiveness::default(), 8).await;
+        assert_evicted_tree(&outcome, free.slot_id.as_str(), &free.worktree_path);
+        assert!(stuck.worktree_path.join(".git").is_file());
+        let manifest = load_manifest_at(layout.pool_root()).unwrap().unwrap();
+        assert!(manifest.bindings.iter().any(|b| b.session_key == "ef1"));
+        assert!(!manifest.slots.contains_key(free.slot_id.as_str()));
+        let records = load_rehydrate_records(&layout).unwrap();
+        assert!(
+            records.iter().all(|r| r.session_key != "ef1"),
+            "the kept session wakes in its tree, not from a record"
+        );
+        assert!(records.iter().any(|r| r.session_key == "ef2"));
+
+        cleanup_test_dirs(&[&base, &remote, &pools]);
+    }
+
     #[tokio::test]
     async fn the_sweep_records_a_lost_retained_checkout_instead_of_forgetting_it() {
         if !git_available() {
