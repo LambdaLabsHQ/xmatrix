@@ -337,7 +337,7 @@ export function controlView(invocation: AgentControlInvocation, outcome: AgentCo
         return result("Failed", `Could not switch the ${noun}: ${outcome.message}`);
     }
   }
-  if (notice) return result(/^Could not|could not find/iu.test(notice.body) ? "Failed" : "Switched", notice.body);
+  if (notice) return result(/^(?:Could not|xMatrix could not find)/iu.test(notice.body) ? "Failed" : "Switched", notice.body);
   return input.fresh ? result("Switching", `Waiting for the Instance to answer.`, true)
     : result("Unconfirmed", "The Instance has not answered this switch.");
 }
