@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { ChevronDown } from "lucide-react";
 import type { EditorView } from "prosemirror-view";
 import { carryPageDocKnown } from "@xmatrix/protocol/page-document";
@@ -39,7 +39,11 @@ function summarize(blame: PageBlame, now: DocNode, from: number, to: number): Bl
 }
 
 /** Where its writers show: `above` stands its bottom at `top`, so a note that opens grows away from the passage. */
-interface Shown { from: number; to: number; left: number; top: number; above?: boolean; summary: BlameSummary | null }
+interface Shown {
+  from: number; to: number; left: number; top: number; above?: boolean; summary: BlameSummary | null;
+  /** Where it stands under the passage instead, when it grows past the top of the view. */
+  under?: number;
+}
 
 function names(writers: readonly BlameWriter[]): string {
   const shown = writers.slice(0, 2).map((writer) => pageAuthorLabel(writer.author));
@@ -232,9 +236,10 @@ export function PageBlameLayer({ view, frame, source, inMargin }: {
         const left = Math.max(0, Math.min(start.left - box.left - 6, box.width - 320));
         const top = above ? start.top - box.top - 6 : end.bottom - box.top + 6;
         setOpen(false);
-        setSelected({ from, to, left, top, above, summary: null });
+        const under = end.bottom - box.top + 6;
+        setSelected({ from, to, left, top, above, under, summary: null });
         void writersOf(from, to).then((summary) => {
-          if (shownFor === key) setSelected(summary ? { from, to, left, top, above, summary } : null);
+          if (shownFor === key) setSelected(summary ? { from, to, left, top, above, under, summary } : null);
         });
       }, SELECTION_MS);
     };
@@ -262,6 +267,16 @@ export function PageBlameLayer({ view, frame, source, inMargin }: {
     reader.current.open(conversationId, revision);
   };
   const selectedSummary = selected?.summary ?? null;
+  // Opened over a passage at the top of the view, the list would run under the page's controls: it goes under it.
+  const note = useRef<HTMLElement | null>(null);
+  useLayoutEffect(() => {
+    const element = note.current;
+    const scroller = view.current?.dom.closest("article")?.getBoundingClientRect();
+    if (!open || !element || !scroller || !selected?.above || selected.under === undefined) return;
+    if (element.getBoundingClientRect().top < scroller.top) {
+      setSelected({ ...selected, above: false, top: selected.under });
+    }
+  }, [open, selected, view]);
   useTint(view, open ? selectedSummary?.stretches ?? null : null);
 
   return (
@@ -273,7 +288,7 @@ export function PageBlameLayer({ view, frame, source, inMargin }: {
         </div>
       )}
       {selectedSummary && (selectedSummary.writers.length > 0 || selectedSummary.writing) && (
-        <PaperPopover data-page-blame="" data-testid="page-blame-note"
+        <PaperPopover ref={note} data-page-blame="" data-testid="page-blame-note"
           className={cn("absolute z-40 max-w-80 rounded-lg px-2 py-1 text-[12.5px] text-muted-foreground",
             selected!.above && "-translate-y-full")}
           style={{ left: selected!.left, top: selected!.top }} onMouseDown={(event) => event.preventDefault()}>

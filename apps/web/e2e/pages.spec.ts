@@ -1543,6 +1543,9 @@ test("who wrote a passage shows over it, and opens the conversation it was writt
   await expect(note).toContainText("claude:1, Daniel");
   await note.getByRole("button", { expanded: false }).click();
   await expect(note.locator("li")).toHaveCount(2);
+  // At the top of the page there is no room over the passage for the list: it opens under it, in view.
+  const [openAt, articleAt] = [(await note.boundingBox())!, (await browser.locator("article").first().boundingBox())!];
+  expect(openAt.y).toBeGreaterThanOrEqual(articleAt.y);
   await browser.screenshot({ path: test.info().outputPath("pages-blame-writers.png") });
 
   // Its conversation opens beside the page, at the message it was at when the passage was written.
