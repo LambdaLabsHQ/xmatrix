@@ -73,7 +73,10 @@ jobs:
       desktop: ${{ inputs.force_full_matrix || steps.filter.outputs.desktop == 'true' }}
       android: ${{ inputs.force_full_matrix || steps.filter.outputs.android == 'true' }}
       cli: ${{ inputs.force_full_matrix || steps.filter.outputs.cli == 'true' }}
+      cli_windows: ${{ inputs.force_full_matrix || steps.filter.outputs.cli_windows == 'true' }}
       duplicates: ${{ inputs.force_full_matrix || steps.filter.outputs.duplicates == 'true' }}
+      # `fast` for pull requests, `full` after merge and for release trains.
+      tier: ${{ steps.filter.outputs.tier }}
       # Ledgered jobs (" web hub-suite ") that already passed this exact
       # content. They are never scheduled, so a squash merge, a release train
       # or a re-run of tested content holds no runner.
@@ -121,6 +124,19 @@ jobs:
           XMATRIX_RELEASE_BASE_REF: ${{ github.event.pull_request.base.sha || github.event.before || '' }}
         run: node scripts/version.mjs check-release-order --merged-tags-only
 
+      # CI has two tiers, chosen here and nowhere else. A pull request runs
+      # the fast tier, each job within about two minutes: the static Node
+      # checks (node-static), the Web unit tests (web-unit), production build
+      # (web-build) and its lint and typecheck (web-check), the Hub
+      # typecheck and deploy bundle
+      # (hub-check) and Linux Clippy (rust-clippy). A push to main (Public
+      # Snapshot CI) and a release train run the full tier: every partition,
+      # including the browser shards and performance budget, the Hub suite
+      # and PostgreSQL tests, Rust tests on Linux and Windows, Desktop,
+      # Android, the package and script tests and the duplicate scan. Only
+      # full-tier jobs carry ledgered names, so a release reuses only results
+      # the full tier earned; a failed main run is reported on its pull
+      # request (post-merge-ci-notice.yml).
       - id: filter
         name: Detect changed areas
         shell: bash
@@ -129,8 +145,10 @@ jobs:
           BEFORE_SHA: ${{ github.event.before || '' }}
           BASE_SHA: ${{ github.event.pull_request.base.sha || '' }}
           RELEASE_SCOPE: ${{ inputs.scope }}
+          TIER: ${{ github.event_name == 'pull_request' && inputs.scope == '' && !inputs.force_full_matrix && 'fast' || 'full' }}
         run: |
           set -euo pipefail
+          echo "tier=$TIER" | tee -a "$GITHUB_OUTPUT"
 
           # A release train names the components it ships; their partitions
           # run whatever the last diff touched.
@@ -143,6 +161,7 @@ jobs:
               echo "desktop=$(selected desktop)"
               echo "android=$(selected android)"
               echo "cli=$(selected cli)"
+              echo "cli_windows=$(selected cli)"
               echo "duplicates=true"
             } | tee -a "$GITHUB_OUTPUT"
             exit 0
@@ -168,6 +187,12 @@ jobs:
           if [ "$EVENT_NAME" != "pull_request" ]; then
             areas="$(printf '%s\n' "$areas" | sed 's/^hub=.*/hub=true/')"
           fi
+          cli="$(printf '%s\n' "$areas" | sed -n 's/^cli=//p')"
+          areas="$(printf '%s\ncli_windows=%s\n' "$areas" "$cli")"
+          # The fast tier has no Desktop, Android, Windows or duplicate job.
+          if [ "$TIER" = fast ]; then
+            areas="$(printf '%s\n' "$areas" | sed -E 's/^(desktop|android|cli_windows|duplicates)=.*/\1=false/')"
+          fi
           printf '%s\n' "$areas" | tee -a "$GITHUB_OUTPUT"
 
       - id: ledger
@@ -179,6 +204,7 @@ jobs:
           DESKTOP: ${{ steps.filter.outputs.desktop }}
           ANDROID: ${{ steps.filter.outputs.android }}
           CLI: ${{ steps.filter.outputs.cli }}
+          CLI_WINDOWS: ${{ steps.filter.outputs.cli_windows }}
         shell: bash
         run: |
           set -euo pipefail
@@ -188,7 +214,8 @@ jobs:
           if selected "$HUB"; then jobs+=(hub-suite); fi
           if selected "$DESKTOP"; then jobs+=(desktop); fi
           if selected "$ANDROID"; then jobs+=(android); fi
-          if selected "$CLI"; then jobs+=(rust-cli rust-cli-windows); fi
+          if selected "$CLI"; then jobs+=(rust-cli); fi
+          if selected "$CLI_WINDOWS"; then jobs+=(rust-cli-windows); fi
           if [ "${#jobs[@]}" -eq 0 ]; then
             echo "reused= " >> "$GITHUB_OUTPUT"
           else
@@ -208,10 +235,21 @@ jobs:
           retention-days: 3
 
   node-checks:
-    # Start this common gate in the first wave. The aggregate still fails on
-    # an unselected failure. Shared checks use the existing Linux CI pool by
-    # default, so selectors and required checks can run in parallel. Release
-    # callers retain their explicit offload_runner override.
+    # This common gate runs for every change; the aggregate still fails on an
+    # unselected failure. It waits only for the tier. Shared checks use the
+    # existing Linux CI pool by default; release callers retain their explicit
+    # offload_runner override. A pull request runs the static checks
+    # (node-static). In the full tier hosted runners give the repository-wide
+    # duplicate scan a job of its own beside the Node checks: on one 4-CPU VM
+    # it could only follow them, as the job's longest stage. A persistent
+    # runner runs both as one job. The ledger records node-checks only when
+    # every entry passed.
+    needs: changes
+    name: ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.changes.outputs.tier == 'fast' && '[{"name":"node-static","partitions":"node-static"}]' || (inputs.hosted || github.event.pull_request.head.repo.fork || vars.XMATRIX_RUNNER_FLEET == 'github-hosted' || (vars.XMATRIX_RUNNER_FLEET != 'self-hosted' && github.event.repository.private == false)) && '[{"name":"node-checks","partitions":"node-checks"},{"name":"node-checks (duplicates)","partitions":"duplicates"}]' || '[{"name":"node-checks","partitions":"node-checks duplicates"}]') }}
     runs-on: *offload_runner
     steps:
       - &checkout_selected_ref
@@ -234,11 +272,9 @@ jobs:
         run: node scripts/ci-ledger.mjs lookup node-checks
       - uses: ./.github/actions/setup-pnpm-node
         if: steps.ledger.outputs.hit != 'true'
-      # The repository-wide duplicate scan follows the Node checks in this job
-      # instead of taking a hosted job of its own.
       - name: Run shared Node checks
         if: steps.ledger.outputs.hit != 'true'
-        run: node scripts/ci.mjs node-checks duplicates
+        run: node scripts/ci.mjs ${{ matrix.partitions }}
 
   web:
     needs: changes
@@ -246,16 +282,19 @@ jobs:
     # surface on the final exact SHA instead of trusting only the last tiny diff.
     if: needs.changes.outputs.web == 'true' && !contains(needs.changes.outputs.reused, ' web ')
     name: ${{ matrix.name }}
-    # Hosted runners spread the functional browser projects over Playwright
+    # A pull request runs the unit tests, the production build, and its lint
+    # and typecheck as three jobs (web-unit, web-build, web-check); the
+    # browser projects run after merge. There,
+    # hosted runners spread the functional browser projects over Playwright
     # shards, each building its own production tree from the restored Next.js
-    # cache. The primary job runs the unit tests and the checked build. Short
-    # and sustained performance budgets each get their own runner, so neither
-    # waits for the unit tests and checked build before starting its window.
-    # Together they are `web web-browser`.
+    # cache. The primary job runs the unit tests and the checked build. The
+    # performance budget gets its own runner, so it does not wait for the unit
+    # tests and checked build before starting its window. Together they are
+    # `web web-browser`.
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ fromJSON((inputs.hosted || github.event.pull_request.head.repo.fork || vars.XMATRIX_RUNNER_FLEET == 'github-hosted' || (vars.XMATRIX_RUNNER_FLEET != 'self-hosted' && github.event.repository.private == false)) && '[{"name":"web","partitions":"web","shard":"","primary":true},{"name":"web (short performance)","partitions":"web-browser","shard":"performance","primary":false},{"name":"web (sustained performance)","partitions":"web-browser","shard":"performance-sustained","primary":false},{"name":"web (browser 1/4)","partitions":"web-browser","shard":"1/4","primary":false},{"name":"web (browser 2/4)","partitions":"web-browser","shard":"2/4","primary":false},{"name":"web (browser 3/4)","partitions":"web-browser","shard":"3/4","primary":false},{"name":"web (browser 4/4)","partitions":"web-browser","shard":"4/4","primary":false}]' || '[{"name":"web","partitions":"web web-browser","shard":"","primary":true}]') }}
+        include: ${{ fromJSON(needs.changes.outputs.tier == 'fast' && '[{"name":"web-unit","partitions":"web-unit","shard":"","primary":true},{"name":"web-build","partitions":"web-build","shard":"","primary":true},{"name":"web-check","partitions":"web-check","shard":"","primary":false}]' || (inputs.hosted || github.event.pull_request.head.repo.fork || vars.XMATRIX_RUNNER_FLEET == 'github-hosted' || (vars.XMATRIX_RUNNER_FLEET != 'self-hosted' && github.event.repository.private == false)) && '[{"name":"web","partitions":"web","shard":"","primary":true},{"name":"web (performance)","partitions":"web-browser","shard":"performance","primary":false},{"name":"web (browser 1/4)","partitions":"web-browser","shard":"1/4","primary":false},{"name":"web (browser 2/4)","partitions":"web-browser","shard":"2/4","primary":false},{"name":"web (browser 3/4)","partitions":"web-browser","shard":"3/4","primary":false},{"name":"web (browser 4/4)","partitions":"web-browser","shard":"4/4","primary":false}]' || '[{"name":"web","partitions":"web web-browser","shard":"","primary":true}]') }}
     # Long tests must not occupy production upload/deploy runners.
     runs-on: &linux_runner ${{ fromJSON(inputs.linux_runner || '"ubuntu-24.04"') }}
     env:
@@ -335,7 +374,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ fromJSON((inputs.hosted || github.event.pull_request.head.repo.fork || vars.XMATRIX_RUNNER_FLEET == 'github-hosted' || (vars.XMATRIX_RUNNER_FLEET != 'self-hosted' && github.event.repository.private == false)) && '[{"name":"hub (static)","partition":"hub-static","shard":""},{"name":"hub (1/3)","partition":"hub-files","shard":"1/3"},{"name":"hub (2/3)","partition":"hub-files","shard":"2/3"},{"name":"hub (3/3)","partition":"hub-files","shard":"3/3"}]' || '[{"name":"hub","partition":"hub","shard":""}]') }}
+        include: ${{ fromJSON(needs.changes.outputs.tier == 'fast' && '[{"name":"hub-check","partition":"hub-check","shard":""}]' || (inputs.hosted || github.event.pull_request.head.repo.fork || vars.XMATRIX_RUNNER_FLEET == 'github-hosted' || (vars.XMATRIX_RUNNER_FLEET != 'self-hosted' && github.event.repository.private == false)) && '[{"name":"hub (static)","partition":"hub-static","shard":""},{"name":"hub (1/3)","partition":"hub-files","shard":"1/3"},{"name":"hub (2/3)","partition":"hub-files","shard":"2/3"},{"name":"hub (3/3)","partition":"hub-files","shard":"3/3"}]' || '[{"name":"hub","partition":"hub","shard":""}]') }}
     runs-on: *linux_runner
     permissions:
       contents: read
@@ -356,14 +395,15 @@ jobs:
           path: ~/.cache/xmatrix/turbo
           key: turbo-${{ runner.os }}-hub-${{ github.sha }}
           restore-keys: turbo-${{ runner.os }}-hub-
+      # The pull request's hub-check runs no PostgreSQL test.
       - name: Restore PostgreSQL 17 test tools on a GitHub-hosted runner
-        if: steps.ledger.outputs.hit != 'true' && runner.environment == 'github-hosted'
+        if: steps.ledger.outputs.hit != 'true' && runner.environment == 'github-hosted' && matrix.partition != 'hub-check'
         uses: actions/cache@v6
         with:
           path: ~/.cache/xmatrix-test-postgres
           key: test-postgres-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/setup-test-postgres.sh', 'scripts/test-postgres-apt.conf') }}
       - name: Build isolated PostgreSQL 17 test tools
-        if: steps.ledger.outputs.hit != 'true'
+        if: steps.ledger.outputs.hit != 'true' && matrix.partition != 'hub-check'
         timeout-minutes: 15
         run: bash scripts/setup-test-postgres.sh
       - name: Run shared Hub checks
@@ -425,7 +465,8 @@ jobs:
     if: needs.changes.outputs.cli == 'true' && !contains(needs.changes.outputs.reused, ' rust-cli ')
     # Clippy and the tests share one job and one compile cache: the native
     # Windows job is the longer Rust gate, so a second Linux job would only
-    # take a hosted slot.
+    # take a hosted slot. A pull request runs Clippy alone (rust-clippy).
+    name: ${{ needs.changes.outputs.tier == 'fast' && 'rust-clippy' || 'rust-cli' }}
     runs-on: *linux_runner
     steps:
       # Default clean checkout. Cross-job compile reuse is kache (RUSTC_WRAPPER),
@@ -455,9 +496,9 @@ jobs:
       - id: ledger
         name: Reuse a passing result for identical content
         run: node scripts/ci-ledger.mjs lookup rust-cli
-      - name: Run Rust CLI tests
+      - name: Run Rust CLI checks
         if: steps.ledger.outputs.hit != 'true'
-        run: node scripts/ci.mjs rust-cli
+        run: node scripts/ci.mjs ${{ needs.changes.outputs.tier == 'fast' && 'rust-clippy' || 'rust-cli' }}
       # A restored store keeps every earlier run's artifacts, so each save
       # grew it (340 MiB to 670 MiB in a day). Least-recently-used entries
       # beyond the cap go before it is saved again.
@@ -477,9 +518,10 @@ jobs:
     needs: changes
     # Next is a continuously deployed server/web integration branch. Do not
     # make every Next deployment depend on the self-hosted Windows builder;
-    # Windows remains required whenever the immediate change actually touches
-    # the CLI/toolchain surface, and the CLI release workflow still builds it.
-    if: needs.changes.outputs.cli == 'true' && !contains(needs.changes.outputs.reused, ' rust-cli-windows ')
+    # Windows remains required after merge whenever the immediate change
+    # actually touches the CLI/toolchain surface, and the CLI release workflow
+    # still builds it. Pull requests do not run it (`changes`, tier).
+    if: needs.changes.outputs.cli_windows == 'true' && !contains(needs.changes.outputs.reused, ' rust-cli-windows ')
     runs-on: ${{ fromJSON(inputs.windows_runner || '"windows-2025"') }}
     env:
       # Compile and test parallelism come from this job's share of the machine
@@ -647,6 +689,7 @@ jobs:
           ANDROID_CHANGED: ${{ needs.changes.outputs.android }}
           ANDROID_RESULT: ${{ needs.android.result }}
           CLI_CHANGED: ${{ needs.changes.outputs.cli }}
+          CLI_WINDOWS_CHANGED: ${{ needs.changes.outputs.cli_windows }}
           RUST_CLI_RESULT: ${{ needs.rust-cli.result }}
           RUST_CLI_WINDOWS_RESULT: ${{ needs.rust-cli-windows.result }}
           DUPLICATES_CHANGED: ${{ needs.changes.outputs.duplicates }}

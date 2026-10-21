@@ -77,6 +77,17 @@ The initial presentation references are `mention.v1`, `launch.v1`, `handoff.v1`,
 `reborn.v1`, `stop.v1`, `runtime-control.v1`, `connector.v1` and `launch-choice.v1`.
 Web rendering consumes these contracts separately from the execution adapters.
 
+A command's answer is drawn on the command, the way a summon's progress is drawn
+on its `@`. When the Hub answers a model or effort switch, a stop that fenced no
+Run, or a refused reborn or handoff with a system notice, that notice names the
+command's `sourceMessageId`. The switch receipt also carries `controlOutcomes`
+(one per statement, in order) and a settling stop notice carries
+`stopCommandOutcome`. A client that holds the command message draws the notice on
+the command's chip and gives it no row of its own; a switch's continuation
+instruction is for the Instance and folds away with it. The notice stays a
+Channel message, so Agents, the CLI and a reader without the command loaded
+still read it as text.
+
 ## First-message choice
 
 The current choice remains three seconds, including the existing display-time

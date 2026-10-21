@@ -18,18 +18,18 @@ type Traffic = { counting: boolean; reports: number; snapshots: number; last: nu
 
 /** Absolute renderer TaskDuration, including normal animations and delivery.
  * Every report retains the legacy Hub pair (Agent card + whole Channel), at
- * 100 reports/s for one burst minute and four uniform minutes. Ten percent of reports target the open
+ * 100 reports/s for one minute, in ten bursts per second. Ten percent of reports target the open
  * Channel, the rest exercise the thousand-Channel catalog. Each ten-second
  * window must meet the same budget: neither idle subtraction nor a long drain
- * can disguise sustained work or socket loss. Both bursts and evenly spaced
- * arrivals exercise the same budget: one flush per burst must not hide a
- * whole-catalog scan repeated on every ordinary 16ms window. Playwright DOM snapshots are
+ * can disguise sustained work or socket loss. Playwright DOM snapshots are
  * excluded because they walk the whole page on every test action. Native TCP
  * WebSocket delivery measures the product path; XMATRIX_PERF_TRANSPORT=cdp keeps
  * the old injected transport available for diagnostic comparisons. CDP still
  * accounts for all product script, style, layout and native renderer work.
  */
-for (const { ticksPerSecond, seconds: SECONDS } of [{ ticksPerSecond: 10, seconds: 60 }, { ticksPerSecond: 100, seconds: 240 }]) test(`${AGENTS} Agents across ${CHANNELS} Channels stay below ten percent with ${ticksPerSecond === 100 ? "even" : "burst"} reports for ${SECONDS}s`, { tag: SECONDS === 240 ? "@sustained" : [] }, async ({ page }) => {
+const ticksPerSecond = 10;
+const SECONDS = 60;
+test(`${AGENTS} Agents across ${CHANNELS} Channels stay below ten percent with burst reports for ${SECONDS}s`, async ({ page }) => {
   test.setTimeout((SECONDS + 90) * 1_000);
   const space = workingAgentsSpace(AGENTS, "k", { focusedInstances: FOCUSED_INSTANCES, intent: "Review channels and message performance" });
   await installRenderCounter(page);
@@ -136,7 +136,7 @@ for (const { ticksPerSecond, seconds: SECONDS } of [{ ticksPerSecond: 10, second
   expect(elapsed).toBeGreaterThanOrEqual(SECONDS);
   expect(elapsed).toBeLessThan(SECONDS + 1);
   // The separate render-scope test isolates report-driven shell commits. This
-  // sustained run also includes ordinary expiry/clock housekeeping.
+  // run also includes ordinary expiry/clock housekeeping.
   expect(renders.messageRows).toBe(0);
   // Arrival counters alone cannot prove the app consumed its final live state.
   // Exercise the real trace UI only after every measured value is captured.

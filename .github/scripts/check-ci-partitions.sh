@@ -48,7 +48,7 @@ check_partition "hub-selector" "${HUB_CHANGED:-}" "hub" "${HUB_RESULT:-}" "hub-s
 check_partition "desktop-selector" "${DESKTOP_CHANGED:-}" "desktop" "${DESKTOP_RESULT:-}"
 check_partition "android-selector" "${ANDROID_CHANGED:-}" "android" "${ANDROID_RESULT:-}"
 check_partition "cli-selector" "${CLI_CHANGED:-}" "rust-cli" "${RUST_CLI_RESULT:-}"
-check_partition "cli-selector" "${CLI_CHANGED:-}" "rust-cli-windows" "${RUST_CLI_WINDOWS_RESULT:-}"
+check_partition "cli-windows-selector" "${CLI_WINDOWS_CHANGED:-}" "rust-cli-windows" "${RUST_CLI_WINDOWS_RESULT:-}"
 check_partition "duplicates-selector" "${DUPLICATES_CHANGED:-}" "duplicates" "${DUPLICATES_RESULT:-}"
 
 if [ "${#failed[@]}" -gt 0 ]; then

@@ -1,13 +1,17 @@
 import { agentAvatarUrlFromMetadata, agentPresetForLauncher, cleanRuntimeOperationFailure, handoffInstanceMentionScanner, mentionAddressTokens, parseHandoffInstanceTarget, parseAutoLaunchMentions, parsePresentedRoutingDecision, rebornFailureReason, scanMentionAddresses, summarizeStopReceipts, type PresentedRoutingDecision, type SerializedAgentLaunch, type SerializedAgentStop,
   type SerializedAgentMessageExecution, type SerializedAgentInvocationRejection, type SerializedAgentContinuation, type AgentLaunchActivity, type AgentStopInvocation,
-  type AutoLaunchMention, type ConnectorInvocation } from "@xmatrix/protocol";
+  type AutoLaunchMention, type ConnectorInvocation, type AgentControlInvocation, type AgentControlOutcomeRecord,
+  parseRebornInstanceMentions, parseHandoffInstanceMentions } from "@xmatrix/protocol";
+import { noticesNaming, type CommandNotice } from "./command-notices";
 
 export type InvocationTone = "active" | "waiting" | "error" | "success" | "neutral";
-/** The whole chip vocabulary. A chip exists only for an invocation that starts
- *  an Agent, and each word answers the one question that raises — did it start
- *  reasoning — so a new runtime phase maps onto an existing answer instead of
- *  introducing another word. Runtime detail belongs in `detail` and the steps. */
-export type InvocationChip = "Starting" | "Started" | "Failed" | "Stopped" | "Stopping" | "Unconfirmed";
+/** The whole chip vocabulary. A launch's words answer the one question it
+ *  raises — did it start reasoning — so a new runtime phase maps onto an
+ *  existing answer instead of introducing another word; a stop and a model or
+ *  effort switch answer theirs the same way. Runtime detail belongs in
+ *  `detail` and the steps. */
+export type InvocationChip = "Starting" | "Started" | "Failed" | "Stopped" | "Stopping" | "Unconfirmed" |
+  "Switching" | "Switched" | "Options" | "Not found" | "Not stopped";
 export type InvocationStep = { label: string; at?: string; state: "done" | "current" | "unknown" | "failed";
   /** A short fact about how the step resolved, shown beside its label. */
   note?: string;
@@ -21,10 +25,12 @@ export type InvocationView = {
 const CHIP_TONE: Record<InvocationChip, InvocationTone> = {
   Starting: "active", Started: "success", Failed: "error", Stopped: "neutral",
   Stopping: "active", Unconfirmed: "waiting",
+  Switching: "active", Switched: "success", Options: "neutral", "Not found": "error", "Not stopped": "neutral",
 };
-/** Only a startup or a stop still in progress may spin. */
+/** Only a startup, a stop or a switch still in progress may spin. */
 export function invocationChipStatus(label: InvocationChip, detail: string, animate = false) {
-  return { label, tone: CHIP_TONE[label], detail, animate: animate && (label === "Starting" || label === "Stopping") };
+  return { label, tone: CHIP_TONE[label], detail,
+    animate: animate && (label === "Starting" || label === "Stopping" || label === "Switching") };
 }
 
 const REASONING_PHASES = new Set(["turn_running", "turn_retrying", "turn_completed", "turn_failed",
@@ -254,7 +260,17 @@ export const STOP_RECEIPT_PENDING_MS = 15_000;
 
 /** The stop command's chip. Confirmation is the Workstation's receipt, the
  * same place a launch shows that it started — not a second message. */
-export function stopView(receipts: readonly SerializedAgentStop[], input: { fresh: boolean; unavailable: boolean }): InvocationView {
+export function stopView(receipts: readonly SerializedAgentStop[], input: { fresh: boolean; unavailable: boolean;
+  notices?: readonly CommandNotice[] }): InvocationView {
+  /* No Run was fenced, so the Hub's notice is the whole answer: a resting
+     Instance stopped, or nothing matched the name. */
+  const settled = receipts.length === 0 ? input.notices?.find(notice => notice.stopOutcome) : undefined;
+  if (settled) {
+    const stopped = settled.stopOutcome === "stopped";
+    const status = invocationChipStatus(stopped ? "Stopped" : "Not stopped", settled.body);
+    return { ...status, tone: stopped ? "success" : status.tone, terminal: true,
+      steps: [{ label: "Stop requested", state: "done" }, { label: stopped ? "Stopped" : "Nothing to stop", state: stopped ? "done" : "failed" }] };
+  }
   const summary = summarizeStopReceipts(receipts);
   const waiting = receipts.length === 0 && input.fresh && !input.unavailable;
   const phase = waiting ? "accepted" as const : summary.phase;
@@ -285,6 +301,54 @@ export function stopView(receipts: readonly SerializedAgentStop[], input: { fres
   // The inline word is the phase. A current ladder step would print
   // "Workstation confirmed" while the Workstation has not answered yet.
   return { ...status, tone: phase === "confirmed" ? "success" : status.tone, steps, terminal: true };
+}
+
+/** How long a model or effort switch reads as in progress before its receipt is overdue. */
+export const CONTROL_RECEIPT_PENDING_MS = 15_000;
+
+/**
+ * A `/model` or `/effort` statement's answer, drawn on the statement. The
+ * Hub's receipt records what each statement came to; a receipt from before it
+ * did is shown as the text it was.
+ */
+export function controlView(invocation: AgentControlInvocation, outcome: AgentControlOutcomeRecord | undefined,
+  notice: CommandNotice | undefined, input: { fresh: boolean }): InvocationView {
+  const noun = invocation.kind;
+  const result = (label: InvocationChip, detail: string, animate = false): InvocationView => {
+    const status = invocationChipStatus(label, detail, animate);
+    const answered = label !== "Switching" && label !== "Unconfirmed";
+    return { ...status, terminal: answered, steps: [
+      { label: invocation.value ? `Switch to ${invocation.value} requested` : `${noun === "model" ? "Models" : "Efforts"} requested`, state: "done" },
+      { label: "Instance answered", at: answered ? notice?.sentAt : undefined,
+        state: label === "Not found" || label === "Failed" ? "failed" : answered ? "done" : label === "Switching" ? "current" : "unknown" },
+    ] };
+  };
+  if (outcome) {
+    switch (outcome.status) {
+      case "switched":
+        return result("Switched", `Now on ${outcome.selected}. A turn that was running was interrupted and continues on it.`);
+      case "catalog":
+        return result("Options", outcome.options.length
+          ? `${outcome.options.length} ${noun === "model" ? "models" : "effort levels"} available${outcome.current ? `; current: ${outcome.current}` : ""}.`
+          : `This Instance has not reported its ${noun === "model" ? "models" : "effort levels"}.`);
+      case "no_instance":
+        return result("Not found", `No live Instance answers to @${outcome.target}. Address one as @<agent>:<number>.`);
+      case "error":
+        return result("Failed", `Could not switch the ${noun}: ${outcome.message}`);
+    }
+  }
+  if (notice) return result(/^(?:Could not|xMatrix could not find)/iu.test(notice.body) ? "Failed" : "Switched", notice.body);
+  return input.fresh ? result("Switching", `Waiting for the Instance to answer.`, true)
+    : result("Unconfirmed", "The Instance has not answered this switch.");
+}
+
+/** A reborn or handoff the Hub refused before any Run existed: its notice is the answer. */
+export function lifecycleRefusalView(notices: readonly CommandNotice[], kind: "reborn" | "handoff"): InvocationView {
+  const status = invocationChipStatus("Failed", notices.map(notice => notice.body).join("\n\n"));
+  return { ...status, terminal: true, steps: [
+    { label: kind === "reborn" ? "Reborn requested" : "Handoff requested", state: "done" },
+    { label: "Refused", at: notices[0]?.sentAt, state: "failed" },
+  ] };
 }
 
 /** One batched query per channel. Keep observing connected-but-not-ready runs. */
@@ -390,6 +454,10 @@ export type InteractionSegment<Target = unknown> =
   | { presentationRef: "launch.v1"; text: string; mention?: AutoLaunchMention;
     launch?: SerializedAgentLaunch; rejection?: SerializedAgentInvocationRejection }
   | { presentationRef: "stop.v1"; text: string; invocation: AgentStopInvocation; receipts: readonly SerializedAgentStop[] }
+  | { presentationRef: "runtime-control.v1"; text: string; invocation: AgentControlInvocation;
+    outcome?: AgentControlOutcomeRecord; notice?: CommandNotice }
+  | { presentationRef: "handoff.v1" | "reborn.v1"; text: string; refused: readonly CommandNotice[];
+    agentName: string; ordinal: number }
   | { presentationRef: "connector.v1"; text: string; invocation: ConnectorInvocation }
   | { presentationRef: "mention.v1"; text: string; target: Target; token?: string };
 
@@ -401,6 +469,10 @@ export interface InteractionRecords<Target> {
   stop?: { invocation: AgentStopInvocation; receipts: readonly SerializedAgentStop[] };
   /** The message's own connector command, when this run is that command's text. */
   connector?: ConnectorInvocation;
+  /** The message's own model and effort statements, when it is one. */
+  controls?: readonly AgentControlInvocation[];
+  /** Hub receipts for this message's command (command-notices.ts). */
+  notices?: readonly CommandNotice[];
   /** Without launch status access, a written handoff stays the prose it was written as. */
   launchStatusUnavailable?: boolean;
   /** Read-state mentions in a run of plain text, from the Channel's member index. */
@@ -444,7 +516,14 @@ export function segmentMessageInteraction<Target>(text: string, records: Interac
       return out;
     });
   };
-  const { stop, connector } = records;
+  const { stop, connector, controls, notices } = records;
+  if (controls?.length) {
+    const receipt = notices?.find(notice => notice.controlOutcomes) ?? notices?.[0];
+    controls.forEach((invocation, index) => claim(invocation.text, { presentationRef: "runtime-control.v1",
+      text: invocation.text, invocation,
+      ...(receipt?.controlOutcomes?.[index] ? { outcome: receipt.controlOutcomes[index] } : {}),
+      ...(receipt ? { notice: receipt } : {}) }));
+  }
   if (stop) claim(stop.invocation.text, { presentationRef: "stop.v1", text: stop.invocation.text,
     invocation: stop.invocation, receipts: stop.receipts });
   if (connector) {
@@ -457,6 +536,28 @@ export function segmentMessageInteraction<Target>(text: string, records: Interac
     start => allowed(start + offset)).map(part => part.kind === "continuation"
     ? { presentationRef: part.record.kind === "reborn" ? "reborn.v1" : "handoff.v1", text: part.text, record: part.record }
     : plain(part.text)));
+  // A reborn or handoff the Hub refused has no record; its notice names the address.
+  if (notices?.length) {
+    segments = refine(segments, (run, offset) => {
+      const refused = [
+        ...parseHandoffInstanceMentions(run).map(m => ({ ...m, kind: "handoff.v1" as const, agentName: m.sourceAgentName })),
+        ...parseRebornInstanceMentions(run).map(m => ({ ...m, kind: "reborn.v1" as const })),
+      ].filter(m => allowed(m.start + offset)).sort((a, b) => a.start - b.start)
+        .map(m => ({ ...m, notices: noticesNaming(notices, m.agentName, m.channelInstanceId) }))
+        .filter(m => m.notices.length > 0);
+      const out: Segment[] = [];
+      let cursor = 0;
+      for (const m of refused) {
+        if (m.start < cursor) continue;
+        if (m.start > cursor) out.push(plain(run.slice(cursor, m.start)));
+        out.push({ presentationRef: m.kind, text: run.slice(m.start, m.end), refused: m.notices,
+          agentName: m.agentName, ordinal: m.channelInstanceId });
+        cursor = m.end;
+      }
+      if (cursor < run.length) out.push(plain(run.slice(cursor)));
+      return out;
+    });
+  }
   if (!records.launchStatusUnavailable) {
     segments = refine(segments, (run, offset) => splitHandoffMentions(run, start => allowed(start + offset))
       .map(part => part.kind === "handoff"

@@ -297,7 +297,7 @@ export function createProductAgentInterventionAuthorityPort(input: {
       });
     },
 
-    async publishSystemNotice(channelId, body, key) {
+    async publishSystemNotice(channelId, body, key, outcome) {
       const messageId = `system:${input.sourceMessageId}:kill-all${key ? `:${key}` : ""}`.slice(0, 200);
       const response = await retryTransientAuthorityResponse(() =>
         dispatchProductMessageAppend(input.env, channelId, {
@@ -314,6 +314,8 @@ export function createProductAgentInterventionAuthorityPort(input: {
               xmatrixProvenance: "system_fact",
               xmatrixSystemNotice: true,
               sourceMessageId: input.sourceMessageId,
+              // The stop command's chip reads this when no Run was fenced.
+              ...(outcome ? { stopCommandOutcome: outcome } : {}),
             },
           },
         }));
