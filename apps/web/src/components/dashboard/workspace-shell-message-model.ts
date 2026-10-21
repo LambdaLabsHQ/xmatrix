@@ -28,6 +28,7 @@ import type {
   MouseEvent as ReactMouseEvent,
 } from "react";
 import { UserFacingProblem } from "../../lib/user-facing-error";
+import type { CommandNotice } from "./command-notices";
 
 export type ComposerSendSnapshot = {
   body: string;
@@ -250,6 +251,8 @@ export type TimelineItem = {
   supersededBy?: string;
   /** A questionnaire card's state as the Hub settled it: answered or withdrawn. */
   questionnaireState?: QuestionnaireState;
+  /** Hub receipts for the command this message wrote, drawn on that command (command-notices.ts). */
+  commandNotices?: CommandNotice[];
   /**
    * A folded row: the activity entries and superseded reports of one run of the
    * same sender, oldest first (conversation-activity-rows.ts). Never a message.
