@@ -86,7 +86,8 @@ function agentFace(agent: MarginConversation["agents"][number]): string | undefi
 
 /**
  * The Agents in it, as a comment thread shows who is typing: each its Instance card from the conversation at a
- * comment's size, on paper. Its vendor's face and its name; its status dot alone says whether it works.
+ * comment's size, on paper. Its vendor's face and its name; its status dot says whether it works, and one at work
+ * runs its dots, as its pill on the page does.
  */
 function WorkingLine({ agents, className }: { agents: MarginConversation["agents"]; className?: string }) {
   const working = agents.filter((agent) => agent.status === "busy");
@@ -100,6 +101,7 @@ function WorkingLine({ agents, className }: { agents: MarginConversation["agents
           <IdentityAvatar kind="agent" label={agent.name} imageUrl={agentFace(agent)} initials={avatarInitials(agent.name)}
             status={agent.status} size="xs" shape="circle" glass={false} className="page-margin-instance-face" />
           <span className="page-margin-instance-name">{agent.name}</span>
+          {agent.status === "busy" && <span className="page-writer-dots" aria-hidden="true"><i /><i /><i /></span>}
         </span>
       ))}
     </span>

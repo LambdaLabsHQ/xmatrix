@@ -282,8 +282,8 @@
 }
 
 /* Who is in a conversation, on its card: each Agent's Instance card from the conversation at a comment's size, a
-   capsule of the card's own paper, a shade deeper: its vendor's face, whose status dot says whether it works, and
-   its name. */
+   capsule of the card's own paper, a shade deeper: its vendor's face, whose status dot says whether it works, its
+   name, and its dots while it works. */
 .page-margin-instance {
   display: inline-flex;
   align-items: center;
@@ -307,6 +307,8 @@
   background: var(--card);
 }
 .page-margin-instance-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.page-margin-instance .page-writer-dots { color: var(--primary); }
+.page-margin-instance .page-writer-dots i { width: 3px; height: 3px; }
 
 html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-message-surface {
   margin: 0 !important;
