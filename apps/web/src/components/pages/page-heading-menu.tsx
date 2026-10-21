@@ -3,7 +3,7 @@
 import { useEffect, useRef, type ComponentType } from "react";
 import { createPortal } from "react-dom";
 import { createRoot } from "react-dom/client";
-import { CalendarClock, Link2, MessageSquarePlus, PenLine } from "lucide-react";
+import { CalendarClock, Link2, MessageSquare, PenLine } from "lucide-react";
 import { listenForOverlayDismissal } from "@/components/dashboard/use-overlay-dismiss";
 import { PaperPopover } from "@/components/ui/material-surfaces";
 
@@ -23,7 +23,7 @@ interface Item { key: string; label: string; icon: ComponentType<{ className?: s
 function items(menu: HeadingMenu): Item[] {
   const list: Item[] = [];
   if (menu.write) list.push({ key: "write", label: menu.write.label, icon: PenLine, run: menu.write.run });
-  if (menu.discuss) list.push({ key: "discuss", label: "Discuss", icon: MessageSquarePlus, run: menu.discuss });
+  if (menu.discuss) list.push({ key: "discuss", label: "Discuss", icon: MessageSquare, run: menu.discuss });
   if (menu.copyLink) list.push({ key: "link", label: "Copy link", icon: Link2, run: menu.copyLink });
   if (menu.attach) list.push({ key: "attach", label: "Schedule", icon: CalendarClock, run: menu.attach });
   return list;
