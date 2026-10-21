@@ -1,3 +1,4 @@
+import { publishChannelInvocationsChanged } from "./channel-live-judgment";
 import { reconcileIdleSleeps } from "./instance-idle-sleep";
 import { reconcileAgentTurnRetries } from "./agent-turn-retry";
 import { reconcileReborn } from "./reborn-reconcile";
@@ -687,6 +688,9 @@ export class RelayPostgresAgentLaunchCoordinatorService {
       this.waitUntil, new Date(), plan.automationDue));
     const claimed = runs("launch")
       ? await this.claimAndPublish({ channelId, shardId: shard.shardId, launchIds: [] }) : 0;
+    // A pass settles launches, reborns, stops and first-message choices: the
+    // Channel's chips read what it left.
+    await publishChannelInvocationsChanged(this.env as Env, channelId);
     const elapsedMs = performance.now() - startedAt;
     if (elapsedMs > 5_000) console.log("PostgreSQL Agent Launch Channel pass was slow", {
       channelId, elapsedMs: Math.round(elapsedMs), stepMs });

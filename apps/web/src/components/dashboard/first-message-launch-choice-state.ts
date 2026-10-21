@@ -49,13 +49,6 @@ export function launchChoiceView(window: InteractionDecisionWindow | undefined,
   return { kind: "reading", ...read };
 }
 
-/** Poll quickly only while a choice is open or being decided. */
-export function launchChoicePollInterval(views: readonly LaunchChoiceView[]): number | undefined {
-  if (views.some(view => view.kind === "open")) return 500;
-  if (views.some(view => view.kind === "reading")) return 1_000;
-  return undefined;
-}
-
 /** The author's first message may still offer the choice: the Hub holds it
  * open at most this long after sending. */
 export function launchChoiceOffered(sentAt: string | undefined, now: number): boolean {

@@ -1,5 +1,5 @@
 import { COMMAND_RESULT_ANNOTATION_NAMESPACE, type AgentControlOutcomeRecord, type CommandResultNote } from "@xmatrix/protocol";
-import { publishChannelMessageCommandResult } from "./channel-messages";
+import { publishChannelMessageCommandResult } from "./channel-live-judgment";
 import { postgresMessageSystemAnnotation } from "./postgres-message-authority";
 import type { Env } from "./types";
 

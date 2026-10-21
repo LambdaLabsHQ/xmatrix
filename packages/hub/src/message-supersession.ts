@@ -8,7 +8,7 @@ import {
   postgresMessageHistoryInSpace,
   postgresMessageSystemAnnotation,
 } from "./postgres-message-authority";
-import { publishChannelMessageSuperseded } from "./channel-messages";
+import { publishChannelMessageSuperseded } from "./channel-live-judgment";
 import type { Env } from "./types";
 import { meterJev } from "./usage-cost-metering";
 

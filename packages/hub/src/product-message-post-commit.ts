@@ -1,3 +1,4 @@
+import { publishChannelInvocationsChanged } from "./channel-live-judgment";
 import { captureServerErrorDiagnostic } from "./server-error-diagnostic";
 import type { ChannelAttachment, DraftSummonIntent } from "@xmatrix/protocol";
 import { parseMessageInteraction, parseConnectorActionCommand, createInstanceMentions, filterOperationalMentions, hasRetiredAgentLaunchMention, parseAutoLaunchMentions,
@@ -304,9 +305,11 @@ export async function dispatchProductMessagePostCommit(
     const started = performance.now();
     sideTasks.push(runtimeRepository(input.env).recordAgentLaunchFirstReply({ requestId: crypto.randomUUID(),
       channelId: input.channelId, runId: input.senderRunId, actorUserId: input.actorUserId,
-      at: new Date().toISOString() }).then((result) => {
+      at: new Date().toISOString() }).then(async (result) => {
       if (result.recorded === true) recordAgentLaunchStage({ env: input.env, stage: "first_reply_append",
         outcome: "ok", durationMs: Number(result.launchAgeMs ?? performance.now() - started) });
+      // A Run's reply starts its summon or answers its execution: their chips read it now.
+      await publishChannelInvocationsChanged(input.env, input.channelId);
     }).catch((error) => {
       recordAgentLaunchStage({ env: input.env, stage: "first_reply_append", outcome: "error",
         durationMs: performance.now() - started });
