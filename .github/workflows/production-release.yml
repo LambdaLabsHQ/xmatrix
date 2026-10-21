@@ -88,6 +88,13 @@ jobs:
           echo "scope=$RELEASE_SCOPE" >> "$GITHUB_OUTPUT"
           echo "channel=$channel" >> "$GITHUB_OUTPUT"
 
+      # Every beta deploys the Hub; the stable Web keeps the last stable's
+      # build. A Hub whose client policy would answer that live Web with 426
+      # never deploys (scripts/stable-web-compatibility.mjs).
+      - name: Require the Hub to keep serving the live stable Web
+        if: contains(format(',{0},', steps.identity.outputs.scope), ',hub,')
+        run: node scripts/stable-web-compatibility.mjs "$(node scripts/deploy-config.mjs origin production web)"
+
       - name: Resolve production version floor
         id: floor
         uses: actions/github-script@v7

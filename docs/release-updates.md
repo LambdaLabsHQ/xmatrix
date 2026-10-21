@@ -186,7 +186,11 @@ source. `server-release.yml` picks the target from the tagged version
 (`node scripts/version.mjs channel`) and `deploy-config.mjs` renders it
 (`web` or `web-beta`). A stable train may name `web`; it still never names
 `hub`. Deployment receipts record the channel's Web, and the receipt reader
-accepts either Web for betas released before the split.
+accepts either Web for betas released before the split. Before a train deploys
+the Hub, preflight reads the live stable Web's build (`/api/web-build`) back to
+its release and refuses a Hub whose client policy would answer it with 426: a
+different protocol version or a higher minimum Web version
+(`scripts/stable-web-compatibility.mjs`).
 
 Migration evidence: the first beta train after this change creates the beta
 Worker and its custom domain on its Web deploy; `xmatrix.sh` keeps the last
