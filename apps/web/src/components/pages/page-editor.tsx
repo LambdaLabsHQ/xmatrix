@@ -432,7 +432,7 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
     };
     const editor = new EditorView(host.current, {
       state: EditorState.create({ schema: pageSchema, plugins: [...editorPlugins({
-        fragment: session.fragment, awareness: session.awareness, handleKeyDown,
+        fragment: session.fragment, awareness: session.awareness, session, handleKeyDown,
         placeholder: () => placeholderText.current,
         onBlockChange: (blockId) => blockChange.current?.(blockId),
         openConversation: (conversationId) => openConversation.current?.(conversationId),
