@@ -139,7 +139,7 @@ export interface PageCompletion {
   agents: readonly WriteAgent[];
   /** A page's title and markdown, for its sections after `[[page#`. */
   readPage: (pageId: string) => Promise<{ pageId: string; title: string; body: string }>;
-  /** `@` picked an Agent: it is woken where it was mentioned, with nothing asked of it beyond that. */
+  /** `@` picked an Agent: it comes to co-write the page from where it was mentioned, told nothing more. */
   summonAgent: (harness: string, blockId: string) => void;
 }
 
@@ -188,7 +188,7 @@ function triggerItems(trigger: PageTrigger, completion: PageCompletion | undefin
       key: agent.harness, label: agent.harness, hint: "Agent",
       icon: <IdentityAvatar kind="agent" label={agent.harness} imageUrl={agent.avatarUrl} size="xs" shape="circle" glass={false}
         initials={agent.avatarUrl ? avatarInitials(agent.harness) : undefined} className="pointer-events-none rounded-full" />,
-      // The mention stays in the page, and wakes the Agent there.
+      // The mention stays in the page, and calls the Agent to co-write from there.
       run: (view) => {
         const blockId = pageDocBlockAt(view.state.doc, trigger.from);
         insertReference(trigger, `@${agent.harness}`)(view.state, view.dispatch, view);

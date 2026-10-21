@@ -322,9 +322,9 @@ fact is about.
   from a Chinese input method). `[[` picks a page, `[[page#` one of its
   sections, `#` a channel: the page keeps `page:<id>#<section>` /
   `channel:<id>` and draws it as a chip. `@` picks an Agent: `@<name>` stays
-  in the text, like everything picked, and only wakes the Agent, as a
-  mention in a conversation does: a conversation linked to the section whose
-  one message is `@<name> page:<id>#<section>`, with no task or mode preset
+  in the text, like everything picked, and calls the Agent into co-writing
+  as the face tap does, except that its one message is only
+  `@<name> launch:force page:<id>#<section>`: nothing tells it what to write
   (decided by Daniel 2026-10-21). `#` opening a paragraph is the heading being typed.
 - **Co-writing is live, as with a person** (decided 2026-10-15). A person
   starts an Agent writing the page from the page itself, typing nothing: one
