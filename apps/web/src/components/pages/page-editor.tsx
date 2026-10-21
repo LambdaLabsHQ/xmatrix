@@ -248,7 +248,7 @@ function ToolButton({ label, active = false, disabled = false, onRun, children }
 
 export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions, sections, follow, writeOn,
   onOpenConversation, discussions, automations, headingActions, focusedConversationId = null, onFocusConversation,
-  onAnchorOffsets, cursorPresence, onReady, readerBaseline = null, readerShown = false, onReaderChanges, onWrite, readFrom, reading,
+  onAnchorOffsets, cursorPresence, onReady, readerBaseline = null, readerShown = false, commentInMargin = false, onReaderChanges, onWrite, readFrom, reading,
   suggestions = null, onSuggestions, suggestionControl, readGitHubFile, references, completion, placeholder, mediaUrl,
   uploadMedia, onChanges }: {
   session: PageLiveSession;
@@ -259,6 +259,8 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
   /** The page's sections, whenever they change. */
   onBlocks?: (blocks: PageDocBlock[]) => void;
   actions?: PageSectionActions;
+  /** The page has a margin beside it: the comment box stands there, level with its passage, as a comment card does. */
+  commentInMargin?: boolean;
   /** Who is on each section and when it last changed, drawn beside it. */
   sections?: Map<string, SectionNote>;
   /** A section to bring into view; a new `seq` follows again. */
@@ -357,6 +359,8 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
   const [mediaFailure, setMediaFailure] = useState<string | null>(null);
   const passageActions = useRef(actions);
   passageActions.current = actions;
+  const inMargin = useRef(commentInMargin);
+  inMargin.current = commentInMargin;
   const [commentDraft, setCommentDraftState] = useState<CommentDraft | null>(null);
   const draftRef = useRef<CommentDraft | null>(null);
   /** A comment closed before it was sent, by its passage's text. */
@@ -436,11 +440,13 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
     const box = frame.current.getBoundingClientRect();
     const start = current.coordsAtPos(from, 1);
     const end = current.coordsAtPos(to, -1);
-    // Under the passage's last line; from where it starts when it is one line, else from the text's edge.
+    // In the margin, level with the passage's first line; else under its last line, from where it starts when it
+    // is one line, else from the text's edge.
     const oneLine = Math.abs(start.top - end.top) < 4;
     const left = Math.max(0, Math.min(oneLine ? start.left - box.left - 10 : 0, box.width - 448));
+    const top = inMargin.current ? start.top - box.top - 8 : end.bottom - box.top + 6;
     const text = unsent.current?.quote === anchor.quote ? unsent.current.text : "";
-    setCommentDraft({ blockId: pageDocBlockAt(current.state.doc, from), anchor, left, top: end.bottom - box.top + 6, text });
+    setCommentDraft({ blockId: pageDocBlockAt(current.state.doc, from), anchor, left, top, text });
     current.dispatch(current.state.tr.setMeta(discussionsKey, { draft: { from: anchor.from, to: anchor.to } }));
     return true;
   }, [session, setCommentDraft]);
@@ -866,7 +872,8 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
         </div>
       )}
       {commentDraft && (
-        <div className="absolute z-30 w-[28rem] max-w-full" style={{ left: commentDraft.left, top: commentDraft.top }}>
+        <div className={commentInMargin ? "absolute z-30 w-80" : "absolute z-30 w-[28rem] max-w-full"}
+          style={{ left: commentInMargin ? "calc(100% + 1.5rem)" : commentDraft.left, top: commentDraft.top }}>
           <PageCommentBox text={commentDraft.text}
             onText={(text) => setCommentDraft({ ...commentDraft, text })}
             onClose={(away) => closeComment({ away })} onPassageKey={passageKey}

@@ -1679,7 +1679,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
                     <div className={drawn ? undefined : "hidden"}>
                       {session && <PageEditor key={session.doc.guid} session={session} canEdit={canEdit} writeOn={writeOn}
                         {...(coWriter ? { placeholder: onboardingCopy.coWrite.firstLine(coWriter) } : {})}
-                        onReady={() => setEditorReady(true)} readerBaseline={readerDiff} readerShown={diffShown} onReaderChanges={setReaderChanges}
+                        onReady={() => setEditorReady(true)} readerBaseline={readerDiff} readerShown={diffShown} commentInMargin={marginOn} onReaderChanges={setReaderChanges}
                         onWrite={coWriting} readFrom={readFrom} reading={reading}
                         suggestions={drawn ? waiting.suggestions : null} onSuggestions={setSuggesting}
                         suggestionControl={suggestionControl}

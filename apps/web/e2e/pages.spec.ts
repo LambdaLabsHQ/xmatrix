@@ -1105,7 +1105,8 @@ test("an editor that meets a Hub still keeping pages as text waits instead of sh
   expect(sockets, "it never joins the old session").toBe(0);
 });
 
-test("selecting a passage opens a comment box under it; sent, the comment is a discussion anchored there", async ({ page: browser }) => {
+test("selecting a passage opens a comment box beside it in the margin; sent, the comment is a discussion anchored there", async ({ page: browser }) => {
+  await browser.setViewportSize({ width: 1600, height: 900 });
   await stubPages(browser, [page("p-relay", null, "Relay", "V")]);
   const pageLinks = /\/api\/xmatrix\/spaces\/[^/]+\/page-links\?.*$/u;
   await fixtureJson(browser, "page-links", pageLinks, { links: [] });
@@ -1117,9 +1118,13 @@ test("selecting a passage opens a comment box under it; sent, the comment is a d
     { method: "POST" });
   const editor = await openLivePage(browser);
   await selectLine(browser, "In progress");
-  // Selected with the mouse, the reply box opens under the passage with the caret in it, the passage marked.
+  // Selected with the mouse, the reply box opens in the margin, level with the passage, with the caret in it, the
+  // passage marked.
   const box = browser.getByTestId("page-comment-box");
   await expect(box).toBeVisible();
+  const [boxAt, passageAt] = [(await box.boundingBox())!, (await editor.getByText("In progress").boundingBox())!];
+  expect(boxAt.x).toBeGreaterThan(passageAt.x + passageAt.width);
+  expect(Math.abs(boxAt.y - passageAt.y)).toBeLessThan(24);
   await expect(box.getByRole("textbox", { name: "Comment" })).toBeFocused();
   await expect(browser.getByTestId("page-selection-menu")).toHaveCount(0);
   await expect(editor.locator(".page-discussion")).toHaveText("In progress");
@@ -1155,7 +1160,8 @@ test("selecting a passage opens a comment box under it; sent, the comment is a d
     .toMatch(/^> In progress\n\n— \[Relay › Status\]\([^)]*page=p-relay#status\)\n\n@auto Is this still accurate\?$/u);
   const [sent] = await fixtureRequestBodies(browser, "discuss-message");
 
-  // The passage stays marked and its bubble opens the discussion.
+  // The passage stays marked and its bubble opens the discussion, where the margin has no room.
+  await browser.setViewportSize(E2E_DESKTOP_CONTEXT.viewport);
   const anchor = (await fixtureRequestBodies(browser, "link-create"))[0]!.anchor;
   await fixtureJson(browser, "page-links", pageLinks, { links: [{ linkId: "l-discuss", conversationId: E2E_CHANNEL.id,
     pageId: "p-relay", blockId: "status", source: "manual", createdAt: NOW, lastSeenAt: NOW, anchor, resolvedAt: null }] });

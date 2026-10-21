@@ -366,6 +366,19 @@ html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-emp
   margin: 0;
   font-size: 0.75rem;
 }
+/* The comment box is a card of paper (§4.2): the composer inside it writes on that paper, with no glass of its own. */
+html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-comment-box :is(.app-composer, .app-composer-shell,
+  .app-composer-box:not(.app-agent-work-card)) {
+  border-color: transparent !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-comment-box .app-composer-box:not(.app-agent-work-card)::before,
+html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-comment-box .app-composer-box:not(.app-agent-work-card)::after {
+  display: none !important;
+}
 .page-section-owed {
   display: inline-flex;
   align-items: center;

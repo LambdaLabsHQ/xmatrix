@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useState, type RefObject } from "react";
 import { Check, ChevronDown, GitCompareArrows } from "lucide-react";
 import { PageChangeMark } from "./page-chrome";
-import { actionClass } from "@/components/ui/action-tone";
 import { noticeClass } from "@/components/ui/status-tone";
 import { cn } from "@/lib/utils";
 import { sameValue } from "@/lib/same-value";
@@ -141,6 +140,12 @@ export function PageReaderChangeMark({ column, article, changes, onViewed }: {
   );
 }
 
+/** Buttons on paper are ink, as the comment box's send is: filled for what to do, bare for the way back. */
+const INK_BUTTON = "inline-flex h-7 items-center gap-1 rounded-full bg-foreground px-3 text-[12px] font-medium text-background "
+  + "hover:bg-foreground/85 [&_svg]:size-3.5";
+const TEXT_BUTTON = "inline-flex h-7 items-center rounded-full px-3 text-[12px] font-medium text-muted-foreground "
+  + "hover:bg-foreground/5 hover:text-foreground";
+
 /**
  * The page opens as it is now; what changed since the reader last read it is offered here, for them to open:
  * as a card at the top of the margin, or above the page where there is no margin. Shown, the changes are
@@ -157,7 +162,7 @@ export function PageReaderChangesOffer({ changes, shown, inMargin, onShow, onHid
 }) {
   return (
     <div data-testid="page-reader-diff" className={inMargin
-      ? "page-margin-card flex flex-col gap-2 rounded-xl px-3 py-2.5"
+      ? "app-material-paper-popover flex flex-col gap-2 px-3 py-2.5"
       : noticeClass("attention", "mb-5 flex flex-wrap items-center gap-x-3 gap-y-2 py-2 pr-2")}>
       <span className={cn("flex min-w-0 items-start gap-2", !inMargin && "mr-auto")}>
         <GitCompareArrows className="mt-0.5 size-4 shrink-0 text-[var(--m-ink-attention,var(--accent))]" aria-hidden="true" />
@@ -173,13 +178,13 @@ export function PageReaderChangesOffer({ changes, shown, inMargin, onShow, onHid
       <span className={cn("flex items-center gap-2", inMargin && "pl-6")}>
         {shown ? (
           <>
-            <button type="button" onClick={onDone} className={actionClass({ variant: "primary", size: "sm" })}>
-              <Check className="size-3.5" aria-hidden="true" />Done
+            <button type="button" onClick={onDone} className={INK_BUTTON}>
+              <Check aria-hidden="true" />Done
             </button>
-            <button type="button" onClick={onHide} className={actionClass({ variant: "secondary", size: "sm" })}>Hide changes</button>
+            <button type="button" onClick={onHide} className={TEXT_BUTTON}>Hide changes</button>
           </>
         ) : (
-          <button type="button" onClick={onShow} className={actionClass({ variant: "primary", size: "sm" })}>Show changes</button>
+          <button type="button" onClick={onShow} className={INK_BUTTON}>Show changes</button>
         )}
       </span>
     </div>

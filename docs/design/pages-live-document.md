@@ -246,7 +246,7 @@ fact is about.
   sections owe an update.
 - **What changed since this person last read the page** is offered to them,
   not shown: the page always opens as it is now, and the first card in the
-  margin (above the page where there is no margin) says how many changes there
+  margin, a card of paper, (above the page where there is no margin) says how many changes there
   are since they last read it and offers *Show changes*, which shows them as a
   diff, in place. Read means seen: what has been on their screen a moment
   (1.5 s, tab in front) is read as it was then, and nothing else is. So what
@@ -320,11 +320,13 @@ fact is about.
   Clicking a link's visible destination edits the address.
 - **Table controls** appear only while the cursor is in a table.
 - **A selection opens a comment box** (decided by Daniel 2026-10-21). A
-  passage selected with the mouse opens, under it, the product's own message
-  box, the caret already in it. Every box on the page (this one, and a
-  conversation's beside it) is the channel's composer as it is, with no
-  page-only styling: its look is changed once, in the composer (decided by
-  Daniel 2026-10-21); the passage is marked in the comment colour while it is
+  passage selected with the mouse opens the product's own message box, the
+  caret already in it, in the margin level with the passage, as a comment
+  card stands (under the passage where the page has no margin). It lies on a
+  card of paper (`PaperPopover`), as the page's menus do, and the composer in
+  it writes on that paper without glass of its own (decided by Daniel
+  2026-10-21: the margin, and paper, for this box and the changes card); the
+  passage is marked in the comment colour while it is
   written about. Typing is the comment, Enter sends it, and the caret goes
   back into the page after the passage, so writing and commenting go on
   side by side. ⌘⌥M (Ctrl+Alt+M) comments on the selection, or on the
