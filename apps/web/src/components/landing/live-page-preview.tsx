@@ -63,7 +63,9 @@ function createStage() {
     own.clientID = writer.id;
     presence.set(writer.id, new awarenessProtocol.Awareness(own));
   }
-  const session = { doc, awareness, fragment: doc.getXmlFragment(PAGE_DOCUMENT_FRAGMENT) } as unknown as PageLiveSession;
+  // Read-only and already in: nothing here is for Ctrl+Z to take back.
+  const session = { doc, awareness, fragment: doc.getXmlFragment(PAGE_DOCUMENT_FRAGMENT), synced: true,
+    on: () => () => undefined } as unknown as PageLiveSession;
   let slots = { ...START };
 
   const caretAfter = (text: string): unknown => {
