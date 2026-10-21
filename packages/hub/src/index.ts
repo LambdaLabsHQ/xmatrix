@@ -1,18 +1,14 @@
 // First, so that error reporting is open before anything else loads.
 import "./error-reporting";
-import { drainGmailNotifications } from "./connectors/gmail-notification-drain";
-import { registerAccountDeletionRoutes, maintainAccountDeletions } from "./index-routes-account-deletion";
-import { maintainChannelDeletions } from "./channel-deletion-maintenance";
-import { reportError, sendErrorReports } from "@xmatrix/protocol/error-reporting";
-import { drainSentryEvents } from "./connectors/sentry-event-drain";
-import { watchHarnessReleasesBesidePostgres } from "./harness-release-watch";
-import { connectorGoogleChatRoomRepository, connectorFeishuRoomRepository, connectorTelegramRoomRepository, connectorTeamsRoomRepository } from "./connectors/credentials";
+import { registerAccountDeletionRoutes } from "./index-routes-account-deletion";
+import { sendErrorReports } from "@xmatrix/protocol/error-reporting";
+import { runScheduledPassBesidePostgres, scheduledTaskFailed } from "./scheduled-pass";
 import { ackRetiredExportQueue } from "./retired-export-queue";
 import { registerMachineNameRoutes } from "./index-routes-machine-name";
 import { registerMachineRetirementRoutes } from "./index-routes-machine-retirement";
 import { registerHarnessActionRoutes } from "./index-routes-harness-actions";
 import { registerWorktreeActionRoutes } from "./index-routes-worktree-actions";
-import { maintainMachineResourceHistoryOnSchedule, registerMachineResourceRoutes } from "./index-routes-machine-resources";
+import { registerMachineResourceRoutes } from "./index-routes-machine-resources";
 import { registerSetupIntentRoutes } from "./index-routes-setup-intents";
 import { registerWelcomeRoutes } from "./index-routes-welcome";
 import { registerOnboardingFunnelRoutes } from "./index-routes-onboarding-funnel";
@@ -32,7 +28,6 @@ import { registerGooglePickerRoutes } from "./index-routes-google-picker";
 import { registerGmailMailboxRoutes } from "./index-routes-gmail-mailboxes";
 import { registerCloudflareLoginRoutes } from "./index-routes-cloudflare-logins";
 import { redirectInsecureRequest } from "./https-redirect";
-import { retryablePostgresFailure } from "./postgres-error-classification";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { requestErrorResponse } from "./index-shared";
@@ -154,23 +149,8 @@ export default {
     }
   },
   scheduled: (event: ScheduledController, env: Env, executionCtx: ExecutionContext) => {
-    const run = (name: string, work: () => Promise<unknown>) => executionCtx.waitUntil(
-      Promise.resolve().then(work).catch((error: unknown) => scheduledTaskFailed(name, error)).finally(sendErrorReports));
-    run("Account deletion maintenance", () => maintainAccountDeletions(env));
-    run("Channel deletion maintenance", () => maintainChannelDeletions(env));
-    run("Sentry event recovery", () => drainSentryEvents(env));
-    run("Gmail notification recovery and renewal", () => drainGmailNotifications(env));
-    run("Harness release watch", () => watchHarnessReleasesBesidePostgres(env));
-    run("Machine load history maintenance", () => maintainMachineResourceHistoryOnSchedule(env, event.scheduledTime));
-    for (const [provider, repository] of [["Teams", connectorTeamsRoomRepository], ["Google Chat", connectorGoogleChatRoomRepository], ["Feishu", connectorFeishuRoomRepository], ["Telegram", connectorTelegramRoomRepository]] as const) {
-      run(`${provider} lifecycle maintenance`, () => repository(env).cleanup({ requestId: crypto.randomUUID(), limit: 100 }));
-    }
+    executionCtx.waitUntil(runScheduledPassBesidePostgres(env, event.scheduledTime)
+      .catch((error: unknown) => scheduledTaskFailed("Scheduled pass", error)).finally(sendErrorReports));
   },
   queue: (batch: MessageBatch<unknown>) => ackRetiredExportQueue(batch),
 } satisfies ExportedHandler<Env>;
-
-/** A failed cron task names its cause; a database outage is logged, a defect is also reported. */
-function scheduledTaskFailed(name: string, error: unknown): void {
-  console.error(`${name} failed`, error);
-  if (!retryablePostgresFailure(error)) reportError(error, { operation: `scheduled: ${name}` });
-}

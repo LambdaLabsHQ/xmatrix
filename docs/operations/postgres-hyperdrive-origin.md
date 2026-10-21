@@ -86,7 +86,16 @@ weekly CPU or latency improvements from a single empty-queue probe.
 per configuration and pool shard. `waitingClients` above 0 for more than a
 minute means the origin connections are held too long; compare with the
 `session` points in the substrate observability dataset
-([connectivity breaker](postgres-connectivity-breaker.md)).
+([connectivity breaker](postgres-connectivity-breaker.md)). Hyperdrive splits
+each limit over its pool shards: the primary's 24 have been six shards of four
+and shard 1's 8 shards of one, so a few long transactions landing on one shard
+are enough to queue it.
+
+Placement moves only fetch handlers. The minute cron starts far from the
+origin (MIA or ATL), so its pass runs in the Runtime cell beside PostgreSQL
+(`packages/hub/src/scheduled-pass.ts`) and the cron only asks it to. A cron
+operation whose session `firstStatementMs` (`double7`) is ~175 ms or more,
+instead of the requests' tens of milliseconds, is running from the far side.
 
 Authentication database operations use the `postgres.auth` family and retain
 their code-defined operation in `blob11`, including `auth.account-revocation`.
