@@ -653,8 +653,10 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   const [opened, setOpened] = useState<{ pageId: string; revision: number | null; seen: string | null } | null>(null);
   // What the page was when this reader last read it, for showing what changed since as a diff.
   const [readerBaseline, setReaderBaseline] = useState<string | null>(null);
-  // How many changes that diff shows (null until known), and whether the reader has ticked it viewed.
+  // How many changes that diff holds (null until known), whether the reader has opened it over the page, and
+  // whether they have viewed it. The page opens as it is now; the diff is only offered until they ask for it.
   const [readerChanges, setReaderChanges] = useState<number | null>(null);
+  const [diffShown, setDiffShown] = useState(false);
   const [diffViewed, setDiffViewed] = useState(false);
   // What of the page this reader has last told the Hub they have seen past `seenRevision`.
   const sentSeen = useRef<string | null>(null);
@@ -663,6 +665,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     setOpened(null);
     setReaderBaseline(null);
     setReaderChanges(null);
+    setDiffShown(false);
     setDiffViewed(false);
     if (!spaceId || !pageId || !token) return;
     const controller = new AbortController();
@@ -711,6 +714,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   }, [headRevision, opened, pageId, spaceId, token]);
   const reading = useRef<PageReading | null>(null);
   const viewDiff = () => {
+    setDiffShown(false);
     setDiffViewed(true);
     reading.current?.seeAll();
     if (headRevision !== null) markSeen(headRevision, null);
@@ -1517,8 +1521,10 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     await queryClient.invalidateQueries({ predicate: (query) => query.queryKey.includes("page-tree") });
   };
 
-  // On a phone the diff is walked from a floating bar under the thumb instead of a line above the text.
-  const phoneDiff = phone && mode === "page" && drawn && !diffViewed && !!readerChanges;
+  // What changed since the reader last read the page is offered above it until they view it; opened, it is marked
+  // over the text, and on a phone walked from a floating bar under the thumb.
+  const diffOffered = drawn && !diffViewed && !!readerChanges;
+  const phoneDiff = phone && mode === "page" && diffOffered && diffShown;
   const writerStarting = starting?.pageId === page?.pageId ? starting : null;
   const writerCalled = called?.pageId === page?.pageId ? called : null;
   const writerFeedback = writerStarting ?? (!phone ? writerCalled : null);
@@ -1655,7 +1661,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
                         </button>
                       </PageChangeMark>
                     )}
-                    {drawn && !!readerChanges && !diffViewed && <PageReaderChangeGutter column={docColumn} />}
+                    {diffOffered && diffShown && <PageReaderChangeGutter column={docColumn} />}
                     {phone && phoneDiff && !suggestionMark && (
                       <PageReaderChangeMark column={docColumn} article={articleElement} changes={readerChanges ?? 0}
                         onViewed={viewDiff} />
@@ -1665,21 +1671,21 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
                       <div className="min-h-[50vh]"><PageDocumentStatic body={document.data.body} testId="page-preview"
                         references={references} mediaUrl={mediaUrl} onAnchorOffsets={setPreviewTops} /></div>
                     )}
-                    {drawn && !!readerChanges && !phone && (
-                      <label className="mb-3 flex w-fit cursor-pointer items-center gap-2 text-xs text-muted-foreground"
-                        data-testid="page-reader-diff">
-                        <input type="checkbox" checked={diffViewed} onChange={(event) => {
-                          if (event.target.checked) viewDiff();
-                          else setDiffViewed(false);
-                        }} />
-                        <span className="text-foreground">Viewed</span>
-                        <span>{readerChanges === 1 ? "1 change" : `${readerChanges} changes`} since you last read this page</span>
-                      </label>
+                    {diffOffered && !phoneDiff && (
+                      <div className="mb-3 flex w-fit items-center gap-2 text-xs text-muted-foreground" data-testid="page-reader-diff">
+                        <button type="button" className="hover:text-foreground hover:underline" aria-expanded={diffShown}
+                          onClick={() => setDiffShown((shown) => !shown)}>
+                          {readerChanges === 1 ? "1 change" : `${readerChanges} changes`} since you last read this page
+                        </button>
+                        {diffShown && (
+                          <button type="button" className="text-foreground hover:underline" onClick={viewDiff}>Done</button>
+                        )}
+                      </div>
                     )}
                     <div className={drawn ? undefined : "hidden"}>
                       {session && <PageEditor key={session.doc.guid} session={session} canEdit={canEdit} writeOn={writeOn}
                         {...(coWriter ? { placeholder: onboardingCopy.coWrite.firstLine(coWriter) } : {})}
-                        onReady={() => setEditorReady(true)} readerBaseline={readerDiff} onReaderChanges={setReaderChanges}
+                        onReady={() => setEditorReady(true)} readerBaseline={readerDiff} readerShown={diffShown} onReaderChanges={setReaderChanges}
                         onWrite={coWriting} readFrom={readFrom} reading={reading}
                         suggestions={drawn ? waiting.suggestions : null} onSuggestions={setSuggesting}
                         suggestionControl={suggestionControl}

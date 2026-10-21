@@ -248,7 +248,7 @@ function ToolButton({ label, active = false, disabled = false, onRun, children }
 
 export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions, sections, follow, writeOn,
   onOpenConversation, discussions, automations, headingActions, focusedConversationId = null, onFocusConversation,
-  onAnchorOffsets, cursorPresence, onReady, readerBaseline = null, onReaderChanges, onWrite, readFrom, reading,
+  onAnchorOffsets, cursorPresence, onReady, readerBaseline = null, readerShown = false, onReaderChanges, onWrite, readFrom, reading,
   suggestions = null, onSuggestions, suggestionControl, readGitHubFile, references, completion, placeholder, mediaUrl,
   uploadMedia, onChanges }: {
   session: PageLiveSession;
@@ -286,6 +286,8 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
   onReady?: () => void;
   /** The page as this reader last read it, as markdown, and the revision to diff it against: what changed since is shown as a diff. */
   readerBaseline?: { body: string; head: number } | null;
+  /** Whether that diff is marked over the text; otherwise the page shows as it is and the changes are only counted. */
+  readerShown?: boolean;
   /** Suggestions waiting on the page, laid over it change by change until the reader takes or leaves each. */
   suggestions?: readonly PageSuggestion[] | null;
   /** How many changes are left, which is in front of the reader, and whose. */
@@ -620,11 +622,11 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
     // After the synced document is in the editor, so the changes are measured against it.
     const frameId = requestAnimationFrame(() => {
       if (!view.current) return;
-      const count = showReaderChanges(view.current, session.fragment, readerBody);
+      const count = showReaderChanges(view.current, session.fragment, readerBody, readerShown);
       if (readerBody !== null) readerChanges.current?.(count);
     });
     return () => cancelAnimationFrame(frameId);
-  }, [readerBody, readerHead, session]);
+  }, [readerBody, readerHead, readerShown, session]);
 
   const seenDoc = useRef<DocNode | null>(null);
   useEffect(() => {
