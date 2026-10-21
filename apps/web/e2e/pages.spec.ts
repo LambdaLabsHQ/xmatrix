@@ -655,7 +655,7 @@ test.describe("on a phone", () => {
     const face = (await away.boundingBox())!;
     expect(face.x + face.width, "at the right edge").toBeGreaterThan(393 - 8);
     // It is not named twice: no edge pill for it, and no button to call another while it writes.
-    await expect(browser.getByTestId("page-people-below")).toHaveCount(0);
+    await expect(browser.getByTestId("page-offscreen-below")).toHaveCount(0);
     await expect(browser.getByRole("button", { name: /^Write with/u })).toHaveCount(0);
     await browser.screenshot({ path: test.info().outputPath("pages-pen-away.png") });
 
@@ -1673,6 +1673,32 @@ test("a discussion opens beside its passage, not under its Agent writing elsewhe
   await expect(editor.getByText(passage, { exact: true })).toBeInViewport();
 });
 
+test("beside a long page, the margin tells what it holds out of view, and only that", async ({ page: browser }) => {
+  const { server, push, pill, article } = await openLongPageWithClaudeWriting(browser, () => ({ blockId: "notes" }));
+  // Someone only reading the Status is not work to scroll to; the margin does not tell of them.
+  push(awarenessFrom(server, 7_654_321, 1, { user: { name: "Ada", color: "#4b6382", kind: "user" },
+    activity: "viewing", block: "status" }, "In progress"));
+  await article.evaluate((element) => { element.scrollTop = 0; });
+  const margin = browser.getByTestId("page-margin");
+  // The Agent writing the Notes far below, and its channel under it, are told at the margin's bottom edge.
+  const below = browser.getByTestId("page-offscreen-below");
+  await expect(below).toBeInViewport();
+  await expect(below).toContainText("1 conversation below");
+  await expect(below).toContainText("claude:2 · Working");
+  await expect(browser.getByTestId("page-offscreen-above")).toHaveCount(0);
+  // It stands in the margin, on the cards' edges.
+  const [edge, column] = [(await below.boundingBox())!, (await margin.boundingBox())!];
+  expect(Math.abs(edge.x - column.x), "on the margin's left edge").toBeLessThan(1);
+  expect(Math.abs(edge.width - column.width), "as wide as a card").toBeLessThan(1);
+  await browser.screenshot({ path: test.info().outputPath("margin-offscreen-below.png") });
+
+  // Pressed, it brings the reader to the Agent, and nothing is out of view below then; Ada, reading above, is not told.
+  await below.click();
+  await expect(pill).toBeInViewport();
+  await expect(below).toHaveCount(0);
+  await expect(browser.getByTestId("page-offscreen-above")).toHaveCount(0);
+});
+
 test("on a long page, who works out of view shows at its edges, and what an Agent writes is highlighted as its own", async ({ page: browser }) => {
   const { server, editor, push } = await openLongPage(browser, () => fixtureJson(browser, "page-agents",
     /\/api\/xmatrix\/spaces\/[^/]+\/page-links\/agents$/u, {
@@ -1680,16 +1706,16 @@ test("on a long page, who works out of view shows at its edges, and what an Agen
         conversationId: E2E_CHANNEL.id, activity: "editing", blockId: "notes" }] }],
     }));
 
-  // Someone reads the Status at the top; an Agent edits the Notes far below, writing as its own client.
+  // Someone edits the Status at the top; an Agent edits the Notes far below, writing as its own client.
   push(awarenessFrom(server, 7_654_321, 1, { user: { name: "Ada", color: "#4b6382", kind: "user" },
-    activity: "viewing", block: "status" }, "In progress"));
+    activity: "editing", block: "status" }, "In progress"));
   agentWrites(server, push, 1, "none", "none yet, shipping Friday", "editing", "shipping Friday");
 
   // The Agent is its face at the right edge, as on a phone, waiting at the bottom and pointing down to its line.
   const below = browser.getByTestId("page-pens").getByRole("button", { name: "claude:2 is writing, below" });
   await expect(below).toBeVisible();
-  await expect(browser.getByTestId("page-people-below"), "an Agent is not named in the middle of the page").toHaveCount(0);
-  await expect(browser.getByTestId("page-people-above"), "Ada is in view").toHaveCount(0);
+  await expect(browser.getByTestId("page-offscreen-below"), "an Agent is not named in the middle of the page").toHaveCount(0);
+  await expect(browser.getByTestId("page-offscreen-above"), "Ada is in view").toHaveCount(0);
   // The Agent's new words are tinted in its colour, and the whole paragraph is highlighted as its own.
   const tinted = editor.locator(`.page-remote-change[data-client="${AGENT_CLIENT}"]`);
   await expect(tinted.first()).toBeAttached();
@@ -1707,13 +1733,13 @@ test("on a long page, who works out of view shows at its edges, and what an Agen
   await expect(browser.getByTestId("page-pens").getByRole("button", { name: "claude:2 is writing", exact: true }))
     .toBeVisible();
   await browser.screenshot({ path: test.info().outputPath("pages-agent-pen-beside.png") });
-  await expect(browser.getByTestId("page-people-above")).toHaveText(/Ada is reading above/u);
+  await expect(browser.getByTestId("page-offscreen-above")).toHaveText(/Ada · Editing/u);
   // It stands on the right, with the other marks of people at work, never centred over the text.
-  const chip = (await browser.getByTestId("page-people-above").boundingBox())!;
+  const chip = (await browser.getByTestId("page-offscreen-above").boundingBox())!;
   const viewport = browser.viewportSize()!;
   expect(chip.x, "the chip is on the right").toBeGreaterThan(viewport.width / 2);
   await browser.screenshot({ path: test.info().outputPath("pages-people-above.png") });
-  await browser.getByTestId("page-people-above").click();
+  await browser.getByTestId("page-offscreen-above").click();
   await expect(editor.getByText("In progress")).toBeInViewport();
 
   // The words' tint fades once they are a few seconds old; the paragraph stays highlighted for longer.
