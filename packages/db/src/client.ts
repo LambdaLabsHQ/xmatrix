@@ -218,7 +218,7 @@ function commitResultMayBeUnknown(error: unknown): boolean {
   const code = errorCode(error).toUpperCase();
   return /^08[0-9A-Z]{3}$/u.test(code) || new Set([
     "ECONNRESET", "EHOSTUNREACH", "ENETDOWN", "ENETUNREACH", "EPIPE", "ETIMEDOUT",
-    "QUERY_READ_TIMEOUT", "CONNECTION_TERMINATED", "CONNECTION_UNUSABLE",
+    "QUERY_READ_TIMEOUT", "CONNECTION_TERMINATED", "CONNECTION_UNUSABLE", "CONNECT_TIMEOUT",
   ]).has(code);
 }
 

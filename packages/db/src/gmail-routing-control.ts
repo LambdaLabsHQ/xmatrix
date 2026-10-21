@@ -1,7 +1,7 @@
 import type { QueryResultRow } from "pg";
 import type { AuthorityDatabase, DatabaseTransaction } from "./contracts.js";
 import { AppControlError } from "./app-control.js";
-import { lostBeforeCommit } from "./client.js";
+import { retryBeforeCommit } from "./transaction-recovery.js";
 import { decryptSecretValue, encryptSecretValue } from "./secret-value-control.js";
 
 export interface GmailRoutingSelection {
@@ -148,10 +148,12 @@ export class PostgresGmailRoutingRepository {
     });
   }
   async cleanup() {
-    return this.transaction("cleanup", tx => tx.query({ name: "gmail_route_cleanup_v1", text: `DELETE FROM data.app_gmail_routes
+    // No provider calls or delivery happen here; an uncommitted deletion can
+    // safely be attempted once more, skipping any rows the old session holds.
+    return retryBeforeCommit(() => this.transaction("cleanup", tx => tx.query({ name: "gmail_route_cleanup_v1", text: `DELETE FROM data.app_gmail_routes
       WHERE route_id IN (SELECT route_id FROM data.app_gmail_routes WHERE NOT enabled
         AND (encrypted_value_json='{}'::jsonb OR (expires_at IS NULL AND error_code IS NULL AND created_at<now()-interval '10 minutes'))
-        ORDER BY created_at LIMIT 100 FOR UPDATE SKIP LOCKED)`, values: [], maxRows: 0 }));
+        ORDER BY created_at LIMIT 100 FOR UPDATE SKIP LOCKED)`, values: [], maxRows: 0 })));
   }
   /**
    * Claiming has no effect outside its transaction, so a response lost before COMMIT
@@ -159,11 +161,7 @@ export class PostgresGmailRoutingRepository {
    * Rows the lost UPDATE may still lock are skipped and claimed on a later tick.
    */
   async claim() {
-    try { return await this.claimOnce(); }
-    catch (error) {
-      if (!lostBeforeCommit(error)) throw error;
-      return this.claimOnce();
-    }
+    return retryBeforeCommit(() => this.claimOnce());
   }
   private claimOnce() {
     return this.transaction("claim", async tx => {
