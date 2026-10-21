@@ -1233,7 +1233,7 @@ function readLastSignInMethod(): SignInMethod | null {
 }
 
 function LastUsed({ shown }: { shown: boolean }) {
-  return shown ? <span className="ml-auto text-xs font-normal opacity-70">Last used</span> : null;
+  return shown ? <span className="auth-last-used">Last used</span> : null;
 }
 
 /** The desktop app's sign-in for a phone that is already signed in: scan, approve there, done here. */
