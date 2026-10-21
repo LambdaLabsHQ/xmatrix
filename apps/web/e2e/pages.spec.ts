@@ -1110,7 +1110,7 @@ test("selecting a passage opens a comment box under it; sent, the comment is a d
   // Sent, the box goes and the page stays in front of the reader; nothing opens over it.
   await expect(box).toHaveCount(0);
   await expect(browser.getByTestId("page-conversation")).toHaveCount(0);
-  await expect(editor).toBeFocused();
+  await expect(editor.locator(".page-document"), "the caret is back in the page").toBeFocused();
   // Its card and the passage's bubble come with the link.
   await fixtureJson(browser, "link-resolve", /\/page-links\/l-discuss\/resolution$/u, { link: {} }, { method: "PUT" });
   await releaseFixture(browser, "channel-create");
@@ -1149,7 +1149,7 @@ test("selecting a passage opens a comment box under it; sent, the comment is a d
   await expect(thread).toBeHidden();
   await browser.setViewportSize({ width: 1600, height: 900 });
   await browser.getByTestId("page-margin").getByRole("button", { name: /^Open .* beside the page$/u }).first().click();
-  await expect(opening).toHaveText("Is this still accurate?");
+  await expect(opening).toHaveText("@auto Is this still accurate?");
   await expect(thread.locator("blockquote")).toHaveCount(0);
   await browser.screenshot({ path: test.info().outputPath("pages-discussion-thread.png") });
   await browser.setViewportSize(E2E_DESKTOP_CONTEXT.viewport);
