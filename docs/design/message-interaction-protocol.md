@@ -90,8 +90,11 @@ still read it as text.
 
 ## First-message choice
 
-The current choice remains three seconds, including the existing display-time
-extension capped at ten seconds after sending. The stored database deadline is
+The author has three seconds to choose, counted from when they see Jev's reading
+rather than from sending (`FIRST_MESSAGE_LAUNCH_WINDOW_MS`, plus
+`FIRST_MESSAGE_LAUNCH_SEEN_MS` for the reading to reach their screen). The window
+never closes later than thirty seconds after sending
+(`FIRST_MESSAGE_LAUNCH_HOLD_LIMIT_MS`). The stored database deadline is
 authoritative. An author can claim only before it; Jev can claim only at or after
 it. Both contend on the same row, so only one decision wins. The winning harness
 is summoned by an `@<harness>` reply whose id derives from the first message, so
