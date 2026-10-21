@@ -64,9 +64,11 @@ export {
   ChannelActivityInvalid, channelActivityLine, channelActivityOf, isReservedAnnotationNamespace,
   isReservedMessageMetadataKey, normalizeChannelActivity, SUPERSEDED_ANNOTATION_NAMESPACE,
   supersededByOf, SYSTEM_ANNOTATION_AUTHOR, QUESTIONNAIRE_STATE_ANNOTATION_NAMESPACE, questionnaireStateOf,
+  COMMAND_RESULT_ANNOTATION_NAMESPACE, commandResultOf, mergeCommandResult,
 } from "./channel-activity.js";
 export type {
   ChannelActivity, ChannelActivityPlanStep, ChannelActivityPlanStepStatus, QuestionnaireState,
+  CommandResult, CommandResultNote,
 } from "./channel-activity.js";
 export {
   channelSummarySource,
@@ -594,6 +596,7 @@ export {
 export * from "./setup-intent.js";
 export * from "./onboarding-message.js";
 export * from "./onboarding-funnel.js";
+export * from "./faces.js";
 export { cleanRepositoryBaseline } from "./repository-baseline.js";
 export type { RepositoryBaseline } from "./repository-baseline.js";
 

@@ -9,17 +9,6 @@ import { cn } from "@/lib/utils";
  * pointer handling, or selected-row styling.
  */
 
-export function avatarInitials(value: string): string {
-  const initials = value
-    .split(/[\s@._-]+/)
-    .filter(Boolean)
-    .map((part) => part[0])
-    .join("")
-    .toUpperCase()
-    .slice(0, 2);
-  return initials || "XM";
-}
-
 export function stopTouchPropagation(event: { stopPropagation: () => void }) {
   event.stopPropagation();
 }

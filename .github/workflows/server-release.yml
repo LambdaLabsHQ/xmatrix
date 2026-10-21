@@ -603,11 +603,14 @@ jobs:
         uses: ./.github/actions/setup-pnpm-node
 
       # Origins and the Web config come from the reviewed production profile.
+      # A beta builds for the beta Web, a stable for the stable one: the
+      # tagged version says which (deploy-config.mjs, web-beta).
       - name: Load the production deployment profile
         env: *production_profile_environment
         run: |
           set -euo pipefail
-          node scripts/deploy-config.mjs env production >> "$GITHUB_ENV"
+          web="$([ "$(node scripts/version.mjs channel)" = beta ] && echo web-beta || echo web)"
+          node scripts/deploy-config.mjs env production "$web" >> "$GITHUB_ENV"
 
       - &verify_web_checkout
         name: Verify exact clean tagged checkout
@@ -689,13 +692,15 @@ jobs:
       - *clear_server_proxy
       - *setup_web_release
 
-      # Origins and the Web config come from the reviewed production profile.
+      # Origins and the Web config come from the reviewed production profile;
+      # a beta deploys the beta Web, a stable the stable one.
       - name: Load the production deployment profile
         env: *production_profile_environment
         run: |
           set -euo pipefail
-          node scripts/deploy-config.mjs env production >> "$GITHUB_ENV"
-          node scripts/deploy-config.mjs render production web
+          web="$([ "$(node scripts/version.mjs channel)" = beta ] && echo web-beta || echo web)"
+          node scripts/deploy-config.mjs env production "$web" >> "$GITHUB_ENV"
+          node scripts/deploy-config.mjs render production "$web"
 
       - *verify_web_checkout
 

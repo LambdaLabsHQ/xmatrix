@@ -11,7 +11,7 @@ import type { OutgoingMessage } from "./workspace-shell-helpers";
 export function channelWithOutgoing(
   channel: ChannelSnapshot,
   outgoing: readonly OutgoingMessage[],
-  currentUser?: { id: string; email: string; name?: string; avatarUrl?: string } | null,
+  currentUser?: { id: string; email: string; name?: string } | null,
 ): ChannelSnapshot {
   const newest = outgoing.reduce<OutgoingMessage | null>((found, message) => message.channelId === channel.id
     && message.status !== "failed" && (!found || Date.parse(message.sentAt) > Date.parse(found.sentAt)) ? message : found, null);
@@ -23,8 +23,8 @@ export function channelWithOutgoing(
     from: {
       kind: "user", label: currentUser ? currentHumanDisplayName(currentUser) : "You",
       userId: currentUser?.id ?? "", email: currentUser?.email ?? "",
+      // Drawn with the reader's face by their id (faceOfSender), as their sent messages are.
       ...(currentUser ? { identityId: `user:${currentUser.id}` } : {}),
-      ...(currentUser?.avatarUrl ? { avatarUrl: currentUser.avatarUrl } : {}),
     },
   };
   const lastMessage = channelLastMessagePreviewFromEntry(entry);

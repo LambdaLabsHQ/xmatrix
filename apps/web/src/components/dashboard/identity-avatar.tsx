@@ -2,7 +2,7 @@
 
 import { memo, type MouseEvent } from "react";
 import { AlertTriangle, Boxes, Bot, Moon, Server, UserRound } from "lucide-react";
-import { LoadingImage } from "@/components/dashboard/content-skeleton";
+import { LoadingImage, MediaSkeleton } from "@/components/dashboard/content-skeleton";
 import { LiquidGlassPill } from "@/components/ui/material-surfaces";
 import { cn } from "@/lib/utils";
 
@@ -57,6 +57,8 @@ interface IdentityAvatarProps {
   status?: string;
   initials?: string;
   imageUrl?: string;
+  /** Its picture is still being read (face.tsx): it waits for it rather than showing letters it may not need. */
+  pending?: boolean;
   size?: IdentityAvatarSize;
   shape?: IdentityAvatarShape;
   showKindBadge?: boolean;
@@ -74,6 +76,7 @@ export const IdentityAvatar = memo(function IdentityAvatar({
   status,
   initials,
   imageUrl,
+  pending = false,
   size = "md",
   shape = "rounded",
   showKindBadge = false,
@@ -122,7 +125,9 @@ export const IdentityAvatar = memo(function IdentityAvatar({
           rest && "opacity-55 grayscale"
         )}
       >
-        {imageSrc ? (
+        {pending ? (
+          <MediaSkeleton announce={false} className="app-media-skeleton-image size-full" />
+        ) : imageSrc ? (
           <LoadingImage
             src={imageSrc}
             alt=""

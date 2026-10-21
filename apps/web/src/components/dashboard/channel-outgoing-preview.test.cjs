@@ -1,9 +1,10 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 require("./typescript-require.cjs").installTypeScriptRequire();
+const { faceOfSender } = require("@xmatrix/protocol");
 const { channelWithOutgoing } = require("./channel-outgoing-preview.ts");
 
-const user = { id: "u1", email: "ada@example.com", name: "Ada", avatarUrl: "https://example.com/ada.png" };
+const user = { id: "u1", email: "ada@example.com", name: "Ada" };
 const channel = { id: "c1", spaceId: "s1", name: "Discussion", mode: "open", messageCount: 0 };
 const outgoing = (over) => ({ clientMessageId: "m1", channelId: "c1", body: "@auto do we support qwen?", attachments: [],
   appMentions: [], sentAt: "2026-10-21T21:50:00.000Z", status: "pending", ...over });
@@ -12,8 +13,8 @@ test("a message on its way is the conversation's last message the moment it is s
   const shown = channelWithOutgoing(channel, [outgoing()], user);
   assert.equal(shown.lastMessage.bodyPreview, "@auto do we support qwen?");
   assert.equal(shown.lastMessage.sentAt, "2026-10-21T21:50:00.000Z");
-  assert.deepEqual([shown.lastMessage.from.kind, shown.lastMessage.from.label, shown.lastMessage.from.avatarUrl],
-    ["user", "Ada", "https://example.com/ada.png"]);
+  // Drawn as the writer, by their account, as their sent messages are.
+  assert.deepEqual(faceOfSender(shown.lastMessage.from), { kind: "user", id: "u1", name: "Ada" });
 });
 
 test("the newest of several, only this conversation's, and none that failed", () => {

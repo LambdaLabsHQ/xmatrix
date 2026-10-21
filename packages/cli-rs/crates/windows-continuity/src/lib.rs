@@ -816,6 +816,7 @@ impl ActivationKernel {
         &self.payload
     }
 
+    #[cfg(test)]
     pub fn admission_open(&self) -> bool {
         self.payload
             .transaction
@@ -1154,41 +1155,6 @@ impl RunEvidence {
             ));
         }
         Ok(())
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RunAccounting {
-    pub expected: BTreeSet<String>,
-    pub adopted: BTreeMap<String, RunEvidence>,
-    pub natural_terminal: BTreeSet<String>,
-    pub quarantined: BTreeSet<String>,
-}
-
-impl RunAccounting {
-    pub fn validate_complete(&self) -> Result<String, ContinuityError> {
-        if !self.quarantined.is_empty() {
-            return Err(ContinuityError::RunConflict);
-        }
-        let accounted = self
-            .adopted
-            .keys()
-            .cloned()
-            .chain(self.natural_terminal.iter().cloned())
-            .collect::<BTreeSet<_>>();
-        if accounted != self.expected {
-            return Err(ContinuityError::RunSetIncomplete);
-        }
-        for (run_id, evidence) in &self.adopted {
-            evidence.validate()?;
-            if run_id != &evidence.run_id {
-                return Err(ContinuityError::RunConflict);
-            }
-        }
-        let bytes =
-            serde_json::to_vec(&(self.expected.clone(), &self.adopted, &self.natural_terminal))?;
-        Ok(hex_sha256(&bytes))
     }
 }
 
@@ -2257,22 +2223,6 @@ mod tests {
         assert_eq!(recovered.last_hub_epoch, Some(7));
         assert!(previous_image_path(&path).is_file());
         fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn run_accounting_requires_exact_complete_set() {
-        let mut accounting = RunAccounting {
-            expected: BTreeSet::from(["run-1".into()]),
-            adopted: BTreeMap::new(),
-            natural_terminal: BTreeSet::new(),
-            quarantined: BTreeSet::new(),
-        };
-        assert!(matches!(
-            accounting.validate_complete(),
-            Err(ContinuityError::RunSetIncomplete)
-        ));
-        accounting.natural_terminal.insert("run-1".into());
-        assert!(accounting.validate_complete().is_ok());
     }
 
     #[test]

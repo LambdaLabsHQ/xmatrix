@@ -260,7 +260,7 @@ export function SettingsView({
   onInstallDesktopUpdate,
   onLogout,
 }: {
-  user: { id: string; email: string; name?: string; avatarUrl?: string };
+  user: { id: string; email: string; name?: string };
   /** The Space whose secrets this lists; secrets belong to a Space. */
   space: { id: string; name: string } | null;
   projectedProfile: HumanProfile;
@@ -829,7 +829,7 @@ export function TeamView({
   onSelectSpace,
 }: {
   token?: string;
-  user: { id: string; email: string; name?: string; avatarUrl?: string };
+  user: { id: string; email: string; name?: string };
   currentSpace: SerializedSpace | null;
   error: string | null;
   joinRequestsBySpace: Record<string, SpaceJoinRequest[]>;

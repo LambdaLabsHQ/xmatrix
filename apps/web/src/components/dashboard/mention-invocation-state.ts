@@ -1,7 +1,7 @@
-import { agentAvatarUrlFromMetadata, agentPresetForLauncher, cleanRuntimeOperationFailure, handoffInstanceMentionScanner, mentionAddressTokens, parseHandoffInstanceTarget, parseAutoLaunchMentions, parsePresentedRoutingDecision, rebornFailureReason, scanMentionAddresses, summarizeStopReceipts, type PresentedRoutingDecision, type SerializedAgentLaunch, type SerializedAgentStop,
+import { agentPresetForLauncher, cleanRuntimeOperationFailure, handoffInstanceMentionScanner, mentionAddressTokens, parseHandoffInstanceTarget, parseAutoLaunchMentions, parsePresentedRoutingDecision, rebornFailureReason, scanMentionAddresses, summarizeStopReceipts, type PresentedRoutingDecision, type SerializedAgentLaunch, type SerializedAgentStop,
   type SerializedAgentMessageExecution, type SerializedAgentInvocationRejection, type SerializedAgentContinuation, type AgentLaunchActivity, type AgentStopInvocation,
   type AutoLaunchMention, type ConnectorInvocation, type AgentControlInvocation, type AgentControlOutcomeRecord,
-  parseRebornInstanceMentions, parseHandoffInstanceMentions } from "@xmatrix/protocol";
+  parseRebornInstanceMentions, parseHandoffInstanceMentions, type FaceOf } from "@xmatrix/protocol";
 import { noticesNaming, type CommandNotice } from "./command-notices";
 
 export type InvocationTone = "active" | "waiting" | "error" | "success" | "neutral";
@@ -351,24 +351,6 @@ export function lifecycleRefusalView(notices: readonly CommandNotice[], kind: "r
   ] };
 }
 
-/** One batched query per channel. Keep observing connected-but-not-ready runs. */
-export function invocationPollInterval(launches: readonly SerializedAgentLaunch[], newestAt: number,
-  now: number, failed: boolean, continuations: readonly SerializedAgentContinuation[] = [],
-  executions: readonly SerializedAgentMessageExecution[] = [],
-  stops: readonly SerializedAgentStop[] = []): number | false {
-  if (failed) return 10_000;
-  if (stops.some(stop => stop.phase === "accepted")) return 2_000;
-  if (executions.some(record => !record.finalReply && record.finishedAt &&
-      now - Date.parse(record.finishedAt) >= 0 && now - Date.parse(record.finishedAt) < 60_000)) return 2_000;
-  if (continuations.some(record => !continuationView(record).terminal)) return 2_000;
-  if (!launches.length) return newestAt > now - 120_000 ? 2_000 : executions.length ? 15_000 : false;
-  // A summon is settled once reasoning starts; later turns are the Run's own
-  // business. Executions still refresh so a saved reply can be recovered.
-  const views = launches.map(launch => summonView(launch, executions));
-  if (views.some(view => view.animate)) return 2_000;
-  return executions.length || views.some(view => !view.terminal) ? 15_000 : false;
-}
-
 /** Match only the exact, server-recorded address within a normal Markdown text run. */
 export function splitMentionRejections(text: string, rejections: readonly SerializedAgentInvocationRejection[], allowed?: (start: number) => boolean) {
   const tokens = mentionAddressTokens(rejections.map((rejection) => rejection.targetRef));
@@ -410,30 +392,55 @@ export function operationFailureDescription(value: unknown): string | undefined 
     : "The runtime reported a failure at this step. Use its diagnostic reference to investigate.";
 }
 
-/** The harness vendor mark for a summon chip. A letter is only the fallback
- *  when nothing names a harness. The bound registration's avatar is already
- *  that mark; otherwise use the route that was selected, then the address the
- *  author wrote (`@grok`, or `harness:` on `@auto`). */
-export function invocationVendorIcon(input: {
-  targetAvatarUrl?: string;
+/** The harness an `@` names, for its face: the route that was selected, else
+ *  the harness the address itself names by its syntax (`@grok`, or `harness:`
+ *  on `@auto`). A name an Agent goes by is never read as a harness. */
+export function invocationVendorHarness(input: {
   sourceMention?: string;
-  targetName?: string;
   routingDecision?: { rows?: ReadonlyArray<{ harness?: string; selected?: boolean }> };
 }): string | undefined {
-  const declared = input.targetAvatarUrl?.trim();
-  if (declared) return declared;
-  const selected = input.routingDecision?.rows?.find((row) => row.selected)?.harness;
-  // "Agent" is the generic display name as well as Cursor's CLI executable.
-  // Only an explicit harness selection may interpret that ambiguous token.
-  const namedHarness = input.targetName?.trim().toLowerCase() === "agent" ? undefined : input.targetName;
-  return presetVendorIcon(selected) ?? presetVendorIcon(writtenHarness(input.sourceMention))
-    ?? presetVendorIcon(namedHarness);
+  return knownHarness(input.routingDecision?.rows?.find((row) => row.selected)?.harness)
+    ?? knownHarness(writtenHarness(input.sourceMention));
 }
 
-function presetVendorIcon(token: string | undefined): string | undefined {
+function knownHarness(token: string | undefined): string | undefined {
   const value = token?.trim();
-  if (!value || !agentPresetForLauncher(value)) return undefined;
-  return agentAvatarUrlFromMetadata({}, value);
+  return value && agentPresetForLauncher(value) ? value : undefined;
+}
+
+/** The face of the Agent an `@` addresses (protocol faces.ts): its harness's
+ *  mark when the address names one, else the Instance its record names, which
+ *  the face directory reads; letters only when neither is known. */
+export function addressedAgentFace(input: {
+  name: string;
+  /** The harness the Hub recorded for the Agent; the address and routing are read only without it. */
+  harness?: string;
+  address?: string;
+  instanceId?: string;
+  routingDecision?: { rows?: ReadonlyArray<{ harness?: string; selected?: boolean }> };
+}): FaceOf {
+  return { kind: "agent", name: input.name,
+    harness: input.harness
+      ?? invocationVendorHarness({ sourceMention: input.address, routingDecision: input.routingDecision }) ?? null,
+    id: input.instanceId ?? null };
+}
+
+/** A summon's face: the Agent its launch started. */
+export function launchFace(launch: SerializedAgentLaunch, name = launch.targetName || "Agent"): FaceOf {
+  return addressedAgentFace({ name, harness: launch.targetHarness, address: launch.sourceMention,
+    instanceId: launch.instanceId, routingDecision: launch.routingDecision });
+}
+
+/** A reborn's or a handoff's two faces: the Instance the work left, and the one
+ *  it went to, by the harness the handoff names (`:handoff:@codex`), else by its
+ *  Instance. A reborn goes back to the Agent it left. */
+export function continuationFaces(record: SerializedAgentContinuation): { source: FaceOf; successor: FaceOf } {
+  const source = addressedAgentFace({ name: record.sourceName, instanceId: record.sourceInstanceId,
+    ...(record.kind === "reborn" && record.targetHarness ? { harness: record.targetHarness } : {}) });
+  if (record.kind === "reborn") return { source, successor: source };
+  const written = parseHandoffInstanceTarget(record.sourceMention.replace(/^[@＠]/u, ""))?.successorName;
+  return { source, successor: addressedAgentFace({ name: record.targetName, harness: record.targetHarness,
+    address: written ? `@${written}` : undefined, instanceId: record.targetInstanceId }) };
 }
 
 /** The harness the summon's own text names (`@grok`, or `harness:` on

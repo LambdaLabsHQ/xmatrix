@@ -444,10 +444,10 @@ test("Space listing fans the global membership page into the routed physical sha
           metadata_json: {}, created_at: "2026-08-30T00:00:00.000Z",
           updated_at: "2026-08-30T00:00:00.000Z",
         }]
-    : query.name === "space_members_hydrate_v1"
+    : query.name === "space_members_hydrate_v2"
       ? [{
             space_id: "space-1", user_id: "user-1", role: "owner", version: 1,
-            email: null, display_name: null, avatar_url: null,
+            email: null, display_name: null,
             created_at: "2026-08-30T00:00:00.000Z",
           }]
         : query.name === "space_join_request_counts_hydrate_v1"

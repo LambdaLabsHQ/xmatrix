@@ -2,10 +2,9 @@
 
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { ArrowDown, ArrowUp, Check, Maximize2, PenLine, X } from "lucide-react";
-import { agentPresetAvatarUrl, normalizeAgentPresetRuntime } from "@xmatrix/protocol";
-import { IdentityAvatar } from "@/components/dashboard/identity-avatar";
+import type { FaceOf } from "@xmatrix/protocol";
+import { Face } from "@/components/dashboard/face";
 import { formatRelativeAge } from "@/components/dashboard/time-display";
-import { avatarInitials } from "@/components/dashboard/completion-option-button";
 import { cn } from "@/lib/utils";
 import { sameValue } from "@/lib/same-value";
 import { anchorTop, layoutMargin, type MarginConversation } from "./page-margin-model";
@@ -79,17 +78,13 @@ function CardContext({ conversation, open = false }: { conversation: MarginConve
   );
 }
 
-/** An Agent's face is its vendor's mark, which its name tells where the listing carries none. */
-function agentFace(agent: MarginConversation["agents"][number]): string | undefined {
-  return agent.avatarUrl ?? agentPresetAvatarUrl(normalizeAgentPresetRuntime(agent.name.split(":")[0] ?? ""));
-}
-
 /**
  * The Agents in it, as a comment thread shows who is typing: each its Instance card from the conversation at a
  * comment's size, on paper. Its vendor's face and its name; its status dot says whether it works, and one at work
  * runs its dots, as its pill on the page does.
  */
-function WorkingLine({ agents, className }: { agents: MarginConversation["agents"]; className?: string }) {
+function WorkingLine({ agents, className }: { agents: ReadonlyArray<Pick<MarginConversation["agents"][number],
+  "instanceId" | "name" | "status" | "face">>; className?: string }) {
   const working = agents.filter((agent) => agent.status === "busy");
   const shown = working.length > 0 ? working : agents;
   if (shown.length === 0) return null;
@@ -98,8 +93,8 @@ function WorkingLine({ agents, className }: { agents: MarginConversation["agents
       {shown.map((agent) => (
         <span key={agent.instanceId} className="page-margin-instance" data-status={agent.status}
           title={`${agent.name} · ${agentState(agent.status)}`}>
-          <IdentityAvatar kind="agent" label={agent.name} imageUrl={agentFace(agent)} initials={avatarInitials(agent.name)}
-            status={agent.status} size="xs" shape="circle" glass={false} className="page-margin-instance-face" />
+          <Face of={agent.face} status={agent.status} size="xs" shape="circle" glass={false}
+            className="page-margin-instance-face" />
           <span className="page-margin-instance-name">{agent.name}</span>
           {agent.status === "busy" && <span className="page-writer-dots" aria-hidden="true"><i /><i /><i /></span>}
         </span>
@@ -143,13 +138,10 @@ function ConversationCard({ conversation, writer, focused, canResolve, onOpen, o
         </span>
         {lastMessage ? (
           <span className="mt-2 flex gap-2">
-            <IdentityAvatar kind={lastMessage.from.kind === "user" ? "human" : lastMessage.from.kind}
-              label={lastMessage.from.label} imageUrl={lastMessage.from.avatarUrl}
-              initials={avatarInitials(lastMessage.from.label)} size="xs" shape="circle"
-              className="mt-px" />
+            <Face of={lastMessage.face} size="xs" shape="circle" className="mt-px" />
             <span className="min-w-0 flex-1">
               <span className="flex items-baseline gap-1.5">
-                <span className="truncate text-[13px] font-semibold text-foreground">{lastMessage.from.label}</span>
+                <span className="truncate text-[13px] font-semibold text-foreground">{lastMessage.label}</span>
                 <span className="shrink-0 text-[11px] text-muted-foreground">{formatRelativeAge(lastMessage.sentAt) ?? ""}</span>
               </span>
               <span className="mt-0.5 line-clamp-2 text-[13px] leading-[1.4] text-foreground/85">{lastMessage.bodyPreview}</span>
@@ -176,6 +168,8 @@ function ConversationCard({ conversation, writer, focused, canResolve, onOpen, o
 
 /** The tallest an open thread grows before its messages scroll. */
 const OPEN_MAX_HEIGHT = "min(34rem, calc(100dvh - 8rem))";
+/** The least an open thread shrinks to near the page's end; with less room than this, it rises instead. */
+const OPEN_MIN_ROOM = 192;
 /** Room between an empty thread's note and its composer. */
 const EMPTY_THREAD_GAP = 12;
 
@@ -186,8 +180,11 @@ const threadAction = "flex size-7 shrink-0 items-center justify-center rounded-f
  * above the other cards and nudged toward the text, with what it is about,
  * then the conversation itself, sized to what it says.
  */
-function OpenConversationCard({ conversation, quietAgents = false, canResolve, children, onResolve, onExpand, onClose, onFocus }: {
+function OpenConversationCard({ conversation, quietAgents = false, room = null, canResolve, children, onResolve, onExpand, onClose,
+  onFocus }: {
   conversation: MarginConversation;
+  /** The room left down to the page's end: the thread is no taller, and its messages scroll inside it. */
+  room?: number | null;
   /** Opened from an Agent's pill, which already says who works in it. */
   quietAgents?: boolean;
   canResolve: boolean;
@@ -246,7 +243,7 @@ function OpenConversationCard({ conversation, quietAgents = false, canResolve, c
     <section data-testid="page-margin-open" aria-label={conversation.name ?? "Conversation"}
       onMouseEnter={() => onFocus(true)} onMouseLeave={() => onFocus(false)}
       onKeyDown={(event) => { if (event.key === "Escape" && onClose) onClose(); }}
-      style={{ height: height ? `min(${height}px, ${OPEN_MAX_HEIGHT})` : OPEN_MAX_HEIGHT }}
+      style={{ height: `min(${[height && `${height}px`, room !== null && `${room}px`, OPEN_MAX_HEIGHT].filter(Boolean).join(", ")})` }}
       className="page-margin-open flex min-h-0 flex-col overflow-hidden rounded-xl">
       <header ref={headerRef} className="flex shrink-0 items-start gap-1 pt-2.5 pr-2 pl-3">
         <span className="min-w-0 flex-1 pt-1">
@@ -307,7 +304,7 @@ function WriterUnit({ writer, open, actions, onPress, children }: {
           <CommentIcon />
           <span className="min-w-0 truncate">
             <span className="font-semibold text-foreground">{cardName(name)}</span>
-            {last && <span className="text-muted-foreground"> · {last.from.label}: {last.bodyPreview}</span>}
+            {last && <span className="text-muted-foreground"> · {last.label}: {last.bodyPreview}</span>}
           </span>
         </button>
       )}
@@ -338,15 +335,16 @@ export function PageOffscreenCard({ side, entries, onJump }: {
   const conversations = [...new Map(entries.flatMap((entry) => entry.conversation
     ? [[entry.conversation.conversationId, entry.conversation] as const] : [])).values()];
   const unread = conversations.reduce((sum, conversation) => sum + conversation.unread, 0);
-  const working = [...new Set([
-    ...entries.flatMap((entry) => entry.person?.agent ? [entry.person.name] : []),
+  // Each Agent at work once, by name, with its face.
+  const working = [...new Map<string, FaceOf>([
+    ...entries.flatMap((entry) => entry.person?.agent ? [[entry.person.name, entry.person.face] as const] : []),
     ...conversations.flatMap((conversation) => conversation.agents.filter((agent) => agent.status === "busy")
-      .map((agent) => agent.name)),
+      .map((agent) => [agent.name, agent.face] as const)),
   ])];
   const editing = [...new Set(entries.flatMap((entry) => entry.person && !entry.person.agent ? [entry.person.name] : []))];
   const said = [
     conversations.length > 0 ? `${conversations.length} ${conversations.length === 1 ? "conversation" : "conversations"}` : null,
-    working.length > 0 ? `${working.join(", ")} working` : null,
+    working.length > 0 ? `${working.map(([name]) => name).join(", ")} working` : null,
     editing.length > 0 ? `${editing.join(", ")} editing` : null,
   ].filter(Boolean).join(", ");
   const Arrow = side === "above" ? ArrowUp : ArrowDown;
@@ -364,7 +362,7 @@ export function PageOffscreenCard({ side, entries, onJump }: {
             <UnreadBadge unread={unread} />
           </span>
         )}
-        <WorkingLine agents={working.map((name) => ({ instanceId: name, name, status: "busy" as const }))} />
+        <WorkingLine agents={working.map(([name, face]) => ({ instanceId: name, name, status: "busy" as const, face }))} />
         {editing.length > 0 && (
           <span className="flex min-w-0 items-center gap-1.5 text-[12px] text-muted-foreground">
             <PenLine className="size-3 shrink-0 text-primary" aria-hidden="true" />
@@ -387,8 +385,8 @@ export function PageOffscreenCard({ side, entries, onJump }: {
 /** The margin's head, kept apart from conversation and Agent ids. */
 const HEAD = "head:";
 
-export function PageMargin({ conversations, writers = [], editors = [], view = null, tops, focusedId, openId = null, renderOpen,
-  canResolve, onOpen, onResolve, onExpand, onClose, onFocus, onJump, onWriter, writerActions, head }: {
+export function PageMargin({ conversations, writers = [], editors = [], view = null, end = null, tops, focusedId, openId = null,
+  renderOpen, canResolve, onOpen, onResolve, onExpand, onClose, onFocus, onJump, onWriter, writerActions, head }: {
   conversations: MarginConversation[];
   /** What stands at the top of the margin, above the cards it would otherwise cover. */
   head?: ReactNode;
@@ -398,6 +396,8 @@ export function PageMargin({ conversations, writers = [], editors = [], view = n
   editors?: ReadonlyArray<{ person: PresentPerson; top: number }>;
   /** The part of the margin in view, in its own coordinates; null before the page is laid out. */
   view?: { top: number; height: number } | null;
+  /** Where the page would end without the margin, in its coordinates: the cards rise to stay above it. */
+  end?: number | null;
   tops: ReadonlyMap<string, number>;
   focusedId: string | null;
   /** The conversation open in the margin, and the conversation itself to show there. */
@@ -471,13 +471,22 @@ export function PageMargin({ conversations, writers = [], editors = [], view = n
     return () => window.cancelAnimationFrame(frame);
   }, [openId]);
 
+  // The margin fits the page and never lengthens it. Near the page's end, an open thread stays at its passage, only
+  // as tall as the room left under it, its messages scrolling inside; with too little room, it rises.
+  const openRoom = ((): number | null => {
+    const opened = items.find((item) => item.id === openItem);
+    if (end === null || !opened) return null;
+    return Math.max(OPEN_MIN_ROOM, end - opened.top - (holder ? ESTIMATED_WRITER_HEIGHT : 0));
+  })();
   // Only the open conversation moves the column. A hovered card only lights up:
   // moving it would slide another card under the pointer, which then moves in turn.
+  // A card with no place beside the open one waits, unseen but measured, until it closes.
   const positions = layoutMargin(items.map((item) => ({ id: item.id, top: item.top,
-    height: heights.get(item.id) ?? item.estimate })), openItem);
-  const bottom = Math.max(0, ...items.map((item) => (positions.get(item.id) ?? 0) + (heights.get(item.id) ?? item.estimate)));
+    height: heights.get(item.id) ?? item.estimate })), openItem, end);
+  const shown = items.filter((item) => positions.has(item.id));
+  const bottom = Math.max(0, ...shown.map((item) => positions.get(item.id)! + (heights.get(item.id) ?? item.estimate)));
   const openCard = (conversation: MarginConversation, quietAgents: boolean) => renderOpen && (
-    <OpenConversationCard conversation={conversation} quietAgents={quietAgents} canResolve={canResolve}
+    <OpenConversationCard conversation={conversation} quietAgents={quietAgents} room={openRoom} canResolve={canResolve}
       onResolve={() => conversation.linkId && onResolve(conversation.linkId)}
       {...(onExpand ? { onExpand: () => onExpand(conversation.conversationId) } : {})}
       {...(onClose ? { onClose } : {})}
@@ -486,7 +495,8 @@ export function PageMargin({ conversations, writers = [], editors = [], view = n
     </OpenConversationCard>
   );
   const place = (id: string, child: ReactNode) => (
-    <div key={id} className="absolute inset-x-0 transition-[top] duration-150" style={{ top: positions.get(id) ?? 0 }}
+    <div key={id} className={cn("absolute inset-x-0 transition-[top] duration-150", !positions.has(id) && "invisible")}
+      style={{ top: positions.get(id) ?? 0 }}
       ref={(node) => { if (node) nodes.current.set(id, node); else nodes.current.delete(id); }}>
       {child}
     </div>
@@ -501,9 +511,9 @@ export function PageMargin({ conversations, writers = [], editors = [], view = n
       if (entry.top + height < view.top + EDGE_ROOM / 2) above.push(entry);
       else if (entry.top > view.top + view.height - EDGE_ROOM) below.push(entry);
     };
-    for (const item of items) {
+    for (const item of shown) {
       if (item.id === HEAD) continue;
-      const top = positions.get(item.id) ?? item.top;
+      const top = positions.get(item.id)!;
       const height = heights.get(item.id) ?? item.estimate;
       const card = cards.find((conversation) => conversation.conversationId === item.id);
       const writer = card ? null : writers.find((entry) => writerId(entry) === item.id);

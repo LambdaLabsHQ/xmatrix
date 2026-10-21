@@ -8,7 +8,7 @@ and default resource names. A profile in `profiles/` describes one deployment.
 
 ```sh
 node scripts/deploy-config.mjs render <profile>        # writes wrangler.generated.<profile>.* next to each config
-node scripts/deploy-config.mjs env <profile>           # origins and rendered config paths as KEY=VALUE
+node scripts/deploy-config.mjs env <profile> [web-beta] # origins and rendered config paths as KEY=VALUE
 pnpm --dir packages/hub exec wrangler deploy --config wrangler.generated.<profile>.toml
 ```
 
@@ -27,6 +27,7 @@ environment at render time and rendering fails if it is unset.
 | `hub.hyperdrive` | Hyperdrive config id for every `[[hyperdrive]]` binding the deployment keeps. A single-database deployment binds only `RELAY_POSTGRES` and omits `RELAY_POSTGRES_SHARD_1`. |
 | `hub.vars` | Deployment-owned Hub vars: `AUTH_COOKIE_DOMAIN`, `AUTH_COOKIE_PREFIX`, `XMATRIX_EMAIL_FROM`, `PLATFORM_ADMIN_EMAILS`, `PLATFORM_ADMIN_SPACE_ID`, and `RELAY_POSTGRES_SHARD_<n>_ID` for each extra database shard binding. A var may live in the committed config or the profile, never both. |
 | `hub.omitBindings`, `web.omitBindings` | Optional bindings this deployment does not provision (for example `RELAY_POSTGRES_SHARD_1`, `RELEASE_ASSETS`). |
+| `web.beta` | Optional beta Web that every beta release deploys: `workerName`, `origin`, `workersDev`, `previewUrls`. `web` is then the stable Web, which only stable releases deploy. The component `web-beta` renders it (`wrangler.generated.<profile>-beta.json`) and `env <profile> web-beta` gives its build URLs. Its origin becomes the Hub's `APP_BETA_URL`, trusted exactly like `APP_URL`, and must sit inside `AUTH_COOKIE_DOMAIN`. |
 
 `production.json` is the official xMatrix deployment and is
 used by the release workflows. Its identity — account, Hyperdrive ids,
@@ -34,6 +35,6 @@ operator emails and Space ids — is read through env references from the
 release environments' secrets (`CLOUDFLARE_ACCOUNT_ID`, `XMATRIX_HYPERDRIVE_ID`,
 `XMATRIX_HYPERDRIVE_SHARD_1_ID`, `XMATRIX_PLATFORM_ADMIN_EMAILS`,
 `XMATRIX_PLATFORM_ADMIN_SPACE_ID`), so the profile ships in the public source
-and the values do not. `node scripts/deploy-config.mjs origin <profile> hub|web`
+and the values do not. `node scripts/deploy-config.mjs origin <profile> hub|web|web-beta`
 prints one public origin without reading those secrets. `ci.json` holds placeholder values for the CI bundle check, and
 `example.json` shows the profile shape.

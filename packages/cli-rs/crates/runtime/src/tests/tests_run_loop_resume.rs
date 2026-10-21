@@ -310,6 +310,58 @@ async fn a_continuation_for_another_switch_runs_nothing() {
     assert!(first.is_none());
 }
 
+/// The Hub's continuation as its own frame to `instance`, naming `switches`.
+fn continuation_frame(instance: &str, switches: &[&str]) -> AgentInstanceConnectionEvent {
+    AgentInstanceConnectionEvent::Server(
+        serde_json::from_value(serde_json::json!({
+            "type": "agent_switch_continuation",
+            "channelId": "channel",
+            "instanceId": instance,
+            "requestIds": switches,
+            "prompt": "[xMatrix] Hub-worded frame continuation",
+        }))
+        .unwrap(),
+    )
+}
+
+#[tokio::test]
+async fn the_hubs_continuation_frame_resumes_the_turn_it_owes() {
+    let ([first, second], _) = inputs_with_hub_continuation(vec![
+        model_switch_event("sonnet"),
+        continuation_frame("inst-claude-test", &["req-sonnet"]),
+    ])
+    .await;
+    let Some(crate::RunLoopInput::Resume { channel_id, prompt }) = first else {
+        panic!("expected the Hub's continuation frame to resume the turn");
+    };
+    assert_eq!(channel_id, "channel");
+    assert_eq!(prompt, "[xMatrix] Hub-worded frame continuation");
+    assert!(second.is_none(), "resumed once");
+}
+
+#[tokio::test]
+async fn a_continuation_frame_for_another_instance_runs_nothing() {
+    let ([first, second], _) = inputs_with_hub_continuation(vec![
+        model_switch_event("sonnet"),
+        continuation_frame("inst-someone-else", &["req-sonnet"]),
+    ])
+    .await;
+    assert!(first.is_none(), "the frame is no turn and no event for the loop");
+    assert!(second.is_none());
+}
+
+#[tokio::test]
+async fn a_newer_message_supersedes_the_hubs_continuation_frame() {
+    let ([first, second], _) = inputs_with_hub_continuation(vec![
+        model_switch_event("sonnet"),
+        channel_message_event("m1", "channel", "do this instead"),
+        continuation_frame("inst-claude-test", &["req-sonnet"]),
+    ])
+    .await;
+    assert!(matches!(first, Some(crate::RunLoopInput::Delivery { .. })));
+    assert!(second.is_none(), "the continuation frame is dropped");
+}
+
 #[tokio::test]
 async fn the_hubs_continuation_reaches_the_run_loop_over_the_socket() {
     let (mut relay, _) = continuation_hub_relay().await;

@@ -196,7 +196,8 @@ export function pageChildren(pages: readonly PageSummary[]): Map<string | null, 
 
 
 export interface PagePresenceState {
-  user?: { name: string; color: string; kind?: "user" | "agent"; conversationId?: string | null };
+  /** Who: a person by their account, so others draw their own face; an Agent by the conversation it works from. */
+  user?: { name: string; color: string; kind?: "user" | "agent"; id?: string; conversationId?: string | null };
   /** A person views or edits; an Agent co-writing live watches, thinks, writes or waits for someone. */
   activity?: "viewing" | "editing" | "watching" | "thinking" | "writing" | "waiting";
   block?: string;
@@ -286,7 +287,7 @@ export class PageLiveSession {
   private readonly listeners = new Set<(notice: PageSessionNotice | { type: "status"; connected: boolean }) => void>();
 
   constructor(private readonly input: { spaceId: string; pageId: string | null; token: string;
-    user: { name: string; color: string };
+    user: { id?: string; name: string; color: string };
     /**
      * For a new page: makes it from this document as it stands (its Yjs state), when this person
      * first writes on it. Like copy-on-write, nothing is kept until then.

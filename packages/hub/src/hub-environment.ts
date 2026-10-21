@@ -129,6 +129,7 @@ export const HUB_ENVIRONMENT = {
 
   // Deployment identity and policy (deployment profile).
   APP_URL: { kind: "var", scope: "deployment", summary: "Web origin; rendered from the profile's `web.origin`. Unset: links, redirects and auth fail closed." },
+  APP_BETA_URL: { kind: "var", scope: "deployment", summary: "Beta Web origin every beta deploys; rendered from the profile's `web.beta.origin`. Trusted for sign-in and direct reads exactly like APP_URL; links still go to APP_URL. Unset: only APP_URL is trusted." },
   CONNECTOR_DINGTALK_COMPANY_CONFIG: { kind: "secret", scope: "feature", summary: "Verified company-console JSON: suite-ticket protocol, sync-http delivery, numeric suiteId, developerCorpId, appId and approved templateId/templateField. Requires complete native suite keys; unset keeps company routes and actions unavailable." },
   HUB_URL: { kind: "var", scope: "deployment", summary: "Hub origin and token issuer; rendered from the profile's `hub.origin`. Unset: authentication fails closed." },
   XMATRIX_RUNTIME_LOCATION_HINT: { kind: "var", scope: "deployment", summary: "Durable Object location hint (e.g. `apac`) for Runtime cells, which must sit next to PostgreSQL. Unset: cells are created near their first caller." },

@@ -9,6 +9,8 @@ import {
   api,
   bumpVersion,
   checkStable,
+  codeqlLanguages,
+  COMPONENTS,
   inflightRef,
   intentRef,
   nextBetaVersion,
@@ -48,11 +50,20 @@ test("a scope is canonical, unique and keeps desktop with its cli", () => {
   }
 });
 
-test("a stable scope names clients only; hub and web ship with every beta", () => {
-  assert.deepEqual(normalizeScope("all", "stable"), ["cli", "desktop", "android", "ios"]);
-  assert.deepEqual(normalizeScope("ios,cli", "stable"), ["cli", "ios"]);
-  for (const bad of ["hub", "cli,web", "desktop", ""]) {
-    assert.throws(() => normalizeScope(bad, "stable"), /hub and web ship with every beta/u, bad);
+test("no component ships unscanned; the workflows that release it are scanned too", () => {
+  for (const component of COMPONENTS) {
+    const [workflows, language, ...rest] = codeqlLanguages([component]);
+    assert.equal(workflows, "actions", component);
+    assert.equal(typeof language, "string", component);
+    assert.deepEqual(rest, [], component);
+  }
+});
+
+test("a stable scope names the stable Web and clients; the hub ships with every beta", () => {
+  assert.deepEqual(normalizeScope("all", "stable"), ["web", "cli", "desktop", "android", "ios"]);
+  assert.deepEqual(normalizeScope("ios,web,cli", "stable"), ["web", "cli", "ios"]);
+  for (const bad of ["hub", "cli,hub", "desktop", ""]) {
+    assert.throws(() => normalizeScope(bad, "stable"), /the hub ships with every beta/u, bad);
   }
 });
 

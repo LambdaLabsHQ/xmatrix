@@ -1,4 +1,5 @@
-import type { PageConversation, PageLink } from "@xmatrix/protocol";
+import { faceOfSender, type FaceOf, type LiveAgentStatus, type PageConversation, type PageLink }
+  from "@xmatrix/protocol";
 
 /**
  * Which conversations sit beside a page, where, and in what order
@@ -12,7 +13,33 @@ export const MARGIN_ACTIVE_MS = 24 * 60 * 60 * 1000;
 /** Space between two cards in the margin, in pixels. */
 export const MARGIN_GAP = 8;
 
-export type MarginAgent = PageConversation["agents"][number];
+/** An Agent live in a conversation, by its face: its harness's when this client knows it, else its Instance's. */
+export interface MarginAgent {
+  instanceId: string;
+  name: string;
+  status: LiveAgentStatus;
+  face: FaceOf;
+}
+
+/** A conversation's newest message: whose face it is, their name, and what it said. */
+export interface MarginMessage {
+  face: FaceOf;
+  label: string;
+  bodyPreview: string;
+  sentAt: string;
+}
+
+/** A message as the listing gives it, by its sender's face (`faceOfSender`): a person and an Agent by their ids. */
+export function listedMessage(message: PageConversation["lastMessage"]): MarginMessage | null {
+  return message ? { face: faceOfSender(message.from), label: message.from.label, bodyPreview: message.bodyPreview,
+    sentAt: message.sentAt } : null;
+}
+
+/** The Agents the listing gives, by their Instances' faces. */
+export function listedAgents(agents: PageConversation["agents"]): MarginAgent[] {
+  return agents.map(({ instanceId, name, status, harness }) => ({ instanceId, name, status,
+    face: { kind: "agent", name, harness: harness ?? null, id: instanceId } }));
+}
 
 export interface MarginConversation {
   conversationId: string;
@@ -26,7 +53,7 @@ export interface MarginConversation {
   /** An open discussion's passage, and the link that resolves it. */
   quote: string | null;
   linkId: string | null;
-  lastMessage: PageConversation["lastMessage"];
+  lastMessage: MarginMessage | null;
   agents: MarginAgent[];
   unread: number;
   activityAt: string;
@@ -39,7 +66,7 @@ export interface MarginConversation {
 /** What this client already knows live about a conversation; newer facts win over the page's listing. */
 export interface LiveConversation {
   name?: string | null;
-  lastMessage?: PageConversation["lastMessage"];
+  lastMessage?: MarginMessage | null;
   agents?: MarginAgent[];
   headSequence?: number;
   readSequence?: number;
@@ -91,12 +118,12 @@ export function marginConversations(input: {
     if (listed && !summary) continue;
     const link = [...links].sort((a, b) => placement(a) - placement(b))[0]!;
     const live = input.live?.(conversationId) ?? null;
-    const lastMessage = newest(summary?.lastMessage ?? null, live?.lastMessage ?? null);
+    const lastMessage = newest(listedMessage(summary?.lastMessage ?? null), live?.lastMessage ?? null);
     const head = Math.max(summary?.headSequence ?? 0, live?.headSequence ?? 0);
     const read = Math.max(summary?.readSequence ?? 0, live?.readSequence ?? 0);
     // Someone who never opened it has nothing unread there; it is not theirs to catch up on.
     const unread = read > 0 ? Math.max(0, head - read) : 0;
-    const agents = live?.agents ?? summary?.agents ?? [];
+    const agents = live?.agents ?? listedAgents(summary?.agents ?? []);
     const activityAt = later(later(summary?.activityAt ?? link.lastSeenAt, link.lastSeenAt), lastMessage?.sentAt);
     const discussion = placement(link) === 0;
     out.push({
@@ -155,36 +182,44 @@ export function anchorTop(tops: ReadonlyMap<string, number>, conversation: Pick<
  * Card positions in the margin, as comments in Google Docs: each card as close
  * to its anchor as the cards before it allow. A focused card sits exactly at
  * its anchor, and the cards before it move up to make room.
+ *
+ * Given where the page ends, the margin fits the page and never lengthens it:
+ * cards that would run past the end move up, a focused card rises only as far
+ * as it must to end there, and a card that still does not fit beside an open
+ * one is left out until it closes.
  */
 export function layoutMargin(cards: ReadonlyArray<{ id: string; top: number; height: number }>,
-  focusedId: string | null = null): Map<string, number> {
+  focusedId: string | null = null, end: number | null = null): Map<string, number> {
   const placed = [...cards].sort((a, b) => a.top - b.top || a.id.localeCompare(b.id));
   const out = new Map<string, number>();
   const pivot = focusedId ? placed.findIndex((card) => card.id === focusedId) : -1;
-  if (pivot < 0) {
-    let bottom = Number.NEGATIVE_INFINITY;
-    for (const card of placed) {
-      const top = Math.max(card.top, bottom + MARGIN_GAP);
-      out.set(card.id, top);
-      bottom = top + card.height;
-    }
-    return out;
-  }
-  const focused = placed[pivot]!;
-  out.set(focused.id, focused.top);
-  let bottom = focused.top + focused.height;
+  const focused = pivot >= 0 ? placed[pivot]! : null;
+  if (focused) out.set(focused.id, end === null ? focused.top : Math.max(0, Math.min(focused.top, end - focused.height)));
+  let bottom = focused ? out.get(focused.id)! + focused.height : Number.NEGATIVE_INFINITY;
   for (const card of placed.slice(pivot + 1)) {
     const top = Math.max(card.top, bottom + MARGIN_GAP);
     out.set(card.id, top);
     bottom = top + card.height;
   }
-  let ceiling = focused.top;
-  for (const card of placed.slice(0, pivot).reverse()) {
+  // With nothing open, the cards past the end move up until the last ends with the page.
+  if (!focused && end !== null && bottom > end) {
+    let floor = end;
+    for (const card of [...placed].reverse()) {
+      const top = Math.min(out.get(card.id)!, floor - card.height);
+      out.set(card.id, top);
+      floor = top - MARGIN_GAP;
+    }
+  }
+  let ceiling = focused ? out.get(focused.id)! : Math.min(0, ...out.values());
+  for (const card of placed.slice(0, Math.max(pivot, 0)).reverse()) {
     const top = Math.min(card.top, ceiling - MARGIN_GAP - card.height);
     out.set(card.id, top);
     ceiling = top;
   }
   // Nothing goes above the page: the whole column moves down instead.
   if (ceiling < 0) for (const [id, top] of out) out.set(id, top - ceiling);
+  if (end !== null) {
+    for (const card of placed) if (card !== focused && out.get(card.id)! + card.height > end) out.delete(card.id);
+  }
   return out;
 }

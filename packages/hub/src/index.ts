@@ -80,6 +80,7 @@ import { registerAppSignInRoutes } from "./index-routes-app-sign-in";
 import { countAuthMetricsIn } from "./auth-observability";
 import { registerAuthSessionRoutes } from "./index-routes-auth-sessions";
 import { registerIndexRoutesHumanAvatar } from "./index-routes-human-avatar";
+import { registerFaceRoutes } from "./index-routes-faces";
 import { registerIndexRoutesMachineDaemonAdmission } from "./index-routes-machine-daemon-admission";
 import { registerIndexRoutesAppleBilling } from "./index-routes-apple-billing";
 import { registerIndexRoutesPush } from "./index-routes-push";
@@ -142,6 +143,7 @@ registerOnboardingFunnelRoutes(app);
 registerIndexRoutesHumanProfile(app);
 registerAuthSessionRoutes(app);
 registerIndexRoutesHumanAvatar(app);
+registerFaceRoutes(app);
 registerAccountDeletionRoutes(app);
 
 export default {

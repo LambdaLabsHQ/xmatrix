@@ -1,7 +1,7 @@
 import { test, expect } from "./fixtures";
 import type { Page } from "@playwright/test";
 import { E2E_CHANNEL, E2E_NOW, E2E_SPACE, E2E_USER_SENDER,
-  fixtureJson, fixtureRequestBodies, fixtureRequests, installWorkspaceStubs } from "./workspace-fixtures";
+  fixtureJson, fixtureRequestBodies, fixtureRequests, installWorkspaceStubs, routeInvocationPush } from "./workspace-fixtures";
 
 const messageId = "message-invocations";
 const source = "@codex repo:LambdaLabsHQ/xmatrix review this; @claude repo:LambdaLabsHQ/xmatrix check tests. @auto model:reviewer check coverage.";
@@ -48,12 +48,14 @@ async function openChip(chip: ReturnType<Page["locator"]>) {
 }
 
 async function installInvocationFixture(page: Page, launches: unknown[], body = source, continuations: unknown[] = []) {
+  const push = await routeInvocationPush(page);
   await installWorkspaceStubs(page, { spaces: [E2E_SPACE], channels: [{ ...E2E_CHANNEL, messageCount: 1, historyHeadSequence: 1 }] });
   await fixtureJson(page, "invocation-history", "**/api/xmatrix/channels/channel-general/history**", {
     messages: [{ messageId, channelId: E2E_CHANNEL.id, sequence: 1, body,
       sentAt: E2E_NOW, from: E2E_USER_SENDER }], hasMore: false,
   });
   await fixtureJson(page, "invocation-launches", "**/api/xmatrix/channels/channel-general/agent-launches/query", { launches, rejections: [rejection], continuations });
+  return push;
 }
 
 test("repository baseline remains in finished invocation details with UTC and unknown evidence", async ({ page }) => {
@@ -76,7 +78,7 @@ test("repository baseline remains in finished invocation details with UTC and un
 
 test("each mention has independent live progress and a keyboard-accessible timeline", async ({ page }) => {
   await page.clock.install({ time: new Date(E2E_NOW) });
-  await installInvocationFixture(page, [codex, claude]);
+  const push = await installInvocationFixture(page, [codex, claude]);
   await page.goto("/app/personal-sspaceperso/channels/general-cchannelgen", { waitUntil: "domcontentloaded" });
   const chips = page.locator(".app-mention-invocation");
   await expect(chips).toHaveCount(3);
@@ -129,6 +131,7 @@ test("each mention has independent live progress and a keyboard-accessible timel
       startupSteps: ["cwd_ready", "relay_registered", "runtime_ready", "turn_running"].map(phase => ({ phase, at: E2E_NOW })) } }, claude],
     rejections: [rejection], executions: [initialExecution("running")],
   });
+  await push();
   await expect(chips.nth(0)).toContainText("Started", { timeout: 15000 });
   await openChip(chips.nth(0));
   await expect(page.getByRole("dialog").getByRole("list", { name: "Invocation progress" }).locator("li", { hasText: "Runtime ready" })).toHaveAttribute("data-state", "done");
@@ -138,17 +141,19 @@ test("each mention has independent live progress and a keyboard-accessible timel
   await fixtureJson(page, "invocation-launches", "**/api/xmatrix/channels/channel-general/agent-launches/query", {
     error: "Channel not found",
   }, { status: 403 });
+  await push();
   // Without launch evidence a summon keeps the words as written and claims no status.
   await expect(page.locator(".app-mention-summon-written")).toHaveCount(3, { timeout: 15000 });
   await expect(chips.locator(".app-mention-invocation-status")).toHaveCount(0);
   await fixtureJson(page, "invocation-launches", "**/api/xmatrix/channels/channel-general/agent-launches/query", {
     launches: [codex, claude], rejections: [rejection],
   });
-  await page.clock.fastForward(11000);
+  await push();
   await expect(chips).toHaveCount(3, { timeout: 15000 });
   await fixtureJson(page, "invocation-launches", "**/api/xmatrix/channels/channel-general/agent-launches/query", {
     launches: [{ ...codex, activity: { ...codex.activity, phase: "wrapper_startup_failed", runStatus: "exited" } }, claude], rejections: [rejection],
   });
+  await push();
   await expect(chips.nth(0)).toContainText("Failed", { timeout: 15000 });
   await expect(chips.nth(1)).toContainText("Started");
   await page.emulateMedia({ reducedMotion: "reduce" });
@@ -195,7 +200,7 @@ test("a started summon stays started whatever its Run does next", async ({ page 
 });
 
 test("reborn and handoff phrases show their own successor without requiring current membership", async ({ page }) => {
-  await installInvocationFixture(page, [], `${reborn.sourceMention} restart; ${handoff.sourceMention} continue.`, [reborn, handoff]);
+  const push = await installInvocationFixture(page, [], `${reborn.sourceMention} restart; ${handoff.sourceMention} continue.`, [reborn, handoff]);
   await page.goto("/app/personal-sspaceperso/channels/general-cchannelgen", { waitUntil: "domcontentloaded" });
   // A handoff draws both of its Agents as invocation chips joined by an arrow.
   const chips = page.locator(".app-mention-invocation");
@@ -229,6 +234,8 @@ test("reborn and handoff phrases show their own successor without requiring curr
   await page.screenshot({ path: "test-results/mention-invocation-continuations-mobile.png", fullPage: true });
   await page.keyboard.press("Escape");
   await fixtureJson(page, "invocation-launches", "**/api/xmatrix/channels/channel-general/agent-launches/query", { error: "Access revoked" }, { status: 403 });
+  // Access is lost between reads; the next change the Hub pushes finds it gone.
+  await push();
   await expect(chips).toHaveCount(0, { timeout: 15000 });
 });
 
@@ -296,7 +303,7 @@ test("an elsewhere handoff shows the parameters Jev picked on the successor chip
 test("a fresh @auto handoff stays on Picking until the picked launch arrives", async ({ page }) => {
   const mention = "@claude:4:handoff:@auto";
   await page.clock.install({ time: new Date(E2E_NOW) });
-  await installInvocationFixture(page, [], `${mention} continue`);
+  const push = await installInvocationFixture(page, [], `${mention} continue`);
   await page.goto("/app/personal-sspaceperso/channels/general-cchannelgen", { waitUntil: "domcontentloaded" });
   const card = page.locator(".app-mention-handoff");
   await expect(card.locator(".app-mention-invocation").nth(1)).toContainText("Picking");
@@ -304,6 +311,7 @@ test("a fresh @auto handoff stays on Picking until the picked launch arrives", a
   await fixtureJson(page, "invocation-launches", "**/api/xmatrix/channels/channel-general/agent-launches/query", {
     launches: [handoffPick(mention, "auto")], rejections: [], continuations: [],
   });
+  await push();
   await expect(card.locator('[data-jev="true"]')).toHaveText([
     "harness:grok", "model:grok-4", "effort:high", "repo:LambdaLabsHQ/xmatrix",
   ], { timeout: 10_000 });
@@ -433,7 +441,7 @@ test("typed startup failures explain their stage and clear after confirmed recov
     diagnosticId: "diag_11111111-1111-4111-8111-111111111111", retryable: true };
   const retrying = { ...codex, activity: { ...codex.activity, operationFailure: failure,
     errorCode: failure.code, diagnosticId: failure.diagnosticId } };
-  await installInvocationFixture(page, [retrying], `${codex.sourceMention} inspect`);
+  const push = await installInvocationFixture(page, [retrying], `${codex.sourceMention} inspect`);
   await page.goto("/app/personal-sspaceperso/channels/general-cchannelgen", { waitUntil: "domcontentloaded" });
   const chip = page.locator(".app-mention-invocation");
   await expect(chip).toContainText("Connecting");
@@ -454,7 +462,7 @@ test("typed startup failures explain their stage and clear after confirmed recov
     launches: [{ ...codex, activity: { runStatus: "running", phase: "runtime_ready", updatedAt: E2E_NOW,
       wrapperReadyAt: E2E_NOW } }], nextCursor: null,
   });
-  await page.clock.fastForward(3000);
+  await push();
   await expect(chip).toContainText("Initializing");
   await expect(chip).not.toContainText("Starting");
   await expect(dialog).not.toContainText("Checking credentials");
@@ -661,10 +669,14 @@ test("the summon chip lists every checked environment, including Grok past the o
   await expect(dialog).toContainText("candidate_1: 80.0%");
   await expect(dialog).toContainText("Environment input digest: " + "b".repeat(64));
   await page.setViewportSize({ width: 393, height: 852 });
-  const box = await dialog.boundingBox();
-  expect(box!.x).toBeGreaterThanOrEqual(0);
-  expect(box!.width).toBeGreaterThan(0);
-  expect(box!.x + box!.width).toBeLessThanOrEqual(393);
+  // The open panel is repositioned on the frame after the resize, not inside
+  // setViewportSize: a box read at once is still the desktop placement.
+  await expect(async () => {
+    const box = await dialog.boundingBox();
+    expect(box!.x).toBeGreaterThanOrEqual(0);
+    expect(box!.width).toBeGreaterThan(0);
+    expect(box!.x + box!.width).toBeLessThanOrEqual(393);
+  }).toPass({ timeout: 5000 });
 });
 
 test("a refusal notice hides environments outside explicit constraints", async ({ page }) => {
@@ -880,7 +892,7 @@ test("Jev's choices enter the mention one by one, taking no space before they ar
       choices: [{ key: "modelEffort", selected: "model_0", probabilities: { model_0: .68, model_1: .32 } },
         { key: "workspace", selected: "workspace_0", probabilities: { workspace_0: 1 } }] },
       rows: [{ harness: "codex", machineId: "machine-bobos", label: "bobos", machineLabel: "build01", activeRuns: 0, selected: true }] } };
-  await installInvocationFixture(page, [], `${mention} fix the flaky registration tests`);
+  const push = await installInvocationFixture(page, [], `${mention} fix the flaky registration tests`);
   await fixtureJson(page, "invocation-launches", "**/api/xmatrix/channels/channel-general/agent-launches/query",
     { launches: [], rejections: [], continuations: [] });
   await page.goto("/app/personal-sspaceperso/channels/general-cchannelgen", { waitUntil: "domcontentloaded" });
@@ -888,6 +900,7 @@ test("Jev's choices enter the mention one by one, taking no space before they ar
   await page.clock.pauseAt(new Date(Date.parse(E2E_NOW) + 20_000));
   await fixtureJson(page, "invocation-launches", "**/api/xmatrix/channels/channel-general/agent-launches/query",
     { launches: [auto], rejections: [], continuations: [] });
+  await push();
   const chip = page.locator(".app-mention-invocation").first();
   const filled = chip.locator('[data-jev="true"]');
   // Step the clock in small slices until the decision lands, so the reveal's own beats stay ahead.

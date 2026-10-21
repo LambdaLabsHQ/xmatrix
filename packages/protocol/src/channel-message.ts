@@ -73,4 +73,10 @@ export interface ChannelMessage {
    * while the card is open.
    */
   questionnaireState?: import("./channel-activity.js").QuestionnaireState;
+  /**
+   * What the command this message wrote came to (a switch, a stop, a refused
+   * reborn or handoff). Derived from the Hub's own annotations; absent until
+   * the Hub answers.
+   */
+  commandResult?: import("./channel-activity.js").CommandResult;
 }

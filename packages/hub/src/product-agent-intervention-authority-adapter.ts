@@ -1,3 +1,5 @@
+import { recordCommandResult } from "./command-result";
+import { publishChannelInvocationsChanged } from "./channel-live-judgment";
 import { HANDOFF_CONTEXT_MAX_CHARS, plainRecord as record } from "@xmatrix/protocol";
 import {
   orchestrateProductAgentIntervention,
@@ -297,8 +299,8 @@ export function createProductAgentInterventionAuthorityPort(input: {
       });
     },
 
-    async publishSystemNotice(channelId, body, key, outcome) {
-      const messageId = `system:${input.sourceMessageId}:kill-all${key ? `:${key}` : ""}`.slice(0, 200);
+    async publishSystemNotice(channelId, body) {
+      const messageId = `system:${input.sourceMessageId}:kill-all`.slice(0, 200);
       const response = await retryTransientAuthorityResponse(() =>
         dispatchProductMessageAppend(input.env, channelId, {
           commandId: stableCommandId("kill-all-notice", messageId),
@@ -309,18 +311,21 @@ export function createProductAgentInterventionAuthorityPort(input: {
           senderSnapshot: productAgentSystemNoticeSenderSnapshot(input.actorUserId),
           residual: {
             appMetadata: {
-              // Stop summaries are control-plane facts. They must never become
-              // fresh Human work when history is replayed to an Agent.
+              // A control-plane fact. It must never become fresh Human work
+              // when history is replayed to an Agent.
               xmatrixProvenance: "system_fact",
               xmatrixSystemNotice: true,
               sourceMessageId: input.sourceMessageId,
-              // The stop command's chip reads this when no Run was fenced.
-              ...(outcome ? { stopCommandOutcome: outcome } : {}),
             },
           },
         }));
       const result = await payload(response);
       if (!response.ok) throw responseError("kill-all notice", response, result);
+    },
+
+    async recordResult(channelId, text, key, outcome) {
+      await recordCommandResult(input.env, { channelId, messageId: input.sourceMessageId,
+        key: key ?? "stop", entry: { note: { text, ...(outcome ? { stopOutcome: outcome } : {}) } } });
     },
   };
 }
@@ -333,7 +338,7 @@ export async function dispatchProductAgentInterventionAfterAuthorityMessage(inpu
   actorUserId: string;
 }): Promise<ProductAgentInterventionResult | undefined> {
   if (!parseProductAgentStopCommand(input.body)) return undefined;
-  return orchestrateProductAgentIntervention({
+  const result = await orchestrateProductAgentIntervention({
     channelId: input.channelId,
     sourceMessageId: input.messageId,
     body: input.body,
@@ -343,6 +348,9 @@ export async function dispatchProductAgentInterventionAfterAuthorityMessage(inpu
       sourceMessageId: input.messageId,
     }),
   });
+  // The stops it issued are the command chip's next answer.
+  await publishChannelInvocationsChanged(input.env, input.channelId);
+  return result;
 }
 
 /** Validated daemon stop targets from an Authority result that terminalized live Runs. */

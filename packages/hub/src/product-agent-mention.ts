@@ -82,8 +82,9 @@ export interface ProductAgentMentionPort {
    * nobody: the harness to summon, or none. `window`: its Human author may choose first. */
   decideFirstMessageLaunch(input: { channelId: string; messageId: string; body: string; window: boolean }):
     Promise<{ claimed: boolean; harness?: string }>;
-  /** Best-effort product feedback when summon cannot proceed. */
-  publishSystemNotice?(channelId: string, body: string): Promise<void>;
+  /** Why a reborn or handoff was refused, recorded on the address that asked
+   * (`key` names it) rather than posted as a message. */
+  recordResult?(channelId: string, text: string, key: string): Promise<void>;
   /** Bounded operational diagnostics; must not include message or command payloads. */
   reportDiagnostic?(input: {
     stage: "summon" | "system_notice";
@@ -227,23 +228,25 @@ export async function orchestrateProductNewConversationStart(input: {
  * either. Without this the whole refusal existed only as a notice count in a
  * log line, and the mention looked like nothing had happened at all.
  */
+const refusal = (address: string, text: string) => ({ address, text });
+
 async function publishContinuationNotices(
   input: ProductAgentMentionOrchestrationInput,
-  notices: readonly string[],
+  notices: readonly { address: string; text: string }[],
 ): Promise<void> {
-  if (!input.port.publishSystemNotice) return;
+  if (!input.port.recordResult) return;
   for (const notice of notices) {
     try {
-      await input.port.publishSystemNotice(input.channelId, notice);
+      await input.port.recordResult(input.channelId, notice.text, notice.address.toLowerCase());
     } catch (error) {
       input.port.reportDiagnostic?.({
         stage: "system_notice",
         channelId: input.channelId,
         messageId: input.messageId,
-        error: error instanceof Error ? error.message : "system notice publication failed",
+        error: error instanceof Error ? error.message : "command result recording failed",
       });
-      // These are refusal notices, not successful-spawn decoration. A failed
-      // publication must remain an error to the caller, never a silent success.
+      // These are refusals, not successful-spawn decoration. A failed
+      // recording must remain an error to the caller, never a silent success.
       throw error;
     }
   }
@@ -253,7 +256,7 @@ async function orchestrateProductAgentRebornMentions(
   input: ProductAgentMentionOrchestrationInput,
   mentions: readonly ProductRebornInstanceMention[],
 ): Promise<ProductAgentMentionOrchestrationResult> {
-  const notices: string[] = [];
+  const notices: { address: string; text: string }[] = [];
   let spawned = 0;
   for (const mention of mentions) {
     const address = `@${mention.agentName}:${mention.channelInstanceId}`;
@@ -264,16 +267,16 @@ async function orchestrateProductAgentRebornMentions(
     } catch (error) {
       input.port.reportDiagnostic?.({ stage: "summon", channelId: input.channelId,
         messageId: input.messageId, error: error instanceof Error ? error.message : "Reborn target lookup failed" });
-      notices.push(`Reborn failed [reborn_target_lookup_failed] for ${address}. ` +
-        "The original Instance could not be read or access was refused. No recovery was queued. Check the Instance and Channel access before retrying.");
+      notices.push(refusal(address, `Reborn failed [reborn_target_lookup_failed] for ${address}. ` +
+        "The original Instance could not be read or access was refused. No recovery was queued. Check the Instance and Channel access before retrying."));
       continue;
     }
     if (!target) {
-      notices.push(`xMatrix could not find ${address} to reborn.`);
+      notices.push(refusal(address, `xMatrix could not find ${address} to reborn.`));
       continue;
     }
     if (target.channelId !== input.channelId || target.channelInstanceId !== mention.channelInstanceId) {
-      notices.push(`xMatrix refused an invalid reborn target for ${address}.`);
+      notices.push(refusal(address, `xMatrix refused an invalid reborn target for ${address}.`));
       continue;
     }
     try {
@@ -285,12 +288,12 @@ async function orchestrateProductAgentRebornMentions(
     } catch (error) {
       const code = error && typeof error === "object" && typeof (error as { code?: unknown }).code === "string"
         ? (error as { code: string }).code : "registration_reborn_failed";
-      notices.push(`Reborn failed [${code}] for ${address}. ` +
-        "No recovery was queued. Check the Agent's registration and Channel access before retrying.");
+      notices.push(refusal(address, `Reborn failed [${code}] for ${address}. ` +
+        "No recovery was queued. Check the Agent's registration and Channel access before retrying."));
     }
   }
   await publishContinuationNotices(input, notices);
-  return { considered: mentions.length, spawned, notices };
+  return { considered: mentions.length, spawned, notices: notices.map((notice) => notice.text) };
 }
 
 async function orchestrateProductAgentHandoffMentions(
@@ -299,30 +302,30 @@ async function orchestrateProductAgentHandoffMentions(
 ): Promise<ProductAgentMentionOrchestrationResult> {
   const resolveSource = input.port.getHandoffTarget?.bind(input.port) ??
     input.port.getRebornTarget.bind(input.port);
-  const notices: string[] = [];
+  const notices: { address: string; text: string }[] = [];
   let spawned = 0;
   for (const mention of mentions) {
     const address = `@${mention.sourceAgentName}:${mention.channelInstanceId}`;
     const target = await resolveSource({ channelId: input.channelId,
       agentName: mention.sourceAgentName, channelInstanceId: mention.channelInstanceId });
     if (!target) {
-      notices.push(`xMatrix could not find ${address} to hand off.`);
+      notices.push(refusal(address, `xMatrix could not find ${address} to hand off.`));
       continue;
     }
     if (target.channelId !== input.channelId || target.channelInstanceId !== mention.channelInstanceId) {
-      notices.push(`xMatrix refused an invalid handoff source for ${address}.`);
+      notices.push(refusal(address, `xMatrix refused an invalid handoff source for ${address}.`));
       continue;
     }
     // Management and direct-conversation directories belong to their purpose.
     const routedAs = metadataString(target.metadata, "routedAs");
     if (routedAs?.startsWith("management_") || routedAs === "direct_conversation") {
-      notices.push(`xMatrix could not hand off ${address} to @${mention.successorName} (handoff_source_not_transferable).`);
+      notices.push(refusal(address, `xMatrix could not hand off ${address} to @${mention.successorName} (handoff_source_not_transferable).`));
       continue;
     }
     const auto = isAutoHandoffSuccessor(mention.successorName);
     const harness = auto ? undefined : agentPresetForLauncher(mention.successorName)?.id;
     if (!input.port.handOff || (!auto && !harness)) {
-      notices.push(`xMatrix could not hand off ${address} to @${mention.successorName} (registration_handoff_failed).`);
+      notices.push(refusal(address, `xMatrix could not hand off ${address} to @${mention.successorName} (registration_handoff_failed).`));
       continue;
     }
     // A handoff is an ordinary launch: routing weighs every machine, with the
@@ -343,9 +346,9 @@ async function orchestrateProductAgentHandoffMentions(
     } catch (error) {
       const code = error && typeof error === "object" && typeof (error as { code?: unknown }).code === "string"
         ? (error as { code: string }).code : "registration_handoff_failed";
-      notices.push(`xMatrix could not hand off ${address} to @${mention.successorName} (${code}).`);
+      notices.push(refusal(address, `xMatrix could not hand off ${address} to @${mention.successorName} (${code}).`));
     }
   }
   await publishContinuationNotices(input, notices);
-  return { considered: mentions.length, spawned, notices };
+  return { considered: mentions.length, spawned, notices: notices.map((notice) => notice.text) };
 }

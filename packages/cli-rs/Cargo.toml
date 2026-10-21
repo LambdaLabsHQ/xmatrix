@@ -111,3 +111,11 @@ xmatrix-cli-runtime = { path = "crates/runtime" }
 
 [dev-dependencies]
 serde_json = { workspace = true }
+
+# Line tables keep file:line in our backtraces; full debug info only made the
+# test build and its Windows PDB link slower. Dependencies carry none.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false

@@ -96,7 +96,7 @@ static CLAUDE_RATE_LIMIT_VERDICT: std::sync::Mutex<Option<(std::time::Instant, L
 /// account at 99.6% that Anthropic still serves read as 100% and showed as a
 /// hard limit (2026-10-05). `isUsingOverage` means the account is being served
 /// past its windows on extra usage.
-pub fn claude_rate_limit_event_usage(value: &Value) -> Option<LlmUsage> {
+pub(crate) fn claude_rate_limit_event_usage(value: &Value) -> Option<LlmUsage> {
     if value.get("type").and_then(Value::as_str) != Some("rate_limit_event") {
         return None;
     }
@@ -207,7 +207,7 @@ static CLAUDE_OAUTH_USAGE_BY_ACCOUNT: KeyedProviderUsageCache =
 ///
 /// The caller must first prove a spawn of its target resolves this same login
 /// (no `CLAUDE_CODE_OAUTH_TOKEN`, `CLAUDE_CONFIG_DIR`, or HOME override).
-pub async fn read_claude_oauth_usage_for_default_account(force: bool) -> Option<LlmUsage> {
+pub(crate) async fn read_claude_oauth_usage_for_default_account(force: bool) -> Option<LlmUsage> {
     let credential = claude_default_account_credential().await?;
     let key = credential.cache_key;
     if let Some(cached) = CLAUDE_OAUTH_USAGE_BY_ACCOUNT.hit_unless_forced(&key, force) {
@@ -230,7 +230,7 @@ pub async fn read_claude_oauth_usage_for_default_account(force: bool) -> Option<
     usage
 }
 
-pub fn claude_oauth_usage_from_value(value: &Value) -> Option<LlmUsage> {
+pub(crate) fn claude_oauth_usage_from_value(value: &Value) -> Option<LlmUsage> {
     let quotas = claude_named_window_quota_usages(value.as_object()?);
     if quotas.is_empty() {
         return None;

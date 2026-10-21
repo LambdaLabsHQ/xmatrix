@@ -28,6 +28,13 @@ test("Machine notices name the Machine as its owner named it, never its hostname
   for (const body of [start.body, stop.body]) assert.doesNotMatch(body, /cursor/u);
 });
 
+test("a failed start carries its Agent's harness, which gives the notice the Agent's face", async () => {
+  const start = await machineRunFailureNoticeCommand({ ...base, harness: "grok", detail: "boom" });
+  assert.equal(start.residual.appMetadata.harness, "grok");
+  const unnamed = await machineRunFailureNoticeCommand({ ...base, detail: "boom" });
+  assert.equal("harness" in unnamed.residual.appMetadata, false);
+});
+
 test("a notice without the Machine name names no machine", async () => {
   const start = await machineRunFailureNoticeCommand({ ...base, detail: "boom" });
   assert.match(start.body, /^Couldn't start @grok\./u);

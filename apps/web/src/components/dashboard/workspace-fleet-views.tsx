@@ -1,7 +1,7 @@
 "use client";
 
 import { AnimatedIcon } from "@/components/ui/animated-icon";
-import { APP_CONNECTOR_PROVIDER_MANIFESTS, agentAvatarUrlFromMetadata, agentLaunchExecutable } from "@xmatrix/protocol";
+import { APP_CONNECTOR_PROVIDER_MANIFESTS, agentLaunchExecutable } from "@xmatrix/protocol";
 import Image from "next/image";
 import { openRepositoryToStar } from "./star-prompt";
 import { registrationStatus } from "./my-agents-registrations";
@@ -27,10 +27,6 @@ import {
 } from "./workspace-shell-constants";
 
 import {
-  localManagedAgentAvatarUrl,
-} from "./workspace-shell-formatters";
-
-import {
   LocalManagedAgent,
   MachineSummary,
 } from "./workspace-shell-helpers";
@@ -43,7 +39,6 @@ import {
 } from "./workspace-shell-navigation";
 
 import {
-  avatarInitials,
   eventLabel,
   formatTime,
   relativeTime,
@@ -116,7 +111,7 @@ import { Textarea } from "@/components/ui/textarea";
 
 import { Input } from "@/components/ui/input";
 
-import { IdentityAvatar } from "@/components/dashboard/identity-avatar";
+import { Face } from "@/components/dashboard/face";
 import { ListSectionHeading } from "./list-section-heading";
 
 import {
@@ -214,8 +209,7 @@ export function MoreView({
           description: profile.handle ? `@${profile.handle}` : "Set up your @handle",
           // An icon's width, so your name starts where the other rows' names do.
           leading: (
-            <IdentityAvatar kind="human" label={profile.displayName} imageUrl={profile.avatarUrl}
-              initials={profile.displayName.slice(0, 2)} size="xs" showKindBadge={false}
+            <Face of={{ kind: "user", id: profile.userId, name: profile.displayName }} size="xs" showKindBadge={false}
               className="-mx-0.5" />
           ),
           onSelect: () => onChangeView("profile"),
@@ -583,8 +577,7 @@ export function LocalMacView({
                   key={agent.id}
                   quiet
                   leading={(
-                    <IdentityAvatar kind="agent" label={agent.name} imageUrl={localManagedAgentAvatarUrl(agent)}
-                      initials={avatarInitials(agent.name)} size="sm" showKindBadge={false} />
+                    <Face of={{ kind: "agent", name: agent.name, harness: agent.harness }} size="sm" showKindBadge={false} />
                   )}
                   title={(
                     <>
@@ -696,9 +689,8 @@ export function LocalMacView({
                   <ul>
                     <LocalLine
                       leading={(
-                        <IdentityAvatar kind="agent" label={discovery.displayName}
-                          imageUrl={agentAvatarUrlFromMetadata({ presetId: discovery.presetId }, discovery.presetId)}
-                          initials={avatarInitials(discovery.displayName)} size="sm" showKindBadge={false} />
+                        <Face of={{ kind: "agent", name: discovery.displayName, harness: discovery.presetId }} size="sm"
+                          showKindBadge={false} />
                       )}
                       title={(
                         <>

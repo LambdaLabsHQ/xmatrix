@@ -13,6 +13,11 @@ export interface MachineDaemonWakeResult {
   owners: number;
   healed: boolean;
   deliverable: boolean;
+  /**
+   * The wake never got an answer from Runtime. That is not proof the socket
+   * is gone, so the catalog must not be marked offline.
+   */
+  unavailable?: boolean;
 }
 
 export function emptyMachineDaemonWakeResult(): MachineDaemonWakeResult {
@@ -22,6 +27,7 @@ export function emptyMachineDaemonWakeResult(): MachineDaemonWakeResult {
     owners: 0,
     healed: false,
     deliverable: false,
+    unavailable: true,
   };
 }
 

@@ -13,13 +13,13 @@ import { editPageMarkdown } from "@/lib/pages/page-markdown-edit";
    write it together, as on a live page, with each Agent's face at the right edge beside its line
    and what it writes highlighted in its colour. Nothing here reaches a Hub. */
 
-interface Writer { id: number; name: string; color: string; avatarUrl?: string; kind: "agent" | "user"; block: string }
+interface Writer { id: number; name: string; color: string; harness?: string; kind: "agent" | "user"; block: string }
 
 const PERSON: Writer = { id: 41_001, name: "Daniel", color: "#4b6382", kind: "user", block: "decided" };
 const AGENTS: Writer[] = [
-  { id: 41_101, name: "claude:1", color: "#b85a3b", avatarUrl: "/agent-vendors/claude.svg", kind: "agent", block: "where-it-stands" },
-  { id: 41_202, name: "codex:1", color: "#2f6f5e", avatarUrl: "/agent-vendors/openai.svg", kind: "agent", block: "workstreams" },
-  { id: 41_303, name: "cursor:1", color: "#7a5389", avatarUrl: "/agent-vendors/cursor.png", kind: "agent", block: "workstreams" },
+  { id: 41_101, name: "claude:1", color: "#b85a3b", harness: "claude", kind: "agent", block: "where-it-stands" },
+  { id: 41_202, name: "codex:1", color: "#2f6f5e", harness: "codex", kind: "agent", block: "workstreams" },
+  { id: 41_303, name: "cursor:1", color: "#7a5389", harness: "cursor", kind: "agent", block: "workstreams" },
 ];
 const [CLAUDE, CODEX, CURSOR] = AGENTS as [Writer, Writer, Writer];
 
@@ -83,8 +83,7 @@ function createStage() {
   };
   const say = (writer: Writer, activity: string, caret: string) => {
     const own = presence.get(writer.id)!;
-    own.setLocalState({ user: { name: writer.name, color: writer.color, kind: writer.kind,
-      ...(writer.kind === "agent" ? { avatarUrl: writer.avatarUrl } : {}) }, activity, block: writer.block,
+    own.setLocalState({ user: { name: writer.name, color: writer.color, kind: writer.kind }, activity, block: writer.block,
       cursor: caretAfter(caret) });
     awarenessProtocol.applyAwarenessUpdate(awareness, awarenessProtocol.encodeAwarenessUpdate(own, [writer.id]), "session");
   };
@@ -204,7 +203,8 @@ export function LivePagePreview() {
     if (!activity || top === undefined) return [];
     const doing = DOING[activity];
     return [{ top: top + 2, away: null, person: { key: `client:${agent.id}`, name: agent.name, color: agent.color, agent: true,
-      avatarUrl: agent.avatarUrl, detail: activity, blockId: agent.block, anchor: `client:${agent.id}`,
+      face: { kind: "agent", name: agent.name, harness: agent.harness }, detail: activity, blockId: agent.block,
+      anchor: `client:${agent.id}`,
       editing: activity === "writing" || activity === "thinking", ...(doing ? { doing } : {}) } }];
   });
 

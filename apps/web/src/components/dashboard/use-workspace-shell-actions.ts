@@ -1986,7 +1986,6 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
         userId: member.userId,
         email: member.email,
         name: member.name,
-        avatarUrl: member.avatarUrl,
         role,
       },
     });

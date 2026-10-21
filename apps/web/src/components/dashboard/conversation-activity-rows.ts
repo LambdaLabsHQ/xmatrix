@@ -115,7 +115,7 @@ function foldRow(items: TimelineItem[]): TimelineItem {
     author: last.author,
     body: foldSummary(items).segments.join(" · "),
     sentAt: first.sentAt,
-    avatarUrl: last.avatarUrl,
+    face: last.face,
     own: last.own,
     senderKind: last.senderKind,
     senderId: last.senderId,

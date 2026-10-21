@@ -8,16 +8,16 @@ use serde::{Deserialize, Serialize};
 use crate::protocol::SerializedAgent;
 
 /// Retention: how much of one Instance's trace the host keeps readable.
-pub const HOST_TRACE_MAX_EVENTS: usize = 5_000;
-pub const HOST_TRACE_MAX_BYTES: usize = 16 * 1024 * 1024;
-pub const HOST_TRACE_MAX_AGE_MS: u64 = 24 * 60 * 60 * 1_000;
+pub(crate) const HOST_TRACE_MAX_EVENTS: usize = 5_000;
+pub(crate) const HOST_TRACE_MAX_BYTES: usize = 16 * 1024 * 1024;
+pub(crate) const HOST_TRACE_MAX_AGE_MS: u64 = 24 * 60 * 60 * 1_000;
 /// One event larger than this is dropped (and the history marked incomplete)
 /// so any single event still fits one Hub page.
-pub const HOST_TRACE_MAX_EVENT_BYTES: usize = 512 * 1024;
+pub(crate) const HOST_TRACE_MAX_EVENT_BYTES: usize = 512 * 1024;
 /// One page of a history read. Retention is paged through `before` cursors;
 /// a page never exceeds these bounds, whatever the caller asks for.
-pub const HOST_TRACE_PAGE_MAX_EVENTS: usize = 500;
-pub const HOST_TRACE_PAGE_MAX_BYTES: usize = 512 * 1024;
+pub(crate) const HOST_TRACE_PAGE_MAX_EVENTS: usize = 500;
+pub(crate) const HOST_TRACE_PAGE_MAX_BYTES: usize = 512 * 1024;
 const HOST_TRACE_TERMINAL_TOMBSTONES: usize = 32;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -44,7 +44,7 @@ pub struct AgentHostTraceEvent {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AgentHostTraceAvailability {
+pub(crate) enum AgentHostTraceAvailability {
     Available,
     Unavailable,
     Expired,
@@ -61,7 +61,7 @@ impl AgentHostTraceAvailability {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct AgentHostTraceHistory {
+pub(crate) struct AgentHostTraceHistory {
     pub availability: AgentHostTraceAvailability,
     /// No older retained event remains and nothing was ever evicted.
     pub complete: bool,
@@ -74,7 +74,7 @@ pub struct AgentHostTraceHistory {
 /// One page request. `since` bounds the newest side (inclusive), `before`
 /// the oldest side (exclusive cursor from a previous page).
 #[derive(Debug, Clone, Copy, Default)]
-pub struct AgentHostTraceHistoryQuery<'a> {
+pub(crate) struct AgentHostTraceHistoryQuery<'a> {
     pub received_order: bool,
     pub max_events: usize,
     pub max_bytes: Option<usize>,
@@ -109,7 +109,7 @@ struct StoredTraceEvent {
 /// a new suffix. Bounded eviction is explicit through `complete=false` so a
 /// caller cannot mistake a retained suffix for complete history.
 #[derive(Debug, Default)]
-pub struct AgentHostTraceStore {
+pub(crate) struct AgentHostTraceStore {
     session: Option<BoundTraceSession>,
     events: VecDeque<StoredTraceEvent>,
     encoded_bytes: usize,
@@ -123,11 +123,11 @@ pub struct AgentHostTraceStore {
 }
 
 impl AgentHostTraceStore {
-    pub fn change_signal(&self) -> Arc<Notify> {
+    pub(crate) fn change_signal(&self) -> Arc<Notify> {
         self.changed.clone()
     }
 
-    pub fn bind_session(&mut self, agent: &SerializedAgent, now_ms: u64) {
+    pub(crate) fn bind_session(&mut self, agent: &SerializedAgent, now_ms: u64) {
         let Some(instance_id) = non_empty(agent.instance_id.as_deref()) else {
             self.clear_active();
             return;
@@ -234,7 +234,7 @@ impl AgentHostTraceStore {
         self.changed.notify_waiters();
     }
 
-    pub fn history(
+    pub(crate) fn history(
         &mut self,
         instance_id: &str,
         query: AgentHostTraceHistoryQuery<'_>,
@@ -358,11 +358,11 @@ impl AgentHostTraceStore {
     /// session cannot keep payloads past their TTL merely because no bind,
     /// record, or history operation happens. Expiry deliberately preserves
     /// the live session binding so a resumed session may start a new suffix.
-    pub fn reap_expired(&mut self, now_ms: u64) {
+    pub(crate) fn reap_expired(&mut self, now_ms: u64) {
         self.prune_expired(now_ms);
     }
 
-    pub fn terminate(&mut self, instance_id: Option<&str>) {
+    pub(crate) fn terminate(&mut self, instance_id: Option<&str>) {
         let terminal_id = instance_id
             .and_then(|value| non_empty(Some(value)).map(str::to_string))
             .or_else(|| {
@@ -377,7 +377,8 @@ impl AgentHostTraceStore {
         self.changed.notify_waiters();
     }
 
-    pub fn current_instance_id(&self) -> Option<&str> {
+    #[cfg(test)]
+    pub(crate) fn current_instance_id(&self) -> Option<&str> {
         self.session
             .as_ref()
             .map(|session| session.instance_id.as_str())
@@ -435,7 +436,7 @@ impl AgentHostTraceStore {
     }
 }
 
-pub fn trace_timestamp_now() -> String {
+pub(crate) fn trace_timestamp_now() -> String {
     time::OffsetDateTime::now_utc()
         .format(&time::format_description::well_known::Rfc3339)
         .unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_string())

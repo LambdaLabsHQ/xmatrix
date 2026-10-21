@@ -164,3 +164,20 @@ test("control statements report the span each was written at", () => {
   ]);
   assert.deepEqual(parseAgentControlInvocations("@claude:1 /effort max please"), []);
 });
+
+test("a command's recorded result merges its outcomes and notes from Hub annotations only", async () => {
+  const { commandResultOf, mergeCommandResult } = await import("../dist/index.js");
+  const hub = (id, payload) => ({ id, namespace: "xmatrix.command-result", authorUserId: "system:xmatrix", payload });
+  const controls = [{ kind: "effort", target: "claude:1", status: "switched", selected: "max" }];
+  const result = commandResultOf([
+    hub("r:controls", { controls }),
+    hub("r:stop", { note: { text: "Stopped @claude:1.", at: "2026-10-21T22:00:02Z", stopOutcome: "stopped" } }),
+    hub("r:cleanup", { note: { text: "Host cleanup pending.", at: "2026-10-21T22:00:01Z" } }),
+    { ...hub("forged", { controls: [] }), authorUserId: "user:1" },
+  ]);
+  assert.deepEqual(result.controls, controls);
+  assert.deepEqual(result.notes.map((note) => [note.id, note.stopOutcome]), [["r:cleanup", undefined], ["r:stop", "stopped"]]);
+  const replayed = mergeCommandResult(result, "r:stop", { note: { text: "Stopped again.", at: "2026-10-21T22:00:03Z" } });
+  assert.equal(replayed.notes.length, 2);
+  assert.equal(commandResultOf([]), undefined);
+});

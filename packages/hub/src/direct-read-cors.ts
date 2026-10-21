@@ -1,6 +1,6 @@
 import type { Hono } from "hono";
 import { CLIENT_COMPATIBILITY_HEADERS } from "@xmatrix/protocol";
-import { appOrigin } from "./deployment-origins";
+import { appOrigins } from "./deployment-origins";
 import { appendVary } from "./index-shared";
 import type { Env } from "./types";
 
@@ -20,6 +20,7 @@ const DIRECT_ROUTES: ReadonlyArray<{ method: "GET" | "POST"; path: RegExp }> = [
   { method: "GET", path: /^\/api\/spaces\/[^/]+\/pages\/[^/]+\/(?:awareness|blame|claims|automations|suggestions|read)$/u },
   { method: "GET", path: /^\/api\/spaces\/[^/]+\/pages\/[^/]+\/revisions\/[0-9]+\/moment$/u },
   { method: "GET", path: /^\/api\/spaces\/[^/]+\/page-links(?:\/agents)?$/u },
+  { method: "GET", path: /^\/api\/spaces\/[^/]+\/faces$/u },
   { method: "GET", path: /^\/api\/channels\/[^/]+\/history$/u },
   // A ticket names no more than the bearer's own access, and lapses unused within a minute.
   { method: "POST", path: /^\/api\/spaces\/[^/]+\/pages\/[^/]+\/live$/u },
@@ -35,16 +36,16 @@ function directRequest(request: Request, env: Env): { origin: string; method: st
   const origin = request.headers.get("origin");
   if (!origin) return null;
   const method = request.method === "OPTIONS" ? request.headers.get("access-control-request-method") : request.method;
-  let allowed: string;
+  let allowed: string[];
   try {
-    allowed = appOrigin(env);
+    allowed = appOrigins(env);
   } catch {
     return null;
   }
-  if (origin !== allowed) return null;
+  if (!allowed.includes(origin)) return null;
   const pathname = new URL(request.url).pathname;
   const route = DIRECT_ROUTES.find((item) => item.method === method && item.path.test(pathname));
-  return route ? { origin: allowed, method: route.method } : null;
+  return route ? { origin, method: route.method } : null;
 }
 
 /** Answers the app's direct requests across origins; registered before every route, the preflight included. */

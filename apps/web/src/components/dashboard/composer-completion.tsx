@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import {
   WEB_PROXY_ROUTES,
+  faceInitials,
   pageBlocks,
   type SpaceLaunchTargetsResponse,
   type AgentInvocationSelection,
@@ -35,11 +36,11 @@ import {
 } from "@/components/dashboard/composer-caret";
 import {
   CompletionOptionButton,
-  avatarInitials,
   stopTouchPropagation,
 } from "@/components/dashboard/completion-option-button";
 import { ContentSkeleton } from "@/components/dashboard/content-skeleton";
 import { IdentityAvatar } from "@/components/dashboard/identity-avatar";
+import { Face } from "@/components/dashboard/face";
 import { MentionCategoryLabel } from "./mention-category-label";
 import { SlashCommandPanel } from "@/components/dashboard/slash-command-panel";
 import { useAuth } from "@/lib/auth-context";
@@ -1023,12 +1024,14 @@ export function useComposerCompletion({
                               <PlugZap className="size-4" />
                             )}
                           </span>
+                        ) : candidate.face ? (
+                          <Face of={candidate.face} size="xs" shape="circle" />
                         ) : (
+                          // A row that is no one, as a command an Agent advertises, keeps its own letters.
                           <IdentityAvatar
                             kind={candidate.kind === "agent" ? "agent" : "human"}
                             label={candidate.name}
-                            initials={avatarInitials(candidate.name)}
-                            imageUrl={candidate.avatarUrl}
+                            initials={faceInitials(candidate.name)}
                             size="xs"
                             shape="circle"
                           />

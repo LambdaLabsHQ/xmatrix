@@ -21,10 +21,10 @@
 //                         verified and the patch, minor or major bump its
 //                         changes call for. The train rebuilds exactly that
 //                         beta's source at the stable version and ships only
-//                         the clients named, to their stable channel and App
-//                         Review; Hub and Web already run every beta. It never
-//                         rides with betas, never takes newer main content and
-//                         never moves a stable source back.
+//                         what it names: the stable Web, and clients to their
+//                         stable channel and App Review. The Hub runs every
+//                         beta. It never rides with betas, never takes newer
+//                         main content and never moves a stable source back.
 //
 //   open beta:   refs/release-intents/<intent-run>/<scope>                         -> main SHA
 //   open stable: refs/release-intents/<intent-run>/<scope>/<bump>/<beta tag>       -> beta commit
@@ -59,9 +59,19 @@ import {
 } from "./release-version-order.mjs";
 
 export const COMPONENTS = Object.freeze(["hub", "web", "cli", "desktop", "android", "ios"]);
-// Hub and Web are single production services that every beta deploys.
-export const STABLE_COMPONENTS = Object.freeze(["cli", "desktop", "android", "ios"]);
+// The Hub is the single production service every beta deploys; a beta
+// deploys the beta Web and a stable the stable Web.
+export const STABLE_COMPONENTS = Object.freeze(["web", "cli", "desktop", "android", "ios"]);
 export const BUMPS = Object.freeze(["patch", "minor", "major"]);
+// The CodeQL language each component is written in.
+const CODEQL_LANGUAGE = Object.freeze({
+  hub: "javascript-typescript",
+  web: "javascript-typescript",
+  cli: "rust",
+  desktop: "javascript-typescript",
+  android: "java-kotlin",
+  ios: "swift",
+});
 const OPEN_PREFIX = "refs/release-intents/";
 const INFLIGHT_PREFIX = "refs/release-inflight/";
 const RUN_ID = /^[1-9]\d*$/u;
@@ -69,7 +79,8 @@ const RELEASE_TAG_PREFIX = /^(?:cli|desktop|android|xmatrix)-v/u;
 
 /**
  * Canonical component list from `hub,web` or `all`; desktop requires cli. A
- * stable release names clients only, and `all` means every client.
+ * stable release names the stable Web and clients only, and `all` means all
+ * of them.
  */
 export function normalizeScope(requested, channel = "beta") {
   const allowed = channel === "stable" ? STABLE_COMPONENTS : COMPONENTS;
@@ -77,10 +88,18 @@ export function normalizeScope(requested, channel = "beta") {
   if (!items.length || items.some((item) => !allowed.includes(item)) || new Set(items).size !== items.length ||
       (items.includes("desktop") && !items.includes("cli"))) {
     throw new Error(channel === "stable"
-      ? "a stable release names unique clients (cli, desktop, android, ios); hub and web ship with every beta; desktop requires cli"
+      ? "a stable release names unique components among web, cli, desktop, android and ios; the hub ships with every beta; desktop requires cli"
       : "release_components must name unique supported components; desktop requires cli");
   }
   return COMPONENTS.filter((item) => items.includes(item));
+}
+
+/**
+ * The CodeQL languages a train scans before it ships `scope`: those its
+ * components are written in, and the workflows that release them.
+ */
+export function codeqlLanguages(scope) {
+  return [...new Set(["actions", ...scope.map((component) => CODEQL_LANGUAGE[component])])];
 }
 
 function isBetaTag(tag) {
@@ -404,6 +423,7 @@ async function claimAndShip(root, { tag, version, channel, sourceSha, runId, int
   output("tag", tag);
   output("channel", channel);
   output("source_sha", sourceSha);
+  output("codeql_languages", JSON.stringify(codeqlLanguages(scope)));
   output("intents", intents.map((intent) => intent.id).join(","));
 }
 

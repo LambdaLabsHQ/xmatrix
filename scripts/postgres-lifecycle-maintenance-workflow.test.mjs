@@ -67,7 +67,7 @@ test("the broker dispatches the release the executor accepts, whatever order Git
     assert.deepEqual(await broker(runs), [{ workflow_id: "production-postgres-lifecycle-maintenance.yml", ref: "xmatrix-v0.16.347" }]);
   }
   // Once betas exist the newest beta, which deploys the Hub, wins over a later
-  // stable that rebuilt an older beta's source for clients only.
+  // stable that rebuilt an older beta's source, which never deploys the Hub.
   const channels = [...legacy, run(400, "xmatrix-v0.16.349-beta.2"), run(401, "xmatrix-v0.16.349-beta.3", "failure"),
     run(402, "xmatrix-v0.17.0")];
   for (const runs of [channels, [...channels].reverse()]) {

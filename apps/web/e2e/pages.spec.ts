@@ -7,8 +7,8 @@ import * as Y from "yjs";
 
 import { expect, test } from "./fixtures";
 import {
-  CREATED_CHANNEL_ID, fixtureChannelCreate, fixtureCreatedChannelId, fixtureJson, fixtureRequestBodies, fixtureRequestRecords,
-  fixtureRule, releaseFixture,
+  CREATED_CHANNEL_ID, fixtureChannelCreate, fixtureCreatedChannelId, fixtureFaces, fixtureJson, fixtureRequestBodies,
+  fixtureRequestRecords, fixtureRule, releaseFixture,
 } from "./in-page-api-fixtures";
 import { editPageMarkdown, pageDocument, pageMarkdown, startedMarkdown } from "./page-document-fixture";
 import {
@@ -118,6 +118,8 @@ const SUGGEST_BODY = "# Relay\n\n## Status\n\nShipped this week.\n\n## Plan\n\nM
 
 /** One suggestion waiting on the page, revision 5 against revision 3, and the review that ends its wait. */
 async function stubSuggestion(browser: Page) {
+  // The suggesting Agent's face is read by its Instance.
+  await fixtureFaces(browser, { "agent:a-claude": "/agent-vendors/claude.svg" });
   await fixtureJson(browser, "page-suggestions", /\/api\/xmatrix\/spaces\/[^/]+\/pages\/p-relay\/suggestions$/u, { suggestions: [
     { revision: 5, kind: "suggestion", basedOnRevision: 3, authors: [{ kind: "agent", id: "a-claude", label: "claude:2" }],
       conversationIds: [E2E_CHANNEL.id], createdAt: NOW }] }, { method: "GET" });
@@ -1313,6 +1315,8 @@ test("a page's conversations sit beside what they are about, and one opens there
   const quiet = { ...E2E_CHANNEL, id: "channel-quiet", name: "Last month's notes" };
   const plan = { ...E2E_CHANNEL, id: "channel-plan", name: "Changelog wording" };
   await stubPages(browser, [page("p-relay", null, "Relay", "V")], [E2E_CHANNEL, release, quiet, plan]);
+  // The listing names its Agent by its Instance, whose face is read.
+  await fixtureFaces(browser, { "agent:i-1": "/agent-vendors/claude.svg" });
   const recent = new Date(Date.now() - 5 * 60_000).toISOString();
   await fixtureJson(browser, "page-links", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\?.*$/u, {
     links: [
@@ -1514,6 +1518,8 @@ test("who wrote a passage shows over it, and opens the conversation it was writt
     revisions: [written(1, daniel, [], 72), written(2, claude, [E2E_CHANNEL.id], 2)],
     conversations: [{ conversationId: E2E_CHANNEL.id, name: E2E_CHANNEL.name }],
   });
+  // Their faces: Daniel's own picture, and the mark of the harness claude:1's Instance runs.
+  await fixtureFaces(browser, { "user:u-daniel": "/role-avatars/default.svg", "agent:a": "/agent-vendors/claude.svg" });
   await fixtureJson(browser, "revision-moment", /\/pages\/p-relay\/revisions\/2\/moment\?conversation=/u,
     { moment: { conversationId: E2E_CHANNEL.id, messageId: "m-asked", sequence: 1 } });
   await fixtureJson(browser, "blame-history", `**/api/xmatrix/channels/${E2E_CHANNEL.id}/history**`, {
@@ -1550,6 +1556,8 @@ test("who wrote a passage shows over it, and opens the conversation it was writt
   await expect(note).toContainText("claude:1, Daniel");
   await note.getByRole("button", { expanded: false }).click();
   await expect(note.locator("li")).toHaveCount(2);
+  await expect(note.locator("li").nth(1).locator("img")).toHaveAttribute("src", "/role-avatars/default.svg");
+  await expect(note.locator("li").nth(0).locator("img")).toHaveAttribute("src", "/agent-vendors/claude.svg");
   // At the top of the page there is no room over the passage for the list: it opens under it, in view.
   const [openAt, articleAt] = [(await note.boundingBox())!, (await browser.locator("article").first().boundingBox())!];
   expect(openAt.y).toBeGreaterThanOrEqual(articleAt.y);
@@ -1568,6 +1576,7 @@ test("two people co-edit a page live: each sees the other's typing and cursor, a
   try {
     for (const person of [first, other]) {
       await stubPages(person, [page("p-relay", null, "Relay", "V")]);
+      await fixtureFaces(person, { "user:e2e-user": "/role-avatars/default.svg" });
       await fixtureJson(person, "page-links", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\?.*$/u, { links: [] });
       await servePageSession(person, server);
       await person.goto("/app", { waitUntil: "domcontentloaded" });
@@ -1592,6 +1601,9 @@ test("two people co-edit a page live: each sees the other's typing and cursor, a
     await expect(first.locator(".ProseMirror-yjs-cursor")).toHaveCount(1);
     await expect(other.locator(".ProseMirror-yjs-cursor")).toHaveCount(1);
     await expect(first.locator(".ProseMirror-yjs-cursor")).toContainText("E2E Tester");
+    // Each is on the page by their own picture, as everywhere else they show.
+    await expect(first.getByTestId("page-now").locator(".identity-avatar-face img"))
+      .toHaveAttribute("src", "/role-avatars/default.svg");
     await expect(first.getByTestId("page-save-state")).toHaveText("All changes saved");
     await first.screenshot({ path: test.info().outputPath("pages-coediting.png") });
   } finally {
@@ -2144,4 +2156,32 @@ test("on a keyboard, Tab takes the suggested change in front of the reader and E
   await expect(editor).not.toContainText("drain the queue");
   await expect(editor).toContainText("DNS is ready.");
   await expect.poll(async () => fixtureRequestBodies(browser, "suggestion-review")).toEqual([{ through: 5 }]);
+});
+
+test("a discussion near the page's end opens at its passage without lengthening the page, its thread scrolling", async ({ page: browser }) => {
+  const passage = "Background paragraph 52.";
+  const { editor, article } = await openLongPageWithClaudeWriting(browser, (server) => ({ blockId: "status",
+    anchor: { quote: passage, from: positionAt(server, passage, false), to: positionAt(server, passage, true) } }));
+  const margin = browser.getByTestId("page-margin");
+  const length = () => article.evaluate((element) => element.scrollHeight);
+  await editor.getByText(passage, { exact: true }).scrollIntoViewIfNeeded();
+  const before = await length();
+  await margin.getByRole("button", { name: `Open ${E2E_CHANNEL.name} beside the page` }).click();
+  const open = margin.getByTestId("page-margin-open");
+  await expect(open).toBeInViewport();
+  // It stays level with its passage, no taller than the room left, its messages scrolling inside; the Agent's pill after
+  // it fits before the text's end or waits until it closes. The page is as long as before, with no blank stretch below.
+  await expect.poll(async () => Math.abs((await open.boundingBox())!.y
+    - (await editor.getByText(passage, { exact: true }).boundingBox())!.y)).toBeLessThan(24);
+  await expect.poll(async () => {
+    const [column, text] = [(await margin.boundingBox())!, (await editor.locator(".page-document").boundingBox())!];
+    return column.y + column.height - (text.y + text.height);
+  }).toBeLessThanOrEqual(1);
+  expect((await open.boundingBox())!.height).toBeLessThan(34 * 16);
+  expect(await length()).toBeLessThanOrEqual(before + 1);
+  await browser.screenshot({ path: test.info().outputPath("margin-open-at-end.png") });
+  // Closed, the pill is back beside its line.
+  await open.getByRole("button", { name: "Close the conversation" }).click();
+  await expect(browser.getByTestId("page-margin").getByRole("button", { name: /^claude:2 is writing/u })).toBeVisible();
+  expect(await length()).toBeLessThanOrEqual(before + 1);
 });

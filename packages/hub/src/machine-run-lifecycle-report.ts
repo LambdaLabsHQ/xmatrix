@@ -1,3 +1,4 @@
+import { publishChannelInvocationsChanged } from "./channel-live-judgment";
 import { cleanRepositoryBaseline } from "@xmatrix/protocol";
 import { PostgresMachineLifecycleRepository, RuntimeControlError, type AuthorityDatabase } from "@xmatrix/db";
 
@@ -67,6 +68,11 @@ export async function machineRunLifecycleReport(
     repoPool: input.eventType === "machine_spawn_result" ? machineSpawnRepoPoolMetadata(payload) : undefined,
     preserveInstanceForReborn: input.runLifecycleStopPurpose === "reborn-predecessor",
   });
+  // A Run the report changed, an execution or a stop result moves a summon's, stop's or reply's chip.
+  if (value.reused !== true && (input.eventType === "machine_execution_report" || input.eventType === "machine_stop_result" ||
+      (Array.isArray(value.changedRunIds) && value.changedRunIds.length > 0))) {
+    await publishChannelInvocationsChanged(env, text(input.channelId, "channelId", 300));
+  }
   if (input.eventType === "machine_spawn_result" && payload.ok !== true &&
       isRecoverableLaunchFailure(payload.error)) {
     await wakeAgentLaunchCoordinator(env, text(input.channelId, "channelId", 300), ["runTerminal", "reborn"]);
@@ -81,6 +87,7 @@ export async function machineRunLifecycleReport(
         runId: text(context.runId, "runId"), channelId: text(context.channelId, "channelId"),
         ownerUserId: text(context.ownerUserId, "ownerUserId"), ownerEmail: ownerEmail(context.ownerUserId),
         agentName: text(context.agentName, "agentName"), machineId: text(context.machineId, "machineId"),
+        ...(typeof context.harness === "string" && context.harness ? { harness: context.harness } : {}),
         hostId: optionalHostname(context.hostId), machineName: optionalMachineName(context.machineName), ...failure,
       });
       // An `@auto` summon's work goes to the next-ranked Agent, once. Its

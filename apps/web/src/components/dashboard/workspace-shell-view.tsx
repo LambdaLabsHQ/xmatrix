@@ -18,6 +18,7 @@ import { useQueries } from "@tanstack/react-query";
 import { cn } from "@/lib/utils";
 
 import { AttachmentDropZoneProvider } from "./composer-attachment-drop-zone";
+import { FaceSpaceContext } from "./face";
 import { realtimeCollectionAny } from "./realtime-collection";
 import { RealtimeChannelsContext, RealtimeEventsContext } from "./realtime-channels";
 import { PresentedChannelTailContext } from "./presented-channel-tail";
@@ -1343,7 +1344,6 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
         id: user.id,
         email: user.email,
         name: user.name,
-        avatarUrl: user.avatarUrl,
       }}
       channels={channels}
       machines={machines}
@@ -1448,6 +1448,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     {deletingChannel && <ChannelDeletionDialog key={deletingChannel.id} channel={deletingChannel} token={token}
       onCancel={() => setDeletingChannel(null)} onDeleted={channelDeleted} />}
     <OnboardingActionsContext.Provider value={onboardingActions}>
+    <FaceSpaceContext.Provider value={currentSpaceId}>
     <RealtimeChannelsContext.Provider value={model.realtimeChannels}>
     <RealtimeEventsContext.Provider value={model.realtimeEventViews}>
     <PresentedChannelTailContext.Provider value={model.presentedChannelTail}>
@@ -1734,6 +1735,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     </PresentedChannelTailContext.Provider>
     </RealtimeEventsContext.Provider>
     </RealtimeChannelsContext.Provider>
+    </FaceSpaceContext.Provider>
     </OnboardingActionsContext.Provider>
     </AttachmentDropZoneProvider>
   );

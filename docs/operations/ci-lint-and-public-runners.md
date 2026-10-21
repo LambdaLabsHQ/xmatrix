@@ -25,22 +25,23 @@ jobs each finish in about two minutes including setup:
   unused imports, duplicate CSS rules and the source line limit;
 - `web-unit`, `web-build` and `web-check`: the Web unit tests, the production
   build, and the lint and typecheck that build would run (`next typegen`, then
-  `tsc`, beside `next lint`); after merge the checked build stays the
+  `tsc`, beside `next lint`); in the full tier the checked build stays the
   authoritative Web lint and typecheck;
 - `hub-check`: the Hub typecheck and its deploy bundle;
 - `rust-clippy`: Clippy on the complete Rust workspace and all targets.
 
-Every push to `main` (Public Snapshot CI) and every release train runs the full
-tier: all of the above plus the protocol, billing, PostgreSQL package and
-script tests, the duplicate-code scan, the browser shards and performance
-budget, the Hub suite, the Rust tests on Linux and Windows, Desktop and
-Android. Only full-tier jobs carry ledgered names (`scripts/ci-ledger.mjs`), so
-the release train reuses only results the full tier earned and still blocks on
-every gate its scope selects. When the full run on `main` fails,
-`post-merge-ci-notice.yml` comments on the pull request that produced the
-commit, listing the failing jobs and the run; the comment reaches the authoring
-Agent's subscribed channel. That workflow runs the default branch's code with
-only `actions: read` and `pull-requests: write`.
+A release train runs the full tier for what it ships. Every train runs the
+protocol, billing, PostgreSQL package and script tests and the duplicate-code
+scan, and a train that ships the Hub runs the Hub suite. The Web suites (the
+checked build, browser shards and performance budget) and the client suites
+(the Rust tests on Linux and Windows, Desktop, Android and the iOS simulator
+gate) gate the stable train that ships them, not each beta: a beta Web or
+client reaches only the people on the beta Web, its dev channel or TestFlight,
+its pull requests checked it and the release builds it (`scripts/ci-areas.mjs`,
+`releaseOutputs`). Merging runs nothing more.
+Only full-tier jobs carry ledgered names (`scripts/ci-ledger.mjs`), so a release
+reuses only results the full tier earned and still blocks on every gate its
+scope and channel select.
 
 ## Hosted runners
 
@@ -82,10 +83,9 @@ Changes to `packages/db` select Node, Web/browser and Hub validation because
 both products consume the shared database package. Database unit tests alone
 do not validate the Hub's message coordination and authority fixtures.
 
-`public-ci.yml` runs the full shared matrix on a public snapshot's `main` push.
-Its manual dispatch also verifies that path in the private repository. A
-private `main` push skips this workflow's only job. Public PRs use `ci.yml`'s
-fast tier and its hosted defaults, including the aggregate `ci` result.
+`public-ci.yml` runs the full shared matrix on manual dispatch. Public PRs use
+`ci.yml`'s fast tier and its hosted defaults, including the aggregate `ci`
+result.
 
 The repository keeps CI, the content ledger, release workflows and their local
 composite actions together. External pull requests are closed in favour of
@@ -103,18 +103,16 @@ PNPM enters the job's PATH only after installation and its version probe succeed
 This recovery applies only to package-manager bootstrap, never validation or
 deployment failures.
 
-GitHub's default CodeQL setup runs outside `ci.yml` and does not inherit its
-PR concurrency group. `pr-codeql-cleanup.yml` handles upstream PR updates using
-only default-branch code and GitHub API metadata. It cancels queued or running
-default CodeQL scans only when their exact PR ref matches and their commit is a
-proven ancestor of the current open PR head. The current head, divergent
-commits, forks, main scans and all other workflows remain untouched. A manual
-dispatch on main accepts an open PR number for recovery of an existing backlog.
-Each request has a 20-second deadline; listing is bounded to three pages per
-status, and the job has a five-minute timeout. Cleanup never authorizes CI or
-release reuse; the current commit still runs its normal required checks.
-If GitHub refuses a cancellation with a conflict, cleanup leaves that scan
-unchanged and does not count it as reclaimed capacity.
+CodeQL scans before a release ships, not on pull requests or merges. Each
+release train runs CodeQL's security-extended queries on its frozen source for
+the languages its components are written in, plus the workflows that release
+them (`codeql` in `production-release-request.yml`; languages from
+`codeqlLanguages` in `scripts/release-train.mjs`). Swift builds on macOS with
+autobuild; the other languages use build mode `none`. Results upload as code
+scanning alerts on `main` under the same `/language:<name>` categories GitHub's
+default setup used, which must stay disabled: GitHub refuses a workflow's
+upload while default setup is on. The analysis has to finish before the train
+ships; its findings are alerts, not a gate verdict.
 
 CLI release builds run both macOS architectures in parallel on isolated hosted
 VMs. When `XMATRIX_RUNNER_FLEET=self-hosted`, macOS builds remain serialized

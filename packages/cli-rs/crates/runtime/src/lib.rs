@@ -32,8 +32,8 @@ use runtime_agent_connection_lifecycle::{
 };
 mod runtime_run_loop_input;
 use runtime_run_loop_input::{
-    ChannelControlledRuntime, RunLoopEvents, RunLoopInput, await_turn_with_events,
-    reassert_busy_on_reconnect,
+    ChannelControlledRuntime, RunLoopEvents, RunLoopInput, SWITCH_CONTINUATION_FRAME,
+    await_turn_with_events, reassert_busy_on_reconnect,
 };
 mod runtime_goal_inbox;
 use runtime_goal_inbox::{

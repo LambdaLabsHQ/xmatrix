@@ -64,6 +64,8 @@ export type FixtureResponder =
     }
   /** One response per call, clamped to the last entry once exhausted. */
   | { kind: "sequence"; responses: ReadonlyArray<{ status?: number; json: unknown }>; delayMs?: number }
+  /** Faces read by id (protocol faces.ts): each id asked for, with its picture in `images` (`user:<id>`, `agent:<id>`) or none. */
+  | { kind: "faces"; images: Readonly<Record<string, string>> }
   /** Mirror the Hub-selected scoped upload path from an upload-intent body. */
   | { kind: "relayV2UploadIntent" }
   /**
@@ -246,6 +248,13 @@ function installInterceptor({
           { messages: eligible.slice(-limit), hasMore: eligible.length > limit },
           200
         );
+      }
+
+      function faces(rule: Rule, url: URL) {
+        const images = (rule.responder.images as Record<string, string>) || {};
+        const read = (kind: string) => url.searchParams.getAll(kind)
+          .map((id) => ({ id, imageUrl: images[`${kind}:${id}`] ?? null }));
+        return jsonResponse({ users: read("user"), agents: read("agent") }, 200);
       }
 
       function launchTargets(rule: Rule, url: URL) {
@@ -491,6 +500,7 @@ function installInterceptor({
           if (rule.responder.kind === "launchTargets") {
             return launchTargets(rule, url);
           }
+          if (rule.responder.kind === "faces") return faces(rule, url);
           if (rule.responder.echoRequestId === true) {
             const requestId = method === "GET" ? url.searchParams.get("requestId") : (body ? JSON.parse(body).requestId : undefined);
             return jsonResponse({ ...(rule.responder.json as Record<string, unknown>), requestId },
@@ -739,4 +749,10 @@ export async function requestedBeforeSequences(
     const value = new URL(url).searchParams.get("beforeSequence");
     return value === null ? null : Number(value);
   });
+}
+
+/** Answers the Web's face reads with `images`, keyed `user:<id>` / `agent:<instanceId>`; any other id has no picture. */
+export async function fixtureFaces(page: Page, images: Readonly<Record<string, string>> = {}) {
+  await fixtureRule(page, { id: "faces", pattern: /\/api\/xmatrix\/spaces\/[^/]+\/faces(?:\?.*)?$/u,
+    responder: { kind: "faces", images } });
 }

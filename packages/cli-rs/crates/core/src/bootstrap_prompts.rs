@@ -78,7 +78,7 @@ impl BootstrapPrompts {
     }
 
     /// Absence is old-Hub compatibility. Invalid supplied data never falls back.
-    pub fn from_env() -> Self {
+    pub(crate) fn from_env() -> Self {
         match std::env::var(ENV) {
             Ok(json) => Self::from_json(&json).unwrap_or_else(|err| panic!("{ENV}: {err}")),
             Err(std::env::VarError::NotPresent) => Self::default(),

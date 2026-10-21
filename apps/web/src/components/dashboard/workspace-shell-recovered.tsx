@@ -6,7 +6,7 @@ import { meterTone, type MachineGlanceReading } from "./machine-load";
 import { MachineLoadGlanceBars } from "./machine-load-panel";
 import { useOpenMachine } from "./machine-link";
 import type { PresentedChannelMemberPresence as ChannelMemberPresence } from "./workspace-shell-presence";
-import { agentInstanceMemberPresence, channelPresenceInstances, presenceInstanceId, crossChannelReplyRelay, channelVisibilityScope, digestCanonicalCloneCborV1, parseLlmQuotaAccount, parseQuotaObservedAt, isUnlistedParameterTag, statusTagIcon, type AgentInvocationSelections, type DraftSummonIntent, type StatusTagIcon } from "@xmatrix/protocol";
+import { agentInstanceMemberPresence, channelPresenceInstances, faceOfSender, presenceInstanceId, crossChannelReplyRelay, channelVisibilityScope, digestCanonicalCloneCborV1, parseLlmQuotaAccount, parseQuotaObservedAt, isUnlistedParameterTag, statusTagIcon, type AgentInvocationSelections, type DraftSummonIntent, type FaceOf, type StatusTagIcon } from "@xmatrix/protocol";
 import { formatLocalClock, formatZonedDateTime } from "./time-display";
 
 import { matchClaimableOutgoing } from "./outgoing-message-claim";
@@ -81,7 +81,6 @@ import {
   MARKDOWN_ATTACHMENT_TYPES,
   MAX_COMPRESSED_IMAGE_DIMENSION,
   MAX_IMAGE_ATTACHMENT_BYTES,
-  XMATRIX_SYSTEM_AVATAR_URL,
 } from "./workspace-shell-constants";
 
 import {
@@ -143,7 +142,7 @@ import {
   Zap,
 } from "lucide-react";
 
-import { IdentityAvatar } from "@/components/dashboard/identity-avatar";
+import { Face } from "@/components/dashboard/face";
 
 import type { StatusChip } from "./workspace-shell-domain-types";
 
@@ -182,7 +181,7 @@ import {
 
 import { cn } from "@/lib/utils";
 
-import { WEB_PROXY_ROUTES, agentAvatarUrlFromMetadata } from "@xmatrix/protocol";
+import { WEB_PROXY_ROUTES } from "@xmatrix/protocol";
 
 import type {
   AgentGoalStatus,
@@ -254,6 +253,7 @@ export function PendingAttachmentCard({
             type="button"
             aria-label={`Open ${attachment.name}`}
             className="block size-20 shrink-0 cursor-zoom-in bg-background"
+            data-lightbox-origin={attachment.id}
             onClick={onOpen}
           >
             <LoadingImage
@@ -747,9 +747,12 @@ export function appendOutgoingTimelineItems(
   timeline: TimelineItem[],
   outgoing: OutgoingMessage[],
   channelId: string | undefined,
-  currentUser?: { id: string; email: string; name?: string; avatarUrl?: string } | null
+  currentUser?: { id: string; email: string; name?: string } | null
 ): TimelineItem[] {
   if (!channelId || outgoing.length === 0) return timeline;
+  const author = currentUser ? currentHumanDisplayName(currentUser) : "You";
+  // The reader's own face, read as every face of theirs is (face.tsx).
+  const face: FaceOf = currentUser ? { kind: "user", id: currentUser.id, name: author } : { kind: "external", name: author };
   const confirmedClientIds = new Set(
     timeline
       .map((message) => message.clientMessageId)
@@ -764,13 +767,13 @@ export function appendOutgoingTimelineItems(
       id: timelineItemId(message.clientMessageId, undefined),
       channelId: message.channelId,
       clientMessageId: message.clientMessageId,
-      author: currentUser ? currentHumanDisplayName(currentUser) : "You",
+      author,
       body: message.body,
       replyToMessageId: message.replyToMessageId,
       replyTo: message.replyTo,
       attachments: message.attachments.length > 0 ? message.attachments : undefined,
       sentAt: message.sentAt,
-      avatarUrl: currentUser?.avatarUrl,
+      face,
       own: true,
       senderKind: "user",
       // Who the confirmed message will be from, so the row is grouped and
@@ -791,7 +794,7 @@ export function buildTimeline(
   channel: ChannelSnapshot | null,
   channels: ChannelSnapshot[],
   events: readonly ObservabilityEvent[],
-  currentUser?: { id: string; email: string; name?: string; avatarUrl?: string } | null,
+  currentUser?: { id: string; email: string; name?: string } | null,
   channelReadCounts: Record<string, number> = {},
   historyCache?: Map<string, ChannelHistoryCacheEntry>,
   outboundClientIdsByMessageId?: Map<string, string>,
@@ -880,13 +883,6 @@ export function buildTimeline(
         ? matchedPresence
         : undefined;
     const reservedSystemAgent = isXMatrixMessageSender(message.from) || systemNotice;
-    const matchedAvatar = reservedSystemAgent
-      ? XMATRIX_SYSTEM_AVATAR_URL
-      : historicalSenderAvatarUrl({
-          snapshotAvatarUrl: message.from.avatarUrl,
-          presenceAvatarUrl: presenceAvatarUrl(kindMatchedPresence),
-          ownAvatarUrl: own ? currentUser?.avatarUrl : undefined,
-        });
     const replyRelay = relayedReply ? crossChannelReplyRelay(message.metadata) : undefined;
     const senderInstanceId = relayedReply ? replyRelay?.replierInstanceId : message.from.instanceId;
     const senderChannelInstanceId = message.from.channelInstanceId;
@@ -902,6 +898,16 @@ export function buildTimeline(
         : undefined;
     const senderOwner = senderRegistration &&
       spaceMembers.find(member => member.userId === senderRegistration.ownerUserId);
+    const author = own && currentUser ? currentHumanDisplayName(currentUser) : authorLabel;
+    // Whose face the row is drawn with. xMatrix's notices are written under their owner and drawn as xMatrix; a
+    // relayed reply is drawn as who answered elsewhere: an Agent by its registration or Instance, a person by the
+    // picture the relay carried, as it names no account.
+    const face: FaceOf = reservedSystemAgent ? { kind: "system", name: author }
+      : relayedReply ? replyRelay?.replierKind === "agent"
+        ? faceOfSender({ kind: "agent", label: author, userId: "", registration: replyRelay.replierRegistration,
+          instanceId: replyRelay.replierInstanceId })
+        : { kind: "external", name: author, imageUrl: message.from.avatarUrl ?? null }
+      : faceOfSender({ ...message.from, label: author, registration: senderRegistration ?? message.from.registration });
     const matchedInstance = senderHasInstanceIdentity
       ? kindMatchedPresence?.instances?.find(
           (instance) =>
@@ -1001,7 +1007,7 @@ export function buildTimeline(
       clientMessageId,
       channelId: message.channelId,
       sequence: message.sequence,
-      author: own && currentUser ? currentHumanDisplayName(currentUser) : authorLabel,
+      author,
       body: message.body,
       replyToMessageId: message.replyToMessageId,
       replyTo,
@@ -1035,7 +1041,7 @@ export function buildTimeline(
       ...(commandNotices.noticesBySource.has(message.messageId)
         ? { commandNotices: commandNotices.noticesBySource.get(message.messageId) } : {}),
       sentAt: displaySentAt,
-      avatarUrl: matchedAvatar,
+      face,
       own,
       senderKind: relayedReply ? linkOrigin.replierKind ?? message.from.kind : message.from.kind,
       senderId: reservedSystemAgent || relayedReply ? undefined : senderIdentityId,
@@ -1064,16 +1070,6 @@ export function buildTimeline(
   return messageItems.sort(
     (a, b) => new Date(a.sentAt).getTime() - new Date(b.sentAt).getTime()
   );
-}
-
-export function historicalSenderAvatarUrl(input: {
-  snapshotAvatarUrl?: string;
-  presenceAvatarUrl?: string;
-  ownAvatarUrl?: string;
-}): string | undefined {
-  return input.snapshotAvatarUrl ||
-    input.presenceAvatarUrl ||
-    input.ownAvatarUrl;
 }
 
 export function effectiveMentionReadStatuses(
@@ -1193,7 +1189,12 @@ export function humanizeLegacyMachineRunFailureBody(body: string): string {
   ].join("\n");
 }
 
-export function MachineRunFailureNotice({ body, machineName }: { body: string; machineName?: string }) {
+export function MachineRunFailureNotice({ body, machineName, harness }: {
+  body: string;
+  machineName?: string;
+  /** The harness that failed to start, as the notice records it; the name in its text may be a renamed Agent's. */
+  harness?: string;
+}) {
   const lines = humanizeLegacyMachineRunFailureBody(body)
     .split(/\r?\n/u)
     .map((line) => line.trim())
@@ -1212,9 +1213,7 @@ export function MachineRunFailureNotice({ body, machineName }: { body: string; m
         error: startMatch[3],
       }
     : null;
-  // The notice names the harness that failed to start; its icon is the harness's.
   const targetName = startMatch?.[1];
-  const targetAvatarUrl = targetName ? agentAvatarUrlFromMetadata({}, targetName) : undefined;
 
   return (
     <div
@@ -1223,15 +1222,8 @@ export function MachineRunFailureNotice({ body, machineName }: { body: string; m
       data-system-notice="machine_run_failure"
     >
       <div className="flex min-w-0 items-start gap-2.5">
-        {targetName && targetAvatarUrl ? (
-          <IdentityAvatar
-            kind="agent"
-            label={targetName}
-            initials={avatarInitials(targetName)}
-            imageUrl={targetAvatarUrl}
-            size="sm"
-            shape="circle"
-          />
+        {targetName && harness ? (
+          <Face of={{ kind: "agent", name: targetName, harness }} size="sm" shape="circle" />
         ) : (
           <AlertTriangle
             className="mt-0.5 size-4 shrink-0 text-destructive"
@@ -1456,7 +1448,7 @@ function uniqueThreadReplyParticipants(
       `${reply.from.kind}:${reply.from.label}`;
     if (seen.has(id)) continue;
     seen.add(id);
-    participants.push({ id, author: reply.from.label, avatarUrl: reply.from.avatarUrl });
+    participants.push({ id, author: reply.from.label, face: faceOfSender(reply.from) });
     if (participants.length === 2) break;
   }
   return participants.length > 0 ? participants : undefined;
@@ -1533,12 +1525,6 @@ export function formatMember(
 
 /* moved to workspace-shell-presence (1) */
 
-export function presenceAvatarUrl(
-  presence: ChannelMemberPresence | undefined
-): string | undefined {
-  return (presence as (ChannelMemberPresence & { avatarUrl?: string }) | undefined)?.avatarUrl;
-}
-
 export function buildAgentWorkItems(
   channel: ChannelSnapshot | null,
   events: ObservabilityEvent[],
@@ -1553,7 +1539,7 @@ export function buildAgentWorkItems(
     const presence = agentInstanceMemberPresence(instance);
     const agentLabel = presence.label || member;
     if (!isChannelResidentPresence(instance)) continue;
-    const avatarUrl = presence.avatarUrl;
+    const face: FaceOf = { kind: "agent", name: agentLabel, harness: instance.registration.harness, id: instance.id };
     const target: AgentTraceTarget = {
       id: member,
       instanceId: instance.id,
@@ -1564,7 +1550,7 @@ export function buildAgentWorkItems(
       connectedAt: instance.connectedAt,
       name: agentInstanceDisplayName(instance),
       status: instance.status,
-      avatarUrl,
+      face,
       activity: presenceStatusLabel(instance),
       gitBranch: instance.gitBranch,
       runtimeState: instance.runtimeState || presence.runtimeState,
@@ -1580,8 +1566,7 @@ export function buildAgentWorkItems(
       label: instance.label || instance.id,
       agentLabel,
       status: instance.status,
-      avatarUrl,
-      avatarKind: "agent",
+      face,
       activity: instance.activity || presence.activity,
       intent: instance.intent || presence.intent,
       files: instance.files?.length ? instance.files : presence.files,
@@ -1612,14 +1597,15 @@ export function buildAgentWorkItems(
     const instance: SerializedAgentInstance = { id: launch.instanceId,
       label: `run ${shortId(launch.runId)}`, connectedAt: launch.createdAt,
       lastSeenAt: launch.updatedAt, status, activity };
+    // The launch's Instance is recorded with it, so its face is read from the harness it is registered with.
+    const face: FaceOf = { kind: "agent", name: label, id: launch.instanceId };
     const target: AgentTraceTarget = { id: actorId, instanceId: launch.instanceId,
       instanceIds: [launch.instanceId], instanceScoped: true, channelId: channel.id,
-      connectedAt: launch.createdAt, name: label, status, avatarUrl: launch.targetAvatarUrl,
-      activity };
+      connectedAt: launch.createdAt, name: label, status, face, activity };
     items.push({ key: `${actorId}:${launch.instanceId}`,
       agentId: actorId, instance, sortIndex: items.length,
       label: instance.label || "starting", agentLabel: label, status,
-      avatarUrl: launch.targetAvatarUrl, activity, lastSeenAt: launch.updatedAt,
+      face, activity, lastSeenAt: launch.updatedAt,
       target, canStop: false });
   }
   for (const event of latestSpawnEventsByAgent(events, channel)) {
@@ -1629,8 +1615,11 @@ export function buildAgentWorkItems(
     if (!agentId || membersWithInstances.has(agentId) || launchedInstanceIds.has(agentId)) continue;
     if (!visibleMembers.has(agentId)) continue;
 
-    const agentLabel = event.agentName || memberPresence(channel, agentId).label || agentId;
-    const avatarUrl = (memberPresence(channel, agentId) as ChannelMemberPresence & { avatarUrl?: string }).avatarUrl;
+    const member = memberPresence(channel, agentId);
+    const agentLabel = event.agentName || member.label || agentId;
+    // A spawn names the run, not an Instance: the face is the member's registered harness.
+    const face: FaceOf = { kind: "agent", name: agentLabel,
+      harness: member.kind === "agent" ? member.registration?.harness ?? null : null };
     const runLabel = eventMetadataString(event, "runLabel");
     const launchInstanceId = eventMetadataString(event, "runId") || event.id;
     const timestamp = event.timestamp;
@@ -1653,7 +1642,7 @@ export function buildAgentWorkItems(
       connectedAt: timestamp,
       name: agentLabel,
       status,
-      avatarUrl,
+      face,
       activity,
     };
 
@@ -1672,7 +1661,7 @@ export function buildAgentWorkItems(
       label: runLabel ? `run ${runLabel}` : "starting",
       agentLabel,
       status,
-      avatarUrl,
+      face,
       activity,
       lastSeenAt: timestamp,
       latestEvent: event,
@@ -2005,20 +1994,6 @@ export function parseInviteEmails(value: string): string[] {
     .map((email) => email.trim().toLowerCase())
     .filter((email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email));
   return Array.from(new Set(emails));
-}
-
-export function initialsFor(value: string): string {
-  return value
-    .split(/[\s@._-]+/)
-    .filter(Boolean)
-    .map((part) => part[0])
-    .join("")
-    .toUpperCase()
-    .slice(0, 2);
-}
-
-export function avatarInitials(value: string): string {
-  return initialsFor(value) || "XM";
 }
 
 export function GoalStatusBadge({

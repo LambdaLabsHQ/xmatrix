@@ -1,7 +1,8 @@
 {
   // Product configuration of the Web Worker. Deployment identity (account,
   // worker name, route) comes from a profile in deploy/profiles/; deploy with
-  //   node scripts/deploy-config.mjs render <profile> web
+  //   node scripts/deploy-config.mjs render <profile> web       (stable Web)
+  //   node scripts/deploy-config.mjs render <profile> web-beta  (beta Web)
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "xmatrix-web",
   "main": "worker.mjs",

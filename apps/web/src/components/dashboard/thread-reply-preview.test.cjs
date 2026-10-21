@@ -7,7 +7,9 @@ const { threadReplyPreviews } = require("./thread-reply-preview.ts");
 const reply = (sequence, kind = "user", overrides = {}) => ({
   messageId: `reply-${sequence}`, channelId: "thread-1", sequence,
   sentAt: `2026-09-13T10:00:0${sequence}Z`, body: `Message ${sequence}`,
-  from: { kind, label: kind }, ...overrides,
+  from: { kind, label: kind, userId: kind === "user" ? "user-1" : "", identityId: kind === "app" ? "app:github" : undefined,
+    registration: kind === "agent" ? { ownerUserId: "user-1", machineId: "machine-1", harness: "codex" } : undefined },
+  ...overrides,
 });
 
 test("latest two replies include agents and apps and render oldest to newest", () => {
@@ -16,6 +18,11 @@ test("latest two replies include agents and apps and render oldest to newest", (
   ]);
   assert.deepEqual(previews.map((item) => item.id), ["reply-2", "reply-3"]);
   assert.deepEqual(previews.map((item) => item.author), ["agent", "app"]);
+  // Each reply is drawn as who wrote it, not as a person.
+  assert.deepEqual(previews.map((item) => item.face), [
+    { kind: "agent", name: "agent", harness: "codex", id: null },
+    { kind: "app", id: "github", name: "app" },
+  ]);
 });
 
 test("cached replies merge with summary without duplicates or unrelated channel roots", () => {

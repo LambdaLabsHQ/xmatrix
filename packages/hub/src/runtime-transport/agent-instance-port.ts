@@ -1,4 +1,5 @@
 import { daemonClientCompatibility as agentInstanceCompatibility } from "../legacy-client-compatibility";
+import { SWITCH_CONTINUATION_FRAME_CAPABILITY } from "../product-agent-model-effort";
 import { plainDeliveryRecord } from "./delivery-record";
 import type {
   AgentInstanceClientMessage,
@@ -438,6 +439,22 @@ export class AgentInstanceRuntimeTransport {
       session.clientCapabilities?.includes("agent_turn_retry"));
     if (targets.length !== 1) return false;
     this.sockets.send(targets[0]![0], input.message);
+    return true;
+  }
+
+  /**
+   * Hand one Instance the instruction to continue the turn its switches
+   * cancelled, on its own socket. False when this cell holds no socket for it
+   * or its runtime predates the frame; the caller then commits the legacy
+   * Channel instruction instead.
+   */
+  deliverSwitchContinuation(input: { channelId: string; instanceId: string; requestIds: string[]; prompt: string }): boolean {
+    const targets = Array.from(this.sockets.entries()).filter(([, session]) =>
+      session.run.instanceId === input.instanceId && session.run.channelId === input.channelId &&
+      session.clientCapabilities?.includes(SWITCH_CONTINUATION_FRAME_CAPABILITY));
+    if (targets.length !== 1) return false;
+    this.sockets.send(targets[0]![0], { type: "agent_switch_continuation", channelId: input.channelId,
+      instanceId: input.instanceId, requestIds: input.requestIds, prompt: input.prompt });
     return true;
   }
 

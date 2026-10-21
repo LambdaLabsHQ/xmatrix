@@ -40,7 +40,7 @@ import {
 } from "./runtime-transport/runtime-route-directory-locator";
 import { legacyClientCompatibilityAdmissionEnabled } from "./client-compatibility-gate";
 import { RELAY_RUNTIME_HUMAN_PRESENCE_PATH } from "./runtime-transport/human-presence-fanout";
-import { RELAY_RUNTIME_AGENT_CONTROL_SWITCH_PATH } from "./product-agent-model-effort";
+import { RELAY_RUNTIME_AGENT_CONTROL_SWITCH_PATH, RELAY_RUNTIME_AGENT_SWITCH_CONTINUATION_PATH } from "./product-agent-model-effort";
 import { RELAY_RUNTIME_AGENT_PRESENCE_PATH } from "./runtime-transport/agent-presence-snapshot";
 import {
   parseChannelAgentPresenceDelivery,
@@ -301,6 +301,20 @@ export class RelayRuntimeLive extends DurableObject<Env> {
         return Response.json({ error: "Invalid retry delivery" }, { status: 400 });
       return Response.json({ delivered: this.productAdapter?.deliverAgentTurnRetry(payload as unknown as
         Parameters<RelayRuntimeProductCallbackAdapter["deliverAgentTurnRetry"]>[0]) ?? false });
+    }
+    if (request.method === "POST" && url.pathname === RELAY_RUNTIME_AGENT_SWITCH_CONTINUATION_PATH) {
+      const payload = plainObject(await request.json().catch(() => undefined));
+      const channelId = boundedId(payload?.channelId, 180);
+      const instanceId = boundedId(payload?.instanceId, 200);
+      const requestIds = Array.isArray(payload?.requestIds) && payload.requestIds.length > 0 && payload.requestIds.length <= 16
+        ? payload.requestIds.map((id) => boundedId(id, 200)) : [];
+      const prompt = typeof payload?.prompt === "string" && payload.prompt.length <= 4_000 ? payload.prompt : undefined;
+      if (!channelId || !instanceId || !prompt || requestIds.length === 0 || requestIds.some((id) => !id)) {
+        return Response.json({ error: "Invalid switch continuation" }, { status: 400, headers: { "cache-control": "no-store" } });
+      }
+      return Response.json({ delivered: this.productAdapter?.deliverSwitchContinuation({
+        channelId, instanceId, requestIds: requestIds as string[], prompt }) ?? false },
+      { headers: { "cache-control": "no-store" } });
     }
     if (request.method === "POST" && url.pathname === RELAY_RUNTIME_AGENT_CONTROL_SWITCH_PATH) {
       const payload = plainObject(await request.json().catch(() => undefined));

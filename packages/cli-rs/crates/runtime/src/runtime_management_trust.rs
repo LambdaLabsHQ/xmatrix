@@ -2832,7 +2832,7 @@ async fn handle_polled_daemon_spawn(
 /// whatever else is configured. That is the right outcome for every case we
 /// decline -- a host that is not GitHub, a request that did not say which
 /// repository, a run holding no grant -- so none of them are errors here.
-pub async fn cmd_git_credential(operation: &str) -> error::Result<()> {
+pub(crate) async fn cmd_git_credential(operation: &str) -> error::Result<()> {
     use std::io::Read as _;
 
     // Git only expects an answer to `get`. It sends `store` and `erase` so a

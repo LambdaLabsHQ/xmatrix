@@ -291,12 +291,12 @@ export class PostgresMachineLifecycleRepository {
         input.repositoryBaseline?.relationship === "diverged" && input.repositoryBaseline.noticeKey !== undefined;
       if ((eventType === "machine_run_exited" || spawnFailure || stopNotice || baselineNotice) &&
           typeof payload.runId === "string" && (spawnFailure || stopNotice || changedRunIds.includes(payload.runId))) {
-        const contexts = await tx.query<QueryResultRow>({ name: "machine_lifecycle_notice_context_v6", text: `SELECT
+        const contexts = await tx.query<QueryResultRow>({ name: "machine_lifecycle_notice_context_v7", text: `SELECT
           r.run_id,r.channel_id,r.owner_user_id,r.status,r.metadata_json,
           (r.metadata_json->'spawnResult'->>'ok'='false' OR
             EXISTS (SELECT 1 FROM data.agent_launches launch WHERE launch.run_id=r.run_id
               AND launch.state='failed' AND launch.spawned_at IS NULL)) AS startup_failed,
-          registration.display_name AS agent_name,machine.name AS machine_name
+          registration.display_name AS agent_name,binding.harness,machine.name AS machine_name
           FROM data.runs r
           JOIN data.run_agent_registrations binding ON binding.run_id=r.run_id AND binding.space_id=$3
           JOIN data.space_agent_registrations registration ON registration.space_id=binding.space_id
@@ -308,7 +308,9 @@ export class PostgresMachineLifecycleRepository {
           values: [payload.runId, channelId, placement.spaceId, ownerUserId], maxRows: 1 });
         const context = contexts[0];
         const notice = context && { runId: String(context.run_id), channelId: String(context.channel_id),
-          ownerUserId: String(context.owner_user_id), agentName: String(context.agent_name), machineId, hostId,
+          ownerUserId: String(context.owner_user_id), agentName: String(context.agent_name),
+          // The notice's face: its Agent's harness, which a renamed Agent's name no longer says.
+          ...(context.harness ? { harness: String(context.harness) } : {}), machineId, hostId,
           // The Channel names the Machine as its owner did; the hostname is only an observation.
           ...(context.machine_name ? { machineName: String(context.machine_name) } : {}) };
         if (!notice ||

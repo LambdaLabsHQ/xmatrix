@@ -11,7 +11,7 @@ use std::time::Duration;
 /// How long a connection must stay up before it counts as healthy and the
 /// backoff starts over. A Hub that accepts the handshake and drops the socket
 /// right after must keep the backoff growing, not reset it every time.
-pub const HEALTHY_CONNECTION: Duration = Duration::from_secs(30);
+pub(crate) const HEALTHY_CONNECTION: Duration = Duration::from_secs(30);
 
 #[derive(Debug, Clone)]
 pub struct Backoff {
@@ -36,7 +36,7 @@ impl Backoff {
         delay
     }
 
-    pub async fn wait(&mut self) {
+    pub(crate) async fn wait(&mut self) {
         tokio::time::sleep(self.next_delay()).await;
     }
 
@@ -45,13 +45,13 @@ impl Backoff {
         self.ceiling
     }
 
-    pub fn reset(&mut self) {
+    pub(crate) fn reset(&mut self) {
         self.ceiling = self.base;
     }
 
     /// Starts over only after a connection that stayed up long enough to be
     /// trusted; a session that dropped sooner keeps the grown backoff.
-    pub fn reset_if_healthy(&mut self, connected_for: Duration) {
+    pub(crate) fn reset_if_healthy(&mut self, connected_for: Duration) {
         if connected_for >= HEALTHY_CONNECTION {
             self.reset();
         }
@@ -59,14 +59,14 @@ impl Backoff {
 }
 
 /// A wait in `[ceiling / 2, ceiling]`.
-pub fn equal_jitter(ceiling: Duration) -> Duration {
+pub(crate) fn equal_jitter(ceiling: Duration) -> Duration {
     let half = ceiling / 2;
     half + random_share(ceiling - half)
 }
 
 /// A wait in `[wait, wait * 1.5]`, never above `cap`: a server-named wait is a
 /// floor, and the spread keeps callers it named together from replaying in step.
-pub fn jitter_above(wait: Duration, cap: Duration) -> Duration {
+pub(crate) fn jitter_above(wait: Duration, cap: Duration) -> Duration {
     (wait + random_share(wait / 2)).min(cap)
 }
 

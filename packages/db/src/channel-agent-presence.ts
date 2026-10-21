@@ -3,11 +3,10 @@ import {
   LIVE_AGENT_STATUS_SQL,
   localLlmUsage,
   type LlmUsage,
-  agentAvatarUrlFromMetadata,
+  agentFaceUrl,
   isLiveAgentStatus,
   type AgentInstanceRest,
   type AgentStatusChip,
-  normalizeAgentPresetRuntime,
   repoSummonReference,
   type ChannelMemberPresence,
   type SerializedAgentInstance,
@@ -79,7 +78,7 @@ const DURABLE_PRESENTATION_SQL = `i.presentation_json->>'model' AS instance_mode
         i.presentation_json->'statusChips' AS instance_status_chips`;
 
 function harnessAvatarUrl(harness: string): string | undefined {
-  return agentAvatarUrlFromMetadata({}, normalizeAgentPresetRuntime(harness) ?? harness);
+  return agentFaceUrl(harness);
 }
 
 /**

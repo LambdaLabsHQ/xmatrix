@@ -4,11 +4,12 @@ import {
   orchestrateProductAgentControlCommands,
   parseProductAgentControlCommands,
   RELAY_RUNTIME_AGENT_CONTROL_SWITCH_PATH,
+  RELAY_RUNTIME_AGENT_SWITCH_CONTINUATION_PATH,
   type ProductAgentControlOutcome,
   type ProductAgentControlPort,
   type ProductAgentControlResult,
 } from "./product-agent-model-effort";
-import { productAgentSystemNoticeSenderSnapshot } from "./product-agent-mention-authority-adapter";
+import { recordCommandResult } from "./command-result";
 import { runtimeCellsForChannel } from "./runtime-transport/runtime-route-directory-delivery";
 import { dispatchProductMessageAppend } from "./product-message-append";
 import type { Env } from "./types";
@@ -95,43 +96,29 @@ export function createProductAgentControlAuthorityPort(input: {
         outcomes[0] ?? { status: "no_instance" };
     },
 
-    async publishSystemNotice(channelId, body, outcomes) {
-      const messageId = `system:${input.sourceMessageId}:control-switch`.slice(0, 200);
-      const response = await dispatchProductMessageAppend(input.env, channelId, {
-        commandId: `product:control-switch-notice:${messageId}`.slice(0, 200),
-        messageId,
-        channelId,
-        body,
-        // The Hub's receipt, not the owner's speech: it answers none of their waits.
-        messageKind: "xmatrix.system.control-switch",
-        principal,
-        senderSnapshot: productAgentSystemNoticeSenderSnapshot(input.actorUserId),
-        residual: {
-          appMetadata: {
-            // The receipt is a control-plane fact. Committing it without this
-            // provenance would hand the switch confirmation back to the very
-            // Instance that was switched, as fresh work.
-            xmatrixProvenance: "system_fact",
-            xmatrixSystemNotice: true,
-            sourceMessageId: input.sourceMessageId,
-            // A client draws each result on the statement that asked for it.
-            controlOutcomes: outcomes,
-          },
-        },
-      });
-      if (!response.ok) {
-        const result = record(await response.json().catch(() => undefined));
-        const detail = typeof result?.error === "string" && result.error.trim()
-          ? `: ${result.error.trim()}`
-          : "";
-        throw new Error(`control switch notice failed (${response.status})${detail}`);
-      }
+    async recordOutcomes(channelId, outcomes) {
+      await recordCommandResult(input.env, { channelId, messageId: input.sourceMessageId,
+        key: "controls", entry: { controls: outcomes } });
     },
 
-    /* The continuation is a committed Channel instruction, as a capacity retry
-       is: only the named Instance, still waiting on one of these switches,
-       runs it, and it checks it has no newer input first. */
-    async publishContinuation(channelId, { instanceId, requestIds, body }) {
+    /* The continuation is an instruction to one Instance, not something
+       anyone says in the Channel: its own socket carries it, and the Instance,
+       still waiting on one of these switches, runs it unless newer input
+       waits. A runtime that predates the frame reads it as a committed
+       Channel instruction instead. */
+    async continueTurn(channelId, { instanceId, requestIds, body }) {
+      const cells = await runtimeCellsForChannel(input.env, channelId);
+      const delivered = await Promise.all(cells.map(async (runtime) => {
+        const response = await runtime.fetch(
+          new Request(`https://relay-runtime.internal${RELAY_RUNTIME_AGENT_SWITCH_CONTINUATION_PATH}`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ channelId, instanceId, requestIds, prompt: body }),
+          }),
+        ).catch(() => undefined);
+        return response?.ok === true && record(await response.json().catch(() => undefined))?.delivered === true;
+      }));
+      if (delivered.some(Boolean)) return;
       const messageId = `system:${input.sourceMessageId}:switch-continuation:${instanceId}`.slice(0, 200);
       const response = await dispatchProductMessageAppend(input.env, channelId, {
         commandId: `product:switch-continuation:${messageId}`.slice(0, 200),

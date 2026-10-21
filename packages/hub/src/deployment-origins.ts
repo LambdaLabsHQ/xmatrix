@@ -30,6 +30,17 @@ export function appOrigin(env: Pick<Env, "APP_URL">): string {
   return deploymentOrigin(env.APP_URL, "APP_URL").origin;
 }
 
+/**
+ * Every Web origin this Hub serves: the stable app and, when the deployment
+ * has one, the beta app every beta release deploys. Trust checks accept
+ * exactly these; links and redirects still go to `appOrigin`.
+ */
+export function appOrigins(env: Pick<Env, "APP_URL" | "APP_BETA_URL">): string[] {
+  const origins = [appOrigin(env)];
+  if (env.APP_BETA_URL?.trim()) origins.push(deploymentOrigin(env.APP_BETA_URL, "APP_BETA_URL").origin);
+  return origins;
+}
+
 /** The Hub origin: Better Auth base URL and the JWT issuer and audience. */
 export function hubAuthBaseUrl(env: Pick<Env, "HUB_URL">): string {
   return deploymentOrigin(env.HUB_URL, "HUB_URL").origin;

@@ -407,10 +407,13 @@ export class PostgresPageRepository {
     if (database.cacheMode !== "disabled") throw new PageControlError("cached_authority_forbidden", 500);
   }
 
-  /** An Agent's page revision is a billable write (docs/design/agent-credits.md). */
-  private async chargeAgentRevision(tx: DatabaseTransaction, spaceId: string, now: string): Promise<void> {
-    const rejection = await spaceBilling.agentWrite(tx, { spaceId, now, kind: "page_revision",
-      creditsWaived: spaceId === this.options.creditsWaivedSpaceId });
+  /**
+   * A page revision counts toward a Free Space's allowance, whoever wrote it,
+   * and an Agent's uses a paid Space's credit (docs/design/agent-credits.md).
+   */
+  private async chargeRevision(tx: DatabaseTransaction, spaceId: string, actor: Actor, now: string): Promise<void> {
+    const rejection = await spaceBilling.durableWrite(tx, { spaceId, now, kind: "page_revision",
+      author: actor.isAgent ? "agent" : "person", creditsWaived: spaceId === this.options.creditsWaivedSpaceId });
     if (rejection) throw new PageControlError(rejection.code, rejection.status, rejection.message, rejection.details);
   }
 
@@ -626,7 +629,7 @@ export class PostgresPageRepository {
           values: [spaceId, pageId, actor.userId, now], maxRows: 0,
         });
       }
-      if (actor.isAgent) await this.chargeAgentRevision(tx, spaceId, now);
+      await this.chargeRevision(tx, spaceId, actor, now);
       await this.insertRevision(tx, spaceId, pageId, 1, newBody, [actor.author], [], "edit", null, now);
       const row = await this.page(tx, spaceId, actor, pageId, "read");
       return { page: this.summary(row) };
@@ -734,7 +737,7 @@ export class PostgresPageRepository {
         "The page changed since you read it; merge your edit into the current revision and retry",
         { headRevision: head, body: current?.body ?? "" });
     }
-    if (actor.isAgent) await this.chargeAgentRevision(tx, spaceId, now);
+    await this.chargeRevision(tx, spaceId, actor, now);
     await this.insertRevision(tx, spaceId, pageId, revision, text, authors, conversationIds,
       suggestion ? "suggestion" : input.kind, input.baseRevision, now);
     const anchoring = suggestion ? { channels: [], detached: [], attached: [] } : await (async () => {
@@ -2080,7 +2083,7 @@ export class PostgresPageRepository {
             const agents = byPage.get(row.page_id) ?? [];
             agents.push({ instanceId: instance.id, name: instance.label || member.label || "Agent",
               status,
-              ...(member.avatarUrl ? { avatarUrl: member.avatarUrl } : {}),
+              ...(member.registration?.harness ? { harness: member.registration.harness } : {}),
               conversationId: row.conversation_id, activity: row.source === "edit" ? "editing" : "viewing",
               blockId: row.block_id });
             byPage.set(row.page_id, agents);

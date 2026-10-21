@@ -11,15 +11,15 @@ use crate::protocol;
 #[derive(Debug, Clone, Default)]
 pub(crate) struct AgentPresentationFacts {
     pub(crate) model: Option<String>,
-    pub(crate) models: Vec<protocol::AgentModelInfo>,
+    pub models: Vec<protocol::AgentModelInfo>,
     pub(crate) models_reported: bool,
     pub(crate) effort: Option<String>,
     pub(crate) effort_config_id: Option<String>,
-    pub(crate) parameters: Option<Vec<protocol::HarnessParameter>>,
+    pub parameters: Option<Vec<protocol::HarnessParameter>>,
     pub(crate) parameter_revision: u64,
-    pub(crate) supported_efforts: Vec<protocol::AgentModelReasoningEffort>,
-    pub(crate) commands: Vec<protocol::AgentInstanceCommand>,
-    pub(crate) status_chips: Vec<protocol::AgentStatusChip>,
+    pub supported_efforts: Vec<protocol::AgentModelReasoningEffort>,
+    pub commands: Vec<protocol::AgentInstanceCommand>,
+    pub status_chips: Vec<protocol::AgentStatusChip>,
     pub(crate) usage: Option<protocol::LlmUsage>,
 }
 
@@ -28,11 +28,11 @@ pub(crate) struct AgentPresentationFacts {
 #[derive(Debug, Clone, Default)]
 pub(crate) struct AgentPresentationSnapshot {
     pub(crate) model: Option<String>,
-    pub(crate) models: Option<Vec<protocol::AgentModelInfo>>,
+    pub models: Option<Vec<protocol::AgentModelInfo>>,
     pub(crate) effort: Option<String>,
-    pub(crate) commands: Option<Vec<protocol::AgentInstanceCommand>>,
-    pub(crate) parameters: Option<Vec<protocol::HarnessParameter>>,
-    pub(crate) status_chips: Option<Vec<protocol::AgentStatusChip>>,
+    pub commands: Option<Vec<protocol::AgentInstanceCommand>>,
+    pub parameters: Option<Vec<protocol::HarnessParameter>>,
+    pub status_chips: Option<Vec<protocol::AgentStatusChip>>,
     pub(crate) usage: Option<protocol::LlmUsage>,
 }
 
@@ -399,7 +399,7 @@ pub(crate) fn resolve_switchable_model(
         .ok_or_else(|| format!("Model '{}' is not available", requested.trim()))
 }
 
-pub(crate) fn models_support_efforts(models: &[protocol::AgentModelInfo]) -> bool {
+pub fn models_support_efforts(models: &[protocol::AgentModelInfo]) -> bool {
     models.iter().any(|item| {
         item.supported_reasoning_efforts
             .as_ref()
@@ -704,7 +704,7 @@ fn reasoning_efforts_from_value(value: &Value) -> Option<Vec<protocol::AgentMode
     (!efforts.is_empty()).then_some(efforts)
 }
 
-pub(crate) fn acp_model_catalog_from_value(value: &Value) -> Vec<protocol::AgentModelInfo> {
+pub fn acp_model_catalog_from_value(value: &Value) -> Vec<protocol::AgentModelInfo> {
     value
         .get("availableModels")
         .or_else(|| value.get("available_models"))

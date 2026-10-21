@@ -149,7 +149,7 @@ impl CachedMedia<'_> {
 }
 
 /// The extension a file of this type and name is saved with.
-pub fn media_extension(mime_type: &str, name: &str) -> &'static str {
+pub(crate) fn media_extension(mime_type: &str, name: &str) -> &'static str {
     let lower_mime = mime_type.to_ascii_lowercase();
     for (needle, extension) in [
         ("png", "png"),

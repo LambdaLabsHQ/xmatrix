@@ -4,9 +4,8 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObje
 import { ChevronDown } from "lucide-react";
 import type { EditorView } from "prosemirror-view";
 import { carryPageDocKnown } from "@xmatrix/protocol/page-document";
-import { agentPresetAvatarUrl, normalizeAgentPresetRuntime, pageAuthorLabel, type PageAuthor, type PageBlame } from "@xmatrix/protocol";
-import { IdentityAvatar } from "@/components/dashboard/identity-avatar";
-import { avatarInitials } from "@/components/dashboard/completion-option-button";
+import { faceOfPageAuthor, pageAuthorLabel, type PageAuthor, type PageBlame } from "@xmatrix/protocol";
+import { Face } from "@/components/dashboard/face";
 import type { Node as DocNode } from "prosemirror-model";
 import { PaperPopover } from "@/components/ui/material-surfaces";
 import { formatRelativeAge } from "@/components/dashboard/time-display";
@@ -57,15 +56,9 @@ function exactTime(at: string): string {
     minute: "2-digit" });
 }
 
-/** A writer's face, as the margin draws the Agents and people on the page. */
-function Face({ author }: { author: PageAuthor }) {
-  const label = pageAuthorLabel(author);
-  const imageUrl = author.kind === "agent"
-    ? agentPresetAvatarUrl(normalizeAgentPresetRuntime(author.label.split(":")[0] ?? "")) : undefined;
-  return (
-    <IdentityAvatar kind={author.kind === "agent" ? "agent" : "human"} label={label} imageUrl={imageUrl}
-      initials={avatarInitials(label)} size="xs" shape="circle" glass={false} className="shrink-0" />
-  );
+/** A writer's face: a person's own picture, an Agent's vendor mark (protocol faces.ts). */
+function WriterFace({ author }: { author: PageAuthor }) {
+  return <Face of={faceOfPageAuthor(author)} size="xs" shape="circle" glass={false} className="shrink-0" />;
 }
 
 /** One line of who wrote it: their names, and when the newest of them wrote. */
@@ -75,7 +68,7 @@ function Byline({ summary }: { summary: BlameSummary }) {
   return (
     <>
       <span className="flex shrink-0 -space-x-1.5">
-        {summary.writers.slice(0, 2).map((writer) => <Face key={`${writer.author.kind}:${writer.author.id}`} author={writer.author} />)}
+        {summary.writers.slice(0, 2).map((writer) => <WriterFace key={`${writer.author.kind}:${writer.author.id}`} author={writer.author} />)}
       </span>
       <span className="truncate font-medium text-foreground">{names(summary.writers)}</span>
       <span aria-hidden="true">·</span>
@@ -321,7 +314,7 @@ export function PageBlameLayer({ view, frame, source, inMargin }: {
             <ul className="mt-1 space-y-1 border-t border-foreground/10 pt-1.5 pb-0.5">
               {selectedSummary.writers.map((writer) => (
                 <li key={`${writer.author.kind}:${writer.author.id}`} className="flex min-w-0 items-center gap-1.5">
-                  <Face author={writer.author} />
+                  <WriterFace author={writer.author} />
                   <span className="truncate font-medium text-foreground">{pageAuthorLabel(writer.author)}</span>
                   <span aria-hidden="true">·</span>
                   <time dateTime={writer.at} title={exactTime(writer.at)} className="shrink-0">

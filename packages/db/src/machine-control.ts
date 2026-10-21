@@ -24,8 +24,8 @@ import { commandFields } from "./command-fields.js";
 import { ControlError } from "./control-error.js";
 
 const ACTIONS = new Set(["enroll", "connect", "report", "unregister", "issue", "issue_batch", "claim",
-  "renew", "complete", "retry", "failed-deliver", "migration_preflight", "migration_fence", "recover_connect",
-  "activation_begin", "activation_prepare", "activation_advance"]);
+  "renew", "complete", "retry", "failed-deliver", "confirm-online", "migration_preflight", "migration_fence",
+  "recover_connect", "activation_begin", "activation_prepare", "activation_advance"]);
 const COMMAND_TYPES = new Set(["spawn", "stop", "cleanup", "request_resolve", "recover_reply", "quota_probe",
   "harness_action", "worktree_action", "text_task", "sleep"]);
 const RESULT_TYPES: Record<string, string> = {
@@ -412,6 +412,17 @@ export class PostgresMachineControlRepository {
         "machine_identity_conflict", 409, "Machine Daemon identity is already bound");
       if (action === "failed-deliver") {
         if (!current) return { delivered: 0, owners: 0, deliverable: false };
+        // The epoch is the generation the failed wake observed. A reconnect
+        // that already replaced it must stay online; this delivery belonged
+        // to the socket that is gone.
+        if (input.connectionEpoch !== undefined &&
+            Number(current.connection_epoch) !== integer(input.connectionEpoch, "connectionEpoch", 1)) {
+          return {
+            commandId, action, daemon: daemon(current),
+            connectionEpoch: Number(current.connection_epoch),
+            delivered: 0, owners: 0, deliverable: false, stale: true,
+          };
+        }
         current = await this.commitDaemon(tx, { action, current, daemonId, ownerUserId, ownerEmail,
           machineId, hostId, input, at });
         return {
@@ -446,7 +457,7 @@ export class PostgresMachineControlRepository {
         throw new MachineControlError("idempotency_mismatch", 409,
           "Machine Daemon enrollment exists without its exact idempotency result");
       }
-      if (!current && ["report", "claim", "renew", "complete", "retry", "unregister"].includes(action)) {
+      if (!current && ["report", "claim", "renew", "complete", "retry", "unregister", "confirm-online"].includes(action)) {
         throw new MachineControlError("machine_daemon_not_registered", 409,
           "Machine Daemon must connect before this operation");
       }
@@ -488,6 +499,10 @@ export class PostgresMachineControlRepository {
       if (action !== "claim" && action !== "complete") {
         const prior = await replay(tx, ownerUserId, commandId, requestDigest);
         if (prior) return prior;
+      }
+      if (action === "confirm-online" && String(current!.status) === "online") {
+        return { commandId, action, daemon: daemon(current!),
+          connectionEpoch: Number(current!.connection_epoch) };
       }
       if (action === "claim") return this.claim(tx, input, current!, connectionEpoch!, at);
       if (action === "renew") return this.renew(tx, input, current!, connectionEpoch!, at);
@@ -929,11 +944,11 @@ export class PostgresMachineControlRepository {
   private async commitDaemon(tx: DatabaseTransaction, input: { action: string; current?: QueryResultRow;
     daemonId: string; ownerUserId: string; ownerEmail: string; machineId: string; hostId: string;
     input: Record<string, unknown>; at: string }) {
-    const status = input.action === "connect" ? "online"
+    const status = input.action === "connect" || input.action === "confirm-online" ? "online"
       : input.action === "unregister" || input.action === "failed-deliver" ? "offline"
       : input.current ? String(input.current.status) : "enrolled";
-    const projectsReachability = input.action === "connect" || input.action === "unregister" ||
-      input.action === "failed-deliver" || input.action === "enroll";
+    const projectsReachability = input.action === "connect" || input.action === "confirm-online" ||
+      input.action === "unregister" || input.action === "failed-deliver" || input.action === "enroll";
     if (input.current && !projectsReachability) return input.current;
     const capabilities = Array.isArray(input.input.capabilities) ? input.input.capabilities : [];
     const body: Record<string, unknown> = input.input.metadata && typeof input.input.metadata === "object" &&

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import type { AgentPreset } from "@xmatrix/protocol";
+import { agentFaceUrl, type AgentPreset } from "@xmatrix/protocol";
 import { GlassSelect } from "@/components/ui/glass-select";
 import { ONBOARDING_COPY, type OnboardingCopy } from "@/lib/onboarding-copy";
 import { cn } from "@/lib/utils";
@@ -11,7 +11,7 @@ import { SUPPORTED_AGENTS, agentInstallCommand } from "./supported-agents-catalo
 
 function AgentMark({ preset }: { preset: AgentPreset }) {
   // eslint-disable-next-line @next/next/no-img-element -- a 20px harness preset icon, as on summon chips.
-  return <img src={preset.avatarUrl} alt="" aria-hidden="true" className="size-full object-contain" />;
+  return <img src={agentFaceUrl(preset.id)} alt="" aria-hidden="true" className="size-full object-contain" />;
 }
 
 /** How many marks lead the line: the agents most people arrive with. */

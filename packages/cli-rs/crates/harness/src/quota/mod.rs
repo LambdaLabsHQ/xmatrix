@@ -19,7 +19,6 @@ pub mod claude;
 pub mod codex;
 pub mod cursor;
 pub mod grok;
-pub mod kimi;
 pub mod opencode;
 pub mod refresh;
 pub mod windows;
@@ -81,16 +80,6 @@ pub struct ReadOptions {
     pub account: Account,
     /// Bypass the success/error TTL cache and ask the provider now.
     pub force: bool,
-}
-
-impl ReadOptions {
-    /// The process login, honouring the cache.
-    pub fn process() -> Self {
-        Self {
-            account: Account::Process,
-            force: false,
-        }
-    }
 }
 
 /// Read one provider's account quota.

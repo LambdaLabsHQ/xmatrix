@@ -46,7 +46,7 @@ test("Reborn lookup refusal publishes a visible error instead of rejecting silen
   const result = await orchestrateProductAgentMentions({ channelId: "ch-1", messageId: "refused-reborn",
     body: "@codex:1:reborn", actorUserId: "user-1", port: {
       async getRebornTarget() { throw Object.assign(new Error("private diagnostic"), { code: "forbidden" }); },
-      async publishSystemNotice(channelId, body) { assert.equal(channelId, "ch-1"); notices.push(body); },
+      async recordResult(channelId, body) { assert.equal(channelId, "ch-1"); notices.push(body); },
     } });
   assert.equal(result.spawned, 0);
   assert.equal(notices.length, 1);
@@ -59,7 +59,7 @@ test("a Reborn refusal whose notice cannot be published remains an error", async
   await assert.rejects(orchestrateProductAgentMentions({ channelId: "ch-1", messageId: "refused-reborn-notice",
     body: "@codex:1:reborn", actorUserId: "user-1", port: {
       async getRebornTarget() { return null; },
-      async publishSystemNotice() { throw new Error("notice transport unavailable"); },
+      async recordResult() { throw new Error("notice transport unavailable"); },
     } }), /notice transport unavailable/);
 });
 
@@ -109,7 +109,7 @@ function basePort(overrides = {}) {
     async getRebornTarget() {
       return null;
     },
-    async publishSystemNotice(_channelId, body) {
+    async recordResult(_channelId, body) {
       notices.push(body);
     },
     ...overrides,

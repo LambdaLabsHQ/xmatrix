@@ -2,14 +2,13 @@
 
 import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { pageAuthorColor, pageAuthorLabel, pageLineDiff, type PageLineDiff } from "@xmatrix/protocol";
+import { pageAuthorColor, pageAuthorLabel, pageLineDiff, type FaceOf, type PageLineDiff } from "@xmatrix/protocol";
 import type { PageDocBlock } from "@xmatrix/protocol/page-document";
 import { ArrowLeft, ChevronDown, ChevronUp } from "lucide-react";
 import {
   CenteredDialogShell, DialogButton, DialogInset, DialogPanelFooter, DialogPanelHeader,
 } from "@/components/dashboard/centered-dialog-shell";
-import { avatarInitials } from "@/components/dashboard/completion-option-button";
-import { IdentityAvatar } from "@/components/dashboard/identity-avatar";
+import { Face } from "@/components/dashboard/face";
 import { COUNT_CHIP_MATERIAL_CLASS } from "@/components/dashboard/workspace-shell-constants";
 import { formatRelativeAge } from "@/components/dashboard/time-display";
 import { Button } from "@/components/ui/button";
@@ -36,7 +35,8 @@ export interface PresentPerson {
   name: string;
   color: string;
   agent: boolean;
-  avatarUrl?: string;
+  /** Their face: a person's own picture, an Agent's vendor mark. */
+  face: FaceOf;
   /** What they are doing, where, and in which conversation. */
   detail: string;
   blockId: string;
@@ -75,9 +75,7 @@ export function PresenceStack({ people, onFollow }: { people: PresentPerson[]; o
             person.idle && "opacity-45")}
           // Ringed in the colour of their caret in the text.
           style={{ boxShadow: `0 0 0 2px var(--background), 0 0 0 3.5px ${person.color}` }}>
-          <IdentityAvatar kind={person.agent ? "agent" : "human"} label={person.name} title={`${person.name} · ${person.detail}`}
-            imageUrl={person.avatarUrl} initials={!person.agent || person.avatarUrl ? avatarInitials(person.name) : undefined}
-            size="xs" shape="circle" className="rounded-full" />
+          <Face of={person.face} title={`${person.name} · ${person.detail}`} size="xs" shape="circle" className="rounded-full" />
         </button>
       ))}
       {people.length > shown.length && (
@@ -300,7 +298,7 @@ export function ConversationList({ conversations, blocks, onOpen, focusBlockId =
                     )}
                     {conversation.lastMessage && (
                       <span className="block truncate text-xs text-muted-foreground">
-                        {conversation.lastMessage.from.label}: {conversation.lastMessage.bodyPreview}
+                        {conversation.lastMessage.label}: {conversation.lastMessage.bodyPreview}
                       </span>
                     )}
                     {conversation.agents.length > 0 && (

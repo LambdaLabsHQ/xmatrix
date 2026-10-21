@@ -17,7 +17,8 @@ export interface SerializedAgentLaunch {
   channelId: string;
   sourceMessageId: string;
   targetName?: string;
-  targetAvatarUrl?: string;
+  /** The harness of the Agent it starts, which gives its face (faces.ts). */
+  targetHarness?: string;
   launchKind: string;
   /** Original invocation address, presentation only; never execution authority. */
   sourceMention?: string;
@@ -144,9 +145,9 @@ export interface InvocationDiagnosticsReport {
   sourceMessageIds: string[];
   selection: { kind: "recent-messages" | "messages" | "run"; limit: number; hasOlderMessages: boolean };
   run?: { runId: string; instanceId?: string; name?: string; activity: AgentLaunchActivity };
-  launches: Array<Omit<SerializedAgentLaunch, "sourceMention" | "errorMessage" | "targetAvatarUrl">>;
+  launches: Array<Omit<SerializedAgentLaunch, "sourceMention" | "errorMessage" | "targetHarness">>;
   rejections: Array<Omit<SerializedAgentInvocationRejection, "sourceMention">>;
-  continuations: Array<Omit<import("./agent-continuation.js").SerializedAgentContinuation, "sourceMention" | "targetAvatarUrl">>;
+  continuations: Array<Omit<import("./agent-continuation.js").SerializedAgentContinuation, "sourceMention" | "targetHarness">>;
   targets?: Array<Omit<import("./agent-message-target.js").SerializedAgentMessageTarget, "sourceBodyHash" | "sourceMention">>;
   executions?: Array<Omit<import("./agent-message-execution.js").SerializedAgentMessageExecution, "sourceBodyHash">>;
   nextCursor: string | null;

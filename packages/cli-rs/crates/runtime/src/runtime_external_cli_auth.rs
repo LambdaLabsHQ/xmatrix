@@ -173,6 +173,9 @@ async fn cmd_external_inner(
     runtime_capabilities.push("harness_parameters_v1".to_string());
     // Every backend co-writes a page live (runtime_page_co_write).
     runtime_capabilities.push("page_co_write_v1".to_string());
+    // Every backend's run loop takes a switch continuation as its own frame
+    // (RunLoopEvents::continuation), so the Hub need not post it to the Channel.
+    runtime_capabilities.push(crate::SWITCH_CONTINUATION_FRAME.to_string());
     if use_codex_app_backend(tool) {
         runtime_capabilities.extend(["agent_turn_retry".into(), "agent_turn_retry_channel_message".into()]);
     }
@@ -317,7 +320,7 @@ pub(crate) struct ExternalRun<'a> {
     pub(crate) cmd_args: &'a [String],
     pub(crate) hub_url: &'a str,
     pub(crate) cwd: Option<&'a str>,
-    pub(crate) relay: Arc<agent_instance_connection::AgentInstanceConnectionClient>,
+    pub relay: Arc<agent_instance_connection::AgentInstanceConnectionClient>,
     pub(crate) event_rx:
         mpsc::UnboundedReceiver<agent_instance_connection::AgentInstanceConnectionEvent>,
     pub(crate) agent: protocol::SerializedAgent,

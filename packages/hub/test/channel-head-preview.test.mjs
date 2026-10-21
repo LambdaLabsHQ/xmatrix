@@ -33,14 +33,16 @@ test("a discussion's first message previews as what was written, not the passage
   assert.equal(preview.bodyPreview, "Is this still accurate?");
 });
 
-test("a page's conversation preview keeps the face its newest message carried", () => {
+test("a page's conversation preview names who wrote it by the ids its message carried, which give its face", () => {
   const conversation = { conversationId: "c-1", name: "Upkeep", activityAt: head.sentAt, headSequence: 7,
     readSequence: 7, agents: [] };
-  const withFace = pageConversation({ ...conversation, head: { ...head, payloadBundleBase64: null, legacyBody: null,
-    preview: { bodyPreview: "Done", senderSnapshot: { label: "grok:1", agentName: "grok",
-      avatarUrl: "/agent-vendors/grok.svg" } } } });
-  assert.deepEqual(withFace.lastMessage.from, { kind: "agent", label: "grok:1", avatarUrl: "/agent-vendors/grok.svg" });
-  const withoutFace = pageConversation({ ...conversation, head: { ...head, payloadBundleBase64: null, legacyBody: "hi",
-    preview: null } });
-  assert.deepEqual(withoutFace.lastMessage.from, { kind: "agent", label: "agent-1" });
+  const registration = { ownerUserId: "owner-1", machineId: "machine-1", harness: "grok" };
+  const agent = pageConversation({ ...conversation, head: { ...head, payloadBundleBase64: null, legacyBody: null,
+    preview: { bodyPreview: "Done", senderSnapshot: { label: "grok:1", agentName: "grok", instanceId: "c-1:1",
+      registration, avatarUrl: "/agent-vendors/grok.svg" } } } });
+  assert.deepEqual(agent.lastMessage.from, { kind: "agent", label: "grok:1", userId: "", identityId: "agent:agent-1",
+    instanceId: "c-1:1", registration, avatarUrl: "/agent-vendors/grok.svg" });
+  const person = pageConversation({ ...conversation, head: { ...head, authorKind: "user", authorId: "u-1",
+    payloadBundleBase64: null, legacyBody: "hi", preview: null } });
+  assert.deepEqual(person.lastMessage.from, { kind: "user", label: "u-1", userId: "u-1", identityId: "user:u-1" });
 });

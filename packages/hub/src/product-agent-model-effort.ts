@@ -9,6 +9,10 @@ export type { ProductAgentControlCommand, ProductAgentControlKind };
  * in the Durable Object so the Core-side caller never has to import the DO.
  */
 export const RELAY_RUNTIME_AGENT_CONTROL_SWITCH_PATH = "/internal/product-agent/control-switch";
+/** Runtime-internal route that hands one Instance its switch continuation. */
+export const RELAY_RUNTIME_AGENT_SWITCH_CONTINUATION_PATH = "/internal/product-agent/switch-continuation";
+/** A runtime that takes its continuation as a frame, not as a Channel message. */
+export const SWITCH_CONTINUATION_FRAME_CAPABILITY = "switch_continuation_frame";
 
 export type ProductAgentControlOutcome =
   | { status: "switched"; selected: string;
@@ -27,11 +31,10 @@ export interface ProductAgentControlPort {
     kind: ProductAgentControlKind;
     value?: string;
   }): Promise<ProductAgentControlOutcome>;
-  /** The receipt is the text an Agent reads; `outcomes` are what a client
-   * hangs on each written statement, in statement order. */
-  publishSystemNotice(channelId: string, body: string, outcomes: readonly AgentControlOutcomeRecord[]): Promise<void>;
-  /** Commit the instruction that one Instance continue the turn its switches cancelled. */
-  publishContinuation?(channelId: string, input: { instanceId: string; requestIds: string[]; body: string }): Promise<void>;
+  /** Record each statement's outcome, in statement order, on the message that wrote them. */
+  recordOutcomes(channelId: string, outcomes: readonly AgentControlOutcomeRecord[]): Promise<void>;
+  /** Tell one Instance to continue the turn its switches cancelled. */
+  continueTurn?(channelId: string, input: { instanceId: string; requestIds: string[]; body: string }): Promise<void>;
 }
 
 /**
@@ -66,39 +69,6 @@ function outcomeRecord(command: ProductAgentControlCommand, outcome: ProductAgen
   }
 }
 
-function noticeForOutcome(
-  command: ProductAgentControlCommand,
-  outcome: ProductAgentControlOutcome,
-): string {
-  const label = `@${command.target}`;
-  const noun = command.kind === "model" ? "model" : "effort";
-  switch (outcome.status) {
-    case "switched":
-      // A switch preempts like any other steering so it takes effect at once;
-      // the Instance then resumes the work it cancelled, on the new selection,
-      // unless a newer message is waiting to be the next turn instead.
-      return `Switched ${label} to \`${outcome.selected}\`. A turn that was running`
-        + ` is interrupted and continues on it.`;
-    case "catalog": {
-      if (outcome.options.length === 0) {
-        return `${label} has not reported a ${noun} catalog.`;
-      }
-      const visible = outcome.options.slice(0, 25).map((option) => `\`${option}\``).join(", ");
-      const remaining = outcome.options.length > 25
-        ? `, and ${outcome.options.length - 25} more`
-        : "";
-      const current = outcome.current ? ` Current: \`${outcome.current}\`.` : "";
-      return `Available ${noun}s for ${label}: ${visible}${remaining}.${current}`
-        + ` Use \`${label} /${noun} <${noun}>\` to switch.`;
-    }
-    case "no_instance":
-      return `xMatrix could not find a live instance for \`${label}\`.`
-        + ` Use \`@<agent>:<channel-instance-number> /${noun} <${noun}>\`.`;
-    case "error":
-      return `Could not switch the ${noun} for ${label}: ${outcome.message}`;
-  }
-}
-
 export async function orchestrateProductAgentControlCommands(input: {
   channelId: string;
   body: string;
@@ -108,7 +78,6 @@ export async function orchestrateProductAgentControlCommands(input: {
   if (commands.length === 0) return [];
 
   const results: ProductAgentControlResult[] = [];
-  const notices: string[] = [];
   /* Sequentially: a model switch changes which efforts the Instance offers, so
      an effort statement written after one has to be resolved against the model
      that is live by then. */
@@ -128,22 +97,16 @@ export async function orchestrateProductAgentControlCommands(input: {
       };
     }
     results.push({ kind: command.kind, outcome });
-    notices.push(noticeForOutcome(command, outcome));
   }
 
-  /* One decision, one receipt. A bullet per statement keeps a partial failure
-     readable without turning a two-tag edit into two system messages. */
-  await input.port.publishSystemNotice(
-    input.channelId,
-    notices.length === 1
-      ? notices[0]!
-      : notices.map((notice) => `- ${notice}`).join("\n"),
-    results.map(({ outcome }, index) => outcomeRecord(commands[index]!, outcome)),
-  );
+  /* One decision, one result, drawn on the statements that asked for it: it
+     is not a message, so it neither previews, counts as unread nor wakes. */
+  await input.port.recordOutcomes(input.channelId,
+    results.map(({ outcome }, index) => outcomeRecord(commands[index]!, outcome)));
   /* A turn a switch cancelled continues on what is selected now, once per
      Instance after every statement has landed: the first switch cancels the
      turn and the next must not cancel its continuation again. */
-  if (input.port.publishContinuation) {
+  if (input.port.continueTurn) {
     const byTarget = new Map<string, { instanceId?: string; requestIds: string[]; selections: string[] }>();
     for (const [index, { kind, outcome }] of results.entries()) {
       if (outcome.status !== "switched" && outcome.status !== "error") continue;
@@ -158,7 +121,7 @@ export async function orchestrateProductAgentControlCommands(input: {
     }
     for (const { instanceId, requestIds, selections } of byTarget.values()) {
       if (!instanceId) continue;
-      await input.port.publishContinuation(input.channelId, { instanceId, requestIds,
+      await input.port.continueTurn(input.channelId, { instanceId, requestIds,
         body: switchContinuationPrompt(selections) });
     }
   }

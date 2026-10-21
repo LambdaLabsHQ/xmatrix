@@ -19,7 +19,8 @@ const {
 const { sameValue } = require("../../lib/same-value.ts");
 
 const CANDIDATES = [
-  { id: "user:u-yiming", name: "Yiming Hu", handle: "yiming-hu", kind: "user", status: "online", avatarUrl: "/a.png" },
+  { id: "user:u-yiming", name: "Yiming Hu", handle: "yiming-hu", kind: "user", status: "online",
+    face: { kind: "user", id: "u-yiming", name: "Yiming Hu" } },
   // Same display-name token as the member above, different person. Indexing
   // display names made `@Yiming` a coin flip between the two.
   { id: "user:u-legend", name: "Yiming", handle: "legend", kind: "user", status: "online" },
@@ -414,10 +415,11 @@ test("an index is the same only while every written name resolves to the same me
   // A Channel replaced by a message or a presence report: same members, new objects.
   assert.equal(sameValue(INDEX, rebuilt()), true);
   assert.equal(sameValue(INDEX, rebuilt((candidate) => ({ ...candidate, status: "busy" }))), true);
-  // A rename, a new avatar, a different person behind a name, a new or lost member.
+  // A rename, a different face, a different person behind a name, a new or lost member. A new picture is not a
+  // change here: the face directory carries pictures, the index only whose face each mention draws.
   const yiming = (change) => (candidate) => (candidate.id === "user:u-yiming" ? { ...candidate, ...change } : candidate);
   assert.equal(sameValue(INDEX, rebuilt(yiming({ name: "Yiming H" }))), false);
-  assert.equal(sameValue(INDEX, rebuilt(yiming({ avatarUrl: "/b.png" }))), false);
+  assert.equal(sameValue(INDEX, rebuilt(yiming({ face: { kind: "external", name: "Yiming Hu", imageUrl: "/b.png" } }))), false);
   assert.equal(sameValue(INDEX, rebuilt(yiming({ id: "user:u-other" }))), false);
   assert.equal(sameValue(INDEX, buildMentionReadIndex(CANDIDATES.slice(1))), false);
   // `@Yiming` is ambiguous in INDEX; once one of the two is gone it names the other.

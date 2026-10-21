@@ -4,7 +4,7 @@ export { accountQuotaUsageFromCandidates, mergeAccountLevelLlmUsage, mergeUsageA
 export { exchangeDesktopCliSession } from "@/lib/desktop/session-exchange";
 import { attachmentMediaType, directMediaLink } from "./attachment-media-type";
 import { MediaLink } from "./media-player";
-import { LoadingImage } from "./content-skeleton";
+import { MessageMarkdownImage } from "./message-markdown-image";
 import { formatInstant, formatZonedDateTime } from "./time-display";
 
 import { messageRichMetadata } from "./workspace-shell-message-model";
@@ -22,7 +22,6 @@ import {
 import type {
   LlmQuotaUsage,
   LlmUsage,
-  LocalManagedAgent,
   UsageLimitSummary,
 } from "./workspace-shell-domain-types";
 
@@ -64,7 +63,7 @@ import {
 import { cn } from "@/lib/utils";
 
 import { RICH_MESSAGE_PARAGRAPH_CLASS_NAME } from "./row-frames";
-import { AGENT_PRESETS, agentAvatarUrlFromMetadata } from "@xmatrix/protocol";
+import { AGENT_PRESETS } from "@xmatrix/protocol";
 
 import type {
   AgentPreset,
@@ -144,13 +143,7 @@ export function createMessageMarkdownComponents(
   },
   img: ({ src, alt }) => {
     if (typeof src !== "string" || !isSafeMessageImageSrc(src)) return null;
-    return (
-      <LoadingImage
-        src={src}
-        alt={typeof alt === "string" ? alt : ""}
-        className="mt-2 max-h-[28rem] max-w-full object-contain"
-      />
-    );
+    return <MessageMarkdownImage src={src} alt={typeof alt === "string" ? alt : ""} />;
   },
   code: ({ className, children }) => {
     const language = /language-([A-Za-z0-9_-]+)/.exec(className || "")?.[1];
@@ -900,11 +893,6 @@ export function agentPresetOrCustom(id: string | undefined | null): AgentPreset 
   return AGENT_PRESETS.find((preset) => preset.id === id) ||
     AGENT_PRESETS.find((preset) => preset.id === "custom") ||
     AGENT_PRESETS[0];
-}
-
-/** Its harness preset's avatar. */
-export function localManagedAgentAvatarUrl(agent: LocalManagedAgent): string | undefined {
-  return agentAvatarUrlFromMetadata({ presetId: agent.harness }, agent.harness);
 }
 
 export function defaultAgentName(preset: AgentPreset): string {
