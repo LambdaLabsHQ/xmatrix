@@ -1512,6 +1512,8 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     focusComposer: () => setComposerAutoFocusRequest((current) => current + 1),
     seedComposer,
     jumpToMessage: queueMessageJump,
+    deliver: (channel, body) => deliverOutgoingMessage(channel,
+      { body, attachments: [], appMentions: parseAppMentions(body, APP_CONNECTORS) }),
   });
 
   function seedQuote(conversationId: string, quote: DiscussionQuote) {

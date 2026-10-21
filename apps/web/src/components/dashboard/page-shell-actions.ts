@@ -1,4 +1,4 @@
-import { WEB_PROXY_ROUTES, type ChannelSnapshot, type SerializedSpace } from "@xmatrix/protocol";
+import type { ChannelSnapshot, SerializedSpace } from "@xmatrix/protocol";
 import {
   appViewPath, pagesViewPath, pagesViewSelection, pushBrowserPath, replaceBrowserPath, type AppView,
 } from "@/components/dashboard/workspace-shell-navigation";
@@ -8,8 +8,6 @@ const PAGE_CONVERSATION_STATE_KEY = "__xmatrixPageConversation";
 import { pageApi, type PageLinkAnchor } from "@/lib/pages/page-client";
 import type { ConversationRequest } from "@/components/dashboard/start-conversation";
 import type { DiscussionQuote } from "@/components/dashboard/selection-discussion";
-import { xmatrixRawResponse } from "@/lib/query/api-client";
-import { UserFacingProblem } from "@/lib/user-facing-error";
 
 /** How the workspace shell opens pages and starts conversations about them. */
 export function pageShellActions(input: {
@@ -38,6 +36,11 @@ export function pageShellActions(input: {
   seedComposer: (conversationId: string, seed: { quote?: DiscussionQuote }) => void;
   /** Brings a message of the conversation into view, wherever its history has it. */
   jumpToMessage: (conversationId: string, messageId: string, sequence?: number) => void;
+  /**
+   * Sends a message as the composer does: its row shows in the conversation at once and goes out as soon as the
+   * conversation exists, kept there to send again if it fails.
+   */
+  deliver: (channel: ChannelSnapshot, body: string) => Promise<void>;
 }) {
   const pagesPath = (pageId: string | null, conversationId: string | null) =>
     pagesViewPath(appViewPath(null, "pages", input.currentSpaceId, input.spaces), pageId, conversationId);
@@ -129,6 +132,9 @@ export function pageShellActions(input: {
       memberName: user.name || user.email || "Human", name: page.name, mode: page.restricted ? "closed" : "open",
       metadata: { fromPageId: page.pageId } });
     options.planned?.(channel.id);
+    // A comment is sent the moment it is written, as in the conversation itself: its message waits only for the
+    // conversation, not for the page's link to it. Co-writing waits for the Hub's instruction to be there first.
+    const delivered = options.firstMessage && !options.coWrite ? input.deliver(channel, options.firstMessage) : null;
     if (options.quote) input.seedComposer(channel.id, { quote: options.quote });
     // A discussion opens beside the page it is about, ready to write in, before it exists.
     // Machinery attached to a page lives in its own conversation; the page stays open.
@@ -147,11 +153,7 @@ export function pageShellActions(input: {
     // in the conversation when the Agent joins it.
     if (options.coWrite) await pageApi.startCoWriting(page.spaceId, page.pageId, token, channel.id);
     if (options.firstMessage) {
-      const sent = await xmatrixRawResponse(WEB_PROXY_ROUTES.channel_messages(channel.id), {
-        method: "POST", headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" },
-        body: JSON.stringify({ body: options.firstMessage }), cache: "no-store",
-      });
-      if (!sent.ok) throw new UserFacingProblem("It was created, but its first message wasn't sent; open it and send the message again.");
+      await (delivered ?? input.deliver(channel, options.firstMessage));
       if (options.open !== false) openPageConversation(channel.id, { focus: false });
     }
     return channel.id;
