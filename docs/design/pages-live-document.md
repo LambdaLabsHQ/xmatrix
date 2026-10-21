@@ -317,16 +317,20 @@ fact is about.
   Clicking a link's visible destination edits the address.
 - **Table controls** appear only while the cursor is in a table.
 - **A selection opens a comment box** (decided by Daniel 2026-10-21). A
-  passage selected with the mouse opens, under it, the product's own reply
-  box (the one under a discussion card, with its send arrow), the caret
-  already in it; the passage is marked in the comment colour while it is
+  passage selected with the mouse opens, under it, the product's own message
+  box, the caret already in it. Every box on the page (this one, and a
+  conversation's beside it) is the channel's composer as it is, with no
+  page-only styling: its look is changed once, in the composer (decided by
+  Daniel 2026-10-21); the passage is marked in the comment colour while it is
   written about. Typing is the comment, Enter sends it, and the caret goes
   back into the page after the passage, so writing and commenting go on
   side by side. ⌘⌥M (Ctrl+Alt+M) comments on the selection, or on the
   caret's paragraph. A selection made from the keyboard or by touch is being
   edited: it shows the selection menu, whose *Comment* opens the same box.
   Until something is typed, Backspace, copy, cut and the mark shortcuts act
-  on the passage; Escape closes the box.
+  on the passage. Escape, or a click anywhere else, closes the box and the
+  passage is no longer selected; a comment closed unsent comes back when the
+  same passage is selected again.
   - The box names nobody. A comment is a discussion of the passage (§4.3)
     whose first message is the comment. An Agent the comment mentions takes
     it at once; one that names nobody goes to the kind of Agent already at

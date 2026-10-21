@@ -1106,6 +1106,17 @@ test("selecting a passage opens a comment box under it; sent, the comment is a d
   await expect(editor.locator(".page-discussion")).toHaveText("In progress");
   await browser.keyboard.type("Is this still accurate?");
   await browser.screenshot({ path: test.info().outputPath("pages-comment-box.png") });
+  // A click anywhere else closes it, the passage no longer selected; what was typed comes back with the passage.
+  await editor.getByText("none", { exact: true }).click();
+  await expect(box).toHaveCount(0);
+  await expect(editor.locator(".page-discussion")).toHaveCount(0);
+  await selectLine(browser, "In progress");
+  await expect(box.getByRole("textbox", { name: "Comment" })).toHaveValue("Is this still accurate?");
+  await browser.mouse.click(1100, 700);
+  await expect(box).toHaveCount(0);
+  await selectLine(browser, "In progress");
+  await expect(box.getByRole("textbox", { name: "Comment" })).toHaveValue("Is this still accurate?");
+  await expect(box.getByRole("textbox", { name: "Comment" })).toBeFocused();
   await browser.keyboard.press("Enter");
   // Sent, the box goes and the page stays in front of the reader; nothing opens over it.
   await expect(box).toHaveCount(0);

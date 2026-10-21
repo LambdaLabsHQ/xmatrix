@@ -8,27 +8,32 @@ import { ComposerInputAuthority } from "@/components/dashboard/composer-input";
  * passage, the caret already in it, so it reads at once as somewhere to write. Typing is the comment; Enter or
  * Send sends it as a discussion of the passage. It names nobody: the Agent at work there takes it, else xMatrix
  * gives it to one, unless the comment mentions whom it is for. Until something is typed, the keys that act on a
- * selection (Backspace, copy, cut, marks) still act on the passage.
+ * selection (Backspace, copy, cut, marks) still act on the passage. Leaving it, by a click anywhere else, closes
+ * it as Escape does; what was typed comes back if the same passage is commented on again.
  */
 export function PageCommentBox({ text, onText, onSend, onClose, onPassageKey }: {
   /** What is typed so far; it stays with the passage's draft, not with the box. */
   text: string;
   onText: (text: string) => void;
   onSend: (text: string) => void;
-  onClose: () => void;
+  /** `away`: the reader left it for somewhere else, which keeps the focus it went to. */
+  onClose: (away?: boolean) => void;
   /** A key for the passage itself, pressed while nothing is typed; true when the passage took it. */
   onPassageKey: (event: KeyboardEvent<HTMLTextAreaElement>) => boolean;
 }) {
   const field = useRef<HTMLTextAreaElement | null>(null);
   return (
-    <div className="page-comment-box" data-testid="page-comment-box" onMouseDown={(event) => event.stopPropagation()}>
+    <div className="page-comment-box" data-testid="page-comment-box" onMouseDown={(event) => {
+      event.stopPropagation();
+      // Its buttons act without taking the focus from the text, which would close it first.
+      if (event.target !== field.current) event.preventDefault();
+    }}>
       <ComposerInputAuthority draft={text} onDraftChange={onText} channel={null} space={null} token={null}
         workspaces={[]} enabled autoFocus textareaRef={field} canSend={Boolean(text.trim())}
         placeholder="Comment, or ask for a change" ariaLabel="Comment" sendTitle="Comment"
-        onSend={() => { if (text.trim()) onSend(text.trim()); else onClose(); }} onEscape={onClose}
+        onSend={() => { if (text.trim()) onSend(text.trim()); else onClose(); }} onEscape={() => onClose()}
         onKeyDownExtra={(event) => { if (!text && onPassageKey(event)) event.preventDefault(); }}
-        // Leaving it with nothing said closes it; what was typed stays until it is sent or dismissed.
-        onTextareaBlur={() => { if (!text.trim()) onClose(); }} />
+        onTextareaBlur={() => onClose(true)} />
     </div>
   );
 }
