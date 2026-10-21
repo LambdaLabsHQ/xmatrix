@@ -230,29 +230,6 @@
   transition: background 0.12s;
 }
 .page-discussion-focus { background: color-mix(in oklab, #f2b632 50%, transparent); }
-/* The box a selected passage opens (§4.2): a slip of paper under it, led by the comment icon its card will
-   carry, the comment in the page's own type. */
-.page-comment-box { align-items: flex-start; }
-.page-comment-box .page-comment-mark { display: flex; height: 25px; align-items: center; }
-.page-comment-box .page-comment-text {
-  font-size: 15px;
-  line-height: 1.6;
-  padding: 1px 0;
-  max-height: 40vh;
-}
-.page-comment-box .page-comment-text::placeholder { color: var(--muted-foreground); }
-/* The page's own type on the slip, not a field inside it: none of the themes' input well (as the composer's
-   textarea is exempt from it), edge or radius. */
-html[data-app-theme] .xmatrix-app .page-comment-box .page-comment-text,
-html[data-app-theme] .xmatrix-app .page-comment-box .page-comment-text:hover,
-html[data-app-theme] .xmatrix-app .page-comment-box .page-comment-text:focus,
-html[data-app-theme] .xmatrix-app .page-comment-box .page-comment-text:focus-visible {
-  background: transparent !important;
-  background-color: transparent !important;
-  border-color: transparent !important;
-  box-shadow: none !important;
-  border-radius: 0 !important;
-}
 /* Marks along the page's scrollbar (§3.2), in the colors the page uses for them. */
 .page-scroll-mark-discussion { background: color-mix(in oklab, #f2b632 85%, transparent); }
 .page-scroll-mark-owed { background: #b45309; }
@@ -382,18 +359,18 @@ html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-emp
   margin: 0;
   font-size: 0.75rem;
 }
-/* The reply box: one flat line, as under a comment. */
+/* The reply box: one flat line, as under a comment; the same box is what a selected passage opens (§4.2). */
 html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-composer {
   padding: 0.25rem 0.75rem 0.75rem !important;
 }
-html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-composer-shell {
+html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app :is(.page-margin-open, .page-comment-box) .app-composer-shell {
   gap: 0.25rem !important;
   align-items: center !important;
 }
-html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .composer-attach {
+html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app :is(.page-margin-open, .page-comment-box) .composer-attach {
   display: none !important;
 }
-html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-composer-box:not(.app-agent-work-card) {
+html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app :is(.page-margin-open, .page-comment-box) .app-composer-box:not(.app-agent-work-card) {
   min-height: 2.25rem !important;
   border: 1px solid var(--border) !important;
   border-radius: 1.125rem !important;
@@ -402,25 +379,25 @@ html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-com
   -webkit-backdrop-filter: none !important;
   backdrop-filter: none !important;
 }
-html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-composer-box:not(.app-agent-work-card):focus-within {
+html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app :is(.page-margin-open, .page-comment-box) .app-composer-box:not(.app-agent-work-card):focus-within {
   border-color: var(--ring) !important;
 }
-html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .composer-input-row {
+html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app :is(.page-margin-open, .page-comment-box) .composer-input-row {
   min-height: 2.125rem !important;
   gap: 0.125rem !important;
   padding: 0 0.25rem 0 0.75rem !important;
 }
-html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-composer-box:not(.app-agent-work-card) .composer-textarea {
+html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app :is(.page-margin-open, .page-comment-box) .app-composer-box:not(.app-agent-work-card) .composer-textarea {
   min-height: 2rem !important;
   padding: 0.45rem 0 !important;
   font-size: 0.8125rem !important;
   line-height: 1.35 !important;
 }
-html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .composer-inline-actions .app-composer-inline-icon {
+html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app :is(.page-margin-open, .page-comment-box) .composer-inline-actions .app-composer-inline-icon {
   width: 1.75rem !important;
   height: 1.75rem !important;
 }
-html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-composer-send {
+html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app :is(.page-margin-open, .page-comment-box) .app-composer-send {
   width: 2rem !important;
   height: 2rem !important;
   background: transparent !important;
@@ -428,9 +405,19 @@ html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-com
   -webkit-backdrop-filter: none !important;
   backdrop-filter: none !important;
 }
-html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-composer-send svg {
+html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app :is(.page-margin-open, .page-comment-box) .app-composer-send svg {
   width: 1rem;
   height: 1rem;
+}
+/* Ready, the send arrow is ink: the themes' ready fill is taken away above, and its white arrow would vanish. */
+html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app :is(.page-margin-open, .page-comment-box) .app-composer-send-ready {
+  color: var(--foreground) !important;
+}
+/* Under the passage it floats over the text after it, lifted as the page's popovers are. */
+html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-comment-box .app-composer-box:not(.app-agent-work-card) {
+  box-shadow:
+    0 1px 2px oklch(0.35 0.07 60 / 0.06),
+    0 8px 24px -6px oklch(0.35 0.07 60 / 0.18) !important;
 }
 .page-section-owed {
   display: inline-flex;
