@@ -245,9 +245,10 @@ fact is about.
 - **The scrollbar** marks where others are, where discussions are and which
   sections owe an update.
 - **What changed since this person last read the page** is offered to them,
-  not shown: the page always opens as it is now, with an attention notice
-  above it saying how many changes there are since they last read it and
-  offering *Show changes*, which shows them as a diff, in place. Read means seen: what has been on their screen a moment
+  not shown: the page always opens as it is now, and the first card in the
+  margin (above the page where there is no margin) says how many changes there
+  are since they last read it and offers *Show changes*, which shows them as a
+  diff, in place. Read means seen: what has been on their screen a moment
   (1.5 s, tab in front) is read as it was then, and nothing else is. So what
   an Agent writes while they watch is read as it arrives, marked only by the
   Agent's own ink, and what it writes out of view or while they are away is

@@ -10,7 +10,7 @@ import {
   type SerializedAutomation, type ChannelSnapshot, type PageConversation, type PageLink,
 } from "@xmatrix/protocol";
 import {
-  Check, Clock, Files, FileText, GitCompareArrows, History, Lock, MessageSquare, Plus, Share2, Trash2, Undo2, X,
+  Check, Clock, Files, FileText, History, Lock, MessageSquare, Plus, Share2, Trash2, Undo2, X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { noticeClass } from "@/components/ui/status-tone";
@@ -42,7 +42,7 @@ import { PageMargin, PageOffscreenCard, type MarginWriter, type OffscreenEntry }
 import type { PageSessionChanges } from "./page-session-changes";
 import { PageSessionChangesList, PageUndoNotice, useSessionChanges } from "./page-session-changes-panel";
 import { PagePhoneDock } from "./page-phone-dock";
-import { PageReaderChangeGutter, PageReaderChangeMark } from "./page-reader-changes-bar";
+import { PageReaderChangeGutter, PageReaderChangeMark, PageReaderChangesOffer } from "./page-reader-changes-bar";
 import type { SuggestionsReport } from "./page-suggestions";
 import { usePageSuggestions } from "./use-page-suggestions";
 import { PageWriteWith } from "./page-write-with";
@@ -1525,6 +1525,10 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   // over the text, and on a phone walked from a floating bar under the thumb.
   const diffOffered = drawn && !diffViewed && !!readerChanges;
   const phoneDiff = phone && mode === "page" && diffOffered && diffShown;
+  const readerOffer = (inMargin: boolean) => (
+    <PageReaderChangesOffer changes={readerChanges ?? 0} shown={diffShown} inMargin={inMargin}
+      onShow={() => setDiffShown(true)} onHide={() => setDiffShown(false)} onDone={viewDiff} />
+  );
   const writerStarting = starting?.pageId === page?.pageId ? starting : null;
   const writerCalled = called?.pageId === page?.pageId ? called : null;
   const writerFeedback = writerStarting ?? (!phone ? writerCalled : null);
@@ -1671,30 +1675,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
                       <div className="min-h-[50vh]"><PageDocumentStatic body={document.data.body} testId="page-preview"
                         references={references} mediaUrl={mediaUrl} onAnchorOffsets={setPreviewTops} /></div>
                     )}
-                    {diffOffered && !phoneDiff && (
-                      // A notice, not a footnote: there is something to catch up on, and the reader chooses to.
-                      <div data-testid="page-reader-diff"
-                        className={noticeClass("attention", "mb-5 flex flex-wrap items-center gap-x-3 gap-y-2 py-2 pr-2")}>
-                        <span className="mr-auto">
-                          <span className="font-medium text-foreground">
-                            {readerChanges === 1 ? "1 change" : `${readerChanges} changes`} since you last read this page
-                          </span>
-                          <span className="text-muted-foreground">
-                            {diffShown ? " · marked in the text" : " · you are reading the latest version"}
-                          </span>
-                        </span>
-                        {diffShown ? (
-                          <>
-                            <Button variant="ghost" size="sm" onClick={() => setDiffShown(false)}>Hide changes</Button>
-                            <Button variant="outline" size="sm" onClick={viewDiff}><Check data-icon="inline-start" />Done</Button>
-                          </>
-                        ) : (
-                          <Button size="sm" onClick={() => setDiffShown(true)}>
-                            <GitCompareArrows data-icon="inline-start" />Show changes
-                          </Button>
-                        )}
-                      </div>
-                    )}
+                    {diffOffered && !phoneDiff && !marginOn && readerOffer(false)}
                     <div className={drawn ? undefined : "hidden"}>
                       {session && <PageEditor key={session.doc.guid} session={session} canEdit={canEdit} writeOn={writeOn}
                         {...(coWriter ? { placeholder: onboardingCopy.coWrite.firstLine(coWriter) } : {})}
@@ -1749,7 +1730,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
                         {...(onCloseConversation ? { onClose: onCloseConversation } : {})}
                         {...(onExpandConversation ? { onExpand: onExpandConversation } : {})}
                         onOpen={openConversation} onResolve={(linkId) => void resolveDiscussion(linkId)}
-                        onFocus={setFocused} />}
+                        onFocus={setFocused} {...(diffOffered ? { head: readerOffer(true) } : {})} />}
                     </aside>
                   )}
                 </div>

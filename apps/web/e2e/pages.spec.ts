@@ -1010,10 +1010,11 @@ async function openChangedPage(browser: Page, before = "# Relay\n\n## Status\n\n
 }
 
 test("the page opens as it is, and what changed since the reader last read it is a diff only when they ask for it", async ({ page: browser }) => {
+  await browser.setViewportSize({ width: 1600, height: 900 });
   const editor = await openChangedPage(browser);
   const added = editor.locator(".page-reader-change");
-  // Opened, the page is as it is now, and above it only how much changed since the reader last read it.
-  const offer = browser.getByTestId("page-reader-diff");
+  // Opened, the page is as it is now, and the margin's first card only says how much changed since the reader last read it.
+  const offer = browser.getByTestId("page-margin").getByTestId("page-reader-diff");
   await expect(offer).toContainText("5 changes since you last read this page");
   await expect(editor).toContainText("Shipped this week");
   await expect(added).toHaveCount(0);
