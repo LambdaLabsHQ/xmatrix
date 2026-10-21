@@ -83,7 +83,7 @@ test("what is known about a document carries to the same text in the next one", 
     return true;
   });
   const carried = carryPageDocKnown(before, known, after);
-  const read = (text) => {
+  const read = () => {
     let out = "";
     after.descendants((node, pos) => {
       if (node.isText) for (let at = 0; at < node.text.length; at++) out += carried[pos + at] === 7 ? node.text[at] : "_";
