@@ -125,16 +125,25 @@ async fn submit_codex_turn_interruptible(
                                 instruction.as_deref(),
                             );
                             let accepted = match interrupter.begin_steer(&input).await {
-                                Ok(Some(accepted)) => {
+                                Ok(Some(mut accepted)) => {
                                     tokio::select! {
                                         biased;
                                         answer = tokio::time::timeout(
                                             Duration::from_secs(CODEX_STEER_RESPONSE_TIMEOUT_SECS),
-                                            accepted,
+                                            &mut accepted,
                                         ) => matches!(answer, Ok(Ok(Ok(())))),
-                                        // The turn ended first: the message is the next one.
+                                        // The turn ended first. Codex can accept the steer
+                                        // in the same read that ends the turn: then the
+                                        // message is already in this turn. Otherwise it is
+                                        // the next one.
                                         result = &mut turn => {
-                                            pending_events.push_back(other);
+                                            if matches!(accepted.try_recv(), Ok(Ok(()))) {
+                                                if let Some(relay) = trace_relay {
+                                                    ack_inbound_channel_messages(relay, std::slice::from_ref(&message));
+                                                }
+                                            } else {
+                                                pending_events.push_back(other);
+                                            }
                                             return InterruptibleCodexTurn::Completed(result);
                                         }
                                     }
