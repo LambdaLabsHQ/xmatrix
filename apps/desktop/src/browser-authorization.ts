@@ -16,7 +16,10 @@ export interface BrowserAuthorizationRequest {
   redirectParam: string;
 }
 
-/** A Hub sign-in start page: https on an xMatrix host, or any local host in a development build. */
+/** The one Hub that the beta and stable Webs both sign in through. */
+const HUB_ORIGIN = "https://xmatrix-hub.xmatrix.sh";
+
+/** A Hub sign-in start page: on exactly the Hub's origin, or any local host in a development build. */
 export function hubSignInStartUrl(value: unknown, options: { allowLocal: boolean }): URL | null {
   if (typeof value !== "string") return null;
   let url: URL;
@@ -25,9 +28,8 @@ export function hubSignInStartUrl(value: unknown, options: { allowLocal: boolean
   } catch {
     return null;
   }
-  const xmatrixHost = url.hostname === "xmatrix.sh" || url.hostname.endsWith(".xmatrix.sh");
   const localHost = ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
-  const allowed = (url.protocol === "https:" && xmatrixHost)
+  const allowed = url.origin === HUB_ORIGIN
     || (options.allowLocal && localHost && ["http:", "https:"].includes(url.protocol));
   return allowed && !url.username && !url.password && url.pathname === "/api/auth/app/start" ? url : null;
 }

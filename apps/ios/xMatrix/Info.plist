@@ -63,6 +63,6 @@
 		<string>UIInterfaceOrientationPortrait</string>
 	</array>
 	<key>XMatrixWebURL</key>
-	<string>https://xmatrix.sh/app</string>
+	<string>$(XMATRIX_WEB_URL)</string>
 </dict>
 </plist>
