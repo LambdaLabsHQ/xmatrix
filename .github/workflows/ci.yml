@@ -248,14 +248,14 @@ jobs:
     name: ${{ matrix.name }}
     # Hosted runners spread the functional browser projects over Playwright
     # shards, each building its own production tree from the restored Next.js
-    # cache. The primary job runs the unit tests and the checked build, then
-    # the short performance budgets on that tree. A separate runner measures
-    # sustained load without adding its four-minute window to the serial tail.
+    # cache. The primary job runs the unit tests and the checked build. Short
+    # and sustained performance budgets each get their own runner, so neither
+    # waits for the unit tests and checked build before starting its window.
     # Together they are `web web-browser`.
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ fromJSON((inputs.hosted || github.event.pull_request.head.repo.fork || vars.XMATRIX_RUNNER_FLEET == 'github-hosted' || (vars.XMATRIX_RUNNER_FLEET != 'self-hosted' && github.event.repository.private == false)) && '[{"name":"web","partitions":"web web-browser","shard":"performance","primary":true},{"name":"web (sustained performance)","partitions":"web-browser","shard":"performance-sustained","primary":false},{"name":"web (browser 1/4)","partitions":"web-browser","shard":"1/4","primary":false},{"name":"web (browser 2/4)","partitions":"web-browser","shard":"2/4","primary":false},{"name":"web (browser 3/4)","partitions":"web-browser","shard":"3/4","primary":false},{"name":"web (browser 4/4)","partitions":"web-browser","shard":"4/4","primary":false}]' || '[{"name":"web","partitions":"web web-browser","shard":"","primary":true}]') }}
+        include: ${{ fromJSON((inputs.hosted || github.event.pull_request.head.repo.fork || vars.XMATRIX_RUNNER_FLEET == 'github-hosted' || (vars.XMATRIX_RUNNER_FLEET != 'self-hosted' && github.event.repository.private == false)) && '[{"name":"web","partitions":"web","shard":"","primary":true},{"name":"web (short performance)","partitions":"web-browser","shard":"performance","primary":false},{"name":"web (sustained performance)","partitions":"web-browser","shard":"performance-sustained","primary":false},{"name":"web (browser 1/4)","partitions":"web-browser","shard":"1/4","primary":false},{"name":"web (browser 2/4)","partitions":"web-browser","shard":"2/4","primary":false},{"name":"web (browser 3/4)","partitions":"web-browser","shard":"3/4","primary":false},{"name":"web (browser 4/4)","partitions":"web-browser","shard":"4/4","primary":false}]' || '[{"name":"web","partitions":"web web-browser","shard":"","primary":true}]') }}
     # Long tests must not occupy production upload/deploy runners.
     runs-on: &linux_runner ${{ fromJSON(inputs.linux_runner || '"ubuntu-24.04"') }}
     env:
