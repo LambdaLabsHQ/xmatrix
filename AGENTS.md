@@ -6,7 +6,7 @@ This is the canonical entrypoint for repository policy. The repository has exact
 
 ## Finishing work
 
-Carry a change on this repository all the way: open its pull request, merge it once required CI passes, request a beta release through the Production Release Intent workflow (Hub and Web reach production, clients their dev channel and TestFlight), and verify the result live. Stable client releases belong to the stable release Agent, which verifies a beta and releases it as stable (`docs/release-updates.md`). Do not stop to ask whether to merge, release, or fix a related problem you found; guardrail P0#4 makes the automated gates the review and release authority here.
+Carry a change on this repository all the way: open its pull request, merge it once required CI passes, request a beta release through the Production Release Intent workflow (the Hub and the beta Web reach production, clients their dev channel and TestFlight), and verify the result live. Stable releases (the stable Web and clients) belong to the stable release Agent, which verifies a beta and releases it as stable (`docs/release-updates.md`). Do not stop to ask whether to merge, release, or fix a related problem you found; guardrail P0#4 makes the automated gates the review and release authority here.
 
 ## Branches
 

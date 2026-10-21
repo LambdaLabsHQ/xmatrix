@@ -31,20 +31,23 @@ All releases form one ascending SemVer line:
   The train freezes `main`, ships the union of the open betas it contains, and
   versions the release as a beta of the patch after the last stable (or of a
   higher `X.Y.Z` that `main`'s `version.json` or an earlier beta already names).
-  Hub and Web deploy to production; CLI, Desktop and Android publish to their
-  dev channel; iOS goes to TestFlight only. Its GitHub Release is a prerelease.
+  The Hub and the beta Web (`beta.xmatrix.sh`) deploy to production; CLI,
+  Desktop and Android publish to their dev channel; iOS goes to TestFlight
+  only. Its GitHub Release is a prerelease.
 - **Stable.** Only the stable release Agent requests one, naming a beta it
   verified and the bump its changes call for:
-  `gh workflow run production-release-intent.yml --ref main -f channel=stable -f candidate=xmatrix-vX.Y.Z-beta.N -f bump=patch|minor|major -f release_components=cli,desktop,android,ios`.
+  `gh workflow run production-release-intent.yml --ref main -f channel=stable -f candidate=xmatrix-vX.Y.Z-beta.N -f bump=patch|minor|major -f release_components=web,cli,desktop,android,ios`.
   The version is the last stable raised by `bump`; it must reach the
   candidate's `X.Y.Z` and exceed every release. The intent and the train check
   that the candidate is an immutable beta tag whose Production Release
   succeeded and shipped every component asked for, and that its source contains
   the last stable's source, so no stable moves back. The train then rebuilds
-  exactly that source at the stable version and publishes the named clients to
-  their stable channel; iOS is also submitted to App Review. Hub and Web are not
-  part of a stable: they run every beta. A stable train ships alone, and wakes
-  the train again for the betas it left open.
+  exactly that source at the stable version, deploys the stable Web
+  (`xmatrix.sh`) when it names `web`, and publishes the named clients to their
+  stable channel; iOS is also submitted to App Review. The Hub is not part of a
+  stable: it runs every beta, and keeps serving the stable Web until the next
+  stable ships a newer one. A stable train ships alone, and wakes the train
+  again for the betas it left open.
 - **Failure.** A beta whose gates or production run failed reopens for the next
   train. A stable that failed before tagging closes: nothing changed. A stable
   whose production run failed stays in flight under
@@ -172,6 +175,29 @@ is there, so the Agents can talk, pick other work, or carry on side by side.
 An Automation occurrence claims its section beside whoever is on it, and the Run
 it starts is told who that is. Opening a block for competition is no longer
 needed.
+
+
+## Unreleased: Web per release channel
+
+Every beta deploys the beta Web (`xmatrix-web-beta`, `https://beta.xmatrix.sh`,
+no workers.dev or preview hosts, not indexed); only a stable deploys the stable
+Web (`xmatrix-web`, `https://xmatrix.sh`), rebuilt from the verified beta's
+source. `server-release.yml` picks the target from the tagged version
+(`node scripts/version.mjs channel`) and `deploy-config.mjs` renders it
+(`web` or `web-beta`). A stable train may name `web`; it still never names
+`hub`. Deployment receipts record the channel's Web, and the receipt reader
+accepts either Web for betas released before the split.
+
+Migration evidence: the first beta train after this change creates the beta
+Worker and its custom domain on its Web deploy; `xmatrix.sh` keeps the last
+beta it served until the first stable that names `web` replaces it. The Hub
+already trusts the beta origin (APP_BETA_URL). Native stable and beta builds
+keep loading `xmatrix.sh` until their shells choose by channel.
+
+Recovery: a failed beta Web deploy is re-run on the same Production Release
+run, like any job; it touches neither the Hub nor `xmatrix.sh`. Undoing the
+split is a revert of this change: betas then deploy `xmatrix.sh` again and the
+idle beta Worker can be deleted.
 
 ## Unreleased: Pull requests that name a page block are not gated
 

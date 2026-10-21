@@ -3,7 +3,7 @@
 The production lifecycle maintenance broker runs daily and dispatches the
 existing bounded executor from the latest successful immutable production tag
 of the line that deploys the Hub: the newest beta (a stable rebuilds an older
-beta's source for clients only, so it is never the target).
+beta's source and never deploys the Hub, so it is never the target).
 For an immediate report, dispatch `production-postgres-lifecycle-maintenance-request.yml`
 with `dry_run=true` and `max_rows=10000`. Inspect its secret-free JSON artifacts
 before dispatching the same broker with `dry_run=false`.

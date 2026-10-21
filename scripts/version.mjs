@@ -8,6 +8,7 @@ import {
   assertSemver,
   listReleaseTags,
   readVersionAtRef,
+  releaseChannel,
   validateReleaseVersionOrder,
 } from "./release-version-order.mjs";
 
@@ -251,9 +252,12 @@ if (invokedDirectly) try {
     check();
   } else if (command === "check-release-order") {
     checkReleaseOrder(commandArgs);
+  } else if (command === "channel") {
+    // The checkout's release channel: beta for X.Y.Z-beta.N, stable for X.Y.Z.
+    console.log(releaseChannel(canonicalVersion()));
   } else {
     throw new Error(
-      "Usage: node scripts/version.mjs <check|sync|set|check-release-order> [version|--base-ref <git-ref>|--require-new-version]",
+      "Usage: node scripts/version.mjs <check|sync|set|check-release-order|channel> [version|--base-ref <git-ref>|--require-new-version]",
     );
   }
 } catch (error) {

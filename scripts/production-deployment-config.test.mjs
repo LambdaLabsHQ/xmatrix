@@ -50,3 +50,11 @@ test("production Web serves its custom domain", () => {
   assert.equal(web.name, "xmatrix-web");
   assert.deepEqual(web.routes, [{ pattern: "xmatrix.sh", custom_domain: true }]);
 });
+
+test("the production beta Web is its own Worker on beta.xmatrix.sh, with no other public host", async () => {
+  const beta = JSON.parse(await renderComponent("web-beta", production));
+  assert.equal(beta.name, "xmatrix-web-beta");
+  assert.deepEqual(beta.routes, [{ pattern: "beta.xmatrix.sh", custom_domain: true }]);
+  assert.equal(beta.workers_dev, false);
+  assert.equal(beta.preview_urls, false);
+});
