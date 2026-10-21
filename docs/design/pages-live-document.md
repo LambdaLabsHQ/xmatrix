@@ -192,8 +192,9 @@ fact is about.
   arrive as well as a person's typing. The session writes an Agent's edit
   under the Agent's awareness id, which is how the editor knows whose text it
   is.
-- **The top and bottom edges** of a long page name who is out of view above
-  or below, placed by their cursor where they have one and by their section
+- **The top and bottom of the right edge** of a long page name who is out of
+  view above or below (decided 2026-10-21: everything about people at work
+  stands on the right, never centred over the text), placed by their cursor where they have one and by their section
   otherwise: "claude:2 is editing below". Clicking scrolls to the nearest of
   them; clicking an avatar in the header does the same.
 - **Beside a wide page, an Agent at work stands in the margin** (decided

@@ -1659,6 +1659,10 @@ test("on a long page, who works out of view shows at its edges, and what an Agen
     .toBeVisible();
   await browser.screenshot({ path: test.info().outputPath("pages-agent-pen-beside.png") });
   await expect(browser.getByTestId("page-people-above")).toHaveText(/Ada is reading above/u);
+  // It stands on the right, with the other marks of people at work, never centred over the text.
+  const chip = (await browser.getByTestId("page-people-above").boundingBox())!;
+  const viewport = browser.viewportSize()!;
+  expect(chip.x, "the chip is on the right").toBeGreaterThan(viewport.width / 2);
   await browser.screenshot({ path: test.info().outputPath("pages-people-above.png") });
   await browser.getByTestId("page-people-above").click();
   await expect(editor.getByText("In progress")).toBeInViewport();

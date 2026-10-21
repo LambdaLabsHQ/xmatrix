@@ -96,8 +96,8 @@ export interface OffscreenPerson { person: PresentPerson; distance: number }
 
 /**
  * Who is working above or below what this person can see (§3.2), at the top
- * and bottom edges of the page as in Google Docs; clicking scrolls to the
- * nearest of them.
+ * and bottom of the page's right edge, where the other marks of people at work
+ * stand; clicking scrolls to the nearest of them.
  */
 export function PageOffscreenPeople({ above, below, onJump }: {
   above: OffscreenPerson[]; below: OffscreenPerson[]; onJump: (person: PresentPerson) => void;
@@ -116,7 +116,7 @@ export function PageOffscreenPeople({ above, below, onJump }: {
       : `${nearest.name} and ${others} ${others === 1 ? "other" : "others"} are ${side}`;
     const Arrow = side === "above" ? ArrowUp : ArrowDown;
     return (
-      <div className={cn("page-offscreen-edge pointer-events-none absolute inset-x-0 z-20 flex justify-center",
+      <div className={cn("page-offscreen-edge pointer-events-none absolute inset-x-0 z-20 flex justify-end pr-6 lg:pr-12",
         side === "above" ? "top-2" : "bottom-3")}>
         <button type="button" onClick={() => onJump(nearest)} data-testid={`page-people-${side}`}
           title={people.map((person) => `${person.name} · ${person.detail}`).join("\n")}
