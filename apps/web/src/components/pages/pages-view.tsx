@@ -296,6 +296,20 @@ export function pageDocumentQuery(userId: string | null, spaceId: string, pageId
  * Automations. Their keys do not carry the page's revision: the live session's commits invalidate them,
  * so a page opens on what was read ahead and keeps it on screen while it is read again.
  */
+/**
+ * A comment as its discussion's first message: an Agent it mentions starts on it at once; one that mentions no
+ * Agent goes to xMatrix to give to one.
+ */
+export function commentBody(text: string, agents: readonly string[]): string {
+  const mention = /(^|\s)[@＠]([\p{L}\p{N}_.:-]+)/gu;
+  for (const match of text.matchAll(mention)) {
+    if (!agents.includes(match[2]!.split(":")[0]!)) continue;
+    const end = match.index! + match[0].length;
+    return `${text.slice(0, end)} launch:force${text.slice(end)}`;
+  }
+  return `@auto ${text}`;
+}
+
 function pageLinksQuery(userId: string | null, spaceId: string, pageId: string, token: string) {
   return {
     queryKey: xmatrixQueryKeys.domain({ userId: userId ?? "anonymous" }, "page-links", [spaceId, pageId]),
@@ -1187,12 +1201,13 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   const blockLink = (blockId: string) => `${pageLink()}#${blockId}`;
   // A discussion is where people and Agents meet alike: asking an Agent is mentioning it there.
   const discuss: NonNullable<PageSectionActions["discuss"]> = (blockId, anchor) => startDiscussion(blockId, anchor);
-  // A comment on a passage, said to an Agent: the discussion of the passage, started with the comment, which
-  // calls the Agent at once; the page stays in front of the reader, the discussion a card beside the passage.
-  const comment: NonNullable<PageSectionActions["comment"]> = (blockId, anchor, to, text) =>
-    startDiscussion(blockId, anchor, { to, text });
+  // A comment on a passage: the discussion of the passage, started with the comment; the page stays in front of
+  // the reader, the discussion a card beside the passage. It names nobody: an Agent the comment mentions takes it,
+  // else xMatrix gives it to one (`@auto`).
+  const comment: NonNullable<PageSectionActions["comment"]> = (blockId, anchor, text) =>
+    startDiscussion(blockId, anchor, { body: commentBody(text, writers.agents.map((agent) => agent.harness)) });
   const startDiscussion = (blockId: string, anchor?: Parameters<NonNullable<PageSectionActions["discuss"]>>[1],
-    said?: { to: string; text: string }) => {
+    said?: { body: string }) => {
     if (!page) return;
     const title = blocks.find((block) => block.id === blockId)?.title;
     // A discussion of a passage is named by the passage, which its first message carries; of a section, by the section.
@@ -1207,8 +1222,8 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     const quote = anchor ? discussionQuote(anchor.quote, { label: place, href: blockLink(blockId) }, true) : undefined;
     void onDiscuss({ spaceId, pageId: page.pageId, blockId, name: anchor ? discussionTitle(anchor.quote) : place,
       restricted, planned, ...(anchor ? { anchor } : {}),
-      ...(said ? { firstMessage: quote ? quotedMessage(quote, { body: `@${said.to} launch:force ${said.text}`, selections: [] }).body
-        : `@${said.to} launch:force ${said.text}`, open: false } : quote ? { quote } : {}) })
+      ...(said ? { firstMessage: quote ? quotedMessage(quote, { body: said.body, selections: [] }).body : said.body,
+        open: false } : quote ? { quote } : {}) })
       .then(() => links.refetch(), (cause: Error) => setNotice(cause.message))
       .finally(() => setStartedLinks((current) => current.filter((link) => link.conversationId !== started)));
   };
@@ -1260,10 +1275,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     setMode("history");
   };
   // What selecting text offers, for the section the selection is in.
-  // A comment goes to the Agent at work on the page, else to this person's favourite, unless they choose another.
-  const commentAgents = [...writers.agents].sort((a, b) => Number(b.harness === coWriter?.split(":")[0])
-    - Number(a.harness === coWriter?.split(":")[0]) || Number(b.harness === writers.favourite) - Number(a.harness === writers.favourite));
-  const sectionActions: PageSectionActions = { discuss, ...(commentAgents.length ? { comment, commentAgents } : {}) };
+  const sectionActions: PageSectionActions = { discuss, comment };
   // What a heading offers, beside it (§3.2).
   const headingActions: HeadingActions = {
     canEdit,

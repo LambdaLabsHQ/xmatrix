@@ -230,18 +230,10 @@
   transition: background 0.12s;
 }
 .page-discussion-focus { background: color-mix(in oklab, #f2b632 50%, transparent); }
-/* The box a selected passage opens (§4.2): a slip of paper under it, the comment in the page's own type, said
-   to the Agent whose face leads it. */
+/* The box a selected passage opens (§4.2): a slip of paper under it, led by the comment icon its card will
+   carry, the comment in the page's own type. */
 .page-comment-box { align-items: flex-start; }
-.page-comment-box .page-comment-to {
-  display: flex;
-  width: 24px;
-  height: 24px;
-  margin-top: 1px;
-  align-items: center;
-  justify-content: center;
-  border-radius: 999px;
-}
+.page-comment-box .page-comment-mark { display: flex; height: 25px; align-items: center; }
 .page-comment-box .page-comment-text {
   font-size: 15px;
   line-height: 1.6;

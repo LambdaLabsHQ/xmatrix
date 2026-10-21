@@ -50,7 +50,7 @@ function cardName(name: string | null): string {
 }
 
 /** A conversation about the page is a comment, as in Google Docs: its icon starts its card and its line. */
-function CommentIcon() {
+export function CommentIcon() {
   return (
     <svg className="page-comment-icon" width="16" height="14" viewBox="0 0 34 30" aria-hidden="true">
       <path d="M6 2h22a4 4 0 0 1 4 4v13a4 4 0 0 1-4 4H14l-6 5v-5H6a4 4 0 0 1-4-4V6a4 4 0 0 1 4-4z" />

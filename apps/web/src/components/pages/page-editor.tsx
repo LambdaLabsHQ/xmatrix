@@ -74,18 +74,16 @@ export interface PageSectionActions {
   /** A conversation about the section; from a selection, anchored to that text. */
   discuss?: (blockId: string, anchor?: PassageAnchor) => void;
   /**
-   * A comment on a passage, said to an Agent (§4.2): a discussion of the passage whose first message is the
-   * comment, which the Agent answers there and in the page.
+   * A comment on a passage (§4.2): a discussion of the passage whose first message is the comment, which an
+   * Agent takes and answers there and in the page.
    */
-  comment?: (blockId: string, anchor: PassageAnchor, to: string, text: string) => void;
-  /** Who a comment may be said to; the first, unless the reader chooses another. */
-  commentAgents?: readonly WriteAgent[];
+  comment?: (blockId: string, anchor: PassageAnchor, text: string) => void;
 }
 
 type PassageAnchor = { quote: string; from: unknown; to: unknown };
 
 /** A comment being written on a passage, in the box under it. */
-interface CommentDraft { blockId: string; anchor: PassageAnchor; left: number; top: number; to: string | null; text: string }
+interface CommentDraft { blockId: string; anchor: PassageAnchor; left: number; top: number; text: string }
 
 interface Toolbar {
   kind: BlockKind;
@@ -434,8 +432,7 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
     // Under the passage's last line; from where it starts when it is one line, else from the text's edge.
     const oneLine = Math.abs(start.top - end.top) < 4;
     const left = Math.max(0, Math.min(oneLine ? start.left - box.left - 10 : 0, box.width - 448));
-    setCommentDraft({ blockId: pageDocBlockAt(current.state.doc, from), anchor, left, top: end.bottom - box.top + 6,
-      to: draftRef.current?.to ?? null, text: "" });
+    setCommentDraft({ blockId: pageDocBlockAt(current.state.doc, from), anchor, left, top: end.bottom - box.top + 6, text: "" });
     current.dispatch(current.state.tr.setMeta(discussionsKey, { draft: { from: anchor.from, to: anchor.to } }));
     return true;
   }, [session, setCommentDraft]);
@@ -721,8 +718,6 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
   const selectionActions = Boolean(actions?.discuss || actions?.comment);
   const selectionMenu = toolbar && !toolbar.empty && toolbar.focused && current && toolbar.kind !== "code" && selectionActions
     && !commentDraft && !(actions?.comment && selectedWithMouse.current) ? place(current.state.selection.from) : null;
-  const commentAgents = actions?.commentAgents ?? [];
-  const commentTo = commentDraft ? commentDraft.to ?? commentAgents[0]?.harness ?? null : null;
   // A key meant for the passage, pressed while the box has nothing typed: it acts on the passage as before.
   const passageKey = (event: { key: string; metaKey: boolean; ctrlKey: boolean }) => {
     const editor = view.current;
@@ -852,14 +847,13 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
         </PaperPopover>
         </div>
       )}
-      {commentDraft && commentTo && (
+      {commentDraft && (
         <div className="absolute z-30 w-[28rem] max-w-full" style={{ left: commentDraft.left, top: commentDraft.top }}>
-          <PageCommentBox agents={commentAgents} to={commentTo} text={commentDraft.text}
+          <PageCommentBox text={commentDraft.text}
             onText={(text) => setCommentDraft({ ...commentDraft, text })}
-            onTo={(to) => setCommentDraft({ ...commentDraft, to })}
             onClose={() => closeComment()} onPassageKey={passageKey}
             onSend={(text) => {
-              actions?.comment?.(commentDraft.blockId, commentDraft.anchor, commentTo, text);
+              actions?.comment?.(commentDraft.blockId, commentDraft.anchor, text);
               closeComment(true);
             }} />
         </div>
