@@ -742,28 +742,23 @@ integration("a section change derived from a body that changed before it was kep
   }
 });
 
-/** Each revision's text in `body`, as `[text, revision]` pieces. */
-function blamed({ body, runs }) {
-  const out = [];
-  let at = 0;
-  for (let index = 0; index < runs.length; index += 2) {
-    out.push([body.slice(at, at + runs[index]), runs[index + 1]]);
-    at += runs[index];
-  }
-  return out;
-}
+/** The body a blame covers, cut into `[text, revision]` at its runs. */
+const blamed = ({ body, runs }) => {
+  let start = 0;
+  return Array.from({ length: runs.length / 2 }, (_, run) => [body.slice(start, start += runs[2 * run]), runs[2 * run + 1]]);
+};
 
 integration("who wrote each piece of a page reads the same once kept, and a purge forgets it", async () => {
   const fixture = await pageTest("blame");
+  const page = await writtenPage(fixture, [
+    "# Launch\n\nShip in May with Secret plan.\n",
+    "# Launch\n\nShip in June with Secret plan.\n",
+    "# Launch\n\nShip in June with Secret plan.\n\nThen measure.\n",
+  ]);
   const { client, ids, pages, owner } = fixture;
+  const base = { spaceId: ids.space, principal: owner };
+  const r = () => crypto.randomUUID();
   try {
-    const r = () => crypto.randomUUID();
-    const base = { spaceId: ids.space, principal: owner };
-    const page = await writtenPage(fixture, [
-      "# Launch\n\nShip in May with Secret plan.\n",
-      "# Launch\n\nShip in June with Secret plan.\n",
-      "# Launch\n\nShip in June with Secret plan.\n\nThen measure.\n",
-    ]);
     const read = async () => blamed(await pages.blame({ requestId: r(), ...base, pageId: page.pageId }));
     const kept = async () => (await client.query(`SELECT revision, blame FROM data.page_revisions
       WHERE space_id=$1 AND page_id=$2 ORDER BY revision`, [ids.space, page.pageId])).rows

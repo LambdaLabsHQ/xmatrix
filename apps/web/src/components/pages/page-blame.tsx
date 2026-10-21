@@ -38,7 +38,8 @@ function summarize(blame: PageBlame, now: DocNode, from: number, to: number): Bl
   return blameOf(base, carried, now, from, to);
 }
 
-interface Shown { from: number; to: number; left: number; top: number; summary: BlameSummary | null }
+/** Where its writers show: `above` stands its bottom at `top`, so a note that opens grows away from the passage. */
+interface Shown { from: number; to: number; left: number; top: number; above?: boolean; summary: BlameSummary | null }
 
 function names(writers: readonly BlameWriter[]): string {
   const shown = writers.slice(0, 2).map((writer) => pageAuthorLabel(writer.author));
@@ -229,11 +230,11 @@ export function PageBlameLayer({ view, frame, source, inMargin }: {
         // under its last, where the comment box is not.
         const above = !phone && (!inMargin || start.top - 40 > (scroller?.top ?? 0));
         const left = Math.max(0, Math.min(start.left - box.left - 6, box.width - 320));
-        const top = above ? start.top - box.top - 34 : end.bottom - box.top + 6;
+        const top = above ? start.top - box.top - 6 : end.bottom - box.top + 6;
         setOpen(false);
-        setSelected({ from, to, left, top, summary: null });
+        setSelected({ from, to, left, top, above, summary: null });
         void writersOf(from, to).then((summary) => {
-          if (shownFor === key) setSelected(summary ? { from, to, left, top, summary } : null);
+          if (shownFor === key) setSelected(summary ? { from, to, left, top, above, summary } : null);
         });
       }, SELECTION_MS);
     };
@@ -273,7 +274,8 @@ export function PageBlameLayer({ view, frame, source, inMargin }: {
       )}
       {selectedSummary && (selectedSummary.writers.length > 0 || selectedSummary.writing) && (
         <PaperPopover data-page-blame="" data-testid="page-blame-note"
-          className="absolute z-40 max-w-80 rounded-lg px-2 py-1 text-[12.5px] text-muted-foreground"
+          className={cn("absolute z-40 max-w-80 rounded-lg px-2 py-1 text-[12.5px] text-muted-foreground",
+            selected!.above && "-translate-y-full")}
           style={{ left: selected!.left, top: selected!.top }} onMouseDown={(event) => event.preventDefault()}>
           {selectedSummary.writers.length > 1 ? (
             <button type="button" className="flex w-full min-w-0 items-center gap-1.5 text-left" aria-expanded={open}
