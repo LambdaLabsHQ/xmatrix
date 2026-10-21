@@ -6,7 +6,7 @@ import {
 } from "@xmatrix/protocol/page-document";
 import {
   BetweenHorizontalEnd, BetweenVerticalEnd, Code2, Columns3, FileCode2, Rows3, Trash2, Heading1, Heading2, Heading3, Link2,
-  FileText, Hash, List, ListChecks, ListOrdered, MessageSquarePlus, Minus, Pilcrow, Quote, Table,
+  FileText, Hash, List, ListChecks, ListOrdered, MessageSquare, Minus, Pilcrow, Quote, Table,
 } from "lucide-react";
 import type { Node as DocNode } from "prosemirror-model";
 import { EditorState, Selection, type Command } from "prosemirror-state";
@@ -738,7 +738,7 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
               onClick={() => actions.discuss!(section, current ? selectionAnchor(current.state, session.fragment) ?? undefined
                 : undefined)}
               className="flex h-8 items-center gap-1.5 rounded-md px-2 text-sm [&_svg]:size-4">
-              <MessageSquarePlus /> Discuss
+              <MessageSquare /> Discuss
             </button>
           )}
         </PaperPopover>

@@ -169,7 +169,6 @@ import {
   Loader2,
   Maximize2,
   MessageSquare,
-  MessageSquarePlus,
   Paperclip,
   Pencil,
   RefreshCw,
@@ -1412,7 +1411,7 @@ function MessagePassageDiscuss({ rootRef, onDiscuss }: {
             document.getSelection()?.removeAllRanges();
           }}
           className="flex h-8 items-center gap-1.5 rounded-md px-2 text-sm [&_svg]:size-4">
-          <MessageSquarePlus /> Discuss
+          <MessageSquare /> Discuss
         </button>
       </PaperPopover>
     </div>,
