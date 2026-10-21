@@ -42,7 +42,7 @@ export function requireLifecycleExecutionAuthority(input) {
 /**
  * The release maintenance runs from: the newest successful Production Release
  * of the line that deploys the Hub. Once betas exist that is the newest beta; a
- * stable rebuilds an older beta's source for clients only, so it never is.
+ * stable rebuilds an older beta's source and never deploys the Hub, so it never is.
  * Before the first beta it is the newest release of the single line before it.
  */
 export function latestMaintenanceRelease(productionRuns) {

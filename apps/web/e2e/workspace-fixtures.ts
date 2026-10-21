@@ -122,6 +122,22 @@ export async function routeHumanSocket(
   return { connections: () => connections };
 }
 
+/**
+ * Routes the Human socket so a test can say what the Hub says when a
+ * Channel's launches, stops, continuations, executions or launch choices move:
+ * the chips re-read their records then, and only then. Nothing polls.
+ */
+export async function routeInvocationPush(page: Page, channelId = "channel-general") {
+  const sockets: Array<(message: unknown) => void> = [];
+  await routeHumanSocket(page, (frame, reply) => { if (frame.type === "human_connect") sockets.push(reply); });
+  return async () => {
+    await expect.poll(() => sockets.length).toBeGreaterThan(0);
+    for (const send of sockets) send({ type: "observable_event", event: { id: `invocations-${Date.now()}`,
+      type: "channel_invocations_changed", channelId, workspaceUserId: "system:xmatrix",
+      timestamp: new Date().toISOString(), metadata: {} } });
+  };
+}
+
 /** Enabled, routing-ready registrations of these harnesses on one machine, as the Space's catalog lists them. */
 export function harnessRegistrations(harnesses: readonly string[]) {
   return harnesses.map((harness) => ({

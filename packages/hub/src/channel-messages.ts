@@ -1,7 +1,7 @@
 import { MessageAuthorityError } from "@xmatrix/db";
-import { SYSTEM_ANNOTATION_AUTHOR, type ObservabilityEvent } from "@xmatrix/protocol";
 import type { AuthorityPrincipal } from "./product-message-command";
 import type { Env } from "./types";
+import { recipientBatches } from "./channel-live-judgment";
 import { postBillingNotice } from "./billing-notice";
 import { resolveChannelCatalog } from "./spaces";
 import {
@@ -31,15 +31,6 @@ import {
   withPostgresMessageRequestScope,
 } from "./postgres-message-authority";
 
-const MAX_RUNTIME_RECIPIENTS_PER_DELIVERY = 1_000;
-
-function recipientBatches(userIds: string[]): string[][] {
-  const batches: string[][] = [];
-  for (let offset = 0; offset < userIds.length; offset += MAX_RUNTIME_RECIPIENTS_PER_DELIVERY) {
-    batches.push(userIds.slice(offset, offset + MAX_RUNTIME_RECIPIENTS_PER_DELIVERY));
-  }
-  return batches;
-}
 
 /** A message call's answer, or the Response its failure maps to. */
 export type ChannelMessageResult = { ok: true; payload: Record<string, unknown> } | { ok: false; response: Response };
@@ -349,69 +340,6 @@ export async function publishChannelMemberRead(
     throw new Error("Runtime rejected PostgreSQL read-state delivery");
   }
   return true;
-}
-
-/**
- * Tell a Channel's people that the Hub folded one message under a later one
- * (docs/design/conversation-activity.md §3.3). The judgment lands seconds
- * after the later message, so every client holding the Channel's rows,
- * opened or not, applies it as it comes instead of finding out when the
- * Channel is next read. Only the two ids travel; a dropped frame is repaired
- * by the next history read, which carries `supersededBy`.
- */
-export async function publishChannelMessageSuperseded(
-  env: Env,
-  input: { channelId: string; messageId: string; supersededBy: string },
-): Promise<void> {
-  await publishChannelMessageJudgment(env, input.channelId, "channel_message_superseded",
-    { messageId: input.messageId, supersededBy: input.supersededBy });
-}
-
-/**
- * Tell a Channel's people what a message's command came to, as the Hub just
- * recorded it on that message. Clients apply the one annotation to the result
- * they hold; a dropped frame is repaired by the next history read, which
- * carries `commandResult`.
- */
-export async function publishChannelMessageCommandResult(
-  env: Env,
-  input: { channelId: string; messageId: string; annotationId: string; payload: Record<string, unknown> },
-): Promise<void> {
-  await publishChannelMessageJudgment(env, input.channelId, "channel_message_interactions_updated",
-    { messageId: input.messageId, annotationId: input.annotationId, payload: input.payload });
-}
-
-/** A Hub judgment about one message, to every live member of its Channel. */
-async function publishChannelMessageJudgment(
-  env: Env,
-  channelId: string,
-  type: ObservabilityEvent["type"],
-  metadata: Record<string, unknown>,
-): Promise<void> {
-  const recipientUserIds = await withPostgresMessageRequestScope(
-    env,
-    (scope) => postgresMessageLiveRecipientUserIds(env, channelId, scope),
-  );
-  const event: ObservabilityEvent = {
-    id: crypto.randomUUID(),
-    type,
-    workspaceUserId: SYSTEM_ANNOTATION_AUTHOR,
-    channelId,
-    metadata,
-    timestamp: new Date().toISOString(),
-  };
-  const tasks: Promise<unknown>[] = [];
-  const responses = await Promise.all(recipientBatches(recipientUserIds).map((recipients) =>
-    publishRuntimeChannelObservableEvent({
-      env,
-      waitUntil: (task) => tasks.push(task),
-      channelId,
-      payload: { recipientUserIds: recipients, event: event as unknown as Record<string, unknown> },
-    })));
-  await Promise.allSettled(tasks);
-  if (responses.some((response) => !response.ok)) {
-    throw new Error(`Runtime rejected PostgreSQL ${type} delivery`);
-  }
 }
 
 /**

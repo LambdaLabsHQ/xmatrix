@@ -1,6 +1,6 @@
 import type { Hono } from "hono";
 import { CLIENT_COMPATIBILITY_HEADERS } from "@xmatrix/protocol";
-import { appOrigin } from "./deployment-origins";
+import { appOrigins } from "./deployment-origins";
 import { appendVary } from "./index-shared";
 import type { Env } from "./types";
 
@@ -35,16 +35,16 @@ function directRequest(request: Request, env: Env): { origin: string; method: st
   const origin = request.headers.get("origin");
   if (!origin) return null;
   const method = request.method === "OPTIONS" ? request.headers.get("access-control-request-method") : request.method;
-  let allowed: string;
+  let allowed: string[];
   try {
-    allowed = appOrigin(env);
+    allowed = appOrigins(env);
   } catch {
     return null;
   }
-  if (origin !== allowed) return null;
+  if (!allowed.includes(origin)) return null;
   const pathname = new URL(request.url).pathname;
   const route = DIRECT_ROUTES.find((item) => item.method === method && item.path.test(pathname));
-  return route ? { origin: allowed, method: route.method } : null;
+  return route ? { origin, method: route.method } : null;
 }
 
 /** Answers the app's direct requests across origins; registered before every route, the preflight included. */

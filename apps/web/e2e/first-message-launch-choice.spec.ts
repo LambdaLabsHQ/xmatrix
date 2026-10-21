@@ -1,7 +1,7 @@
 import type { Page } from "@playwright/test";
 import { expect, test } from "./fixtures";
 import { E2E_CHANNEL, E2E_NOW, E2E_SPACE, E2E_USER_SENDER, fixtureJson, fixtureRequestBodies,
-  installWorkspaceStubs } from "./workspace-fixtures";
+  installWorkspaceStubs, routeInvocationPush } from "./workspace-fixtures";
 
 const messageId = "message-first";
 const body = "The login test flakes on CI about one run in five — find out why and fix it";
@@ -15,6 +15,7 @@ function location(harness: string) {
 }
 
 async function install(page: Page, launchChoices: unknown[]) {
+  const push = await routeInvocationPush(page);
   await installWorkspaceStubs(page, { spaces: [E2E_SPACE],
     channels: [{ ...E2E_CHANNEL, metadata: { autoName: true }, messageCount: 1, historyHeadSequence: 1 }] });
   await fixtureJson(page, "first-history", "**/api/xmatrix/channels/channel-general/history**", {
@@ -25,6 +26,7 @@ async function install(page: Page, launchChoices: unknown[]) {
     registrations: locations, capabilities: locations.map(item => ({ harness: item.key.harness, models: [], locations: [item] })),
   });
   await launches(page, launchChoices);
+  return push;
 }
 
 async function launches(page: Page, launchChoices: unknown[]) {
@@ -44,7 +46,7 @@ test("the author's three seconds start when Jev's reading appears, and a pick se
   // Opening the conversation took 2.5s and Jev has not read the message yet.
   const open = (extra: Record<string, unknown> = {}) => openChoice({ open: true, ...extra });
   await page.clock.install({ time: new Date(Date.parse(E2E_NOW) + 2_500) });
-  await install(page, [open()]);
+  const push = await install(page, [open()]);
   await fixtureJson(page, "first-choice", `**/api/xmatrix/channels/channel-general/messages/${messageId}/launch-choice`,
     { claimed: true });
   await page.goto("/app/personal-sspaceperso/channels/general-cchannelgen", { waitUntil: "domcontentloaded" });
@@ -58,6 +60,7 @@ test("the author's three seconds start when Jev's reading appears, and a pick se
 
   // Jev's reading arrives: the author's three seconds start, and the Hub is told.
   await launches(page, [open({ recommendation: { start: true, harness: "codex" } })]);
+  await push();
   await page.clock.runFor(700);
   await expect(card.getByRole("button", { name: "Start codex (xMatrix's pick)" })).toHaveAttribute("data-recommended", "true");
   // Far enough ahead that a loaded runner has not already passed it.
@@ -74,6 +77,7 @@ test("the author's three seconds start when Jev's reading appears, and a pick se
 
   await launches(page, [open({ open: false, recommendation: { start: true, harness: "codex" },
     choice: { start: true, harness: "claude", by: "author", at: E2E_NOW } })]);
+  await push();
   await page.clock.runFor(1_000);
   // The pick is summoned by xMatrix's `@claude` reply, which shows the launch itself.
   await expect(card).toHaveAttribute("data-state", "chosen");

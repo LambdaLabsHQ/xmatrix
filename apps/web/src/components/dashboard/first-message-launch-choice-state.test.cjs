@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 require("./typescript-require.cjs").installTypeScriptRequire();
-const { launchChoiceView, launchChoicePollInterval } = require("./first-message-launch-choice-state.ts");
+const { launchChoiceView } = require("./first-message-launch-choice-state.ts");
 const sent = "2026-10-02T00:00:00.000Z";
 const at = (ms) => Date.parse(sent) + ms;
 const { agentFaceUrl, firstMessageDecisionWindow, harnessLaunchOption } = require("@xmatrix/protocol");
@@ -58,9 +58,3 @@ test("the window lists what the reader may start, plus whatever Jev or the autho
   assert.equal(record({ recommendation: { start: false } }).recommendation, null);
 });
 
-test("only an open or undecided choice polls quickly", () => {
-  assert.equal(launchChoicePollInterval([{ kind: "open", deadlineAt: 1 }]), 500);
-  assert.equal(launchChoicePollInterval([{ kind: "reading" }]), 1_000);
-  assert.equal(launchChoicePollInterval([{ kind: "none", by: "jev" }, { kind: "hidden" }]), undefined);
-  assert.equal(launchChoicePollInterval([{ kind: "chosen", by: "author" }]), undefined);
-});

@@ -4,7 +4,10 @@ import fs from "node:fs";
 import process from "node:process";
 
 import { runCliMain } from "./cli-entrypoint.mjs";
-import { RELEASE_TAG_PATTERN } from "./release-version-order.mjs";
+import { RELEASE_TAG_PATTERN, releaseChannel } from "./release-version-order.mjs";
+
+const STABLE_WEB = "https://xmatrix.sh";
+const BETA_WEB = "https://beta.xmatrix.sh";
 
 export function verifyProductionDeploymentReceipt(receipt, expected) {
   const { scope, sha, tag, runId, runAttempt } = expected;
@@ -24,8 +27,11 @@ export function verifyProductionDeploymentReceipt(receipt, expected) {
       receipt.components.some((item, index) => item !== components[index])) {
     throw new Error("R2 deployment receipt does not match the exact production run and scope");
   }
+  // A stable deploys the stable Web; a beta deploys the beta Web, or the
+  // stable one for betas released before the Web was split per channel.
+  const webUrls = releaseChannel(receipt.version) === "stable" ? [STABLE_WEB] : [BETA_WEB, STABLE_WEB];
   if ((components.includes("hub") ? receipt.hubUrl !== "https://xmatrix-hub.xmatrix.sh" : receipt.hubUrl !== undefined) ||
-      (components.includes("web") ? receipt.webUrl !== "https://xmatrix.sh" : receipt.webUrl !== undefined)) {
+      (components.includes("web") ? !webUrls.includes(receipt.webUrl) : receipt.webUrl !== undefined)) {
     throw new Error("R2 deployment receipt claims a different deployed surface");
   }
   return receipt;

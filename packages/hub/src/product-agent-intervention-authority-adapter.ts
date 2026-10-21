@@ -1,4 +1,5 @@
 import { recordCommandResult } from "./command-result";
+import { publishChannelInvocationsChanged } from "./channel-live-judgment";
 import { HANDOFF_CONTEXT_MAX_CHARS, plainRecord as record } from "@xmatrix/protocol";
 import {
   orchestrateProductAgentIntervention,
@@ -337,7 +338,7 @@ export async function dispatchProductAgentInterventionAfterAuthorityMessage(inpu
   actorUserId: string;
 }): Promise<ProductAgentInterventionResult | undefined> {
   if (!parseProductAgentStopCommand(input.body)) return undefined;
-  return orchestrateProductAgentIntervention({
+  const result = await orchestrateProductAgentIntervention({
     channelId: input.channelId,
     sourceMessageId: input.messageId,
     body: input.body,
@@ -347,6 +348,9 @@ export async function dispatchProductAgentInterventionAfterAuthorityMessage(inpu
       sourceMessageId: input.messageId,
     }),
   });
+  // The stops it issued are the command chip's next answer.
+  await publishChannelInvocationsChanged(input.env, input.channelId);
+  return result;
 }
 
 /** Validated daemon stop targets from an Authority result that terminalized live Runs. */

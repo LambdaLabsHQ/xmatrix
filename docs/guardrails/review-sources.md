@@ -1,5 +1,18 @@
 # Guardrail Review Sources
 
+- 2026-10-21 Web per release channel (P0#4 text): maintainer direction (Daniel)
+  that beta and stable are told apart by version for the Web too, not only for
+  clients. Every beta now deploys the beta Web (`beta.xmatrix.sh`); a stable
+  rebuilds a verified beta's source and deploys the stable Web (`xmatrix.sh`),
+  which desktop, iOS and Android stable builds load. The Hub stays one service
+  with one dataset that every beta deploys, so beta and stable users share
+  Channels; it trusts both exact Web origins and must keep serving the older
+  stable Web until a stable ships the newer one. Reviewed Better Auth trusted
+  origins, credentialed and direct-read CORS, the shared `.xmatrix.sh` session
+  cookie, passkey origins, native shell origin trust, receipts and SEO. Same
+  direction as 2026-10-21 #851: pull requests run a fast tier, client suites
+  and CodeQL gate releases instead of merges.
+
 - 2026-10-19 steer instead of interrupt: maintainer direction (Daniel) that an
   ordinary Human message steers a busy Instance and only a message that
   @-addresses it interrupts. It supersedes the 2026-07-13 rule that every fresh

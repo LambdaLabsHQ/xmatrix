@@ -83,6 +83,47 @@ test("fails closed on missing or conflicting deployment identity", () => {
   );
 });
 
+test("a beta Web is the Hub's APP_BETA_URL, its own origin inside the session's cookie domain", () => {
+  const beta = { workerName: "acme-web-beta", origin: "https://beta.acme.example", workersDev: false };
+  const resolved = resolveProfile(profile({ web: { beta } }), env);
+  assert.equal(renderHubConfig(hubBase, resolved).vars.APP_BETA_URL, "https://beta.acme.example");
+  assert.equal("APP_BETA_URL" in renderHubConfig(hubBase, resolveProfile(profile(), env)).vars, false);
+
+  assert.throws(() => resolveProfile(profile({ web: { beta: { ...beta, origin: "https://acme.example" } } }), env),
+    /must be its own origin/u);
+  assert.throws(() => resolveProfile(profile({ web: { beta: { ...beta, origin: "https://beta.other.example" } } }), env),
+    /inside AUTH_COOKIE_DOMAIN/u);
+  assert.throws(() => resolveProfile(profile({ web: { beta: { ...beta, extra: 1 } } }), env), /unknown key web.beta.extra/u);
+  assert.throws(() => resolveProfile(profile({ hub: { vars: { APP_BETA_URL: "x" } } }), env), /derived from the origins/u);
+});
+
+test("a beta release deploys its own Worker at the beta origin and builds for it", () => {
+  const beta = { workerName: "acme-web-beta", origin: "https://beta.acme.example", workersDev: false, previewUrls: false };
+  const resolved = resolveProfile(profile({ web: { beta } }), env);
+  const base = { name: "xmatrix-web", main: "worker.mjs" };
+  assert.deepEqual(renderWebConfig(base, resolved, "web-beta"), {
+    name: "acme-web-beta",
+    account_id: "0123456789abcdef0123456789abcdef",
+    main: "worker.mjs",
+    workers_dev: false,
+    preview_urls: false,
+    routes: [{ pattern: "beta.acme.example", custom_domain: true }],
+  });
+  assert.equal(renderWebConfig(base, resolved).name, "acme-web", "the stable Web is unchanged");
+
+  const stable = profileEnvironment(resolved);
+  const betaEnvironment = profileEnvironment(resolved, "web-beta");
+  assert.equal(stable.NEXT_PUBLIC_APP_URL, "https://acme.example");
+  assert.equal(stable.NEXT_PUBLIC_XMATRIX_WEB_CHANNEL, "stable");
+  assert.equal(betaEnvironment.NEXT_PUBLIC_APP_URL, "https://beta.acme.example");
+  assert.equal(betaEnvironment.XMATRIX_APP_ORIGIN, "https://beta.acme.example");
+  assert.equal(betaEnvironment.NEXT_PUBLIC_XMATRIX_WEB_CHANNEL, "beta");
+  assert.notEqual(betaEnvironment.XMATRIX_WEB_CONFIG, stable.XMATRIX_WEB_CONFIG);
+  assert.equal(betaEnvironment.NEXT_PUBLIC_XMATRIX_HUB_URL, stable.NEXT_PUBLIC_XMATRIX_HUB_URL, "one Hub serves both");
+
+  assert.throws(() => profileEnvironment(resolveProfile(profile(), env), "web-beta"), /needs web.beta/u);
+});
+
 test("a deployment meters nothing unless its profile names a billing policy", () => {
   const unmetered = resolveProfile(profile(), env);
   assert.equal(unmetered.billing, null);

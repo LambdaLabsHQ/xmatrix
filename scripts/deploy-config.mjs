@@ -24,7 +24,8 @@ import { fileURLToPath } from "node:url";
 
 export const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 export const PROFILE_SCHEMA_VERSION = 1;
-export const COMPONENTS = ["hub", "web"];
+// `web` is the stable Web; `web-beta` is the Web every beta deploys (`web.beta`).
+export const COMPONENTS = ["hub", "web", "web-beta"];
 
 const PROFILE_KEYS = new Set(["schemaVersion", "name", "cloudflare", "billing", "hub", "web"]);
 const CLOUDFLARE_KEYS = new Set(["accountId"]);
@@ -33,10 +34,12 @@ const HUB_KEYS = new Set([
   "omitBindings", "hyperdrive", "vars",
 ]);
 const WEB_KEYS = new Set([
-  "config", "workerName", "origin", "workersDev", "previewUrls", "omitBindings",
+  "config", "workerName", "origin", "workersDev", "previewUrls", "omitBindings", "beta",
 ]);
+// The Web that every beta deploys, beside the stable one at `web.origin`.
+const WEB_BETA_KEYS = new Set(["workerName", "origin", "workersDev", "previewUrls"]);
 // URL and identity vars derived from profile fields, never set as raw vars.
-const DERIVED_HUB_VARS = new Set(["APP_URL", "HUB_URL"]);
+const DERIVED_HUB_VARS = new Set(["APP_URL", "APP_BETA_URL", "HUB_URL"]);
 
 function fail(message) {
   throw new Error(`deploy profile: ${message}`);
@@ -141,10 +144,27 @@ export function resolveProfile(profile, env = process.env) {
     ? undefined
     : resolveValue(profile.hub.placementRegion, "hub.placementRegion", env);
 
-  for (const component of ["hub", "web"]) {
+  const betaProfile = profile.web.beta;
+  let beta = null;
+  if (betaProfile !== undefined) {
+    assertKnownKeys(betaProfile, WEB_BETA_KEYS, "web.beta");
+    beta = {
+      workerName: resolveValue(betaProfile.workerName, "web.beta.workerName", env),
+      ...resolveOrigin(betaProfile.origin, "web.beta.origin", env),
+      workersDev: betaProfile.workersDev,
+      previewUrls: betaProfile.previewUrls,
+    };
+    if ([webOrigin.origin, hubOrigin.origin].includes(beta.origin)) fail("web.beta.origin must be its own origin");
+    // The beta Web shares the session, so it must sit inside the cookie domain.
+    const cookieDomain = hubVars.AUTH_COOKIE_DOMAIN;
+    if (cookieDomain && !`.${beta.host}`.endsWith(cookieDomain)) {
+      fail(`web.beta.origin must be inside AUTH_COOKIE_DOMAIN ${cookieDomain}`);
+    }
+  }
+
+  for (const [where, value] of [["hub", profile.hub], ["web", profile.web], ["web.beta", betaProfile ?? {}]]) {
     for (const key of ["workersDev", "previewUrls"]) {
-      const value = profile[component][key];
-      if (value !== undefined && typeof value !== "boolean") fail(`${component}.${key} must be a boolean`);
+      if (value[key] !== undefined && typeof value[key] !== "boolean") fail(`${where}.${key} must be a boolean`);
     }
   }
   for (const where of ["hub", "web"]) {
@@ -176,6 +196,7 @@ export function resolveProfile(profile, env = process.env) {
       workersDev: profile.web.workersDev,
       previewUrls: profile.web.previewUrls,
       omitBindings: profile.web.omitBindings ?? [],
+      beta,
     },
   };
 }
@@ -238,18 +259,27 @@ export function renderHubConfig(base, resolved) {
     ...config.vars,
     ...hub.vars,
     APP_URL: resolved.web.origin,
+    ...(resolved.web.beta ? { APP_BETA_URL: resolved.web.beta.origin } : {}),
     HUB_URL: hub.origin,
   };
   return rendered;
 }
 
-/** Merges a resolved profile into the committed Web config. */
-export function renderWebConfig(base, resolved) {
-  const web = resolved.web;
+/** The Worker identity and origin of `web` (stable) or `web-beta`. */
+export function webTarget(resolved, component = "web") {
+  if (component === "web") return resolved.web;
+  if (component !== "web-beta") fail(`unknown Web component ${component}`);
+  if (!resolved.web.beta) fail("web-beta needs web.beta in the profile");
+  return resolved.web.beta;
+}
+
+/** Merges a resolved profile into the committed Web config, for the stable or the beta Web. */
+export function renderWebConfig(base, resolved, component = "web") {
+  const web = webTarget(resolved, component);
   const config = structuredClone(base);
   delete config.$schema;
-  assertNoDeploymentIdentity(config, web.config);
-  omitBindings(config, web.omitBindings, "web");
+  assertNoDeploymentIdentity(config, resolved.web.config);
+  omitBindings(config, resolved.web.omitBindings, "web");
   return {
     name: web.workerName,
     account_id: resolved.accountId,
@@ -266,30 +296,38 @@ function parseJsonc(source) {
 
 /** Path of the rendered config, next to the committed one so relative paths hold. */
 export function renderedConfigPath(component, resolved) {
-  const config = resolved[component].config;
-  const extension = component === "hub" ? "toml" : "json";
-  return resolve(REPO_ROOT, dirname(config), `wrangler.generated.${resolved.name}.${extension}`);
+  if (component === "hub") {
+    return resolve(REPO_ROOT, dirname(resolved.hub.config), `wrangler.generated.${resolved.name}.toml`);
+  }
+  webTarget(resolved, component);
+  const suffix = component === "web-beta" ? "-beta" : "";
+  return resolve(REPO_ROOT, dirname(resolved.web.config), `wrangler.generated.${resolved.name}${suffix}.json`);
 }
 
 export async function renderComponent(component, resolved) {
-  const basePath = resolve(REPO_ROOT, resolved[component].config);
+  const basePath = resolve(REPO_ROOT, (component === "hub" ? resolved.hub : resolved.web).config);
   const source = await readFile(basePath, "utf8");
   if (component === "hub") {
     const { parse, stringify } = await import("smol-toml");
     return `${stringify(renderHubConfig(parse(source), resolved))}\n`;
   }
-  return `${JSON.stringify(renderWebConfig(parseJsonc(source), resolved), null, 2)}\n`;
+  return `${JSON.stringify(renderWebConfig(parseJsonc(source), resolved, component), null, 2)}\n`;
 }
 
-/** Shell-style KEY=VALUE lines other steps read (for example via $GITHUB_ENV). */
-export function profileEnvironment(resolved) {
+/**
+ * Shell-style KEY=VALUE lines other steps read (for example via $GITHUB_ENV),
+ * for the stable Web (`web`) or the beta Web (`web-beta`).
+ */
+export function profileEnvironment(resolved, web = "web") {
+  const target = webTarget(resolved, web);
   return {
     XMATRIX_DEPLOY_PROFILE: resolved.name,
-    XMATRIX_APP_ORIGIN: resolved.web.origin,
+    XMATRIX_APP_ORIGIN: target.origin,
     XMATRIX_HUB_ORIGIN: resolved.hub.origin,
     XMATRIX_HUB_CONFIG: renderedConfigPath("hub", resolved),
-    XMATRIX_WEB_CONFIG: renderedConfigPath("web", resolved),
-    NEXT_PUBLIC_APP_URL: resolved.web.origin,
+    XMATRIX_WEB_CONFIG: renderedConfigPath(web, resolved),
+    NEXT_PUBLIC_APP_URL: target.origin,
+    NEXT_PUBLIC_XMATRIX_WEB_CHANNEL: web === "web-beta" ? "beta" : "stable",
     NEXT_PUBLIC_AUTH_BASE_URL: resolved.hub.origin,
     NEXT_PUBLIC_XMATRIX_HUB_URL: resolved.hub.origin,
   };
@@ -298,24 +336,26 @@ export function profileEnvironment(resolved) {
 async function main(argv) {
   const [command, profileName, ...rest] = argv;
   if (!command || !profileName || !["render", "env", "origin"].includes(command)) {
-    throw new Error("Usage: node scripts/deploy-config.mjs render|env|origin <profile> [hub|web ...]");
+    throw new Error("Usage: node scripts/deploy-config.mjs render|env|origin <profile> [hub|web|web-beta ...]");
   }
   // A public origin alone, without the deployment identity the rest of the profile reads from secrets.
   if (command === "origin") {
     const [component] = rest;
     if (!COMPONENTS.includes(component)) throw new Error(`unknown component ${component}`);
     const profile = await loadProfile(profileName);
-    process.stdout.write(`${resolveOrigin(profile[component]?.origin, `${component}.origin`, process.env).origin}\n`);
+    const entry = component === "web-beta" ? profile.web?.beta : profile[component];
+    process.stdout.write(`${resolveOrigin(entry?.origin, `${component}.origin`, process.env).origin}\n`);
     return;
   }
   const resolved = resolveProfile(await loadProfile(profileName));
   if (command === "env") {
-    for (const [key, value] of Object.entries(profileEnvironment(resolved))) {
+    const [web = "web"] = rest;
+    for (const [key, value] of Object.entries(profileEnvironment(resolved, web))) {
       process.stdout.write(`${key}=${value}\n`);
     }
     return;
   }
-  const components = rest.length ? rest : COMPONENTS;
+  const components = rest.length ? rest : COMPONENTS.filter((component) => component !== "web-beta" || resolved.web.beta);
   for (const component of components) {
     if (!COMPONENTS.includes(component)) throw new Error(`unknown component ${component}`);
     const output = renderedConfigPath(component, resolved);

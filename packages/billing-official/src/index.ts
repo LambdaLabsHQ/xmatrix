@@ -1,6 +1,6 @@
 /**
  * The official xMatrix deployment's Space plans: a Free Space has three human
- * seats and 500 messages; a paid Space has the seats its Stripe subscription
+ * seats and 500 writes (messages and page revisions); a paid Space has the seats its Stripe subscription
  * bought, each with a monthly allowance of Agent credits (docs/design/agent-credits.md),
  * and is read-only while a past-due payment is in its grace period.
  * The official build supplies this policy under the `@xmatrix/billing` name.
@@ -200,6 +200,22 @@ function creditNotice(row: Record<string, unknown>): BillingNotice | null {
   return { key: `credits:${period}:${level}`, body };
 }
 
+/** Why a Free Space's write was refused, when its counter did not advance. */
+function freeRefused(row: Record<string, unknown>): BillingRejection | null {
+  if (row.free_message_count != null) return null;
+  if (row.prior_free_message_count == null) {
+    return {
+      code: "billing_usage_unavailable", status: 503,
+      message: "Space billing usage is unavailable", retryable: true,
+    };
+  }
+  return {
+    code: "payment_required", status: 402,
+    message: `This Free Space has used its ${FREE_SPACE_MESSAGE_LIMIT}-write allowance of messages and page edits; upgrade to continue`,
+    details: { freeWriteLimit: FREE_SPACE_MESSAGE_LIMIT },
+  };
+}
+
 /**
  * An account may create a Space while it owns fewer than two Free Spaces. A
  * Space on an active or trialing subscription is not Free, a deleted one is
@@ -329,30 +345,40 @@ export const spaceBilling: SpaceBillingPolicy = {
         }
         return creditRefused(row) ? creditsExhausted(now) : null;
       }
-      if (row.free_message_count != null) return null;
-      if (row.prior_free_message_count == null) {
-        return {
-          code: "billing_usage_unavailable", status: 503,
-          message: "Space billing usage is unavailable", retryable: true,
-        };
-      }
-      return {
-        code: "payment_required", status: 402,
-        message: `This Free Space has reached its ${FREE_SPACE_MESSAGE_LIMIT}-message allowance; upgrade to continue`,
-      };
+      return freeRefused(row);
     },
     notice: creditNotice,
   },
 
-  async agentWrite(transaction, { spaceId, now, creditsWaived }) {
-    // A page revision has no Channel to tell, so it never raises the notice level.
+  async durableWrite(transaction, { spaceId, now, author, creditsWaived }) {
+    // A Free Space's revision takes the same counter as its messages; a paid
+    // Space charges an Agent's. A page revision has no Channel to tell, so it
+    // never raises the notice level.
     const row = (await transaction.query({
-      name: "official_space_agent_write_credit_v2",
+      name: "official_space_durable_write_v1",
       text: `WITH ${subscriptionCte("$1", "$2::timestamptz")}, ${paidSeatsCte("$1")},
-        ${creditMeterCte("$2::timestamptz", "NOT $3")}, ${creditChargeCte("$1", "$2::timestamptz", false)}
-        SELECT ${CREDIT_COLUMNS}`,
-      values: [spaceId, now, creditsWaived === true], maxRows: 1,
+        ${creditMeterCte("$2::timestamptz", "NOT $3 AND $4='agent'")}, ${creditChargeCte("$1", "$2::timestamptz", false)},
+        prior_usage AS MATERIALIZED (
+          SELECT free_message_count FROM data.space_billing_usage WHERE space_id=$1 LIMIT 1
+        ), usage AS (
+          UPDATE data.space_billing_usage SET
+            free_message_count=free_message_count+1,
+            version=version+1,updated_at=GREATEST($2::timestamptz,created_at)
+          WHERE space_id=$1 AND free_message_count<${FREE_SPACE_MESSAGE_LIMIT}
+            AND NOT EXISTS (SELECT 1 FROM subscription WHERE status IN ('active','trialing')
+              OR (status='past_due' AND grace_until IS NOT NULL AND grace_until>$2::timestamptz))
+          RETURNING free_message_count
+        )
+        SELECT (SELECT status FROM subscription) AS status,
+          (SELECT grace_until FROM subscription) AS grace_until,
+          (SELECT free_message_count FROM prior_usage) AS prior_free_message_count,
+          (SELECT free_message_count FROM usage) AS free_message_count,
+          ${CREDIT_COLUMNS}`,
+      values: [spaceId, now, creditsWaived === true, author], maxRows: 1,
     }))[0];
-    return row && creditRefused(row) ? creditsExhausted(now) : null;
+    if (!row) return null;
+    if (graceActive(row, now)) return PAST_DUE_READ_ONLY;
+    if (row.status === "active" || row.status === "trialing") return creditRefused(row) ? creditsExhausted(now) : null;
+    return freeRefused(row);
   },
 };

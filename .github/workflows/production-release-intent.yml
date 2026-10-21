@@ -6,19 +6,19 @@ run-name: Production Release Intent ${{ inputs.channel }} ${{ inputs.release_com
 # version itself; the version says the channel (scripts/release-train.mjs):
 #
 # - beta, the default: any Agent, after merging. The train ships the union of
-#   every open beta its frozen main revision contains as X.Y.Z-beta.N: Hub and
-#   Web to production, clients to their dev channel and TestFlight.
+#   every open beta its frozen main revision contains as X.Y.Z-beta.N: the Hub
+#   and the beta Web to production, clients to their dev channel and TestFlight.
 # - stable: the stable release Agent, naming a beta it verified and the patch,
 #   minor or major bump its changes call for. The train rebuilds exactly that
-#   beta's source as X.Y.Z and ships the named clients to their stable channel
-#   and App Review. Hub and Web already run every beta.
+#   beta's source as X.Y.Z and ships what it names: the stable Web, and clients
+#   to their stable channel and App Review. The Hub runs every beta.
 #
 # Intents live in refs, so a train that GitHub displaces while pending loses nothing.
 on:
   workflow_dispatch:
     inputs:
       release_components:
-        description: Comma-separated hub,web,cli,desktop,android,ios or all (a stable names clients only)
+        description: Comma-separated hub,web,cli,desktop,android,ios or all (a stable names web and clients only)
         required: true
         default: hub
         type: string

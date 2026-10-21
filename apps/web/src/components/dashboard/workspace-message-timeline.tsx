@@ -220,10 +220,9 @@ import type { SerializedAgentInvocationRejection, SerializedAgentStop, AgentInvo
 import { firstMessageDecisionWindow, harnessLaunchOption, hasOperationalAgentInvocation, isAutoHandoffSuccessor, isHandoffSuccessorName, parseAgentControlInvocations, parseAgentStopInvocation, parseAutoLaunchMentions, parseConnectorInvocation } from "@xmatrix/protocol";
 import { UnpublishedTurnState } from "./unpublished-turn-status";
 import { FirstMessageLaunchChoice } from "./first-message-launch-choice";
-import { launchChoiceOffered, launchChoicePollInterval, launchChoiceView } from "./first-message-launch-choice-state";
+import { launchChoiceOffered } from "./first-message-launch-choice-state";
 import { useAgentRegistrationCatalog } from "./agent-capability-select";
 import { InvocationAccessError, invocationSourceMessages, isInvocationSource, loadInvocationPages } from "./mention-invocation-query";
-import { invocationPollInterval } from "./mention-invocation-state";
 import {
   buildMentionReadIndex, machineOfflineMentionSubjects, withInvocationMentionTargets,
   type MentionReadIndex,
@@ -380,8 +379,6 @@ function useChannelAgentLaunches(channel: ChannelSnapshot | null, token: string 
     }
     return (askedRef.current = { channelId, ids: shownMessageIds, revisions: shownRevisionKey });
   }, [channelId, shownMessageIds, shownRevisionKey]);
-  const newestSourceAt = launchSourceMessages.reduce((latest, message) =>
-    Math.max(latest, Date.parse(message.sentAt) || 0), 0);
   return useQuery<AgentInvocationQueryPage>({
     queryKey: ["agent-launches", channel?.id, viewerIdentity, sourceMessageIds,
       sourceRevisionKey],
@@ -413,19 +410,7 @@ function useChannelAgentLaunches(channel: ChannelSnapshot | null, token: string 
         return response.json();
       },
     }),
-    refetchInterval: (query) => {
-      const base = invocationPollInterval(query.state.data?.launches ?? [],
-        newestSourceAt, Date.now(), query.state.status === "error", query.state.data?.continuations ?? [],
-        query.state.data?.executions ?? [], query.state.data?.stops ?? []);
-      // A first message's launch choice lasts seconds: follow it closely.
-      const now = Date.now();
-      const choice = launchChoicePollInterval([
-        ...(query.state.data?.launchChoices ?? []).map(record => launchChoiceView(firstMessageDecisionWindow(record, []), {}, now)),
-        ...launchSourceMessages.filter(message => offersLaunchChoice(message, channel))
-          .map(message => launchChoiceView(undefined, { sentAt: message.sentAt }, now)),
-      ]);
-      return choice === undefined ? base : base === false ? choice : Math.min(base, choice);
-    },
+    // Nothing polls: the Hub pushes `channel_invocations_changed` when any of these records moves.
   });
 }
 

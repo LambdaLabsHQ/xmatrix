@@ -32,12 +32,13 @@ jobs each finish in about two minutes including setup:
 
 A release train runs the full tier for what it ships. Every train runs the
 protocol, billing, PostgreSQL package and script tests and the duplicate-code
-scan; a train that ships the Hub runs the Hub suite, and one that ships Web runs
-the browser shards and performance budget. Client suites (the Rust tests on
-Linux and Windows, Desktop, Android and the iOS simulator gate) gate the stable
-train that ships a client, not each beta: a beta client reaches only the people
-on its dev channel or TestFlight, its pull requests checked it and the release
-builds it (`scripts/ci-areas.mjs`, `releaseOutputs`). Merging runs nothing more.
+scan, and a train that ships the Hub runs the Hub suite. The Web suites (the
+checked build, browser shards and performance budget) and the client suites
+(the Rust tests on Linux and Windows, Desktop, Android and the iOS simulator
+gate) gate the stable train that ships them, not each beta: a beta Web or
+client reaches only the people on the beta Web, its dev channel or TestFlight,
+its pull requests checked it and the release builds it (`scripts/ci-areas.mjs`,
+`releaseOutputs`). Merging runs nothing more.
 Only full-tier jobs carry ledgered names (`scripts/ci-ledger.mjs`), so a release
 reuses only results the full tier earned and still blocks on every gate its
 scope and channel select.

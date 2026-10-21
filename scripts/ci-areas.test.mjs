@@ -195,13 +195,13 @@ test("installer changes require the CLI lane with native PowerShell coverage", (
   }
 });
 
-test("a beta train gates the Hub and Web it ships; client suites gate the stable", () => {
+test("a beta train gates the Hub it ships; Web and client suites gate the stable", () => {
   const everything = "hub,web,cli,desktop,android,ios";
   assert.deepEqual(releaseOutputs(everything, "beta"), {
-    node: true, web: true, hub: true, desktop: false, android: false, cli: false, cli_windows: false, duplicates: true,
+    node: true, web: false, hub: true, desktop: false, android: false, cli: false, cli_windows: false, duplicates: true,
   });
-  // After a beta skips them, the stable train is the only place client suites run.
-  assert.deepEqual(releaseOutputs("cli,desktop,android,ios", "stable"), {
-    node: true, web: false, hub: false, desktop: true, android: true, cli: true, cli_windows: true, duplicates: true,
+  // After a beta skips them, the stable train is the only place these suites run.
+  assert.deepEqual(releaseOutputs("web,cli,desktop,android,ios", "stable"), {
+    node: true, web: true, hub: false, desktop: true, android: true, cli: true, cli_windows: true, duplicates: true,
   });
 });

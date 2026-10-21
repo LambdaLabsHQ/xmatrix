@@ -76,6 +76,13 @@ function pages(env: Env): PostgresPageRepository {
   }), { creditsWaivedSpaceId: platformAdminSpaceId(env) });
 }
 
+/**
+ * A commit the Space's plan refuses: an Agent's when the month's credits are
+ * gone, anyone's when a Free Space has used its allowance or a past-due Space
+ * is read-only.
+ */
+const PLAN_REFUSALS = new Set(["credits_exhausted", "payment_required", "billing_grace_read_only"]);
+
 /** The summary being written for this page, so a second one does not start beside it. */
 type SummaryExecution = { requestId: string; revision: number; startedAt: number; ended?: true };
 /** A summary that has not ended in this long is taken as lost: an unclaimed task expires, a claimed one times out. */
@@ -126,9 +133,9 @@ export class RelayPageSession extends DurableObject<Env> {
           if (error instanceof PageControlError && error.code === "page_revision_conflict") {
             throw new PageSessionConflict(Number(error.detail?.headRevision ?? 0), String(error.detail?.body ?? ""));
           }
-          // Pending text stays in the session; whoever edits next commits it.
-          if (error instanceof PageControlError && error.code === "credits_exhausted") {
-            ports.broadcast(encodeNotice({ type: "error", code: "credits_exhausted" }));
+          // Pending text stays in the session for the next commit the Space's plan admits.
+          if (error instanceof PageControlError && PLAN_REFUSALS.has(error.code)) {
+            ports.broadcast(encodeNotice({ type: "error", code: error.code }));
           }
           throw error;
         }
@@ -459,9 +466,9 @@ export class RelayPageSession extends DurableObject<Env> {
   }
 
   /**
-   * A refused commit (no Agent credits left, a page over its size) keeps its
-   * edits pending for a later commit; it never stops the alarm that
-   * re-authorizes open connections.
+   * A refused commit (no Agent credits left, a Free allowance used up, a page
+   * over its size) keeps its edits pending for a later commit; it never stops
+   * the alarm that re-authorizes open connections.
    */
   private async commitPending(): Promise<void> {
     try {

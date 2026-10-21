@@ -867,6 +867,12 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
       if (event.type === "error" && event.code === "credits_exhausted") {
         setNotice("This Space has used this month's Agent credits; an Agent's edit is saved once someone edits the page or credits return.");
       }
+      if (event.type === "error" && event.code === "payment_required") {
+        setNotice("This Free Space has used its 500 messages and page edits; edits on this page are kept and saved once the Space upgrades to Pro.");
+      }
+      if (event.type === "error" && event.code === "billing_grace_read_only") {
+        setNotice("This Space is read-only while a past-due payment is resolved; edits on this page are kept and saved once it is.");
+      }
       if (event.type === "error" && event.code === "page_server_outdated") {
         setNotice(PAGE_SERVER_OUTDATED_NOTICE);
       }

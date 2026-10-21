@@ -1,3 +1,4 @@
+import { publishChannelInvocationsChanged } from "../channel-live-judgment";
 import { reportAgentTurnRetry } from "../agent-turn-retry";
 import { postgresSettleQuestionnaire } from "../postgres-message-authority";
 import { INSTANCE_IDLE_SLEEP_MS, presenceRests } from "../instance-idle-sleep";
@@ -153,6 +154,8 @@ export interface PostgresAgentInstancePortDependencies {
   /** Settle a questionnaire card once (postgresSettleQuestionnaire). */
   settleQuestionnaire?(input: Parameters<typeof postgresSettleQuestionnaire>[1]): ReturnType<typeof postgresSettleQuestionnaire>;
   observeAgentLaunchStage?(stage: string, outcome: "ok" | "error", durationMs: number): void;
+  /** Tell the Channel's people its summon chips changed (publishChannelInvocationsChanged). */
+  invocationsChanged?(channelId: string): Promise<void>;
 }
 
 export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
@@ -207,6 +210,7 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
       observeAgentLaunchStage: (stage, outcome, durationMs) => recordAgentLaunchStage({
         env: input.env, stage, outcome, durationMs,
       }),
+      invocationsChanged: (channelId) => publishChannelInvocationsChanged(input.env, channelId),
       ...(input.env.RELAY_RUNTIME
         ? { runtimeCells: (ownerUserId: string) => relayRuntimeCellsForOwners(input.env, [ownerUserId]) }
         : {}),
@@ -545,6 +549,10 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
         if (connectionVersion < 1) throw new Error("Agent connection version is invalid");
         if (this.dependencies.atomicInstanceConnect) this.dependencies.observeAgentLaunchStage?.(
           "instance_connect", "ok", performance.now() - connectStarted);
+        // Connected is the summon's next step: its chip reads it now.
+        const connectedChannelId = typeof value.channelId === "string" ? value.channelId : undefined;
+        const pushed = connectedChannelId ? this.dependencies.invocationsChanged?.(connectedChannelId) : undefined;
+        if (pushed) this.dependencies.runInBackground?.(pushed);
       } catch (error) {
         if (this.dependencies.atomicInstanceConnect) this.dependencies.observeAgentLaunchStage?.(
           "instance_connect", "error", performance.now() - connectStarted);

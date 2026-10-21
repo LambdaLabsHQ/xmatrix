@@ -230,10 +230,11 @@ export function githubOutputs(changedFiles) {
 }
 
 /**
- * The partitions a release train gates on. Hub and Web reach everyone with
- * every beta, so their suites gate each train that ships them. A beta client
- * reaches only the people on its dev channel: its pull requests checked it
- * and the release builds it, and its suites (Rust on Linux and Windows,
+ * The partitions a release train gates on. The Hub reaches everyone with
+ * every beta, so its suite gates each train that ships it. A beta Web or
+ * client reaches only the people on the beta Web, its dev channel or
+ * TestFlight: its pull requests checked it and the release builds it, and its
+ * suites (the Web's browser shards and budget, Rust on Linux and Windows,
  * Desktop, Android) gate the stable that ships it.
  */
 export function releaseOutputs(scope, channel) {
@@ -241,7 +242,7 @@ export function releaseOutputs(scope, channel) {
   const client = (component) => channel === "stable" && shipped.has(component);
   return {
     node: true,
-    web: shipped.has("web"),
+    web: client("web"),
     hub: shipped.has("hub"),
     desktop: client("desktop"),
     android: client("android"),
