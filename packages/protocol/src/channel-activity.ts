@@ -217,7 +217,7 @@ export function commandResultOf(annotations: unknown): CommandResult | undefined
  * applies the live event and the Hub applies its stored annotations. */
 export function mergeCommandResult(result: CommandResult | undefined, annotationId: string, payload: unknown): CommandResult {
   const value = payload && typeof payload === "object" && !Array.isArray(payload) ? payload as Record<string, unknown> : {};
-  const next: CommandResult = { ...(result ?? {}) };
+  const next: CommandResult = { ...result };
   if (Array.isArray(value.controls) && value.controls.every((item) =>
     item && typeof item === "object" && typeof (item as { status?: unknown }).status === "string")) {
     next.controls = value.controls as NonNullable<CommandResult["controls"]>;
