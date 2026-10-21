@@ -53,3 +53,30 @@ test("Internet media loads only after Preview and playback failures retain the o
   await page.getByRole("button", { name: "Close media" }).click();
   await expect(page.getByText("This media could not be played.", { exact: false })).toHaveCount(0);
 });
+
+test("a file attachment is a slip of tinted paper, not a glass card", async ({ page }) => {
+  await openGeneralChannelWithHistory(page, { ...E2E_CHANNEL, messageCount: 1, lastMessageSequence: 1 }, [{
+    messageId: "file-message", channelId: E2E_CHANNEL.id, sequence: 1,
+    body: "Repro files", sentAt: E2E_NOW, from: E2E_USER_SENDER,
+    attachments: [
+      { id: "repro", kind: "file", name: "review817-repro.mjs", mimeType: "application/octet-stream", size: 5530, url: "/e2e-media/repro.mjs" },
+    ],
+  }]);
+  const card = page.getByRole("button", { name: "Download review817-repro.mjs" });
+  await expect(card).toBeVisible();
+  const material = await card.evaluate((element) => {
+    const style = getComputedStyle(element);
+    const icon = getComputedStyle(element.firstElementChild!);
+    return {
+      boxShadow: style.boxShadow,
+      backdropFilter: style.backdropFilter,
+      borderWidth: style.borderTopWidth,
+      background: style.backgroundColor,
+      before: getComputedStyle(element, "::before").content,
+      iconBackground: icon.backgroundColor,
+      iconShadow: icon.boxShadow,
+    };
+  });
+  expect(material).toMatchObject({ boxShadow: "none", backdropFilter: "none", borderWidth: "0px", before: "none", iconBackground: "rgba(0, 0, 0, 0)", iconShadow: "none" });
+  expect(material.background).not.toBe("rgba(0, 0, 0, 0)");
+});
