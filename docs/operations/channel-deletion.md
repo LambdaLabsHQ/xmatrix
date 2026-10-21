@@ -1,11 +1,20 @@
 # Channel deletion
 
 A Human Space owner or admin chooses **Delete Channel…** from the conversation
-actions or details, types its current name and acknowledges deletion for every
-member. Stop the Channel's Agents first. The Hub rejects Agent credentials,
-ordinary members, a mismatched Space, changed names and active or stopping Runs,
-unreleased allocations and pending launches. All verification uses isolated data;
-never delete a real person's production Channel to test this feature.
+actions or details and confirms deletion for every member. If the Hub reports
+active work, the dialog asks separately to **Stop Agents and Delete**. Cancelling
+leaves the Agents running. Confirming posts the existing `/stop all` command to
+that exact Channel, then retries deletion for up to 30 seconds while the daemon
+confirms termination and allocations and pending launches are released. An
+uncertain stop append reuses its message ID on retry. A refusal or timeout keeps
+the dialog open with an actionable error; it never reports deletion as complete.
+
+The Hub still rejects Agent credentials, ordinary members, a mismatched Space,
+changed names and active or stopping Runs, unreleased allocations and pending
+launches. These server checks remain the authority for retirement. Older clients
+can continue to stop Agents manually before retrying. All verification uses
+isolated data; never delete a real person's production Channel to test this
+feature.
 
 ## Authority and recovery
 

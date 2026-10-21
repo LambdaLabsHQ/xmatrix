@@ -1442,7 +1442,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     // Files are accepted by the whole window, not by the composer element, so
     // the drop surface has to sit above the app's isolate stacking context.
     <AttachmentDropZoneProvider>
-    {deletingChannel && <ChannelDeletionDialog key={deletingChannel.id} channel={deletingChannel}
+    {deletingChannel && <ChannelDeletionDialog key={deletingChannel.id} channel={deletingChannel} token={token}
       onCancel={() => setDeletingChannel(null)} onDeleted={channelDeleted} />}
     <OnboardingActionsContext.Provider value={onboardingActions}>
     <RealtimeChannelsContext.Provider value={model.realtimeChannels}>
