@@ -268,7 +268,7 @@ function WriterUnit({ writer, open, actions, onPress, children }: {
   actions: ReactNode;
   onPress: () => void;
   /** The open conversation, under the pill. */
-  children: ReactNode;
+  children?: ReactNode;
 }) {
   const name = writer.conversation?.name ?? writer.channel;
   const last = writer.conversation?.lastMessage ?? null;
@@ -324,10 +324,14 @@ export function PageMargin({ conversations, writers = [], tops, focusedId, openI
 }) {
   const nodes = useRef(new Map<string, HTMLElement>());
   const [heights, setHeights] = useState<ReadonlyMap<string, number>>(new Map());
-  const withWriters = new Set(writers.flatMap((writer) => writer.conversation ? [writer.conversation.conversationId] : []));
+  // A discussion stays beside the passage it was started on, which is where its reader opens it; its Agent at work
+  // stands at its own line without taking the conversation there.
+  const atPassage = (writer: MarginWriter) => writer.conversation?.anchor.startsWith("text:") ?? false;
+  const holding = writers.filter((writer) => writer.conversation && !atPassage(writer));
+  const withWriters = new Set(holding.map((writer) => writer.conversation!.conversationId));
   const cards = conversations.filter((conversation) => conversation.live && !withWriters.has(conversation.conversationId));
   // A channel open beside the page opens under the first of its Agents at work, or in its card's place.
-  const holder = openId ? writers.find((writer) => writer.conversation?.conversationId === openId) ?? null : null;
+  const holder = openId ? holding.find((writer) => writer.conversation?.conversationId === openId) ?? null : null;
   const writerId = (writer: MarginWriter) => `writer:${writer.key}`;
   const items = [
     ...cards.map((card) => ({ id: card.conversationId, top: anchorTop(tops, card), estimate: ESTIMATED_CARD_HEIGHT })),
@@ -350,13 +354,19 @@ export function PageMargin({ conversations, writers = [], tops, focusedId, openI
     return () => observer.disconnect();
   }, [cardKey]);
 
-  // Opened from elsewhere (a cursor label, a heading), the conversation scrolls into view where it sits.
+  // Opened from elsewhere (a cursor label, a heading), the conversation scrolls into view where it sits, once as it
+  // opens: its Agent going busy or idle, or its live session coming and going, moves it between the Agent's pill and
+  // its card, and that must not take the reader there again.
+  const openedItem = useRef(openItem);
+  openedItem.current = openItem;
   useEffect(() => {
-    if (!openItem) return;
-    const frame = window.requestAnimationFrame(() =>
-      nodes.current.get(openItem)?.scrollIntoView({ block: "nearest", behavior: "smooth" }));
+    if (!openId) return;
+    const frame = window.requestAnimationFrame(() => {
+      const item = openedItem.current;
+      if (item) nodes.current.get(item)?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    });
     return () => window.cancelAnimationFrame(frame);
-  }, [openItem]);
+  }, [openId]);
 
   // Only the open conversation moves the column. A hovered card only lights up:
   // moving it would slide another card under the pointer, which then moves in turn.
@@ -390,6 +400,13 @@ export function PageMargin({ conversations, writers = [], tops, focusedId, openI
       {writers.map((writer) => {
         const conversation = writer.conversation;
         const open = Boolean(conversation && writer === holder && renderOpen);
+        if (conversation && atPassage(writer)) {
+          // Its discussion's card says the channel at the passage; the pill opens it there.
+          return place(writerId(writer), (
+            <WriterUnit writer={{ ...writer, conversation: null, channel: null }} open={false} actions={null}
+              onPress={() => conversation.conversationId === openId ? onClose?.() : onOpen(conversation.conversationId)} />
+          ));
+        }
         return place(writerId(writer), (
           <WriterUnit writer={writer} open={open} actions={writerActions?.(writer.person) ?? null}
             onPress={() => {

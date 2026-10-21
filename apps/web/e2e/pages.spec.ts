@@ -1451,28 +1451,32 @@ test("two people co-edit a page live: each sees the other's typing and cursor, a
   }
 });
 
-/** Someone's presence on the page, as the session relays it; `caret` is the text their caret follows. */
-function awarenessFrom(server: Y.Doc, clientId: number, clock: number, state: Record<string, unknown>,
+/** Where `passage` starts, or ends, in the session's text, as the page keeps a position. */
+function positionAt(server: Y.Doc, passage: string, end: boolean): unknown {
+  const walk = (type: Y.XmlFragment | Y.XmlElement): Y.XmlText | null => {
+    for (const child of type.toArray()) {
+      if (child instanceof Y.XmlText && child.toString().includes(passage)) return child;
+      if (child instanceof Y.XmlElement) { const found = walk(child); if (found) return found; }
+    }
+    return null;
+  };
+  const text = walk(server.getXmlFragment("prosemirror"))!;
+  return Y.relativePositionToJSON(Y.createRelativePositionFromTypeIndex(text, text.toString().indexOf(passage)
+    + (end ? passage.length : 0)));
+}
+
+/**
+ * Someone's presence on the page, as the session relays it; `caret` is the text their caret follows. A null state
+ * is their client leaving the page.
+ */
+function awarenessFrom(server: Y.Doc, clientId: number, clock: number, state: Record<string, unknown> | null,
   caret?: string): Uint8Array {
-  let cursor: unknown = null;
-  if (caret) {
-    const walk = (type: Y.XmlFragment | Y.XmlElement): Y.XmlText | null => {
-      for (const child of type.toArray()) {
-        if (child instanceof Y.XmlText && child.toString().includes(caret)) return child;
-        if (child instanceof Y.XmlElement) { const found = walk(child); if (found) return found; }
-      }
-      return null;
-    };
-    const text = walk(server.getXmlFragment("prosemirror"))!;
-    const at = Y.relativePositionToJSON(Y.createRelativePositionFromTypeIndex(text, text.toString().indexOf(caret)
-      + caret.length));
-    cursor = { anchor: at, head: at };
-  }
+  const at = caret ? positionAt(server, caret, true) : null;
   const update = encoding.createEncoder();
   encoding.writeVarUint(update, 1);
   encoding.writeVarUint(update, clientId);
   encoding.writeVarUint(update, clock);
-  encoding.writeVarString(update, JSON.stringify({ ...state, ...(cursor ? { cursor } : {}) }));
+  encoding.writeVarString(update, JSON.stringify(state && { ...state, ...(at ? { cursor: { anchor: at, head: at } } : {}) }));
   const message = encoding.createEncoder();
   encoding.writeVarUint(message, 1);
   encoding.writeVarUint8Array(message, encoding.toUint8Array(update));
@@ -1483,13 +1487,13 @@ function awarenessFrom(server: Y.Doc, clientId: number, clock: number, state: Re
 const AGENT_CLIENT = 1_234_567;
 
 /** A long page, Status at its top and Notes far below, open live; `stub` serves more before it opens. */
-async function openLongPage(browser: Page, stub: () => Promise<void> = async () => {}) {
+async function openLongPage(browser: Page, stub: (server: Y.Doc) => Promise<void> = async () => {}) {
   const filler = Array.from({ length: 60 }, (_, index) => `Background paragraph ${index + 1}.`).join("\n\n");
   const server = pageDocument(`# Relay\n\n## Status\n\nIn progress\n\n${filler}\n\n## Notes\n\nnone\n`);
   let send: (data: Uint8Array) => void = () => {};
   await stubPages(browser, [page("p-relay", null, "Relay", "V")]);
   await fixtureJson(browser, "page-links", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\?.*$/u, { links: [] });
-  await stub();
+  await stub(server);
   await servePageSession(browser, server, { connect: (next) => { send = next; } });
   await browser.goto("/app", { waitUntil: "domcontentloaded" });
   await browser.getByRole("button", { name: "Pages", exact: true }).first().click();
@@ -1622,6 +1626,51 @@ test("an Agent at work stands in the margin beside its line, its channel under i
   const [tag, pen] = [(await status.boundingBox())!, (await face.boundingBox())!];
   expect(tag.x, "the tag reaches no further left than the face").toBeGreaterThanOrEqual(pen.x - 4);
   await browser.screenshot({ path: test.info().outputPath("writer-on-phone.png") });
+});
+
+/** A long page whose conversation `link` names, with claude:2 at work for it and writing in the Notes far below. */
+async function openLongPageWithClaudeWriting(browser: Page, link: (server: Y.Doc) => Record<string, unknown>) {
+  await browser.setViewportSize({ width: 1600, height: 900 });
+  const recent = new Date(Date.now() - 60_000).toISOString();
+  const opened = await openLongPage(browser, async (server) => {
+    await stubClaudeWritingNotes(browser);
+    await fixtureJson(browser, "page-links", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\?.*$/u, {
+      links: [{ linkId: "l-claude", conversationId: E2E_CHANNEL.id, pageId: "p-relay", source: "edit", createdAt: NOW,
+        lastSeenAt: recent, anchor: null, resolvedAt: null, ...link(server) }],
+      conversations: [{ conversationId: E2E_CHANNEL.id, name: E2E_CHANNEL.name, activityAt: recent, headSequence: 0,
+        readSequence: 0, lastMessage: null, agents: [{ instanceId: "i-claude", name: "claude:2", status: "busy" }] }],
+    });
+  });
+  agentWrites(opened.server, opened.push, 1, "none", "none yet, shipping Friday", "editing", "shipping Friday");
+  const pill = browser.getByTestId("page-margin").getByRole("button", { name: /^claude:2 is writing/u });
+  await expect(pill).toBeAttached();
+  return { ...opened, pill, article: browser.locator(".app-page-article") };
+}
+
+test("an Agent's open channel brings the reader to it once, not again as its Agent comes and goes", async ({ page: browser }) => {
+  const { server, push, pill, article } = await openLongPageWithClaudeWriting(browser, () => ({ blockId: "notes" }));
+  // The reader opens the Agent's channel under its pill, far down the page, then scrolls back up to the Status.
+  await pill.click();
+  await expect(browser.getByTestId("page-margin").getByTestId("page-margin-open")).toBeVisible();
+  await article.evaluate((element) => { element.scrollTop = 0; });
+  // The Agent's live session leaves while its Run still works: its channel moves from under one pill to another.
+  push(awarenessFrom(server, AGENT_CLIENT, 2, null));
+  await expect(browser.locator(`.ProseMirror-yjs-cursor[data-client="${AGENT_CLIENT}"]`)).toHaveCount(0);
+  // Nothing takes the reader back down: the page stays where they scrolled it.
+  await browser.waitForTimeout(1_000);
+  expect(await article.evaluate((element) => element.scrollTop)).toBe(0);
+});
+
+test("a discussion opens beside its passage, not under its Agent writing elsewhere on the page", async ({ page: browser }) => {
+  const passage = "Background paragraph 3.";
+  const { editor } = await openLongPageWithClaudeWriting(browser, (server) => ({ blockId: "status",
+    anchor: { quote: passage, from: positionAt(server, passage, false), to: positionAt(server, passage, true) } }));
+  // The reader opens the discussion near the top of the page; its Agent works far below.
+  const margin = browser.getByTestId("page-margin");
+  await margin.getByRole("button", { name: `Open ${E2E_CHANNEL.name} beside the page` }).click();
+  const open = margin.getByTestId("page-margin-open");
+  await expect(open).toBeInViewport();
+  await expect(editor.getByText(passage, { exact: true })).toBeInViewport();
 });
 
 test("on a long page, who works out of view shows at its edges, and what an Agent writes is highlighted as its own", async ({ page: browser }) => {
