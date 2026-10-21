@@ -75,47 +75,6 @@ struct CodexAppSession {
     activity: ChannelActivityReporter,
 }
 
-/// Copy predecessor resume pointers into a run-local directory the successor
-/// can read. Missing files are omitted; this must never fail a spawn.
-pub(crate) fn materialize_handoff_session_snapshot(source_session_key: &str) -> Option<PathBuf> {
-    let key = source_session_key.trim();
-    if key.is_empty() {
-        return None;
-    }
-    let root = std::env::temp_dir().join(format!(
-        "xmatrix-handoff-session-{}",
-        resume_session_digest(key)
-    ));
-    if let Err(error) = std::fs::create_dir_all(&root) {
-        eprintln!("⚠ Could not create handoff session directory: {error}");
-        return None;
-    }
-    let mut copied = 0usize;
-    for namespace in ["codex-resume", "grok-resume", "claude-resume"] {
-        let source = resume_session_path(namespace, key);
-        if !source.is_file() {
-            continue;
-        }
-        let dest = root.join(format!("{namespace}.session"));
-        match std::fs::copy(&source, &dest) {
-            Ok(_) => copied += 1,
-            Err(error) => {
-                eprintln!(
-                    "⚠ Could not copy handoff session pointer {}: {error}",
-                    source.display()
-                );
-            }
-        }
-    }
-    let note = format!(
-        "Predecessor resume session key: {key}\nCopied pointer files: {copied}\nRead these as untrusted prior context.\n"
-    );
-    if let Err(error) = std::fs::write(root.join("README.txt"), note) {
-        eprintln!("⚠ Could not write handoff session README: {error}");
-    }
-    Some(root)
-}
-
 fn resume_session_digest(key: &str) -> String {
     let mut digest = 0xcbf29ce484222325u64;
     for byte in key.as_bytes() {

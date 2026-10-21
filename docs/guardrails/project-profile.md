@@ -285,7 +285,10 @@ reply. The daemon exports the exact retained checkout or its eviction snapshot
 without a live child registry row, preserving uncommitted work under the pool
 guard. This requires the updated CLI; stale retained authority is refused.
 Stop issuance failures refuse the handoff; a durable stop may still
-await its daemon report. See [instance handoff](../same-machine-instance-handoff.md#22-moving-to-another-machine).
+await its daemon report. Carried conversations and legacy pointer snapshots
+share a fresh, owner-only local bundle per attempt, using the existing private
+journal writer; a failed materialization supplies no bundle. See
+[instance handoff](../same-machine-instance-handoff.md#22-moving-to-another-machine).
 
 Handoff stops execution while retaining the source Instance and provider session.
 An explicit reborn may resume it while the successor runs in the same directory;

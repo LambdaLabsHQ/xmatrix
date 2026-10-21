@@ -2320,7 +2320,7 @@ async fn spawn_headless_agent(
     if let Some(dir) = handoff_context
         .and_then(|context| runtime_handoff_context::materialize_handoff_context(
             context, run_id.or(execution_key).unwrap_or(agent_name)))
-        .or_else(|| handoff_source_resume_session_key.and_then(materialize_handoff_session_snapshot))
+        .or_else(|| handoff_source_resume_session_key.and_then(runtime_handoff_context::materialize_handoff_session_snapshot))
     {
         command.env("XMATRIX_HANDOFF_SESSION_DIR", dir.display().to_string());
     }
