@@ -31,6 +31,7 @@ test("production configuration cannot enable mock auth or reference test resourc
   assert.deepEqual({ ...hub.placement }, { region: "aws:ap-southeast-1" });
   assert.deepEqual(hub.routes.map((route) => ({ ...route })), [{ pattern: "xmatrix-hub.xmatrix.sh", custom_domain: true }]);
   assert.equal(hub.vars.APP_URL, "https://xmatrix.sh");
+  assert.equal(hub.vars.APP_BETA_URL, "https://beta.xmatrix.sh");
   assert.equal(hub.vars.HUB_URL, "https://xmatrix-hub.xmatrix.sh");
   assert.equal(binding(hub, "analytics_engine_datasets", "XMATRIX_USAGE_COST_AE").dataset, "xmatrix_usage_cost");
 });

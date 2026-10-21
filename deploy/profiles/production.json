@@ -38,6 +38,12 @@
     "workerName": "xmatrix-web",
     "origin": "https://xmatrix.sh",
     "workersDev": true,
-    "previewUrls": true
+    "previewUrls": true,
+    "beta": {
+      "workerName": "xmatrix-web-beta",
+      "origin": "https://beta.xmatrix.sh",
+      "workersDev": false,
+      "previewUrls": false
+    }
   }
 }

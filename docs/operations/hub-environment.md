@@ -22,6 +22,7 @@ Set under `hub.vars` (or derived from the origins) in `deploy/profiles/<name>.js
 
 | Name | Kind | What it does |
 | --- | --- | --- |
+| `APP_BETA_URL` | var | Beta Web origin every beta deploys; rendered from the profile's `web.beta.origin`. Trusted for sign-in and direct reads exactly like APP_URL; links still go to APP_URL. Unset: only APP_URL is trusted. |
 | `APP_URL` | var | Web origin; rendered from the profile's `web.origin`. Unset: links, redirects and auth fail closed. |
 | `AUTH_COOKIE_DOMAIN` | var | Shared cookie domain for the Web and Hub origins (e.g. `.example.com`). Unset: cookies stay host-only, which suits localhost only. |
 | `AUTH_COOKIE_PREFIX` | var | Cookie name prefix, for a deployment nested under another's cookie domain. |

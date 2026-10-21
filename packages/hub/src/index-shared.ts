@@ -19,7 +19,7 @@ import {
 import type {
   ChannelAppMention,
 } from "@xmatrix/protocol";
-import { appOrigin, hubAuthBaseUrl } from "./deployment-origins";
+import { appOrigins, hubAuthBaseUrl } from "./deployment-origins";
 import type { Env } from "./types";
 import { relayRuntimeSingleCell } from "./relay-authority-locator";
 import {
@@ -171,7 +171,7 @@ export function authCorsOrigin(request: Request, env: Env): string | null {
   }
 
   const allowedOrigins = new Set(
-    [appOrigin(env), hubAuthBaseUrl(env)]
+    [...appOrigins(env), hubAuthBaseUrl(env)]
       .map((value) => normalizeOrigin(value))
       .filter((value): value is string => Boolean(value))
   );

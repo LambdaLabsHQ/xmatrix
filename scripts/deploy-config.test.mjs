@@ -83,6 +83,20 @@ test("fails closed on missing or conflicting deployment identity", () => {
   );
 });
 
+test("a beta Web is the Hub's APP_BETA_URL, its own origin inside the session's cookie domain", () => {
+  const beta = { workerName: "acme-web-beta", origin: "https://beta.acme.example", workersDev: false };
+  const resolved = resolveProfile(profile({ web: { beta } }), env);
+  assert.equal(renderHubConfig(hubBase, resolved).vars.APP_BETA_URL, "https://beta.acme.example");
+  assert.equal("APP_BETA_URL" in renderHubConfig(hubBase, resolveProfile(profile(), env)).vars, false);
+
+  assert.throws(() => resolveProfile(profile({ web: { beta: { ...beta, origin: "https://acme.example" } } }), env),
+    /must be its own origin/u);
+  assert.throws(() => resolveProfile(profile({ web: { beta: { ...beta, origin: "https://beta.other.example" } } }), env),
+    /inside AUTH_COOKIE_DOMAIN/u);
+  assert.throws(() => resolveProfile(profile({ web: { beta: { ...beta, extra: 1 } } }), env), /unknown key web.beta.extra/u);
+  assert.throws(() => resolveProfile(profile({ hub: { vars: { APP_BETA_URL: "x" } } }), env), /derived from the origins/u);
+});
+
 test("a deployment meters nothing unless its profile names a billing policy", () => {
   const unmetered = resolveProfile(profile(), env);
   assert.equal(unmetered.billing, null);

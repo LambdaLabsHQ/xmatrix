@@ -51,6 +51,12 @@ All releases form one ascending SemVer line:
   `refs/release-inflight/<tag>/`, pending recovery by re-running that run's
   failed jobs, until it succeeds or a later successful stable ships every
   component it names. No train retries a stable on its own.
+- **Gates.** A train runs the CI gates for what it ships on its release
+  commit. The Hub and Web suites gate each beta that ships them; client suites
+  (Rust on Linux and Windows, Desktop, Android, the iOS simulator) gate the
+  stable that ships a client. Every train runs CodeQL on its source for the
+  languages it ships before anything deploys
+  (`docs/operations/ci-lint-and-public-runners.md`).
 - **Evidence.** Each tag's annotation records the `scope`, `source` and
   `channel` later trains read back. The request's authorization job is named
   `authorize <scope> production <tag>`, and stable preflight accepts only the

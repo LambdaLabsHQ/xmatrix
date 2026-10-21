@@ -33,10 +33,12 @@ const HUB_KEYS = new Set([
   "omitBindings", "hyperdrive", "vars",
 ]);
 const WEB_KEYS = new Set([
-  "config", "workerName", "origin", "workersDev", "previewUrls", "omitBindings",
+  "config", "workerName", "origin", "workersDev", "previewUrls", "omitBindings", "beta",
 ]);
+// The Web that every beta deploys, beside the stable one at `web.origin`.
+const WEB_BETA_KEYS = new Set(["workerName", "origin", "workersDev", "previewUrls"]);
 // URL and identity vars derived from profile fields, never set as raw vars.
-const DERIVED_HUB_VARS = new Set(["APP_URL", "HUB_URL"]);
+const DERIVED_HUB_VARS = new Set(["APP_URL", "APP_BETA_URL", "HUB_URL"]);
 
 function fail(message) {
   throw new Error(`deploy profile: ${message}`);
@@ -141,10 +143,27 @@ export function resolveProfile(profile, env = process.env) {
     ? undefined
     : resolveValue(profile.hub.placementRegion, "hub.placementRegion", env);
 
-  for (const component of ["hub", "web"]) {
+  const betaProfile = profile.web.beta;
+  let beta = null;
+  if (betaProfile !== undefined) {
+    assertKnownKeys(betaProfile, WEB_BETA_KEYS, "web.beta");
+    beta = {
+      workerName: resolveValue(betaProfile.workerName, "web.beta.workerName", env),
+      ...resolveOrigin(betaProfile.origin, "web.beta.origin", env),
+      workersDev: betaProfile.workersDev,
+      previewUrls: betaProfile.previewUrls,
+    };
+    if ([webOrigin.origin, hubOrigin.origin].includes(beta.origin)) fail("web.beta.origin must be its own origin");
+    // The beta Web shares the session, so it must sit inside the cookie domain.
+    const cookieDomain = hubVars.AUTH_COOKIE_DOMAIN;
+    if (cookieDomain && !`.${beta.host}`.endsWith(cookieDomain)) {
+      fail(`web.beta.origin must be inside AUTH_COOKIE_DOMAIN ${cookieDomain}`);
+    }
+  }
+
+  for (const [where, value] of [["hub", profile.hub], ["web", profile.web], ["web.beta", betaProfile ?? {}]]) {
     for (const key of ["workersDev", "previewUrls"]) {
-      const value = profile[component][key];
-      if (value !== undefined && typeof value !== "boolean") fail(`${component}.${key} must be a boolean`);
+      if (value[key] !== undefined && typeof value[key] !== "boolean") fail(`${where}.${key} must be a boolean`);
     }
   }
   for (const where of ["hub", "web"]) {
@@ -176,6 +195,7 @@ export function resolveProfile(profile, env = process.env) {
       workersDev: profile.web.workersDev,
       previewUrls: profile.web.previewUrls,
       omitBindings: profile.web.omitBindings ?? [],
+      beta,
     },
   };
 }
@@ -238,6 +258,7 @@ export function renderHubConfig(base, resolved) {
     ...config.vars,
     ...hub.vars,
     APP_URL: resolved.web.origin,
+    ...(resolved.web.beta ? { APP_BETA_URL: resolved.web.beta.origin } : {}),
     HUB_URL: hub.origin,
   };
   return rendered;
