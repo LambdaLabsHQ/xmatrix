@@ -23,6 +23,14 @@ async function pictureDataUrl(page: Page) {
   });
 }
 
+/** Serves the picture at /e2e-chart.png, for Markdown that refers to it (Markdown drops data: URLs). */
+async function servePicture(page: Page) {
+  const dataUrl = await pictureDataUrl(page);
+  await page.route("**/e2e-chart.png", (route) => route.fulfill({
+    status: 200, contentType: "image/png", body: Buffer.from(dataUrl.split(",")[1], "base64"),
+  }));
+}
+
 async function openGallery(page: Page, names: string[]) {
   const dataUrl = await pictureDataUrl(page);
   await openGeneralChannelWithHistory(page, { ...E2E_CHANNEL, messageCount: 1, lastMessageSequence: 1 }, [{
@@ -135,6 +143,23 @@ test("a tap beside the picture closes the viewer and does not reach the page beh
   await expect(page.locator("[data-actions-open]")).toHaveCount(0);
 });
 
+test("an image written into a message's text opens in the viewer and zooms", async ({ page }) => {
+  await servePicture(page);
+  await openGeneralChannelWithHistory(page, { ...E2E_CHANNEL, messageCount: 1, lastMessageSequence: 1 }, [{
+    messageId: "markdown-image", channelId: E2E_CHANNEL.id, sequence: 1,
+    body: "The chart:\n\n![chart](/e2e-chart.png)", sentAt: E2E_NOW, from: E2E_USER_SENDER,
+  }]);
+  await page.getByRole("button", { name: "Open chart" }).tap();
+  const image = page.getByRole("dialog").getByRole("img", { name: "chart" });
+  await expect(image).toBeVisible();
+  await expect.poll(() => viewOf(image)).toEqual({ scale: 1, x: 0, y: 0 });
+  await page.touchscreen.tap(196, 426);
+  await page.touchscreen.tap(196, 426);
+  await expect.poll(async () => (await viewOf(image)).scale).toBeGreaterThanOrEqual(2);
+  await page.getByRole("button", { name: "Close attachment" }).tap();
+  await expect(page.locator(".app-attachment-lightbox")).toHaveCount(0);
+});
+
 test.describe("with a mouse", () => {
   test.use(E2E_DESKTOP_CONTEXT);
 
@@ -179,5 +204,21 @@ test.describe("with a mouse", () => {
 
     await page.keyboard.press("Escape");
     await expect(page.locator(".app-attachment-lightbox")).toHaveCount(0);
+  });
+
+  test("Escape closes a picture opened from a Markdown attachment and leaves the attachment open", async ({ page }) => {
+    await servePicture(page);
+    const markdown = Buffer.from("# Notes\n\n![chart](/e2e-chart.png)\n").toString("base64");
+    await openGeneralChannelWithHistory(page, { ...E2E_CHANNEL, messageCount: 1, lastMessageSequence: 1 }, [{
+      messageId: "markdown-notes", channelId: E2E_CHANNEL.id, sequence: 1,
+      body: "Notes attached", sentAt: E2E_NOW, from: E2E_USER_SENDER,
+      attachments: [{ id: "notes.md", kind: "markdown", name: "notes.md", mimeType: "text/markdown", size: 40, dataUrl: `data:text/markdown;base64,${markdown}` }],
+    }]);
+    await page.getByRole("button", { name: "Open notes.md" }).click();
+    await page.getByRole("dialog", { name: "notes.md" }).getByRole("button", { name: "Open chart" }).click();
+    await expect(page.getByRole("dialog", { name: "chart" }).getByRole("img", { name: "chart" })).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("dialog", { name: "chart" })).toHaveCount(0);
+    await expect(page.getByRole("dialog", { name: "notes.md" })).toBeVisible();
   });
 });

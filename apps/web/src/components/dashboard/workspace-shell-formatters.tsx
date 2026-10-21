@@ -4,7 +4,7 @@ export { accountQuotaUsageFromCandidates, mergeAccountLevelLlmUsage, mergeUsageA
 export { exchangeDesktopCliSession } from "@/lib/desktop/session-exchange";
 import { attachmentMediaType, directMediaLink } from "./attachment-media-type";
 import { MediaLink } from "./media-player";
-import { LoadingImage } from "./content-skeleton";
+import { MessageMarkdownImage } from "./message-markdown-image";
 import { formatInstant, formatZonedDateTime } from "./time-display";
 
 import { messageRichMetadata } from "./workspace-shell-message-model";
@@ -144,13 +144,7 @@ export function createMessageMarkdownComponents(
   },
   img: ({ src, alt }) => {
     if (typeof src !== "string" || !isSafeMessageImageSrc(src)) return null;
-    return (
-      <LoadingImage
-        src={src}
-        alt={typeof alt === "string" ? alt : ""}
-        className="mt-2 max-h-[28rem] max-w-full object-contain"
-      />
-    );
+    return <MessageMarkdownImage src={src} alt={typeof alt === "string" ? alt : ""} />;
   },
   code: ({ className, children }) => {
     const language = /language-([A-Za-z0-9_-]+)/.exec(className || "")?.[1];
