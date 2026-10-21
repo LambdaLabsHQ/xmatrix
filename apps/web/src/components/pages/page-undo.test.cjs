@@ -26,7 +26,7 @@ function page(synced = false) {
   const view = plugins[1].spec.view();
   return {
     fragment, session, state, view,
-    sync: () => { session.synced = true; for (const listener of [...listeners]) listener({ type: "synced" }); },
+    sync: () => { session.synced = true; for (const listener of listeners) listener({ type: "synced" }); },
     text: () => fragment.toArray().map((block) => block.toArray().map(String).join("")),
   };
 }
