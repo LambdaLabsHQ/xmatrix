@@ -221,7 +221,8 @@ test("the Hub suite is recorded only from a run that passed all of it", () => {
 test("a job split over a matrix is recorded only when every entry passed", () => {
   const job = (name, conclusion = "success") => ({ name, conclusion });
   const hub = ["hub (static)", ...[1, 2, 3, 4, 5, 6].map((shard) => `hub (${shard}/6)`)];
-  const web = ["web", ...[1, 2, 3, 4].map((shard) => `web (browser ${shard}/4)`)];
+  const web = ["web", "web (short performance)", "web (sustained performance)",
+    ...[1, 2, 3, 4].map((shard) => `web (browser ${shard}/4)`)];
   const rust = ["rust-cli (clippy)", "rust-cli (test)"];
   assert.deepEqual(
     passedLedgerJobs([...hub, ...web, ...rust, "rust-cli-windows"].map((name) => job(name))).sort(),
@@ -229,6 +230,9 @@ test("a job split over a matrix is recorded only when every entry passed", () =>
   );
   assert.deepEqual(passedLedgerJobs([...hub.slice(0, 6).map((name) => job(name)), job("hub (6/6)", "failure")]), []);
   assert.deepEqual(passedLedgerJobs([job("web"), job("web (browser 2/4)", "cancelled")]), []);
+  for (const performance of web.filter((name) => name.includes("performance"))) {
+    assert.deepEqual(passedLedgerJobs(web.map((name) => job(name, name === performance ? "failure" : "success"))), []);
+  }
   assert.deepEqual(passedLedgerJobs([job("rust-cli (clippy)"), job("rust-cli (test)", "skipped")]), []);
   assert.equal(ledgerJobOf("rust-cli-windows"), "rust-cli-windows");
   assert.equal(ledgerJobOf("hub (static)"), HUB_SUITE_LEDGER_JOB);

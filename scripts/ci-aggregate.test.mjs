@@ -200,6 +200,22 @@ test("the complete Hub suite runs in one job that the aggregate requires", () =>
   assert.match(failed.stderr, /hub-required=failure/u);
 });
 
+test("hosted Web keeps both performance budgets independent of the checked build", () => {
+  const { hosted, persistent } = hostedMatrix(jobBlock("web"));
+  assert.deepEqual(persistent, [{ name: "web", partitions: "web web-browser", shard: "", primary: true }]);
+  const primary = hosted.filter((entry) => entry.primary);
+  assert.deepEqual(primary, [{ name: "web", partitions: "web", shard: "", primary: true }]);
+  const browsers = hosted.filter((entry) => !entry.primary);
+  assert.ok(browsers.every((entry) => entry.partitions === "web-browser"));
+  const functional = browsers.filter((entry) => /^\d+\/\d+$/u.test(entry.shard));
+  assert.ok(functional.length > 0);
+  assert.deepEqual(functional.map((entry) => entry.shard), functional.map((_, index) => `${index + 1}/${functional.length}`));
+  assert.deepEqual(
+    browsers.filter((entry) => !functional.includes(entry)).map((entry) => entry.shard).sort(),
+    ["performance", "performance-sustained"],
+  );
+});
+
 test("a CLI change requires both Rust partitions", () => {
   const selected = {
     CLI_CHANGED: "true",
