@@ -363,38 +363,55 @@ export async function publishChannelMessageSuperseded(
   env: Env,
   input: { channelId: string; messageId: string; supersededBy: string },
 ): Promise<void> {
+  await publishChannelMessageJudgment(env, input.channelId, "channel_message_superseded",
+    { messageId: input.messageId, supersededBy: input.supersededBy });
+}
+
+/**
+ * Tell a Channel's people what a message's command came to, as the Hub just
+ * recorded it on that message. Clients apply the one annotation to the result
+ * they hold; a dropped frame is repaired by the next history read, which
+ * carries `commandResult`.
+ */
+export async function publishChannelMessageCommandResult(
+  env: Env,
+  input: { channelId: string; messageId: string; annotationId: string; payload: Record<string, unknown> },
+): Promise<void> {
+  await publishChannelMessageJudgment(env, input.channelId, "channel_message_interactions_updated",
+    { messageId: input.messageId, annotationId: input.annotationId, payload: input.payload });
+}
+
+/** A Hub judgment about one message, to every live member of its Channel. */
+async function publishChannelMessageJudgment(
+  env: Env,
+  channelId: string,
+  type: ObservabilityEvent["type"],
+  metadata: Record<string, unknown>,
+): Promise<void> {
   const recipientUserIds = await withPostgresMessageRequestScope(
     env,
-    (scope) => postgresMessageLiveRecipientUserIds(env, input.channelId, scope),
+    (scope) => postgresMessageLiveRecipientUserIds(env, channelId, scope),
   );
+  const event: ObservabilityEvent = {
+    id: crypto.randomUUID(),
+    type,
+    workspaceUserId: SYSTEM_ANNOTATION_AUTHOR,
+    channelId,
+    metadata,
+    timestamp: new Date().toISOString(),
+  };
   const tasks: Promise<unknown>[] = [];
   const responses = await Promise.all(recipientBatches(recipientUserIds).map((recipients) =>
     publishRuntimeChannelObservableEvent({
       env,
       waitUntil: (task) => tasks.push(task),
-      channelId: input.channelId,
-      payload: {
-        recipientUserIds: recipients,
-        event: channelMessageSupersededEvent(input) as unknown as Record<string, unknown>,
-      },
+      channelId,
+      payload: { recipientUserIds: recipients, event: event as unknown as Record<string, unknown> },
     })));
   await Promise.allSettled(tasks);
   if (responses.some((response) => !response.ok)) {
-    throw new Error("Runtime rejected PostgreSQL supersession delivery");
+    throw new Error(`Runtime rejected PostgreSQL ${type} delivery`);
   }
-}
-
-function channelMessageSupersededEvent(
-  input: { channelId: string; messageId: string; supersededBy: string },
-): ObservabilityEvent {
-  return {
-    id: crypto.randomUUID(),
-    type: "channel_message_superseded",
-    workspaceUserId: SYSTEM_ANNOTATION_AUTHOR,
-    channelId: input.channelId,
-    metadata: { messageId: input.messageId, supersededBy: input.supersededBy },
-    timestamp: new Date().toISOString(),
-  };
 }
 
 /**

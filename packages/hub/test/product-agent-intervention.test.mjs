@@ -44,7 +44,7 @@ function portWithTargets(targets) {
     async issueStop(stopTarget, controlId, reason) {
       stops.push({ target: stopTarget, controlId, reason });
     },
-    async publishSystemNotice(_channelId, body, key) {
+    async recordResult(_channelId, body, key) {
       notices.push(key ? `${key}: ${body}` : body);
     },
   };
@@ -135,7 +135,7 @@ test("a target-authority failure is visible and never claims a stop was issued",
     port: {
       async listKillTargets() { throw failure; },
       async issueStop() { assert.fail("stop must not be issued without an authoritative target"); },
-      async publishSystemNotice(_channelId, body) { notices.push(body); },
+      async recordResult(_channelId, body) { notices.push(body); },
     },
   }), failure);
   assert.deepEqual(notices, [

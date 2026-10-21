@@ -834,14 +834,18 @@ pub fn channel_switch_continuation(message: &ChannelMessage) -> Option<ChannelSw
     let continuation: ChannelSwitchContinuation =
         serde_json::from_value(metadata["xmatrixSwitchContinuation"].clone()).ok()?;
     (continuation.version == 1
-        && instruction_instance_id(&continuation.instance_id)
-        && !continuation.request_ids.is_empty()
-        && continuation.request_ids.len() <= 16
-        && continuation
-            .request_ids
-            .iter()
-            .all(|id| instruction_token(id)))
+        && switch_continuation_names_valid(&continuation.instance_id, &continuation.request_ids))
     .then_some(continuation)
+}
+
+/// Whether a switch continuation names one Instance and 1 to 16 switches in
+/// the shape the Hub writes them, whether it came as Channel metadata or as an
+/// `agent_switch_continuation` frame.
+pub fn switch_continuation_names_valid(instance_id: &str, request_ids: &[String]) -> bool {
+    instruction_instance_id(instance_id)
+        && !request_ids.is_empty()
+        && request_ids.len() <= 16
+        && request_ids.iter().all(|id| instruction_token(id))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1693,6 +1697,16 @@ pub enum AgentInstanceServerMessage {
         input: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none", default)]
         reason: Option<String>,
+    },
+    /// The Hub's instruction that one Instance continue the turn a live
+    /// switch cancelled, sent to that Instance alone: `prompt` is the input,
+    /// and only an Instance still waiting on one of `request_ids` runs it.
+    /// Sent only to a runtime advertising `switch_continuation_frame`.
+    AgentSwitchContinuation {
+        channel_id: String,
+        instance_id: String,
+        request_ids: Vec<String>,
+        prompt: String,
     },
     AgentModelSwitchRequested {
         request_id: String,
@@ -2627,6 +2641,34 @@ mod tests {
         assert_eq!(json["type"], "agent_model_switch_result");
         assert_eq!(json["requestId"], "req-1");
         assert_eq!(json["model"], "gpt-5.5");
+    }
+
+    #[test]
+    fn agent_switch_continuation_wire_format() {
+        let frame: AgentInstanceServerMessage = serde_json::from_str(
+            r#"{"type":"agent_switch_continuation","channelId":"ch-1","instanceId":"inst-1","requestIds":["req-1"],"prompt":"continue"}"#,
+        )
+        .unwrap();
+        let AgentInstanceServerMessage::AgentSwitchContinuation {
+            channel_id,
+            instance_id,
+            request_ids,
+            prompt,
+        } = frame
+        else {
+            panic!("expected agent_switch_continuation");
+        };
+        assert_eq!(channel_id, "ch-1");
+        assert_eq!(prompt, "continue");
+        assert!(switch_continuation_names_valid(&instance_id, &request_ids));
+        assert!(!switch_continuation_names_valid(&instance_id, &[]));
+        let too_many: Vec<String> = (0..17).map(|i| format!("r{i}")).collect();
+        assert!(!switch_continuation_names_valid(&instance_id, &too_many));
+        assert!(!switch_continuation_names_valid("", &request_ids));
+        assert!(!switch_continuation_names_valid(
+            &instance_id,
+            &["bad id".to_string()]
+        ));
     }
 
     #[test]

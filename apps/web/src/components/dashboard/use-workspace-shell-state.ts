@@ -62,6 +62,7 @@ import {
   mergeChannelHistory,
   sortChannelHistory,
   supersededHistoryMessage,
+  commandResultHistoryMessage,
 } from "@/components/dashboard/channel-history";
 import { sameValue } from "../../lib/same-value";
 import {
@@ -1723,6 +1724,13 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
             const folded = supersededHistoryMessage(
               heldChannelWindow(channelId, false).messages, message.event.metadata);
             if (folded) mergeAndRememberChannelHistory(channelId, [folded], undefined, false);
+          }
+          // The Hub recorded what a message's command came to: its chip answers now.
+          if (message.event.type === "channel_message_interactions_updated" && message.event.channelId) {
+            const channelId = message.event.channelId;
+            const answered = commandResultHistoryMessage(
+              heldChannelWindow(channelId, false).messages, message.event.metadata);
+            if (answered) mergeAndRememberChannelHistory(channelId, [answered], undefined, false);
           }
           if (message.event.type === "agent_disconnected") {
             const instanceId = message.event.metadata?.instanceId;

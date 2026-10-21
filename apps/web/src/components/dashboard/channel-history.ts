@@ -1,3 +1,4 @@
+import { mergeCommandResult, type CommandResult } from "@xmatrix/protocol";
 import { dateTimeFormat, formatInstant, formatZonedDateTime } from "./time-display";
 
 type SequencedHistoryEntry = {
@@ -140,6 +141,19 @@ export function supersededHistoryMessage<
   const held = messages.find((message) => message.messageId === messageId);
   if (!held || held.recalledAt || held.supersededBy === supersededBy) return undefined;
   return { ...held, supersededBy };
+}
+
+/** The held message with one command-result annotation the Hub just recorded
+ * applied, or undefined when it is not held or is recalled. */
+export function commandResultHistoryMessage<
+  T extends ChannelHistoryLike & { recalledAt?: string; commandResult?: CommandResult },
+>(messages: readonly T[], metadata: Record<string, unknown> | undefined): T | undefined {
+  const messageId = metadata?.messageId;
+  const annotationId = metadata?.annotationId;
+  if (typeof messageId !== "string" || typeof annotationId !== "string" || !messageId || !annotationId) return undefined;
+  const held = messages.find((message) => message.messageId === messageId);
+  if (!held || held.recalledAt) return undefined;
+  return { ...held, commandResult: mergeCommandResult(held.commandResult, annotationId, metadata?.payload) };
 }
 
 export function mergeChannelHistory<T extends ChannelHistoryLike>(

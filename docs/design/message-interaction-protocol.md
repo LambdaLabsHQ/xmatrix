@@ -78,15 +78,23 @@ The initial presentation references are `mention.v1`, `launch.v1`, `handoff.v1`,
 Web rendering consumes these contracts separately from the execution adapters.
 
 A command's answer is drawn on the command, the way a summon's progress is drawn
-on its `@`. When the Hub answers a model or effort switch, a stop that fenced no
-Run, or a refused reborn or handoff with a system notice, that notice names the
-command's `sourceMessageId`. The switch receipt also carries `controlOutcomes`
-(one per statement, in order) and a settling stop notice carries
-`stopCommandOutcome`. A client that holds the command message draws the notice on
-the command's chip and gives it no row of its own; a switch's continuation
-instruction is for the Instance and folds away with it. The notice stays a
-Channel message, so Agents, the CLI and a reader without the command loaded
-still read it as text.
+on its `@`, and it is not a message. When the Hub answers a model or effort
+switch, a stop that fenced no Run, or a refused reborn or handoff, it records the
+answer as a system annotation (`xmatrix.command-result`) on the message that
+wrote the command: `controls` holds one outcome per statement, in order, and
+each `note` holds one fact in the Hub's words (a stop note that settles the stop
+carries `stopOutcome`). Messages carry the merged `commandResult`, and a
+`channel_message_interactions_updated` event applies a new annotation to every
+client that holds the message. Because it is not a message, the answer neither
+previews in the conversation list, counts as unread, nor wakes an Agent.
+
+What a switch asks of the switched Instance (continue the turn the switch
+cancelled) is an instruction to that Instance, not something said in the
+Channel: the Hub sends it as an `agent_switch_continuation` frame on the
+Instance's own socket to a runtime that lists `switch_continuation_frame`. A
+runtime that predates the frame still receives the committed
+`xmatrix.switch-continuation` message, which, like the switch receipt an older
+Hub posted, counts as unread for nobody and folds onto the command when shown.
 
 ## First-message choice
 

@@ -375,6 +375,12 @@ const WAITING_MESSAGE_JOIN = `LEFT JOIN LATERAL (
     AND message.deleted_at IS NULL LIMIT 1
 ) waiting ON TRUE`;
 
+/* Messages nobody needs to read: activity entries (docs/design/conversation-activity.md
+   §3.2), and the switch receipt and continuation an older Hub or runtime still
+   commits as messages. A command's answer now sits on the command itself. */
+const NOT_FOR_READING_KINDS = [CHANNEL_ACTIVITY_MESSAGE_KIND, "xmatrix.system.control-switch", "xmatrix.switch-continuation"]
+  .map((kind) => `'${kind}'`).join(",");
+
 /**
  * How far the principal has read a conversation. Activity entries after the
  * cursor need no reading (docs/design/conversation-activity.md §3.2), so a
@@ -389,7 +395,7 @@ function effectiveReadSequenceSql(head: string): string {
       WHERE unread.space_id=channel.space_id AND unread.channel_id=channel.channel_id
         AND unread.deleted_at IS NULL
         AND unread.timeline_sequence>COALESCE(cursor_row.acknowledged_sequence,0)
-        AND unread.message_kind<>'${CHANNEL_ACTIVITY_MESSAGE_KIND}'
+        AND unread.message_kind NOT IN (${NOT_FOR_READING_KINDS})
     ),GREATEST(${head},COALESCE(cursor_row.acknowledged_sequence,0)))`;
 }
 
@@ -398,7 +404,7 @@ const UNREAD_MESSAGE_EXISTS_SQL = `EXISTS (SELECT 1 FROM data.messages message
       WHERE message.space_id=channel.space_id AND message.channel_id=channel.channel_id
         AND message.deleted_at IS NULL
         AND message.timeline_sequence>COALESCE(cursor_row.acknowledged_sequence,0)
-        AND message.message_kind<>'${CHANNEL_ACTIVITY_MESSAGE_KIND}')`;
+        AND message.message_kind NOT IN (${NOT_FOR_READING_KINDS}))`;
 
 function catalogIndexCtes(filter: ChannelCatalogPageFilter): string {
   const hasUnread = filter === "unread" ? UNREAD_MESSAGE_EXISTS_SQL : "FALSE";

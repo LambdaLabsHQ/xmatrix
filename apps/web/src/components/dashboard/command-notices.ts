@@ -1,10 +1,10 @@
 import { parseMessageInteraction, type AgentControlOutcomeRecord, type ChannelMessage } from "@xmatrix/protocol";
 
 /**
- * A Hub receipt for a command a message wrote. It is drawn on that command,
- * the way a summon's progress is drawn on its `@`, instead of as a row of its
- * own. The receipt stays a Channel message: an Agent, the CLI and a reader
- * whose page does not hold the command still read it there.
+ * What the Hub said about a command a message wrote, drawn on that command
+ * the way a summon's progress is drawn on its `@`. The Hub records it on the
+ * command message (`commandResult`); an older Hub posted it as a system
+ * notice naming the command, which folds onto the command the same way.
  */
 export type CommandNotice = {
   messageId: string;
@@ -56,6 +56,10 @@ export function foldCommandNotices(history: readonly ChannelMessage[]): {
   const noticesBySource = new Map<string, CommandNotice[]>();
   const folded = new Set<string>();
   for (const message of history) {
+    const recorded = message.recalledAt || message.editedAt ? [] : recordedNotices(message);
+    if (recorded.length) noticesBySource.set(message.messageId, recorded);
+  }
+  for (const message of history) {
     const sourceId = noticeSource(message);
     const source = sourceId ? byId.get(sourceId) : undefined;
     if (!source || source.recalledAt || source.editedAt || message.recalledAt) continue;
@@ -78,6 +82,18 @@ export function foldCommandNotices(history: readonly ChannelMessage[]): {
     noticesBySource.set(source.messageId, notices);
   }
   return { noticesBySource, folded };
+}
+
+/** The result the Hub recorded on a command message, as the notices a chip reads. */
+function recordedNotices(message: ChannelMessage): CommandNotice[] {
+  const result = message.commandResult;
+  if (!result) return [];
+  return [
+    ...(result.controls ? [{ messageId: `${message.messageId}:controls`, body: "", sentAt: message.sentAt,
+      controlOutcomes: result.controls }] : []),
+    ...(result.notes ?? []).map((note) => ({ messageId: note.id, body: note.text, sentAt: note.at,
+      ...(note.stopOutcome ? { stopOutcome: note.stopOutcome } : {}) })),
+  ];
 }
 
 /** The notices that name this reborn or handoff address. */

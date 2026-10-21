@@ -23,19 +23,16 @@ function intent(body) {
 
 function portWith(outcome) {
   const requests = [];
-  const notices = [];
   const outcomes = [];
   return {
     requests,
-    notices,
     outcomes,
     async switchControl(input) {
       requests.push(input);
       if (outcome instanceof Error) throw outcome;
       return outcome;
     },
-    async publishSystemNotice(_channelId, body, recorded) {
-      notices.push(body);
+    async recordOutcomes(_channelId, recorded) {
       outcomes.push(recorded);
     },
   };
@@ -87,10 +84,8 @@ test("a confirmed switch names the model the instance actually accepted", async 
     value: "fable",
   }]);
   assert.equal(result[0].outcome.status, "switched");
-  assert.match(port.notices[0], /Switched @claude:1 to `fable`/u);
-  // The receipt says what the switch does to running work: it preempts, and
-  // the Instance resumes that work on the new selection by itself.
-  assert.match(port.notices[0], /A turn that was running is interrupted and continues on it\./u);
+  // The answer is recorded on the statement, not posted as a message.
+  assert.deepEqual(port.outcomes, [[{ kind: "model", target: "claude:1", status: "switched", selected: "fable" }]]);
 });
 
 test("a bare command lists the catalog and the current selection", async () => {
@@ -101,8 +96,8 @@ test("a bare command lists the catalog and the current selection", async () => {
     port,
   });
   assert.equal(port.requests[0].value, undefined);
-  assert.match(port.notices[0], /`fable`, `opus`/u);
-  assert.match(port.notices[0], /Current: `opus`/u);
+  assert.deepEqual(port.outcomes[0], [{ kind: "model", target: "claude:1", status: "catalog",
+    options: ["fable", "opus"], current: "opus" }]);
 });
 
 test("a missing instance and a failed switch both report instead of going silent", async () => {
@@ -112,7 +107,7 @@ test("a missing instance and a failed switch both report instead of going silent
     body: "@claude:9 /effort high",
     port: missing,
   });
-  assert.match(missing.notices[0], /could not find a live instance for `@claude:9`/u);
+  assert.equal(missing.outcomes[0][0].status, "no_instance");
 
   const failed = portWith({ status: "error", message: "timed out." });
   await orchestrateProductAgentControlCommands({
@@ -120,7 +115,7 @@ test("a missing instance and a failed switch both report instead of going silent
     body: "@claude:1 /model fable",
     port: failed,
   });
-  assert.match(failed.notices[0], /Could not switch the model for @claude:1: timed out\./u);
+  assert.deepEqual(failed.outcomes[0][0], { kind: "model", target: "claude:1", status: "error", message: "timed out." });
 });
 
 test("a thrown port failure is narrated, not swallowed", async () => {
@@ -131,7 +126,7 @@ test("a thrown port failure is narrated, not swallowed", async () => {
     port,
   });
   assert.equal(result[0].outcome.status, "error");
-  assert.match(port.notices[0], /runtime unavailable/u);
+  assert.equal(port.outcomes[0][0].message, "runtime unavailable");
 });
 
 test("non-commands never reach the port", async () => {
@@ -143,7 +138,7 @@ test("non-commands never reach the port", async () => {
   });
   assert.deepEqual(result, []);
   assert.deepEqual(port.requests, []);
-  assert.deepEqual(port.notices, []);
+  assert.deepEqual(port.outcomes, []);
 });
 
 test("a control command delivers as context so it cannot burn an instance turn", () => {
@@ -173,10 +168,8 @@ test("one message carries several statements and answers with one receipt", asyn
   });
   assert.deepEqual(result.map((entry) => entry.kind), ["model", "effort"]);
   assert.deepEqual(port.requests.map((request) => request.kind), ["model", "effort"]);
-  // A tag edit is one decision; it must not post one system message per tag.
-  assert.equal(port.notices.length, 1);
-  assert.match(port.notices[0], /^- Switched @claude:1/u);
-  assert.equal(port.notices[0].split("\n").length, 2);
+  // A tag edit is one decision: one recording, not one per tag.
+  assert.equal(port.outcomes.length, 1);
   // Each written statement gets its own result, in the order it was written.
   assert.deepEqual(port.outcomes[0], [
     { kind: "model", target: "claude:1", status: "switched", selected: "fable" },
@@ -211,8 +204,8 @@ function continuationPort(outcomes) {
   const continuations = [];
   const port = {
     async switchControl(input) { return outcomes.shift()(input); },
-    async publishSystemNotice() {},
-    async publishContinuation(_channelId, input) { continuations.push(input); },
+    async recordOutcomes() {},
+    async continueTurn(_channelId, input) { continuations.push(input); },
   };
   return { port, continuations };
 }

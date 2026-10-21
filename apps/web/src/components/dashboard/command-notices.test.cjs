@@ -69,3 +69,15 @@ test("a stop that fenced nothing reads the Hub's notice as its answer", () => {
   assert.equal(resting.label, "Stopped");
   assert.equal(resting.tone, "success");
 });
+
+test("a result the Hub recorded on the command is drawn there, and a live event applies to the held message", () => {
+  const { commandResultHistoryMessage } = require("./channel-history.ts");
+  const controls = [{ kind: "effort", target: "claude:1", status: "switched", selected: "max" }];
+  const held = human("m1", "@claude:1 /effort max", { sequence: 1 });
+  const answered = commandResultHistoryMessage([held], { messageId: "m1", annotationId: "a1", payload: { controls } });
+  assert.deepEqual(answered.commandResult, { controls });
+  const { noticesBySource, folded } = foldCommandNotices([answered]);
+  assert.equal(folded.size, 0);
+  assert.deepEqual(noticesBySource.get("m1").map(notice => notice.controlOutcomes), [controls]);
+  assert.equal(commandResultHistoryMessage([held], { messageId: "other", annotationId: "a1", payload: {} }), undefined);
+});

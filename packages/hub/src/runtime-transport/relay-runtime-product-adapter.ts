@@ -344,6 +344,10 @@ export class RelayRuntimeProductCallbackAdapter {
     return this.agentInstance.deliverTurnRetry(input);
   }
 
+  deliverSwitchContinuation(input: Parameters<AgentInstanceRuntimeTransport["deliverSwitchContinuation"]>[0]): boolean {
+    return this.agentInstance.deliverSwitchContinuation(input);
+  }
+
   switchAgentInstanceControl(
     input: Parameters<AgentInstanceRuntimeTransport["switchInstanceControl"]>[0],
   ): ReturnType<AgentInstanceRuntimeTransport["switchInstanceControl"]> {

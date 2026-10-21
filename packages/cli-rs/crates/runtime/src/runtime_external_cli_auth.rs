@@ -173,6 +173,9 @@ async fn cmd_external_inner(
     runtime_capabilities.push("harness_parameters_v1".to_string());
     // Every backend co-writes a page live (runtime_page_co_write).
     runtime_capabilities.push("page_co_write_v1".to_string());
+    // Every backend's run loop takes a switch continuation as its own frame
+    // (RunLoopEvents::continuation), so the Hub need not post it to the Channel.
+    runtime_capabilities.push(crate::SWITCH_CONTINUATION_FRAME.to_string());
     if use_codex_app_backend(tool) {
         runtime_capabilities.extend(["agent_turn_retry".into(), "agent_turn_retry_channel_message".into()]);
     }

@@ -1,3 +1,4 @@
+import { recordCommandResult } from "./command-result";
 import { HANDOFF_CONTEXT_MAX_CHARS, plainRecord as record } from "@xmatrix/protocol";
 import {
   orchestrateProductAgentIntervention,
@@ -297,8 +298,8 @@ export function createProductAgentInterventionAuthorityPort(input: {
       });
     },
 
-    async publishSystemNotice(channelId, body, key, outcome) {
-      const messageId = `system:${input.sourceMessageId}:kill-all${key ? `:${key}` : ""}`.slice(0, 200);
+    async publishSystemNotice(channelId, body) {
+      const messageId = `system:${input.sourceMessageId}:kill-all`.slice(0, 200);
       const response = await retryTransientAuthorityResponse(() =>
         dispatchProductMessageAppend(input.env, channelId, {
           commandId: stableCommandId("kill-all-notice", messageId),
@@ -309,18 +310,21 @@ export function createProductAgentInterventionAuthorityPort(input: {
           senderSnapshot: productAgentSystemNoticeSenderSnapshot(input.actorUserId),
           residual: {
             appMetadata: {
-              // Stop summaries are control-plane facts. They must never become
-              // fresh Human work when history is replayed to an Agent.
+              // A control-plane fact. It must never become fresh Human work
+              // when history is replayed to an Agent.
               xmatrixProvenance: "system_fact",
               xmatrixSystemNotice: true,
               sourceMessageId: input.sourceMessageId,
-              // The stop command's chip reads this when no Run was fenced.
-              ...(outcome ? { stopCommandOutcome: outcome } : {}),
             },
           },
         }));
       const result = await payload(response);
       if (!response.ok) throw responseError("kill-all notice", response, result);
+    },
+
+    async recordResult(channelId, text, key, outcome) {
+      await recordCommandResult(input.env, { channelId, messageId: input.sourceMessageId,
+        key: key ?? "stop", entry: { note: { text, ...(outcome ? { stopOutcome: outcome } : {}) } } });
     },
   };
 }

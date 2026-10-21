@@ -15,6 +15,9 @@ export const SUPERSEDED_ANNOTATION_NAMESPACE = "xmatrix.superseded";
 /** The Hub's record that a questionnaire card was answered or withdrawn. */
 export const QUESTIONNAIRE_STATE_ANNOTATION_NAMESPACE = "xmatrix.questionnaire";
 
+/** The Hub's answer to a command a message wrote (`/model`, `/effort`, a stop, a reborn or handoff). */
+export const COMMAND_RESULT_ANNOTATION_NAMESPACE = "xmatrix.command-result";
+
 /** Author of annotations the Hub writes itself. Public writers cannot take it. */
 export const SYSTEM_ANNOTATION_AUTHOR = "system:xmatrix";
 
@@ -170,6 +173,64 @@ export function supersededByOf(annotations: unknown): string | undefined {
     if (typeof payload.supersededBy === "string" && payload.supersededBy) return payload.supersededBy;
   }
   return undefined;
+}
+
+/** One thing the Hub said about a command, in its own words. */
+export interface CommandResultNote {
+  /** The annotation that holds it: one note per fact, written once. */
+  id: string;
+  text: string;
+  at: string;
+  /** A stop that fenced no Run: this note is its whole answer. */
+  stopOutcome?: "stopped" | "not_stopped";
+}
+
+/**
+ * What a command came to, recorded on the message that wrote it rather than
+ * posted as another message: the answer belongs to the command, and a reader
+ * finds it there (docs/design/message-interaction-protocol.md).
+ */
+export interface CommandResult {
+  /** `/model` and `/effort`: one outcome per statement, in statement order. */
+  controls?: import("./agent-control-command.js").AgentControlOutcomeRecord[];
+  notes?: CommandResultNote[];
+}
+
+/** The merged result the Hub recorded for this message's command, if any. */
+export function commandResultOf(annotations: unknown): CommandResult | undefined {
+  if (!Array.isArray(annotations)) return undefined;
+  let controls: CommandResult["controls"];
+  const notes: CommandResultNote[] = [];
+  for (const entry of annotations) {
+    const annotation = entry && typeof entry === "object" ? entry as Record<string, unknown> : undefined;
+    if (annotation?.namespace !== COMMAND_RESULT_ANNOTATION_NAMESPACE ||
+        annotation.authorUserId !== SYSTEM_ANNOTATION_AUTHOR) continue;
+    const merged = mergeCommandResult({ ...(controls ? { controls } : {}), notes },
+      typeof annotation.id === "string" ? annotation.id : "", annotation.payload);
+    controls = merged.controls;
+    notes.splice(0, notes.length, ...(merged.notes ?? []));
+  }
+  return controls || notes.length ? { ...(controls ? { controls } : {}), ...(notes.length ? { notes } : {}) } : undefined;
+}
+
+/** `result` with one recorded command-result annotation applied, as a client
+ * applies the live event and the Hub applies its stored annotations. */
+export function mergeCommandResult(result: CommandResult | undefined, annotationId: string, payload: unknown): CommandResult {
+  const value = payload && typeof payload === "object" && !Array.isArray(payload) ? payload as Record<string, unknown> : {};
+  const next: CommandResult = { ...(result ?? {}) };
+  if (Array.isArray(value.controls) && value.controls.every((item) =>
+    item && typeof item === "object" && typeof (item as { status?: unknown }).status === "string")) {
+    next.controls = value.controls as NonNullable<CommandResult["controls"]>;
+  }
+  const note = value.note && typeof value.note === "object" ? value.note as Record<string, unknown> : undefined;
+  if (annotationId && typeof note?.text === "string" && note.text && typeof note.at === "string") {
+    const stopOutcome: CommandResultNote["stopOutcome"] =
+      note.stopOutcome === "stopped" || note.stopOutcome === "not_stopped" ? note.stopOutcome : undefined;
+    next.notes = [...(result?.notes ?? []).filter((item) => item.id !== annotationId),
+      { id: annotationId, text: note.text, at: note.at, ...(stopOutcome ? { stopOutcome } : {}) }]
+      .sort((a, b) => a.at.localeCompare(b.at));
+  }
+  return next;
 }
 
 /** How a questionnaire card was settled, as the Hub recorded it. */

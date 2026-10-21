@@ -64,9 +64,11 @@ export {
   ChannelActivityInvalid, channelActivityLine, channelActivityOf, isReservedAnnotationNamespace,
   isReservedMessageMetadataKey, normalizeChannelActivity, SUPERSEDED_ANNOTATION_NAMESPACE,
   supersededByOf, SYSTEM_ANNOTATION_AUTHOR, QUESTIONNAIRE_STATE_ANNOTATION_NAMESPACE, questionnaireStateOf,
+  COMMAND_RESULT_ANNOTATION_NAMESPACE, commandResultOf, mergeCommandResult,
 } from "./channel-activity.js";
 export type {
   ChannelActivity, ChannelActivityPlanStep, ChannelActivityPlanStepStatus, QuestionnaireState,
+  CommandResult, CommandResultNote,
 } from "./channel-activity.js";
 export {
   channelSummarySource,
