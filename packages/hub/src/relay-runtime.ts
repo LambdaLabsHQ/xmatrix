@@ -53,7 +53,7 @@ import {
   validAgentHostTraceSince,
   parseAgentHostTraceCursor,
 } from "./agent-host-trace";
-import { answerHarnessReleaseWatch, RELAY_RUNTIME_HARNESS_RELEASE_WATCH_PATH } from "./harness-release-watch";
+import { answerScheduledPass, RELAY_RUNTIME_SCHEDULED_PASS_PATH } from "./scheduled-pass";
 import { analyticsWorkerVersion } from "./analytics-sampling";
 
 const MAX_COMMITTED_EVENT_BYTES = 64 * 1024;
@@ -463,8 +463,8 @@ export class RelayRuntimeLive extends DurableObject<Env> {
       const woken = await this.machineDaemonWakeSignals.wait(ownerUserId, machineId, hostId, waitMs);
       return Response.json({ woken }, { headers: { "cache-control": "no-store" } });
     }
-    if (request.method === "POST" && url.pathname === RELAY_RUNTIME_HARNESS_RELEASE_WATCH_PATH) {
-      return answerHarnessReleaseWatch(this.env);
+    if (request.method === "POST" && url.pathname === RELAY_RUNTIME_SCHEDULED_PASS_PATH) {
+      return answerScheduledPass(request, this.env);
     }
     if (request.method === "GET" && url.pathname === "/internal/health") {
       return Response.json({
