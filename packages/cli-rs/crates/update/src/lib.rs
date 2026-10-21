@@ -19,13 +19,13 @@ pub use daemon_service::{
     launchd_plist_path, systemd_unit, systemd_unit_path, windows_daemon_scheduled_task_script,
 };
 
-pub(crate) const STABLE_CLI_RELEASE_API_URL: &str = "https://xmatrix.sh/api/cli/releases/latest";
-pub(crate) const DEV_CLI_RELEASE_API_URL: &str = "https://xmatrix.sh/api/cli/releases/dev";
+pub const STABLE_CLI_RELEASE_API_URL: &str = "https://xmatrix.sh/api/cli/releases/latest";
+pub const DEV_CLI_RELEASE_API_URL: &str = "https://xmatrix.sh/api/cli/releases/dev";
 
 /// The release feed a CLI of `version` follows: a beta `X.Y.Z-beta.N` follows
 /// the dev channel, a stable `X.Y.Z` the stable one, so each build updates only
 /// along the channel it was published to.
-pub(crate) fn cli_release_api_url_for(version: &str) -> &'static str {
+pub fn cli_release_api_url_for(version: &str) -> &'static str {
     let prerelease = version
         .split_once('+')
         .map_or(version, |(value, _)| value)
@@ -141,6 +141,17 @@ pub struct CliReleaseManifest {
     #[serde(rename = "releaseVersion")]
     pub release_version: Option<String>,
     pub assets: Vec<CliReleaseAsset>,
+    pub provenance: Option<CliReleaseProvenance>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CliReleaseProvenance {
+    pub workflow: String,
+    pub git_sha: String,
+    pub run_id: String,
+    pub run_attempt: Option<String>,
+    pub published_at: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -159,6 +170,7 @@ pub struct PendingCliUpdate {
     pub temp_path: PathBuf,
     pub release_envelope_asset: Option<CliReleaseAsset>,
     pub release_envelope_temp_path: Option<PathBuf>,
+    pub provenance: Option<CliReleaseProvenance>,
 }
 
 pub struct InstalledCliUpdate {
@@ -172,6 +184,170 @@ pub struct WindowsStagedDaemonCandidate {
     pub previous_version: String,
     pub latest_version: String,
     pub artifact: xmatrix_windows_continuity::ArtifactIdentity,
+}
+
+#[cfg(windows)]
+pub async fn stage_windows_daemon_candidate(
+    update: PendingCliUpdate,
+) -> error::Result<WindowsStagedDaemonCandidate> {
+    use xmatrix_cli_core::hex::sha256_hex;
+
+    let expected_size = update.asset.size.ok_or_else(|| {
+        CliError::Launch("Windows release manifest omitted candidate size".into())
+    })?;
+    let expected_sha256 = update
+        .asset
+        .sha256
+        .clone()
+        .filter(|value| value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit()))
+        .ok_or_else(|| {
+            CliError::Launch("Windows release manifest omitted candidate SHA-256".into())
+        })?;
+    let provenance = update.provenance.as_ref().ok_or_else(|| {
+        CliError::Launch("Windows release manifest omitted reviewed provenance".into())
+    })?;
+    let envelope_asset = update.release_envelope_asset.as_ref().ok_or_else(|| {
+        CliError::Launch("Windows release manifest omitted the signed release envelope".into())
+    })?;
+    let envelope_temp_path = update.release_envelope_temp_path.as_ref().ok_or_else(|| {
+        CliError::Launch("Windows signed release envelope has no staging path".into())
+    })?;
+    let envelope_size = envelope_asset.size.ok_or_else(|| {
+        CliError::Launch("Windows release envelope omitted its exact size".into())
+    })?;
+    let envelope_sha256 = envelope_asset
+        .sha256
+        .clone()
+        .filter(|value| value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit()))
+        .ok_or_else(|| {
+            CliError::Launch("Windows release envelope omitted its exact SHA-256".into())
+        })?;
+    if provenance.workflow != "cli-release.yml"
+        || provenance.git_sha.len() != 40
+        || !provenance
+            .git_sha
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit())
+        || provenance
+            .run_id
+            .parse::<u64>()
+            .ok()
+            .filter(|value| *value > 0)
+            .is_none()
+    {
+        return Err(CliError::Launch(
+            "Windows release provenance is invalid".into(),
+        ));
+    }
+    download_release_asset(&update.asset.browser_download_url, &update.temp_path).await?;
+    download_release_asset(&envelope_asset.browser_download_url, envelope_temp_path).await?;
+    let bytes = std::fs::read(&update.temp_path)?;
+    let actual_sha256 = sha256_hex(&bytes);
+    if bytes.len() as u64 != expected_size || actual_sha256 != expected_sha256 {
+        let _ = std::fs::remove_file(&update.temp_path);
+        return Err(CliError::Launch(
+            "Windows staged daemon size or digest does not match release authority".into(),
+        ));
+    }
+    let envelope_bytes = std::fs::read(envelope_temp_path)?;
+    let actual_envelope_sha256 = sha256_hex(&envelope_bytes);
+    if envelope_bytes.len() as u64 != envelope_size || actual_envelope_sha256 != envelope_sha256 {
+        let _ = std::fs::remove_file(&update.temp_path);
+        let _ = std::fs::remove_file(envelope_temp_path);
+        return Err(CliError::Launch(
+            "Windows signed release envelope size or digest is invalid".into(),
+        ));
+    }
+    let publisher_sha256 = xmatrix_windows_continuity::verify_authenticode_publisher(
+        &update.temp_path,
+    )
+    .map_err(|error| {
+        CliError::Launch(format!(
+            "Windows staged daemon publisher is invalid: {error}"
+        ))
+    })?;
+    let current = std::env::current_exe()?;
+    // The downloaded publisher is evidence, not a trust anchor. Keep the same
+    // publisher continuity enforced by the Supervisor before probing any code.
+    let trusted_publisher_sha256 =
+        xmatrix_windows_continuity::verify_authenticode_publisher(&current).map_err(|error| {
+            CliError::Launch(format!("Current daemon publisher is invalid: {error}"))
+        })?;
+    let daemon_root = current
+        .ancestors()
+        .find(|path| {
+            path.file_name()
+                .and_then(|value| value.to_str())
+                .is_some_and(|value| value.eq_ignore_ascii_case("xmatrix-daemon"))
+        })
+        .ok_or_else(|| {
+            CliError::Launch("Windows daemon is outside the stable Supervisor root".into())
+        })?;
+    let generation = format!("{}-{expected_sha256}", update.latest_version);
+    if !is_safe_windows_daemon_generation_name(&generation) {
+        return Err(CliError::Launch(
+            "Windows candidate generation is invalid".into(),
+        ));
+    }
+    let generation_dir = daemon_root.join("generations").join(&generation);
+    std::fs::create_dir_all(&generation_dir)?;
+    let executable_path = generation_dir.join("xmatrix.exe");
+    let release_envelope_path = generation_dir.join("release-envelope.exe");
+    if executable_path.exists() {
+        if xmatrix_windows_continuity::sha256_file(&executable_path)
+            .map_err(|error| CliError::Launch(error.to_string()))?
+            != expected_sha256
+        {
+            return Err(CliError::Launch(
+                "Immutable Windows candidate generation already has different bytes".into(),
+            ));
+        }
+    } else {
+        std::fs::rename(&update.temp_path, &executable_path)?;
+    }
+    if release_envelope_path.exists() {
+        if xmatrix_windows_continuity::sha256_file(&release_envelope_path)
+            .map_err(|error| CliError::Launch(error.to_string()))?
+            != envelope_sha256
+        {
+            return Err(CliError::Launch(
+                "Immutable Windows release envelope already has different bytes".into(),
+            ));
+        }
+    } else {
+        std::fs::rename(envelope_temp_path, &release_envelope_path)?;
+    }
+    let release_sequence =
+        xmatrix_windows_continuity::release_sequence_from_version(&update.latest_version)
+            .map_err(|error| CliError::Launch(error.to_string()))?;
+    let artifact = xmatrix_windows_continuity::ArtifactIdentity {
+        generation,
+        sha256: expected_sha256,
+        executable_path,
+        release_envelope_path,
+        release_envelope_sha256: envelope_sha256,
+        publisher_sha256: publisher_sha256.clone(),
+        version: update.latest_version.clone(),
+        target: "x86_64-pc-windows-msvc".into(),
+        release_sequence,
+        protocol_min: 1,
+        protocol_max: 1,
+    };
+    xmatrix_windows_continuity::verify_signed_artifact(
+        &artifact,
+        xmatrix_windows_continuity::current_unix_time()
+            .map_err(|error| CliError::Launch(error.to_string()))?,
+        0,
+        Some(&trusted_publisher_sha256),
+        false,
+    )
+    .map_err(|error| CliError::Launch(error.to_string()))?;
+    validate_downloaded_binary(&artifact.executable_path, &update.latest_version)?;
+    Ok(WindowsStagedDaemonCandidate {
+        previous_version: update.current_version,
+        latest_version: update.latest_version.clone(),
+        artifact,
+    })
 }
 
 pub enum CliUpdateCheck {
@@ -353,6 +529,7 @@ pub async fn check_cli_update(release_api_url: &str, force: bool) -> error::Resu
         temp_path,
         release_envelope_asset,
         release_envelope_temp_path,
+        provenance: manifest.provenance.clone(),
     }))
 }
 
@@ -367,7 +544,7 @@ pub fn latest_release_manifest_version(manifest: &CliReleaseManifest) -> String 
         .to_string()
 }
 
-pub(crate) async fn install_cli_update(
+pub async fn install_cli_update(
     update: PendingCliUpdate,
     hub_url: &str,
 ) -> error::Result<InstalledCliUpdate> {
@@ -448,7 +625,7 @@ pub fn release_version_cmp(left: &str, right: &str) -> Option<std::cmp::Ordering
 
 /// Whether an update to `latest` installs: a newer release always, the same
 /// release only when forced (a reinstall), an older or unreadable one never.
-pub(crate) fn update_installs(latest_version: &str, current_version: &str, force: bool) -> bool {
+pub fn update_installs(latest_version: &str, current_version: &str, force: bool) -> bool {
     match release_version_cmp(latest_version, current_version) {
         Some(std::cmp::Ordering::Greater) => true,
         Some(std::cmp::Ordering::Equal) => force,
@@ -536,6 +713,40 @@ fn windows_daemon_root_dir(install_path: &Path) -> PathBuf {
 
 fn is_safe_windows_daemon_generation_name(value: &str) -> bool {
     xmatrix_windows_continuity::is_safe_generation_name(value)
+}
+
+pub fn windows_daemon_generation_path(
+    install_path: &Path,
+    version: &str,
+    generation: &str,
+) -> PathBuf {
+    let safe_component = |value: &str| {
+        let value = value
+            .chars()
+            .map(|character| {
+                if character.is_ascii_alphanumeric() || matches!(character, '.' | '-' | '_') {
+                    character
+                } else {
+                    '-'
+                }
+            })
+            .take(48)
+            .collect::<String>();
+        let value = value.trim_matches(|character: char| !character.is_ascii_alphanumeric());
+        if value.is_empty() {
+            "unknown".to_string()
+        } else {
+            value.to_string()
+        }
+    };
+    windows_daemon_root_dir(install_path)
+        .join("generations")
+        .join(format!(
+            "{}-{}",
+            safe_component(version),
+            safe_component(generation)
+        ))
+        .join("xmatrix.exe")
 }
 
 pub fn reconcile_windows_daemon_generations(current_exe: &Path) -> error::Result<usize> {
@@ -636,13 +847,11 @@ fn windows_host_cli_path_with_default(
     install_path.to_path_buf()
 }
 
-#[cfg(any(windows, test))]
-pub(crate) fn windows_daemon_launcher_path(install_path: &Path) -> PathBuf {
+pub fn windows_daemon_launcher_path(install_path: &Path) -> PathBuf {
     windows_daemon_root_dir(install_path).join("launch-hidden.vbs")
 }
 
-#[cfg(any(windows, test))]
-pub(crate) fn reconcile_windows_daemon_launcher_if_installed(
+pub fn reconcile_windows_daemon_launcher_if_installed(
     install_path: &Path,
 ) -> error::Result<Option<PathBuf>> {
     let daemon_root = windows_daemon_root_dir(install_path);
@@ -677,12 +886,61 @@ pub(crate) fn reconcile_windows_daemon_launcher_if_installed(
     Ok(Some(launcher_path))
 }
 
-#[cfg(any(windows, test))]
 fn windows_daemon_launcher_matches(bytes: &[u8]) -> bool {
     std::str::from_utf8(bytes).is_ok_and(|text| {
         text.replace("\r\n", "\n").trim_end_matches('\n')
             == WINDOWS_DAEMON_LAUNCHER.trim_end_matches('\n')
     })
+}
+
+pub fn windows_daemon_ping_path(install_path: &Path) -> PathBuf {
+    windows_daemon_root_dir(install_path)
+        .join("ping")
+        .join("xmatrix.exe")
+}
+
+pub fn windows_daemon_pong_path(install_path: &Path) -> PathBuf {
+    windows_daemon_root_dir(install_path)
+        .join("pong")
+        .join("xmatrix.exe")
+}
+
+pub fn windows_next_daemon_slot_path(install_path: &Path) -> PathBuf {
+    let ping = windows_daemon_ping_path(install_path);
+    let pong = windows_daemon_pong_path(install_path);
+
+    if paths_equal_relaxed(install_path, &ping) {
+        pong
+    } else {
+        ping
+    }
+}
+
+fn windows_cli_root_dir(install_path: &Path) -> PathBuf {
+    windows_slot_root_dir(install_path, "xmatrix-cli")
+}
+
+pub fn windows_cli_ping_path(install_path: &Path) -> PathBuf {
+    windows_cli_root_dir(install_path)
+        .join("ping")
+        .join("xmatrix.exe")
+}
+
+pub fn windows_cli_pong_path(install_path: &Path) -> PathBuf {
+    windows_cli_root_dir(install_path)
+        .join("pong")
+        .join("xmatrix.exe")
+}
+
+pub fn windows_next_cli_slot_path(install_path: &Path) -> PathBuf {
+    let ping = windows_cli_ping_path(install_path);
+    let pong = windows_cli_pong_path(install_path);
+
+    if paths_equal_relaxed(install_path, &ping) {
+        pong
+    } else {
+        ping
+    }
 }
 
 fn paths_equal_relaxed(left: &Path, right: &Path) -> bool {
@@ -2347,13 +2605,17 @@ mod tests {
     use super::{
         CliReleaseManifest, UpdateHintTarget, WINDOWS_ATOMIC_UPDATE_HELPERS_PS,
         WINDOWS_DAEMON_LAUNCHER, WINDOWS_DAEMON_TASK_PATH_RESOLUTION_PS, WindowsUpdateHandoff,
-        cli_release_api_url_for, latest_release_manifest_version, observe_update_handoff_child,
+        cli_release_api_url_for, is_safe_windows_daemon_generation_name,
+        latest_release_manifest_version, observe_update_handoff_child,
         reconcile_windows_daemon_generations, reconcile_windows_daemon_launcher_if_installed,
         release_version_cmp, release_version_is_newer, update_hint_lines, update_installs,
+        windows_cli_ping_path, windows_cli_pong_path, windows_daemon_generation_path,
         windows_daemon_launcher_matches, windows_daemon_launcher_path,
-        windows_daemon_launcher_reconciliation_ps, windows_host_cli_path,
-        windows_host_cli_path_with_default, windows_update_handoff_creation_flags,
-        windows_update_handoff_schedule_ps, windows_update_handoff_script,
+        windows_daemon_launcher_reconciliation_ps, windows_daemon_ping_path,
+        windows_daemon_pong_path, windows_host_cli_path, windows_host_cli_path_with_default,
+        windows_next_cli_slot_path, windows_next_daemon_slot_path,
+        windows_update_handoff_creation_flags, windows_update_handoff_schedule_ps,
+        windows_update_handoff_script,
     };
     use std::path::PathBuf;
 
@@ -2915,6 +3177,29 @@ mod tests {
     }
 
     #[test]
+    fn windows_daemon_generation_paths_are_immutable_and_sanitized() {
+        let stable = PathBuf::from("C:/Users/Daniel/.local/bin/xmatrix.exe");
+        assert_eq!(
+            windows_daemon_generation_path(&stable, "0.15.31", "request:42"),
+            PathBuf::from(
+                "C:/Users/Daniel/.local/bin/xmatrix-daemon/generations/0.15.31-request-42/xmatrix.exe"
+            )
+        );
+        assert_eq!(
+            windows_daemon_generation_path(&stable, "..", ".."),
+            PathBuf::from(
+                "C:/Users/Daniel/.local/bin/xmatrix-daemon/generations/unknown-unknown/xmatrix.exe"
+            )
+        );
+        assert!(!is_safe_windows_daemon_generation_name("."));
+        assert!(!is_safe_windows_daemon_generation_name(".."));
+        assert!(!is_safe_windows_daemon_generation_name(&"a".repeat(129)));
+        assert!(is_safe_windows_daemon_generation_name(
+            "0.15.35-0123456789abcdef"
+        ));
+    }
+
+    #[test]
     fn windows_daemon_generation_reconciliation_keeps_current_and_previous() {
         let root = std::env::temp_dir().join(format!(
             "xmatrix-daemon-generations-test-{}",
@@ -2957,6 +3242,49 @@ mod tests {
         };
 
         assert_eq!(installed.install_path, install_path);
+    }
+
+    #[test]
+    fn windows_daemon_slots_live_under_shared_install_dir() {
+        let install_path = PathBuf::from("C:/Users/Daniel/.local/bin/xmatrix.exe");
+
+        assert_eq!(
+            windows_daemon_ping_path(&install_path),
+            PathBuf::from("C:/Users/Daniel/.local/bin/xmatrix-daemon/ping/xmatrix.exe")
+        );
+        assert_eq!(
+            windows_daemon_pong_path(&install_path),
+            PathBuf::from("C:/Users/Daniel/.local/bin/xmatrix-daemon/pong/xmatrix.exe")
+        );
+    }
+
+    #[test]
+    fn windows_daemon_update_alternates_ping_pong_slots() {
+        let shared = PathBuf::from("C:/Users/Daniel/.local/bin/xmatrix.exe");
+        let ping = PathBuf::from("C:/Users/Daniel/.local/bin/xmatrix-daemon/ping/xmatrix.exe");
+        let pong = PathBuf::from("C:/Users/Daniel/.local/bin/xmatrix-daemon/pong/xmatrix.exe");
+
+        assert_eq!(windows_next_daemon_slot_path(&shared), ping);
+        assert_eq!(windows_next_daemon_slot_path(&ping), pong);
+        assert_eq!(windows_next_daemon_slot_path(&pong), ping);
+    }
+
+    #[test]
+    fn windows_daemon_update_recovers_from_version_slot_paths() {
+        let versioned =
+            PathBuf::from("C:/Users/Daniel/.local/bin/xmatrix-daemon/versions/0.11.14/xmatrix.exe");
+        let nested = PathBuf::from(
+            "C:/Users/Daniel/.local/bin/xmatrix-daemon/ping/xmatrix-daemon/versions/0.11.5/xmatrix.exe",
+        );
+        let ping = PathBuf::from("C:/Users/Daniel/.local/bin/xmatrix-daemon/ping/xmatrix.exe");
+        let pong = PathBuf::from("C:/Users/Daniel/.local/bin/xmatrix-daemon/pong/xmatrix.exe");
+
+        assert_eq!(windows_daemon_ping_path(&versioned), ping);
+        assert_eq!(windows_daemon_pong_path(&versioned), pong);
+        assert_eq!(windows_next_daemon_slot_path(&versioned), ping);
+        assert_eq!(windows_daemon_ping_path(&nested), ping);
+        assert_eq!(windows_daemon_pong_path(&nested), pong);
+        assert_eq!(windows_next_daemon_slot_path(&nested), ping);
     }
 
     #[test]
@@ -3089,6 +3417,37 @@ mod tests {
     }
 
     #[test]
+    fn windows_live_cli_update_alternates_ping_pong_slots() {
+        let shared = PathBuf::from("C:/Users/Daniel/.local/bin/xmatrix.exe");
+        let ping = PathBuf::from("C:/Users/Daniel/.local/bin/xmatrix-cli/ping/xmatrix.exe");
+        let pong = PathBuf::from("C:/Users/Daniel/.local/bin/xmatrix-cli/pong/xmatrix.exe");
+
+        assert_eq!(windows_cli_ping_path(&shared), ping);
+        assert_eq!(windows_cli_pong_path(&shared), pong);
+        assert_eq!(windows_next_cli_slot_path(&shared), ping);
+        assert_eq!(windows_next_cli_slot_path(&ping), pong);
+        assert_eq!(windows_next_cli_slot_path(&pong), ping);
+    }
+
+    #[test]
+    fn windows_live_cli_update_recovers_from_nested_slot_paths() {
+        let versioned =
+            PathBuf::from("C:/Users/Daniel/.local/bin/xmatrix-cli/versions/0.11.14/xmatrix.exe");
+        let nested = PathBuf::from(
+            "C:/Users/Daniel/.local/bin/xmatrix-cli/ping/xmatrix-cli/versions/0.11.5/xmatrix.exe",
+        );
+        let ping = PathBuf::from("C:/Users/Daniel/.local/bin/xmatrix-cli/ping/xmatrix.exe");
+        let pong = PathBuf::from("C:/Users/Daniel/.local/bin/xmatrix-cli/pong/xmatrix.exe");
+
+        assert_eq!(windows_cli_ping_path(&versioned), ping);
+        assert_eq!(windows_cli_pong_path(&versioned), pong);
+        assert_eq!(windows_next_cli_slot_path(&versioned), ping);
+        assert_eq!(windows_cli_ping_path(&nested), ping);
+        assert_eq!(windows_cli_pong_path(&nested), pong);
+        assert_eq!(windows_next_cli_slot_path(&nested), ping);
+    }
+
+    #[test]
     fn release_version_compare_prevents_daemon_downgrades() {
         assert!(release_version_is_newer("0.9.10", "0.9.9"));
         assert!(!release_version_is_newer("0.9.8", "0.9.9"));
@@ -3148,6 +3507,7 @@ mod tests {
             version: Some("0.9.21".to_string()),
             release_version: Some("0.9.20".to_string()),
             assets: vec![],
+            provenance: None,
         };
 
         assert_eq!(latest_release_manifest_version(&manifest), "0.9.21");
