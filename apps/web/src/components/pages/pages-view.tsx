@@ -27,10 +27,12 @@ import { CountPill } from "@/components/dashboard/count-pill";
 import { avatarInitials } from "@/components/dashboard/completion-option-button";
 import { IdentityAvatar } from "@/components/dashboard/identity-avatar";
 import { MobileInlineActions } from "@/components/dashboard/mobile-inline-actions";
+import { useMessageReferenceCatalog } from "@/components/dashboard/message-reference-catalog";
 import { listenForOverlayDismissal } from "@/components/dashboard/use-overlay-dismiss";
 import { pagesViewPath } from "@/components/dashboard/workspace-shell-navigation";
 import type {
-  CursorPresence, Discussion, HeadingActions, PageReading, PageSectionActions, SectionNote, SuggestionControl,
+  CursorPresence, Discussion, HeadingActions, PageCompletion, PageReading, PageSectionActions, SectionNote,
+  SuggestionControl,
 } from "./page-editor";
 import { PageAttached, type PageScheduleInput } from "./page-attached";
 import {
@@ -1144,6 +1146,13 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   };
   // A page made to be co-written at once calls its Agent as it opens (co-write-request.ts).
   const coWriteRef = useRef<((harness: string, blockId: string | null) => Promise<void>) | null>(null);
+  // Typing `[[`, `#` and `@` on the page completes as it does in the composer; an `@` Agent writes there.
+  const referenceCatalog = useMessageReferenceCatalog();
+  const completion = useMemo<PageCompletion | undefined>(() => spaceId ? {
+    spaceId, pages: tree.data ?? [], channels: referenceCatalog?.channels ?? [], agents: writers.agents,
+    readPage: (id) => queryClient.fetchQuery(pageDocumentQuery(userId ?? null, spaceId, id, token)),
+    callAgent: (harness, blockId) => void coWriteRef.current?.(harness, blockId || null),
+  } : undefined, [queryClient, referenceCatalog?.channels, spaceId, token, tree.data, userId, writers.agents]);
   useEffect(() => {
     if (!page || !canEdit || !coWriteRef.current) return;
     const harness = takeCoWriteRequest(page.pageId);
@@ -1625,7 +1634,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
                         actions={sectionActions} headingActions={headingActions} sections={sections}
                         onBlocks={(next) => startTransition(() => setEditorBlocks({ session, blocks: next }))}
                         follow={follow} onOpenConversation={openConversation} discussions={discussions}
-                        automations={automationsById} references={references}
+                        automations={automationsById} references={references} completion={completion}
                         focusedConversationId={activeConversationId ?? focused} onFocusConversation={setFocused}
                         onAnchorOffsets={setAnchorTops} cursorPresence={cursorPresence} readGitHubFile={readGitHubFile}
                         mediaUrl={mediaUrl} uploadMedia={uploadMedia} />}

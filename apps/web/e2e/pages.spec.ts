@@ -939,7 +939,18 @@ test("a page: reference in a page's text is a chip with the page's title that op
   await expect(editor.locator(".page-reference-source")).toBeHidden();
   await expect(editor.locator("code")).toHaveText(`page:${planId}`);
   await expect(editor).toContainText(`See page:${unseenId} too.`);
-  await chip.click();
+
+  // `[[` on the page completes a page as in the composer, and the pick is a chip again.
+  await editor.getByText("too.").click();
+  await browser.keyboard.press("End");
+  await browser.keyboard.type(" Next: [[Laun");
+  await expect(browser.getByTestId("page-page-menu")).toContainText("Launch plan");
+  await browser.keyboard.press("Enter");
+  await expect(browser.getByTestId("page-page-menu")).toHaveCount(0);
+  await expect(chip).toHaveCount(2);
+  await expect(chip.nth(1)).toHaveText("Launch plan");
+
+  await chip.first().click();
   await expect(browser).toHaveURL(new RegExp(`/pages\\?page=${planId}`, "u"));
 });
 
