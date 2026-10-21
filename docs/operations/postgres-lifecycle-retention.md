@@ -10,10 +10,15 @@ before dispatching the same broker with `dry_run=false`.
 
 The executor visits the primary database and every configured shard. Deletion
 uses batches of at most 1,000 rows, a per-relation ceiling (10,000 by default,
-100,000 for the existing daily schedule), a shared time budget, a five-second
-statement timeout and `FOR UPDATE SKIP LOCKED`. Each batch commits separately;
-repeating a pass resumes from the remaining eligible rows. Before/after reports
-include row counts, relation sizes and capped eligibility counts, never content.
+1,000,000 for the daily schedule), a 240-second time budget per database, a
+five-second statement timeout and `FOR UPDATE SKIP LOCKED`. Each batch is one
+statement and its own transaction; repeating a pass resumes from the remaining
+eligible rows. The relations take the budget in turns, one batch each per
+round, so no relation goes without: when each ran to the end in a fixed order,
+the outbox and sign-in sessions used the whole 30-second budget from
+2026-10-18 and the scoped replay table, run last, kept ~390,000 expired rows
+and grew from 3.1 GB to 4.1 GB. Before/after reports include row counts,
+relation sizes and eligibility counts capped at 100,001, never content.
 
 Expired idempotency keys, sequence reservations, Agent message executions,
 connector install attempts and scoped command replays retain their existing
