@@ -244,8 +244,10 @@ fact is about.
   (§4.4).
 - **The scrollbar** marks where others are, where discussions are and which
   sections owe an update.
-- **What changed since this person last read the page** is shown to them as
-  a diff, in place. Read means seen: what has been on their screen a moment
+- **What changed since this person last read the page** is offered to them,
+  not shown: the page always opens as it is now, with an attention notice
+  above it saying how many changes there are since they last read it and
+  offering *Show changes*, which shows them as a diff, in place. Read means seen: what has been on their screen a moment
   (1.5 s, tab in front) is read as it was then, and nothing else is. So what
   an Agent writes while they watch is read as it arrives, marked only by the
   Agent's own ink, and what it writes out of view or while they are away is
@@ -263,12 +265,12 @@ fact is about.
   changed lines next to each other one bar and empty lines left out; inside a
   line that changed in part, new words underlined in brass and text taken out
   struck through in faint ink where it stood. Nothing is animated and nothing
-  fades: the diff stays for that visit until its reader ticks *Viewed* above
-  the page, which reads all of it and shows the page as it is, or writes on
-  the page, which only stops marking it; unticking shows the diff again. On a
-  phone the diff is walked from the right edge instead: a mark beside the
-  change in front of the reader counts the changes, steps to the next and says
-  *Viewed*. A first visit shows nothing as changed. Agents have no read state.
+  fades: once opened, the diff stays until its reader clicks *Hide changes*,
+  which keeps offering it, or *Done*, which reads all of it and
+  shows the page as it is, or writes on the page, which only stops marking it.
+  On a phone the opened diff is walked from the right edge instead: a mark
+  beside the change in front of the reader counts the changes, steps to the
+  next and says *Viewed*. A first visit shows nothing as changed. Agents have no read state.
 - **Opening a page draws it as the editor will.** Until the live session has
   synced, the page shows its prefetched document rendered from the same
   document schema and list item view as the editor, with the margin's room
