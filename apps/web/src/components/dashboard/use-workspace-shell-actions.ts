@@ -1511,6 +1511,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     setSelectedPageId: s.setSelectedPageId, setSelectedChannelId, setBrowserPath,
     focusComposer: () => setComposerAutoFocusRequest((current) => current + 1),
     seedComposer,
+    jumpToMessage: queueMessageJump,
   });
 
   function seedQuote(conversationId: string, quote: DiscussionQuote) {

@@ -1,15 +1,15 @@
 import {
   DEFAULT_HUB_URL, HUB_ROUTES, PAGE_DOCUMENT_FRAGMENT, PAGE_MEDIA_OWNER_KIND, WEB_PROXY_ROUTES, normalizeHubUrl, pageMediaRefId,
   spaceVisibilityScope,
-  type AutomationTrigger, type PageAutomationAnchorChange, type PageAwareness, type PageClaim, type PageConversation, type PageDocument,
+  type AutomationTrigger, type PageAutomationAnchorChange, type PageAwareness, type PageBlame, type PageClaim, type PageConversation, type PageDocument,
   type PageGitHubFile, type PageLinkAnchor,
-  type PageLink, type PageRecentChange, type PageRevision, type PageSummary, type PageTreeActivity, type PageTreeAgent,
+  type PageLink, type PageRecentChange, type PageRevision, type PageRevisionMoment, type PageSummary, type PageTreeActivity, type PageTreeAgent,
   type SerializedAutomation,
 } from "@xmatrix/protocol";
 
 export type {
-  PageAwareness, PageClaim, PageConversation, PageDocument, PageLinkAnchor, PageLink, PageRecentChange, PageRevision,
-  PageSummary, PageTreeActivity, PageTreeAgent,
+  PageAwareness, PageBlame, PageClaim, PageConversation, PageDocument, PageLinkAnchor, PageLink, PageRecentChange, PageRevision,
+  PageRevisionMoment, PageSummary, PageTreeActivity, PageTreeAgent,
 };
 import * as decoding from "lib0/decoding";
 import { encodePageSync, encodePageAwareness, readPageSyncReply } from "./page-sync-codec";
@@ -92,6 +92,17 @@ export const pageApi = {
   awareness: (spaceId: string, pageId: string, token: string, signal?: AbortSignal) =>
     xmatrixHubRead<PageAwareness>({ hubPath: `${hubPage(spaceId, pageId, "awareness")}?scope=sections`,
       webUrl: `${WEB_PROXY_ROUTES.space_page(spaceId, pageId)}/awareness?scope=sections`, token, signal }),
+  /** Who wrote each piece of the page's newest revision (page-blame.ts). */
+  blame: (spaceId: string, pageId: string, token: string, signal?: AbortSignal) =>
+    xmatrixHubRead<PageBlame>({ hubPath: hubPage(spaceId, pageId, "blame"),
+      webUrl: `${WEB_PROXY_ROUTES.space_page(spaceId, pageId)}/blame`, token, signal }),
+  /** The message `conversationId` was at when `revision` was written, to open it there; null when not readable. */
+  revisionMoment: (spaceId: string, pageId: string, token: string, revision: number, conversationId: string) => {
+    const query = `?conversation=${encodeURIComponent(conversationId)}`;
+    return xmatrixHubRead<{ moment: PageRevisionMoment | null }>({
+      hubPath: `${hubPage(spaceId, pageId, `revisions/${revision}/moment`)}${query}`,
+      webUrl: `${WEB_PROXY_ROUTES.space_page(spaceId, pageId)}/revisions/${revision}/moment${query}`, token });
+  },
   governance: (spaceId: string, token: string, signal?: AbortSignal) =>
     xmatrixApiRequest<SpaceGovernance>({ url: WEB_PROXY_ROUTES.space_governance(spaceId), token, signal }),
   setGovernance: (spaceId: string, token: string, change: Partial<SpaceGovernance>) =>

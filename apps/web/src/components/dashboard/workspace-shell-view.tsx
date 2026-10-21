@@ -1309,7 +1309,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       onConversationDockChange={setPageConversationDocked}
       onCloseConversation={closePageConversation}
       onExpandConversation={(conversationId) => navigateToChannel(conversationId)}
-      onOpenConversation={(conversationId) => openPageConversation(conversationId)}
+      onOpenConversation={(conversationId, at) => openPageConversation(conversationId, at ? { at } : {})}
       onConversationIntent={resolvePageConversation}
       onDiscuss={({ firstMessage, quote, open, coWrite, planned, ...input }) => startPageConversation(input,
         { ...(firstMessage ? { firstMessage } : {}), ...(quote ? { quote } : {}),

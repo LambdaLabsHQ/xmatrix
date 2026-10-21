@@ -9,7 +9,7 @@ import { requireAuth } from "./index-shared";
 import { publishPreReviewVerdict } from "./github-pre-review";
 import { gitHubFileReferenceHref, gitHubFileReferences, immutableContentObjectKey, pageLineDiff, pageMediaFile,
   pageMediaReferences, parseGitHubFileReference, spaceVisibilityScope, type PageAwareness,
-  type PageChanges, type PageConversation, type PageLink, type PageLinkAnchor, type PageTreeActivity,
+  type PageBlame, type PageChanges, type PageConversation, type PageLink, type PageLinkAnchor, type PageTreeActivity,
   type PublicPage } from "@xmatrix/protocol";
 import { canonicalPageMarkdown } from "@xmatrix/protocol/page-document";
 import type { AuthUser } from "./auth";
@@ -706,6 +706,23 @@ export function registerPageRoutes(app: Hono<{ Bindings: Env }>): void {
         .sort((a, b) => a.revision - b.revision),
       diff: pageLineDiff(canonicalPageMarkdown(before.body), canonicalPageMarkdown(head.body)),
     };
+  }));
+
+  // Who wrote each piece of the head (pages-live-document.md §3, Facts), and the message a revision's
+  // conversation was at when it was written, to open it there.
+  app.get(`${base}/:pageId/blame`, async (c) => run(c, async (): Promise<PageBlame> =>
+    repository(c.env).blame({ requestId: crypto.randomUUID(), spaceId: c.req.param("spaceId"),
+      pageId: c.req.param("pageId"), principal: await principal(c) })));
+
+  app.get(`${base}/:pageId/revisions/:revision/moment`, async (c) => run(c, async () => {
+    const revision = Number(c.req.param("revision"));
+    const conversationId = c.req.query("conversation") ?? "";
+    if (!Number.isSafeInteger(revision) || revision < 1 || !conversationId) {
+      throw new PageControlError("invalid_request", 400, "a revision and its conversation are required");
+    }
+    return { moment: await repository(c.env).revisionMoment({ requestId: crypto.randomUUID(),
+      spaceId: c.req.param("spaceId"), pageId: c.req.param("pageId"), principal: await principal(c), revision,
+      conversationId }) };
   }));
 
   app.get(`${base}/:pageId/history`, async (c) => run(c, async () => {

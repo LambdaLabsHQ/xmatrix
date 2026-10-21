@@ -221,6 +221,27 @@ export interface PageChanges {
   diff: Array<{ kind: "same" | "removed" | "added"; lines: string[] }>;
 }
 
+/**
+ * Who wrote each piece of a page's newest revision (pages-live-document.md §3, Facts; page-blame.ts): `runs`
+ * are `[length, revision, …]` over `body`, and `revisions` says who wrote each revision they name, from
+ * which conversations, and when. `conversations` names those of them the reader can read.
+ */
+export interface PageBlame {
+  pageId: string;
+  revision: number;
+  body: string;
+  runs: number[];
+  revisions: PageRevision[];
+  conversations: Array<{ conversationId: string; name: string }>;
+}
+
+/** The message a revision's conversation was at when the revision was written, to open it there. */
+export interface PageRevisionMoment {
+  conversationId: string;
+  messageId: string;
+  sequence: number;
+}
+
 export interface PageAwareness {
   pageId: string;
   headRevision: number;

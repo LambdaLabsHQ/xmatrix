@@ -36,6 +36,8 @@ export function pageShellActions(input: {
    * discusses, which its first message carries.
    */
   seedComposer: (conversationId: string, seed: { quote?: DiscussionQuote }) => void;
+  /** Brings a message of the conversation into view, wherever its history has it. */
+  jumpToMessage: (conversationId: string, messageId: string, sequence?: number) => void;
 }) {
   const pagesPath = (pageId: string | null, conversationId: string | null) =>
     pagesViewPath(appViewPath(null, "pages", input.currentSpaceId, input.spaces), pageId, conversationId);
@@ -67,8 +69,10 @@ export function pageShellActions(input: {
    * Opens a conversation beside the page it is about (pages-live-document.md
    * §4.4): the page stays, and Back closes the conversation.
    */
-  function openPageConversation(conversationId: string, options: { focus?: boolean } = {}) {
+  function openPageConversation(conversationId: string,
+    options: { focus?: boolean; at?: { messageId: string; sequence: number } } = {}) {
     if (!input.selectedPageId) return;
+    if (options.at) input.jumpToMessage(conversationId, options.at.messageId, options.at.sequence);
     const nextPath = pagesPath(input.selectedPageId, conversationId);
     if (input.selectedChannelId !== conversationId) {
       input.setSelectedChannelId(conversationId);

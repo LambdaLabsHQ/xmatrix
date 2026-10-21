@@ -37,6 +37,8 @@ xmatrix page edit <page-id> --base <revision> -f page.md
 
 `xmatrix page read <page-id> --since <revision>` prints only what changed after a revision, and `xmatrix page history <page-id>` lists the revisions.
 
+To see who wrote a passage in the app, rest the pointer on its paragraph: the margin shows who wrote it and when. Select a passage and a note over it says the same, with the conversation it was written in; clicking that opens the conversation beside the page, at the message it had reached when the passage was written. Text being typed that is not saved yet reads "being written".
+
 ### What belongs on a page
 
 A page says what is true now. Rewrite it in place and remove what is finished or superseded; do not append a log. Evidence such as commit hashes, run ids and timestamps stays in the pull request and the conversation, and the page links to them. Write each fact once and link to it from elsewhere.

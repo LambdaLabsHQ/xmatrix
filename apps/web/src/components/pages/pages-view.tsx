@@ -19,8 +19,10 @@ import { useAuth } from "@/lib/auth-context";
 import { xmatrixQueryKeys } from "@/lib/query/query-keys";
 import {
   PageLiveSession, pageApi, pageChildren,
-  type PageLinkAnchor, type PagePresenceState, type PageRecentChange, type PageSummary, type PageTreeActivity, type PageTreeAgent,
+  type PageLinkAnchor, type PagePresenceState, type PageRecentChange, type PageRevisionMoment, type PageSummary, type PageTreeActivity,
+  type PageTreeAgent,
 } from "@/lib/pages/page-client";
+import type { PageBlameSource } from "./page-blame";
 import { cn } from "@/lib/utils";
 import { ListSkeleton } from "@/components/dashboard/content-skeleton";
 import { CountPill } from "@/components/dashboard/count-pill";
@@ -549,7 +551,8 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   onCloseConversation?: () => void;
   onExpandConversation?: (conversationId: string) => void;
   /** Opens a conversation beside the page (pages-live-document.md §4.4). */
-  onOpenConversation: (conversationId: string) => void;
+  /** Opens a conversation beside the page, at `at` when given. */
+  onOpenConversation: (conversationId: string, at?: { messageId: string; sequence: number }) => void;
   /** The reader rests on one of the page's conversations, which may be opened next. */
   onConversationIntent?: (conversationId: string) => void;
   onDiscuss: (input: { spaceId: string; pageId: string; blockId: string; name: string; restricted: boolean;
@@ -645,6 +648,9 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     article.addEventListener("scroll", readViewport, { passive: true });
   }, [readViewport]);
   const [headRevision, setHeadRevision] = useState<number | null>(null);
+  // The head whose blame is read, for the reads the editor asks for (page-blame.tsx).
+  const blameRevision = useRef(headRevision);
+  blameRevision.current = headRevision;
   // How far this person has read the page, kept by the Hub on every device of theirs (§3.1): the newest
   // revision they have seen whole, and the page as they have seen it when they saw only part of it past that.
   // History shows a dot when the page moved past it, as Google Docs does. `opened` is where it stood as the
@@ -1346,10 +1352,23 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     ...(onConnectGitHub ? { onConnectGitHub: (input: { blockId: string; repository: string }) =>
       onConnectGitHub({ spaceId, pageId: page.pageId, restricted, ...input }).then(() => void links.refetch()) } : {}),
   } : null;
-  const openConversation = (conversationId: string) => {
+  const openConversation = (conversationId: string, at?: PageRevisionMoment) => {
     setDialog(null);
-    onOpenConversation(conversationId);
+    onOpenConversation(conversationId, at ? { messageId: at.messageId, sequence: at.sequence } : undefined);
   };
+  // Who wrote what (page-blame.tsx), read once per head revision when the reader first asks.
+  const blame: PageBlameSource | undefined = spaceId && pageId && !pending ? {
+    read: () => queryClient.fetchQuery({
+      queryKey: xmatrixQueryKeys.domain({ userId: userId ?? "anonymous" }, "page-blame",
+        [spaceId, pageId, blameRevision.current]),
+      queryFn: ({ signal }) => pageApi.blame(spaceId, pageId, token, signal),
+      staleTime: Infinity,
+    }),
+    open: (conversationId, revision) => {
+      void pageApi.revisionMoment(spaceId, pageId, token, revision, conversationId)
+        .then(({ moment }) => openConversation(conversationId, moment ?? undefined), () => openConversation(conversationId));
+    },
+  } : undefined;
   const attachSection = dialog && typeof dialog === "object" && dialog.kind === "attach" ? dialog.blockId : null;
   // Where the document column, and the margin level with it, starts in the article's scrolled content.
   const columnTop = (): number | null => {
@@ -1689,7 +1708,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
                         automations={automationsById} references={references} completion={completion}
                         focusedConversationId={activeConversationId ?? focused} onFocusConversation={setFocused}
                         onAnchorOffsets={setAnchorTops} cursorPresence={cursorPresence} readGitHubFile={readGitHubFile}
-                        mediaUrl={mediaUrl} uploadMedia={uploadMedia} onChanges={setSessionChanges} />}
+                        mediaUrl={mediaUrl} uploadMedia={uploadMedia} onChanges={setSessionChanges} blame={blame} />}
                     </div>
                   </div>
                   {/* The margin holds its room from the start, so the text does not reflow when the page has synced;

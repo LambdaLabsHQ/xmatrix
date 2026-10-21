@@ -31,6 +31,7 @@ import type { ReadGitHubFile } from "./page-github-file-embeds";
 import type { LocalMedia, PageMediaUrl, UploadPageMedia } from "./page-media";
 import { referencesKey, type PageReferenceTargets } from "./page-reference-chips";
 import { PageCommentBox } from "./page-comment-box";
+import { PageBlameLayer, type PageBlameSource } from "./page-blame";
 import type { PageSessionChanges } from "./page-session-changes";
 import {
   addColumnAfter, addRowAfter, anchorOffsets, blockKind, caretBlockAnchor, deleteColumn, deleteRow, deleteTable, discussionsKey,
@@ -250,8 +251,10 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
   onOpenConversation, discussions, automations, headingActions, focusedConversationId = null, onFocusConversation,
   onAnchorOffsets, cursorPresence, onReady, readerBaseline = null, readerShown = false, commentInMargin = false, onReaderChanges, onWrite, readFrom, reading,
   suggestions = null, onSuggestions, suggestionControl, readGitHubFile, references, completion, placeholder, mediaUrl,
-  uploadMedia, onChanges }: {
+  uploadMedia, onChanges, blame }: {
   session: PageLiveSession;
+  /** Who wrote what, shown where the reader rests or selects; without it the page does not say. */
+  blame?: PageBlameSource;
   /** What an empty page asks for instead of its title: someone co-writing it asks for its first line. */
   placeholder?: string;
   canEdit: boolean;
@@ -883,6 +886,7 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
             }} />
         </div>
       )}
+      {blame && <PageBlameLayer view={view} frame={frame} source={blame} inMargin={commentInMargin} />}
       {trigger && menuAt && (
         <div className="absolute z-20 w-64" style={{ left: menuAt.left, top: menuAt.bottom + 4 }}>
         <PaperPopover role="listbox" aria-label={MENU_LABELS[trigger.kind]} data-testid={`page-${trigger.kind}-menu`}

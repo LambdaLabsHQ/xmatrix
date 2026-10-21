@@ -12,8 +12,9 @@ import { requireAgentChannelAccess, type AgentChannelRunProof } from "./agent-ch
 import { PostgresChannelSpaceDirectory, PostgresSpacePlacementDirectory } from "./placement.js";
 import { reconcilePageAutomations, removePageAutomations } from "./automation-page-anchor.js";
 import { keepSectionChanges, readRevisionBodies, walkSectionChanges, type SectionRevisionRow } from "./page-section-changes.js";
+import { keepBlames, walkBlame, type BlameRevisionRow } from "./page-blame.js";
 import type {
-  PageAuthor, PageAutomationAnchorChange, PageBlockAwareness, PageClaim, PageDocument, PageLink, PageLinkAnchor, PageOwedUpdate, PageRecentChange, PageRevision, PageSearchHit, PageSummary, PageTreeAgent, PublicPage,
+  PageAuthor, PageAutomationAnchorChange, PageBlame, PageBlockAwareness, PageClaim, PageDocument, PageLink, PageLinkAnchor, PageOwedUpdate, PageRecentChange, PageRevision, PageRevisionMoment, PageSearchHit, PageSummary, PageTreeAgent, PublicPage,
 } from "@xmatrix/protocol";
 
 export type { PageAuthor, PageClaim, PageDocument, PageLink, PageRevision, PageSummary, PublicPage };
@@ -57,6 +58,8 @@ const MAX_HISTORY = 200;
 const OWED_WINDOW_DAYS = 7;
 /** How far back a section's last change is looked for; older changes read as unknown. */
 const BLOCK_UPDATE_REVISIONS = 30;
+/** Conversations a page's blame names, the newest revisions' first. */
+const MAX_BLAME_CONVERSATIONS = 200;
 /** Suggestions older than this no longer wait on the page; History still has them. */
 const SUGGESTION_WAIT_DAYS = 14;
 /** At most this many suggestions wait on a page at once. */
@@ -1026,6 +1029,90 @@ export class PostgresPageRepository {
   }
 
   /**
+   * Who wrote each piece of the head (page-blame.ts): derived along the page's line from its newest revision
+   * already derived, and kept for the next read.
+   */
+  async blame(input: { requestId: string; spaceId: string; pageId: string; principal: PagePrincipal }):
+    Promise<PageBlame> {
+    const spaceId = bounded(input.spaceId, "spaceId");
+    const pageId = bounded(input.pageId, "pageId");
+    const requestId = bounded(input.requestId, "requestId");
+    const { rows, userId } = await this.inSpace(requestId, "page.blame", spaceId, async (tx) => {
+      const actor = await pageActor(tx, spaceId, input.principal, false);
+      const row = await this.page(tx, spaceId, actor, pageId, "read");
+      // The page's line, from its newest revision whose blame is kept, or from its first.
+      const rows = await tx.query<BlameRevisionRow>({
+        name: "page_blame_line_v1",
+        text: `WITH line AS (SELECT revision, blame FROM data.page_revisions
+            WHERE space_id=$1 AND page_id=$2 AND revision <= $3 AND kind NOT IN ('suggestion','purge'))
+          SELECT revision, blame FROM line
+          WHERE revision >= COALESCE((SELECT max(revision) FROM line WHERE blame IS NOT NULL), 0)
+          ORDER BY revision`,
+        values: [spaceId, pageId, Number(row.head_revision)], maxRows: MAX_GIT_REVISIONS,
+      });
+      return { rows, userId: actor.userId };
+    });
+    const head = await walkBlame(rows, (revisions) =>
+      this.inSpace(requestId, "page.blame.bodies", spaceId, (tx) => readRevisionBodies(tx, spaceId, pageId, revisions)),
+      (derived) => this.inSpace(requestId, "page.blame.keep", spaceId, (tx) => keepBlames(tx, spaceId, pageId, derived)));
+    if (!head) throw new PageControlError("page_not_found", 404);
+    const named = new Set<number>();
+    for (let index = 1; index < head.runs.length; index += 2) named.add(head.runs[index]!);
+    const { revisions, conversations } = named.size === 0 ? { revisions: [], conversations: [] }
+      : await this.inSpace(requestId, "page.blame.revisions", spaceId, async (tx) => {
+        const revisions = (await tx.query<RevisionRow>({
+          name: "page_blame_revisions_v1",
+          text: `SELECT revision,kind,authors_json,conversation_ids,based_on_revision,created_at
+            FROM data.page_revisions WHERE space_id=$1 AND page_id=$2 AND revision = ANY($3::bigint[])`,
+          values: [spaceId, pageId, [...named].map(String)], maxRows: named.size,
+        })).map(revisionOf);
+        // The newest revisions' conversations first, when there are more than are described.
+        const ids = [...new Set([...revisions].sort((a, b) => b.revision - a.revision)
+          .flatMap((revision) => revision.conversationIds))].slice(0, MAX_BLAME_CONVERSATIONS);
+        const conversations = ids.length === 0 ? [] : (await tx.query<QueryResultRow & { channel_id: string; name: string | null }>({
+          name: "page_blame_conversations_v1",
+          text: `SELECT c.channel_id, c.name FROM data.channels c
+            WHERE c.space_id=$1 AND c.channel_id = ANY($2::text[])
+              AND ${channelCapabilityPredicate({ capability: "message_content_read", channelAlias: "c",
+                principalKindSql: "'user'", principalIdSql: "$3" })}`,
+          values: [spaceId, ids, userId], maxRows: ids.length,
+        })).map((row) => ({ conversationId: row.channel_id, name: row.name ?? "" }));
+        return { revisions, conversations };
+      });
+    return { pageId, revision: head.revision, body: head.body, runs: head.runs, revisions, conversations };
+  }
+
+  /**
+   * The message `conversationId` was at when `revision` of the page was written: its newest message sent by
+   * then. Null unless the revision came from that conversation and the reader can read it.
+   */
+  async revisionMoment(input: { requestId: string; spaceId: string; pageId: string; principal: PagePrincipal;
+    revision: number; conversationId: string }): Promise<PageRevisionMoment | null> {
+    const spaceId = bounded(input.spaceId, "spaceId");
+    const pageId = bounded(input.pageId, "pageId");
+    const conversationId = bounded(input.conversationId, "conversationId");
+    return this.inSpace(bounded(input.requestId, "requestId"), "page.revision-moment", spaceId, async (tx) => {
+      const actor = await pageActor(tx, spaceId, input.principal, false);
+      await this.page(tx, spaceId, actor, pageId, "read");
+      const rows = await tx.query<QueryResultRow & { message_id: string; timeline_sequence: string | number }>({
+        name: "page_revision_moment_v1",
+        text: `SELECT m.message_id, m.timeline_sequence
+          FROM data.page_revisions r
+          JOIN data.channels c ON c.space_id=r.space_id AND c.channel_id=$4
+          CROSS JOIN LATERAL (SELECT message_id, timeline_sequence FROM data.messages m
+            WHERE m.space_id=c.space_id AND m.channel_id=c.channel_id AND m.deleted_at IS NULL AND m.sent_at <= r.created_at
+            ORDER BY m.timeline_sequence DESC LIMIT 1) m
+          WHERE r.space_id=$1 AND r.page_id=$2 AND r.revision=$3 AND $4 = ANY(r.conversation_ids)
+            AND ${channelCapabilityPredicate({ capability: "message_content_read", channelAlias: "c",
+              principalKindSql: "'user'", principalIdSql: "$5" })}`,
+        values: [spaceId, pageId, input.revision, conversationId, actor.userId], maxRows: 1,
+      });
+      const row = rows[0];
+      return row ? { conversationId, messageId: row.message_id, sequence: Number(row.timeline_sequence) } : null;
+    });
+  }
+
+  /**
    * The pages the reader can read that changed last, newest first, each with
    * its latest change: the section and the first text it added, read from
    * the page's last two revisions.
@@ -1686,12 +1773,13 @@ export class PostgresPageRepository {
           WHERE space_id=$1 AND page_id=$2 AND strpos(body,$3) > 0 RETURNING 1) SELECT count(*)::int AS n FROM redacted`,
         values: [spaceId, pageId, needle, replacement], maxRows: 1,
       });
-      // What the page's revisions changed was derived from bodies this may have rewritten, and can name
-      // the removed text's headings: it is derived again from the redacted bodies (page-section-changes.ts).
+      // What the page's revisions changed, and who wrote what, were derived from bodies this may have
+      // rewritten, and can name the removed text's headings or measure it: they are derived again from the
+      // redacted bodies (page-section-changes.ts, page-blame.ts).
       await tx.query({
-        name: "page_purge_forget_section_changes_v1",
-        text: `UPDATE data.page_revisions SET changed_blocks=NULL
-          WHERE space_id=$1 AND page_id=$2 AND changed_blocks IS NOT NULL`,
+        name: "page_purge_forget_derivations_v1",
+        text: `UPDATE data.page_revisions SET changed_blocks=NULL, blame=NULL
+          WHERE space_id=$1 AND page_id=$2 AND (changed_blocks IS NOT NULL OR blame IS NOT NULL)`,
         values: [spaceId, pageId], maxRows: 0,
       });
       return { redactedRevisions: Number(rows[0]?.n ?? 0) };

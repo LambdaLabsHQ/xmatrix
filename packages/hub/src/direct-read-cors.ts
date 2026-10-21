@@ -17,7 +17,8 @@ const DIRECT_ROUTES: ReadonlyArray<{ method: "GET" | "POST"; path: RegExp }> = [
   { method: "GET", path: /^\/api\/spaces\/[^/]+\/pages$/u },
   { method: "GET", path: /^\/api\/spaces\/[^/]+\/pages\/recent-changes$/u },
   { method: "GET", path: /^\/api\/spaces\/[^/]+\/pages\/[^/]+$/u },
-  { method: "GET", path: /^\/api\/spaces\/[^/]+\/pages\/[^/]+\/(?:awareness|claims|automations|suggestions|read)$/u },
+  { method: "GET", path: /^\/api\/spaces\/[^/]+\/pages\/[^/]+\/(?:awareness|blame|claims|automations|suggestions|read)$/u },
+  { method: "GET", path: /^\/api\/spaces\/[^/]+\/pages\/[^/]+\/revisions\/[0-9]+\/moment$/u },
   { method: "GET", path: /^\/api\/spaces\/[^/]+\/page-links(?:\/agents)?$/u },
   { method: "GET", path: /^\/api\/channels\/[^/]+\/history$/u },
   // A ticket names no more than the bearer's own access, and lapses unused within a minute.

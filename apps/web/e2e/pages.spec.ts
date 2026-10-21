@@ -1490,6 +1490,67 @@ test("a page's history shows what each revision changed, colored, and the conver
   await browser.screenshot({ path: test.info().outputPath("pages-version-history.png") });
 });
 
+test("who wrote a passage shows over it, and opens the conversation it was written in at that moment", async ({ page: browser }) => {
+  await browser.setViewportSize({ width: 1600, height: 900 });
+  await stubPages(browser, [page("p-relay", null, "Relay", "V")]);
+  await fixtureJson(browser, "page-links", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\?.*$/u, { links: [] });
+  // Daniel wrote the page; claude, in a conversation, wrote "In progress".
+  const at = BODY.indexOf("In progress");
+  const daniel = { kind: "user", id: "u-daniel", label: "Daniel" };
+  const claude = { kind: "agent", id: "a", label: "claude:1" };
+  const written = (n: number, author: typeof daniel, conversationIds: string[], hoursAgo: number) => ({ revision: n,
+    kind: "edit", authors: [author], conversationIds, basedOnRevision: n - 1,
+    createdAt: new Date(Date.now() - hoursAgo * 3_600_000).toISOString() });
+  await fixtureJson(browser, "page-blame", /\/pages\/p-relay\/blame$/u, {
+    pageId: "p-relay", revision: 3, body: BODY,
+    runs: [at, 1, "In progress".length, 2, BODY.length - at - "In progress".length, 1],
+    revisions: [written(1, daniel, [], 72), written(2, claude, [E2E_CHANNEL.id], 2)],
+    conversations: [{ conversationId: E2E_CHANNEL.id, name: E2E_CHANNEL.name }],
+  });
+  await fixtureJson(browser, "revision-moment", /\/pages\/p-relay\/revisions\/2\/moment\?conversation=/u,
+    { moment: { conversationId: E2E_CHANNEL.id, messageId: "m-asked", sequence: 1 } });
+  await fixtureJson(browser, "blame-history", `**/api/xmatrix/channels/${E2E_CHANNEL.id}/history**`, {
+    messages: [{ messageId: "m-asked", channelId: E2E_CHANNEL.id, sequence: 1, body: "Mark Status in progress",
+      sentAt: NOW, reactions: [], annotations: [], attachments: [], from: E2E_USER_SENDER }],
+    hasMore: false, historyHeadSequence: 1 });
+  const editor = await openLivePage(browser);
+
+  // Resting on a paragraph names who wrote it, level with it in the margin.
+  await editor.getByText("none", { exact: true }).hover();
+  const line = browser.getByTestId("page-blame-line");
+  await expect(line).toContainText("Daniel");
+  await expect(line).toContainText("3d ago");
+  const [lineAt, noneAt] = [(await line.boundingBox())!, (await editor.getByText("none", { exact: true }).boundingBox())!];
+  expect(lineAt.x).toBeGreaterThan(noneAt.x + noneAt.width);
+  expect(Math.abs(lineAt.y - noneAt.y)).toBeLessThan(12);
+
+  // A selected passage says who wrote it on a note over it, with the conversation it came from.
+  await selectLine(browser, "In progress");
+  const note = browser.getByTestId("page-blame-note");
+  await expect(note).toContainText("claude:1");
+  await expect(note).toContainText("2h ago");
+  const [noteAt, passageAt] = [(await note.boundingBox())!, (await editor.getByText("In progress").boundingBox())!];
+  expect(noteAt.y + noteAt.height).toBeLessThanOrEqual(passageAt.y + 2);
+  expect(Math.abs(noteAt.x - passageAt.x)).toBeLessThan(16);
+  await expect(browser.getByTestId("page-comment-box"), "the comment box still opens beside it").toBeVisible();
+  await browser.screenshot({ path: test.info().outputPath("pages-blame-note.png") });
+
+  // Several writers: the note opens to each of them.
+  await editor.locator("h2", { hasText: "Status" }).click({ clickCount: 3 });
+  await browser.keyboard.down("Shift");
+  await editor.getByText("In progress", { exact: true }).click();
+  await browser.keyboard.up("Shift");
+  await expect(note).toContainText("claude:1, Daniel");
+  await note.getByRole("button", { expanded: false }).click();
+  await expect(note.locator("li")).toHaveCount(2);
+  await browser.screenshot({ path: test.info().outputPath("pages-blame-writers.png") });
+
+  // Its conversation opens beside the page, at the message it was at when the passage was written.
+  await note.getByRole("button", { name: `in ${E2E_CHANNEL.name}` }).click();
+  await expect.poll(async () => (await fixtureRequestRecords(browser, "revision-moment")).length).toBe(1);
+  await expect(browser.getByTestId("page-conversation").locator("[data-message-body='m-asked']")).toBeVisible();
+});
+
 test("two people co-edit a page live: each sees the other's typing and cursor, and the session gets both", async ({ page: first, browser }) => {
   const server = pageDocument(BODY);
   const second = await browser.newContext({ ...E2E_DESKTOP_CONTEXT, baseURL: test.info().project.use.baseURL });

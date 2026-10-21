@@ -117,6 +117,21 @@ document change. The Web reads a page's sections alone
 (`GET …/awareness?scope=sections`): claims, discussions and presence reach it
 live on their own.
 
+Who wrote each passage is the same attribution read finer: every character of
+a revision is owed to the first revision in the page's line that put it there,
+as `git blame` walks commits (`page-blame.ts`). A revision's blame is derived
+from the revision before it, comparing markdown lines and then the words of the
+lines that changed, never parsed documents, so marking words bold leaves them
+with whoever wrote them and moved text reads as its mover's. It is derived once
+and kept on the revision (`page_revisions.blame`), batch by batch, each batch
+kept only while its bodies and the blame it was derived from are still the ones
+read; a purge forgets it with `changed_blocks`. The Web draws the head's blame on
+the head's document through the markdown's source positions and carries it to
+the live document, so what is typed since reads as being written. A paragraph
+rested on shows its writers in the margin; a selected passage shows them on a
+note over it, each with the conversation the revision came from, opened beside
+the page at the message it had reached when the revision was written.
+
 - **Intent line.** An Agent on a block publishes one line of what it is
   doing: the note on its claim, or else the title of the conversation its Run
   is in plus its invocation state. For example `claude:3 · Working · adding

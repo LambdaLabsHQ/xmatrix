@@ -8,6 +8,7 @@ import { createAuthorityDatabase } from "../dist/index.js";
 import { PostgresPageRepository, pageNameFrom, pagePositionBetween } from "../dist/page-control.js";
 import { describePageConversations } from "../dist/page-conversations.js";
 import { keepSectionChanges, walkSectionChanges } from "../dist/page-section-changes.js";
+import { keepBlames, walkBlame } from "../dist/page-blame.js";
 
 
 
@@ -735,6 +736,122 @@ integration("a section change derived from a body that changed before it was kep
       AND revision=1`, [ids.space, page.pageId])).rows[0].body);
     assert.equal(await keep(), 1, "from the bodies as they are now, it is");
     assert.equal(await keep(), 0, "and kept once");
+  } finally {
+    await cleanup(client, ids);
+    await client.end();
+  }
+});
+
+/** Each revision's text in `body`, as `[text, revision]` pieces. */
+function blamed({ body, runs }) {
+  const out = [];
+  let at = 0;
+  for (let index = 0; index < runs.length; index += 2) {
+    out.push([body.slice(at, at + runs[index]), runs[index + 1]]);
+    at += runs[index];
+  }
+  return out;
+}
+
+integration("who wrote each piece of a page reads the same once kept, and a purge forgets it", async () => {
+  const fixture = await pageTest("blame");
+  const { client, ids, pages, owner } = fixture;
+  try {
+    const r = () => crypto.randomUUID();
+    const base = { spaceId: ids.space, principal: owner };
+    const page = await writtenPage(fixture, [
+      "# Launch\n\nShip in May with Secret plan.\n",
+      "# Launch\n\nShip in June with Secret plan.\n",
+      "# Launch\n\nShip in June with Secret plan.\n\nThen measure.\n",
+    ]);
+    const read = async () => blamed(await pages.blame({ requestId: r(), ...base, pageId: page.pageId }));
+    const kept = async () => (await client.query(`SELECT revision, blame FROM data.page_revisions
+      WHERE space_id=$1 AND page_id=$2 ORDER BY revision`, [ids.space, page.pageId])).rows
+      .map((row) => [Number(row.revision), row.blame !== null]);
+    const expected = [["# Launch\n\nShip in ", 1], ["June", 2], [" with Secret plan.\n", 1], ["\nThen measure.\n", 3]];
+    assert.deepEqual(await read(), expected, "derived from the bodies");
+    assert.deepEqual(await kept(), [[1, true], [2, true], [3, true]], "each revision's blame is kept");
+    const result = await pages.blame({ requestId: r(), ...base, pageId: page.pageId });
+    assert.deepEqual(result.revisions.map((revision) => [revision.revision, revision.authors[0].id]).sort(),
+      [[1, ids.owner], [2, ids.owner], [3, ids.owner]], "with who wrote each revision it names");
+    assert.deepEqual(await read(), expected, "read again from what was kept");
+
+    await pages.edit({ requestId: r(), ...base, pageId: page.pageId, baseRevision: 3,
+      body: "# Launch\n\nShip in June with Secret plan.\n\nThen measure twice.\n" });
+    assert.deepEqual((await read()).at(-2), [" twice", 4], "a new revision is derived from the kept one before it");
+
+    await pages.purge({ requestId: r(), ...base, pageId: page.pageId, needle: "Secret plan", replacement: "the plan" });
+    assert.deepEqual(await kept(), [[1, false], [2, false], [3, false], [4, false]],
+      "a purge forgets every blame, which measures the text it rewrote");
+    assert.deepEqual(await read(), [["# Launch\n\nShip in ", 1], ["June", 2], [" with the plan.\n", 1],
+      ["\nThen measure", 3], [" twice", 4], [".\n", 3]], "derived again from the redacted bodies");
+  } finally {
+    await cleanup(client, ids);
+    await client.end();
+  }
+});
+
+integration("a blame derived from a body, or a base blame, that changed before it was kept is not kept", async () => {
+  const fixture = await pageTest("blame-race");
+  const { client, ids } = fixture;
+  try {
+    const r = () => crypto.randomUUID();
+    const page = await writtenPage(fixture, ["# Plan\n\nShip in May.\n", "# Plan\n\nShip in June.\n"]);
+    const readBodies = async (revisions) => {
+      const read = await client.query(`SELECT revision, body FROM data.page_revisions
+        WHERE space_id=$1 AND page_id=$2 AND revision = ANY($3::bigint[])`, [ids.space, page.pageId, revisions]);
+      return new Map(read.rows.map((row) => [Number(row.revision), row.body]));
+    };
+    const batches = [];
+    await walkBlame([{ revision: 1, blame: null }, { revision: 2, blame: null }], readBodies, async (derived) => {
+      batches.push(derived);
+    });
+    assert.equal(batches.length, 1);
+    const [derived] = batches;
+    // A purge rewrites the earlier body between the read and the keep.
+    await client.query(`UPDATE data.page_revisions SET body=replace(body, 'Plan', 'Goal')
+      WHERE space_id=$1 AND page_id=$2 AND revision=1`, [ids.space, page.pageId]);
+    const db = database(client);
+    const keep = (item) => db.transaction({ requestId: r(), operation: "test.keep" }, (tx) =>
+      keepBlames(tx, ids.space, page.pageId, item));
+    assert.equal(await keep(derived), 0, "a blame derived from a body since rewritten is not kept");
+    const bodies = await readBodies([1, 2]);
+    assert.equal(await keep({ ...derived, bodies }), 2, "from the bodies as they are now, it is");
+    // A base whose kept blame is no longer the one derived from: a purge forgot it, or it was derived again.
+    await client.query(`UPDATE data.page_revisions SET blame=NULL WHERE space_id=$1 AND page_id=$2 AND revision=2`,
+      [ids.space, page.pageId]);
+    const next = { base: { revision: 1, runs: [999, 1] }, blames: [{ revision: 2, runs: [1, 2] }], bodies };
+    assert.equal(await keep(next), 0, "not from a base blame that is not the kept one");
+  } finally {
+    await cleanup(client, ids);
+    await client.end();
+  }
+});
+
+integration("a revision's moment is its conversation's newest message by then, for readers of that conversation", async () => {
+  const fixture = await pageTest("blame-moment");
+  const { client, ids, pages, owner, agent } = fixture;
+  try {
+    const r = () => crypto.randomUUID();
+    const { page } = await pages.create({ requestId: r(), spaceId: ids.space, principal: owner, title: "Goals",
+      body: "# Goals\n\nNext.\n" });
+    const message = (id, sequence, sentAt) => client.query(`INSERT INTO data.messages
+      (space_id,channel_id,message_id,timeline_sequence,entity_version,author_kind,author_id,
+       message_kind,content_hash,payload_kind,payload_ref,sent_at,updated_at,search_rank_sequence,legacy_body,created_at)
+      VALUES ($1,$2,$3,$4,1,'user',$5,'message','hash','inline','inline',$6,$6,$3,'hello',$6)`,
+    [ids.space, ids.open, id, sequence, ids.member, sentAt]);
+    await message("asked", 1, new Date(Date.now() - 60_000));
+    await pages.edit({ requestId: r(), spaceId: ids.space, pageId: page.pageId, principal: agent, baseRevision: 1,
+      conversationIds: [ids.open], body: "# Goals\n\nShipped.\n" });
+    await message("later", 2, new Date(Date.now() + 60_000));
+    const moment = (principal, conversationId, revision = 2) => pages.revisionMoment({ requestId: r(),
+      spaceId: ids.space, pageId: page.pageId, principal, revision, conversationId });
+    assert.deepEqual(await moment(owner, ids.open), { conversationId: ids.open, messageId: "asked", sequence: 1 });
+    assert.equal(await moment(owner, ids.open, 1), null, "revision 1 did not come from that conversation");
+    assert.equal(await moment(owner, ids.closed), null);
+    const blame = await pages.blame({ requestId: r(), spaceId: ids.space, pageId: page.pageId, principal: owner });
+    assert.deepEqual(blame.conversations, [{ conversationId: ids.open, name: ids.open }],
+      "the blame names the conversations its revisions came from");
   } finally {
     await cleanup(client, ids);
     await client.end();
