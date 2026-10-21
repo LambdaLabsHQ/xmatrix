@@ -128,10 +128,11 @@ jobs:
       # typecheck and deploy bundle (hub-check) and Linux Clippy
       # (rust-clippy). A release train runs the full tier for what it ships:
       # the package and script tests and the duplicate scan, and the Hub
-      # suite with its PostgreSQL tests and the Web browser shards and
-      # performance budget when it ships those. Client suites (Rust tests on
-      # Linux and Windows, Desktop, Android) gate the stable train that ships
-      # a client, not each beta (scripts/ci-areas.mjs, releaseOutputs).
+      # suite with its PostgreSQL tests when it ships the Hub. The Web suites
+      # (checked build, browser shards, performance budget) and the client
+      # suites (Rust tests on Linux and Windows, Desktop, Android) gate the
+      # stable train that ships them, not each beta (scripts/ci-areas.mjs,
+      # releaseOutputs).
       # Merging runs nothing more; Public Snapshot CI runs every partition on
       # manual dispatch. Only full-tier jobs carry ledgered names, so a
       # release reuses only results the full tier earned.
