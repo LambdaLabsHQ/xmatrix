@@ -15,29 +15,58 @@ A deliberate exception is a `#[expect(lint, reason = "…")]` or an
 `eslint-disable-next-line` comment that says why. The existing Web ESLint rules
 remain available through its package's lint command.
 
+## CI tiers
+
+CI validates in two tiers, chosen in one place: the `changes` job of `ci.yml`
+(its `tier` output). Pull request CI is the fast tier, a pre-merge check whose
+jobs each finish in about two minutes including setup:
+
+- `node-static`: Oxlint, synchronized versions, dependency reachability,
+  unused imports, duplicate CSS rules and the source line limit;
+- `web-unit` and `web-build`: the Web unit tests, and the checked production
+  build that is the Web lint and typecheck;
+- `hub-check`: the Hub typecheck and its deploy bundle;
+- `rust-clippy`: Clippy on the complete Rust workspace and all targets.
+
+Every push to `main` (Public Snapshot CI) and every release train runs the full
+tier: all of the above plus the protocol, billing, PostgreSQL package and
+script tests, the duplicate-code scan, the browser shards and performance
+budget, the Hub suite, the Rust tests on Linux and Windows, Desktop and
+Android. Only full-tier jobs carry ledgered names (`scripts/ci-ledger.mjs`), so
+the release train reuses only results the full tier earned and still blocks on
+every gate its scope selects. When the full run on `main` fails,
+`post-merge-ci-notice.yml` comments on the pull request that produced the
+commit, listing the failing jobs and the run; the comment reaches the authoring
+Agent's subscribed channel. That workflow runs the default branch's code with
+only `actions: read` and `pull-requests: write`.
+
 ## Hosted runners
 
 `ci.yml` defaults to GitHub-hosted `ubuntu-24.04` and `windows-2025`.
-The public repository has no self-hosted runners. Hosted Hub validation uses
-one static job and three test-file shards; Web uses one primary job, four
-functional browser shards, and separate short and sustained performance jobs.
-The primary job runs the unit tests and checked production build; both
-performance jobs start alongside it on their own VMs, with the sustained job
-running the four-minute `@sustained` budget. Both
-performance jobs retain one worker, the same sampling windows and assertions.
-Unsharded local runs still execute every performance case. Together with Node,
-desktop, Android, both Rust jobs, the selector and aggregate, the full matrix
-has 18 jobs. The primary job also saves its Next.js and Turbo build caches
-without waiting for browser sampling to finish.
+The public repository has no self-hosted runners. In the full tier, hosted Hub
+validation uses one static job and three test-file shards; Web uses one primary
+job, four functional browser shards and a performance job. The primary job runs
+the unit tests and checked production build; the performance job starts
+alongside it on its own VM with one worker. Unsharded local runs still execute
+every performance case. The Node checks and the duplicate scan run as two jobs
+beside each other. Together with Desktop, Android, both Rust jobs, the selector
+and aggregate, the full matrix has 18 jobs. The primary job also saves its
+Next.js and Turbo build caches without waiting for browser sampling to finish.
+
+Each hosted job carries PNPM's lockfile supply-chain verification record
+(`lockfile-verified.jsonl`) in the Actions cache, keyed by the lockfile, the
+workspace policy files and the PNPM version. PNPM itself skips its per-entry
+registry check only for a lockfile with the same content hash verified under a
+policy at least as strict; any other lockfile or policy is checked in full.
 Reusable callers can set `linux_runner`, `offload_runner`, and `windows_runner`
 to a JSON runner label or array, for example `'"ubuntu-24.04"'`. These inputs
 select compute only; they do not change the tests or release authorization.
 Hosted jobs use the same content-addressed CI ledger as release gates; a
 missing or unreachable ledger runs the complete selected checks.
-The first-wave Node job queries that dependency-free ledger before bootstrapping
-PNPM or installing workspace dependencies. A hit finishes without installation;
-a miss or unavailable ledger installs dependencies and runs the full Node and
-duplicate checks as usual.
+The Node job queries that dependency-free ledger before bootstrapping PNPM or
+installing workspace dependencies. A hit finishes without installation; a miss
+or unavailable ledger installs dependencies and runs its tier's Node checks as
+usual.
 
 The reusable workflow's optional `ref` accepts only its triggering commit or
 that commit's verified release stamp. Each job first checks out the triggering
@@ -53,8 +82,8 @@ do not validate the Hub's message coordination and authority fixtures.
 
 `public-ci.yml` runs the full shared matrix on a public snapshot's `main` push.
 Its manual dispatch also verifies that path in the private repository. A
-private `main` push skips this workflow's only job. Public PRs use `ci.yml` and
-its hosted defaults, including the aggregate `ci` result.
+private `main` push skips this workflow's only job. Public PRs use `ci.yml`'s
+fast tier and its hosted defaults, including the aggregate `ci` result.
 
 The repository keeps CI, the content ledger, release workflows and their local
 composite actions together. External pull requests are closed in favour of

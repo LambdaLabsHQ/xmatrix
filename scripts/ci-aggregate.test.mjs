@@ -25,6 +25,7 @@ const defaultEnvironment = {
   ANDROID_CHANGED: "false",
   ANDROID_RESULT: "skipped",
   CLI_CHANGED: "false",
+  CLI_WINDOWS_CHANGED: "false",
   RUST_CLI_RESULT: "skipped",
   RUST_CLI_WINDOWS_RESULT: "skipped",
   DUPLICATES_CHANGED: "false",
@@ -98,41 +99,6 @@ test("aggregate CI materializes files hidden by stale sparse checkout state", ()
   }
 });
 
-function jobBlock(name) {
-  return workflow.match(
-    new RegExp(`^  ${name}:\\r?\\n([\\s\\S]*?)(?=^  [a-z][a-z0-9-]*:\\r?$)`, "mu"),
-  )?.[0];
-}
-
-test("the shared Node gate starts before change detection finishes", () => {
-  const nodeJob = jobBlock("node-checks");
-  assert.ok(nodeJob, "shared Node job is missing");
-  assert.ok(nodeJob.includes("run: node scripts/ci.mjs node-checks"), "shared Node gate command changed");
-  assert.doesNotMatch(nodeJob, /^    needs: changes$/mu, "shared Node waits for changes");
-  assert.doesNotMatch(nodeJob, /^    if: needs\.changes\.outputs\./mu, "shared Node is selector-gated");
-});
-
-test("the Hub gate runs on every push and on pull requests that reach the Hub", () => {
-  const hubJob = jobBlock("hub");
-  assert.ok(hubJob, "Hub job is missing");
-  // Persistent runners size the Hub pool from the host; only an ephemeral
-  // hosted VM, which runs the job alone, pins it.
-  for (const line of hubJob.match(/^.*XMATRIX_HUB_TEST_(?:CONCURRENCY|HOST_PRESSURE):.*$/gmu) ?? []) {
-    assert.match(line, /runner\.environment == 'github-hosted' && '[^']+' \|\| ''/u, line);
-  }
-  assert.doesNotMatch(hubJob, /XMATRIX_HUB_TEST_BATCH_SIZE/u);
-  assert.ok(hubJob.includes("run: node scripts/ci.mjs ${{ matrix.partition }}"), "Hub gate command changed");
-  assert.match(hubJob, /^    needs: changes$/mu);
-  assert.match(
-    hubJob,
-    /^    if: needs\.changes\.outputs\.hub == 'true' && !contains\(needs\.changes\.outputs\.reused, ' hub-suite '\)$/mu,
-  );
-  // Only a pull request selects the Hub by its diff.
-  const changesJob = jobBlock("changes");
-  assert.ok(changesJob.includes('if [ "$EVENT_NAME" != "pull_request" ]; then'));
-  assert.ok(changesJob.includes("sed 's/^hub=.*/hub=true/'"));
-});
-
 test("a selected partition the ledger reused may be skipped", () => {
   const reused = run({ WEB_CHANGED: "true", WEB_RESULT: "skipped", REUSED: " web " });
   assert.equal(reused.status, 0, reused.stderr);
@@ -145,8 +111,9 @@ test("a selected partition the ledger reused may be skipped", () => {
   const failed = run({ WEB_CHANGED: "true", WEB_RESULT: "failure", REUSED: " web " });
   assert.notEqual(failed.status, 0);
   assert.match(failed.stderr, /web-required=failure/u);
-  assert.notEqual(run({ CLI_CHANGED: "true", RUST_CLI_RESULT: "skipped", RUST_CLI_WINDOWS_RESULT: "success", REUSED: " rust-cli-windows " }).status, 0);
-  assert.equal(run({ CLI_CHANGED: "true", RUST_CLI_RESULT: "success", RUST_CLI_WINDOWS_RESULT: "skipped", REUSED: " rust-cli-windows " }).status, 0);
+  const cli = { CLI_CHANGED: "true", CLI_WINDOWS_CHANGED: "true" };
+  assert.notEqual(run({ ...cli, RUST_CLI_RESULT: "skipped", RUST_CLI_WINDOWS_RESULT: "success", REUSED: " rust-cli-windows " }).status, 0);
+  assert.equal(run({ ...cli, RUST_CLI_RESULT: "success", RUST_CLI_WINDOWS_RESULT: "skipped", REUSED: " rust-cli-windows " }).status, 0);
 });
 
 test("every selected Node product partition must succeed", () => {
@@ -166,59 +133,10 @@ test("every selected Node product partition must succeed", () => {
   }
 });
 
-// The layout follows the same fleet rule as every runs-on selector in ci.yml:
-// the caller's flag, a fork pull request, XMATRIX_RUNNER_FLEET, or (unset) a public repository.
-const HOSTED_FLEET = "(inputs.hosted || github.event.pull_request.head.repo.fork || vars.XMATRIX_RUNNER_FLEET == 'github-hosted' || "
-  + "(vars.XMATRIX_RUNNER_FLEET != 'self-hosted' && github.event.repository.private == false))";
-const escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
-
-function hostedMatrix(job) {
-  const include = job.match(new RegExp(
-    `^        include: \\$\\{\\{ fromJSON\\(${escapeRegExp(HOSTED_FLEET)} && '([^']+)' \\|\\| '([^']+)'\\) \\}\\}$`,
-    "mu",
-  ));
-  assert.ok(include, "matrix is chosen by the fleet rule");
-  return { hosted: JSON.parse(include[1]), persistent: JSON.parse(include[2]) };
-}
-
-test("the complete Hub suite runs in one job that the aggregate requires", () => {
-  const hubJob = jobBlock("hub");
-  assert.doesNotMatch(workflow, /^  hub-2:/mu);
-  const { hosted, persistent } = hostedMatrix(hubJob);
-  // A persistent runner runs the whole suite in one job named `hub`.
-  assert.deepEqual(persistent, [{ name: "hub", partition: "hub", shard: "" }]);
-  // A hosted run splits it into the static job and every shard of the files.
-  assert.deepEqual(hosted.filter((entry) => entry.partition === "hub-static").length, 1);
-  const shards = hosted.filter((entry) => entry.partition === "hub-files").map((entry) => entry.shard);
-  assert.ok(shards.length > 0);
-  assert.deepEqual(shards, shards.map((_, index) => `${index + 1}/${shards.length}`));
-  assert.equal(hosted.length, shards.length + 1);
-  const selected = { HUB_CHANGED: "true", HUB_RESULT: "success" };
-  assert.equal(run(selected).status, 0);
-  const failed = run({ ...selected, HUB_RESULT: "failure" });
-  assert.notEqual(failed.status, 0);
-  assert.match(failed.stderr, /hub-required=failure/u);
-});
-
-test("hosted Web keeps both performance budgets independent of the checked build", () => {
-  const { hosted, persistent } = hostedMatrix(jobBlock("web"));
-  assert.deepEqual(persistent, [{ name: "web", partitions: "web web-browser", shard: "", primary: true }]);
-  const primary = hosted.filter((entry) => entry.primary);
-  assert.deepEqual(primary, [{ name: "web", partitions: "web", shard: "", primary: true }]);
-  const browsers = hosted.filter((entry) => !entry.primary);
-  assert.ok(browsers.every((entry) => entry.partitions === "web-browser"));
-  const functional = browsers.filter((entry) => /^\d+\/\d+$/u.test(entry.shard));
-  assert.ok(functional.length > 0);
-  assert.deepEqual(functional.map((entry) => entry.shard), functional.map((_, index) => `${index + 1}/${functional.length}`));
-  assert.deepEqual(
-    browsers.filter((entry) => !functional.includes(entry)).map((entry) => entry.shard).sort(),
-    ["performance", "performance-sustained"],
-  );
-});
-
-test("a CLI change requires both Rust partitions", () => {
+test("a full-tier CLI change requires both Rust partitions", () => {
   const selected = {
     CLI_CHANGED: "true",
+    CLI_WINDOWS_CHANGED: "true",
     RUST_CLI_RESULT: "success",
     RUST_CLI_WINDOWS_RESULT: "success",
   };
@@ -232,6 +150,15 @@ test("a CLI change requires both Rust partitions", () => {
     assert.notEqual(result.status, 0, partition);
     assert.match(result.stderr, new RegExp(`${partition}-required=skipped`));
   }
+});
+
+test("a pull request's CLI change requires only the Linux Rust job", () => {
+  const fast = { CLI_CHANGED: "true", RUST_CLI_RESULT: "success", RUST_CLI_WINDOWS_RESULT: "skipped" };
+  assert.equal(run(fast).status, 0);
+  const failed = run({ ...fast, RUST_CLI_WINDOWS_RESULT: "failure" });
+  assert.notEqual(failed.status, 0);
+  assert.match(failed.stderr, /rust-cli-windows-unselected=failure/u);
+  assert.notEqual(run({ ...fast, RUST_CLI_RESULT: "skipped" }).status, 0);
 });
 
 test("a source change requires the duplicate gate", () => {

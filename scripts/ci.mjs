@@ -239,9 +239,9 @@ const webBuildStep = {
 // dependency chain in one shard, so `performance` (ordered after the
 // functional projects only to keep host contention out of its wall-clock
 // budget) would pull every functional case into one shard; a sharded run
-// gives the short and sustained budgets separate machines instead. Each keeps
-// one worker so renderer CPU measurements stay isolated. Every shard together
-// is the full browser run.
+// gives the budget a machine of its own instead. Each keeps one worker so
+// renderer CPU measurements stay isolated. Every shard together is the full
+// browser run.
 function browserTestStages() {
   const shard = process.env.XMATRIX_PLAYWRIGHT_SHARD;
   const stage = (label, extraArgs) => ({
@@ -260,12 +260,8 @@ function browserTestStages() {
     },
   });
   if (!shard) return [stage("Test browser projects", [])];
-  if (shard === "performance" || shard === "performance-sustained") {
-    const sustained = shard === "performance-sustained";
-    return [stage(`Test the ${sustained ? "sustained " : ""}browser performance budget`, [
-      "--project=performance", "--no-deps",
-      `${sustained ? "--grep" : "--grep-invert"}=@sustained`,
-    ])];
+  if (shard === "performance") {
+    return [stage("Test the browser performance budget", ["--project=performance", "--no-deps"])];
   }
   return [
     stage(`Test functional browser projects (shard ${shard})`, [
@@ -276,83 +272,103 @@ function browserTestStages() {
   ];
 }
 
+// Pull request CI runs only the static Node checks (`node-static`); after
+// merge, `node-checks` adds the package, PostgreSQL and script tests. The
+// tiers are chosen in .github/workflows/ci.yml (`changes`).
+const nodeSetupStages = [
+  {
+    label: "Check Oxlint (--deny-warnings)",
+    command: pnpm,
+    args: ["exec", "oxlint", "--config", ".oxlintrc.json", "--deny-warnings", "."],
+  },
+  {
+    label: "Build protocol and billing for executable evidence",
+    command: pnpm,
+    args: turboArgs(["build"], "@xmatrix/db^..."),
+  },
+];
+const nodeTestLanes = [
+  {
+    label: "Test protocol",
+    command: pnpm,
+    args: turboArgs(["test"], "@xmatrix/protocol"),
+    parallelGroup: nodeTestParallelGroup,
+    parallelLane: "protocol-test",
+  },
+  {
+    label: "Test the default billing policy",
+    command: pnpm,
+    args: turboArgs(["test"], "@xmatrix/billing"),
+    parallelGroup: nodeTestParallelGroup,
+    parallelLane: "billing-test",
+  },
+  {
+    // Runs beside the other lanes, but after the billing tests in their
+    // lane: their package script rebuilds billing's dist, which this
+    // check's typecheck and billing-official build read.
+    label: "Check PostgreSQL package and migrations",
+    command: pnpm,
+    args: ["--filter", "@xmatrix/db", "check"],
+    parallelGroup: nodeTestParallelGroup,
+    parallelLane: "billing-test",
+  },
+  ...nodeTestStages({ allFiles: scriptTests }),
+];
+const nodeStaticStages = [
+  {
+    label: "Check synchronized versions",
+    command: process.execPath,
+    args: ["scripts/version.mjs", "check"],
+    parallelGroup: nodeTestParallelGroup,
+    parallelLane: "version-check",
+  },
+  {
+    label: "Check dependency reachability",
+    command: pnpm,
+    args: ["run", "check:reachability"],
+    env: { KNIP_OXC_RAW_TRANSFER: "0" },
+    parallelGroup: nodeTestParallelGroup,
+    parallelLane: "reachability-check",
+  },
+  {
+    label: "Check unused imports",
+    command: pnpm,
+    args: ["run", "check:unused-imports"],
+    parallelGroup: nodeTestParallelGroup,
+    parallelLane: "unused-imports-check",
+  },
+  {
+    label: "Check duplicate CSS rules",
+    command: pnpm,
+    args: ["run", "check:css-duplicate-rules"],
+    parallelGroup: nodeTestParallelGroup,
+    parallelLane: "css-duplicate-rules-check",
+  },
+  {
+    label: "Check source line limit (≤5000)",
+    command: pnpm,
+    args: ["run", "check:line-limit"],
+    parallelGroup: nodeTestParallelGroup,
+    parallelLane: "line-limit-check",
+  },
+];
+
 const partitions = {
-  "node-checks": [
-    {
-      label: "Check Oxlint (--deny-warnings)",
-      command: pnpm,
-      args: ["exec", "oxlint", "--config", ".oxlintrc.json", "--deny-warnings", "."],
-    },
-    {
-      label: "Build protocol and billing for executable evidence",
-      command: pnpm,
-      args: turboArgs(["build"], "@xmatrix/db^..."),
-    },
-    {
-      label: "Test protocol",
-      command: pnpm,
-      args: turboArgs(["test"], "@xmatrix/protocol"),
-      parallelGroup: nodeTestParallelGroup,
-      parallelLane: "protocol-test",
-    },
-    {
-      label: "Test the default billing policy",
-      command: pnpm,
-      args: turboArgs(["test"], "@xmatrix/billing"),
-      parallelGroup: nodeTestParallelGroup,
-      parallelLane: "billing-test",
-    },
-    {
-      // Runs beside the other lanes, but after the billing tests in their
-      // lane: their package script rebuilds billing's dist, which this
-      // check's typecheck and billing-official build read.
-      label: "Check PostgreSQL package and migrations",
-      command: pnpm,
-      args: ["--filter", "@xmatrix/db", "check"],
-      parallelGroup: nodeTestParallelGroup,
-      parallelLane: "billing-test",
-    },
-    ...nodeTestStages({ allFiles: scriptTests }),
-    {
-      label: "Check synchronized versions",
-      command: process.execPath,
-      args: ["scripts/version.mjs", "check"],
-      parallelGroup: nodeTestParallelGroup,
-      parallelLane: "version-check",
-    },
-    {
-      label: "Check dependency reachability",
-      command: pnpm,
-      args: ["run", "check:reachability"],
-      env: { KNIP_OXC_RAW_TRANSFER: "0" },
-      parallelGroup: nodeTestParallelGroup,
-      parallelLane: "reachability-check",
-    },
-    {
-      label: "Check unused imports",
-      command: pnpm,
-      args: ["run", "check:unused-imports"],
-      parallelGroup: nodeTestParallelGroup,
-      parallelLane: "unused-imports-check",
-    },
-    {
-      label: "Check duplicate CSS rules",
-      command: pnpm,
-      args: ["run", "check:css-duplicate-rules"],
-      parallelGroup: nodeTestParallelGroup,
-      parallelLane: "css-duplicate-rules-check",
-    },
-    {
-      label: "Check source line limit (≤5000)",
-      command: pnpm,
-      args: ["run", "check:line-limit"],
-      parallelGroup: nodeTestParallelGroup,
-      parallelLane: "line-limit-check",
-    },
-  ],
+  "node-checks": [...nodeSetupStages, ...nodeTestLanes, ...nodeStaticStages],
+  "node-static": [...nodeSetupStages, ...nodeStaticStages],
   web: [
     webBuildStep,
   ],
+  // Pull request CI splits `web` over two jobs: the unit tests, and the
+  // checked production build (the Web lint and typecheck).
+  "web-unit": [
+    {
+      label: "Test web",
+      command: pnpm,
+      args: turboArgs(["test:ci"], "@xmatrix/web"),
+    },
+  ],
+  "web-build": [webBuildStep],
   "web-browser": [
     {
       label: "Install Playwright Chromium",
@@ -403,6 +419,8 @@ const partitions = {
     },
     hubBundle,
   ],
+  // Pull request CI: the Hub typecheck and deploy bundle, without the suite.
+  "hub-check": [hubWorkspaceBuild, hubRenderConfig, hubTypecheck, hubBundle],
   "hub-files": [
     hubWorkspaceBuild,
     {
@@ -446,6 +464,8 @@ const partitions = {
     },
   ],
   "rust-cli": [rustCliTestBuild, rustClippyBesideTests, rustCliTestBesideClippy],
+  // Pull request CI compiles and lints every Rust target; tests run after merge.
+  "rust-clippy": [rustClippy],
   duplicates: [
     {
       label: "Check duplicated code",
