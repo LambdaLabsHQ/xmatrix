@@ -29,6 +29,7 @@ import { automationsKey } from "./page-automation-chips";
 import type { ReadGitHubFile } from "./page-github-file-embeds";
 import type { LocalMedia, PageMediaUrl, UploadPageMedia } from "./page-media";
 import { referencesKey, type PageReferenceTargets } from "./page-reference-chips";
+import type { PageSessionChanges } from "./page-session-changes";
 import {
   addColumnAfter, addRowAfter, anchorOffsets, blockKind, deleteColumn, deleteRow, deleteTable, discussionsKey,
   editorPlugins, isInTable, insertRule, insertTable, linkAt, nodeViews, scrollToSection, showReaderChanges,
@@ -237,7 +238,7 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
   onOpenConversation, discussions, automations, headingActions, focusedConversationId = null, onFocusConversation,
   onAnchorOffsets, cursorPresence, onReady, readerBaseline = null, onReaderChanges, onWrite, readFrom, reading,
   suggestions = null, onSuggestions, suggestionControl, readGitHubFile, references, completion, placeholder, mediaUrl,
-  uploadMedia }: {
+  uploadMedia, onChanges }: {
   session: PageLiveSession;
   /** What an empty page asks for instead of its title: someone co-writing it asks for its first line. */
   placeholder?: string;
@@ -281,6 +282,8 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
   suggestionControl?: MutableRefObject<SuggestionControl | null>;
   /** How many changes that diff shows. */
   onReaderChanges?: (count: number) => void;
+  /** The changes Ctrl+Z steps back through, everyone's since the page opened; null once the editor is gone. */
+  onChanges?: (changes: PageSessionChanges | null) => void;
   /** This person changed the text themselves, not someone else's change arriving. */
   onWrite?: () => void;
   /**
@@ -393,6 +396,8 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
     current.focus();
   }, []);
 
+  const sessionChanges = useRef(onChanges);
+  sessionChanges.current = onChanges;
   useEffect(() => {
     if (!host.current) return;
     const handleKeyDown = (_view: EditorView, event: KeyboardEvent) => {
@@ -432,7 +437,8 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
     };
     const editor = new EditorView(host.current, {
       state: EditorState.create({ schema: pageSchema, plugins: [...editorPlugins({
-        fragment: session.fragment, awareness: session.awareness, handleKeyDown,
+        fragment: session.fragment, awareness: session.awareness, session, handleKeyDown,
+        onChanges: (changes) => sessionChanges.current?.(changes),
         placeholder: () => placeholderText.current,
         onBlockChange: (blockId) => blockChange.current?.(blockId),
         openConversation: (conversationId) => openConversation.current?.(conversationId),
