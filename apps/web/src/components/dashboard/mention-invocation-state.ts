@@ -351,24 +351,6 @@ export function lifecycleRefusalView(notices: readonly CommandNotice[], kind: "r
   ] };
 }
 
-/** One batched query per channel. Keep observing connected-but-not-ready runs. */
-export function invocationPollInterval(launches: readonly SerializedAgentLaunch[], newestAt: number,
-  now: number, failed: boolean, continuations: readonly SerializedAgentContinuation[] = [],
-  executions: readonly SerializedAgentMessageExecution[] = [],
-  stops: readonly SerializedAgentStop[] = []): number | false {
-  if (failed) return 10_000;
-  if (stops.some(stop => stop.phase === "accepted")) return 2_000;
-  if (executions.some(record => !record.finalReply && record.finishedAt &&
-      now - Date.parse(record.finishedAt) >= 0 && now - Date.parse(record.finishedAt) < 60_000)) return 2_000;
-  if (continuations.some(record => !continuationView(record).terminal)) return 2_000;
-  if (!launches.length) return newestAt > now - 120_000 ? 2_000 : executions.length ? 15_000 : false;
-  // A summon is settled once reasoning starts; later turns are the Run's own
-  // business. Executions still refresh so a saved reply can be recovered.
-  const views = launches.map(launch => summonView(launch, executions));
-  if (views.some(view => view.animate)) return 2_000;
-  return executions.length || views.some(view => !view.terminal) ? 15_000 : false;
-}
-
 /** Match only the exact, server-recorded address within a normal Markdown text run. */
 export function splitMentionRejections(text: string, rejections: readonly SerializedAgentInvocationRejection[], allowed?: (start: number) => boolean) {
   const tokens = mentionAddressTokens(rejections.map((rejection) => rejection.targetRef));

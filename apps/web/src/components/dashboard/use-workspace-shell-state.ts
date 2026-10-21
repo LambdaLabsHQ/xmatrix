@@ -1647,6 +1647,7 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
             void queryClient.invalidateQueries({ queryKey: xmatrixQueryKeys.domain(identity, "workspace-projects") });
             void queryClient.invalidateQueries({ queryKey: xmatrixQueryKeys.domain(identity, "workspace-events") });
             invalidateWorkspaceResources(queryClient);
+            void queryClient.invalidateQueries({ queryKey: ["agent-launches"] });
           }
           connectedBefore = true;
           reconcileUnconfirmedOnReconnectRef.current?.();
@@ -1724,6 +1725,11 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
             const folded = supersededHistoryMessage(
               heldChannelWindow(channelId, false).messages, message.event.metadata);
             if (folded) mergeAndRememberChannelHistory(channelId, [folded], undefined, false);
+          }
+          // A launch, stop, continuation, execution or launch choice moved: the
+          // chips of the messages shown re-read their records. Nothing polls.
+          if (message.event.type === "channel_invocations_changed" && message.event.channelId) {
+            void queryClient.invalidateQueries({ queryKey: ["agent-launches", message.event.channelId] });
           }
           // The Hub recorded what a message's command came to: its chip answers now.
           if (message.event.type === "channel_message_interactions_updated" && message.event.channelId) {
