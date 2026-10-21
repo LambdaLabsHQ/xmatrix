@@ -27,7 +27,7 @@ pub(crate) async fn send_llm_trace(
 /// Where a turn reports its trace: the channel it serves, when it has one.
 #[derive(Clone, Copy)]
 pub(crate) struct TurnTrace<'a> {
-    pub(crate) relay: Option<&'a Arc<agent_instance_connection::AgentInstanceConnectionClient>>,
+    pub relay: Option<&'a Arc<agent_instance_connection::AgentInstanceConnectionClient>>,
     pub(crate) channel_id: Option<&'a str>,
     pub(crate) source: &'a str,
     pub(crate) agent: &'a protocol::SerializedAgent,

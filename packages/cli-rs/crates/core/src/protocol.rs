@@ -4,21 +4,21 @@ use std::collections::HashMap;
 // ── Constants ────────────────────────────────────────────────────────────────
 
 pub const DEFAULT_HUB_URL: &str = "https://xmatrix-hub.xmatrix.sh";
-pub const DEFAULT_WEB_URL: &str = "https://xmatrix.sh";
+pub(crate) const DEFAULT_WEB_URL: &str = "https://xmatrix.sh";
 pub struct HubRoutes;
 impl HubRoutes {
-    pub const LOGIN: &str = "/api/auth/cli/login";
-    pub const DEVICE_START: &str = "/api/auth/cli/device/start";
+    pub(crate) const LOGIN: &str = "/api/auth/cli/login";
+    pub(crate) const DEVICE_START: &str = "/api/auth/cli/device/start";
     pub const SETUP_INTENTS: &str = "/api/setup-intents";
-    pub const DEVICE_TOKEN: &str = "/api/auth/cli/device/token";
-    pub const REFRESH: &str = "/api/auth/refresh";
-    pub const EXCHANGE_SESSION: &str = "/api/auth/cli/exchange-session";
-    pub const SIGN_OUT: &str = "/api/auth/cli/sign-out";
+    pub(crate) const DEVICE_TOKEN: &str = "/api/auth/cli/device/token";
+    pub(crate) const REFRESH: &str = "/api/auth/refresh";
+    pub(crate) const EXCHANGE_SESSION: &str = "/api/auth/cli/exchange-session";
+    pub(crate) const SIGN_OUT: &str = "/api/auth/cli/sign-out";
     pub const ME: &str = "/api/auth/me";
     pub const AGENT_INSTANCES: &str = "/api/agent-instances";
     pub const MACHINE_DAEMONS: &str = "/api/machine-daemons";
     pub const MACHINES: &str = "/api/machines";
-    pub const MACHINE_DAEMON_CREDENTIALS: &str = "/api/machine-daemon-credentials";
+    pub(crate) const MACHINE_DAEMON_CREDENTIALS: &str = "/api/machine-daemon-credentials";
     pub const MACHINE_DAEMON_MIGRATION_FENCE: &str = "/api/machine-daemon/migration-fence";
     pub const MACHINE_DAEMON_WORKSPACES: &str = "/api/machine-daemon/workspaces";
     pub const MACHINE_DAEMON_AGENT_RUN_TOKEN: &str = "/api/machine-daemon/agent-runs/token";
@@ -41,7 +41,7 @@ impl HubRoutes {
     pub const CHANNELS: &str = "/api/channels";
     pub const MESSAGE_ATTACHMENT_PRODUCT_MEDIA: &str =
         "/api/relay-v2/message-attachments/product-media";
-    pub const OBSERVABLE_CLIENT_METRICS: &str = "/api/observable/client-metrics";
+    pub(crate) const OBSERVABLE_CLIENT_METRICS: &str = "/api/observable/client-metrics";
     pub const MIGRATIONS_SLACK: &str = "/api/migrations/slack";
     pub const SLACK_OAUTH_START: &str = "/api/migrations/slack/oauth/start";
     pub const SLACK_OAUTH_TOKEN: &str = "/api/migrations/slack/oauth/token";
@@ -200,7 +200,7 @@ pub struct SerializedAgent {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[allow(dead_code)]
-pub struct AutomationMessage {
+pub(crate) struct AutomationMessage {
     pub body: String,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub app_mentions: Option<Vec<serde_json::Value>>,
@@ -208,7 +208,7 @@ pub struct AutomationMessage {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct AutomationCapabilities {
+pub(crate) struct AutomationCapabilities {
     pub update: bool,
     pub pause: bool,
     pub resume: bool,
@@ -218,7 +218,7 @@ pub struct AutomationCapabilities {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct AutomationExecutionStatus {
+pub(crate) struct AutomationExecutionStatus {
     pub status: String,
     pub attempts: u64,
     pub scheduled_for: String,
@@ -235,7 +235,7 @@ pub struct AutomationExecutionStatus {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[allow(dead_code)]
-pub struct SerializedAutomation {
+pub(crate) struct SerializedAutomation {
     pub id: String,
     pub owner_user_id: String,
     #[serde(default)]
@@ -894,7 +894,7 @@ pub struct ChannelMessage {
 }
 
 /// Metadata provenance of an activity entry (docs/design/conversation-activity.md).
-pub const CHANNEL_ACTIVITY_PROVENANCE: &str = "activity";
+pub(crate) const CHANNEL_ACTIVITY_PROVENANCE: &str = "activity";
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -938,7 +938,7 @@ pub enum ChannelActivity {
 }
 
 /// The activity an activity entry carries, from its metadata.
-pub fn channel_activity_of(metadata: Option<&serde_json::Value>) -> Option<ChannelActivity> {
+pub(crate) fn channel_activity_of(metadata: Option<&serde_json::Value>) -> Option<ChannelActivity> {
     let metadata = metadata?;
     if metadata.get("xmatrixProvenance")?.as_str()? != CHANNEL_ACTIVITY_PROVENANCE {
         return None;
@@ -975,7 +975,7 @@ pub fn folded_history_line(message: &ChannelMessage) -> Option<String> {
 }
 
 /// One plain line for an activity entry, the same glyphs the web shows.
-pub fn channel_activity_line(activity: &ChannelActivity) -> String {
+pub(crate) fn channel_activity_line(activity: &ChannelActivity) -> String {
     match activity {
         ChannelActivity::PullRequest {
             url,
@@ -1272,7 +1272,7 @@ pub struct AgentLifecycleSnapshot {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct AgentInstanceRuntimeIdentity {
+pub(crate) struct AgentInstanceRuntimeIdentity {
     pub kind: String,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub client_version: Option<String>,
@@ -1283,7 +1283,7 @@ pub struct AgentInstanceRuntimeIdentity {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct AgentInstanceConnectMessage {
+pub(crate) struct AgentInstanceConnectMessage {
     #[serde(rename = "type")]
     pub message_type: &'static str,
     #[serde(skip_serializing_if = "Option::is_none", default)]

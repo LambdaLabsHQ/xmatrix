@@ -57,7 +57,7 @@ impl WorktreeOrigin {
     }
 
     /// Trees the daemon created and already reclaims on its own schedule.
-    pub fn managed_by_xmatrix(self) -> bool {
+    pub(crate) fn managed_by_xmatrix(self) -> bool {
         matches!(self, Self::RepoPool | Self::RunWorktree)
     }
 }
@@ -79,7 +79,7 @@ pub struct MachineWorktree {
 /// Where this machine keeps the trees and repositories the inventory knows by
 /// layout.
 #[derive(Debug, Clone)]
-pub struct InventoryRoots {
+pub(crate) struct InventoryRoots {
     pub pools_root: Option<PathBuf>,
     pub run_worktrees_root: PathBuf,
     pub managed_repos_root: PathBuf,
@@ -144,7 +144,7 @@ pub async fn machine_worktrees(known_cwds: &[PathBuf]) -> Vec<MachineWorktree> {
     machine_worktrees_at(&InventoryRoots::current(), known_cwds).await
 }
 
-pub async fn machine_worktrees_at(
+pub(crate) async fn machine_worktrees_at(
     roots: &InventoryRoots,
     known_cwds: &[PathBuf],
 ) -> Vec<MachineWorktree> {
@@ -288,7 +288,7 @@ pub fn set_foreign_auto_reclaim(enabled: bool) -> Result<(), String> {
     write_foreign_auto_reclaim(&policy_path(), enabled)
 }
 
-pub fn policy_path() -> PathBuf {
+pub(crate) fn policy_path() -> PathBuf {
     xmatrix_cli_core::config::config_dir().join(POLICY_FILE)
 }
 
@@ -437,7 +437,7 @@ pub(crate) fn process_cwds() -> Vec<PathBuf> {
 }
 
 /// The daemon's sweep: only when the owner turned it on.
-pub async fn reclaim_foreign_worktrees_if_enabled(
+pub(crate) async fn reclaim_foreign_worktrees_if_enabled(
     live_cwds: &HashSet<PathBuf>,
     min_idle: Duration,
 ) -> Option<ForeignReclaimOutcome> {
@@ -454,7 +454,7 @@ pub async fn reclaim_foreign_worktrees_if_enabled(
     Some(reclaim_foreign_worktrees(&trees, live_cwds, None, min_idle, true).await)
 }
 
-pub fn log_foreign_reclaim_outcome(outcome: &ForeignReclaimOutcome) {
+pub(crate) fn log_foreign_reclaim_outcome(outcome: &ForeignReclaimOutcome) {
     if outcome.reclaimed.is_empty() && outcome.skipped.is_empty() {
         return;
     }

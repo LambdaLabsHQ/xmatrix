@@ -35,7 +35,7 @@ use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken}
 
 const ACCESS_ALLOWED_ACE_TYPE: u8 = 0;
 
-pub fn apply_and_verify_owner_only(path: &Path, directory: bool) -> io::Result<()> {
+pub(crate) fn apply_and_verify_owner_only(path: &Path, directory: bool) -> io::Result<()> {
     let wide_path = nul_terminated_path(path)?;
     let token_user = CurrentTokenUser::load()?;
     let inheritance = if directory {
@@ -91,7 +91,7 @@ pub fn apply_and_verify_owner_only(path: &Path, directory: bool) -> io::Result<(
     verify_owner_only(path, directory)
 }
 
-pub fn verify_owner_only(path: &Path, directory: bool) -> io::Result<()> {
+pub(crate) fn verify_owner_only(path: &Path, directory: bool) -> io::Result<()> {
     let wide_path = nul_terminated_path(path)?;
     let token_user = CurrentTokenUser::load()?;
     let mut owner: PSID = ptr::null_mut();
@@ -230,7 +230,7 @@ pub fn verify_owner_only(path: &Path, directory: bool) -> io::Result<()> {
 }
 
 #[allow(dead_code)] // SQLCipher includes this module but has no replaceable JSON ledger.
-pub fn atomic_replace(source: &Path, destination: &Path) -> io::Result<()> {
+pub(crate) fn atomic_replace(source: &Path, destination: &Path) -> io::Result<()> {
     let source = nul_terminated_path(source)?;
     let destination = nul_terminated_path(destination)?;
     // SAFETY: both paths are NUL-terminated and remain live for the call. The

@@ -80,7 +80,10 @@ fn codex_chatgpt_auth_snapshot_in(home: &Path) -> Option<CodexAuthSnapshot> {
 /// The home is passed in rather than taken from the process environment: a
 /// pre-launch reader must read the same account the spawn would use, and two
 /// Profiles on one host must not share one cache slot.
-pub async fn read_codex_chatgpt_usage_for_home(home: &Path, force: bool) -> Option<LlmUsage> {
+pub(crate) async fn read_codex_chatgpt_usage_for_home(
+    home: &Path,
+    force: bool,
+) -> Option<LlmUsage> {
     read_codex_usage_from_endpoint(home, force, CODEX_CHATGPT_USAGE_URL).await
 }
 
@@ -144,7 +147,7 @@ pub async fn read_codex_chatgpt_usage(force: bool) -> Option<LlmUsage> {
     read_codex_chatgpt_usage_for_home(&home, force).await
 }
 
-pub fn codex_wham_usage_from_value(value: &Value) -> Option<LlmUsage> {
+pub(crate) fn codex_wham_usage_from_value(value: &Value) -> Option<LlmUsage> {
     let mut best = LlmUsage::default();
     append_quota_usages(
         &mut best.quota_usages,

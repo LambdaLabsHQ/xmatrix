@@ -1039,12 +1039,17 @@
   }
 
   .app-attachment-lightbox {
-    -webkit-backdrop-filter: blur(18px);
-    backdrop-filter: blur(18px);
     box-shadow: none;
     -webkit-mask-image: none !important;
     mask-image: none !important;
     clip-path: none !important;
+  }
+
+  /* The blur lives on its own layer so it fades with the dim: opening grows
+     out of the page, and a dismiss drag shows the page coming back. */
+  .app-attachment-lightbox .app-attachment-lightbox-backdrop {
+    -webkit-backdrop-filter: blur(18px);
+    backdrop-filter: blur(18px);
   }
 
   .app-attachment-lightbox :is(.app-attachment-lightbox-dialog, .app-attachment-lightbox-zoom, .app-attachment-lightbox-image, .app-attachment-lightbox-close, .app-attachment-lightbox-download, .app-attachment-lightbox-copy) {
@@ -1053,6 +1058,10 @@
     box-shadow: none;
     -webkit-mask-image: none !important;
     mask-image: none !important;
+  }
+
+  /* The open image is clipped only while it morphs to and from its thumbnail. */
+  .app-attachment-lightbox :is(.app-attachment-lightbox-dialog, .app-attachment-lightbox-zoom, .app-attachment-lightbox-close, .app-attachment-lightbox-download, .app-attachment-lightbox-copy) {
     clip-path: none !important;
   }
 

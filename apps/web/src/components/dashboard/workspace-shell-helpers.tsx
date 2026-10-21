@@ -59,7 +59,6 @@ import {
   useState,
   type MutableRefObject,
   type PointerEvent as ReactPointerEvent,
-  type TouchEvent as ReactTouchEvent,
 } from "react";
 
 import { parseAppMentions } from "@/components/dashboard/mention-complete";
@@ -618,18 +617,6 @@ export function useIsMobileViewport() {
   }, []);
 
   return isMobile;
-}
-
-export function touchPoints(touches: ReactTouchEvent<HTMLDivElement>["touches"]) {
-  return Array.from(touches, (touch) => ({ x: touch.clientX, y: touch.clientY }));
-}
-
-export function pointerDistance(first: { x: number; y: number }, second: { x: number; y: number }) {
-  return Math.hypot(first.x - second.x, first.y - second.y);
-}
-
-export function pointerMidpoint(first: { x: number; y: number }, second: { x: number; y: number }) {
-  return { x: (first.x + second.x) / 2, y: (first.y + second.y) / 2 };
 }
 
 /** What a message row reads of its conversation: never the catalog's whole, ever-changing record. */

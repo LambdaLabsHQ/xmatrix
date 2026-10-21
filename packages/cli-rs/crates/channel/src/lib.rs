@@ -500,7 +500,7 @@ pub async fn cmd_space(hub_url: &str, token: &str, command: SpaceCommand) -> err
     }
 }
 
-pub async fn cmd_recover_send(
+pub(crate) async fn cmd_recover_send(
     hub_url: &str,
     token: &str,
     channel: &str,
@@ -590,7 +590,7 @@ async fn write_message_into_pages(
     sent
 }
 
-pub struct SendOptions<'a> {
+pub(crate) struct SendOptions<'a> {
     pub message_parts: &'a [String],
     pub attachment_paths: &'a [PathBuf],
     pub read_stdin: bool,
@@ -602,7 +602,7 @@ pub struct SendOptions<'a> {
     pub wait: bool,
 }
 
-pub async fn cmd_send(
+pub(crate) async fn cmd_send(
     hub_url: &str,
     token: &str,
     channel_id: &str,
@@ -932,7 +932,7 @@ impl UploadedMessageAttachment {
     }
 }
 
-pub fn load_channel_file_attachments(
+pub(crate) fn load_channel_file_attachments(
     paths: &[PathBuf],
 ) -> error::Result<Vec<PendingFileAttachment>> {
     if paths.len() > CHANNEL_FILE_ATTACHMENT_LIMIT {
@@ -1162,7 +1162,7 @@ pub fn channel_image_mime_type(path: &Path) -> Option<&'static str> {
     }
 }
 
-pub fn channel_file_mime_type(path: &Path) -> &'static str {
+pub(crate) fn channel_file_mime_type(path: &Path) -> &'static str {
     if let Some(image) = channel_image_mime_type(path) {
         return image;
     }
@@ -2642,9 +2642,10 @@ pub fn format_history_message(message: &protocol::ChannelMessage) -> String {
     )
 }
 
+#[cfg(test)]
 /// Render one history line against a fixed clock, so a whole transcript shares
 /// one anchor and a test can pin the ages it asserts on.
-pub fn format_history_message_at(
+pub(crate) fn format_history_message_at(
     message: &protocol::ChannelMessage,
     read_at: Option<&str>,
 ) -> String {
@@ -2655,7 +2656,7 @@ pub fn format_history_message_at(
 /// coordinates (no data URL / signed URL), prefer a materialized local path so
 /// agents and humans do not see a false "missing data" state for successful
 /// uploads.
-pub fn format_history_message_with_local_images(
+pub(crate) fn format_history_message_with_local_images(
     message: &protocol::ChannelMessage,
     local_images: &HashMap<(String, String), PathBuf>,
     read_at: Option<&str>,
@@ -3016,7 +3017,7 @@ fn fallback_member_label(member: &str) -> String {
         .unwrap_or_else(|| member.to_string())
 }
 
-pub fn short_channel_id(channel_id: &str) -> String {
+pub(crate) fn short_channel_id(channel_id: &str) -> String {
     channel_id.chars().take(8).collect()
 }
 

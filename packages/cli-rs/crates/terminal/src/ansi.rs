@@ -165,13 +165,13 @@ impl AnsiParser {
 
     /// Feed a UTF-8 string (convenience wrapper).
     #[allow(dead_code)]
-    pub fn feed_str(&mut self, input: &str) -> String {
+    pub(crate) fn feed_str(&mut self, input: &str) -> String {
         self.feed(input.as_bytes())
     }
 
     /// Reset parser to initial state.
     #[allow(dead_code)]
-    pub fn reset(&mut self) {
+    pub(crate) fn reset(&mut self) {
         self.state = State::Ground;
     }
 }

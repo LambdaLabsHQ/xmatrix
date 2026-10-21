@@ -329,7 +329,7 @@ fn derive_http_base_url(hub_url: &str) -> String {
     format!("{}://{host}", if secure { "https" } else { "http" })
 }
 
-pub fn derive_connection_url(hub_url: &str) -> String {
+pub(crate) fn derive_connection_url(hub_url: &str) -> String {
     let (secure, host) = connection_host(hub_url);
     format!(
         "{}://{host}/ws/agent-instances",
@@ -1309,7 +1309,7 @@ impl AgentInstanceConnectionClient {
         );
     }
 
-    pub fn write_tx_clone(&self) -> Option<mpsc::Sender<String>> {
+    pub(crate) fn write_tx_clone(&self) -> Option<mpsc::Sender<String>> {
         self.write_tx.lock().ok().and_then(|slot| slot.clone())
     }
 
@@ -1487,51 +1487,6 @@ impl AgentInstanceConnectionClient {
                 message, failure, ..
             } => Err(agent_operation_error(message, failure)),
             _ => Err(CliError::Relay("Unexpected join_channel response".into())),
-        }
-    }
-
-    pub fn replay_channel_history(
-        &self,
-        channel_id: String,
-        history_limit: u32,
-        after_sequence: Option<u64>,
-    ) -> Result<()> {
-        if let Ok(mut history) = self.history_channels.lock() {
-            history.clear();
-            history.insert(channel_id.clone());
-        }
-        self.send(AgentInstanceClientMessage::ReplayChannelHistory {
-            request_id: None,
-            channel_id,
-            history_limit,
-            after_sequence,
-        })
-    }
-
-    pub async fn get_channel_history(
-        &self,
-        channel_id: String,
-        limit: Option<u32>,
-        before: Option<String>,
-        after_sequence: Option<u64>,
-    ) -> Result<Vec<ChannelMessage>> {
-        match self
-            .request(AgentInstanceClientMessage::GetChannelHistory {
-                request_id: None,
-                channel_id,
-                limit,
-                before,
-                after_sequence,
-            })
-            .await?
-        {
-            AgentInstanceServerMessage::ChannelHistory { messages, .. } => Ok(messages),
-            AgentInstanceServerMessage::Error {
-                message, failure, ..
-            } => Err(agent_operation_error(message, failure)),
-            _ => Err(CliError::Relay(
-                "Unexpected get_channel_history response".into(),
-            )),
         }
     }
 

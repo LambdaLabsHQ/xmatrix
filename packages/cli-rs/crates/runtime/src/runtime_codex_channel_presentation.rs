@@ -112,7 +112,7 @@ impl PresencePatch {
         }
     }
 
-    pub(crate) fn parameters(mut self, parameters: Vec<protocol::HarnessParameter>) -> Self {
+    pub fn parameters(mut self, parameters: Vec<protocol::HarnessParameter>) -> Self {
         if let Some(commands) = self.presentation.commands.as_mut() {
             crate::harness_parameters::add_commands(commands, &parameters);
         }
@@ -120,12 +120,12 @@ impl PresencePatch {
         self
     }
 
-    pub(crate) fn goal(mut self, goal: Option<protocol::AgentGoalStatus>) -> Self {
+    pub fn goal(mut self, goal: Option<protocol::AgentGoalStatus>) -> Self {
         self.goal = Some(goal);
         self
     }
 
-    pub(crate) fn goal_patch(mut self, goal: Option<Option<protocol::AgentGoalStatus>>) -> Self {
+    pub fn goal_patch(mut self, goal: Option<Option<protocol::AgentGoalStatus>>) -> Self {
         self.goal = goal;
         self
     }

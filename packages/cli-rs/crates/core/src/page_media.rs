@@ -14,7 +14,7 @@ use std::path::PathBuf;
 
 use crate::attachment_cache::attachment_cache_dir;
 
-pub const PAGE_MEDIA_SCHEME: &str = "xmatrix:page-media/";
+pub(crate) const PAGE_MEDIA_SCHEME: &str = "xmatrix:page-media/";
 
 /// Where a page's images are saved, below the attachment cache.
 const LOCAL_DIR: &str = "page-media";
@@ -49,7 +49,7 @@ fn page_media_file_name(file: &str) -> Option<&str> {
 }
 
 /// The file (`<sha-256>.<extension>`) a page's image reference names.
-pub fn page_media_file(reference: &str) -> Option<&str> {
+pub(crate) fn page_media_file(reference: &str) -> Option<&str> {
     page_media_file_name(reference.strip_prefix(PAGE_MEDIA_SCHEME)?)
 }
 

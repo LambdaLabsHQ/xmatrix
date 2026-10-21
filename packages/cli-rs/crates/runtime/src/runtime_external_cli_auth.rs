@@ -320,7 +320,7 @@ pub(crate) struct ExternalRun<'a> {
     pub(crate) cmd_args: &'a [String],
     pub(crate) hub_url: &'a str,
     pub(crate) cwd: Option<&'a str>,
-    pub(crate) relay: Arc<agent_instance_connection::AgentInstanceConnectionClient>,
+    pub relay: Arc<agent_instance_connection::AgentInstanceConnectionClient>,
     pub(crate) event_rx:
         mpsc::UnboundedReceiver<agent_instance_connection::AgentInstanceConnectionEvent>,
     pub(crate) agent: protocol::SerializedAgent,
