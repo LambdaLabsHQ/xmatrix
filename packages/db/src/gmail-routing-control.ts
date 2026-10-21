@@ -1,6 +1,7 @@
 import type { QueryResultRow } from "pg";
 import type { AuthorityDatabase, DatabaseTransaction } from "./contracts.js";
 import { AppControlError } from "./app-control.js";
+import { lostBeforeCommit } from "./client.js";
 import { decryptSecretValue, encryptSecretValue } from "./secret-value-control.js";
 
 export interface GmailRoutingSelection {
@@ -152,7 +153,19 @@ export class PostgresGmailRoutingRepository {
         AND (encrypted_value_json='{}'::jsonb OR (expires_at IS NULL AND error_code IS NULL AND created_at<now()-interval '10 minutes'))
         ORDER BY created_at LIMIT 100 FOR UPDATE SKIP LOCKED)`, values: [], maxRows: 0 }));
   }
+  /**
+   * Claiming has no effect outside its transaction, so a response lost before COMMIT
+   * (a Hyperdrive round-trip stall, XMATRIX-HUB-90) claims again on a fresh checkout.
+   * Rows the lost UPDATE may still lock are skipped and claimed on a later tick.
+   */
   async claim() {
+    try { return await this.claimOnce(); }
+    catch (error) {
+      if (!lostBeforeCommit(error)) throw error;
+      return this.claimOnce();
+    }
+  }
+  private claimOnce() {
     return this.transaction("claim", async tx => {
       const rows = await tx.query<QueryResultRow>({ name: "gmail_route_claim_v1", text: `WITH due AS
         (SELECT route_id FROM data.app_gmail_routes WHERE enabled AND (wake_version>processed_version OR renew_at<=now() OR next_poll_at<=now())
