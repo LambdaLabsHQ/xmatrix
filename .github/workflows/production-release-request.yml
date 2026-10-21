@@ -125,7 +125,10 @@ jobs:
   # XMATRIX_RUNNER_FLEET selects. On the repository's own machines they take
   # the release test runners, so a train never waits behind PR CI. The release
   # commit is keyed by its source's tree (scripts/ci-ledger.mjs), so partitions
-  # main already passed are not run again.
+  # that already passed identical content are not run again. Client suites
+  # gate the stable train that ships a client, not each beta
+  # (scripts/ci-areas.mjs, releaseOutputs); the iOS simulator gate below
+  # follows the same rule.
   ci:
     needs: plan
     if: needs.plan.outputs.scope != ''
@@ -143,7 +146,7 @@ jobs:
 
   ios:
     needs: plan
-    if: contains(format(',{0},', needs.plan.outputs.scope), ',ios,')
+    if: contains(format(',{0},', needs.plan.outputs.scope), ',ios,') && needs.plan.outputs.channel == 'stable'
     runs-on: ${{ vars.XMATRIX_RUNNER_FLEET == 'self-hosted' && fromJSON('["self-hosted","xmatrix-macos-release"]') || 'macos-26' }}
     timeout-minutes: 30
     permissions:
@@ -162,7 +165,7 @@ jobs:
     needs: [plan, ci, ios]
     if: >-
       always() && needs.plan.result == 'success' && needs.ci.result == 'success' &&
-      (contains(format(',{0},', needs.plan.outputs.scope), ',ios,') == (needs.ios.result == 'success')) &&
+      ((contains(format(',{0},', needs.plan.outputs.scope), ',ios,') && needs.plan.outputs.channel == 'stable') == (needs.ios.result == 'success')) &&
       (needs.ios.result == 'success' || needs.ios.result == 'skipped')
     runs-on: ${{ vars.XMATRIX_RUNNER_FLEET == 'self-hosted' && fromJSON('["xmatrix-ci-offload"]') || 'ubuntu-24.04' }}
     steps:

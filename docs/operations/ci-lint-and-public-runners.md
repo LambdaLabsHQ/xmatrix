@@ -25,22 +25,22 @@ jobs each finish in about two minutes including setup:
   unused imports, duplicate CSS rules and the source line limit;
 - `web-unit`, `web-build` and `web-check`: the Web unit tests, the production
   build, and the lint and typecheck that build would run (`next typegen`, then
-  `tsc`, beside `next lint`); after merge the checked build stays the
+  `tsc`, beside `next lint`); in the full tier the checked build stays the
   authoritative Web lint and typecheck;
 - `hub-check`: the Hub typecheck and its deploy bundle;
 - `rust-clippy`: Clippy on the complete Rust workspace and all targets.
 
-Every push to `main` (Public Snapshot CI) and every release train runs the full
-tier: all of the above plus the protocol, billing, PostgreSQL package and
-script tests, the duplicate-code scan, the browser shards and performance
-budget, the Hub suite, the Rust tests on Linux and Windows, Desktop and
-Android. Only full-tier jobs carry ledgered names (`scripts/ci-ledger.mjs`), so
-the release train reuses only results the full tier earned and still blocks on
-every gate its scope selects. When the full run on `main` fails,
-`post-merge-ci-notice.yml` comments on the pull request that produced the
-commit, listing the failing jobs and the run; the comment reaches the authoring
-Agent's subscribed channel. That workflow runs the default branch's code with
-only `actions: read` and `pull-requests: write`.
+A release train runs the full tier for what it ships. Every train runs the
+protocol, billing, PostgreSQL package and script tests and the duplicate-code
+scan; a train that ships the Hub runs the Hub suite, and one that ships Web runs
+the browser shards and performance budget. Client suites (the Rust tests on
+Linux and Windows, Desktop, Android and the iOS simulator gate) gate the stable
+train that ships a client, not each beta: a beta client reaches only the people
+on its dev channel or TestFlight, its pull requests checked it and the release
+builds it (`scripts/ci-areas.mjs`, `releaseOutputs`). Merging runs nothing more.
+Only full-tier jobs carry ledgered names (`scripts/ci-ledger.mjs`), so a release
+reuses only results the full tier earned and still blocks on every gate its
+scope and channel select.
 
 ## Hosted runners
 
@@ -82,10 +82,9 @@ Changes to `packages/db` select Node, Web/browser and Hub validation because
 both products consume the shared database package. Database unit tests alone
 do not validate the Hub's message coordination and authority fixtures.
 
-`public-ci.yml` runs the full shared matrix on a public snapshot's `main` push.
-Its manual dispatch also verifies that path in the private repository. A
-private `main` push skips this workflow's only job. Public PRs use `ci.yml`'s
-fast tier and its hosted defaults, including the aggregate `ci` result.
+`public-ci.yml` runs the full shared matrix on manual dispatch. Public PRs use
+`ci.yml`'s fast tier and its hosted defaults, including the aggregate `ci`
+result.
 
 The repository keeps CI, the content ledger, release workflows and their local
 composite actions together. External pull requests are closed in favour of
