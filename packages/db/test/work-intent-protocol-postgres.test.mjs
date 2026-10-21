@@ -23,14 +23,14 @@ async function protocol(run) {
     const client = new Client({ connectionString });
     await client.connect();
     clients.push(client);
-    return { async query({ name, text, values, maxRows }) {
+    return { raw: client, async query({ name, text, values, maxRows }) {
       const result = await client.query(rewrite(text), values);
       assert.ok(result.rows.length <= maxRows, `${name} exceeded its row bound`);
       return result.rows;
     } };
   };
   try {
-    await run({ tx: await connect(), connect, sql: (text, values) => admin.query(rewrite(text), values) });
+    await run({ tx: await connect(), connect, rewrite, sql: (text, values) => admin.query(rewrite(text), values) });
   } finally {
     for (const client of clients) await client.end();
     await admin.query(`DROP SCHEMA ${schema} CASCADE`);
@@ -67,7 +67,7 @@ integration("B: one dispatch token starts once, even from concurrent consumers",
 integration("B: a queue slower than the re-send cooldown never invalidates the message waiting in it", async () => {
   await protocol(async ({ tx }) => {
     const waiting = await scheduleWork(tx, id(), { op: "set", at: past() });
-    await markWorkSent(tx, waiting);
+    await markWorkSent(tx, waiting, 0);
     for (let round = 0; round < 3; round++) {
       const [resent] = await reconcileUnsentWork(tx, { cooldownMs: 0, limit: 10 });
       assert.equal(resent.dispatchToken, waiting.dispatchToken);
@@ -90,8 +90,8 @@ integration("B: an early message is not due; a long-delay relay replaces its tok
   await protocol(async ({ tx, connect }) => {
     const far = await scheduleWork(tx, id(), { op: "set", at: later(3 * 24 * 60) });
     assert.equal(await startWork(tx, far, shard), "not_due");
-    const relays = await Promise.all([relayWork(await connect(), far, 24 * 3_600_000),
-      relayWork(await connect(), far, 24 * 3_600_000)]);
+    const relay = { horizonMs: 24 * 3_600_000, cooldownMs: 60_000 };
+    const relays = await Promise.all([relayWork(await connect(), far, relay), relayWork(await connect(), far, relay)]);
     const next = relays.filter(Boolean);
     assert.equal(next.length, 1);
     assert.notEqual(next[0].dispatchToken, far.dispatchToken);
@@ -165,11 +165,11 @@ integration("expired executions follow the kind's effect contract instead of bei
 integration("a scope's quota refuses without holding a slot or consuming a business attempt", async () => {
   await protocol(async ({ tx, sql }) => {
     const limited = { ...shard, scopeLimit: 1 };
-    const first = await scheduleWork(tx, id("a", "space:big"), { op: "set", at: past() });
-    const second = await scheduleWork(tx, id("b", "space:big"), { op: "set", at: past() });
+    const first = await scheduleWork(tx, id("a", "system:big"), { op: "set", at: past() });
+    const second = await scheduleWork(tx, id("b", "system:big"), { op: "set", at: past() });
     const running = await startWork(tx, first, limited);
     assert.equal(await startWork(tx, second, limited), "quota");
-    const refused = await row(sql, id("b", "space:big"));
+    const refused = await row(sql, id("b", "system:big"));
     assert.equal(refused.business_attempts, 0);
     assert.equal(refused.refusals, 1);
     await finishWork(tx, running, { kind: "done" }, shard);
@@ -204,5 +204,101 @@ integration("H: an old placement epoch can neither start nor settle", async () =
     assert.equal(await startWork(tx, again, shard), "stale");
     assert.equal(await startWork(tx, { ...again, placementEpoch: 2 }, shard), "stale",
       "a message cannot claim an epoch the intent does not carry");
+  });
+});
+
+integration("an old permanent or uncertain outcome never stops a newer business plan", async () => {
+  await protocol(async ({ tx, sql }) => {
+    for (const outcome of [{ kind: "permanent", errorCode: "old_failure" }, { kind: "uncertain", errorCode: "lost_reply" }]) {
+      const identity = id(`plan-${outcome.kind}`);
+      const dispatch = await scheduleWork(tx, identity, { op: "set", at: past() });
+      const execution = await startWork(tx, dispatch, shard);
+      await scheduleWork(tx, identity, { op: "set", at: past() });
+      const { settled, next } = await finishWork(tx, execution, outcome, shard);
+      assert.equal(settled, true);
+      assert.ok(next, `${outcome.kind}: the newer plan still has a message to send`);
+      const resumed = await startWork(tx, next, shard);
+      assert.equal(typeof resumed, "object", `${outcome.kind}: the newer plan runs`);
+      assert.equal(resumed.needsReconcile, outcome.kind === "uncertain",
+        "an unknown outcome is carried to the next execution as evidence");
+      if (outcome.kind === "uncertain") assert.equal((await row(sql, identity)).unknown_outcomes, 1);
+    }
+  });
+});
+
+integration("unsettled evidence survives cancel, done and recreate until it is reconciled", async () => {
+  await protocol(async ({ tx, sql }) => {
+    const identity = id("evidence");
+    const dispatch = await scheduleWork(tx, identity, { op: "set", at: past() });
+    await startWork(tx, dispatch, { ...shard, leaseMs: 1 });
+    await sleep(20);
+    await reconcileExpiredWork(tx, { limit: 10, retryAfterMs: 0,
+      effects: { safe: [], reconcile: ["gmail.route"], at_most_once: [] } });
+    await scheduleWork(tx, identity, { op: "cancel" });
+    const kept = await row(sql, identity);
+    assert.deepEqual([kept.state, kept.cancelled, kept.needs_reconcile, kept.unknown_outcomes],
+      ["parked", true, true, 1], "cancel does not delete an unknown outcome");
+    const recreated = await scheduleWork(tx, identity, { op: "set", at: past() });
+    assert.equal(recreated.incarnation, dispatch.incarnation, "the evidence keeps its identity");
+    const execution = await startWork(tx, recreated, shard);
+    assert.equal(execution.needsReconcile, true);
+    await finishWork(tx, execution, { kind: "done" }, shard);
+    assert.equal((await row(sql, identity)).state, "parked", "done without reconciling keeps the evidence");
+    const again = await scheduleWork(tx, identity, { op: "set", at: past() });
+    const reconciling = await startWork(tx, again, shard);
+    await finishWork(tx, reconciling, { kind: "done", reconciled: true }, shard);
+    assert.equal(await row(sql, identity), undefined, "only a reconciled outcome lets the intent go");
+  });
+});
+
+integration("a Space intent without placement evidence fails closed", async () => {
+  await protocol(async ({ tx }) => {
+    await assert.rejects(scheduleWork(tx, id("x", "space:missing"), { op: "set", at: past() }), /placement epoch/u);
+    await assert.rejects(scheduleWork(tx, id("x", "system:gmail"), { op: "set", at: past() }, 1), /placement epoch/u);
+    const unplaced = await scheduleWork(tx, id("x", "space:missing"), { op: "set", at: past() }, 1);
+    assert.equal(await startWork(tx, unplaced, shard), "stale", "no placement row means no start");
+  });
+});
+
+integration("a finish that waits for the row lock past its lease settles nothing", async () => {
+  await protocol(async ({ tx, connect, sql, rewrite }) => {
+    const dispatch = await scheduleWork(tx, id("lock-wait"), { op: "set", at: past() });
+    const execution = await startWork(tx, dispatch, { ...shard, leaseMs: 300 });
+    const { lease_until: leaseUntil } = await row(sql, id("lock-wait"));
+    const blocker = await connect();
+    await blocker.raw.query("BEGIN");
+    await blocker.raw.query(rewrite("SELECT 1 FROM data.work_intents FOR UPDATE"));
+    const finishing = finishWork(await connect(), execution, { kind: "done" }, shard);
+    await sleep(Math.max(0, leaseUntil.getTime() - Date.now() + 100));
+    await blocker.raw.query("COMMIT");
+    assert.deepEqual(await finishing, { settled: false, next: null });
+    assert.equal((await row(sql, id("lock-wait"))).state, "started", "the reconciler owns the expired execution");
+  });
+});
+
+integration("recovery reads only intents whose recovery time has come, however many wait for the future", async () => {
+  await protocol(async ({ tx, connect, sql, rewrite }) => {
+    await sql(`INSERT INTO data.work_intents(scope,kind,key,incarnation,state,pending_at,planned_at,dispatch_token,
+        sent_at,recover_at)
+      SELECT 'system:gmail','gmail.route',g::text,gen_random_uuid(),'pending',now()+interval '30 days',
+        now()+interval '30 days',gen_random_uuid(),now()-interval '1 day',now()+interval '30 days'
+      FROM generate_series(1,100000) g`);
+    await scheduleWork(tx, id("due-now"), { op: "set", at: past() });
+    await sql("ANALYZE data.work_intents");
+    const explaining = await connect();
+    let plan;
+    await explaining.raw.query("BEGIN");
+    await reconcileUnsentWork({ async query({ text, values }) {
+      plan = (await explaining.raw.query(`EXPLAIN (ANALYZE, FORMAT JSON) ${rewrite(text)}`, values)).rows[0]["QUERY PLAN"];
+      return [];
+    } }, { cooldownMs: 60_000, limit: 10 });
+    await explaining.raw.query("ROLLBACK");
+    const nodes = [];
+    const walk = node => { nodes.push(node); for (const child of node.Plans ?? []) walk(child); };
+    walk(plan[0].Plan);
+    const scans = nodes.filter(node => node["Relation Name"]?.endsWith("work_intents") && node["Index Name"]);
+    assert.ok(scans.some(node => node["Index Name"] === "work_intents_recovery"), JSON.stringify(nodes.map(n => n["Node Type"])));
+    const examined = nodes.reduce((sum, node) => sum + (node["Rows Removed by Filter"] ?? 0), 0);
+    assert.ok(examined <= 10, `the recovery scan filtered ${examined} future rows`);
   });
 });
