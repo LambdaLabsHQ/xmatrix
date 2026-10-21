@@ -244,8 +244,11 @@ fact is about.
   (§4.4).
 - **The scrollbar** marks where others are, where discussions are and which
   sections owe an update.
-- **What changed since this person last read the page** is shown to them as
-  a diff, in place. Read means seen: what has been on their screen a moment
+- **What changed since this person last read the page** is offered to them,
+  not shown: the page always opens as it is now, and the first card in the
+  margin, a card of paper, (above the page where there is no margin) says how many changes there
+  are since they last read it and offers *Show changes*, which shows them as a
+  diff, in place. Read means seen: what has been on their screen a moment
   (1.5 s, tab in front) is read as it was then, and nothing else is. So what
   an Agent writes while they watch is read as it arrives, marked only by the
   Agent's own ink, and what it writes out of view or while they are away is
@@ -263,12 +266,12 @@ fact is about.
   changed lines next to each other one bar and empty lines left out; inside a
   line that changed in part, new words underlined in brass and text taken out
   struck through in faint ink where it stood. Nothing is animated and nothing
-  fades: the diff stays for that visit until its reader ticks *Viewed* above
-  the page, which reads all of it and shows the page as it is, or writes on
-  the page, which only stops marking it; unticking shows the diff again. On a
-  phone the diff is walked from the right edge instead: a mark beside the
-  change in front of the reader counts the changes, steps to the next and says
-  *Viewed*. A first visit shows nothing as changed. Agents have no read state.
+  fades: once opened, the diff stays until its reader clicks *Hide changes*,
+  which keeps offering it, or *Done*, which reads all of it and
+  shows the page as it is, or writes on the page, which only stops marking it.
+  On a phone the opened diff is walked from the right edge instead: a mark
+  beside the change in front of the reader counts the changes, steps to the
+  next and says *Viewed*. A first visit shows nothing as changed. Agents have no read state.
 - **Opening a page draws it as the editor will.** Until the live session has
   synced, the page shows its prefetched document rendered from the same
   document schema and list item view as the editor, with the margin's room
@@ -317,11 +320,13 @@ fact is about.
   Clicking a link's visible destination edits the address.
 - **Table controls** appear only while the cursor is in a table.
 - **A selection opens a comment box** (decided by Daniel 2026-10-21). A
-  passage selected with the mouse opens, under it, the product's own message
-  box, the caret already in it. Every box on the page (this one, and a
-  conversation's beside it) is the channel's composer as it is, with no
-  page-only styling: its look is changed once, in the composer (decided by
-  Daniel 2026-10-21); the passage is marked in the comment colour while it is
+  passage selected with the mouse opens the product's own message box, the
+  caret already in it, in the margin level with the passage, as a comment
+  card stands (under the passage where the page has no margin). It lies on a
+  card of paper (`PaperPopover`), as the page's menus do, and the composer in
+  it writes on that paper without glass of its own (decided by Daniel
+  2026-10-21: the margin, and paper, for this box and the changes card); the
+  passage is marked in the comment colour while it is
   written about. Typing is the comment, Enter sends it, and the caret goes
   back into the page after the passage, so writing and commenting go on
   side by side. ⌘⌥M (Ctrl+Alt+M) comments on the selection, or on the

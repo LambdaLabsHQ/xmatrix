@@ -1234,7 +1234,8 @@ function wholeBlockAt(doc: DocNode, from: number, to: number): number | null {
  * markdown, against the document the editor holds now, and says how many
  * changes that is. Without a baseline the page is shown as it is.
  */
-export function showReaderChanges(view: EditorView, fragment: Y.XmlFragment, baseline: string | null): number {
+/** Counts what changed since `baseline`, and marks it over the text only while the reader has asked to see it. */
+export function showReaderChanges(view: EditorView, fragment: Y.XmlFragment, baseline: string | null, shown: boolean): number {
   const mapping = yMapping(view.state);
   if (!mapping) return 0;
   const relative = (pos: number) => absolutePositionToRelativePosition(pos, fragment, mapping as never);
@@ -1246,7 +1247,7 @@ export function showReaderChanges(view: EditorView, fragment: Y.XmlFragment, bas
     return { id, kind: "added", block: change.block, from: relative(change.from), to: change.block ? null : relative(change.to),
       text: "" };
   });
-  view.dispatch(view.state.tr.setMeta(readerChangesKey, changes));
+  view.dispatch(view.state.tr.setMeta(readerChangesKey, shown ? changes : []));
   return changes.length;
 }
 
