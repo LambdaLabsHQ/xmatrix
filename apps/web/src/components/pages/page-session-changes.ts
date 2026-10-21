@@ -35,6 +35,8 @@ export interface PageUndoNotice {
 }
 
 type StackItem = Y.UndoManager["undoStack"][number];
+/** The items a change wrote or took out (Yjs keeps the type to itself). */
+export type PageChangeItems = StackItem["insertions"];
 
 interface Entry {
   id: number;
@@ -48,7 +50,7 @@ interface Entry {
 }
 
 /** The text of a set of items, in the order each writer wrote it; blocks it holds end a line. */
-function textOf(doc: Y.Doc, set: Y.DeleteSet, keep: (item: Y.Item) => boolean): string {
+function textOf(doc: Y.Doc, set: PageChangeItems, keep: (item: Y.Item) => boolean): string {
   let text = "";
   set.clients.forEach((ranges, client) => {
     for (const { clock, len } of ranges) {
@@ -82,7 +84,7 @@ export class PageSessionChanges {
   private seq = 0;
 
   constructor(private readonly undoManager: Y.UndoManager,
-    private readonly writerOf: (origin: unknown, insertions: Y.DeleteSet) => PageChangeWriter | null) {
+    private readonly writerOf: (origin: unknown, insertions: PageChangeItems) => PageChangeWriter | null) {
     undoManager.on("stack-item-added", this.added);
     undoManager.on("stack-item-updated", this.updated);
     undoManager.on("stack-item-popped", this.popped);

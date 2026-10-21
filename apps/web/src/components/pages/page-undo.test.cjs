@@ -41,26 +41,31 @@ function page(synced = false) {
   const theirs = new Awareness(peer.doc);
   theirs.setLocalStateField("user", { name: "Claude", color: "#abcdef", kind: "agent" });
   applyAwarenessUpdate(awareness, encodeAwarenessUpdate(theirs, [peer.doc.clientID]), "remote");
+  const sync = () => {
+    Y.applyUpdate(peer.doc, Y.encodeStateAsUpdate(doc));
+    session.synced = true;
+    for (const listener of listeners) listener({ type: "synced" });
+  };
   return {
     fragment, session, state, peer, changes: () => changes,
     // Presence checks on a timer, which would keep the test running.
     view: { destroy: () => { opened.destroy(); awareness.destroy(); theirs.destroy(); } },
-    sync: () => {
+    sync,
+    /** The page opens; this person writes a paragraph, then Claude writes one. */
+    mineThenTheirs: () => {
+      sync();
+      paragraph(fragment, "mine", ySyncPluginKey);
       Y.applyUpdate(peer.doc, Y.encodeStateAsUpdate(doc));
-      session.synced = true;
-      for (const listener of listeners) listener({ type: "synced" });
+      written(fragment, session, peer, (theirs) => paragraph(theirs, "theirs"));
     },
     text: () => fragment.toArray().map((block) => block.toArray().map(String).join("")),
   };
 }
 
 test("Ctrl+Z steps back through everyone's writes, but not past the page as it opened", () => {
-  const { fragment, session, state, view, peer, sync, text } = page();
+  const { fragment, session, state, view, text, mineThenTheirs } = page();
   paragraph(fragment, "opened", session);
-  sync();
-  paragraph(fragment, "mine", ySyncPluginKey);
-  Y.applyUpdate(peer.doc, Y.encodeStateAsUpdate(fragment.doc));
-  written(fragment, session, peer, (theirs) => paragraph(theirs, "theirs"));
+  mineThenTheirs();
   assert.deepEqual(text(), ["opened", "mine", "theirs"]);
   assert.equal(undo(state), true);
   assert.deepEqual(text(), ["opened", "mine"], "another writer's write is a step of its own");
@@ -80,11 +85,8 @@ test("a session already synced counts the others' writes from the start", () => 
 });
 
 test("the list names each change's writer and what it wrote, and marks what Ctrl+Z undid", () => {
-  const { fragment, session, state, view, peer, sync, changes } = page();
-  sync();
-  paragraph(fragment, "mine", ySyncPluginKey);
-  Y.applyUpdate(peer.doc, Y.encodeStateAsUpdate(fragment.doc));
-  written(fragment, session, peer, (theirs) => paragraph(theirs, "theirs"));
+  const { state, view, changes, mineThenTheirs } = page();
+  mineThenTheirs();
   const list = () => changes().changes.map(({ writer, added, state: done, undoable, redoable }) =>
     ({ writer: writer?.name ?? null, self: writer?.self ?? null, added, state: done, undoable, redoable }));
   assert.deepEqual(list(), [

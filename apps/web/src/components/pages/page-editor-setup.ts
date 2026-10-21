@@ -22,7 +22,7 @@ import {
 import type { Awareness } from "y-protocols/awareness";
 import * as Y from "yjs";
 import { automationChips } from "./page-automation-chips";
-import { PageSessionChanges, type PageChangeWriter } from "./page-session-changes";
+import { PageSessionChanges, type PageChangeItems, type PageChangeWriter } from "./page-session-changes";
 import { referenceChips, type PageReferenceTargets } from "./page-reference-chips";
 import { githubFileEmbeds, type ReadGitHubFile } from "./page-github-file-embeds";
 import { imageView, pageMediaPaste, type LocalMedia, type PageMediaSource, type UploadPageMedia } from "./page-media";
@@ -224,7 +224,7 @@ export function pageUndo(fragment: Y.XmlFragment, session: PageWrites, awareness
   });
   const opened = () => undoManager.addTrackedOrigin(session);
   // This person's write is theirs; another's is named by the presence of the client that wrote it.
-  const writerOf = (origin: unknown, insertions: Y.DeleteSet): PageChangeWriter | null => {
+  const writerOf = (origin: unknown, insertions: PageChangeItems): PageChangeWriter | null => {
     if (origin !== session) {
       const user = awareness.getLocalState()?.user as { color?: string } | undefined;
       return { name: "You", color: user?.color ?? null, kind: "user", self: true };
