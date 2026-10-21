@@ -169,12 +169,13 @@ no harness can load another's tool-call blocks, reasoning or signatures.
    only), Codex's `~/.codex/sessions/**/rollout-*-<id>.jsonl` (`response_item`s,
    not developer messages), or Grok's
    `~/.grok/sessions/*/<id>/chat_history.jsonl` (the window its model sees
-   after compaction, without synthetic turns). It keeps harness-neutral
+   after compaction, without synthetic turns, preceded by its newest
+   `compaction/segment_*.md` as a `summary` entry). It keeps harness-neutral
    entries (`user`, `assistant`, `tool_call` with its tool's name, `tool_result`),
    each clipped (a message to 6,000 characters, keeping the head and the ask of
    a long request; a tool call to 600; a result to 1,200), and drops reasoning,
-   signatures and images. Within `maxChars` it keeps the first request and the
-   newest entries, counting the rest as `omittedEntries`. The stop result
+   signatures and images. Within `maxChars` it keeps any summary, the first
+   request and the newest entries, counting the rest as `omittedEntries`. The stop result
    carries `handoffContext: { format: "xmatrix.handoff-context.v1", harness,
    sessionId, entries, omittedEntries, error? }`; a missing session is an
    `error`, never a failed stop.

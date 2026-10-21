@@ -413,7 +413,8 @@ pub struct MachineHandoffContextRequest {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MachineHandoffContextEntry {
-    /// `user`, `assistant`, `tool_call` or `tool_result`.
+    /// `summary` (what the harness compacted away), `user`, `assistant`,
+    /// `tool_call` or `tool_result`.
     pub role: String,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub tool: Option<String>,

@@ -97,30 +97,34 @@ fn bound_entries(
     max_chars: usize,
 ) -> (Vec<MachineHandoffContextEntry>, usize) {
     let size = |entry: &MachineHandoffContextEntry| entry.text.chars().count() + 16;
-    let first_user = entries.iter().position(|entry| entry.role == "user");
+    // A compaction summary and the first request are kept whatever the size.
+    let pinned: Vec<usize> = ["summary", "user"]
+        .iter()
+        .filter_map(|role| entries.iter().position(|entry| entry.role == *role))
+        .collect();
     let mut budget = max_chars;
-    if let Some(index) = first_user {
-        budget = budget.saturating_sub(size(&entries[index]));
+    for index in &pinned {
+        budget = budget.saturating_sub(size(&entries[*index]));
     }
     let mut tail_start = entries.len();
     while tail_start > 0 {
-        let candidate = &entries[tail_start - 1];
-        if Some(tail_start - 1) == first_user {
-            tail_start -= 1;
-            continue;
+        let index = tail_start - 1;
+        if !pinned.contains(&index) {
+            let cost = size(&entries[index]);
+            if cost > budget {
+                break;
+            }
+            budget -= cost;
         }
-        let cost = size(candidate);
-        if cost > budget {
-            break;
-        }
-        budget -= cost;
         tail_start -= 1;
     }
-    let mut kept = Vec::new();
-    if let Some(index) = first_user.filter(|index| *index < tail_start) {
-        kept.push(entries[index].clone());
-    }
-    let omitted = tail_start - usize::from(first_user.is_some_and(|index| index < tail_start));
+    let mut head: Vec<usize> = pinned
+        .into_iter()
+        .filter(|index| *index < tail_start)
+        .collect();
+    head.sort_unstable();
+    let omitted = tail_start - head.len();
+    let mut kept: Vec<_> = head.iter().map(|index| entries[*index].clone()).collect();
     kept.extend(entries.into_iter().skip(tail_start));
     (kept, omitted)
 }
@@ -156,7 +160,8 @@ fn entry(
     text: &str,
     max: usize,
 ) -> Option<MachineHandoffContextEntry> {
-    let text = if role == "user" {
+    // A request ends with its ask, and a compaction summary where it got to.
+    let text = if matches!(role, "user" | "summary") {
         clip_middle(text, max)
     } else {
         clip(text, max)
@@ -378,7 +383,31 @@ fn find_grok_transcript(session_id: &str) -> Option<PathBuf> {
 /// compaction. Synthetic user turns are Grok's own; encrypted reasoning
 /// stays with its vendor.
 fn read_grok_entries(path: &Path) -> std::io::Result<Vec<MachineHandoffContextEntry>> {
-    Ok(grok_entries(&json_lines(path)?))
+    let mut entries = Vec::new();
+    // What compaction took out of that window: its newest segment, ending
+    // where the window begins.
+    if let Some(summary) = path
+        .parent()
+        .and_then(|session| newest_grok_compaction_segment(&session.join("compaction")))
+    {
+        entries.extend(entry("summary", None, &summary, MESSAGE_MAX_CHARS));
+    }
+    entries.extend(grok_entries(&json_lines(path)?));
+    Ok(entries)
+}
+
+fn newest_grok_compaction_segment(dir: &Path) -> Option<String> {
+    let newest = std::fs::read_dir(dir)
+        .ok()?
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with("segment_") && name.ends_with(".md"))
+        })
+        .max()?;
+    std::fs::read_to_string(newest).ok()
 }
 
 fn grok_entries(lines: &[Value]) -> Vec<MachineHandoffContextEntry> {
@@ -474,6 +503,7 @@ pub(crate) fn render_handoff_markdown(context: &MachineHandoffContext) -> String
             ("tool_call", Some(tool)) => format!("### Tool call: {tool}"),
             ("tool_call", None) => "### Tool call".to_string(),
             ("tool_result", _) => "### Tool result".to_string(),
+            ("summary", _) => "## Earlier, as the predecessor's harness summarized it".to_string(),
             (other, _) => format!("## {other}"),
         };
         let fence = if entry.role.starts_with("tool") {
@@ -579,6 +609,22 @@ mod tests {
                 .map(|e| e.text.chars().next().unwrap())
                 .collect::<String>(),
             "gyl"
+        );
+    }
+
+    #[test]
+    fn a_compaction_summary_is_kept_ahead_of_the_newest_entries() {
+        let entries = vec![
+            text("summary", "earlier"),
+            text("user", "goal"),
+            text("assistant", &"x".repeat(100)),
+            text("assistant", "last"),
+        ];
+        let (kept, omitted) = bound_entries(entries, 80);
+        assert_eq!(omitted, 1);
+        assert_eq!(
+            kept.iter().map(|e| e.text.as_str()).collect::<Vec<_>>(),
+            vec!["earlier", "goal", "last"]
         );
     }
 

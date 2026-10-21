@@ -39,7 +39,8 @@ export interface MachineHandoffContextRequest {
 }
 
 export interface MachineHandoffContextEntry {
-  role: "user" | "assistant" | "tool_call" | "tool_result";
+  /** `summary`: what the predecessor's harness compacted out of its window. */
+  role: "summary" | "user" | "assistant" | "tool_call" | "tool_result";
   tool?: string;
   text: string;
 }
