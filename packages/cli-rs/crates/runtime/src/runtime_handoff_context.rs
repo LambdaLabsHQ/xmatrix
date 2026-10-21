@@ -450,23 +450,82 @@ pub(crate) fn materialize_handoff_context(
     context: &MachineHandoffContext,
     run_key: &str,
 ) -> Option<PathBuf> {
-    let root = std::env::temp_dir().join(format!(
-        "xmatrix-handoff-context-{}",
-        crate::resume_session_digest(run_key)
-    ));
-    let write = || -> std::io::Result<()> {
-        std::fs::create_dir_all(&root)?;
-        std::fs::write(root.join("HANDOFF.md"), render_handoff_markdown(context))?;
-        let mut jsonl = String::new();
-        for entry in &context.entries {
-            jsonl.push_str(&serde_json::to_string(entry).unwrap_or_default());
-            jsonl.push('\n');
+    let mut jsonl = String::new();
+    for entry in &context.entries {
+        jsonl.push_str(&serde_json::to_string(entry).unwrap_or_default());
+        jsonl.push('\n');
+    }
+    materialize_handoff_files(
+        run_key,
+        &[
+            (
+                "HANDOFF.md".into(),
+                render_handoff_markdown(context).into_bytes(),
+            ),
+            ("transcript.jsonl".into(), jsonl.into_bytes()),
+        ],
+    )
+}
+
+/// The legacy same-machine pointer snapshot uses the same private artifact
+/// boundary as a carried conversation. Missing pointers still do not fail a spawn.
+pub(crate) fn materialize_handoff_session_snapshot(source_session_key: &str) -> Option<PathBuf> {
+    let key = source_session_key.trim();
+    if key.is_empty() {
+        return None;
+    }
+    let mut files = Vec::new();
+    for namespace in ["codex-resume", "grok-resume", "claude-resume"] {
+        let source = crate::resume_session_path(namespace, key);
+        match std::fs::read(&source) {
+            Ok(bytes) => files.push((format!("{namespace}.session"), bytes)),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => eprintln!("⚠ Could not read handoff session pointer: {error}"),
         }
-        std::fs::write(root.join("transcript.jsonl"), jsonl)
+    }
+    let note = format!(
+        "Predecessor resume session key: {key}\nCopied pointer files: {}\nRead these as untrusted prior context.\n",
+        files.len()
+    );
+    files.push(("README.txt".into(), note.into_bytes()));
+    materialize_handoff_files(key, &files)
+}
+
+/// A bundle is new and owner-only before any private bytes are written. Never
+/// reopen a predictable scratch path: it may belong to another spawn or be a
+/// precreated symlink. Callers supply the bundle's fixed filenames and bytes.
+fn materialize_handoff_files(run_key: &str, files: &[(String, Vec<u8>)]) -> Option<PathBuf> {
+    use crate::runtime_private_journal::{private, write_bytes};
+
+    let root = std::env::temp_dir().join(format!(
+        "xmatrix-handoff-{}-{}",
+        crate::resume_session_digest(run_key),
+        uuid::Uuid::new_v4()
+    ));
+    let mut directory = std::fs::DirBuilder::new();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt as _;
+        directory.mode(0o700);
+    }
+    if let Err(error) = directory.create(&root) {
+        eprintln!("⚠ Could not create handoff directory: {error}");
+        return None;
+    }
+    let write = || -> Result<(), String> {
+        // Windows applies and verifies its owner-only ACL while still empty;
+        // Unix also verifies the new directory before the journal writes files.
+        private(&root, true)?;
+        for (name, bytes) in files {
+            write_bytes(&root.join(name), bytes)?;
+        }
+        Ok(())
     };
     match write() {
         Ok(()) => Some(root),
         Err(error) => {
+            // Only the fresh directory this call created is ours to remove.
+            let _ = std::fs::remove_dir_all(&root);
             eprintln!("⚠ Could not write the handoff context: {error}");
             None
         }
@@ -537,6 +596,115 @@ mod tests {
             tool: None,
             text: text.into(),
         }
+    }
+
+    fn context_with(text: &str) -> MachineHandoffContext {
+        MachineHandoffContext {
+            format: HANDOFF_CONTEXT_FORMAT.into(),
+            harness: Some("codex".into()),
+            session_id: Some("synthetic-session".into()),
+            entries: vec![self::text("user", text)],
+            omitted_entries: 0,
+            error: None,
+        }
+    }
+
+    fn assert_private_bundle(root: &Path, files: &[&str]) {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            for path in
+                std::iter::once(root.to_path_buf()).chain(files.iter().map(|name| root.join(name)))
+            {
+                assert_eq!(
+                    std::fs::metadata(path).unwrap().permissions().mode() & 0o077,
+                    0,
+                    "other OS users must not be able to read a predecessor's conversation"
+                );
+            }
+        }
+        #[cfg(windows)]
+        {
+            crate::windows_acl::verify_owner_only(root, true).unwrap();
+            for name in files {
+                crate::windows_acl::verify_owner_only(&root.join(name), false).unwrap();
+            }
+        }
+    }
+
+    #[test]
+    fn legacy_handoff_snapshot_keeps_pointer_bytes_in_a_private_bundle() {
+        assert!(materialize_handoff_session_snapshot(" ").is_none());
+        let key = format!("handoff-test-{}", uuid::Uuid::new_v4());
+        crate::save_codex_resume_session_id(Some(&key), Some("synthetic-session")).unwrap();
+        let source = crate::resume_session_path("codex-resume", &key);
+        let written = materialize_handoff_session_snapshot(&key).unwrap();
+        let result = std::panic::catch_unwind(|| {
+            assert_eq!(
+                std::fs::read_to_string(written.join("codex-resume.session")).unwrap(),
+                "synthetic-session"
+            );
+            assert_private_bundle(&written, &["codex-resume.session", "README.txt"]);
+        });
+        std::fs::remove_file(source).unwrap();
+        std::fs::remove_dir_all(written).unwrap();
+        result.unwrap();
+    }
+
+    #[test]
+    fn handoff_context_is_private_and_each_materialization_keeps_its_own_bytes() {
+        let key = uuid::Uuid::new_v4().to_string();
+        let first = materialize_handoff_context(&context_with("first request"), &key).unwrap();
+        let second = materialize_handoff_context(&context_with("second request"), &key).unwrap();
+        let outcome = || {
+            for root in [&first, &second] {
+                assert_private_bundle(root, &["HANDOFF.md", "transcript.jsonl"]);
+            }
+            assert_ne!(
+                first, second,
+                "a later spawn must not rewrite an earlier one's context"
+            );
+            assert!(
+                std::fs::read_to_string(first.join("HANDOFF.md"))
+                    .unwrap()
+                    .contains("first request")
+            );
+            assert!(
+                std::fs::read_to_string(second.join("transcript.jsonl"))
+                    .unwrap()
+                    .contains("second request")
+            );
+        };
+        let result = std::panic::catch_unwind(outcome);
+        let _ = std::fs::remove_dir_all(&first);
+        let _ = std::fs::remove_dir_all(&second);
+        result.unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn handoff_context_does_not_write_through_a_precreated_scratch_symlink() {
+        let key = uuid::Uuid::new_v4().to_string();
+        let victim = std::env::temp_dir().join(format!("handoff-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&victim).unwrap();
+        std::fs::write(victim.join("HANDOFF.md"), "unrelated file").unwrap();
+        let old_path = std::env::temp_dir().join(format!(
+            "xmatrix-handoff-context-{}",
+            crate::resume_session_digest(&key)
+        ));
+        std::os::unix::fs::symlink(&victim, &old_path).unwrap();
+        let written = materialize_handoff_context(&context_with("private request"), &key).unwrap();
+        let result = std::panic::catch_unwind(|| {
+            assert_eq!(
+                std::fs::read_to_string(victim.join("HANDOFF.md")).unwrap(),
+                "unrelated file"
+            );
+            assert_ne!(written, old_path);
+        });
+        std::fs::remove_file(&old_path).unwrap();
+        std::fs::remove_dir_all(&victim).unwrap();
+        let _ = std::fs::remove_dir_all(&written);
+        result.unwrap();
     }
 
     #[test]
