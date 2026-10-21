@@ -200,7 +200,7 @@ test("a started summon stays started whatever its Run does next", async ({ page 
 });
 
 test("reborn and handoff phrases show their own successor without requiring current membership", async ({ page }) => {
-  await installInvocationFixture(page, [], `${reborn.sourceMention} restart; ${handoff.sourceMention} continue.`, [reborn, handoff]);
+  const push = await installInvocationFixture(page, [], `${reborn.sourceMention} restart; ${handoff.sourceMention} continue.`, [reborn, handoff]);
   await page.goto("/app/personal-sspaceperso/channels/general-cchannelgen", { waitUntil: "domcontentloaded" });
   // A handoff draws both of its Agents as invocation chips joined by an arrow.
   const chips = page.locator(".app-mention-invocation");
@@ -234,6 +234,8 @@ test("reborn and handoff phrases show their own successor without requiring curr
   await page.screenshot({ path: "test-results/mention-invocation-continuations-mobile.png", fullPage: true });
   await page.keyboard.press("Escape");
   await fixtureJson(page, "invocation-launches", "**/api/xmatrix/channels/channel-general/agent-launches/query", { error: "Access revoked" }, { status: 403 });
+  // Access is lost between reads; the next change the Hub pushes finds it gone.
+  await push();
   await expect(chips).toHaveCount(0, { timeout: 15000 });
 });
 
@@ -667,10 +669,14 @@ test("the summon chip lists every checked environment, including Grok past the o
   await expect(dialog).toContainText("candidate_1: 80.0%");
   await expect(dialog).toContainText("Environment input digest: " + "b".repeat(64));
   await page.setViewportSize({ width: 393, height: 852 });
-  const box = await dialog.boundingBox();
-  expect(box!.x).toBeGreaterThanOrEqual(0);
-  expect(box!.width).toBeGreaterThan(0);
-  expect(box!.x + box!.width).toBeLessThanOrEqual(393);
+  // The open panel is repositioned on the frame after the resize, not inside
+  // setViewportSize: a box read at once is still the desktop placement.
+  await expect(async () => {
+    const box = await dialog.boundingBox();
+    expect(box!.x).toBeGreaterThanOrEqual(0);
+    expect(box!.width).toBeGreaterThan(0);
+    expect(box!.x + box!.width).toBeLessThanOrEqual(393);
+  }).toPass({ timeout: 5000 });
 });
 
 test("a refusal notice hides environments outside explicit constraints", async ({ page }) => {
