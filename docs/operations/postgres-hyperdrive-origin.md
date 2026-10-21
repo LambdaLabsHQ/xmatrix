@@ -107,6 +107,15 @@ read gets the existing single retry on a fresh checkout; a second failure still
 fails maintenance. Claiming and advancing a deletion remain explicit write
 transactions with their existing lease and commit-unknown behavior.
 
+Automation catalogs (`list`, page lists, cross-Space lists and `get`) run each
+lock-free SELECT, including access checks, as a placed `single_read` on a
+request-local session. A lost response destroys that checkout and retries the
+statement once; a second loss or an answered database error still fails the
+request. Each statement checks the placement fence and takes its own snapshot,
+as the previous READ COMMITTED transaction did. Page visibility and private
+event redaction still finish before any catalog result is returned. Automation
+mutations and their commit reconciliation remain explicit transactions.
+
 ## Agent lifecycle locks
 
 Agent message preparation, observed-head and receipt reads, content reads and

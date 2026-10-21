@@ -14,6 +14,7 @@ import { commandDigest as digest } from "./command-digest.js";
 import { cancelRunExecution } from "./runtime-control.js";
 
 import type { AuthorityDatabase, DatabaseTransaction } from "./contracts.js";
+import type { DatabaseRequestContext } from "./context.js";
 import {
   channelCapabilityPredicate,
   requireChannelCapability,
@@ -530,6 +531,24 @@ export class PostgresAutomationRepository {
     this.placements = new PostgresSpacePlacementDirectory(database);
   }
 
+  /**
+   * Catalogs and their access checks are lock-free reads. Keep their checkout
+   * request-local, but give each SELECT its own implicit transaction so a lost
+   * response gets the client's one fresh-checkout retry, without BEGIN/COMMIT.
+   * As with READ COMMITTED, each query sees its own snapshot; every placed
+   * query still checks and holds the placement fence for that statement.
+   */
+  private async read<T>(context: DatabaseRequestContext,
+    callback: (reader: DatabaseTransaction) => Promise<T>): Promise<T> {
+    const session = this.database.openSession();
+    try {
+      return await callback({ query: (query) => session.transaction(
+        { ...context, statement: "single_read" }, (tx) => tx.query(query)) });
+    } finally {
+      await session.close();
+    }
+  }
+
   private async placement(requestId: string, operation: string, spaceId: string): Promise<SpacePlacement> {
     const placement = await this.placements.find({ requestId, operation }, spaceId);
     if (!placement) throw new AutomationControlError("space_not_found", 404, "Space not found");
@@ -854,7 +873,7 @@ export class PostgresAutomationRepository {
       "conflict", 409, "Automation list scope is inconsistent");
     const placement = routedSpaceId
       ? await this.placement(requestId, "automation.list.placement", routedSpaceId) : null;
-    return this.database.transaction(placement ? { requestId, operation: "automation.list",
+    return this.read(placement ? { requestId, operation: "automation.list",
       placement: { spaceId: placement.spaceId, shardId: placement.shardId,
         placementEpoch: placement.placementEpoch } } : {
       requestId, operation: "automation.list-unscoped-legacy",
@@ -917,7 +936,7 @@ export class PostgresAutomationRepository {
     const requestId = text(input.requestId, "requestId", 200);
     const spaceId = text(input.spaceId, "spaceId", 300);
     const placement = await this.placement(requestId, "automation.page.placement", spaceId);
-    return this.database.transaction({ requestId, operation: "automation.page.list", placement: {
+    return this.read({ requestId, operation: "automation.page.list", placement: {
       spaceId: placement.spaceId, shardId: placement.shardId, placementEpoch: placement.placementEpoch,
     } }, async (tx) => {
       const rows = await tx.query<QueryResultRow>({ name: "automation_page_list_v1", text: `SELECT
@@ -953,7 +972,7 @@ export class PostgresAutomationRepository {
     }
     const pages = await Promise.all([...byShard.values()].map(async (group) => {
       const anchor = group[0]!;
-      return this.database.transaction({ requestId: input.requestId,
+      return this.read({ requestId: input.requestId,
         operation: "automation.list-shard", placement: {
           spaceId: anchor.spaceId, shardId: anchor.shardId,
           placementEpoch: anchor.placementEpoch,
@@ -989,7 +1008,7 @@ export class PostgresAutomationRepository {
     const principal = object(input.principal, "principal");
     const automationId = text(input.automationId ?? input.taskId, "automationId", 300);
     const placement = await this.opaquePlacement(requestId, "automation", automationId);
-    return this.database.transaction({ requestId, operation: "automation.get",
+    return this.read({ requestId, operation: "automation.get",
       placement: { spaceId: placement.spaceId, shardId: placement.shardId,
         placementEpoch: placement.placementEpoch } }, async (tx) => {
       if (principal.kind === "agent") {
