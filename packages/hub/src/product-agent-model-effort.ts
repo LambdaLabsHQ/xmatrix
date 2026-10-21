@@ -1,5 +1,5 @@
 import { parseAgentControlCommands as parseProductAgentControlCommands,
-  type AgentControlCommand as ProductAgentControlCommand,
+  type AgentControlCommand as ProductAgentControlCommand, type AgentControlOutcomeRecord,
   type AgentControlKind as ProductAgentControlKind } from "@xmatrix/protocol";
 export { parseProductAgentControlCommands };
 export type { ProductAgentControlCommand, ProductAgentControlKind };
@@ -27,7 +27,9 @@ export interface ProductAgentControlPort {
     kind: ProductAgentControlKind;
     value?: string;
   }): Promise<ProductAgentControlOutcome>;
-  publishSystemNotice(channelId: string, body: string): Promise<void>;
+  /** The receipt is the text an Agent reads; `outcomes` are what a client
+   * hangs on each written statement, in statement order. */
+  publishSystemNotice(channelId: string, body: string, outcomes: readonly AgentControlOutcomeRecord[]): Promise<void>;
   /** Commit the instruction that one Instance continue the turn its switches cancelled. */
   publishContinuation?(channelId: string, input: { instanceId: string; requestIds: string[]; body: string }): Promise<void>;
 }
@@ -51,6 +53,17 @@ export function switchContinuationPrompt(selections: readonly string[]): string 
 export interface ProductAgentControlResult {
   kind: ProductAgentControlKind;
   outcome: ProductAgentControlOutcome;
+}
+
+function outcomeRecord(command: ProductAgentControlCommand, outcome: ProductAgentControlOutcome): AgentControlOutcomeRecord {
+  const statement = { kind: command.kind, target: command.target };
+  switch (outcome.status) {
+    case "switched": return { ...statement, status: "switched", selected: outcome.selected };
+    case "catalog": return { ...statement, status: "catalog", options: [...outcome.options],
+      ...(outcome.current ? { current: outcome.current } : {}) };
+    case "no_instance": return { ...statement, status: "no_instance" };
+    case "error": return { ...statement, status: "error", message: outcome.message };
+  }
 }
 
 function noticeForOutcome(
@@ -125,6 +138,7 @@ export async function orchestrateProductAgentControlCommands(input: {
     notices.length === 1
       ? notices[0]!
       : notices.map((notice) => `- ${notice}`).join("\n"),
+    results.map(({ outcome }, index) => outcomeRecord(commands[index]!, outcome)),
   );
   /* A turn a switch cancelled continues on what is selected now, once per
      Instance after every statement has landed: the first switch cancels the

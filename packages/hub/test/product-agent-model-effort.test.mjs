@@ -24,16 +24,19 @@ function intent(body) {
 function portWith(outcome) {
   const requests = [];
   const notices = [];
+  const outcomes = [];
   return {
     requests,
     notices,
+    outcomes,
     async switchControl(input) {
       requests.push(input);
       if (outcome instanceof Error) throw outcome;
       return outcome;
     },
-    async publishSystemNotice(_channelId, body) {
+    async publishSystemNotice(_channelId, body, recorded) {
       notices.push(body);
+      outcomes.push(recorded);
     },
   };
 }
@@ -174,6 +177,11 @@ test("one message carries several statements and answers with one receipt", asyn
   assert.equal(port.notices.length, 1);
   assert.match(port.notices[0], /^- Switched @claude:1/u);
   assert.equal(port.notices[0].split("\n").length, 2);
+  // Each written statement gets its own result, in the order it was written.
+  assert.deepEqual(port.outcomes[0], [
+    { kind: "model", target: "claude:1", status: "switched", selected: "fable" },
+    { kind: "effort", target: "claude:1", status: "switched", selected: "fable" },
+  ]);
 });
 
 test("a statement that is not a command disqualifies the whole message", () => {

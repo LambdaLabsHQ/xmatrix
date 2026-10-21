@@ -521,10 +521,10 @@ export type {
 } from "./harness-parameters.js";
 
 export {
-  parseAgentControlCommands,
+  parseAgentControlCommands, parseAgentControlInvocations,
 } from "./agent-control-command.js";
 export type {
-  AgentControlCommand, AgentControlKind,
+  AgentControlCommand, AgentControlInvocation, AgentControlKind, AgentControlOutcomeRecord,
 } from "./agent-control-command.js";
 export {
   parseHandoffInstanceMentions, parseRebornInstanceMentions,

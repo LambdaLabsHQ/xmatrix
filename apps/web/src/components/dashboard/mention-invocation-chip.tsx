@@ -2,7 +2,7 @@
 
 import { AnimatedIcon } from "@/components/ui/animated-icon";
 
-import { createContext, useCallback, useContext, useEffect, useId, useMemo, useState, type ReactNode, type Dispatch, type SetStateAction } from "react";
+import { createContext, Fragment, useCallback, useContext, useEffect, useId, useMemo, useState, type ReactNode, type Dispatch, type SetStateAction } from "react";
 import { Popover } from "@base-ui/react/popover";
 import { LiquidGlassCard } from "@/components/ui/material-surfaces";
 import { Check, CircleHelp, Clock3, LoaderCircle, TriangleAlert, X, Zap } from "lucide-react";
@@ -11,8 +11,9 @@ import { useAuth } from "@/lib/auth-context";
 import { useXMatrixQueryFetch } from "@/lib/query/use-query-fetch";
 import { declinedIntentCopy, type DeclinedIntent } from "./summon-intent";
 import { noteJevReading } from "./jev-filled-tags";
-import type { AgentStopInvocation, LaunchParameterEvidence, SerializedAgentMessageExecution, SerializedAgentStop, AgentLaunchActivity, SerializedAgentContinuation, SerializedAgentInvocationRejection, SerializedAgentLaunch } from "@xmatrix/protocol";
-import { summonView, invocationChipStatus, invocationVendorIcon, operationFailureStageLabel, continuationView, handoffView, stopView, STOP_RECEIPT_PENDING_MS, type InvocationView, type InvocationStep } from "./mention-invocation-state";
+import type { AgentControlInvocation, AgentControlOutcomeRecord, AgentStopInvocation, LaunchParameterEvidence, SerializedAgentMessageExecution, SerializedAgentStop, AgentLaunchActivity, SerializedAgentContinuation, SerializedAgentInvocationRejection, SerializedAgentLaunch } from "@xmatrix/protocol";
+import { summonView, invocationChipStatus, invocationVendorIcon, operationFailureStageLabel, continuationView, handoffView, stopView, STOP_RECEIPT_PENDING_MS, controlView, CONTROL_RECEIPT_PENDING_MS, lifecycleRefusalView, type InvocationView, type InvocationStep } from "./mention-invocation-state";
+import type { CommandNotice } from "./command-notices";
 import { LoadingImage } from "@/components/dashboard/content-skeleton";
 import { avatarImageSrc } from "./identity-avatar";
 import { formatZonedDateTime } from "./time-display";
@@ -257,22 +258,32 @@ export function MentionIntentDeclinedChip({ rejection, category, labelContent, o
   </MentionProseCard>;
 }
 
+/** True until `until`, then re-renders once and stays false: a receipt still due. */
+function useBefore(until: number | undefined): boolean {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (until === undefined || now >= until) return;
+    const timer = setTimeout(() => setNow(Date.now()), Math.max(0, until - Date.now()) + 20);
+    return () => clearTimeout(timer);
+  }, [now, until]);
+  return until !== undefined && now < until;
+}
+
 /** A stop command. Its phase sits on the command the way a launch's phase sits
  * on the summon: requested, then confirmed by the Workstation. */
-export function MentionStopChip({ invocation, receipts, sentAt, pending, unavailable }: {
+export function MentionStopChip({ invocation, receipts, sentAt, pending, unavailable, notices }: {
   invocation: AgentStopInvocation; receipts: readonly SerializedAgentStop[];
   sentAt?: string; pending?: boolean; unavailable?: boolean;
+  /** What the Hub said about this stop beyond the receipts: queued, resting, nothing matched. */
+  notices?: readonly CommandNotice[];
 }) {
-  const [now, setNow] = useState(() => Date.now());
-  const pendingUntil = sentAt && receipts.length === 0 && !unavailable ? Date.parse(sentAt) + STOP_RECEIPT_PENDING_MS : undefined;
-  useEffect(() => {
-    if (pendingUntil === undefined || now >= pendingUntil) return;
-    const timer = setTimeout(() => setNow(Date.now()), Math.max(0, pendingUntil - Date.now()) + 20);
-    return () => clearTimeout(timer);
-  }, [now, pendingUntil]);
+  const fresh = useBefore(sentAt && receipts.length === 0 && !unavailable ? Date.parse(sentAt) + STOP_RECEIPT_PENDING_MS : undefined);
   const view = stopView(receipts, {
-    fresh: Boolean(pending) || (pendingUntil !== undefined && now < pendingUntil), unavailable: Boolean(unavailable),
+    fresh: Boolean(pending) || fresh, unavailable: Boolean(unavailable),
+    notices,
   });
+  // A notice that settled the chip is already its detail; the rest add to it.
+  const extra = (notices ?? []).filter(notice => notice.body !== view.detail);
   const agentName = invocation.all ? "all" : invocation.target.replace(/:[1-9]\d*$/u, "");
   const ordinal = receipts.length === 1 ? receipts[0]?.instanceOrdinal : invocation.target.match(/:([1-9]\d*)$/u)?.[1];
   const machines = [...new Set(receipts.map(stop => stop.machineName).filter((name): name is string => Boolean(name)))];
@@ -283,7 +294,52 @@ export function MentionStopChip({ invocation, receipts, sentAt, pending, unavail
       ?? invocationVendorIcon({ sourceMention: `@${agentName}`, targetName: named }))}
     sourceAddress={invocation.text}
     subtitle={machines.length === 1 ? machines[0]! : machines.length > 1 ? `${machines.length} machines` : "Selected machine"}
-    view={view} />;
+    view={view} context={extra.length ? <NoticeLines notices={extra} /> : undefined} />;
+}
+
+/** Hub receipts as the popover reads them: the receipt's own words, once each. */
+function NoticeLines({ notices }: { notices: readonly CommandNotice[] }) {
+  return <>{notices.map(notice => <p key={notice.messageId} className="app-invocation-description">{notice.body}</p>)}</>;
+}
+
+/** A `/model` or `/effort` statement, highlighted whole like the `@` it starts
+ * with, its value marked where it sits, and the Instance's answer beside it:
+ * the switch receipt is drawn here instead of as a message of its own. */
+export function MentionControlChip({ invocation, outcome, notice, sentAt }: {
+  invocation: AgentControlInvocation; outcome?: AgentControlOutcomeRecord; notice?: CommandNotice; sentAt?: string;
+}) {
+  const fresh = useBefore(sentAt && !notice ? Date.parse(sentAt) + CONTROL_RECEIPT_PENDING_MS : undefined);
+  const view = controlView(invocation, outcome, notice, { fresh });
+  const agentName = invocation.target.replace(/:[1-9]\d*$/u, "");
+  const ordinal = invocation.target.match(/:([1-9]\d*)$/u)?.[1];
+  const value = invocation.value;
+  const valueAt = value && invocation.text.endsWith(value) ? invocation.text.length - value.length : -1;
+  const labelContent = valueAt > 0
+    ? <>{invocation.text.slice(0, valueAt)}<span className="app-summon-condition">{value}</span></>
+    : invocation.text;
+  const options = outcome?.status === "catalog" ? outcome.options : [];
+  return <InvocationChip label={invocation.text.replace(/^[@＠]/u, "")} labelContent={labelContent}
+    name={agentName} instanceOrdinal={ordinal}
+    imageSrc={avatarImageSrc(invocationVendorIcon({ sourceMention: `@${agentName}`, targetName: agentName }))}
+    sourceAddress={invocation.text}
+    subtitle={invocation.kind === "model" ? "Model" : "Effort"}
+    view={view}
+    context={options.length ? <p className="app-invocation-description">
+      {options.map((option, index) => <Fragment key={option}>{index > 0 && " "}
+        <code data-current={option === (outcome as { current?: string }).current || undefined}>{option}</code></Fragment>)}
+    </p> : undefined} />;
+}
+
+/** A reborn or handoff the Hub refused before any Run existed. The refusal
+ * is drawn on the address that asked for it instead of as a message. */
+export function MentionRefusedLifecycleChip({ kind, text, agentName, ordinal, notices }: {
+  kind: "reborn" | "handoff"; text: string; agentName: string; ordinal: number; notices: readonly CommandNotice[];
+}) {
+  return <InvocationChip label={text.replace(/^[@＠]/u, "")} labelContent={text}
+    name={agentName} instanceOrdinal={String(ordinal)}
+    imageSrc={avatarImageSrc(invocationVendorIcon({ sourceMention: `@${agentName}`, targetName: agentName }))}
+    sourceAddress={text} subtitle={kind === "reborn" ? "Reborn" : "Handoff"}
+    view={lifecycleRefusalView(notices, kind)} />;
 }
 
 const LAUNCH_HINT_TITLES: Record<string, string> = {
