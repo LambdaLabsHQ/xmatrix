@@ -315,13 +315,15 @@ test("a page is co-edited live and shows an Agent working on a section it claime
   await browser.keyboard.press("End");
   await browser.keyboard.type(" and verified");
   await expect.poll(() => pageMarkdown(server)).toContain("Shipped and verified");
-  // Selecting text offers collaboration on the passage. Formatting is typed, or a shortcut.
+  // Selecting text offers collaboration on the passage. Formatting is typed, or a shortcut. Selected from the
+  // keyboard, it is being edited: the menu offers a comment rather than opening the box.
   await browser.keyboard.press("Shift+Home");
   const selection = browser.getByTestId("page-selection-menu");
-  await expect(selection.getByRole("button", { name: "Discuss" })).toBeVisible();
-  // Discuss is all a passage offers: asking an Agent is mentioning it in the discussion, and what acts
-  // on the whole section is the heading's.
-  await expect(selection.getByRole("button")).toHaveText(["Discuss"]);
+  await expect(selection.getByRole("button", { name: "Comment" })).toBeVisible();
+  // A comment is all a passage offers: asking an Agent is commenting, and what acts on the whole section is the
+  // heading's.
+  await expect(selection.getByRole("button")).toHaveText(["Comment"]);
+  await expect(browser.getByTestId("page-comment-box")).toHaveCount(0);
   await expect(browser.getByRole("button", { name: "Bold" })).toHaveCount(0);
   await expect(browser.getByTestId("page-toolbar")).toHaveCount(0);
   await browser.screenshot({ path: test.info().outputPath("pages-selection-menu.png") });
@@ -1084,7 +1086,7 @@ test("an editor that meets a Hub still keeping pages as text waits instead of sh
   expect(sockets, "it never joins the old session").toBe(0);
 });
 
-test("selecting a passage starts a discussion anchored to it, drawn beside the text until it is resolved", async ({ page: browser }) => {
+test("selecting a passage opens a comment box under it; sent, the comment is a discussion anchored there", async ({ page: browser }) => {
   await stubPages(browser, [page("p-relay", null, "Relay", "V")]);
   const pageLinks = /\/api\/xmatrix\/spaces\/[^/]+\/page-links\?.*$/u;
   await fixtureJson(browser, "page-links", pageLinks, { links: [] });
@@ -1092,45 +1094,42 @@ test("selecting a passage starts a discussion anchored to it, drawn beside the t
   await stubPageConversation(browser, discussion, { linkId: "l-discuss", blockId: "status" });
   // The Hub is slow to create it.
   await fixtureChannelCreate(browser, "channel-create", discussion, { held: true });
+  await fixtureJson(browser, "discuss-message", /\/api\/xmatrix\/channels\/[^/]+\/messages$/u, { message: {} },
+    { method: "POST" });
   const editor = await openLivePage(browser);
   await selectLine(browser, "In progress");
-  await browser.getByTestId("page-selection-menu").getByRole("button", { name: "Discuss" }).click();
-  // It opens beside the page at once, ready to write in, its passage marked, before the Hub has made it;
-  // the page stays where it was.
-  await expect(browser).toHaveURL(new RegExp(`page=p-relay&conversation=${CREATED_CHANNEL_ID}`, "u"), { timeout: 1_000 });
-  await expect(browser.getByTestId("page-conversation")).toBeVisible({ timeout: 1_000 });
-  await expect(editor.locator(".page-discussion")).toHaveText("In progress", { timeout: 1_000 });
-  expect(await fixtureRequestBodies(browser, "link-create")).toEqual([]);
+  // Selected with the mouse, the reply box opens under the passage with the caret in it, the passage marked.
+  const box = browser.getByTestId("page-comment-box");
+  await expect(box).toBeVisible();
+  await expect(box.getByRole("textbox", { name: "Comment" })).toBeFocused();
+  await expect(browser.getByTestId("page-selection-menu")).toHaveCount(0);
+  await expect(editor.locator(".page-discussion")).toHaveText("In progress");
+  await browser.keyboard.type("Is this still accurate?");
+  await browser.screenshot({ path: test.info().outputPath("pages-comment-box.png") });
+  await browser.keyboard.press("Enter");
+  // Sent, the box goes and the page stays in front of the reader; nothing opens over it.
+  await expect(box).toHaveCount(0);
+  await expect(browser.getByTestId("page-conversation")).toHaveCount(0);
+  await expect(editor).toBeFocused();
+  // Its card and the passage's bubble come with the link.
+  await fixtureJson(browser, "link-resolve", /\/page-links\/l-discuss\/resolution$/u, { link: {} }, { method: "PUT" });
   await releaseFixture(browser, "channel-create");
   const created = await fixtureCreatedChannelId(browser, "channel-create");
-  expect(browser.url()).toContain(`conversation=${created}`);
   await expect.poll(async () => (await fixtureRequestBodies(browser, "link-create"))[0]).toMatchObject({
     conversationId: created, pageId: "p-relay", blockId: "status", anchor: { quote: "In progress" } });
   expect((await fixtureRequestBodies(browser, "channel-create"))[0]!.name, "a discussion is named by its passage")
     .toBe("“In progress”");
-  await expect(editor).toContainText("In progress");
-  // Its composer opens empty: the passage is the thread's anchor, marked in the text and heading the thread,
-  // and its first message carries it, with a link back, for the Agents that read the conversation.
-  const composer = browser.locator("textarea.composer-textarea").first();
-  await expect(composer).toHaveValue(/^\u200B?$/u);
-  await expect(browser.getByTestId("composer-quote")).toHaveCount(0);
-  await browser.screenshot({ path: test.info().outputPath("pages-discussion-open.png") });
-  await fixtureJson(browser, "discuss-message", new RegExp(`/api/xmatrix/channels/${created}/messages$`, "u"),
-    { message: {} }, { method: "POST" });
-  await composer.fill("Is this still accurate?");
-  await composer.press("Enter");
+  // Its first message carries the passage, with a link back, and the comment, which names nobody: no Agent is at
+  // work on the page, so xMatrix gives it to one.
   await expect.poll(async () => (await fixtureRequestBodies(browser, "discuss-message"))[0]?.body)
-    .toMatch(/^> In progress\n\n— \[Relay › Status\]\([^)]*page=p-relay#status\)\n\nIs this still accurate\?$/u);
+    .toMatch(/^> In progress\n\n— \[Relay › Status\]\([^)]*page=p-relay#status\)\n\n@auto Is this still accurate\?$/u);
   const [sent] = await fixtureRequestBodies(browser, "discuss-message");
 
-  // Closed again, the passage is marked and its bubble opens the discussion.
+  // The passage stays marked and its bubble opens the discussion.
   const anchor = (await fixtureRequestBodies(browser, "link-create"))[0]!.anchor;
   await fixtureJson(browser, "page-links", pageLinks, { links: [{ linkId: "l-discuss", conversationId: E2E_CHANNEL.id,
     pageId: "p-relay", blockId: "status", source: "manual", createdAt: NOW, lastSeenAt: NOW, anchor, resolvedAt: null }] });
-  await fixtureJson(browser, "link-resolve", /\/page-links\/l-discuss\/resolution$/u, { link: {} }, { method: "PUT" });
-  await browser.getByRole("button", { name: "Close the conversation" }).click();
-  await expect(browser.getByTestId("page-conversation")).toBeHidden();
-  await expect(browser).not.toHaveURL(/conversation=/u);
+  await browser.reload();
   await expect(editor.locator(".page-discussion")).toHaveText("In progress");
   await expect(editor.getByRole("button", { name: `Open the discussion ${E2E_CHANNEL.name}` })).toBeVisible();
   await browser.screenshot({ path: test.info().outputPath("pages-discussion.png") });

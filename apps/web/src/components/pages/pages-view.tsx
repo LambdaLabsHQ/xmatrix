@@ -57,6 +57,7 @@ import {
 } from "@/components/dashboard/selection-discussion";
 import { refetchUnlessHumanPush } from "@/components/dashboard/workspace-resource-push";
 import { PageMigrationReview, usePageMigration } from "./page-migration-review";
+import { commentBody } from "./page-comment";
 import { NEW_PAGE_ID, NEW_PAGE_TITLE, type PageCreation } from "./page-creation";
 import { PageTreeRow } from "./page-tree-row";
 import type { PageReferenceTargets } from "./page-reference-chips";
@@ -296,20 +297,6 @@ export function pageDocumentQuery(userId: string | null, spaceId: string, pageId
  * Automations. Their keys do not carry the page's revision: the live session's commits invalidate them,
  * so a page opens on what was read ahead and keeps it on screen while it is read again.
  */
-/**
- * A comment as its discussion's first message: an Agent it mentions starts on it at once; one that mentions no
- * Agent goes to xMatrix to give to one.
- */
-export function commentBody(text: string, agents: readonly string[]): string {
-  const mention = /(^|\s)[@＠]([\p{L}\p{N}_.:-]+)/gu;
-  for (const match of text.matchAll(mention)) {
-    if (!agents.includes(match[2]!.split(":")[0]!)) continue;
-    const end = match.index! + match[0].length;
-    return `${text.slice(0, end)} launch:force${text.slice(end)}`;
-  }
-  return `@auto ${text}`;
-}
-
 function pageLinksQuery(userId: string | null, spaceId: string, pageId: string, token: string) {
   return {
     queryKey: xmatrixQueryKeys.domain({ userId: userId ?? "anonymous" }, "page-links", [spaceId, pageId]),
@@ -1203,9 +1190,11 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   const discuss: NonNullable<PageSectionActions["discuss"]> = (blockId, anchor) => startDiscussion(blockId, anchor);
   // A comment on a passage: the discussion of the passage, started with the comment; the page stays in front of
   // the reader, the discussion a card beside the passage. It names nobody: an Agent the comment mentions takes it,
-  // else xMatrix gives it to one (`@auto`).
+  // else the kind of Agent at work on the page, nearest the passage first, else xMatrix gives it to one (`@auto`).
   const comment: NonNullable<PageSectionActions["comment"]> = (blockId, anchor, text) =>
-    startDiscussion(blockId, anchor, { body: commentBody(text, writers.agents.map((agent) => agent.harness)) });
+    startDiscussion(blockId, anchor, { body: commentBody(text, writers.agents.map((agent) => agent.harness),
+      [...liveOnPage].sort((a, b) => Number(b.blockId === blockId) - Number(a.blockId === blockId))
+        .map((agent) => agent.name)) });
   const startDiscussion = (blockId: string, anchor?: Parameters<NonNullable<PageSectionActions["discuss"]>>[1],
     said?: { body: string }) => {
     if (!page) return;

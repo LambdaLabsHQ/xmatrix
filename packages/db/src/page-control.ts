@@ -855,6 +855,26 @@ export class PostgresPageRepository {
     });
   }
 
+  /**
+   * Ends every live co-writing on a page once the people have left it (pages-live-document.md §4.2): its
+   * Agents are on the page like colleagues until stopped or the people leave. The page's live session
+   * decides it, for nobody in particular; each ended conversation is returned with who started it, whose
+   * authority tells its Agent to leave.
+   */
+  async endCoWritingOnPage(input: { requestId: string; spaceId: string; pageId: string }):
+    Promise<Array<{ conversationId: string; startedByUserId: string }>> {
+    const spaceId = bounded(input.spaceId, "spaceId");
+    const pageId = bounded(input.pageId, "pageId");
+    return this.inSpace(bounded(input.requestId, "requestId"), "page.co_writing_end_on_page", spaceId, async (tx) => {
+      const ended = await tx.query<QueryResultRow & { conversation_id: string; started_by_user_id: string }>({
+        name: "page_co_writing_end_on_page_v1",
+        text: `UPDATE data.page_co_writing SET ended_at=now()
+          WHERE space_id=$1 AND page_id=$2 AND ended_at IS NULL RETURNING conversation_id,started_by_user_id`,
+        values: [spaceId, pageId], maxRows: MAX_LINKS });
+      return ended.map((row) => ({ conversationId: row.conversation_id, startedByUserId: row.started_by_user_id }));
+    });
+  }
+
   /** Co-writing is a person's to start and end, on a page they may edit. */
   private coWriting<T>(input: CoWritingInput, operation: string, run: (tx: DatabaseTransaction,
     at: { spaceId: string; pageId: string; conversationId: string; actor: Actor }) => Promise<T>): Promise<T> {
