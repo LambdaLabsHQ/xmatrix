@@ -30,7 +30,7 @@ export function PageDocumentStatic({ body, testId, references, mediaUrl, onAncho
     const measure = () => {
       if (!anchorsChange.current) return;
       const origin = target.getBoundingClientRect().top;
-      const offsets = new Map<string, number>([["page", 0]]);
+      const offsets = new Map<string, number>([["page", 0], ["end", target.offsetHeight]]);
       for (const [id, heading] of headings) offsets.set(`block:${id}`, heading.getBoundingClientRect().top - origin);
       const key = JSON.stringify([...offsets.values()].map(Math.round));
       if (key === last) return;

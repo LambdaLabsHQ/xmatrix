@@ -374,8 +374,8 @@ export function PageOffscreenCard({ side, entries, onJump }: {
 /** The margin's head, kept apart from conversation and Agent ids. */
 const HEAD = "head:";
 
-export function PageMargin({ conversations, writers = [], editors = [], view = null, tops, focusedId, openId = null, renderOpen,
-  canResolve, onOpen, onResolve, onExpand, onClose, onFocus, onJump, onWriter, writerActions, head }: {
+export function PageMargin({ conversations, writers = [], editors = [], view = null, end = null, tops, focusedId, openId = null,
+  renderOpen, canResolve, onOpen, onResolve, onExpand, onClose, onFocus, onJump, onWriter, writerActions, head }: {
   conversations: MarginConversation[];
   /** What stands at the top of the margin, above the cards it would otherwise cover. */
   head?: ReactNode;
@@ -385,6 +385,8 @@ export function PageMargin({ conversations, writers = [], editors = [], view = n
   editors?: ReadonlyArray<{ person: PresentPerson; top: number }>;
   /** The part of the margin in view, in its own coordinates; null before the page is laid out. */
   view?: { top: number; height: number } | null;
+  /** Where the page would end without the margin, in its coordinates: the cards rise to stay above it. */
+  end?: number | null;
   tops: ReadonlyMap<string, number>;
   focusedId: string | null;
   /** The conversation open in the margin, and the conversation itself to show there. */
@@ -460,8 +462,9 @@ export function PageMargin({ conversations, writers = [], editors = [], view = n
 
   // Only the open conversation moves the column. A hovered card only lights up:
   // moving it would slide another card under the pointer, which then moves in turn.
+  // An open card near the page's end rises rather than lengthening the page under it.
   const positions = layoutMargin(items.map((item) => ({ id: item.id, top: item.top,
-    height: heights.get(item.id) ?? item.estimate })), openItem);
+    height: heights.get(item.id) ?? item.estimate })), openItem, end);
   const bottom = Math.max(0, ...items.map((item) => (positions.get(item.id) ?? 0) + (heights.get(item.id) ?? item.estimate)));
   const openCard = (conversation: MarginConversation, quietAgents: boolean) => renderOpen && (
     <OpenConversationCard conversation={conversation} quietAgents={quietAgents} canResolve={canResolve}

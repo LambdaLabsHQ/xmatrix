@@ -768,13 +768,15 @@ function discussionOverlay(fragment: Y.XmlFragment, openConversation: (conversat
 /**
  * Where each anchor the margin places a conversation by is (§4.4), as an
  * offset from the top of `frame`: discussions by their passage, sections by
- * their heading, the whole page by the start of the document. Everyone else
+ * their heading, the whole page by the start of the document, and where the
+ * document ends as `end`, which the margin does not run past. Everyone else
  * with a caret on the page is placed by it, as `client:<awareness id>`.
  */
 export function anchorOffsets(view: EditorView, fragment: Y.XmlFragment, frame: HTMLElement,
   discussions: readonly Discussion[], awareness: Awareness): Map<string, number> {
   const origin = frame.getBoundingClientRect().top;
-  const out = new Map<string, number>([["page", view.dom.getBoundingClientRect().top - origin]]);
+  const text = view.dom.getBoundingClientRect();
+  const out = new Map<string, number>([["page", text.top - origin], ["end", text.bottom - origin]]);
   for (const block of pageDocBlocks(view.state.doc)) {
     const dom = view.nodeDOM(block.pos);
     if (dom instanceof HTMLElement) out.set(`block:${block.id}`, dom.getBoundingClientRect().top - origin);

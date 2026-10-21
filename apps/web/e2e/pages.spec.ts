@@ -2074,3 +2074,24 @@ test("on a keyboard, Tab takes the suggested change in front of the reader and E
   await expect(editor).toContainText("DNS is ready.");
   await expect.poll(async () => fixtureRequestBodies(browser, "suggestion-review")).toEqual([{ through: 5 }]);
 });
+
+test("a discussion near the page's end opens there without lengthening the page under it", async ({ page: browser }) => {
+  const passage = "Background paragraph 59.";
+  const { editor, article } = await openLongPageWithClaudeWriting(browser, (server) => ({ blockId: "status",
+    anchor: { quote: passage, from: positionAt(server, passage, false), to: positionAt(server, passage, true) } }));
+  const margin = browser.getByTestId("page-margin");
+  const length = () => article.evaluate((element) => element.scrollHeight);
+  await editor.getByText(passage, { exact: true }).scrollIntoViewIfNeeded();
+  const before = await length();
+  await margin.getByRole("button", { name: `Open ${E2E_CHANNEL.name} beside the page` }).click();
+  const open = margin.getByTestId("page-margin-open");
+  await expect(open).toBeInViewport();
+  await expect(editor.getByText(passage, { exact: true })).toBeInViewport();
+  // The open thread and the Agent's pill after it rise to end with the text: no blank stretch below the page.
+  await expect.poll(async () => {
+    const [column, text] = [(await margin.boundingBox())!, (await editor.locator(".page-document").boundingBox())!];
+    return column.y + column.height - (text.y + text.height);
+  }).toBeLessThanOrEqual(1);
+  expect(await length()).toBeLessThanOrEqual(before + 1);
+  await browser.screenshot({ path: test.info().outputPath("margin-open-at-end.png") });
+});

@@ -1467,6 +1467,13 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     const base = columnTop();
     return marginOn && drawn && viewport.height && base !== null ? { top: viewport.top - base, height: viewport.height } : null;
   })();
+  // Where the page ends without the margin: its text's end, or the window's bottom on a page shorter than the window.
+  const marginEnd = ((): number | null => {
+    const text = (drawn ? anchorTops : previewTops).get("end");
+    if (text === undefined) return null;
+    const base = columnTop();
+    return base !== null && viewport.height ? Math.max(text, viewport.height - base) : text;
+  })();
   // Without a margin, the same card stands at the page's right edge, for the people editing out of view.
   const edgeOffscreen = ((): { above: OffscreenEntry[]; below: OffscreenEntry[] } => {
     const above: OffscreenEntry[] = [];
@@ -1703,7 +1710,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
                         </div>
                       ) : (drawn || openInMargin || (document.data && links.data)) && <PageMargin conversations={marginCards}
                         tops={drawn ? anchorTops : previewTops} focusedId={focused} canResolve={canEdit}
-                        writers={marginWriters} editors={editors} view={marginView}
+                        writers={marginWriters} editors={editors} view={marginView} end={marginEnd}
                         onJump={(top) => { const base = columnTop(); if (base !== null) scrollToContent(base + top); }}
                         onWriter={(writer) => setDialog({ kind: "agent", key: writer.key })}
                         writerActions={(person) => {
