@@ -105,9 +105,9 @@ and statement limits.
 
 | Step | Effect |
 | --- | --- |
-| dispatch | A new dispatch token is persisted on the pending intent (in the business transaction itself, or by the step that schedules the next plan) before any message carrying it is sent. |
-| start | One compare-and-set from pending to started. It requires the message's incarnation, version and dispatch token to be current; the intent's start time to have passed on the server's clock; the scope's in-flight quota to have room; and, for a Space, its placement to be active on this shard at the recorded epoch. It records the execution token and the execution lease. A duplicated, late or superseded message matches no row and is dropped. |
-| finish | Requires the current execution token. If the version is unchanged, the outcome applies. If it changed, the execution settles only its own attempt and receipt: the new plan stands as the business left it, and the old execution's next time is not merged into it. A next plan gets its own dispatch token in the same statement, before its message is sent. |
+| dispatch | A dispatch token is persisted on the pending intent before any message carrying it is sent. A new token is minted only by a state change: a new business plan (in the business transaction itself), a plan scheduled by `finish` after the previous token was consumed, a retry authorized after a started attempt, or a long-delay relay that replaces the old token by compare-and-set. Re-sending an unstarted dispatch reuses its token. |
+| start | One compare-and-set from pending to started. It requires the message's incarnation, version, dispatch token and placement epoch to be current; the intent's start time to have passed on the server's clock; the scope's in-flight quota to have room; and, for a Space, its placement to be active on this shard at that epoch. It records the execution token and the execution lease. A duplicated, late or superseded message matches no row and is dropped. |
+| finish | Requires the current incarnation and execution token, an unexpired execution lease and, for a Space, its placement still active on this shard at the recorded epoch. If the version is unchanged, the outcome applies. If it changed, the execution settles only its own attempt and receipt: the new plan stands as the business left it, and the old execution's next time is not merged into it. A next plan gets its own dispatch token in the same statement, before its message is sent. |
 
 An execution reports one of:
 
@@ -147,9 +147,9 @@ can still reach the business tables unless the business checks.
   id, a delivery digest, a control id), never a dispatch or execution token.
 - Each kind declares its effects: **safe** (replay is harmless), **reconcile**
   (it can find out whether a previous attempt took effect) or **at-most-once**.
-  An unknown outcome is never replayed automatically: a safe kind is dispatched
-  again, a reconcile kind runs its reconcile step first, and an at-most-once kind
-  is parked for a person.
+  An unknown outcome is never replayed blindly; the kind's contract decides: a
+  safe kind is dispatched again, a reconcile kind runs its reconcile step first,
+  and an at-most-once kind is parked for a person.
 - Cancel stops further authorization. It does not undo what already happened, and
   a request already sent cannot be recalled by a lease.
 
@@ -219,10 +219,12 @@ executor selection or rebalancing of our own.
 1. **Commit.** The business write, its intent and the first dispatch token are
    committed in one transaction on the owning shard.
 2. **Send.** After the commit, a message naming the intent (identity,
-   incarnation, version, dispatch token) is sent with a delivery delay until its
-   wake time. A wake further away than the queue's maximum delay is sent at the
-   maximum; on early arrival the consumer persists a new dispatch token and
-   sends the next link. PostgreSQL stays the authority, so a lost link is
+   incarnation, version, placement epoch, dispatch token) is sent with a
+   delivery delay until its wake time. The consumer finds the intent's current
+   owning shard from its stable identity, never from a shard named in the
+   message. A wake further away than the queue's maximum delay is sent at the
+   maximum; on early arrival the consumer replaces the token by compare-and-set
+   and sends the next link. PostgreSQL stays the authority, so a lost link is
    recovered once the intent is due.
 3. **Execute.** A consumer runs `start`; if the intent is not yet startable
    (backoff, quota) the message is retried with a delay, and a stale message is
@@ -231,17 +233,22 @@ executor selection or rebalancing of our own.
    message is sent.
 4. **Retry.** Infrastructure failures retry the message with jittered delay and
    never count as business attempts. When a message runs out of retries or
-   expires, the intent is still pending and the reconciler sends a fresh one.
+   expires, the intent is still pending and the reconciler sends it again.
 5. **Reconcile.** The minute cron triggers one reconciler per physical shard. It
    reads two partial indexes and changes only recovery metadata:
-   - pending intents that are startable but whose last dispatch is older than a
-     cooldown: each gets a new dispatch token and a message;
-   - started intents whose execution lease has expired: each is handled by its
-     kind's effect contract (dispatch again, reconcile first, or park).
+   - pending intents that are startable but whose last send is older than a
+     cooldown: the same dispatch token is sent again. Reusing the token means a
+     slow queue never invalidates the messages already waiting in it; the
+     start compare-and-set discards the duplicates;
+   - started intents whose execution lease has expired: the reconciler records
+     the recovery decision from the kind's effect contract (dispatch again,
+     reconcile first, or park) and sends the work reference. Any reconcile
+     step runs in a consumer through the resource entry; the reconciler never
+     calls a provider.
 
    Each run is bounded by a row limit, a time limit and its database and send
-   budgets. Rows are taken oldest dispatch first, so a row just re-sent moves to
-   the back and a large backlog cannot starve later rows; a full page continues
+   budgets. Rows are taken oldest send first, so a row just re-sent moves to the
+   back and a large backlog cannot starve later rows; a full page continues
    in the next run. The cron is a trigger period, not a promise that a backlog of
    any size is re-sent within one period. The reconciler chooses no machine and
    runs no business.
@@ -320,7 +327,11 @@ than three times what the Gmail claim admits.
 
 By Little's law:
 
-- consumer invocations busy ≈ λ·d;
+- business executions in flight (execution slots) ≈ λ·d. Consumer invocations
+  are a separate quantity: an invocation can take a batch and process it with
+  bounded concurrency, so invocations needed ≈ message rate × mean batch wall
+  time ÷ mean effective batch size, measured with real batch sizes, concurrency
+  and CPU and I/O limits;
 - busy origin connections ≈ λ·o + c, where o is the origin-connection occupancy
   measured per execution: the sum, over its database phases, of how long each
   holds an origin connection. That can include round trips and waits inside a
@@ -339,9 +350,9 @@ execution takes d = 1 s, mostly an external call, with three database phases.
 
 - Working off the burst within a 5-minute lag deadline needs about 333/s for
   the burst plus the 140/s still arriving: about 475 executions per second for
-  those five minutes, so about 475 busy consumer invocations before any
-  headroom, which is above one queue's consumer limit. Fewer means the burst
-  becomes visible lag, not failures.
+  those five minutes, so about 475 execution slots before any headroom. How many
+  consumer invocations that takes depends on batching and is measured, not
+  assumed. Less capacity means the burst becomes visible lag, not failures.
 - Busy origin connections at 475/s are 475 × o. If each phase held a connection
   only for 5 ms of server time (o = 15 ms), that is about 7. If each phase were
   a transaction spanning a 200 ms round trip (o ≈ 0.6 s), it is about 285, far
@@ -421,9 +432,9 @@ measured in a declared environment against declared lag deadlines:
 | | Scenario |
 | --- | --- |
 | S1 | A million live intents, mostly idle |
-| S2 | A large share due in the same minute |
+| S2 | A large share due in the same minute, with queue waits longer than the re-send cooldown |
 | S3 | A giant tenant beside many small ones |
-| S4 | Inflow above capacity for an hour |
+| S4 | Inflow above capacity for an hour, with queue waits longer than the re-send cooldown |
 | S5 | A slow database: added round-trip time, then several times the server time |
 | S6 | Spaces moving between physical shards under load |
 | S7 | Consumer concurrency and queues doubled: how throughput and engine cost change, and where the bottleneck moves |
@@ -454,7 +465,7 @@ origin, not what the mechanism believes.
 | | Scenario | Must hold |
 | --- | --- | --- |
 | A | The writer dies right after committing; no client retries. | The accepted work is still dispatched. |
-| B | Disconnects at each dispatch, send, start and finish boundary; duplicated, delayed, reordered and expired messages. | Recovery; a dispatch token starts once; an old execution never overwrites a newer plan. |
+| B | Disconnects at each dispatch, send, start and finish boundary; duplicated, delayed, reordered and expired messages; a queue wait longer than the re-send cooldown. | Recovery; a dispatch token starts once; an old execution never overwrites a newer plan; work still starts when the queue is slower than the cooldown. |
 | C | Reschedule, cancel, delete and recreate during an execution. | No old work comes back; uncertain external results keep their reconcile identity. |
 | D | An email was sent but the response was lost; the provider has no idempotency key. | The attempt is `uncertain`; nothing claims exactly-once. |
 | E | Admission restarts; an old request pauses and begins late; old SQL outlives its client deadline. | The real capacity bound holds, and the document names the origin-side protection it relies on. |
