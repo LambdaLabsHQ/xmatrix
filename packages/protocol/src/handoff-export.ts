@@ -22,3 +22,36 @@ export interface MachineHandoffExportResult {
   dirty: boolean;
   error?: string;
 }
+
+/**
+ * A handoff carries the predecessor's conversation, whatever its harness or
+ * model. The stop asks the source's daemon to export it; the daemon reads its
+ * harness's own transcript and keeps harness-neutral entries (no vendor tool
+ * blocks, reasoning or signatures) within `maxChars`. The successor reads them
+ * as untrusted prior context and never resumes the predecessor's session.
+ */
+export const HANDOFF_CONTEXT_FORMAT = "xmatrix.handoff-context.v1";
+/** How much conversation a handoff carries: the first request and the newest entries. */
+export const HANDOFF_CONTEXT_MAX_CHARS = 60_000;
+
+export interface MachineHandoffContextRequest {
+  maxChars: number;
+}
+
+export interface MachineHandoffContextEntry {
+  role: "user" | "assistant" | "tool_call" | "tool_result";
+  tool?: string;
+  text: string;
+}
+
+export interface MachineHandoffContext {
+  format: typeof HANDOFF_CONTEXT_FORMAT;
+  /** `claude`, `codex` or `grok`; absent when no session was found. */
+  harness?: string;
+  sessionId?: string;
+  entries: MachineHandoffContextEntry[];
+  /** Entries left out to stay within the requested size. */
+  omittedEntries: number;
+  /** Why there is no conversation, when there is none. */
+  error?: string;
+}

@@ -106,6 +106,7 @@ mod runtime_claude_turn;
 mod runtime_codex_turn_errors;
 mod runtime_connector;
 mod runtime_failure_detail;
+mod runtime_handoff_context;
 mod runtime_harness_questions;
 mod runtime_headless_runs;
 mod runtime_page_co_write;

@@ -40,8 +40,8 @@ export interface ProductAgentInterventionPort {
   /**
    * Stop the target, with `handoffExport` so its daemon carries its checkout
    * to a handoff branch, and wait up to `timeoutMs` for the daemon's report.
-   * The reported `handoffExport` is the export outcome; a daemon that predates
-   * exports reports none.
+   * The reported `handoffExport` is the export outcome, and `handoffContext`
+   * the source's conversation; a daemon that predates either reports none.
    */
   issueHandoffStop?(
     target: ProductAgentKillTarget,
@@ -50,7 +50,7 @@ export interface ProductAgentInterventionPort {
     channelId: string,
     handoffExport: ProductAgentHandoffExport | undefined,
     timeoutMs: number,
-  ): Promise<{ stopped: boolean; handoffExport?: Record<string, unknown> }>;
+  ): Promise<{ stopped: boolean; handoffExport?: Record<string, unknown>; handoffContext?: Record<string, unknown> }>;
   /**
    * Whether the target's machine daemon is online to receive a stop now;
    * `undefined` when that could not be read. A stop to an offline daemon

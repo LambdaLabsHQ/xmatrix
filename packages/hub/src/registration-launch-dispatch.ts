@@ -76,6 +76,8 @@ interface RegistrationInputRequest {
   initialMessageId?: string; presentationMessageId?: string; tags?: AutoLaunchTags;
   /** Capabilities the work needs; those a daemon can prove gate where it runs. */
   requiredCapabilities?: readonly string[];
+  /** A handoff predecessor's conversation, handed to the successor's spawn. */
+  handoffContext?: Record<string, unknown>;
 }
 
 /** Launch from any input. Jev chooses among every authorized registration in

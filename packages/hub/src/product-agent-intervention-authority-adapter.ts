@@ -1,4 +1,4 @@
-import { plainRecord as record } from "@xmatrix/protocol";
+import { HANDOFF_CONTEXT_MAX_CHARS, plainRecord as record } from "@xmatrix/protocol";
 import {
   orchestrateProductAgentIntervention,
   parseProductAgentStopCommand,
@@ -91,7 +91,8 @@ export function createProductAgentInterventionAuthorityPort(input: {
   // and returned this exact live target. The command is queued for the
   // Machine owner's daemon, which is where it claims commands.
   async function issueDaemonStop(target: ProductAgentKillTarget, controlId: string, reason: string,
-    channelId: string | undefined, handoffExport?: ProductAgentHandoffExport): Promise<void> {
+    channelId: string | undefined, handoff?: { export?: ProductAgentHandoffExport }): Promise<void> {
+    const handoffExport = handoff?.export;
     await retryTransient(() =>
       machineDaemonCommand(input.env, {
         commandId: stableCommandId("machine-stop", controlId),
@@ -112,8 +113,11 @@ export function createProductAgentInterventionAuthorityPort(input: {
           instanceId: target.instanceId,
           reason,
           worktreeDisposition: "retain",
-          ...(handoffExport ? { handoffExport, preserveInstanceForReborn: true, resumeSessionKey: target.resumeSessionKey,
-            ...target.repoPool } : {}),
+          // A handoff's stop names the session it ends, whether or not a
+          // checkout travels: its status is read back under those fields.
+          ...(handoff ? { resumeSessionKey: target.resumeSessionKey, ...target.repoPool,
+            handoffContext: { maxChars: HANDOFF_CONTEXT_MAX_CHARS } } : {}),
+          ...(handoffExport ? { handoffExport, preserveInstanceForReborn: true } : {}),
         },
         metadata: {},
         capabilities: [],
@@ -271,10 +275,11 @@ export function createProductAgentInterventionAuthorityPort(input: {
       // before the successor can reply and wake it; its checkout stays retained.
       await runtime().stopRestingInstances({ requestId: stableCommandId("handoff-rest-stop", controlId),
         channelId, actorUserId: input.actorUserId, handoffSource: { instanceId: target.instanceId, runId: target.runId } });
-      await issueDaemonStop(target, controlId, reason, channelId, handoffExport);
+      await issueDaemonStop(target, controlId, reason, channelId, { export: handoffExport });
       const result = await awaitDaemonStopResult(target, controlId, timeoutMs, true);
       if (!result) return { stopped: false };
-      return { stopped: true, ...(record(result.handoffExport) ? { handoffExport: record(result.handoffExport)! } : {}) };
+      return { stopped: true, ...(record(result.handoffExport) ? { handoffExport: record(result.handoffExport)! } : {}),
+        ...(record(result.handoffContext) ? { handoffContext: record(result.handoffContext)! } : {}) };
     },
 
     async stopResting(channelId, target) {
