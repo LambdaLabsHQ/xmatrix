@@ -209,7 +209,10 @@ fact is about.
   the pill opens the channel right under it, on the same left edge, the pill
   staying put, with what may be done to the Agent (stop, undo, write with
   another) beside the pill. An idle Agent leaves the margin and its channel is
-  a card again (§4.4). Only a solid pill means an Agent at work.
+  a card again (§4.4). An Agent at work for a discussion is the exception: the
+  discussion stays a card beside its passage, and its pill, with no channel
+  under it, opens the discussion there (decided 2026-10-21). Only a solid pill
+  means an Agent at work.
 - **On a phone, and beside a page without room for the margin, Agents are at
   the right edge.** Each Agent on the page is its face beside the line it is at, travelling with the text as the page scrolls
   and waiting at the top or bottom of the edge, a chevron pointing to the
@@ -502,7 +505,13 @@ or joining one never leaves the page.
 - **An Agent at work comes first.** While one of a conversation's Agents is
   at work on the page, the conversation hangs under that Agent's pill beside
   the line it writes (§3.2) instead of sitting at its own anchor, and opens
-  there; when the Agent goes idle, it is a card at its anchor again.
+  there; when the Agent goes idle, it is a card at its anchor again. A
+  discussion is about the passage it was started on, so it stays at its
+  passage whoever works for it (decided 2026-10-21).
+- **Opening brings it into view once.** Opening a conversation scrolls the
+  page to where it opens. While it stays open, its Agent going busy or idle,
+  or its live session leaving and coming back, moves it in the margin but never
+  scrolls the page (decided 2026-10-21).
 - **Where it sits.** A discussion sits beside its passage. A conversation
   linked to a section sits beside the section's heading, and one linked to
   the whole page beside the title.
