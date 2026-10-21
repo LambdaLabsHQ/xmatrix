@@ -289,11 +289,6 @@ const partitions = {
       args: turboArgs(["build"], "@xmatrix/db^..."),
     },
     {
-      label: "Check PostgreSQL package and migrations",
-      command: pnpm,
-      args: ["--filter", "@xmatrix/db", "check"],
-    },
-    {
       label: "Test protocol",
       command: pnpm,
       args: turboArgs(["test"], "@xmatrix/protocol"),
@@ -304,6 +299,16 @@ const partitions = {
       label: "Test the default billing policy",
       command: pnpm,
       args: turboArgs(["test"], "@xmatrix/billing"),
+      parallelGroup: nodeTestParallelGroup,
+      parallelLane: "billing-test",
+    },
+    {
+      // Runs beside the other lanes, but after the billing tests in their
+      // lane: their package script rebuilds billing's dist, which this
+      // check's typecheck and billing-official build read.
+      label: "Check PostgreSQL package and migrations",
+      command: pnpm,
+      args: ["--filter", "@xmatrix/db", "check"],
       parallelGroup: nodeTestParallelGroup,
       parallelLane: "billing-test",
     },
@@ -446,8 +451,9 @@ const partitions = {
       label: "Check duplicated code",
       command: pnpm,
       args: ["run", "check:duplicates"],
-      // Runs after, not beside, the Node check lanes when CI requests both:
-      // on a 4-CPU hosted VM the scan starves their process-tree timing tests.
+      // Runs after, not beside, the Node check lanes when one process
+      // requests both: on a 4-CPU hosted VM the scan starves their
+      // process-tree timing tests. Hosted CI gives it a job of its own.
     },
   ],
   // The Windows required gate runs the same Cargo suite. Platform-independent

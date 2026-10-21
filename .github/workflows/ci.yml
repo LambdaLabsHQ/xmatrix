@@ -212,6 +212,15 @@ jobs:
     # an unselected failure. Shared checks use the existing Linux CI pool by
     # default, so selectors and required checks can run in parallel. Release
     # callers retain their explicit offload_runner override.
+    # Hosted runners give the repository-wide duplicate scan a job of its own
+    # beside the Node checks: on one 4-CPU VM it could only follow them, as
+    # the job's longest stage. A persistent runner runs both as one job. The
+    # ledger records node-checks only when every entry passed.
+    name: ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON((inputs.hosted || github.event.pull_request.head.repo.fork || vars.XMATRIX_RUNNER_FLEET == 'github-hosted' || (vars.XMATRIX_RUNNER_FLEET != 'self-hosted' && github.event.repository.private == false)) && '[{"name":"node-checks","partitions":"node-checks"},{"name":"node-checks (duplicates)","partitions":"duplicates"}]' || '[{"name":"node-checks","partitions":"node-checks duplicates"}]') }}
     runs-on: *offload_runner
     steps:
       - &checkout_selected_ref
@@ -234,11 +243,9 @@ jobs:
         run: node scripts/ci-ledger.mjs lookup node-checks
       - uses: ./.github/actions/setup-pnpm-node
         if: steps.ledger.outputs.hit != 'true'
-      # The repository-wide duplicate scan follows the Node checks in this job
-      # instead of taking a hosted job of its own.
       - name: Run shared Node checks
         if: steps.ledger.outputs.hit != 'true'
-        run: node scripts/ci.mjs node-checks duplicates
+        run: node scripts/ci.mjs ${{ matrix.partitions }}
 
   web:
     needs: changes

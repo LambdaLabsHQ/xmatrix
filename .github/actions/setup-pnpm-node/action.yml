@@ -88,6 +88,35 @@ runs:
         key: pnpm-store-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
         restore-keys: pnpm-store-${{ runner.os }}-
 
+    # PNPM re-checks every lockfile entry against its supply-chain policy
+    # (minimumReleaseAge) before installing: a registry metadata request per
+    # package, 6-8 s and once 75 s on a hosted VM. It records each passing
+    # check in lockfile-verified.jsonl in its cache directory and skips the
+    # check only for a lockfile with the same content hash, checked under a
+    # policy at least as strict as today's. Carry that record between hosted
+    # jobs, so one job per lockfile and policy pays for the check; any other
+    # lockfile, policy or PNPM version misses and is checked in full.
+    # Persistent runners keep their cache directory and already reuse it.
+    - name: Locate the PNPM lockfile verification record on a GitHub-hosted runner
+      id: hosted-verified
+      if: inputs.install-deps == 'true' && runner.environment == 'github-hosted'
+      shell: bash
+      run: |
+        # PNPM's own cache directory choice (getCacheDir in pnpm).
+        if [ -n "${XDG_CACHE_HOME:-}" ]; then dir="$XDG_CACHE_HOME/pnpm"
+        elif [ "$RUNNER_OS" = macOS ]; then dir="$HOME/Library/Caches/pnpm"
+        elif [ "$RUNNER_OS" = Windows ]; then dir="$LOCALAPPDATA/pnpm-cache"
+        else dir="$HOME/.cache/pnpm"
+        fi
+        echo "path=$dir/lockfile-verified.jsonl" >> "$GITHUB_OUTPUT"
+
+    - name: Restore the PNPM lockfile verification record on a GitHub-hosted runner
+      if: inputs.install-deps == 'true' && runner.environment == 'github-hosted'
+      uses: actions/cache@v6
+      with:
+        path: ${{ steps.hosted-verified.outputs.path }}
+        key: pnpm-lockfile-verified-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', '.npmrc', 'package.json') }}
+
     # Supported product jobs use persistent self-hosted runners. PNPM's
     # content-addressed store lives outside each checkout, so clean worktrees
     # reuse the machine-local packages and download only missing lockfile
