@@ -218,10 +218,15 @@ test("the Hub suite is recorded only from a run that passed all of it", () => {
   assert.deepEqual(passedLedgerJobs([job(HUB_SUITE_LEDGER_JOB)]), [], "no job can claim the suite by name");
 });
 
+test("pull request jobs never vouch for the full tier a release reuses", () => {
+  const fast = ["node-static", "web-unit", "web-build", "web-check", "hub-check", "rust-clippy"];
+  assert.deepEqual(passedLedgerJobs(fast.map((name) => ({ name, conclusion: "success" }))), []);
+});
+
 test("a job split over a matrix is recorded only when every entry passed", () => {
   const job = (name, conclusion = "success") => ({ name, conclusion });
   const hub = ["hub (static)", ...[1, 2, 3, 4, 5, 6].map((shard) => `hub (${shard}/6)`)];
-  const web = ["web", "web (short performance)", "web (sustained performance)",
+  const web = ["web", "web (performance)",
     ...[1, 2, 3, 4].map((shard) => `web (browser ${shard}/4)`)];
   const rust = ["rust-cli (clippy)", "rust-cli (test)"];
   assert.deepEqual(
