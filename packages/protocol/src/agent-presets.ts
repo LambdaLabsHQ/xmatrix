@@ -88,10 +88,6 @@ export function agentPresetById(id: string | undefined | null): AgentPreset | un
   return AGENT_PRESETS.find((preset) => preset.id === id);
 }
 
-export function agentPresetAvatarUrl(id: string | undefined | null): string | undefined {
-  return agentPresetById(id)?.avatarUrl;
-}
-
 /** Lowercase launcher stem: drops directories and Windows launcher extensions. */
 function agentLauncherStem(value: string): string {
   const fileName = value.replace(/\\/g, "/").split("/").pop() || value;

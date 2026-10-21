@@ -1025,7 +1025,8 @@ export function useComposerCompletion({
                             )}
                           </span>
                         ) : candidate.face ? (
-                          <Face of={candidate.face} size="xs" shape="circle" />
+                          // A row's face is named as the row is: `codex:1`, not the Agent's bare name.
+                          <Face of={{ ...candidate.face, name: candidate.name }} size="xs" shape="circle" />
                         ) : (
                           // A row that is no one, as a command an Agent advertises, keeps its own letters.
                           <IdentityAvatar

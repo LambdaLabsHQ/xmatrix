@@ -20,7 +20,6 @@ export {
   agentHarnessSpec,
   agentLaunchExecutable,
   withMachineSpawnHarness,
-  agentPresetAvatarUrl,
   agentPresetById,
   agentPresetForLauncher,
   normalizeAgentPresetRuntime,
