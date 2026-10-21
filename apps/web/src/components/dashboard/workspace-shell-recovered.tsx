@@ -253,6 +253,7 @@ export function PendingAttachmentCard({
             type="button"
             aria-label={`Open ${attachment.name}`}
             className="block size-20 shrink-0 cursor-zoom-in bg-background"
+            data-lightbox-origin={attachment.id}
             onClick={onOpen}
           >
             <LoadingImage
