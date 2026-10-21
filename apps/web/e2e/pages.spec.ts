@@ -1105,6 +1105,48 @@ test("an editor that meets a Hub still keeping pages as text waits instead of sh
   expect(sockets, "it never joins the old session").toBe(0);
 });
 
+test("a passage dragged past the text's edge opens the comment box as one dragged within it", async ({ page: browser }) => {
+  await stubPages(browser, [page("p-relay", null, "Relay", "V")]);
+  await fixtureJson(browser, "page-links", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\?.*$/u, { links: [] });
+  const editor = await openLivePage(browser);
+  const line = (await editor.getByText("In progress", { exact: true }).boundingBox())!;
+  const text = (await editor.locator(".page-document").boundingBox())!;
+  // The button comes up beyond the editor, to the right of the line's end.
+  await browser.mouse.move(line.x + 1, line.y + line.height / 2);
+  await browser.mouse.down();
+  await browser.mouse.move(text.x + text.width + 12, line.y + line.height / 2, { steps: 8 });
+  expect(await browser.evaluate(([x, y]) => Boolean(document.elementFromPoint(x!, y!)?.closest(".page-document")),
+    [text.x + text.width + 12, line.y + line.height / 2]), "the drag ends outside the editor").toBe(false);
+  await browser.mouse.up();
+  const box = browser.getByTestId("page-comment-box");
+  await expect(box.getByRole("textbox", { name: "Comment" })).toBeFocused();
+  await expect(editor.locator(".page-discussion")).toHaveText("In progress");
+});
+
+test("a drag that starts in code or bold text selects the passage, its markdown markers held until the button is up", async ({ page: browser }) => {
+  await stubPages(browser, [page("p-relay", null, "Relay", "V")]);
+  await fixtureJson(browser, "page-links", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\?.*$/u, { links: [] });
+  const editor = await openLivePage(browser,
+    "# Relay\n\n## Status\n\n`past_due` has a grace week.\n\n## Notes\n\n**Seats** are paid by people.\n");
+  const box = browser.getByTestId("page-comment-box");
+  for (const [start, marker, passage] of [["code", "`", "ast_due has a grace week."], ["strong", "**", "eats are paid by people."]] as const) {
+    const from = (await editor.locator(start).boundingBox())!;
+    const line = (await editor.locator("p", { has: browser.locator(start) }).boundingBox())!;
+    const y = from.y + from.height / 2;
+    await browser.mouse.move(from.x + 12, y);
+    await browser.mouse.down();
+    await browser.mouse.move(from.x + 40, y, { steps: 4 });
+    // Drawn under the pointer, the markers would replace the text the drag is anchored in.
+    await expect(editor.locator(".page-md-syntax", { hasText: marker })).toHaveCount(0);
+    await browser.mouse.move(line.x + line.width - 2, y, { steps: 8 });
+    await browser.mouse.up();
+    await expect(box.getByRole("textbox", { name: "Comment" })).toBeFocused();
+    await expect.poll(async () => (await editor.locator(".page-discussion").allTextContents()).join("")).toBe(passage);
+    await browser.keyboard.press("Escape");
+    await expect(box).toHaveCount(0);
+  }
+});
+
 test("selecting a passage opens a comment box beside it in the margin; sent, the comment is a discussion anchored there", async ({ page: browser }) => {
   await browser.setViewportSize({ width: 1600, height: 900 });
   await stubPages(browser, [page("p-relay", null, "Relay", "V")]);

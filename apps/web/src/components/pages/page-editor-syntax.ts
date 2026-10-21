@@ -3,7 +3,7 @@ import { setBlockType, lift } from "prosemirror-commands";
 import { InputRule, inputRules, textblockTypeInputRule, wrappingInputRule } from "prosemirror-inputrules";
 import { keymap } from "prosemirror-keymap";
 import type { MarkType, Node as DocNode } from "prosemirror-model";
-import { type Command, type EditorState, Plugin, type Transaction } from "prosemirror-state";
+import { type Command, type EditorState, Plugin, PluginKey, type Transaction } from "prosemirror-state";
 import { findWrapping } from "prosemirror-transform";
 import { Decoration, DecorationSet } from "prosemirror-view";
 
@@ -124,11 +124,25 @@ export function syntaxDecorations(state: EditorState): DecorationSet {
   return drawn.length ? DecorationSet.create(state.doc, drawn) : DecorationSet.empty;
 }
 
-/** A second click on the link the caret is already in edits its address. */
+const syntaxKey = new PluginKey<{ held: boolean; shown: DecorationSet }>("page-syntax");
+
+/**
+ * A second click on the link the caret is already in edits its address. While the mouse button is held the
+ * markers stay as they were: drawn under the pointer as it presses, they would replace the text the browser
+ * anchors its drag in, and the drag would only move the caret. They follow the caret once the button is up.
+ */
 export function syntaxPlugin(): Plugin {
   return new Plugin({
+    key: syntaxKey,
+    state: {
+      init: (_config, state) => ({ held: false, shown: syntaxDecorations(state) }),
+      apply: (tr, value, _old, state) => {
+        const held = tr.getMeta(syntaxKey) ?? value.held;
+        return { held, shown: held ? value.shown.map(tr.mapping, tr.doc) : syntaxDecorations(state) };
+      },
+    },
     props: {
-      decorations: syntaxDecorations,
+      decorations: (state) => syntaxKey.getState(state)?.shown,
       handleDOMEvents: {
         mousedown(view, event) {
           if (!view.editable) return false;
@@ -142,6 +156,12 @@ export function syntaxPlugin(): Plugin {
             }));
             return true;
           }
+          if (event.button !== 0) return false;
+          view.dispatch(view.state.tr.setMeta(syntaxKey, true));
+          // After the editor has read where the drag ended.
+          view.dom.ownerDocument.addEventListener("mouseup", () => window.setTimeout(() => {
+            if (!view.isDestroyed) view.dispatch(view.state.tr.setMeta(syntaxKey, false));
+          }), { once: true, capture: true });
           return false;
         },
       },

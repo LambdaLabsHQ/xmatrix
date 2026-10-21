@@ -551,21 +551,21 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
         measure();
       },
       handleDOMEvents: {
-        mousedown: () => {
+        mousedown: (current) => {
           selectedWithMouse.current = true;
           window.clearTimeout(commentTimer.current);
+          // A drag often ends past the text's edge, outside the editor; wherever the button comes up, it was made here.
+          current.dom.ownerDocument.addEventListener("mouseup", () => {
+            window.clearTimeout(commentTimer.current);
+            commentTimer.current = window.setTimeout(() => {
+              if (!current.isDestroyed && selectedWithMouse.current && !current.state.selection.empty && current.hasFocus()) {
+                openComment(current, false);
+              }
+            }, 220);
+          }, { once: true, capture: true });
           return false;
         },
         touchstart: () => { selectedWithMouse.current = false; return false; },
-        mouseup: (current) => {
-          window.clearTimeout(commentTimer.current);
-          commentTimer.current = window.setTimeout(() => {
-            if (!current.isDestroyed && selectedWithMouse.current && !current.state.selection.empty && current.hasFocus()) {
-              openComment(current, false);
-            }
-          }, 220);
-          return false;
-        },
         focus: (focused) => { showToolbar(readToolbar(focused)); return false; },
         blur: (blurred, event) => {
           // Leaving for the page's own menus keeps them open.
