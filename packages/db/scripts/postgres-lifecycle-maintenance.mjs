@@ -8,7 +8,10 @@ import { runIfInvoked, withClient, withClientTransaction } from "./cli.mjs";
 const DEFAULT_BATCH_SIZE = 1_000;
 const DEFAULT_MAX_ROWS = 10_000;
 const DEFAULT_BUDGET_MS = 30_000;
-const MAX_MANUAL_ROWS = 100_000;
+const MAX_ROWS = 1_000_000;
+const MAX_BUDGET_MS = 300_000;
+// Eligibility counts in the report stop here; past it the report says "at least".
+const EVIDENCE_ROWS = 100_000;
 
 function integer(raw, name, fallback, maximum) {
   if (raw === undefined) return fallback;
@@ -35,8 +38,8 @@ export function parseLifecycleOptions(argv) {
   return Object.freeze({
     dryRun,
     batchSize: integer(values.get("batch-size"), "batch-size", DEFAULT_BATCH_SIZE, 1_000),
-    maxRows: integer(values.get("max-rows"), "max-rows", DEFAULT_MAX_ROWS, MAX_MANUAL_ROWS),
-    budgetMs: integer(values.get("budget-ms"), "budget-ms", DEFAULT_BUDGET_MS, 90_000),
+    maxRows: integer(values.get("max-rows"), "max-rows", DEFAULT_MAX_ROWS, MAX_ROWS),
+    budgetMs: integer(values.get("budget-ms"), "budget-ms", DEFAULT_BUDGET_MS, MAX_BUDGET_MS),
   });
 }
 
@@ -124,7 +127,7 @@ async function readSnapshot(client) {
             AND available_at<now()-interval '35 days' AND created_at<now()-interval '35 days'
             AND updated_at<now()-interval '35 days'
           ORDER BY available_at,outbox_id LIMIT $1
-        ) bounded) AS retained_outbox_rows`, [MAX_MANUAL_ROWS + 1]);
+        ) bounded) AS retained_outbox_rows`, [EVIDENCE_ROWS + 1]);
   return {
     relations: relations.rows,
     oldest: ages,
@@ -137,7 +140,7 @@ async function readSnapshot(client) {
     expiredScopedCommandReplayRowsCapped: Number(expired.rows[0]?.scoped_command_replay_rows ?? 0),
     expiredAuthSessionRowsCapped: Number(expired.rows[0]?.auth_session_rows ?? 0),
     retainedOutboxRowsCapped: Number(expired.rows[0]?.retained_outbox_rows ?? 0),
-    expiredIdempotencyRowsCappedAt: MAX_MANUAL_ROWS + 1,
+    expiredIdempotencyRowsCappedAt: EVIDENCE_ROWS + 1,
   };
 }
 
@@ -196,15 +199,10 @@ async function deleteBatch(client, relation, limit) {
                   WHERE target.ctid=expired.ctid RETURNING 1`
               : null;
   if (!statement) throw new Error("Unsupported lifecycle relation");
-  await client.query("BEGIN");
-  try {
-    const result = await client.query(statement, [limit]);
-    await client.query("COMMIT");
-    return result.rowCount ?? result.rows.length;
-  } catch (error) {
-    await client.query("ROLLBACK").catch(() => undefined);
-    throw error;
-  }
+  // One statement is its own transaction. The runner is an ocean away from the
+  // origin, so a BEGIN and COMMIT around it would triple each batch's round trips.
+  const result = await client.query(statement, [limit]);
+  return result.rowCount ?? result.rows.length;
 }
 
 export async function runLifecycleMaintenance(client, options, dependencies = {}) {
@@ -217,7 +215,7 @@ export async function runLifecycleMaintenance(client, options, dependencies = {}
   const deleted = { idempotency: 0, sequenceReservation: 0, messageExecution: 0, wecomInstallAttempt: 0, dingtalkCompanyAttempt: 0, retainedOutbox: 0, authSession: 0, scopedCommandReplay: 0 };
   const batches = { idempotency: 0, sequenceReservation: 0, messageExecution: 0, wecomInstallAttempt: 0, dingtalkCompanyAttempt: 0, retainedOutbox: 0, authSession: 0, scopedCommandReplay: 0 };
   if (!options.dryRun) {
-    for (const target of [
+    let pending = [
       { relation: "idempotency", key: "idempotency" },
       { relation: "sequence-reservation", key: "sequenceReservation" },
       { relation: "message-execution", key: "messageExecution" },
@@ -227,17 +225,25 @@ export async function runLifecycleMaintenance(client, options, dependencies = {}
       // An expired session is refused by every sign-in check; only its row remains.
       { relation: "auth-session", key: "authSession" },
       // Every reader already ignores expired replays; this only frees their rows.
-      // Last, because it is the largest and must not starve the others' budget.
       { relation: "scoped-command-replay", key: "scopedCommandReplay" },
-    ]) {
-      while (deleted[target.key] < options.maxRows &&
-          monotonicNow() - startedAt < options.budgetMs) {
+    ];
+    // Each round gives every relation with rows left one batch, so the shared
+    // budget is split between them: a relation that came last in a run-each-
+    // to-the-end order got no batch at all once the others filled the budget.
+    while (pending.length && monotonicNow() - startedAt < options.budgetMs) {
+      const next = [];
+      for (const target of pending) {
+        if (monotonicNow() - startedAt >= options.budgetMs) {
+          next.push(target);
+          continue;
+        }
         const limit = Math.min(options.batchSize, options.maxRows - deleted[target.key]);
         const count = await deleteBatch(client, target.relation, limit);
         deleted[target.key] += count;
         batches[target.key] += 1;
-        if (count < limit) break;
+        if (count === limit && deleted[target.key] < options.maxRows) next.push(target);
       }
+      pending = next;
     }
   }
   const after = await snapshot(client);

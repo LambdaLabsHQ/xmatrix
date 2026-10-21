@@ -24,7 +24,7 @@ export function requireLifecycleExecutionAuthority(input) {
     throw new Error("maintenance broker must be a successful main-history run");
   }
   if (dryRun !== "true" && dryRun !== "false") throw new Error("dry_run is invalid");
-  if (maxRows !== "10000" && maxRows !== "100000") throw new Error("max_rows is invalid");
+  if (!["10000", "100000", "1000000"].includes(maxRows)) throw new Error("max_rows is invalid");
   const expectedRequestTitle = lifecycleRequestTitle(dryRun, maxRows);
   if (input.broker?.display_title !== expectedRequestTitle) {
     throw new Error("maintenance parameters do not match the broker receipt");
