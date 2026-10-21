@@ -2714,7 +2714,7 @@ export const MessageRow = memo(function MessageRow({
                   )}
                 >
                   {attachmentMediaType(displayAttachment.mimeType, displayAttachment.name) === "audio" ? (
-                    <div className="rounded-md border border-border bg-muted/45 p-3">
+                    <div className="app-paper-tile p-3">
                       <div className="mb-2 truncate text-sm font-medium">{displayAttachment.name}</div>
                       {source ? (
                         <MediaPlayer kind="audio" src={source} name={displayAttachment.name} />
@@ -2769,9 +2769,9 @@ export const MessageRow = memo(function MessageRow({
                       title={`${displayAttachment.kind === "markdown" ? "Open" : "Download"} ${displayAttachment.name}`}
                       aria-label={`${displayAttachment.kind === "markdown" ? "Open" : "Download"} ${displayAttachment.name}`}
                       onClick={() => void (displayAttachment.kind === "markdown" ? openMessageAttachment : downloadMessageAttachment)(displayAttachment)}
-                      className="flex w-full min-w-0 items-center gap-3 rounded-md border border-border bg-muted/45 px-3 py-3 text-left transition hover:bg-muted"
+                      className="app-paper-tile flex w-full min-w-0 items-center gap-3 px-3 py-3 text-left transition-colors"
                     >
-                      <span className="flex size-10 shrink-0 items-center justify-center rounded bg-background text-muted-foreground">
+                      <span className="flex size-10 shrink-0 items-center justify-center text-muted-foreground">
                         {displayAttachment.kind === "markdown" ? <FileText className="size-5" /> : <Paperclip className="size-5" />}
                       </span>
                       <span className="min-w-0 flex-1">
