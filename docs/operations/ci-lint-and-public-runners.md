@@ -23,8 +23,10 @@ jobs each finish in about two minutes including setup:
 
 - `node-static`: Oxlint, synchronized versions, dependency reachability,
   unused imports, duplicate CSS rules and the source line limit;
-- `web-unit` and `web-build`: the Web unit tests, and the checked production
-  build that is the Web lint and typecheck;
+- `web-unit`, `web-build` and `web-check`: the Web unit tests, the production
+  build, and the lint and typecheck that build would run (`next typegen`, then
+  `tsc`, beside `next lint`); after merge the checked build stays the
+  authoritative Web lint and typecheck;
 - `hub-check`: the Hub typecheck and its deploy bundle;
 - `rust-clippy`: Clippy on the complete Rust workspace and all targets.
 

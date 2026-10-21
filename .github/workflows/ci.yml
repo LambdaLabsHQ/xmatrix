@@ -126,8 +126,9 @@ jobs:
 
       # CI has two tiers, chosen here and nowhere else. A pull request runs
       # the fast tier, each job within about two minutes: the static Node
-      # checks (node-static), the Web unit tests (web-unit) and checked
-      # production build (web-build), the Hub typecheck and deploy bundle
+      # checks (node-static), the Web unit tests (web-unit), production build
+      # (web-build) and its lint and typecheck (web-check), the Hub
+      # typecheck and deploy bundle
       # (hub-check) and Linux Clippy (rust-clippy). A push to main (Public
       # Snapshot CI) and a release train run the full tier: every partition,
       # including the browser shards and performance budget, the Hub suite
@@ -281,8 +282,9 @@ jobs:
     # surface on the final exact SHA instead of trusting only the last tiny diff.
     if: needs.changes.outputs.web == 'true' && !contains(needs.changes.outputs.reused, ' web ')
     name: ${{ matrix.name }}
-    # A pull request runs the unit tests and the checked build as two jobs
-    # (web-unit, web-build); the browser projects run after merge. There,
+    # A pull request runs the unit tests, the production build, and its lint
+    # and typecheck as three jobs (web-unit, web-build, web-check); the
+    # browser projects run after merge. There,
     # hosted runners spread the functional browser projects over Playwright
     # shards, each building its own production tree from the restored Next.js
     # cache. The primary job runs the unit tests and the checked build. The
@@ -292,7 +294,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ fromJSON(needs.changes.outputs.tier == 'fast' && '[{"name":"web-unit","partitions":"web-unit","shard":"","primary":true},{"name":"web-build","partitions":"web-build","shard":"","primary":true}]' || (inputs.hosted || github.event.pull_request.head.repo.fork || vars.XMATRIX_RUNNER_FLEET == 'github-hosted' || (vars.XMATRIX_RUNNER_FLEET != 'self-hosted' && github.event.repository.private == false)) && '[{"name":"web","partitions":"web","shard":"","primary":true},{"name":"web (performance)","partitions":"web-browser","shard":"performance","primary":false},{"name":"web (browser 1/4)","partitions":"web-browser","shard":"1/4","primary":false},{"name":"web (browser 2/4)","partitions":"web-browser","shard":"2/4","primary":false},{"name":"web (browser 3/4)","partitions":"web-browser","shard":"3/4","primary":false},{"name":"web (browser 4/4)","partitions":"web-browser","shard":"4/4","primary":false}]' || '[{"name":"web","partitions":"web web-browser","shard":"","primary":true}]') }}
+        include: ${{ fromJSON(needs.changes.outputs.tier == 'fast' && '[{"name":"web-unit","partitions":"web-unit","shard":"","primary":true},{"name":"web-build","partitions":"web-build","shard":"","primary":true},{"name":"web-check","partitions":"web-check","shard":"","primary":false}]' || (inputs.hosted || github.event.pull_request.head.repo.fork || vars.XMATRIX_RUNNER_FLEET == 'github-hosted' || (vars.XMATRIX_RUNNER_FLEET != 'self-hosted' && github.event.repository.private == false)) && '[{"name":"web","partitions":"web","shard":"","primary":true},{"name":"web (performance)","partitions":"web-browser","shard":"performance","primary":false},{"name":"web (browser 1/4)","partitions":"web-browser","shard":"1/4","primary":false},{"name":"web (browser 2/4)","partitions":"web-browser","shard":"2/4","primary":false},{"name":"web (browser 3/4)","partitions":"web-browser","shard":"3/4","primary":false},{"name":"web (browser 4/4)","partitions":"web-browser","shard":"4/4","primary":false}]' || '[{"name":"web","partitions":"web web-browser","shard":"","primary":true}]') }}
     # Long tests must not occupy production upload/deploy runners.
     runs-on: &linux_runner ${{ fromJSON(inputs.linux_runner || '"ubuntu-24.04"') }}
     env:

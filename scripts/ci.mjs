@@ -359,8 +359,9 @@ const partitions = {
   web: [
     webBuildStep,
   ],
-  // Pull request CI splits `web` over two jobs: the unit tests, and the
-  // checked production build (the Web lint and typecheck).
+  // Pull request CI splits `web` over three jobs that each fit its two-minute
+  // budget: the unit tests, the production build, and its lint and typecheck.
+  // The full tier keeps the checked build above as the authoritative check.
   "web-unit": [
     {
       label: "Test web",
@@ -368,7 +369,40 @@ const partitions = {
       args: turboArgs(["test:ci"], "@xmatrix/web"),
     },
   ],
-  "web-build": [webBuildStep],
+  "web-build": [{ ...webBuildStep, env: { XMATRIX_NEXT_BUILD_SKIP_CHECKS: "1" } }],
+  // The lint and typecheck `next build` runs after compiling, run on their
+  // own. `next typegen` first writes the generated route types the build
+  // would (the reason a bare `tsc` was weaker; see webBuildStep), and
+  // `next lint` lints the directories the build lints. On a reused local
+  // checkout, stale route types can still fail it; CI checkouts are clean.
+  "web-check": [
+    {
+      label: "Build web dependencies",
+      command: pnpm,
+      args: turboArgs(["build"], "@xmatrix/web^..."),
+    },
+    {
+      label: "Generate web route types",
+      command: pnpm,
+      args: ["--filter", "@xmatrix/web", "exec", "next", "typegen"],
+      parallelGroup: "web-checks",
+      parallelLane: "typecheck",
+    },
+    {
+      label: "Typecheck web",
+      command: pnpm,
+      args: ["--filter", "@xmatrix/web", "typecheck"],
+      parallelGroup: "web-checks",
+      parallelLane: "typecheck",
+    },
+    {
+      label: "Lint web",
+      command: pnpm,
+      args: ["--filter", "@xmatrix/web", "exec", "next", "lint"],
+      parallelGroup: "web-checks",
+      parallelLane: "lint",
+    },
+  ],
   "web-browser": [
     {
       label: "Install Playwright Chromium",
