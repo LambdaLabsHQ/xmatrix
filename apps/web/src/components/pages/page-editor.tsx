@@ -357,6 +357,8 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
   passageActions.current = actions;
   const [commentDraft, setCommentDraftState] = useState<CommentDraft | null>(null);
   const draftRef = useRef<CommentDraft | null>(null);
+  /** A comment closed before it was sent, by its passage's text. */
+  const unsent = useRef<{ quote: string; text: string } | null>(null);
   const setCommentDraft = useCallback((next: CommentDraft | null) => {
     draftRef.current = next;
     setCommentDraftState(next);
@@ -422,7 +424,7 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
 
   /** Opens the comment box under the selection, or, with `caretBlock`, under the caret's paragraph. */
   const openComment = useCallback((current: EditorView, caretBlock: boolean) => {
-    if (!passageActions.current?.comment || !frame.current || draftRef.current?.text.trim()) return false;
+    if (!passageActions.current?.comment || !frame.current) return false;
     const { selection } = current.state;
     if (selection.$from.parent.type.spec.code) return false;
     const anchor = selectionAnchor(current.state, session.fragment)
@@ -435,20 +437,28 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
     // Under the passage's last line; from where it starts when it is one line, else from the text's edge.
     const oneLine = Math.abs(start.top - end.top) < 4;
     const left = Math.max(0, Math.min(oneLine ? start.left - box.left - 10 : 0, box.width - 448));
-    setCommentDraft({ blockId: pageDocBlockAt(current.state.doc, from), anchor, left, top: end.bottom - box.top + 6, text: "" });
+    const text = unsent.current?.quote === anchor.quote ? unsent.current.text : "";
+    setCommentDraft({ blockId: pageDocBlockAt(current.state.doc, from), anchor, left, top: end.bottom - box.top + 6, text });
     current.dispatch(current.state.tr.setMeta(discussionsKey, { draft: { from: anchor.from, to: anchor.to } }));
     return true;
   }, [session, setCommentDraft]);
 
-  const closeComment = useCallback((collapse = false) => {
+  /**
+   * Closes the box. Sent (`collapse`) or left for somewhere else (`away`), the passage is no longer selected, so
+   * what is typed next does not replace it; left, the focus stays where the reader went. A comment closed unsent
+   * is kept for the passage.
+   */
+  const closeComment = useCallback(({ collapse = false, away = false } = {}) => {
+    const draft = draftRef.current;
+    if (!draft) return;
+    unsent.current = !collapse && draft.text.trim() ? { quote: draft.anchor.quote, text: draft.text } : null;
     setCommentDraft(null);
     const current = view.current;
     if (!current) return;
     const tr = current.state.tr.setMeta(discussionsKey, { draft: null });
-    // Sent: the caret goes on after the passage, so what is typed next does not replace it.
-    if (collapse) tr.setSelection(TextSelection.create(tr.doc, current.state.selection.to));
+    if (collapse || away) tr.setSelection(TextSelection.create(tr.doc, current.state.selection.to));
     current.dispatch(tr);
-    current.focus();
+    if (!away) current.focus();
   }, [setCommentDraft]);
 
   const sessionChanges = useRef(onChanges);
@@ -857,10 +867,10 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
         <div className="absolute z-30 w-[28rem] max-w-full" style={{ left: commentDraft.left, top: commentDraft.top }}>
           <PageCommentBox text={commentDraft.text}
             onText={(text) => setCommentDraft({ ...commentDraft, text })}
-            onClose={() => closeComment()} onPassageKey={passageKey}
+            onClose={(away) => closeComment({ away })} onPassageKey={passageKey}
             onSend={(text) => {
               actions?.comment?.(commentDraft.blockId, commentDraft.anchor, text);
-              closeComment(true);
+              closeComment({ collapse: true });
             }} />
         </div>
       )}
