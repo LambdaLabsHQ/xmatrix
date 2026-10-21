@@ -54,9 +54,12 @@ import { formatRelativeAge, mobileChatTimeLabel } from "@/components/dashboard/t
 import { ListSectionHeading } from "@/components/dashboard/list-section-heading";
 import { InlineRowPreview } from "@/components/dashboard/inline-row-preview";
 import { MORE_RECENT_CHANGES, RECENT_CHANGES, pageRecentChangePreview, pageTreeHeadKey } from "./page-recent-changes";
-import { discussionQuote, discussionTitle, type DiscussionQuote } from "@/components/dashboard/selection-discussion";
+import {
+  discussionQuote, discussionTitle, quotedMessage, type DiscussionQuote,
+} from "@/components/dashboard/selection-discussion";
 import { refetchUnlessHumanPush } from "@/components/dashboard/workspace-resource-push";
 import { PageMigrationReview, usePageMigration } from "./page-migration-review";
+import { commentBody } from "./page-comment";
 import { NEW_PAGE_ID, NEW_PAGE_TITLE, type PageCreation } from "./page-creation";
 import { PageTreeRow } from "./page-tree-row";
 import type { PageReferenceTargets } from "./page-reference-chips";
@@ -1190,7 +1193,16 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   // The link a pull request names for the block it works on.
   const blockLink = (blockId: string) => `${pageLink()}#${blockId}`;
   // A discussion is where people and Agents meet alike: asking an Agent is mentioning it there.
-  const discuss: NonNullable<PageSectionActions["discuss"]> = (blockId, anchor) => {
+  const discuss: NonNullable<PageSectionActions["discuss"]> = (blockId, anchor) => startDiscussion(blockId, anchor);
+  // A comment on a passage: the discussion of the passage, started with the comment; the page stays in front of
+  // the reader, the discussion a card beside the passage. It names nobody: an Agent the comment mentions takes it,
+  // else the kind of Agent at work on the page, nearest the passage first, else xMatrix gives it to one (`@auto`).
+  const comment: NonNullable<PageSectionActions["comment"]> = (blockId, anchor, text) =>
+    startDiscussion(blockId, anchor, { body: commentBody(text, writers.agents.map((agent) => agent.harness),
+      [...liveOnPage].sort((a, b) => Number(b.blockId === blockId) - Number(a.blockId === blockId))
+        .map((agent) => agent.name)) });
+  const startDiscussion = (blockId: string, anchor?: Parameters<NonNullable<PageSectionActions["discuss"]>>[1],
+    said?: { body: string }) => {
     if (!page) return;
     const title = blocks.find((block) => block.id === blockId)?.title;
     // A discussion of a passage is named by the passage, which its first message carries; of a section, by the section.
@@ -1202,9 +1214,12 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
       setStartedLinks((current) => [...current, { linkId: `started:${conversationId}`, conversationId,
         pageId: page.pageId, blockId, source: "manual", createdAt: now, lastSeenAt: now, anchor: anchor ?? null }]);
     };
+    const quote = anchor ? discussionQuote(anchor.quote, { label: place, href: blockLink(blockId) }, true) : undefined;
     void onDiscuss({ spaceId, pageId: page.pageId, blockId, name: anchor ? discussionTitle(anchor.quote) : place,
-      restricted, planned, ...(anchor ? { anchor,
-        quote: discussionQuote(anchor.quote, { label: place, href: blockLink(blockId) }, true) } : {}) }).then(() => links.refetch(), (cause: Error) => setNotice(cause.message))
+      restricted, planned, ...(anchor ? { anchor } : {}),
+      ...(said ? { firstMessage: quote ? quotedMessage(quote, { body: said.body, selections: [] }).body : said.body,
+        open: false } : quote ? { quote } : {}) })
+      .then(() => links.refetch(), (cause: Error) => setNotice(cause.message))
       .finally(() => setStartedLinks((current) => current.filter((link) => link.conversationId !== started)));
   };
   const resolveDiscussion = (linkId: string) => pageApi.resolveLink(spaceId, token, linkId, true)
@@ -1255,7 +1270,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     setMode("history");
   };
   // What selecting text offers, for the section the selection is in.
-  const sectionActions: PageSectionActions = { discuss };
+  const sectionActions: PageSectionActions = { discuss, comment };
   // What a heading offers, beside it (§3.2).
   const headingActions: HeadingActions = {
     canEdit,

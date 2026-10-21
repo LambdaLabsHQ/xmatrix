@@ -1681,3 +1681,67 @@ test("an Agent's edit typed in while someone reads the page comes a word at a ti
   "a word each time reading the last one, and the breath after its sentence, has passed");
   assert.equal(coWriterOf(ann).activity, "editing", "it is done writing");
 });
+
+// Co-writing lasts while the people are on the page (pages-live-document.md §4.2): once they have been gone a
+// while, each Agent co-writing it live is told to leave, and its Run rests and sleeps as any other.
+function coWritingFixture({ sockets = [], peopleLeft, ended = [{ conversationId: "conv", startedByUserId: "ann" }] } = {}) {
+  const data = new Map(peopleLeft ? [["peopleLeft", peopleLeft]] : []);
+  const told = [];
+  const endCalls = [];
+  const db = summarySessionRequire("@xmatrix/db");
+  const { RelayPageSession: Session, PAGE_CO_WRITING_PEOPLE_GONE_MS: goneMs } = summarySessionModule(name =>
+    name === "./page-co-write-instruction" ? { async tellPageCoWriter(_env, input) { told.push(input); } }
+    : name === "./page-summary" ? { async startPageSummary() { return { started: false }; } }
+    : name === "@xmatrix/db" ? { ...db, PostgresPageRepository: class {
+      async endCoWritingOnPage(input) { endCalls.push(input); return ended; } } }
+    : name === "./postgres-authority-fleet" ? { createPostgresAuthorityDatabase: () => ({}) }
+    : name === "cloudflare:workers" ? { DurableObject } : summarySessionRequire(name));
+  const connected = sockets.map((attachment) => ({ deserializeAttachment: () => ({ spaceId: "space", pageId: "page",
+    connectionId: attachment.principal.id, ...attachment }) }));
+  let alarm = null;
+  const object = Object.create(Session.prototype);
+  Object.assign(object, { spaceId: "space", pageId: "page", env: {}, rehydrated: Promise.resolve(),
+    summaryStarting: null,
+    session: { disconnect() {}, hasPendingEdits: false, async commit() {} },
+    ctx: { getWebSockets: () => connected, waitUntil: () => {}, storage: { get: async (key) => data.get(key),
+      put: async (key, value) => { data.set(key, value); }, delete: async (key) => data.delete(key),
+      getAlarm: async () => alarm, setAlarm: async (at) => { alarm = at; }, deleteAlarm: async () => { alarm = null; } } } });
+  return { object, connected, data, told, endCalls, goneMs, alarm: () => alarm };
+}
+
+const person = { principal: { kind: "user", id: "ann", label: "Ann" } };
+const coWriter = { principal: { kind: "user", id: "ann", label: "Ann" }, coWriter: true };
+
+test("co-writing: the last person leaving starts the wait; an Agent's co-writer does not hold the page", async () => {
+  const f = coWritingFixture({ sockets: [person, coWriter] });
+  const leaving = f.connected[0];
+  f.connected.splice(0, 1);
+  await f.object.webSocketClose(leaving);
+  assert.equal(f.data.get("peopleLeft").pageId, "page");
+  assert.ok(f.alarm() !== null && f.alarm() <= Date.now() + f.goneMs, "the alarm comes when the wait is over");
+  assert.equal(f.endCalls.length, 0, "a reload or a dropped connection gets time to come back");
+});
+
+test("co-writing: the people gone long enough, it ends and each Agent is told to leave", async () => {
+  const f = coWritingFixture({ sockets: [coWriter],
+    peopleLeft: { at: Date.now() - 3 * 60_000, spaceId: "space", pageId: "page" } });
+  await f.object.coWritingDue();
+  assert.deepEqual(f.endCalls.map(({ spaceId, pageId }) => [spaceId, pageId]), [["space", "page"]]);
+  assert.deepEqual(f.told.map(({ conversationId, userId, active }) => [conversationId, userId, active]),
+    [["conv", "ann", false]], "told under the authority of who started it");
+  assert.equal(f.data.has("peopleLeft"), false);
+});
+
+test("co-writing: a person back in time, or a wait not yet over, keeps it", async () => {
+  const back = coWritingFixture({ sockets: [person, coWriter],
+    peopleLeft: { at: Date.now() - 3 * 60_000, spaceId: "space", pageId: "page" } });
+  await back.object.coWritingDue();
+  assert.equal(back.endCalls.length, 0);
+  assert.equal(back.data.has("peopleLeft"), false, "they are back: nothing waits to end");
+  const waiting = coWritingFixture({ sockets: [], peopleLeft: { at: Date.now(), spaceId: "space", pageId: "page" } });
+  await waiting.object.coWritingDue();
+  assert.equal(waiting.endCalls.length, 0);
+  assert.ok(waiting.alarm() !== null, "the alarm is set for the rest of the wait");
+  await waiting.object.settle();
+  assert.ok(waiting.alarm() !== null, "an empty page keeps the alarm while co-writing waits to end");
+});

@@ -681,8 +681,11 @@ function currentHeading(): Plugin {
  */
 export interface Discussion { linkId: string; conversationId: string; name: string; from: unknown; to: unknown }
 
+/** The passage a comment is being written about, before it is sent; its Yjs relative positions. */
+export interface DiscussionDraft { from: unknown; to: unknown }
+
 export const discussionsKey = new PluginKey<{ discussions: Discussion[]; focused: string | null;
-  decorations: DecorationSet }>("page-discussions");
+  draft: DiscussionDraft | null; decorations: DecorationSet }>("page-discussions");
 
 function yMapping(state: EditorState): Map<unknown, unknown> | null {
   const sync = ySyncPluginKey.getState(state) as { binding?: { mapping: Map<unknown, unknown> } } | undefined;
@@ -702,8 +705,15 @@ function anchorPosition(state: EditorState, fragment: Y.XmlFragment, position: u
 }
 
 function discussionDecorations(state: EditorState, fragment: Y.XmlFragment, discussions: Discussion[],
-  focused: string | null, openConversation: (conversationId: string) => void): DecorationSet {
+  focused: string | null, draft: DiscussionDraft | null, openConversation: (conversationId: string) => void): DecorationSet {
   const decorations: Decoration[] = [];
+  if (draft) {
+    const from = anchorPosition(state, fragment, draft.from);
+    const to = anchorPosition(state, fragment, draft.to);
+    if (from !== null && to !== null && to > from) {
+      decorations.push(Decoration.inline(from, to, { class: "page-discussion page-discussion-focus" }));
+    }
+  }
   for (const discussion of discussions) {
     const from = anchorPosition(state, fragment, discussion.from);
     const to = anchorPosition(state, fragment, discussion.to);
@@ -729,14 +739,18 @@ function discussionOverlay(fragment: Y.XmlFragment, openConversation: (conversat
     key: discussionsKey,
     state: {
       init: (_config, state) => ({ discussions: [] as Discussion[], focused: null as string | null,
-        decorations: DecorationSet.create(state.doc, []) }),
+        draft: null as DiscussionDraft | null, decorations: DecorationSet.create(state.doc, []) }),
       apply(tr, value, _old, state) {
-        const meta = tr.getMeta(discussionsKey) as { discussions?: Discussion[]; focused?: string | null } | undefined;
+        const meta = tr.getMeta(discussionsKey) as {
+          discussions?: Discussion[]; focused?: string | null; draft?: DiscussionDraft | null } | undefined;
         const discussions = meta?.discussions ?? value.discussions;
         const focused = meta && "focused" in meta ? meta.focused ?? null : value.focused;
-        if (discussions === value.discussions && focused === value.focused && !tr.docChanged) return value;
-        return { discussions, focused,
-          decorations: discussionDecorations(state, fragment, discussions, focused, openConversation) };
+        const draft = meta && "draft" in meta ? meta.draft ?? null : value.draft;
+        if (discussions === value.discussions && focused === value.focused && draft === value.draft && !tr.docChanged) {
+          return value;
+        }
+        return { discussions, focused, draft,
+          decorations: discussionDecorations(state, fragment, discussions, focused, draft, openConversation) };
       },
     },
     props: {
@@ -791,11 +805,23 @@ export function anchorOffsets(view: EditorView, fragment: Y.XmlFragment, frame: 
 }
 
 /** The selection as a discussion anchor: its text, and where it is in the live document. */
-export function selectionAnchor(state: EditorState, fragment: Y.XmlFragment):
-  { quote: string; from: unknown; to: unknown } | null {
+export function selectionAnchor(state: EditorState, fragment: Y.XmlFragment): DiscussionAnchor | null {
   const { from, to, empty } = state.selection;
+  return empty ? null : rangeAnchor(state, fragment, from, to);
+}
+
+type DiscussionAnchor = { quote: string; from: unknown; to: unknown };
+
+/** The paragraph (or other text block) the caret is in, as a discussion anchor. */
+export function caretBlockAnchor(state: EditorState, fragment: Y.XmlFragment): DiscussionAnchor | null {
+  const { $from } = state.selection;
+  if (!$from.parent.isTextblock) return null;
+  return rangeAnchor(state, fragment, $from.start(), $from.end());
+}
+
+function rangeAnchor(state: EditorState, fragment: Y.XmlFragment, from: number, to: number): DiscussionAnchor | null {
   const mapping = yMapping(state);
-  if (empty || !mapping) return null;
+  if (!mapping) return null;
   const quote = state.doc.textBetween(from, to, " ", " ").trim();
   if (!quote) return null;
   return {

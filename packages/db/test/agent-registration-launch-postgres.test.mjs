@@ -44,6 +44,7 @@ integration("launch survives a hostname change with stale Workspace metadata and
       CREATE TABLE data.pages (space_id text,page_id text);
       CREATE TABLE data.page_co_writing (space_id text,page_id text,conversation_id text,started_by_user_id text,
         started_at timestamptz,ended_at timestamptz);
+      CREATE TABLE data.page_links (space_id text,conversation_id text,anchor_json jsonb,resolved_at timestamptz);
       CREATE TABLE data.channels (channel_id text,space_id text,mode text,metadata_json jsonb,version bigint,archived_at timestamptz);
       CREATE TABLE data.channel_access (channel_id text,space_id text,subject_kind text,subject_id text);
       CREATE TABLE data.messages (space_id text,channel_id text,message_id text,author_kind text,author_id text,
@@ -613,6 +614,21 @@ integration("launch survives a hostname change with stale Workspace metadata and
     assert.equal(coWritePayload.remoteRepo, undefined, "nothing to check out");
     assert.match(coWritePayload.workspace.managedKey, /^registration-[a-f0-9]{48}$/);
     await sql(`UPDATE data.page_co_writing SET ended_at=now()`);
+
+    // So does a comment on a passage: its Agent writes the page, and starts at once. Resolved, the discussion
+    // no longer holds the conversation to the page.
+    await sql(`INSERT INTO data.page_links VALUES ('space','channel','{"quote":"q"}',NULL)`);
+    const commentBody = "@codex make this shorter", commentHash = await digestCanonicalCloneCborV1(commentBody);
+    await sql(`INSERT INTO data.messages VALUES ('space','channel','comment','user','caller',$1,1,1,1,$2,NULL,NULL,NULL)`,
+      [commentHash, { selections: { schemaVersion: 1, sourceRevision: 1, sourceBodyHash: commentHash,
+        selections: [{ start: 0, end: 6, text: "@codex", target: { kind: "capability", harness: "codex" } }] } }]);
+    const comment = await launches.dispatchFromMessage({ commandId: "comment", actorUserId: "caller",
+      channelId: "channel", sourceMessageId: "comment", body: commentBody }, async ({ candidates, managedOnly }) => {
+        assert.equal(managedOnly, true);
+        return { key: candidates[0].key, model: "model" };
+      });
+    assert.equal(comment.prepared.length, 1);
+    await sql(`UPDATE data.page_links SET resolved_at=now()`);
 
     // Reborn keeps the Instance id, ordinal and harness session; its successor
     // is a registration Run of the same tuple, created only after the

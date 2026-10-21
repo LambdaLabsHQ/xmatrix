@@ -57,6 +57,18 @@ export function PenContent({ person, named, from = true }: { person: PresentPers
  * An Agent at work in the page's margin (§4.4): the same pill as at the right edge, standing in the column with
  * the cards, on their left edge, level with the line it writes. A press opens the channel it works for.
  */
+/** The same pill, inside a discussion's card when the Agent works on the card's own passage: its card is its place. */
+export function CardPen({ person }: { person: PresentPerson }) {
+  return (
+    <span className="page-pens is-named page-margin-pen page-card-pen">
+      <span className={cn("page-pen", person.editing && "is-writing")}
+        style={{ "--page-pen-color": person.color } as CSSProperties} title={`${person.name} · ${person.detail}`}>
+        <PenContent person={person} named from={false} />
+      </span>
+    </span>
+  );
+}
+
 export function MarginPen({ person, open, onPress }: { person: PresentPerson; open: boolean; onPress: () => void }) {
   return (
     <div className="page-pens is-named page-margin-pen">

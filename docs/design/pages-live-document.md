@@ -316,16 +316,30 @@ fact is about.
   by a space becomes a link.
   Clicking a link's visible destination edits the address.
 - **Table controls** appear only while the cursor is in a table.
-- **Selection menu**: *Discuss*, and nothing else (decided 2026-10-19).
-  What acts on the whole section (copying its link) is the heading's, not a
-  passage's; *Show editors* gave way to History, and *Claim* is not a
-  person's to make.
-  - *Discuss* starts a conversation anchored to the selection (§4.3).
-    People and Agents meet in it alike, so there is no separate *Ask AI*:
-    asking an Agent, or asking it for a change, is
-    mentioning it there (`@auto` lets xMatrix pick), beside the page (§4.4)
-    where the answer arrives, and the Agent edits the page as the page lets
-    it. There is no second input over the page.
+- **A selection opens a comment box** (decided by Daniel 2026-10-21). A
+  passage selected with the mouse opens, under it, the product's own reply
+  box (the one under a discussion card, with its send arrow), the caret
+  already in it; the passage is marked in the comment colour while it is
+  written about. Typing is the comment, Enter sends it, and the caret goes
+  back into the page after the passage, so writing and commenting go on
+  side by side. ⌘⌥M (Ctrl+Alt+M) comments on the selection, or on the
+  caret's paragraph. A selection made from the keyboard or by touch is being
+  edited: it shows the selection menu, whose *Comment* opens the same box.
+  Until something is typed, Backspace, copy, cut and the mark shortcuts act
+  on the passage; Escape closes the box.
+  - The box names nobody. A comment is a discussion of the passage (§4.3)
+    whose first message is the comment. An Agent the comment mentions takes
+    it at once; one that names nobody goes to the kind of Agent already at
+    work on the page, nearest the passage first, and with none there to
+    xMatrix (`@auto`). Who took it shows on its card once sent.
+  - Its Agent starts at once in a private managed directory, as a
+    co-writer's does, unless the comment names a repository (`repo:`,
+    `pwd:`), and writes its change into the page, where its card says it is
+    at work (one pill, in the card, not a second one above it).
+  - People and Agents meet in a discussion alike, so there is no separate
+    *Ask AI*. What acts on the whole section (copying its link) is the
+    heading's, not a passage's; *Show editors* gave way to History, and
+    *Claim* is not a person's to make.
 - **`/` insert**: heading, list, task list, table, divider, GitHub file.
 - **`[[`, `#` and `@` complete as in the composer** (and `【【`, `＃`, `＠`
   from a Chinese input method). `[[` picks a page, `[[page#` one of its
@@ -339,7 +353,9 @@ fact is about.
   starts an Agent writing the page from the page itself, typing nothing: one
   tap on the face of the Agent to write with. The Agent is then on the page
   like a colleague in a shared document, until it is stopped or the people
-  leave: its face in the header, its caret in its colour with what it is doing
+  leave (two minutes after the last person's connection closes, the page's
+  session ends its co-writing and tells its Agent so; its Run then rests and
+  sleeps as any other): its face in the header, its caret in its colour with what it is doing
   (watching, thinking, writing, waiting), and its words arriving as its harness
   writes them.
   - **Selection feedback.** Choosing an Agent immediately shows that it is
@@ -350,8 +366,9 @@ fact is about.
     the pending state and shows its reason on the page.
   - **At once.** The Agent a co-writing conversation calls starts in a private
     managed directory, ready the moment its process does: a launch in a
-    conversation that co-writes a page reads no repository and checks none out,
-    unless its message names one (`repo:`, `pwd:`).
+    conversation that co-writes a page, or comments on a passage of one,
+    reads no repository and checks none out, unless its message names one
+    (`repo:`, `pwd:`).
   - **Any Agent.** The co-writer is the Agent's own Run, whatever its harness:
     the runtime already drives every harness through a structured session
     (Claude stream-json, Codex app-server, ACP and the others), each able to
@@ -560,9 +577,10 @@ or joining one never leaves the page.
   count open the list of every
   conversation linked to the page, grouped by section, including resolved
   discussions and sunk conversations; open discussions resolve from it too.
-- **Starting one.** *Discuss* on a selection or a heading creates the
-  conversation already linked there and opens it beside the page
-  with its composer focused.
+- **Starting one.** A comment on a selection (§4.2) creates the conversation
+  already linked there with the comment as its first message, and the page
+  stays in front of the reader; *Discuss* on a heading creates it and opens
+  it beside the page with its composer focused.
 - **Narrow windows** have no margin: when the page has no room for a full
   document column beside it, passages stay highlighted with a bubble and
   headings count their conversations and mark the Agents working in them
