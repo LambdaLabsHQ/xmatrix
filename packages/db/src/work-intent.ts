@@ -70,15 +70,25 @@ function dispatchOf(row: QueryResultRow): WorkDispatch {
 }
 
 /**
- * A Space scope must carry an epoch that is active on this shard; a missing
- * placement fails closed. Only a system scope has no epoch.
+ * The Space placement fence, taken `FOR SHARE` before the intent row, the same
+ * order as every placed transaction (fence, then business rows). Waiting for a
+ * move returns the placement as committed, not as the statement's snapshot saw
+ * it. A system scope reads no fence.
  */
-function placementCurrent(shardParameter: number): string {
-  return `CASE WHEN i.scope LIKE 'space:%' THEN i.placement_epoch IS NOT NULL AND EXISTS (
-      SELECT 1 FROM control.space_placement p WHERE p.space_id=substring(i.scope FROM 7) AND p.state='active'
-        AND p.target_shard_id IS NULL AND p.shard_id=$${shardParameter} AND p.placement_epoch=i.placement_epoch)
-    ELSE i.placement_epoch IS NULL END`;
+function placementFence(scopeParameter: number, shardParameter: number): string {
+  return `fence AS MATERIALIZED (SELECT p.placement_epoch FROM control.space_placement p
+      WHERE $${scopeParameter}::text LIKE 'space:%' AND p.space_id=substring($${scopeParameter}::text FROM 7)
+        AND p.state='active' AND p.target_shard_id IS NULL AND p.shard_id=$${shardParameter}
+      FOR SHARE)`;
 }
+
+/**
+ * A Space scope must carry an epoch the fence holds; a missing placement fails
+ * closed. Only a system scope has no epoch.
+ */
+const PLACEMENT_HELD = `CASE WHEN i.scope LIKE 'space:%' THEN i.placement_epoch IS NOT NULL
+    AND EXISTS (SELECT 1 FROM fence f WHERE f.placement_epoch=i.placement_epoch)
+  ELSE i.placement_epoch IS NULL END`;
 
 function requirePlacement(identity: WorkIdentity, placementEpoch: number | null): void {
   const space = identity.scope.startsWith("space:");
@@ -163,17 +173,21 @@ export async function startWork(tx: DatabaseTransaction, dispatch: WorkDispatch,
   options: { leaseMs: number; scopeLimit: number; shardId: string }):
   Promise<WorkExecution | WorkStartRefusal> {
   const identity = [dispatch.scope, dispatch.kind, dispatch.key, dispatch.incarnation, dispatch.dispatchToken];
-  const rows = await tx.query<QueryResultRow>({ name: "work_intent_start_v1", text: `WITH candidate AS (
-      SELECT i.scope,i.kind,i.key FROM data.work_intents i
+  // The fence, then the intent row; the row FOR UPDATE returns is the latest
+  // committed one, and every decision below reads it, never the snapshot.
+  const rows = await tx.query<QueryResultRow>({ name: "work_intent_start_v1", text: `WITH ${placementFence(1, 9)},
+    candidate AS MATERIALIZED (
+      SELECT i.scope,i.kind,i.key,i.version,i.pending_at FROM data.work_intents i
       WHERE i.scope=$1 AND i.kind=$2 AND i.key=$3 AND i.incarnation=$4::uuid AND i.dispatch_token=$5::uuid
         AND i.state='pending' AND NOT i.cancelled AND i.pending_at IS NOT NULL
         AND ${STARTABLE_AT}<=statement_timestamp()
-        AND i.placement_epoch IS NOT DISTINCT FROM $6::bigint AND ${placementCurrent(9)}
+        AND i.placement_epoch IS NOT DISTINCT FROM $6::bigint AND ${PLACEMENT_HELD}
       FOR UPDATE),
     slot AS (UPDATE data.work_scope_quota q SET inflight=q.inflight+1
       WHERE q.scope=$1 AND q.inflight<$7 AND EXISTS (SELECT 1 FROM candidate) RETURNING q.scope)
-    UPDATE data.work_intents i SET state='started',execution_token=gen_random_uuid(),started_version=i.version,
-      running_plan_at=i.pending_at,pending_at=NULL,dispatch_token=NULL,recover_at=NULL,
+    UPDATE data.work_intents i SET state='started',execution_token=gen_random_uuid(),
+      started_version=candidate.version,running_plan_at=candidate.pending_at,pending_at=NULL,dispatch_token=NULL,
+      recover_at=NULL,
       lease_until=clock_timestamp()+$8*interval '1 millisecond',
       business_attempts=i.business_attempts+1,updated_at=now()
     FROM candidate WHERE (i.scope,i.kind,i.key)=(candidate.scope,candidate.kind,candidate.key)
@@ -191,11 +205,12 @@ export async function startWork(tx: DatabaseTransaction, dispatch: WorkDispatch,
   // Why it did not start decides what the consumer does with the message. A
   // refusal is counted apart from business attempts.
   const refused = await tx.query<QueryResultRow & { not_due: boolean }>({ name: "work_intent_start_refusal_v1",
-    text: `UPDATE data.work_intents i SET refusals=i.refusals+CASE WHEN ${STARTABLE_AT}>statement_timestamp()
+    text: `WITH ${placementFence(1, 7)}
+      UPDATE data.work_intents i SET refusals=i.refusals+CASE WHEN ${STARTABLE_AT}>statement_timestamp()
         THEN 0 ELSE 1 END
       WHERE i.scope=$1 AND i.kind=$2 AND i.key=$3 AND i.incarnation=$4::uuid AND i.dispatch_token=$5::uuid
         AND i.state='pending' AND NOT i.cancelled AND i.placement_epoch IS NOT DISTINCT FROM $6::bigint
-        AND ${placementCurrent(7)}
+        AND ${PLACEMENT_HELD}
       RETURNING ${STARTABLE_AT}>statement_timestamp() AS not_due`,
   values: [...identity, dispatch.placementEpoch, options.shardId], maxRows: 1 });
   if (!refused[0]) return "stale";
@@ -203,9 +218,12 @@ export async function startWork(tx: DatabaseTransaction, dispatch: WorkDispatch,
 }
 
 /**
- * Settles an execution. The row is locked first; only then are the lease and
- * placement checked against the server's actual time, so a finish that waited
- * for the lock past its lease settles nothing.
+ * Settles an execution. The placement fence and then the intent row are
+ * locked, and every decision reads the row `FOR UPDATE` returned: the latest
+ * committed version, never the statement's snapshot, which may predate a plan
+ * or a move committed while this finish waited. The lease is checked after the
+ * lock on the server's actual time, so a finish that waited past its lease
+ * settles nothing.
  *
  * If the business changed the plan meanwhile, the old execution settles only
  * its own attempt: the new plan stays runnable whatever the old outcome was,
@@ -217,25 +235,27 @@ export async function finishWork(tx: DatabaseTransaction, execution: WorkExecuti
   const reconcileLater = "($6='uncertain' AND $13::timestamptz IS NOT NULL)";
   const removes = "NOT current.evidence AND (current.cancelled OR (NOT current.changed AND $6='done'))";
   const state = `CASE WHEN current.cancelled THEN 'parked'
-    WHEN current.changed THEN CASE WHEN i.pending_at IS NULL AND current.evidence THEN 'parked' ELSE 'pending' END
+    WHEN current.changed THEN CASE WHEN current.pending_at IS NULL AND current.evidence THEN 'parked' ELSE 'pending' END
     WHEN $6 IN ('permanent','done') OR ($6='uncertain' AND NOT ${reconcileLater}) THEN 'parked'
     ELSE 'pending' END`;
-  const pending = `CASE WHEN current.cancelled THEN NULL WHEN current.changed THEN i.pending_at
+  const pending = `CASE WHEN current.cancelled THEN NULL WHEN current.changed THEN current.pending_at
     WHEN $6='defer' THEN $7::timestamptz WHEN $6='continue' THEN statement_timestamp()
     WHEN $6='retry' OR ${reconcileLater} THEN current.running_plan_at END`;
   const notBefore = `CASE WHEN current.cancelled OR current.changed THEN NULL
     WHEN $6='retry' THEN $8::timestamptz WHEN ${reconcileLater} THEN $13::timestamptz END`;
   const rows = await tx.query<QueryResultRow & { result: string; state: string | null }>({ name: "work_intent_finish_v1",
-    text: `WITH locked AS MATERIALIZED (
-      SELECT i.scope,i.kind,i.key FROM data.work_intents i
+    text: `WITH ${placementFence(1, 10)},
+    locked AS MATERIALIZED (
+      SELECT i.scope,i.kind,i.key,i.version,i.started_version,i.cancelled,i.needs_reconcile,i.running_plan_at,
+        i.pending_at,i.planned_at,i.dispatch_token,i.lease_until
+      FROM data.work_intents i
       WHERE i.scope=$1 AND i.kind=$2 AND i.key=$3 AND i.incarnation=$4::uuid AND i.execution_token=$5::uuid
-        AND i.state='started'
+        AND i.state='started' AND ${PLACEMENT_HELD}
       FOR UPDATE),
     current AS MATERIALIZED (
-      SELECT i.scope,i.kind,i.key,i.version<>i.started_version AS changed,i.cancelled,i.running_plan_at,
-        (i.needs_reconcile AND NOT $11::boolean) OR $12::boolean AS evidence
-      FROM data.work_intents i JOIN locked USING (scope,kind,key)
-      WHERE i.lease_until>clock_timestamp() AND ${placementCurrent(10)}),
+      SELECT scope,kind,key,version<>started_version AS changed,cancelled,running_plan_at,pending_at,planned_at,
+        dispatch_token,(needs_reconcile AND NOT $11::boolean) OR $12::boolean AS evidence
+      FROM locked WHERE lease_until>clock_timestamp()),
     slot AS (UPDATE data.work_scope_quota q SET inflight=greatest(q.inflight-1,0)
       FROM current WHERE q.scope=current.scope RETURNING q.scope),
     removed AS (DELETE FROM data.work_intents i USING current
@@ -245,10 +265,10 @@ export async function finishWork(tx: DatabaseTransaction, execution: WorkExecuti
       state=${state},
       needs_reconcile=current.evidence,
       pending_at=${pending},
-      planned_at=CASE WHEN current.cancelled THEN NULL WHEN current.changed THEN i.planned_at
-        WHEN $6='defer' THEN $7::timestamptz WHEN $6 IN ('retry','continue','uncertain') THEN i.planned_at END,
+      planned_at=CASE WHEN current.cancelled THEN NULL WHEN current.changed THEN current.planned_at
+        WHEN $6='defer' THEN $7::timestamptz WHEN $6 IN ('retry','continue','uncertain') THEN current.planned_at END,
       not_before=${notBefore},
-      dispatch_token=CASE WHEN current.cancelled THEN NULL WHEN current.changed THEN i.dispatch_token
+      dispatch_token=CASE WHEN current.cancelled THEN NULL WHEN current.changed THEN current.dispatch_token
         WHEN $6 IN ('defer','continue','retry') OR ${reconcileLater} THEN gen_random_uuid() END,
       recover_at=CASE WHEN (${state})='pending'
         THEN greatest(${pending},coalesce(${notBefore},${pending})) END,

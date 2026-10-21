@@ -302,3 +302,88 @@ integration("recovery reads only intents whose recovery time has come, however m
     assert.ok(examined <= 10, `the recovery scan filtered ${examined} future rows`);
   });
 });
+
+/** Runs one protocol step in an explicit transaction, as a consumer would. */
+async function inTransaction(connection, step) {
+  await connection.raw.query("BEGIN");
+  try {
+    const result = await step(connection);
+    await connection.raw.query("COMMIT");
+    return result;
+  } catch (error) {
+    await connection.raw.query("ROLLBACK");
+    throw error;
+  }
+}
+
+/** Waits until the session is blocked on a lock, so the interleaving is real. */
+async function blockedOnLock(sql, connection) {
+  const { pid } = (await connection.raw.query("SELECT pg_backend_pid() AS pid")).rows[0];
+  return async () => {
+    for (let poll = 0; poll < 400; poll++) {
+      const activity = (await sql("SELECT wait_event_type FROM pg_stat_activity WHERE pid=$1", [pid])).rows[0];
+      if (activity?.wait_event_type === "Lock") return;
+      await sleep(5);
+    }
+    throw new Error("the step never waited for a lock");
+  };
+}
+
+integration("a finish that waited while a new plan committed reads that plan, not its snapshot", async () => {
+  await protocol(async ({ tx, connect, sql }) => {
+    const identity = id("snapshot-plan");
+    const dispatch = await scheduleWork(tx, identity, { op: "set", at: past() });
+    const execution = await startWork(tx, dispatch, shard);
+    const writer = await connect(), finisher = await connect();
+    await writer.raw.query("BEGIN");
+    const plan = await scheduleWork(writer, identity, { op: "set", at: later(60) });
+    assert.equal(plan, null, "the plan is picked up by the running execution's finish");
+    const waiting = await blockedOnLock(sql, finisher);
+    const finishing = inTransaction(finisher, connection => finishWork(connection, execution, { kind: "done" }, shard));
+    await waiting();
+    await writer.raw.query("COMMIT");
+    const { settled, next } = await finishing;
+    assert.equal(settled, true);
+    assert.ok(next, "the committed plan survives the old execution's done");
+    const kept = await row(sql, identity);
+    assert.equal(kept.state, "pending");
+    assert.equal(kept.dispatch_token, next.dispatchToken);
+    assert.equal(next.wakeAt.getTime() > Date.now() + 50 * 60_000, true);
+  });
+});
+
+integration("a finish that waited while the Space moved settles nothing", async () => {
+  await protocol(async ({ tx, connect, sql, rewrite }) => {
+    const identity = id("snapshot-epoch", "space:abc");
+    await sql(`INSERT INTO data.space_placement VALUES ('abc','shard-0',1,'active',NULL)`);
+    const dispatch = await scheduleWork(tx, identity, { op: "set", at: past() }, 1);
+    const execution = await startWork(tx, dispatch, shard);
+    const mover = await connect(), finisher = await connect();
+    await mover.raw.query("BEGIN");
+    await mover.raw.query(rewrite("UPDATE data.space_placement SET placement_epoch=2 WHERE space_id='abc'"));
+    await mover.raw.query(rewrite("SELECT 1 FROM data.work_intents FOR UPDATE"));
+    const waiting = await blockedOnLock(sql, finisher);
+    const finishing = inTransaction(finisher, connection => finishWork(connection, execution, { kind: "done" }, shard));
+    await waiting();
+    await mover.raw.query("COMMIT");
+    assert.deepEqual(await finishing, { settled: false, next: null });
+    assert.equal((await row(sql, identity)).state, "started");
+  });
+});
+
+integration("a start that waited while the Space moved does not start or take a slot", async () => {
+  await protocol(async ({ tx, connect, sql, rewrite }) => {
+    const identity = id("snapshot-start", "space:abc");
+    await sql(`INSERT INTO data.space_placement VALUES ('abc','shard-0',1,'active',NULL)`);
+    const dispatch = await scheduleWork(tx, identity, { op: "set", at: past() }, 1);
+    const mover = await connect(), starter = await connect();
+    await mover.raw.query("BEGIN");
+    await mover.raw.query(rewrite("UPDATE data.space_placement SET placement_epoch=2 WHERE space_id='abc'"));
+    const waiting = await blockedOnLock(sql, starter);
+    const starting = inTransaction(starter, connection => startWork(connection, dispatch, shard));
+    await waiting();
+    await mover.raw.query("COMMIT");
+    assert.equal(await starting, "stale");
+    assert.equal((await sql(`SELECT inflight FROM data.work_scope_quota WHERE scope='space:abc'`)).rows[0].inflight, 0);
+  });
+});
