@@ -57,7 +57,8 @@ export function passedLedgerJobs(jobs) {
 
 /**
  * The CI jobs whose success the ledger records and every lookup names. The
- * `node-checks` job also runs the duplicate scan.
+ * `node-checks` job also runs the duplicate scan (on hosted runners as its
+ * `node-checks (duplicates)` entry).
  */
 export const LEDGER_JOBS = new Set([
   "node-checks", "web", HUB_SUITE_LEDGER_JOB, "desktop", "android", "rust-cli", "rust-cli-windows",
