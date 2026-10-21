@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode, type Ref } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode, type Ref, type SyntheticEvent } from "react";
 import { createPortal } from "react-dom";
 import { ChevronLeft, ChevronRight, Minus, Plus, X } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -24,7 +24,6 @@ export function AttachmentLightbox({
   onRequestClose,
   actions,
   fullBleed = false,
-  closing = false,
   rootRef,
   backdropRef,
   chromeRef,
@@ -34,26 +33,35 @@ export function AttachmentLightbox({
   onRequestClose: () => void;
   actions?: ReactNode;
   fullBleed?: boolean;
-  closing?: boolean;
   rootRef?: Ref<HTMLDivElement>;
   backdropRef?: Ref<HTMLDivElement>;
   chromeRef?: Ref<HTMLDivElement>;
   children: ReactNode;
 }) {
   if (typeof document === "undefined") return null;
-  const closeOnSurround = (event: { target: EventTarget; currentTarget: EventTarget }) => {
+  // The lightbox is portalled out of the message or composer that opened it, but React still
+  // bubbles its events there: a tap beside the picture would toggle the message's actions,
+  // a wheel would read as scrolling the timeline. They end here.
+  const contain = (event: SyntheticEvent) => event.stopPropagation();
+  const closeOnSurround = (event: SyntheticEvent) => {
+    event.stopPropagation();
     if (!fullBleed && event.target === event.currentTarget) onRequestClose();
   };
   return createPortal(
     <div
       ref={rootRef}
-      className={cn(
-        "app-attachment-lightbox fixed inset-0 z-50 flex items-center justify-center p-3 text-white sm:p-5",
-        // On its way out the viewer no longer holds the page.
-        closing && "pointer-events-none"
-      )}
+      className="app-attachment-lightbox fixed inset-0 z-50 flex items-center justify-center p-3 text-white sm:p-5"
       role="presentation"
       onMouseDown={closeOnSurround}
+      onClick={contain}
+      onPointerDown={contain}
+      onPointerUp={contain}
+      onTouchStart={contain}
+      onTouchMove={contain}
+      onTouchEnd={contain}
+      onWheel={contain}
+      onContextMenu={contain}
+      onKeyDown={contain}
     >
       <div
         ref={backdropRef}
@@ -205,7 +213,6 @@ export function ImageGalleryLightbox({
   const live = useRef<ImageViewerState>({ images, activeId, onActiveChange, onClose, originFor });
   const [imageElements] = useState(() => new Map<string, HTMLImageElement>());
   const [zoom, setZoom] = useState({ zoomed: false, percent: 100 });
-  const [closing, setClosing] = useState(false);
   const [viewer] = useState(() => createImageViewer({
     viewport: () => viewportRef.current,
     track: () => trackRef.current,
@@ -214,7 +221,6 @@ export function ImageGalleryLightbox({
     images: imageElements,
     state: () => live.current,
     zoomChanged: setZoom,
-    closing: () => setClosing(true),
   }));
 
   useLayoutEffect(() => {
@@ -245,7 +251,8 @@ export function ImageGalleryLightbox({
     root.addEventListener("gesturestart", viewer.safariGestureStart);
     root.addEventListener("gesturechange", viewer.safariGestureChange);
     root.addEventListener("gestureend", viewer.safariGestureEnd);
-    document.addEventListener("keydown", viewer.keyDown);
+    // Captured first, so the viewer's keys are its own even over another lightbox.
+    document.addEventListener("keydown", viewer.keyDown, true);
     const resize = new ResizeObserver(() => viewer.resized());
     resize.observe(viewport);
     return () => {
@@ -258,7 +265,7 @@ export function ImageGalleryLightbox({
       root.removeEventListener("gesturestart", viewer.safariGestureStart);
       root.removeEventListener("gesturechange", viewer.safariGestureChange);
       root.removeEventListener("gestureend", viewer.safariGestureEnd);
-      document.removeEventListener("keydown", viewer.keyDown);
+      document.removeEventListener("keydown", viewer.keyDown, true);
       resize.disconnect();
     };
   }, [viewer]);
@@ -277,7 +284,6 @@ export function ImageGalleryLightbox({
       label={images[index]?.name ?? "Image"}
       onRequestClose={viewer.requestClose}
       fullBleed
-      closing={closing}
       rootRef={rootRef}
       backdropRef={backdropRef}
       chromeRef={chromeRef}

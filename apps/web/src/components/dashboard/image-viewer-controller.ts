@@ -54,7 +54,6 @@ export type ImageViewerHost = {
   images: ReadonlyMap<string, HTMLImageElement>;
   state: () => ImageViewerState;
   zoomChanged: (zoom: { zoomed: boolean; percent: number }) => void;
-  closing: () => void;
 };
 
 /** Space between neighbouring images while they slide. */
@@ -336,8 +335,9 @@ export function createImageViewer(host: ImageViewerHost) {
 
   function requestClose(velocity: Point = { x: 0, y: 0 }) {
     if (closing) return;
+    // The viewer keeps the screen until it is gone: the click that follows a closing tap must
+    // land on the viewer, not on whatever is under the finger.
     closing = true;
-    host.closing();
     cancelTapTimer();
     gesture = { kind: "idle" };
     pointers.clear();
@@ -469,7 +469,11 @@ export function createImageViewer(host: ImageViewerHost) {
   }
 
   function pointerDown(event: PointerEvent) {
-    if (closing) return;
+    // A new press while it closes means the person has moved on: finish now.
+    if (closing) {
+      finishClose();
+      return;
+    }
     if (event.pointerType === "mouse" && event.button !== 0) return;
     if (pointers.size >= 2) return;
     const viewport = host.viewport();
@@ -788,6 +792,7 @@ export function createImageViewer(host: ImageViewerHost) {
         return;
     }
     event.preventDefault();
+    event.stopPropagation();
   }
 
   /** The image now on screen has decoded and has its fitted size. */

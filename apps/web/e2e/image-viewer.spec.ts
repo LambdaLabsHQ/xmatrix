@@ -121,6 +121,20 @@ test("dragging the picture down fades the viewer and puts it away", async ({ pag
   await expect(page.locator(".app-attachment-lightbox")).toHaveCount(0);
 });
 
+test("a tap beside the picture closes the viewer and does not reach the page behind it", async ({ page }) => {
+  await openGallery(page, ["beside.png"]);
+  // The message's text lies under the dim area around the picture: a tap on it would open the message's actions.
+  const text = await page.getByText("Pictures", { exact: true }).boundingBox();
+  if (!text) throw new Error("message text has no box");
+  await page.getByRole("button", { name: "Open beside.png" }).tap();
+  const image = page.getByRole("dialog").getByRole("img", { name: "beside.png" });
+  await expect(image).toBeVisible();
+  await expect.poll(() => viewOf(image)).toEqual({ scale: 1, x: 0, y: 0 });
+  await page.touchscreen.tap(text.x + text.width / 2, text.y + text.height / 2);
+  await expect(page.locator(".app-attachment-lightbox")).toHaveCount(0);
+  await expect(page.locator("[data-actions-open]")).toHaveCount(0);
+});
+
 test.describe("with a mouse", () => {
   test.use(E2E_DESKTOP_CONTEXT);
 
