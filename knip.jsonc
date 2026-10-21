@@ -54,6 +54,7 @@
         "src/app/**/*.{ts,tsx}",
         "src/components/dashboard/agent-trace-stream.ts",
         "src/components/**/*.test.cjs",
+        "src/lib/faces/*.test.cjs",
         "src/lib/relay-v2/*.test.cjs",
         // Playwright's global setup spawns it by path to hold the shared browser.
         "e2e/hold-shared-browser.mjs",
