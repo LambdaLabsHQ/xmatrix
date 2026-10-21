@@ -35,7 +35,6 @@ export interface BlameWriter {
   at: string;
   /** The conversation that revision came from, when the reader can read it. */
   conversation: { id: string; name: string } | null;
-  color: string;
 }
 
 export interface BlameSummary {
@@ -61,7 +60,7 @@ export function blameOf(base: BlameDoc, carried: Int32Array, now: DocNode, from:
     const author = revision.authors[0];
     if (!author) return null;
     const conversationId = revision.conversationIds.find((id) => base.conversations.has(id));
-    return { author, revision: revision.revision, at: revision.createdAt, color: pageAuthorColor(author),
+    return { author, revision: revision.revision, at: revision.createdAt,
       conversation: conversationId ? { id: conversationId, name: base.conversations.get(conversationId)! } : null };
   };
   now.nodesBetween(from, to, (node, pos) => {
