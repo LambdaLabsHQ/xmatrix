@@ -317,8 +317,13 @@ fact is about.
     mentioning it there (`@auto` lets xMatrix pick), beside the page (§4.4)
     where the answer arrives, and the Agent edits the page as the page lets
     it. There is no second input over the page.
-- **`/` insert**: heading, list, task list, table, page reference, live
-  reference, mention.
+- **`/` insert**: heading, list, task list, table, divider, GitHub file.
+- **`[[`, `#` and `@` complete as in the composer** (and `【【`, `＃`, `＠`
+  from a Chinese input method). `[[` picks a page, `[[page#` one of its
+  sections, `#` a channel: the page keeps `page:<id>#<section>` /
+  `channel:<id>` and draws it as a chip. `@` picks an Agent, which comes to
+  co-write the section the caret is in, as the face tap does; the `@name`
+  is not kept. `#` opening a paragraph is the heading being typed.
 - **Co-writing is live, as with a person** (decided 2026-10-15). A person
   starts an Agent writing the page from the page itself, typing nothing: one
   tap on the face of the Agent to write with. The Agent is then on the page

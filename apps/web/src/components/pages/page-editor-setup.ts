@@ -26,6 +26,7 @@ import { referenceChips, type PageReferenceTargets } from "./page-reference-chip
 import { githubFileEmbeds, type ReadGitHubFile } from "./page-github-file-embeds";
 import { imageView, pageMediaPaste, type LocalMedia, type PageMediaSource, type UploadPageMedia } from "./page-media";
 import { markdownShortcuts, syntaxPlugin, typoraKeymap } from "./page-editor-syntax";
+import { pageTriggers } from "./page-triggers";
 import { mountHeadingMenu, type HeadingMenu } from "./page-heading-menu";
 import { NEW_PAGE_TITLE } from "./page-creation";
 import { mountSectionAgents, type SectionAgent } from "./page-section-agents";
@@ -1158,28 +1159,6 @@ export function showReaderChanges(view: EditorView, fragment: Y.XmlFragment, bas
   return changes.length;
 }
 
-/** Whether `/` opened the insert menu, and what has been typed after it. */
-export interface SlashState { from: number; to: number; query: string }
-export const slashKey = new PluginKey<SlashState | null>("page-slash");
-
-function slashMenu(): Plugin<SlashState | null> {
-  return new Plugin<SlashState | null>({
-    key: slashKey,
-    state: {
-      init: () => null,
-      apply(tr, _value, _old, state) {
-        if (tr.getMeta(slashKey) === "close") return null;
-        const { $from, empty } = state.selection;
-        if (!empty || !$from.parent.isTextblock || $from.parent.type === nodes.code_block) return null;
-        const before = $from.parent.textBetween(0, $from.parentOffset, undefined, "￼");
-        const match = /(?:^|\s)\/([^\s/]{0,24})$/u.exec(before);
-        if (!match) return null;
-        return { from: $from.pos - match[1]!.length - 1, to: $from.pos, query: match[1]! };
-      },
-    },
-  });
-}
-
 export function editorPlugins(input: {
   fragment: Y.XmlFragment; awareness: Awareness; placeholder: () => string | undefined;
   onBlockChange?: (blockId: string) => void;
@@ -1215,7 +1194,7 @@ export function editorPlugins(input: {
     yUndoPlugin(),
     new Plugin({ props: { handleKeyDown: input.handleKeyDown } }),
     typoraKeymap(),
-    slashMenu(),
+    pageTriggers(),
     markdownShortcuts(),
     syntaxPlugin(),
     taskShortcut,
