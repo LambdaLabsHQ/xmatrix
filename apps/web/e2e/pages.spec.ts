@@ -136,7 +136,7 @@ async function stubSuggestion(browser: Page) {
 async function stubClaudeWritingNotes(browser: Page) {
   await fixtureJson(browser, "page-agents", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\/agents$/u, {
     pages: [{ pageId: "p-relay", agents: [{ instanceId: "i-claude", name: "claude:2", status: "busy",
-      conversationId: E2E_CHANNEL.id, activity: "editing", blockId: "notes", avatarUrl: "/agent-vendors/claude.svg" }] }],
+      conversationId: E2E_CHANNEL.id, activity: "editing", blockId: "notes", harness: "claude" }] }],
   });
 }
 
@@ -621,14 +621,14 @@ test.describe("on a phone", () => {
   test("an Agent on the page is its face at the right edge, not again on its section's heading", async ({ page: browser }) => {
     const plan = { ...E2E_CHANNEL, id: "channel-plan", name: "Plan the move" };
     await stubPages(browser, [page("p-relay", null, "Relay", "V")], [E2E_CHANNEL, plan]);
-    const talk = (conversationId: string, name: string, agent: { instanceId: string; name: string }) => ({
+    const talk = (conversationId: string, name: string, agent: { instanceId: string; name: string; harness: string }) => ({
       conversationId, name, activityAt: NOW, headSequence: 1, readSequence: 1, lastMessage: null,
       agents: [{ ...agent, status: "busy" }] });
     await fixtureJson(browser, "page-links", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\?.*$/u, {
       links: [E2E_CHANNEL.id, plan.id].map((conversationId) => ({ linkId: `l-${conversationId}`, conversationId,
         pageId: "p-relay", blockId: "notes", source: "edit", createdAt: NOW, lastSeenAt: NOW })),
-      conversations: [talk(E2E_CHANNEL.id, E2E_CHANNEL.name, { instanceId: "i-claude", name: "claude:2" }),
-        talk(plan.id, plan.name, { instanceId: "i-codex", name: "codex:1" })],
+      conversations: [talk(E2E_CHANNEL.id, E2E_CHANNEL.name, { instanceId: "i-claude", name: "claude:2", harness: "claude" }),
+        talk(plan.id, plan.name, { instanceId: "i-codex", name: "codex:1", harness: "codex" })],
     });
     await stubClaudeWritingNotes(browser);
     const editor = await openRelayOnPhone(browser, pageDocument(BODY));
@@ -1730,7 +1730,7 @@ async function openLongPageWithClaudeWriting(browser: Page, link: (server: Y.Doc
       links: [{ linkId: "l-claude", conversationId: E2E_CHANNEL.id, pageId: "p-relay", source: "edit", createdAt: NOW,
         lastSeenAt: recent, anchor: null, resolvedAt: null, ...link(server) }],
       conversations: [{ conversationId: E2E_CHANNEL.id, name: E2E_CHANNEL.name, activityAt: recent, headSequence: 0,
-        readSequence: 0, lastMessage: null, agents: [{ instanceId: "i-claude", name: "claude:2", status: "busy" }] }],
+        readSequence: 0, lastMessage: null, agents: [{ instanceId: "i-claude", name: "claude:2", status: "busy", harness: "claude" }] }],
     });
   });
   agentWrites(opened.server, opened.push, 1, "none", "none yet, shipping Friday", "editing", "shipping Friday");

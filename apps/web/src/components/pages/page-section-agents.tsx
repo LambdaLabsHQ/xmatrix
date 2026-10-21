@@ -52,16 +52,20 @@ function SectionAgents({ agents, openConversation }: { agents: readonly SectionA
  * inside the page's own tree, so their faces read as every other face does (face.tsx), not from a tree of
  * their own that knows neither the reader nor their Space.
  */
-const stacks = new Map<HTMLElement, { key: string; agents: readonly SectionAgent[];
-  openConversation: (conversationId: string) => void }>();
+type Stack = { element: HTMLElement; key: string; agents: readonly SectionAgent[];
+  openConversation: (conversationId: string) => void };
+const stacks = new Map<HTMLElement, Stack>();
 const listeners = new Set<() => void>();
-let version = 0;
+/** What is drawn, as a new list on every change: the page renders from it, so its render is never stale. */
+let drawn: readonly Stack[] = [];
 let nextKey = 0;
 
 function changed(): void {
-  version += 1;
+  drawn = [...stacks.values()];
   for (const listener of listeners) listener();
 }
+
+const drawnNow = () => drawn;
 
 function subscribe(listener: () => void): () => void {
   listeners.add(listener);
@@ -71,7 +75,7 @@ function subscribe(listener: () => void): () => void {
 /** Draws the stack into a heading's widget; the returned function takes it down. */
 export function mountSectionAgents(element: HTMLElement, agents: readonly SectionAgent[],
   openConversation: (conversationId: string) => void): () => void {
-  stacks.set(element, { key: `section-agents-${nextKey++}`, agents, openConversation });
+  stacks.set(element, { element, key: `section-agents-${nextKey++}`, agents, openConversation });
   changed();
   // The editor drops a widget while React may be rendering; take it down after.
   return () => queueMicrotask(() => {
@@ -81,10 +85,10 @@ export function mountSectionAgents(element: HTMLElement, agents: readonly Sectio
 
 /** Every heading's stack, drawn into its widget from the page's tree. */
 export function SectionAgentsInPage() {
-  useSyncExternalStore(subscribe, () => version, () => version);
+  const current = useSyncExternalStore(subscribe, drawnNow, drawnNow);
   return (
     <>
-      {[...stacks].map(([element, { key, agents, openConversation }]) =>
+      {current.map(({ element, key, agents, openConversation }) =>
         createPortal(<SectionAgents agents={agents} openConversation={openConversation} />, element, key))}
     </>
   );
