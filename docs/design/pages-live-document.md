@@ -321,9 +321,11 @@ fact is about.
 - **`[[`, `#` and `@` complete as in the composer** (and `【【`, `＃`, `＠`
   from a Chinese input method). `[[` picks a page, `[[page#` one of its
   sections, `#` a channel: the page keeps `page:<id>#<section>` /
-  `channel:<id>` and draws it as a chip. `@` picks an Agent, which comes to
-  co-write the section the caret is in, as the face tap does; the `@name`
-  is not kept. `#` opening a paragraph is the heading being typed.
+  `channel:<id>` and draws it as a chip. `@` picks an Agent: `@<name>` stays
+  in the text, like everything picked, and only wakes the Agent, as a
+  mention in a conversation does: a conversation linked to the section whose
+  one message is `@<name> page:<id>#<section>`, with no task or mode preset
+  (decided by Daniel 2026-10-21). `#` opening a paragraph is the heading being typed.
 - **Co-writing is live, as with a person** (decided 2026-10-15). A person
   starts an Agent writing the page from the page itself, typing nothing: one
   tap on the face of the Agent to write with. The Agent is then on the page

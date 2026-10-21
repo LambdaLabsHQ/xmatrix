@@ -55,8 +55,8 @@ export function pageTriggers(): Plugin<PageTrigger | null> {
 }
 
 /**
- * Puts a picked reference where its trigger was typed: the `page:<id>` or `channel:<id>` the page keeps
- * (and draws as a chip), then a space. A `[[` typed inside `[[…]]` takes the closing brackets with it.
+ * Puts a pick where its trigger was typed: the `page:<id>` or `channel:<id>` the page keeps (and draws
+ * as a chip), or the `@<agent>` mention, then a space. A `[[` typed inside `[[…]]` takes the closing brackets with it.
  */
 export function insertReference(trigger: PageTrigger, token: string): Command {
   return (state, dispatch) => {

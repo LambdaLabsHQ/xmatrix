@@ -1,5 +1,5 @@
 "use client";
-import { channelPresenceInstances } from "@xmatrix/protocol";
+import { channelPresenceInstances, pageReferenceToken } from "@xmatrix/protocol";
 
 import { startTransition, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import dynamic from "next/dynamic";
@@ -1146,12 +1146,13 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   };
   // A page made to be co-written at once calls its Agent as it opens (co-write-request.ts).
   const coWriteRef = useRef<((harness: string, blockId: string | null) => Promise<void>) | null>(null);
-  // Typing `[[`, `#` and `@` on the page completes as it does in the composer; an `@` Agent writes there.
+  // Typing `[[`, `#` and `@` on the page completes as it does in the composer; an `@` wakes the Agent.
+  const summonRef = useRef<((harness: string, blockId: string) => Promise<void>) | null>(null);
   const referenceCatalog = useMessageReferenceCatalog();
   const completion = useMemo<PageCompletion | undefined>(() => spaceId ? {
     spaceId, pages: tree.data ?? [], channels: referenceCatalog?.channels ?? [], agents: writers.agents,
     readPage: (id) => queryClient.fetchQuery(pageDocumentQuery(userId ?? null, spaceId, id, token)),
-    callAgent: (harness, blockId) => void coWriteRef.current?.(harness, blockId || null),
+    summonAgent: (harness, blockId) => void summonRef.current?.(harness, blockId),
   } : undefined, [queryClient, referenceCatalog?.channels, spaceId, token, tree.data, userId, writers.agents]);
   useEffect(() => {
     if (!page || !canEdit || !coWriteRef.current) return;
@@ -1240,6 +1241,22 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     }
   };
   coWriteRef.current = coWrite;
+  // `@` in the text only wakes the Agent, as a mention in a conversation does: a conversation linked to the
+  // section whose message is the mention and where it was made, asking nothing more of it.
+  const summon = async (harness: string, blockId: string) => {
+    if (!page) return;
+    try {
+      const mentionedOn = pending && session ? await session.make() : page.pageId;
+      const section = blockId ? blocks.find((block) => block.id === blockId)?.title ?? null : null;
+      await onDiscuss({ spaceId, pageId: mentionedOn, blockId, restricted, open: false,
+        name: section ? `${page.title} › ${section}` : page.title,
+        firstMessage: `@${harness} ${pageReferenceToken(mentionedOn, blockId || null)}` });
+      void links.refetch();
+    } catch (cause) {
+      setNotice(userErrorMessage(cause, `Couldn't wake ${harness}`));
+    }
+  };
+  summonRef.current = summon;
   const openHistory = () => {
     reading.current?.seeAll();
     if (headRevision !== null) markSeen(headRevision, null);
