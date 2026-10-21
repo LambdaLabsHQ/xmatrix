@@ -9,7 +9,8 @@ import {
   FileText, Hash, List, ListChecks, ListOrdered, MessageSquare, Minus, Pilcrow, Quote, Table,
 } from "lucide-react";
 import type { Node as DocNode } from "prosemirror-model";
-import { EditorState, Selection, type Command } from "prosemirror-state";
+import { toggleMark } from "prosemirror-commands";
+import { EditorState, Selection, TextSelection, type Command } from "prosemirror-state";
 import { EditorView } from "prosemirror-view";
 import { yCursorPluginKey, ySyncPluginKey } from "y-prosemirror";
 import {
@@ -29,8 +30,9 @@ import { automationsKey } from "./page-automation-chips";
 import type { ReadGitHubFile } from "./page-github-file-embeds";
 import type { LocalMedia, PageMediaUrl, UploadPageMedia } from "./page-media";
 import { referencesKey, type PageReferenceTargets } from "./page-reference-chips";
+import { PageCommentBox } from "./page-comment-box";
 import {
-  addColumnAfter, addRowAfter, anchorOffsets, blockKind, deleteColumn, deleteRow, deleteTable, discussionsKey,
+  addColumnAfter, addRowAfter, anchorOffsets, blockKind, caretBlockAnchor, deleteColumn, deleteRow, deleteTable, discussionsKey,
   editorPlugins, isInTable, insertRule, insertTable, linkAt, nodeViews, scrollToSection, showReaderChanges,
   sectionsKey, selectionAnchor, setBlockKind, setLink, type BlockKind, type CursorPresence, type Discussion,
   type HeadingActions, type SectionNote,
@@ -70,8 +72,20 @@ export type { CursorPresence, Discussion, HeadingActions, SectionNote };
  */
 export interface PageSectionActions {
   /** A conversation about the section; from a selection, anchored to that text. */
-  discuss?: (blockId: string, anchor?: { quote: string; from: unknown; to: unknown }) => void;
+  discuss?: (blockId: string, anchor?: PassageAnchor) => void;
+  /**
+   * A comment on a passage, said to an Agent (§4.2): a discussion of the passage whose first message is the
+   * comment, which the Agent answers there and in the page.
+   */
+  comment?: (blockId: string, anchor: PassageAnchor, to: string, text: string) => void;
+  /** Who a comment may be said to; the first, unless the reader chooses another. */
+  commentAgents?: readonly WriteAgent[];
 }
+
+type PassageAnchor = { quote: string; from: unknown; to: unknown };
+
+/** A comment being written on a passage, in the box under it. */
+interface CommentDraft { blockId: string; anchor: PassageAnchor; left: number; top: number; to: string | null; text: string }
 
 interface Toolbar {
   kind: BlockKind;
@@ -338,6 +352,18 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
     localMedia.clear();
   }, [localMedia]);
   const [mediaFailure, setMediaFailure] = useState<string | null>(null);
+  const passageActions = useRef(actions);
+  passageActions.current = actions;
+  const [commentDraft, setCommentDraftState] = useState<CommentDraft | null>(null);
+  const draftRef = useRef<CommentDraft | null>(null);
+  const setCommentDraft = useCallback((next: CommentDraft | null) => {
+    draftRef.current = next;
+    setCommentDraftState(next);
+  }, []);
+  // A selection made with the mouse opens the comment box under it once the clicks settle (a double click
+  // may be the first two of a triple); one made from the keyboard is being edited, and shows the menu.
+  const selectedWithMouse = useRef(false);
+  const commentTimer = useRef(0);
   const anchorsChange = useRef(onAnchorOffsets);
   anchorsChange.current = onAnchorOffsets;
   const presenceOf = useRef<CursorPresence>(cursorPresence ?? (() => "active"));
@@ -393,9 +419,44 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
     current.focus();
   }, []);
 
+  /** Opens the comment box under the selection, or, with `caretBlock`, under the caret's paragraph. */
+  const openComment = useCallback((current: EditorView, caretBlock: boolean) => {
+    if (!passageActions.current?.comment || !frame.current || draftRef.current?.text.trim()) return false;
+    const { selection } = current.state;
+    if (selection.$from.parent.type.spec.code) return false;
+    const anchor = selectionAnchor(current.state, session.fragment)
+      ?? (caretBlock ? caretBlockAnchor(current.state, session.fragment) : null);
+    if (!anchor) return false;
+    const [from, to] = selection.empty ? [selection.$from.start(), selection.$from.end()] : [selection.from, selection.to];
+    const box = frame.current.getBoundingClientRect();
+    const start = current.coordsAtPos(from, 1);
+    const end = current.coordsAtPos(to, -1);
+    // Under the passage's last line; from where it starts when it is one line, else from the text's edge.
+    const oneLine = Math.abs(start.top - end.top) < 4;
+    const left = Math.max(0, Math.min(oneLine ? start.left - box.left - 10 : 0, box.width - 448));
+    setCommentDraft({ blockId: pageDocBlockAt(current.state.doc, from), anchor, left, top: end.bottom - box.top + 6,
+      to: draftRef.current?.to ?? null, text: "" });
+    current.dispatch(current.state.tr.setMeta(discussionsKey, { draft: { from: anchor.from, to: anchor.to } }));
+    return true;
+  }, [session, setCommentDraft]);
+
+  const closeComment = useCallback((collapse = false) => {
+    setCommentDraft(null);
+    const current = view.current;
+    if (!current) return;
+    const tr = current.state.tr.setMeta(discussionsKey, { draft: null });
+    // Sent: the caret goes on after the passage, so what is typed next does not replace it.
+    if (collapse) tr.setSelection(TextSelection.create(tr.doc, current.state.selection.to));
+    current.dispatch(tr);
+    current.focus();
+  }, [setCommentDraft]);
+
   useEffect(() => {
     if (!host.current) return;
     const handleKeyDown = (_view: EditorView, event: KeyboardEvent) => {
+      selectedWithMouse.current = false;
+      // As in Google Docs: ⌘⌥M comments on the selection, or on the caret's paragraph.
+      if (event.code === "KeyM" && event.altKey && (event.metaKey || event.ctrlKey) && openComment(_view, true)) return true;
       const trigger = menu.current.trigger;
       // As in Cursor: Tab takes the suggested change in front of the reader, Escape leaves it.
       if (!trigger && !event.shiftKey && !event.metaKey && !event.ctrlKey && !event.altKey
@@ -469,6 +530,21 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
         measure();
       },
       handleDOMEvents: {
+        mousedown: () => {
+          selectedWithMouse.current = true;
+          window.clearTimeout(commentTimer.current);
+          return false;
+        },
+        touchstart: () => { selectedWithMouse.current = false; return false; },
+        mouseup: (current) => {
+          window.clearTimeout(commentTimer.current);
+          commentTimer.current = window.setTimeout(() => {
+            if (!current.isDestroyed && selectedWithMouse.current && !current.state.selection.empty && current.hasFocus()) {
+              openComment(current, false);
+            }
+          }, 220);
+          return false;
+        },
         focus: (focused) => { showToolbar(readToolbar(focused)); return false; },
         blur: (blurred, event) => {
           // Leaving for the page's own menus keeps them open.
@@ -499,6 +575,7 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
       session.awareness.off("change", measure);
       cancelAnimationFrame(measureFrame.current);
       measureFrame.current = 0;
+      window.clearTimeout(commentTimer.current);
       editor.destroy();
       view.current = null;
     };
@@ -641,9 +718,34 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
     return { left: at.left - box.left, top: at.top - box.top, bottom: at.bottom - box.top };
   };
   const section = current ? pageDocBlockAt(current.state.doc, current.state.selection.from) : "";
-  const selectionActions = Boolean(actions?.discuss);
+  const selectionActions = Boolean(actions?.discuss || actions?.comment);
   const selectionMenu = toolbar && !toolbar.empty && toolbar.focused && current && toolbar.kind !== "code" && selectionActions
-    ? place(current.state.selection.from) : null;
+    && !commentDraft && !(actions?.comment && selectedWithMouse.current) ? place(current.state.selection.from) : null;
+  const commentAgents = actions?.commentAgents ?? [];
+  const commentTo = commentDraft ? commentDraft.to ?? commentAgents[0]?.harness ?? null : null;
+  // A key meant for the passage, pressed while the box has nothing typed: it acts on the passage as before.
+  const passageKey = (event: { key: string; metaKey: boolean; ctrlKey: boolean }) => {
+    const editor = view.current;
+    if (!editor) return false;
+    const mod = event.metaKey || event.ctrlKey;
+    const key = event.key.toLowerCase();
+    const { from, to } = editor.state.selection;
+    const passage = editor.state.doc.textBetween(from, to, "\n\n");
+    if (mod && key === "c") { void navigator.clipboard?.writeText(passage); return true; }
+    if (event.key === "Backspace" || event.key === "Delete" || (mod && key === "x")) {
+      if (mod) void navigator.clipboard?.writeText(passage);
+      closeComment();
+      editor.dispatch(editor.state.tr.deleteSelection().scrollIntoView());
+      return true;
+    }
+    const mark = mod ? { b: pageSchema.marks.strong, i: pageSchema.marks.em, e: pageSchema.marks.code }[key] : undefined;
+    if (mark) {
+      closeComment();
+      toggleMark(mark)(editor.state, editor.dispatch, editor);
+      return true;
+    }
+    return false;
+  };
   const linkAtPos = linkDraft !== null && current ? place(current.state.selection.from) : null;
   const fileAtPos = fileDraft !== null && current ? place(current.state.selection.from) : null;
   const trigger = canEdit && toolbar?.trigger && toolbar.focused ? toolbar.trigger : null;
@@ -733,7 +835,13 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
           style={{ left: Math.max(0, selectionMenu.left - 8), top: selectionMenu.top - 6 }}>
         <PaperPopover role="toolbar" aria-label="Selection" data-testid="page-selection-menu"
           className="flex items-center p-1">
-          {actions?.discuss && (
+          {actions?.comment ? (
+            <button type="button" onMouseDown={(event) => event.preventDefault()}
+              onClick={() => { if (current) openComment(current, false); }}
+              className="flex h-8 items-center gap-1.5 rounded-md px-2 text-sm [&_svg]:size-4">
+              <MessageSquare /> Comment
+            </button>
+          ) : actions?.discuss && (
             <button type="button" onMouseDown={(event) => event.preventDefault()}
               onClick={() => actions.discuss!(section, current ? selectionAnchor(current.state, session.fragment) ?? undefined
                 : undefined)}
@@ -742,6 +850,18 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
             </button>
           )}
         </PaperPopover>
+        </div>
+      )}
+      {commentDraft && commentTo && (
+        <div className="absolute z-30 w-[28rem] max-w-full" style={{ left: commentDraft.left, top: commentDraft.top }}>
+          <PageCommentBox agents={commentAgents} to={commentTo} text={commentDraft.text}
+            onText={(text) => setCommentDraft({ ...commentDraft, text })}
+            onTo={(to) => setCommentDraft({ ...commentDraft, to })}
+            onClose={() => closeComment()} onPassageKey={passageKey}
+            onSend={(text) => {
+              actions?.comment?.(commentDraft.blockId, commentDraft.anchor, commentTo, text);
+              closeComment(true);
+            }} />
         </div>
       )}
       {trigger && menuAt && (

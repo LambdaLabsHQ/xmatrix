@@ -11,7 +11,7 @@ import { cn } from "@/lib/utils";
 import { sameValue } from "@/lib/same-value";
 import { anchorTop, layoutMargin, type MarginConversation } from "./page-margin-model";
 import type { PresentPerson } from "./page-chrome";
-import { MarginPen } from "./page-pen";
+import { CardPen, MarginPen } from "./page-pen";
 import { discussionTitle } from "@/components/dashboard/selection-discussion";
 
 /** A card's height before it is measured. */
@@ -93,8 +93,10 @@ function WorkingLine({ agents, className }: { agents: MarginConversation["agents
   );
 }
 
-function ConversationCard({ conversation, focused, canResolve, onOpen, onResolve, onFocus }: {
+function ConversationCard({ conversation, writer, focused, canResolve, onOpen, onResolve, onFocus }: {
   conversation: MarginConversation;
+  /** Its Agent at work on its own passage, whose pill the card holds in place of its working line. */
+  writer?: MarginWriter | undefined;
   focused: boolean;
   canResolve: boolean;
   onOpen: () => void;
@@ -138,7 +140,8 @@ function ConversationCard({ conversation, focused, canResolve, onOpen, onResolve
             {formatRelativeAge(conversation.activityAt) ?? ""}
           </span>
         )}
-        <WorkingLine agents={agents} className="mt-2" />
+        {writer ? <span className="mt-2 block"><CardPen person={writer.person} /></span>
+          : <WorkingLine agents={agents} className="mt-2" />}
       </button>
       {canResolve && conversation.linkId && (
         <button type="button" onClick={onResolve} title="Resolve: its outcome is in the page"
@@ -327,6 +330,13 @@ export function PageMargin({ conversations, writers = [], tops, focusedId, openI
   // A discussion stays beside the passage it was started on, which is where its reader opens it; its Agent at work
   // stands at its own line without taking the conversation there.
   const atPassage = (writer: MarginWriter) => writer.conversation?.anchor.startsWith("text:") ?? false;
+  // An Agent writing its discussion's own passage is at work in the card there: one place, not a pill above a card.
+  const writerTop = (writer: MarginWriter) =>
+    tops.get(writer.anchor) ?? anchorTop(tops, { anchor: writer.anchor, blockId: writer.person.blockId });
+  const inCard = new Map(writers.filter((writer) => writer.conversation && atPassage(writer)
+    && Math.abs(writerTop(writer) - anchorTop(tops, writer.conversation)) < 120)
+    .map((writer) => [writer.conversation!.conversationId, writer]));
+  const pens = writers.filter((writer) => !inCard.has(writer.conversation?.conversationId ?? ""));
   const holding = writers.filter((writer) => writer.conversation && !atPassage(writer));
   const withWriters = new Set(holding.map((writer) => writer.conversation!.conversationId));
   const cards = conversations.filter((conversation) => conversation.live && !withWriters.has(conversation.conversationId));
@@ -335,8 +345,7 @@ export function PageMargin({ conversations, writers = [], tops, focusedId, openI
   const writerId = (writer: MarginWriter) => `writer:${writer.key}`;
   const items = [
     ...cards.map((card) => ({ id: card.conversationId, top: anchorTop(tops, card), estimate: ESTIMATED_CARD_HEIGHT })),
-    ...writers.map((writer) => ({ id: writerId(writer), estimate: ESTIMATED_WRITER_HEIGHT,
-      top: (tops.get(writer.anchor) ?? anchorTop(tops, { anchor: writer.anchor, blockId: writer.person.blockId })) - WRITER_RISE })),
+    ...pens.map((writer) => ({ id: writerId(writer), estimate: ESTIMATED_WRITER_HEIGHT, top: writerTop(writer) - WRITER_RISE })),
   ];
   const openItem = holder ? writerId(holder) : openId;
   const cardKey = items.map((item) => item.id).join("\u0000");
@@ -392,12 +401,13 @@ export function PageMargin({ conversations, writers = [], tops, focusedId, openI
   return (
     <div className="relative" style={{ minHeight: bottom }} data-testid="page-margin" aria-label="Conversations on this page">
       {cards.map((card) => place(card.conversationId, card.conversationId === openId && renderOpen ? openCard(card, false) : (
-        <ConversationCard conversation={card} focused={card.conversationId === focusedId} canResolve={canResolve}
+        <ConversationCard conversation={card} writer={inCard.get(card.conversationId)}
+          focused={card.conversationId === focusedId} canResolve={canResolve}
           onOpen={() => onOpen(card.conversationId)}
           onResolve={() => card.linkId && onResolve(card.linkId)}
           onFocus={(focused) => onFocus(focused ? card.conversationId : null)} />
       )))}
-      {writers.map((writer) => {
+      {pens.map((writer) => {
         const conversation = writer.conversation;
         const open = Boolean(conversation && writer === holder && renderOpen);
         if (conversation && atPassage(writer)) {

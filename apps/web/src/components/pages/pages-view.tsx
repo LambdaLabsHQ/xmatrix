@@ -52,7 +52,9 @@ import { formatRelativeAge, mobileChatTimeLabel } from "@/components/dashboard/t
 import { ListSectionHeading } from "@/components/dashboard/list-section-heading";
 import { InlineRowPreview } from "@/components/dashboard/inline-row-preview";
 import { MORE_RECENT_CHANGES, RECENT_CHANGES, pageRecentChangePreview, pageTreeHeadKey } from "./page-recent-changes";
-import { discussionQuote, discussionTitle, type DiscussionQuote } from "@/components/dashboard/selection-discussion";
+import {
+  discussionQuote, discussionTitle, quotedMessage, type DiscussionQuote,
+} from "@/components/dashboard/selection-discussion";
 import { refetchUnlessHumanPush } from "@/components/dashboard/workspace-resource-push";
 import { PageMigrationReview, usePageMigration } from "./page-migration-review";
 import { NEW_PAGE_ID, NEW_PAGE_TITLE, type PageCreation } from "./page-creation";
@@ -1184,7 +1186,13 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   // The link a pull request names for the block it works on.
   const blockLink = (blockId: string) => `${pageLink()}#${blockId}`;
   // A discussion is where people and Agents meet alike: asking an Agent is mentioning it there.
-  const discuss: NonNullable<PageSectionActions["discuss"]> = (blockId, anchor) => {
+  const discuss: NonNullable<PageSectionActions["discuss"]> = (blockId, anchor) => startDiscussion(blockId, anchor);
+  // A comment on a passage, said to an Agent: the discussion of the passage, started with the comment, which
+  // calls the Agent at once; the page stays in front of the reader, the discussion a card beside the passage.
+  const comment: NonNullable<PageSectionActions["comment"]> = (blockId, anchor, to, text) =>
+    startDiscussion(blockId, anchor, { to, text });
+  const startDiscussion = (blockId: string, anchor?: Parameters<NonNullable<PageSectionActions["discuss"]>>[1],
+    said?: { to: string; text: string }) => {
     if (!page) return;
     const title = blocks.find((block) => block.id === blockId)?.title;
     // A discussion of a passage is named by the passage, which its first message carries; of a section, by the section.
@@ -1196,9 +1204,12 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
       setStartedLinks((current) => [...current, { linkId: `started:${conversationId}`, conversationId,
         pageId: page.pageId, blockId, source: "manual", createdAt: now, lastSeenAt: now, anchor: anchor ?? null }]);
     };
+    const quote = anchor ? discussionQuote(anchor.quote, { label: place, href: blockLink(blockId) }, true) : undefined;
     void onDiscuss({ spaceId, pageId: page.pageId, blockId, name: anchor ? discussionTitle(anchor.quote) : place,
-      restricted, planned, ...(anchor ? { anchor,
-        quote: discussionQuote(anchor.quote, { label: place, href: blockLink(blockId) }, true) } : {}) }).then(() => links.refetch(), (cause: Error) => setNotice(cause.message))
+      restricted, planned, ...(anchor ? { anchor } : {}),
+      ...(said ? { firstMessage: quote ? quotedMessage(quote, { body: `@${said.to} launch:force ${said.text}`, selections: [] }).body
+        : `@${said.to} launch:force ${said.text}`, open: false } : quote ? { quote } : {}) })
+      .then(() => links.refetch(), (cause: Error) => setNotice(cause.message))
       .finally(() => setStartedLinks((current) => current.filter((link) => link.conversationId !== started)));
   };
   const resolveDiscussion = (linkId: string) => pageApi.resolveLink(spaceId, token, linkId, true)
@@ -1249,7 +1260,10 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     setMode("history");
   };
   // What selecting text offers, for the section the selection is in.
-  const sectionActions: PageSectionActions = { discuss };
+  // A comment goes to the Agent at work on the page, else to this person's favourite, unless they choose another.
+  const commentAgents = [...writers.agents].sort((a, b) => Number(b.harness === coWriter?.split(":")[0])
+    - Number(a.harness === coWriter?.split(":")[0]) || Number(b.harness === writers.favourite) - Number(a.harness === writers.favourite));
+  const sectionActions: PageSectionActions = { discuss, ...(commentAgents.length ? { comment, commentAgents } : {}) };
   // What a heading offers, beside it (§3.2).
   const headingActions: HeadingActions = {
     canEdit,

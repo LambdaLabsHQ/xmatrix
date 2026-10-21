@@ -616,8 +616,11 @@ function currentHeading(): Plugin {
  */
 export interface Discussion { linkId: string; conversationId: string; name: string; from: unknown; to: unknown }
 
+/** The passage a comment is being written about, before it is sent; its Yjs relative positions. */
+export interface DiscussionDraft { from: unknown; to: unknown }
+
 export const discussionsKey = new PluginKey<{ discussions: Discussion[]; focused: string | null;
-  decorations: DecorationSet }>("page-discussions");
+  draft: DiscussionDraft | null; decorations: DecorationSet }>("page-discussions");
 
 function yMapping(state: EditorState): Map<unknown, unknown> | null {
   const sync = ySyncPluginKey.getState(state) as { binding?: { mapping: Map<unknown, unknown> } } | undefined;
@@ -637,8 +640,15 @@ function anchorPosition(state: EditorState, fragment: Y.XmlFragment, position: u
 }
 
 function discussionDecorations(state: EditorState, fragment: Y.XmlFragment, discussions: Discussion[],
-  focused: string | null, openConversation: (conversationId: string) => void): DecorationSet {
+  focused: string | null, draft: DiscussionDraft | null, openConversation: (conversationId: string) => void): DecorationSet {
   const decorations: Decoration[] = [];
+  if (draft) {
+    const from = anchorPosition(state, fragment, draft.from);
+    const to = anchorPosition(state, fragment, draft.to);
+    if (from !== null && to !== null && to > from) {
+      decorations.push(Decoration.inline(from, to, { class: "page-discussion page-discussion-focus" }));
+    }
+  }
   for (const discussion of discussions) {
     const from = anchorPosition(state, fragment, discussion.from);
     const to = anchorPosition(state, fragment, discussion.to);
@@ -664,14 +674,18 @@ function discussionOverlay(fragment: Y.XmlFragment, openConversation: (conversat
     key: discussionsKey,
     state: {
       init: (_config, state) => ({ discussions: [] as Discussion[], focused: null as string | null,
-        decorations: DecorationSet.create(state.doc, []) }),
+        draft: null as DiscussionDraft | null, decorations: DecorationSet.create(state.doc, []) }),
       apply(tr, value, _old, state) {
-        const meta = tr.getMeta(discussionsKey) as { discussions?: Discussion[]; focused?: string | null } | undefined;
+        const meta = tr.getMeta(discussionsKey) as {
+          discussions?: Discussion[]; focused?: string | null; draft?: DiscussionDraft | null } | undefined;
         const discussions = meta?.discussions ?? value.discussions;
         const focused = meta && "focused" in meta ? meta.focused ?? null : value.focused;
-        if (discussions === value.discussions && focused === value.focused && !tr.docChanged) return value;
-        return { discussions, focused,
-          decorations: discussionDecorations(state, fragment, discussions, focused, openConversation) };
+        const draft = meta && "draft" in meta ? meta.draft ?? null : value.draft;
+        if (discussions === value.discussions && focused === value.focused && draft === value.draft && !tr.docChanged) {
+          return value;
+        }
+        return { discussions, focused, draft,
+          decorations: discussionDecorations(state, fragment, discussions, focused, draft, openConversation) };
       },
     },
     props: {
@@ -733,6 +747,13 @@ export function selectionAnchor(state: EditorState, fragment: Y.XmlFragment): Di
 
 type DiscussionAnchor = { quote: string; from: unknown; to: unknown };
 
+/** The paragraph (or other text block) the caret is in, as a discussion anchor. */
+export function caretBlockAnchor(state: EditorState, fragment: Y.XmlFragment): DiscussionAnchor | null {
+  const { $from } = state.selection;
+  if (!$from.parent.isTextblock) return null;
+  return rangeAnchor(state, fragment, $from.start(), $from.end());
+}
+
 function rangeAnchor(state: EditorState, fragment: Y.XmlFragment, from: number, to: number): DiscussionAnchor | null {
   const mapping = yMapping(state);
   if (!mapping) return null;
@@ -743,50 +764,6 @@ function rangeAnchor(state: EditorState, fragment: Y.XmlFragment, from: number, 
     from: Y.relativePositionToJSON(absolutePositionToRelativePosition(from, fragment, mapping as never)),
     to: Y.relativePositionToJSON(absolutePositionToRelativePosition(to, fragment, mapping as never)),
   };
-}
-
-/**
- * A line said to an Agent (§4.2): a paragraph of its own that opens with `@<agent>`, then what to do. It is a
- * comment, not the page's text: drawn as one while the caret is on it, and Enter sends it as a discussion of
- * the passage above and takes it out of the page (page-editor.tsx). `text` is empty while nothing is said yet.
- */
-export interface CommentLine { harness: string; text: string; from: number; to: number }
-
-const COMMENT_LINE = /^[@＠]([\p{L}\p{N}_.:-]{1,32})(?:[ \u3000]+([\s\S]*))?$/u;
-
-/** The line at the caret said to one of `agents`, if it is one. */
-export function commentLineAt(state: EditorState, agents: readonly string[]): CommentLine | null {
-  const { $from, empty } = state.selection;
-  if (!empty || $from.depth !== 1 || $from.parent.type !== nodes.paragraph) return null;
-  const match = COMMENT_LINE.exec($from.parent.textContent);
-  const harness = match ? agents.find((agent) => agent.toLowerCase() === match[1]!.toLowerCase()) : undefined;
-  if (!match || !harness || match[2] === undefined) return null;
-  return { harness, text: match[2].trim(), from: $from.before(), to: $from.after() };
-}
-
-/** What a comment line at `pos` is about: the last text above it. */
-export function passageAbove(state: EditorState, fragment: Y.XmlFragment, pos: number): DiscussionAnchor | null {
-  let passage: { from: number; to: number } | null = null;
-  state.doc.nodesBetween(0, pos, (node, at) => {
-    if (!node.isTextblock) return true;
-    if (node.textContent.trim()) passage = { from: at + 1, to: at + 1 + node.content.size };
-    return false;
-  });
-  const found = passage as { from: number; to: number } | null;
-  return found ? rangeAnchor(state, fragment, found.from, found.to) : null;
-}
-
-function commentLines(agents: () => readonly string[]): Plugin {
-  return new Plugin({
-    props: {
-      decorations(state) {
-        const line = commentLineAt(state, agents());
-        if (!line) return null;
-        return DecorationSet.create(state.doc, [Decoration.node(line.from, line.to, { class: "page-comment-line",
-          "data-comment-hint": line.text ? `↵ Send to ${line.harness}` : `Tell ${line.harness} what to do` })]);
-      },
-    },
-  });
 }
 
 /** Scrolls a section into view, for following someone on the page. */
@@ -1226,8 +1203,6 @@ export function editorPlugins(input: {
   /** The files this writer pasted, drawn from their own copy while they upload. */
   localMedia: Map<string, LocalMedia>;
   onMediaFailure: (message: string) => void;
-  /** The Agents a line of the page may be said to. */
-  commentAgents: () => readonly string[];
 }): Plugin[] {
   const presenceOf = (clientId: number) => {
     const state = input.awareness.getStates().get(clientId);
@@ -1261,7 +1236,6 @@ export function editorPlugins(input: {
     sectionOverlay(input.openConversation, input.headingActions),
     currentHeading(),
     discussionOverlay(input.fragment, input.openConversation, input.focusConversation),
-    commentLines(input.commentAgents),
     remoteChanges(input.fragment, input.awareness),
     readerChanges(input.fragment),
     automationChips(input.openConversation),
