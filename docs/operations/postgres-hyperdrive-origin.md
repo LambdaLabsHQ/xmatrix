@@ -101,6 +101,12 @@ or `account-deletion.claim`). Opening failures retain `phase.begin` and
 `database_phase_begin_v1` before any business SQL runs. Query and session
 points use the same family; no account or request identities are labels.
 
+The account-deletion pending-job scan is one lock-free `single_read`: it does
+not open a transaction or wait for COMMIT after obtaining its candidates. A lost
+read gets the existing single retry on a fresh checkout; a second failure still
+fails maintenance. Claiming and advancing a deletion remain explicit write
+transactions with their existing lease and commit-unknown behavior.
+
 ## Agent lifecycle locks
 
 Agent message preparation, observed-head and receipt reads, content reads and
