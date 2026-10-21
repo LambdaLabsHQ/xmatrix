@@ -493,8 +493,13 @@ function useTicking(active: boolean): number {
 
 function liveAgents(channel: ChannelSnapshot): LiveConversation["agents"] {
   if (!channel.presence) return undefined;
-  return channelPresenceInstances(channel.presence).flatMap(instance => isLiveAgentStatus(instance.status)
-    ? [{ instanceId: instance.id, name: instance.label || instance.agentName, status: instance.status }] : []);
+  return channelPresenceInstances(channel.presence).flatMap(instance => {
+    if (!isLiveAgentStatus(instance.status)) return [];
+    // Its face is its vendor's mark, as on its card in the conversation.
+    const avatarUrl = agentPresetAvatarUrl(instance.registration.harness);
+    return [{ instanceId: instance.id, name: instance.label || instance.agentName, status: instance.status,
+      ...(avatarUrl ? { avatarUrl } : {}) }];
+  });
 }
 
 /** What an Agent co-writing live is doing, as its face at the edge says it (page-co-writer.ts). */
