@@ -10,7 +10,7 @@ import {
   type SerializedAutomation, type ChannelSnapshot, type PageConversation, type PageLink,
 } from "@xmatrix/protocol";
 import {
-  Check, Clock, Files, FileText, History, Lock, MessageSquare, Plus, Share2, Trash2, X,
+  Check, Clock, Files, FileText, History, Lock, MessageSquare, Plus, Share2, Trash2, Undo2, X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { noticeClass } from "@/components/ui/status-tone";
@@ -39,6 +39,8 @@ import {
   ConversationList, DeletePageDialog, PageChangeMark, PageDialog, PageHistory, PagePens, PageScrollMarks, PresenceStack, ShareDialog, type PagePen, type PresentPerson, type PageScrollMark,
 } from "./page-chrome";
 import { PageMargin, PageOffscreenCard, type MarginWriter, type OffscreenEntry } from "./page-margin";
+import type { PageSessionChanges } from "./page-session-changes";
+import { PageSessionChangesList, PageUndoNotice, useSessionChanges } from "./page-session-changes-panel";
 import { PagePhoneDock } from "./page-phone-dock";
 import { PageReaderChangeGutter, PageReaderChangeMark } from "./page-reader-changes-bar";
 import type { SuggestionsReport } from "./page-suggestions";
@@ -594,6 +596,10 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   // Reads the page's waiting suggestions again; the live session calls it when one arrives.
   const waitingRefetch = useRef<() => void>(() => undefined);
   const [mode, setMode] = useState<"page" | "history">("page");
+  // Everyone's changes since the page opened, which Ctrl+Z steps back through, and whether their list is open.
+  const [sessionChanges, setSessionChanges] = useState<PageSessionChanges | null>(null);
+  const [changesOpen, setChangesOpen] = useState(false);
+  const { list: changeList, notice: undoNotice } = useSessionChanges(sessionChanges);
   const [dialog, setDialog] = useState<PageDialogState | null>(null);
   // The conversation whose card is being read, so its passage is marked (§4.4).
   const [focused, setFocused] = useState<string | null>(null);
@@ -857,7 +863,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     return () => {
       off();
       if (madeSession.current === live) return;
-      live.destroy(); setSession(null); setConnected(false); setSynced(false); setEditorReady(false);
+      live.destroy(); setSession(null); setConnected(false); setSynced(false); setEditorReady(false); setChangesOpen(false);
       setSaveState("idle");
     };
   }, [spaceId, pageId, pending, hasToken, userId, userName, queryClient]);
@@ -1513,6 +1519,12 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
           Co-write
         </Button>
       )}
+      {mode === "page" && drawn && changeList.length > 0 && (
+        <Button variant="ghost" size="sm" aria-pressed={changesOpen} title="Changes since you opened this page"
+          onClick={() => setChangesOpen((open) => !open)}>
+          <Undo2 /> Changes
+        </Button>
+      )}
       {/* What only a made page has: its conversations, history and sharing. A new page gets them on its first write. */}
       {!pending && (
         <>
@@ -1662,7 +1674,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
                         automations={automationsById} references={references} completion={completion}
                         focusedConversationId={activeConversationId ?? focused} onFocusConversation={setFocused}
                         onAnchorOffsets={setAnchorTops} cursorPresence={cursorPresence} readGitHubFile={readGitHubFile}
-                        mediaUrl={mediaUrl} uploadMedia={uploadMedia} />}
+                        mediaUrl={mediaUrl} uploadMedia={uploadMedia} onChanges={setSessionChanges} />}
                     </div>
                   </div>
                   {/* The margin holds its room from the start, so the text does not reflow when the page has synced;
@@ -1670,7 +1682,11 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
                       anchors in the text once the page is drawn. */}
                   {marginOn && (
                     <aside className="w-80 shrink-0">
-                      {(drawn || openInMargin || (document.data && links.data)) && <PageMargin conversations={marginCards}
+                      {changesOpen && sessionChanges ? (
+                        <div className="sticky top-4">
+                          <PageSessionChangesList list={changeList} changes={sessionChanges} onClose={() => setChangesOpen(false)} />
+                        </div>
+                      ) : (drawn || openInMargin || (document.data && links.data)) && <PageMargin conversations={marginCards}
                         tops={drawn ? anchorTops : previewTops} focusedId={focused} canResolve={canEdit}
                         writers={marginWriters} editors={editors} view={marginView}
                         onJump={(top) => { const base = columnTop(); if (base !== null) scrollToContent(base + top); }}
@@ -1713,6 +1729,16 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
           onCall={() => setDialog({ kind: "write" })} />
       )}
       {docked && renderConversation?.("dock")}
+      {sessionChanges && mode === "page" && (
+        <>
+          <PageUndoNotice notice={undoNotice} changes={sessionChanges} onShowChanges={() => setChangesOpen(true)} />
+          {/* Without the margin beside the page, the list opens over it. */}
+          <PageDialog open={changesOpen && !marginOn} onClose={() => setChangesOpen(false)} id="page-session-changes-title"
+            title="Changes since you opened">
+            <PageSessionChangesList list={changeList} changes={sessionChanges} />
+          </PageDialog>
+        </>
+      )}
       {page && (
         <>
           {((dialog && typeof dialog === "object" && dialog.kind === "write") || tapped) && (
