@@ -6,13 +6,22 @@ import {
 } from "@xmatrix/protocol/page-document";
 import {
   BetweenHorizontalEnd, BetweenVerticalEnd, Code2, Columns3, FileCode2, Rows3, Trash2, Heading1, Heading2, Heading3, Link2,
-  List, ListChecks, ListOrdered, MessageSquarePlus, Minus, Pilcrow, Quote, Table,
+  FileText, Hash, List, ListChecks, ListOrdered, MessageSquarePlus, Minus, Pilcrow, Quote, Table,
 } from "lucide-react";
 import type { Node as DocNode } from "prosemirror-model";
 import { EditorState, Selection, type Command } from "prosemirror-state";
 import { EditorView } from "prosemirror-view";
 import { yCursorPluginKey, ySyncPluginKey } from "y-prosemirror";
-import { gitHubFileReferenceFrom, gitHubFileReferenceHref, type SerializedAutomation } from "@xmatrix/protocol";
+import {
+  channelReferenceToken, gitHubFileReferenceFrom, gitHubFileReferenceHref, pageBlocks, pageReferenceToken,
+  type PageSummary, type SerializedAutomation,
+} from "@xmatrix/protocol";
+import { avatarInitials } from "@/components/dashboard/completion-option-button";
+import { IdentityAvatar } from "@/components/dashboard/identity-avatar";
+import type { ChannelReference } from "@/components/dashboard/message-reference-catalog";
+import {
+  channelReferenceCandidates, pageReferenceCandidates, sectionReferenceCandidates, type ReferenceCandidate,
+} from "@/components/dashboard/reference-complete";
 import { PaperPopover } from "@/components/ui/material-surfaces";
 import { sameValue } from "@/lib/same-value";
 import type { PageLiveSession } from "@/lib/pages/page-client";
@@ -23,9 +32,11 @@ import { referencesKey, type PageReferenceTargets } from "./page-reference-chips
 import {
   addColumnAfter, addRowAfter, anchorOffsets, blockKind, deleteColumn, deleteRow, deleteTable, discussionsKey,
   editorPlugins, isInTable, insertRule, insertTable, linkAt, nodeViews, scrollToSection, showReaderChanges,
-  sectionsKey, selectionAnchor, setBlockKind, setLink, slashKey, type BlockKind, type CursorPresence, type Discussion,
-  type HeadingActions, type SectionNote, type SlashState,
+  sectionsKey, selectionAnchor, setBlockKind, setLink, type BlockKind, type CursorPresence, type Discussion,
+  type HeadingActions, type SectionNote,
 } from "./page-editor-setup";
+import { insertReference, triggersKey, type PageTrigger } from "./page-triggers";
+import type { WriteAgent } from "./page-write-with";
 import {
   currentSuggestionTop, leaveSuggestion, pageSuggestions, showSuggestions, stepSuggestion, suggestionsKey,
   takeSuggestion, type PageSuggestion, type SuggestionsReport,
@@ -69,7 +80,7 @@ interface Toolbar {
   focused: boolean;
   /** The selection is in a table, which shows its row and column controls. */
   inTable: boolean;
-  slash: SlashState | null;
+  trigger: PageTrigger | null;
 }
 
 function readToolbar(view: EditorView): Toolbar {
@@ -80,7 +91,7 @@ function readToolbar(view: EditorView): Toolbar {
     empty: state.selection.empty,
     inTable: isInTable(state),
     focused: view.hasFocus(),
-    slash: slashKey.getState(state) ?? null,
+    trigger: triggersKey.getState(state) ?? null,
   };
 }
 
@@ -120,6 +131,87 @@ function embedGitHubFile(text: string): Command | null {
   };
 }
 
+/** What `[[`, `#` and `@` complete on a page, and what picking an Agent does. */
+export interface PageCompletion {
+  spaceId: string;
+  pages: readonly PageSummary[];
+  channels: readonly ChannelReference[];
+  agents: readonly WriteAgent[];
+  /** A page's title and markdown, for its sections after `[[page#`. */
+  readPage: (pageId: string) => Promise<{ pageId: string; title: string; body: string }>;
+  /** `@` picked an Agent: it comes to write the section the caret is in. */
+  callAgent: (harness: string, blockId: string) => void;
+}
+
+/** One row of the menu typing opened. */
+interface MenuItem { key: string; label: string; hint: string; icon: ReactNode; run: (view: EditorView) => void }
+
+type PageSections = { pageId: string; title: string; blocks: ReturnType<typeof pageBlocks> };
+
+function referenceItem(trigger: PageTrigger, candidate: ReferenceCandidate): MenuItem {
+  const token = candidate.kind === "channel" ? channelReferenceToken(candidate.channelId)
+    : pageReferenceToken(candidate.pageId, candidate.blockId);
+  return {
+    key: candidate.id, label: candidate.label, hint: candidate.detail,
+    icon: candidate.kind === "channel" ? <Hash /> : <FileText />,
+    run: (view) => { insertReference(trigger, token)(view.state, view.dispatch, view); },
+  };
+}
+
+function triggerItems(trigger: PageTrigger, completion: PageCompletion | undefined,
+  sections: ReadonlyMap<string, PageSections>): MenuItem[] {
+  if (trigger.kind === "insert") {
+    return matchingItems(trigger.query).map((item) => ({ key: item.label, label: item.label, hint: item.hint, icon: item.icon,
+      run: (view) => {
+        view.dispatch(view.state.tr.delete(trigger.from, trigger.to).setMeta(triggersKey, "close"));
+        item.run(view.state, view.dispatch, view);
+      } }));
+  }
+  if (!completion) return [];
+  if (trigger.kind === "channel") {
+    return channelReferenceCandidates(completion.channels, trigger.query, completion.spaceId, null)
+      .map((candidate) => referenceItem(trigger, candidate));
+  }
+  if (trigger.kind === "page") {
+    if (trigger.section === null) {
+      return pageReferenceCandidates(completion.pages, trigger.query).map((candidate) => referenceItem(trigger, candidate));
+    }
+    const page = sectionPage(trigger, completion);
+    const read = page ? sections.get(page) : undefined;
+    return read ? sectionReferenceCandidates(read, read.blocks, trigger.section)
+      .map((candidate) => referenceItem(trigger, candidate)) : [];
+  }
+  const wanted = trigger.query.toLowerCase();
+  return completion.agents.filter((agent) => agent.harness.toLowerCase().includes(wanted))
+    .sort((a, b) => Number(!a.harness.toLowerCase().startsWith(wanted)) - Number(!b.harness.toLowerCase().startsWith(wanted)))
+    .map((agent) => ({
+      key: agent.harness, label: agent.harness, hint: "Write here",
+      icon: <IdentityAvatar kind="agent" label={agent.harness} imageUrl={agent.avatarUrl} size="xs" shape="circle" glass={false}
+        initials={agent.avatarUrl ? avatarInitials(agent.harness) : undefined} className="pointer-events-none rounded-full" />,
+      run: (view) => {
+        const blockId = pageDocBlockAt(view.state.doc, trigger.from);
+        view.dispatch(view.state.tr.delete(trigger.from, trigger.to).setMeta(triggersKey, "close"));
+        completion.callAgent(agent.harness, blockId);
+      },
+    }));
+}
+
+/** The page `[[page#` names: the best match for what was typed before the `#`. */
+function sectionPage(trigger: PageTrigger & { kind: "page" }, completion: PageCompletion): string | null {
+  const best = pageReferenceCandidates(completion.pages, trigger.query)[0];
+  return best?.kind === "page" ? best.pageId : null;
+}
+
+const MENU_LABELS: Record<PageTrigger["kind"], string> = {
+  insert: "Insert", page: "Pages", channel: "Channels", agent: "Agents",
+};
+
+/** A menu starts again at its first row when what it lists changes. */
+function triggerKey(trigger: PageTrigger | null): string {
+  if (!trigger) return "";
+  return `${trigger.kind}:${trigger.from}:${trigger.query}:${trigger.kind === "page" ? trigger.section ?? "" : ""}`;
+}
+
 function matchingItems(query: string): InsertItem[] {
   const needle = query.toLowerCase();
   return needle ? INSERT_ITEMS.filter((item) => item.keywords.includes(needle) || item.label.toLowerCase().includes(needle))
@@ -143,7 +235,8 @@ function ToolButton({ label, active = false, disabled = false, onRun, children }
 export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions, sections, follow, writeOn,
   onOpenConversation, discussions, automations, headingActions, focusedConversationId = null, onFocusConversation,
   onAnchorOffsets, cursorPresence, onReady, readerBaseline = null, onReaderChanges, onWrite, readFrom, reading,
-  suggestions = null, onSuggestions, suggestionControl, readGitHubFile, references, placeholder, mediaUrl, uploadMedia }: {
+  suggestions = null, onSuggestions, suggestionControl, readGitHubFile, references, completion, placeholder, mediaUrl,
+  uploadMedia }: {
   session: PageLiveSession;
   /** What an empty page asks for instead of its title: someone co-writing it asks for its first line. */
   placeholder?: string;
@@ -199,6 +292,8 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
   readGitHubFile?: ReadGitHubFile;
   /** What `page:<id>` and `channel:<id>` in the text name and open. */
   references?: PageReferenceTargets;
+  /** What typing `[[`, `#` and `@` offers. */
+  completion?: PageCompletion;
   /** Where the page reads an image or video pasted into it. */
   mediaUrl?: PageMediaUrl;
   /** Uploads an image or video pasted or dropped into the page. */
@@ -274,12 +369,14 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
     shownToolbar.current = next;
     setToolbar(next);
   }, []);
-  const [slashIndex, setSlashIndex] = useState(0);
+  const [menuIndex, setMenuIndex] = useState(0);
   const [linkDraft, setLinkDraft] = useState<string | null>(null);
   // A GitHub file link being pasted to embed, and why the last one was not a file.
   const [fileDraft, setFileDraft] = useState<string | null>(null);
   const [fileDraftError, setFileDraftError] = useState(false);
-  const menu = useRef({ slash: null as SlashState | null, index: 0 });
+  const menu = useRef({ trigger: null as PageTrigger | null, items: [] as MenuItem[], index: 0 });
+  // The sections of pages `[[page#` named, as they are read.
+  const [sectionsRead, setSectionsRead] = useState<ReadonlyMap<string, PageSections>>(() => new Map());
 
   const run = useCallback((command: Command) => {
     const current = view.current;
@@ -288,41 +385,38 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
     current.focus();
   }, []);
 
-  const applyInsert = useCallback((item: InsertItem) => {
+  const applyItem = useCallback((item: MenuItem) => {
     const current = view.current;
-    const slash = menu.current.slash;
     if (!current) return;
-    if (slash) current.dispatch(current.state.tr.delete(slash.from, slash.to).setMeta(slashKey, "close"));
-    item.run(current.state, current.dispatch, current);
+    item.run(current);
     current.focus();
   }, []);
 
   useEffect(() => {
     if (!host.current) return;
     const handleKeyDown = (_view: EditorView, event: KeyboardEvent) => {
-      const slash = menu.current.slash;
+      const trigger = menu.current.trigger;
       // As in Cursor: Tab takes the suggested change in front of the reader, Escape leaves it.
-      if (!slash && !event.shiftKey && !event.metaKey && !event.ctrlKey && !event.altKey
+      if (!trigger && !event.shiftKey && !event.metaKey && !event.ctrlKey && !event.altKey
         && suggestionsKey.getState(_view.state)?.hunks.length) {
         if (event.key === "Tab") return takeSuggestion(_view);
         if (event.key === "Escape") return leaveSuggestion(_view);
       }
-      if (!slash) return false;
-      const items = matchingItems(slash.query);
-      if (!items.length) return false;
+      const items = menu.current.items;
+      if (!trigger || !items.length) return false;
       if (event.key === "ArrowDown" || event.key === "ArrowUp") {
         const step = event.key === "ArrowDown" ? 1 : -1;
         const next = (menu.current.index + step + items.length) % items.length;
         menu.current.index = next;
-        setSlashIndex(next);
+        setMenuIndex(next);
         return true;
       }
       if (event.key === "Enter" || event.key === "Tab") {
-        applyInsert(items[Math.min(menu.current.index, items.length - 1)]!);
+        applyItem(items[Math.min(menu.current.index, items.length - 1)]!);
         return true;
       }
       if (event.key === "Escape") {
-        _view.dispatch(_view.state.tr.setMeta(slashKey, "close"));
+        _view.dispatch(_view.state.tr.setMeta(triggersKey, "close"));
         return true;
       }
       return false;
@@ -363,11 +457,11 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
         // What the shared document brings (others' writes, its first sync) carries the sync's meta.
         if (tr.docChanged && tr.getMeta(ySyncPluginKey) === undefined) wrote.current?.();
         const next = readToolbar(this);
-        if (next.slash?.query !== menu.current.slash?.query || Boolean(next.slash) !== Boolean(menu.current.slash)) {
+        if (triggerKey(next.trigger) !== triggerKey(menu.current.trigger)) {
           menu.current.index = 0;
-          setSlashIndex(0);
+          setMenuIndex(0);
         }
-        menu.current.slash = next.slash;
+        menu.current.trigger = next.trigger;
         // Metadata-only transactions do not move the selection menu. Document and selection changes
         // still render it, even when its controls match, to update its position.
         if (tr.docChanged || tr.selectionSet || tr.storedMarksSet || !sameValue(shownToolbar.current, next)) showToolbar(next);
@@ -551,9 +645,20 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
     ? place(current.state.selection.from) : null;
   const linkAtPos = linkDraft !== null && current ? place(current.state.selection.from) : null;
   const fileAtPos = fileDraft !== null && current ? place(current.state.selection.from) : null;
-  const slash = canEdit && toolbar?.slash && toolbar.focused ? toolbar.slash : null;
-  const slashItems = slash ? matchingItems(slash.query) : [];
-  const slashAt = slash && slashItems.length ? place(slash.from) : null;
+  const trigger = canEdit && toolbar?.trigger && toolbar.focused ? toolbar.trigger : null;
+  const menuItems = trigger ? triggerItems(trigger, completion, sectionsRead) : [];
+  menu.current.items = menuItems;
+  const menuAt = trigger && menuItems.length ? place(trigger.from) : null;
+  const namedPage = trigger?.kind === "page" && trigger.section !== null && completion ? sectionPage(trigger, completion) : null;
+  const readPage = completion?.readPage;
+  useEffect(() => {
+    if (!namedPage || !readPage || sectionsRead.has(namedPage)) return;
+    let live = true;
+    void readPage(namedPage).then((read) => {
+      if (live) setSectionsRead((known) => new Map(known).set(read.pageId, { ...read, blocks: pageBlocks(read.body) }));
+    }, () => undefined);
+    return () => { live = false; };
+  }, [namedPage, readPage, sectionsRead]);
 
   return (
     <div ref={frame} className="relative" data-testid="page-editor">
@@ -638,19 +743,19 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
         </PaperPopover>
         </div>
       )}
-      {slash && slashAt && (
-        <div className="absolute z-20 w-64" style={{ left: slashAt.left, top: slashAt.bottom + 4 }}>
-        <PaperPopover role="listbox" aria-label="Insert" data-testid="page-insert-menu"
+      {trigger && menuAt && (
+        <div className="absolute z-20 w-64" style={{ left: menuAt.left, top: menuAt.bottom + 4 }}>
+        <PaperPopover role="listbox" aria-label={MENU_LABELS[trigger.kind]} data-testid={`page-${trigger.kind}-menu`}
           className="max-h-80 overflow-y-auto p-1">
-          {slashItems.map((item, index) => (
-            <button key={item.label} type="button" role="option" aria-selected={index === slashIndex}
-              onMouseDown={(event) => event.preventDefault()} onClick={() => applyInsert(item)}
-              onMouseEnter={() => { menu.current.index = index; setSlashIndex(index); }}
+          {menuItems.map((item, index) => (
+            <button key={item.key} type="button" role="option" aria-selected={index === menuIndex}
+              onMouseDown={(event) => event.preventDefault()} onClick={() => applyItem(item)}
+              onMouseEnter={() => { menu.current.index = index; setMenuIndex(index); }}
               className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm [&_svg]:size-4
-                [&_svg]:text-muted-foreground`}>
+                [&_svg]:shrink-0 [&_svg]:text-muted-foreground`}>
               {item.icon}
-              <span className="flex-1">{item.label}</span>
-              <span className="text-xs text-muted-foreground">{item.hint}</span>
+              <span className="min-w-0 flex-1 truncate">{item.label}</span>
+              <span className="max-w-[45%] truncate text-xs text-muted-foreground">{item.hint}</span>
             </button>
           ))}
         </PaperPopover>
