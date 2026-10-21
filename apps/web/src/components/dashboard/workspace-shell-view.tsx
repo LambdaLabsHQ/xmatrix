@@ -36,6 +36,7 @@ import {
   spaceJoinRequestsQueryOptions,
 } from "@/components/dashboard/space-join-requests";
 import { canInviteToSpace } from "@/components/dashboard/workspace-shell-recovered";
+import { channelWithOutgoing } from "./channel-outgoing-preview";
 import { issueReportUrl } from "@/lib/issue-report";
 import { channelSidebarError } from "@/components/dashboard/workspace-sidebar-error";
 import { ConnectorActionApproval, useConnectorActionApprovals } from "./connector-action-approval";
@@ -144,6 +145,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     highlightedMessageId,
     channels,
     setChannels,
+    outgoingMessages,
     spaces,
     projects,
     setProjects,
@@ -581,10 +583,11 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
   // A conversation and a new one are pushed screens over the dock track.
   const mobileDockCovered = view === "messages" && (Boolean(selectedChannel) || composingConversation);
   // What the shell holds live about a conversation linked to a page (pages-live-document.md §4.4).
-  const pageConversation = useCallback(
-    (conversationId: string) => channels.find((channel) => channel.id === conversationId) ?? null,
-    [channels],
-  );
+  // A message on its way is its last one already, so a page's card for it shows the comment as it is sent.
+  const pageConversation = useCallback((conversationId: string) => {
+    const channel = channels.find((item) => item.id === conversationId);
+    return channel ? channelWithOutgoing(channel, outgoingMessages, user) : null;
+  }, [channels, outgoingMessages, user]);
   // A page's conversation the loaded catalog has not got is resolved while the reader rests on it, so opening
   // it beside the page does not wait on that read; once asked, it is not asked again on this page view.
   const pageConversationLookup = useRef({ pageConversation, paging: channelCatalogPaging, spaceId: currentSpaceId });

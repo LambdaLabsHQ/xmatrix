@@ -1188,6 +1188,9 @@ test("selecting a passage opens a comment box beside it in the margin; sent, the
   await expect(box).toHaveCount(0);
   await expect(browser.getByTestId("page-conversation")).toHaveCount(0);
   await expect(editor.locator(".page-document"), "the caret is back in the page").toBeFocused();
+  // The comment is on its card the moment it is sent, as a message in a conversation is, while the Hub is still
+  // making the conversation.
+  await expect(browser.getByTestId("page-margin-card").filter({ hasText: "Is this still accurate?" })).toBeVisible();
   // Its card and the passage's bubble come with the link.
   await fixtureJson(browser, "link-resolve", /\/page-links\/l-discuss\/resolution$/u, { link: {} }, { method: "PUT" });
   await releaseFixture(browser, "channel-create");
@@ -1351,7 +1354,11 @@ test("a page's conversations sit beside what they are about, and one opens there
   const card = cards.filter({ hasText: "Release notes" });
   await expect(card).toContainText("claude:1");
   await expect(card).toContainText("Drafted the notes; checking the changelog.");
-  await expect(card).toContainText("claude:1 · Working");
+  // Its Agent is its Instance card at a comment's size: the vendor's face, whose status dot says it works.
+  const instance = card.locator(".page-margin-instance");
+  await expect(instance).toHaveText("claude:1");
+  await expect(instance).toHaveAttribute("data-status", "busy");
+  await expect(instance.locator(".identity-avatar-face img")).toHaveAttribute("src", /agent-vendors\/claude/u);
   const status = editor.locator("h2", { hasText: "Status" });
   await expect.poll(async () => Math.abs((await card.boundingBox())!.y - (await status.boundingBox())!.y),
     { message: "the card is level with its section's heading" }).toBeLessThan(4);
@@ -1761,7 +1768,7 @@ test("beside a long page, the margin tells what it holds out of view, and only t
   const below = browser.getByTestId("page-offscreen-below");
   await expect(below).toBeInViewport();
   await expect(below).toContainText("1 conversation below");
-  await expect(below).toContainText("claude:2 · Working");
+  await expect(below.locator(".page-margin-instance[data-status='busy']")).toHaveText("claude:2");
   await expect(browser.getByTestId("page-offscreen-above")).toHaveCount(0);
   // It stands in the margin, on the cards' edges.
   const [edge, column] = [(await below.boundingBox())!, (await margin.boundingBox())!];

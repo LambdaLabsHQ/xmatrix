@@ -281,6 +281,33 @@
   font-size: 0.625rem;
 }
 
+/* Who is in a conversation, on its card: each Agent's Instance card from the conversation at a comment's size, a
+   capsule of the card's own paper, a shade deeper: its vendor's face, whose status dot says whether it works, and
+   its name. */
+.page-margin-instance {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  max-width: 100%;
+  height: 22px;
+  padding: 0 8px 0 2px;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--foreground) 6%, transparent);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  color: var(--foreground);
+}
+.page-margin-card .page-margin-instance .identity-avatar-face,
+.page-margin-instance .identity-avatar-face {
+  width: 18px;
+  height: 18px;
+  background: var(--card);
+}
+.page-margin-instance-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+
 html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-message-surface {
   margin: 0 !important;
   border-radius: 0 !important;

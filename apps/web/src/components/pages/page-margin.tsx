@@ -1,9 +1,8 @@
 "use client";
 
-import { AnimatedIcon } from "@/components/ui/animated-icon";
-
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import { ArrowDown, ArrowUp, Check, Maximize2, PenLine, Sparkles, X } from "lucide-react";
+import { ArrowDown, ArrowUp, Check, Maximize2, PenLine, X } from "lucide-react";
+import { agentPresetAvatarUrl, normalizeAgentPresetRuntime } from "@xmatrix/protocol";
 import { IdentityAvatar } from "@/components/dashboard/identity-avatar";
 import { formatRelativeAge } from "@/components/dashboard/time-display";
 import { avatarInitials } from "@/components/dashboard/completion-option-button";
@@ -80,17 +79,29 @@ function CardContext({ conversation, open = false }: { conversation: MarginConve
   );
 }
 
-/** The Agents working in it, as a comment thread shows who is typing. */
+/** An Agent's face is its vendor's mark, which its name tells where the listing carries none. */
+function agentFace(agent: MarginConversation["agents"][number]): string | undefined {
+  return agent.avatarUrl ?? agentPresetAvatarUrl(normalizeAgentPresetRuntime(agent.name.split(":")[0] ?? ""));
+}
+
+/**
+ * The Agents in it, as a comment thread shows who is typing: each its Instance card from the conversation at a
+ * comment's size, on paper. Its vendor's face and its name; its status dot alone says whether it works.
+ */
 function WorkingLine({ agents, className }: { agents: MarginConversation["agents"]; className?: string }) {
   const working = agents.filter((agent) => agent.status === "busy");
   const shown = working.length > 0 ? working : agents;
   if (shown.length === 0) return null;
   return (
-    <span className={cn("page-margin-working flex items-center gap-1.5 text-[12px] text-muted-foreground", className)}>
-      <AnimatedIcon icon={Sparkles} className={cn("size-3 shrink-0", working.length > 0 && "animate-pulse text-primary")} />
-      <span className="truncate">
-        {shown.map((agent) => agent.name).join(", ")} · {agentState(shown[0]!.status)}
-      </span>
+    <span className={cn("page-margin-working flex min-w-0 flex-wrap items-center gap-1.5", className)}>
+      {shown.map((agent) => (
+        <span key={agent.instanceId} className="page-margin-instance" data-status={agent.status}
+          title={`${agent.name} · ${agentState(agent.status)}`}>
+          <IdentityAvatar kind="agent" label={agent.name} imageUrl={agentFace(agent)} initials={avatarInitials(agent.name)}
+            status={agent.status} size="xs" shape="circle" glass={false} className="page-margin-instance-face" />
+          <span className="page-margin-instance-name">{agent.name}</span>
+        </span>
+      ))}
     </span>
   );
 }
