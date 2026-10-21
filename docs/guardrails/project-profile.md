@@ -35,7 +35,9 @@ the ordinary first-message automatic summon and author choice window while
 retaining their preset titles. See [automatic invocation](../architecture/auto-launch-completion.md#a-new-conversations-first-message).
 
 Human Space owners/admins can confirm Channel deletion in its actions or
-details. Retirement revokes access immediately; a durable job erases the exact
+details. Active work prompts a second confirmation to stop the Channel's
+Agents, then automatically retries deletion after daemon termination. Retirement
+revokes access immediately; a durable job erases the exact
 Channel closure in bounded, retryable passes while keeping linked Pages and
 other Channels. Account deletion remains separately available in Settings.
 See [Channel deletion](../operations/channel-deletion.md) and
