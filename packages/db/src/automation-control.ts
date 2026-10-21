@@ -15,6 +15,7 @@ import { cancelRunExecution } from "./runtime-control.js";
 
 import type { AuthorityDatabase, DatabaseTransaction } from "./contracts.js";
 import type { DatabaseRequestContext } from "./context.js";
+import { singleReadStatements } from "./single-read-statements.js";
 import {
   channelCapabilityPredicate,
   requireChannelCapability,
@@ -542,8 +543,7 @@ export class PostgresAutomationRepository {
     callback: (reader: DatabaseTransaction) => Promise<T>): Promise<T> {
     const session = this.database.openSession();
     try {
-      return await callback({ query: (query) => session.transaction(
-        { ...context, statement: "single_read" }, (tx) => tx.query(query)) });
+      return await callback(singleReadStatements(session, context));
     } finally {
       await session.close();
     }

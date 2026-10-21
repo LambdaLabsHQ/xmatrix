@@ -1,13 +1,14 @@
 import assert from "node:assert/strict";
 import { Client } from "pg";
-import { createAuthorityDatabase, PostgresAutomationRepository, PostgresPageRepository } from "../dist/index.js";
+import { createAuthorityDatabase, PostgresAutomationRepository, PostgresChannelCatalogRepository,
+  PostgresPageRepository } from "../dist/index.js";
 import { integration, connectionString } from "./postgres-database.fixture.mjs";
 import { spaceSecretFixture } from "./space-secret-postgres.fixture.mjs";
 
 // The existing catalog privacy tests use healthy connections. Exercise the
 // repository through the real client and SQL when a read response disappears,
 // including a later access check: recovery must still redact private events.
-integration("Automation catalogs recover a lost SELECT without losing access checks (XMATRIX-HUB-96)", async () => {
+integration("catalogs recover lost SELECTs without losing access checks (XMATRIX-HUB-96/8P)", async () => {
   const f = await spaceSecretFixture();
   const automationId = crypto.randomUUID();
   let fault;
@@ -61,6 +62,21 @@ integration("Automation catalogs recover a lost SELECT without losing access che
         assert.equal(fault.checkouts[0].ended, true, "the lost response's checkout is destroyed");
         assert.ok(clients.indexOf(fault.checkouts[0]) < clients.length - 1, "recovery checks out a new connection");
       }
+    }
+    const catalog = new PostgresChannelCatalogRepository(database);
+    const catalogInput = { ...input, view: "flat", filter: "all" };
+    // HUB-8P lost the counts response, after its page SELECT had succeeded.
+    for (const read of [() => catalog.page(catalogInput),
+      () => catalog.page({ ...catalogInput, countsOnly: true }),
+      () => catalog.resolve({ ...input, channelIds: [f.ids.channel] })]) {
+      fault = { matches: /counts AS \(SELECT|requested_targets AS MATERIALIZED/u,
+        remaining: 1, error: new Error("Query read timeout"), checkouts: [] };
+      const result = await read();
+      if (result.counts) assert.equal(result.counts.active, 1);
+      else assert.ok(JSON.stringify(result).includes(f.ids.channel));
+      assert.equal(fault.checkouts.length, 1);
+      assert.equal(fault.checkouts[0].ended, true);
+      assert.ok(clients.indexOf(fault.checkouts[0]) < clients.length - 1);
     }
     await f.client.query("UPDATE data.space_members SET role='participant' WHERE space_id=$1 AND user_id=$2",
       [f.ids.space, f.ids.owner]);

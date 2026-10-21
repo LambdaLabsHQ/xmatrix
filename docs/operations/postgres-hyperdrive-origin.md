@@ -115,6 +115,8 @@ request. Each statement checks the placement fence and takes its own snapshot,
 as the previous READ COMMITTED transaction did. Page visibility and private
 event redaction still finish before any catalog result is returned. Automation
 mutations and their commit reconciliation remain explicit transactions.
+Channel catalog pages, counts, participant reads and exact-ID resolution use
+the same per-statement recovery, with authorization still checked by their SQL.
 
 ## Agent lifecycle locks
 
