@@ -472,7 +472,8 @@ test.describe("on a phone", () => {
     // The page opens as it is; the changes are walked once the reader asks for them.
     await expect(editor).toContainText("Shipped this week");
     await expect(editor.locator(".page-reader-change")).toHaveCount(0);
-    await browser.getByTestId("page-reader-diff").getByRole("button", { name: "5 changes since you last read this page" }).click();
+    await expect(browser.getByTestId("page-reader-diff")).toContainText("5 changes since you last read this page");
+    await browser.getByTestId("page-reader-diff").getByRole("button", { name: "Show changes" }).click();
     const mark = browser.getByRole("toolbar", { name: "Changes since you last read this page" });
     await expect(mark).toContainText("1/4");
     // It stands at the right edge beside the first change, not in a bar across the bottom.
@@ -1018,7 +1019,8 @@ test("the page opens as it is, and what changed since the reader last read it is
   await expect(added).toHaveCount(0);
   await expect(editor.locator(".page-reader-removed")).toHaveCount(0);
   await expect(browser.getByTestId("page-reader-gutter")).toHaveCount(0);
-  await offer.getByRole("button", { name: "5 changes since you last read this page" }).click();
+  await browser.screenshot({ path: test.info().outputPath("pages-reader-offer.png") });
+  await offer.getByRole("button", { name: "Show changes" }).click();
   await expect(added.filter({ hasText: "Shipped" })).toBeVisible();
   await expect(added.filter({ hasText: "Late reviews" })).toHaveCount(1);
   // Lines changed next to each other are barred once in the margin, left of the text: the changed status line
@@ -1036,7 +1038,11 @@ test("the page opens as it is, and what changed since the reader last read it is
   expect(first.y + first.height).toBeGreaterThanOrEqual(second.y + second.height / 2);
   await expect(editor.locator(".page-reader-removed")).toContainText("Planned for next");
   await browser.screenshot({ path: test.info().outputPath("pages-reader-changes.png") });
-  // The diff does not play out or fade. The page, all of it on screen a moment, is read whole meanwhile.
+  // Hidden again, it is still offered; the diff does not play out or fade, and the page, all of it on screen a
+  // moment, is read whole meanwhile.
+  await offer.getByRole("button", { name: "Hide changes" }).click();
+  await expect(added).toHaveCount(0);
+  await offer.getByRole("button", { name: "Show changes" }).click();
   await browser.waitForTimeout(2_500);
   await expect(added.filter({ hasText: "Shipped" })).toBeVisible();
   expect(await added.first().evaluate((element) => getComputedStyle(element).animationName)).toBe("none");
@@ -1067,7 +1073,7 @@ test("what the reader has not had on screen stays unread, as they last saw it, t
 
 test("writing on a page that changed while its reader was away stops marking the diff over the writing", async ({ page: browser }) => {
   const editor = await openChangedPage(browser);
-  await browser.getByTestId("page-reader-diff").getByRole("button", { name: /changes since you last read/u }).click();
+  await browser.getByTestId("page-reader-diff").getByRole("button", { name: "Show changes" }).click();
   await expect(browser.getByTestId("page-reader-gutter").locator(".page-reader-bar")).toHaveCount(2);
   await editor.getByText("none", { exact: true }).click();
   await browser.keyboard.press("End");

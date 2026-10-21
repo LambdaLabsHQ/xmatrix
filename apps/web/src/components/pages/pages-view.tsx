@@ -10,7 +10,7 @@ import {
   type SerializedAutomation, type ChannelSnapshot, type PageConversation, type PageLink,
 } from "@xmatrix/protocol";
 import {
-  Check, Clock, Files, FileText, History, Lock, MessageSquare, Plus, Share2, Trash2, Undo2, X,
+  Check, Clock, Files, FileText, GitCompareArrows, History, Lock, MessageSquare, Plus, Share2, Trash2, Undo2, X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { noticeClass } from "@/components/ui/status-tone";
@@ -1672,13 +1672,26 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
                         references={references} mediaUrl={mediaUrl} onAnchorOffsets={setPreviewTops} /></div>
                     )}
                     {diffOffered && !phoneDiff && (
-                      <div className="mb-3 flex w-fit items-center gap-2 text-xs text-muted-foreground" data-testid="page-reader-diff">
-                        <button type="button" className="hover:text-foreground hover:underline" aria-expanded={diffShown}
-                          onClick={() => setDiffShown((shown) => !shown)}>
-                          {readerChanges === 1 ? "1 change" : `${readerChanges} changes`} since you last read this page
-                        </button>
-                        {diffShown && (
-                          <button type="button" className="text-foreground hover:underline" onClick={viewDiff}>Done</button>
+                      // A notice, not a footnote: there is something to catch up on, and the reader chooses to.
+                      <div data-testid="page-reader-diff"
+                        className={noticeClass("attention", "mb-5 flex flex-wrap items-center gap-x-3 gap-y-2 py-2 pr-2")}>
+                        <span className="mr-auto">
+                          <span className="font-medium text-foreground">
+                            {readerChanges === 1 ? "1 change" : `${readerChanges} changes`} since you last read this page
+                          </span>
+                          <span className="text-muted-foreground">
+                            {diffShown ? " · marked in the text" : " · you are reading the latest version"}
+                          </span>
+                        </span>
+                        {diffShown ? (
+                          <>
+                            <Button variant="ghost" size="sm" onClick={() => setDiffShown(false)}>Hide changes</Button>
+                            <Button variant="outline" size="sm" onClick={viewDiff}><Check data-icon="inline-start" />Done</Button>
+                          </>
+                        ) : (
+                          <Button size="sm" onClick={() => setDiffShown(true)}>
+                            <GitCompareArrows data-icon="inline-start" />Show changes
+                          </Button>
                         )}
                       </div>
                     )}
