@@ -105,7 +105,7 @@ test("a handoff of a directory without a repository stops the source and gives i
     assert.equal(history.messages.filter(message => /could not hand off/u.test(message.body ?? "")).length, 0,
       JSON.stringify(history.messages.map(message => message.body)));
     await waitForChannelHistoryMessage(worker, MOCK_TOKEN, channel.id,
-      message => /:handoff:@codex$/u.test(message.body ?? ""), "handoff message", 5_000);
+      message => (message.body ?? "").endsWith(":handoff:@codex"), "handoff message", 5_000);
   } finally {
     source?.ws?.close();
     daemonA?.ws?.close();
