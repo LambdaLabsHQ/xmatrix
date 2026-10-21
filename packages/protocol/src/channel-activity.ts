@@ -183,6 +183,8 @@ export interface CommandResultNote {
   at: string;
   /** A stop that fenced no Run: this note is its whole answer. */
   stopOutcome?: "stopped" | "not_stopped";
+  /** The Run the note is about, so the chip of the summon that started it shows it. */
+  runId?: string;
 }
 
 /**
@@ -227,7 +229,8 @@ export function mergeCommandResult(result: CommandResult | undefined, annotation
     const stopOutcome: CommandResultNote["stopOutcome"] =
       note.stopOutcome === "stopped" || note.stopOutcome === "not_stopped" ? note.stopOutcome : undefined;
     next.notes = [...(result?.notes ?? []).filter((item) => item.id !== annotationId),
-      { id: annotationId, text: note.text, at: note.at, ...(stopOutcome ? { stopOutcome } : {}) }]
+      { id: annotationId, text: note.text, at: note.at, ...(stopOutcome ? { stopOutcome } : {}),
+        ...(typeof note.runId === "string" && note.runId && note.runId.length <= 200 ? { runId: note.runId } : {}) }]
       .sort((a, b) => a.at.localeCompare(b.at));
   }
   return next;

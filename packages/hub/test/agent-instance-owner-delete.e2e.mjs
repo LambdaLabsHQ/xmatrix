@@ -270,7 +270,7 @@ test("owner delete fences an in-flight remote-repo spawn before abandoning its p
   }
 });
 
-test("a failed daemon stop result surfaces a channel notice that the process may still run", async () => {
+test("a failed daemon stop result answers on its command that the process may still run", async () => {
   const userId = `daemon-stop-failed-e2e-${randomUUID()}`;
   const worker = await startPgHubWorker({
     vars: {
@@ -301,50 +301,49 @@ test("a failed daemon stop result surfaces a channel notice that the process may
       (message) => message.type === "machine_stop_agent" && message.runId === spawned.runId,
       "failed-stop machine stop command",
     );
-    assert.equal((await worker.fetch(`/api/channels/${encodeURIComponent(channelId)}/messages`, {
+    const posted = await worker.fetch(`/api/channels/${encodeURIComponent(channelId)}/messages`, {
       method: "POST",
       headers: { ...auth, "content-type": "application/json" },
       body: JSON.stringify({ body: "@codex-stop-failed:1:stop" }),
-    })).status, 200);
+    });
+    assert.equal(posted.status, 200);
+    const stopMessageId = (await posted.json()).message.messageId;
     const stopCommand = await stopCommandPromise;
 
     const hostError =
       "process tree still alive after termination: [9999] " +
       "(wrapper /Users/dev/.local/bin/xmatrix claude --resume s-123)";
     sendStopResult(daemon, stopCommand, { ok: false, pid: 9999, error: hostError });
-    const failureNotice = await waitForChannelHistoryMessage(
+    // A channel stop's result answers on the stop command, not as another message.
+    const stopFailed = (message) => (message.commandResult?.notes ?? []).filter((note) =>
+      note.runId === spawned.runId && note.text.startsWith("Couldn't stop @codex-stop-failed on "));
+    const answered = await waitForChannelHistoryMessage(
       worker,
       MOCK_TOKEN,
       channelId,
-      (message) => typeof message.body === "string" &&
-        message.body.startsWith("Couldn't stop @codex-stop-failed on "),
-      "failed stop channel notice",
+      (message) => message.messageId === stopMessageId && stopFailed(message).length > 0,
+      "failed stop on its command",
     );
-    assert.ok(
-      failureNotice.body.includes("may still be running"),
-      "failure notice must warn that the process may still be running",
-    );
-    // The notice shows the daemon's own error after boundary redaction:
-    // local paths and credentials never enter channel-visible fields.
-    assert.ok(failureNotice.body.includes("process tree still alive after termination: [9999]"),
-      "the failure notice shows the originating daemon error");
-    assert.ok(!JSON.stringify(failureNotice).includes("/Users/dev/"), "no channel-visible field carries a local path");
-    assert.equal(failureNotice.metadata?.stopOutcome, "failed");
-    assert.equal(failureNotice.metadata?.stopFailureCode, "process_tree_still_alive");
-    assert.equal(failureNotice.metadata?.stopFailureDetail, undefined);
+    const [failure] = stopFailed(answered);
+    assert.ok(failure.text.includes("may still be running"),
+      "the result must warn that the process may still be running");
+    // It shows the daemon's own error after boundary redaction: local paths
+    // and credentials never enter channel-visible fields.
+    assert.ok(failure.text.includes("process tree still alive after termination: [9999]"),
+      "the result shows the originating daemon error");
+    assert.ok(!JSON.stringify(answered).includes("/Users/dev/"), "no channel-visible field carries a local path");
 
-    // A duplicate late result must not duplicate the notice.
+    // A duplicate late result must not duplicate it.
     sendStopResult(daemon, stopCommand, { ok: false, pid: 9999, error: hostError });
     await sleep(200);
     const history = await json(await worker.fetch(
       `/api/channels/${encodeURIComponent(channelId)}/history?limit=50`,
       { headers: auth },
     ));
-    const failureNotices = (history.messages || []).filter(
-      (message) => typeof message.body === "string" &&
-        message.body.startsWith("Couldn't stop @codex-stop-failed on "),
-    );
-    assert.equal(failureNotices.length, 1, "late duplicate stop results must not duplicate the notice");
+    const stopMessage = (history.messages || []).find((message) => message.messageId === stopMessageId);
+    assert.equal(stopFailed(stopMessage).length, 1, "late duplicate stop results must not duplicate the result");
+    assert.equal((history.messages || []).filter((message) => typeof message.body === "string" &&
+      message.body.startsWith("Couldn't stop @codex-stop-failed on ")).length, 0, "no notice message is posted");
   } finally {
     if (daemon) daemon.ws.close();
     await worker.stop();

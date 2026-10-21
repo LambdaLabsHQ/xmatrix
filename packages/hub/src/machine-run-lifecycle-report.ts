@@ -88,6 +88,7 @@ export async function machineRunLifecycleReport(
         ownerUserId: text(context.ownerUserId, "ownerUserId"), ownerEmail: ownerEmail(context.ownerUserId),
         agentName: text(context.agentName, "agentName"), machineId: text(context.machineId, "machineId"),
         hostId: optionalHostname(context.hostId), machineName: optionalMachineName(context.machineName), ...failure,
+        ...(typeof context.sourceMessageId === "string" ? { sourceMessageId: context.sourceMessageId } : {}),
       });
       // An `@auto` summon's work goes to the next-ranked Agent, once. Its
       // command is per Run, so a replay of this report recovers that launch.
@@ -95,7 +96,8 @@ export async function machineRunLifecycleReport(
         channelId: text(context.channelId, "channelId"), runId: text(context.runId, "runId") });
       if (handed) await publishStartupFallbackNotice(env, { runId: text(context.runId, "runId"),
         channelId: text(context.channelId, "channelId"), agentName: handed.agentName,
-        ownerUserId: text(context.ownerUserId, "ownerUserId"), ownerEmail: ownerEmail(context.ownerUserId) });
+        ownerUserId: text(context.ownerUserId, "ownerUserId"), ownerEmail: ownerEmail(context.ownerUserId),
+        ...(typeof context.sourceMessageId === "string" ? { sourceMessageId: context.sourceMessageId } : {}) });
     }
   }
   if ("repositoryBaselineNoticeContext" in value) {
@@ -121,6 +123,7 @@ export async function machineRunLifecycleReport(
       ownerUserId: text(context.ownerUserId, "ownerUserId"), ownerEmail: ownerEmail(context.ownerUserId),
       machineId: text(context.machineId, "machineId"), hostId: optionalHostname(context.hostId),
       machineName: optionalMachineName(context.machineName),
+      ...(typeof context.sourceMessageId === "string" ? { sourceMessageId: context.sourceMessageId } : {}),
     }).catch(error => console.error("Machine Daemon stop result notice append failed", {
       runId: context.runId, channelId: context.channelId, error: error instanceof Error ? error.message : String(error) }));
     delete value.stopResultNoticeContext;

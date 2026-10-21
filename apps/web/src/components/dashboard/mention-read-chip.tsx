@@ -269,9 +269,13 @@ function InteractionSegmentView({ segment, scope, reading }: {
       const fillKey = scope?.sequence !== undefined ? `${scope.sequence}:${segment.mention.start}` : undefined;
       const expression = <SummonExpression mention={segment.mention} filled={filled} fillKey={fillKey} />;
       const announcement = jevFilledAnnouncement(filled);
+      // What the Hub said about any Run this summon started: a failed start, a fallback.
+      const runIds = new Set((scope?.launches ?? []).filter(item => item.sourceMention === segment.mention!.text)
+        .map(item => item.runId));
+      const notes = scope?.notices?.filter(notice => notice.runId && runIds.has(notice.runId));
       return segment.launch
         ? <MentionInvocationChip label={segment.mention.text.replace(/^[@＠]/u, "")} labelContent={expression}
-          announcement={announcement}
+          announcement={announcement} notes={notes}
           launch={segment.launch} shared={false}
           unavailable={scope?.launchStatusUnavailable} executions={scope?.executions ?? []} />
         : segment.rejection ? <RecordedRejectionChip rejection={segment.rejection} labelContent={expression} announcement={announcement} scope={scope} />
