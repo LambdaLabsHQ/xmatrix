@@ -10,6 +10,7 @@ import {
   DatabasePlacementStaleError,
   DatabaseRowLimitError,
   SpacePlacementHints,
+  PostgresAccountDeletionRepository,
 } from "../dist/index.js";
 
 function fakeFactory(options = {}) {
@@ -783,3 +784,28 @@ async function assertPlacementRejected(fake) {
     call.input.text === "SELECT one"), false);
   assert.equal(fake.calls.some((call) => call.input === "ROLLBACK"), true);
 }
+
+// The repository's PostgreSQL lifecycle tests cover which deletion jobs are due.
+// These regressions protect admission when a transport loses a read or COMMIT;
+// the generic single-read tests cannot ensure this caller opts into that contract.
+test("account-deletion admission succeeds without a fallible read-only COMMIT", async () => {
+  const fake = fakeFactory({ failOn: /^COMMIT$/u, failureCode: "08006" });
+  const database = createAuthorityDatabase({ connectionString: "postgres://example.invalid/xmatrix",
+    shardId: "shard-0", clientFactory: fake.factory });
+  const repository = new PostgresAccountDeletionRepository(database, [database], ["shard-0"]);
+  assert.deepEqual(await repository.pending(), []);
+  const statements = fake.calls.filter(call => call.kind === "query").map(call =>
+    typeof call.input === "string" ? call.input : call.input.text);
+  assert.equal(statements.length, 1, "admission has one bounded database round trip");
+});
+
+test("account-deletion admission surfaces a second lost read and destroys both checkouts", async () => {
+  const second = new Error("Query read timeout");
+  const fake = retryPool(/account_deletion_requests/u, [new Error("Query read timeout"), second]);
+  const database = createAuthorityDatabase({ connectionString: "postgres://example.invalid/xmatrix",
+    shardId: "shard-0", poolFactory: fake.factory });
+  const repository = new PostgresAccountDeletionRepository(database, [database], ["shard-0"]);
+  await assert.rejects(repository.pending(), error => error === second);
+  assert.equal(fake.clients.length, 2, "one retry, with no third checkout");
+  assert.deepEqual(fake.clients.map(client => client.releases), [[true], [true]]);
+});
