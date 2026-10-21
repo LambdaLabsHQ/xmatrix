@@ -102,8 +102,8 @@ export function Pricing() {
           })}
         </div>
         <p className="mt-6 text-center text-xs leading-5 text-muted-foreground">
-          Free includes 500 lifetime messages per Space, with up to 2 Free Spaces per account
-          besides its personal Space. On Pro, people write for free; each Agent or app message or
+          Free includes 500 lifetime writes per Space, counting channel messages and page edits by
+          anyone, with up to 2 Free Spaces per account besides its personal Space. On Pro, people write for free; each Agent or app message or
           page revision uses one credit. A grace of half the allowance applies before Agents pause.
           Service rate limits apply.
         </p>

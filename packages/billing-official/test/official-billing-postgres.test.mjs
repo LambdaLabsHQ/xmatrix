@@ -38,12 +38,18 @@ integration("the Free allowance and seat limit hold against the real schema", as
       VALUES ($1,$1,'Official billing test',$1,1,'{}',now(),now())`, [spaceId]);
     await spaceBilling.spaceCreated(transaction(client), { spaceId, now });
     await client.query("UPDATE data.space_billing_usage SET free_message_count=$2 WHERE space_id=$1",
-      [spaceId, FREE_SPACE_MESSAGE_LIMIT - 1]);
+      [spaceId, FREE_SPACE_MESSAGE_LIMIT - 2]);
+    // A page revision takes the same counter as messages, whoever writes it.
+    assert.equal(await spaceBilling.durableWrite(transaction(client),
+      { spaceId, now, kind: "page_revision", author: "person" }), null);
 
     const last = await publish(client, spaceId, true);
     assert.equal(last.accepted, true);
     assert.equal(spaceBilling.message.rejection(last, { now }), null);
     const over = await publish(client, spaceId, true);
+    assert.equal((await spaceBilling.durableWrite(transaction(client),
+      { spaceId, now, kind: "page_revision", author: "person" }))?.code, "payment_required",
+    "a page revision after the 500th write is refused");
     assert.equal(over.accepted, false);
     assert.equal(spaceBilling.message.rejection(over, { now })?.code, "payment_required");
     assert.equal((await publish(client, spaceId, false)).accepted, true, "system messages are not billable");
@@ -56,6 +62,32 @@ integration("the Free allowance and seat limit hold against the real schema", as
     assert.equal((await spaceBilling.seatAdmission(transaction(client), { spaceId, now }))?.code,
       "billing_seat_limit");
     assert.equal(await spaceBilling.spaceDeletion(transaction(client), { spaceId, now }), null);
+  } finally {
+    await client.query("ROLLBACK");
+    await client.end();
+  }
+});
+
+integration("a past-due Space in its grace takes no page revision", async () => {
+  const client = new Client({ connectionString });
+  await client.connect();
+  const spaceId = `official-grace-${crypto.randomUUID()}`;
+  const now = new Date().toISOString();
+  try {
+    await client.query("BEGIN");
+    await client.query(`INSERT INTO data.spaces
+      (space_id,owner_user_id,name,search_rank_sequence,version,metadata_json,created_at,updated_at)
+      VALUES ($1,$1,'Grace test',$1,1,'{}',now(),now())`, [spaceId]);
+    await spaceBilling.spaceCreated(transaction(client), { spaceId, now });
+    await client.query(`INSERT INTO data.space_billing_subscriptions
+      (space_id,billing_owner_user_id,provider_customer_id,provider_subscription_id,provider_price_id,plan,status,
+       seat_quantity,grace_until,provider_event_created_at,version,created_at,updated_at)
+      VALUES ($1,'owner-1','cus_test',$1,'price_test','pro','past_due',1,now()+interval '1 day',now(),1,now(),now())`,
+    [spaceId]);
+    assert.equal((await spaceBilling.durableWrite(transaction(client),
+      { spaceId, now, kind: "page_revision", author: "person" }))?.code, "billing_grace_read_only");
+    const usage = await client.query("SELECT free_message_count FROM data.space_billing_usage WHERE space_id=$1", [spaceId]);
+    assert.equal(Number(usage.rows[0].free_message_count), 0, "a grace refusal takes nothing from the Free allowance");
   } finally {
     await client.query("ROLLBACK");
     await client.end();
@@ -116,8 +148,10 @@ integration("a paid Space's Agent credits run included, packs, grace, then refus
     assert.equal((await publish(client, spaceId, true, "user")).accepted, true, "people still write");
     const waived = await publish(client, spaceId, true, "agent", now, true);
     assert.deepEqual([waived.accepted, waived.credit_metered], [true, false], "an operator Space is not charged");
-    assert.equal((await spaceBilling.agentWrite(transaction(client),
-      { spaceId, now, kind: "page_revision" }))?.code, "credits_exhausted");
+    assert.equal((await spaceBilling.durableWrite(transaction(client),
+      { spaceId, now, kind: "page_revision", author: "agent" }))?.code, "credits_exhausted");
+    assert.equal(await spaceBilling.durableWrite(transaction(client),
+      { spaceId, now, kind: "page_revision", author: "person" }), null, "people still edit pages");
 
     // A new month starts the counters again and keeps the pack balance.
     await client.query("UPDATE data.space_credit_state SET pack_balance=7 WHERE space_id=$1", [spaceId]);
@@ -126,19 +160,19 @@ integration("a paid Space's Agent credits run included, packs, grace, then refus
     const rolled = await credits();
     assert.deepEqual([Number(rolled.included_used), Number(rolled.grace_used), Number(rolled.pack_balance),
       Number(rolled.notice_level)], [1, 0, 7, 0]);
-    assert.equal(await spaceBilling.agentWrite(transaction(client), { spaceId, now: next, kind: "page_revision" }), null);
+    assert.equal(await spaceBilling.durableWrite(transaction(client), { spaceId, now: next, kind: "page_revision", author: "agent" }), null);
     assert.equal(Number((await credits()).included_used), 2);
 
     // A page revision has no Channel to tell: the crossing it makes is announced by the next message.
     await state({ included: CREDITS_PER_SEAT * 0.8 - 1 });
-    assert.equal(await spaceBilling.agentWrite(transaction(client), { spaceId, now: next, kind: "page_revision" }), null);
+    assert.equal(await spaceBilling.durableWrite(transaction(client), { spaceId, now: next, kind: "page_revision", author: "agent" }), null);
     assert.equal(Number((await credits()).notice_level), 0);
     assert.equal(spaceBilling.message.notice(await publish(client, spaceId, true, "agent", next))?.key.endsWith(":1"), true);
 
     // The operator's own Space is not charged for page revisions either.
     await state({ included: CREDITS_PER_SEAT, grace: GRACE_CREDITS_PER_SEAT });
-    assert.equal(await spaceBilling.agentWrite(transaction(client),
-      { spaceId, now: next, kind: "page_revision", creditsWaived: true }), null);
+    assert.equal(await spaceBilling.durableWrite(transaction(client),
+      { spaceId, now: next, kind: "page_revision", author: "agent", creditsWaived: true }), null);
     assert.equal(Number((await credits()).grace_used), GRACE_CREDITS_PER_SEAT);
   } finally {
     await client.query("ROLLBACK");

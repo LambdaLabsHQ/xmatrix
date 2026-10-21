@@ -24,7 +24,7 @@ test("both plans are marked, and only Pro takes the brass", () => {
     plan: "free",
     label: "Free",
     state: "active",
-    title: "Free — 488 of 500 messages left",
+    title: "Free — 488 of 500 messages and page edits left",
   });
 });
 
@@ -76,7 +76,7 @@ test("an exhausted Free allowance blocks the Space and names the cap", () => {
   });
   assert.equal(mark?.state, "blocked");
   assert.equal(mark?.label, "Free");
-  assert.match(mark?.title ?? "", /all 500 messages used/);
+  assert.match(mark?.title ?? "", /all 500 messages and page edits used/);
 });
 
 test("Pro ignores the Free counter it is also served", () => {

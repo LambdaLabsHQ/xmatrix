@@ -43,7 +43,7 @@ export class PostgresPaidCallRepository {
     });
   }
 
-  private async member(tx: Parameters<SpaceBillingPolicy["agentWrite"]>[0], spaceId: string, userId: string) {
+  private async member(tx: Parameters<SpaceBillingPolicy["durableWrite"]>[0], spaceId: string, userId: string) {
     const row = await tx.query({ name: "paid_call_member_v1", text: `SELECT user_id FROM data.space_members
       WHERE space_id=$1 AND user_id=$2 LIMIT 1`, values: [spaceId, text(userId, "actorUserId")], maxRows: 1 });
     if (!row[0]) throw new BillingControlError("forbidden", 403, "Space membership is required");

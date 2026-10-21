@@ -124,6 +124,8 @@ try {
     "packages/db/test/apple-billing-postgres.test.mjs",
     "packages/db/test/credit-pack-postgres.test.mjs",
     "packages/db/test/paid-call-postgres.test.mjs",
+    // The official plan's Free allowance, credits and grace against the real schema.
+    "packages/billing-official/test/official-billing-postgres.test.mjs",
     "packages/db/test/outbox-retention-postgres.test.mjs",
     "packages/db/test/discord-lifecycle-postgres.test.mjs",
     "packages/db/test/sentry-event-postgres.test.mjs",

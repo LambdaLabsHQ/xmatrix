@@ -91,8 +91,8 @@ export interface PaidCallPolicy {
   notice?(transaction: BillingTransaction, input: { spaceId: string; now: string }): Promise<BillingNotice | null>;
 }
 
-/** A durable write by an Agent other than a Channel message. */
-export type AgentWriteKind = "page_revision";
+/** A durable write other than a Channel message. */
+export type DurableWriteKind = "page_revision";
 
 export interface SpaceBillingPolicy {
   /** Distinguishes this policy's prepared statements. */
@@ -126,13 +126,14 @@ export interface SpaceBillingPolicy {
   ): Promise<BillingRejection | null>;
   readonly message: MessageAdmission;
   /**
-   * Called in the transaction that commits an Agent's write; a rejection
+   * Called in the transaction that commits a durable write other than a
+   * message, by a person or an Agent, before it is written; a rejection
    * refuses it. `creditsWaived`, as for messages, is the deployment's own
    * operator Space.
    */
-  agentWrite(
+  durableWrite(
     transaction: BillingTransaction,
-    input: { spaceId: string; now: string; kind: AgentWriteKind; creditsWaived?: boolean },
+    input: { spaceId: string; now: string; kind: DurableWriteKind; author: "person" | "agent"; creditsWaived?: boolean },
   ): Promise<BillingRejection | null>;
 }
 
@@ -144,7 +145,7 @@ export const spaceBilling: SpaceBillingPolicy = {
   async spaceCreated() {},
   async spaceDeletion() { return null; },
   async seatAdmission() { return null; },
-  async agentWrite() { return null; },
+  async durableWrite() { return null; },
   message: {
     ctes: "admission AS MATERIALIZED (SELECT TRUE AS unmetered)",
     accepts: "TRUE",

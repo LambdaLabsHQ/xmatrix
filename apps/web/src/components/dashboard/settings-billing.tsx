@@ -227,7 +227,7 @@ function StripeSpaceBillingSection({ userId, space }: {
       ) : (
         <>
           <PlanCard plan="free" name="Free" title={space.name}>
-            <PlanMeter label="Messages" used={billing.freeUsage.acceptedMessages} limit={billing.freeUsage.limit} />
+            <PlanMeter label="Messages & page edits" used={billing.freeUsage.acceptedMessages} limit={billing.freeUsage.limit} />
             <SeatPips used={billing.seats.used} limit={billing.seats.limit} />
           </PlanCard>
           <BillingWarnings billing={billing} spaceName={space.name} />
