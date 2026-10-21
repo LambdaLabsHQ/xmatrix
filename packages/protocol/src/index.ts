@@ -280,8 +280,9 @@ export {
   isHostDerivedMachineId, legacyMachineDaemonId, sha256HexSync, stableMachineDaemonId,
 } from "./machine-daemon-id.js";
 export {
-  HANDOFF_BRANCH_PREFIX, } from "./handoff-export.js";
+  HANDOFF_BRANCH_PREFIX, HANDOFF_CONTEXT_FORMAT, HANDOFF_CONTEXT_MAX_CHARS, } from "./handoff-export.js";
 export type {
+  MachineHandoffContext, MachineHandoffContextEntry, MachineHandoffContextRequest,
   MachineHandoffExport, MachineHandoffExportResult,
 } from "./handoff-export.js";
 export {
