@@ -65,11 +65,6 @@ integration("private trigger summaries follow each reader's current Space role a
     }
   } finally {
     await f.client.query("DELETE FROM data.automations WHERE automation_id=$1", [automationId]);
-    for (const table of ["page_revisions", "page_access", "pages"]) {
-      await f.client.query(`DELETE FROM data.${table} WHERE space_id=$1`, [f.ids.space]);
-    }
-    await f.client.query("DELETE FROM control.scoped_control_command_replays WHERE scope_kind='space' AND scope_id=$1", [f.ids.space]);
-    await f.client.query("DELETE FROM data.space_control_heads WHERE space_id=$1", [f.ids.space]);
     await database.close?.();
     await f.close();
   }
