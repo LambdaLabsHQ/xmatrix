@@ -58,4 +58,5 @@ test("a pick replaces its trigger with the reference the page keeps", () => {
   assert.equal(page.doc.textBetween(page.caret - 1, page.caret), " ");
   assert.equal(pick("See [[Road]] here", "[[Road", `page:${PAGE}`).markdown, `See page:${PAGE} here`);
   assert.equal(pick("Ask in #bu", "#bu", `channel:${CHANNEL}`).markdown, `Ask in channel:${CHANNEL}`);
+  assert.equal(pick("Then ＠cla next", "＠cla", "@claude").markdown, "Then @claude next");
 });

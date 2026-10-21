@@ -1,5 +1,5 @@
 "use client";
-import { channelPresenceInstances } from "@xmatrix/protocol";
+import { channelPresenceInstances, pageReferenceToken } from "@xmatrix/protocol";
 
 import { startTransition, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import dynamic from "next/dynamic";
@@ -1145,13 +1145,13 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
       .find((harness) => harness !== quiet && writers.agents.some((agent) => agent.harness === harness));
   };
   // A page made to be co-written at once calls its Agent as it opens (co-write-request.ts).
-  const coWriteRef = useRef<((harness: string, blockId: string | null) => Promise<void>) | null>(null);
-  // Typing `[[`, `#` and `@` on the page completes as it does in the composer; an `@` Agent writes there.
+  const coWriteRef = useRef<((harness: string, blockId: string | null, mentioned?: boolean) => Promise<void>) | null>(null);
+  // Typing `[[`, `#` and `@` on the page completes as it does in the composer; an `@` calls the Agent to the page.
   const referenceCatalog = useMessageReferenceCatalog();
   const completion = useMemo<PageCompletion | undefined>(() => spaceId ? {
     spaceId, pages: tree.data ?? [], channels: referenceCatalog?.channels ?? [], agents: writers.agents,
     readPage: (id) => queryClient.fetchQuery(pageDocumentQuery(userId ?? null, spaceId, id, token)),
-    callAgent: (harness, blockId) => void coWriteRef.current?.(harness, blockId || null),
+    summonAgent: (harness, blockId) => void coWriteRef.current?.(harness, blockId || null, true),
   } : undefined, [queryClient, referenceCatalog?.channels, spaceId, token, tree.data, userId, writers.agents]);
   useEffect(() => {
     if (!page || !canEdit || !coWriteRef.current) return;
@@ -1209,7 +1209,9 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   // Co-writing with an Agent: a conversation of its own, linked to the page or a section, whose first
   // message calls the chosen runtime to infer what the page needs and write it. The page stays open,
   // and the Agent shows at the right edge beside the line it writes.
-  const coWrite = async (harness: string, blockId: string | null) => {
+  // An `@` in the page's text calls the Agent the same way, but its message is only the mention and where it
+  // was made: the page tells it nothing of what to write.
+  const coWrite = async (harness: string, blockId: string | null, mentioned = false) => {
     if (!page || startingWriter.current) return;
     coWriting();
     startingWriter.current = true;
@@ -1223,8 +1225,9 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
       setStarting({ pageId: writing, harness });
       const where = `page:${writing}${blockId ? ` (section #${blockId})` : ""}`;
       // The page itself tells the Agent what it needs, live, as turns its runtime hands it (§4.2).
-      const firstMessage = `@${harness} launch:force You're co-writing ${where} with me live. The page sends you ` +
-        "what changed as I write, and you answer there, in the page; nothing to do here until it does.";
+      const firstMessage = mentioned ? `@${harness} launch:force ${pageReferenceToken(writing, blockId)}`
+        : `@${harness} launch:force You're co-writing ${where} with me live. The page sends you ` +
+          "what changed as I write, and you answer there, in the page; nothing to do here until it does.";
       const conversationId = await onDiscuss({ spaceId, pageId: writing, blockId: blockId ?? "", restricted,
         name: `Co-writing ${section ? `${page.title} › ${section}` : page.title}`, firstMessage, open: false,
         coWrite: true });

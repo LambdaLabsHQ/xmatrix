@@ -139,8 +139,8 @@ export interface PageCompletion {
   agents: readonly WriteAgent[];
   /** A page's title and markdown, for its sections after `[[page#`. */
   readPage: (pageId: string) => Promise<{ pageId: string; title: string; body: string }>;
-  /** `@` picked an Agent: it comes to write the section the caret is in. */
-  callAgent: (harness: string, blockId: string) => void;
+  /** `@` picked an Agent: it comes to co-write the page from where it was mentioned, told nothing more. */
+  summonAgent: (harness: string, blockId: string) => void;
 }
 
 /** One row of the menu typing opened. */
@@ -185,13 +185,14 @@ function triggerItems(trigger: PageTrigger, completion: PageCompletion | undefin
   return completion.agents.filter((agent) => agent.harness.toLowerCase().includes(wanted))
     .sort((a, b) => Number(!a.harness.toLowerCase().startsWith(wanted)) - Number(!b.harness.toLowerCase().startsWith(wanted)))
     .map((agent) => ({
-      key: agent.harness, label: agent.harness, hint: "Write here",
+      key: agent.harness, label: agent.harness, hint: "Agent",
       icon: <IdentityAvatar kind="agent" label={agent.harness} imageUrl={agent.avatarUrl} size="xs" shape="circle" glass={false}
         initials={agent.avatarUrl ? avatarInitials(agent.harness) : undefined} className="pointer-events-none rounded-full" />,
+      // The mention stays in the page, and calls the Agent to co-write from there.
       run: (view) => {
         const blockId = pageDocBlockAt(view.state.doc, trigger.from);
-        view.dispatch(view.state.tr.delete(trigger.from, trigger.to).setMeta(triggersKey, "close"));
-        completion.callAgent(agent.harness, blockId);
+        insertReference(trigger, `@${agent.harness}`)(view.state, view.dispatch, view);
+        completion.summonAgent(agent.harness, blockId);
       },
     }));
 }
