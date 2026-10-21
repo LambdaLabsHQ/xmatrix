@@ -9,6 +9,8 @@ import {
   api,
   bumpVersion,
   checkStable,
+  codeqlLanguages,
+  COMPONENTS,
   inflightRef,
   intentRef,
   nextBetaVersion,
@@ -45,6 +47,15 @@ test("a scope is canonical, unique and keeps desktop with its cli", () => {
   assert.deepEqual(normalizeScope("all"), ["hub", "web", "cli", "desktop", "android", "ios"]);
   for (const bad of ["", "hub,hub", "desktop", "hub,server"]) {
     assert.throws(() => normalizeScope(bad), /desktop requires cli/u, bad);
+  }
+});
+
+test("no component ships unscanned; the workflows that release it are scanned too", () => {
+  for (const component of COMPONENTS) {
+    const [workflows, language, ...rest] = codeqlLanguages([component]);
+    assert.equal(workflows, "actions", component);
+    assert.equal(typeof language, "string", component);
+    assert.deepEqual(rest, [], component);
   }
 });
 

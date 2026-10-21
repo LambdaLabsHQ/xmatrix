@@ -102,18 +102,16 @@ PNPM enters the job's PATH only after installation and its version probe succeed
 This recovery applies only to package-manager bootstrap, never validation or
 deployment failures.
 
-GitHub's default CodeQL setup runs outside `ci.yml` and does not inherit its
-PR concurrency group. `pr-codeql-cleanup.yml` handles upstream PR updates using
-only default-branch code and GitHub API metadata. It cancels queued or running
-default CodeQL scans only when their exact PR ref matches and their commit is a
-proven ancestor of the current open PR head. The current head, divergent
-commits, forks, main scans and all other workflows remain untouched. A manual
-dispatch on main accepts an open PR number for recovery of an existing backlog.
-Each request has a 20-second deadline; listing is bounded to three pages per
-status, and the job has a five-minute timeout. Cleanup never authorizes CI or
-release reuse; the current commit still runs its normal required checks.
-If GitHub refuses a cancellation with a conflict, cleanup leaves that scan
-unchanged and does not count it as reclaimed capacity.
+CodeQL scans before a release ships, not on pull requests or merges. Each
+release train runs CodeQL's security-extended queries on its frozen source for
+the languages its components are written in, plus the workflows that release
+them (`codeql` in `production-release-request.yml`; languages from
+`codeqlLanguages` in `scripts/release-train.mjs`). Swift builds on macOS with
+autobuild; the other languages use build mode `none`. Results upload as code
+scanning alerts on `main` under the same `/language:<name>` categories GitHub's
+default setup used, which must stay disabled: GitHub refuses a workflow's
+upload while default setup is on. The analysis has to finish before the train
+ships; its findings are alerts, not a gate verdict.
 
 CLI release builds run both macOS architectures in parallel on isolated hosted
 VMs. When `XMATRIX_RUNNER_FLEET=self-hosted`, macOS builds remain serialized

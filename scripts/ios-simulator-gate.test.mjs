@@ -72,7 +72,7 @@ test("PR CI exercises the same simulator gate and production keeps its exact rev
   const gates = request.jobs.gates;
   assert.ok(gates.needs.includes("ios"));
   const permits = new Function("needs", "always", "contains", "format", `return (${gates.if});`);
-  const needs = { plan: { result: "success", outputs: { scope: "ios", channel: "stable" } }, ci: { result: "success" }, ios: { result: "success" } };
+  const needs = { plan: { result: "success", outputs: { scope: "ios", channel: "stable" } }, ci: { result: "success" }, ios: { result: "success" }, codeql: { result: "success" } };
   const evaluate = () => permits(needs, () => true, (value, part) => value.includes(part), (_, scope) => `,${scope},`);
   assert.equal(evaluate(), true);
   for (const result of ["failure", "skipped", "cancelled"]) {

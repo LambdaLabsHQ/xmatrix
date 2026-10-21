@@ -62,6 +62,15 @@ export const COMPONENTS = Object.freeze(["hub", "web", "cli", "desktop", "androi
 // Hub and Web are single production services that every beta deploys.
 export const STABLE_COMPONENTS = Object.freeze(["cli", "desktop", "android", "ios"]);
 export const BUMPS = Object.freeze(["patch", "minor", "major"]);
+// The CodeQL language each component is written in.
+const CODEQL_LANGUAGE = Object.freeze({
+  hub: "javascript-typescript",
+  web: "javascript-typescript",
+  cli: "rust",
+  desktop: "javascript-typescript",
+  android: "java-kotlin",
+  ios: "swift",
+});
 const OPEN_PREFIX = "refs/release-intents/";
 const INFLIGHT_PREFIX = "refs/release-inflight/";
 const RUN_ID = /^[1-9]\d*$/u;
@@ -81,6 +90,14 @@ export function normalizeScope(requested, channel = "beta") {
       : "release_components must name unique supported components; desktop requires cli");
   }
   return COMPONENTS.filter((item) => items.includes(item));
+}
+
+/**
+ * The CodeQL languages a train scans before it ships `scope`: those its
+ * components are written in, and the workflows that release them.
+ */
+export function codeqlLanguages(scope) {
+  return [...new Set(["actions", ...scope.map((component) => CODEQL_LANGUAGE[component])])];
 }
 
 function isBetaTag(tag) {
@@ -404,6 +421,7 @@ async function claimAndShip(root, { tag, version, channel, sourceSha, runId, int
   output("tag", tag);
   output("channel", channel);
   output("source_sha", sourceSha);
+  output("codeql_languages", JSON.stringify(codeqlLanguages(scope)));
   output("intents", intents.map((intent) => intent.id).join(","));
 }
 
