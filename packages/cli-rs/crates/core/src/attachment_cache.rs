@@ -13,7 +13,7 @@ pub fn attachment_cache_dir() -> PathBuf {
 /// The same directory under an explicitly supplied profile state root, for
 /// callers that captured the root at startup instead of reading the
 /// task-local profile context.
-pub fn attachment_cache_dir_at(profile_state_root: &Path) -> PathBuf {
+pub(crate) fn attachment_cache_dir_at(profile_state_root: &Path) -> PathBuf {
     profile_state_root.join("attachment-cache")
 }
 
@@ -30,7 +30,7 @@ pub fn cache_stem_for_identity(
     sha256_hex(format!("identity\0{channel_id}\0{message_id}\0{attachment_id}\0{size}").as_bytes())
 }
 
-pub fn cache_stem_for_bytes(bytes: &[u8]) -> String {
+pub(crate) fn cache_stem_for_bytes(bytes: &[u8]) -> String {
     sha256_hex(bytes)
 }
 
@@ -38,7 +38,7 @@ pub fn cached_attachment_path(stem: &str) -> PathBuf {
     attachment_cache_dir().join(stem)
 }
 
-pub fn read_cached_attachment(stem: &str, expected_size: Option<u64>) -> Option<Vec<u8>> {
+pub(crate) fn read_cached_attachment(stem: &str, expected_size: Option<u64>) -> Option<Vec<u8>> {
     let path = cached_attachment_path(stem);
     let bytes = std::fs::read(&path).ok()?;
     if bytes.is_empty() {
@@ -55,7 +55,7 @@ pub fn read_cached_attachment(stem: &str, expected_size: Option<u64>) -> Option<
 /// How long a refused attachment read is remembered before it is asked again:
 /// long enough that re-reading a history does not re-request every refused
 /// image, short enough that a newly granted or repaired one is read soon.
-pub const REFUSED_ATTACHMENT_TTL_SECS: u64 = 60 * 60;
+pub(crate) const REFUSED_ATTACHMENT_TTL_SECS: u64 = 60 * 60;
 
 fn refused_marker_path(dir: &Path, stem: &str) -> PathBuf {
     dir.join(format!("{stem}.refused"))
@@ -70,12 +70,12 @@ fn unix_now_secs() -> u64 {
 
 /// Whether the Hub refused this attachment (403 or 404) within the TTL. Asking
 /// again before then would only be refused again, after a full authorization.
-pub fn attachment_recently_refused(stem: &str) -> bool {
+pub(crate) fn attachment_recently_refused(stem: &str) -> bool {
     attachment_refused_within(&attachment_cache_dir(), stem, unix_now_secs())
 }
 
 /// Remember that the Hub refused this attachment, as of now.
-pub fn remember_refused_attachment(stem: &str) -> std::io::Result<()> {
+pub(crate) fn remember_refused_attachment(stem: &str) -> std::io::Result<()> {
     remember_refused_attachment_at(&attachment_cache_dir(), stem, unix_now_secs())
 }
 
@@ -159,7 +159,7 @@ pub fn store_cached_attachment_bytes(
     write_cached_attachment(&cache_stem_for_attachment(attachment, Some(bytes)), bytes)
 }
 
-pub fn copy_cached_attachment_to(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+pub(crate) fn copy_cached_attachment_to(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     if let Some(parent) = path
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())

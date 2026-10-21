@@ -238,7 +238,7 @@ async fn abort_machine_daemon_writer(writer: tokio::task::JoinHandle<()>) {
     let _ = writer.await;
 }
 
-pub fn derive_connection_url(hub_url: &str) -> String {
+pub(crate) fn derive_connection_url(hub_url: &str) -> String {
     crate::websocket::domain_connection_url(hub_url, "/ws/machine-daemons")
 }
 
@@ -1209,7 +1209,7 @@ pub enum MachineDaemonConnectionEvent {
 }
 
 /// Report identities the daemon request broker gives its approval cards.
-pub const MACHINE_REQUEST_NOTICE_REPORT_PREFIX: &str = "machine-request-notice:";
+pub(crate) const MACHINE_REQUEST_NOTICE_REPORT_PREFIX: &str = "machine-request-notice:";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -1742,7 +1742,7 @@ impl MachineDaemonConnectionClient {
         (epoch > 0 && self.is_connected()).then_some(epoch)
     }
 
-    pub fn claim_connection_epoch(&self) -> Option<u64> {
+    pub(crate) fn claim_connection_epoch(&self) -> Option<u64> {
         let epoch = self.connection_epoch.load(Ordering::Acquire);
         (epoch > 0).then_some(epoch)
     }

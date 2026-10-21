@@ -182,7 +182,7 @@ pub(crate) struct ClaudeStreamLaunch<'a> {
 
 /// The state a stream process's reader and watchdog share with its session.
 pub(crate) struct ClaudeStreamShared {
-    pub(crate) relay: Arc<agent_instance_connection::AgentInstanceConnectionClient>,
+    pub relay: Arc<agent_instance_connection::AgentInstanceConnectionClient>,
     pub(crate) agent: protocol::SerializedAgent,
     pub(crate) active: Arc<AsyncMutex<Option<ActiveStreamTurn>>>,
     pub(crate) alive: Arc<AtomicBool>,

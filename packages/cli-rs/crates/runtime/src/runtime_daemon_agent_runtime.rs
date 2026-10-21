@@ -1,6 +1,6 @@
 // The harness registry (`agent-presets.json`) owns every launcher alias; the
 // predicates in this file only ask it questions.
-pub(crate) use xmatrix_cli_agent::acp_backend_matches;
+pub use xmatrix_cli_agent::acp_backend_matches;
 use xmatrix_cli_agent::{
     agent_preset_by_id, agent_preset_for_launcher, agent_type_for_launcher, launcher_stem_matches,
 };

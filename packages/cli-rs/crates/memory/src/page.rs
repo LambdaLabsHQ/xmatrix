@@ -20,7 +20,7 @@ use xmatrix_cli_core::text_input::{self, TextRoutes, TextSource};
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct PageSummary {
+pub(crate) struct PageSummary {
     pub page_id: String,
     pub parent_page_id: Option<String>,
     pub title: String,
@@ -37,14 +37,14 @@ pub struct PageSummary {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct PageAuthor {
+pub(crate) struct PageAuthor {
     pub kind: String,
     pub label: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct PageRevision {
+pub(crate) struct PageRevision {
     pub revision: u64,
     #[serde(default)]
     pub kind: String,
@@ -57,7 +57,7 @@ pub struct PageRevision {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct PageDocument {
+pub(crate) struct PageDocument {
     #[serde(flatten)]
     pub summary: PageSummary,
     pub body: String,
@@ -68,14 +68,14 @@ pub struct PageDocument {
 /// where it last changed, who has claimed it, who is on it now.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct PageAwareness {
+pub(crate) struct PageAwareness {
     #[serde(default)]
     pub blocks: Vec<PageBlockAwareness>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct PageBlockAwareness {
+pub(crate) struct PageBlockAwareness {
     pub block_id: String,
     #[serde(default)]
     pub updated: Option<PageRevision>,
@@ -95,7 +95,7 @@ pub struct PageBlockAwareness {
 /// the page open.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct PageWorkingAgent {
+pub(crate) struct PageWorkingAgent {
     pub name: String,
     pub status: String,
     pub conversation_id: String,
@@ -104,7 +104,7 @@ pub struct PageWorkingAgent {
 /// Claimed work on a section ended after its last change and was not written back.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct PageOwedUpdate {
+pub(crate) struct PageOwedUpdate {
     pub reason: String,
     pub at: String,
     pub holder: String,
@@ -117,7 +117,7 @@ pub struct PageOwedUpdate {
 /// An open discussion anchored in a section's text.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct PageDiscussion {
+pub(crate) struct PageDiscussion {
     pub link_id: String,
     pub conversation_id: String,
     pub quote: String,
@@ -125,7 +125,7 @@ pub struct PageDiscussion {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct PagePresent {
+pub(crate) struct PagePresent {
     pub name: String,
     pub kind: String,
     #[serde(default)]
@@ -206,7 +206,7 @@ fn render_edit_effects(page: &str, base: u64, edited: &EditResponse) -> String {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct PageClaim {
+pub(crate) struct PageClaim {
     pub claim_id: String,
     pub block_id: String,
     pub holder: PageAuthor,
@@ -239,7 +239,7 @@ struct ReleaseResponse {
 }
 
 /// One line per claim: where, who, until when, and its id to release it.
-pub fn render_page_claim(claim: &PageClaim) -> String {
+pub(crate) fn render_page_claim(claim: &PageClaim) -> String {
     let block = if claim.block_id.is_empty() {
         "(whole page)".to_string()
     } else {
@@ -320,7 +320,7 @@ pub(crate) fn page_route(space: &str, page: &str) -> String {
 }
 
 /// Children listed under their parent, in sibling order.
-pub fn render_page_tree(pages: &[PageSummary]) -> String {
+pub(crate) fn render_page_tree(pages: &[PageSummary]) -> String {
     let mut children: BTreeMap<Option<String>, Vec<&PageSummary>> = BTreeMap::new();
     for page in pages {
         children
@@ -387,7 +387,7 @@ pub fn render_page_tree(pages: &[PageSummary]) -> String {
 /// What changed on a page since a revision someone read.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct PageChanges {
+pub(crate) struct PageChanges {
     pub page_id: String,
     pub since: u64,
     pub head_revision: u64,
@@ -398,13 +398,13 @@ pub struct PageChanges {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct PageDiffPart {
+pub(crate) struct PageDiffPart {
     pub kind: String,
     pub lines: Vec<String>,
 }
 
 /// The revisions after `since` and a diff of the page since then, with a line of context around each change.
-pub fn render_page_changes(changes: &PageChanges) -> String {
+pub(crate) fn render_page_changes(changes: &PageChanges) -> String {
     let mut out = format!(
         "---\npageId: {}\nsince: {}\nheadRevision: {}\n",
         changes.page_id, changes.since, changes.head_revision
@@ -471,7 +471,10 @@ pub fn render_page_changes(changes: &PageChanges) -> String {
 /// The `blocks:` front matter: per section, its last change, claims and who is on it.
 /// A claim held for `own_conversation` is marked as the reader's, so a Run whose
 /// Automation claimed the section on its behalf does not mistake it for another Run's.
-pub fn render_page_awareness(awareness: &PageAwareness, own_conversation: Option<&str>) -> String {
+pub(crate) fn render_page_awareness(
+    awareness: &PageAwareness,
+    own_conversation: Option<&str>,
+) -> String {
     let mut out = String::new();
     for block in &awareness.blocks {
         let mut lines = Vec::new();
@@ -571,12 +574,15 @@ pub fn render_page_awareness(awareness: &PageAwareness, own_conversation: Option
     }
 }
 
-pub fn render_page_document(page: &PageDocument) -> String {
+pub(crate) fn render_page_document(page: &PageDocument) -> String {
     render_page_document_with(page, None)
 }
 
 /// The page with its header; the header carries each section's awareness when it is known.
-pub fn render_page_document_with(page: &PageDocument, awareness: Option<&PageAwareness>) -> String {
+pub(crate) fn render_page_document_with(
+    page: &PageDocument,
+    awareness: Option<&PageAwareness>,
+) -> String {
     let authors = page
         .revision_info
         .authors
@@ -1213,7 +1219,7 @@ pub async fn cmd_page(hub_url: &str, token: &str, command: PageCommand) -> error
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct PageMigrationView {
+pub(crate) struct PageMigrationView {
     pub state: String,
     pub version: u64,
     pub drafter: Option<PageAuthor>,
@@ -1221,13 +1227,13 @@ pub struct PageMigrationView {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct PageMigrationDraftView {
+pub(crate) struct PageMigrationDraftView {
     pub pages: Vec<PageMigrationDraftPageView>,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct PageMigrationDraftPageView {
+pub(crate) struct PageMigrationDraftPageView {
     pub key: String,
     pub parent_key: Option<String>,
     pub title: String,
@@ -1235,7 +1241,7 @@ pub struct PageMigrationDraftPageView {
 }
 
 /// The drafted tree as an outline: each page's key, title and source count.
-pub fn render_page_migration(view: &PageMigrationView) -> String {
+pub(crate) fn render_page_migration(view: &PageMigrationView) -> String {
     let mut out = format!("state: {} · version: {}", view.state, view.version);
     if let Some(drafter) = &view.drafter {
         out.push_str(&format!(" · drafted by {}", drafter.label));

@@ -77,7 +77,7 @@ impl AgentPreset {
     }
 
     /// The harness's own config / credential directories, `~` expanded.
-    pub fn config_dirs(&self) -> Vec<PathBuf> {
+    pub(crate) fn config_dirs(&self) -> Vec<PathBuf> {
         self.classic_config_dirs
             .iter()
             .map(|dir| expand_home_path(dir))
@@ -180,7 +180,7 @@ fn known_agent_preset_ids() -> String {
         .join(", ")
 }
 
-pub fn expand_home_path(value: &str) -> PathBuf {
+pub(crate) fn expand_home_path(value: &str) -> PathBuf {
     if value == "~" {
         return dirs::home_dir().unwrap_or_else(|| PathBuf::from(value));
     }

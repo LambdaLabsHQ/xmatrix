@@ -67,7 +67,7 @@ pub(crate) fn account_meter_cache(provider: AccountMeter) -> &'static ProviderUs
 }
 
 impl ProviderUsageCache {
-    pub(crate) const fn new(fresh_ttl: Duration, error_ttl: Duration) -> Self {
+    pub const fn new(fresh_ttl: Duration, error_ttl: Duration) -> Self {
         Self {
             slot: OnceLock::new(),
             fresh_ttl,
@@ -195,7 +195,7 @@ pub(crate) struct KeyedProviderUsageCache {
 }
 
 impl KeyedProviderUsageCache {
-    pub(crate) const fn new(fresh_ttl: Duration, error_ttl: Duration) -> Self {
+    pub const fn new(fresh_ttl: Duration, error_ttl: Duration) -> Self {
         Self {
             slots: OnceLock::new(),
             fresh_ttl,

@@ -37,7 +37,7 @@ struct ErrorResponse {
     error: Option<String>,
 }
 
-pub fn broker_state_path() -> PathBuf {
+pub(crate) fn broker_state_path() -> PathBuf {
     config::profile_state_dir().join("daemon-auth-broker.json")
 }
 

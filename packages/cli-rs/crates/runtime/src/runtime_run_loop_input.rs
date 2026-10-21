@@ -114,7 +114,7 @@ pub(crate) struct RunLoopEvents<'a> {
 impl<'a> RunLoopEvents<'a> {
     /// Events for a loop that also ends on SIGTERM, SIGHUP or Ctrl-C. The
     /// signals are taken over only once the loop first waits for input.
-    pub(crate) fn new(
+    pub fn new(
         rx: mpsc::UnboundedReceiver<ConnectionEvent>,
         relay: &'a agent_instance_connection::AgentInstanceConnectionClient,
         auto_join_channel_id: Option<&'a str>,

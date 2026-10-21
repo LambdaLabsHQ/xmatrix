@@ -83,7 +83,7 @@ pub(crate) fn classify_socket_command_admission(
     }
 }
 
-pub(crate) use xmatrix_cli_core::error::describe_error_chain;
+pub use xmatrix_cli_core::error::describe_error_chain;
 
 #[cfg(test)]
 mod tests {

@@ -545,7 +545,7 @@ pub(crate) fn save_claude_resume_session_id(
 /// `--model` and by the `set_model` control request (verified empirically).
 /// Aliases always track the latest build of each tier, so this catalog does
 /// not go stale when new model ids ship.
-pub(crate) fn claude_model_catalog() -> Vec<protocol::AgentModelInfo> {
+pub fn claude_model_catalog() -> Vec<protocol::AgentModelInfo> {
     fn entry(id: &str, display_name: &str, description: &str) -> protocol::AgentModelInfo {
         protocol::AgentModelInfo {
             id: id.to_string(),
@@ -599,7 +599,7 @@ pub(crate) fn claude_model_catalog() -> Vec<protocol::AgentModelInfo> {
 /// enabled, and `auto` (return to the model default) has no `--effort`
 /// spelling, so a selection would not survive the next respawn. Offering
 /// either would advertise a switch that can silently not stick.
-pub(crate) fn claude_effort_catalog() -> Vec<protocol::AgentModelReasoningEffort> {
+pub fn claude_effort_catalog() -> Vec<protocol::AgentModelReasoningEffort> {
     fn level(reasoning_effort: &str, description: &str) -> protocol::AgentModelReasoningEffort {
         protocol::AgentModelReasoningEffort {
             reasoning_effort: reasoning_effort.to_string(),

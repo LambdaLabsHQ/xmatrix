@@ -130,7 +130,7 @@ pub(crate) struct ClaudeParkedQuestion {
 }
 
 impl ClaudeSessionControls {
-    pub(crate) fn new(initial: Option<String>, initial_effort: Option<String>) -> Self {
+    pub fn new(initial: Option<String>, initial_effort: Option<String>) -> Self {
         Self {
             selected: Mutex::new(None),
             current: Mutex::new(initial),
@@ -185,7 +185,7 @@ impl ClaudeSessionControls {
             .clone()
     }
 
-    pub(crate) fn current(&self) -> Option<String> {
+    pub fn current(&self) -> Option<String> {
         self.current
             .lock()
             .unwrap_or_else(|poison| poison.into_inner())
@@ -491,10 +491,10 @@ pub(crate) struct ActiveStreamTurn {
 pub(crate) struct SessionPresentation {
     pub(crate) current_model: Option<String>,
     pub(crate) current_effort: Option<String>,
-    pub(crate) models: Vec<protocol::AgentModelInfo>,
-    pub(crate) commands: Option<Vec<protocol::AgentInstanceCommand>>,
-    pub(crate) parameters: Vec<protocol::HarnessParameter>,
-    pub(crate) goal: Option<protocol::AgentGoalStatus>,
+    pub models: Vec<protocol::AgentModelInfo>,
+    pub commands: Option<Vec<protocol::AgentInstanceCommand>>,
+    pub parameters: Vec<protocol::HarnessParameter>,
+    pub goal: Option<protocol::AgentGoalStatus>,
 }
 
 impl SessionPresentation {
@@ -674,7 +674,7 @@ impl ClaudeStreamSession {
         &self.transcript
     }
 
-    pub(crate) fn new(
+    pub fn new(
         cmd: &str,
         cmd_args: &[String],
         cwd: Option<&str>,

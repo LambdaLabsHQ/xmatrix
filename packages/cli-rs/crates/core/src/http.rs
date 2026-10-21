@@ -19,15 +19,15 @@ use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 
 use crate::error::{CliError, HttpStatusError, Result};
 
-pub const CLIENT_COMPATIBILITY_PROTOCOL_VERSION: u32 = 2;
-pub const CLIENT_UPGRADE_REQUIRED_CLOSE_CODE: u16 = 4003;
-pub const CLIENT_COMPONENT_HEADER: &str = "x-xmatrix-client-component";
-pub const CLIENT_VERSION_HEADER: &str = "x-xmatrix-client-version";
-pub const CLIENT_PROTOCOL_HEADER: &str = "x-xmatrix-client-protocol";
-pub const CLIENT_PLATFORM_HEADER: &str = "x-xmatrix-client-platform";
+pub(crate) const CLIENT_COMPATIBILITY_PROTOCOL_VERSION: u32 = 2;
+pub(crate) const CLIENT_UPGRADE_REQUIRED_CLOSE_CODE: u16 = 4003;
+pub(crate) const CLIENT_COMPONENT_HEADER: &str = "x-xmatrix-client-component";
+pub(crate) const CLIENT_VERSION_HEADER: &str = "x-xmatrix-client-version";
+pub(crate) const CLIENT_PROTOCOL_HEADER: &str = "x-xmatrix-client-protocol";
+pub(crate) const CLIENT_PLATFORM_HEADER: &str = "x-xmatrix-client-platform";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ClientComponent {
+pub(crate) enum ClientComponent {
     Cli,
     Daemon,
 }
@@ -47,7 +47,7 @@ pub fn mark_process_as_daemon() {
     PROCESS_COMPONENT.store(1, Ordering::Release);
 }
 
-pub fn process_client_component() -> ClientComponent {
+pub(crate) fn process_client_component() -> ClientComponent {
     if PROCESS_COMPONENT.load(Ordering::Acquire) == 1 {
         ClientComponent::Daemon
     } else {
@@ -55,7 +55,7 @@ pub fn process_client_component() -> ClientComponent {
     }
 }
 
-pub fn client_identity_headers(component: ClientComponent) -> HeaderMap {
+pub(crate) fn client_identity_headers(component: ClientComponent) -> HeaderMap {
     let mut headers = HeaderMap::new();
     headers.insert(
         HeaderName::from_static(CLIENT_COMPONENT_HEADER),
@@ -101,7 +101,7 @@ pub fn client() -> Result<reqwest::Client> {
 /// handshake storm against the Hub, and each handshake the edge drops
 /// (`tls handshake eof`) took down the daemon's whole session and forced a
 /// credential re-enrollment. Cloning is cheap: the client is internally shared.
-pub fn client_for(component: ClientComponent) -> Result<reqwest::Client> {
+pub(crate) fn client_for(component: ClientComponent) -> Result<reqwest::Client> {
     let cell = match component {
         ClientComponent::Cli => &CLI_CLIENT,
         ClientComponent::Daemon => &DAEMON_CLIENT,
@@ -268,7 +268,7 @@ fn rate_limit_wait(response: &reqwest::Response) -> Option<Duration> {
     Some(wait.map_or(MAX_RATE_LIMIT_WAIT, |wait| wait.min(MAX_RATE_LIMIT_WAIT)))
 }
 
-pub async fn websocket_request(
+pub(crate) async fn websocket_request(
     url: &str,
     component: ClientComponent,
 ) -> Result<tokio_tungstenite::tungstenite::http::Request<()>> {
@@ -302,7 +302,7 @@ pub async fn websocket_request(
     Ok(request)
 }
 
-pub fn websocket_connect_error(
+pub(crate) fn websocket_connect_error(
     context: &str,
     error: tokio_tungstenite::tungstenite::Error,
 ) -> CliError {
@@ -339,7 +339,7 @@ pub fn websocket_connect_error(
     }
 }
 
-pub fn is_upgrade_required_close(
+pub(crate) fn is_upgrade_required_close(
     frame: Option<&tokio_tungstenite::tungstenite::protocol::CloseFrame>,
 ) -> bool {
     frame.is_some_and(|frame| u16::from(frame.code) == CLIENT_UPGRADE_REQUIRED_CLOSE_CODE)
@@ -845,7 +845,7 @@ pub async fn put_bytes<T: DeserializeOwned>(
 }
 
 /// Accept only a successful status before callers consume a media body.
-pub async fn require_success(response: reqwest::Response) -> Result<reqwest::Response> {
+pub(crate) async fn require_success(response: reqwest::Response) -> Result<reqwest::Response> {
     let status = response.status();
     if !status.is_success() {
         let text = response.text().await.unwrap_or_default();
@@ -861,7 +861,7 @@ async fn response_rejection_error(response: reqwest::Response) -> CliError {
     response_status_error(status, &text)
 }
 
-pub fn response_status_error(status: reqwest::StatusCode, body: &str) -> CliError {
+pub(crate) fn response_status_error(status: reqwest::StatusCode, body: &str) -> CliError {
     let response = serde_json::from_str::<serde_json::Value>(body).ok();
     let detail = response
         .as_ref()

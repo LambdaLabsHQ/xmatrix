@@ -163,8 +163,9 @@ impl ProfileTaskSet {
         }
     }
 
+    #[cfg(test)]
     /// Tasks that are still running.
-    pub fn live(&self) -> usize {
+    pub(crate) fn live(&self) -> usize {
         self.handles
             .lock()
             .map(|handles| {
@@ -307,11 +308,11 @@ pub fn config_path() -> PathBuf {
     profile_state_dir().join("config.json")
 }
 
-pub fn session_path() -> PathBuf {
+pub(crate) fn session_path() -> PathBuf {
     profile_state_dir().join("session.json")
 }
 
-pub fn sessions_dir() -> PathBuf {
+pub(crate) fn sessions_dir() -> PathBuf {
     profile_state_dir().join("sessions")
 }
 
@@ -389,7 +390,7 @@ pub fn claude_projects_dir() -> Option<PathBuf> {
     dirs::home_dir().map(|home| home.join(".claude").join("projects"))
 }
 
-pub async fn load_config() -> CliConfig {
+pub(crate) async fn load_config() -> CliConfig {
     let path = config_path();
     match tokio::fs::read_to_string(&path).await {
         Ok(raw) => parse_config(&raw).unwrap_or_else(|err| {
@@ -413,7 +414,7 @@ pub async fn active_hub_url() -> String {
     DEFAULT_HUB_URL.to_string()
 }
 
-pub async fn load_session() -> Option<CliSession> {
+pub(crate) async fn load_session() -> Option<CliSession> {
     let hub_url = active_hub_url().await;
     load_session_for_hub(&hub_url).await
 }
@@ -617,7 +618,7 @@ pub async fn machine_identity_for_owner(owner_user_id: &str) -> Result<MachineId
 }
 
 /// `machine:` + SHA-256 of the owner and the host fingerprint.
-pub fn derive_machine_id(owner_user_id: &str, host_fingerprint: &str) -> String {
+pub(crate) fn derive_machine_id(owner_user_id: &str, host_fingerprint: &str) -> String {
     let digest =
         sha256_hex(format!("xmatrix-machine-v1\0{owner_user_id}\0{host_fingerprint}").as_bytes());
     format!("{MACHINE_ID_PREFIX}{digest}")
@@ -653,12 +654,12 @@ fn legacy_machine_ids(config: &CliConfig, machine_id: &str) -> Vec<String> {
 }
 
 /// Legacy ids still waiting for the Hub to adopt them into `machine_id`.
-pub async fn pending_legacy_machine_ids(machine_id: &str) -> Vec<String> {
+pub(crate) async fn pending_legacy_machine_ids(machine_id: &str) -> Vec<String> {
     legacy_machine_ids(&load_config().await, machine_id)
 }
 
 /// Forgets legacy ids after the Hub reported them adopted.
-pub async fn forget_legacy_machine_ids(adopted: &[String]) -> Result<()> {
+pub(crate) async fn forget_legacy_machine_ids(adopted: &[String]) -> Result<()> {
     if adopted.is_empty() {
         return Ok(());
     }
@@ -926,7 +927,7 @@ pub fn unix_now_secs() -> u64 {
         .as_secs()
 }
 
-pub fn renewed_session_expires_at() -> String {
+pub(crate) fn renewed_session_expires_at() -> String {
     unix_now_secs()
         .saturating_add(SESSION_MAX_AGE_SECS)
         .to_string()

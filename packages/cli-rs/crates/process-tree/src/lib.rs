@@ -153,15 +153,15 @@ mod platform {
             Self::bind_handle(handle as HANDLE)
         }
 
-        pub fn bind_std_child(child: &std::process::Child) -> io::Result<Self> {
+        pub(crate) fn bind_std_child(child: &std::process::Child) -> io::Result<Self> {
             Self::bind_handle(child.as_raw_handle() as HANDLE)
         }
 
-        pub fn bind_raw_handle(handle: RawHandle) -> io::Result<Self> {
+        pub(crate) fn bind_raw_handle(handle: RawHandle) -> io::Result<Self> {
             Self::bind_handle(handle as HANDLE)
         }
 
-        pub fn noop() -> Self {
+        pub(crate) fn noop() -> Self {
             Self {
                 job: None,
                 detached_process: None,
@@ -169,7 +169,7 @@ mod platform {
             }
         }
 
-        pub fn track_detached_child(child: &std::process::Child) -> Self {
+        pub(crate) fn track_detached_child(child: &std::process::Child) -> Self {
             Self {
                 job: None,
                 detached_process: Some(child.as_handle().try_clone_to_owned()),
@@ -722,28 +722,28 @@ mod platform {
             })
         }
 
-        pub fn bind_std_child(child: &std::process::Child) -> io::Result<Self> {
+        pub(crate) fn bind_std_child(child: &std::process::Child) -> io::Result<Self> {
             Ok(Self {
                 process_group: Some(child.id() as libc::pid_t),
                 terminate_on_drop: true,
             })
         }
 
-        pub fn bind_process_id(pid: u32) -> Self {
+        pub(crate) fn bind_process_id(pid: u32) -> Self {
             Self {
                 process_group: Some(pid as libc::pid_t),
                 terminate_on_drop: true,
             }
         }
 
-        pub fn noop() -> Self {
+        pub(crate) fn noop() -> Self {
             Self {
                 process_group: None,
                 terminate_on_drop: false,
             }
         }
 
-        pub fn track_detached_child(child: &std::process::Child) -> Self {
+        pub(crate) fn track_detached_child(child: &std::process::Child) -> Self {
             Self {
                 process_group: Some(child.id() as libc::pid_t),
                 terminate_on_drop: false,
@@ -954,19 +954,19 @@ mod platform {
             Ok(Self)
         }
 
-        pub fn bind_std_child(_child: &std::process::Child) -> io::Result<Self> {
+        pub(crate) fn bind_std_child(_child: &std::process::Child) -> io::Result<Self> {
             Ok(Self)
         }
 
-        pub fn noop() -> Self {
+        pub(crate) fn noop() -> Self {
             Self
         }
 
-        pub fn track_detached_child(_child: &std::process::Child) -> Self {
+        pub(crate) fn track_detached_child(_child: &std::process::Child) -> Self {
             Self
         }
 
-        pub fn terminate(&mut self) -> io::Result<()> {
+        pub(crate) fn terminate(&mut self) -> io::Result<()> {
             Ok(())
         }
     }
@@ -1013,18 +1013,7 @@ pub use platform::{process_file_times, terminate_single_process};
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
-/// Keeps a background child from opening a console window on Windows.
-pub fn hide_console_window(command: &mut std::process::Command) {
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt as _;
-        command.creation_flags(CREATE_NO_WINDOW);
-    }
-    #[cfg(not(windows))]
-    let _ = command;
-}
-
-/// [`hide_console_window`] for a Tokio command.
+/// Keeps a background Tokio child from opening a console window on Windows.
 pub fn hide_tokio_console_window(command: &mut tokio::process::Command) {
     #[cfg(windows)]
     command.creation_flags(CREATE_NO_WINDOW);
@@ -1086,7 +1075,9 @@ pub fn track_detached_std_child(child: &std::process::Child) -> ProcessTreeGuard
 }
 
 #[cfg(windows)]
-pub fn bind_portable_pty_child(child: &dyn portable_pty::Child) -> io::Result<ProcessTreeGuard> {
+pub(crate) fn bind_portable_pty_child(
+    child: &dyn portable_pty::Child,
+) -> io::Result<ProcessTreeGuard> {
     let handle = child
         .as_raw_handle()
         .ok_or_else(|| io::Error::other("PTY child process handle is unavailable"))?;
@@ -1094,7 +1085,9 @@ pub fn bind_portable_pty_child(child: &dyn portable_pty::Child) -> io::Result<Pr
 }
 
 #[cfg(unix)]
-pub fn bind_portable_pty_child(child: &dyn portable_pty::Child) -> io::Result<ProcessTreeGuard> {
+pub(crate) fn bind_portable_pty_child(
+    child: &dyn portable_pty::Child,
+) -> io::Result<ProcessTreeGuard> {
     let pid = child
         .process_id()
         .ok_or_else(|| io::Error::other("PTY child process id is unavailable"))?;
@@ -1102,7 +1095,9 @@ pub fn bind_portable_pty_child(child: &dyn portable_pty::Child) -> io::Result<Pr
 }
 
 #[cfg(not(any(unix, windows)))]
-pub fn bind_portable_pty_child(_child: &dyn portable_pty::Child) -> io::Result<ProcessTreeGuard> {
+pub(crate) fn bind_portable_pty_child(
+    _child: &dyn portable_pty::Child,
+) -> io::Result<ProcessTreeGuard> {
     Ok(ProcessTreeGuard::noop())
 }
 

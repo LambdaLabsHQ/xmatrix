@@ -2,8 +2,8 @@ use reqwest::Url;
 
 use crate::config;
 
-pub const DAEMON_REQUEST_URL_ENV: &str = "XMATRIX_DAEMON_REQUEST_URL";
-pub const DAEMON_REQUEST_CAPABILITY_ENV: &str = "XMATRIX_DAEMON_REQUEST_CAPABILITY";
+pub(crate) const DAEMON_REQUEST_URL_ENV: &str = "XMATRIX_DAEMON_REQUEST_URL";
+pub(crate) const DAEMON_REQUEST_CAPABILITY_ENV: &str = "XMATRIX_DAEMON_REQUEST_CAPABILITY";
 
 /// Largest broker locator this will read. The file holds one small record.
 const MAX_BROKER_STATE_BYTES: u64 = 4096;
@@ -71,7 +71,7 @@ fn broker_url_from_state(bytes: &[u8], active_profile: Option<&str>) -> Option<S
     loopback_broker_url(state.get("url")?.as_str()?)
 }
 
-pub fn daemon_request_broker() -> Option<(String, String)> {
+pub(crate) fn daemon_request_broker() -> Option<(String, String)> {
     // The capability is this Run's own secret and only ever arrives by
     // environment; the locator is public routing and must stay current.
     let capability = std::env::var(DAEMON_REQUEST_CAPABILITY_ENV).ok()?;
@@ -104,7 +104,7 @@ pub fn inside_agent_run() -> bool {
 /// from the run registry. When those disagree, prefer the exact registry key
 /// for this Run/execution so send can re-authorize without re-spawning.
 #[derive(Debug, PartialEq, Eq)]
-pub enum DaemonRequestCapabilityRediscovery {
+pub(crate) enum DaemonRequestCapabilityRediscovery {
     /// One persisted key differs from the spawn-time capability.
     Replacement { url: String, capability: String },
     /// Registry and sidecar disagree about the same Run — do not pick one.
@@ -115,7 +115,7 @@ pub enum DaemonRequestCapabilityRediscovery {
     None,
 }
 
-pub fn rediscovered_daemon_request_capability(
+pub(crate) fn rediscovered_daemon_request_capability(
     current_capability: &str,
 ) -> DaemonRequestCapabilityRediscovery {
     let Some(run_id) = std::env::var("XMATRIX_RUN_ID")

@@ -18,14 +18,14 @@
 //      returns disk.
 
 /// How many idle slots a repo pool keeps warm for reuse.
-pub const REPO_POOL_IDLE_KEEP_ENV: &str = "XMATRIX_REPO_POOL_IDLE_KEEP";
+pub(crate) const REPO_POOL_IDLE_KEEP_ENV: &str = "XMATRIX_REPO_POOL_IDLE_KEEP";
 /// How long a stranded lease must sit before liveness is trusted to demote it.
-pub const REPO_POOL_ORPHAN_MIN_AGE_SECS_ENV: &str = "XMATRIX_REPO_POOL_ORPHAN_MIN_AGE_SECS";
+pub(crate) const REPO_POOL_ORPHAN_MIN_AGE_SECS_ENV: &str = "XMATRIX_REPO_POOL_ORPHAN_MIN_AGE_SECS";
 /// How long a slot tree must sit untouched before its disk may be taken.
-pub const REPO_POOL_EVICT_MIN_IDLE_SECS_ENV: &str = "XMATRIX_REPO_POOL_EVICT_MIN_IDLE_SECS";
+pub(crate) const REPO_POOL_EVICT_MIN_IDLE_SECS_ENV: &str = "XMATRIX_REPO_POOL_EVICT_MIN_IDLE_SECS";
 /// How long a resting session's tree must sit untouched before the sweep may
 /// reclaim it behind a rehydrate record (docs/instance-sleep.md §6).
-pub const REPO_POOL_RESTING_EVICT_SECS_ENV: &str = "XMATRIX_REPO_POOL_RESTING_EVICT_SECS";
+pub(crate) const REPO_POOL_RESTING_EVICT_SECS_ENV: &str = "XMATRIX_REPO_POOL_RESTING_EVICT_SECS";
 
 /// A slot is a full checkout plus whatever the build leaves behind — `target/`
 /// and `node_modules/` survive the `git clean -ffd` on reuse by design — so a

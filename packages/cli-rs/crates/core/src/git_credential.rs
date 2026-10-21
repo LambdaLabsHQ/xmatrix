@@ -26,7 +26,7 @@ tokio::task_local! {
 }
 
 /// The username GitHub expects alongside an installation token.
-pub const INSTALLATION_TOKEN_USERNAME: &str = "x-access-token";
+pub(crate) const INSTALLATION_TOKEN_USERNAME: &str = "x-access-token";
 
 pub const GIT_CREDENTIAL_PATH: &str = "/git/credential";
 pub const GIT_CREDENTIAL_CAPABILITY_HEADER: &str = "x-xmatrix-git-credential-capability";
@@ -60,7 +60,7 @@ pub enum CredentialDeclined {
     MissingRepositoryPath,
 }
 
-pub type CredentialDecision = std::result::Result<CredentialRequest, CredentialDeclined>;
+pub(crate) type CredentialDecision = std::result::Result<CredentialRequest, CredentialDeclined>;
 
 /// Repositories whose earlier history was retired to a private backup when they
 /// were published, each with the root commit of that retired history. A checkout
