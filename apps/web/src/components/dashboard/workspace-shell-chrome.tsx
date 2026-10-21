@@ -37,13 +37,10 @@ import {
 } from "./workspace-shell-navigation";
 
 import {
-  avatarInitials,
   channelOnlineAgentAvatarItems,
   formatMember,
-  initialsFor,
   memberPresence,
   memberPresenceSummary,
-  presenceAvatarUrl,
   spaceRoleFor,
   visibleHumanChannelMembers,
 } from "./workspace-shell-recovered";
@@ -110,7 +107,7 @@ import {
 
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 
-import { IdentityAvatar } from "@/components/dashboard/identity-avatar";
+import { Face } from "@/components/dashboard/face";
 
 
 import {
@@ -124,13 +121,14 @@ import {
 
 import { cn } from "@/lib/utils";
 
-import type {
-  ChannelMemberPresence,
-  ObservabilityEvent,
-  SerializedAgentInstance,
-  HumanProfile,
-  ChannelSnapshot,
-  SerializedSpace,
+import {
+  faceInitials,
+  type ChannelMemberPresence,
+  type ObservabilityEvent,
+  type SerializedAgentInstance,
+  type HumanProfile,
+  type ChannelSnapshot,
+  type SerializedSpace,
 } from "@xmatrix/protocol";
 
 // Semantic module extracted from workspace-app-shell (AST-safe)
@@ -181,11 +179,8 @@ export const WorkspaceRail = memo(function WorkspaceRail({
         onClick={onOpenProfile}
         className="flex size-11 items-center justify-center rounded-full"
       >
-        <IdentityAvatar
-          kind="human"
-          label={profile.displayName}
-          imageUrl={profile.avatarUrl}
-          initials={profile.displayName.slice(0, 2)}
+        <Face
+          of={{ kind: "user", id: profile.userId, name: profile.displayName }}
           size="md"
           showKindBadge={false}
           className="app-rail-user-avatar"
@@ -1256,16 +1251,12 @@ export function ChannelPresenceAvatars({
       onClick={(event) => event.stopPropagation()}
     >
       {visibleHumans.map((member) => {
-        const presence = memberPresence(channel, member);
         const label = formatMember(channel, member);
         return (
-          <IdentityAvatar
+          <Face
             key={member}
-            kind="human"
-            label={label}
+            of={member.startsWith("user:") ? { kind: "user", id: member.slice(5), name: label } : { kind: "external", name: label }}
             status="online"
-            imageUrl={presenceAvatarUrl(presence)}
-            initials={avatarInitials(label)}
             size="sm"
             showKindBadge={false}
             className="app-channel-human-avatar rounded-full"
@@ -1277,16 +1268,12 @@ export function ChannelPresenceAvatars({
         if (presence.kind !== "agent") return null;
         const label = agentInstanceDisplayName(item.instance);
         const status = channelAgentAvatarStatus(channel, item.member, presence, events, item.instance);
-        const imageUrl = presenceAvatarUrl(presence);
 
         return (
-          <IdentityAvatar
+          <Face
             key={item.key}
-            kind="agent"
-            label={label}
+            of={{ kind: "agent", name: label, harness: presence.registration?.harness ?? null, id: item.instance.id }}
             status={status}
-            imageUrl={imageUrl}
-            initials={imageUrl ? avatarInitials(label) : undefined}
             size="sm"
             showKindBadge={false}
             className="app-channel-agent-avatar rounded-full"
@@ -1356,7 +1343,7 @@ export function SpaceAvatar({ space }: { space: SerializedSpace }) {
       style={spaceAvatarStyle(space)}
       aria-hidden="true"
     >
-      {initialsFor(space.name) || "W"}
+      {faceInitials(space.name)}
     </span>
   );
 }

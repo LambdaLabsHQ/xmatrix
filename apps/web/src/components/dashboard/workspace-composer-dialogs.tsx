@@ -113,7 +113,6 @@ import {
   PendingAttachmentCard,
   AttachmentOriginalOption,
   attachVideoMetadata,
-  avatarInitials,
   channelAttachmentKindForFile,
   channelOnlineAgentAvatarItems,
   cleanStatusChips,
@@ -182,7 +181,7 @@ import { Textarea } from "@/components/ui/textarea";
 
 import { Input } from "@/components/ui/input";
 
-import { IdentityAvatar } from "@/components/dashboard/identity-avatar";
+import { Face } from "@/components/dashboard/face";
 
 import {
   type MentionInstanceTargetScope,
@@ -1689,12 +1688,9 @@ export const ChannelDetails = memo(function ChannelDetails({
                               )}
                               className="app-detail-agent-avatar-button shrink-0 rounded-full"
                             >
-                              <IdentityAvatar
-                                kind="agent"
-                                label={label}
+                              <Face
+                                of={{ kind: "agent", name: label, harness: registration?.harness ?? null, id: instance.id }}
                                 status={instance.status}
-                                imageUrl={presence.avatarUrl}
-                                initials={avatarInitials(label)}
                                 size="sm"
                               />
                             </button>
@@ -2288,7 +2284,7 @@ export function ToolSurface({
   view: Exclude<AppView, "messages">;
   /** Whose profile the Profile view shows; null is the viewer's own. */
   profileUserId: string | null;
-  user: { id: string; email: string; name?: string; avatarUrl?: string };
+  user: { id: string; email: string; name?: string };
   /** Hub-reported operator capability; the admin route re-checks it. */
   platformAdmin?: boolean;
   channels: ChannelSnapshot[];

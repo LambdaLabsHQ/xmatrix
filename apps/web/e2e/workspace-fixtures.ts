@@ -5,6 +5,7 @@ import {
   fixtureChannelCatalog,
   fixtureChannelCreate,
   fixtureJson,
+  fixtureFaces,
   fixtureRequestBodies,
   fixtureRequests,
   fixtureRule,
@@ -29,6 +30,8 @@ export {
 export const E2E_NOW = "2026-07-01T00:00:00.000Z";
 
 export type WorkspaceStubFixtures = {
+  /** People's and Agent Instances' pictures, keyed `user:<id>` / `agent:<instanceId>`, as the faces read answers them. */
+  faces?: Record<string, string>;
   spaces?: unknown[];
   channels?: unknown[];
   /** The Space's Agent registrations; each Agent a composer can start. */
@@ -272,6 +275,7 @@ export async function installWorkspaceStubs(
     spaces: fixtures.spaces ?? [],
   });
   await fixtureSpaceResources(page);
+  await fixtureFaces(page, fixtures.faces);
   const registrations = (fixtures.registrations ?? []).map((registration) => ({
     displayName: registration.key.harness, ownerName: "Owner", machineName: registration.key.machineId,
     version: 1, state: "enabled", models: [], routingReady: true, canManageOwnerGrant: false,

@@ -258,6 +258,7 @@ export {
 export type {
   PageConversationRecord,
 } from "./page-conversations.js";
+export { FaceControlError, readAgentFaces, readUserFaces, userFacesOf } from "./faces.js";
 export {
   migratedPageId, PageMigrationError, PostgresPageMigrationRepository, revisedDraft, validDraft,
 } from "./page-migration.js";

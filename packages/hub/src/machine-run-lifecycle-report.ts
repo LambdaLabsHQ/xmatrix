@@ -81,6 +81,7 @@ export async function machineRunLifecycleReport(
         runId: text(context.runId, "runId"), channelId: text(context.channelId, "channelId"),
         ownerUserId: text(context.ownerUserId, "ownerUserId"), ownerEmail: ownerEmail(context.ownerUserId),
         agentName: text(context.agentName, "agentName"), machineId: text(context.machineId, "machineId"),
+        ...(typeof context.harness === "string" && context.harness ? { harness: context.harness } : {}),
         hostId: optionalHostname(context.hostId), machineName: optionalMachineName(context.machineName), ...failure,
       });
       // An `@auto` summon's work goes to the next-ranked Agent, once. Its

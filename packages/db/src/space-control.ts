@@ -224,7 +224,6 @@ interface MemberRow extends QueryResultRow {
   role: string;
   email: string | null;
   display_name: string | null;
-  avatar_url: string | null;
   created_at: Date | string;
   profile_name: string | null;
   profile_handle: string | null;
@@ -418,8 +417,8 @@ function serializeSpace(
       ...(member.email ? { email: member.email } : {}),
       ...(member.profile_name || member.display_name
         ? { name: member.profile_name || member.display_name! } : {}),
-      ...(member.profile_avatar_url || member.avatar_url
-        ? { avatarUrl: member.profile_avatar_url || member.avatar_url! } : {}),
+      // A person's face is their account's picture alone (protocol faces.ts); the member row's copy is not read.
+      ...(member.profile_avatar_url ? { avatarUrl: member.profile_avatar_url } : {}),
       ...(member.profile_handle ? { handle: member.profile_handle } : {}),
       ...(member.profile_bio ? { bio: member.profile_bio } : {}),
       ...(member.profile_time_zone ? { timeZone: member.profile_time_zone } : {}),
@@ -1533,8 +1532,8 @@ export class PostgresSpaceControlRepository {
     if (spaces.length === 0) return [];
     const ids = spaces.map((space) => space.space_id);
     const members = await transaction.query<MemberRow>({
-      name: "space_members_hydrate_v1",
-      text: `SELECT m.space_id, m.user_id, m.role, m.email, m.display_name, m.avatar_url,
+      name: "space_members_hydrate_v2",
+      text: `SELECT m.space_id, m.user_id, m.role, m.email, m.display_name,
           m.created_at, u.name AS profile_name, u.handle AS profile_handle,
           u.image AS profile_avatar_url, u.bio AS profile_bio,
           u.time_zone AS profile_time_zone, u.profile_version

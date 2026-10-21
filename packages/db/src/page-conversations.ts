@@ -82,7 +82,7 @@ export async function describePageConversations(tx: DatabaseTransaction, spaceId
         return [{
           instanceId: instance.id, name: instance.label || member.label || "Agent",
           status: instance.status,
-          ...(member.avatarUrl ? { avatarUrl: member.avatarUrl } : {}),
+          ...(member.registration?.harness ? { harness: member.registration.harness } : {}),
         }];
       });
     });

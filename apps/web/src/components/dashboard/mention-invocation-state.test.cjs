@@ -4,10 +4,11 @@ const path = require("node:path");
 const test = require("node:test");
 require("./typescript-require.cjs").installTypeScriptRequire();
 const {
-  summonView, invocationPollInterval, invocationVendorIcon, splitMentionRejections,
-  continuationView, splitMentionContinuations, splitHandoffMentions, handoffView,
+  summonView, invocationPollInterval, invocationVendorHarness, addressedAgentFace, launchFace, continuationFaces,
+  splitMentionRejections, continuationView, splitMentionContinuations, splitHandoffMentions, handoffView,
   handoffSuccessorLaunch, segmentMessageInteraction,
 } = require("./mention-invocation-state.ts");
+const { agentFaceUrl, staticFace } = require("@xmatrix/protocol");
 
 const at = "2026-09-12T15:31:05.470Z";
 const base = { launchId: "launch:one", sourceMessageId: "message:one", channelId: "channel:one",
@@ -15,28 +16,45 @@ const base = { launchId: "launch:one", sourceMessageId: "message:one", channelId
   sourceMention: "@codex:new:owner/repo", runId: "run:one", instanceId: "instance:one",
   state: "connected", attempt: 0, retryable: false, createdAt: at, updatedAt: at, connectedAt: at };
 const step = (view, label) => view.steps.find(entry => entry.label === label);
-test("a summon chip leads with the harness vendor icon", () => {
-  assert.equal(invocationVendorIcon({ sourceMention: "@grok machine:Workstation", targetName: "grok" }),
-    "/agent-vendors/grok.svg");
-  assert.equal(invocationVendorIcon({ sourceMention: "@auto machine:Workstation harness:codex", targetName: "Agent" }),
-    "/agent-vendors/openai.svg");
-  assert.equal(invocationVendorIcon({
-    sourceMention: "@auto machine:Workstation", targetName: "Reviewer",
-    routingDecision: { rows: [{ harness: "claude", selected: true }] },
+test("a summon chip leads with the face of the harness its address names", () => {
+  const mark = (input) => agentFaceUrl(invocationVendorHarness(input));
+  assert.equal(mark({ sourceMention: "@grok machine:Workstation" }), "/agent-vendors/grok.svg");
+  assert.equal(mark({ sourceMention: "@auto machine:Workstation harness:codex" }), "/agent-vendors/openai.svg");
+  assert.equal(mark({
+    sourceMention: "@auto machine:Workstation", routingDecision: { rows: [{ harness: "claude", selected: true }] },
   }), "/agent-vendors/claude.svg");
-  // The bound registration's mark wins once the launch carries it.
-  assert.equal(invocationVendorIcon({
-    sourceMention: "@grok machine:Workstation", targetAvatarUrl: "/agent-vendors/grok.svg",
-  }), "/agent-vendors/grok.svg");
-  assert.equal(invocationVendorIcon({ sourceMention: "@auto machine:Workstation", targetName: "Agent" }), undefined);
-  assert.equal(invocationVendorIcon({ sourceMention: "@auto harness:agent", targetName: "Agent" }),
-    "/agent-vendors/cursor.png");
-  assert.equal(invocationVendorIcon({ sourceMention: "@auto harness:cursor-agent", targetName: "Agent" }),
-    "/agent-vendors/cursor.png");
+  assert.equal(invocationVendorHarness({ sourceMention: "@auto machine:Workstation" }), undefined);
+  assert.equal(mark({ sourceMention: "@auto harness:agent" }), "/agent-vendors/cursor.png");
+  assert.equal(mark({ sourceMention: "@auto harness:cursor-agent" }), "/agent-vendors/cursor.png");
   // Read with the launch grammar: `harness:` after prose is not a condition.
-  assert.equal(invocationVendorIcon({ sourceMention: "@auto review harness:codex", targetName: "Agent" }), undefined);
-  assert.equal(invocationVendorIcon({ sourceMention: '@auto harness:"claude_code"', targetName: "Agent" }),
-    "/agent-vendors/claude.svg");
+  assert.equal(invocationVendorHarness({ sourceMention: "@auto review harness:codex" }), undefined);
+  assert.equal(mark({ sourceMention: '@auto harness:"claude_code"' }), "/agent-vendors/claude.svg");
+});
+
+test("an Agent whose address names no harness is drawn by its Instance, never by its name", () => {
+  // A name an Agent goes by is not a harness, even one that looks like it.
+  const named = addressedAgentFace({ name: "grok" });
+  assert.deepEqual(named, { kind: "agent", name: "grok", harness: null, id: null });
+  const launched = launchFace({ ...base, sourceMention: "@auto machine:Workstation", targetName: "Reviewer" });
+  assert.deepEqual(launched, { kind: "agent", name: "Reviewer", harness: null, id: "instance:one" });
+  assert.equal(staticFace(launched), null, "its picture is read through the face directory");
+  assert.equal(staticFace(launchFace({ ...base, sourceMention: "@codex machine:Workstation" })).imageUrl,
+    "/agent-vendors/openai.svg", "`@codex` names Codex");
+  // A renamed Agent keeps its vendor's mark: the harness the Hub recorded wins over what its name or address say.
+  assert.equal(staticFace(launchFace({ ...base, sourceMention: "@auto", targetName: "Reviewer", targetHarness: "claude_code" }))
+    .imageUrl, "/agent-vendors/claude.svg");
+});
+
+test("a handoff's faces are the Instance it left and the harness it names, a reborn's its own Instance", () => {
+  const record = { schemaVersion: 1, kind: "handoff", sourceMessageId: "message:one", sourceMessageVersion: 1,
+    sourceMention: "@claude:3:handoff:@codex", sourceInstanceId: "channel:one:3", sourceRunId: "run:old",
+    sourceName: "claude", sourceOrdinal: 3, targetInstanceId: "channel:one:4", runId: "run:new", channelId: "channel:one",
+    targetName: "codex", createdAt: at };
+  const faces = continuationFaces(record);
+  assert.deepEqual(faces.source, { kind: "agent", name: "claude", harness: null, id: "channel:one:3" });
+  assert.deepEqual(faces.successor, { kind: "agent", name: "codex", harness: "codex", id: "channel:one:4" });
+  const reborn = continuationFaces({ ...record, kind: "reborn", sourceMention: "@claude:3:reborn" });
+  assert.deepEqual(reborn.successor, reborn.source);
 });
 test("a summon lists every step on one level", () => {
   const chosen = summonView({ ...base, routingDecision: { source: "jev", evaluatedAt: "2026-09-22T18:00:00Z" } });

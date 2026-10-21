@@ -93,7 +93,6 @@ import {
   goalStatusBadgeLabel,
   MachineRunFailureNotice,
   StatusChipBadge,
-  avatarInitials,
   buildAgentWorkItems,
   formatFileSize,
   formatTime,
@@ -183,7 +182,7 @@ import { Textarea } from "@/components/ui/textarea";
 
 
 
-import { IdentityAvatar } from "@/components/dashboard/identity-avatar";
+import { Face } from "@/components/dashboard/face";
 import {
   MESSAGE_AUTHOR_NAME_CLASS_NAME,
   MESSAGE_AVATAR_CLASS_NAME,
@@ -1682,7 +1681,8 @@ function NamedMachineRunFailureNotice({ body, metadata, spaceId, token }: {
   const machineId = typeof metadata?.machineId === "string" ? metadata.machineId : undefined;
   const ownerUserId = typeof metadata?.machineOwnerUserId === "string" ? metadata.machineOwnerUserId : undefined;
   return <MachineRunFailureNotice body={body}
-    machineName={registrationMachineName(catalog.data?.registrations ?? [], machineId, ownerUserId)} />;
+    machineName={registrationMachineName(catalog.data?.registrations ?? [], machineId, ownerUserId)}
+    {...(typeof metadata?.harness === "string" && metadata.harness ? { harness: metadata.harness } : {})} />;
 }
 
 export const MessageRow = memo(function MessageRow({
@@ -2405,24 +2405,11 @@ export const MessageRow = memo(function MessageRow({
         }}
       >
         <RealtimeMessageAvatar
+          of={message.face}
           channelId={message.channelId}
           instanceId={message.senderKind === "agent" ? message.senderInstanceId : undefined}
           senderId={message.linkOrigin?.kind === "reply" ? undefined : message.senderId}
-          kind={
-            message.reservedSystemAgent
-              ? "system"
-              : message.senderKind === "agent"
-              ? "agent"
-              : message.senderKind === "app"
-                ? "app"
-                : message.senderKind === "system"
-                  ? "system"
-                  : "human"
-          }
-          label={message.author}
           status={message.senderStatus}
-          imageUrl={message.avatarUrl}
-          initials={avatarInitials(message.author)}
           size="md"
           showKindBadge={false}
           glass={false}
@@ -2439,6 +2426,7 @@ export const MessageRow = memo(function MessageRow({
                   name: message.author,
                   status: message.senderStatus,
                   goal: message.senderGoal,
+                  face: message.face,
                 })
               : humanSenderUserId
                 ? () => onOpenHumanProfile(humanSenderUserId)
@@ -2936,8 +2924,7 @@ export const MessageRow = memo(function MessageRow({
           <div className="app-thread-reply-preview mt-2 max-w-xl space-y-2 border-l-2 border-border pl-3">
             {message.threadReplies.map((reply) => (
               <div key={reply.id} className="flex w-full items-start gap-2 p-1 text-left text-xs">
-                <IdentityAvatar kind="human" label={reply.author} imageUrl={reply.avatarUrl}
-                  initials={avatarInitials(reply.author)} size="xs" shape="circle" showKindBadge={false} />
+                <Face of={reply.face} size="xs" shape="circle" showKindBadge={false} />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate font-bold">{reply.author}</span>
                   <span className="line-clamp-2 whitespace-pre-wrap break-words text-muted-foreground">{reply.body}</span>
@@ -2958,12 +2945,9 @@ export const MessageRow = memo(function MessageRow({
             {message.threadReplyParticipants?.length ? (
               <span aria-hidden="true" className="app-thread-participant-stack flex shrink-0 -space-x-1.5">
                 {message.threadReplyParticipants.map((participant) => (
-                  <IdentityAvatar
+                  <Face
                     key={participant.id}
-                    kind="human"
-                    label={participant.author}
-                    imageUrl={participant.avatarUrl}
-                    initials={avatarInitials(participant.author)}
+                    of={participant.face}
                     size="xs"
                     shape="circle"
                     showKindBadge={false}
@@ -3867,12 +3851,9 @@ export const AgentWorkAvatar = memo(function AgentWorkAvatar({
       }}
       className="app-agent-work-avatar relative flex shrink-0 items-center justify-center rounded-full outline-none"
     >
-      <IdentityAvatar
-        kind={item.avatarKind || "agent"}
-        label={item.agentLabel}
+      <Face
+        of={item.face}
         status={displayStatus}
-        imageUrl={item.avatarUrl}
-        initials={avatarInitials(item.agentLabel)}
         size="md"
         showKindBadge={false}
         glass={false}

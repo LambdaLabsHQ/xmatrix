@@ -1,4 +1,3 @@
-import { agentPresetAvatarUrl } from "./agent-presets.js";
 import type { ChannelAgentMemberPresence, ChannelMemberPresence } from "./authority-runtime.js";
 import { presenceInstanceId, type AgentInstancePresence, type HumanPresence, type ChannelSnapshot } from "./channel-presence.js";
 
@@ -10,7 +9,8 @@ export function agentInstanceMemberPresence(instance: AgentInstancePresence): Ch
   const cached = agentViews.get(instance);
   if (cached) return cached;
   const { agentName, registration, email, ...value } = instance;
-  const view: ChannelAgentMemberPresence = { kind: "agent", label: agentName, registration, email, avatarUrl: agentPresetAvatarUrl(registration.harness),
+  // Its face is drawn from `registration.harness` (faces.ts); the view carries no picture.
+  const view: ChannelAgentMemberPresence = { kind: "agent", label: agentName, registration, email,
     lastSeenAt: instance.lastSeenAt, activity: instance.activity, files: instance.files,
     intent: instance.intent, runtimeState: instance.runtimeState, goal: instance.goal,
     usage: instance.usage, instances: [value] };

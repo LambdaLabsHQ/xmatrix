@@ -6,8 +6,8 @@ import dynamic from "next/dynamic";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { PageDocBlock } from "@xmatrix/protocol/page-document";
 import {
-  agentPresetAvatarUrl, isLiveAgentStatus, normalizeAgentPresetRuntime, pageAuthorColor, pageAuthorLabel,
-  type SerializedAutomation, type ChannelSnapshot, type PageConversation, type PageLink,
+  faceOfSender, isLiveAgentStatus, pageAuthorColor, pageAuthorLabel,
+  type FaceOf, type SerializedAutomation, type ChannelSnapshot, type PageConversation, type PageLink,
 } from "@xmatrix/protocol";
 import {
   Check, Clock, Files, FileText, History, Lock, MessageSquare, Plus, Share2, Trash2, Undo2, X,
@@ -24,8 +24,7 @@ import {
 import { cn } from "@/lib/utils";
 import { ListSkeleton } from "@/components/dashboard/content-skeleton";
 import { CountPill } from "@/components/dashboard/count-pill";
-import { avatarInitials } from "@/components/dashboard/completion-option-button";
-import { IdentityAvatar } from "@/components/dashboard/identity-avatar";
+import { Face } from "@/components/dashboard/face";
 import { MobileInlineActions } from "@/components/dashboard/mobile-inline-actions";
 import { useMessageReferenceCatalog } from "@/components/dashboard/message-reference-catalog";
 import { listenForOverlayDismissal } from "@/components/dashboard/use-overlay-dismiss";
@@ -212,9 +211,8 @@ function TreeNode({ page, childrenOf, activity, depth, selectedPageId, onSelect,
             {agents.length > 0 && (
               <span className="app-channel-agent-avatars flex shrink-0 items-center -space-x-1.5 px-0.5" data-testid="page-tree-agents">
                 {[...new Map(agents.map((agent) => [agent.name, agent])).values()].slice(0, 3).map((agent) => (
-                  <IdentityAvatar key={agent.instanceId} kind="agent" label={agent.name} status={agent.status}
-                    imageUrl={agent.avatarUrl} size="sm" showKindBadge={false}
-                    className="app-channel-agent-avatar rounded-full" />
+                  <Face key={agent.instanceId} of={{ kind: "agent", name: agent.name, harness: agent.harness ?? null, id: agent.instanceId }}
+                    status={agent.status} size="sm" showKindBadge={false} className="app-channel-agent-avatar rounded-full" />
                 ))}
               </span>
             )}
@@ -495,10 +493,10 @@ function liveAgents(channel: ChannelSnapshot): LiveConversation["agents"] {
   if (!channel.presence) return undefined;
   return channelPresenceInstances(channel.presence).flatMap(instance => {
     if (!isLiveAgentStatus(instance.status)) return [];
+    const name = instance.label || instance.agentName;
     // Its face is its vendor's mark, as on its card in the conversation.
-    const avatarUrl = agentPresetAvatarUrl(instance.registration.harness);
-    return [{ instanceId: instance.id, name: instance.label || instance.agentName, status: instance.status,
-      ...(avatarUrl ? { avatarUrl } : {}) }];
+    return [{ instanceId: instance.id, name, status: instance.status,
+      face: { kind: "agent", name, harness: instance.registration.harness, id: instance.id } }];
   });
 }
 
@@ -809,7 +807,8 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     if (made && !kept) made.destroy();
     // One session per page; it must not churn when the auth context re-renders.
     const live = kept ?? new PageLiveSession({ spaceId, pageId, token: tokenRef.current,
-      user: { name: userName, color: pageAuthorColor({ kind: "user", id: userId }) },
+      // Others draw this person's own face beside their caret, by their account.
+      user: { ...(userId ? { id: userId } : {}), name: userName, color: pageAuthorColor({ kind: "user", id: userId }) },
       // A failed make says why on the page; a later write tries again.
       ...(pending ? { make: (document: Uint8Array) => make.current(document).catch((cause: unknown) => {
         setNotice(userErrorMessage(cause, "Couldn't create the page"));
@@ -946,9 +945,8 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     const last = channel.lastMessage;
     return {
       name: channel.name ?? null,
-      lastMessage: last ? { from: { kind: last.from.kind === "agent" || last.from.kind === "app" ? last.from.kind : "user",
-        label: last.from.label, ...(last.from.avatarUrl ? { avatarUrl: last.from.avatarUrl } : {}) },
-        bodyPreview: last.bodyPreview, sentAt: last.sentAt } : null,
+      lastMessage: last ? { face: faceOfSender(last.from), label: last.from.label, bodyPreview: last.bodyPreview,
+        sentAt: last.sentAt } : null,
       agents: liveAgents(channel),
       ...(channel.historyHeadSequence !== undefined ? { headSequence: channel.historyHeadSequence } : {}),
       ...(channel.readSequence !== undefined ? { readSequence: channel.readSequence } : {}),
@@ -1048,10 +1046,15 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     const run = liveRunOf(present, liveOnPage);
     return !run ? null : run.status === "busy" ? "active" : "idle";
   }, [liveOnPage]);
-  // An Agent writing through its caret shows the face of the Run it writes from.
-  const cursorAvatar = useCallback((state: object) => {
-    const present = state as PagePresenceState;
-    return present.user?.kind === "agent" ? liveRunOf(present, liveOnPage)?.avatarUrl : undefined;
+  // Whose face someone on the page is: a person by their account, an Agent writing through its caret by the Run
+  // it writes from.
+  const presentFace = useCallback((state: PagePresenceState): FaceOf => {
+    const user = state.user!;
+    if (user.kind === "agent") {
+      const run = liveRunOf(state, liveOnPage);
+      return { kind: "agent", name: run?.name ?? user.name, harness: run?.harness ?? null, id: run?.instanceId ?? null };
+    }
+    return user.id ? { kind: "user", id: user.id, name: user.name } : { kind: "external", name: user.name };
   }, [liveOnPage]);
   const present = useMemo(() => presence.filter(({ state }) => cursorPresence(state) !== null),
     [cursorPresence, presence]);
@@ -1092,7 +1095,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
       if (item.agents.length === 0 || edge.has(item.conversationId)) continue;
       const working = note(item.blockId).working ??= [];
       for (const agent of item.agents) {
-        working.push({ name: agent.name, busy: agent.status === "busy", avatarUrl: agent.avatarUrl,
+        working.push({ name: agent.name, busy: agent.status === "busy", face: agent.face,
           conversation: { id: item.conversationId, name: item.name } });
       }
     }
@@ -1308,7 +1311,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   const people: PresentPerson[] = [
     ...present.map(({ clientId, state }) => ({ key: `client:${clientId}`, name: state.user!.name,
       color: state.user!.color, agent: state.user!.kind === "agent", blockId: state.block ?? "",
-      avatarUrl: cursorAvatar(state),
+      face: presentFace(state),
       idle: cursorPresence(state) === "idle",
       // Placed by their caret where they have one, so the edge hints point at the line.
       anchor: anchorTops.has(`client:${clientId}`) ? `client:${clientId}` : sectionAnchor(state.block ?? ""),
@@ -1328,8 +1331,9 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
         ? coWriterDoing(state)
         : CO_WRITER_DOING[state.activity ?? ""] ?? state.activity ?? "viewing", state.block ?? "",
         state.user!.conversationId), state.say].filter(Boolean).join(" — ") })),
-    ...staying.map((agent) => ({ key: `agent:${agent.instanceId}:${agent.conversationId}`, name: agent.name,
-      color: pageAuthorColor({ kind: "agent", id: agent.instanceId }), agent: true, avatarUrl: agent.avatarUrl, blockId: agent.blockId,
+    ...staying.map((agent): PresentPerson => ({ key: `agent:${agent.instanceId}:${agent.conversationId}`, name: agent.name,
+      color: pageAuthorColor({ kind: "agent", id: agent.instanceId }), agent: true,
+      face: { kind: "agent", name: agent.name, harness: agent.harness ?? null, id: agent.instanceId }, blockId: agent.blockId,
       idle: agent.status !== "busy",
       anchor: sectionAnchor(agent.blockId), editing: agent.status === "busy", conversationId: agent.conversationId,
       detail: whereDetail(agent.status === "busy" ? `${agent.activity}, working` : agent.activity, agent.blockId,
@@ -1384,7 +1388,6 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   // Whose suggestion is in front of the reader: its face, and what to do with the change, stand beside
   // the change at the right edge, as if the Agent were writing that line.
   const suggestedBy = suggesting.count > 0 && suggesting.author ? suggesting.author : null;
-  const suggesterAvatar = suggestedBy ? agentPresetAvatarUrl(normalizeAgentPresetRuntime(suggestedBy.split(":")[0])) : undefined;
   const suggestionMark = ((): { top: number; away: "above" | "below" | null } | null => {
     const top = anchorTops.get("suggestion");
     const at = contentTop("suggestion");
@@ -1423,15 +1426,11 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   })();
   // The page's button: the face of the Agent the reader co-writes with, while no Agent is on the page;
   // an Agent just called shows there, starting, until it is on the page beside its line.
-  const caller = ((): { agent: { name: string; avatarUrl?: string }; starting: boolean } | null => {
+  const caller = ((): { agent: { name: string; face: FaceOf }; starting: boolean } | null => {
     if (!phone || mode !== "page" || !drawn || !canEdit || people.some((person) => person.agent && !person.idle)) return null;
-    if (called && called.pageId === pageId) {
-      const avatarUrl = writers.agents.find((agent) => agent.harness === called.harness)?.avatarUrl;
-      return { agent: { name: called.harness, ...(avatarUrl ? { avatarUrl } : {}) }, starting: true };
-    }
-    const favourite = writers.agents[0];
-    return favourite ? { agent: { name: favourite.harness, ...(favourite.avatarUrl ? { avatarUrl: favourite.avatarUrl } : {}) },
-      starting: false } : null;
+    const harness = called && called.pageId === pageId ? called.harness : writers.agents[0]?.harness;
+    return harness ? { agent: { name: harness, face: { kind: "agent", name: harness, harness } },
+      starting: Boolean(called && called.pageId === pageId) } : null;
   })();
   const tapped = dialog && typeof dialog === "object" && dialog.kind === "agent"
     ? people.find((person) => person.key === dialog.key) ?? null : null;
@@ -1551,7 +1550,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
       {!phone && canEdit && writers.agents[0] && (
         <Button variant="ghost" size="sm" disabled={Boolean(starting)} onClick={() => setDialog({ kind: "write" })}
           title={`Co-write with ${writers.agents[0].harness}`}>
-          <IdentityAvatar kind="agent" label={writers.agents[0].harness} imageUrl={writers.agents[0].avatarUrl} size="xs"
+          <Face of={{ kind: "agent", name: writers.agents[0].harness, harness: writers.agents[0].harness }} size="xs"
             shape="circle" glass={false} className="pointer-events-none rounded-full" />
           Co-write
         </Button>
@@ -1660,12 +1659,11 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
                       <PageChangeMark top={suggestionMark.top} away={suggestionMark.away} testId="page-suggestions"
                         label={`${suggestedBy} suggests this change, ${suggesting.current + 1} of ${suggesting.count}`}>
                         {/* Its face rides its pen in the line; here it says who waits, while the line is out of view. */}
-                        {suggestionMark.away && <button type="button" className="page-change-face" aria-label={`${suggestedBy}, show its change`}
+                        {suggestionMark.away && waiting.face && <button type="button" className="page-change-face"
+                          aria-label={`${suggestedBy}, show its change`}
                           title={`${suggestedBy} suggests · ${suggesting.current + 1} of ${suggesting.count}`}
                           onClick={() => suggestionControl.current?.step(0)}>
-                          <IdentityAvatar kind="agent" label={suggestedBy} imageUrl={suggesterAvatar} size="sm" shape="circle"
-                            glass={false} initials={suggesterAvatar ? avatarInitials(suggestedBy) : undefined}
-                            className="pointer-events-none rounded-full" />
+                          <Face of={waiting.face} size="sm" shape="circle" glass={false} className="pointer-events-none rounded-full" />
                         </button>}
                         <button type="button" onClick={() => suggestionControl.current?.take()} aria-label="Take this change"
                           title={phone ? "Accept" : "Accept (Tab)"} className="page-change-button is-primary">
@@ -1770,8 +1768,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
         <>
           {((dialog && typeof dialog === "object" && dialog.kind === "write") || tapped) && (
             <PageWriteWith agents={writers.agents} onClose={() => setDialog(null)}
-              working={tapped ? { name: tapped.name, ...(tapped.avatarUrl ? { avatarUrl: tapped.avatarUrl } : {}),
-                doing: tapped.detail } : null}
+              working={tapped ? { name: tapped.name, face: tapped.face, doing: tapped.detail } : null}
               onStart={(harness) => { setDialog(null); void coWrite(harness, null); }}
               {...(tappedControls?.switchTo ? { switchTo: tappedControls.switchTo } : {})}
               onOpenConversation={tapped?.conversationId

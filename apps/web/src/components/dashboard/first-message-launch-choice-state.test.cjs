@@ -4,7 +4,7 @@ require("./typescript-require.cjs").installTypeScriptRequire();
 const { launchChoiceView, launchChoicePollInterval } = require("./first-message-launch-choice-state.ts");
 const sent = "2026-10-02T00:00:00.000Z";
 const at = (ms) => Date.parse(sent) + ms;
-const { firstMessageDecisionWindow, harnessLaunchOption } = require("@xmatrix/protocol");
+const { agentFaceUrl, firstMessageDecisionWindow, harnessLaunchOption } = require("@xmatrix/protocol");
 // The Hub's choice record as the decision window the card reads.
 const record = (extra = {}, options = [harnessLaunchOption("claude"), harnessLaunchOption("codex")]) =>
   firstMessageDecisionWindow({ channelId: "c", messageId: "m", deadlineAt: "2026-10-02T00:00:03.000Z", ...extra }, options);
@@ -51,7 +51,8 @@ test("the window lists what the reader may start, plus whatever Jev or the autho
   assert.deepEqual(window.options.map(option => option.optionId), ["claude", "gemini"]);
   assert.equal(window.recommendation, "gemini");
   assert.equal(window.presentationRef, "launch-choice.v1");
-  assert.ok(window.options.every(option => option.funding.kind === "owner-subscription" && option.iconRef));
+  // Each option shows the face of the harness it starts.
+  assert.ok(window.options.every(option => option.funding.kind === "owner-subscription" && agentFaceUrl(option.harness)));
   const chosen = record({ choice: { start: true, harness: "grok", by: "author", at: sent } }, []);
   assert.deepEqual(chosen.decision, { optionId: "grok", by: "author", at: sent });
   assert.equal(record({ recommendation: { start: false } }).recommendation, null);

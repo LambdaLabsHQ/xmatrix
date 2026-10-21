@@ -956,7 +956,7 @@ test("channelMentionCandidates does not add goal actions for unsupported runtime
   );
 });
 
-test("channelMentionCandidates carries member avatar URLs into mention suggestions", () => {
+test("channelMentionCandidates shows each member by their account's face", () => {
   const channel = openChannel({
     memberPresence: {
       "user:1": {
@@ -982,7 +982,8 @@ test("channelMentionCandidates carries member avatar URLs into mention suggestio
 
   const human = channelMentionCandidates(members(channel, []), null, [], space)
     .find((candidate) => candidate.kind === "user");
-  assert.equal(human.avatarUrl, "https://example.com/yiming.png");
+  // The member's face is read by their account, never from the copy a presence or member row carries.
+  assert.deepEqual(human.face, { kind: "user", id: "1", name: "Yiming Hu" });
   assert.equal(human.mention, "Yiming Hu");
   assert.equal(completeMention("@Yi", 3, human).value, "@Yiming Hu ");
   space.members[0].handle = "old-handle";
@@ -1048,21 +1049,21 @@ test("channelMentionCandidates joins visible Human ids with the Space member dir
   ).candidates.filter((candidate) => candidate.kind === "user");
 
   assert.deepEqual(
-    humans.map(({ id, name, status, email, avatarUrl }) => ({ id, name, status, email, avatarUrl })),
+    humans.map(({ id, name, status, email, face }) => ({ id, name, status, email, face })),
     [
       {
         id: "user:online",
         name: "Online Person",
         status: "online",
         email: "online@example.com",
-        avatarUrl: undefined,
+        face: { kind: "user", id: "online", name: "Online Person" },
       },
       {
         id: "user:offline",
         name: "Offline Person",
         status: "offline",
         email: "offline@example.com",
-        avatarUrl: "https://example.com/offline.png",
+        face: { kind: "user", id: "offline", name: "Offline Person" },
       },
     ]
   );

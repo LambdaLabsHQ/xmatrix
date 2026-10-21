@@ -1,4 +1,4 @@
-import { mergePageText } from "@xmatrix/protocol";
+import { mergePageText, type FaceOf } from "@xmatrix/protocol";
 import {
   markdownToPageDoc, pageDocHunks, pageDocToMarkdown, pageSchema, type PageDocHunk,
 } from "@xmatrix/protocol/page-document";
@@ -9,10 +9,11 @@ import { edgeRoom, edgeRoomAt } from "./page-editor-setup";
 
 /**
  * A suggestion waiting on the page (pages-live-document.md §4.2): the whole document an Agent proposed,
- * the text it proposed it against, and who proposed it.
+ * the text it proposed it against, and who proposed it, by name, colour and face. The pen in the line is
+ * plain DOM, so the page hands it the picture of that face as resolved (`faceUrl`, face.tsx).
  */
 export interface PageSuggestion {
-  revision: number; base: string; body: string; author: string; color: string; avatarUrl?: string;
+  revision: number; base: string; body: string; author: string; color: string; face: FaceOf; faceUrl?: string;
 }
 
 /**
@@ -68,8 +69,8 @@ function suggestedHunks(doc: DocNode, suggestions: readonly PageSuggestion[], le
 
 const serializer = DOMSerializer.fromSchema(pageSchema);
 
-/** Who is writing the change in front of the reader: their colour, and the face their pen carries. */
-interface Writer { color: string; avatarUrl?: string }
+/** Who is writing the change in front of the reader: their colour, and the picture of the face their pen carries. */
+interface Writer { color: string; faceUrl?: string }
 
 /** The words already written out once, so laying the suggestions over the page again does not write them twice. */
 const written = new Set<string>();
@@ -81,10 +82,10 @@ function pen(writer: Writer): HTMLElement {
   element.contentEditable = "false";
   element.setAttribute("aria-hidden", "true");
   element.style.setProperty("--page-suggest-color", writer.color);
-  if (writer.avatarUrl) {
+  if (writer.faceUrl) {
     const face = document.createElement("img");
     face.className = "page-suggest-pen-face";
-    face.src = writer.avatarUrl;
+    face.src = writer.faceUrl;
     face.alt = "";
     face.draggable = false;
     element.append(face);
@@ -274,7 +275,7 @@ export function pageSuggestions(report: () => ((state: SuggestionsReport) => voi
         current = hunks.length ? Math.min(current, hunks.length - 1) : 0;
         if (!meta && !tr.docChanged) return value;
         const last = suggestions[suggestions.length - 1];
-        const writer = { color: last?.color ?? "", ...(last?.avatarUrl ? { avatarUrl: last.avatarUrl } : {}) };
+        const writer = { color: last?.color ?? "", ...(last?.faceUrl ? { faceUrl: last.faceUrl } : {}) };
         return { suggestions, hunks, left, current, through, decorations: decorate(state.doc, hunks, current, writer) };
       },
     },

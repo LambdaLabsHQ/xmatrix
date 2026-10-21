@@ -1992,7 +1992,7 @@ export class PostgresPageRepository {
             const agents = byPage.get(row.page_id) ?? [];
             agents.push({ instanceId: instance.id, name: instance.label || member.label || "Agent",
               status,
-              ...(member.avatarUrl ? { avatarUrl: member.avatarUrl } : {}),
+              ...(member.registration?.harness ? { harness: member.registration.harness } : {}),
               conversationId: row.conversation_id, activity: row.source === "edit" ? "editing" : "viewing",
               blockId: row.block_id });
             byPage.set(row.page_id, agents);

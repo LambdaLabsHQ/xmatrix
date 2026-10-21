@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useMemo, useState } from "react";
-import { agentPresetAvatarUrl, normalizeAgentPresetRuntime } from "@xmatrix/protocol";
 import { useAgentRegistrationCatalog } from "@/components/dashboard/agent-capability-select";
 import type { WriteAgent } from "./page-write-with";
 
@@ -21,11 +20,8 @@ export function usePageWriters(spaceId: string | null, token: string, enabled: b
     for (const registration of catalog.data?.registrations ?? []) {
       if (registration.state === "enabled" && registration.routingReady) harnesses.add(registration.key.harness);
     }
-    const list = [...harnesses].map((harness) => {
-      const avatarUrl = agentPresetAvatarUrl(normalizeAgentPresetRuntime(harness));
-      return { harness, ...(avatarUrl ? { avatarUrl } : {}) };
-    });
-    return list.sort((a, b) => Number(b.harness === favourite) - Number(a.harness === favourite));
+    return [...harnesses].map((harness) => ({ harness }))
+      .sort((a, b) => Number(b.harness === favourite) - Number(a.harness === favourite));
   }, [catalog.data, favourite]);
   const choose = useCallback((harness: string) => {
     setFavourite(harness);

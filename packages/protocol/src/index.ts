@@ -596,6 +596,7 @@ export {
 export * from "./setup-intent.js";
 export * from "./onboarding-message.js";
 export * from "./onboarding-funnel.js";
+export * from "./faces.js";
 export { cleanRepositoryBaseline } from "./repository-baseline.js";
 export type { RepositoryBaseline } from "./repository-baseline.js";
 

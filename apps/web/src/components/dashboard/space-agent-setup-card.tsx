@@ -3,13 +3,12 @@
 import { useDesktopDaemonFailureDelivered } from "@/lib/desktop-daemon-failure-report";
 import { AnimatedIcon } from "@/components/ui/animated-icon";
 import { actionClass } from "@/components/ui/action-tone";
-import { agentPresetAvatarUrl } from "@xmatrix/protocol";
 import { Check, CloudOff, Loader2, PlayCircle, RefreshCw, Terminal } from "lucide-react";
 import { noticeClass } from "@/components/ui/status-tone";
 import type { OnboardingCopy } from "@/lib/onboarding-copy";
 import { useOnboardingCopy } from "@/lib/onboarding-locale";
 import { SetupCardHeader, SetupCardShell } from "./space-setup-card-chrome";
-import { IdentityAvatar } from "./identity-avatar";
+import { Face } from "./face";
 import { defaultInstallPlatform, type InstallPlatform } from "./connect-machine";
 import { InstalledHarnessSwitchList } from "./installed-harness-switch-list";
 import { AgentInstallPicker } from "./supported-agents";
@@ -214,11 +213,8 @@ function CandidateRow({
     <div className="border-b border-border py-4 last:border-0">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex min-w-0 items-start gap-3">
-          <IdentityAvatar
-            kind="agent"
-            label={candidate.displayName}
-            imageUrl={agentPresetAvatarUrl(candidate.presetId)}
-            initials={candidate.displayName.slice(0, 2)}
+          <Face
+            of={{ kind: "agent", name: candidate.displayName, harness: candidate.presetId }}
             size="md"
             className="app-space-agent-vendor-avatar shrink-0"
           />

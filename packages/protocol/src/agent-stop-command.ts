@@ -50,7 +50,8 @@ export interface SerializedAgentStop {
   sourceMessageId: string;
   runId: string;
   targetName: string;
-  targetAvatarUrl?: string;
+  /** The harness of the Agent it starts, which gives its face (faces.ts). */
+  targetHarness?: string;
   instanceOrdinal?: string;
   /** The Machine as its owner named it. A hostname is not a Machine name. */
   machineName?: string;

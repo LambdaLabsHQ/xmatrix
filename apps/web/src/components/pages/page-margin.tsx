@@ -2,10 +2,9 @@
 
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { ArrowDown, ArrowUp, Check, Maximize2, PenLine, X } from "lucide-react";
-import { agentPresetAvatarUrl, normalizeAgentPresetRuntime } from "@xmatrix/protocol";
-import { IdentityAvatar } from "@/components/dashboard/identity-avatar";
+import type { FaceOf } from "@xmatrix/protocol";
+import { Face } from "@/components/dashboard/face";
 import { formatRelativeAge } from "@/components/dashboard/time-display";
-import { avatarInitials } from "@/components/dashboard/completion-option-button";
 import { cn } from "@/lib/utils";
 import { sameValue } from "@/lib/same-value";
 import { anchorTop, layoutMargin, type MarginConversation } from "./page-margin-model";
@@ -79,17 +78,13 @@ function CardContext({ conversation, open = false }: { conversation: MarginConve
   );
 }
 
-/** An Agent's face is its vendor's mark, which its name tells where the listing carries none. */
-function agentFace(agent: MarginConversation["agents"][number]): string | undefined {
-  return agent.avatarUrl ?? agentPresetAvatarUrl(normalizeAgentPresetRuntime(agent.name.split(":")[0] ?? ""));
-}
-
 /**
  * The Agents in it, as a comment thread shows who is typing: each its Instance card from the conversation at a
  * comment's size, on paper. Its vendor's face and its name; its status dot says whether it works, and one at work
  * runs its dots, as its pill on the page does.
  */
-function WorkingLine({ agents, className }: { agents: MarginConversation["agents"]; className?: string }) {
+function WorkingLine({ agents, className }: { agents: ReadonlyArray<Pick<MarginConversation["agents"][number],
+  "instanceId" | "name" | "status" | "face">>; className?: string }) {
   const working = agents.filter((agent) => agent.status === "busy");
   const shown = working.length > 0 ? working : agents;
   if (shown.length === 0) return null;
@@ -98,8 +93,8 @@ function WorkingLine({ agents, className }: { agents: MarginConversation["agents
       {shown.map((agent) => (
         <span key={agent.instanceId} className="page-margin-instance" data-status={agent.status}
           title={`${agent.name} · ${agentState(agent.status)}`}>
-          <IdentityAvatar kind="agent" label={agent.name} imageUrl={agentFace(agent)} initials={avatarInitials(agent.name)}
-            status={agent.status} size="xs" shape="circle" glass={false} className="page-margin-instance-face" />
+          <Face of={agent.face} status={agent.status} size="xs" shape="circle" glass={false}
+            className="page-margin-instance-face" />
           <span className="page-margin-instance-name">{agent.name}</span>
           {agent.status === "busy" && <span className="page-writer-dots" aria-hidden="true"><i /><i /><i /></span>}
         </span>
@@ -143,13 +138,10 @@ function ConversationCard({ conversation, writer, focused, canResolve, onOpen, o
         </span>
         {lastMessage ? (
           <span className="mt-2 flex gap-2">
-            <IdentityAvatar kind={lastMessage.from.kind === "user" ? "human" : lastMessage.from.kind}
-              label={lastMessage.from.label} imageUrl={lastMessage.from.avatarUrl}
-              initials={avatarInitials(lastMessage.from.label)} size="xs" shape="circle"
-              className="mt-px" />
+            <Face of={lastMessage.face} size="xs" shape="circle" className="mt-px" />
             <span className="min-w-0 flex-1">
               <span className="flex items-baseline gap-1.5">
-                <span className="truncate text-[13px] font-semibold text-foreground">{lastMessage.from.label}</span>
+                <span className="truncate text-[13px] font-semibold text-foreground">{lastMessage.label}</span>
                 <span className="shrink-0 text-[11px] text-muted-foreground">{formatRelativeAge(lastMessage.sentAt) ?? ""}</span>
               </span>
               <span className="mt-0.5 line-clamp-2 text-[13px] leading-[1.4] text-foreground/85">{lastMessage.bodyPreview}</span>
@@ -312,7 +304,7 @@ function WriterUnit({ writer, open, actions, onPress, children }: {
           <CommentIcon />
           <span className="min-w-0 truncate">
             <span className="font-semibold text-foreground">{cardName(name)}</span>
-            {last && <span className="text-muted-foreground"> · {last.from.label}: {last.bodyPreview}</span>}
+            {last && <span className="text-muted-foreground"> · {last.label}: {last.bodyPreview}</span>}
           </span>
         </button>
       )}
@@ -343,15 +335,16 @@ export function PageOffscreenCard({ side, entries, onJump }: {
   const conversations = [...new Map(entries.flatMap((entry) => entry.conversation
     ? [[entry.conversation.conversationId, entry.conversation] as const] : [])).values()];
   const unread = conversations.reduce((sum, conversation) => sum + conversation.unread, 0);
-  const working = [...new Set([
-    ...entries.flatMap((entry) => entry.person?.agent ? [entry.person.name] : []),
+  // Each Agent at work once, by name, with its face.
+  const working = [...new Map<string, FaceOf>([
+    ...entries.flatMap((entry) => entry.person?.agent ? [[entry.person.name, entry.person.face] as const] : []),
     ...conversations.flatMap((conversation) => conversation.agents.filter((agent) => agent.status === "busy")
-      .map((agent) => agent.name)),
+      .map((agent) => [agent.name, agent.face] as const)),
   ])];
   const editing = [...new Set(entries.flatMap((entry) => entry.person && !entry.person.agent ? [entry.person.name] : []))];
   const said = [
     conversations.length > 0 ? `${conversations.length} ${conversations.length === 1 ? "conversation" : "conversations"}` : null,
-    working.length > 0 ? `${working.join(", ")} working` : null,
+    working.length > 0 ? `${working.map(([name]) => name).join(", ")} working` : null,
     editing.length > 0 ? `${editing.join(", ")} editing` : null,
   ].filter(Boolean).join(", ");
   const Arrow = side === "above" ? ArrowUp : ArrowDown;
@@ -369,7 +362,7 @@ export function PageOffscreenCard({ side, entries, onJump }: {
             <UnreadBadge unread={unread} />
           </span>
         )}
-        <WorkingLine agents={working.map((name) => ({ instanceId: name, name, status: "busy" as const }))} />
+        <WorkingLine agents={working.map(([name, face]) => ({ instanceId: name, name, status: "busy" as const, face }))} />
         {editing.length > 0 && (
           <span className="flex min-w-0 items-center gap-1.5 text-[12px] text-muted-foreground">
             <PenLine className="size-3 shrink-0 text-primary" aria-hidden="true" />

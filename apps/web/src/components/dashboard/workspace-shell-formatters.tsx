@@ -22,7 +22,6 @@ import {
 import type {
   LlmQuotaUsage,
   LlmUsage,
-  LocalManagedAgent,
   UsageLimitSummary,
 } from "./workspace-shell-domain-types";
 
@@ -64,7 +63,7 @@ import {
 import { cn } from "@/lib/utils";
 
 import { RICH_MESSAGE_PARAGRAPH_CLASS_NAME } from "./row-frames";
-import { AGENT_PRESETS, agentAvatarUrlFromMetadata } from "@xmatrix/protocol";
+import { AGENT_PRESETS } from "@xmatrix/protocol";
 
 import type {
   AgentPreset,
@@ -894,11 +893,6 @@ export function agentPresetOrCustom(id: string | undefined | null): AgentPreset 
   return AGENT_PRESETS.find((preset) => preset.id === id) ||
     AGENT_PRESETS.find((preset) => preset.id === "custom") ||
     AGENT_PRESETS[0];
-}
-
-/** Its harness preset's avatar. */
-export function localManagedAgentAvatarUrl(agent: LocalManagedAgent): string | undefined {
-  return agentAvatarUrlFromMetadata({ presetId: agent.harness }, agent.harness);
 }
 
 export function defaultAgentName(preset: AgentPreset): string {

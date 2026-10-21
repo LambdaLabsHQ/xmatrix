@@ -1,8 +1,7 @@
 "use client";
 
 import type { CSSProperties } from "react";
-import { avatarInitials } from "@/components/dashboard/completion-option-button";
-import { IdentityAvatar } from "@/components/dashboard/identity-avatar";
+import { Face } from "@/components/dashboard/face";
 import { cn } from "@/lib/utils";
 import type { PresentPerson } from "./page-chrome";
 
@@ -28,9 +27,7 @@ function penStatus(person: PresentPerson): string {
 export function PenContent({ person, named, from = true }: { person: PresentPerson; named: boolean; from?: boolean }) {
   return (
     <>
-      <IdentityAvatar kind="agent" label={person.name} imageUrl={person.avatarUrl}
-        initials={person.avatarUrl ? avatarInitials(person.name) : undefined} size="sm" shape="circle"
-        className="page-pen-face pointer-events-none rounded-full" />
+      <Face of={person.face} size="sm" shape="circle" className="page-pen-face pointer-events-none rounded-full" />
       {named && (
         <span className="page-pen-label" aria-hidden="true">
           {penName(person.name)}

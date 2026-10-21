@@ -3,11 +3,12 @@ const test = require("node:test");
 require("../dashboard/typescript-require.cjs").installTypeScriptRequire();
 
 const {
-  MARGIN_GAP, anchorTop, layoutMargin, marginConversations, sectionConversationCounts, withOpenConversation,
+  MARGIN_GAP, anchorTop, layoutMargin, listedMessage, marginConversations, sectionConversationCounts, withOpenConversation,
 } = require("./page-margin-model.ts");
 
 const NOW = Date.parse("2026-09-27T12:00:00.000Z");
 const hoursAgo = (hours) => new Date(NOW - hours * 3_600_000).toISOString();
+const NOW_ISO = new Date(NOW).toISOString();
 
 function link(overrides) {
   return { linkId: `l-${overrides.conversationId}`, pageId: "p", blockId: "", source: "manual",
@@ -78,8 +79,10 @@ test("a conversation the listing leaves out is not shown, and what the client kn
       lastMessage: { from: { kind: "user", label: "Ann" }, bodyPreview: "Earlier", sentAt: hoursAgo(30) } })],
     live: (conversationId) => conversationId === "mine" ? {
       name: "Release notes",
-      lastMessage: { from: { kind: "agent", label: "claude:1" }, bodyPreview: "Done", sentAt: hoursAgo(1) },
-      agents: [{ instanceId: "i", name: "claude:1", status: "idle" }], headSequence: 8, readSequence: 6,
+      lastMessage: { face: { kind: "agent", name: "claude:1", harness: "claude", id: "i" }, label: "claude:1",
+        bodyPreview: "Done", sentAt: hoursAgo(1) },
+      agents: [{ instanceId: "i", name: "claude:1", status: "idle",
+        face: { kind: "agent", name: "claude:1", harness: "claude", id: "i" } }], headSequence: 8, readSequence: 6,
     } : null,
   });
   assert.deepEqual(cards.map((card) => card.conversationId), ["mine"]);
@@ -150,4 +153,30 @@ test("the conversation open in the margin shows there even once it has sunk, or 
     anchor: "page", blockId: "", quote: null, linkId: null, lastMessage: null, agents: [], unread: 0,
     activityAt: undefined, live: true, resolved: false });
   assert.deepEqual(withOpenConversation(cards, null), cards);
+});
+
+test("the listing's people and Agents are drawn by their own faces, never by their names", () => {
+  const [card] = marginConversations({
+    now: NOW,
+    links: [link({ conversationId: "c", blockId: "status" })],
+    conversations: [conversation({
+      lastMessage: { from: { kind: "user", label: "Ann", userId: "u-ann" }, bodyPreview: "Ship it", sentAt: hoursAgo(1) },
+      agents: [{ instanceId: "c:2", name: "claude:2", status: "busy", harness: "claude" },
+        { instanceId: "c:3", name: "renamed:3", status: "online" }],
+    })],
+  });
+  assert.deepEqual(card.lastMessage, { face: { kind: "user", id: "u-ann", name: "Ann" }, label: "Ann",
+    bodyPreview: "Ship it", sentAt: hoursAgo(1) });
+  assert.deepEqual(card.agents, [
+    { instanceId: "c:2", name: "claude:2", status: "busy", face: { kind: "agent", name: "claude:2", harness: "claude", id: "c:2" } },
+    { instanceId: "c:3", name: "renamed:3", status: "online", face: { kind: "agent", name: "renamed:3", harness: null, id: "c:3" } },
+  ], "an Agent is drawn by its harness, or else read by its Instance");
+  const listed = (from) => listedMessage({ from, bodyPreview: "", sentAt: NOW_ISO }).face;
+  assert.deepEqual(listed({ kind: "agent", label: "claude:1", userId: "o", instanceId: "c:1",
+    registration: { ownerUserId: "o", machineId: "m", harness: "claude_code" } }),
+  { kind: "agent", name: "claude:1", harness: "claude_code", id: "c:1" });
+  assert.deepEqual(listed({ kind: "user", label: "Ann", userId: "u-ann", avatarUrl: "https://example.com/old.png" }),
+    { kind: "user", id: "u-ann", name: "Ann" }, "a person is their account's face, not the picture the message carried");
+  assert.deepEqual(listed({ kind: "user", label: "Ann", userId: "", avatarUrl: "https://example.com/old.png" }),
+    { kind: "external", name: "Ann" }, "a sender the listing does not name is no one's face, not an old picture");
 });

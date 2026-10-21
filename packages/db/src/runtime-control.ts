@@ -12,7 +12,7 @@ import { readContinuationSource } from "./runtime-continuation-source.js";
 import { queryMessageAgentTargets } from "./message-agent-targets.js";
 import { queryMessageExecutions, selectRunExecutionSources } from "./runtime-message-executions.js";
 import { ACTIVE_RUN_STATUS_SQL, isActiveRunStatus, isRunStatus, isTerminalRunStatus, validRunTransition, type RunStatus, PREPARATION_REJECTION_MESSAGES, REGISTRATION_PREPARATION_REJECTION_CODES, preparationRejectionMessage, parseDecisionAnswerFailure, parseHarnessTooOld, parseHarnessSignedOut,
-  parsePresentedRoutingDecision, rebornFailureReason, agentAvatarUrlFromMetadata, isAgentStatus,
+  parsePresentedRoutingDecision, rebornFailureReason, isAgentStatus,
   isLiveAgentStatus, LIVE_AGENT_STATUS_SQL, agentPresetById, type HarnessSignedOut, normalizeAgentPresetRuntime, type AgentStatus, type AgentLaunchState,
   type RuntimeOperationFailure, type SerializedAgentContinuation, type SerializedAgentLaunch, type SerializedAgentInvocationRejection, type SerializedAgentStop, type AgentStopPhase, type AgentInvocationQueryPage, type AgentLaunchActivity, type InvocationDiagnosticsReport } from "@xmatrix/protocol";
 import { commandDigest as digest } from "./command-digest.js";
@@ -221,9 +221,10 @@ function invocationRunActivity(row: QueryResultRow): AgentLaunchActivity | undef
   };
 }
 
-function invocationTargetAvatar(row: QueryResultRow): string | undefined {
-  const runtime = typeof row.target_runtime === "string" ? row.target_runtime : "custom";
-  return agentAvatarUrlFromMetadata({}, normalizeAgentPresetRuntime(runtime) ?? runtime);
+/** The harness an invocation's Agent runs, which gives it its face (protocol faces.ts). */
+function invocationTargetHarness(row: QueryResultRow): string | undefined {
+  return typeof row.target_runtime === "string" && row.target_runtime
+    ? normalizeAgentPresetRuntime(row.target_runtime) ?? row.target_runtime : undefined;
 }
 
 /** A fenced stop's phase. The Workstation's stop receipt is the only
@@ -249,7 +250,7 @@ function serializeAgentStop(row: QueryResultRow): SerializedAgentStop | undefine
     ? iso((evidence as { completedAt?: unknown }).completedAt) : undefined;
   const requestedAt = iso((request as { requestedAt?: unknown }).requestedAt) ?? iso(row.updated_at);
   if (!requestedAt) return undefined;
-  const avatar = invocationTargetAvatar(row);
+  const harness = invocationTargetHarness(row);
   const ordinal = /^[1-9]\d*$/u.test(String(row.channel_instance_id ?? "")) ? String(row.channel_instance_id) : undefined;
   const machineName = typeof row.machine_name === "string" ? row.machine_name.trim().slice(0, 120) : "";
   const phase = stopReceiptPhase(String(row.status), runMetadata);
@@ -257,7 +258,7 @@ function serializeAgentStop(row: QueryResultRow): SerializedAgentStop | undefine
     stopId: `${sourceMessageId}:${row.run_id}`.slice(0, 300),
     channelId: String(row.channel_id), sourceMessageId, runId: String(row.run_id),
     targetName: String(row.target_name || "Agent").slice(0, 80),
-    ...(avatar ? { targetAvatarUrl: avatar } : {}),
+    ...(harness ? { targetHarness: harness } : {}),
     ...(ordinal ? { instanceOrdinal: ordinal } : {}),
     ...(machineName ? { machineName } : {}),
     phase, requestedAt, ...(phase === "confirmed" && confirmedAt ? { confirmedAt } : {}),
@@ -285,12 +286,12 @@ function serializeAgentContinuation(row: QueryResultRow): SerializedAgentContinu
     handoff.runId === source.sourceRunId && handoff.instanceId === source.sourceInstanceId &&
     handoff.sourceMessageId === source.sourceMessageId && handoff.successorInstanceId === source.targetInstanceId
     ? safeAt(handoff.transferredAt) : undefined;
-  const avatar = invocationTargetAvatar(row);
+  const harness = invocationTargetHarness(row);
   // Only a known reborn failure code is public; any other is `reborn_failed`.
   const errorCode = rebornFailureReason(publicRuntimeErrorCode(row.reborn_error_code)).code;
   return [{ ...source, runId: String(row.run_id), channelId: String(row.channel_id),
     targetName: String(row.target_name),
-    ...(avatar ? { targetAvatarUrl: avatar } : {}), createdAt: iso(row.created_at)!,
+    ...(harness ? { targetHarness: harness } : {}), createdAt: iso(row.created_at)!,
     ...(activity && row.run_created_at ? { runCreatedAt: iso(row.run_created_at) } : {}),
     ...(rebornState ? { reborn: { state: rebornState, stopRequired: row.reborn_stop_required === true,
       ...(rebornState === "failed" ? { errorCode } : {}), updatedAt: iso(row.reborn_updated_at)! } } : {}),
@@ -305,7 +306,7 @@ function routingDecisionView(value: unknown): SerializedAgentLaunch["routingDeci
 }
 
 function serializeAgentLaunch(row: QueryResultRow): SerializedAgentLaunch {
-  const targetAvatarUrl = invocationTargetAvatar(row);
+  const targetHarness = invocationTargetHarness(row);
   const errorCode = publicLaunchFailureCode(row.error_code, row.error_message);
   const errorStage = publicRuntimeErrorCode(row.error_stage);
   const errorMessage = row.state === "failed" || row.error_message ? publicLaunchFailureMessage(row.error_code, row.error_message) : undefined;
@@ -319,7 +320,7 @@ function serializeAgentLaunch(row: QueryResultRow): SerializedAgentLaunch {
     channelId: String(row.channel_id),
     sourceMessageId: String(row.trigger_id),
     ...(row.target_name ? { targetName: String(row.target_name) } : {}),
-    ...(targetAvatarUrl ? { targetAvatarUrl } : {}),
+    ...(targetHarness ? { targetHarness } : {}),
     launchKind: String(row.launch_kind),
     ...(sourceMention ? { sourceMention } : {}),
     ...(routingDecision ? { routingDecision } : {}),
@@ -1075,13 +1076,13 @@ export class PostgresRuntimeRepository {
       selection: { kind: runId ? "run" : input.sourceMessageIds ? "messages" : "recent-messages",
         limit: input.sourceMessageIds ? selection.sourceMessageIds.length : limit, hasOlderMessages: selection.hasOlderMessages }, ...(selection.run ? { run: selection.run } : {}),
       launches: page.launches.filter((launch) => !runId || launch.runId === runId).map((launch) => {
-        const { sourceMention: _address, errorMessage: _freeformError, targetAvatarUrl: _avatar,
+        const { sourceMention: _address, errorMessage: _freeformError, targetHarness: _face,
           errorCode, errorStage, ...safe } = launch;
         const code = (value: unknown): value is string => typeof value === "string" && /^[a-z][a-z0-9_.-]{0,79}$/u.test(value);
         return { ...safe, ...(code(errorCode) ? { errorCode } : {}), ...(code(errorStage) ? { errorStage } : {}) };
       }),
       rejections: runId ? [] : (page.rejections ?? []).map(({ sourceMention: _address, ...safe }) => safe),
-      continuations: (page.continuations ?? []).map(({ sourceMention: _address, targetAvatarUrl: _avatar, ...safe }) => safe),
+      continuations: (page.continuations ?? []).map(({ sourceMention: _address, targetHarness: _face, ...safe }) => safe),
       targets: (page.targets ?? []).map(({ sourceBodyHash: _hash, sourceMention: _mention, ...safe }) => safe),
       executions: (page.executions ?? []).map(({ sourceBodyHash: _hash, ...safe }) => safe),
       nextCursor: page.nextCursor ?? null };

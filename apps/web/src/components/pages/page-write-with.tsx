@@ -2,17 +2,17 @@
 
 import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
-import { avatarInitials } from "@/components/dashboard/completion-option-button";
-import { IdentityAvatar } from "@/components/dashboard/identity-avatar";
+import type { FaceOf } from "@xmatrix/protocol";
+import { Face } from "@/components/dashboard/face";
 import { listenForOverlayDismissal } from "@/components/dashboard/use-overlay-dismiss";
 import { actionClass } from "@/components/ui/action-tone";
 import { LiquidGlassCard } from "@/components/ui/material-surfaces";
 
-/** An Agent the reader can co-write the page with: a runtime of the Space, by its own face. */
-export interface WriteAgent { harness: string; avatarUrl?: string }
+/** An Agent the reader can co-write the page with: a runtime of the Space, whose face is its vendor's. */
+export interface WriteAgent { harness: string }
 
-/** An Agent already on the page: who, and what it is doing. */
-export interface WritingAgent { name: string; avatarUrl?: string; doing: string }
+/** An Agent already on the page: who, its face, and what it is doing. */
+export interface WritingAgent { name: string; face: FaceOf; doing: string }
 
 /**
  * Co-writing a page with an Agent (pages-live-document.md §3.2). The reader types only in the page:
@@ -46,8 +46,7 @@ export function PageWriteWith({ agents, working, onStart, onOpenConversation, on
         className="rounded-[28px] px-3 pb-3 pt-2.5 text-foreground">
         {working ? (
           <div className="flex items-center gap-3">
-            <IdentityAvatar kind="agent" label={working.name} imageUrl={working.avatarUrl} size="md" shape="circle" glass={false}
-              initials={working.avatarUrl ? avatarInitials(working.name) : undefined} className="pointer-events-none rounded-full" />
+            <Face of={working.face} size="md" shape="circle" glass={false} className="pointer-events-none rounded-full" />
             <div className="min-w-0 flex-1 leading-tight">
               <p className="truncate text-[15px] font-semibold">{working.name}</p>
               <p className="truncate text-[13px] text-muted-foreground">{working.doing}</p>
@@ -83,7 +82,7 @@ export function PageWriteWith({ agents, working, onStart, onOpenConversation, on
               {agents.map((agent) => (
                 <button key={agent.harness} type="button" onClick={() => onStart(agent.harness)}
                   className="flex w-[4.5rem] shrink-0 flex-col items-center gap-1.5 rounded-[20px] py-1.5 active:bg-foreground/[0.06]">
-                  <IdentityAvatar kind="agent" label={agent.harness} imageUrl={agent.avatarUrl} size="lg" shape="circle"
+                  <Face of={{ kind: "agent", name: agent.harness, harness: agent.harness }} size="lg" shape="circle"
                     glass={false} className="pointer-events-none rounded-full" />
                   <span className="max-w-full truncate text-[13px] font-medium">{agent.harness}</span>
                 </button>

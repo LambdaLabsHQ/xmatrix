@@ -17,8 +17,7 @@ import {
   channelReferenceToken, gitHubFileReferenceFrom, gitHubFileReferenceHref, pageBlocks, pageReferenceToken,
   type PageSummary, type SerializedAutomation,
 } from "@xmatrix/protocol";
-import { avatarInitials } from "@/components/dashboard/completion-option-button";
-import { IdentityAvatar } from "@/components/dashboard/identity-avatar";
+import { Face } from "@/components/dashboard/face";
 import type { ChannelReference } from "@/components/dashboard/message-reference-catalog";
 import {
   channelReferenceCandidates, pageReferenceCandidates, sectionReferenceCandidates, type ReferenceCandidate,
@@ -31,6 +30,7 @@ import type { ReadGitHubFile } from "./page-github-file-embeds";
 import type { LocalMedia, PageMediaUrl, UploadPageMedia } from "./page-media";
 import { referencesKey, type PageReferenceTargets } from "./page-reference-chips";
 import { PageCommentBox } from "./page-comment-box";
+import { SectionAgentsInPage } from "./page-section-agents";
 import type { PageSessionChanges } from "./page-session-changes";
 import {
   addColumnAfter, addRowAfter, anchorOffsets, blockKind, caretBlockAnchor, deleteColumn, deleteRow, deleteTable, discussionsKey,
@@ -199,8 +199,8 @@ function triggerItems(trigger: PageTrigger, completion: PageCompletion | undefin
     .sort((a, b) => Number(!a.harness.toLowerCase().startsWith(wanted)) - Number(!b.harness.toLowerCase().startsWith(wanted)))
     .map((agent) => ({
       key: agent.harness, label: agent.harness, hint: "Agent",
-      icon: <IdentityAvatar kind="agent" label={agent.harness} imageUrl={agent.avatarUrl} size="xs" shape="circle" glass={false}
-        initials={agent.avatarUrl ? avatarInitials(agent.harness) : undefined} className="pointer-events-none rounded-full" />,
+      icon: <Face of={{ kind: "agent", name: agent.harness, harness: agent.harness }} size="xs" shape="circle" glass={false}
+        className="pointer-events-none rounded-full" />,
       // The mention stays in the page, and calls the Agent to co-write from there.
       run: (view) => {
         const blockId = pageDocBlockAt(view.state.doc, trigger.from);
@@ -784,6 +784,7 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
 
   return (
     <div ref={frame} className="relative" data-testid="page-editor">
+      <SectionAgentsInPage />
       {/* Surfaces are slips of the page's paper (PaperPopover); the wrappers place them. */}
       {canEdit && toolbar?.inTable && (
         <div className="sticky top-0 z-10 mb-2 w-fit">

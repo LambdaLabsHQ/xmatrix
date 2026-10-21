@@ -18,11 +18,10 @@
 import { listenForOverlayDismissal } from "./use-overlay-dismiss";
 import { createContext, Fragment, memo, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Check } from "lucide-react";
-import { LoadingImage } from "@/components/dashboard/content-skeleton";
 
 import type { CommandNotice } from "./command-notices";
 import { parseAgentStopInvocation, type AgentControlInvocation, type ChannelMentionReadStatus, type ConnectorInvocation, type SerializedAgentLaunch, type SerializedAgentInvocationRejection, type SerializedAgentStop } from "@xmatrix/protocol";
-import { avatarImageSrc } from "./identity-avatar";
+import { MentionChipFace } from "./mention-chip-face";
 import {
   mentionChipLabel,
   mentionReadResolution,
@@ -352,7 +351,6 @@ export function MentionReadChip({
     channelScope?.currentUserIdentityId &&
     channelScope.currentUserIdentityId === target.subjectId
   );
-  const imageSrc = avatarImageSrc(target.avatarUrl);
   const label = mentionChipLabel(text, target.label, token);
   // The existing unread receipt is the delivery indicator; it only adds why
   // this one will not be read until the machine comes back.
@@ -379,20 +377,7 @@ export function MentionReadChip({
     >
       <span className="app-mention-chip-avatar">
         <span className="app-mention-chip-avatar-face" aria-hidden="true">
-          {imageSrc ? (
-            <LoadingImage
-              src={imageSrc}
-              alt=""
-              announce={false}
-              retain
-              referrerPolicy="no-referrer"
-              draggable={false}
-              className="size-full object-cover"
-              fallback={<span className="app-mention-chip-initial">{mentionInitial(label)}</span>}
-            />
-          ) : (
-            <span className="app-mention-chip-initial">{mentionInitial(label)}</span>
-          )}
+          <MentionChipFace of={target.face} />
         </span>
         <span ref={receiptRef} className="app-mention-chip-receipt">
           <button
@@ -442,9 +427,7 @@ function ConnectorCommandChip({ invocation, text }: { invocation: ConnectorInvoc
     <span className="app-mention-chip app-connector-command-chip" data-connector={invocation.provider}>
       <span className="app-mention-chip-avatar" aria-hidden="true">
         <span className="app-mention-chip-avatar-face">
-          <LoadingImage src={`/app-connectors/${invocation.provider}.svg`} alt="" announce={false} retain draggable={false}
-            className="size-full object-contain"
-            fallback={<span className="app-mention-chip-initial">{mentionInitial(invocation.provider)}</span>} />
+          <MentionChipFace of={{ kind: "app", id: invocation.provider, name: invocation.provider }} contain />
         </span>
       </span>
       <span className="app-mention-chip-label">
@@ -463,6 +446,3 @@ export function mentionReadStateCopy(state: "read" | "unread" | "unknown", machi
   return "Unknown";
 }
 
-function mentionInitial(label: string): string {
-  return Array.from(label.trim())[0]?.toUpperCase() || "@";
-}
