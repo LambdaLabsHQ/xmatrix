@@ -4,7 +4,7 @@ import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { pageAuthorColor, pageAuthorLabel, pageLineDiff, type PageLineDiff } from "@xmatrix/protocol";
 import type { PageDocBlock } from "@xmatrix/protocol/page-document";
-import { ArrowDown, ArrowLeft, ArrowUp, ChevronDown, ChevronUp } from "lucide-react";
+import { ArrowLeft, ChevronDown, ChevronUp } from "lucide-react";
 import {
   CenteredDialogShell, DialogButton, DialogInset, DialogPanelFooter, DialogPanelHeader,
 } from "@/components/dashboard/centered-dialog-shell";
@@ -14,7 +14,6 @@ import { COUNT_CHIP_MATERIAL_CLASS } from "@/components/dashboard/workspace-shel
 import { formatRelativeAge } from "@/components/dashboard/time-display";
 import { Button } from "@/components/ui/button";
 import { LiquidGlassPill } from "@/components/ui/material-surfaces";
-import { actionClass } from "@/components/ui/action-tone";
 import { noticeClass, statusInkClass } from "@/components/ui/status-tone";
 import { useAuth } from "@/lib/auth-context";
 import { xmatrixQueryKeys } from "@/lib/query/query-keys";
@@ -89,58 +88,6 @@ export function PresenceStack({ people, onFollow }: { people: PresentPerson[]; o
       )}
     </div>
   );
-}
-
-/** Someone out of view, and which way to scroll to them. */
-export interface OffscreenPerson { person: PresentPerson; distance: number }
-
-/**
- * Who is working above or below what this person can see (§3.2), at the top
- * and bottom of the page's right edge, where the other marks of people at work
- * stand; clicking scrolls to the nearest of them.
- */
-export function PageOffscreenPeople({ above, below, onJump }: {
-  above: OffscreenPerson[]; below: OffscreenPerson[]; onJump: (person: PresentPerson) => void;
-}) {
-  const edge = (side: "above" | "below", entries: OffscreenPerson[]) => {
-    if (entries.length === 0) return null;
-    const sorted = [...entries].sort((a, b) => a.distance - b.distance);
-    const people = sorted.map((entry) => entry.person);
-    const nearest = people[0]!;
-    const verb = nearest.editing ? "editing" : "reading";
-    const others = people.length - 1;
-    // One person keeps the verb ("Ada is reading above"). Several drop it:
-    // they are not all doing the nearest person's thing, and "and 1 other above"
-    // does not read as a sentence.
-    const label = people.length === 1 ? `${nearest.name} is ${verb} ${side}`
-      : `${nearest.name} and ${others} ${others === 1 ? "other" : "others"} are ${side}`;
-    const Arrow = side === "above" ? ArrowUp : ArrowDown;
-    return (
-      <div className={cn("page-offscreen-edge pointer-events-none absolute inset-x-0 z-20 flex justify-end pr-6 lg:pr-12",
-        side === "above" ? "top-2" : "bottom-3")}>
-        <button type="button" onClick={() => onJump(nearest)} data-testid={`page-people-${side}`}
-          title={people.map((person) => `${person.name} · ${person.detail}`).join("\n")}
-          className={actionClass({ variant: "secondary", size: "sm" },
-            "page-offscreen-people pointer-events-auto max-w-[min(22rem,90%)] rounded-full")}>
-          <span className="flex -space-x-1">
-            {people.slice(0, 3).map((person) => (
-              <span key={person.key} className="inline-flex rounded-full"
-                style={{ boxShadow: `0 0 0 1.5px var(--background), 0 0 0 3px ${person.color}` }}>
-                <IdentityAvatar kind={person.agent ? "agent" : "human"} label={person.name} imageUrl={person.avatarUrl}
-                  initials={!person.agent || person.avatarUrl ? avatarInitials(person.name) : undefined}
-                  size="xs" shape="circle" className="rounded-full" />
-              </span>
-            ))}
-          </span>
-          {nearest.editing && <span className="page-offscreen-typing size-1.5 shrink-0 rounded-full"
-            style={{ backgroundColor: nearest.color }} aria-hidden="true" />}
-          <span className="truncate">{label}</span>
-          <Arrow className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
-        </button>
-      </div>
-    );
-  };
-  return <>{edge("above", above)}{edge("below", below)}</>;
 }
 
 /** Room a face needs to carry its name beside it. */

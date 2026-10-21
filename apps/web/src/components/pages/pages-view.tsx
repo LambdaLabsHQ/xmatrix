@@ -36,9 +36,9 @@ import type {
 } from "./page-editor";
 import { PageAttached, type PageScheduleInput } from "./page-attached";
 import {
-  ConversationList, DeletePageDialog, PageChangeMark, PageDialog, PageHistory, PagePens, PageOffscreenPeople, PageScrollMarks, PresenceStack, ShareDialog, type OffscreenPerson, type PagePen, type PresentPerson, type PageScrollMark,
+  ConversationList, DeletePageDialog, PageChangeMark, PageDialog, PageHistory, PagePens, PageScrollMarks, PresenceStack, ShareDialog, type PagePen, type PresentPerson, type PageScrollMark,
 } from "./page-chrome";
-import { PageMargin, type MarginWriter } from "./page-margin";
+import { PageMargin, PageOffscreenCard, type MarginWriter, type OffscreenEntry } from "./page-margin";
 import { PagePhoneDock } from "./page-phone-dock";
 import { PageReaderChangeGutter, PageReaderChangeMark } from "./page-reader-changes-bar";
 import type { SuggestionsReport } from "./page-suggestions";
@@ -1326,19 +1326,27 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     onOpenConversation(conversationId);
   };
   const attachSection = dialog && typeof dialog === "object" && dialog.kind === "attach" ? dialog.blockId : null;
-  // Where an anchor is in the article's scrolled content, or null before the page is laid out.
-  const contentTop = (anchor: string): number | null => {
+  // Where the document column, and the margin level with it, starts in the article's scrolled content.
+  const columnTop = (): number | null => {
     const article = articleElement.current;
     const column = docColumn.current;
+    if (!article || !column) return null;
+    return column.getBoundingClientRect().top - article.getBoundingClientRect().top + article.scrollTop;
+  };
+  // Where an anchor is in the article's scrolled content, or null before the page is laid out.
+  const contentTop = (anchor: string): number | null => {
+    const base = columnTop();
     const top = anchorTops.get(anchor);
-    if (!article || !column || top === undefined) return null;
-    return column.getBoundingClientRect().top - article.getBoundingClientRect().top + article.scrollTop + top;
+    return base === null || top === undefined ? null : base + top;
+  };
+  const scrollToContent = (top: number) => {
+    const article = articleElement.current;
+    article?.scrollTo({ top: Math.max(0, top - article.clientHeight / 3), behavior: "smooth" });
   };
   const jumpTo = (person: PresentPerson) => {
     const top = contentTop(person.anchor);
-    const article = articleElement.current;
-    if (top === null || !article) return followBlock(person.blockId);
-    article.scrollTo({ top: Math.max(0, top - article.clientHeight / 3), behavior: "smooth" });
+    if (top === null || !articleElement.current) return followBlock(person.blockId);
+    scrollToContent(top);
   };
   // Who is out of view above or below, at the page's edges (§3.2). A line of room keeps
   // someone on the very edge counted as seen.
@@ -1376,7 +1384,6 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     channel: person.conversationId ? conversationName(person.conversationId) : null,
   })) : [];
   const edgePens = writersInMargin ? [] : pens;
-  const penned = new Set(edgePens.map((pen) => pen.person.key));
   // Room beside the text column for a face to carry its name: from the column's edge to the article's.
   const penRoom = ((): number => {
     const article = articleElement.current;
@@ -1425,16 +1432,26 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     };
   };
   const tappedControls = tapped ? agentControls(tapped) : null;
-  const offscreen = ((): { above: OffscreenPerson[]; below: OffscreenPerson[] } => {
-    const above: OffscreenPerson[] = [];
-    const below: OffscreenPerson[] = [];
-    if (mode !== "page" || !drawn || !viewport.height) return { above, below };
-    for (const person of people) {
-      if (penned.has(person.key)) continue;
+  // People editing the page, by their caret's line: with the margin's cards, who is told at its edges when out of
+  // view (§3.2). Someone only reading is in the presence stack; an Agent is its pen or its pill in the margin.
+  const editors = mode === "page" && drawn ? people.flatMap((person) => {
+    const top = anchorTops.get(person.anchor);
+    return !person.agent && person.editing && !person.idle && top !== undefined ? [{ person, top }] : [];
+  }) : [];
+  const marginView = ((): { top: number; height: number } | null => {
+    const base = columnTop();
+    return marginOn && drawn && viewport.height && base !== null ? { top: viewport.top - base, height: viewport.height } : null;
+  })();
+  // Without a margin, the same card stands at the page's right edge, for the people editing out of view.
+  const edgeOffscreen = ((): { above: OffscreenEntry[]; below: OffscreenEntry[] } => {
+    const above: OffscreenEntry[] = [];
+    const below: OffscreenEntry[] = [];
+    if (marginOn || mode !== "page" || !drawn || !viewport.height) return { above, below };
+    for (const { person } of editors) {
       const top = contentTop(person.anchor);
       if (top === null) continue;
-      if (top < viewport.top + 8) above.push({ person, distance: viewport.top - top });
-      else if (top > viewport.top + viewport.height - 24) below.push({ person, distance: top - viewport.top - viewport.height });
+      if (top < viewport.top + 8) above.push({ key: person.key, top, person });
+      else if (top > viewport.top + viewport.height - 24) below.push({ key: person.key, top, person });
     }
     return { above, below };
   })();
@@ -1547,7 +1564,12 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
         )}
         <div className="relative flex min-h-0 min-w-0 flex-1">
           <PageScrollMarks marks={scrollMarks} />
-          <PageOffscreenPeople above={offscreen.above} below={offscreen.below} onJump={jumpTo} />
+          {(["above", "below"] as const).map((side) => edgeOffscreen[side].length > 0 && (
+            <div key={side} className={cn("pointer-events-none absolute right-6 z-20 w-[min(18rem,calc(100%-3rem))] lg:right-12",
+              side === "above" ? "top-2" : "bottom-3")}>
+              <PageOffscreenCard side={side} entries={edgeOffscreen[side]} onJump={scrollToContent} />
+            </div>
+          ))}
           <article ref={measureArticle} className={phone ? "app-mobile-page-article min-h-0 min-w-0 flex-1 overflow-y-auto px-6"
             : "app-page-article min-h-0 min-w-0 flex-1 overflow-y-auto px-6 pt-4 pb-6 lg:px-12"}>
             <div className={column}>
@@ -1650,7 +1672,8 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
                     <aside className="w-80 shrink-0">
                       {(drawn || openInMargin || (document.data && links.data)) && <PageMargin conversations={marginCards}
                         tops={drawn ? anchorTops : previewTops} focusedId={focused} canResolve={canEdit}
-                        writers={marginWriters}
+                        writers={marginWriters} editors={editors} view={marginView}
+                        onJump={(top) => { const base = columnTop(); if (base !== null) scrollToContent(base + top); }}
                         onWriter={(writer) => setDialog({ kind: "agent", key: writer.key })}
                         writerActions={(person) => {
                           const controls = agentControls(person);

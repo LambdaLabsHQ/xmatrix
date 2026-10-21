@@ -3,7 +3,7 @@
 import { AnimatedIcon } from "@/components/ui/animated-icon";
 
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import { Check, Maximize2, Sparkles, X } from "lucide-react";
+import { ArrowDown, ArrowUp, Check, Maximize2, PenLine, Sparkles, X } from "lucide-react";
 import { IdentityAvatar } from "@/components/dashboard/identity-avatar";
 import { formatRelativeAge } from "@/components/dashboard/time-display";
 import { avatarInitials } from "@/components/dashboard/completion-option-button";
@@ -16,6 +16,8 @@ import { discussionTitle } from "@/components/dashboard/selection-discussion";
 
 /** A card's height before it is measured. */
 const ESTIMATED_CARD_HEIGHT = 76;
+/** Room the card at the margin's top or bottom edge covers: what is under it counts as out of view. */
+const EDGE_ROOM = 48;
 /** An Agent's pill and the line under it, before they are measured. */
 const ESTIMATED_WRITER_HEIGHT = 56;
 /** How far above its line an Agent's pill stands, so the pill is level with the line, as at the right edge. */
@@ -93,6 +95,16 @@ function WorkingLine({ agents, className }: { agents: MarginConversation["agents
   );
 }
 
+function UnreadBadge({ unread, className }: { unread: number; className?: string }) {
+  if (unread <= 0) return null;
+  return (
+    <span className={cn("shrink-0 rounded-full bg-primary px-1.5 text-[10px] font-bold leading-4 text-primary-foreground", className)}
+      aria-label={`${unread} unread`}>
+      {unread}
+    </span>
+  );
+}
+
 function ConversationCard({ conversation, focused, canResolve, onOpen, onResolve, onFocus }: {
   conversation: MarginConversation;
   focused: boolean;
@@ -112,12 +124,7 @@ function ConversationCard({ conversation, focused, canResolve, onOpen, onResolve
           focused && "page-margin-card-focused")}>
         <span className="flex items-start gap-2 pr-5">
           <span className="min-w-0 flex-1"><CardContext conversation={conversation} /></span>
-          {unread > 0 && (
-            <span className="mt-0.5 shrink-0 rounded-full bg-primary px-1.5 text-[10px] font-bold leading-4 text-primary-foreground"
-              aria-label={`${unread} unread`}>
-              {unread}
-            </span>
-          )}
+          <UnreadBadge unread={unread} className="mt-0.5" />
         </span>
         {lastMessage ? (
           <span className="mt-2 flex gap-2">
@@ -292,6 +299,68 @@ function WriterUnit({ writer, open, actions, onPress, children }: {
   );
 }
 
+/** Something beside the page that is out of view: a conversation's card, an Agent at work, or someone editing. */
+export interface OffscreenEntry {
+  key: string;
+  /** Where it is, in the coordinates the card's jump takes. */
+  top: number;
+  conversation?: MarginConversation | null;
+  person?: PresentPerson;
+}
+
+/**
+ * What is beside the page above or below what the reader sees (§3.2, §4.4), told as the margin tells it: the
+ * conversations out of view by their comment icon, and who works or edits there as a card's working line says
+ * it. Only what the margin draws and who is editing count; someone only reading, or an Agent at rest, is not
+ * work to scroll to. A press goes to the nearest.
+ */
+export function PageOffscreenCard({ side, entries, onJump }: {
+  side: "above" | "below"; entries: readonly OffscreenEntry[]; onJump: (top: number) => void;
+}) {
+  if (entries.length === 0) return null;
+  const nearest = entries.reduce((best, entry) => (side === "above" ? entry.top > best.top : entry.top < best.top) ? entry : best);
+  const conversations = [...new Map(entries.flatMap((entry) => entry.conversation
+    ? [[entry.conversation.conversationId, entry.conversation] as const] : [])).values()];
+  const unread = conversations.reduce((sum, conversation) => sum + conversation.unread, 0);
+  const working = [...new Set([
+    ...entries.flatMap((entry) => entry.person?.agent ? [entry.person.name] : []),
+    ...conversations.flatMap((conversation) => conversation.agents.filter((agent) => agent.status === "busy")
+      .map((agent) => agent.name)),
+  ])];
+  const editing = [...new Set(entries.flatMap((entry) => entry.person && !entry.person.agent ? [entry.person.name] : []))];
+  const said = [
+    conversations.length > 0 ? `${conversations.length} ${conversations.length === 1 ? "conversation" : "conversations"}` : null,
+    working.length > 0 ? `${working.join(", ")} working` : null,
+    editing.length > 0 ? `${editing.join(", ")} editing` : null,
+  ].filter(Boolean).join(", ");
+  const Arrow = side === "above" ? ArrowUp : ArrowDown;
+  return (
+    <button type="button" onClick={() => onJump(nearest.top)} data-testid={`page-offscreen-${side}`}
+      aria-label={`${said} ${side}`}
+      className="page-margin-card page-margin-edge pointer-events-auto flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left">
+      <span className="flex min-w-0 flex-1 flex-col gap-1">
+        {conversations.length > 0 && (
+          <span className="flex min-w-0 items-center gap-2">
+            <span className="grid h-5 w-6 shrink-0 place-items-center"><CommentIcon /></span>
+            <span className="truncate text-[13px] font-semibold leading-5 text-foreground">
+              {conversations.length} {conversations.length === 1 ? "conversation" : "conversations"} {side}
+            </span>
+            <UnreadBadge unread={unread} />
+          </span>
+        )}
+        <WorkingLine agents={working.map((name) => ({ instanceId: name, name, status: "busy" as const }))} />
+        {editing.length > 0 && (
+          <span className="flex min-w-0 items-center gap-1.5 text-[12px] text-muted-foreground">
+            <PenLine className="size-3 shrink-0 text-primary" aria-hidden="true" />
+            <span className="truncate">{editing.join(", ")} · Editing</span>
+          </span>
+        )}
+      </span>
+      <Arrow className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+    </button>
+  );
+}
+
 /**
  * The page's margin (pages-live-document.md §4.4): each live conversation
  * beside what it is about, as comments are in Google Docs. `tops` are the
@@ -299,11 +368,15 @@ function WriterUnit({ writer, open, actions, onPress, children }: {
  * The open conversation expands in its card's place, level with its anchor,
  * and the other cards make room above and below it.
  */
-export function PageMargin({ conversations, writers = [], tops, focusedId, openId = null, renderOpen, canResolve, onOpen,
-  onResolve, onExpand, onClose, onFocus, onWriter, writerActions }: {
+export function PageMargin({ conversations, writers = [], editors = [], view = null, tops, focusedId, openId = null, renderOpen,
+  canResolve, onOpen, onResolve, onExpand, onClose, onFocus, onJump, onWriter, writerActions }: {
   conversations: MarginConversation[];
   /** The Agents at work on the page. Each stands beside its line, and its channel's card is not drawn again. */
   writers?: readonly MarginWriter[];
+  /** People editing the page, at their caret's line: out of view, they are told at the margin's edges with what it holds. */
+  editors?: ReadonlyArray<{ person: PresentPerson; top: number }>;
+  /** The part of the margin in view, in its own coordinates; null before the page is laid out. */
+  view?: { top: number; height: number } | null;
   tops: ReadonlyMap<string, number>;
   focusedId: string | null;
   /** The conversation open in the margin, and the conversation itself to show there. */
@@ -317,6 +390,8 @@ export function PageMargin({ conversations, writers = [], tops, focusedId, openI
   onClose?: () => void;
   /** The card being read, so its passage is marked in the text. */
   onFocus: (conversationId: string | null) => void;
+  /** Scrolls the page to a place in the margin, from the card at its edge. */
+  onJump?: (top: number) => void;
   /** An Agent pressed whose channel the page cannot open beside it. */
   onWriter?: (writer: MarginWriter) => void;
   /** What may be done to an Agent whose channel is open. */
@@ -389,35 +464,72 @@ export function PageMargin({ conversations, writers = [], tops, focusedId, openI
     </div>
   );
 
+  // What the margin holds out of view, at its top and bottom edges, by where each card and pill is drawn.
+  const offscreen = ((): { above: OffscreenEntry[]; below: OffscreenEntry[] } => {
+    const above: OffscreenEntry[] = [];
+    const below: OffscreenEntry[] = [];
+    if (!view || !onJump) return { above, below };
+    const sort = (entry: OffscreenEntry, height: number) => {
+      if (entry.top + height < view.top + EDGE_ROOM / 2) above.push(entry);
+      else if (entry.top > view.top + view.height - EDGE_ROOM) below.push(entry);
+    };
+    for (const item of items) {
+      const top = positions.get(item.id) ?? item.top;
+      const height = heights.get(item.id) ?? item.estimate;
+      const card = cards.find((conversation) => conversation.conversationId === item.id);
+      const writer = card ? null : writers.find((entry) => writerId(entry) === item.id);
+      sort(card ? { key: item.id, top, conversation: card }
+        : { key: item.id, top, person: writer!.person,
+          conversation: atPassage(writer!) ? null : writer!.conversation }, height);
+    }
+    for (const { person, top } of editors) sort({ key: person.key, top, person }, 0);
+    return { above, below };
+  })();
+
   return (
-    <div className="relative" style={{ minHeight: bottom }} data-testid="page-margin" aria-label="Conversations on this page">
-      {cards.map((card) => place(card.conversationId, card.conversationId === openId && renderOpen ? openCard(card, false) : (
-        <ConversationCard conversation={card} focused={card.conversationId === focusedId} canResolve={canResolve}
-          onOpen={() => onOpen(card.conversationId)}
-          onResolve={() => card.linkId && onResolve(card.linkId)}
-          onFocus={(focused) => onFocus(focused ? card.conversationId : null)} />
-      )))}
-      {writers.map((writer) => {
-        const conversation = writer.conversation;
-        const open = Boolean(conversation && writer === holder && renderOpen);
-        if (conversation && atPassage(writer)) {
-          // Its discussion's card says the channel at the passage; the pill opens it there.
+    <>
+      {view && onJump && (
+        // Held in view while the page scrolls under it, the height of what is seen, so its cards stand at the edges.
+        <div className="pointer-events-none sticky top-0 z-20 h-0">
+          <div className="relative" style={{ height: view.height }}>
+            {offscreen.above.length > 0 && (
+              <div className="absolute inset-x-0 top-2"><PageOffscreenCard side="above" entries={offscreen.above} onJump={onJump} /></div>
+            )}
+            {offscreen.below.length > 0 && (
+              <div className="absolute inset-x-0 bottom-3"><PageOffscreenCard side="below" entries={offscreen.below} onJump={onJump} /></div>
+            )}
+          </div>
+        </div>
+      )}
+      <div className="relative" style={{ minHeight: bottom }} data-testid="page-margin" aria-label="Conversations on this page">
+        {cards.map((card) => place(card.conversationId, card.conversationId === openId && renderOpen ? openCard(card, false) : (
+          <ConversationCard conversation={card} focused={card.conversationId === focusedId} canResolve={canResolve}
+            onOpen={() => onOpen(card.conversationId)}
+            onResolve={() => card.linkId && onResolve(card.linkId)}
+            onFocus={(focused) => onFocus(focused ? card.conversationId : null)} />
+        )))}
+        {writers.map((writer) => {
+          const conversation = writer.conversation;
+          const open = Boolean(conversation && writer === holder && renderOpen);
+          if (conversation && atPassage(writer)) {
+            // Its discussion's card says the channel at the passage; the pill opens it there.
+            return place(writerId(writer), (
+              <WriterUnit writer={{ ...writer, conversation: null, channel: null }} open={false} actions={null}
+                onPress={() => conversation.conversationId === openId ? onClose?.() : onOpen(conversation.conversationId)} />
+            ));
+          }
           return place(writerId(writer), (
-            <WriterUnit writer={{ ...writer, conversation: null, channel: null }} open={false} actions={null}
-              onPress={() => conversation.conversationId === openId ? onClose?.() : onOpen(conversation.conversationId)} />
+            <WriterUnit writer={writer} open={open} actions={writerActions?.(writer.person) ?? null}
+              onPress={() => {
+                if (open) onClose?.();
+                else if (conversation) onOpen(conversation.conversationId);
+                else onWriter?.(writer);
+              }}>
+              {open && conversation && <div className="mt-2">{openCard(conversation, true)}</div>}
+            </WriterUnit>
           ));
-        }
-        return place(writerId(writer), (
-          <WriterUnit writer={writer} open={open} actions={writerActions?.(writer.person) ?? null}
-            onPress={() => {
-              if (open) onClose?.();
-              else if (conversation) onOpen(conversation.conversationId);
-              else onWriter?.(writer);
-            }}>
-            {open && conversation && <div className="mt-2">{openCard(conversation, true)}</div>}
-          </WriterUnit>
-        ));
-      })}
-    </div>
+        })}
+      </div>
+    </>
   );
 }
