@@ -2,6 +2,7 @@ import type { QueryResultRow } from "pg";
 import type { AuthorityDatabase, DatabaseTransaction } from "./contracts.js";
 import { AppControlError, appRequestFields } from "./app-control.js";
 import { lockSentryInstallation, sentryInstallationKey } from "./sentry-installation-lifecycle.js";
+import { retryBeforeCommit } from "./transaction-recovery.js";
 
 /** Narrow provider references only; no title, URL, actor, exception, request or token. */
 export interface SentryEventIdentity {
@@ -132,7 +133,9 @@ export class PostgresSentryEventRepository {
   async claim(input: { requestId: string; appClientId: string; appUuid: string }): Promise<SentryEventJob[]> {
     const values = sentryInstallationKey({ appClientId: input.appClientId, eventScopeId: input.appUuid,
       installationId: "00000000-0000-0000-0000-000000000000" }).slice(0, 2);
-    return this.database.transaction({ requestId: request(input), operation: "app.sentry-event.claim" }, async tx => {
+    // Claim/cleanup has no effect outside this transaction. A lost pre-COMMIT
+    // connection gets one fresh session; unknown commits retain lease recovery.
+    return retryBeforeCommit(() => this.database.transaction({ requestId: request(input), operation: "app.sentry-event.claim" }, async tx => {
       await this.lockApp(tx, values);
       await this.cleanup(tx, values);
       const active = await tx.query<QueryResultRow>({ name: "sentry_event_active_leases_v1", text: `SELECT count(*) AS count
@@ -161,7 +164,7 @@ export class PostgresSentryEventRepository {
         installationId: String(row.installation_uuid), deliveryDigest: String(row.delivery_digest),
         connectionId: String(row.connection_id), spaceId: String(row.space_id), grantGeneration: String(row.grant_generation),
         leaseId: String(row.lease_id), identity: validateSentryEventIdentity(row.identity_json as SentryEventIdentity) }));
-    });
+    }));
   }
 
   /** A refresh retains grant_generation; a Human replacement or uninstall cannot revive accepted work. */

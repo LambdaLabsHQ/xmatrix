@@ -118,6 +118,16 @@ mutations and their commit reconciliation remain explicit transactions.
 Channel catalog pages, counts, participant reads and exact-ID resolution use
 the same per-statement recovery, with authorization still checked by their SQL.
 
+Sentry event claiming (including receipt cleanup), Gmail route cleanup and Gmail
+claiming each replay once on a fresh request session after a connection timeout
+or lost response before COMMIT. These transactions have no provider or delivery
+side effects. The failed session closes first; locked candidates use SKIP LOCKED,
+and unfinished work remains eligible on a later pass. A second failure, an open
+connectivity breaker or an answered database rejection still fails the pass.
+Once COMMIT has been sent, connection loss is an unknown result: no immediate
+replay occurs, and the next bounded cleanup pass or expired-lease recovery
+reconciles it. Provider calls and notification delivery are outside the replay.
+
 ## Agent lifecycle locks
 
 Agent message preparation, observed-head and receipt reads, content reads and
