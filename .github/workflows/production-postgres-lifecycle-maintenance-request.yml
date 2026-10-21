@@ -59,7 +59,7 @@ jobs:
             // (latestMaintenanceRelease) -- the highest successful run id of
             // the newest betas, which deploy the Hub, or of every release
             // before the first beta -- or it refuses the tag. A stable ships
-            // an older beta's source to clients only, so it is never chosen.
+            // an older beta's source and never deploys the Hub, so it is never chosen.
             const successful = runs.filter((run) => run.conclusion === "success" && run.event === "workflow_dispatch" &&
               /^xmatrix-v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-beta\.[1-9]\d*)?$/.test(run.head_branch));
             const betas = successful.filter((run) => run.head_branch.includes("-beta."));

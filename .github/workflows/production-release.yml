@@ -60,9 +60,11 @@ jobs:
         with:
           install-deps: "false"
 
-      # The version alone says the channel: X.Y.Z-beta.N is a beta, whose
-      # clients go to dev and TestFlight; X.Y.Z is a stable, which ships clients
-      # only, to their stable channel and App Review.
+      # The version alone says the channel: X.Y.Z-beta.N is a beta, which
+      # deploys the Hub and the beta Web and sends clients to dev and
+      # TestFlight; X.Y.Z is a stable, which deploys the stable Web and sends
+      # clients to their stable channel and App Review. The Hub ships with
+      # every beta.
       - name: Resolve exact immutable release identity
         id: identity
         env:
@@ -76,8 +78,8 @@ jobs:
           channel="$(node --input-type=module -e 'import { releaseChannel } from "./scripts/release-version-order.mjs"; console.log(releaseChannel(process.argv[1]));' "$version")"
           test "$(git rev-parse "$tag^{commit}")" = "$sha"
           test -z "$(git status --porcelain)"
-          if [[ "$channel" == stable && ",$RELEASE_SCOPE," =~ ,(hub|web), ]]; then
-            echo "Stable $tag cannot ship $RELEASE_SCOPE: Hub and Web ship with every beta." >&2
+          if [[ "$channel" == stable && ",$RELEASE_SCOPE," == *,hub,* ]]; then
+            echo "Stable $tag cannot ship $RELEASE_SCOPE: the Hub ships with every beta." >&2
             exit 1
           fi
           echo "deploy_sha=$sha" >> "$GITHUB_OUTPUT"
@@ -85,6 +87,13 @@ jobs:
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "scope=$RELEASE_SCOPE" >> "$GITHUB_OUTPUT"
           echo "channel=$channel" >> "$GITHUB_OUTPUT"
+
+      # Every beta deploys the Hub; the stable Web keeps the last stable's
+      # build. A Hub whose client policy would answer that live Web with 426
+      # never deploys (scripts/stable-web-compatibility.mjs).
+      - name: Require the Hub to keep serving the live stable Web
+        if: contains(format(',{0},', steps.identity.outputs.scope), ',hub,')
+        run: node scripts/stable-web-compatibility.mjs "$(node scripts/deploy-config.mjs origin production web)"
 
       - name: Resolve production version floor
         id: floor
@@ -562,7 +571,9 @@ jobs:
             const fs = require("fs");
             const origin = (component) => require("child_process")
               .execFileSync("node", ["scripts/deploy-config.mjs", "origin", "production", component], { encoding: "utf8" }).trim();
-            const origins = { XMATRIX_HUB_ORIGIN: origin("hub"), XMATRIX_APP_ORIGIN: origin("web") };
+            // A beta deploys the beta Web, a stable the stable one.
+            const web = process.env.RELEASE_CHANNEL === "beta" ? "web-beta" : "web";
+            const origins = { XMATRIX_HUB_ORIGIN: origin("hub"), XMATRIX_APP_ORIGIN: origin(web) };
             const receipt = {
               schemaVersion: 1,
               scope: process.env.RELEASE_SCOPE,
