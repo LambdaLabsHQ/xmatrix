@@ -477,6 +477,10 @@ export class PostgresMachineDaemonPort implements MachineDaemonSocketBackend {
     await this.dependencies.daemonCommand(sessionCommand(session, "unregister"));
   }
 
+  async confirmOnline(session: Readonly<MachineDaemonRuntimeSession>): Promise<void> {
+    await this.dependencies.daemonCommand(sessionCommand(session, "confirm-online"));
+  }
+
   connected(
     session: Readonly<MachineDaemonRuntimeSession>,
     deliver: (message: MachineDaemonServerMessage) => Promise<void>,
@@ -755,7 +759,7 @@ function machineCommand(
 
 function sessionCommand(
   session: Readonly<MachineDaemonRuntimeSession>,
-  action: "report" | "complete" | "unregister" | "renew" | "activation_begin" | "activation_prepare" | "activation_advance",
+  action: "report" | "complete" | "unregister" | "renew" | "confirm-online" | "activation_begin" | "activation_prepare" | "activation_advance",
   message?: ExecutableMessage,
   relayLease?: MachineCommandLease,
 ): Record<string, unknown> {

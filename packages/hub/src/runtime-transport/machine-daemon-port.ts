@@ -147,6 +147,11 @@ export interface MachineDaemonSocketBackend {
     session: Readonly<MachineDaemonRuntimeSession>,
     details: { code?: number; reason?: string; wasClean?: boolean },
   ): void | Promise<void>;
+  /**
+   * A live socket is proof this connection is online. Catalog offline left
+   * behind by a missed wake is corrected without replacing the socket.
+   */
+  confirmOnline?(session: Readonly<MachineDaemonRuntimeSession>): Promise<void>;
 }
 
 export class MachineDaemonAuthorityCapabilityError extends Error {
@@ -185,6 +190,8 @@ export class MachineDaemonRuntimeTransport {
   readonly controller: MachineDaemonConnectionController;
   private readonly sockets: RuntimeSocketState<MachineDaemonRuntimeSession, MachineDaemonServerMessage>;
   private readonly backend: MachineDaemonSocketBackend;
+  /** Next time a live socket may correct a catalog row that says offline. */
+  private readonly catalogHealNotBefore = new Map<string, number>();
 
   constructor(
     backend: MachineDaemonSocketBackend,
@@ -253,9 +260,44 @@ export class MachineDaemonRuntimeTransport {
     const input = decodeMachineDaemonConnectionInput(frame, this.controller.socket.isConnected(ws));
     if (input.ok && input.message.type === "ping") {
       this.controller.handleFrame(ws, frame);
+      this.scheduleCatalogHeal(ws);
       return Promise.resolve();
     }
+    this.scheduleCatalogHeal(ws);
     return this.sockets.ordered.run(ws, () => this.controller.handleFrame(ws, frame));
+  }
+
+  /**
+   * The socket is attached, so this connection is online even if a missed
+   * wake wrote the catalog offline. The pong and the caller's frame are not
+   * delayed on the catalog write. A heal that finishes after the socket is
+   * gone unregisters that same generation, so it cannot resurrect a replaced
+   * connection.
+   */
+  private scheduleCatalogHeal(ws: WebSocket): void {
+    const confirm = this.backend.confirmOnline;
+    if (!confirm) return;
+    const session = this.sockets.get(ws);
+    if (!session || session.activationPhase) return;
+    const key = `${session.principal.ownerUserId}\0${session.principal.machineId}`;
+    const now = Date.now();
+    if ((this.catalogHealNotBefore.get(key) ?? 0) > now) return;
+    this.catalogHealNotBefore.set(key, now + 15_000);
+    void confirm(session).then(() => {
+      if (this.sockets.get(ws) === session) return;
+      return this.backend.disconnected(session, {
+        code: MACHINE_DAEMON_ROUTE_CLOSE.failedDeliver.code,
+        reason: "catalog heal lost its socket",
+        wasClean: false,
+      });
+    }).catch((error: unknown) => {
+      this.catalogHealNotBefore.delete(key);
+      console.warn("Machine Daemon catalog heal failed", {
+        ownerUserId: session.principal.ownerUserId,
+        machineId: session.principal.machineId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
   }
 
   /**
