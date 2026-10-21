@@ -502,13 +502,14 @@ fn materialize_handoff_files(run_key: &str, files: &[(String, Vec<u8>)]) -> Opti
         crate::resume_session_digest(run_key),
         uuid::Uuid::new_v4()
     ));
-    let mut directory = std::fs::DirBuilder::new();
     #[cfg(unix)]
-    {
+    let created = {
         use std::os::unix::fs::DirBuilderExt as _;
-        directory.mode(0o700);
-    }
-    if let Err(error) = directory.create(&root) {
+        std::fs::DirBuilder::new().mode(0o700).create(&root)
+    };
+    #[cfg(not(unix))]
+    let created = std::fs::create_dir(&root);
+    if let Err(error) = created {
         eprintln!("⚠ Could not create handoff directory: {error}");
         return None;
     }
