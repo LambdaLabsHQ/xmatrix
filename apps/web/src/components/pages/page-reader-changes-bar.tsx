@@ -140,11 +140,9 @@ export function PageReaderChangeMark({ column, article, changes, onViewed }: {
   );
 }
 
-/** Buttons on paper are ink, as the comment box's send is: filled for what to do, bare for the way back. */
-const INK_BUTTON = "inline-flex h-7 items-center gap-1 rounded-full bg-foreground px-3 text-[12px] font-medium text-background "
-  + "hover:bg-foreground/85 [&_svg]:size-3.5";
-const TEXT_BUTTON = "inline-flex h-7 items-center rounded-full px-3 text-[12px] font-medium text-muted-foreground "
-  + "hover:bg-foreground/5 hover:text-foreground";
+/** Buttons on paper are words in ink, as a comment's Reply is, never a capsule laid on the card. */
+const INK_BUTTON = "inline-flex items-center gap-1 text-[13px] font-semibold text-foreground hover:underline [&_svg]:size-3.5";
+const TEXT_BUTTON = "inline-flex items-center text-[13px] text-muted-foreground hover:text-foreground hover:underline";
 
 /**
  * The page opens as it is now; what changed since the reader last read it is offered here, for them to open:
@@ -175,7 +173,7 @@ export function PageReaderChangesOffer({ changes, shown, inMargin, onShow, onHid
           </span>
         </span>
       </span>
-      <span className={cn("flex items-center gap-2", inMargin && "pl-6")}>
+      <span className={cn("flex items-center gap-4", inMargin && "pl-6")}>
         {shown ? (
           <>
             <button type="button" onClick={onDone} className={INK_BUTTON}>

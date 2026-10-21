@@ -366,18 +366,76 @@ html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-emp
   margin: 0;
   font-size: 0.75rem;
 }
-/* The comment box is a card of paper (§4.2): the composer inside it writes on that paper, with no glass of its own. */
+/* The comment box is a card of paper (§4.2) and nothing else: the composer inside it is a bare line on that paper,
+   with no pill, glass or field of its own, and its send is an ink arrow, not a button laid on the card. */
+html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-comment-box :is(.app-composer, .app-composer-shell,
+  .app-composer-box, .composer-input-row, .composer-textarea),
 html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-comment-box :is(.app-composer, .app-composer-shell,
-  .app-composer-box:not(.app-agent-work-card)) {
-  border-color: transparent !important;
+  .app-composer-box, .composer-input-row, .composer-textarea) {
+  min-height: 0 !important;
+  border: none !important;
+  border-radius: 0 !important;
   background: transparent !important;
   box-shadow: none !important;
   -webkit-backdrop-filter: none !important;
   backdrop-filter: none !important;
 }
-html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-comment-box .app-composer-box:not(.app-agent-work-card)::before,
-html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-comment-box .app-composer-box:not(.app-agent-work-card)::after {
+/* The capsule's glass is drawn from the liquid tokens; on the paper they draw nothing. */
+.xmatrix-app .page-comment-box,
+.xmatrix-app .page-comment-box .app-composer-box {
+  --app-liquid-surface-bg: transparent !important;
+  --app-liquid-shared-surface-bg: transparent !important;
+  --app-liquid-specular-lead: transparent !important;
+  --app-liquid-specular-trail: transparent !important;
+  --app-liquid-float-shadow: transparent !important;
+  --app-liquid-fill-tint: transparent !important;
+  --app-liquid-rim-layers: 0 0 transparent !important;
+  --app-liquid-edge-meniscus: 0 0 transparent !important;
+  --app-glass-edge: none !important;
+}
+/* The themes pin the capsule's glass with long selectors; the paper outweighs them here. */
+html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app-shell .page-comment-box.page-comment-box
+  .app-composer-box.app-composer-box:not(.app-agent-work-card).app-material-liquid-pill {
+  border: none !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  background-color: transparent !important;
+  box-shadow: none !important;
+  contain: none;
+  --app-liquid-backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-comment-box .app-composer-box::before,
+html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-comment-box .app-composer-box::after {
   display: none !important;
+}
+html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-comment-box .app-composer {
+  padding: 0 !important;
+}
+html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-comment-box .composer-attach {
+  display: none !important;
+}
+html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-comment-box .composer-textarea {
+  padding: 0.5rem 0 !important;
+  font-size: 0.875rem !important;
+  line-height: 1.4 !important;
+}
+html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-comment-box :is(.app-composer-send, .app-composer-send-ready) {
+  width: 1.75rem !important;
+  height: 1.75rem !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+  color: var(--muted-foreground) !important;
+}
+html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-comment-box .app-composer-send-ready {
+  color: var(--foreground) !important;
+}
+html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-comment-box .app-composer-send svg {
+  width: 1rem;
+  height: 1rem;
 }
 .page-section-owed {
   display: inline-flex;

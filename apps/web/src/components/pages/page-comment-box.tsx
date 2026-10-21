@@ -25,7 +25,7 @@ export function PageCommentBox({ text, onText, onSend, onClose, onPassageKey }: 
 }) {
   const field = useRef<HTMLTextAreaElement | null>(null);
   return (
-    <PaperPopover className="page-comment-box p-1" data-testid="page-comment-box" onMouseDown={(event) => {
+    <PaperPopover className="page-comment-box py-1 pr-1.5 pl-3" data-testid="page-comment-box" onMouseDown={(event) => {
       event.stopPropagation();
       // Its buttons act without taking the focus from the text, which would close it first.
       if (event.target !== field.current) event.preventDefault();
