@@ -726,11 +726,16 @@ export function anchorOffsets(view: EditorView, fragment: Y.XmlFragment, frame: 
 }
 
 /** The selection as a discussion anchor: its text, and where it is in the live document. */
-export function selectionAnchor(state: EditorState, fragment: Y.XmlFragment):
-  { quote: string; from: unknown; to: unknown } | null {
+export function selectionAnchor(state: EditorState, fragment: Y.XmlFragment): DiscussionAnchor | null {
   const { from, to, empty } = state.selection;
+  return empty ? null : rangeAnchor(state, fragment, from, to);
+}
+
+type DiscussionAnchor = { quote: string; from: unknown; to: unknown };
+
+function rangeAnchor(state: EditorState, fragment: Y.XmlFragment, from: number, to: number): DiscussionAnchor | null {
   const mapping = yMapping(state);
-  if (empty || !mapping) return null;
+  if (!mapping) return null;
   const quote = state.doc.textBetween(from, to, " ", " ").trim();
   if (!quote) return null;
   return {
@@ -738,6 +743,50 @@ export function selectionAnchor(state: EditorState, fragment: Y.XmlFragment):
     from: Y.relativePositionToJSON(absolutePositionToRelativePosition(from, fragment, mapping as never)),
     to: Y.relativePositionToJSON(absolutePositionToRelativePosition(to, fragment, mapping as never)),
   };
+}
+
+/**
+ * A line said to an Agent (§4.2): a paragraph of its own that opens with `@<agent>`, then what to do. It is a
+ * comment, not the page's text: drawn as one while the caret is on it, and Enter sends it as a discussion of
+ * the passage above and takes it out of the page (page-editor.tsx). `text` is empty while nothing is said yet.
+ */
+export interface CommentLine { harness: string; text: string; from: number; to: number }
+
+const COMMENT_LINE = /^[@＠]([\p{L}\p{N}_.:-]{1,32})(?:[ \u3000]+([\s\S]*))?$/u;
+
+/** The line at the caret said to one of `agents`, if it is one. */
+export function commentLineAt(state: EditorState, agents: readonly string[]): CommentLine | null {
+  const { $from, empty } = state.selection;
+  if (!empty || $from.depth !== 1 || $from.parent.type !== nodes.paragraph) return null;
+  const match = COMMENT_LINE.exec($from.parent.textContent);
+  const harness = match ? agents.find((agent) => agent.toLowerCase() === match[1]!.toLowerCase()) : undefined;
+  if (!match || !harness || match[2] === undefined) return null;
+  return { harness, text: match[2].trim(), from: $from.before(), to: $from.after() };
+}
+
+/** What a comment line at `pos` is about: the last text above it. */
+export function passageAbove(state: EditorState, fragment: Y.XmlFragment, pos: number): DiscussionAnchor | null {
+  let passage: { from: number; to: number } | null = null;
+  state.doc.nodesBetween(0, pos, (node, at) => {
+    if (!node.isTextblock) return true;
+    if (node.textContent.trim()) passage = { from: at + 1, to: at + 1 + node.content.size };
+    return false;
+  });
+  const found = passage as { from: number; to: number } | null;
+  return found ? rangeAnchor(state, fragment, found.from, found.to) : null;
+}
+
+function commentLines(agents: () => readonly string[]): Plugin {
+  return new Plugin({
+    props: {
+      decorations(state) {
+        const line = commentLineAt(state, agents());
+        if (!line) return null;
+        return DecorationSet.create(state.doc, [Decoration.node(line.from, line.to, { class: "page-comment-line",
+          "data-comment-hint": line.text ? `↵ Send to ${line.harness}` : `Tell ${line.harness} what to do` })]);
+      },
+    },
+  });
 }
 
 /** Scrolls a section into view, for following someone on the page. */
@@ -1177,6 +1226,8 @@ export function editorPlugins(input: {
   /** The files this writer pasted, drawn from their own copy while they upload. */
   localMedia: Map<string, LocalMedia>;
   onMediaFailure: (message: string) => void;
+  /** The Agents a line of the page may be said to. */
+  commentAgents: () => readonly string[];
 }): Plugin[] {
   const presenceOf = (clientId: number) => {
     const state = input.awareness.getStates().get(clientId);
@@ -1210,6 +1261,7 @@ export function editorPlugins(input: {
     sectionOverlay(input.openConversation, input.headingActions),
     currentHeading(),
     discussionOverlay(input.fragment, input.openConversation, input.focusConversation),
+    commentLines(input.commentAgents),
     remoteChanges(input.fragment, input.awareness),
     readerChanges(input.fragment),
     automationChips(input.openConversation),
