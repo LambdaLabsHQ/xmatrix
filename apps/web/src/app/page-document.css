@@ -246,10 +246,6 @@
 .pages-margin-on .page-discussion-bubble,
 .pages-margin-on .page-section-talk,
 .pages-margin-on .page-section-agents { display: none; }
-/* The chip is centered on the scrollport. With the margin open the column is
-   the text plus gap-6 and a w-80 aside (21.5rem), so that center sits on the
-   text's right half and covers the paragraph. Shift onto the text. */
-.pages-margin-on .page-offscreen-edge { transform: translateX(-10.75rem); }
 /*
  * The margin reads as comments do in Google Docs (§4.4). A card at rest is flat
  * and tinted a step off the page; the one being read lifts. The open one is
