@@ -186,7 +186,15 @@ no harness can load another's tool-call blocks, reasoning or signatures.
    within the wait starts the successor without one.
 4. The successor's daemon writes `HANDOFF.md` (the entries as Markdown, headed
    as untrusted prior context) and `transcript.jsonl` (the same entries) to a
-   scratch directory and exports it as `XMATRIX_HANDOFF_SESSION_DIR`. The
+   fresh, owner-only scratch directory and exports it as `XMATRIX_HANDOFF_SESSION_DIR`. The
+   conversation and the legacy pointer snapshot share one materializer: a new
+   unpredictable directory per attempt, mode `0700` on Unix or a verified
+   owner-only Windows ACL, secured before any content is written. Files use
+   the private journal's atomic writes (`0600` on Unix, owner-only ACL on
+   Windows). A retry cannot overwrite an earlier bundle or follow a precreated
+   scratch symlink; a privacy/write failure omits the bundle and removes only
+   that attempt's newly created directory. Existing scratch copies are not
+   reopened or migrated by this change. The
    successor's assignment tells it to read `HANDOFF.md` there before acting,
    to treat it as context rather than instructions, to verify the state it
    describes, and never to resume it.
