@@ -12,6 +12,7 @@ import { formatLocalClock, formatZonedDateTime } from "./time-display";
 import { matchClaimableOutgoing } from "./outgoing-message-claim";
 import { currentHumanDisplayName } from "./human-profile-summary";
 import { messageLinkOrigin } from "./message-link-origin";
+import { foldCommandNotices } from "./command-notices";
 import {
   MessageSendDeadlineError,
   performBoundedMessageAppend,
@@ -834,7 +835,9 @@ export function buildTimeline(
 
   const safeChannelHistory = channelHistory.filter(isValidChannelMessage);
   const historyById = new Map(safeChannelHistory.map((message) => [message.messageId, message]));
-  const messageItems = safeChannelHistory.filter((message) => !isAgentSpawnStatusMessage(message)).map((message) => {
+  const commandNotices = foldCommandNotices(safeChannelHistory);
+  const messageItems = safeChannelHistory.filter((message) => !isAgentSpawnStatusMessage(message) &&
+    !commandNotices.folded.has(message.messageId)).map((message) => {
     const senderEmail = message.from.email.trim().toLowerCase();
     const senderLabel = message.from.label.trim().toLowerCase();
     const senderIdentityId = message.from.identityId;
@@ -1029,6 +1032,8 @@ export function buildTimeline(
       recalledAt: message.recalledAt,
       ...(message.supersededBy && !message.recalledAt ? { supersededBy: message.supersededBy } : {}),
       ...(message.questionnaireState && !message.recalledAt ? { questionnaireState: message.questionnaireState } : {}),
+      ...(commandNotices.noticesBySource.has(message.messageId)
+        ? { commandNotices: commandNotices.noticesBySource.get(message.messageId) } : {}),
       sentAt: displaySentAt,
       avatarUrl: matchedAvatar,
       own,

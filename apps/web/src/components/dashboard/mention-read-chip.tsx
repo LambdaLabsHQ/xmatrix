@@ -20,7 +20,8 @@ import { createContext, Fragment, memo, useContext, useEffect, useMemo, useRef, 
 import { Check } from "lucide-react";
 import { LoadingImage } from "@/components/dashboard/content-skeleton";
 
-import { parseAgentStopInvocation, type ChannelMentionReadStatus, type ConnectorInvocation, type SerializedAgentLaunch, type SerializedAgentInvocationRejection, type SerializedAgentStop } from "@xmatrix/protocol";
+import type { CommandNotice } from "./command-notices";
+import { parseAgentStopInvocation, type AgentControlInvocation, type ChannelMentionReadStatus, type ConnectorInvocation, type SerializedAgentLaunch, type SerializedAgentInvocationRejection, type SerializedAgentStop } from "@xmatrix/protocol";
 import { avatarImageSrc } from "./identity-avatar";
 import {
   mentionChipLabel,
@@ -33,7 +34,8 @@ import {
 } from "./mention-read-state";
 import { cn } from "@/lib/utils";
 import { MentionInvocationChip, MentionInvocationRejectionChip, MentionContinuationChip, InvocationPopoverGroup,
-  MentionIntentDeclinedChip, MentionLaunchHintChip, MentionStopChip, MentionSummonPending } from "./mention-invocation-chip";
+  MentionIntentDeclinedChip, MentionLaunchHintChip, MentionStopChip, MentionSummonPending, MentionControlChip,
+  MentionRefusedLifecycleChip } from "./mention-invocation-chip";
 import { declinedIntent, readingIntentUntil } from "./summon-intent";
 import { handoffSuccessorLaunch, segmentMessageInteraction, type InteractionSegment } from "./mention-invocation-state";
 import { HandoffCard } from "./handoff-arrow";
@@ -61,6 +63,10 @@ export type MentionReadMessageScope = {
   rejections?: readonly SerializedAgentInvocationRejection[];
   /** The connector command this message is. Absent on a quote of it. */
   connector?: ConnectorInvocation;
+  /** The model and effort statements this message is. Absent on a quote of it. */
+  controls?: readonly AgentControlInvocation[];
+  /** Hub receipts for this message's command, drawn on it instead of as rows. */
+  notices?: readonly CommandNotice[];
   continuations?: readonly import("@xmatrix/protocol").SerializedAgentContinuation[];
   executions?: readonly import("@xmatrix/protocol").SerializedAgentMessageExecution[];
   sourceBody?: string;
@@ -211,11 +217,13 @@ export const MentionRichText = memo(function MentionRichText({ text, rawMarkdown
       continuations: scope?.continuations, rejections: scope?.rejections, launches,
       ...(stop ? { stop } : {}),
       ...(scope?.connector ? { connector: scope.connector } : {}),
+      ...(scope?.controls ? { controls: scope.controls } : {}),
+      ...(scope?.notices ? { notices: scope.notices } : {}),
       launchStatusUnavailable: scope?.launchStatusUnavailable,
       mentions: run => splitMentionSegments(run, index ? index(run) : null),
     }, allowed);
   }, [text, allowed, base, scope?.continuations, scope?.rejections, scope?.launches,
-    scope?.stops, scope?.stopReceiptsLoaded, scope?.connector, scope?.sourceBody, scope?.launchStatusUnavailable]);
+    scope?.stops, scope?.stopReceiptsLoaded, scope?.connector, scope?.controls, scope?.notices, scope?.sourceBody, scope?.launchStatusUnavailable]);
   if (!operational) return <PageReferenceRichText text={text} />;
   return <>{segments.map((segment, index) =>
     <InteractionSegmentView key={index} segment={segment} scope={scope} reading={reading} />)}</>;
@@ -233,8 +241,13 @@ function InteractionSegmentView({ segment, scope, reading }: {
     case null:
       return <PageReferenceRichText text={segment.text} />;
     case "reborn.v1":
-      return <MentionContinuationChip record={segment.record} unavailable={scope?.launchStatusUnavailable} />;
+      return "refused" in segment
+        ? <MentionRefusedLifecycleChip kind="reborn" text={segment.text} agentName={segment.agentName}
+          ordinal={segment.ordinal} notices={segment.refused} />
+        : <MentionContinuationChip record={segment.record} unavailable={scope?.launchStatusUnavailable} />;
     case "handoff.v1":
+      if ("refused" in segment) return <MentionRefusedLifecycleChip kind="handoff" text={segment.text}
+        agentName={segment.agentName} ordinal={segment.ordinal} notices={segment.refused} />;
       return "record" in segment
         ? <MentionContinuationChip record={segment.record} unavailable={scope?.launchStatusUnavailable} />
         : <HandoffCard sourceName={segment.written.sourceName} sourceOrdinal={segment.written.sourceOrdinal}
@@ -267,7 +280,10 @@ function InteractionSegmentView({ segment, scope, reading }: {
     case "stop.v1":
       return <MentionStopChip invocation={segment.invocation} receipts={segment.receipts}
         sentAt={scope?.sentAt} pending={scope?.stopReceiptsLoaded === false}
-        unavailable={scope?.launchStatusUnavailable} />;
+        unavailable={scope?.launchStatusUnavailable} notices={scope?.notices} />;
+    case "runtime-control.v1":
+      return <MentionControlChip invocation={segment.invocation} outcome={segment.outcome}
+        notice={segment.notice} sentAt={scope?.sentAt} />;
     case "mention.v1":
       return <MentionReadChip target={segment.target} text={segment.text} token={segment.token} />;
     case "connector.v1":

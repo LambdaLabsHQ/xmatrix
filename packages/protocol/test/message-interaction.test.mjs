@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import { matchInteractionGrammar, parseMessageInteraction, MessageInteractionRegistry,
-  parseConnectorActionCommand, parseConnectorInvocation, parseAgentControlCommands, parseAgentStopCommand, parseAgentStopInvocation,
+  parseConnectorActionCommand, parseConnectorInvocation, parseAgentControlCommands, parseAgentControlInvocations, parseAgentStopCommand, parseAgentStopInvocation,
   summarizeStopReceipts, agentInteractionTarget, connectorInteractionTarget,
   humanInteractionTarget, interactionRegistry } from "../dist/index.js";
 
@@ -154,4 +154,13 @@ test("stop receipts summarize without treating acceptance as confirmation", () =
   assert.equal(confirmed.confirmed, 2);
   assert.equal(confirmed.machineName, "build-box-1");
   assert.equal(summarizeStopReceipts([stop("confirmed", "a"), stop("confirmed", "b")]).machineName, undefined);
+});
+
+test("control statements report the span each was written at", () => {
+  const body = "@claude:1 /model fable\n  @claude:1 /effort  ";
+  assert.deepEqual(parseAgentControlInvocations(body), [
+    { kind: "model", target: "claude:1", value: "fable", start: 0, end: 22, text: "@claude:1 /model fable" },
+    { kind: "effort", target: "claude:1", start: 25, end: 42, text: "@claude:1 /effort" },
+  ]);
+  assert.deepEqual(parseAgentControlInvocations("@claude:1 /effort max please"), []);
 });

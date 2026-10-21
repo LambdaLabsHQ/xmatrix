@@ -95,7 +95,7 @@ export function createProductAgentControlAuthorityPort(input: {
         outcomes[0] ?? { status: "no_instance" };
     },
 
-    async publishSystemNotice(channelId, body) {
+    async publishSystemNotice(channelId, body, outcomes) {
       const messageId = `system:${input.sourceMessageId}:control-switch`.slice(0, 200);
       const response = await dispatchProductMessageAppend(input.env, channelId, {
         commandId: `product:control-switch-notice:${messageId}`.slice(0, 200),
@@ -114,6 +114,8 @@ export function createProductAgentControlAuthorityPort(input: {
             xmatrixProvenance: "system_fact",
             xmatrixSystemNotice: true,
             sourceMessageId: input.sourceMessageId,
+            // A client draws each result on the statement that asked for it.
+            controlOutcomes: outcomes,
           },
         },
       });

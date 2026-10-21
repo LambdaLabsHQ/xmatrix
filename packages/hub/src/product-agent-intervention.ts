@@ -58,7 +58,8 @@ export interface ProductAgentInterventionPort {
    */
   daemonOnline?(target: ProductAgentKillTarget): Promise<boolean | undefined>;
   /** `key` distinguishes this command's notices; each key posts at most once. */
-  publishSystemNotice(channelId: string, body: string, key?: "host-cleanup"): Promise<void>;
+  /** `outcome` is set on a notice that is the stop's whole answer, because no Run was fenced. */
+  publishSystemNotice(channelId: string, body: string, key?: "host-cleanup", outcome?: "stopped" | "not_stopped"): Promise<void>;
   /**
    * Stop resting Instances, which have no process to terminate: they simply
    * stop waking (docs/instance-sleep.md §4). `mention` selects one
@@ -124,7 +125,7 @@ export async function orchestrateProductAgentIntervention(input: {
     try {
       await input.port.publishSystemNotice(
         input.channelId,
-        "xMatrix could not resolve live Agent Instances. No stop request was issued.",
+        "xMatrix could not resolve live Agent Instances. No stop request was issued.", undefined, "not_stopped",
       );
     } catch {
       // Preserve the authority failure that prevented the stop. The caller logs
@@ -143,7 +144,8 @@ export async function orchestrateProductAgentIntervention(input: {
 
   if (!command.all && selected.length > 1) {
     await input.port.publishSystemNotice(input.channelId,
-      "More than one Agent matches this name. Select the owner and machine before stopping an Instance.");
+      "More than one Agent matches this name. Select the owner and machine before stopping an Instance.",
+      undefined, "not_stopped");
     return { considered: 1, stopped: 0, failures: ["ambiguous_agent_name"] };
   }
 
@@ -151,11 +153,12 @@ export async function orchestrateProductAgentIntervention(input: {
     const resting = await input.port.stopResting?.(input.channelId, { mention: command.target, exclude: [] }) ?? [];
     if (resting.length > 0) {
       await input.port.publishSystemNotice(input.channelId,
-        `Stopped @${resting[0]!.mentionTarget}. It was resting and will no longer wake for new messages.`);
+        `Stopped @${resting[0]!.mentionTarget}. It was resting and will no longer wake for new messages.`,
+        undefined, "stopped");
       return { considered: 1, stopped: resting.length, failures: [] };
     }
     const notice = `xMatrix could not find a live instance for \`@${command.target}\`.`;
-    await input.port.publishSystemNotice(input.channelId, notice);
+    await input.port.publishSystemNotice(input.channelId, notice, undefined, "not_stopped");
     return { considered: 1, stopped: 0, failures: [] };
   }
   // `/kill all` also ends every resting Instance's rest; a live target is
@@ -227,7 +230,8 @@ export async function orchestrateProductAgentIntervention(input: {
       ? `Failed ${failures.length}: ${failures.join("; ")}.`
       : "",
   ].filter(Boolean).join(" ") || (selected.length === 0 ? "No live agent instances to stop in this channel." : "");
-  if (summary) await input.port.publishSystemNotice(input.channelId, summary);
+  if (summary) await input.port.publishSystemNotice(input.channelId, summary, undefined,
+    selected.length === 0 ? restingStopped > 0 ? "stopped" : "not_stopped" : undefined);
   return { considered: selected.length, stopped, failures,
     ...(pending.length ? { pending: pending.length } : {}) };
 }
