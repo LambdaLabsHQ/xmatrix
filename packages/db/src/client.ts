@@ -222,6 +222,16 @@ function commitResultMayBeUnknown(error: unknown): boolean {
   ]).has(code);
 }
 
+/**
+ * The connection was lost before COMMIT or PREPARE was sent, so the
+ * transaction cannot have committed. A caller whose transaction has no effect
+ * outside the database may run it again on a fresh checkout.
+ */
+export function lostBeforeCommit(error: unknown): boolean {
+  return !(error instanceof DatabaseCommitUnknownError) && !(error instanceof DatabasePreparedUnknownError) &&
+    commitResultMayBeUnknown(error);
+}
+
 function observe(observer: DatabaseObserver | undefined, value: DatabaseObservation): void {
   if (!observer) return;
   try {

@@ -122,6 +122,30 @@ integration("signals survive coalescing during leases; renewal and outbox replay
   });
 });
 
+integration("a claim replayed after a lost response skips the route the lost UPDATE still locks (XMATRIX-HUB-90)",async()=>{
+  await fixture(async({repository,database,activate})=>{
+    const id=await activate();await repository.signal("signal-digest");
+    let release,locked;const holding=new Promise(resolve=>{locked=resolve;});
+    const lost=database.transaction({requestId:crypto.randomUUID(),operation:"test.lost-claim"},async tx=>{
+      await tx.query({name:"test_lost_claim_lock",text:"SELECT route_id FROM data.app_gmail_routes WHERE route_id=$1 FOR UPDATE",values:[id],maxRows:1});
+      locked();await new Promise(resolve=>{release=resolve;});
+    });
+    await holding;
+    let calls=0;
+    const stalled={cacheMode:"disabled",transaction:(context,run)=>{
+      if(calls++===0)return Promise.reject(new Error("Query read timeout"));
+      return database.transaction(context,run);
+    }};
+    const replaying=new PostgresGmailRoutingRepository(stalled,"fixture-encryption-key");
+    assert.deepEqual(await replaying.claim(),[],"the replay must not wait on or double-claim the locked route");
+    assert.equal(calls,2);
+    release();await lost;
+    const [job]=await replaying.claim();
+    assert.equal(job?.id,id,"the route is claimed once the lost transaction ends");
+    assert.equal((await replaying.claim()).length,0);
+  });
+});
+
 integration("abandoned OAuth attempts release capacity while live grants remain; blocked jobs erase their native grant",async()=>{
   await fixture(async({repository,activate,create,sql,spaceId})=>{
     const active=await activate(),pending=await create();
