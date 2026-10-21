@@ -2,6 +2,7 @@ import { checkedStoredIso } from "./stored-values.js";
 import type { QueryResultRow } from "pg";
 
 import type { AuthorityDatabase, DatabaseTransaction } from "./contracts.js";
+import { singleReadStatements } from "./single-read-statements.js";
 import { channelCapabilityPredicate } from "./channel-capability-policy.js";
 import { loadChannelAgentPresence } from "./channel-agent-presence.js";
 import {
@@ -490,10 +491,10 @@ export class PostgresChannelCatalogRepository {
   }
 
   /**
-   * One transaction on the Space's active placement. The fleet router reroutes
-   * it once if the shard's fence refuses a placement that went stale.
+   * Read statements on the Space's active placement. Each statement checks
+   * its fence; the router reroutes a read once if that placement went stale.
    */
-  private async withPlacedTransaction<T>(
+  private async withPlacedReads<T>(
     requestId: string,
     operation: string,
     spaceId: string,
@@ -503,10 +504,10 @@ export class PostgresChannelCatalogRepository {
     if (placement.state !== "active" || placement.targetShardId !== null) {
       throw new DatabaseContractError("Space placement is unavailable");
     }
-    return this.database.transaction({
+    return callback(singleReadStatements(this.database, {
       requestId, operation,
       placement: { spaceId, shardId: placement.shardId, placementEpoch: placement.placementEpoch },
-    }, callback);
+    }));
   }
 
   async page(input: ChannelCatalogPageInput): Promise<Record<string, unknown>> {
@@ -517,7 +518,7 @@ export class PostgresChannelCatalogRepository {
     const query = (input.query ?? "").trim().toLocaleLowerCase().slice(0, 200);
     const limit = Math.min(Math.max(Number(input.limit ?? 50), 1), 50);
     if (!Number.isSafeInteger(limit)) throw new DatabaseContractError("limit is invalid");
-    return this.withPlacedTransaction(
+    return this.withPlacedReads(
       requestId, "channel-catalog.page", spaceId, async (transaction) => {
       const selected = viewSql(input.view, input.filter);
       const cursor = input.cursor;
@@ -697,7 +698,7 @@ export class PostgresChannelCatalogRepository {
         channelIds.length + (routeToken ? 1 : 0) > 200) {
       throw new DatabaseContractError("Catalog resolve must contain between 1 and 200 selectors");
     }
-    return this.withPlacedTransaction(
+    return this.withPlacedReads(
       requestId, "channel-catalog.resolve", spaceId, async (transaction) => {
       const envelopes = await transaction.query<CatalogResolveEnvelope>({
         name: "channel_catalog_resolve_v15",
