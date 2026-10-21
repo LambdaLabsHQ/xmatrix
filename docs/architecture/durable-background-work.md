@@ -213,13 +213,16 @@ changing the contracts above.
   Durable Object whose alarm is the earlier of its next wake time and a bounded
   discovery interval, so a missed notice costs at most that interval while the
   control plane is healthy. Drivers only claim and dispatch; they never run
-  business. The minute cron only checks that every driver's alarm exists; it
-  reads no database and runs no business.
-- **Execution.** Light kinds run in a shared executor. CPU-heavy kinds run in a
-  separately deployed executor Worker, never beside scheduling, the control
-  plane or WebSocket service. One invocation per execution, or a batch of one,
-  is not by itself proof of isolation: a Worker isolate can serve several
-  requests at once.
+  business, and no single object runs every kind's work. The minute cron and
+  business events only wake drivers, in parallel; the cron also checks that
+  every driver's alarm exists. It reads no database and runs no business.
+- **Execution.** Queue consumers run the work (see Scaling out below). Light
+  kinds share an execution lane; CPU-heavy kinds and kinds that call the same
+  dependency get their own lanes, and CPU-heavy kinds run in a separately
+  deployed executor Worker, never beside scheduling, the control plane or
+  WebSocket service. One invocation per execution, or a batch of one, is not by
+  itself proof of isolation: a Worker isolate can serve several requests at
+  once.
 - **Database entry.** Each transaction re-checks its admission before it begins
   and runs with server-side transaction, statement, lock and idle limits.
 - **Health.** Lag, parked and uncertain counts per kind. External monitoring is a
@@ -263,27 +266,41 @@ alone is about 70 a minute, more than three times what the Gmail claim admits.
 | k, s | Database phases per execution, server time per phase |
 | e | External calls per execution, per provider |
 
-By Little's law, executor slots in use ≈ λ·d, busy origin connections ≈ λ·k·s
-plus the control plane (three single statements per execution), and each
-provider sees λ·e calls per second.
+By Little's law:
+
+- executor slots in use ≈ λ·d;
+- busy origin connections ≈ λ·o + c, where o is the origin-connection occupancy
+  measured per execution: the sum, over its database phases, of how long each
+  holds an origin connection. That can include round trips and waits inside a
+  transaction and the pool's return delay, which is what E2 measures. c is the
+  control plane's own occupancy (claim, start and finish on the usual path,
+  set-based per batch). Idle pooled connections count separately against the
+  instance budget;
+- each provider sees λ·e calls per second.
 
 An example with assumed numbers, not measurements, for N = 1,000,000: a fifth
 connect an integration (A = 200,000) with three intents each (I = 600,000), each
-due hourly on average (λ ≈ 170/s), and a hundred thousand of them due in the
-same minute at the top of the hour; d = 1 s, mostly an external call; k = 3,
-s = 5 ms.
+due once an hour. Of those, 100,000 fall due in the same minute at the top of
+the hour and the other 500,000 spread evenly over the hour (about 140/s). Each
+execution takes d = 1 s, mostly an external call, with three database phases.
 
-- To meet a 5-minute lag deadline, that burst needs about 330 executions per
-  second for 5 minutes, so about 330 executor slots at d = 1 s. Fewer slots
-  means the burst is absorbed as visible lag, not failures.
-- Busy origin connections: about 2.6 on average and about 5 while working off
-  the burst at 330 per second, for the whole platform, spread over the physical
-  instances. Working it off within the minute instead would take about 25, which
-  is why the burst rate is a budget decision, not a default.
-- Providers see about 170 calls per second on average. Provider quotas, not the
-  engine, become the binding limit: polling every mailbox every minute would be
-  100,000 calls a minute, which is a business decision to replace by push or a
-  longer interval, not something to absorb.
+- Working off the burst within a 5-minute lag deadline needs about 333/s for
+  the burst plus the 140/s still arriving: about 475 executions per second for
+  those five minutes, so about 475 executor slots before any headroom. Fewer
+  slots means the burst becomes visible lag, not failures.
+- Busy origin connections at 475/s are 475 × o. If each phase held a connection
+  only for 5 ms of server time (o = 15 ms), that is about 7. If each phase were
+  a transaction spanning a 200 ms round trip (o ≈ 0.6 s), it is about 285, far
+  beyond one instance. E2 decides which applies; the example shows why
+  database phases must be short and admitted, not what the platform can carry.
+- Providers see about 170 calls per second on average. Timing is a business
+  decision here: polling every mailbox every minute would be 100,000 calls a
+  minute, which a kind replaces by push or a longer interval rather than absorb.
+
+These numbers illustrate the model; they are not capacity, and they do not say
+which limit binds first. Provider quotas, physical instances, the fairness
+index, the control plane, hot rows and partition scheduling are all candidates,
+and finding the first is what the scale runs are for.
 
 ### Discovery cost
 
@@ -299,21 +316,60 @@ s = 5 ms.
 ### Fairness without a global hotspot
 
 - Fairness is local to a partition. Scope summaries are rows per (partition,
-  scope); there is no table, counter or lock shared by all tenants, and
-  partitions are claimed independently.
+  scope); there is no global counter row or serial coordinator for all tenants
+  (the physical tables are shared, of course), and partitions are claimed
+  independently.
 - A scope's share is weighted, not one execution at a time. A pass takes up to a
   per-class number of intents from each eligible scope, and the in-flight limit
   is per partition.
 - A large Space spreads its work over many keys (one per route, Channel or
   connection), so its keys spread over partitions and run in parallel within
-  their limits. A small Space's new intent waits at most one rotation of its
-  partition.
+  their limits. When resources are available, a small Space's new intent is
+  selected within one rotation of its partition; that is a selection order, not
+  a wall-clock guarantee.
 
 ### Hot keys
 
-One intent runs one execution at a time by construction, so more consumers do
-not help a hot key. Its kind must merge wakes, split the work into steps
-(`continue`), or refuse at the entry beyond a stated rate.
+An intent has one valid execution at a time: its version and lease fence decide
+which result counts. An expired execution can still be running while a newer
+lease starts another, so the same work can physically overlap; the resource
+protections bound that overlap, they do not prevent it. More consumers do not
+raise a hot key's throughput, and steps (`continue`) improve deadlines and
+recovery but not a serial key's throughput. A hot key's kind must merge wakes,
+split into independent sub-work keys that can run in parallel, or refuse at the
+entry beyond a stated rate.
+
+### Scaling out on Cloudflare
+
+Edge compute is elastic; the database and providers are not. The design puts
+parallelism where the platform has it and bounds only the phases that touch a
+shared dependency.
+
+- **Triggering is light; draining is continuous.** The cron and business events
+  wake partition drivers in parallel. Each driver discovers and dispatches on
+  its own and keeps dispatching while its partition has due work and capacity,
+  and Queue consumers drain the backlog continuously. Throughput is not capped
+  by a per-minute batch: today's 20 routes per run is our code, not a
+  Cloudflare limit.
+- **Execution is elastic.** Work that needs no mutual exclusion runs in
+  parallel across Queue consumers, which Cloudflare scales out per queue. A
+  single queue has its own throughput and consumer-concurrency limits, so lanes
+  are partitioned and each has a budget.
+- **These are different boundaries.** `Promise.all` inside one invocation is
+  asynchronous concurrency inside one invocation's limits. A service-binding
+  fan-out shares the caller's connection limit. Independent Queue consumer
+  invocations are the platform's horizontal scale-out, and even they may share
+  an isolate, so CPU isolation remains E3.
+- **The database holds only bounded state phases.** Claiming, reading the state
+  an execution needs and committing its result are short phases, set-based per
+  batch where possible; computation and remote waits happen between them,
+  holding nothing. The database budget is per physical instance, and the edge's
+  executors are never all allowed to contend for one pool.
+- **Dispatch follows capacity and pressure.** Free execution capacity, backlog
+  age and each dependency's responses decide how much is dispatched. Pressure on
+  one dependency lowers only the concurrency of phases that use it; other work
+  keeps using edge capacity. Placement can improve data locality, but
+  correctness never depends on a fixed data centre.
 
 ### Physical capacity and rebalancing
 
@@ -328,7 +384,7 @@ not help a hot key. Its kind must merge wakes, split the work into steps
 
 ### Scale acceptance
 
-No "supports N users" claim before these are measured in a declared environment
+No "supports N users" claim, and no claim of linear scaling, before these are measured in a declared environment
 against declared lag deadlines:
 
 | | Scenario |
@@ -339,6 +395,8 @@ against declared lag deadlines:
 | S4 | Inflow above capacity for an hour |
 | S5 | A slow database: added round-trip time, then several times the server time |
 | S6 | Shard rebalancing and a partition count change under load |
+| S7 | Execution capacity and partitions doubled: how throughput and control-plane cost change, and where the bottleneck moves |
+| S8 | One dependency slowed (the database, or one provider): only its phases slow down while other work keeps scaling |
 
 Each run records throughput; lag at p50, p99 and maximum per scope class and
 the age of the oldest pending work; control-plane statements and Durable Object
