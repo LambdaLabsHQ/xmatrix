@@ -340,9 +340,12 @@ against declared lag deadlines:
 | S5 | A slow database: added round-trip time, then several times the server time |
 | S6 | Shard rebalancing and a partition count change under load |
 
-Each run records throughput; lag at p50, p99 and maximum per scope class;
-control-plane statements and Durable Object requests per second; peak origin
-connections and transactions; and cost per thousand executions.
+Each run records throughput; lag at p50, p99 and maximum per scope class and
+the age of the oldest pending work; control-plane statements and Durable Object
+requests per second; peak origin connections and transactions; and cost per
+thousand executions. A run passes only if lag stays within the declared
+deadline: "it eventually catches up" is not a pass, and a miss means finding
+and removing the bottleneck.
 
 ## Experiments
 
