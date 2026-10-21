@@ -469,6 +469,11 @@ test.describe("on a phone", () => {
     const editor = await openChangedPage(browser);
     // A phone opens on the list of pages.
     await browser.getByRole("button", { name: /^Relay/u }).click();
+    // The page opens as it is; the changes are walked once the reader asks for them.
+    await expect(editor).toContainText("Shipped this week");
+    await expect(editor.locator(".page-reader-change")).toHaveCount(0);
+    await expect(browser.getByTestId("page-reader-diff")).toContainText("5 changes since you last read this page");
+    await browser.getByTestId("page-reader-diff").getByRole("button", { name: "Show changes" }).click();
     const mark = browser.getByRole("toolbar", { name: "Changes since you last read this page" });
     await expect(mark).toContainText("1/4");
     // It stands at the right edge beside the first change, not in a bar across the bottom.
@@ -1004,9 +1009,19 @@ async function openChangedPage(browser: Page, before = "# Relay\n\n## Status\n\n
   return openLivePage(browser, after);
 }
 
-test("what changed since the reader last read the page stays as a diff until it is ticked viewed, while what is on screen is read", async ({ page: browser }) => {
+test("the page opens as it is, and what changed since the reader last read it is a diff only when they ask for it", async ({ page: browser }) => {
+  await browser.setViewportSize({ width: 1600, height: 900 });
   const editor = await openChangedPage(browser);
   const added = editor.locator(".page-reader-change");
+  // Opened, the page is as it is now, and the margin's first card only says how much changed since the reader last read it.
+  const offer = browser.getByTestId("page-margin").getByTestId("page-reader-diff");
+  await expect(offer).toContainText("5 changes since you last read this page");
+  await expect(editor).toContainText("Shipped this week");
+  await expect(added).toHaveCount(0);
+  await expect(editor.locator(".page-reader-removed")).toHaveCount(0);
+  await expect(browser.getByTestId("page-reader-gutter")).toHaveCount(0);
+  await browser.screenshot({ path: test.info().outputPath("pages-reader-offer.png") });
+  await offer.getByRole("button", { name: "Show changes" }).click();
   await expect(added.filter({ hasText: "Shipped" })).toBeVisible();
   await expect(added.filter({ hasText: "Late reviews" })).toHaveCount(1);
   // Lines changed next to each other are barred once in the margin, left of the text: the changed status line
@@ -1024,15 +1039,18 @@ test("what changed since the reader last read the page stays as a diff until it 
   expect(first.y + first.height).toBeGreaterThanOrEqual(second.y + second.height / 2);
   await expect(editor.locator(".page-reader-removed")).toContainText("Planned for next");
   await browser.screenshot({ path: test.info().outputPath("pages-reader-changes.png") });
-  // The diff does not play out or fade. The page, all of it on screen a moment, is read whole meanwhile.
-  const viewed = browser.getByTestId("page-reader-diff");
-  await expect(viewed).toContainText("since you last read this page");
+  // Hidden again, it is still offered; the diff does not play out or fade, and the page, all of it on screen a
+  // moment, is read whole meanwhile.
+  await offer.getByRole("button", { name: "Hide changes" }).click();
+  await expect(added).toHaveCount(0);
+  await offer.getByRole("button", { name: "Show changes" }).click();
   await browser.waitForTimeout(2_500);
   await expect(added.filter({ hasText: "Shipped" })).toBeVisible();
   expect(await added.first().evaluate((element) => getComputedStyle(element).animationName)).toBe("none");
   await expect.poll(async () => await fixtureRequestBodies(browser, "page-mark-read")).toContainEqual({ revision: 3, seen: null });
-  // Ticked viewed, the page is as it is.
-  await viewed.getByRole("checkbox").check();
+  // Done, the page is as it is and nothing is offered any more.
+  await offer.getByRole("button", { name: "Done" }).click();
+  await expect(offer).toHaveCount(0);
   await expect(added).toHaveCount(0);
   await expect(editor.locator(".page-reader-removed")).toHaveCount(0);
   await expect(editor).toContainText("Shipped this week");
@@ -1044,7 +1062,7 @@ test("what the reader has not had on screen stays unread, as they last saw it, t
   const filler = Array.from({ length: 40 }, (_, index) => `Filler line ${index + 1}`).join("\n\n");
   const editor = await openChangedPage(browser, `# Relay\n\nPlanned\n\n${filler}\n\nOld ending\n`,
     `# Relay\n\nShipped\n\n${filler}\n\nNew ending\n`);
-  await expect(editor.locator(".page-reader-change", { hasText: "Shipped" })).toBeVisible();
+  await expect(browser.getByTestId("page-reader-diff")).toContainText("4 changes since you last read this page");
   // The top was on screen, so it is read as it is; the ending below the fold is kept as the reader last saw it.
   await expect.poll(async () => (await fixtureRequestBodies(browser, "page-mark-read")).at(-1)).toEqual({ revision: 2,
     seen: `# Relay\n\nShipped\n\n${filler}\n\nOld ending\n` });
@@ -1056,6 +1074,7 @@ test("what the reader has not had on screen stays unread, as they last saw it, t
 
 test("writing on a page that changed while its reader was away stops marking the diff over the writing", async ({ page: browser }) => {
   const editor = await openChangedPage(browser);
+  await browser.getByTestId("page-reader-diff").getByRole("button", { name: "Show changes" }).click();
   await expect(browser.getByTestId("page-reader-gutter").locator(".page-reader-bar")).toHaveCount(2);
   await editor.getByText("none", { exact: true }).click();
   await browser.keyboard.press("End");

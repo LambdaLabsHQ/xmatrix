@@ -1,8 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useState, type RefObject } from "react";
-import { Check, ChevronDown } from "lucide-react";
+import { Check, ChevronDown, GitCompareArrows } from "lucide-react";
 import { PageChangeMark } from "./page-chrome";
+import { actionClass } from "@/components/ui/action-tone";
+import { noticeClass } from "@/components/ui/status-tone";
+import { cn } from "@/lib/utils";
 import { sameValue } from "@/lib/same-value";
 
 /** The blocks of the page that hold a change, in reading order: several marks in one paragraph are one stop. */
@@ -135,5 +138,50 @@ export function PageReaderChangeMark({ column, article, changes, onViewed }: {
         <Check className="size-4" />
       </button>
     </PageChangeMark>
+  );
+}
+
+/**
+ * The page opens as it is now; what changed since the reader last read it is offered here, for them to open:
+ * as a card at the top of the margin, or above the page where there is no margin. Shown, the changes are
+ * marked in the text, and the reader hides them again or is done with them, which reads them all.
+ */
+export function PageReaderChangesOffer({ changes, shown, inMargin, onShow, onHide, onDone }: {
+  changes: number;
+  shown: boolean;
+  /** A card among the margin's, rather than a notice above the page. */
+  inMargin: boolean;
+  onShow: () => void;
+  onHide: () => void;
+  onDone: () => void;
+}) {
+  return (
+    <div data-testid="page-reader-diff" className={inMargin
+      ? "page-margin-card flex flex-col gap-2 rounded-xl px-3 py-2.5"
+      : noticeClass("attention", "mb-5 flex flex-wrap items-center gap-x-3 gap-y-2 py-2 pr-2")}>
+      <span className={cn("flex min-w-0 items-start gap-2", !inMargin && "mr-auto")}>
+        <GitCompareArrows className="mt-0.5 size-4 shrink-0 text-[var(--m-ink-attention,var(--accent))]" aria-hidden="true" />
+        <span className="flex min-w-0 flex-col">
+          <span className="text-[13px] font-semibold leading-5 text-foreground">
+            {changes === 1 ? "1 change" : `${changes} changes`} since you last read this page
+          </span>
+          <span className="text-[12px] leading-5 text-muted-foreground">
+            {shown ? "Marked in the text." : "You are reading the latest version."}
+          </span>
+        </span>
+      </span>
+      <span className={cn("flex items-center gap-2", inMargin && "pl-6")}>
+        {shown ? (
+          <>
+            <button type="button" onClick={onDone} className={actionClass({ variant: "primary", size: "sm" })}>
+              <Check className="size-3.5" aria-hidden="true" />Done
+            </button>
+            <button type="button" onClick={onHide} className={actionClass({ variant: "secondary", size: "sm" })}>Hide changes</button>
+          </>
+        ) : (
+          <button type="button" onClick={onShow} className={actionClass({ variant: "primary", size: "sm" })}>Show changes</button>
+        )}
+      </span>
+    </div>
   );
 }
