@@ -188,6 +188,16 @@ requested again by the stable release Agent through Production Release Intent.
 No manual ref restoration, moved tag, new deployment path or weaker success
 requirement is introduced. Existing immutable releases are unchanged.
 
+Production preflight also re-reads an omitted current Production Release run
+before deciding which exact-SHA run is authoritative. Own-run discovery and
+request-job conclusions share one ten-minute window, with uncached reads and
+ten-second request timeouts. A known earlier same-SHA run still refuses a
+duplicate immediately; a missing current run or an exhausted window never
+authorizes deployment. The 1.5.1-beta.9 preflight exposed this second empty-list
+case before production mutation and recovered through the same run's failed-job
+retry once its record became visible. New immutable releases contain the
+bounded discovery; historical tags retain their existing same-run recovery.
+
 ## Shared release workflow definitions
 
 The immutable Production Release train calls `server-release.yml` with an explicit `hub`, `web-build`, or `web` target. The former `hub-deploy.yml`, `web-build.yml`, and `web-deploy.yml` had no other callers. Their original steps now live in separate target-selected jobs in the shared workflow. Hub and Web retain independent production concurrency groups, exact-request authorization, read-only GitHub permissions, the same production environments, and unchanged credential bindings. The build job explicitly keeps `contents: read` only. Web still builds beside Hub after PostgreSQL readiness; only Web deployment waits for Hub and the verified build handoff. Selected jobs keep the historical `hub / deploy`, `web-build / build`, and `web / deploy` evidence names; inactive jobs have distinct names. Unknown targets select no production job.

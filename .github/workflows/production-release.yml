@@ -152,19 +152,38 @@ jobs:
               core.setFailed("Invalid release scope");
               return;
             }
-            const productionRuns = await github.paginate(github.rest.actions.listWorkflowRuns, {
+            // Run discovery and job conclusions share one bounded evidence
+            // window. A temporarily omitted current run is not a duplicate.
+            const evidenceDeadline = Date.now() + 10 * 60_000;
+            const readEvidence = async (read, complete) => {
+              let evidence = [];
+              for (let attempt = 0; attempt < 120; attempt += 1) {
+                if (attempt) await new Promise((resolve) => setTimeout(resolve, 5000));
+                if (Date.now() >= evidenceDeadline) break;
+                evidence = await read();
+                if (complete(evidence)) break;
+              }
+              return evidence;
+            };
+            const productionRuns = await readEvidence(() => github.paginate(github.rest.actions.listWorkflowRuns, {
               owner: context.repo.owner,
               repo: context.repo.repo,
               workflow_id: "production-release.yml",
               branch: context.ref.replace("refs/tags/", ""),
               event: "workflow_dispatch",
               per_page: 100,
-            });
+              headers: { "Cache-Control": "no-cache" },
+              request: { timeout: 10_000 },
+            }), (runs) => runs.some((run) => run.head_sha === process.env.DEPLOY_SHA && run.id <= context.runId));
             const authoritative = productionRuns
               .filter((run) => run.head_sha === process.env.DEPLOY_SHA)
               .sort((left, right) => left.id - right.id)[0];
-            if (!authoritative || authoritative.id !== context.runId) {
-              core.setFailed(`Another authoritative production run already exists: ${authoritative?.html_url ?? "unknown"}`);
+            if (!authoritative || authoritative.id > context.runId) {
+              core.setFailed("Current Production Release run is not visible within the evidence window; retry its failed jobs");
+              return;
+            }
+            if (authoritative.id !== context.runId) {
+              core.setFailed(`Another authoritative production run already exists: ${authoritative.html_url ?? authoritative.id}`);
               return;
             }
             if (!/^\d+$/.test(process.env.REQUEST_RUN_ID || "")) {
@@ -199,24 +218,19 @@ jobs:
             // Poll for ten minutes, five seconds apart, for the complete set;
             // a successful authority alone cannot stand in for its gates.
             const authorityName = `authorize ${scope} production ${context.ref.replace("refs/tags/", "")}`;
-            let jobs = [];
-            let authorities = [];
-            const evidenceDeadline = Date.now() + 10 * 60_000;
-            for (let attempt = 0; attempt < 120; attempt += 1) {
-              if (attempt) await new Promise((resolve) => setTimeout(resolve, 5000));
-              if (Date.now() >= evidenceDeadline) break;
-              jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRun, {
-                ...context.repo, run_id: requestRun.id, filter: "latest", per_page: 100,
-                headers: { "Cache-Control": "no-cache" },
-                request: { timeout: 10_000 },
-              });
-              authorities = jobs.filter((job) => job.name === authorityName);
-              const gates = ["plan", "gates"].map(name => jobs.find(job => job.name === name));
+            const jobs = await readEvidence(() => github.paginate(github.rest.actions.listJobsForWorkflowRun, {
+              ...context.repo, run_id: requestRun.id, filter: "latest", per_page: 100,
+              headers: { "Cache-Control": "no-cache" },
+              request: { timeout: 10_000 },
+            }), (evidence) => {
+              const authorities = evidence.filter((job) => job.name === authorityName);
+              const gates = ["plan", "gates"].map(name => evidence.find(job => job.name === name));
               const rejected = [...gates, ...authorities].some(job => job?.conclusion && job.conclusion !== "success");
-              if (authorities.length > 1 || rejected ||
-                  (gates.every(job => job?.conclusion === "success") &&
-                   authorities.length === 1 && authorities[0].status === "completed" && authorities[0].conclusion === "success")) break;
-            }
+              return authorities.length > 1 || rejected ||
+                (gates.every(job => job?.conclusion === "success") &&
+                 authorities.length === 1 && authorities[0].status === "completed" && authorities[0].conclusion === "success");
+            });
+            const authorities = jobs.filter((job) => job.name === authorityName);
             // The request's `gates` job passes only when every gate its scope
             // selects passed (ci.yml's aggregate and the iOS gate).
             for (const name of ["plan", "gates"]) {

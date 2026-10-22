@@ -80,7 +80,7 @@ const fakeRequire = (name) => {
 
 async function runAuthorization({ scope = "web", overrides = {}, authorityScope = scope, authorityConclusion = "success",
   authorityStatus = "completed", authorityCount = 1, requestSha = sha, deploySha = sha, lagging = 0, laggingGates = 0, reader = authorize,
-  tag = "xmatrix-v0.16.339", authorityTag = tag, channel = "beta" } = {}) {
+  tag = "xmatrix-v0.16.339", authorityTag = tag, channel = "beta", laggingRuns = 0, otherProductionRuns = [] } = {}) {
   const failures = [];
   // The request's own `gates` job stands for every gate its scope selected;
   // ci.yml's job names (`ci / hub (1/6)`, ...) are not part of the evidence.
@@ -91,6 +91,7 @@ async function runAuthorization({ scope = "web", overrides = {}, authorityScope 
   jobs.push(...Array.from({ length: authorityCount }, () => authority));
   jobs.push({ name: "authorize-and-dispatch", status: "completed", conclusion: "success", steps: [] });
   let reads = 0;
+  let runReads = 0;
   const listRuns = () => {};
   const listJobs = () => {};
   const github = {
@@ -109,7 +110,10 @@ async function runAuthorization({ scope = "web", overrides = {}, authorityScope 
     // The first `lagging` reads lack the authorization job conclusion;
     // no step metadata is available even after every job completes.
     paginate: async (method) => {
-      if (method === listRuns) return [{ id: 456, head_sha: deploySha }];
+      if (method === listRuns) {
+        runReads += 1;
+        return [...(runReads <= laggingRuns ? [] : [{ id: 456, head_sha: deploySha }]), ...otherProductionRuns];
+      }
       reads += 1;
       return jobs.map(job => {
         if ((job === authority && reads <= lagging) ||
@@ -185,6 +189,15 @@ test("tagged preflight re-reads exact authorization whose conclusion is not yet 
   assert.deepEqual(await runAuthorization({ lagging: 1 }), []);
 });
 
+test("tagged preflight waits for its own run without accepting an older duplicate", async () => {
+  assert.deepEqual(await runAuthorization({ laggingRuns: 80 }), []);
+  assert.deepEqual(await runAuthorization({ laggingRuns: 80, otherProductionRuns: [{ id: 457, head_sha: sha }] }), []);
+  assert.notDeepEqual(await runAuthorization({ laggingRuns: Infinity }), [], "a missing own run never authorizes deployment");
+  assert.notDeepEqual(await runAuthorization({ otherProductionRuns: [{ id: 455, head_sha: sha }] }), [],
+    "a known older run remains authoritative");
+  assert.deepEqual(await runAuthorization({ otherProductionRuns: [{ id: 1, head_sha: "b".repeat(40) }] }), []);
+});
+
 test("tagged preflight waits several minutes for the complete gate and authorization evidence", async () => {
   assert.deepEqual(await runAuthorization({ lagging: 80 }), []);
   assert.deepEqual(await runAuthorization({ laggingGates: 80 }), [],
@@ -202,6 +215,17 @@ test("tagged preflight expires its evidence window even before exhausting the re
   });
   assert.notDeepEqual(await runAuthorization({ lagging: 20 }), [],
     "evidence that would arrive after the deadline cannot authorize deployment");
+});
+
+test("own-run discovery and request conclusions share the same evidence deadline", async t => {
+  let elapsed = 0;
+  t.mock.method(Date, "now", () => { elapsed += 6_000; return elapsed; });
+  assert.deepEqual(await runAuthorization({ laggingRuns: 80 }), []);
+  elapsed = 0;
+  assert.deepEqual(await runAuthorization({ lagging: 80 }), []);
+  elapsed = 0;
+  assert.notDeepEqual(await runAuthorization({ laggingRuns: 80, lagging: 80 }), [],
+    "discovery cannot grant a second ten-minute window for job conclusions");
 });
 
 
