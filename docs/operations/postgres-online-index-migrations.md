@@ -25,7 +25,8 @@ needs to drain and can deadlock with its owner.
 
 After construction, the migrator checks readiness, validity and target identity,
 then marks the index with its exact build identity. Only after all builds pass
-does the usual transaction commit runtime grants and the migration receipt.
+and target-table analysis collects expression selectivity does the usual
+transaction commit runtime grants and the migration receipt.
 A partial build is not a completed migration. On retry, an exact marked, valid
 index is reused. A durable matching intent may remove and rebuild its unmarked
 or invalid index, covering interruption between CREATE's internal commits and

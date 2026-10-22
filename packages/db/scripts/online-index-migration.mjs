@@ -97,4 +97,8 @@ export async function buildOnlineIndexes(client, migration) {
       await client.query(`COMMENT ON INDEX ${qualified(index.schema, index.name)} IS '${marker}'`);
     } finally { await client.query("SET statement_timeout='25s'"); }
   }
+  // Expression-index selectivity is needed immediately, before a new Hub uses
+  // it. A marked build still revisits this step if statistics were interrupted.
+  const tables = new Set(migration.onlineIndexes.map(index => qualified(index.schema, index.table)));
+  for (const table of tables) await client.query(`ANALYZE ${table}`);
 }
