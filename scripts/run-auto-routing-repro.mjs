@@ -145,6 +145,11 @@ try {
   if (hubSuitePackages) run("node", ["--test", "packages/db/test/channel-catalog-postgres.test.mjs"], {
     XMATRIX_REQUIRE_POSTGRES_TEST: "true", XMATRIX_TEST_POSTGRES_URL: url.toString(),
   });
+  // This fixture resets shared lifecycle tables. Run it alone, including the
+  // first-reply observation's Channel contention regression (XMATRIX-HUB-9A).
+  if (hubSuitePackages) run("node", ["--test", "packages/db/test/agent-launch-postgres.test.mjs"], {
+    XMATRIX_REQUIRE_POSTGRES_TEST: "true", XMATRIX_TEST_POSTGRES_URL: url.toString(),
+  });
   // Workspace packages whose SQL only a real database proves declare test:postgres.
   if (hubSuitePackages) run("pnpm", ["--recursive", "--if-present", "run", "test:postgres"], {
     XMATRIX_REQUIRE_POSTGRES_TEST: "true", XMATRIX_TEST_POSTGRES_URL: url.toString(),
