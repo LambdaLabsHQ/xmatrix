@@ -50,7 +50,9 @@ import { PageWriteWith } from "./page-write-with";
 import { takeCoWriteRequest } from "@/lib/pages/co-write-request";
 import { useOnboardingCopy } from "@/lib/onboarding-locale";
 import { usePageWriters } from "./page-writers";
-import { marginConversations, sectionConversationCounts, withOpenConversation, type LiveConversation } from "./page-margin-model";
+import {
+  listedAgents, marginConversations, sectionConversationCounts, withOpenConversation, type LiveConversation,
+} from "./page-margin-model";
 import { formatRelativeAge, mobileChatTimeLabel } from "@/components/dashboard/time-display";
 import { ListSectionHeading } from "@/components/dashboard/list-section-heading";
 import { InlineRowPreview } from "@/components/dashboard/inline-row-preview";
@@ -60,7 +62,8 @@ import {
 } from "@/components/dashboard/selection-discussion";
 import { refetchUnlessHumanPush } from "@/components/dashboard/workspace-resource-push";
 import { PageMigrationReview, usePageMigration } from "./page-migration-review";
-import { commentBody } from "./page-comment";
+import { commentBody, commentCall, commentTaker } from "./page-comment";
+import type { ConversationCall } from "@/components/dashboard/page-shell-actions";
 import { NEW_PAGE_ID, NEW_PAGE_TITLE, type PageCreation } from "./page-creation";
 import { PageTreeRow } from "./page-tree-row";
 import { pageMentions, type PageReferenceTargets } from "./page-reference-chips";
@@ -566,7 +569,8 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   onDiscuss: (input: { spaceId: string; pageId: string; blockId: string; name: string; restricted: boolean;
     anchor?: PageLinkAnchor; firstMessage?: string; quote?: DiscussionQuote; open?: boolean; coWrite?: boolean;
     /** Hears the conversation's id as soon as it is known, before the Hub has made or linked it. */
-    planned?: (conversationId: string) => void }) => Promise<unknown>;
+    planned?: (conversationId: string) => void;
+    call?: ConversationCall }) => Promise<unknown>;
   /** Subscribes a conversation of its own, linked to a section, to a repository's issues and pull requests. */
   onConnectGitHub?: (input: { spaceId: string; pageId: string; blockId: string; repository: string;
     restricted: boolean }) => Promise<void>;
@@ -1229,14 +1233,22 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   // A discussion is where people and Agents meet alike: asking an Agent is mentioning it there.
   const discuss: NonNullable<PageSectionActions["discuss"]> = (blockId, anchor) => startDiscussion(blockId, anchor);
   // A comment on a passage: the discussion of the passage, started with the comment; the page stays in front of
-  // the reader, the discussion a card beside the passage. It names nobody: an Agent the comment mentions takes it,
-  // else the kind of Agent at work on the page, nearest the passage first, else xMatrix gives it to one (`@auto`).
-  const comment: NonNullable<PageSectionActions["comment"]> = (blockId, anchor, text) =>
-    startDiscussion(blockId, anchor, { body: commentBody(text, writers.agents.map((agent) => agent.harness),
-      [...liveOnPage].sort((a, b) => Number(b.blockId === blockId) - Number(a.blockId === blockId))
-        .map((agent) => agent.name)) });
+  // the reader, the discussion a card beside the passage. An Agent the comment mentions takes it, else the Agent at
+  // work on the page, nearest the passage first, called to it in its own conversation, where its Instance lives;
+  // else xMatrix gives it to one (`@auto`).
+  const takerOf = (blockId: string) => commentTaker(liveOnPage, blockId, (id) => Boolean(conversation(id)));
+  const commentTakerFace: NonNullable<PageSectionActions["commentTaker"]> = (blockId) => {
+    const agent = takerOf(blockId);
+    return agent && listedAgents([agent])[0];
+  };
+  const comment: NonNullable<PageSectionActions["comment"]> = (blockId, anchor, text) => {
+    const { body, taker } = commentBody(text, writers.agents.map((agent) => agent.harness), takerOf(blockId));
+    const home = taker && conversation(taker.conversationId);
+    startDiscussion(blockId, anchor, { body,
+      ...(taker && home ? { call: { channel: home, body: (discussionId) => commentCall(taker, discussionId) } } : {}) });
+  };
   const startDiscussion = (blockId: string, anchor?: Parameters<NonNullable<PageSectionActions["discuss"]>>[1],
-    said?: { body: string }) => {
+    said?: { body: string; call?: ConversationCall }) => {
     if (!page) return;
     const title = blocks.find((block) => block.id === blockId)?.title;
     // A discussion of a section is named by the section; of a passage, by what was written about it, and by the
@@ -1255,7 +1267,8 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
       name: !anchor ? place
         : firstMessage !== undefined ? automaticConversationName(firstMessage) : discussionTitle(anchor.quote),
       restricted, planned, ...(anchor ? { anchor } : {}),
-      ...(firstMessage !== undefined ? { firstMessage, open: false } : quote ? { quote } : {}) })
+      ...(firstMessage !== undefined ? { firstMessage, open: false } : quote ? { quote } : {}),
+      ...(said?.call ? { call: said.call } : {}) })
       .then(() => links.refetch(), (cause: Error) => setNotice(cause.message))
       .finally(() => setStartedLinks((current) => current.filter((link) => link.conversationId !== started)));
   };
@@ -1307,7 +1320,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     setMode("history");
   };
   // What selecting text offers, for the section the selection is in.
-  const sectionActions: PageSectionActions = { discuss, comment };
+  const sectionActions: PageSectionActions = { discuss, comment, commentTaker: commentTakerFace };
   // What a heading offers, beside it (§3.2).
   const headingActions: HeadingActions = {
     canEdit,

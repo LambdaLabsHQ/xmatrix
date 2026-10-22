@@ -86,7 +86,7 @@ function CardContext({ conversation, open = false }: { conversation: MarginConve
  * comment's size, on paper. Its vendor's face and its name; its status dot says whether it works, and one at work
  * runs its dots, as its pill on the page does.
  */
-function WorkingLine({ agents, className }: { agents: ReadonlyArray<Pick<MarginConversation["agents"][number],
+export function WorkingLine({ agents, className }: { agents: ReadonlyArray<Pick<MarginConversation["agents"][number],
   "instanceId" | "name" | "status" | "face">>; className?: string }) {
   const working = agents.filter((agent) => agent.status === "busy");
   const shown = working.length > 0 ? working : agents;

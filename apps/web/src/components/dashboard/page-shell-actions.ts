@@ -9,6 +9,9 @@ import { pageApi, type PageLinkAnchor } from "@/lib/pages/page-client";
 import type { ConversationRequest } from "@/components/dashboard/start-conversation";
 import type { DiscussionQuote } from "@/components/dashboard/selection-discussion";
 
+/** Calls an Agent live in another conversation to a new one: a message in its own, once the new one's first is in. */
+export type ConversationCall = { channel: ChannelSnapshot; body: (conversationId: string) => string };
+
 /** How the workspace shell opens pages and starts conversations about them. */
 export function pageShellActions(input: {
   token: string | null | undefined;
@@ -127,6 +130,7 @@ export function pageShellActions(input: {
   }, options: {
     open?: boolean; firstMessage?: string; quote?: DiscussionQuote; coWrite?: boolean;
     planned?: (conversationId: string) => void;
+    call?: ConversationCall;
   } = {}): Promise<string | null> {
     const { token, user } = input;
     if (!token || !user) return null;
@@ -156,6 +160,8 @@ export function pageShellActions(input: {
     if (options.coWrite) await pageApi.startCoWriting(page.spaceId, page.pageId, token, channel.id);
     if (options.firstMessage) {
       await (delivered ?? input.deliver(channel, options.firstMessage));
+      // Its Instance lives in its own conversation, so it is told there, and answers here.
+      if (options.call) await input.deliver(options.call.channel, options.call.body(channel.id));
       if (options.open !== false) openPageConversation(channel.id, { focus: false });
     }
     return channel.id;

@@ -30,6 +30,7 @@ import type { ReadGitHubFile } from "./page-github-file-embeds";
 import type { LocalMedia, PageMediaUrl, UploadPageMedia } from "./page-media";
 import { referencesKey, type PageReferenceTargets } from "./page-reference-chips";
 import { PageCommentBox } from "./page-comment-box";
+import type { MarginAgent } from "./page-margin-model";
 import { PageBlameLayer, type PageBlameSource } from "./page-blame";
 import { SectionAgentsInPage } from "./page-section-agents";
 import type { PageSessionChanges } from "./page-session-changes";
@@ -80,6 +81,8 @@ export interface PageSectionActions {
    * Agent takes and answers there and in the page.
    */
   comment?: (blockId: string, anchor: PassageAnchor, text: string) => void;
+  /** The Agent at work on the page that takes a comment on the block, shown under the box. */
+  commentTaker?: (blockId: string) => MarginAgent | undefined;
 }
 
 type PassageAnchor = { quote: string; from: unknown; to: unknown };
@@ -878,7 +881,7 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
       {commentDraft && (
         <div className={commentInMargin ? "absolute z-30 w-80" : "absolute z-30 w-[28rem] max-w-full"}
           style={{ left: commentInMargin ? "calc(100% + 1.5rem)" : commentDraft.left, top: commentDraft.top }}>
-          <PageCommentBox text={commentDraft.text}
+          <PageCommentBox text={commentDraft.text} taker={actions?.commentTaker?.(commentDraft.blockId)}
             onText={(text) => setCommentDraft({ ...commentDraft, text })}
             onClose={(away) => closeComment({ away })} onPassageKey={passageKey}
             onSend={(text) => {

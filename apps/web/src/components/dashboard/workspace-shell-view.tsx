@@ -1316,9 +1316,10 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       onExpandConversation={(conversationId) => navigateToChannel(conversationId)}
       onOpenConversation={(conversationId, at) => openPageConversation(conversationId, at ? { at } : {})}
       onConversationIntent={resolvePageConversation}
-      onDiscuss={({ firstMessage, quote, open, coWrite, planned, ...input }) => startPageConversation(input,
+      onDiscuss={({ firstMessage, quote, open, coWrite, planned, call, ...input }) => startPageConversation(input,
         { ...(firstMessage ? { firstMessage } : {}), ...(quote ? { quote } : {}),
-          ...(open === false ? { open } : {}), ...(coWrite ? { coWrite } : {}), ...(planned ? { planned } : {}) })}
+          ...(open === false ? { open } : {}), ...(coWrite ? { coWrite } : {}), ...(planned ? { planned } : {}),
+          ...(call ? { call } : {}) })}
       onConnectGitHub={async (input) => {
         // The repository's issues and pull requests arrive in a conversation linked to the page.
         await startPageConversation({ spaceId: input.spaceId, pageId: input.pageId, blockId: input.blockId,

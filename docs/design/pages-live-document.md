@@ -351,11 +351,18 @@ fact is about.
   on the passage. Escape, or a click anywhere else, closes the box and the
   passage is no longer selected; a comment closed unsent comes back when the
   same passage is selected again.
-  - The box names nobody. A comment is a discussion of the passage (§4.3)
-    whose first message is the comment. An Agent the comment mentions takes
-    it at once; one that names nobody goes to the kind of Agent already at
-    work on the page, nearest the passage first, and with none there to
-    xMatrix (`@auto`). Who took it shows on its card once sent.
+  - A comment is a discussion of the passage (§4.3) whose first message is
+    the comment. An Agent the comment mentions takes it at once. One that
+    names nobody goes to the Agent already at work on the page, nearest the
+    passage first, among those in conversations the reader can write in: its
+    Instance card stands under the box, as under a conversation's composer,
+    while the comment is written (decided by Daniel 2026-10-22: the existing
+    Agent first, a new one only when there is none). Its Instance lives in its
+    own conversation, so the comment calls it there with
+    `@<name>:<n> A comment for you: channel:<discussion>`; it answers in the
+    discussion, and a reply to its answer is relayed back to it (a
+    cross-Channel link). With none there it goes to xMatrix (`@auto`), and an
+    Agent started for it shows on its card once sent.
   - Its Agent starts at once in a private managed directory, as a
     co-writer's does, unless the comment names a repository (`repo:`,
     `pwd:`), and writes its change into the page, where its card says it is
