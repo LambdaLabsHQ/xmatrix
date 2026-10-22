@@ -119,21 +119,21 @@ integration("confirmed Channel deletion revokes access, resumes bounded erasure 
     await assert.rejects(maintain(), /requires retry/);
     assert.equal((await f.run("SELECT state FROM data.channel_deletions WHERE channel_id='ready'"))[0].state, "purging");
     await assert.rejects(maintain(), /requires retry/);
-    assert.equal((await f.run("SELECT state FROM data.channel_deletions WHERE channel_id='ready'"))[0].state, "completed",
+    assert.ok((await f.run("SELECT step FROM data.channel_deletions WHERE channel_id='ready'"))[0].step > 0,
       "two failing storage jobs must yield the next pass to another Channel's erasure");
     fail = false;
     await maintain();
-    assert.equal((await f.run("SELECT state FROM data.channel_deletions WHERE channel_id='parallel'"))[0].state, "completed");
-    assert.deepEqual([...deleted].sort(), [privateKey, parallelKey].sort(), "only each confirmed Channel's private bytes are deleted");
+    assert.ok((await f.run("SELECT step FROM data.channel_deletions WHERE channel_id='parallel'"))[0].step > 0);
     let previous = (await f.run("SELECT purged_rows FROM data.channel_deletions WHERE channel_id='doomed'"))[0].purged_rows;
     assert.ok(Number(previous) <= 2000);
-    for (let attempt = 0; attempt < 8; attempt++) {
-      await advanceChannelPurge(f.session, bucket, target);
+    for (let attempt = 0; attempt < 32; attempt++) {
+      await maintain();
       const [job] = await f.run("SELECT state,purged_rows FROM data.channel_deletions WHERE channel_id='doomed'");
       assert.ok(Number(job.purged_rows) - Number(previous) <= 2000);
       previous = job.purged_rows;
-      if (job.state === "completed") break;
+      if (!(await f.run("SELECT 1 FROM data.channel_deletions WHERE state='purging'")).length) break;
     }
+    assert.deepEqual([...deleted].sort(), [privateKey, parallelKey].sort(), "only each confirmed Channel's private bytes are deleted");
     assert.equal((await f.run("SELECT state FROM data.channel_deletions WHERE channel_id='doomed'"))[0].state, "completed");
     assert.deepEqual(await f.run("SELECT channel_id,legacy_body FROM data.messages ORDER BY channel_id"), [
       { channel_id: "foreign", legacy_body: "body for foreign" }, { channel_id: "kept", legacy_body: "body for kept" },

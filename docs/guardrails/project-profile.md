@@ -39,7 +39,8 @@ Human Space owners/admins can confirm Channel deletion in its actions or
 details. Active work prompts a second confirmation to stop the Channel's
 Agents, then automatically retries deletion after daemon termination. Retirement
 revokes access immediately; a durable job erases the exact
-Channel closure in bounded, retryable passes while keeping linked Pages and
+Channel closure in bounded, retryable passes that checkpoint a plan-bound cursor
+before the transaction deadline, while keeping linked Pages and
 other Channels. Account deletion remains separately available in Settings.
 See [Channel deletion](../operations/channel-deletion.md) and
 [account deletion](../operations/account-deletion.md) for recovery and retained-data limits.

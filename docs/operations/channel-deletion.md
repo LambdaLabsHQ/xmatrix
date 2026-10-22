@@ -43,7 +43,13 @@ added before a retained progress marker are still processed after an upgrade.
 Immutable Apple purchase ownership and content-free secret-access audits remain.
 
 Each pass deletes at most 100 restricted objects and mutates at most 2,000 rows
-in batches of 500, then commits its progress. Storage failures leave the cursor
+in batches of 500. Row cleanup makes at most eight table-delete calls and stops
+starting more after two seconds of SQL work, then commits its next step with a digest of the
+ordered table/predicate plan. Missing or changed digests restart the dependency
+plan, so an upgrade cannot skip a newly inserted earlier step. This bounds empty
+table round trips as well as deleted rows under the unchanged transaction
+deadline; a lost commit is reconciled from the saved journal on a later pass.
+Storage failures leave the object cursor
 unchanged; a restart retries the same exact keys. Failed jobs yield their
 admission slots to pending peers on the next pass. Every restricted key is parsed
 and checked against the deleted Channel before deletion. Content-addressed

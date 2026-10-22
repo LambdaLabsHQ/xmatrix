@@ -1,7 +1,7 @@
 import type { QueryResultRow } from "pg";
 import type { DatabaseTransaction } from "./contracts.js";
 import { SpaceControlError } from "./space-control.js";
-import { ACTIVE_RUN_STATUS_SQL, parseRestrictedChannelContentScope } from "@xmatrix/protocol";
+import { ACTIVE_RUN_STATUS_SQL, parseRestrictedChannelContentScope, sha256Hex } from "@xmatrix/protocol";
 
 const RUNS = "(SELECT run_id FROM data.runs WHERE channel_id=$2)";
 const INSTANCES = "(SELECT instance_id FROM data.instances WHERE channel_id=$2)";
@@ -58,6 +58,7 @@ export const CHANNEL_PURGE_STEPS: readonly { table: string; predicate: string }[
 export interface ChannelDeletionRow extends QueryResultRow {
   space_id: string; channel_id: string; state: "purging" | "completed";
   step: number; object_cursor: string; objects_done: boolean;
+  row_plan_digest: string | null;
 }
 
 export async function retireChannel(tx: DatabaseTransaction, input: {
@@ -104,10 +105,15 @@ export async function purgeChannelRows(tx: DatabaseTransaction, input: {
     WHERE ctid IN (SELECT ctid FROM data.user_space_channel_view_preferences
       WHERE space_id=$1 AND pinned_channel_ids_json ? $2 LIMIT 500) RETURNING 1`,
     values: [input.spaceId, input.channelId, input.at], maxRows: 500 });
-  // Deleted rows are progress. Revisiting the finite plan also handles new
-  // dependency steps inserted before a marker retained by an older release.
-  let step = 0, removed = pins.length;
-  while (step < CHANNEL_PURGE_STEPS.length && removed < 2_000) {
+  // A row cap alone does not bound the many empty-table round trips. Resume
+  // only the exact plan that saved this cursor; a changed plan starts over so
+  // newly inserted dependencies before an old cursor cannot be skipped.
+  const planDigest = await sha256Hex(JSON.stringify(CHANNEL_PURGE_STEPS));
+  let step = job.row_plan_digest === planDigest ? job.step : 0, removed = pins.length;
+  if (!Number.isInteger(step) || step < 0 || step > CHANNEL_PURGE_STEPS.length) throw new Error("Channel purge cursor is invalid");
+  const deadline = performance.now() + 2_000;
+  let queries = 0;
+  while (step < CHANNEL_PURGE_STEPS.length && removed < 2_000 && queries < 8 && performance.now() < deadline) {
     const { table, predicate } = CHANNEL_PURGE_STEPS[step]!;
     const limit = Math.min(500, 2_000 - removed);
     const rows = await tx.query({ name: `channel_purge_${table.replace(".", "_")}_v1`, text:
@@ -116,6 +122,7 @@ export async function purgeChannelRows(tx: DatabaseTransaction, input: {
           AND $3::text IS NOT NULL AND $4::text IS NOT NULL LIMIT $5) RETURNING 1`,
       values: [input.spaceId, input.channelId, restrictedPrefix(input.channelId), objectPrefix(input.channelId), limit], maxRows: limit });
     removed += rows.length;
+    queries++;
     if (rows.length < limit) step++;
   }
   const complete = step === CHANNEL_PURGE_STEPS.length && pins.length < 500;
@@ -123,10 +130,10 @@ export async function purgeChannelRows(tx: DatabaseTransaction, input: {
     text: "DELETE FROM data.channels WHERE space_id=$1 AND channel_id=$2 AND mode='deleted'",
     values: [input.spaceId, input.channelId], maxRows: 0 });
   await tx.query({ name: "channel_purge_progress_v1", text: `UPDATE data.channel_deletions SET
-      step=$3,purged_rows=purged_rows+$4,updated_at=$5,state=$6,
+      step=$3,purged_rows=purged_rows+$4,updated_at=$5,state=$6,row_plan_digest=$7,
       completed_at=CASE WHEN $6='completed' THEN $5::timestamptz ELSE NULL END
       WHERE space_id=$1 AND channel_id=$2`,
-    values: [input.spaceId, input.channelId, step, removed, input.at, complete ? "completed" : "purging"], maxRows: 0 });
+    values: [input.spaceId, input.channelId, step, removed, input.at, complete ? "completed" : "purging", planDigest], maxRows: 0 });
   return complete;
 }
 

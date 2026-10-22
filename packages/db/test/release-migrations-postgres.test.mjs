@@ -24,9 +24,12 @@ integration("release expand migrations refuse unowned indexes and resume once on
       .rows[0].ledger, null, "release does not bootstrap an empty database");
 
     const manifest = await loadMigrationManifest();
-    const last = manifest.at(-1);
-    assert.equal(last.id, "0213_expand_channel_replay_online_indexes");
-    for (const migration of manifest.slice(0, -1)) {
+    // Anchor the interrupted online build; subsequent expand migrations are
+    // part of the same release and must also apply exactly once.
+    const last = manifest.find(migration => migration.id === "0213_expand_channel_replay_online_indexes");
+    assert.ok(last);
+    const pending = manifest.slice(manifest.indexOf(last));
+    for (const migration of manifest.slice(0, manifest.indexOf(last))) {
       await applyMigration(client, migration, "fixture", role);
     }
     await client.query(`INSERT INTO control.postgres_shards
@@ -42,7 +45,7 @@ integration("release expand migrations refuse unowned indexes and resume once on
       [last.id])).rows[0].n, 0);
     await client.query("DROP INDEX control.scoped_replays_channel_purge_idx");
     const results = await Promise.all([invoke(), invoke()]);
-    assert.equal(results.flatMap(({ stdout }) => JSON.parse(stdout).applied).length, 1);
+    assert.equal(results.flatMap(({ stdout }) => JSON.parse(stdout).applied).length, pending.length);
     const receipt = (await client.query(`SELECT app_revision,checksum_sha256 FROM control.schema_migrations
       WHERE migration_id=$1`, [last.id])).rows;
     assert.deepEqual(receipt, [{ app_revision: revision, checksum_sha256: last.checksumSha256 }]);
