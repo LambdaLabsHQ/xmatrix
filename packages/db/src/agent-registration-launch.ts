@@ -977,7 +977,7 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
     });
     const [observed, latencies] = await this.database.transaction({ requestId: `registration-models:${target.harness ?? "auto"}`,
       operation: "registration.launch.model-catalog", placement: this.placement }, async tx => [await tx.query({
-      name: "registration_launch_model_catalog_v4", text: `SELECT requested.owner,requested.machine,requested.harness,catalog.models,catalog.observed_at,parameter_catalog.parameters,parameter_catalog.parameter_model,parameter_catalog.parameters_observed_at,startup.startup_failed_at,signed_out.signed_out_at
+      name: "registration_launch_model_catalog_v5", text: `SELECT requested.owner,requested.machine,requested.harness,catalog.models,catalog.observed_at,parameter_catalog.parameters,parameter_catalog.parameter_model,parameter_catalog.parameters_observed_at,startup.startup_failed_at,signed_out.signed_out_at
         FROM jsonb_to_recordset($1::jsonb) AS requested(owner text,machine text,harness text)
         LEFT JOIN LATERAL (SELECT i.presentation_json->'models' AS models,
           i.presentation_json->>'modelsObservedAt' AS observed_at
@@ -1004,14 +1004,20 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
             AND run.metadata_json->'stopRequest' IS NULL AND run.metadata_json->'executionCancellation' IS NULL
             AND (run.metadata_json->'spawnResult'->>'ok'='false'
               OR run.metadata_json->'invocationProgress'->>'phase'=ANY($3::text[]))) startup ON TRUE
-        LEFT JOIN LATERAL (SELECT max(GREATEST(
+        LEFT JOIN LATERAL (SELECT refused.at AS signed_out_at FROM (SELECT max(GREATEST(
             CASE WHEN pg_input_is_valid(run.metadata_json->>'signedOutAt','timestamp with time zone')
               THEN (run.metadata_json->>'signedOutAt')::timestamptz END,
             CASE WHEN run.metadata_json->'invocationProgress'->'operationFailure'->>'code'='harness_signed_out'
-              THEN run.finished_at END)) AS signed_out_at
+              THEN run.finished_at END)) AS at
           FROM data.run_agent_registrations r JOIN data.runs run ON run.run_id=r.run_id
           WHERE r.space_id=$2 AND r.owner_user_id=requested.owner AND r.machine_id=requested.machine AND r.harness=requested.harness
-            AND run.updated_at>=statement_timestamp()-interval '${SIGNED_OUT_FAILURE_WINDOW_HOURS} hours') signed_out ON TRUE`,
+            AND run.updated_at>=statement_timestamp()-interval '${SIGNED_OUT_FAILURE_WINDOW_HOURS} hours') refused
+          WHERE refused.at IS NOT NULL AND NOT EXISTS (SELECT 1
+            FROM data.run_agent_registrations r JOIN data.instances i ON i.run_id=r.run_id
+            JOIN data.messages m ON m.space_id=$2 AND m.author_kind='agent' AND m.author_id=i.instance_id
+              AND m.sent_at>refused.at AND m.message_id NOT LIKE 'turn-failure:%'
+            WHERE r.space_id=$2 AND r.owner_user_id=requested.owner AND r.machine_id=requested.machine
+              AND r.harness=requested.harness)) signed_out ON TRUE`,
       values: [JSON.stringify(candidates.map(candidate => ({ owner: candidate.key.ownerUserId,
         machine: candidate.key.machineId, harness: candidate.key.harness }))),this.placement.spaceId,
         [...STARTUP_FAILURE_PHASES]], maxRows: 100 }),
@@ -1188,8 +1194,12 @@ export function harnessTooOldOn(daemon: QueryResultRow, harness: string): Harnes
 
 /** This harness signed out of its account on its machine: which program on
  * which machine. The machine's own report says so, or a start or turn it
- * refused as signed out (`signedOutAt`) that no later report has answered:
- * a program's status command can say signed in while its token cannot refresh.
+ * refused as signed out (`signedOutAt`) that neither a later report nor a
+ * later message from one of its Instances has answered: a program's status
+ * command can say signed in while its token cannot refresh, and one process
+ * refused by its provider (a token another process just rotated) is not the
+ * program signed out once an Instance of it speaks again. Hub's turn-failure
+ * notice in the Instance's name (`turn-failure:` id) is not it speaking.
  * An unchecked or unknown sign-in is not judged. */
 export function harnessSignedOutOn(daemon: QueryResultRow, key: { harness: string; machineId: string },
   signedOutAt?: unknown): HarnessSignedOut | undefined {

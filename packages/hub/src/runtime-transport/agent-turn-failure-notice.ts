@@ -53,6 +53,7 @@ export function agentTurnFailureAppendCommand(input: {
     // not create another notice when that old failure reconnects after rollout.
     ...(input.noticeId ? [channelId, input.noticeId] : [body.split("\n")[0]!.replace(/\s+/gu, " ").slice(0, TURN_FAILURE_NOTICE_IDENTITY_MAX)]),
   ].join(":");
+  // Routing tells this notice from the Instance speaking by the prefix.
   const messageId = runtimeCommandId("turn-failure", identity);
   return {
     commandId: runtimeCommandId("agent-turn-failure", messageId),
