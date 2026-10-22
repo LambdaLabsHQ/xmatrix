@@ -194,6 +194,16 @@ test("tagged preflight waits several minutes for the complete gate and authoriza
   }
 });
 
+test("tagged preflight expires its evidence window even before exhausting the read budget", async t => {
+  let elapsed = 0;
+  t.mock.method(Date, "now", () => {
+    elapsed += 60_000;
+    return elapsed;
+  });
+  assert.notDeepEqual(await runAuthorization({ lagging: 20 }), [],
+    "evidence that would arrive after the deadline cannot authorize deployment");
+});
+
 
 test("exact-scope job authorization works without steps and never accepts failed, missing or ambiguous evidence", async () => {
   for (const [reader, scope] of [[authorize, "web"], [hub, "hub"], [web, "web"]]) {
