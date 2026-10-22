@@ -1,16 +1,14 @@
--- Index only Channel identities, never the complete replay body. Native
--- scope/aggregate identities and all four historical JSON locations share one
--- lookup, so an unindexed OR arm cannot force a scan of unrelated receipts.
-CREATE INDEX scoped_replays_channel_purge_idx ON control.scoped_control_command_replays USING gin
-  ((ARRAY[CASE WHEN scope_kind='channel' THEN scope_id END,
-    result_json->>'channelId', result_json->'message'->>'channelId',
-    result_json->'channel'->>'id', result_json->'task'->>'channelId']));
-
-CREATE INDEX idempotency_channel_purge_idx ON data.idempotency_keys USING gin
-  ((ARRAY[result_json->>'channelId', result_json->'message'->>'channelId',
-    result_json->'channel'->>'id', result_json->'task'->>'channelId']));
-
-CREATE INDEX outbox_channel_purge_idx ON data.outbox USING gin
-  ((ARRAY[CASE WHEN aggregate_kind='channel' THEN aggregate_id END,
-    payload_json->>'channelId', payload_json->'message'->>'channelId',
-    payload_json->'channel'->>'id', payload_json->'task'->>'channelId']));
+-- No production shard applied the original transactional index build: the
+-- release's 25-second deadline rolled it back before its ledger receipt.
+-- Reserve exact online index identities before their nontransactional builds.
+CREATE TABLE control.schema_migration_index_builds (
+  index_schema text NOT NULL CHECK (index_schema IN ('control','data')),
+  index_name text NOT NULL,
+  migration_id text NOT NULL,
+  checksum_sha256 text NOT NULL CHECK (checksum_sha256 ~ '^[a-f0-9]{64}$'),
+  statement_sha256 text NOT NULL CHECK (statement_sha256 ~ '^[a-f0-9]{64}$'),
+  table_schema text NOT NULL,
+  table_name text NOT NULL,
+  started_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+  PRIMARY KEY (index_schema,index_name)
+);

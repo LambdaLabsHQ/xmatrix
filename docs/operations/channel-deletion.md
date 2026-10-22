@@ -56,6 +56,8 @@ or aggregate identity and the four retained JSON Channel identity locations.
 The array-containment predicate matches those expressions; adding an unindexed
 OR branch would force full receipt scans and can roll back every batch at the
 query deadline. The indexes contain identities only, not complete payloads.
+Their initial build uses the exact-tag migrator's [online index mode](postgres-online-index-migrations.md)
+so a large replay history does not require blocking production writers.
 
 Cleanup removes Channel messages, message replay copies, metadata history,
 attachments, schedules, linked execution records, grants, Page links and its pins.

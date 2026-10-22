@@ -1,5 +1,10 @@
 # Release Updates
 
+Exact-tag PostgreSQL expand migrations support bounded concurrent index builds
+with durable, checksum-bound name reservations and the existing migration
+ledger. Interrupted builds recover only their own indexes; unknown names and
+changed definitions fail closed. See [online index migrations](operations/postgres-online-index-migrations.md).
+
 xMatrix has one global source version. The root `version.json` file is the canonical
 version source for a release train. An on-demand train publishes only its
 selected components; existing versions of other components remain live and the
