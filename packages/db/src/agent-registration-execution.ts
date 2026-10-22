@@ -202,9 +202,13 @@ export class PostgresRegistrationExecutionRepository {
       if (row.process_terminal === true) throw new RegistrationAccessError("allocation_terminal", 409);
       if (row.authorization_digest !== input.authorizationDigest) throw new RegistrationAccessError("allocation_authorization_changed", 403);
       if (row.state === "admitted") {
-        if (row.daemon_id !== input.daemonId || Number(row.connection_epoch) !== input.connectionEpoch) {
-          throw new RegistrationAccessError("allocation_daemon_changed", 409);
-        }
+        if (row.daemon_id !== input.daemonId) throw new RegistrationAccessError("allocation_daemon_changed", 409);
+        // The same daemon reconnected after it admitted this Run, and its retry
+        // arrives on the current connection (checked above). The daemon keeps one
+        // process per Run, so the admission moves to that connection.
+        if (Number(row.connection_epoch) !== input.connectionEpoch) await tx.query({
+          name: "registration_allocation_readmit_epoch_v1", text: `UPDATE control.registration_execution_allocations
+            SET connection_epoch=$2 WHERE allocation_id=$1`, values: [input.allocationId, input.connectionEpoch], maxRows: 0 });
         return view(row, true);
       }
       if (row.state !== "reserved") throw new RegistrationAccessError("allocation_terminal", 409);
