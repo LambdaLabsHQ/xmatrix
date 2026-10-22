@@ -319,7 +319,11 @@ export class AgentInstanceRuntimeTransport {
     }
     this.sockets.restore(ws, attachment.session);
     void this.bindLiveDelivery(ws, attachment.session);
-    void this.onPresenceChange?.({ reason: "connect", session: attachment.session });
+    // Hibernation kept the socket, so the Instance never left: its viewers
+    // already have its card, and what a status report needs to reach them is
+    // kept in the cell's storage. Announcing a join on every wake read the
+    // whole Channel and fanned out across cells for each Instance, and any
+    // frame wakes the object.
     return true;
   }
   accept(ws: WebSocket): void { this.controller.socket.accept(ws); }

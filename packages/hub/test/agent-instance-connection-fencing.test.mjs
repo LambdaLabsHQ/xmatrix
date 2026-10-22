@@ -140,6 +140,22 @@ test("reconnect during the predecessor's database close preserves live delivery 
   assert.equal(transport.liveSessions().length, 1);
 });
 
+test("a socket restored from hibernation keeps its Instance's presence instead of announcing a join", async () => {
+  const f = fixture();
+  const changes = [];
+  const record = (change) => { changes.push(change.reason); };
+  const awake = new AgentInstanceRuntimeTransport(f.port, 1000, record);
+  const socket = new Socket(); awake.accept(socket);
+  await awake.handleFrame(socket, JSON.stringify(f.message));
+  assert.deepEqual(changes, ["connect"]);
+  // Any frame wakes a hibernated object into a fresh transport.
+  const woken = new AgentInstanceRuntimeTransport(f.port, 1000, record);
+  assert.equal(woken.rehydrate(socket, awake.hibernationAttachment(socket)), true);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(changes, ["connect"], "a wake is not a join");
+  assert.equal(f.live.get("instance"), woken.session(socket), "live delivery is bound again");
+});
+
 test("a slower earlier handshake cannot replace the newer authenticated connection", async () => {
   const f = fixture();
   const reached = deferred(); const release = deferred();
