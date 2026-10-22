@@ -80,7 +80,7 @@ const fakeRequire = (name) => {
 
 async function runAuthorization({ scope = "web", overrides = {}, authorityScope = scope, authorityConclusion = "success",
   authorityStatus = "completed", authorityCount = 1, requestSha = sha, deploySha = sha, lagging = 0, laggingGates = 0, reader = authorize,
-  tag = "xmatrix-v0.16.339", authorityTag = tag, channel = "beta", laggingRuns = 0, otherProductionRuns = [] } = {}) {
+  tag = "xmatrix-v0.16.339", authorityTag = tag, channel = "beta", laggingRuns = 0, otherProductionRuns = [], capture } = {}) {
   const failures = [];
   // The request's own `gates` job stands for every gate its scope selected;
   // ci.yml's job names (`ci / hub (1/6)`, ...) are not part of the evidence.
@@ -109,7 +109,8 @@ async function runAuthorization({ scope = "web", overrides = {}, authorityScope 
     },
     // The first `lagging` reads lack the authorization job conclusion;
     // no step metadata is available even after every job completes.
-    paginate: async (method) => {
+    paginate: async (method, parameters) => {
+      if (capture) capture.push(parameters);
       if (method === listRuns) {
         runReads += 1;
         return [...(runReads <= laggingRuns ? [] : [{ id: 456, head_sha: deploySha }]), ...otherProductionRuns];
@@ -187,6 +188,18 @@ test("hub and web reuse a stable cut of a revision the request contains", async 
 
 test("tagged preflight re-reads exact authorization whose conclusion is not yet reported", async () => {
   assert.deepEqual(await runAuthorization({ lagging: 1 }), []);
+});
+
+test("evidence reads bust the jobs-list cache on every poll", async () => {
+  const capture = [];
+  assert.deepEqual(await runAuthorization({ lagging: 2, capture }), []);
+  const busts = capture.map((parameters) => parameters?.cachebust);
+  assert.ok(busts.length >= 3);
+  assert.ok(busts.every((bust) => /^(runs|jobs)-\d+-\d+$/.test(bust)));
+  assert.equal(new Set(busts).size, busts.length);
+  const reuse = [];
+  assert.deepEqual(await runAuthorization({ reader: hub, scope: "hub", capture: reuse }), []);
+  assert.match(reuse[0]?.cachebust, /^\d+-1$/);
 });
 
 test("tagged preflight waits for its own run without accepting an older duplicate", async () => {
