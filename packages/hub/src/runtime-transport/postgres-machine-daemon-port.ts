@@ -393,6 +393,11 @@ export class PostgresMachineDaemonPort implements MachineDaemonSocketBackend {
     if (message.type === "machine_run_exited" && requestId && runId) {
       return { type: "machine_run_report_acked", requestId, runId };
     }
+    // A partial snapshot is the daemon's minute report: answered, it proves this
+    // session too, so the daemon need not also probe it (each probe wakes us).
+    if (message.type === "machine_run_snapshot" && message.snapshotComplete !== true) {
+      return { type: "machine_run_snapshot_acked" };
+    }
     return message.type === "unregister"
       ? { type: "unregistered", requestId: message.requestId }
       : undefined;

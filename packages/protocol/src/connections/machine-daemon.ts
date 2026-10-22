@@ -494,6 +494,16 @@ export interface MachineDaemonRunReportAcked {
   runId: string;
 }
 
+/**
+ * Additive receipt: a partial Run snapshot committed. It is the daemon's minute
+ * report, so answering it lets that report prove the Hub still holds the
+ * session; the daemon's own session probe, which wakes the Relay Runtime, is
+ * then rarely needed. Older daemons ignore it.
+ */
+export interface MachineDaemonRunSnapshotAcked {
+  type: "machine_run_snapshot_acked";
+}
+
 export interface MachineDaemonQuotaProbeCommand {
   type: "machine_quota_probe";
   requestId: string;
@@ -649,4 +659,5 @@ export type MachineDaemonServerMessage =
   | MachineDaemonCommandAdmissionAcked
   | MachineDaemonCommandCompletionAcked
   | MachineDaemonRunReportAcked
+  | MachineDaemonRunSnapshotAcked
   | MachineDaemonActivationReceipt;

@@ -482,6 +482,12 @@ test("a partial snapshot is offered without a replay; a full snapshot or a named
   assert.deepEqual(reports.map((call) => call.input.replayable), [false, false, undefined, undefined]);
 });
 
+test("a partial snapshot is answered, so the daemon's minute report also proves its session", async () => {
+  const port = authorityPort({ commands: recordingCommands([]), keepAlive: () => undefined });
+  assert.deepEqual(await port.execute(session, { type: "machine_run_snapshot", snapshotComplete: false, runs: [] }),
+    { type: "machine_run_snapshot_acked" });
+});
+
 test("a partial snapshot reconciles only its Runs' Channels in its frame; a full one fans out off the socket", async () => {
   const reconciled = [];
   const background = [];
