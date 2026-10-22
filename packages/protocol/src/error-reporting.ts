@@ -1,4 +1,5 @@
 import {
+  addConsoleInstrumentationHandler,
   captureConsoleIntegration,
   captureException,
   createStackParser,
@@ -6,10 +7,13 @@ import {
   dedupeIntegration,
   flush,
   getGlobalScope,
+  getClient,
+  isError,
   linkedErrorsIntegration,
   rewriteFramesIntegration,
   setCurrentClient,
   type ErrorEvent,
+  type EventHint,
   type StackFrame,
 } from "@sentry/core";
 import { nodeStackLineParser, ServerRuntimeClient } from "@sentry/core/server";
@@ -22,6 +26,8 @@ export type ErrorReportingTarget = {
 };
 
 let reporting = false;
+const workerStackParser = createStackParser(nodeStackLineParser());
+const consoleCaptureBoundaries = new WeakMap<object, Error>();
 
 /**
  * A Worker names its bundled module bare (`index.js`). The release uploads that
@@ -60,8 +66,26 @@ export function consoleLine(args: readonly unknown[]): string {
   return parts.filter(Boolean).join(" ").slice(0, CONSOLE_LINE_LIMIT);
 }
 
-/** Titles a captured `console.error` report with the facts it logged. */
-function titleConsoleReport(event: ErrorEvent): ErrorEvent {
+/**
+ * Platform/RPC errors may have no originating stack. Keep the SDK's synchronous
+ * capture boundary in that case, explicitly labeled so it cannot be mistaken
+ * for the failed storage/delivery call. beforeSend runs after frame rewriting.
+ */
+function prepareErrorReport(event: ErrorEvent, hint: EventHint): ErrorEvent {
+  const exception = event.exception?.values?.[0];
+  const boundary = isError(hint.originalException)
+    ? consoleCaptureBoundaries.get(hint.originalException) ?? hint.syntheticException : hint.syntheticException;
+  if (exception && !exception.stacktrace?.frames?.length && boundary?.stack) {
+    const frames = workerStackParser(boundary.stack, 1).map(bundleFrame);
+    if (frames.length) {
+      exception.stacktrace = { frames };
+      exception.mechanism = {
+        type: "generic",
+        ...exception.mechanism,
+        data: { ...exception.mechanism?.data, stack_origin: "capture_boundary" },
+      };
+    }
+  }
   const args = event.extra?.arguments;
   if (event.logger !== "console" || !Array.isArray(args) || !args.some((arg) => arg && typeof arg === "object")) {
     return event;
@@ -89,12 +113,26 @@ export function startErrorReporting({ dsn, release, component }: ErrorReportingT
     platform: "javascript",
     runtime: { name: "cloudflare" },
     dataCollection: { userInfo: false, cookies: false, httpHeaders: false, httpBodies: [], urlQueryParams: false },
-    stackParser: createStackParser(nodeStackLineParser()),
-    beforeSend: titleConsoleReport,
+    stackParser: workerStackParser,
+    beforeSend: prepareErrorReport,
     integrations: [
       dedupeIntegration(),
       linkedErrorsIntegration(),
       rewriteFramesIntegration({ iteratee: bundleFrame }),
+      {
+        name: "StacklessConsoleBoundary",
+        setup(client) {
+          // Capture before the SDK's scope wrappers consume the runtime's stack
+          // depth budget. Weak keys neither retain errors nor mix concurrent logs.
+          addConsoleInstrumentationHandler(({ args, level }) => {
+            if (level !== "error" || getClient() !== client) return;
+            const error = args.find(isError);
+            if (error && !workerStackParser(error.stack ?? "", 1).length) {
+              consoleCaptureBoundaries.set(error, new Error("Console capture boundary"));
+            }
+          });
+        },
+      },
       captureConsoleIntegration({ levels: ["error"] }),
     ],
     transport: (options) => createTransport(options, async ({ body }) => {

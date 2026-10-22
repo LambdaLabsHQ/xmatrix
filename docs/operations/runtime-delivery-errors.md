@@ -22,6 +22,16 @@ deployed head sampling rate is one; an empty query is not proof of no failure.
 Keep unresolved incidents open until the originating failure is understood and
 any fix is verified in production.
 
+A platform or RPC Error can arrive without a JavaScript stack. The Worker
+reporter then retains the SDK's synchronous capture stack and labels its
+mechanism `stack_origin=capture_boundary`; Sentry issue reads show
+`stack=capture boundary (origin unavailable)`. These source-mapped frames locate
+the console/reporting call, not the original storage operation. Original stacks
+are preserved when available. For HUB-9C and HUB-88, use the next event's capture
+caller to identify the responsible DO path, then establish whether delivery or
+commit already occurred before choosing recovery. This diagnostic does not
+retry, ignore or resolve the underlying failure.
+
 Machine text-task answers that update a conversation's About carry the current
 Runtime's local delivery capability through the catalog mutation and its
 after-commit notification. Deliver the catalog change directly to that cell;

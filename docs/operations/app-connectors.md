@@ -336,7 +336,10 @@ credentials, queries, fragments or inline script schemes. Issue occurrence
 count and first/last-seen UTC times support recurrence checks; these are issue
 totals, not release-specific counts. Only frame names, paths and positions are returned; local variables,
 source context, requests and breadcrumbs remain excluded. The full receipt
-still has the shared 12,000-character context limit.
+still has the shared 12,000-character context limit. When the Worker reporter
+could only retain a capture stack for a stackless platform Error, its fixed
+mechanism label is shown as `stack=capture boundary (origin unavailable)`;
+arbitrary mechanism data remains excluded. See [runtime delivery errors](runtime-delivery-errors.md).
 
 Gmail search/read answer in the Channel receipt that replies to the command,
 like every other action, so everyone who can read the Channel reads the mail.

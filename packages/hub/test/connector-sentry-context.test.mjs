@@ -145,11 +145,11 @@ test("a stackless event retains bounded provenance without copying private paylo
       { key: "user.email", value: "private-user-tag" }, { key: "request", value: "private-request-tag" }],
     entries: [{ type: "exception", data: { values: [{ type: "Error", value: "Request Canceled",
       mechanism: { type: "auto.browser.global_handlers.onunhandledrejection", handled: false, synthetic: true,
-        data: { secret: "private-mechanism-data" }, meta: { secret: "private-mechanism-meta" } } }] } }] };
+        data: { secret: "private-mechanism-data", stack_origin: "capture_boundary" }, meta: { secret: "private-mechanism-meta" } } }] } }] };
   const { result, calls } = await run([{ body: issue }, { body: diagnosticEvent }], undefined, "123");
   for (const expected of ["Event time: 2026-10-09T09:59:39.498000Z", "Release: xmatrix-v1.0.149",
     "Component: web", "Environment: production", "SDK: sentry.javascript.browser 11.4.0",
-    "Mechanism: auto.browser.global_handlers.onunhandledrejection · handled=false · synthetic=true"]) {
+    "Mechanism: auto.browser.global_handlers.onunhandledrejection · handled=false · synthetic=true · stack=capture boundary (origin unavailable)"]) {
     assert.ok(result.summary.includes(expected), expected);
   }
   assert.doesNotMatch(result.summary, /private-|Frame:/);
@@ -161,7 +161,7 @@ test("malformed or oversized diagnostic metadata is omitted and does not fail an
     release: "x".repeat(161), sdk: { name: "private-sdk\nsecret", version: "private-version" },
     tags: [{ key: "component", value: "private-component" }, { key: "environment", value: "private-environment\nsecret" }],
     entries: [{ type: "exception", data: { values: [{ type: "Error", value: "Request Canceled",
-      mechanism: { type: "x".repeat(161), handled: "private-handled", synthetic: "private-synthetic" } }] } }],
+      mechanism: { type: "x".repeat(161), handled: "private-handled", synthetic: "private-synthetic", data: { stack_origin: "private-origin" } } }] } }],
   } }], undefined, "123");
   assert.match(result.summary, /Request Canceled/);
   assert.doesNotMatch(result.summary, /private-|Event time:|Release:|SDK:|Component:|Environment:|Mechanism:/);

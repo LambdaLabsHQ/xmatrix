@@ -67,5 +67,9 @@ export function sentryExceptionMechanism(value: Record<string, unknown>): string
   if (token(type)) fields.push(type as string);
   if (typeof handled === "boolean") fields.push(`handled=${handled}`);
   if (typeof synthetic === "boolean") fields.push(`synthetic=${synthetic}`);
+  // This one fixed diagnostic label is emitted by our Worker reporter. Never
+  // export arbitrary mechanism data or imply these are originating frames.
+  const data = (mechanism as { data?: { stack_origin?: unknown } }).data;
+  if (data?.stack_origin === "capture_boundary") fields.push("stack=capture boundary (origin unavailable)");
   return fields.length ? `Mechanism: ${fields.join(" · ")}` : undefined;
 }
