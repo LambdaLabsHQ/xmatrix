@@ -291,7 +291,7 @@ export class PostgresMachineLifecycleRepository {
         input.repositoryBaseline?.relationship === "diverged" && input.repositoryBaseline.noticeKey !== undefined;
       if ((eventType === "machine_run_exited" || spawnFailure || stopNotice || baselineNotice) &&
           typeof payload.runId === "string" && (spawnFailure || stopNotice || changedRunIds.includes(payload.runId))) {
-        const contexts = await tx.query<QueryResultRow>({ name: "machine_lifecycle_notice_context_v7", text: `SELECT
+        const contexts = await tx.query<QueryResultRow>({ name: "machine_lifecycle_notice_context_v8", text: `SELECT
           r.run_id,r.channel_id,r.owner_user_id,r.status,r.metadata_json,
           (SELECT message.message_id FROM data.agent_launches launch
             JOIN data.messages message ON message.space_id=launch.space_id AND message.channel_id=launch.channel_id
