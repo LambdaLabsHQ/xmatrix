@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { machineRunFailureNoticeCommand, machineStopResultNoticeCommand, repositoryBaselineNoticeCommand,
+import { machineRunFailureNoticeCommand, machineStopCauseText, machineStopResultNoticeCommand, repositoryBaselineNoticeCommand,
   startupFallbackNoticeCommand } from "../src/machine-run-failure-notice.ts";
 
 const base = { runId: "run-1", channelId: "channel-1", agentName: "grok", ownerUserId: "owner",
@@ -95,3 +95,18 @@ test("the Agent that takes over a failed start is named once per failed Run", as
   assert.notEqual((await startupFallbackNoticeCommand({ ...base, runId: "run-2", agentName: "claude" })).messageId, notice.messageId);
   assert.notEqual(notice.messageId, (await machineRunFailureNoticeCommand({ ...base, detail: "boom" })).messageId);
 });
+
+test("a stop nothing in the Channel asked for says why and who caused it", async () => {
+  const stop = await machineStopResultNoticeCommand({ ...base, machineName: "srv2018194", controlKey: "k", ok: true,
+    cause: { code: "registration_disabled", actorName: "Daniel" } });
+  assert.equal(stop.body, "Stopped @grok on srv2018194. Daniel turned this Agent off in this Space. " +
+    "The Machine confirmed the process tree is terminated.");
+  assert.equal(stop.residual.appMetadata.stopCause, "registration_disabled");
+  const failed = await machineStopResultNoticeCommand({ ...base, controlKey: "k", ok: false,
+    cause: { code: "instance_deleted", ownerName: "Ada" } });
+  assert.match(failed.body, /^Couldn't stop @grok\. Ada deleted this Instance\.\n/u);
+  assert.equal(machineStopCauseText({ code: "registration_membership" }),
+    "This Agent's owner is no longer a member of this Space, so it can't run here.");
+  assert.equal(machineStopCauseText({ code: "something_new" }), undefined, "an unknown cause is not guessed");
+});
+

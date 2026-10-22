@@ -5,7 +5,7 @@ import { PostgresMachineLifecycleRepository, RuntimeControlError, type Authority
 import { wakeAgentLaunchCoordinator } from "./agent-launch-coordinator-wake";
 import { isRecoverableLaunchFailure } from "./live-run-admission";
 import { publishMachineRunFailureNotice, publishMachineStopResultNotice, publishRepositoryBaselineNotice,
-  publishStartupFallbackNotice } from "./machine-run-failure-notice";
+  publishStartupFallbackNotice, type MachineStopCause } from "./machine-run-failure-notice";
 import { dispatchStartupFallback } from "./registration-launch-dispatch";
 import { createPostgresAuthorityDatabase } from "./postgres-authority-fleet";
 import {
@@ -125,6 +125,7 @@ export async function machineRunLifecycleReport(
       machineId: text(context.machineId, "machineId"), hostId: optionalHostname(context.hostId),
       machineName: optionalMachineName(context.machineName),
       ...(typeof context.sourceMessageId === "string" ? { sourceMessageId: context.sourceMessageId } : {}),
+      ...(context.stopCause && typeof context.stopCause === "object" ? { cause: context.stopCause as MachineStopCause } : {}),
     }).catch(error => console.error("Machine Daemon stop result notice append failed", {
       runId: context.runId, channelId: context.channelId, error: error instanceof Error ? error.message : String(error) }));
     delete value.stopResultNoticeContext;

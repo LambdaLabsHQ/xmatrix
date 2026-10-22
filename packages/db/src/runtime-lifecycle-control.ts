@@ -153,6 +153,23 @@ export interface MachineLifecycleInput {
   preserveInstanceForReborn?: boolean;
 }
 
+/** Why a Run nothing in the Channel asked to stop was stopped, and by whom,
+ * so its notice can say so: a withdrawn registration names the change and who
+ * made it, a deleted Instance its owner. Names are as the Space shows them. */
+function stopCause(context: QueryResultRow, runMetadata: Record<string, unknown>):
+  { stopCause?: { code: string; actorName?: string; ownerName?: string; launcherName?: string } } {
+  const name = (value: unknown) => typeof value === "string" && value.trim() ? value.trim().slice(0, 120) : undefined;
+  const deletion = runMetadata.instanceDeletion;
+  const code = typeof context.stop_reason_code === "string" && context.stop_reason_code
+    ? context.stop_reason_code.slice(0, 100)
+    : deletion && typeof deletion === "object" ? "instance_deleted" : undefined;
+  if (!code) return {};
+  const actorName = name(context.access_actor_name), ownerName = name(context.owner_name),
+    launcherName = name(context.launcher_name);
+  return { stopCause: { code, ...(actorName ? { actorName } : {}), ...(ownerName ? { ownerName } : {}),
+    ...(launcherName ? { launcherName } : {}) } };
+}
+
 export class PostgresMachineLifecycleRepository {
   private readonly channelDirectory: PostgresChannelSpaceDirectory;
   private readonly entityDirectory: PostgresEntitySpaceDirectory;
@@ -291,7 +308,7 @@ export class PostgresMachineLifecycleRepository {
         input.repositoryBaseline?.relationship === "diverged" && input.repositoryBaseline.noticeKey !== undefined;
       if ((eventType === "machine_run_exited" || spawnFailure || stopNotice || baselineNotice) &&
           typeof payload.runId === "string" && (spawnFailure || stopNotice || changedRunIds.includes(payload.runId))) {
-        const contexts = await tx.query<QueryResultRow>({ name: "machine_lifecycle_notice_context_v8", text: `SELECT
+        const contexts = await tx.query<QueryResultRow>({ name: "machine_lifecycle_notice_context_v9", text: `SELECT
           r.run_id,r.channel_id,r.owner_user_id,r.status,r.metadata_json,
           (SELECT message.message_id FROM data.agent_launches launch
             JOIN data.messages message ON message.space_id=launch.space_id AND message.channel_id=launch.channel_id
@@ -300,7 +317,16 @@ export class PostgresMachineLifecycleRepository {
           (r.metadata_json->'spawnResult'->>'ok'='false' OR
             EXISTS (SELECT 1 FROM data.agent_launches launch WHERE launch.run_id=r.run_id
               AND launch.state='failed' AND launch.spawned_at IS NULL)) AS startup_failed,
-          registration.display_name AS agent_name,binding.harness,machine.name AS machine_name
+          registration.display_name AS agent_name,binding.harness,machine.name AS machine_name,
+          stop_intent.reason_code AS stop_reason_code,owner_member.display_name AS owner_name,
+          launcher.display_name AS launcher_name,
+          -- Whoever last changed this Agent's access in the Space, up to the withdrawal that stopped it.
+          (SELECT actor.display_name FROM data.registration_access_changes change
+            LEFT JOIN data.space_members actor ON actor.space_id=change.space_id AND actor.user_id=change.actor_user_id
+            WHERE change.space_id=binding.space_id AND change.owner_user_id=binding.owner_user_id
+              AND change.machine_id=binding.machine_id AND change.harness=binding.harness
+              AND change.created_at<=COALESCE(stop_intent.created_at,clock_timestamp())
+            ORDER BY change.created_at DESC LIMIT 1) AS access_actor_name
           FROM data.runs r
           JOIN data.run_agent_registrations binding ON binding.run_id=r.run_id AND binding.space_id=$3
           JOIN data.space_agent_registrations registration ON registration.space_id=binding.space_id
@@ -308,6 +334,11 @@ export class PostgresMachineLifecycleRepository {
             AND registration.harness=binding.harness
           LEFT JOIN data.machines machine ON machine.owner_user_id=binding.owner_user_id
             AND machine.machine_id=binding.machine_id
+          LEFT JOIN data.registration_stop_intents stop_intent ON stop_intent.run_id=r.run_id
+          LEFT JOIN data.space_members owner_member ON owner_member.space_id=binding.space_id
+            AND owner_member.user_id=binding.owner_user_id
+          LEFT JOIN data.space_members launcher ON launcher.space_id=binding.space_id
+            AND launcher.user_id=binding.actor_user_id
           WHERE r.run_id=$1 AND r.channel_id=$2 AND r.owner_user_id=$4`,
           values: [payload.runId, channelId, placement.spaceId, ownerUserId], maxRows: 1 });
         const context = contexts[0];
@@ -343,6 +374,7 @@ export class PostgresMachineLifecycleRepository {
               // A channel stop answers on its command, not as another message.
               ...(channelStop ? { sourceMessageId: (stopRequest as { sourceMessageId: string }).sourceMessageId } : {}),
               ...(startupFailed ? { startupFailed: true } : {}),
+              ...(!channelStop ? stopCause(context!, runMetadata) : {}),
               controlKey: typeof payload.requestId === "string" && payload.requestId ? payload.requestId.slice(0, 200) : notice.runId,
               ...(typeof payload.error === "string" && payload.error.trim() ? { detail: payload.error.trim().slice(0, 2_000) } : {}) },
           });
