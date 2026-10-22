@@ -3128,6 +3128,21 @@ pub(crate) mod tests {
         (listener, address)
     }
 
+    /// A client registered with the fake Hub listening at `address`.
+    async fn registered_test_client(
+        address: std::net::SocketAddr,
+    ) -> AgentInstanceConnectionClient {
+        let mut client = AgentInstanceConnectionClient::new(
+            format!("ws://{address}/ws/agent-instances"),
+            "token".into(),
+            "builder".into(),
+            "codex".into(),
+            None,
+        );
+        client.register().await.expect("fake hub registration");
+        client
+    }
+
     fn presence_test_client() -> Arc<AgentInstanceConnectionClient> {
         Arc::new(AgentInstanceConnectionClient::new(
             "ws://127.0.0.1:1/ws/agent-instances".into(),
@@ -3519,14 +3534,7 @@ pub(crate) mod tests {
             }
         });
 
-        let mut client = AgentInstanceConnectionClient::new(
-            format!("ws://{address}/ws/agent-instances"),
-            "token".into(),
-            "builder".into(),
-            "codex".into(),
-            None,
-        );
-        client.register().await.expect("fake hub registration");
+        let client = registered_test_client(address).await;
         // What the Hub listed on connect is what this client may send.
         assert!(client.hub_accepts("channel_activity"));
         assert!(!client.hub_accepts("channel_unknown"));
@@ -4009,14 +4017,7 @@ pub(crate) mod tests {
             }
             second
         });
-        let mut client = AgentInstanceConnectionClient::new(
-            format!("ws://{address}/ws/agent-instances"),
-            "token".into(),
-            "builder".into(),
-            "codex".into(),
-            None,
-        );
-        client.register().await.expect("fake hub registration");
+        let mut client = registered_test_client(address).await;
         let mut events = client.event_rx.take().unwrap();
         let mut handed: Vec<String> = Vec::new();
         // What the runtime is handed, until the connection is quiet a moment after the catch-up.
