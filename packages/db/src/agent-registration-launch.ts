@@ -10,6 +10,7 @@ import {
   harnessCommandLine,
   harnessTooOld,
   parseHarnessInventory,
+  harnessItemObservedAt,
   digestCanonicalCloneCborV1,
   parseSpaceAgentRegistrationKey,
   parseSpaceAgentConfiguration,
@@ -1188,7 +1189,8 @@ export function harnessTooOldOn(daemon: QueryResultRow, harness: string): Harnes
 
 /** This harness signed out of its account on its machine: which program on
  * which machine. The machine's own report says so, or a start or turn it
- * refused as signed out (`signedOutAt`) that no later report has answered:
+ * refused as signed out (`signedOutAt`) that no later observation of the program
+ * has answered, a sign-in through xMatrix included:
  * a program's status command can say signed in while its token cannot refresh.
  * An unchecked or unknown sign-in is not judged. */
 export function harnessSignedOutOn(daemon: QueryResultRow, key: { harness: string; machineId: string },
@@ -1198,7 +1200,8 @@ export function harnessSignedOutOn(daemon: QueryResultRow, key: { harness: strin
   const item = inventory?.items.find(entry => entry.id === key.harness && entry.installed);
   const refusedAt = signedOutAt instanceof Date ? signedOutAt.getTime()
     : typeof signedOutAt === "string" ? Date.parse(signedOutAt) : Number.NaN;
-  const unanswered = Number.isFinite(refusedAt) && !(inventory && Date.parse(inventory.capturedAt) > refusedAt);
+  const unanswered = Number.isFinite(refusedAt) && !(inventory &&
+    (item ? harnessItemObservedAt(inventory, item) : Date.parse(inventory.capturedAt)) > refusedAt);
   if (item?.login !== "signed_out" && !unanswered) return undefined;
   const machineName = typeof daemon.machine_name === "string" ? daemon.machine_name.trim() : "";
   return { harness: key.harness, program: agentPresetById(key.harness)?.displayName ?? key.harness,

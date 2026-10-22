@@ -8,7 +8,8 @@ const ERROR_MAX = 256;
 /**
  * Fold a completed action's re-probe into the Machine's inventory. A refresh
  * replaces the whole observation unless a fresher one is stored; a single
- * re-probed preset replaces only its own item in an existing observation.
+ * re-probed preset replaces only its own item in an existing observation and
+ * records when it was observed, so a sign-in answers refusals made before it.
  */
 export async function recordHarnessActionInventory(tx: DatabaseTransaction, input: {
   ownerUserId: string; machineId: string; hostId: string; result: HarnessActionResult; at: string;
@@ -23,7 +24,10 @@ export async function recordHarnessActionInventory(tx: DatabaseTransaction, inpu
     values: [ownerUserId, machineId, JSON.stringify(result.inventory), result.inventory.capturedAt], maxRows: 0 });
     return;
   }
-  const item = result.item;
+  // The item was probed when its action finished: that, not the inventory's
+  // capture, is how old its sign-in answer is.
+  const observedAt = new Date(input.at).toISOString();
+  const item = result.item && { ...result.item, observedAt };
   if (!item) return;
   const rows = await tx.query<QueryResultRow>({ name: "machine_harness_action_item_lock_v2", text: `SELECT
     metadata_json->'harnesses' AS harnesses FROM data.machine_daemons
