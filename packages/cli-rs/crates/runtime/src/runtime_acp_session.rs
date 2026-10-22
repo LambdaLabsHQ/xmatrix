@@ -195,11 +195,19 @@ impl AcpSession {
                     && err.code == Some(ACP_AUTH_REQUIRED_CODE) =>
             {
                 let method_id = acp_retry_auth_method(&self.auth_method_ids);
+                // The agent itself said it needs credentials and refused the
+                // ones it has: whatever its wording, that is a sign-in problem.
                 self.request(
                     "authenticate",
                     Some(serde_json::json!({ "methodId": method_id })),
                 )
-                .await?;
+                .await
+                .map_err(|err| {
+                    CliError::Launch(format!(
+                        "{} authentication required: {err}",
+                        self.config.display_name
+                    ))
+                })?;
                 self.request(method, Some(params)).await
             }
             Err(err) => Err(CliError::Launch(err.detail)),
@@ -1202,5 +1210,48 @@ fn acp_retry_auth_method(advertised: &[String]) -> String {
         "login".to_string()
     } else {
         advertised[0].clone()
+    }
+}
+
+/// How long a readiness check may take, from spawn to an open session.
+const ACP_READINESS_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// Whether an ACP harness can take work on this machine, asked the way a
+/// launch asks it: the same spawn, `initialize`, credential retry and
+/// `session/new`, then closed before any prompt, so no model is called. A
+/// vendor's status command can be missing or wrong (an expired sign-in still
+/// reads signed in); this cannot. `Some(Err(reason))` is the harness's own
+/// account of why it refused; `None` is no answer (no start, a timeout, or a
+/// failure that is not about credentials).
+pub(crate) async fn acp_harness_readiness(
+    preset: &xmatrix_cli_agent::AgentPreset,
+    launcher: &std::path::Path,
+) -> Option<Result<(), String>> {
+    let config = match preset.backend.as_str() {
+        "grok-acp" => AcpVendorConfig::grok(),
+        "acp" => AcpVendorConfig::generic(&preset.runtime),
+        _ => return None,
+    };
+    // A scratch project, so the session it opens never lands in the owner's
+    // own project history.
+    let cwd = dirs::config_dir()?.join("xmatrix").join("harness-check");
+    std::fs::create_dir_all(&cwd).ok()?;
+    let cwd = cwd.to_str()?.to_string();
+    let program = launcher.to_str()?.to_string();
+    let mut app = AcpSession::spawn(&program, &preset.default_args, Some(&cwd), config)
+        .await
+        .ok()?;
+    let opened = tokio::time::timeout(
+        ACP_READINESS_TIMEOUT,
+        app.initialize(Some(&cwd), None, false, None),
+    )
+    .await;
+    app.shutdown().await;
+    match opened.ok()? {
+        Ok(_) => Some(Ok(())),
+        Err(err) => {
+            let detail = err.to_string();
+            harness_signed_out_error(&detail).then_some(Err(detail))
+        }
     }
 }

@@ -87,8 +87,11 @@ export interface HarnessInventoryItem {
   latestVersion?: string;
   /** Effective automatic updating on this machine: native control or the daemon's own update. */
   autoUpdate?: "enabled" | "disabled" | "unknown";
-  /** The harness's own sign-in status, when its preset has a status command. */
+  /** The harness's own sign-in status: its status command's answer, or for an ACP harness without one,
+   * whether it opened a session when started the way a launch starts it. */
   login?: HarnessLoginState;
+  /** Why a harness started the way a launch starts it refused to open a session, in its own words. */
+  loginDetail?: string;
 }
 
 export const HARNESS_LOGIN_STATES = ["signed_in", "signed_out", "unknown"] as const;
@@ -121,7 +124,7 @@ export function parseHarnessInventory(value: unknown): HarnessInventory | undefi
         !STATUSES.has(item.probeStatus)) return undefined;
     if (item.autoUpdate !== undefined && !AUTO_UPDATE_STATES.has(item.autoUpdate as string)) return undefined;
     if (item.login !== undefined && !(HARNESS_LOGIN_STATES as readonly unknown[]).includes(item.login)) return undefined;
-    for (const [key, max] of [["path", 4096], ["version", 128], ["latestVersion", 128]] as const) {
+    for (const [key, max] of [["path", 4096], ["version", 128], ["latestVersion", 128], ["loginDetail", 300]] as const) {
       if (item[key] !== undefined && (typeof item[key] !== "string" ||
           item[key].length === 0 || item[key].length > max || hasControlCharacter(item[key]))) return undefined;
     }
@@ -136,6 +139,7 @@ export function parseHarnessInventory(value: unknown): HarnessInventory | undefi
       ...(item.latestVersion === undefined ? {} : { latestVersion: item.latestVersion as string }),
       ...(item.autoUpdate === undefined ? {} : { autoUpdate: item.autoUpdate as HarnessInventoryItem["autoUpdate"] }),
       ...(item.login === undefined ? {} : { login: item.login as HarnessLoginState }),
+      ...(item.loginDetail === undefined || item.login !== "signed_out" ? {} : { loginDetail: item.loginDetail as string }),
     });
   }
   const inventory: HarnessInventory = { schemaVersion: 1, capturedAt: input.capturedAt, items };

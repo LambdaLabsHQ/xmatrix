@@ -40,6 +40,12 @@ const en = {
   signedOut: (program: string, machine: string) =>
     `${program} on ${machine} is not signed in, so it cannot take work yet. Sign it in here:`,
   signIn: "Sign in",
+  /** A program that is set up on its own machine, not signed in from here. */
+  cannotTakeWork: (program: string, machine: string) => `${program} on ${machine} can't take work yet.`,
+  itSays: "It says:",
+  setUpThere: (command: string) => `Run ${command} in a terminal on that computer, set it up as it asks, then check again.`,
+  checkAgain: "Check again",
+  stillCannot: "It still can't take work.",
   /** After a signed-out notice's sign-in: its summon was sent again. */
   signedInResent: "Your message went to it again.",
   resendFailed: "Your message could not be sent again. Send it once more.",
@@ -159,6 +165,11 @@ const zh: OnboardingCopy = {
   nothingUntilUpdated: "更新之前不会给它派活。",
   signedOut: (program, machine) => `${machine} 上的 ${program} 还没登录，登录之前接不了活。在这里登录：`,
   signIn: "登录",
+  cannotTakeWork: (program, machine) => `${machine} 上的 ${program} 还不能接活。`,
+  itSays: "它说：",
+  setUpThere: (command) => `在那台电脑的终端里运行 ${command}，按提示设置好，然后重新检查。`,
+  checkAgain: "重新检查",
+  stillCannot: "还是不能接活。",
   signedInResent: "你的消息已重新交给它。",
   resendFailed: "消息没能重新发出，请再发一次。",
   sendAgain: "再发一次消息就能继续。",

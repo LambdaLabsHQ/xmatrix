@@ -2,7 +2,7 @@
 
 import { agentPresetById, type AgentRegistrationSummary } from "@xmatrix/protocol";
 import type { OnboardingCopy } from "@/lib/onboarding-copy";
-import { HarnessSignInSection } from "./harness-sign-in";
+import { HarnessSignedOutBody } from "./harness-sign-in";
 
 /* An agent brought in whose own program is signed out on its machine looks
    ready and answers nothing. Onboarding names the program and the machine and
@@ -14,10 +14,9 @@ export function SignedOutAgents({ registrations, token, userId, copy }: {
   if (!token || !userId || registrations.length === 0) return null;
   return registrations.map((registration) => (
     <div key={JSON.stringify(registration.key)} className="mt-3" data-testid="signed-out-agent">
-      <p>{copy.signedOut(agentPresetById(registration.key.harness)?.displayName ?? registration.displayName,
-        registration.machineName)}</p>
-      <div className="mt-2"><HarnessSignInSection registration={registration} token={token} userId={userId} bare
-        signInLabel={copy.signIn} /></div>
+      <HarnessSignedOutBody registration={registration} token={token} userId={userId} copy={copy}
+        program={agentPresetById(registration.key.harness)?.displayName ?? registration.displayName}
+        machine={registration.machineName} />
     </div>
   ));
 }

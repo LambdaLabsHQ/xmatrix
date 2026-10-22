@@ -36,6 +36,9 @@ pub(crate) struct InventoryItem {
     pub(crate) auto_update: Option<&'static str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) login: Option<&'static str>,
+    /// The harness's own words for why it cannot take work, when it said so.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) login_detail: Option<String>,
 }
 
 /// A harness process the daemon starts itself: closed stdin, piped output, the
@@ -188,8 +191,75 @@ pub(crate) async fn probe(preset: &AgentPreset, policy: &HarnessPolicy) -> Inven
     });
     if item.installed {
         item.login = crate::runtime_daemon_harness_login::inventory_state(preset).await;
+        if item.login.is_none()
+            && let Some((state, detail)) = readiness(&preset.id)
+        {
+            item.login = Some(state);
+            item.login_detail = detail;
+        }
     }
     item
+}
+
+/// What each status-less ACP harness answered when last started the way a
+/// launch starts it (`acp_harness_readiness`): "signed_in", or "signed_out"
+/// with the harness's own words.
+type Readiness = (&'static str, Option<String>);
+static READINESS: Mutex<BTreeMap<String, Readiness>> = Mutex::new(BTreeMap::new());
+
+fn readiness(preset_id: &str) -> Option<Readiness> {
+    READINESS.lock().ok()?.get(preset_id).cloned()
+}
+
+/// The part of a refusal the harness wrote itself: the longest of the
+/// `provider_error_detail` parts once the launch's own "... failed: " lead is cut.
+fn harness_own_words(detail: &str) -> String {
+    let own = detail
+        .split(" | ")
+        .map(|part| part.rsplit_once("failed: ").map_or(part, |(_, rest)| rest))
+        .max_by_key(|part| part.chars().count())
+        .unwrap_or(detail);
+    xmatrix_cli_core::failure_detail::sanitize(own.trim(), 600)
+        .chars()
+        .take(300)
+        .collect()
+}
+
+/// Start every installed ACP harness that has no status command up to an open
+/// session and keep whether it could take work. Serial, like the probes.
+/// True when an answer changed, so the inventory is worth reporting again.
+pub(crate) async fn refresh_readiness() -> bool {
+    let mut changed = false;
+    for preset in agent_presets() {
+        let has_status = preset
+            .management
+            .as_ref()
+            .and_then(|management| management.login.as_ref())
+            .is_some_and(|login| login.status.is_some());
+        if has_status || !matches!(preset.backend.as_str(), "acp" | "grok-acp") {
+            continue;
+        }
+        let state = match resolve_launcher(preset) {
+            None => None,
+            Some(launcher) => match crate::acp_harness_readiness(preset, &launcher).await {
+                Some(Ok(())) => Some(("signed_in", None)),
+                Some(Err(reason)) => {
+                    eprintln!("{} cannot take work: {reason}", preset.display_name);
+                    Some(("signed_out", Some(harness_own_words(&reason))))
+                }
+                None => None,
+            },
+        };
+        let Ok(mut answers) = READINESS.lock() else {
+            return changed;
+        };
+        let previous = match state.clone() {
+            Some(state) => answers.insert(preset.id.clone(), state),
+            None => answers.remove(&preset.id),
+        };
+        changed |= previous != state;
+    }
+    changed
 }
 
 async fn probe_launcher(preset: &AgentPreset) -> InventoryItem {
@@ -207,6 +277,7 @@ async fn probe_launcher(preset: &AgentPreset) -> InventoryItem {
         latest_version: None,
         auto_update: None,
         login: None,
+        login_detail: None,
         probe_status: if path.is_some() {
             "unsupported"
         } else {
@@ -370,6 +441,11 @@ pub(crate) fn spawn_inventory_report(
         loop {
             every.tick().await;
             report_inventory(&relay).await;
+            // Starting each ACP harness takes seconds, so what it says follows
+            // the first report rather than holding it back.
+            if refresh_readiness().await {
+                report_inventory(&relay).await;
+            }
         }
     }))
 }
@@ -377,6 +453,22 @@ pub(crate) fn spawn_inventory_report(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_refusal_keeps_the_harness_words_without_the_launch_lead() {
+        let detail = "Qwen Code authentication required: Launch failed: qwen code agent authenticate failed: \
+            Internal error | code=-32603 | Missing API key for openai auth. Set OPENAI_API_KEY.";
+        assert_eq!(
+            harness_own_words(detail),
+            "Missing API key for openai auth. Set OPENAI_API_KEY."
+        );
+        assert_eq!(
+            harness_own_words(
+                "Cursor authentication required: cursor agent authenticate failed: Not logged in"
+            ),
+            "Not logged in"
+        );
+    }
 
     #[test]
     fn legacy_cursor_alias_probes_the_resolved_binary_while_adapters_probe_the_cli() {
