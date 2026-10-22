@@ -28,6 +28,7 @@ jobs:
   preflight:
     if: startsWith(github.ref, 'refs/tags/xmatrix-v')
     runs-on: &release_runner ${{ vars.XMATRIX_RUNNER_FLEET == 'self-hosted' && fromJSON('["self-hosted","xmatrix-us-release"]') || 'ubuntu-24.04' }}
+    timeout-minutes: 20
     permissions:
       actions: read
       contents: read
@@ -195,16 +196,19 @@ jobs:
             // Scope and tag are durable job evidence, not optional step
             // metadata. The dispatcher cannot run until this exact authorization
             // succeeds. GitHub can lag several minutes behind completed jobs.
-            // Poll up to 60 times, five seconds apart, for the complete set;
+            // Poll for ten minutes, five seconds apart, for the complete set;
             // a successful authority alone cannot stand in for its gates.
             const authorityName = `authorize ${scope} production ${context.ref.replace("refs/tags/", "")}`;
             let jobs = [];
             let authorities = [];
-            for (let attempt = 0; attempt < 60; attempt += 1) {
+            const evidenceDeadline = Date.now() + 10 * 60_000;
+            for (let attempt = 0; attempt < 120; attempt += 1) {
               if (attempt) await new Promise((resolve) => setTimeout(resolve, 5000));
+              if (Date.now() >= evidenceDeadline) break;
               jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRun, {
                 ...context.repo, run_id: requestRun.id, filter: "latest", per_page: 100,
                 headers: { "Cache-Control": "no-cache" },
+                request: { timeout: 10_000 },
               });
               authorities = jobs.filter((job) => job.name === authorityName);
               const gates = ["plan", "gates"].map(name => jobs.find(job => job.name === name));

@@ -185,9 +185,9 @@ test("tagged preflight re-reads exact authorization whose conclusion is not yet 
   assert.deepEqual(await runAuthorization({ lagging: 1 }), []);
 });
 
-test("tagged preflight waits beyond a minute for the complete gate and authorization evidence", async () => {
-  assert.deepEqual(await runAuthorization({ lagging: 20 }), []);
-  assert.deepEqual(await runAuthorization({ laggingGates: 20 }), [],
+test("tagged preflight waits several minutes for the complete gate and authorization evidence", async () => {
+  assert.deepEqual(await runAuthorization({ lagging: 80 }), []);
+  assert.deepEqual(await runAuthorization({ laggingGates: 80 }), [],
     "a published authority cannot substitute for gates whose success is still missing");
   for (const delayed of [{ lagging: Infinity }, { laggingGates: Infinity }]) {
     assert.notDeepEqual(await runAuthorization(delayed), [], "unreported success never authorizes deployment");

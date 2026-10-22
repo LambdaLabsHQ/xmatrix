@@ -148,7 +148,9 @@ conditions remain in force.
 
 Before production mutation, preflight reads the request's plan, aggregate gates
 and exact tag/scope authorization together. It retries missing or incomplete
-conclusions up to 60 reads, five seconds apart, with uncached requests. A
+conclusions within a ten-minute window, at most 120 reads five seconds apart,
+with uncached requests and a ten-second request timeout. The full preflight
+job has a 20-minute timeout. A
 reported failure or duplicate authorization still stops immediately; exhausting
 the bound still refuses deployment. Successful authorization without reported
 gate success is insufficient.
