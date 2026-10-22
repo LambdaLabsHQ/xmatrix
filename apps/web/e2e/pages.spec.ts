@@ -2209,9 +2209,14 @@ test("a discussion with many conversations above it opens level with its passage
   const article = browser.locator(".app-page-article");
   const margin = browser.getByTestId("page-margin");
   const text = editor.getByText(passage, { exact: true });
-  await expect(margin.getByRole("button", { name: `Open ${E2E_CHANNEL.name} beside the page` })).toBeVisible();
+  const button = margin.getByRole("button", { name: `Open ${E2E_CHANNEL.name} beside the page` });
+  await expect(button).toBeVisible();
+  // Reach the closed card before measuring what opening it does. It can sit
+  // below the viewport while the cards above it are still being measured;
+  // Playwright's click would otherwise include its own scroll in this delta.
+  await button.scrollIntoViewIfNeeded();
   const scrolled = await article.evaluate((element) => element.scrollTop);
-  await margin.getByRole("button", { name: `Open ${E2E_CHANNEL.name} beside the page` }).click();
+  await button.click();
   const open = margin.getByTestId("page-margin-open");
   await expect(open).toBeVisible();
   // The cards that have no room above it wait; the open one does not take the column, and the reader, down the page.
