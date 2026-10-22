@@ -1,8 +1,6 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
-require("../dashboard/typescript-require.cjs").installTypeScriptRequire();
-const { EditorState } = require("prosemirror-state");
-const { markdownToPageDoc, pageSchema } = require("@xmatrix/protocol/page-document");
+const { pageEditorState } = require("./page-editor-state-fixture.cjs");
 const { pageMentions, referenceChips } = require("./page-reference-chips.ts");
 
 const CHANNEL = "019a0b4c-1d2e-7f30-8a41-b5c6d7e8f901";
@@ -17,7 +15,7 @@ const targets = {
 
 function chips(markdown) {
   const plugin = referenceChips(() => targets);
-  const state = EditorState.create({ doc: markdownToPageDoc(markdown), schema: pageSchema, plugins: [plugin] });
+  const state = pageEditorState(markdown, [plugin]);
   return plugin.props.decorations(state).find().map((decoration) => decoration.spec.key).filter(Boolean);
 }
 
