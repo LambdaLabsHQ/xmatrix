@@ -181,7 +181,7 @@ function StripeSpaceBillingSection({ userId, space }: {
   const price = PRO_SEAT_PRICE_USD[interval];
   return (
     <div className="app-settings-section min-w-0 space-y-4" data-testid="space-billing">
-      {packConfirmed && <p role="status" className={noticeClass("settled")}>Credit pack payment confirmed. 10,000 credits added to the Space.</p>}
+      {packConfirmed && <p role="status" className={noticeClass("settled")}>Credit pack payment confirmed. Its credits were added to the Space.</p>}
       {returned.spaceNotice === "success" && (
         <p className={noticeClass("settled")}>
           {billing?.plan === "pro" ? `Payment received. ${space.name} is on Pro.` : "Payment received. Confirming the checkout with Stripe…"}
@@ -219,7 +219,7 @@ function StripeSpaceBillingSection({ userId, space }: {
               {billing.credits && <button type="button" className={actionClass({ variant: "secondary", size: "md" })}
                 disabled={busy !== null || subscription?.access === "read_only"} onClick={() => void run("credits/checkout")}>
                 {busy === "credits/checkout" && <AnimatedIcon icon={Loader2} className="size-4 animate-spin" />}
-                Buy 10,000 credits · $10
+                Buy {billing.credits.packCredits.toLocaleString("en-US")} credits · $10
               </button>}
             </div>
           )}

@@ -239,7 +239,7 @@ export function TermsOfServiceContent() {
           outcomes retain the reservation. Media rates are provisional pending verification of upstream
           charges. Unused included credits do not carry over. After included credits, purchased pack
           credits are used, then a grace of 2,500 credits per seat in the same month. Packs cost $10
-          for 10,000 credits plus applicable tax on the web, do not renew automatically and do not
+          for 5,000 credits plus applicable tax on the web, do not renew automatically and do not
           expire while the Space exists. When the total balance is insufficient, paid X actions and
           new Agent/app writes are refused until the next month or a credit pack; people can still
           write in xMatrix and all content stays readable. We notify the Space as included credits

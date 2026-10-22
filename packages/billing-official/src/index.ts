@@ -15,7 +15,7 @@ export { CREDITS_PER_SEAT, GRACE_CREDITS_PER_SEAT } from "./credit-allowances.js
 export const FREE_SPACE_HUMAN_SEAT_LIMIT = 3;
 export const FREE_SPACE_MESSAGE_LIMIT = 500;
 /** Credits one credit pack adds. */
-export const CREDIT_PACK_CREDITS = 10_000;
+export const CREDIT_PACK_CREDITS = 5_000;
 export const FREE_SPACES_PER_ACCOUNT = 2;
 
 interface SubscriptionRow extends Record<string, unknown> {

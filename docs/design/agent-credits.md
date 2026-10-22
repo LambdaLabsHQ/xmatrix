@@ -45,7 +45,7 @@ page revisions or X calls; its cost is still visible in per-Space cost metering.
 
 - Each purchased seat includes **5,000 credits per calendar month (UTC)**. The
   allowance is pooled across the Space: a Space with three seats has 15,000.
-- **Credit packs** add 10,000 credits for $10. Pack credits do not expire while
+- **Credit packs** add 5,000 credits for $10. Pack credits do not expire while
   the Space exists and are used only after the month's included credits.
 - When both are used up, Agents keep working through a **grace** of half the
   included allowance (2,500 per seat), so a busy month never stops work without
@@ -172,7 +172,7 @@ allocation/replay/refunds, and fake-provider tests cover pre-HTTP admission.
 
 ## Pack purchases
 
-The Space owner buys one 10,000-credit pack for $10 (plus applicable tax) in
+The Space owner buys one 5,000-credit pack for $10 (plus applicable tax) in
 Settings → Billing on the web. A current active/trialing Pro subscription is
 required. Prices and credit quantities come only from the server policy and
 its purchase row, never request parameters. Packs are a one-time card payment;
