@@ -100,71 +100,13 @@ jobs:
         run: echo "channel=$(node scripts/version.mjs channel)" >> "$GITHUB_OUTPUT"
 
       - name: Reverify exact selected request before reusing its test result
-        uses: actions/github-script@v7
-        env:
-          DEPLOY_SHA: ${{ inputs.deploy_sha }}
-          REQUEST_RUN_ID: ${{ inputs.request_run_id }}
-          RELEASE_SCOPE: ${{ inputs.release_scope }}
-          RELEASE_CHANNEL: ${{ steps.release-channel.outputs.channel }}
+        uses: ./.github/actions/reverify-release-gate
         with:
-          # A runner-side "fetch failed" is retried rather than failing the job.
-          retries: 3
-          script: |
-            const scope = process.env.RELEASE_SCOPE;
-            if (!scope.split(",").includes("hub")) {
-              core.setFailed("Hub deployment requires selected Hub authorization");
-              return;
-            }
-            if (!/^\d+$/.test(process.env.REQUEST_RUN_ID || "")) {
-              core.setFailed("Hub gate reuse requires an exact request run ID");
-              return;
-            }
-            const { data: productionRun } = await github.rest.actions.getWorkflowRun({
-              ...context.repo, run_id: context.runId,
-            });
-            if (productionRun.path !== ".github/workflows/production-release.yml" ||
-                productionRun.event !== "workflow_dispatch" ||
-                productionRun.head_sha !== process.env.DEPLOY_SHA) {
-              core.setFailed("Hub deployment must be called by the tagged Production Release run");
-              return;
-            }
-            const { data: requestRun } = await github.rest.actions.getWorkflowRun({
-              ...context.repo, run_id: Number(process.env.REQUEST_RUN_ID),
-            });
-            if (requestRun.path !== ".github/workflows/production-release-request.yml" ||
-                requestRun.event !== "workflow_dispatch" ||
-                requestRun.head_branch !== "main") {
-              core.setFailed("Hub gate reuse is not authorized for this exact tagged SHA");
-              return;
-            }
-            // A beta request tested either this exact main revision or its
-            // release commit (that revision plus the stamped release version). A
-            // stable request tested the release commit of a verified beta's
-            // source, which the request's main revision contains.
-            try {
-              require("child_process").execFileSync("node",
-                ["scripts/release-commit.mjs", process.env.RELEASE_CHANNEL === "stable" ? "verify-cut" : "verify",
-                  process.env.DEPLOY_SHA, requestRun.head_sha],
-                { stdio: "inherit" });
-            } catch {
-              core.setFailed("Hub gate reuse is not authorized for this exact tagged SHA");
-              return;
-            }
-            const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRun, {
-              ...context.repo, run_id: requestRun.id, filter: "latest", per_page: 100,
-            });
-            // The request's `gates` job passes only when every gate its scope
-            // selects passed, and the scope selects Hub.
-            for (const name of ["plan", "gates"]) {
-              if (!jobs.some(job => job.name === name && job.conclusion === "success")) {
-                core.setFailed(`Hub gate reuse is missing successful ${name}`);
-                return;
-              }
-            }
-            const authorities = jobs.filter(job => job.name === `authorize ${scope} production ${context.ref.replace("refs/tags/", "")}`);
-            if (authorities.length !== 1 || authorities[0].status !== "completed" || authorities[0].conclusion !== "success") {
-              core.setFailed("Hub gate reuse is missing the exact-scope authorization job");
-            }
+          component: hub
+          deploy_sha: ${{ inputs.deploy_sha }}
+          request_run_id: ${{ inputs.request_run_id }}
+          release_scope: ${{ inputs.release_scope }}
+          release_channel: ${{ steps.release-channel.outputs.channel }}
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -717,67 +659,13 @@ jobs:
         run: echo "channel=$(node scripts/version.mjs channel)" >> "$GITHUB_OUTPUT"
 
       - name: Reverify exact selected request before reusing the Web test result
-        uses: actions/github-script@v7
-        env:
-          DEPLOY_SHA: ${{ inputs.deploy_sha }}
-          REQUEST_RUN_ID: ${{ inputs.request_run_id }}
-          RELEASE_SCOPE: ${{ inputs.release_scope }}
-          RELEASE_CHANNEL: ${{ steps.release-channel.outputs.channel }}
+        uses: ./.github/actions/reverify-release-gate
         with:
-          # A runner-side "fetch failed" is retried rather than failing the job.
-          retries: 3
-          script: |
-            const scope = process.env.RELEASE_SCOPE;
-            if (!scope.split(",").includes("web") || !/^\d+$/.test(process.env.REQUEST_RUN_ID || "")) {
-              core.setFailed("Web deployment requires an exact request selecting Web");
-              return;
-            }
-            const { data: productionRun } = await github.rest.actions.getWorkflowRun({
-              ...context.repo, run_id: context.runId,
-            });
-            if (productionRun.path !== ".github/workflows/production-release.yml" ||
-                productionRun.event !== "workflow_dispatch" ||
-                productionRun.head_sha !== process.env.DEPLOY_SHA) {
-              core.setFailed("Web deployment must be called by the tagged Production Release run");
-              return;
-            }
-            const { data: requestRun } = await github.rest.actions.getWorkflowRun({
-              ...context.repo, run_id: Number(process.env.REQUEST_RUN_ID),
-            });
-            if (requestRun.path !== ".github/workflows/production-release-request.yml" ||
-                requestRun.event !== "workflow_dispatch" ||
-                requestRun.head_branch !== "main") {
-              core.setFailed("Web gate reuse is not authorized for this exact tagged SHA");
-              return;
-            }
-            // A beta request tested either this exact main revision or its
-            // release commit (that revision plus the stamped release version). A
-            // stable request tested the release commit of a verified beta's
-            // source, which the request's main revision contains.
-            try {
-              require("child_process").execFileSync("node",
-                ["scripts/release-commit.mjs", process.env.RELEASE_CHANNEL === "stable" ? "verify-cut" : "verify",
-                  process.env.DEPLOY_SHA, requestRun.head_sha],
-                { stdio: "inherit" });
-            } catch {
-              core.setFailed("Web gate reuse is not authorized for this exact tagged SHA");
-              return;
-            }
-            const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRun, {
-              ...context.repo, run_id: requestRun.id, filter: "latest", per_page: 100,
-            });
-            // The request's `gates` job passes only when every gate its scope
-            // selects passed, and the scope selects Web.
-            for (const name of ["plan", "gates"]) {
-              if (!jobs.some(job => job.name === name && job.conclusion === "success")) {
-                core.setFailed(`Web gate reuse is missing successful ${name}`);
-                return;
-              }
-            }
-            const authorities = jobs.filter(job => job.name === `authorize ${scope} production ${context.ref.replace("refs/tags/", "")}`);
-            if (authorities.length !== 1 || authorities[0].status !== "completed" || authorities[0].conclusion !== "success") {
-              core.setFailed("Web gate reuse is missing the exact-scope authorization job");
-            }
+          component: web
+          deploy_sha: ${{ inputs.deploy_sha }}
+          request_run_id: ${{ inputs.request_run_id }}
+          release_scope: ${{ inputs.release_scope }}
+          release_channel: ${{ steps.release-channel.outputs.channel }}
 
       # The build target built this exact commit in this run, alongside the Hub
       # deploy. Restore only a handoff whose checksums and commit match.

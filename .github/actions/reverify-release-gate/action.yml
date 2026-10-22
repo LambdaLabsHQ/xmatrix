@@ -1,0 +1,110 @@
+name: Reverify release gate reuse
+description: >-
+  Before a tagged Hub or Web deploy, require the selected request's gates for
+  this exact release. A beta deploy must be that main revision or its release
+  commit. A stable deploy must be the release commit of a verified beta source
+  that main still contains.
+
+inputs:
+  component:
+    description: hub or web
+    required: true
+  deploy_sha:
+    description: Exact immutable production tag commit
+    required: true
+  request_run_id:
+    description: Exact successful request authorizing the tested SHA
+    required: true
+  release_scope:
+    description: Scope bound to the successful request marker
+    required: true
+  release_channel:
+    description: beta or stable, from the tagged version
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Reverify exact selected request before reusing its test result
+      uses: actions/github-script@v7
+      env:
+        DEPLOY_SHA: ${{ inputs.deploy_sha }}
+        REQUEST_RUN_ID: ${{ inputs.request_run_id }}
+        RELEASE_SCOPE: ${{ inputs.release_scope }}
+        RELEASE_CHANNEL: ${{ inputs.release_channel }}
+        GATE_COMPONENT: ${{ inputs.component }}
+      with:
+        # A runner-side "fetch failed" is retried rather than failing the job.
+        retries: 3
+        script: |
+          const component = process.env.GATE_COMPONENT;
+          const scope = process.env.RELEASE_SCOPE || "";
+          const hub = component === "hub";
+          if (hub) {
+            if (!scope.split(",").includes("hub")) {
+              core.setFailed("Hub deployment requires selected Hub authorization");
+              return;
+            }
+            if (!/^\d+$/.test(process.env.REQUEST_RUN_ID || "")) {
+              core.setFailed("Hub gate reuse requires an exact request run ID");
+              return;
+            }
+          } else if (component === "web") {
+            if (!scope.split(",").includes("web") || !/^\d+$/.test(process.env.REQUEST_RUN_ID || "")) {
+              core.setFailed("Web deployment requires an exact request selecting Web");
+              return;
+            }
+          } else {
+            core.setFailed("Release gate reuse requires Hub or Web");
+            return;
+          }
+          const label = hub ? "Hub" : "Web";
+          const unauthorized = hub
+            ? "Hub gate reuse is not authorized for this exact tagged SHA"
+            : "Web gate reuse is not authorized for this exact tagged SHA";
+          const { data: productionRun } = await github.rest.actions.getWorkflowRun({
+            ...context.repo, run_id: context.runId,
+          });
+          if (productionRun.path !== ".github/workflows/production-release.yml" ||
+              productionRun.event !== "workflow_dispatch" ||
+              productionRun.head_sha !== process.env.DEPLOY_SHA) {
+            core.setFailed(`${label} deployment must be called by the tagged Production Release run`);
+            return;
+          }
+          const { data: requestRun } = await github.rest.actions.getWorkflowRun({
+            ...context.repo, run_id: Number(process.env.REQUEST_RUN_ID),
+          });
+          if (requestRun.path !== ".github/workflows/production-release-request.yml" ||
+              requestRun.event !== "workflow_dispatch" ||
+              requestRun.head_branch !== "main") {
+            core.setFailed(unauthorized);
+            return;
+          }
+          // A beta request tested either this exact main revision or its
+          // release commit (that revision plus the stamped release version). A
+          // stable request tested the release commit of a verified beta's
+          // source, which the request's main revision contains.
+          try {
+            require("child_process").execFileSync("node",
+              ["scripts/release-commit.mjs", process.env.RELEASE_CHANNEL === "stable" ? "verify-cut" : "verify",
+                process.env.DEPLOY_SHA, requestRun.head_sha],
+              { stdio: "inherit" });
+          } catch {
+            core.setFailed(unauthorized);
+            return;
+          }
+          const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRun, {
+            ...context.repo, run_id: requestRun.id, filter: "latest", per_page: 100,
+          });
+          // The request's `gates` job passes only when every gate its scope
+          // selects passed, and the scope selects this component.
+          for (const name of ["plan", "gates"]) {
+            if (!jobs.some(job => job.name === name && job.conclusion === "success")) {
+              core.setFailed(`${label} gate reuse is missing successful ${name}`);
+              return;
+            }
+          }
+          const authorities = jobs.filter(job => job.name === `authorize ${scope} production ${context.ref.replace("refs/tags/", "")}`);
+          if (authorities.length !== 1 || authorities[0].status !== "completed" || authorities[0].conclusion !== "success") {
+            core.setFailed(`${label} gate reuse is missing the exact-scope authorization job`);
+          }

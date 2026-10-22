@@ -9,8 +9,11 @@ const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
 const sha = "a".repeat(40);
 
 function scriptFrom(workflow, stepName) {
-  const step = Object.values(parse(workflow).jobs).flatMap(job => job?.steps ?? [])
-    .find(step => step.name === stepName);
+  const parsed = parse(workflow);
+  const steps = parsed.jobs
+    ? Object.values(parsed.jobs).flatMap(job => job?.steps ?? [])
+    : parsed.runs?.steps ?? [];
+  const step = steps.find(step => step.name === stepName);
   assert.equal(typeof step?.with?.script, "string", `Missing workflow script ${stepName}`);
   return new AsyncFunction("github", "context", "core", "process", "require", "setTimeout", step.with.script);
 }
@@ -19,8 +22,10 @@ const intent = await readFile(new URL("../.github/workflows/production-release-i
 const record = scriptFrom(intent, "Record the intent and wake the train");
 const authorize = scriptFrom(production, "Require successful exact-SHA selected request evidence");
 const server = await readFile(new URL("../.github/workflows/server-release.yml", import.meta.url), "utf8");
-const hub = scriptFrom(server, "Reverify exact selected request before reusing its test result");
-const web = scriptFrom(server, "Reverify exact selected request before reusing the Web test result");
+const gateAction = await readFile(new URL("../.github/actions/reverify-release-gate/action.yml", import.meta.url), "utf8");
+const gate = scriptFrom(gateAction, "Reverify exact selected request before reusing its test result");
+const hub = gate;
+const web = gate;
 
 async function runIntent(env) {
   const failures = [];
@@ -113,7 +118,10 @@ async function runAuthorization({ scope = "web", overrides = {}, authorityScope 
   await reader(github, {
     repo: { owner: "LambdaLabsHQ", repo: "xmatrix" }, ref: `refs/tags/${tag}`, runId: 456,
   }, { setFailed: (message) => failures.push(message) }, {
-    env: { DEPLOY_SHA: deploySha, REQUEST_RUN_ID: "123", RELEASE_SCOPE: scope, RELEASE_CHANNEL: channel },
+    env: {
+      DEPLOY_SHA: deploySha, REQUEST_RUN_ID: "123", RELEASE_SCOPE: scope, RELEASE_CHANNEL: channel,
+      GATE_COMPONENT: scope === "hub" || scope === "web" ? scope : "web",
+    },
   }, fakeRequire, (resolve) => { resolve(); });
   return failures;
 }
@@ -149,12 +157,15 @@ test("a stable preflight accepts the cut of a revision its request contains, nev
 
 test("hub and web reuse a stable cut of a revision the request contains", async () => {
   const jobs = parse(server).jobs;
-  for (const job of [jobs.hub, jobs.web]) {
+  const gateScript = parse(gateAction).runs.steps.find((step) => step.with?.script).with.script;
+  assert.match(gateScript, /RELEASE_CHANNEL === "stable" \? "verify-cut" : "verify"/);
+  for (const [job, component] of [[jobs.hub, "hub"], [jobs.web, "web"]]) {
     const channel = job.steps.find((step) => step.id === "release-channel");
     const reverify = job.steps.find((step) => String(step.name).startsWith("Reverify exact selected request"));
     assert.equal(channel.run, 'echo "channel=$(node scripts/version.mjs channel)" >> "$GITHUB_OUTPUT"');
-    assert.equal(reverify.env.RELEASE_CHANNEL, "${{ steps.release-channel.outputs.channel }}");
-    assert.match(reverify.with.script, /RELEASE_CHANNEL === "stable" \? "verify-cut" : "verify"/);
+    assert.equal(reverify.uses, "./.github/actions/reverify-release-gate");
+    assert.equal(reverify.with.component, component);
+    assert.equal(reverify.with.release_channel, "${{ steps.release-channel.outputs.channel }}");
   }
   for (const [reader, scope] of [[hub, "hub"], [web, "web"]]) {
     const stable = { reader, scope, tag: "xmatrix-v1.1.0", channel: "stable", deploySha: "d".repeat(40) };
