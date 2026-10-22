@@ -168,6 +168,26 @@ production run and live Web before requesting stable. The normal same-run
 failed-job recovery remains available when GitHub accepts it; no direct deploy,
 manual tag move or substitute authorization is introduced.
 
+### Delayed candidate run discovery
+
+Train GitHub reads bypass caches and have a ten-second request timeout. An empty
+Production Release list is re-read at most 120 times, five seconds apart within
+a ten-minute evidence window. A reported active run remains active; the newest
+completed run must succeed, so an older success cannot hide a newer failure.
+If a checked stable intent's candidate evidence is still missing, active or
+unreadable, planning fails with that intent preserved. It cannot discard the
+stable decision or fall through to a beta on unavailable evidence. A definitive
+candidate rejection retains the existing refusal behavior.
+
+Migration evidence: the 1.5.1-beta.6 Production Release succeeded and its stable
+intent passed, but the following train received an empty candidate run list,
+deleted the checked intent and selected a beta instead. No stable tag was cut.
+Recovery: after the reviewed fix merges, re-run the affected planning job when
+the intent still exists. An intent the old planner already deleted must be
+requested again by the stable release Agent through Production Release Intent.
+No manual ref restoration, moved tag, new deployment path or weaker success
+requirement is introduced. Existing immutable releases are unchanged.
+
 ## Shared release workflow definitions
 
 The immutable Production Release train calls `server-release.yml` with an explicit `hub`, `web-build`, or `web` target. The former `hub-deploy.yml`, `web-build.yml`, and `web-deploy.yml` had no other callers. Their original steps now live in separate target-selected jobs in the shared workflow. Hub and Web retain independent production concurrency groups, exact-request authorization, read-only GitHub permissions, the same production environments, and unchanged credential bindings. The build job explicitly keeps `contents: read` only. Web still builds beside Hub after PostgreSQL readiness; only Web deployment waits for Hub and the verified build handoff. Selected jobs keep the historical `hub / deploy`, `web-build / build`, and `web / deploy` evidence names; inactive jobs have distinct names. Unknown targets select no production job.

@@ -336,7 +336,9 @@ export async function api(pathname, token, { attempts = 5, delayMs = 2_000 } = {
     let response;
     try {
       response = await fetch(`https://api.github.com/repos/${process.env.GITHUB_REPOSITORY}${pathname}`, {
-        headers: { authorization: `Bearer ${token}`, accept: "application/vnd.github+json" },
+        headers: { authorization: `Bearer ${token}`, accept: "application/vnd.github+json", "cache-control": "no-cache" },
+        cache: "no-store",
+        signal: AbortSignal.timeout(10_000),
       });
     } catch (error) {
       if (attempt >= attempts) throw new Error(`GitHub ${pathname}: ${error.message}`);
@@ -351,13 +353,23 @@ export async function api(pathname, token, { attempts = 5, delayMs = 2_000 } = {
 
 /** "success", "failed", "active" or "none" for the latest Production Release of `tag`. */
 async function productionStateOf(tag, token) {
-  const { workflow_runs: runs } = await api(
-    `/actions/workflows/production-release.yml/runs?branch=${encodeURIComponent(tag)}&event=workflow_dispatch&per_page=20`, token);
-  const latest = [...runs].sort((left, right) => right.id - left.id)[0];
-  if (!latest) return "none";
-  if (latest.status !== "completed") return "active";
-  return latest.conclusion === "success" ? "success" : "failed";
+  // The list can temporarily omit a run that the intent already verified.
+  // Never turn that first empty response into a lost stable or a duplicate beta.
+  const deadline = Date.now() + 10 * 60_000;
+  for (let attempt = 0; attempt < 120; attempt += 1) {
+    if (attempt) await new Promise((resolve) => setTimeout(resolve, 5_000));
+    if (Date.now() >= deadline) break;
+    const { workflow_runs: runs } = await api(
+      `/actions/workflows/production-release.yml/runs?branch=${encodeURIComponent(tag)}&event=workflow_dispatch&per_page=20`, token);
+    const latest = [...runs].sort((left, right) => right.id - left.id)[0];
+    if (!latest) continue;
+    if (latest.status !== "completed") return "active";
+    return latest.conclusion === "success" ? "success" : "failed";
+  }
+  return "none";
 }
+
+class ProductionEvidenceUnavailable extends Error {}
 
 /**
  * Whether a stable intent may ship, and as what. The candidate must be the
@@ -371,7 +383,15 @@ export async function checkStable(root, { candidate, bump, scope, sha }, { tagNa
   }
   const record = tagRecord(root, candidate);
   if (sha && record.commit !== sha) throw new Error(`${candidate} no longer points at ${sha}`);
-  const state = await productionState(candidate);
+  let state;
+  try {
+    state = await productionState(candidate);
+  } catch (error) {
+    throw new ProductionEvidenceUnavailable(`${candidate}'s Production Release could not be read: ${error.message}`);
+  }
+  if (state === "none" || state === "active") {
+    throw new ProductionEvidenceUnavailable(`${candidate}'s Production Release is ${state}, not success; retry this train when its evidence is available`);
+  }
   if (state !== "success") throw new Error(`${candidate}'s Production Release is ${state}, not success`);
   const missing = scope.filter((component) => !record.scope.includes(component));
   if (missing.length) {
@@ -475,6 +495,9 @@ async function plan(root) {
       stable = await checkStable(root, { ...intent.stable, scope: intent.scope, sha: intent.sha },
         { tagNames, mainSha: trainSha, productionState });
     } catch (error) {
+      // An intent was checked before it was recorded. Temporary absence of
+      // that proof is not a new decision to discard it or ship a beta instead.
+      if (error instanceof ProductionEvidenceUnavailable) throw error;
       console.log(`::error::Stable intent ${intent.id} for ${intent.stable.candidate} refused: ${error.message}`);
       pushUpdates(root, [{ delete: intent.ref }]);
       continue;
