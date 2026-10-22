@@ -7,7 +7,11 @@ const RUNS = "(SELECT run_id FROM data.runs WHERE channel_id=$2)";
 const INSTANCES = "(SELECT instance_id FROM data.instances WHERE channel_id=$2)";
 const CONTENT_SCOPE = "(root_set_id='channel:'||$2 OR starts_with(root_set_id,$3))";
 const UPLOAD_SCOPE = "(scope_id='channel:'||$2 OR starts_with(scope_id,$3))";
-const REPLAY_CHANNEL = "result_json->>'channelId'=$2 OR result_json->'message'->>'channelId'=$2 OR result_json->'channel'->>'id'=$2 OR result_json->'task'->>'channelId'=$2";
+// Match the narrow GIN expressions in the Channel replay lookup migration.
+// An OR across unindexed JSON paths scanned every receipt for every batch,
+// repeatedly exhausting the deadline and rolling back all prior progress.
+const REPLAY_CHANNEL_IDS = "result_json->>'channelId', result_json->'message'->>'channelId', result_json->'channel'->>'id', result_json->'task'->>'channelId'";
+const REPLAY_CHANNEL = `ARRAY[${REPLAY_CHANNEL_IDS}] @> ARRAY[$2]`;
 
 /** Order preserves the identities needed to find indirectly owned records. */
 export const CHANNEL_PURGE_STEPS: readonly { table: string; predicate: string }[] = [
@@ -23,7 +27,8 @@ export const CHANNEL_PURGE_STEPS: readonly { table: string; predicate: string }[
     `channel_id=$2 OR source_channel_id=$2 OR run_id IN ${RUNS}` },
   ...["data.page_links", "data.page_claims", "data.page_co_writing"]
     .map(table => ({ table, predicate: "conversation_id=$2" })),
-  { table: "control.scoped_control_command_replays", predicate: `(scope_kind='channel' AND scope_id=$2) OR (${REPLAY_CHANNEL})` },
+  { table: "control.scoped_control_command_replays", predicate:
+    `ARRAY[CASE WHEN scope_kind='channel' THEN scope_id END, ${REPLAY_CHANNEL_IDS}] @> ARRAY[$2]` },
   { table: "data.content_refs", predicate: `space_id=$1 AND ${CONTENT_SCOPE}` },
   { table: "data.blob_upload_intents", predicate: `space_id=$1 AND ${UPLOAD_SCOPE}` },
   ...["data.content_objects", "data.content_gc_candidates"]
@@ -47,7 +52,7 @@ export const CHANNEL_PURGE_STEPS: readonly { table: string; predicate: string }[
   { table: "data.idempotency_keys", predicate:
     REPLAY_CHANNEL },
   { table: "data.outbox", predicate:
-    `(aggregate_kind='channel' AND aggregate_id=$2) OR (${REPLAY_CHANNEL.replaceAll("result_json", "payload_json")})` },
+    `ARRAY[CASE WHEN aggregate_kind='channel' THEN aggregate_id END, ${REPLAY_CHANNEL_IDS.replaceAll("result_json", "payload_json")}] @> ARRAY[$2]` },
 ];
 
 export interface ChannelDeletionRow extends QueryResultRow {

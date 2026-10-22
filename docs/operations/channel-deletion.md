@@ -51,6 +51,12 @@ and checked against the deleted Channel before deletion. Content-addressed
 under the existing content retention/collection policy. Removing a Channel
 removes its references, not another Channel's bytes.
 
+Replay and outbox erasure uses narrow GIN indexes over the native Channel scope
+or aggregate identity and the four retained JSON Channel identity locations.
+The array-containment predicate matches those expressions; adding an unindexed
+OR branch would force full receipt scans and can roll back every batch at the
+query deadline. The indexes contain identities only, not complete payloads.
+
 Cleanup removes Channel messages, message replay copies, metadata history,
 attachments, schedules, linked execution records, grants, Page links and its pins.
 Other Channels, Pages and their revision bodies remain; a Page can contain text
