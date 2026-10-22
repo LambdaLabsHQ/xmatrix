@@ -17,7 +17,8 @@ test('unreviewed, stale, active, unprivileged and widened cleanup requests fail 
   for (const override of [{ tag: 'main' }, { currentSha: 'b'.repeat(40) }, { actorPermission: 'write' },
     { removalIncluded: false }, { dryRun: 'maybe' }, { dryRun: 'false' }, { maxRows: '1000000' },
     { productionRuns: [] }, { productionRuns: [{ ...input().productionRuns[0], head_sha: 'b'.repeat(40) }] },
-    { productionRuns: [...input().productionRuns, { id: 2, status: 'queued' }] },
+    ...['queued', 'in_progress', 'waiting', 'pending', 'requested'].map(status =>
+      ({ productionRuns: [...input().productionRuns, { id: 2, status }] })),
     { productionRuns: [...input().productionRuns, { ...input().productionRuns[0], id: 2, head_branch: 'xmatrix-v0.16.501' }] }]) {
     assert.throws(() => requireAgentLifecycleCleanupAuthority({ ...input(), ...override }));
   }
@@ -26,7 +27,7 @@ test('unreviewed, stale, active, unprivileged and widened cleanup requests fail 
 test('authorization refreshes production facts and rejects a release that began while the job queued', async () => {
   let runs = input().productionRuns;
   let lists = 0;
-  const github = { rest: {
+  const github = { paginate: async (method, args) => (await method(args)).data.workflow_runs, rest: {
     git: { getRef: async () => ({ data: { object: { type: 'tag', sha: 'tag-object' } } }),
       getTag: async () => ({ data: { object: { type: 'commit', sha: input().currentSha } } }) },
     actions: { listWorkflowRuns: async args => { lists++; assert.equal(args.per_page, 100);
@@ -37,7 +38,7 @@ test('authorization refreshes production facts and rejects a release that began 
   const request = { github, context: { ref: `refs/tags/${input().tag}`, sha: input().currentSha,
     actor: 'owner', repo: { owner: 'o', repo: 'r' } }, dryRun: 'true', maxRows: '10000' };
   await authorizeAgentLifecycleCleanup(request);
-  runs = [...runs, { id: 2, status: 'in_progress' }];
+  runs = [...runs, { id: 2, event: 'workflow_dispatch', status: 'in_progress' }];
   await assert.rejects(authorizeAgentLifecycleCleanup(request), /active Production/);
   assert.equal(lists, 2);
 });

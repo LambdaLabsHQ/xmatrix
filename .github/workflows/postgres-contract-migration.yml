@@ -41,6 +41,12 @@ jobs:
       revision: ${{ steps.authorize.outputs.revision }}
       hub_ref: ${{ steps.authorize.outputs.hub_ref }}
     steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          sparse-checkout: scripts/release-run-evidence.cjs
+          sparse-checkout-cone-mode: false
       - name: Require an administrator, the exact confirmation and a green reviewed revision
         id: authorize
         uses: actions/github-script@v7
@@ -65,9 +71,11 @@ jobs:
             const pulls = await github.paginate(github.rest.pulls.list, { owner, repo, state: "open", base: "main", per_page: 100 });
             const pull = pulls.find((candidate) => candidate.head.sha === REVISION);
             if (REVISION !== main && !pull) return core.setFailed("revision is neither main nor an open PR head against main");
-            const ciRuns = await github.paginate(github.rest.actions.listWorkflowRuns, {
-              owner, repo, workflow_id: "ci.yml", head_sha: REVISION, status: "success", per_page: 100 });
-            if (!ciRuns.some((run) => run.head_sha === REVISION && run.conclusion === "success")) {
+            const { readWorkflowRunsForSha } = require(`${process.env.GITHUB_WORKSPACE}/scripts/release-run-evidence.cjs`);
+            const ciRuns = await readWorkflowRunsForSha({ sha: REVISION, workflow: ".github/workflows/ci.yml",
+              readPage: async query => (await github.rest.actions.listWorkflowRunsForRepo({ owner, repo, ...query,
+                headers: { "cache-control": "no-cache" }, request: { timeout: 10_000 } })).data });
+            if (!ciRuns.some((run) => run.status === "completed" && run.conclusion === "success")) {
               return core.setFailed(`No successful CI exists for exact SHA ${REVISION}`);
             }
             // Only a deploying Production Release excludes a contract. A release

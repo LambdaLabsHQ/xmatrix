@@ -168,6 +168,31 @@ production run and live Web before requesting stable. The normal same-run
 failed-job recovery remains available when GitHub accepts it; no direct deploy,
 manual tag move or substitute authorization is introduced.
 
+### Workflow run discovery
+
+Exact-version production and contract-CI evidence is read from the repository
+run endpoint by full commit SHA, then matched locally to the workflow path,
+tag and event. The first matching production run remains authoritative across
+its retries; a later duplicate cannot replace its result. Incomplete run
+conclusions remain active. Exact-commit pagination is capped at 1,000 records
+and rejects malformed, repeated or incomplete data rather than inferring success.
+
+Migration evidence: GitHub's filtered workflow-specific list omitted an existing
+successful production run that both the direct run endpoint and repository
+exact-SHA endpoint returned. The intent accepted that candidate, but the train's
+second check safely refused the missing indexed result. Repository SHA discovery
+retains the same exact source, tag, workflow, scope and success requirements.
+Maintenance readers enumerate the unfiltered workflow list and apply their
+event, status and tag predicates locally; administrator, confirmation and replay
+requirements are unchanged. Contract preflight reads its shared helper from the
+exact workflow revision without retained checkout credentials.
+
+Recovery: closed stable decisions remain closed and immutable tags remain
+untouched. Merge the reader fix through CI, verify a beta containing it and the
+authored target-version notes, and request a new stable decision from that
+candidate. No empty indexed response or published page substitutes for successful
+production evidence.
+
 ## Shared release workflow definitions
 
 The immutable Production Release train calls `server-release.yml` with an explicit `hub`, `web-build`, or `web` target. The former `hub-deploy.yml`, `web-build.yml`, and `web-deploy.yml` had no other callers. Their original steps now live in separate target-selected jobs in the shared workflow. Hub and Web retain independent production concurrency groups, exact-request authorization, read-only GitHub permissions, the same production environments, and unchanged credential bindings. The build job explicitly keeps `contents: read` only. Web still builds beside Hub after PostgreSQL readiness; only Web deployment waits for Hub and the verified build handoff. Selected jobs keep the historical `hub / deploy`, `web-build / build`, and `web / deploy` evidence names; inactive jobs have distinct names. Unknown targets select no production job.

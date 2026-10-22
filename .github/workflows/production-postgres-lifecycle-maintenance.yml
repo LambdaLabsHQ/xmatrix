@@ -63,14 +63,14 @@ jobs:
             }
             const productionRuns = await github.paginate(github.rest.actions.listWorkflowRuns, {
               ...context.repo, workflow_id: "production-release.yml",
-              event: "workflow_dispatch", status: "success", per_page: 100,
+              per_page: 100,
               uncached: String(context.runId), headers: { "cache-control": "no-cache" },
-            });
+            }).then(runs => runs.filter(run => run.event === "workflow_dispatch" && run.conclusion === "success"));
             const sameTagRuns = await github.paginate(github.rest.actions.listWorkflowRuns, {
               ...context.repo, workflow_id: "production-postgres-lifecycle-maintenance.yml",
-              branch: tag, event: "workflow_dispatch", per_page: 100,
+              per_page: 100,
               uncached: String(context.runId), headers: { "cache-control": "no-cache" },
-            });
+            }).then(runs => runs.filter(run => run.head_branch === tag && run.event === "workflow_dispatch"));
             // Read this run directly: run lists on self-hosted runners have been
             // served stale and then omit the very run that is executing.
             const currentRun = (await github.rest.actions.getWorkflowRun({

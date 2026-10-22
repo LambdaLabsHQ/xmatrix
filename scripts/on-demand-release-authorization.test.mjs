@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { parse } from "yaml";
+import releaseRunEvidence from "./release-run-evidence.cjs";
 
 const awaitedRequest = await readFile(new URL("../.github/workflows/production-release-request.yml", import.meta.url), "utf8");
 const production = await readFile(new URL("../.github/workflows/production-release.yml", import.meta.url), "utf8");
@@ -65,6 +66,7 @@ const releaseCommits = new Map([["c".repeat(40), sha]]);
 // request's main revision contains (`verify-cut`).
 const stableCuts = new Map([["d".repeat(40), sha]]);
 const fakeRequire = (name) => {
+  if (name.endsWith("/scripts/release-run-evidence.cjs")) return releaseRunEvidence;
   assert.equal(name, "child_process");
   return {
     execFileSync: (command, [script, verb, deploySha, sourceSha]) => {
@@ -97,6 +99,10 @@ async function runAuthorization({ scope = "web", overrides = {}, authorityScope 
     rest: {
       actions: {
         listWorkflowRuns: listRuns,
+        listWorkflowRunsForRepo: async () => ({ data: { total_count: 1, workflow_runs: [{
+          id: 456, path: ".github/workflows/production-release.yml", event: "workflow_dispatch",
+          head_branch: tag, head_sha: deploySha, status: "in_progress", conclusion: null,
+        }] } }),
         listJobsForWorkflowRun: listJobs,
         getWorkflowRun: async ({ run_id }) => ({ data: run_id === 456 ? {
           path: ".github/workflows/production-release.yml", event: "workflow_dispatch", head_sha: deploySha,
@@ -126,6 +132,7 @@ async function runAuthorization({ scope = "web", overrides = {}, authorityScope 
     env: {
       DEPLOY_SHA: deploySha, REQUEST_RUN_ID: "123", RELEASE_SCOPE: scope, RELEASE_CHANNEL: channel,
       GATE_COMPONENT: scope === "hub" || scope === "web" ? scope : "web",
+      GITHUB_WORKSPACE: "/workspace",
     },
   }, fakeRequire, (resolve) => { resolve(); });
   return failures;

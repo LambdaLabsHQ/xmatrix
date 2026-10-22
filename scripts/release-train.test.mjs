@@ -17,6 +17,7 @@ import {
   normalizeScope,
   parseIntentRef,
   planTrain,
+  productionStateOf,
   stableVersion,
 } from "./release-train.mjs";
 
@@ -268,6 +269,24 @@ function releaseRepository() {
   };
   return { directory, root, commitMain, release, push: () => run(["push", "--quiet", "origin", "main"]) };
 }
+
+test("production evidence survives an empty workflow search index", async t => {
+  const repo = releaseRepository();
+  t.after(() => rmSync(repo.directory, { recursive: true, force: true }));
+  const source = repo.commitMain("candidate");
+  const tag = "xmatrix-v1.0.1-beta.1";
+  const commit = repo.release(source, "1.0.1-beta.1", { scope: "web", source });
+  repo.push();
+  t.mock.method(globalThis, "fetch", async url => {
+    const request = new URL(url);
+    if (request.pathname.includes("/actions/workflows/")) return Response.json({ workflow_runs: [], total_count: 0 });
+    assert.ok(request.pathname.endsWith("/actions/runs"));
+    assert.equal(request.searchParams.get("head_sha"), commit);
+    return Response.json({ total_count: 1, workflow_runs: [{ id: 42, path: ".github/workflows/production-release.yml",
+      event: "workflow_dispatch", head_branch: tag, head_sha: commit, status: "completed", conclusion: "success" }] });
+  });
+  assert.equal(await productionStateOf(repo.root, tag, "fixture-token"), "success");
+});
 
 test("a stable ships only a delivered beta that covers its clients and moves no stable source back", async (t) => {
   const repo = releaseRepository();

@@ -152,17 +152,16 @@ jobs:
               core.setFailed("Invalid release scope");
               return;
             }
-            const productionRuns = await github.paginate(github.rest.actions.listWorkflowRuns, {
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              workflow_id: "production-release.yml",
-              branch: context.ref.replace("refs/tags/", ""),
-              event: "workflow_dispatch",
-              per_page: 100,
+            const { readWorkflowRunsForSha } = require(`${process.env.GITHUB_WORKSPACE}/scripts/release-run-evidence.cjs`);
+            const productionRuns = await readWorkflowRunsForSha({
+              readPage: async query => (await github.rest.actions.listWorkflowRunsForRepo({
+                ...context.repo, ...query,
+                headers: { "cache-control": "no-cache" }, request: { timeout: 10_000 },
+              })).data,
+              sha: process.env.DEPLOY_SHA, workflow: ".github/workflows/production-release.yml",
+              branch: context.ref.replace("refs/tags/", ""), event: "workflow_dispatch",
             });
-            const authoritative = productionRuns
-              .filter((run) => run.head_sha === process.env.DEPLOY_SHA)
-              .sort((left, right) => left.id - right.id)[0];
+            const authoritative = productionRuns[0];
             if (!authoritative || authoritative.id !== context.runId) {
               core.setFailed(`Another authoritative production run already exists: ${authoritative?.html_url ?? "unknown"}`);
               return;

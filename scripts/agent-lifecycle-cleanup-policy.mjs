@@ -7,7 +7,7 @@ export function requireAgentLifecycleCleanupAuthority(input) {
   requirePublishedMaintenanceTarget(input);
   if (input.actorPermission !== 'admin') throw new Error('cleanup requires a repository administrator');
   if (input.removalIncluded !== true) throw new Error('production does not contain the reviewed removal');
-  if (input.productionRuns.some(run => ['queued', 'in_progress', 'waiting', 'pending'].includes(run.status))) {
+  if (input.productionRuns.some(run => run.status !== 'completed')) {
     throw new Error('wait for active Production Releases to finish');
   }
   const dryRun = String(input.dryRun);
@@ -26,10 +26,10 @@ export async function authorizeAgentLifecycleCleanup({ github, context, dryRun, 
   if (ref.type !== 'tag') throw new Error('an annotated production tag is required');
   const target = (await github.rest.git.getTag({ ...context.repo, tag_sha: ref.sha })).data.object;
   if (target.type !== 'commit') throw new Error('the tag must point to a commit');
-  const productionRuns = (await github.rest.actions.listWorkflowRuns({
-    ...context.repo, workflow_id: 'production-release.yml', event: 'workflow_dispatch', per_page: 100,
+  const productionRuns = (await github.paginate(github.rest.actions.listWorkflowRuns, {
+    ...context.repo, workflow_id: 'production-release.yml', per_page: 100,
     uncached: `${context.runId}-${Date.now()}`, headers: { 'cache-control': 'no-cache' },
-  })).data.workflow_runs;
+  })).filter(run => run.event === 'workflow_dispatch');
   const actorPermission = (await github.rest.repos.getCollaboratorPermissionLevel({
     ...context.repo, username: context.actor,
   })).data.permission;

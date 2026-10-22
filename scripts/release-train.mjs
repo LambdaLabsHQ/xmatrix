@@ -50,6 +50,7 @@ import { fileURLToPath } from "node:url";
 import { claimRelease } from "./release-claim.mjs";
 import { releaseCommitProblemAt } from "./release-commit.mjs";
 import { authoredReleaseNotes } from "./release-notes.mjs";
+import releaseRunEvidence from "./release-run-evidence.cjs";
 import {
   compareSemver,
   parseSemver,
@@ -336,7 +337,8 @@ export async function api(pathname, token, { attempts = 5, delayMs = 2_000 } = {
     let response;
     try {
       response = await fetch(`https://api.github.com/repos/${process.env.GITHUB_REPOSITORY}${pathname}`, {
-        headers: { authorization: `Bearer ${token}`, accept: "application/vnd.github+json" },
+        headers: { authorization: `Bearer ${token}`, accept: "application/vnd.github+json", "cache-control": "no-cache" },
+        signal: AbortSignal.timeout(15_000),
       });
     } catch (error) {
       if (attempt >= attempts) throw new Error(`GitHub ${pathname}: ${error.message}`);
@@ -349,14 +351,10 @@ export async function api(pathname, token, { attempts = 5, delayMs = 2_000 } = {
   }
 }
 
-/** "success", "failed", "active" or "none" for the latest Production Release of `tag`. */
-async function productionStateOf(tag, token) {
-  const { workflow_runs: runs } = await api(
-    `/actions/workflows/production-release.yml/runs?branch=${encodeURIComponent(tag)}&event=workflow_dispatch&per_page=20`, token);
-  const latest = [...runs].sort((left, right) => right.id - left.id)[0];
-  if (!latest) return "none";
-  if (latest.status !== "completed") return "active";
-  return latest.conclusion === "success" ? "success" : "failed";
+/** State of the authoritative exact-tag Production Release, including retries. */
+export async function productionStateOf(root, tag, token) {
+  return releaseRunEvidence.readProductionState({ sha: tagRecord(root, tag).commit, tag,
+    readPage: query => api(`/actions/runs?${new URLSearchParams(query)}`, token) });
 }
 
 /**
@@ -436,7 +434,7 @@ async function plan(root) {
   const productionStates = new Map();
   const productionState = async (tag) => {
     if (!productionStates.has(tag)) {
-      productionStates.set(tag, tagNames.includes(tag) ? await productionStateOf(tag, token) : "untagged");
+      productionStates.set(tag, tagNames.includes(tag) ? await productionStateOf(root, tag, token) : "untagged");
     }
     return productionStates.get(tag);
   };
@@ -516,7 +514,7 @@ async function intent(root, { runId, channel, components, candidate, bump }) {
   const ref = intentRef(runId, scope, { bump, candidate });
   const tagNames = lsRemote(root, ["refs/tags/*"]).map(({ ref: name }) => name.slice("refs/tags/".length));
   const stable = await checkStable(root, { candidate, bump, scope }, {
-    tagNames, mainSha, productionState: (tag) => productionStateOf(tag, process.env.GITHUB_TOKEN),
+    tagNames, mainSha, productionState: (tag) => productionStateOf(root, tag, process.env.GITHUB_TOKEN),
   });
   console.log(`${candidate} can ship as stable ${stable.version} (${scope.join(",")}) from ${stable.sourceSha}.`);
   output("ref", ref);
