@@ -7,7 +7,7 @@ import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-quer
 import type { PageDocBlock } from "@xmatrix/protocol/page-document";
 import {
   faceOfSender, isLiveAgentStatus, pageAuthorColor, pageAuthorLabel,
-  type FaceOf, type SerializedAutomation, type ChannelSnapshot, type PageConversation, type PageLink,
+  type FaceOf, type SerializedAutomation, type ChannelSnapshot, type PageConversation, type PageLink, type SpaceMember,
 } from "@xmatrix/protocol";
 import {
   Check, Clock, Files, FileText, History, Lock, MessageSquare, Plus, Share2, Trash2, Undo2, X,
@@ -63,7 +63,8 @@ import { PageMigrationReview, usePageMigration } from "./page-migration-review";
 import { commentBody } from "./page-comment";
 import { NEW_PAGE_ID, NEW_PAGE_TITLE, type PageCreation } from "./page-creation";
 import { PageTreeRow } from "./page-tree-row";
-import type { PageReferenceTargets } from "./page-reference-chips";
+import { pageMentions, type PageReferenceTargets } from "./page-reference-chips";
+import { avatarImageSrc } from "@/components/dashboard/identity-avatar";
 import { userErrorMessage } from "@/lib/user-facing-error";
 
 // The native shell also imports this module for its list screens. The editor
@@ -530,12 +531,16 @@ type PageDialogState =
   | { kind: "write" }
   | { kind: "agent"; key: string };
 
+const NO_MEMBERS: readonly SpaceMember[] = [];
+
 export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpenSection, onPageDeleted, conversation, activeConversationId = null,
   renderConversation, onConversationDockChange, onCloseConversation, onExpandConversation, onOpenConversation,
   onConversationIntent, onDiscuss, onConnectGitHub, canMigrate, layout = "desktop", focusSection = null,
-  creation }: {
+  creation, members = NO_MEMBERS }: {
   spaceId: string | null;
   token: string;
+  /** The Space's members, whom an `@` in a page names. */
+  members?: readonly SpaceMember[];
   /** A made page, or NEW_PAGE_ID for the new page + opened, which its first write makes (page-creation.tsx). */
   selectedPageId: string | null;
   onSelectPage: (pageId: string) => void;
@@ -970,15 +975,9 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     conversations.find((item) => item.conversationId === conversationId)?.name ?? conversation(conversationId)?.name ?? null,
   [conversation, conversations]);
   // `page:<id>` and `channel:<id>` in the text read as the names this reader's lists give them.
-  // They are drawn again only when the page list changes; the rest is read when a chip is drawn or clicked.
+  // They are drawn again only when the page list or whom an `@` names changes; the rest is read when a chip is drawn or clicked.
   const referenceActions = useRef({ conversation, onOpenConversation, onOpenSection });
   referenceActions.current = { conversation, onOpenConversation, onOpenSection };
-  const references = useMemo<PageReferenceTargets>(() => ({
-    pageTitle: (id) => tree.data?.find((item) => item.pageId === id)?.title ?? null,
-    channelName: (id) => referenceActions.current.conversation(id)?.name ?? null,
-    openPage: (id, blockId) => referenceActions.current.onOpenSection(id, blockId),
-    openChannel: (id) => referenceActions.current.onOpenConversation(id),
-  }), [tree.data]);
   // Open discussions anchored in the text, highlighted there (pages-live-document.md §4.3).
   const discussions = useMemo<Discussion[]>(() => linkList.filter((link) => link.anchor && !link.resolvedAt)
     .map((link) => ({ linkId: link.linkId, conversationId: link.conversationId, from: link.anchor!.from,
@@ -1018,6 +1017,17 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   const liveOnPage = useMemo(() => pageAgents.data?.agents.get(pageId ?? "") ?? [], [pageAgents.data, pageId]);
   // Who this person can call to write the page with them, and the one they last called.
   const writers = usePageWriters(spaceId, token, Boolean(page) && canEdit);
+  // An `@` in the text reads as the Agent or member it names, as a message's mention does.
+  const mentions = useMemo(() => pageMentions(
+    members.map((member) => ({ name: member.name, handle: member.handle, imageUrl: avatarImageSrc(member.avatarUrl) })),
+    writers.agents.map((agent) => agent.harness)), [members, writers.agents]);
+  const references = useMemo<PageReferenceTargets>(() => ({
+    pageTitle: (id) => tree.data?.find((item) => item.pageId === id)?.title ?? null,
+    channelName: (id) => referenceActions.current.conversation(id)?.name ?? null,
+    openPage: (id, blockId) => referenceActions.current.onOpenSection(id, blockId),
+    openChannel: (id) => referenceActions.current.onOpenConversation(id),
+    mentions,
+  }), [mentions, tree.data]);
   // An empty page someone is co-writing asks for its first line, naming who writes the next.
   const onboardingCopy = useOnboardingCopy(spaceId, token, userId ?? undefined);
   // What Agents co-writing the page suggest (§4.2), laid over it change by change.
