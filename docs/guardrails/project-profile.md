@@ -44,6 +44,11 @@ other Channels. Account deletion remains separately available in Settings.
 See [Channel deletion](../operations/channel-deletion.md) and
 [account deletion](../operations/account-deletion.md) for recovery and retained-data limits.
 
+Exact-tag expand migrations can build non-unique indexes concurrently while
+ordinary production writes continue. Durable, checksum-bound reservations own
+interrupted builds; the existing migration ledger records completion after
+index verification. See [online index migrations](../operations/postgres-online-index-migrations.md).
+
 Connector action receipts resume only the exact authenticated calling Instance,
 queueing behind an active turn; subscribed App events reach existing Channel
 Instances and resume sleeping/interrupted ones through the bounded wake
