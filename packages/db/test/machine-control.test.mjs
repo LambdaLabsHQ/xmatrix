@@ -684,6 +684,44 @@ test("a routed exit report is recorded for the coordinator in the report transac
   assert.equal(unrouted.db.calls.some((call) => call.name === "machine_run_terminal_report_record_v1"), false);
 });
 
+test("a progress snapshot or online check without a caller id keeps no replay", async () => {
+  const command = (input) => {
+    const db = database((query) => query.name === "machine_control_daemon_lock_v1"
+      ? [{ ...daemon, connection_epoch: 3 }] : []);
+    return { db, value: new PostgresMachineControlRepository(db).command({
+      ownerUserId: "user-1", ownerEmail: "one@example.com", machineId: "machine-1", hostId: "host-1",
+      daemonId: "daemon-1", connectionEpoch: 3, metadata: {}, capabilities: [], principal: machinePrincipal(),
+      ...input,
+    }) };
+  };
+  const replays = (db) => db.calls.filter((call) => call.name === "machine_control_replay_read_v1" ||
+    call.name === "machine_control_replay_write_v1").length;
+  const progress = { type: "machine_run_snapshot", snapshotComplete: false, runs: [],
+    machineResources: { observedAt: new Date().toISOString(), cpuUsagePercent: 12 } };
+  // The daemon's minute load report: no caller can retry it by the id the Hub minted.
+  const minted = command({ commandId: "machine-report:minted", action: "report", replayable: false,
+    eventType: progress.type, payload: progress });
+  await minted.value;
+  assert.equal(replays(minted.db), 0);
+  assert.ok(minted.db.calls.some((call) => call.name === "machine_resource_observation_v2"));
+  const online = command({ commandId: "machine-confirm-online:minted", action: "confirm-online",
+    replayable: false, payload: {} });
+  await online.value;
+  assert.equal(replays(online.db), 0);
+  // A full snapshot reconciles Runs, so it keeps its replay even without a caller id;
+  // a report the daemon named keeps one too.
+  for (const input of [
+    { commandId: "machine-report:full", replayable: false, eventType: progress.type,
+      payload: { ...progress, snapshotComplete: true, capturedAt: new Date().toISOString() } },
+    { commandId: "machine-report:exit-1", eventType: "machine_run_exited",
+      payload: { type: "machine_run_exited", requestId: "exit-1", runId: "run-1" } },
+  ]) {
+    const kept = command({ action: "report", ...input });
+    await kept.value;
+    assert.equal(replays(kept.db), 2, input.commandId);
+  }
+});
+
 test("Machine stop issue persists a canonical lifecycle route for legacy ghosts", async () => {
   const db = database((query) => query.name === "machine_control_issue_v1"
     ? [{ command_id: "stop-1" }]

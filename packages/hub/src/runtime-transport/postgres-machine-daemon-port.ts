@@ -280,6 +280,7 @@ export class PostgresMachineDaemonPort implements MachineDaemonSocketBackend {
     if (message.type === "machine_run_snapshot" && message.registryConnectionEpoch !== undefined &&
         message.registrySequence !== undefined) {
       machineControlInput.commandId = await causalSnapshotCommandId(session, message);
+      delete machineControlInput.replayable;
     }
     const result = await this.dependencies.daemonCommand(machineControlInput);
     if (message.type === "machine_quota_probe_result") {
@@ -772,6 +773,9 @@ function sessionCommand(
   const payload = message ? redactAuditPayload(message) : {};
   return {
     commandId: runtimeCommandId(`machine-${action}`, requestId),
+    // Without the daemon's request id the command id is minted here, so no
+    // caller can retry it by that id; Authority decides what may then skip a replay.
+    ...(requestId === undefined ? { replayable: false } : {}),
     action,
     ...(action === "complete" ? {
       controlId: requestId,

@@ -464,6 +464,21 @@ test("causal snapshot evidence is connection-fenced and produces a stable lifecy
   assert.equal(calls.length, before, "invalid causal evidence must fail before Authority mutation");
 });
 
+test("a load report has no daemon request id to be replayed by; a causal snapshot or a named report has", async () => {
+  const calls = [];
+  const background = [];
+  const port = authorityPort({ commands: recordingCommands(calls), keepAlive: (task) => background.push(task) });
+  await port.execute(session, { type: "machine_run_snapshot", snapshotComplete: false, runs: [] });
+  await port.execute({ ...session, capabilities: ["machine_run_snapshot_causal_v1"] }, {
+    type: "machine_run_snapshot", snapshotComplete: true, registryConnectionEpoch: 7, registrySequence: 3,
+    capturedAt: new Date().toISOString(), runs: [] });
+  await port.execute(session, { type: "machine_run_exited", requestId: "exit-1", runId: "run-1",
+    executionKey: "execution-1" });
+  await Promise.all(background);
+  const reports = calls.filter((call) => call.input.action === "report" && !call.input.runLifecycleReplica);
+  assert.deepEqual(reports.map((call) => call.input.replayable), [false, undefined, undefined]);
+});
+
 test("a partial snapshot reconciles only its Runs' Channels in its frame; a full one fans out off the socket", async () => {
   const reconciled = [];
   const background = [];

@@ -195,6 +195,19 @@ async function replay(tx: DatabaseTransaction, ownerUserId: string, commandId: s
   return { ...(rows[0].result_json as Record<string, unknown>), reused: true };
 }
 
+/**
+ * A command the Hub minted a fresh id for has no caller that can retry it by
+ * that id, so its replay would never be read. Only commands that are safe to
+ * apply twice may skip it: an online confirmation, and a partial Run snapshot
+ * (resources, harnesses and Run progress, all of which only move forward).
+ * Such snapshots are most of a daemon's commands, about one a minute each.
+ */
+function storesReplay(action: string, input: Record<string, unknown>, payload: Record<string, unknown>): boolean {
+  if (input.replayable !== false) return true;
+  if (action === "confirm-online") return false;
+  return !(action === "report" && input.eventType === "machine_run_snapshot" && payload.snapshotComplete !== true);
+}
+
 async function storeReplay(tx: DatabaseTransaction, input: { ownerUserId: string; commandId: string;
   requestDigest: string; value: Record<string, unknown>; at: string; ttlMs: number }) {
   await storeScopedCommandReplay(tx, "machine_control_replay_write_v1", {
@@ -366,7 +379,8 @@ export class PostgresMachineControlRepository {
         "invalid_machine_command", 400, "Machine Daemon stop cleanup reason is invalid");
     }
     const at = new Date().toISOString();
-    const requestDigest = await digest(input);
+    const replayable = storesReplay(action, input, payload);
+    const requestDigest = replayable ? await digest(input) : "";
     return this.database.transaction({ requestId: commandId,
       operation: `machine-control.${action}` }, async (tx) => {
       await tx.query({ name: "machine_control_scope_lock_v2",
@@ -496,7 +510,7 @@ export class PostgresMachineControlRepository {
         throw new MachineControlError("machine_daemon_activation_fenced", 409,
           "Machine Daemon cannot claim commands before Supervisor StableGranted");
       }
-      if (action !== "claim" && action !== "complete") {
+      if (replayable && action !== "claim" && action !== "complete") {
         const prior = await replay(tx, ownerUserId, commandId, requestDigest);
         if (prior) return prior;
       }
@@ -521,11 +535,6 @@ export class PostgresMachineControlRepository {
         connectionEpoch!);
       current = await this.commitDaemon(tx, { action, current, daemonId, ownerUserId, ownerEmail,
         machineId, hostId, input, at });
-      if (action === "connect" || action === "report" && connectionEpoch !== undefined) {
-        await tx.query({ name: "machine_routing_observation_v1", text: `UPDATE data.machine_daemons
-          SET routing_observed_at=clock_timestamp() WHERE daemon_id=$1 AND status='online'
-            AND connection_epoch=$2`, values: [daemonId, Number(current.connection_epoch)], maxRows: 0 });
-      }
       if (action === "enroll") await tx.query({ name: "machine_control_enrollment_audit_v1", text: `INSERT INTO
         data.machine_daemon_control_audit
         (command_id,daemon_id,owner_user_id,action,event_type,payload_json,created_at)
@@ -626,7 +635,7 @@ export class PostgresMachineControlRepository {
         ...(completion?.stopPurpose
           ? { runLifecycleStopPurpose: completion.stopPurpose }
           : {}) };
-      if (completion?.reused !== true) {
+      if (replayable && completion?.reused !== true) {
         await storeReplay(tx, { ownerUserId, commandId, requestDigest, value, at,
           ttlMs: action === "report" ? REPORT_REPLAY_TTL_MS : REPLAY_TTL_MS });
       }

@@ -10,6 +10,9 @@ import {
   nextRuntimeHibernationExpiry,
 } from "./hibernation-bounds";
 
+/** How long a live daemon socket waits before it checks its catalog row again. */
+export const MACHINE_DAEMON_CATALOG_HEAL_INTERVAL_MS = 5 * 60_000;
+
 export interface MachineDaemonHibernationAttachment {
   version: 1;
   domain: "machine_daemon";
@@ -32,7 +35,7 @@ export function parseMachineDaemonHibernationAttachment(value: unknown): Machine
   const session = value.session;
   const keys = ["principal", "connectionEpoch", "displayName", "capabilities", "machineMetadata", "connectedAt", "lastSeenAt"] as const;
   if (!hibernationRecord(session) ||
-      !hibernationHasOnlyKeys(session, [...keys, "clientVersion", "clientProtocolVersion"]) ||
+      !hibernationHasOnlyKeys(session, [...keys, "clientVersion", "clientProtocolVersion", "catalogHealNotBefore"]) ||
       !keys.every((key) => key in session) || !hibernationBoundedString(session.displayName) ||
       !Number.isSafeInteger(session.connectionEpoch) || (session.connectionEpoch as number) < 1 ||
       !(session.clientVersion === undefined || hibernationBoundedString(session.clientVersion)) ||
@@ -66,6 +69,15 @@ export function parseMachineDaemonHibernationAttachment(value: unknown): Machine
       machineMetadata: Object.freeze({ ...session.machineMetadata }),
       connectedAt: session.connectedAt,
       lastSeenAt: session.lastSeenAt,
+      ...(catalogHealNotBefore(session.catalogHealNotBefore)
+        ? { catalogHealNotBefore: session.catalogHealNotBefore as string }
+        : {}),
     },
   };
+}
+
+/** A heal deadline is kept only within one interval from now; anything else checks again. */
+function catalogHealNotBefore(value: unknown): boolean {
+  return hibernationValidDate(value) &&
+    Date.parse(value) <= Date.now() + MACHINE_DAEMON_CATALOG_HEAL_INTERVAL_MS + 1_000;
 }

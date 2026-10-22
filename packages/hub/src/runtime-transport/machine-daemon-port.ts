@@ -17,6 +17,7 @@ import {
 import { RuntimeClientOperationError, supersededMachineDaemonConnection } from "./runtime-operation-failure";
 import { RuntimeSocketState } from "./ordered-socket-dispatch";
 import {
+  MACHINE_DAEMON_CATALOG_HEAL_INTERVAL_MS,
   parseMachineDaemonHibernationAttachment,
   serializeMachineDaemonHibernationAttachment,
   type MachineDaemonHibernationAttachment,
@@ -103,6 +104,12 @@ export interface MachineDaemonRuntimeSession {
   lastSeenAt: string;
   /** Present only while a replacement daemon is fenced from route ownership. */
   activationPhase?: MachineDaemonActivationReceipt["phase"];
+  /**
+   * When this socket may next correct a catalog row that says offline. It rides
+   * the hibernation attachment: waking the object for a frame is not by itself a
+   * reason to read the catalog again.
+   */
+  catalogHealNotBefore?: string;
 }
 
 export interface MachineDaemonRouteIdentity {
@@ -190,8 +197,6 @@ export class MachineDaemonRuntimeTransport {
   readonly controller: MachineDaemonConnectionController;
   private readonly sockets: RuntimeSocketState<MachineDaemonRuntimeSession, MachineDaemonServerMessage>;
   private readonly backend: MachineDaemonSocketBackend;
-  /** Next time a live socket may correct a catalog row that says offline. */
-  private readonly catalogHealNotBefore = new Map<string, number>();
 
   constructor(
     backend: MachineDaemonSocketBackend,
@@ -272,17 +277,18 @@ export class MachineDaemonRuntimeTransport {
    * wake wrote the catalog offline. The pong and the caller's frame are not
    * delayed on the catalog write. A heal that finishes after the socket is
    * gone unregisters that same generation, so it cannot resurrect a replaced
-   * connection.
+   * connection. One check per interval is enough: the daemon's probes wake
+   * this object every minute, and each wake would otherwise cost a catalog
+   * transaction that almost always finds the row already online.
    */
   private scheduleCatalogHeal(ws: WebSocket): void {
     const confirm = this.backend.confirmOnline;
     if (!confirm) return;
     const session = this.sockets.get(ws);
     if (!session || session.activationPhase) return;
-    const key = `${session.principal.ownerUserId}\0${session.principal.machineId}`;
     const now = Date.now();
-    if ((this.catalogHealNotBefore.get(key) ?? 0) > now) return;
-    this.catalogHealNotBefore.set(key, now + 15_000);
+    if (session.catalogHealNotBefore && Date.parse(session.catalogHealNotBefore) > now) return;
+    session.catalogHealNotBefore = new Date(now + MACHINE_DAEMON_CATALOG_HEAL_INTERVAL_MS).toISOString();
     void confirm(session).then(() => {
       if (this.sockets.get(ws) === session) return;
       return this.backend.disconnected(session, {
@@ -291,7 +297,8 @@ export class MachineDaemonRuntimeTransport {
         wasClean: false,
       });
     }).catch((error: unknown) => {
-      this.catalogHealNotBefore.delete(key);
+      // The socket's next frame tries again.
+      delete session.catalogHealNotBefore;
       console.warn("Machine Daemon catalog heal failed", {
         ownerUserId: session.principal.ownerUserId,
         machineId: session.principal.machineId,
