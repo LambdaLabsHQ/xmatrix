@@ -132,42 +132,31 @@ test("a lost channel-purge step is replayed once on a new session and the pass s
   assert.equal(operations.includes("channel-purge.retry"), false);
 });
 
-test("a second lost channel-purge step fails the pass without reusing the dead session", async () => {
-  const second = new Error("Query read timeout");
-  const { database, operations } = purgeDatabase([new Error("Query read timeout"), second]);
+async function expectPurgeFailure(failures, reported, advances) {
+  const { database, operations } = purgeDatabase(failures);
   const [env, dependencies] = purgeEnv(database);
   await assert.rejects(maintainChannelDeletions(env, dependencies), (error) => {
     assert.ok(error instanceof AggregateError);
-    assert.deepEqual(error.errors, [second]);
+    assert.deepEqual(error.errors, [reported]);
     return true;
   });
-  assert.equal(operations.filter((operation) => operation === "channel-purge.advance").length, 2);
+  assert.equal(operations.filter((operation) => operation === "channel-purge.advance").length, advances);
   assert.equal(operations.filter((operation) => operation === "channel-purge.retry").length, 1);
+  return operations;
+}
+
+test("a second lost channel-purge step fails the pass without reusing the dead session", async () => {
+  const second = new Error("Query read timeout");
+  const operations = await expectPurgeFailure([new Error("Query read timeout"), second], second, 2);
   assert.equal(operations.some((operation) => String(operation).includes("unusable")), false);
 });
 
 test("an answered channel-purge failure is not replayed and still yields its slot", async () => {
   const answered = Object.assign(new Error("canceling statement due to statement timeout"), { code: "57014" });
-  const { database, operations } = purgeDatabase([answered]);
-  const [env, dependencies] = purgeEnv(database);
-  await assert.rejects(maintainChannelDeletions(env, dependencies), (error) => {
-    assert.ok(error instanceof AggregateError);
-    assert.deepEqual(error.errors, [answered]);
-    return true;
-  });
-  assert.equal(operations.filter((operation) => operation === "channel-purge.advance").length, 1);
-  assert.equal(operations.filter((operation) => operation === "channel-purge.retry").length, 1);
+  await expectPurgeFailure([answered], answered, 1);
 });
 
 test("an unknown channel-purge commit is reconciled later instead of replayed", async () => {
   const unknown = new DatabaseCommitUnknownError("QUERY_READ_TIMEOUT");
-  const { database, operations } = purgeDatabase([unknown]);
-  const [env, dependencies] = purgeEnv(database);
-  await assert.rejects(maintainChannelDeletions(env, dependencies), (error) => {
-    assert.ok(error instanceof AggregateError);
-    assert.deepEqual(error.errors, [unknown]);
-    return true;
-  });
-  assert.equal(operations.filter((operation) => operation === "channel-purge.advance").length, 1);
-  assert.equal(operations.filter((operation) => operation === "channel-purge.retry").length, 1);
+  await expectPurgeFailure([unknown], unknown, 1);
 });
