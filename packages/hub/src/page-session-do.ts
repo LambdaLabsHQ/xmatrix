@@ -519,6 +519,7 @@ export class RelayPageSession extends DurableObject<Env> {
     await this.commitPending();
     await this.coWritingDue();
     // Access changes reach open connections: re-authorize each distinct principal.
+    // Access is the read check without the page's text, which a verdict never needs.
     const repository = pages(this.env);
     const verdicts = new Map<string, { canRead: boolean; canEdit: boolean }>();
     for (const socket of this.ctx.getWebSockets()) {
@@ -527,9 +528,9 @@ export class RelayPageSession extends DurableObject<Env> {
       const key = `${attachment.principal.kind}:${attachment.principal.id}:${attachment.principal.runProof?.runId ?? ""}`;
       if (!verdicts.has(key)) {
         try {
-          const { page } = await repository.read({ requestId: crypto.randomUUID(), spaceId: attachment.spaceId,
+          const { canEdit } = await repository.access({ requestId: crypto.randomUUID(), spaceId: attachment.spaceId,
             pageId: attachment.pageId, principal: pagePrincipalFromSession(attachment.principal) });
-          verdicts.set(key, { canRead: true, canEdit: page.canEdit });
+          verdicts.set(key, { canRead: true, canEdit });
         } catch (error) {
           if (!(error instanceof PageControlError) || error.status >= 500) continue;
           verdicts.set(key, { canRead: false, canEdit: false });
