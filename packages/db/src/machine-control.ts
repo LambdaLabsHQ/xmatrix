@@ -196,11 +196,12 @@ async function replay(tx: DatabaseTransaction, ownerUserId: string, commandId: s
 }
 
 /**
- * A command the Hub minted a fresh id for has no caller that can retry it by
- * that id, so its replay would never be read. Only commands that are safe to
- * apply twice may skip it: an online confirmation, and a partial Run snapshot
+ * A command no caller asks about again (the Hub marks it `replayable: false`)
+ * would store a replay nothing reads. Only commands that are safe to apply
+ * twice may skip it: an online confirmation, and a partial Run snapshot
  * (resources, harnesses and Run progress, all of which only move forward).
- * Such snapshots are most of a daemon's commands, about one a minute each.
+ * Partial snapshots are most of a daemon's commands: on 2026-10-22 about
+ * 70,000 of the roughly 80,000 replay rows written a day.
  */
 function storesReplay(action: string, input: Record<string, unknown>, payload: Record<string, unknown>): boolean {
   if (input.replayable !== false) return true;

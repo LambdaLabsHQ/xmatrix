@@ -36,12 +36,13 @@ fresh command id, and the snapshot head refuses an older registry sequence,
 so neither replay answers anything after the sender's own prompt retries.
 Rows written before the change expire on their original 30-day schedule.
 
-Since 2026-10-22 a daemon command whose id the Hub minted, because the daemon
-sent no request id, stores no replay at all when applying it twice is harmless:
-an online confirmation, and a partial Run snapshot (the minute load report and
-Run progress). Nothing could ever read those rows, and they were about three
-quarters of the roughly 42,000 replay rows written a day. Reports the daemon
-names (exits, stop results), full snapshots and every other command keep theirs.
+Since 2026-10-22 two daemon commands store no replay at all, because nothing
+asks for their result again and applying them twice is harmless: an online
+confirmation, and a partial Run snapshot (the minute load report, Run progress
+and harness inventory). A partial snapshot carries a causal id but is sent once
+and never answered. These snapshots were about 70,000 of the roughly 80,000
+replay rows written on 2026-10-22. Reports the daemon names (exits, stop
+results), full snapshots and every other command keep theirs.
 
 Expired sign-in sessions (`control.auth_sessions` past `expires_at`) are
 removed in the same bounded batches. Every sign-in check already refuses them;
