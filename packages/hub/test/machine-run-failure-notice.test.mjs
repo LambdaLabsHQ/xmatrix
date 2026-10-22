@@ -97,9 +97,9 @@ test("the Agent that takes over a failed start is named once per failed Run", as
 });
 
 test("a stop nothing in the Channel asked for says why and who caused it", async () => {
-  const stop = await machineStopResultNoticeCommand({ ...base, machineName: "srv2018194", controlKey: "k", ok: true,
+  const stop = await machineStopResultNoticeCommand({ ...base, machineName: "Build Box", controlKey: "k", ok: true,
     cause: { code: "registration_disabled", actorName: "Daniel" } });
-  assert.equal(stop.body, "Stopped @grok on srv2018194. Daniel turned this Agent off in this Space. " +
+  assert.equal(stop.body, "Stopped @grok on Build Box. Daniel turned this Agent off in this Space. " +
     "The Machine confirmed the process tree is terminated.");
   assert.equal(stop.residual.appMetadata.stopCause, "registration_disabled");
   const failed = await machineStopResultNoticeCommand({ ...base, controlKey: "k", ok: false,
