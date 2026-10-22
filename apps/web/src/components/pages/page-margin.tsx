@@ -11,11 +11,14 @@ import { anchorTop, layoutMargin, type MarginConversation } from "./page-margin-
 import type { PresentPerson } from "./page-chrome";
 import { CardPen, MarginPen } from "./page-pen";
 import { discussionTitle } from "@/components/dashboard/selection-discussion";
+import { InlineRowPreview } from "@/components/dashboard/inline-row-preview";
 
 /** A card's height before it is measured. */
 const ESTIMATED_CARD_HEIGHT = 76;
 /** Room the card at the margin's top or bottom edge covers: what is under it counts as out of view. */
 const EDGE_ROOM = 48;
+/** Marks what the margin draws, so a paragraph's writers show beside it only where nothing stands. */
+export const MARGIN_ITEM = "[data-page-margin-item]";
 /** An Agent's pill and the line under it, before they are measured. */
 const ESTIMATED_WRITER_HEIGHT = 56;
 /** How far above its line an Agent's pill stands, so the pill is level with the line, as at the right edge. */
@@ -144,7 +147,7 @@ function ConversationCard({ conversation, writer, focused, canResolve, onOpen, o
                 <span className="truncate text-[13px] font-semibold text-foreground">{lastMessage.label}</span>
                 <span className="shrink-0 text-[11px] text-muted-foreground">{formatRelativeAge(lastMessage.sentAt) ?? ""}</span>
               </span>
-              <span className="mt-0.5 line-clamp-2 text-[13px] leading-[1.4] text-foreground/85">{lastMessage.bodyPreview}</span>
+              <span className="mt-0.5 line-clamp-2 text-[13px] leading-[1.4] text-foreground/85"><InlineRowPreview text={lastMessage.bodyPreview} /></span>
             </span>
           </span>
         ) : agents.length === 0 && (
@@ -304,7 +307,7 @@ function WriterUnit({ writer, open, actions, onPress, children }: {
           <CommentIcon />
           <span className="min-w-0 truncate">
             <span className="font-semibold text-foreground">{cardName(name)}</span>
-            {last && <span className="text-muted-foreground"> · {last.label}: {last.bodyPreview}</span>}
+            {last && <span className="text-muted-foreground"> · {last.label}: <InlineRowPreview text={last.bodyPreview} /></span>}
           </span>
         </button>
       )}
@@ -496,7 +499,7 @@ export function PageMargin({ conversations, writers = [], editors = [], view = n
   );
   const place = (id: string, child: ReactNode) => (
     <div key={id} className={cn("absolute inset-x-0 transition-[top] duration-150", !positions.has(id) && "invisible")}
-      style={{ top: positions.get(id) ?? 0 }}
+      style={{ top: positions.get(id) ?? 0 }} data-page-margin-item={positions.has(id) ? "" : undefined}
       ref={(node) => { if (node) nodes.current.set(id, node); else nodes.current.delete(id); }}>
       {child}
     </div>
@@ -532,10 +535,10 @@ export function PageMargin({ conversations, writers = [], editors = [], view = n
         <div className="pointer-events-none sticky top-0 z-20 h-0">
           <div className="relative" style={{ height: view.height }}>
             {offscreen.above.length > 0 && (
-              <div className="absolute inset-x-0 top-2"><PageOffscreenCard side="above" entries={offscreen.above} onJump={onJump} /></div>
+              <div className="absolute inset-x-0 top-2" data-page-margin-item=""><PageOffscreenCard side="above" entries={offscreen.above} onJump={onJump} /></div>
             )}
             {offscreen.below.length > 0 && (
-              <div className="absolute inset-x-0 bottom-3"><PageOffscreenCard side="below" entries={offscreen.below} onJump={onJump} /></div>
+              <div className="absolute inset-x-0 bottom-3" data-page-margin-item=""><PageOffscreenCard side="below" entries={offscreen.below} onJump={onJump} /></div>
             )}
           </div>
         </div>

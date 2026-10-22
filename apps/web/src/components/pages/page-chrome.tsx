@@ -11,6 +11,7 @@ import {
 import { Face } from "@/components/dashboard/face";
 import { COUNT_CHIP_MATERIAL_CLASS } from "@/components/dashboard/workspace-shell-constants";
 import { formatRelativeAge } from "@/components/dashboard/time-display";
+import { InlineRowPreview } from "@/components/dashboard/inline-row-preview";
 import { Button } from "@/components/ui/button";
 import { LiquidGlassPill } from "@/components/ui/material-surfaces";
 import { noticeClass, statusInkClass } from "@/components/ui/status-tone";
@@ -298,7 +299,7 @@ export function ConversationList({ conversations, blocks, onOpen, focusBlockId =
                     )}
                     {conversation.lastMessage && (
                       <span className="block truncate text-xs text-muted-foreground">
-                        {conversation.lastMessage.label}: {conversation.lastMessage.bodyPreview}
+                        {conversation.lastMessage.label}: <InlineRowPreview text={conversation.lastMessage.bodyPreview} />
                       </span>
                     )}
                     {conversation.agents.length > 0 && (

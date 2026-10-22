@@ -10,6 +10,7 @@ import type { Node as DocNode } from "prosemirror-model";
 import { PaperPopover } from "@/components/ui/material-surfaces";
 import { formatRelativeAge } from "@/components/dashboard/time-display";
 import { cn } from "@/lib/utils";
+import { MARGIN_ITEM } from "./page-margin";
 import { blameDoc, blameOf, type BlameDoc, type BlameSummary, type BlameWriter } from "./page-blame-model";
 
 /** Where a page reads who wrote it, and opens the conversation a passage was written in. */
@@ -37,6 +38,17 @@ function summarize(blame: PageBlame, now: DocNode, from: number, to: number): Bl
   let carried = byDoc.get(now);
   if (!carried) byDoc.set(now, carried = carryPageDocKnown(base.doc, base.known, now));
   return blameOf(base, carried, now, from, to);
+}
+
+/** The height of a paragraph's byline in the margin. */
+const BYLINE_HEIGHT = 20;
+
+/** Whether a card, pill or edge card in the margin stands across `top`..`bottom` of the view. */
+function marginTaken(top: number, bottom: number): boolean {
+  return [...document.querySelectorAll(MARGIN_ITEM)].some((item) => {
+    const box = item.getBoundingClientRect();
+    return box.height > 0 && box.top < bottom && box.bottom > top;
+  });
 }
 
 /** Where its writers show: `above` stands its bottom at `top`, so a note that opens grows away from the passage. */
@@ -189,6 +201,8 @@ export function PageBlameLayer({ view, frame, source, inMargin }: {
       timer = window.setTimeout(() => {
         const box = element.getBoundingClientRect();
         const first = current.coordsAtPos(from, 1);
+        // The margin's cards are what the reader came to it for: the byline does not draw over them.
+        if (marginTaken(first.top, first.top + BYLINE_HEIGHT)) return;
         const shown = { from, to, left: 0, top: first.top - box.top, summary: null };
         void writersOf(from, to).then((summary) => {
           if (block?.from === from && block.to === to && summary) setHovered({ ...shown, summary });
