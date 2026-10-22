@@ -1149,6 +1149,45 @@ test("a drag that starts in code or bold text selects the passage, its markdown 
   }
 });
 
+test("a drag selects the line under the pointer, wherever the caret was: nothing the caret shows moves the text", async ({ page: browser }) => {
+  await browser.setViewportSize({ width: 1280, height: 720 });
+  await stubPages(browser, [page("p-relay", null, "Relay", "V")]);
+  await fixtureJson(browser, "page-links", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\?.*$/u, { links: [] });
+  const address = `https://example.com/${"long/path/".repeat(14)}end`;
+  const filler = (from: number) => Array.from({ length: 12 }, (_, index) => `Filler line ${from + index}.`).join("\n\n");
+  const editor = await openLivePage(browser, `# Relay\n\n## Status\n\n${filler(1)}\n\nSee [the guide](${address}) for the rollout.\n\n` +
+    `Under the link.\n\n\`\`\`\ncode one\n\`\`\`\n\nUnder the code.\n\n| Area | State |\n|---|---|\n| Search | Shipped |\n| Billing | Planned |\n\n` +
+    `Under the table.\n\n${filler(13)}\n`);
+  const top = (text: string) => editor.locator("p, td", { hasText: text }).first().evaluate((node) => node.getBoundingClientRect().top);
+  const selected = () => browser.evaluate(() => window.getSelection()?.toString() ?? "");
+  // Presses on `text`, drags along its line and lets go; where the line stood is where it stays.
+  const drag = async (text: string, by: number) => {
+    const line = (await editor.locator("p, td", { hasText: text }).first().boundingBox())!;
+    const y = line.y + line.height / 2;
+    const before = await top(text);
+    await browser.mouse.move(line.x + 2, y);
+    await browser.mouse.down();
+    expect(await top(text), `pressing on "${text}" leaves it under the pointer`).toBe(before);
+    await browser.mouse.move(line.x + by, y, { steps: 6 });
+    await browser.mouse.up();
+    const passage = await selected();
+    expect(passage.length > 2 && text.startsWith(passage), `"${passage}" is from "${text}"`).toBe(true);
+    // Scrolling lands on whole pixels.
+    await expect.poll(async () => Math.abs(await top(text) - before) < 1, `"${text}" stays under the pointer once the button is up`)
+      .toBe(true);
+    await browser.keyboard.press("Escape");
+  };
+  // Room to scroll either way, as on a long page.
+  await editor.getByText("Under the code.").evaluate((node) => node.scrollIntoView({ block: "center" }));
+  const guide = (await editor.locator("a", { hasText: "the guide" }).boundingBox())!;
+  await browser.mouse.click(guide.x + 8, guide.y + guide.height / 2);
+  await drag("Under the link.", 400);
+  await editor.getByText("code one").click();
+  await drag("Under the code.", 400);
+  await drag("Billing", 30);
+  await drag("Under the table.", 400);
+});
+
 test("selecting a passage opens a comment box beside it in the margin; sent, the comment is a discussion anchored there", async ({ page: browser }) => {
   await browser.setViewportSize({ width: 1600, height: 900 });
   await stubPages(browser, [page("p-relay", null, "Relay", "V")]);

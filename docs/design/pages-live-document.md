@@ -333,7 +333,13 @@ fact is about.
   delimiter drops that mark. Shortcuts still apply marks. A typed URL followed
   by a space becomes a link.
   Clicking a link's visible destination edits the address.
-- **Table controls** appear only while the cursor is in a table.
+- **What the caret shows never moves the text under the pointer.** Markers
+  stay as they were while the button is down and follow the caret once it is
+  up; if the markers it leaves took lines, the page scrolls by that much so
+  the selection stays under the pointer. A code fence shows in its block's
+  corner, not on a line of its own.
+- **Table controls** appear only while the cursor is in a table, floating
+  above it rather than taking room in the page.
 - **A selection opens a comment box** (decided by Daniel 2026-10-21). A
   passage selected with the mouse opens the product's own message box, the
   caret already in it, in the margin level with the passage, as a comment

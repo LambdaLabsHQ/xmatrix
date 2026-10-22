@@ -5,7 +5,7 @@ import { keymap } from "prosemirror-keymap";
 import type { MarkType, Node as DocNode } from "prosemirror-model";
 import { type Command, type EditorState, Plugin, PluginKey, type Transaction } from "prosemirror-state";
 import { findWrapping } from "prosemirror-transform";
-import { Decoration, DecorationSet } from "prosemirror-view";
+import { Decoration, DecorationSet, type EditorView } from "prosemirror-view";
 
 /**
  * Typing on a page (docs/design/pages-live-document.md §4.2). People format
@@ -127,6 +127,26 @@ export function syntaxDecorations(state: EditorState): DecorationSet {
 const syntaxKey = new PluginKey<{ held: boolean; shown: DecorationSet }>("page-syntax");
 
 /**
+ * The markers follow the caret once the button is up. Those it leaves can take whole lines, as a long link's
+ * address does, so the page scrolls by what they moved: what was just selected stays under the pointer.
+ */
+function releaseMarkers(view: EditorView) {
+  const head = () => view.coordsAtPos(view.state.selection.head).top;
+  const before = head();
+  view.dispatch(view.state.tr.setMeta(syntaxKey, false));
+  const moved = head() - before;
+  if (!moved) return;
+  for (let element = view.dom.parentElement; element; element = element.parentElement) {
+    const overflow = getComputedStyle(element).overflowY;
+    if ((overflow === "auto" || overflow === "scroll") && element.scrollHeight > element.clientHeight) {
+      element.scrollTop += moved;
+      return;
+    }
+  }
+  view.dom.ownerDocument.scrollingElement?.scrollBy(0, moved);
+}
+
+/**
  * A second click on the link the caret is already in edits its address. While the mouse button is held the
  * markers stay as they were: drawn under the pointer as it presses, they would replace the text the browser
  * anchors its drag in, and the drag would only move the caret. They follow the caret once the button is up.
@@ -160,7 +180,7 @@ export function syntaxPlugin(): Plugin {
           view.dispatch(view.state.tr.setMeta(syntaxKey, true));
           // After the editor has read where the drag ended.
           view.dom.ownerDocument.addEventListener("mouseup", () => window.setTimeout(() => {
-            if (!view.isDestroyed) view.dispatch(view.state.tr.setMeta(syntaxKey, false));
+            if (!view.isDestroyed) releaseMarkers(view);
           }), { once: true, capture: true });
           return false;
         },

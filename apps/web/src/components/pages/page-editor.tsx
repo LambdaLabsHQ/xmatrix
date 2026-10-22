@@ -8,7 +8,7 @@ import {
   BetweenHorizontalEnd, BetweenVerticalEnd, Code2, Columns3, FileCode2, Rows3, Trash2, Heading1, Heading2, Heading3, Link2,
   FileText, Hash, List, ListChecks, ListOrdered, MessageSquare, Minus, Pilcrow, Quote, Table,
 } from "lucide-react";
-import type { Node as DocNode } from "prosemirror-model";
+import type { Node as DocNode, ResolvedPos } from "prosemirror-model";
 import { toggleMark } from "prosemirror-commands";
 import { EditorState, Selection, TextSelection, type Command } from "prosemirror-state";
 import { EditorView } from "prosemirror-view";
@@ -744,6 +744,18 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
     const at = current.coordsAtPos(pos);
     return { left: at.left - box.left, top: at.top - box.top, bottom: at.bottom - box.top };
   };
+  const placeTable = ($pos: ResolvedPos) => {
+    if (!current || !frame.current) return null;
+    for (let depth = $pos.depth; depth > 0; depth--) {
+      if ($pos.node(depth).type.spec.tableRole !== "table") continue;
+      const table = current.nodeDOM($pos.before(depth));
+      if (!(table instanceof HTMLElement)) return null;
+      const box = frame.current.getBoundingClientRect();
+      const at = table.getBoundingClientRect();
+      return { left: at.left - box.left, top: at.top - box.top };
+    }
+    return null;
+  };
   const section = current ? pageDocBlockAt(current.state.doc, current.state.selection.from) : "";
   const selectionActions = Boolean(actions?.discuss || actions?.comment);
   const selectionMenu = toolbar && !toolbar.empty && toolbar.focused && current && toolbar.kind !== "code" && selectionActions
@@ -771,6 +783,7 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
     }
     return false;
   };
+  const tableAt = toolbar?.inTable && current ? placeTable(current.state.selection.$from) : null;
   const linkAtPos = linkDraft !== null && current ? place(current.state.selection.from) : null;
   const fileAtPos = fileDraft !== null && current ? place(current.state.selection.from) : null;
   const trigger = canEdit && toolbar?.trigger && toolbar.focused ? toolbar.trigger : null;
@@ -792,8 +805,9 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
     <div ref={frame} className="relative" data-testid="page-editor">
       <SectionAgentsInPage />
       {/* Surfaces are slips of the page's paper (PaperPopover); the wrappers place them. */}
-      {canEdit && toolbar?.inTable && (
-        <div className="sticky top-0 z-10 mb-2 w-fit">
+      {/* Over the page, above the table: taking room in the page would move the text under the pointer. */}
+      {canEdit && toolbar?.inTable && tableAt && (
+        <div className="absolute z-10 w-fit -translate-y-full" style={{ left: tableAt.left, top: tableAt.top - 6 }}>
         <PaperPopover role="toolbar" aria-label="Table" className="flex items-center gap-0.5 px-1.5 py-1"
           data-testid="page-table-tools">
           <ToolButton label="Add a row below" onRun={() => run(addRowAfter)}><BetweenHorizontalEnd /></ToolButton>
