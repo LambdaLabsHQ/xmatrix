@@ -40,7 +40,7 @@ function iso(value: string | Date): string {
  * (docs/design/pages-live-document.md §4.4): each one's name, newest message,
  * the reader's read position and the Agents live in it. Only conversations
  * the reader may read are described; the others are left out, as links
- * grant nothing. Read inside the transaction that found the reader, so a
+ * grant nothing. Read inside the request session that found the reader, so a
  * page's links come with them in one (`PostgresPageRepository.links`).
  */
 export async function describePageConversations(tx: DatabaseTransaction, spaceId: string, userId: string,

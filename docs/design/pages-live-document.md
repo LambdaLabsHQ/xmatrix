@@ -619,6 +619,13 @@ or joining one never leaves the page.
   current. A conversation the reader cannot open does not appear (parent
   §7).
 
+The page tree's Agent activity and page conversation lists use lock-free,
+independent `single_read` statements on one request session, including their
+access checks and conversation descriptions. Each statement retains its
+placement fence and READ COMMITTED snapshot. A lost response destroys that
+checkout and retries the read once on a fresh connection; repeated loss and
+answered SQL failures propagate. These reads need no enclosing BEGIN/COMMIT.
+
 ## 5. Keeping pages current in time
 
 A page is only worth reading if it is current within minutes of the change it

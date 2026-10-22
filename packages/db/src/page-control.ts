@@ -6,6 +6,7 @@ import { readsOnly } from "./space-roles.js";
 import { MessageAuthorityError } from "./message-authority-error.js";
 import { ControlError } from "./control-error.js";
 import type { AuthorityDatabase, DatabaseTransaction } from "./contracts.js";
+import { singleReadStatements } from "./single-read-statements.js";
 import { channelCapabilityPredicate, requireChannelCapability } from "./channel-capability-policy.js";
 import { loadChannelAgentPresence } from "./channel-agent-presence.js";
 import { requireAgentChannelAccess, type AgentChannelRunProof } from "./agent-channel-access.js";
@@ -307,11 +308,10 @@ write: boolean): Promise<PageActor> {
   };
 }
 
-/** Runs a transaction on the Space's shard, which must not be moving. */
-export async function inActiveSpace<T>(database: AuthorityDatabase,
+/** Resolves the Space's active shard for both transactional work and independent reads. */
+async function activeSpaceContext(database: AuthorityDatabase,
   input: { requestId: string; operation: string; spaceId: string },
-  ErrorType: new (code: string, status: number) => Error,
-  callback: (tx: DatabaseTransaction) => Promise<T>): Promise<T> {
+  ErrorType: new (code: string, status: number) => Error) {
   const { requestId, operation, spaceId } = input;
   const placement = await new PostgresSpacePlacementDirectory(database).find({ requestId, operation }, spaceId);
   if (!placement) throw new ErrorType("space_not_found", 404);
@@ -320,8 +320,16 @@ export async function inActiveSpace<T>(database: AuthorityDatabase,
     // domain asked, so every client retries it like the other controls do.
     throw new ControlError("space_placement_unavailable", 503, "Space placement is unavailable", true);
   }
-  return database.transaction({ requestId, operation,
-    placement: { spaceId, shardId: placement.shardId, placementEpoch: placement.placementEpoch } }, callback);
+  return { requestId, operation,
+    placement: { spaceId, shardId: placement.shardId, placementEpoch: placement.placementEpoch } };
+}
+
+/** Runs a transaction on the Space's shard, which must not be moving. */
+export async function inActiveSpace<T>(database: AuthorityDatabase,
+  input: { requestId: string; operation: string; spaceId: string },
+  ErrorType: new (code: string, status: number) => Error,
+  callback: (tx: DatabaseTransaction) => Promise<T>): Promise<T> {
+  return database.transaction(await activeSpaceContext(database, input, ErrorType), callback);
 }
 
 /** A page as one actor sees it: their access, and whether it is the Space's governance page. */
@@ -420,6 +428,18 @@ export class PostgresPageRepository {
   private inSpace<T>(requestId: string, operation: string, spaceId: string,
     callback: (tx: DatabaseTransaction) => Promise<T>): Promise<T> {
     return inActiveSpace(this.database, { requestId, operation, spaceId }, PageControlError, callback);
+  }
+
+  /** Lock-free activity reads retain READ COMMITTED's per-statement snapshots and placement fences. */
+  private async readInSpace<T>(requestId: string, operation: string, spaceId: string,
+    callback: (tx: DatabaseTransaction) => Promise<T>): Promise<T> {
+    const session = this.database.openSession();
+    try {
+      const context = await activeSpaceContext(session, { requestId, operation, spaceId }, PageControlError);
+      return await callback(singleReadStatements(session, context));
+    } finally {
+      await session.close();
+    }
   }
 
   private accessibleTree(tx: DatabaseTransaction, spaceId: string, actor: Actor): Promise<TreeRow[]> {
@@ -1976,7 +1996,7 @@ export class PostgresPageRepository {
 
   /** Links of one page (for its presence gutter) or of one conversation (for its header). */
   /**
-   * `describe` reads more about the links in the same transaction, as the reader it found: a page's
+   * `describe` reads more about the links in the same request session, as the reader it found: a page's
    * margin reads its conversations with them (`describePageConversations`).
    */
   async links<Described = never>(input: { requestId: string; spaceId: string; principal: PagePrincipal;
@@ -1987,7 +2007,7 @@ export class PostgresPageRepository {
     if (!input.pageId === !input.conversationId) {
       throw new PageControlError("invalid_request", 400, "name exactly one of pageId or conversationId");
     }
-    return this.inSpace(bounded(input.requestId, "requestId"), "page.links", spaceId, async (tx) => {
+    return this.readInSpace(bounded(input.requestId, "requestId"), "page.links", spaceId, async (tx) => {
       const actor = await pageActor(tx, spaceId, input.principal, false);
       const readable = new Set((await this.accessibleTree(tx, spaceId, actor)).map((row) => row.page_id));
       if (input.pageId && !readable.has(input.pageId)) throw new PageControlError("page_not_found", 404);
@@ -2024,11 +2044,11 @@ export class PostgresPageRepository {
    * described.
    */
   async agentsOnPages<Described = never>(input: { requestId: string; spaceId: string; principal: PagePrincipal;
-    /** Reads more about the open discussions, newest first, in the same transaction (as `links` does). */
+    /** Reads more about the open discussions, newest first, in the same read session (as `links` does). */
     describe?: (tx: DatabaseTransaction, userId: string, discussions: string[]) => Promise<Described> }):
     Promise<{ pages: Array<{ pageId: string; agents: PageTreeAgent[]; discussions: string[] }>; described?: Described }> {
     const spaceId = bounded(input.spaceId, "spaceId");
-    return this.inSpace(bounded(input.requestId, "requestId"), "page.agents", spaceId, async (tx) => {
+    return this.readInSpace(bounded(input.requestId, "requestId"), "page.agents", spaceId, async (tx) => {
       const actor = await pageActor(tx, spaceId, input.principal, false);
       const tree = await this.accessibleTree(tx, spaceId, actor);
       const readable = new Set(tree.map((row) => row.page_id));

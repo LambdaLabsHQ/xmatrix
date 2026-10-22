@@ -33,7 +33,9 @@ export function boundedPostgresTransaction(client, rewrite = text => text) {
 
 /** An AuthorityDatabase backed by a test's existing connection. */
 export function postgresDatabase(client, rewrite) {
-  return { cacheMode: "disabled", async transaction(_context, callback) {
+  const database = { cacheMode: "disabled",
+    openSession: () => ({ ...database, close: async () => {} }),
+    async transaction(_context, callback) {
     await client.query("BEGIN");
     try {
       const value = await callback(boundedPostgresTransaction(client, rewrite));
@@ -44,6 +46,7 @@ export function postgresDatabase(client, rewrite) {
       throw error;
     }
   } };
+  return database;
 }
 
 /** Independent command transactions, preserving the test's concurrency. */
