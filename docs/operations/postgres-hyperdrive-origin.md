@@ -118,8 +118,9 @@ mutations and their commit reconciliation remain explicit transactions.
 Channel catalog pages, counts, participant reads and exact-ID resolution use
 the same per-statement recovery, with authorization still checked by their SQL.
 
-Sentry event claiming (including receipt cleanup), Gmail route cleanup and Gmail
-claiming each replay once on a fresh request session after a connection timeout
+Sentry event claiming (including receipt cleanup), Gmail route cleanup and
+claiming, and Bot room expiry cleanup (Google Chat, Feishu, Telegram and Teams)
+each replay once on a fresh request session after a connection timeout
 or lost response before COMMIT. These transactions have no provider or delivery
 side effects. The failed session closes first; locked candidates use SKIP LOCKED,
 and unfinished work remains eligible on a later pass. A second failure, an open
