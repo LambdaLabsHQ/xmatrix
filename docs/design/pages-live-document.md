@@ -128,9 +128,9 @@ kept only while its bodies and the blame it was derived from are still the ones
 read; a purge forgets it with `changed_blocks`. The Web draws the head's blame on
 the head's document through the markdown's source positions and carries it to
 the live document, so what is typed since reads as being written. A paragraph
-rested on shows its writers in the margin; a selected passage shows them on a
-note over it, each with the conversation the revision came from, opened beside
-the page at the message it had reached when the revision was written.
+rested on shows its writers in the margin. Selecting text leaves attribution
+hidden so it does not obscure the passage or compete with its discussion
+controls. Revision history retains the conversations each revision came from.
 
 - **Intent line.** An Agent on a block publishes one line of what it is
   doing: the note on its claim, or else the title of the conversation its Run

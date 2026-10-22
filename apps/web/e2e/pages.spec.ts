@@ -1501,7 +1501,7 @@ test("a page's history shows what each revision changed, colored, and the conver
   await browser.screenshot({ path: test.info().outputPath("pages-version-history.png") });
 });
 
-test("who wrote a passage shows over it, and opens the conversation it was written in at that moment", async ({ page: browser }) => {
+test("paragraph attribution stays in the margin and selecting text leaves only discussion controls", async ({ page: browser }) => {
   await browser.setViewportSize({ width: 1600, height: 900 });
   await stubPages(browser, [page("p-relay", null, "Relay", "V")]);
   await fixtureJson(browser, "page-links", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\?.*$/u, { links: [] });
@@ -1520,12 +1520,6 @@ test("who wrote a passage shows over it, and opens the conversation it was writt
   });
   // Their faces: Daniel's own picture, and the mark of the harness claude:1's Instance runs.
   await fixtureFaces(browser, { "user:u-daniel": "/role-avatars/default.svg", "agent:a": "/agent-vendors/claude.svg" });
-  await fixtureJson(browser, "revision-moment", /\/pages\/p-relay\/revisions\/2\/moment\?conversation=/u,
-    { moment: { conversationId: E2E_CHANNEL.id, messageId: "m-asked", sequence: 1 } });
-  await fixtureJson(browser, "blame-history", `**/api/xmatrix/channels/${E2E_CHANNEL.id}/history**`, {
-    messages: [{ messageId: "m-asked", channelId: E2E_CHANNEL.id, sequence: 1, body: "Mark Status in progress",
-      sentAt: NOW, reactions: [], annotations: [], attachments: [], from: E2E_USER_SENDER }],
-    hasMore: false, historyHeadSequence: 1 });
   const editor = await openLivePage(browser);
 
   // Resting on a paragraph names who wrote it, level with it in the margin.
@@ -1537,36 +1531,25 @@ test("who wrote a passage shows over it, and opens the conversation it was writt
   expect(lineAt.x).toBeGreaterThan(noneAt.x + noneAt.width);
   expect(Math.abs(lineAt.y - noneAt.y)).toBeLessThan(12);
 
-  // A selected passage says who wrote it on a note over it, with the conversation it came from.
+  // Selecting text clears attribution and leaves the existing discussion controls available.
   await selectLine(browser, "In progress");
-  const note = browser.getByTestId("page-blame-note");
-  await expect(note).toContainText("claude:1");
-  await expect(note).toContainText("2h ago");
-  const [noteAt, passageAt] = [(await note.boundingBox())!, (await editor.getByText("In progress").boundingBox())!];
-  expect(noteAt.y + noteAt.height).toBeLessThanOrEqual(passageAt.y + 2);
-  expect(Math.abs(noteAt.x - passageAt.x)).toBeLessThan(16);
-  await expect(browser.getByTestId("page-comment-box"), "the comment box still opens beside it").toBeVisible();
-  await browser.screenshot({ path: test.info().outputPath("pages-blame-note.png") });
+  await expect(line).toHaveCount(0);
+  await expect(browser.getByTestId("page-comment-box")).toBeVisible();
+  // Wait beyond the old selection-note delay; selecting text must not add another overlay.
+  await browser.waitForTimeout(400);
+  await expect(browser.getByTestId("page-blame-note")).toHaveCount(0);
+  await browser.screenshot({ path: test.info().outputPath("pages-selection-without-blame.png") });
 
-  // Several writers: the note opens to each of them.
-  await editor.locator("h2", { hasText: "Status" }).click({ clickCount: 3 });
-  await browser.keyboard.down("Shift");
-  await editor.getByText("In progress", { exact: true }).click();
-  await browser.keyboard.up("Shift");
-  await expect(note).toContainText("claude:1, Daniel");
-  await note.getByRole("button", { expanded: false }).click();
-  await expect(note.locator("li")).toHaveCount(2);
-  await expect(note.locator("li").nth(1).locator("img")).toHaveAttribute("src", "/role-avatars/default.svg");
-  await expect(note.locator("li").nth(0).locator("img")).toHaveAttribute("src", "/agent-vendors/claude.svg");
-  // At the top of the page there is no room over the passage for the list: it opens under it, in view.
-  const [openAt, articleAt] = [(await note.boundingBox())!, (await browser.locator("article").first().boundingBox())!];
-  expect(openAt.y).toBeGreaterThanOrEqual(articleAt.y);
-  await browser.screenshot({ path: test.info().outputPath("pages-blame-writers.png") });
+  // Moving over the selected paragraph must not bring attribution back.
+  await editor.getByText("In progress", { exact: true }).hover();
+  await browser.waitForTimeout(700);
+  await expect(line).toHaveCount(0);
+  await expect(browser.getByTestId("page-blame-note")).toHaveCount(0);
 
-  // Its conversation opens beside the page, at the message it was at when the passage was written.
-  await note.getByRole("button", { name: `in ${E2E_CHANNEL.name}` }).click();
-  await expect.poll(async () => (await fixtureRequestRecords(browser, "revision-moment")).length).toBe(1);
-  await expect(browser.getByTestId("page-conversation").locator("[data-message-body='m-asked']")).toBeVisible();
+  // Collapsing the selection restores the ordinary paragraph hover.
+  await editor.getByText("none", { exact: true }).click();
+  await editor.getByText("none", { exact: true }).hover();
+  await expect(line).toContainText("Daniel");
 });
 
 test("two people co-edit a page live: each sees the other's typing and cursor, and the session gets both", async ({ page: first, browser }) => {

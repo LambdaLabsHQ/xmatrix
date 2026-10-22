@@ -1392,10 +1392,6 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
       queryFn: ({ signal }) => pageApi.blame(spaceId, pageId, token, signal),
       staleTime: Infinity,
     }),
-    open: (conversationId, revision) => {
-      void pageApi.revisionMoment(spaceId, pageId, token, revision, conversationId)
-        .then(({ moment }) => openConversation(conversationId, moment ?? undefined), () => openConversation(conversationId));
-    },
   } : undefined;
   const attachSection = dialog && typeof dialog === "object" && dialog.kind === "attach" ? dialog.blockId : null;
   // Where the document column, and the margin level with it, starts in the article's scrolled content.
