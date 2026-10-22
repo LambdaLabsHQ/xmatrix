@@ -632,7 +632,9 @@ function handleAcp(message) {
         },
         authMethods: provider === "acp-cursor-login"
           ? [{ id: "cursor_login", name: "Cursor Login", description: "fixture login" }]
-          : [{ id: "login", name: "Login", description: "fixture login" }],
+          : provider === "acp-missing-key"
+            ? [{ id: "openai", name: "Use OpenAI API key", description: "Requires setting the `OPENAI_API_KEY` environment variable" }]
+            : [{ id: "login", name: "Login", description: "fixture login" }],
         agentInfo: { name: "Kimi Code CLI", version: "0.30.0" },
       });
       break;
@@ -643,11 +645,17 @@ function handleAcp(message) {
           data: { message: `Unknown authentication method: ${message.params?.methodId}. Supported method: cursor_login` } } });
         break;
       }
+      // Qwen Code 0.26 without a configured provider refuses its only method.
+      if (provider === "acp-missing-key") {
+        send({ jsonrpc: "2.0", id: message.id, error: { code: -32603, message: "Internal error",
+          data: { details: "Missing API key for openai auth. Provide an API key via settings, or set OPENAI_API_KEY." } } });
+        break;
+      }
       acpState.authenticateSeen = true;
       response(message, {});
       break;
     case "session/new":
-      if (provider === "acp-cursor-login" && !acpState.authenticateSeen) {
+      if ((provider === "acp-cursor-login" || provider === "acp-missing-key") && !acpState.authenticateSeen) {
         send({ jsonrpc: "2.0", id: message.id, error: { code: -32000, message: "Authentication required" } });
         break;
       }
@@ -750,6 +758,7 @@ const handlers = {
   grok: handleGrok,
   acp: handleAcp,
   "acp-cursor-login": handleAcp,
+  "acp-missing-key": handleAcp,
   "acp-live-canary": handleAcp,
 };
 

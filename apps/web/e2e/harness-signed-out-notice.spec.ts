@@ -21,9 +21,12 @@ const NOTICE = { messageId: "notice", channelId: CHANNEL.id, sequence: 2, sentAt
   metadata: { kind: "xmatrix.harness-signed-out.v1", signedOut, sourceMention: "@auto", sourceMessageId: "summon",
     xmatrixSystemNotice: true, xmatrixProvenance: "system_fact" } };
 
-async function openRefusedSummon(page: Parameters<typeof openWorkspaceWithStubs>[0], ownerUserId = "e2e-user", notice = NOTICE) {
-  const registrations = [{ key: { spaceId: E2E_SPACE.id, ownerUserId, machineId: MACHINE, harness: "claude" },
-    displayName: "claude", ownerName: "E2E Tester", machineName: "mac-mini", version: 1, state: "enabled", models: [],
+const CLAUDE_ITEM = { id: "claude", installed: true, probeStatus: "ok", version: "2.1.292", login: "signed_out" };
+
+async function openRefusedSummon(page: Parameters<typeof openWorkspaceWithStubs>[0], ownerUserId = "e2e-user", notice = NOTICE,
+  item: Record<string, unknown> & { id: string } = CLAUDE_ITEM) {
+  const registrations = [{ key: { spaceId: E2E_SPACE.id, ownerUserId, machineId: MACHINE, harness: item.id },
+    displayName: item.id, ownerName: "E2E Tester", machineName: "mac-mini", version: 1, state: "enabled", models: [],
     routingReady: true, canManageOwnerGrant: true, canConfigureSpace: true, canRemoveFromSpace: true,
     live: { machine: { online: true, platform: "macos" }, running: [] } }];
   const machineDaemons = [{ id: "daemon-mac", userId: ownerUserId, email: "e2e@xmatrix.test", name: "mac-mini",
@@ -31,7 +34,7 @@ async function openRefusedSummon(page: Parameters<typeof openWorkspaceWithStubs>
     connectedAt: E2E_NOW, lastSeenAt: new Date().toISOString(), daemonVersion: "1.0.562",
     metadata: { platform: "macos", capabilities: ["machine_harness_action_v1", "machine_harness_login_v1"],
       harnesses: { schemaVersion: 1, capturedAt: E2E_NOW,
-        items: [{ id: "claude", installed: true, probeStatus: "ok", version: "2.1.292", login: "signed_out" }] } } }];
+        items: [item] } } }];
   await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], registrations, machineDaemons, channels: [CHANNEL] });
   await fixtureJson(page, "history", `**/api/xmatrix/channels/${CHANNEL.id}/history**`, { messages: [SUMMON, notice], hasMore: false });
   await fixtureJson(page, "launch-anyway", `**/api/xmatrix/channels/${CHANNEL.id}/messages/summon/launch-anyway`,
@@ -78,4 +81,25 @@ test("a turn its program refused as signed out is signed in from its notice, and
   await signInFromNotice(page, notice);
   await expect(notice).toContainText("Send your message again to continue.");
   expect(await fixtureRequestBodies(page, "launch-anyway")).toEqual([]);
+});
+
+test("a program set up only on its machine shows its own words, and a check after setting it up sends the summon again", async ({ page }) => {
+  const qwen = { harness: "qwen", program: "Qwen Code", machineId: MACHINE, machineName: "mac-mini" };
+  const refusal = "Missing API key for openai auth. Set the environment variable 'OPENAI_API_KEY'.";
+  const notice = await openRefusedSummon(page, "e2e-user", { ...NOTICE, metadata: { ...NOTICE.metadata, signedOut: qwen } },
+    { id: "qwen", installed: true, probeStatus: "ok", version: "0.26.0", login: "signed_out", loginDetail: refusal });
+  await expect(notice).toContainText("Qwen Code on mac-mini can't take work yet.", { timeout: 20_000 });
+  await expect(notice).toContainText(refusal);
+  await expect(notice).toContainText("Run qwen in a terminal on that computer");
+  await expect(notice.getByRole("button", { name: "Sign in", exact: true })).toHaveCount(0);
+  // The machine starts Qwen Code again the way a launch does, and now it opens a session.
+  await fixtureJson(page, "check-again", `**/api/xmatrix/machine-daemons/harness-actions/${encodeURIComponent(START)}`, {
+    controlId: START, presetId: "custom", action: "refresh", status: "succeeded",
+    result: { presetId: "custom", action: "refresh", status: "succeeded", inventory: { schemaVersion: 1, capturedAt: E2E_NOW,
+      items: [{ id: "qwen", installed: true, probeStatus: "ok", version: "0.26.0", login: "signed_in" }] } } });
+  await notice.getByRole("button", { name: "Check again" }).click();
+  await expect(notice).toContainText("Your message went to it again.", { timeout: 20_000 });
+  await expect.poll(() => fixtureRequestBodies(page, "launch-anyway"))
+    .toEqual([{ body: "@auto fix the build", sourceMention: "@auto" }]);
+  await page.screenshot({ path: test.info().outputPath("set-up-there-notice.png") });
 });

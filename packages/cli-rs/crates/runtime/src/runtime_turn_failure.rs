@@ -22,7 +22,7 @@ pub(crate) const AGENT_SIGNED_OUT_LIFECYCLE_REASON: &str = "harness_signed_out";
 /// Whether a harness's error says its own sign-in is missing or expired. The
 /// vendors' wording, as observed: Claude Code's "Failed to authenticate: OAuth
 /// session expired and could not be refreshed" and "Please run /login", Codex's
-/// "Not logged in", API key and 401 refusals.
+/// "Not logged in", API key and 401 refusals (Qwen Code: "Missing API key").
 pub(crate) fn harness_signed_out_error(detail: &str) -> bool {
     let text = detail.to_ascii_lowercase();
     [
@@ -33,6 +33,7 @@ pub(crate) fn harness_signed_out_error(detail: &str) -> bool {
         "please run /login",
         "run `claude /login`",
         "invalid api key",
+        "missing api key",
         "authentication_error",
         "authentication required",
         "login required",
