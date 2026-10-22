@@ -29,8 +29,11 @@ mechanism `stack_origin=capture_boundary`; Sentry issue reads show
 the console/reporting call, not the original storage operation. Original stacks
 are preserved when available. For HUB-9C and HUB-88, use the next event's capture
 caller to identify the responsible DO path, then establish whether delivery or
-commit already occurred before choosing recovery. This diagnostic does not
-retry, ignore or resolve the underlying failure.
+commit already occurred before choosing recovery. The route-directory
+register/unregister path (HUB-9E) is that caller: a storage reset aborts the
+directory write, and the idempotent mutation is replayed once. A second failure
+returns the scope to the unsynced set so the next socket refresh tries again.
+Message delivery still does not replay an unknown commit.
 
 Machine text-task answers that update a conversation's About carry the current
 Runtime's local delivery capability through the catalog mutation and its

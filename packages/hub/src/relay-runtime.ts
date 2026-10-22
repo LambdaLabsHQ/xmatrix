@@ -152,6 +152,14 @@ function relayRuntimeProductFactoryFromEnv(
 /** The sole live relay runtime Durable Object implementation. */
 
 const RELAY_RUNTIME_OWNER_CELL_KEY = "runtime-owner-cell";
+const DURABLE_OBJECT_STORAGE_RESET = "Internal error in Durable Object storage caused object to be reset";
+
+function durableObjectStorageReset(error: unknown): boolean {
+  if (error instanceof Error) return error.message.includes(DURABLE_OBJECT_STORAGE_RESET);
+  if (!error || typeof error !== "object" || !("message" in error)) return false;
+  const message = (error as { message: unknown }).message;
+  return typeof message === "string" && message.includes(DURABLE_OBJECT_STORAGE_RESET);
+}
 
 export class RelayRuntimeLive extends DurableObject<Env> {
   private readonly productAdapter: RelayRuntimeProductCallbackAdapter | undefined;
@@ -548,15 +556,55 @@ export class RelayRuntimeLive extends DurableObject<Env> {
     scopeIds: readonly string[],
   ): void {
     if (scopeIds.length === 0 || !this.env.RELAY_RUNTIME_ROUTE_DIRECTORY) return;
-    const task = this.mutateRouteDirectory(action, cellName, scopeIds).catch((error: unknown) => {
-      console.error(`Runtime route-directory ${action} failed`, error);
-    });
+    const task = this.applyRouteDirectoryMutation(action, cellName, scopeIds);
     try {
       this.ctx.waitUntil(task);
     } catch (error) {
       // A test or platform shim may refuse task registration. The socket path
       // remains independent of this replaceable delivery projection.
       console.error(`Runtime route-directory ${action} scheduling failed`, error);
+    }
+  }
+
+  /**
+   * A directory storage reset aborts that object's in-flight write. Register
+   * and unregister are idempotent, so the lost write is replayed once on the
+   * reset object. An answered rejection is not replayed. A failure that
+   * remains leaves local occupancy ahead of the directory; putting those
+   * scopes back makes the next socket refresh try again.
+   */
+  private applyRouteDirectoryMutation(
+    action: "register" | "unregister",
+    cellName: RuntimeRouteDirectoryCell,
+    scopeIds: readonly string[],
+  ): Promise<void> {
+    return this.mutateRouteDirectory(action, cellName, scopeIds).catch(async (error: unknown) => {
+      if (durableObjectStorageReset(error)) {
+        try {
+          await this.mutateRouteDirectory(action, cellName, scopeIds);
+          return;
+        } catch (retryError) {
+          this.revertRouteDirectoryBookkeeping(action, scopeIds);
+          console.error(`Runtime route-directory ${action} failed`, retryError);
+          return;
+        }
+      }
+      this.revertRouteDirectoryBookkeeping(action, scopeIds);
+      console.error(`Runtime route-directory ${action} failed`, error);
+    });
+  }
+
+  private revertRouteDirectoryBookkeeping(
+    action: "register" | "unregister",
+    scopeIds: readonly string[],
+  ): void {
+    const occupied = this.productAdapter ? new Set(this.productAdapter.occupiedChannelIds()) : null;
+    for (const scopeId of scopeIds) {
+      if (action === "register") {
+        if (!occupied || occupied.has(scopeId)) this.productOccupiedScopes.delete(scopeId);
+      } else if (!occupied || !occupied.has(scopeId)) {
+        this.productOccupiedScopes.add(scopeId);
+      }
     }
   }
 
