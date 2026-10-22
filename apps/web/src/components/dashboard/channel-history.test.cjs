@@ -10,6 +10,7 @@ const {
   formatMessageDateTime,
   formatMessageTimestamp,
   mergeChannelHistory,
+  commandResultHistoryMessage,
   supersededHistoryMessage,
 } = history.exports;
 
@@ -153,4 +154,19 @@ test("a live supersession judgment folds the held message once", () => {
     { messageId: "m1", supersededBy: "m2" }), undefined);
   assert.equal(supersededHistoryMessage(window, { messageId: "m1" }), undefined);
   assert.equal(supersededHistoryMessage(window, undefined), undefined);
+});
+
+test("a send's own reply never erases the answer the Hub already pushed for it", () => {
+  const sent = { messageId: "m1", channelId: "a", sequence: 4, sentAt: "2026-10-22T08:29:03.019Z", body: "@claude:1 /effort max" };
+  const controls = [{ kind: "effort", target: "claude:1", status: "switched", selected: "max" }];
+  // The answer arrives first, on the echo the reader holds.
+  const answered = commandResultHistoryMessage([sent], { messageId: "m1", annotationId: "a1", payload: { controls } });
+  const held = mergeChannelHistory("a", [], [answered]);
+  // Then the send returns the message as committed, before any answer.
+  const [merged] = mergeChannelHistory("a", held, [{ ...sent, mentionReadStatuses: [] }]);
+  assert.deepEqual(merged.commandResult, { controls });
+  assert.deepEqual(merged.mentionReadStatuses, [], "the newer frame's own fields still apply");
+  // A recall is the one frame that does end what the Hub judged.
+  const [recalled] = mergeChannelHistory("a", [merged], [{ ...sent, body: "", recalledAt: "2026-10-22T08:30:00Z" }]);
+  assert.equal(recalled.commandResult, undefined);
 });

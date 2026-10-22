@@ -166,9 +166,25 @@ export function mergeChannelHistory<T extends ChannelHistoryLike>(
     byId.set(message.messageId, message);
   }
   for (const message of filterHistoryForChannel(channelId, incoming)) {
-    byId.set(message.messageId, message);
+    const held = byId.get(message.messageId);
+    byId.set(message.messageId, held ? withHeldJudgments(held, message) : message);
   }
   return sortChannelHistory(Array.from(byId.values()));
+}
+
+/* What the Hub judged about a message after it was committed, read from its
+   annotations. A frame built at commit time (the send's own answer, a live
+   echo) cannot carry one and knows nothing of it, so it never erases one the
+   reader already holds. A sent `/effort`'s answer is pushed before the send
+   returns, and that answer must survive the send's reply. */
+const HUB_JUDGMENTS = ["supersededBy", "questionnaireState", "commandResult"] as const;
+
+function withHeldJudgments<T extends ChannelHistoryLike>(held: T, incoming: T): T {
+  if ((incoming as { recalledAt?: string }).recalledAt) return incoming;
+  const kept = HUB_JUDGMENTS.filter((key) => (held as Record<string, unknown>)[key] !== undefined &&
+    (incoming as Record<string, unknown>)[key] === undefined);
+  if (!kept.length) return incoming;
+  return { ...incoming, ...Object.fromEntries(kept.map((key) => [key, (held as Record<string, unknown>)[key]])) };
 }
 
 export function compactChannelHistoryWindow<T extends ChannelHistoryLike>(
