@@ -1,4 +1,4 @@
-import { mergeCommandResult, type CommandResult } from "@xmatrix/protocol";
+import { mergeCommandResult, mergeCommandResults, type CommandResult } from "@xmatrix/protocol";
 import { dateTimeFormat, formatInstant, formatZonedDateTime } from "./time-display";
 
 type SequencedHistoryEntry = {
@@ -9,6 +9,7 @@ type ChannelHistoryLike = SequencedHistoryEntry & {
   messageId: string;
   channelId?: string;
   sentAt: string;
+  commandResult?: CommandResult;
 };
 
 export function formatMessageDateTime(
@@ -181,6 +182,9 @@ const HUB_JUDGMENTS = ["supersededBy", "questionnaireState", "commandResult"] as
 
 function withHeldJudgments<T extends ChannelHistoryLike>(held: T, incoming: T): T {
   if ((incoming as { recalledAt?: string }).recalledAt) return incoming;
+  if (held.commandResult && incoming.commandResult) incoming = {
+    ...incoming, commandResult: mergeCommandResults(held.commandResult, incoming.commandResult),
+  };
   const kept = HUB_JUDGMENTS.filter((key) => (held as Record<string, unknown>)[key] !== undefined &&
     (incoming as Record<string, unknown>)[key] === undefined);
   if (!kept.length) return incoming;

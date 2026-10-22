@@ -88,6 +88,14 @@ carries `stopOutcome`). Messages carry the merged `commandResult`, and a
 client that holds the message. Because it is not a message, the answer neither
 previews in the conversation list, counts as unread, nor wakes an Agent.
 
+Live annotations and history snapshots merge by fact, through the protocol's
+same command-result reducer. A partial snapshot retains notes absent from it;
+each note's annotation id deduplicates replay, and its recording time keeps a
+late read or event from undoing a newer wording. Equal-time notes sort by id.
+A notes-only snapshot retains the command's statement-ordered control answer.
+A recalled message still clears its judgments. The wire shape is unchanged;
+older clients continue to read the same result fields.
+
 What the Hub asks of one Agent Instance (continue a turn a switch cancelled,
 retry a turn capacity cut short, co-write a page) is an instruction to that
 Instance, not something said in the Channel. A switch continuation goes as an

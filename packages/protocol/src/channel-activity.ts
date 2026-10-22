@@ -220,25 +220,41 @@ export interface CommandResult {
 /** The merged result the Hub recorded for this message's command, if any. */
 export function commandResultOf(annotations: unknown): CommandResult | undefined {
   if (!Array.isArray(annotations)) return undefined;
-  let controls: CommandResult["controls"];
-  const notes: CommandResultNote[] = [];
+  let result: CommandResult = {};
   for (const entry of annotations) {
     const annotation = entry && typeof entry === "object" ? entry as Record<string, unknown> : undefined;
     if (annotation?.namespace !== COMMAND_RESULT_ANNOTATION_NAMESPACE ||
         annotation.authorUserId !== SYSTEM_ANNOTATION_AUTHOR) continue;
-    const merged = mergeCommandResult({ ...(controls ? { controls } : {}), notes },
+    result = mergeCommandResult(result,
       typeof annotation.id === "string" ? annotation.id : "", annotation.payload);
-    controls = merged.controls;
-    notes.splice(0, notes.length, ...(merged.notes ?? []));
   }
-  return controls || notes.length ? { ...(controls ? { controls } : {}), ...(notes.length ? { notes } : {}) } : undefined;
+  return result.controls || result.notes?.length ? result : undefined;
+}
+
+/**
+ * Join the facts two reads know about one command. Each note has its annotation's
+ * identity and recording time: partial or out-of-order snapshots cannot remove
+ * another Run's result or restore an older wording of the same fact. Controls
+ * are the command's single statement-ordered answer; a notes-only read retains it.
+ */
+export function mergeCommandResults(held: CommandResult | undefined, incoming: CommandResult): CommandResult {
+  const result = { ...held, ...incoming };
+  if (held?.notes || incoming.notes) {
+    const notes = new Map<string, CommandResultNote>();
+    for (const note of [...(held?.notes ?? []), ...(incoming.notes ?? [])]) {
+      const prior = notes.get(note.id);
+      if (!prior || note.at >= prior.at) notes.set(note.id, note);
+    }
+    result.notes = [...notes.values()].sort((a, b) => a.at.localeCompare(b.at) || a.id.localeCompare(b.id));
+  }
+  return result;
 }
 
 /** `result` with one recorded command-result annotation applied, as a client
  * applies the live event and the Hub applies its stored annotations. */
 export function mergeCommandResult(result: CommandResult | undefined, annotationId: string, payload: unknown): CommandResult {
   const value = payload && typeof payload === "object" && !Array.isArray(payload) ? payload as Record<string, unknown> : {};
-  const next: CommandResult = { ...result };
+  const next: CommandResult = {};
   if (Array.isArray(value.controls) && value.controls.every((item) =>
     item && typeof item === "object" && typeof (item as { status?: unknown }).status === "string")) {
     next.controls = value.controls as NonNullable<CommandResult["controls"]>;
@@ -247,12 +263,10 @@ export function mergeCommandResult(result: CommandResult | undefined, annotation
   if (annotationId && typeof note?.text === "string" && note.text && typeof note.at === "string") {
     const stopOutcome: CommandResultNote["stopOutcome"] =
       note.stopOutcome === "stopped" || note.stopOutcome === "not_stopped" ? note.stopOutcome : undefined;
-    next.notes = [...(result?.notes ?? []).filter((item) => item.id !== annotationId),
-      { id: annotationId, text: note.text, at: note.at, ...(stopOutcome ? { stopOutcome } : {}),
-        ...(typeof note.runId === "string" && note.runId && note.runId.length <= 200 ? { runId: note.runId } : {}) }]
-      .sort((a, b) => a.at.localeCompare(b.at));
+    next.notes = [{ id: annotationId, text: note.text, at: note.at, ...(stopOutcome ? { stopOutcome } : {}),
+      ...(typeof note.runId === "string" && note.runId && note.runId.length <= 200 ? { runId: note.runId } : {}) }];
   }
-  return next;
+  return mergeCommandResults(result, next);
 }
 
 /** How a questionnaire card was settled, as the Hub recorded it. */
