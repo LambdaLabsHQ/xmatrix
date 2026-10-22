@@ -147,6 +147,24 @@ test("a stable preflight accepts the cut of a revision its request contains, nev
   assert.notDeepEqual(await runAuthorization({ ...stable, authorityTag: "xmatrix-v1.0.606-beta.3" }), []);
 });
 
+test("hub and web reuse a stable cut of a revision the request contains", async () => {
+  const jobs = parse(server).jobs;
+  for (const job of [jobs.hub, jobs.web]) {
+    const channel = job.steps.find((step) => step.id === "release-channel");
+    const reverify = job.steps.find((step) => String(step.name).startsWith("Reverify exact selected request"));
+    assert.equal(channel.run, 'echo "channel=$(node scripts/version.mjs channel)" >> "$GITHUB_OUTPUT"');
+    assert.equal(reverify.env.RELEASE_CHANNEL, "${{ steps.release-channel.outputs.channel }}");
+    assert.match(reverify.with.script, /RELEASE_CHANNEL === "stable" \? "verify-cut" : "verify"/);
+  }
+  for (const [reader, scope] of [[hub, "hub"], [web, "web"]]) {
+    const stable = { reader, scope, tag: "xmatrix-v1.1.0", channel: "stable", deploySha: "d".repeat(40) };
+    assert.deepEqual(await runAuthorization(stable), []);
+    assert.notDeepEqual(await runAuthorization({ ...stable, deploySha: "c".repeat(40) }), [],
+      `${scope} rejects a beta release commit as a stable cut`);
+    assert.notDeepEqual(await runAuthorization({ ...stable, requestSha: "b".repeat(40) }), []);
+  }
+});
+
 test("tagged preflight re-reads exact authorization whose conclusion is not yet reported", async () => {
   assert.deepEqual(await runAuthorization({ lagging: 1 }), []);
 });

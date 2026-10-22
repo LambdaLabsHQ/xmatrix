@@ -95,12 +95,17 @@ jobs:
           test "$(git rev-parse "$GITHUB_REF^{commit}")" = "$XMATRIX_DEPLOY_SHA"
           test -z "$(git status --porcelain)"
 
+      - name: Read the tagged release channel
+        id: release-channel
+        run: echo "channel=$(node scripts/version.mjs channel)" >> "$GITHUB_OUTPUT"
+
       - name: Reverify exact selected request before reusing its test result
         uses: actions/github-script@v7
         env:
           DEPLOY_SHA: ${{ inputs.deploy_sha }}
           REQUEST_RUN_ID: ${{ inputs.request_run_id }}
           RELEASE_SCOPE: ${{ inputs.release_scope }}
+          RELEASE_CHANNEL: ${{ steps.release-channel.outputs.channel }}
         with:
           # A runner-side "fetch failed" is retried rather than failing the job.
           retries: 3
@@ -132,11 +137,14 @@ jobs:
               core.setFailed("Hub gate reuse is not authorized for this exact tagged SHA");
               return;
             }
-            // The request tested either this exact main revision or its release
-            // commit (that revision plus the stamped release version).
+            // A beta request tested either this exact main revision or its
+            // release commit (that revision plus the stamped release version). A
+            // stable request tested the release commit of a verified beta's
+            // source, which the request's main revision contains.
             try {
               require("child_process").execFileSync("node",
-                ["scripts/release-commit.mjs", "verify", process.env.DEPLOY_SHA, requestRun.head_sha],
+                ["scripts/release-commit.mjs", process.env.RELEASE_CHANNEL === "stable" ? "verify-cut" : "verify",
+                  process.env.DEPLOY_SHA, requestRun.head_sha],
                 { stdio: "inherit" });
             } catch {
               core.setFailed("Hub gate reuse is not authorized for this exact tagged SHA");
@@ -704,12 +712,17 @@ jobs:
 
       - *verify_web_checkout
 
+      - name: Read the tagged release channel
+        id: release-channel
+        run: echo "channel=$(node scripts/version.mjs channel)" >> "$GITHUB_OUTPUT"
+
       - name: Reverify exact selected request before reusing the Web test result
         uses: actions/github-script@v7
         env:
           DEPLOY_SHA: ${{ inputs.deploy_sha }}
           REQUEST_RUN_ID: ${{ inputs.request_run_id }}
           RELEASE_SCOPE: ${{ inputs.release_scope }}
+          RELEASE_CHANNEL: ${{ steps.release-channel.outputs.channel }}
         with:
           # A runner-side "fetch failed" is retried rather than failing the job.
           retries: 3
@@ -737,11 +750,14 @@ jobs:
               core.setFailed("Web gate reuse is not authorized for this exact tagged SHA");
               return;
             }
-            // The request tested either this exact main revision or its release
-            // commit (that revision plus the stamped release version).
+            // A beta request tested either this exact main revision or its
+            // release commit (that revision plus the stamped release version). A
+            // stable request tested the release commit of a verified beta's
+            // source, which the request's main revision contains.
             try {
               require("child_process").execFileSync("node",
-                ["scripts/release-commit.mjs", "verify", process.env.DEPLOY_SHA, requestRun.head_sha],
+                ["scripts/release-commit.mjs", process.env.RELEASE_CHANNEL === "stable" ? "verify-cut" : "verify",
+                  process.env.DEPLOY_SHA, requestRun.head_sha],
                 { stdio: "inherit" });
             } catch {
               core.setFailed("Web gate reuse is not authorized for this exact tagged SHA");
