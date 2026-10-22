@@ -8,6 +8,7 @@ import { loadChannelAgentPresence } from "./channel-agent-presence.js";
 import {
   channelVisibilityScope,
   CHANNEL_ACTIVITY_MESSAGE_KIND,
+  AGENT_INSTRUCTION_MESSAGE_KINDS,
   type ChannelCatalogPageFilter,
   type ChannelCatalogPageView, utf8ByteLength } from "@xmatrix/protocol";
 import { DatabaseContractError } from "./errors.js";
@@ -354,11 +355,11 @@ const HEAD_MESSAGE_FIELDS = `
   COALESCE((SELECT counter.content_revision FROM data.channel_content_counters counter
     WHERE counter.space_id=channel.space_id AND counter.channel_id=channel.channel_id),0)
     AS content_revision,
-  head.message_id AS head_message_id,head.sent_at AS head_sent_at,
-  head.author_kind AS head_author_kind,head.author_id AS head_author_id,
-  head.recalled_at AS head_recalled_at,head.preview_json AS head_preview_json,
-  head.payload_bundle_base64 AS head_payload_bundle_base64,
-  head.legacy_body AS head_legacy_body,`;
+  preview.message_id AS head_message_id,preview.sent_at AS head_sent_at,
+  preview.author_kind AS head_author_kind,preview.author_id AS head_author_id,
+  preview.recalled_at AS head_recalled_at,preview.preview_json AS head_preview_json,
+  preview.payload_bundle_base64 AS head_payload_bundle_base64,
+  preview.legacy_body AS head_legacy_body,`;
 
 /* The newest message that holds the principal's attention rides the row too,
    read by its sequence on the timeline index, only for a row that has one. */
@@ -376,9 +377,12 @@ const WAITING_MESSAGE_JOIN = `LEFT JOIN LATERAL (
 ) waiting ON TRUE`;
 
 /* Messages nobody needs to read: activity entries (docs/design/conversation-activity.md
-   §3.2), and the switch receipt and continuation an older Hub or runtime still
-   commits as messages. A command's answer now sits on the command itself. */
-const NOT_FOR_READING_KINDS = [CHANNEL_ACTIVITY_MESSAGE_KIND, "xmatrix.system.control-switch", "xmatrix.switch-continuation"]
+   §3.2), instructions to one Agent Instance, and the switch receipt an older Hub
+   posted before a command's answer sat on the command itself. */
+const NOT_FOR_READING_KINDS = [CHANNEL_ACTIVITY_MESSAGE_KIND, ...AGENT_INSTRUCTION_MESSAGE_KINDS,
+  "xmatrix.system.control-switch"].map((kind) => `'${kind}'`).join(",");
+/* What a list row previews: the newest message a person reads, never an instruction. */
+const NOT_FOR_PREVIEW_KINDS = [...AGENT_INSTRUCTION_MESSAGE_KINDS, "xmatrix.system.control-switch"]
   .map((kind) => `'${kind}'`).join(",");
 
 /**
@@ -541,7 +545,7 @@ export class PostgresChannelCatalogRepository {
           AND channel_id>(SELECT cursor_channel_id FROM catalog_input))
       )` : "";
       const envelopes = input.countsOnly ? [] : await transaction.query<CatalogPageEnvelope>({
-        name: `channel_catalog_page_${input.view}_${input.filter}_v13`,
+        name: `channel_catalog_page_${input.view}_${input.filter}_v14`,
         text: `WITH RECURSIVE catalog_input AS (
           SELECT $1::text AS space_id,$2::text AS principal_id,$3::text AS principal_kind,
             $4::text AS search_query,
@@ -590,6 +594,12 @@ export class PostgresChannelCatalogRepository {
               AND message.deleted_at IS NULL
             ORDER BY message.timeline_sequence DESC LIMIT 1
           ) head ON TRUE
+          LEFT JOIN LATERAL (
+            SELECT ${HEAD_MESSAGE_COLUMNS} FROM data.messages message
+            WHERE message.space_id=channel.space_id AND message.channel_id=channel.channel_id
+              AND message.deleted_at IS NULL AND message.message_kind NOT IN (${NOT_FOR_PREVIEW_KINDS})
+            ORDER BY message.timeline_sequence DESC LIMIT 1
+          ) preview ON TRUE
           LEFT JOIN data.delivery_cursors cursor_row
             ON cursor_row.space_id=channel.space_id AND cursor_row.channel_id=channel.channel_id
               AND cursor_row.subject_id=input.principal_kind||':'||input.principal_id
@@ -625,7 +635,7 @@ export class PostgresChannelCatalogRepository {
       }
       const statsRows = input.countsOnly || input.includeCounts !== false
         ? await transaction.query<StatsRow>({
-        name: "channel_catalog_counts_v10",
+        name: "channel_catalog_counts_v11",
         text: `WITH catalog_input AS (
             SELECT $1::text AS space_id,$2::text AS principal_id,$3::text AS principal_kind
           ), ${PRINCIPAL_CONTEXT_CTE}, ${AUTHORIZED_CHANNELS_CTE}, attention_by_channel AS (
@@ -707,7 +717,7 @@ export class PostgresChannelCatalogRepository {
     return this.withPlacedReads(
       requestId, "channel-catalog.resolve", spaceId, async (transaction) => {
       const envelopes = await transaction.query<CatalogResolveEnvelope>({
-        name: "channel_catalog_resolve_v15",
+        name: "channel_catalog_resolve_v16",
         text: `WITH catalog_input AS (
             SELECT $1::text AS space_id,$2::text AS principal_id,$3::text AS principal_kind,
               $4::text[] AS requested_channel_ids,$5::text[] AS route_range_lowers,
@@ -768,6 +778,12 @@ export class PostgresChannelCatalogRepository {
                 AND message.deleted_at IS NULL
               ORDER BY message.timeline_sequence DESC LIMIT 1
             ) head ON TRUE
+            LEFT JOIN LATERAL (
+              SELECT ${HEAD_MESSAGE_COLUMNS} FROM data.messages message
+              WHERE message.space_id=channel.space_id AND message.channel_id=channel.channel_id
+                AND message.deleted_at IS NULL AND message.message_kind NOT IN (${NOT_FOR_PREVIEW_KINDS})
+              ORDER BY message.timeline_sequence DESC LIMIT 1
+            ) preview ON TRUE
             LEFT JOIN data.delivery_cursors cursor_row
               ON cursor_row.space_id=channel.space_id AND cursor_row.channel_id=channel.channel_id
                 AND cursor_row.subject_id=input.principal_kind||':'||input.principal_id

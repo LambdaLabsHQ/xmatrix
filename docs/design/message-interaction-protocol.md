@@ -88,13 +88,20 @@ carries `stopOutcome`). Messages carry the merged `commandResult`, and a
 client that holds the message. Because it is not a message, the answer neither
 previews in the conversation list, counts as unread, nor wakes an Agent.
 
-What a switch asks of the switched Instance (continue the turn the switch
-cancelled) is an instruction to that Instance, not something said in the
-Channel: the Hub sends it as an `agent_switch_continuation` frame on the
-Instance's own socket to a runtime that lists `switch_continuation_frame`. A
-runtime that predates the frame still receives the committed
-`xmatrix.switch-continuation` message, which, like the switch receipt an older
-Hub posted, counts as unread for nobody and folds onto the command when shown.
+What the Hub asks of one Agent Instance (continue a turn a switch cancelled,
+retry a turn capacity cut short, co-write a page) is an instruction to that
+Instance, not something said in the Channel. A switch continuation goes as an
+`agent_switch_continuation` frame on the Instance's own socket to a runtime that
+lists `switch_continuation_frame`. The rest, and a continuation for an older
+runtime, are committed in the Channel log as its durable inbox (a resting or
+reconnecting Instance still reads them), with a kind in
+`AGENT_INSTRUCTION_MESSAGE_KINDS`: no person reads them, so they never preview in
+the conversation list, count as unread, or take a timeline row.
+
+Machine facts about a Run a message asked for answer on that message too: a
+summoned Run's failed start or fallback is a note on the summon (shown on its
+chip by `runId`), and a channel stop's failed or cleanup result is a note on the
+stop command. A Run nothing in the Channel asked for still posts its notice.
 
 ## First-message choice
 

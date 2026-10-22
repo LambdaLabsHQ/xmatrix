@@ -18,6 +18,25 @@ export const QUESTIONNAIRE_STATE_ANNOTATION_NAMESPACE = "xmatrix.questionnaire";
 /** The Hub's answer to a command a message wrote (`/model`, `/effort`, a stop, a reborn or handoff). */
 export const COMMAND_RESULT_ANNOTATION_NAMESPACE = "xmatrix.command-result";
 
+/**
+ * Message kinds the Hub commits for one Agent Instance to act on: continue a
+ * turn a switch cancelled, retry one capacity cut short, co-write a page. The
+ * Channel log is their durable inbox, so a resting or reconnecting Instance
+ * still reads them; no person reads them. They neither preview, count as
+ * unread, nor take a row.
+ */
+export const AGENT_INSTRUCTION_MESSAGE_KINDS = ["xmatrix.switch-continuation", "xmatrix.capacity-retry",
+  "xmatrix.system.page-co-write"] as const;
+
+/** Whether a message's metadata is an Agent instruction (AGENT_INSTRUCTION_MESSAGE_KINDS). */
+export function isAgentInstruction(metadata: Record<string, unknown> | undefined): boolean {
+  if (!metadata || metadata.xmatrixSystemNotice !== true) return false;
+  const retry = metadata.xmatrixTurnRetry;
+  return metadata.xmatrixSwitchContinuation !== undefined || metadata.xmatrixPageCoWrite !== undefined ||
+    (Boolean(retry) && typeof retry === "object" && (retry as { state?: unknown }).state === "issued" &&
+      (retry as { version?: unknown }).version === 1);
+}
+
 /** Author of annotations the Hub writes itself. Public writers cannot take it. */
 export const SYSTEM_ANNOTATION_AUTHOR = "system:xmatrix";
 

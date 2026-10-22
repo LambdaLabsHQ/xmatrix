@@ -38,7 +38,8 @@ async function seed() {
        created_at,updated_at,activity_at)
       VALUES ('read-then-activity',$2,'Read then activity','read-then-activity','open','rank-a',1,'{}',$1,$1,$1),
         ('unread-speech',$2,'Unread speech','unread-speech','open','rank-b',1,'{}',$1,$1,$1),
-        ('activity-only',$2,'Activity only','activity-only','open','rank-c',1,'{}',$1,$1,$1)`,
+        ('activity-only',$2,'Activity only','activity-only','open','rank-c',1,'{}',$1,$1,$1),
+        ('read-then-instruction',$2,'Read then instruction','read-then-instruction','open','rank-d',1,'{}',$1,$1,$1)`,
       [now, SPACE]);
     const messages = [
       ["read-then-activity", 1, "xmatrix.message.text"],
@@ -48,6 +49,9 @@ async function seed() {
       ["unread-speech", 2, "xmatrix.activity"],
       ["unread-speech", 3, "xmatrix.message.text"],
       ["activity-only", 1, "xmatrix.activity"],
+      ["read-then-instruction", 1, "xmatrix.message.text"],
+      ["read-then-instruction", 2, "xmatrix.switch-continuation"],
+      ["read-then-instruction", 3, "xmatrix.capacity-retry"],
     ];
     for (const [channelId, sequence, kind] of messages) {
       await client.query(`INSERT INTO data.messages
@@ -60,7 +64,8 @@ async function seed() {
     await client.query(`INSERT INTO data.delivery_cursors
       (space_id,subject_id,channel_id,acknowledged_sequence,version,updated_at)
       VALUES ($1,'user:reader','read-then-activity',1,1,$2),
-        ($1,'user:reader','unread-speech',1,1,$2)`, [SPACE, now]);
+        ($1,'user:reader','unread-speech',1,1,$2),
+        ($1,'user:reader','read-then-instruction',1,1,$2)`, [SPACE, now]);
   } finally {
     await client.end();
   }
@@ -79,7 +84,7 @@ integration("activity after a reader's cursor neither makes a conversation unrea
 
     const resolved = await repository.resolve({
       ...base, requestId: "resolve",
-      channelIds: ["read-then-activity", "unread-speech", "activity-only"],
+      channelIds: ["read-then-activity", "unread-speech", "activity-only", "read-then-instruction"],
     });
     const byId = new Map(resolved.channels.map((channel) => [channel.id, channel]));
     // Caught up but for activity: read through the head.
@@ -89,6 +94,11 @@ integration("activity after a reader's cursor neither makes a conversation unrea
     assert.equal(byId.get("unread-speech").readSequence, 2);
     // Never opened, nothing but activity: nothing to read.
     assert.equal(byId.get("activity-only").readSequence, 1);
+    // An instruction to one Agent Instance is its input: nobody reads it, and
+    // the row previews the last thing a person reads.
+    assert.equal(byId.get("read-then-instruction").historyHeadSequence, 3);
+    assert.equal(byId.get("read-then-instruction").readSequence, 3);
+    assert.equal(byId.get("read-then-instruction").headMessage?.messageId, "read-then-instruction-1");
 
     const flat = await repository.page({ ...base, requestId: "flat", view: "flat", filter: "all" });
     const pageById = new Map(flat.rows.map((row) => [row.channel.id, row.channel]));

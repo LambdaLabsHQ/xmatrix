@@ -181,3 +181,15 @@ test("a command's recorded result merges its outcomes and notes from Hub annotat
   assert.equal(replayed.notes.length, 2);
   assert.equal(commandResultOf([]), undefined);
 });
+
+test("Hub instructions to one Agent Instance are recognized; notices people read are not", async () => {
+  const { isAgentInstruction } = await import("../dist/index.js");
+  const notice = { xmatrixSystemNotice: true, xmatrixProvenance: "system_fact" };
+  assert.equal(isAgentInstruction({ ...notice, xmatrixSwitchContinuation: { version: 1 } }), true);
+  assert.equal(isAgentInstruction({ ...notice, xmatrixPageCoWrite: { version: 1 } }), true);
+  assert.equal(isAgentInstruction({ ...notice, xmatrixTurnRetry: { version: 1, state: "issued" } }), true);
+  // The people-facing retry notice and a caller's look-alike metadata are not instructions.
+  assert.equal(isAgentInstruction({ ...notice, xmatrixTurnRetry: { state: "waiting", attempt: 1 } }), false);
+  assert.equal(isAgentInstruction({ xmatrixPageCoWrite: { version: 1 } }), false);
+  assert.equal(isAgentInstruction(undefined), false);
+});
