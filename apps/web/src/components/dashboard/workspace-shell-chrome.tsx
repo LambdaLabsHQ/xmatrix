@@ -10,6 +10,7 @@ import { LiquidGlassCard, LiquidGlassPill, WoodPanel } from "@/components/ui/mat
 import type { CreateAction } from "./list-create";
 import { useGlobalSearchClearance } from "./global-search-clearance";
 import { StarAsk, openRepositoryToStar, useStarPrompt } from "./star-prompt";
+import { BetaTag } from "./status-tag";
 
 import {
   agentInstanceDisplayName,
@@ -186,6 +187,7 @@ export const WorkspaceRail = memo(function WorkspaceRail({
           className="app-rail-user-avatar"
         />
       </button>
+      <BetaTag className="mt-2" />
       <div className="mt-5 flex flex-1 flex-col items-center gap-2">
         <RailButton active={activeView === "pages"} icon={BookOpen} label="Pages" onClick={() => onChangeView("pages")} />
         <RailButton

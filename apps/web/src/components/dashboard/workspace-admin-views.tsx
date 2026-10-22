@@ -172,7 +172,8 @@ import {
 
 import { cn } from "@/lib/utils";
 
-import { tagClass } from "./status-tag";
+import { BetaTag, tagClass } from "./status-tag";
+import canonicalVersion from "../../../../../version.json" with { type: "json" };
 import { errorFromResponse, xmatrixApiRequest, requireResponseOk, xmatrixRawResponse, unexpectedResponse, requireField, requireJson } from "@/lib/query/api-client";
 import { hubReadResponse } from "@/lib/query/hub-read";
 import { userErrorMessage } from "@/lib/user-facing-error";
@@ -663,11 +664,15 @@ export function SettingsView({
     { key: "desktop", label: "Desktop app", icon: Monitor, summary: desktopAvailable ? "Connected" : "Browser", content: (
         <div className="app-settings-section min-w-0 space-y-10">
           <ToolDetailSection title="This app" action={
-            <span className={tagClass()}>
-              {desktopAvailable ? "Connected" : "Browser"}
+            <span className="flex items-center gap-1.5">
+              <BetaTag />
+              <span className={tagClass()}>
+                {desktopAvailable ? "Connected" : "Browser"}
+              </span>
             </span>
           }>
             <div className="py-2 text-sm">
+              <DetailRow label="Web version" value={canonicalVersion.version} />
               <DetailRow label="App version" value={desktopContext?.version || "-"} />
               <DetailRow label="Platform" value={desktopContext ? desktopContext.platform : "-"} />
               <DetailRow label="Updates" value={desktopUpdateLabel(desktopUpdateStatus, desktopAvailable, desktopUpdateBridgeAvailable)} />

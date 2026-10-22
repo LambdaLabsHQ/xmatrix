@@ -16,11 +16,13 @@
  * liquid glass only on wood (user 2026-10-09: 只有木板上的走 liquid glass).
  */
 
-import { GitPullRequest } from "lucide-react";
+import { FlaskConical, GitPullRequest } from "lucide-react";
 import type { ComponentType, ReactNode, SVGProps } from "react";
 
 import { LiquidGlassPill } from "@/components/ui/material-surfaces";
+import { isBetaWeb } from "@/lib/site-url";
 import { cn } from "@/lib/utils";
+import canonicalVersion from "../../../../../version.json" with { type: "json" };
 
 import { COUNT_CHIP_MATERIAL_CLASS } from "./workspace-shell-constants";
 
@@ -112,6 +114,18 @@ export function Tag({
     >
       {body}
     </LiquidGlassPill>
+  );
+}
+
+/** Says this is the beta Web (beta.xmatrix.sh and the shells on the beta
+    channel); the stable Web shows nothing. */
+export function BetaTag({ className }: { className?: string }) {
+  if (!isBetaWeb) return null;
+  return (
+    <Tag icon={FlaskConical} nowrap className={className}
+      title={`Beta: xMatrix ${canonicalVersion.version}, released before stable`}>
+      Beta
+    </Tag>
   );
 }
 
