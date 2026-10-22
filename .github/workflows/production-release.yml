@@ -165,6 +165,10 @@ jobs:
               }
               return evidence;
             };
+            // The jobs and runs lists keep serving one cached response for the
+            // same URL. A new query on every read is what makes the next poll
+            // see a job that completed after that snapshot.
+            let runEvidenceReads = 0;
             const productionRuns = await readEvidence(() => github.paginate(github.rest.actions.listWorkflowRuns, {
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -172,6 +176,7 @@ jobs:
               branch: context.ref.replace("refs/tags/", ""),
               event: "workflow_dispatch",
               per_page: 100,
+              cachebust: `runs-${process.env.GITHUB_RUN_ATTEMPT ?? 0}-${runEvidenceReads += 1}`,
               headers: { "Cache-Control": "no-cache" },
               request: { timeout: 10_000 },
             }), (runs) => runs.some((run) => run.head_sha === process.env.DEPLOY_SHA && run.id <= context.runId));
@@ -214,12 +219,16 @@ jobs:
             }
             // Scope and tag are durable job evidence, not optional step
             // metadata. The dispatcher cannot run until this exact authorization
-            // succeeds. GitHub can lag several minutes behind completed jobs.
-            // Poll for ten minutes, five seconds apart, for the complete set;
-            // a successful authority alone cannot stand in for its gates.
+            // succeeds. GitHub can lag several minutes behind completed jobs,
+            // and will keep returning that same jobs-list snapshot while the
+            // URL does not change. Poll for ten minutes, five seconds apart,
+            // each time with a new query, for the complete set; a successful
+            // authority alone cannot stand in for its gates.
             const authorityName = `authorize ${scope} production ${context.ref.replace("refs/tags/", "")}`;
+            let jobEvidenceReads = 0;
             const jobs = await readEvidence(() => github.paginate(github.rest.actions.listJobsForWorkflowRun, {
               ...context.repo, run_id: requestRun.id, filter: "latest", per_page: 100,
+              cachebust: `jobs-${process.env.GITHUB_RUN_ATTEMPT ?? 0}-${jobEvidenceReads += 1}`,
               headers: { "Cache-Control": "no-cache" },
               request: { timeout: 10_000 },
             }), (evidence) => {
