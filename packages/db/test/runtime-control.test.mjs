@@ -177,7 +177,7 @@ test("instance_connect atomically promotes Instance, Run, and Launch", async () 
 
 test("the first Agent reply is recorded once against its exact Launch", async () => {
   const db = database((query) => placedChannel(query) ?? (
-    query.name === "channel_capability_runtime_terminalize_v3" ? [channel]
+    query.name === "channel_capability_runtime_check_v3" ? [channel]
         : query.name === "runtime_agent_launch_first_reply_v1" ? [{ launch_age_ms: "1250" }] : []));
   const value = await new PostgresRuntimeRepository(db).recordAgentLaunchFirstReply({
     requestId: "first-reply-1", channelId: "channel-1", runId: "run-1",

@@ -48,7 +48,7 @@ const runtimeCapabilityError = (failure: {
 
 export function runtimeChannelCapability(tx: DatabaseTransaction, channelId: string, userId: string,
   capability: Extract<ChannelCapability,
-    "runtime_history_read" | "runtime_new_work" | "runtime_terminalize">,
+    "runtime_history_read" | "runtime_new_work" | "runtime_terminalize" | "runtime_check">,
 ): Promise<ChannelCapabilityGrant> {
   return requireChannelCapability(tx, { channelId, principal: { kind: "user", id: userId },
     capability, error: runtimeCapabilityError });
@@ -1459,8 +1459,10 @@ export class PostgresRuntimeRepository {
     if (!route) return { recorded: false };
     const placement = await this.spaces.resolve(requestId, "runtime.agent-launch.first-reply.placement", route.spaceId);
     return this.spaces.transaction(requestId, "runtime.agent-launch.first-reply", placement, async (tx) => {
+      // The reply is already committed. This observation starts no work and
+      // changes no Channel state, so it must not queue behind a Channel writer.
       await runtimeChannelCapability(tx, channelId, text(input.actorUserId, "actorUserId", 300),
-        "runtime_terminalize");
+        "runtime_check");
       const rows = await tx.query<QueryResultRow>({ name: "runtime_agent_launch_first_reply_v1", text: `UPDATE
         data.agent_launches SET first_reply_at=$3,updated_at=GREATEST(updated_at,$3),version=version+1
         WHERE channel_id=$1 AND run_id=$2 AND state='connected' AND first_reply_at IS NULL

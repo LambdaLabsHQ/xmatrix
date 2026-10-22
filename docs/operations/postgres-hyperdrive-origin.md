@@ -130,6 +130,12 @@ reconciles it. Provider calls and notification delivery are outside the replay.
 
 ## Agent lifecycle locks
 
+First-reply observation runs after the Agent message commits. It checks current
+Channel access without a lifecycle row lock (`runtime_check`): it starts no work
+and updates only the connected Launch whose `first_reply_at` is still null.
+Concurrent appends and lifecycle commands therefore cannot block the observation
+on the Channel row; repeated replies retain the first timestamp.
+
 Agent message preparation, observed-head and receipt reads, content reads and
 Channel access checks validate current Run and registration snapshots without
 holding lifecycle rows. Preparation never authorizes a later send. Commands
