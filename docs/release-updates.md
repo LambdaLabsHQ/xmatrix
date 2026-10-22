@@ -103,6 +103,15 @@ consumers can ignore it and the native IPC shape stays unchanged. After release,
 verify that the exact version's public page and update links work. Old releases
 without user-facing notes show an explicit unavailable message.
 
+Beta note generation bypasses cached release-list responses before choosing its
+explicit preceding published version. Reads retain the existing three-attempt,
+15-second-request bound; the note length and release-control-marker validators
+remain unchanged. In 1.5.1-beta.11, an outdated baseline expanded the generated
+notes beyond their bound after the Web deployment had succeeded. Re-running
+only that Production Release's failed receipt job published the correct small
+change list. Preserve immutable tags and use the same-run failed-job recovery;
+do not edit an already published body's notes to repair a failed receipt.
+
 Migration: existing immutable releases are untouched. New stable candidates
 must include notes in their source, so an older beta must be superseded by a
 newly verified one containing the document. Receipt failures retain the existing
