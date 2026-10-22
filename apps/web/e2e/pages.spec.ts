@@ -2185,3 +2185,40 @@ test("a discussion near the page's end opens at its passage without lengthening 
   await expect(browser.getByTestId("page-margin").getByRole("button", { name: /^claude:2 is writing/u })).toBeVisible();
   expect(await length()).toBeLessThanOrEqual(before + 1);
 });
+
+test("a discussion with many conversations above it opens level with its passage, not down the page", async ({ page: browser }) => {
+  const passage = "Background paragraph 6.";
+  const recent = new Date(Date.now() - 60_000).toISOString();
+  const others = Array.from({ length: 8 }, (_, index) => `c-above-${index}`);
+  await browser.setViewportSize({ width: 1600, height: 900 });
+  const { editor } = await openLongPage(browser, async (server) => {
+    await fixtureJson(browser, "page-links", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\?.*$/u, {
+      links: [
+        ...others.map((conversationId) => ({ linkId: `l-${conversationId}`, conversationId, pageId: "p-relay",
+          source: "edit", createdAt: NOW, lastSeenAt: recent, anchor: null, resolvedAt: null, blockId: "status" })),
+        { linkId: "l-passage", conversationId: E2E_CHANNEL.id, pageId: "p-relay", source: "discuss", createdAt: NOW,
+          lastSeenAt: recent, resolvedAt: null, blockId: "status",
+          anchor: { quote: passage, from: positionAt(server, passage, false), to: positionAt(server, passage, true) } },
+      ],
+      conversations: [...others, E2E_CHANNEL.id].map((conversationId) => ({ conversationId,
+        name: conversationId === E2E_CHANNEL.id ? E2E_CHANNEL.name : `Above ${conversationId}`, activityAt: recent,
+        headSequence: 1, readSequence: 1, agents: [],
+        lastMessage: { from: { kind: "user", label: "Yiming Hu" }, bodyPreview: "A note about the status.", sentAt: recent } })),
+    });
+  });
+  const article = browser.locator(".app-page-article");
+  const margin = browser.getByTestId("page-margin");
+  const text = editor.getByText(passage, { exact: true });
+  await expect(margin.getByRole("button", { name: `Open ${E2E_CHANNEL.name} beside the page` })).toBeVisible();
+  const scrolled = await article.evaluate((element) => element.scrollTop);
+  await margin.getByRole("button", { name: `Open ${E2E_CHANNEL.name} beside the page` }).click();
+  const open = margin.getByTestId("page-margin-open");
+  await expect(open).toBeVisible();
+  // The cards that have no room above it wait; the open one does not take the column, and the reader, down the page.
+  await expect.poll(async () => Math.abs((await open.boundingBox())!.y - (await text.boundingBox())!.y)).toBeLessThan(24);
+  // At most it is brought into view where it sits: the passage stays on screen beside it.
+  await browser.waitForTimeout(500);
+  expect(await article.evaluate((element) => element.scrollTop) - scrolled).toBeLessThan(300);
+  await expect(text).toBeInViewport();
+  await expect(open.getByRole("button", { name: "Close the conversation" })).toBeInViewport();
+});

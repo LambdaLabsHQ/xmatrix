@@ -111,10 +111,16 @@ test("cards sit at their anchors and push down the ones after them; a focused ca
     { a: 100, b: 180 + MARGIN_GAP, c: 400 });
   assert.deepEqual(Object.fromEntries(layoutMargin(cards, "b")),
     { a: 120 - MARGIN_GAP - 80, b: 120, c: 400 });
-  // Near the top, the focused card's neighbours cannot move above the page: the column moves down instead.
+  // Near the top, the focused card's neighbours cannot move above the page: it stays at its passage, and a card
+  // with no room above it waits until it closes, rather than the column taking the open card down the page.
   const crowded = layoutMargin([{ id: "a", top: 0, height: 50 }, { id: "b", top: 10, height: 50 }], "b");
-  assert.equal(crowded.get("a"), 0);
-  assert.equal(crowded.get("b"), 50 + MARGIN_GAP);
+  assert.deepEqual(Object.fromEntries(crowded), { b: 10 });
+  const stacked = layoutMargin([{ id: "head", top: 0, height: 120 }, { id: "a", top: 40, height: 200 },
+    { id: "b", top: 60, height: 200 }, { id: "open", top: 300, height: 400 }, { id: "c", top: 320, height: 60 }], "open");
+  assert.deepEqual(Object.fromEntries(stacked), { b: 60, open: 300, c: 700 + MARGIN_GAP });
+  // With nothing open, a column crowded at the top still moves down rather than above the page.
+  assert.deepEqual(Object.fromEntries(layoutMargin([{ id: "a", top: -20, height: 50 }, { id: "b", top: 10, height: 50 }])),
+    { a: 0, b: 50 + MARGIN_GAP });
 });
 
 test("the margin fits the page: near its end the cards move up, and what still does not fit beside an open one waits", () => {

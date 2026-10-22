@@ -186,7 +186,7 @@ export function anchorTop(tops: ReadonlyMap<string, number>, conversation: Pick<
  * Given where the page ends, the margin fits the page and never lengthens it:
  * cards that would run past the end move up, a focused card rises only as far
  * as it must to end there, and a card that still does not fit beside an open
- * one is left out until it closes.
+ * one, above or below it, is left out until it closes.
  */
 export function layoutMargin(cards: ReadonlyArray<{ id: string; top: number; height: number }>,
   focusedId: string | null = null, end: number | null = null): Map<string, number> {
@@ -216,8 +216,12 @@ export function layoutMargin(cards: ReadonlyArray<{ id: string; top: number; hei
     out.set(card.id, top);
     ceiling = top;
   }
-  // Nothing goes above the page: the whole column moves down instead.
-  if (ceiling < 0) for (const [id, top] of out) out.set(id, top - ceiling);
+  // Nothing goes above the page. The open card stays at its passage, so a card with no room above it waits until it
+  // closes; with nothing open, the whole column moves down instead.
+  if (ceiling < 0) {
+    if (focused) for (const [id, top] of out) { if (top < 0) out.delete(id); }
+    else for (const [id, top] of out) out.set(id, top - ceiling);
+  }
   if (end !== null) {
     for (const card of placed) if (card !== focused && out.get(card.id)! + card.height > end) out.delete(card.id);
   }
