@@ -77,11 +77,16 @@ final class AppSignIn: NSObject {
         return false
     }
 
-    private static func isHubSignInStart(_ url: URL) -> Bool {
-        guard url.scheme == "https", let host = url.host, url.user == nil, url.password == nil else {
+    /// The one Hub that the beta and stable Webs both sign in through.
+    private static let hubHost = "xmatrix-hub.xmatrix.sh"
+
+    /// The Hub's sign-in start page, on exactly the Hub's https origin: the only page the sheet opens.
+    static func isHubSignInStart(_ url: URL) -> Bool {
+        guard url.scheme == "https", url.host?.lowercased() == hubHost, url.port == nil || url.port == 443,
+              url.user == nil, url.password == nil else {
             return false
         }
-        return (host == "xmatrix.sh" || host.hasSuffix(".xmatrix.sh")) && url.path == "/api/auth/app/start"
+        return url.path == "/api/auth/app/start"
     }
 
     private func finishApple(_ result: Result<[String: Any], Error>) {

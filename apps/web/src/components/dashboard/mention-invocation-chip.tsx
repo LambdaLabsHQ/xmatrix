@@ -82,7 +82,7 @@ export function MentionContinuationChip({ record, unavailable }: { record: Seria
     </>} />;
 }
 
-export function MentionInvocationChip({ label, labelContent, announcement, launch, shared, unavailable, onRetry, executions = [] }: {
+export function MentionInvocationChip({ label, labelContent, announcement, launch, shared, unavailable, onRetry, executions = [], notes }: {
   label: string;
   /** The address drawn with its own parts marked up; `label` still carries the plain text. */
   labelContent?: ReactNode;
@@ -91,6 +91,8 @@ export function MentionInvocationChip({ label, labelContent, announcement, launc
   launch: SerializedAgentLaunch; shared: boolean;
   executions?: readonly SerializedAgentMessageExecution[];
   unavailable?: boolean; onRetry?: (launch: SerializedAgentLaunch) => Promise<void>;
+  /** What the Hub said about this summon's Runs, recorded on its message. */
+  notes?: readonly CommandNotice[];
 }) {
   const decision = parsePresentedRoutingDecision(launch.routingDecision);
   const summon = summonView(launch, executions, unavailable);
@@ -109,6 +111,7 @@ export function MentionInvocationChip({ label, labelContent, announcement, launc
     context={<>
       {shared && <p className="app-invocation-description">This mention shares the first invocation of this agent and lifecycle in this message.</p>}
       {execution && !unavailable && <MentionReplyRecovery key={execution.id} execution={execution} />}
+      {notes?.length ? <NoticeLines notices={notes} /> : null}
     </>}
     jev={{ channelId: launch.channelId, messageId: launch.sourceMessageId, sourceMention: launch.sourceMention || `@${label}`,
       ...(decision?.parameters ? { parameters: decision.parameters } : {}) }}

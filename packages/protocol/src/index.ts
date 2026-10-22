@@ -65,6 +65,7 @@ export {
   isReservedMessageMetadataKey, normalizeChannelActivity, SUPERSEDED_ANNOTATION_NAMESPACE,
   supersededByOf, SYSTEM_ANNOTATION_AUTHOR, QUESTIONNAIRE_STATE_ANNOTATION_NAMESPACE, questionnaireStateOf,
   COMMAND_RESULT_ANNOTATION_NAMESPACE, commandResultOf, mergeCommandResult,
+  AGENT_INSTRUCTION_MESSAGE_KINDS, isAgentInstruction,
 } from "./channel-activity.js";
 export type {
   ChannelActivity, ChannelActivityPlanStep, ChannelActivityPlanStepStatus, QuestionnaireState,
