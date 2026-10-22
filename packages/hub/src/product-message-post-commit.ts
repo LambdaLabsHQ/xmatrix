@@ -4,7 +4,7 @@ import type { ChannelAttachment, DraftSummonIntent } from "@xmatrix/protocol";
 import { parseMessageInteraction, parseConnectorActionCommand, createInstanceMentions, filterOperationalMentions, hasRetiredAgentLaunchMention, parseAutoLaunchMentions,
   isLaunchHintRejection, parseHarnessCapabilityMentions, PREPARATION_REJECTION_MESSAGES, RETIRED_AGENT_LAUNCH_NOTICE,
   REGISTRATION_PREPARATION_REJECTION_CODES, HARNESS_SIGNED_OUT_NOTICE_KIND, preparationRejectionMessage } from "@xmatrix/protocol";
-import { startChannelAbout } from "./channel-about";
+import { nameDiscussionByFirstMessage, startChannelAbout } from "./channel-about";
 import {
   dispatchProductAgentMentionsAfterAuthorityMessage,
   dispatchProductNewConversationStart,
@@ -359,14 +359,19 @@ export async function dispatchProductMessagePostCommit(
   }
   const about = channelAboutDue(input.sequence);
   if (about) {
+    // A discussion's first message names it before the About reads it.
+    const named = input.sequence === 1 ? nameDiscussionByFirstMessage(input.env, input).catch((error) => {
+      logPostCommitFailure("Discussion naming failed", input, error);
+    }) : Promise.resolve();
     sideTasks.push(
-      startChannelAbout(input.env, { channelId: input.channelId, unnamedOnly: about.unnamedOnly }).catch((error) => {
-        console.error("Channel About could not start", {
-          channelId: input.channelId,
-          messageId: input.messageId,
-          error: error instanceof Error ? error.message : String(error),
-        });
-      }),
+      named.then(() => startChannelAbout(input.env, { channelId: input.channelId, unnamedOnly: about.unnamedOnly }))
+        .catch((error) => {
+          console.error("Channel About could not start", {
+            channelId: input.channelId,
+            messageId: input.messageId,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }),
     );
   }
   if (interaction.stop) {

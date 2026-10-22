@@ -1,5 +1,5 @@
 "use client";
-import { channelPresenceInstances, pageReferenceToken } from "@xmatrix/protocol";
+import { automaticConversationName, channelPresenceInstances, pageReferenceToken } from "@xmatrix/protocol";
 
 import { startTransition, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import dynamic from "next/dynamic";
@@ -1229,7 +1229,8 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     said?: { body: string }) => {
     if (!page) return;
     const title = blocks.find((block) => block.id === blockId)?.title;
-    // A discussion of a passage is named by the passage, which its first message carries; of a section, by the section.
+    // A discussion of a section is named by the section; of a passage, by what was written about it, and by the
+    // passage only until something is.
     const place = title ? `${page.title} › ${title}` : page.title;
     let started: string | null = null;
     const planned = (conversationId: string) => {
@@ -1239,10 +1240,12 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
         pageId: page.pageId, blockId, source: "manual", createdAt: now, lastSeenAt: now, anchor: anchor ?? null }]);
     };
     const quote = anchor ? discussionQuote(anchor.quote, { label: place, href: blockLink(blockId) }, true) : undefined;
-    void onDiscuss({ spaceId, pageId: page.pageId, blockId, name: anchor ? discussionTitle(anchor.quote) : place,
+    const firstMessage = said && (quote ? quotedMessage(quote, { body: said.body, selections: [] }).body : said.body);
+    void onDiscuss({ spaceId, pageId: page.pageId, blockId,
+      name: !anchor ? place
+        : firstMessage !== undefined ? automaticConversationName(firstMessage) : discussionTitle(anchor.quote),
       restricted, planned, ...(anchor ? { anchor } : {}),
-      ...(said ? { firstMessage: quote ? quotedMessage(quote, { body: said.body, selections: [] }).body : said.body,
-        open: false } : quote ? { quote } : {}) })
+      ...(firstMessage !== undefined ? { firstMessage, open: false } : quote ? { quote } : {}) })
       .then(() => links.refetch(), (cause: Error) => setNotice(cause.message))
       .finally(() => setStartedLinks((current) => current.filter((link) => link.conversationId !== started)));
   };

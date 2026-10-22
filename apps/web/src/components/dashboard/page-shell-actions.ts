@@ -118,7 +118,9 @@ export function pageShellActions(input: {
    * Hub creates and links it meanwhile (`planned` hears its id first, so the
    * page can show the discussion before the link lands), and the answer
    * settles when both are done.
-   * A conversation about a restricted page is closed, like the page.
+   * A conversation about a restricted page is closed, like the page. One about
+   * a passage is named by it only until its first message names it by what was
+   * written, as a new conversation is.
    */
   async function startPageConversation(page: {
     spaceId: string; pageId: string; blockId: string; name: string; restricted: boolean; anchor?: PageLinkAnchor;
@@ -130,7 +132,7 @@ export function pageShellActions(input: {
     if (!token || !user) return null;
     const { channel, created } = await input.beginConversation({ spaceId: page.spaceId,
       memberName: user.name || user.email || "Human", name: page.name, mode: page.restricted ? "closed" : "open",
-      metadata: { fromPageId: page.pageId } });
+      metadata: { fromPageId: page.pageId, ...(page.anchor ? { autoName: true } : {}) } });
     options.planned?.(channel.id);
     // A comment is sent the moment it is written, as in the conversation itself: its message waits only for the
     // conversation, not for the page's link to it. Co-writing waits for the Hub's instruction to be there first.

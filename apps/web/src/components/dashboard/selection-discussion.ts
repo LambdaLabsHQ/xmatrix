@@ -1,7 +1,8 @@
 /**
  * Starting a conversation from a selected passage, of a page or of a message
  * (docs/design/pages-and-conversations.md §3.2): the new conversation is named
- * by the passage, and its first message opens with the passage and a link back
+ * by what its first message says, by the passage until then, and that message
+ * opens with the passage and a link back
  * to where it came from (`discussionHead` in @xmatrix/protocol), the context
  * every Agent in the conversation reads, in the conversation itself. People see
  * the passage once: a page's passage is its discussion's anchor, which its
@@ -16,7 +17,7 @@ export const MAX_DISCUSSION_QUOTE_CHARS = 4000;
 /** Longest passage used as the conversation's name. */
 const MAX_DISCUSSION_TITLE_CHARS = 60;
 
-/** A discussion of a passage is named by the passage. */
+/** A discussion of a passage is named by the passage until its first message says something. */
 export function discussionTitle(quote: string): string {
   const line = quote.trim().replace(/\s+/gu, " ");
   return `“${line.length > MAX_DISCUSSION_TITLE_CHARS ? `${line.slice(0, MAX_DISCUSSION_TITLE_CHARS - 1)}…` : line}”`;
