@@ -79,7 +79,7 @@ const fakeRequire = (name) => {
 };
 
 async function runAuthorization({ scope = "web", overrides = {}, authorityScope = scope, authorityConclusion = "success",
-  authorityStatus = "completed", authorityCount = 1, requestSha = sha, deploySha = sha, lagging = 0, reader = authorize,
+  authorityStatus = "completed", authorityCount = 1, requestSha = sha, deploySha = sha, lagging = 0, laggingGates = 0, reader = authorize,
   tag = "xmatrix-v0.16.339", authorityTag = tag, channel = "beta" } = {}) {
   const failures = [];
   // The request's own `gates` job stands for every gate its scope selected;
@@ -111,8 +111,13 @@ async function runAuthorization({ scope = "web", overrides = {}, authorityScope 
     paginate: async (method) => {
       if (method === listRuns) return [{ id: 456, head_sha: deploySha }];
       reads += 1;
-      return reads > lagging ? jobs : jobs.map((job) => job === authority
-        ? { ...job, status: "in_progress", conclusion: null } : job);
+      return jobs.map(job => {
+        if ((job === authority && reads <= lagging) ||
+            (["plan", "gates"].includes(job.name) && reads <= laggingGates)) {
+          return { ...job, status: "in_progress", conclusion: null };
+        }
+        return job;
+      });
     },
   };
   await reader(github, {
@@ -178,6 +183,15 @@ test("hub and web reuse a stable cut of a revision the request contains", async 
 
 test("tagged preflight re-reads exact authorization whose conclusion is not yet reported", async () => {
   assert.deepEqual(await runAuthorization({ lagging: 1 }), []);
+});
+
+test("tagged preflight waits beyond a minute for the complete gate and authorization evidence", async () => {
+  assert.deepEqual(await runAuthorization({ lagging: 20 }), []);
+  assert.deepEqual(await runAuthorization({ laggingGates: 20 }), [],
+    "a published authority cannot substitute for gates whose success is still missing");
+  for (const delayed of [{ lagging: Infinity }, { laggingGates: Infinity }]) {
+    assert.notDeepEqual(await runAuthorization(delayed), [], "unreported success never authorizes deployment");
+  }
 });
 
 

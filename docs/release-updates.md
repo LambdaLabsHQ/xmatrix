@@ -144,6 +144,28 @@ change and this fix. No provider mutation, manual tag move, direct deployment or
 credential expansion is needed. Existing production serialization and recovery
 conditions remain in force.
 
+### Delayed job conclusions
+
+Before production mutation, preflight reads the request's plan, aggregate gates
+and exact tag/scope authorization together. It retries missing or incomplete
+conclusions up to 60 reads, five seconds apart, with uncached requests. A
+reported failure or duplicate authorization still stops immediately; exhausting
+the bound still refuses deployment. Successful authorization without reported
+gate success is insufficient.
+
+Migration evidence: 1.5.1-beta.2 and beta.3 passed their request gates but failed
+production preflight because GitHub's Jobs API had not reported those successes
+within the former one-minute window. No build or deployment ran. Completed job
+logs were available while the API still reported pending jobs for several
+minutes. This changes only the bounded evidence read, retaining the same exact
+source, workflow, tag, scope and successful-job requirements.
+
+Recovery: preserve failed tags and use a new beta from the CI-validated main
+revision containing this fix and its authored stable notes. Verify its successful
+production run and live Web before requesting stable. The normal same-run
+failed-job recovery remains available when GitHub accepts it; no direct deploy,
+manual tag move or substitute authorization is introduced.
+
 ## Shared release workflow definitions
 
 The immutable Production Release train calls `server-release.yml` with an explicit `hub`, `web-build`, or `web` target. The former `hub-deploy.yml`, `web-build.yml`, and `web-deploy.yml` had no other callers. Their original steps now live in separate target-selected jobs in the shared workflow. Hub and Web retain independent production concurrency groups, exact-request authorization, read-only GitHub permissions, the same production environments, and unchanged credential bindings. The build job explicitly keeps `contents: read` only. Web still builds beside Hub after PostgreSQL readiness; only Web deployment waits for Hub and the verified build handoff. Selected jobs keep the historical `hub / deploy`, `web-build / build`, and `web / deploy` evidence names; inactive jobs have distinct names. Unknown targets select no production job.

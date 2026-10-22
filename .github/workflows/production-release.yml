@@ -194,17 +194,24 @@ jobs:
             }
             // Scope and tag are durable job evidence, not optional step
             // metadata. The dispatcher cannot run until this exact authorization
-            // succeeds. Re-read boundedly while GitHub publishes the conclusion.
+            // succeeds. GitHub can lag several minutes behind completed jobs.
+            // Poll up to 60 times, five seconds apart, for the complete set;
+            // a successful authority alone cannot stand in for its gates.
             const authorityName = `authorize ${scope} production ${context.ref.replace("refs/tags/", "")}`;
             let jobs = [];
             let authorities = [];
-            for (let attempt = 0; attempt < 12; attempt += 1) {
+            for (let attempt = 0; attempt < 60; attempt += 1) {
               if (attempt) await new Promise((resolve) => setTimeout(resolve, 5000));
               jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRun, {
                 ...context.repo, run_id: requestRun.id, filter: "latest", per_page: 100,
+                headers: { "Cache-Control": "no-cache" },
               });
               authorities = jobs.filter((job) => job.name === authorityName);
-              if (authorities.length > 1 || authorities[0]?.conclusion) break;
+              const gates = ["plan", "gates"].map(name => jobs.find(job => job.name === name));
+              const rejected = [...gates, ...authorities].some(job => job?.conclusion && job.conclusion !== "success");
+              if (authorities.length > 1 || rejected ||
+                  (gates.every(job => job?.conclusion === "success") &&
+                   authorities.length === 1 && authorities[0].status === "completed" && authorities[0].conclusion === "success")) break;
             }
             // The request's `gates` job passes only when every gate its scope
             // selects passed (ci.yml's aggregate and the iOS gate).
