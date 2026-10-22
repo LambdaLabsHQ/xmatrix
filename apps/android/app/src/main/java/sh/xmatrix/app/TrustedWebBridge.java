@@ -19,14 +19,14 @@ final class TrustedWebBridge {
     WebViewCompat.addWebMessageListener(
       webView,
       JAVASCRIPT_OBJECT_NAME,
-      AppConfiguration.trustedBridgeOriginRules(BuildConfig.DEBUG),
+      AppConfiguration.trustedBridgeOriginRules(),
       (view, message, sourceOrigin, isMainFrame, replyProxy) ->
         handleMessage(bridge, message, sourceOrigin, isMainFrame, replyProxy)
     );
     WebViewCompat.addDocumentStartJavaScript(
       webView,
       BridgeScript.source(BuildConfig.VERSION_NAME),
-      AppConfiguration.trustedBridgeOriginRules(BuildConfig.DEBUG)
+      AppConfiguration.trustedBridgeOriginRules()
     );
     return true;
   }

@@ -13,6 +13,10 @@ test("only the Hub's sign-in start page may be opened, and local hosts only in a
   assert.equal(hubSignInStartUrl(start, { allowLocal: false })?.toString(), start);
   for (const refused of ["https://evil.example/api/auth/app/start", "http://xmatrix-hub.xmatrix.sh/api/auth/app/start",
     "https://xmatrix-hub.xmatrix.sh/other", "https://user@xmatrix-hub.xmatrix.sh/api/auth/app/start",
+    // The Hub itself only: neither Web, no other host under xmatrix.sh, no other port.
+    "https://xmatrix.sh/api/auth/app/start", "https://beta.xmatrix.sh/api/auth/app/start",
+    "https://other.xmatrix.sh/api/auth/app/start", "https://xmatrix-hub.xmatrix.sh:8443/api/auth/app/start",
+    "https://xmatrix-hub.xmatrix.sh.evil.example/api/auth/app/start",
     "http://localhost:8787/api/auth/app/start", "not a url", 42]) {
     assert.equal(hubSignInStartUrl(refused, { allowLocal: false }), null, String(refused));
   }

@@ -81,3 +81,11 @@ test("a result the Hub recorded on the command is drawn there, and a live event 
   assert.deepEqual(noticesBySource.get("m1").map(notice => notice.controlOutcomes), [controls]);
   assert.equal(commandResultHistoryMessage([held], { messageId: "other", annotationId: "a1", payload: {} }), undefined);
 });
+
+test("a note about a Run keeps the Run, so the summon that started it can show it", () => {
+  const held = human("m1", "@auto fix it", { commandResult: { notes: [
+    { id: "n1", text: "Couldn't start @codex on build-1.", at: sentAt, runId: "run:1" }] } });
+  const { noticesBySource } = foldCommandNotices([held]);
+  assert.deepEqual(noticesBySource.get("m1").map(notice => [notice.body, notice.runId]),
+    [["Couldn't start @codex on build-1.", "run:1"]]);
+});

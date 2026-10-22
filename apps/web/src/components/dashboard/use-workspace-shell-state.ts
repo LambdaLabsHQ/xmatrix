@@ -97,7 +97,7 @@ import { invalidateWorkspaceResources, refetchUnlessHumanPush, setHumanPushConne
 import { useSelectedChannelHeadCatchUp } from "./use-selected-channel-head-catch-up";
 import { clearProductMessageAttachmentMediaCache } from "@/lib/relay-v2/product-message-attachment-media";
 import { releaseMessageAttachmentMediaStores } from "./message-attachment-media-store";
-import { channelActivityOf, DEFAULT_HUB_URL, HUMAN_AUTH_INVALID_FAILURE_CODE, HUMAN_AUTH_REQUIRED_CLOSE_CODE, HUMAN_CLIENT_PRESENCE_DIGEST, normalizeHubUrl, parseHumanChannelCatalogChangedMessage, parseHumanWorkspaceResourceChangedMessage } from "@xmatrix/protocol";
+import { channelActivityOf, isAgentInstruction, DEFAULT_HUB_URL, HUMAN_AUTH_INVALID_FAILURE_CODE, HUMAN_AUTH_REQUIRED_CLOSE_CODE, HUMAN_CLIENT_PRESENCE_DIGEST, normalizeHubUrl, parseHumanChannelCatalogChangedMessage, parseHumanWorkspaceResourceChangedMessage } from "@xmatrix/protocol";
 import type {
   ChannelAttachment,
   ChannelMessage,
@@ -2000,12 +2000,14 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
              now. For any other, the rows that show it do, and the shell is
              told when the catalog window below reorders the list, instead of
              once per message (use-channel-catalog-paging.ts). */
+          // An instruction to one Agent Instance neither previews nor needs reading.
+          const instruction = isAgentInstruction(entry.metadata);
           const arrival = {
             entry,
-            preview: channelLastMessagePreviewFromEntry(entry),
+            preview: instruction ? undefined : channelLastMessagePreviewFromEntry(entry),
             known: alreadyCached,
             historyCount: historyMessageCountEstimate(merged),
-            activity: channelActivityOf(entry.metadata) !== undefined,
+            activity: instruction || channelActivityOf(entry.metadata) !== undefined,
           };
           // No read of this reader's has brought the Channel yet: the one on
           // its way may be older than this message, which is applied to it then.

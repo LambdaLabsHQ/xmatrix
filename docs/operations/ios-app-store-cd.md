@@ -39,8 +39,12 @@ browser-session release path.
 
 Apple's store version is the release's `X.Y.Z`: a beta `X.Y.Z-beta.N` and the
 stable `X.Y.Z` it precedes upload under the same store version, told apart by
-build number. A beta stops after TestFlight (`testflight-only` in the job
-summary); only a stable continues to App Store metadata and review submission.
+build number. The archive carries the channel in the Web it loads, set from the
+release version: a beta's build loads `https://beta.xmatrix.sh/app`, a
+stable's `https://xmatrix.sh/app` (`XMATRIX_WEB_URL` in
+`scripts/ios-testflight.sh`). A beta stops after TestFlight (`testflight-only`
+in the job summary); only a stable continues to App Store metadata and review
+submission.
 The stable release Agent verifies the stable's own TestFlight build and keeps
 the review state (submitted, deferred, approved, live) on the release Page.
 

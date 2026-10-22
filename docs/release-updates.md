@@ -192,16 +192,34 @@ its release and refuses a Hub whose client policy would answer it with 426: a
 different protocol version or a higher minimum Web version
 (`scripts/stable-web-compatibility.mjs`).
 
+The native shells load and trust the Web of their own channel. A beta desktop,
+Android or iOS build opens `https://beta.xmatrix.sh/app` and a stable one
+`https://xmatrix.sh/app`. Each lets only that exact https origin navigate in
+place and call its bridge (the stable Web also under `www.xmatrix.sh`), never
+the other channel's Web or another host under `xmatrix.sh`. Desktop and Android
+read the channel from the app's own version. iOS cannot, because its App Store
+version drops `-beta.N`; `scripts/ios-testflight.sh` sets its Web
+(`XMATRIX_WEB_URL`, read back as `XMatrixWebURL`) from the release version when
+it archives. Android's packaged offline Web is served under the build's own Web
+origin. On every shell, the in-place sign-in opens only the Hub
+(`xmatrix-hub.xmatrix.sh`), no longer any `xmatrix.sh` host. Beta users sign in
+once more on the beta Web, because the session cookies the Web sets for native
+shells belong to `xmatrix.sh` alone.
+
 Migration evidence: the first beta train after this change creates the beta
 Worker and its custom domain on its Web deploy; `xmatrix.sh` keeps the last
 beta it served until the first stable that names `web` replaces it. The Hub
-already trusts the beta origin (APP_BETA_URL). Native stable and beta builds
-keep loading `xmatrix.sh` until their shells choose by channel.
+already trusts the beta origin (APP_BETA_URL). Native builds released before
+the shells chose by channel keep loading `xmatrix.sh`. Clients that choose by
+channel ship only once `beta.xmatrix.sh` serves: their first beta follows the
+first beta Web deploy, or names `web` itself.
 
 Recovery: a failed beta Web deploy is re-run on the same Production Release
-run, like any job; it touches neither the Hub nor `xmatrix.sh`. Undoing the
-split is a revert of this change: betas then deploy `xmatrix.sh` again and the
-idle beta Worker can be deleted.
+run, like any job; it touches neither the Hub nor `xmatrix.sh`. Beta native
+builds load nothing while the beta Web is down, so that re-run restores them
+too. Undoing the split is a revert of this change and of the shells choosing
+by channel: betas then deploy `xmatrix.sh` again, later native betas load it,
+and the idle beta Worker can be deleted.
 
 ## Unreleased: Pull requests that name a page block are not gated
 

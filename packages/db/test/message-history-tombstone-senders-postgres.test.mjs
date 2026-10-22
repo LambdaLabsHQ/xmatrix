@@ -1,4 +1,4 @@
-import { connectionString as url, integration } from "./postgres-database.fixture.mjs";
+import { boundedPostgresTransaction, connectionString as url, integration } from "./postgres-database.fixture.mjs";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { Client } from "pg";
@@ -28,11 +28,8 @@ integration("recalled rows are named by their Space author; live rows and other 
       ('run-8','space','human','m','claude'),('run-far','other','outsider','m','codex')`);
     await client.query(`INSERT INTO ${schema}.space_agent_registrations VALUES
       ('space','human','m','claude','claude'),('other','outsider','m','codex','codex')`);
-    const tx = { query: async ({ text, values, maxRows }) => {
-      const { rows } = await client.query(text.replaceAll("data.", `${schema}.`).replaceAll("control.", `${schema}.`), values);
-      assert.ok(rows.length <= maxRows);
-      return rows;
-    } };
+    // The Space's tables and the accounts' both read from this test's schema.
+    const tx = boundedPostgresTransaction(client, (text) => text.replace(/\b(?:data|control)\./gu, `${schema}.`));
     const rows = [
       { author_kind: "user", author_id: "human", payload_bundle_base64: null },
       { author_kind: "agent", author_id: "birth:8", payload_bundle_base64: null },

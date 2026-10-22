@@ -6,7 +6,7 @@ import { meterTone, type MachineGlanceReading } from "./machine-load";
 import { MachineLoadGlanceBars } from "./machine-load-panel";
 import { useOpenMachine } from "./machine-link";
 import type { PresentedChannelMemberPresence as ChannelMemberPresence } from "./workspace-shell-presence";
-import { agentInstanceMemberPresence, channelPresenceInstances, faceOfSender, presenceInstanceId, crossChannelReplyRelay, channelVisibilityScope, digestCanonicalCloneCborV1, parseLlmQuotaAccount, parseQuotaObservedAt, isUnlistedParameterTag, statusTagIcon, type AgentInvocationSelections, type DraftSummonIntent, type FaceOf, type StatusTagIcon } from "@xmatrix/protocol";
+import { isAgentInstruction, agentInstanceMemberPresence, channelPresenceInstances, faceOfSender, presenceInstanceId, crossChannelReplyRelay, channelVisibilityScope, digestCanonicalCloneCborV1, parseLlmQuotaAccount, parseQuotaObservedAt, isUnlistedParameterTag, statusTagIcon, type AgentInvocationSelections, type DraftSummonIntent, type FaceOf, type StatusTagIcon } from "@xmatrix/protocol";
 import { formatLocalClock, formatZonedDateTime } from "./time-display";
 
 import { matchClaimableOutgoing } from "./outgoing-message-claim";
@@ -839,8 +839,9 @@ export function buildTimeline(
   const safeChannelHistory = channelHistory.filter(isValidChannelMessage);
   const historyById = new Map(safeChannelHistory.map((message) => [message.messageId, message]));
   const commandNotices = foldCommandNotices(safeChannelHistory);
+  // An instruction to one Agent Instance is its input, not anything said to people.
   const messageItems = safeChannelHistory.filter((message) => !isAgentSpawnStatusMessage(message) &&
-    !commandNotices.folded.has(message.messageId)).map((message) => {
+    !commandNotices.folded.has(message.messageId) && !isAgentInstruction(message.metadata)).map((message) => {
     const senderEmail = message.from.email.trim().toLowerCase();
     const senderLabel = message.from.label.trim().toLowerCase();
     const senderIdentityId = message.from.identityId;

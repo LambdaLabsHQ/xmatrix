@@ -293,6 +293,10 @@ export class PostgresMachineLifecycleRepository {
           typeof payload.runId === "string" && (spawnFailure || stopNotice || changedRunIds.includes(payload.runId))) {
         const contexts = await tx.query<QueryResultRow>({ name: "machine_lifecycle_notice_context_v7", text: `SELECT
           r.run_id,r.channel_id,r.owner_user_id,r.status,r.metadata_json,
+          (SELECT message.message_id FROM data.agent_launches launch
+            JOIN data.messages message ON message.space_id=launch.space_id AND message.channel_id=launch.channel_id
+              AND message.message_id=launch.trigger_id AND message.deleted_at IS NULL
+            WHERE launch.run_id=r.run_id LIMIT 1) AS summon_message_id,
           (r.metadata_json->'spawnResult'->>'ok'='false' OR
             EXISTS (SELECT 1 FROM data.agent_launches launch WHERE launch.run_id=r.run_id
               AND launch.state='failed' AND launch.spawned_at IS NULL)) AS startup_failed,
@@ -336,11 +340,15 @@ export class PostgresMachineLifecycleRepository {
           if (automationRunIdentity(runMetadata).automationOccurrenceId === undefined &&
               !(payload.ok === true && channelStop && !startupFailed)) Object.assign(value, {
             stopResultNoticeContext: { ...notice, ok: payload.ok === true,
+              // A channel stop answers on its command, not as another message.
+              ...(channelStop ? { sourceMessageId: (stopRequest as { sourceMessageId: string }).sourceMessageId } : {}),
               ...(startupFailed ? { startupFailed: true } : {}),
               controlKey: typeof payload.requestId === "string" && payload.requestId ? payload.requestId.slice(0, 200) : notice.runId,
               ...(typeof payload.error === "string" && payload.error.trim() ? { detail: payload.error.trim().slice(0, 2_000) } : {}) },
           });
-        } else Object.assign(value, { startupFailureNoticeContext: notice });
+        } else Object.assign(value, { startupFailureNoticeContext: { ...notice,
+          // A summoned Run's failed start answers on the summon, not as another message.
+          ...(context!.summon_message_id ? { sourceMessageId: String(context!.summon_message_id) } : {}) } });
       }
       await commit(tx, { spaceId: String(channel.space_id), commandId, requestDigest, value, at,
         ttlMs: eventType === "machine_run_snapshot" ? SNAPSHOT_REPLAY_TTL_MS : REPLAY_TTL_MS });

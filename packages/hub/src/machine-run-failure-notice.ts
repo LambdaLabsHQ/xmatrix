@@ -1,5 +1,6 @@
 import { publicMachineStartupFailure, sha256Hex, type RepositoryBaseline } from "@xmatrix/protocol";
 import { appendChannelMessage } from "./channel-messages";
+import { recordCommandResult } from "./command-result";
 import { humanizeMachineRunFailureDetail, machineStopFailureCode } from "./machine-run-failure";
 import { XMATRIX_SYSTEM_AVATAR_URL, XMATRIX_SYSTEM_LABEL } from "./xmatrix-system-identity";
 import type { Env } from "./types";
@@ -8,6 +9,8 @@ export interface MachineRunFailureNotice {
   runId: string; channelId: string; agentName: string; detail: string; phase?: string;
   /** The Agent's harness, which gives the notice its face (protocol faces.ts). */
   harness?: string;
+  /** The summon that started the Run: the failure answers on its chip. */
+  sourceMessageId?: string;
   ownerUserId: string; ownerEmail: string; machineId: string; hostId: string;
   /** The owner's name for the Machine; the notice names nothing else. */
   machineName?: string;
@@ -48,7 +51,23 @@ export async function machineRunFailureNoticeCommand(input: MachineRunFailureNot
 }
 
 export async function publishMachineRunFailureNotice(env: Env, input: MachineRunFailureNotice): Promise<void> {
-  await appendChannelMessage(env, input.channelId, await machineRunFailureNoticeCommand(input));
+  await deliverMachineNotice(env, await machineRunFailureNoticeCommand(input), input, "startup-failure");
+}
+
+/**
+ * A Machine fact about a Run a message asked for answers on that message's
+ * chip, recorded on the message, never posted as another one. A Run nothing in
+ * the Channel asked for (a stop from elsewhere, an Automation) still says it
+ * as a notice, because nothing else would.
+ */
+async function deliverMachineNotice(env: Env, command: Record<string, unknown> & { channelId: string; body: string },
+  input: { runId: string; sourceMessageId?: string }, key: string): Promise<void> {
+  if (!input.sourceMessageId) {
+    await appendChannelMessage(env, command.channelId, command);
+    return;
+  }
+  await recordCommandResult(env, { channelId: command.channelId, messageId: input.sourceMessageId,
+    key: `${key}:${input.runId}`, entry: { note: { text: command.body, runId: input.runId } } });
 }
 
 /** The same message went to another Agent after a failed start. Stable per
@@ -67,8 +86,9 @@ export async function startupFallbackNoticeCommand(input: {
   };
 }
 
-export async function publishStartupFallbackNotice(env: Env, input: Parameters<typeof startupFallbackNoticeCommand>[0]): Promise<void> {
-  await appendChannelMessage(env, input.channelId, await startupFallbackNoticeCommand(input));
+export async function publishStartupFallbackNotice(env: Env,
+  input: Parameters<typeof startupFallbackNoticeCommand>[0] & { sourceMessageId?: string }): Promise<void> {
+  await deliverMachineNotice(env, await startupFallbackNoticeCommand(input), input, "startup-fallback");
 }
 
 export interface MachineStopResultNotice {
@@ -76,6 +96,8 @@ export interface MachineStopResultNotice {
   ownerUserId: string; ownerEmail: string; machineId: string; hostId: string;
   machineName?: string;
   startupFailed?: boolean;
+  /** The stop command that asked for this stop: the result answers on its chip. */
+  sourceMessageId?: string;
 }
 
 /** Stable per stop and outcome. The daemon's error passes the same boundary
@@ -103,7 +125,7 @@ export async function machineStopResultNoticeCommand(input: MachineStopResultNot
 }
 
 export async function publishMachineStopResultNotice(env: Env, input: MachineStopResultNotice): Promise<void> {
-  await appendChannelMessage(env, input.channelId, await machineStopResultNoticeCommand(input));
+  await deliverMachineNotice(env, await machineStopResultNoticeCommand(input), input, "stop-result");
 }
 
 /** Once per checkout/base in this Channel, including report replays and later

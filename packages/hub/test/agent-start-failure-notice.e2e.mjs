@@ -13,6 +13,16 @@ import {
 import { createPgSpawnableScenario, launchScenarioRun, sendSpawnResult, sendStopResult }
   from "./agent-launch-postgres.fixture.mjs";
 
+/** The Hub's note about one Run on the summon that started it, once it lands. */
+async function runNote(worker, auth, channelId, runId, label) {
+  const headers = { ...auth, "content-type": "application/json" };
+  const sourceMessageId = (await diagnosedLaunch(worker, headers, runId)).sourceMessageId;
+  const message = await waitForChannelHistoryMessage(worker, MOCK_TOKEN, channelId,
+    (candidate) => candidate.messageId === sourceMessageId &&
+      (candidate.commandResult?.notes ?? []).some((note) => note.runId === runId), label);
+  return { message, notes: message.commandResult.notes.filter((note) => note.runId === runId) };
+}
+
 async function diagnosedLaunch(worker, headers, runId) {
   const diagnosis = await json(await worker.fetch("/api/invocations/diagnostics", {
     method: "POST", headers, body: JSON.stringify({ runId }),
@@ -102,29 +112,18 @@ test("a Workstation startup failure is persisted in-channel as a product notice"
     await daemon.inbox.waitFor(message => message.type === "machine_run_report_acked" &&
       message.requestId === exitReport.requestId, "replayed failure report committed");
 
-    const notice = await waitForChannelHistoryMessage(
-      worker,
-      MOCK_TOKEN,
-      channelId,
-      (message) =>
-        message.metadata?.source === "machine_run_failure" &&
-        message.metadata?.runId === command.runId,
-      "persisted Agent startup failure notice",
-    );
-    assert.match(notice.body, /Couldn't start @codex-start-failure/u);
-    assert.match(notice.body, /wrapper_startup_failed/u);
+    // A summoned Run's failed start answers on the summon, not as another message.
+    const { notes } = await runNote(worker, auth, channelId, command.runId, "startup failure on its summon");
+    assert.equal(notes.length, 1, "replayed terminal reports must not duplicate the note");
+    const [note] = notes;
+    assert.match(note.text, /Couldn't start @codex-start-failure/u);
+    assert.match(note.text, /wrapper_startup_failed/u);
     // Preserve the adapter's vendor attribution with the original error text.
-    assert.ok(notice.body.includes(runtimeError));
-    assert.doesNotMatch(notice.body, /Runtime error:/u);
-    assert.equal(notice.from.label, "xMatrix");
-    assert.equal(notice.metadata?.xmatrixProvenance, "system_fact");
-    assert.equal(notice.metadata?.xmatrixSystemNotice, true);
-    assert.equal(notice.metadata?.source, "machine_run_failure");
-    assert.equal(notice.metadata?.runId, command.runId);
-    assert.equal(notice.metadata?.failureDetail, runtimeError);
+    assert.ok(note.text.includes(runtimeError));
+    assert.doesNotMatch(note.text, /Runtime error:/u);
     const history = await json(await worker.fetch(`/api/channels/${channelId}/history?limit=20`, { headers: auth }));
-    assert.equal(history.messages.filter(message => message.metadata?.source === "machine_run_failure" &&
-      message.metadata?.runId === command.runId).length, 1, "replayed terminal reports must not duplicate the notice");
+    assert.equal(history.messages.filter(message => message.metadata?.source === "machine_run_failure").length, 0,
+      "the failure is not posted as another message");
     const liveAfterFailure = await json(await worker.fetch("/api/agent-instances", {
       headers: auth,
     }));
@@ -149,14 +148,10 @@ for (const [reason, code] of [
     const { command } = await launchScenarioRun(worker, scenario, "reproduce repository preparation failure");
     const failure = { ok: false, error: `repo pool lease unavailable (${reason}) /private/TOKEN_SENTINEL` };
     sendSpawnResult(daemon, command, failure);
-    const notice = await waitForChannelHistoryMessage(worker, MOCK_TOKEN, channelId,
-      message => message.metadata?.source === "machine_run_failure" && message.metadata?.runId === command.runId,
-      "pre-spawn failure notice");
-    assert.ok(notice.body.includes(reason));
-    assert.ok(notice.metadata.failureDetail.includes(reason));
-    assert.doesNotMatch(notice.body, /initial commit|Check the machine/u);
-    assert.equal(notice.metadata.failureCode, code);
-    assert.doesNotMatch(JSON.stringify(notice), /TOKEN_SENTINEL/u);
+    const { notes: [note] } = await runNote(worker, auth, channelId, command.runId, "pre-spawn failure on its summon");
+    assert.ok(note.text.includes(reason));
+    assert.doesNotMatch(note.text, /initial commit|Check the machine/u);
+    assert.doesNotMatch(JSON.stringify(note), /TOKEN_SENTINEL/u);
     const headers = { ...auth, "content-type": "application/json" };
     const launch = await diagnosedLaunch(worker, headers, command.runId);
     assert.equal(launch.state, "failed");
@@ -179,9 +174,9 @@ for (const [reason, code] of [
       "failed startup cleanup notice");
     assert.match(cleanup.body, /^Startup failed/u);
     assert.match(cleanup.body, /no process remains/u);
-    const history = await json(await worker.fetch(`/api/channels/${channelId}/history?limit=20`, { headers: auth }));
-    assert.equal(history.messages.filter(message => message.metadata?.source === "machine_run_failure" &&
-      message.metadata?.runId === command.runId).length, 1, "replay does not duplicate the failure notice");
+    const { notes: replayed } = await runNote(worker, auth, channelId, command.runId, "pre-spawn failure after replay");
+    assert.equal(replayed.filter(item => item.id.includes(":startup-failure:")).length, 1,
+      "replay does not duplicate the failure note");
   } finally {
     await stopAgentWorker(worker, undefined, daemon);
   }
