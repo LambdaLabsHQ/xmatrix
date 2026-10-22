@@ -867,6 +867,17 @@ function SpinningLoader({ className }: { className?: string }) {
   return <AnimatedIcon icon={Loader2} className={cn(className, "animate-spin")} />;
 }
 
+function createUpdateArrowEffects(element: HTMLElement): readonly KeyframeEffect[] {
+  const arrow = element.querySelector(".app-rail-update-arrow");
+  return arrow ? [new KeyframeEffect(arrow, [
+    { offset: 0, transform: "translateY(0)", opacity: 1, easing: "cubic-bezier(0.5, 0, 0.9, 0.4)" },
+    { offset: 0.1, transform: "translateY(-26px)", opacity: 0 },
+    { offset: 0.1001, transform: "translateY(26px)", opacity: 0, easing: "cubic-bezier(0.2, 0.8, 0.3, 1)" },
+    { offset: 0.26, transform: "translateY(0)", opacity: 1 },
+    { offset: 1, transform: "translateY(0)", opacity: 1 },
+  ], { duration: 4200, delay: 1000, iterations: Infinity })] : [];
+}
+
 /**
  * The rail's update button. The desktop app checks and downloads in the
  * background, so the rail only asks for the one step that needs the person:
@@ -881,6 +892,8 @@ export function DesktopUpdateRailButton({
   onInstall: () => void;
 }) {
   const state = status?.state;
+  // Observe the fixed window: the arrow itself leaves its clip each cycle.
+  const arrowRef = useDecorationAnimationGroup(createUpdateArrowEffects, state === "downloaded" || state === "available");
   // "available" comes only from shells that do not download on their own;
   // the button downloads first there.
   if (state !== "downloaded" && state !== "available" && state !== "installing") return null;
@@ -907,8 +920,10 @@ export function DesktopUpdateRailButton({
       {state === "installing"
         ? <SpinningLoader className="size-[18px]" />
         : (
-          <span className="app-rail-update-window">
-            <AnimatedIcon icon={ArrowUp} className="app-rail-update-arrow size-[18px]" strokeWidth={2.25} />
+          <span ref={arrowRef} className="app-rail-update-window">
+            <span className="app-rail-update-arrow inline-flex size-[18px]">
+              <ArrowUp className="size-full" strokeWidth={2.25} />
+            </span>
           </span>
         )}
     </LiquidGlassPill>
