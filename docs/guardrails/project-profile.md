@@ -31,8 +31,9 @@ read grant is checked on subscription and again before every delivery; see
 [App connectors](../operations/app-connectors.md).
 
 Page discussions and conversations started from selected message passages use
-the ordinary first-message automatic summon and author choice window while
-retaining their preset titles. See [automatic invocation](../architecture/auto-launch-completion.md#a-new-conversations-first-message).
+the ordinary first-message automatic summon and author choice window. Passage
+discussions are named after the first message's text rather than its quote;
+section discussions keep the section name. See [automatic invocation](../architecture/auto-launch-completion.md#a-new-conversations-first-message).
 
 Human Space owners/admins can confirm Channel deletion in its actions or
 details. Active work prompts a second confirmation to stop the Channel's
