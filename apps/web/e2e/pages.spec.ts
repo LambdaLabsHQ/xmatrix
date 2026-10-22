@@ -1154,7 +1154,7 @@ test("selecting a passage opens a comment box beside it in the margin; sent, the
   await stubPages(browser, [page("p-relay", null, "Relay", "V")]);
   const pageLinks = /\/api\/xmatrix\/spaces\/[^/]+\/page-links\?.*$/u;
   await fixtureJson(browser, "page-links", pageLinks, { links: [] });
-  const discussion = { ...E2E_CHANNEL, name: "“In progress”" };
+  const discussion = { ...E2E_CHANNEL, name: "Is this still accurate?" };
   await stubPageConversation(browser, discussion, { linkId: "l-discuss", blockId: "status" });
   // The Hub is slow to create it.
   await fixtureChannelCreate(browser, "channel-create", discussion, { held: true });
@@ -1199,8 +1199,8 @@ test("selecting a passage opens a comment box beside it in the margin; sent, the
   const created = await fixtureCreatedChannelId(browser, "channel-create");
   await expect.poll(async () => (await fixtureRequestBodies(browser, "link-create"))[0]).toMatchObject({
     conversationId: created, pageId: "p-relay", blockId: "status", anchor: { quote: "In progress" } });
-  expect((await fixtureRequestBodies(browser, "channel-create"))[0]!.name, "a discussion is named by its passage")
-    .toBe("“In progress”");
+  expect((await fixtureRequestBodies(browser, "channel-create"))[0]!.name, "a discussion is named by what was written")
+    .toBe("Is this still accurate?");
   // Its first message carries the passage, with a link back, and the comment, which names nobody: no Agent is at
   // work on the page, so xMatrix gives it to one.
   await expect.poll(async () => (await fixtureRequestBodies(browser, "discuss-message"))[0]?.body)
