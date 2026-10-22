@@ -298,7 +298,7 @@ export function HarnessSignedOutBody({ registration, token, userId, copy, progra
       </Button>
       {check.data === false && <p role="status" className="text-[13px] text-muted-foreground">{copy.stillCannot}</p>}
       {check.isError && <p role="status" className="text-[13px] text-destructive">
-        {userErrorMessage(check.error, "Couldn't reach that machine")}</p>}
+        {userErrorMessage(check.error, "Couldn't send that to the machine")}</p>}
     </div>
   </>;
 }
