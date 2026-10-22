@@ -4445,7 +4445,7 @@ mod tests {
         ));
 
         let rejected = parse_machine_daemon_server_event(
-            r#"{"type":"error","requestId":"machine-request-notice:req:1:pending","message":"The Workstation request could not be processed. (code=runtime.authority_rejected, retryable=false, status=409)","failure":{"code":"runtime.authority_rejected","diagnosticId":"diag_1"}}"#,
+            r#"{"type":"error","requestId":"machine-request-notice:req:1:pending","message":"The Machine request could not be processed. (code=runtime.authority_rejected, retryable=false, status=409)","failure":{"code":"runtime.authority_rejected","diagnosticId":"diag_1"}}"#,
         );
         assert!(matches!(
             rejected,

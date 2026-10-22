@@ -227,7 +227,7 @@ function invocationTargetHarness(row: QueryResultRow): string | undefined {
     ? normalizeAgentPresetRuntime(row.target_runtime) ?? row.target_runtime : undefined;
 }
 
-/** A fenced stop's phase. The Workstation's stop receipt is the only
+/** A fenced stop's phase. The Machine's stop receipt is the only
  * confirmation; a Run that merely left `stopping` some other way is not. */
 function stopReceiptPhase(status: string, runMetadata: Record<string, unknown>): AgentStopPhase {
   const evidence = runMetadata.daemonStopEvidence;

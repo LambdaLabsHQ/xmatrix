@@ -258,7 +258,7 @@ function splitRecordedMentions<T extends { kind: string; text: string }>(
 /** How long a just-sent stop shows "Stopping" before an empty receipt is "Unconfirmed". */
 export const STOP_RECEIPT_PENDING_MS = 15_000;
 
-/** The stop command's chip. Confirmation is the Workstation's receipt, the
+/** The stop command's chip. Confirmation is the Machine's receipt, the
  * same place a launch shows that it started — not a second message. */
 export function stopView(receipts: readonly SerializedAgentStop[], input: { fresh: boolean; unavailable: boolean;
   notices?: readonly CommandNotice[] }): InvocationView {
@@ -279,14 +279,14 @@ export function stopView(receipts: readonly SerializedAgentStop[], input: { fres
     ? "Status could not be refreshed; this is the last confirmed state."
     : phase === "accepted"
       ? count > 1
-        ? `Stop requested for ${count} agent instances. ${summary.accepted} still waiting for the Workstation.`
-        : "Stop requested. Waiting for the Workstation to confirm the process has terminated."
+        ? `Stop requested for ${count} agent instances. ${summary.accepted} still waiting for the Machine.`
+        : "Stop requested. Waiting for the Machine to confirm the process has terminated."
       : phase === "confirmed"
         ? count > 1
-          ? `Stopped ${count} agent instances. The Workstation confirmed each process tree is terminated.`
-          : "The Workstation confirmed the process tree is terminated."
+          ? `Stopped ${count} agent instances. The Machine confirmed each process tree is terminated.`
+          : "The Machine confirmed the process tree is terminated."
         : phase === "failed"
-          ? "The Workstation reported the stop failed, so the process may still be running."
+          ? "The Machine reported the stop failed, so the process may still be running."
           : "The stop was not confirmed.";
   const label: InvocationChip = phase === "accepted" ? "Stopping" : phase === "confirmed" ? "Stopped"
     : phase === "failed" ? "Failed" : "Unconfirmed";
@@ -294,12 +294,12 @@ export function stopView(receipts: readonly SerializedAgentStop[], input: { fres
   const confirmedAt = receipts.map(stop => stop.confirmedAt).filter((at): at is string => Boolean(at)).sort().at(-1);
   const steps: InvocationStep[] = [
     { label: "Stop requested", at: requestedAt, state: count > 0 || waiting ? "done" : "unknown" },
-    { label: "Workstation confirmed", at: phase === "confirmed" ? confirmedAt : undefined,
+    { label: "Machine confirmed", at: phase === "confirmed" ? confirmedAt : undefined,
       state: phase === "confirmed" ? "done" : phase === "failed" ? "failed" : phase === "accepted" ? "current" : "unknown" },
   ];
   const status = invocationChipStatus(label, detail, phase === "accepted");
   // The inline word is the phase. A current ladder step would print
-  // "Workstation confirmed" while the Workstation has not answered yet.
+  // "Machine confirmed" while the Machine has not answered yet.
   return { ...status, tone: phase === "confirmed" ? "success" : status.tone, steps, terminal: true };
 }
 

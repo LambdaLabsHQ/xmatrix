@@ -1834,7 +1834,7 @@ fn terminal_report_rejection_survives_the_hub_rewriting_the_authority_code() {
     // code with its generic one. Recognising this is the difference between
     // dropping a dead run and re-sending its exit forever.
     assert!(daemon_report_terminal_rejection(&CliError::Http(
-        "The Workstation request could not be processed. \
+        "The Machine request could not be processed. \
          (code=runtime.authority_rejected, retryable=false, status=404)"
             .into()
     )));
@@ -1844,14 +1844,14 @@ fn terminal_report_rejection_survives_the_hub_rewriting_the_authority_code() {
 fn a_report_that_could_still_succeed_is_never_treated_as_terminal() {
     // Retryable, so the run is still ours and the report must be re-sent.
     assert!(!daemon_report_terminal_rejection(&CliError::Http(
-        "The Workstation request could not be processed. \
+        "The Machine request could not be processed. \
          (code=runtime.authority_rejected, retryable=true, status=503)"
             .into()
     )));
     // Non-retryable, but not a missing run: an authorization change must not
     // silently discard the exit of a run that still exists.
     assert!(!daemon_report_terminal_rejection(&CliError::Http(
-        "The Workstation request could not be processed. \
+        "The Machine request could not be processed. \
          (code=runtime.authority_rejected, retryable=false, status=403)"
             .into()
     )));

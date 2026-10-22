@@ -487,7 +487,7 @@ export class MachineDaemonRuntimeTransport {
       ws.close(CLIENT_UPGRADE_REQUIRED_CLOSE_CODE, "Client upgrade required");
       return;
     }
-    await this.sockets.answerOperation(ws, message.requestId, "Workstation request could not be completed", async () => {
+    await this.sockets.answerOperation(ws, message.requestId, "Machine request could not be completed", async () => {
       const authentication = await this.backend.authenticate(message);
       assertMachineBinding(message, authentication);
       const now = new Date().toISOString();
@@ -520,7 +520,7 @@ export class MachineDaemonRuntimeTransport {
   private async dispatch(ws: WebSocket, message: ExecutableMachineDaemonMessage): Promise<void> {
     const requestId = "requestId" in message ? message.requestId : undefined;
     let superseded = false;
-    await this.sockets.authenticatedOperation(ws, requestId, "Machine Daemon", "Workstation request could not be completed", async (session) => {
+    await this.sockets.authenticatedOperation(ws, requestId, "Machine Daemon", "Machine request could not be completed", async (session) => {
       const activationMessage = message.type === "machine_activation_prepare" ||
         message.type === "machine_activation_advance";
       if (session.activationPhase && !activationMessage) {
@@ -576,7 +576,7 @@ export class MachineDaemonRuntimeTransport {
   }
 
   private async refresh(ws: WebSocket, message: Message<"refresh_auth">): Promise<void> {
-    await this.sockets.authenticatedOperation(ws, message.requestId, "Machine Daemon", "Workstation request could not be completed", async (session) => {
+    await this.sockets.authenticatedOperation(ws, message.requestId, "Machine Daemon", "Machine request could not be completed", async (session) => {
       const principal = await this.backend.refresh(message.token, session);
       assertSamePrincipal(session.principal, principal);
       session.principal = { ...principal, hostId: session.principal.hostId, hostName: session.principal.hostName };

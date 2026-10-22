@@ -269,7 +269,7 @@ function useBefore(until: number | undefined): boolean {
 }
 
 /** A stop command. Its phase sits on the command the way a launch's phase sits
- * on the summon: requested, then confirmed by the Workstation. */
+ * on the summon: requested, then confirmed by the Machine. */
 export function MentionStopChip({ invocation, receipts, sentAt, pending, unavailable, notices }: {
   invocation: AgentStopInvocation; receipts: readonly SerializedAgentStop[];
   sentAt?: string; pending?: boolean; unavailable?: boolean;

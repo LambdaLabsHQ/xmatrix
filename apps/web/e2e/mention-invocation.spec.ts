@@ -843,7 +843,7 @@ test("a confirmed stop sits on the command instead of another message", async ({
   await expect(page.getByText("Stop requested for")).toHaveCount(0);
   await openChip(chip);
   const dialog = page.getByRole("dialog");
-  await expect(dialog).toContainText("The Workstation confirmed the process tree is terminated.");
+  await expect(dialog).toContainText("The Machine confirmed the process tree is terminated.");
   await expect(dialog).toContainText("build-box-1");
   await expect(dialog).toContainText("Stopped");
   await page.screenshot({ path: "test-results/mention-stop-confirmed-desktop.png" });
@@ -870,13 +870,13 @@ test("a stop's reason stays prose beside the command chip", async ({ page }) => 
   await page.screenshot({ path: "test-results/mention-stop-reason.png" });
 });
 
-test("an accepted stop says Stopping until the Workstation confirms it", async ({ page }) => {
+test("an accepted stop says Stopping until the Machine confirms it", async ({ page }) => {
   const chip = await openStopChip(page, "@claude:1:stop", [stopReceipt("accepted")], "stop-receipts-accepted");
   await expect(chip).toContainText("Stopping");
   await expect(chip.locator(".app-invocation-spinner")).toBeVisible();
   await expect(page.getByText("xMatrix is reading")).toHaveCount(0);
   await openChip(chip);
-  await expect(page.getByRole("dialog")).toContainText("Waiting for the Workstation to confirm the process has terminated.");
+  await expect(page.getByRole("dialog")).toContainText("Waiting for the Machine to confirm the process has terminated.");
 });
 
 /* After "Jev is reading", the parameters Jev chose enter the mention one per

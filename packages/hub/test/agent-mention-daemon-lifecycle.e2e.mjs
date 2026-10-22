@@ -550,7 +550,7 @@ test("a historical instance reborn mention reuses its durable session key after 
       if (confirmed?.phase === "confirmed") break;
       await sleep(25);
     }
-    assert.equal(confirmed?.phase, "confirmed", "the command's receipt is the Workstation confirmation");
+    assert.equal(confirmed?.phase, "confirmed", "the command's receipt is the Machine confirmation");
     const history = await json(await worker.fetch(
       `/api/channels/${encodeURIComponent(channelId)}/history?limit=50`,
       { headers: auth },

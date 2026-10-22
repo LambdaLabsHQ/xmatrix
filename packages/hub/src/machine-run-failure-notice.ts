@@ -109,9 +109,9 @@ export async function machineStopResultNoticeCommand(input: MachineStopResultNot
   const body = input.ok
     ? input.startupFailed
       ? `Startup failed for @${input.agentName}${onMachine(input)}. Cleanup confirmed no process remains. See the startup failure notice or invocation details for the cause.`
-      : `Stopped @${input.agentName}${onMachine(input)}. The Workstation confirmed the process tree is terminated.`
+      : `Stopped @${input.agentName}${onMachine(input)}. The Machine confirmed the process tree is terminated.`
     : [`Couldn't stop @${input.agentName}${onMachine(input)}.`, "",
-      publicMachineStartupFailure(input.detail)?.summary ?? "The Workstation reported the stop failed without an error.", "",
+      publicMachineStartupFailure(input.detail)?.summary ?? "The Machine reported the stop failed without an error.", "",
       "The process may still be running. Retry the stop."].join("\n");
   return {
     commandId: `machine-stop-result-notice:${digest}`.slice(0, 200),

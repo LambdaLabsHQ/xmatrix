@@ -40,7 +40,7 @@ export function parseAgentStopCommand(body: string): AgentStopCommand | undefine
 }
 
 /** What the stop chip can say. Accepting the request is not confirmation that
- * the process is gone; only the Workstation's stop receipt is. */
+ * the process is gone; only the Machine's stop receipt is. */
 export type AgentStopPhase = "accepted" | "confirmed" | "failed" | "unconfirmed";
 
 /** One Run a stop command fenced, projected for the mention it was written on. */
