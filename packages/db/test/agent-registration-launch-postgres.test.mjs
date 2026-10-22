@@ -49,7 +49,7 @@ integration("launch survives a hostname change with stale Workspace metadata and
       CREATE TABLE data.channel_access (channel_id text,space_id text,subject_kind text,subject_id text);
       CREATE TABLE data.messages (space_id text,channel_id text,message_id text,author_kind text,author_id text,
         body_hash text,entity_version bigint,invocation_input_version bigint,timeline_sequence bigint,
-        agent_invocation_targets_json jsonb,edited_at timestamptz,deleted_at timestamptz,recalled_at timestamptz,sent_at timestamptz);
+        agent_invocation_targets_json jsonb,edited_at timestamptz,deleted_at timestamptz,recalled_at timestamptz);
       CREATE TABLE data.delivery_cursors (space_id text,subject_id text,channel_id text,acknowledged_sequence bigint,
         version bigint,updated_at timestamptz,PRIMARY KEY (space_id,subject_id,channel_id));
       CREATE TABLE data.message_attention_revisions (space_id text,subject_id text,channel_id text,revision bigint,

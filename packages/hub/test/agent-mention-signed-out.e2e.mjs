@@ -8,7 +8,7 @@ import {
 const reporting = (capturedAt, login) => JSON.stringify({ schemaVersion: 1, capturedAt,
   items: [{ id: "codex", installed: true, probeStatus: "ok", version: "0.130.0", login }] });
 
-test("a summon only a signed-out agent could take is refused naming it, from its report or a refused turn its Instances have not spoken since", async () => {
+test("a summon only a signed-out agent could take is refused naming it, from its report or a refused turn", async () => {
   const userId = `signed-out-e2e-${randomUUID()}`;
   const worker = await startPgHubWorker({ vars: { XMATRIX_MOCK_AUTH_TOKEN: MOCK_TOKEN, XMATRIX_MOCK_AUTH_USER_ID: userId,
     XMATRIX_MOCK_AUTH_EMAIL: "signed-out-e2e@example.com", XMATRIX_MOCK_AUTH_NAME: "Signed Out E2E" } });
@@ -61,24 +61,8 @@ test("a summon only a signed-out agent could take is refused naming it, from its
     });
     assert.equal((await refusal(`${mention} again`)).rejections[0]?.code, "registration_harness_signed_out");
 
-    // The Instance's message in its name after it: Hub's turn-failure notice
-    // is not it speaking (still refused); its own reply is (another process of
-    // the program refreshed the sign-in), so the summon is routed again.
-    const instanceId = `${channelId}:9`;
-    const speak = (messageId) => inTestTransaction(tx => tx.query({ text: `INSERT INTO data.messages
-      SELECT (jsonb_populate_record(NULL::data.messages, to_jsonb(source) || jsonb_build_object(
-        'message_id',$2::text,'author_kind','agent','author_id',$3::text,
-        'timeline_sequence',(SELECT max(timeline_sequence)+1 FROM data.messages WHERE channel_id=$1),
-        'search_rank_sequence',$2::text,'source_family_sequence',NULL,
-        'created_at',now()+interval '1 second','updated_at',now()+interval '1 second','sent_at',now()+interval '1 second'))).*
-      FROM data.messages source WHERE channel_id=$1 AND author_kind='user' LIMIT 1`,
-    values: [channelId, messageId, instanceId] }));
-    await inTestTransaction(tx => tx.query({ text: `INSERT INTO data.instances
-      (instance_id,run_id,channel_id,channel_instance_id,status,version,created_at,updated_at)
-      VALUES ($1,$2,$3,9,'busy',1,now(),now())`, values: [instanceId, runId, channelId] }));
-    await speak(`turn-failure:${instanceId}:${channelId}:${randomUUID()}`);
-    assert.equal((await refusal(`${mention} still`)).rejections[0]?.code, "registration_harness_signed_out");
-    await speak(randomUUID());
+    // A report after it (as signing in from the card makes) answers it: the summon is routed again.
+    await report(new Date(Date.now() + 1_000).toISOString(), "signed_in");
     const routed = await refusal(`${mention} once more`);
     assert.deepEqual((routed.rejections ?? []).map(item => item.code), []);
     assert.equal(routed.launches.length, 1);
