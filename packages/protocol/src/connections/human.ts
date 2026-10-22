@@ -72,6 +72,8 @@ export interface HumanFocusChannelMessage {
  * The web client's heartbeat. The Hub answers this exact frame with
  * `HUMAN_HEARTBEAT_PONG` itself (a WebSocket auto-response) without waking the
  * Durable Object that holds the socket, so the web can probe often for free.
+ * The CLI's Agent Instance heartbeat sends the same frame: a Relay Runtime has
+ * one auto-response for all its sockets.
  * Both are compared byte for byte: never build them any other way.
  */
 export const HUMAN_HEARTBEAT_PING = '{"type":"ping","requestId":"web-heartbeat"}';

@@ -37,6 +37,12 @@ const HEARTBEAT_INTERVAL_MS: u64 = 60_000;
 const HEARTBEAT_RETRY_BASE_MS: u64 = 500;
 const HEARTBEAT_RETRY_MAX_MS: u64 = 4_000;
 const HEARTBEAT_TIMEOUT_MS: u64 = 90_000;
+/// The Relay Runtime answers this exact frame itself (its WebSocket
+/// auto-response, shared with the web's heartbeat) without waking the Durable
+/// Object that owns this socket. It must match the Hub's `HUMAN_HEARTBEAT_PING`
+/// byte for byte. Its answer carries no `ts`, so it never parses as a reply:
+/// like any server frame it only proves the socket, which is all this probe asks.
+const EDGE_HEARTBEAT_FRAME: &str = r#"{"type":"ping","requestId":"web-heartbeat"}"#;
 const TRACE_REAP_INTERVAL_MS: u64 = HEARTBEAT_INTERVAL_MS;
 const CONNECT_TIMEOUT_MS: u64 = 15_000;
 const REGISTER_RESPONSE_TIMEOUT_SECS: u64 = 20;
@@ -2875,12 +2881,7 @@ fn spawn_ping(
                 continue;
             }
 
-            let ping = AgentInstanceClientMessage::Ping {
-                request_id: Some(uuid::Uuid::new_v4().to_string()),
-            };
-            if let Ok(json) = serde_json::to_string(&ping)
-                && write_tx.try_send(json).is_err()
-            {
+            if write_tx.try_send(EDGE_HEARTBEAT_FRAME.to_string()).is_err() {
                 signals.disconnect(generation_id, &event_tx, "Write channel closed".into());
                 return;
             }
@@ -3221,6 +3222,37 @@ pub(crate) mod tests {
         commit.abort();
         assert!(commit.await.unwrap_err().is_cancelled());
         assert!(client.pending.lock().await.is_empty());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn the_idle_heartbeat_is_the_frame_the_relay_runtime_answers_itself() {
+        let (write_tx, mut frames) = tokio::sync::mpsc::channel::<String>(4);
+        let (event_tx, _events) = tokio::sync::mpsc::unbounded_channel();
+        let signals = super::ConnectionSignals {
+            generation: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(7)),
+            intentional_close: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            disconnect_notify: std::sync::Arc::new(tokio::sync::Notify::new()),
+            disconnect_generation: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0)),
+        };
+        let activity = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(super::now_ms()));
+        let ping = super::spawn_ping(write_tx, 7, activity, signals, event_tx);
+        tokio::time::advance(std::time::Duration::from_millis(
+            super::HEARTBEAT_INTERVAL_MS + 1,
+        ))
+        .await;
+        let frame = frames.recv().await.unwrap();
+        ping.abort();
+        // Any other frame wakes the Durable Object that owns this socket.
+        assert_eq!(frame, super::EDGE_HEARTBEAT_FRAME);
+        let hub = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../../protocol/src/connections/human.ts"),
+        )
+        .unwrap();
+        assert!(
+            hub.contains(&format!("HUMAN_HEARTBEAT_PING = '{frame}'")),
+            "the Hub must auto-answer exactly this frame"
+        );
     }
 
     #[tokio::test(start_paused = true)]

@@ -163,8 +163,9 @@ export class RelayRuntimeLive extends DurableObject<Env> {
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
-    // The web heartbeat is answered without waking this object (and without
-    // ending its hibernation), so the web can find a dead socket in seconds.
+    // The heartbeat of the web and of Agent Instances is answered without waking
+    // this object (and without ending its hibernation), so a dead socket is
+    // found in seconds and an idle one costs nothing.
     ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair(HUMAN_HEARTBEAT_PING, HUMAN_HEARTBEAT_PONG));
     const productFactory = relayRuntimeProductFactoryFromEnv(
       env,
