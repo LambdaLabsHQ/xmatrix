@@ -1,7 +1,7 @@
 import {
   DEFAULT_HUB_URL, HUB_ROUTES, PAGE_DOCUMENT_FRAGMENT, PAGE_MEDIA_OWNER_KIND, WEB_PROXY_ROUTES, normalizeHubUrl, pageMediaRefId,
   spaceVisibilityScope,
-  type AutomationTrigger, type PageAutomationAnchorChange, type PageAwareness, type PageBlame, type PageClaim, type PageConversation, type PageDocument,
+  type PageAutomationAnchorChange, type PageAwareness, type PageBlame, type PageClaim, type PageConversation, type PageDocument,
   type PageGitHubFile, type PageLinkAnchor,
   type PageLink, type PageRecentChange, type PageRevision, type PageRevisionMoment, type PageSummary, type PageTreeActivity, type PageTreeAgent,
   type SerializedAutomation,
@@ -155,18 +155,13 @@ export const pageApi = {
   automations: (spaceId: string, pageId: string, token: string, signal?: AbortSignal) =>
     xmatrixHubRead<{ automations: SerializedAutomation[] }>({ hubPath: hubPage(spaceId, pageId, "automations"),
       webUrl: `${WEB_PROXY_ROUTES.space_page(spaceId, pageId)}/automations`, token, signal }),
-  createAutomation: (spaceId: string, pageId: string, token: string, input: { name: string; instruction: string;
-    intervalMinutes: number; blockId: string; triggers?: AutomationTrigger[] }) =>
-    xmatrixApiRequest<{ automation: SerializedAutomation }>({
-      url: `${WEB_PROXY_ROUTES.space_page(spaceId, pageId)}/automations`, token, method: "POST", body: input }),
   changeAutomation: (spaceId: string, pageId: string, token: string, automation: SerializedAutomation,
-    action: "pause" | "resume" | "run" | "reference" | "delete", blockId?: string) =>
+    action: "pause" | "resume" | "run" | "delete") =>
     xmatrixApiRequest<{ automation?: SerializedAutomation }>({
       url: `${WEB_PROXY_ROUTES.space_page(spaceId, pageId)}/automations/${encodeURIComponent(automation.id)}${
         action === "delete" ? `?expectedVersion=${automation.version}` : `/${action}`}`,
       token, method: action === "delete" ? "DELETE" : "POST",
-      ...(action === "delete" ? {} : { body: action === "reference" ? { blockId: blockId ?? "" }
-        : { expectedVersion: automation.version } }) }),
+      ...(action === "delete" ? {} : { body: { expectedVersion: automation.version } }) }),
   link: (spaceId: string, token: string, input: { conversationId: string; pageId: string; blockId?: string;
     anchor?: PageLinkAnchor }) =>
     xmatrixApiRequest<{ link: PageLink }>({ url: WEB_PROXY_ROUTES.space_page_links(spaceId), token,

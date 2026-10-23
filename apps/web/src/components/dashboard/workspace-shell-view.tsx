@@ -1320,12 +1320,6 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
         { ...(firstMessage ? { firstMessage } : {}), ...(quote ? { quote } : {}),
           ...(open === false ? { open } : {}), ...(coWrite ? { coWrite } : {}), ...(planned ? { planned } : {}),
           ...(call ? { call } : {}) })}
-      onConnectGitHub={async (input) => {
-        // The repository's issues and pull requests arrive in a conversation linked to the page.
-        await startPageConversation({ spaceId: input.spaceId, pageId: input.pageId, blockId: input.blockId,
-          restricted: input.restricted, name: `GitHub · ${input.repository}` },
-        { open: false, firstMessage: `@github:subscribe:${input.repository} issues pulls` });
-      }}
       canMigrate={canMovePages}
       layout={isMobileViewport ? "phone" : "desktop"} />
   );

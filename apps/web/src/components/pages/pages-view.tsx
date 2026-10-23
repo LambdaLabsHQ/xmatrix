@@ -7,7 +7,7 @@ import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-quer
 import type { PageDocBlock } from "@xmatrix/protocol/page-document";
 import {
   faceOfSender, isLiveAgentStatus, pageAuthorColor, pageAuthorLabel,
-  type FaceOf, type SerializedAutomation, type ChannelSnapshot, type PageConversation, type PageLink, type SpaceMember,
+  type FaceOf, type ChannelSnapshot, type PageConversation, type PageLink, type SpaceMember,
 } from "@xmatrix/protocol";
 import {
   Check, Clock, Files, FileText, History, Lock, MessageSquare, Plus, Share2, Trash2, Undo2, X,
@@ -35,7 +35,6 @@ import type {
   CursorPresence, Discussion, HeadingActions, PageCompletion, PageReading, PageSectionActions, SectionNote,
   SuggestionControl,
 } from "./page-editor";
-import { PageAttached, type PageScheduleInput } from "./page-attached";
 import {
   ConversationList, DeletePageDialog, PageChangeMark, PageDialog, PageHistory, PagePens, PageScrollMarks, PresenceStack, ShareDialog, type PagePen, type PresentPerson, type PageScrollMark,
 } from "./page-chrome";
@@ -530,7 +529,6 @@ type PageDialogState =
   | "share"
   | "delete"
   | { kind: "conversations"; blockId: string | null }
-  | { kind: "attach"; blockId: string }
   | { kind: "write" }
   | { kind: "agent"; key: string };
 
@@ -538,7 +536,7 @@ const NO_MEMBERS: readonly SpaceMember[] = [];
 
 export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpenSection, onPageDeleted, conversation, activeConversationId = null,
   renderConversation, onConversationDockChange, onCloseConversation, onExpandConversation, onOpenConversation,
-  onConversationIntent, onDiscuss, onConnectGitHub, canMigrate, layout = "desktop", focusSection = null,
+  onConversationIntent, onDiscuss, canMigrate, layout = "desktop", focusSection = null,
   creation, members = NO_MEMBERS }: {
   spaceId: string | null;
   token: string;
@@ -571,9 +569,6 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     /** Hears the conversation's id as soon as it is known, before the Hub has made or linked it. */
     planned?: (conversationId: string) => void;
     call?: ConversationCall }) => Promise<unknown>;
-  /** Subscribes a conversation of its own, linked to a section, to a repository's issues and pull requests. */
-  onConnectGitHub?: (input: { spaceId: string; pageId: string; blockId: string; repository: string;
-    restricted: boolean }) => Promise<void>;
   /** A Space owner or admin may move the Space's Channels to pages. */
   canMigrate: boolean;
   /** On a phone a page is a pushed screen, like a conversation; the shell's back bar carries its title. */
@@ -1276,7 +1271,6 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     .then(() => links.refetch(), (cause: Error) => setNotice(cause.message));
   const copy = (text: string) => void navigator.clipboard.writeText(text)
     .then(() => setNotice("Link copied."), (cause: Error) => setNotice(cause.message));
-  const copyLink = (blockId: string) => copy(blockLink(blockId));
   // Co-writing with an Agent: a conversation of its own, linked to the page or a section, whose first
   // message calls the chosen runtime to infer what the page needs and write it. The page stays open,
   // and the Agent shows at the right edge beside the line it writes.
@@ -1324,9 +1318,6 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   // What a heading offers, beside it (§3.2).
   const headingActions: HeadingActions = {
     canEdit,
-    discuss: (blockId) => discuss(blockId),
-    copyLink,
-    attach: (blockId: string) => setDialog({ kind: "attach", blockId }),
     showConversations: (blockId) => setDialog({ kind: "conversations", blockId }),
     phone,
     ...(writers.favourite ? { write: { label: `Co-write with ${writers.favourite}`,
@@ -1382,17 +1373,6 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   const marginCards = withOpenConversation(conversations, openInMargin ? activeConversationId : null,
     activeConversationId ? conversation(activeConversationId)?.name ?? null : null);
   const liveCount = conversations.filter((item) => item.live).length;
-  // What runs on the page, and how people change it (§6).
-  const attachedProps = page ? {
-    automations: automations.data ?? [], canEdit,
-    onSchedule: (input: PageScheduleInput) => pageApi.createAutomation(spaceId, page.pageId, token, input)
-      .then(() => { void automations.refetch(); void links.refetch(); }),
-    onPutBack: (automation: SerializedAutomation, blockId: string) =>
-      pageApi.changeAutomation(spaceId, page.pageId, token, automation, "reference", blockId)
-        .then(() => void automations.refetch()),
-    ...(onConnectGitHub ? { onConnectGitHub: (input: { blockId: string; repository: string }) =>
-      onConnectGitHub({ spaceId, pageId: page.pageId, restricted, ...input }).then(() => void links.refetch()) } : {}),
-  } : null;
   const openConversation = (conversationId: string, at?: PageRevisionMoment) => {
     setDialog(null);
     onOpenConversation(conversationId, at ? { messageId: at.messageId, sequence: at.sequence } : undefined);
@@ -1406,7 +1386,6 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
       staleTime: Infinity,
     }),
   } : undefined;
-  const attachSection = dialog && typeof dialog === "object" && dialog.kind === "attach" ? dialog.blockId : null;
   // Where the document column, and the margin level with it, starts in the article's scrolled content.
   const columnTop = (): number | null => {
     const article = articleElement.current;
@@ -1820,13 +1799,6 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
             <ConversationList conversations={conversations} blocks={blocks} onOpen={openConversation}
               focusBlockId={listSection?.blockId ?? null}
               {...(canEdit ? { onResolve: (linkId: string) => void resolveDiscussion(linkId) } : {})} />
-          </PageDialog>
-          <PageDialog open={attachSection !== null} onClose={() => setDialog(null)} id="page-attach-title"
-            title={`Attach to ${blocks.find((block) => block.id === attachSection)?.title ?? page.title}`}>
-            {attachSection !== null && attachedProps && (
-              <PageAttached {...attachedProps} section={attachSection}
-                onAttached={() => setDialog(null)} />
-            )}
           </PageDialog>
         </>
       )}

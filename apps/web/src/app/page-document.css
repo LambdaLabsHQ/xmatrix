@@ -189,7 +189,7 @@
   color: var(--muted-foreground);
 }
 .page-section-talk:hover { color: var(--foreground); }
-/* What a heading offers, at the row's right edge while it is hovered or holds the cursor. */
+/* What a heading offers on a phone, at the row's right edge while its section holds the cursor. */
 .page-heading-tools {
   float: right;
   display: inline-flex;
@@ -215,10 +215,6 @@
   color: var(--muted-foreground);
 }
 .page-heading-tools button:hover { background: var(--accent); color: var(--foreground); }
-/* On a desktop they show only while the reader is there: hovering the heading, or typing in its section.
-   A page someone only reads, or watches others write, carries none. */
-.page-document :is(h1, h2, h3, h4, h5, h6):hover .page-heading-tools,
-.page-document.ProseMirror-focused .page-heading-current .page-heading-tools,
 .page-document .page-heading-current .page-heading-tools.is-phone,
 .page-heading-tools:focus-within { opacity: 1; pointer-events: auto; }
 /* On a phone the heading of the section the reader is in carries one quiet "⋯"; its menu names each action. */

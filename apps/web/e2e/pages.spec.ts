@@ -581,17 +581,16 @@ test.describe("on a phone", () => {
       "Write the first line here. @claude writes the next.", { timeout: 20_000 });
   });
 
-  test("a heading's actions are named in one menu, and Co-write starts on that section", async ({ page: browser }) => {
+  test("a heading's one action is named in a menu, and Co-write starts on that section", async ({ page: browser }) => {
     await stubCoWriting(browser, "status");
     await stubWriters(browser, ["claude"]);
     const editor = await openRelayOnPhone(browser, pageDocument(BODY));
     const status = editor.locator("h2", { hasText: "Status" });
     await status.click();
-    // No row of bare icons by the heading: one "⋯", whose menu names each action.
-    await expect(status.getByRole("button", { name: "Copy a link to this section" })).toHaveCount(0);
+    // No row of bare icons by the heading: one "⋯", whose menu names the action.
     await status.getByRole("button", { name: "Actions for Status" }).click();
     const menu = browser.getByRole("menu", { name: "Actions for Status" });
-    await expect(menu.getByRole("menuitem")).toHaveText(["Co-write with claude", "Discuss", "Copy link", "Schedule"]);
+    await expect(menu.getByRole("menuitem")).toHaveText(["Co-write with claude"]);
     await browser.screenshot({ path: test.info().outputPath("pages-heading-menu-phone.png") });
 
     await menu.getByRole("menuitem", { name: "Co-write with claude" }).click();
@@ -900,26 +899,17 @@ test("a page is typed like Typora: the caret's line shows its markers", async ({
       if (!marker) return null;
       const headingStyle = getComputedStyle(heading);
       const markerStyle = getComputedStyle(marker);
-      const text = Array.from(heading.childNodes).find((node) =>
-        node.nodeType === Node.TEXT_NODE && node.textContent?.includes("Lambda"));
-      const range = document.createRange();
-      if (text) range.selectNodeContents(text);
-      const textBox = text ? range.getBoundingClientRect() : null;
-      const tools = heading.querySelector(".page-heading-tools")?.getBoundingClientRect() ?? null;
-      const box = heading.getBoundingClientRect();
+      // Nothing but the heading's own content sits on its row: no tools beside a title.
+      const tools = heading.querySelectorAll(".page-heading-tools button").length;
       return {
         sameSize: markerStyle.fontSize === headingStyle.fontSize,
         sameFamily: markerStyle.fontFamily === headingStyle.fontFamily,
-        toolsClearOfTitle: tools && textBox ? tools.left - textBox.right : null,
-        toolsAtEnd: tools ? box.right - tools.right : null,
-        sameLine: tools && textBox ? Math.abs(tools.top - textBox.top) < 24 : false,
+        tools,
       };
     });
     expect(markerFit?.sameSize, `the # uses the heading's size at ${width}`).toBe(true);
     expect(markerFit?.sameFamily, `the # uses the heading's font at ${width}`).toBe(true);
-    expect(markerFit?.sameLine, `section actions stay on the title's row at ${width}`).toBe(true);
-    expect(markerFit?.toolsClearOfTitle ?? 0, `section actions sit clear of the title at ${width}`).toBeGreaterThan(16);
-    expect(markerFit?.toolsAtEnd ?? 99, `section actions sit at the row's right edge at ${width}`).toBeLessThan(8);
+    if (width === 1280) expect(markerFit?.tools, "a desktop heading carries no tools").toBe(0);
     if (width === 1280) await expect(browser.getByTestId("page-title"), "the heading already is the title").toHaveCount(0);
   }
   await expect(editor).not.toContainText("|---|");
@@ -1314,7 +1304,7 @@ test("selecting a passage opens a comment box beside it in the margin; sent, the
   await expect.poll(async () => fixtureRequestBodies(browser, "link-resolve")).toEqual([{ resolved: true }]);
 });
 
-test("a page's Automations are chips in their sections, listed from its menu and attached from a heading", async ({ page: browser }) => {
+test("a page's Automations are chips in their sections", async ({ page: browser }) => {
   const nextRunAt = new Date(Date.now() + 3 * 3_600_000).toISOString();
   const release = { id: "auto-release", version: 1, ownerUserId: "e2e-user", authorityRootUserId: "e2e-user",
     name: "Release check", channelId: E2E_CHANNEL.id, pageId: "p-relay", spaceId: E2E_SPACE.id, blockId: "status",
@@ -1324,58 +1314,23 @@ test("a page's Automations are chips in their sections, listed from its menu and
     message: { body: "check the release" }, intervalMinutes: 1440, enabled: true,
     triggers: [{ kind: "merged", repository: "acme/widgets", installationId: "1" }],
     createdAt: NOW, updatedAt: NOW, nextRunAt, runCount: 0, deliveryCount: 0 };
-  const detached = { ...release, id: "auto-sweep", name: "Old sweep", blockId: undefined, enabled: false,
-    detachedAt: NOW, capabilities: { ...release.capabilities, pause: false } };
   await stubPages(browser, [page("p-relay", null, "Relay", "V")]);
   await fixtureJson(browser, "page-links", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\?.*$/u, { links: [] });
-  const automations = /\/api\/xmatrix\/spaces\/[^/]+\/pages\/p-relay\/automations$/u;
-  await fixtureJson(browser, "page-automations", automations, { automations: [release, detached] }, { method: "GET" });
-  await fixtureJson(browser, "automation-create", automations, { automation: { ...release, id: "auto-weekly" } },
-    { method: "POST" });
-  await fixtureJson(browser, "automation-reference", /\/automations\/auto-sweep\/reference$/u,
-    { automation: { ...detached, detachedAt: undefined, enabled: true, blockId: "notes" } }, { method: "POST" });
+  await fixtureJson(browser, "page-automations", /\/api\/xmatrix\/spaces\/[^/]+\/pages\/p-relay\/automations$/u,
+    { automations: [release] }, { method: "GET" });
   const editor = await openLivePage(browser,
     "# Relay\n\n## Status\n\nIn progress\n\n[Release check](xmatrix:automation/auto-release)\n\n## Notes\n\nnone\n");
   // The reference reads as a chip whose state comes from the Automation, not from the page's text.
   await expect(editor.locator(".page-automation-chip")).toHaveText("Release check");
   await expect(editor.locator(".page-automation-status")).toHaveText("daily · next in 3 h");
   await browser.screenshot({ path: test.info().outputPath("pages-automation-chip.png") });
-
-  // There is no page-wide list: a running one is its chip, and a detached one is put back from a heading.
+  // There is no page-wide list, and a heading offers nothing to attach: a running one is its chip.
   await expect(browser.getByTestId("pages-view").getByRole("button", { name: "Page menu" })).toHaveCount(0);
   const notes = editor.locator("h2", { hasText: "Notes" });
   await notes.hover();
-  await notes.getByRole("button", { name: "Attach a schedule or a repository to this section" }).click();
-  const putBack = browser.getByRole("dialog", { name: "Attach to Notes" }).getByTestId("page-attached");
-  await expect(putBack.getByTestId("page-automation")).toHaveCount(1);
-  await expect(putBack).toContainText("Old sweep");
-  await expect(putBack).toContainText("paused, its reference left the page");
-  await putBack.getByRole("button", { name: "Put back here" }).click();
-  await expect.poll(async () => fixtureRequestBodies(browser, "automation-reference")).toEqual([{ blockId: "notes" }]);
-  await expect(browser.getByRole("dialog", { name: "Attach to Notes" })).toBeHidden();
-
-  // Attaching starts from the section it is for.
-  await notes.hover();
-  await notes.getByRole("button", { name: "Attach a schedule or a repository to this section" }).click();
-  const attach = browser.getByRole("dialog", { name: "Attach to Notes" });
-  const attached = attach.getByTestId("page-attached");
-  await attached.getByRole("button", { name: "Schedule" }).click();
-  await expect(attached.getByRole("combobox", { name: "Section" }), "the heading already said where").toHaveCount(0);
-  await attached.getByLabel("Name").fill("Weekly review");
-  await attached.getByLabel("What to do each time").fill("@auto review the notes and update them");
-  await attached.getByRole("combobox", { name: "How often" }).click();
-  await browser.getByRole("option", { name: "Weekly" }).click();
-  await attached.getByRole("combobox", { name: "Also run" }).click();
-  await browser.getByRole("option", { name: "Also when a pull request merges" }).click();
-  await attached.getByLabel("Repository to watch").fill("acme/widgets");
-  await attached.getByRole("button", { name: "Schedule", exact: true }).click();
-  await expect.poll(async () => (await fixtureRequestBodies(browser, "automation-create"))[0]).toEqual({
-    name: "Weekly review", instruction: "@auto review the notes and update them", intervalMinutes: 10080,
-    blockId: "notes", triggers: [{ kind: "merged", repository: "acme/widgets" }] });
-  // The page stays open: what was scheduled works in its own conversation.
-  await expect(attach).toBeHidden();
-  await expect(browser.getByTestId("pages-view")).toBeVisible();
+  await expect(notes.getByRole("button")).toHaveCount(0);
 });
+
 
 test("a page's conversations sit beside what they are about, and one opens there among the others", async ({ page: browser }) => {
   await browser.setViewportSize({ width: 1600, height: 900 });

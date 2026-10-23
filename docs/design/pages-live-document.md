@@ -247,11 +247,11 @@ fact is about.
   freshness mark (§5.4). Who has taken a section is the Agents' to know
   (`page read`) and is not drawn for people, and a person neither claims nor
   releases (decided 2026-10-19: coordination is lock-free, and what an Agent
-  intends is felt only through what it writes). Hovering a heading, or
-  editing in its section, offers Discuss, Copy link and Attach at the
-  heading's right edge (§6). A phone has no hover:
-  the heading of the section the reader is in carries one ⋯ whose menu names
-  each action, *Co-write with ‹Agent›* first.
+  intends is felt only through what it writes). A heading carries no row of
+  tools (removed 2026-10-23 at Daniel's request): discussion starts from a
+  selection (§4.2), and Automations are written into the section (§6.1). On
+  a phone the heading of the section the reader is in carries one ⋯ whose
+  menu offers *Co-write with ‹Agent›*.
 - **No change log in the text.** As in Google Docs, who changed a section
   and when is not written under it. History says who changed each part,
   when and in which conversation (parent §4.2).
@@ -616,8 +616,7 @@ or joining one never leaves the page.
   discussions and sunk conversations; open discussions resolve from it too.
 - **Starting one.** A comment on a selection (§4.2) creates the conversation
   already linked there with the comment as its first message, and the page
-  stays in front of the reader; *Discuss* on a heading creates it and opens
-  it beside the page with its composer focused.
+  stays in front of the reader.
 - **Narrow windows** have no margin: when the page has no room for a full
   document column beside it, passages stay highlighted with a bubble and
   headings count their conversations and mark the Agents working in them
@@ -756,9 +755,8 @@ section it keeps true, and it is written there:
   read` lists it under `live:` like every live reference.
 - **Deleting the reference pauses the Automation** (reason `detached`); it is
   not deleted. Putting the reference back, by undo or by restoring a
-  revision, resumes one that was paused only for that reason. A heading's
-  *Attach* offers the page's detached Automations with *Put back here*; the
-  Space's Schedules list every Automation, with *Delete*. The edit says so
+  revision, resumes one that was paused only for that reason. The Space's
+  Schedules list every Automation, with *Delete*. The edit says so
   when it happens: its result names each Automation it detached or resumed
   and each top section it removed, `page edit` prints a line for each, and
   people on the page see a notice. A resumed Automation that never ran gets
@@ -961,8 +959,8 @@ There is no side panel. What its tabs held is shown where it acts:
 |---|---|
 | Now: presence, claims, running Agents | Header avatars, cursors, and each heading's avatars and claim flag (§3.2) |
 | Discussions | Cards beside their passages and the conversation list (§4.4) |
-| Attached: Automations | Chips in the section they keep true (§6.1); *Attach* on a heading adds one or puts a detached one back; the Space's Schedules list them all |
-| Attached: connectors | A conversation linked to its section, a card like any other; *Attach* on the heading adds one |
+| Attached: Automations | Chips in the section they keep true (§6.1), written there by an Agent; the Space's Schedules list them all |
+| Attached: connectors | A conversation linked to its section, a card like any other |
 | History | A mode of the page: the margin lists revisions, and the document shows the chosen one's changes colored by author, with restore |
 | Settings: publishing, suggestion mode | The Share dialog from the header |
 | Settings: project governance | Open participation on the Space in Team; the governance page in Share ("Space rules": only owners and admins edit it, every Agent follows it), both for Space owners and admins |

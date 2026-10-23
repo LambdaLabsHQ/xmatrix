@@ -506,9 +506,6 @@ export interface SectionNote {
 /** What a heading offers when it is hovered or holds the cursor (§3.2). */
 export interface HeadingActions {
   canEdit: boolean;
-  discuss?: (blockId: string) => void;
-  copyLink?: (blockId: string) => void;
-  attach?: (blockId: string) => void;
   /** Lists the section's conversations, the quiet ones too. */
   showConversations?: (blockId: string) => void;
   /** On a phone the tools open from one "⋯" as a menu of named actions. */
@@ -521,11 +518,7 @@ export const sectionsKey = new PluginKey<{ notes: Map<string, SectionNote>; deco
 
 // Lucide's icons, drawn here because widgets are plain DOM.
 const ICONS = {
-  discuss: '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>',
-  link: '<path d="M9 17H7A5 5 0 0 1 7 7h2"/><path d="M15 7h2a5 5 0 1 1 0 10h-2"/><line x1="8" x2="16" y1="12" y2="12"/>',
   flag: '<path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" x2="4" y1="22" y2="15"/>',
-  schedule: '<path d="M16 14v2.2l1.6 1"/><path d="M16 2v4"/><path d="M21 7.5V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h3.5"/>'
-    + '<path d="M3 10h5"/><path d="M8 2v4"/><circle cx="16" cy="16" r="6"/>',
   talk: '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>',
   more: '<circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/>',
 } as const;
@@ -555,13 +548,10 @@ const unmountAgents = new WeakMap<Element, () => void>();
 const unmountMenus = new WeakMap<Element, () => void>();
 
 /** A phone's heading tools: one "⋯" that opens them as a menu of named actions. */
-function phoneHeadingTools(tools: HTMLElement, blockId: string, title: string, current: HeadingActions): HTMLElement {
+function phoneHeadingTools(tools: HTMLElement, blockId: string, title: string,
+  write: NonNullable<HeadingActions["write"]>): HTMLElement {
   tools.classList.add("is-phone");
-  const menu: HeadingMenu = {};
-  if (current.canEdit && current.write) menu.write = { label: current.write.label, run: () => current.write!.run(blockId) };
-  if (current.discuss) menu.discuss = () => current.discuss!(blockId);
-  if (current.copyLink) menu.copyLink = () => current.copyLink!(blockId);
-  if (current.canEdit && current.attach) menu.attach = () => current.attach!(blockId);
+  const menu: HeadingMenu = { write: { label: write.label, run: () => write.run(blockId) } };
   const holder = document.createElement("span");
   const close = () => {
     unmountMenus.get(holder)?.();
@@ -625,12 +615,8 @@ function sectionDecorations(doc: DocNode, notes: Map<string, SectionNote>,
       const tools = document.createElement("span");
       tools.className = "page-heading-tools";
       tools.contentEditable = "false";
-      if (current.phone) return phoneHeadingTools(tools, block.id, block.title, current);
-      if (current.discuss) tools.append(control("", "Discuss this section", () => current.discuss!(block.id), icon("discuss")));
-      if (current.copyLink) tools.append(control("", "Copy a link to this section", () => current.copyLink!(block.id), icon("link")));
-      if (current.canEdit && current.attach) {
-        tools.append(control("", "Attach a schedule or a repository to this section", () => current.attach!(block.id),
-          icon("schedule")));
+      if (current.phone && current.canEdit && current.write) {
+        return phoneHeadingTools(tools, block.id, block.title, current.write);
       }
       return tools;
     }, { side: 2, ignoreSelection: true,
