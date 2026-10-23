@@ -1,5 +1,11 @@
 # Release Updates
 
+Hub releases apply and read back an exact-host `/mcp` Browser Integrity Check
+exception with the existing protected deployment credential, then require an
+anonymous Python-style client to reach the Hub's 401 OAuth challenge. Other
+security products and paths remain protected. Creation, retry and retirement
+are documented in [MCP edge compatibility](design/mcp-server.md#cloudflare-edge-compatibility).
+
 Exact-tag PostgreSQL expand migrations support bounded concurrent index builds
 with durable, checksum-bound name reservations and the existing migration
 ledger. Interrupted builds recover only their own indexes; unknown names and

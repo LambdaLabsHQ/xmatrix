@@ -523,6 +523,12 @@ jobs:
           --delay-ms 5000
           --expected-sha "$XMATRIX_DEPLOY_SHA"
 
+      - name: Apply and verify the tagged MCP edge policy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: node scripts/mcp-edge-policy.mjs
+
       - name: Verify HTTP redirects to HTTPS
         run: node scripts/https-postdeploy-smoke.mjs "$XMATRIX_HUB_ORIGIN"
 
