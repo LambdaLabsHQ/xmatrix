@@ -64,7 +64,7 @@ test("scheduled failures send exactly one event with task and database evidence"
     const harness = events.filter(value => value.tags.operation === "scheduled: Harness release watch")
       .map(value => JSON.parse(value.extra.harness_release_watch_failure))
       .sort((a, b) => a.phase.localeCompare(b.phase));
-    assert.deepEqual(harness.map(({ durationMs, ...evidence }) => evidence), [
+    assert.deepEqual(harness.map(({ durationMs: _durationMs, ...evidence }) => evidence), [
       { phase: "response_body", responseStatus: 200, retryable: false, overloaded: true },
       { phase: "runtime_fetch", responseStatus: 0, retryable: true, overloaded: false },
     ]);
