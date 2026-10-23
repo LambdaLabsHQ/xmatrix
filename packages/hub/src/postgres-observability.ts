@@ -58,6 +58,7 @@ const TRANSIENT_ERROR_CODES = new Set([
   "CONNECTION_UNUSABLE",
   "CONNECT_TIMEOUT",
   "DATABASE_CONTRACT_ERROR",
+  "DATABASE_CIRCUIT_OPEN",
 ]);
 const AGENT_LAUNCH_STAGES = new Set([
   "message_commit_to_interpret", "launch_resolve", "launch_prepare", "directory_publish",
@@ -211,9 +212,16 @@ export function recordPostgresQueryObservation(
       QUERY_NAME.test(input.queryName) ? input.queryName : "other",
       kept.reason,
       operationName(input.operation),
+      ...(input.connectivity ? [
+        input.connectivity.state === "open" || input.connectivity.state === "half_open" ? input.connectivity.state : "other",
+        safeErrorCode(input.connectivity.failureCode), operationName(input.connectivity.failureOperation),
+        QUERY_NAME.test(input.connectivity.failureQuery) ? input.connectivity.failureQuery : "other",
+      ] : []),
     ],
     doubles: [
       safeDuration(input.durationMs), safeRowCount(input.rowCount), input.slow ? 1 : 0, kept.weight,
+      ...(input.connectivity ? [safeDuration(input.connectivity.retryAfterMs),
+        safeDuration(input.connectivity.failureAgeMs), safeRowCount(input.connectivity.failureCount)] : []),
     ],
   });
 }

@@ -85,6 +85,30 @@ test("client read deadlines remain distinguishable from server SQLSTATE timeouts
   assert.deepEqual(written.map((point) => point.blobs[5]), ["QUERY_READ_TIMEOUT", "57014"]);
 });
 
+// The existing timeout test cannot catch an open breaker being collapsed to DATABASE_ERROR,
+// or a refusal losing the failure that opened it. Exercise the persisted privacy boundary.
+test("breaker refusals retain their operation and bounded opening-failure diagnostics", () => {
+  const { env, written } = sink();
+  const point = { requestId: "private", operation: "app.sentry-event.claim",
+    queryName: "database_phase_pool_checkout_v1", shardId: "shard-0",
+    durationMs: 0, rowCount: 0, outcome: "error", slow: false, errorCode: "database_circuit_open",
+    connectivity: { state: "half_open", failureCode: "QUERY_READ_TIMEOUT",
+      failureOperation: "app.googlechat.cleanup", failureQuery: "database_phase_begin_v1",
+      failureCount: 5, failureAgeMs: 6_000, retryAfterMs: 1_000 } };
+  recordPostgresQueryObservation(env, point);
+  assert.equal(written[0].blobs[5], "DATABASE_CIRCUIT_OPEN");
+  assert.equal(written[0].blobs[10], "app.sentry-event.claim");
+  assert.deepEqual(written[0].blobs.slice(11), ["half_open", "QUERY_READ_TIMEOUT",
+    "app.googlechat.cleanup", "database_phase_begin_v1"]);
+  assert.deepEqual(written[0].doubles, [0, 0, 0, 1, 1_000, 6_000, 5]);
+  recordPostgresQueryObservation(env, { ...point, connectivity: {
+    state: "private", failureCode: "password=secret", failureOperation: "private@example.com",
+    failureQuery: "SELECT password", failureCount: -1, failureAgeMs: NaN, retryAfterMs: Infinity } });
+  assert.deepEqual(written[1].blobs.slice(11), ["other", "DATABASE_ERROR", "other", "other"]);
+  assert.deepEqual(written[1].doubles.slice(4), [0, 0, 0]);
+  assert.equal(JSON.stringify(written).includes("private"), false);
+});
+
 test("hot-path operations retain bounded stage, transaction phase, and SQLSTATE", () => {
   const { env, written } = sink();
   const cases = [

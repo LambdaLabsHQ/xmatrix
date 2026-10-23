@@ -73,8 +73,10 @@ test("an open breaker fails new sessions before any connection is attempted", as
   const time = clock();
   const breaker = new ConnectivityBreaker("shard-0", time.now);
   let connects = 0;
+  const observations = [];
   const database = createAuthorityDatabase({
     connectionString: "postgres://example.invalid/db", shardId: "shard-0", connectivityBreaker: breaker,
+    observer: point => observations.push(point),
     clientFactory: () => ({
       async connect() {
         connects += 1;
@@ -87,10 +89,23 @@ test("an open breaker fails new sessions before any connection is attempted", as
     }),
   });
   const context = { requestId: "request-1", operation: "message.append" };
-  const run = () => database.transaction(context, async () => "unreachable");
+  const run = (operation = context.operation) => database.transaction({ ...context, operation }, async () => "unreachable");
 
-  for (let index = 0; index < 5; index++) await assert.rejects(run(), { code: "ETIMEDOUT" });
+  for (let index = 0; index < 5; index++) await assert.rejects(run("app.googlechat.cleanup"), { code: "ETIMEDOUT" });
   assert.equal(connects, 5);
   await assert.rejects(run(), (error) => error instanceof DatabaseCircuitOpenError && error.retryAfterMs === 5_000);
   assert.equal(connects, 5, "the open breaker refused without connecting");
+  assert.equal(observations.at(-1).operation, "message.append");
+  assert.equal(observations.at(-1).errorCode, "database_circuit_open");
+  assert.deepEqual(observations.at(-1).connectivity, {
+    state: "open", failureCode: "ETIMEDOUT", failureOperation: "app.googlechat.cleanup",
+    failureQuery: "database_phase_pool_checkout_v1", failureCount: 5, failureAgeMs: 0, retryAfterMs: 5_000,
+  });
+  time.advance(5_000);
+  breaker.admit(); // A probe is in flight; the next request must distinguish that from cooldown.
+  await assert.rejects(run(), DatabaseCircuitOpenError);
+  assert.deepEqual(observations.at(-1).connectivity, {
+    state: "half_open", failureCode: "ETIMEDOUT", failureOperation: "app.googlechat.cleanup",
+    failureQuery: "database_phase_pool_checkout_v1", failureCount: 5, failureAgeMs: 5_000, retryAfterMs: 1_000,
+  });
 });

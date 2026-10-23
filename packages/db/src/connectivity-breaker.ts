@@ -29,12 +29,24 @@ const PROBE_IN_FLIGHT_RETRY_MS = 1_000;
 /** Shards tracked per isolate; the oldest entry is forgotten beyond this. */
 const MAX_TRACKED_SHARDS = 64;
 
+/** Snapshot at refusal; no request ids, SQL, values or connection strings. */
+export interface ConnectivityRejection {
+  state: "open" | "half_open";
+  failureCode: string;
+  failureOperation: string;
+  failureQuery: string;
+  failureCount: number;
+  failureAgeMs: number;
+  retryAfterMs: number;
+}
+
 /** No PostgreSQL work was attempted: the shard's breaker is open. Always safe to replay. */
 export class DatabaseCircuitOpenError extends Error {
   readonly code = "database_circuit_open";
   readonly retryable = true;
 
-  constructor(readonly shardId: string, readonly retryAfterMs: number) {
+  constructor(readonly shardId: string, readonly retryAfterMs: number,
+    readonly connectivity?: ConnectivityRejection) {
     super("PostgreSQL shard is temporarily unavailable");
     this.name = "DatabaseCircuitOpenError";
   }
@@ -70,6 +82,8 @@ type BreakerState =
 export class ConnectivityBreaker {
   private state: BreakerState = { kind: "closed", failures: 0, streakStartedAt: 0 };
   private opens = 0;
+  private failureCount = 0;
+  private lastFailure: { code: string; operation: string; queryName: string; at: number } | null = null;
 
   constructor(
     readonly shardId: string,
@@ -92,20 +106,25 @@ export class ConnectivityBreaker {
   /** A statement completed on this shard: the path works. */
   success(): void {
     this.opens = 0;
+    this.failureCount = 0;
+    this.lastFailure = null;
     this.state = { kind: "closed", failures: 0, streakStartedAt: 0 };
   }
 
   /** A session met a connectivity failure (see `connectivityFailureCode`). */
-  failure(): void {
+  failure(code = "unknown", operation = "unknown", queryName = "unknown"): void {
     const now = this.now();
     const state = this.state;
     if (state.kind === "open") return;
+    this.lastFailure = { code, operation, queryName, at: now };
     if (state.kind === "half_open") {
+      this.failureCount += 1;
       this.open(now);
       return;
     }
     const fresh = state.failures === 0 || now - state.streakStartedAt > CONNECTIVITY_FAILURE_WINDOW_MS;
     const failures = fresh ? 1 : state.failures + 1;
+    this.failureCount = failures;
     const streakStartedAt = fresh ? now : state.streakStartedAt;
     if (failures >= CONNECTIVITY_FAILURE_THRESHOLD) this.open(now);
     else this.state = { kind: "closed", failures, streakStartedAt };
@@ -123,7 +142,14 @@ export class ConnectivityBreaker {
   }
 
   private rejection(retryAfterMs: number): DatabaseCircuitOpenError {
-    return new DatabaseCircuitOpenError(this.shardId, Math.max(1, Math.ceil(retryAfterMs)));
+    const retry = Math.max(1, Math.ceil(retryAfterMs));
+    const last = this.lastFailure;
+    return new DatabaseCircuitOpenError(this.shardId, retry, {
+      state: this.state.kind === "half_open" ? "half_open" : "open",
+      failureCode: last?.code ?? "unknown", failureOperation: last?.operation ?? "unknown",
+      failureQuery: last?.queryName ?? "unknown", failureCount: this.failureCount,
+      failureAgeMs: last ? Math.max(0, this.now() - last.at) : 0, retryAfterMs: retry,
+    });
   }
 }
 
@@ -163,10 +189,10 @@ export class SessionConnectivity {
     this.breaker.success();
   }
 
-  failed(code: string): void {
+  failed(code: string, operation: string, queryName: string): void {
     if (this.settled || !connectivityFailureCode(code)) return;
     this.settled = true;
-    this.breaker.failure();
+    this.breaker.failure(code, operation, queryName);
   }
 
   close(): void {

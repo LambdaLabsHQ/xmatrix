@@ -13,7 +13,7 @@ import type {
   DatabaseTransaction,
 } from "./contracts.js";
 import { databaseRequestContext, type DatabaseRequestContext } from "./context.js";
-import { SessionConnectivity, shardConnectivityBreaker, type ConnectivityBreaker } from "./connectivity-breaker.js";
+import { DatabaseCircuitOpenError, SessionConnectivity, shardConnectivityBreaker, type ConnectivityBreaker } from "./connectivity-breaker.js";
 import {
   DatabaseCommitUnknownError,
   DatabaseContractError,
@@ -295,9 +295,9 @@ class SessionStats {
     this.totals.sqlMaxMs = Math.max(this.totals.sqlMaxMs, durationMs);
   }
 
-  fail(code: string): void {
+  fail(code: string, operation: string, queryName: string): void {
     this.errorCode ??= code;
-    this.connectivity.failed(code);
+    this.connectivity.failed(code, operation, queryName);
   }
 
   observation(shardId: string, endedAt: number): DatabaseSessionObservation {
@@ -332,7 +332,7 @@ class PgDatabaseTransaction implements DatabaseTransaction {
       this.stats.query(durationMs, result.rows.length);
       this.stats.connectivity.reached();
       if (result.rows.length > query.maxRows) {
-        this.stats.fail("database_row_limit_exceeded");
+        this.stats.fail("database_row_limit_exceeded", this.context.operation, query.name);
         observe(this.options.observer, this.observation(
           query.name,
           durationMs,
@@ -353,7 +353,7 @@ class PgDatabaseTransaction implements DatabaseTransaction {
       if (!(error instanceof DatabaseRowLimitError)) {
         const durationMs = performance.now() - startedAt;
         this.stats.query(durationMs, 0);
-        this.stats.fail(errorCode(error));
+        this.stats.fail(errorCode(error), this.context.operation, query.name);
         observe(this.options.observer, this.observation(
           query.name,
           durationMs,
@@ -633,7 +633,7 @@ function observePhase(
 ): void {
   const durationMs = performance.now() - startedAt;
   stats.phase(phase, durationMs);
-  if (error) stats.fail(errorCode(error));
+  if (error) stats.fail(errorCode(error), context.operation, `database_phase_${phase}_v1`);
   // A checkout through a reachable Hyperdrive can still stall on the origin,
   // so only a completed statement, never the checkout, closes the breaker.
   else if (phase !== "pool_checkout") stats.connectivity.reached();
@@ -647,6 +647,7 @@ function observePhase(
     outcome: error ? "error" : "ok",
     slow: durationMs >= options.slowQueryMs,
     ...(error ? { errorCode: errorCode(error) } : {}),
+    ...(error instanceof DatabaseCircuitOpenError && error.connectivity ? { connectivity: error.connectivity } : {}),
   });
 }
 
