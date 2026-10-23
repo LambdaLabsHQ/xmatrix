@@ -4,14 +4,14 @@
  */
 .page-document {
   font-size: 15px;
-  line-height: 1.65;
+  line-height: 1.75;
   color: var(--foreground);
   outline: none;
   white-space: pre-wrap;
   word-wrap: break-word;
   padding-bottom: 48px;
 }
-.page-document > * + * { margin-top: 0.75em; }
+.page-document > * + * { margin-top: 16px; }
 .page-document h1 { font-size: 1.75em; font-weight: 800; line-height: 1.3; margin-top: 1.2em; }
 .page-document h2 { font-size: 1.35em; font-weight: 750; line-height: 1.35; margin-top: 1.1em; }
 .page-document h3 { font-size: 1.12em; font-weight: 700; margin-top: 1em; }
@@ -41,7 +41,7 @@
 .page-document blockquote { border-left: 3px solid var(--border); padding-left: 1em; color: var(--muted-foreground); }
 .page-document ul { list-style: disc; padding-left: 1.5em; }
 .page-document ol { list-style: decimal; padding-left: 1.5em; }
-.page-document li + li { margin-top: 0.15em; }
+.page-document li + li { margin-top: 8px; }
 .page-document li.page-task { list-style: none; margin-left: -1.5em; display: flex; gap: 0.5em; align-items: flex-start; }
 .page-document li.page-task > input { margin-top: 0.4em; width: 1em; height: 1em; accent-color: var(--primary); cursor: pointer; }
 .page-document li.page-task > div { flex: 1; min-width: 0; }
@@ -75,7 +75,7 @@
 }
 .page-document .page-media.ProseMirror-selectednode { outline: 2px solid var(--primary); outline-offset: 2px; }
 .page-document table { border-collapse: collapse; width: 100%; table-layout: fixed; font-size: 0.95em; }
-.page-document th, .page-document td { border: 1px solid var(--border); padding: 0.35em 0.6em; vertical-align: top; }
+.page-document th, .page-document td { border: 1px solid var(--border); padding: 8px 0.6em; vertical-align: top; }
 .page-document th { background: var(--muted); font-weight: 650; text-align: left; }
 .page-document .selectedCell { background: color-mix(in oklab, var(--primary) 12%, transparent); }
 /* Typora markers: the line's own type, muted, so a heading's # is the heading's size. */
@@ -125,14 +125,14 @@
    gutters, wrapped list items with air between them, and headings that sit
    closer to their own section than to the one above. */
 @media (max-width: 767px) {
-  .page-document { font-size: 16px; line-height: 1.65; }
-  .page-document > * + * { margin-top: 0.8em; }
+  .page-document { font-size: 16px; line-height: 1.75; }
+  .page-document > * + * { margin-top: 16px; }
   .page-document :is(h1, h2, h3, h4, h5, h6) + * { margin-top: 0.4em; }
   .page-document h1 { font-size: 1.6em; margin-top: 1.4em; }
   .page-document h2 { font-size: 1.3em; margin-top: 1.6em; }
   .page-document h3 { margin-top: 1.4em; }
   .page-document :is(ul, ol) { padding-left: 1.3em; }
-  .page-document li + li { margin-top: 0.45em; }
+  .page-document li + li { margin-top: 8px; }
   .page-document li.page-task { margin-left: -1.3em; }
   .page-document blockquote { padding-left: 0.75em; }
 }
@@ -572,7 +572,7 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-comm
 .page-github-file-open:hover { color: var(--foreground); }
 .page-github-file-body { max-height: 32rem; overflow: hidden; padding: 1em 0 0; }
 /* Body text keeps the page's reading size; file headings sit below the page's. */
-.page-github-file-doc > * + * { margin-top: 0.75em; }
+.page-github-file-doc > * + * { margin-top: 16px; }
 .page-document .page-github-file-doc > :first-child { margin-top: 0; }
 .page-document .page-github-file-doc h1 { font-size: 1.3em; margin-top: 0.9em; }
 .page-document .page-github-file-doc h2 { font-size: 1.15em; margin-top: 0.9em; }
