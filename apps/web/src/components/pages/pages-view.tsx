@@ -10,7 +10,7 @@ import {
   type FaceOf, type ChannelSnapshot, type PageConversation, type PageLink, type SpaceMember,
 } from "@xmatrix/protocol";
 import {
-  Check, Clock, Files, FileText, History, Lock, MessageSquare, Plus, Share2, Trash2, Undo2, X,
+  Check, Clock, Files, FileText, History, Lock, MessageSquare, Plus, Share, Trash2, Undo2, X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { noticeClass } from "@/components/ui/status-tone";
@@ -1598,7 +1598,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
             {unseen && <span className="absolute right-1 top-1 size-1.5 rounded-full bg-primary" data-testid="page-history-new" />}
           </Button>
           <Button variant="ghost" size="sm" onClick={() => setDialog("share")}>
-            <Share2 /> Share
+            <Share /> Share
           </Button>
           {canEdit && (
             <Button variant="ghost" size="sm" title="Delete page" aria-label="Delete page"

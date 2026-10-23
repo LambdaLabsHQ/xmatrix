@@ -89,7 +89,6 @@ import {
   Plus,
   Settings,
   Share,
-  Share2,
   Shield,
   Star,
   Trash2,
@@ -1044,7 +1043,7 @@ export function ChannelTitleActions({
     <>
       <button type="button" title={copyLabel} aria-label={copyLabel} aria-live="polite"
         onClick={() => void handleCopy()} className={channelTitleIconClassName}>
-        {copied ? <Check className="size-4 text-primary" /> : <Share2 className="size-4" />}
+        {copied ? <Check className="size-4 text-primary" /> : <Share className="size-4" />}
       </button>
       {onDelete && (
         <button type="button" title="Delete Channel…" aria-label={`Delete #${title}…`}
