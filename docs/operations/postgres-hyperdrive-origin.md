@@ -177,7 +177,8 @@ provider failover or restart.
 ## Channel catalogue counts
 
 A Space-scoped control request (including the Channel list) with no placement
-answers `space_not_found` (404), before opening a shard transaction. A moving or
+answers `space_not_found` (404), before opening a shard transaction. The Agent's
+subsequent cross-Space grant lookup preserves that refusal. A moving or
 blocked placement still answers retryable `space_placement_unavailable` (503).
 Malformed placement rows and database failures remain unexpected failures;
 a missing caller-selected Space is not a storage contract violation.

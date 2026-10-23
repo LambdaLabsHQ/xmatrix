@@ -800,12 +800,9 @@ export class PostgresSpaceControlRepository {
   }
 
   private async placement(requestId: string, operation: string, spaceId: string): Promise<SpacePlacement> {
-    const found = await this.placements.find({ requestId, operation: `${operation}.placement` }, spaceId);
-    if (!found) throw new SpaceControlError("space_not_found", 404, "Space not found");
-    if (found.state !== "active" || found.targetShardId !== null) {
-      throw new SpaceControlError("space_placement_unavailable", 503, "Space placement is not writable", true);
-    }
-    return found;
+    return this.placements.resolveWritable({ requestId, operation: `${operation}.placement` }, spaceId,
+      () => new SpaceControlError("space_placement_unavailable", 503, "Space placement is not writable", true),
+      () => new SpaceControlError("space_not_found", 404, "Space not found"));
   }
 
   private async publishCurrentChannelRoutes(

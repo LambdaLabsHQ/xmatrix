@@ -37,6 +37,17 @@ test("a Run reads another of its owner's Spaces only while the owner's grant sta
       name: `cross-space-agent-${randomUUID()}`, agentType: "codex", spaceId: home.id,
     }, token);
     const agent = { Authorization: `Bearer ${prepared.token}`, "content-type": "application/json" };
+    // The Agent's ordinary 404 passes through grant lookup before it returns.
+    // Neither boundary may turn a caller-selected absent Space into a 500.
+    const missingSpaceId = `missing-${randomUUID()}`;
+    for (const headers of [owner, agent]) {
+      const missing = await worker.fetch(`/api/channels?spaceId=${missingSpaceId}`, { headers });
+      assert.equal(missing.status, 404, await missing.clone().text());
+      assert.deepEqual(await missing.json(), {
+        error: "Space not found", code: "space_not_found", retryable: false,
+      });
+    }
+
     const history = (channelId) => worker.fetch(
       `/api/channels/${encodeURIComponent(channelId)}/history?limit=20`, { headers: agent });
 

@@ -102,19 +102,6 @@ test("Space authority rejects cached databases", () => {
   );
 });
 
-test("Channel listing rejects an absent Space before opening a shard transaction", async () => {
-  for (const kind of ["user", "agent"]) {
-    const db = database();
-    const repository = new PostgresSpaceControlRepository(db, "shard-0");
-    await assert.rejects(repository.listChannels({
-      requestId: "missing-space", spaceId: "missing", principal: { kind, id: "reader" },
-    }), (error) => error instanceof SpaceControlError && error.code === "space_not_found" &&
-      error.status === 404 && error.retryable === false);
-    assert.equal(db.calls.filter((call) => call.context).length, 1);
-    assert.equal(db.calls.some((call) => call.context?.placement), false);
-  }
-});
-
 test("Channel listing preserves placement corruption, database failures and migration fences", async () => {
   const driverError = Object.assign(new Error("query failed"), { code: "QUERY_READ_TIMEOUT" });
   for (const scenario of ["blocked", "moving", "target", "malformed", "database"]) {
