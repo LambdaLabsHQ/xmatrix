@@ -1,5 +1,6 @@
 import { parseDatabaseFailureEvidence } from "@xmatrix/db";
 import { clientDefectAction } from "@xmatrix/protocol";
+import { parseHarnessReleaseWatchEvidence } from "../../harness-release-watch-failure";
 
 /** Diagnostic provenance only; never copy arbitrary tags, contexts or mechanism data. */
 function token(value: unknown): string | undefined {
@@ -33,6 +34,14 @@ export function sentryEventMetadata(event: Record<string, unknown>): string[] {
   }
   // Sentry serializes SDK `extra` as `context` in its issue-event API.
   const extra = event.context;
+  const harness = extra && typeof extra === "object" ? (extra as Record<string, unknown>).harness_release_watch_failure : undefined;
+  if (typeof harness === "string" && harness.length <= 512) {
+    try {
+      const evidence = parseHarnessReleaseWatchEvidence(JSON.parse(harness));
+      if (evidence) lines.push(`Harness release watch failure: ${evidence.phase} · ${evidence.durationMs} ms · ` +
+        `HTTP ${evidence.responseStatus || "unavailable"} · retryable=${evidence.retryable} · overloaded=${evidence.overloaded}`);
+    } catch { /* Malformed optional diagnostics do not fail the issue read. */ }
+  }
   const attempts = extra && typeof extra === "object" ? (extra as Record<string, unknown>).database_failure_attempts : undefined;
   if (typeof attempts === "string" && attempts.length <= 4096) {
     try {

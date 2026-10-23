@@ -159,6 +159,8 @@ export function startErrorReporting({ dsn, release, component }: ErrorReportingT
 export type ErrorReportContext = {
   operation: string;
   ids?: Record<string, string>;
+  /** Code-defined grouping for boundaries whose stackless causes otherwise deduplicate. */
+  fingerprint?: readonly string[];
 };
 
 /**
@@ -168,7 +170,8 @@ export type ErrorReportContext = {
 export function reportError(error: unknown, context?: ErrorReportContext): string | undefined {
   if (!reporting) return undefined;
   return captureException(error, context
-    ? { tags: { operation: context.operation }, extra: context.ids ?? {} }
+    ? { tags: { operation: context.operation }, extra: context.ids ?? {},
+      ...(context.fingerprint ? { fingerprint: [...context.fingerprint] } : {}) }
     : undefined);
 }
 

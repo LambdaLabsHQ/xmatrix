@@ -190,6 +190,10 @@ and log artifacts cannot replay the exit on reconnect. See
 
 Sentry issue reads retain bounded generated script locations alongside mapped
 exception callers, plus issue occurrence totals and first/last-seen UTC times.
+Harness release watch failures distinguish Runtime fetch, body and contract
+phases with bounded duration, HTTP status and platform flags; the pass is never
+blindly replayed after a lost response, while its target lookup retries as a
+single read on a fresh connection.
 Generated locations exclude URL credentials, queries, fragments and inline code;
 source context, locals and request data remain private. See
 [connector operations](../operations/app-connectors.md).

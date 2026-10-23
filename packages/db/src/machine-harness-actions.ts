@@ -167,7 +167,7 @@ export async function readHarnessReleaseTargets(database: AuthorityDatabase, inp
   // equal share, and a daemon past it is told on a later pass.
   const limit = Math.max(1, Math.min(input.limit ?? 500, 500,
     Math.floor(RELEASE_TARGET_ROWS / input.releases.length)));
-  return database.transaction({ requestId: input.requestId, operation: "machine-control.harness-release-targets" },
+  return database.transaction({ requestId: input.requestId, operation: "machine-control.harness-release-targets", statement: "single_read" },
     async (tx) => {
       const rows = await tx.query<QueryResultRow>({ name: "machine_harness_release_targets_v3", text: `SELECT
         release.preset_id,target.owner_user_id,target.owner_email,target.machine_id,target.hostname,target.daemon_id

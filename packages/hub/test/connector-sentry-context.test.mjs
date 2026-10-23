@@ -368,3 +368,18 @@ test("scheduled failures expose bounded retry phases and keep unrelated event ex
     assert.doesNotMatch(malformed.summary, /Database failure|Scheduled task:|private-/);
   }
 });
+
+test("harness watch transport stages are readable without arbitrary extras or response content", async () => {
+  const evidence = { phase: "runtime_fetch", durationMs: 123, responseStatus: 0, retryable: true, overloaded: false };
+  for (const [value, valid] of [[evidence, true], [{ ...evidence, phase: "response_body", responseStatus: 200 }, true],
+    [{ ...evidence, body: "private-body" }, false], [{ ...evidence, phase: "private-phase" }, false],
+    [{ ...evidence, responseStatus: 999 }, false], [{ ...evidence, durationMs: -1 }, false],
+    [{ ...evidence, durationMs: 120001 }, false], [{ ...evidence, retryable: "private-flag" }, false]]) {
+    const { result } = await run([{ body: issue }, { body: { ...event, context: {
+      harness_release_watch_failure: JSON.stringify(value), body: "private-body", daemon: "private-daemon" },
+    } }], undefined, "123");
+    assert.equal(result.summary.includes("Harness release watch failure:"), valid);
+    if (valid) assert.match(result.summary, /Harness release watch failure: (runtime_fetch|response_body) · 123 ms · HTTP (unavailable|200) · retryable=true · overloaded=false/);
+    assert.doesNotMatch(result.summary, /private-/);
+  }
+});

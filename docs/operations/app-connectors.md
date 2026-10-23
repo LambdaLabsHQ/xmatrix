@@ -341,6 +341,15 @@ could only retain a capture stack for a stackless platform Error, its fixed
 mechanism label is shown as `stack=capture boundary (origin unavailable)`;
 arbitrary mechanism data remains excluded. See [runtime delivery errors](runtime-delivery-errors.md).
 
+Scheduled Harness release watch failures retain the original rejection and
+distinguish the Runtime fetch, response body and response contract phases.
+`read_issue` exposes only their bounded duration, HTTP status (or unavailable)
+and the platform's retryable/overloaded flags. A lost response never replays
+the entire pass: notices may already have committed, so the next scheduled
+pass reads current targets again. The target lookup is a `single_read`, whose
+lost SQL response can be retried once on a fresh checkout independently of
+notice issuance. Request, registry, daemon and response content stay private.
+
 Gmail search/read answer in the Channel receipt that replies to the command,
 like every other action, so everyone who can read the Channel reads the mail.
 Read mail in a Channel only the people who may see it are in. Search is
