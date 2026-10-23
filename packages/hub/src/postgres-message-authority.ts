@@ -1,3 +1,4 @@
+import { reportPostgresConflict } from "./postgres-conflict-diagnostic";
 import {
   DatabaseCommitUnknownError,
   ContentControlError,
@@ -349,10 +350,11 @@ export function postgresMessageFailure(error: unknown): {
     return { status: error.status, body: { error: error.message, code: error.code, retryable: error.retryable },
       outage: error.retryable && error.status === 503 };
   }
-  console.error("PostgreSQL message authority failed", error);
   if (postgresTransactionConflict(error)) {
+    reportPostgresConflict(error);
     return { status: 503, outage: true, body: { ...TRANSACTION_CONFLICT, retryable: true } };
   }
+  console.error("PostgreSQL message authority failed", error);
   const outage = retryablePostgresFailure(error);
   return outage
     ? { status: 503, outage, body: { error: "PostgreSQL message authority is unavailable",

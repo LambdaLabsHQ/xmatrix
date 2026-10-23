@@ -1,4 +1,5 @@
 import { ControlError } from "@xmatrix/db";
+import { reportPostgresConflict } from "../postgres-conflict-diagnostic";
 
 import { transientDurableObjectFailure } from "../durable-object-failure";
 import { postgresTransactionConflict, retryablePostgresFailure, TRANSACTION_CONFLICT } from "../postgres-error-classification";
@@ -52,7 +53,7 @@ export class RuntimeAuthorityOperationError extends Error {
     // unpublished code into `runtime.authority_rejected`, which names no cause.
     const authorityCode = typeof value.code === "string" && AUTHORITY_CODE.test(value.code)
       ? value.code : "unknown";
-    (this.committedIdentityConflict || code === SUPERSEDED_CONNECTION_CODE ? console.warn : console.error)(
+    (this.committedIdentityConflict || code === SUPERSEDED_CONNECTION_CODE || code === TRANSACTION_CONFLICT.code ? console.warn : console.error)(
       "xMatrix runtime authority rejection", { ...this.failure, authorityCode, operation, status });
   }
 }
@@ -84,6 +85,7 @@ function authorityRejection(error: object): RuntimeAuthorityOperationError | und
       : new RuntimeAuthorityOperationError(error.name, error.status, body);
   }
   if (postgresTransactionConflict(error)) {
+    reportPostgresConflict(error);
     return new RuntimeAuthorityOperationError("postgres", 503, { code: TRANSACTION_CONFLICT.code, retryable: true });
   }
   if (retryablePostgresFailure(error)) {

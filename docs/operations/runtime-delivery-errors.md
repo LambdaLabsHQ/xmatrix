@@ -107,7 +107,7 @@ capture loses the original cause stack and creates a synthetic duplicate.
 The next launch failure should be investigated through the original mapped cause
 and `launch.dispatch.registration` operation, rather than `causes=[Array]`.
 
-HTTP PostgreSQL conflicts likewise send one original exception with the failing
+HTTP, message and socket PostgreSQL conflicts likewise send one original exception with the failing
 operation, named query and transaction phase. Deadlocks additionally retain at
 most four wait edges using local process aliases, allowlisted lock modes and
 resource kinds, plus an allowlisted relation from PostgreSQL's tuple context.

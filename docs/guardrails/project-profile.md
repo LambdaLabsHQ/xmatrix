@@ -365,7 +365,7 @@ usage unknown. See [platform admin](../operations/platform-admin-overview.md#con
 
 Hub-authored turn-failure notices use the existing unmetered system message
 kind while preserving Run authorization and replay identity. Registration launch
-and HTTP PostgreSQL conflict reports retain the original exception, correlated
+and PostgreSQL conflict reports retain the original exception, correlated
 bounded query evidence and, for deadlocks, a content-free wait graph readable
 through Sentry. See [Agent turn failures](../operations/agent-turn-failures.md)
 and [Runtime delivery errors](../operations/runtime-delivery-errors.md).
