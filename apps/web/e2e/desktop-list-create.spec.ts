@@ -105,7 +105,7 @@ test("the page tree leads with New page, and Ctrl+N there makes a page", async (
   await expect(page).toHaveURL(/page=p-new/u);
 });
 
-test("a new page offers Co-write as any page does, and calling an Agent makes it", async ({ page }) => {
+test("a new page's header is empty, and calling an Agent with @ makes it", async ({ page }) => {
   await installPageTreeStubs(page, ["Home"]);
   const registrations = harnessRegistrations(["claude", "codex"]);
   await fixtureJson(page, "registration-catalog", "**/agent-registrations", { registrations,
@@ -126,18 +126,16 @@ test("a new page offers Co-write as any page does, and calling an Agent makes it
   await expect(page.getByTestId("page-editor").locator(".page-document")).toBeFocused();
   // Its header is a page's; what needs a made page (History, Share) comes with the first write.
   const controls = page.getByTestId("page-controls");
-  await expect(controls.getByRole("button", { name: "Co-write" })).toBeVisible();
-  await expect(controls.getByRole("button", { name: /History/u })).toHaveCount(0);
-  await controls.getByRole("button", { name: "Co-write" }).click();
-  await page.getByTestId("page-write-with").getByRole("button", { name: "codex" }).click();
-  // Calling an Agent to write it is a write: the page is made, empty, for the Agent to write.
+  await expect(controls.getByRole("button")).toHaveCount(0);
+  await page.keyboard.type("@cod");
+  await page.getByTestId("page-agent-menu").getByRole("option", { name: /codex/u }).click();
+  // Calling an Agent to write it is a write: the page is made for the Agent to write.
   await expect.poll(async () => (await fixtureRequestBodies(page, "page-create")).length).toBe(1);
   const [made] = await fixtureRequestBodies(page, "page-create");
   expect(made).toMatchObject({ parentPageId: null });
-  expect(startedMarkdown(made!.document)).toBe("");
   await expect(page).toHaveURL(/page=p-new/u);
   await expect.poll(async () => (await fixtureRequestBodies(page, "writer-message"))[0]?.body)
-    .toMatch(/^@codex launch:force You're co-writing page:p-new/u);
+    .toMatch(/^@codex launch:force page:p-new/u);
   expect(await fixtureRequestBodies(page, "co-writing")).toEqual([{
     conversationId: await fixtureCreatedChannelId(page, "writer-conversation"), live: true }]);
   expect(await page.evaluate(() => window.localStorage.getItem("xmatrix.page-writer.space-personal"))).toBe("codex");

@@ -91,3 +91,39 @@ export function blameOf(base: BlameDoc, carried: Int32Array, now: DocNode, from:
   });
   return { writers: [...writers.values()].sort((a, b) => b.revision - a.revision), writing, stretches };
 }
+
+/** One author of the page as it is now: whose words stand in it, how many, and where. */
+export interface PageWriter {
+  author: PageAuthor;
+  /** Their characters in the page. */
+  chars: number;
+  /** Where their words are, in the page as it is. */
+  ranges: Array<{ from: number; to: number }>;
+}
+
+/**
+ * The page's authors (pages-live-document.md §3.2, Byline): everyone whose words stand in the page now, most
+ * words first. Someone whose words were all taken out is no longer an author; text not in a revision yet is no one's.
+ */
+export function pageWriters(base: BlameDoc, carried: Int32Array, now: DocNode): PageWriter[] {
+  const writers = new Map<string, PageWriter>();
+  now.descendants((node, pos) => {
+    if (!node.isText) return true;
+    for (let offset = 0; offset < node.text!.length; offset++) {
+      const at = pos + offset;
+      const revision = base.revisions.get(carried[at] ?? -1);
+      if (!revision || !node.text![offset]!.trim()) continue;
+      for (const author of revision.authors) {
+        const key = authorKey(author);
+        let writer = writers.get(key);
+        if (!writer) writers.set(key, writer = { author, chars: 0, ranges: [] });
+        writer.chars++;
+        const last = writer.ranges[writer.ranges.length - 1];
+        if (last && last.to >= at - 1 && last.to <= at) last.to = at + 1;
+        else writer.ranges.push({ from: at, to: at + 1 });
+      }
+    }
+    return false;
+  });
+  return [...writers.values()].sort((a, b) => b.chars - a.chars);
+}

@@ -1019,3 +1019,22 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-comm
   border-radius: 999px;
   background: var(--page-suggest-color);
 }
+
+/* The page's byline (pages-live-document.md §3.2): its authors under its title, face and name, a hairline between.
+   The title keeps the byline's room in the preview as in the editor, so nothing moves when the authors arrive. */
+.page-byline-room .page-document > h1:first-child { margin-bottom: 46px; }
+.page-byline-rule {
+  width: 1px;
+  height: 14px;
+  margin: 0 14px;
+  background: color-mix(in oklab, var(--foreground) 18%, transparent);
+}
+.page-byline-writing { animation: page-byline-breathe 1.8s ease-in-out infinite; }
+@keyframes page-byline-breathe {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in oklab, var(--primary) 0%, transparent); }
+  50% { box-shadow: 0 0 0 3px color-mix(in oklab, var(--primary) 24%, transparent); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .page-byline-writing { animation: none; box-shadow: 0 0 0 3px color-mix(in oklab, var(--primary) 24%, transparent); }
+}
+::highlight(page-author) { background-color: color-mix(in oklab, var(--primary) 16%, transparent); }

@@ -9,7 +9,6 @@ import {
   CenteredDialogShell, DialogButton, DialogInset, DialogPanelFooter, DialogPanelHeader,
 } from "@/components/dashboard/centered-dialog-shell";
 import { Face } from "@/components/dashboard/face";
-import { COUNT_CHIP_MATERIAL_CLASS } from "@/components/dashboard/workspace-shell-constants";
 import { formatRelativeAge } from "@/components/dashboard/time-display";
 import { InlineRowPreview } from "@/components/dashboard/inline-row-preview";
 import { Button } from "@/components/ui/button";
@@ -61,32 +60,6 @@ export interface PresentPerson {
   thinking?: boolean;
   /** How long it has thought, as briefly as a face's tag can say it: "19s", "2m". */
   brief?: string;
-}
-
-/** Everyone on the page, as in Google Docs: hover says who and where, a click goes there. */
-export function PresenceStack({ people, onFollow }: { people: PresentPerson[]; onFollow: (person: PresentPerson) => void }) {
-  if (people.length === 0) return null;
-  const shown = people.slice(0, 5);
-  return (
-    <div className="flex items-center -space-x-0.5" data-testid="page-now" aria-label="On this page now">
-      {shown.map((person) => (
-        <button key={person.key} type="button" onClick={() => onFollow(person)}
-          title={`${person.name} · ${person.detail}`} aria-label={`${person.name}, ${person.detail}`}
-          className={cn("inline-flex rounded-full focus-visible:outline-2 focus-visible:outline-primary",
-            person.idle && "opacity-45")}
-          // Ringed in the colour of their caret in the text.
-          style={{ boxShadow: `0 0 0 2px var(--background), 0 0 0 3.5px ${person.color}` }}>
-          <Face of={person.face} title={`${person.name} · ${person.detail}`} size="xs" shape="circle" className="rounded-full" />
-        </button>
-      ))}
-      {people.length > shown.length && (
-        <span className={cn("app-overflow-count inline-flex h-5 min-w-5 items-center justify-center px-1 text-[10px] font-bold",
-          COUNT_CHIP_MATERIAL_CLASS)}>
-          +{people.length - shown.length}
-        </span>
-      )}
-    </div>
-  );
 }
 
 /** Room a face needs to carry its name beside it. */

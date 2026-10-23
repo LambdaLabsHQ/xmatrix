@@ -3,7 +3,7 @@ const test = require("node:test");
 require("../dashboard/typescript-require.cjs").installTypeScriptRequire();
 
 const { carryPageDocKnown, markdownToPageDoc, pageBlameFirst, pageBlameStep } = require("@xmatrix/protocol/page-document");
-const { blameDoc, blameOf } = require("./page-blame-model.ts");
+const { blameDoc, blameOf, pageWriters } = require("./page-blame-model.ts");
 
 const daniel = { kind: "user", id: "u1", label: "Daniel" };
 const claude = { kind: "agent", id: "c:1", label: "claude" };
@@ -59,4 +59,20 @@ test("text typed since the newest revision reads as being written", () => {
   const summary = blameOf(base, carryPageDocKnown(base.doc, base.known, now), now, from, to);
   assert.equal(summary.writing, true);
   assert.deepEqual(summary.writers.map((writer) => writer.author.label), ["Daniel"]);
+});
+
+test("the page's authors are whoever has words in it now, most words first, with where their words are", () => {
+  const base = blameDoc(blame);
+  const now = markdownToPageDoc(two);
+  const writers = pageWriters(base, carryPageDocKnown(base.doc, base.known, now), now);
+  assert.deepEqual(writers.map((writer) => writer.author.label), ["Daniel", "claude"]);
+  const claudes = writers[1].ranges.map(({ from, to }) => now.textBetween(from, to));
+  assert.ok(claudes.some((text) => text.includes("set a passkey in the app")), claudes.join("|"));
+});
+
+test("someone whose words were all taken out is no longer an author", () => {
+  const base = blameDoc(blame);
+  const now = markdownToPageDoc(one);
+  const writers = pageWriters(base, carryPageDocKnown(base.doc, base.known, now), now);
+  assert.deepEqual(writers.map((writer) => writer.author.label), ["Daniel"]);
 });

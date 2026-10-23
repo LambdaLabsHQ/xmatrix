@@ -296,11 +296,8 @@ test("a page is co-edited live and shows an Agent working on a section it claime
   await expect(editor.getByRole("button", { name: /^(Claim|Release)/u })).toHaveCount(0);
   await expect(browser.getByTestId("page-outline"), "there is no side panel").toHaveCount(0);
 
-  // Who is on the page, and where, is in its header; a click follows them.
-  const now = browser.getByTestId("page-now");
-  await expect(now.getByRole("button", { name: `claude:2, editing · Status · in ${E2E_CHANNEL.name}` })).toBeVisible();
-  await expect(now.getByRole("button", { name: `codex:1, viewing · Notes · in ${E2E_CHANNEL.name}` })).toBeVisible();
-  // The header already says who is where; the headings do not draw them again.
+  // The header names no one: who is where shows in the text, and the headings do not draw them again.
+  await expect(browser.getByTestId("page-now")).toHaveCount(0);
   await expect(editor.locator(".page-section-present [title*='viewing'], .page-section-present [title*='editing']"))
     .toHaveCount(0);
   // As in Google Docs the text carries no change log: who changed the page last is on History's button.
@@ -432,10 +429,12 @@ for (const width of [1000, 1440, 1600]) for (const refused of [false, true]) {
     await expect(editor).toContainText("In progress");
     const titleTop = (await editor.locator("h1").first().boundingBox())!.y;
     const controls = browser.getByTestId("page-controls");
-    await controls.getByRole("button", { name: /Co-write$/u }).click();
-    await browser.getByTestId("page-write-with").getByRole("button", { name: "codex" }).click();
-    await expect(browser.getByTestId("page-write-with")).toBeHidden();
-    await expect(controls.getByRole("button", { name: /Co-write$/u })).toBeDisabled();
+    // On a desktop an Agent is called from the text: `@` and its name.
+    await expect(controls.getByRole("button", { name: /Co-write/u })).toHaveCount(0);
+    await editor.getByText("In progress").click();
+    await browser.keyboard.press("End");
+    await browser.keyboard.type(" @cod");
+    await browser.getByTestId("page-agent-menu").getByRole("option", { name: /codex/u }).click();
     const article = browser.getByTestId("pages-view").locator("article");
     await expect(article.getByRole("status")).toHaveCount(0);
     expect((await editor.locator("h1").first().boundingBox())!.y).toBe(titleTop);
@@ -449,14 +448,13 @@ for (const width of [1000, 1440, 1600]) for (const refused of [false, true]) {
     }
     await releaseFixture(browser, refused ? "writer-create" : "writer-co-writing");
     await expect(controls.getByRole("status")).toHaveCount(0);
-    await expect(controls.getByRole("button", { name: /Co-write$/u })).toBeEnabled();
     if (refused) {
       await expect(browser.getByText(/Couldn't start the Agent/u)).toBeVisible();
       expect(await fixtureRequestBodies(browser, "write-message")).toEqual([]);
       return;
     }
     await expect.poll(async () => (await fixtureRequestBodies(browser, "write-message"))[0]?.body)
-      .toMatch(/^@codex launch:force You're co-writing page:p-relay/u);
+      .toMatch(/^@codex launch:force page:p-relay/u);
     await expect(browser.getByText("Write in the page; your Agent responds here.", { exact: false })).toHaveCount(0);
     await expect(browser).not.toHaveURL(/conversation=/u);
     expect((await editor.locator("h1").first().boundingBox())!.y).toBe(titleTop);
@@ -466,11 +464,8 @@ for (const width of [1000, 1440, 1600]) for (const refused of [false, true]) {
       await expect(card).toHaveCount(1);
       await expect(card).toBeVisible();
       await card.click();
-    } else {
-      await controls.getByRole("button", { name: /conversations about this page/u }).click();
-      await browser.getByTestId("page-conversations").getByRole("button", { name: /Co-writing Relay/u }).click();
+      await expect(browser).toHaveURL(new RegExp(`conversation=${await fixtureCreatedChannelId(browser, "writer-create")}`, "u"));
     }
-    await expect(browser).toHaveURL(new RegExp(`conversation=${await fixtureCreatedChannelId(browser, "writer-create")}`, "u"));
   });
 }
 
@@ -1391,10 +1386,9 @@ test("a page's conversations sit beside what they are about, and one opens there
     { message: "the card is level with its section's heading" }).toBeLessThan(4);
   // The Agent works in that conversation, not on the page, and the section says so.
   await expect(status.locator(".page-section-working")).toHaveAttribute("title", "claude:1 · Working · in Release notes");
-  // A conversation gone quiet leaves the margin and the text; the header's count still lists it,
-  // as Google Docs keeps older comments behind its comment history.
-  await expect(browser.getByTestId("pages-view").getByRole("button", { name: "3 conversations about this page" }))
-    .toBeVisible();
+  // A conversation gone quiet leaves the margin and the text; the header counts none of them.
+  await expect(browser.getByTestId("pages-view").getByRole("button", { name: /conversations about this page/u }))
+    .toHaveCount(0);
   await expect(editor).not.toContainText("quiet conversation");
   await browser.screenshot({ path: test.info().outputPath("pages-margin.png") });
 
@@ -1545,6 +1539,17 @@ test("paragraph attribution stays in the margin and selecting text leaves only d
   await fixtureFaces(browser, { "user:u-daniel": "/role-avatars/default.svg", "agent:a": "/agent-vendors/claude.svg" });
   const editor = await openLivePage(browser);
 
+  // Under the title, its authors by face and name, most words first, as a column's byline.
+  const byline = browser.getByTestId("page-byline");
+  await expect(byline).toHaveText("Danielclaude:1");
+  await expect(byline.locator(".identity-avatar-face img").first()).toHaveAttribute("src", "/role-avatars/default.svg");
+  const [titleBox, bylineBox] = [(await editor.locator("h1").first().boundingBox())!, (await byline.boundingBox())!];
+  expect(bylineBox.y).toBeGreaterThan(titleBox.y + titleBox.height);
+  expect(Math.abs(bylineBox.x - titleBox.x)).toBeLessThan(2);
+  const firstLine = (await editor.locator("h1 + *").first().boundingBox())!;
+  expect(firstLine.y).toBeGreaterThan(bylineBox.y + bylineBox.height);
+  await browser.screenshot({ path: test.info().outputPath("pages-byline.png") });
+
   // Resting on a paragraph names who wrote it, level with it in the margin.
   await editor.getByText("none", { exact: true }).hover();
   const line = browser.getByTestId("page-blame-line");
@@ -1607,10 +1612,8 @@ test("two people co-edit a page live: each sees the other's typing and cursor, a
     await expect(first.locator(".ProseMirror-yjs-cursor")).toHaveCount(1);
     await expect(other.locator(".ProseMirror-yjs-cursor")).toHaveCount(1);
     await expect(first.locator(".ProseMirror-yjs-cursor")).toContainText("E2E Tester");
-    // Each is on the page by their own picture, as everywhere else they show.
-    await expect(first.getByTestId("page-now").locator(".identity-avatar-face img"))
-      .toHaveAttribute("src", "/role-avatars/default.svg");
-    await expect(first.getByTestId("page-save-state")).toHaveText("All changes saved");
+    // Edits are kept as they are made: the header does not speak of saving.
+    await expect(first.getByTestId("page-save-state")).toHaveText("");
     await first.screenshot({ path: test.info().outputPath("pages-coediting.png") });
   } finally {
     await second.close();
@@ -1934,7 +1937,6 @@ test("on a long page, who works out of view shows at its edges, and what an Agen
   await fixtureJson(browser, "page-agents", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\/agents$/u, { pages: [] });
   push(committed(6));
   await expect(caret).toHaveCount(0);
-  await expect(browser.getByTestId("page-now").getByRole("button", { name: /^claude:2/u })).toHaveCount(0);
 });
 
 test("an Agent writing above what the reader sees waits under the page's controls, clear of the window's search", async ({ page: browser }) => {

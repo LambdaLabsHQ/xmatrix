@@ -178,16 +178,27 @@ it concerns. There is no panel of lists beside the document: a list repeats
 what the document already shows, and it separates each fact from the text the
 fact is about.
 
-- **Header**: the save state, and everyone on the page as a stack of
-  avatars. The page's name is the document's opening heading (§4.1), so the
-  header never shows it. A document that opens without one reads "Untitled"
-  in its place, as the editor's own h1; clicking it starts that heading. Hovering an
-  avatar says who it is, what they are doing, where and in which
-  conversation; clicking one scrolls to them. Idle people are dimmed. Beside
-  the avatars: the page's conversation count (§4.4), History and Share. There
-  is no ⋯ menu: each setting sits where it acts (§7). As Google Docs does with its clock icon, hovering History says
-  who changed the page last and when, and a dot on it means the page changed
-  since this person last read it.
+- **Header** (decided by Daniel 2026-10-23): History and Share, and
+  nothing else that is always there. It names no one, keeps no conversation
+  count and offers no Co-write: who is where shows in the text, the
+  conversations stand beside what they are about, and an Agent is called
+  with `@` in the text. It speaks of saving only when something is wrong:
+  edits held while the session is away (*Offline*), a session still
+  connecting after two seconds, and a page the reader may only read. The
+  page's name is the document's opening heading (§4.1), so the header never
+  shows it. A document that opens without one reads "Untitled" in its place,
+  as the editor's own h1; clicking it starts that heading. There is no ⋯
+  menu: each setting sits where it acts (§7). As Google Docs does with its
+  clock icon, hovering History says who changed the page last and when, and
+  a dot on it means the page changed since this person last read it.
+- **Byline** (decided by Daniel 2026-10-23): under the title, as a column
+  names its writers, each author of the page by face and name, a hairline
+  between them, and no other words. An author is whoever has words in the
+  page now, from its blame (most words first); someone whose words were all
+  taken out is no longer one. Pointing at an author marks their words in the
+  text, and an author changing the page now breathes. The title keeps the
+  byline's room in the preview as in the editor, so nothing moves when the
+  authors arrive.
 - **Cursors**, as in Google Docs: a line in the person's colour with their
   name above it. The name shows while they move or type and hides about five
   seconds later, leaving a square at the caret's top; hovering the caret
@@ -212,11 +223,10 @@ fact is about.
   Only what the margin draws and who is editing count, by where each card and
   pill is drawn: a card in the cards' style says "2 conversations below", its
   working line "claude:2 · Working", and "Ada · Editing" for a person editing
-  there. Someone only reading is in the header's presence stack, and an Agent
+  there. Someone only reading is not drawn, and an Agent
   at rest is its card's "Idle" line; neither is told at the edges. Without a
   margin, the same card at the right edge tells of people editing out of view,
-  since each Agent is its own face there. Clicking scrolls to the nearest;
-  clicking an avatar in the header goes to that person.
+  since each Agent is its own face there. Clicking scrolls to the nearest.
 - **Beside a wide page, an Agent at work stands in the margin** (decided
   2026-10-19): its pill, solid in its colour with its face, its name and what
   it is doing (its dots, or *thinking 12s*), level with the line it writes and
@@ -237,8 +247,7 @@ fact is about.
   the right edge.** Each Agent on the page is its face beside the line it is at, travelling with the text as the page scrolls
   and waiting at the top or bottom of the edge, a chevron pointing to the
   line, while the line is out of view; a tap goes back to it, or, beside its
-  line, says what it is doing and opens its conversation. The header's avatar
-  stack names only the people. While no Agent is on the page, the bottom
+  line, says what it is doing and opens its conversation. While no Agent is on the page, the bottom
   right holds the face of the Agent this person co-writes with (§4.2).
 - **Headings** carry who is on the section: the people and Agents in it, and
   the Agents working in a conversation linked to it even when they do not
@@ -392,11 +401,11 @@ fact is about.
   like a colleague in a shared document, until it is stopped or the people
   leave (two minutes after the last person's connection closes, the page's
   session ends its co-writing and tells its Agent so; its Run then rests and
-  sleeps as any other): its face in the header, its caret in its colour with what it is doing
+  sleeps as any other): its caret in its colour with what it is doing
   (watching, thinking, writing, waiting), and its words arriving as its harness
   writes them.
-  - **Selection feedback.** The desktop Co-write control disables another call
-    while its request is pending. Launch results and the conversation stay in
+  - **Selection feedback.** A call disables another while its request is
+    pending. Launch results and the conversation stay in
     the existing margin card (or the page's conversation list in a narrow
     window); no banner is inserted above the document. The phone's existing
     Agent button shows the called Agent until it appears on the page. A failed
@@ -610,8 +619,7 @@ or joining one never leaves the page.
   work dock work there; per-message tags and actions, attachments and the
   full header stay in *Open in Conversations*, which gives it the whole
   window.
-- **The conversation list.** The header's conversation count, a heading's
-  count open the list of every
+- **The conversation list.** A heading's count opens the list of every
   conversation linked to the page, grouped by section, including resolved
   discussions and sunk conversations; open discussions resolve from it too.
 - **Starting one.** A comment on a selection (§4.2) creates the conversation
@@ -957,7 +965,7 @@ There is no side panel. What its tabs held is shown where it acts:
 
 | Was | Now |
 |---|---|
-| Now: presence, claims, running Agents | Header avatars, cursors, and each heading's avatars and claim flag (§3.2) |
+| Now: presence, claims, running Agents | Cursors, the margin's Agents and each heading's avatars (§3.2) |
 | Discussions | Cards beside their passages and the conversation list (§4.4) |
 | Attached: Automations | Chips in the section they keep true (§6.1), written there by an Agent; the Space's Schedules list them all |
 | Attached: connectors | A conversation linked to its section, a card like any other |
@@ -966,9 +974,9 @@ There is no side panel. What its tabs held is shown where it acts:
 | Settings: project governance | Open participation on the Space in Team; the governance page in Share ("Space rules": only owners and admins edit it, every Agent follows it), both for Space owners and admins |
 | The move to pages | A notice on the page while an Agent's draft waits for an owner or admin |
 
-A phone shows the same things on the page itself: avatars and the
-conversation count in the header, headings and bubbles in the text,
-and Share and History in the page's top bar.
+A phone shows the same things on the page itself: the byline under the
+title, headings and bubbles in the text, and Share and History in the
+page's top bar.
 
 Creating a page works as in Notion: the desktop list's + and Ctrl/⌘+N, the
 phone's FAB, the empty list and a parent row's sub-page + each open a new page
@@ -976,7 +984,7 @@ at once, with no dialog or browser prompt, on its title, on a phone as on a
 desktop. The title is the document's first line, drawn as its h1 with an
 "Untitled" placeholder; there is no title field, so a new page looks exactly
 like any page. A new page is an ordinary page on screen, with the same editor
-and header, Co-write included (§4.2), and there is no draft: it is made by its
+and header, and there is no draft: it is made by its
 first write, like copy-on-write. Until then its live document exists only in
 the browser, and one opened and left empty is not kept anywhere. The first
 write is a keystroke (letters typed on the first line make it the opening
@@ -985,7 +993,7 @@ as it stands. The Hub keeps the document's markdown as revision 1 and starts
 the page's live session from the same Yjs document, so the editor joins that
 session without reloading and goes on syncing what is typed meanwhile. Enter after
 the name goes on into the text; left without one the page stays unnamed. Until it is made, the header
-shows only Co-write. A failed make says so on the page, and the next write
+is empty. A failed make says so on the page, and the next write
 tries again.
 
 ## 8. Build order

@@ -7,7 +7,7 @@ import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-quer
 import type { PageDocBlock } from "@xmatrix/protocol/page-document";
 import {
   faceOfSender, isLiveAgentStatus, pageAuthorColor, pageAuthorLabel,
-  type FaceOf, type ChannelSnapshot, type PageConversation, type PageLink, type SpaceMember,
+  type FaceOf, type ChannelSnapshot, type PageAuthor, type PageConversation, type PageLink, type SpaceMember,
 } from "@xmatrix/protocol";
 import {
   Check, Clock, Files, FileText, History, Lock, MessageSquare, Plus, Share2, Trash2, Undo2, X,
@@ -36,7 +36,7 @@ import type {
   SuggestionControl,
 } from "./page-editor";
 import {
-  ConversationList, DeletePageDialog, PageChangeMark, PageDialog, PageHistory, PagePens, PageScrollMarks, PresenceStack, ShareDialog, type PagePen, type PresentPerson, type PageScrollMark,
+  ConversationList, DeletePageDialog, PageChangeMark, PageDialog, PageHistory, PagePens, PageScrollMarks, ShareDialog, type PagePen, type PresentPerson, type PageScrollMark,
 } from "./page-chrome";
 import { PageMargin, PageOffscreenCard, type MarginWriter, type OffscreenEntry } from "./page-margin";
 import type { PageSessionChanges } from "./page-session-changes";
@@ -458,6 +458,9 @@ function liveRunOf(state: PagePresenceState, agents: readonly PageTreeAgent[]): 
     (agent.name === user.name || agent.name.startsWith(`${user.name}:`)));
 }
 
+/** How long a page may take to connect before it says it is connecting. */
+const CONNECTING_SAID_AFTER_MS = 2_000;
+
 /** How long the page stays on screen at a new revision before it counts as read there. */
 const READ_AFTER_MS = 1_500;
 
@@ -600,10 +603,16 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   const [editorReady, setEditorReady] = useState(false);
   const drawn = synced && editorReady;
   const [connected, setConnected] = useState(false);
-  // Like Google Docs: "Saving…" while this person's edits are on their way, then "Saved".
-  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "offline">("idle");
-  const connectedRef = useRef(false);
-  const saveTimer = useRef<number | undefined>(undefined);
+  // Edits are sent as they are made, so saving is never said; only edits held while the session is away are.
+  const [offline, setOffline] = useState(false);
+  const edited = useRef(false);
+  // A session still connecting says so only once it has kept the reader waiting.
+  const [slowToConnect, setSlowToConnect] = useState(false);
+  useEffect(() => {
+    if (connected) { setSlowToConnect(false); return; }
+    const timer = window.setTimeout(() => setSlowToConnect(true), CONNECTING_SAID_AFTER_MS);
+    return () => window.clearTimeout(timer);
+  }, [connected]);
   const [canEdit, setCanEdit] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   // Reads the page's waiting suggestions again; the live session calls it when one arrives.
@@ -830,20 +839,17 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
       // A new page has nothing to sync: it is this document until it is made.
       if (pending) { setSynced(true); setCanEdit(true); }
     }
+    let connectedNow = false;
     const off = live.on((event) => {
       if (event.type === "status") {
         setConnected(event.connected);
-        connectedRef.current = event.connected;
-        setSaveState((state) => (state === "offline" || state === "saving") && event.connected ? "saved"
-          : state !== "idle" && !event.connected ? "offline" : state);
+        connectedNow = event.connected;
+        setOffline(!event.connected && edited.current);
       }
       if (event.type === "local-edit") {
+        edited.current = true;
         // Until the page is made and its session first reached, an edit is on its way, not offline.
-        setSaveState(connectedRef.current || live.underway ? "saving" : "offline");
-        window.clearTimeout(saveTimer.current);
-        // The edit is sent as it is made; the session keeps it as it arrives.
-        saveTimer.current = window.setTimeout(() => setSaveState(connectedRef.current ? "saved"
-          : live.underway ? "saving" : "offline"), 700);
+        setOffline(!connectedNow && !live.underway);
       }
       if (event.type === "made") {
         setNotice(null);
@@ -891,7 +897,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
       off();
       if (madeSession.current === live) return;
       live.destroy(); setSession(null); setConnected(false); setSynced(false); setEditorReady(false); setChangesOpen(false);
-      setSaveState("idle");
+      setOffline(false); edited.current = false;
     };
   }, [spaceId, pageId, pending, hasToken, userId, userName, queryClient]);
   // Closed before the page it made opened: nothing keeps its session any more.
@@ -1372,7 +1378,6 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   // expands in place there, and docks beside the page only when the margin has no room for it (§4.4).
   const marginCards = withOpenConversation(conversations, openInMargin ? activeConversationId : null,
     activeConversationId ? conversation(activeConversationId)?.name ?? null : null);
-  const liveCount = conversations.filter((item) => item.live).length;
   const openConversation = (conversationId: string, at?: PageRevisionMoment) => {
     setDialog(null);
     onOpenConversation(conversationId, at ? { messageId: at.messageId, sequence: at.sequence } : undefined);
@@ -1385,7 +1390,15 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
       queryFn: ({ signal }) => pageApi.blame(spaceId, pageId, token, signal),
       staleTime: Infinity,
     }),
+    head: headRevision,
   } : undefined;
+  // Which of the page's authors is changing it now, so their face in the byline breathes (§3.2).
+  const writingNow = (author: PageAuthor) => present.some(({ state }) => {
+    const user = state.user!;
+    if (author.kind === "user") return user.kind !== "agent" && user.id === author.id && state.activity === "editing";
+    return user.kind === "agent" && (state.activity === "writing" || state.activity === "thinking")
+      && (liveRunOf(state, liveOnPage)?.name ?? user.name) === author.label;
+  });
   // Where the document column, and the margin level with it, starts in the article's scrolled content.
   const columnTop = (): number | null => {
     const article = articleElement.current;
@@ -1568,16 +1581,6 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   );
   const controls = (
     <>
-      {/* On a phone an Agent is its face in the margin and on the page's button; the stack names the people. */}
-      <PresenceStack people={phone ? people.filter((person) => !person.agent) : people} onFollow={jumpTo} />
-      {!phone && canEdit && writers.agents[0] && (
-        <Button variant="ghost" size="sm" disabled={Boolean(starting)} onClick={() => setDialog({ kind: "write" })}
-          title={`Co-write with ${writers.agents[0].harness}`}>
-          <Face of={{ kind: "agent", name: writers.agents[0].harness, harness: writers.agents[0].harness }} size="xs"
-            shape="circle" glass={false} className="pointer-events-none rounded-full" />
-          Co-write
-        </Button>
-      )}
       {mode === "page" && drawn && changeList.length > 0 && (
         <Button variant="ghost" size="sm" aria-pressed={changesOpen} title="Changes since you opened this page"
           onClick={() => setChangesOpen((open) => !open)}>
@@ -1587,10 +1590,6 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
       {/* What only a made page has: its conversations, history and sharing. A new page gets them on its first write. */}
       {!pending && (
         <>
-          <Button variant="ghost" size="sm" onClick={() => setDialog({ kind: "conversations", blockId: null })}
-            title="Conversations about this page" aria-label={`${conversations.length} conversations about this page`}>
-            <MessageSquare /> {liveCount || conversations.length || ""}
-          </Button>
           <Button variant="ghost" size="sm" aria-pressed={mode === "history"} title={lastEdit ?? "Version history"}
             aria-label={`Version history${unseen ? ", changed since you last looked" : ""}`}
             onClick={() => (mode === "history" ? setMode("page") : openHistory())} className="relative">
@@ -1622,12 +1621,11 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
           <div className="app-page-band shrink-0 px-6 lg:px-12">
             <header className={cn(column, "app-band-header flex flex-wrap items-center gap-1.5")} data-testid="page-controls">
               <span className="mr-auto" />
-              <span className="mr-1 text-xs text-muted-foreground" data-testid="page-save-state"
-                title={`Revision ${headRevision ?? page?.headRevision ?? ""}`}>
-                {saveState === "saving" ? "Saving…" : saveState === "saved" ? "All changes saved"
-                  : saveState === "offline" ? "Offline · your changes sync when you reconnect"
-                  : pending ? "" : connected ? `r${headRevision ?? page?.headRevision ?? ""}` : "Connecting…"}
-                {!canEdit && connected ? " · read-only" : ""}
+              {/* The page speaks of saving only when something is wrong; who wrote it stands under its title. */}
+              <span className="mr-1 inline-flex items-center gap-1 text-xs text-muted-foreground" data-testid="page-save-state">
+                {offline ? "Offline · your changes sync when you reconnect"
+                  : !pending && slowToConnect ? "Connecting…"
+                  : connected && !canEdit ? <><Lock className="size-3" aria-hidden="true" />Read-only</> : null}
               </span>
               {controls}
             </header>
@@ -1663,7 +1661,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
                     query.queryKey.includes("page-tree") })} />
               ) : (
                 <div className="flex gap-6">
-                  <div ref={docColumn} className={cn("relative min-w-0 max-w-3xl flex-1",
+                  <div ref={docColumn} className={cn("relative min-w-0 max-w-3xl flex-1", !pending && "page-byline-room",
                     phone && phoneDiff && !suggestionMark && "has-reader-mark")}>
                     <PagePens pens={edgePens} room={penRoom} onJump={jumpTo}
                       onOpen={(person) => setDialog({ kind: "agent", key: person.key })} />
@@ -1711,7 +1709,8 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
                         automations={automationsById} references={references} completion={completion}
                         focusedConversationId={activeConversationId ?? focused} onFocusConversation={setFocused}
                         onAnchorOffsets={setAnchorTops} cursorPresence={cursorPresence} readGitHubFile={readGitHubFile}
-                        mediaUrl={mediaUrl} uploadMedia={uploadMedia} onChanges={setSessionChanges} blame={blame} />}
+                        mediaUrl={mediaUrl} uploadMedia={uploadMedia} onChanges={setSessionChanges} blame={blame}
+                        writing={writingNow} />}
                     </div>
                   </div>
                   {/* The margin holds its room from the start, so the text does not reflow when the page has synced;
