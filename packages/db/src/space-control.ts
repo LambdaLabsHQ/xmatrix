@@ -1229,7 +1229,9 @@ export class PostgresSpaceControlRepository {
     const at = iso(input.at);
     // A purged Space has no placement left; to its owner it is simply gone.
     const placement = await this.placement(requestId, "space.space_restore", spaceId).catch((error: unknown) => {
-      if (missingPlacement(error)) throw new SpaceControlError("not_found", 404, "Space not found");
+      if (error instanceof SpaceControlError && error.code === "space_not_found") {
+        throw new SpaceControlError("not_found", 404, "Space not found");
+      }
       throw error;
     });
     const requestDigest = await digest(input);
