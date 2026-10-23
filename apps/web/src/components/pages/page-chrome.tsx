@@ -8,7 +8,6 @@ import { ArrowLeft, ChevronDown, ChevronUp } from "lucide-react";
 import {
   CenteredDialogShell, DialogButton, DialogInset, DialogPanelFooter, DialogPanelHeader,
 } from "@/components/dashboard/centered-dialog-shell";
-import { Face } from "@/components/dashboard/face";
 import { formatRelativeAge } from "@/components/dashboard/time-display";
 import { InlineRowPreview } from "@/components/dashboard/inline-row-preview";
 import { Button } from "@/components/ui/button";
