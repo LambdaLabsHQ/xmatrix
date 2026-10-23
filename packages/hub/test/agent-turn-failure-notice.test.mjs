@@ -43,6 +43,8 @@ test("turn-failure append is an agent-attributed system_fact, not a new task", (
   assert.match(command.body, /unknown certificate verification error/);
   assert.equal(command.payload.principal.kind, "agent");
   assert.equal(command.payload.principal.id, "agent-1");
+  assert.equal(command.payload.messageKind, "xmatrix.system.runtime-failure",
+    "a Hub-authored lifecycle fact must remain writable when the Space's allowance is exhausted");
   assert.equal(command.payload.residual.appMetadata.xmatrixProvenance, "system_fact");
   assert.equal(command.payload.residual.appMetadata.xmatrixTurnFailure, true);
   assert.equal(command.payload.agentRunProof.runId, "run-1");

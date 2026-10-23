@@ -63,6 +63,7 @@ export function agentTurnFailureAppendCommand(input: {
       messageId,
       channelId,
       body,
+      messageKind: "xmatrix.system.runtime-failure",
       principal: { kind: "agent", id: input.agentId },
       agentRunProof: {
         runId: input.runId,

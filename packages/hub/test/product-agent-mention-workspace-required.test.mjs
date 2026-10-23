@@ -203,6 +203,7 @@ test("Agent rejection notice appends through current channel message authority",
   assert.equal(appends[0].channelId, "ch-rejected");
   assert.equal(appends[0].command.channelId, "ch-rejected");
   assert.equal(appends[0].command.body, "xMatrix could not start @agent.");
+  assert.equal(appends[0].command.messageKind, "xmatrix.system.runtime-failure");
   assert.equal(appends[0].command.residual.appMetadata.xmatrixSystemNotice, true);
 });
 

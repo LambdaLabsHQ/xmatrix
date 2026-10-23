@@ -307,6 +307,7 @@ export function createProductAgentInterventionAuthorityPort(input: {
           messageId,
           channelId,
           body,
+          messageKind: "xmatrix.system.stop-result",
           principal,
           senderSnapshot: productAgentSystemNoticeSenderSnapshot(input.actorUserId),
           residual: {

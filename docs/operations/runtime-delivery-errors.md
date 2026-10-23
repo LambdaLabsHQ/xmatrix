@@ -99,3 +99,21 @@ is built. Exception text, file paths and private inputs are not copied. These
 names locate the original failure path; the captured console stack still points
 to the reporting boundary. This diagnostic does not establish the underlying
 failure's cause or change the socket's rejection or retry policy.
+
+Registration launch diagnostics report the original exception to Sentry once,
+with the diagnostic reference and bounded database attempt evidence. The local
+structured log is a warning: reporting its nested cause array through console
+capture loses the original cause stack and creates a synthetic duplicate.
+The next launch failure should be investigated through the original mapped cause
+and `launch.dispatch.registration` operation, rather than `causes=[Array]`.
+
+HTTP PostgreSQL conflicts likewise send one original exception with the failing
+operation, named query and transaction phase. Deadlocks additionally retain at
+most four wait edges using local process aliases, allowlisted lock modes and
+resource kinds, plus an allowlisted relation from PostgreSQL's tuple context.
+SQL, values, backend PIDs, transaction IDs and tuple coordinates stay out of this
+projection. Sentry issue reads show these fields, including `unavailable` when
+PostgreSQL supplied no usable detail. For a repeated Page claim deadlock, compare
+the named query, waiting relation and wait cycle before changing lock order;
+the HTTP response remains a retryable `transaction_conflict` and no transaction
+or unknown commit is automatically replayed.

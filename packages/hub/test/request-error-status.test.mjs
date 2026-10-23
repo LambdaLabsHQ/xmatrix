@@ -47,7 +47,7 @@ test("route failures never echo a database's own message", async () => {
 });
 
 test("a transaction that lost a conflict is answered and logged as one, never as an outage", async (t) => {
-  const logged = t.mock.method(console, "error", () => {});
+  const logged = t.mock.method(console, "warn", () => {});
   const app = await answering({
     "/serialization": Object.assign(new Error("could not serialize access due to concurrent update"), { code: "40001" }),
     "/deadlock": Object.assign(new Error("deadlock detected"), { code: "40P01" }),

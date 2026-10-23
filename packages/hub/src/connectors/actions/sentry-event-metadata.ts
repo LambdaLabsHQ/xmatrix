@@ -1,6 +1,8 @@
 import { parseDatabaseFailureEvidence } from "@xmatrix/db";
 import { clientDefectAction } from "@xmatrix/protocol";
 import { parseHarnessReleaseWatchEvidence } from "../../harness-release-watch-failure";
+import { postgresConflictMetadata } from "../../postgres-conflict-diagnostic";
+import { safeServerDiagnosticId } from "../../server-error-diagnostic";
 
 /** Diagnostic provenance only; never copy arbitrary tags, contexts or mechanism data. */
 function token(value: unknown): string | undefined {
@@ -20,6 +22,9 @@ export function sentryEventMetadata(event: Record<string, unknown>): string[] {
       if (!tag || typeof tag !== "object") continue;
       if (tag.key === "component" && ["hub", "web"].includes(tag.value)) lines.push(`Component: ${tag.value}`);
       if (tag.key === "environment" && token(tag.value)) lines.push(`Environment: ${tag.value}`);
+      if (tag.key === "operation" && ["launch.dispatch.registration", "postgres.transaction-conflict"].includes(tag.value)) {
+        lines.push(`Capture operation: ${tag.value}`);
+      }
       if (tag.key === "operation" && typeof tag.value === "string" &&
           /^scheduled: (?:Account deletion maintenance|Channel deletion maintenance|Sentry event recovery|Gmail notification recovery and renewal|Harness release watch|Machine load history maintenance|(?:Teams|Google Chat|Feishu|Telegram) lifecycle maintenance)$/u.test(tag.value)) {
         lines.push(`Scheduled task: ${tag.value.slice("scheduled: ".length)}`);
@@ -34,6 +39,11 @@ export function sentryEventMetadata(event: Record<string, unknown>): string[] {
   }
   // Sentry serializes SDK `extra` as `context` in its issue-event API.
   const extra = event.context;
+  if (extra && typeof extra === "object") {
+    lines.push(...postgresConflictMetadata(extra as Record<string, unknown>));
+    const diagnosticId = safeServerDiagnosticId((extra as Record<string, unknown>).diagnosticId);
+    if (diagnosticId) lines.push(`Diagnostic reference: ${diagnosticId}`);
+  }
   const harness = extra && typeof extra === "object" ? (extra as Record<string, unknown>).harness_release_watch_failure : undefined;
   if (typeof harness === "string" && harness.length <= 512) {
     try {

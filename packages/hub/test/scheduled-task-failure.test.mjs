@@ -1,3 +1,4 @@
+import { exceptionEvents } from "./support/error-reports.mjs";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createAuthorityDatabase } from "@xmatrix/db";
@@ -48,9 +49,7 @@ test("scheduled failures send exactly one event with task and database evidence"
     }));
     assert.deepEqual(calls.sort(), [0, 1], "one call per pass, without a transport replay");
     await sendErrorReports();
-    const events = envelopes.flatMap(body => body.split("\n").map(line => {
-      try { return JSON.parse(line); } catch { return null; }
-    })).filter(value => value?.event_id && value.exception);
+    const events = exceptionEvents(envelopes);
     assert.equal(events.length, 4, "one report per failed task, including transport and transient PG failures");
     const event = events.find(value => value.tags.operation === "scheduled: Channel deletion maintenance");
     const attempts = JSON.parse(event.extra.database_failure_attempts);

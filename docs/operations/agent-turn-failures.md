@@ -39,3 +39,9 @@ CLI and a newly started or resumed Run. xMatrix cannot reconstruct an HTTP statu
 that a third-party harness never emitted. Inspect that harness's local diagnostics
 when the notice states that evidence is missing; do not substitute another API's
 status or assume that restarting or logging out will fix it.
+
+Hub-authored turn-failure and background-interruption notices use the existing
+`xmatrix.system.runtime-failure` message kind. They retain their Agent attribution,
+exact Run authorization and stable replay identity, but consume neither a Free
+Space write nor a paid Agent credit. A spent allowance must not hide the failure
+notice or prevent the subsequent quota handoff.

@@ -93,6 +93,7 @@ export async function dispatchProductAgentSystemNotice(input: {
     messageId,
     channelId: input.channelId,
     body: input.body,
+    messageKind: "xmatrix.system.runtime-failure",
     principal: { kind: "user", id: input.actorUserId },
     senderSnapshot: productAgentSystemNoticeSenderSnapshot(input.actorUserId),
     residual: {
