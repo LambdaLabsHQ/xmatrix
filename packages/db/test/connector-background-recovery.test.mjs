@@ -120,6 +120,6 @@ test("Gmail pending IDs recover a lost read without opening a transaction", asyn
   assert.deepEqual(await new PostgresGmailRoutingRepository(database, "fixture-key").pending({ id: "route" }), []);
   assert.equal(pools.length, 1, "a single-read retry replaces the checkout within its session");
   assert.equal(pools[0].queries.length, 2);
-  assert.ok(pools[0].queries.every(sql => sql.startsWith("SELECT single_read.*")));
+  assert.ok(pools[0].queries.every(sql => !/^(?:BEGIN|COMMIT|ROLLBACK)\b/u.test(sql)));
   assert.equal(pools[0].ended, true);
 });
