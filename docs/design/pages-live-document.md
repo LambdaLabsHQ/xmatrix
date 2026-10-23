@@ -395,12 +395,12 @@ fact is about.
   sleeps as any other): its face in the header, its caret in its colour with what it is doing
   (watching, thinking, writing, waiting), and its words arriving as its harness
   writes them.
-  - **Selection feedback.** Choosing an Agent immediately shows that it is
-    starting, including while a new empty page is being made. The desktop
-    header disables another call while that request is pending. Once sent,
-    desktop feedback explains to write in the page and offers the co-writing
-    conversation, where launch results can be inspected. A failed request clears
-    the pending state and shows its reason on the page.
+  - **Selection feedback.** The desktop Co-write control disables another call
+    while its request is pending. Launch results and the conversation stay in
+    the existing margin card (or the page's conversation list in a narrow
+    window); no banner is inserted above the document. The phone's existing
+    Agent button shows the called Agent until it appears on the page. A failed
+    request clears the pending state and shows its reason on the page.
   - **At once.** The Agent a co-writing conversation calls starts in a private
     managed directory, ready the moment its process does: a launch in a
     conversation that co-writes a page, or comments on a passage of one,

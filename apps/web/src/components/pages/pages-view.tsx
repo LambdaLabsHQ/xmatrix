@@ -1587,9 +1587,6 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     <PageReaderChangesOffer changes={readerChanges ?? 0} shown={diffShown} inMargin={inMargin}
       onShow={() => setDiffShown(true)} onHide={() => setDiffShown(false)} onDone={viewDiff} />
   );
-  const writerStarting = starting?.pageId === page?.pageId ? starting : null;
-  const writerCalled = called?.pageId === page?.pageId ? called : null;
-  const writerFeedback = writerStarting ?? (!phone ? writerCalled : null);
   const controls = (
     <>
       {/* On a phone an Agent is its face in the margin and on the page's button; the stack names the people. */}
@@ -1669,17 +1666,6 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
             : "app-page-article min-h-0 min-w-0 flex-1 overflow-y-auto px-6 pt-4 pb-6 lg:px-12"}>
             <div className={column}>
               {phone && <div className="-mr-2 flex items-center justify-end gap-1 pb-3" data-testid="page-controls">{controls}</div>}
-              {writerFeedback && (
-                <div role="status" className="mb-3 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-                  <span className="page-writer-dots" aria-hidden="true"><i /><i /><i /></span>
-                  <span>{writerFeedback.harness} is starting…{!writerStarting && " Write in the page; your Agent responds here."}</span>
-                  {!writerStarting && writerCalled && (
-                    <Button variant="ghost" size="sm" onClick={() => openConversation(writerCalled.conversationId)}>
-                      Conversation
-                    </Button>
-                  )}
-                </div>
-              )}
               {notice && <p className={noticeClass("attention", "mb-3 rounded-md px-3 py-2 text-sm")}>{notice}</p>}
               {migration.data?.state === "proposed" && (
                 // An Agent drafted the move; it waits for an owner or admin, however many pages exist.

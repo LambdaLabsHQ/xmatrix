@@ -415,37 +415,61 @@ test("a bookmark says in small type what the last change to its section did", as
   await expect(card).not.toContainText("Planned");
 });
 
-for (const refused of [false, true]) {
-  test(`desktop co-writing acknowledges the selection while its request is pending (${refused ? "refused" : "accepted"})`, async ({ page: browser }) => {
+for (const width of [1000, 1440, 1600]) for (const refused of [false, true]) {
+  test(`desktop co-writing keeps startup feedback out of the document at ${width}px (${refused ? "refused" : "accepted"})`, async ({ page: browser }) => {
+    await browser.setViewportSize({ width, height: 900 });
     await stubCoWriting(browser, "");
     await stubWriters(browser, ["claude", "codex"]);
     if (refused) {
       await fixtureRule(browser, { id: "writer-create", pattern: /\/api\/xmatrix\/channels$/u, method: "POST",
         responder: { kind: "deferred", status: 403, json: { error: "forbidden" } } });
     } else {
-      await fixtureChannelCreate(browser, "writer-create", { ...E2E_CHANNEL, name: "Co-writing Relay" }, { held: true });
+      await fixtureChannelCreate(browser, "writer-create", { ...E2E_CHANNEL, name: "Co-writing Relay" });
+      await fixtureRule(browser, { id: "writer-co-writing", pattern: /\/pages\/p-relay\/co-writing$/u, method: "POST",
+        responder: { kind: "deferred", json: { startedAt: NOW } } });
     }
-    await openLivePage(browser);
+    const editor = await openLivePage(browser);
+    await expect(editor).toContainText("In progress");
+    const titleTop = (await editor.locator("h1").first().boundingBox())!.y;
     const controls = browser.getByTestId("page-controls");
     await controls.getByRole("button", { name: /Co-write$/u }).click();
     await browser.getByTestId("page-write-with").getByRole("button", { name: "codex" }).click();
     await expect(browser.getByTestId("page-write-with")).toBeHidden();
-    const feedback = browser.getByRole("status").filter({ hasText: "codex is starting" });
-    await expect(feedback).toBeVisible();
     await expect(controls.getByRole("button", { name: /Co-write$/u })).toBeDisabled();
-    await releaseFixture(browser, "writer-create");
+    const article = browser.getByTestId("pages-view").locator("article");
+    await expect(article.getByRole("status")).toHaveCount(0);
+    expect((await editor.locator("h1").first().boundingBox())!.y).toBe(titleTop);
+    if (!refused) {
+      const writing = await fixtureCreatedChannelId(browser, "writer-create");
+      const now = new Date().toISOString();
+      await fixtureJson(browser, "page-links", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\?.*$/u, { links: [{
+        linkId: "l-write", conversationId: writing, pageId: "p-relay", blockId: "", source: "manual",
+        createdAt: now, lastSeenAt: now, anchor: null, resolvedAt: null,
+      }] });
+    }
+    await releaseFixture(browser, refused ? "writer-create" : "writer-co-writing");
+    await expect(controls.getByRole("status")).toHaveCount(0);
+    await expect(controls.getByRole("button", { name: /Co-write$/u })).toBeEnabled();
     if (refused) {
-      await expect(feedback).toBeHidden();
       await expect(browser.getByText(/Couldn't start the Agent/u)).toBeVisible();
-      await expect(controls.getByRole("button", { name: /Co-write$/u })).toBeEnabled();
       expect(await fixtureRequestBodies(browser, "write-message")).toEqual([]);
       return;
     }
     await expect.poll(async () => (await fixtureRequestBodies(browser, "write-message"))[0]?.body)
       .toMatch(/^@codex launch:force You're co-writing page:p-relay/u);
-    await expect(feedback).toContainText("Write in the page");
+    await expect(browser.getByText("Write in the page; your Agent responds here.", { exact: false })).toHaveCount(0);
     await expect(browser).not.toHaveURL(/conversation=/u);
-    await feedback.getByRole("button", { name: "Conversation", exact: true }).click();
+    expect((await editor.locator("h1").first().boundingBox())!.y).toBe(titleTop);
+    await browser.screenshot({ path: test.info().outputPath(`co-writing-${width}.png`) });
+    if (width === 1600) {
+      const card = browser.getByTestId("page-margin").getByTestId("page-margin-card");
+      await expect(card).toHaveCount(1);
+      await expect(card).toBeVisible();
+      await card.click();
+    } else {
+      await controls.getByRole("button", { name: /conversations about this page/u }).click();
+      await browser.getByTestId("page-conversations").getByRole("button", { name: /Co-writing Relay/u }).click();
+    }
     await expect(browser).toHaveURL(new RegExp(`conversation=${await fixtureCreatedChannelId(browser, "writer-create")}`, "u"));
   });
 }
@@ -503,8 +527,10 @@ test.describe("on a phone", () => {
   });
 
   test("co-writing starts with one tap on an Agent's face, and the reader stays on the page", async ({ page: browser }) => {
+    await browser.setViewportSize({ width: 390, height: 844 });
     await stubCoWriting(browser, "");
     await stubWriters(browser, ["claude", "codex"]);
+    await fixtureChannelCreate(browser, "channel-create", { ...E2E_CHANNEL, name: "Co-writing Relay" }, { held: true });
     await expect(await openRelayOnPhone(browser, pageDocument(BODY))).toContainText("In progress");
 
     // The page's button is the face of the Agent the reader writes with, on glass.
@@ -516,6 +542,8 @@ test.describe("on a phone", () => {
     await expect(picker.locator("textarea, input")).toHaveCount(0);
     await picker.getByRole("button", { name: "codex" }).click();
 
+    await expect(browser.getByTestId("pages-view").locator("article").getByRole("status")).toHaveCount(0);
+    await releaseFixture(browser, "channel-create");
     await expect.poll(async () => (await fixtureRequestBodies(browser, "write-message"))[0]?.body).toMatch(
       /^@codex launch:force You're co-writing page:p-relay with me live\./u);
     const writing = await fixtureCreatedChannelId(browser, "channel-create");
@@ -525,6 +553,7 @@ test.describe("on a phone", () => {
     await expect(picker).toBeHidden();
     await expect(browser).not.toHaveURL(/conversation=/u);
     await expect(browser.getByRole("status")).toHaveText(/codex is starting/u);
+    await browser.screenshot({ path: test.info().outputPath("co-writing-phone.png") });
     // The one picked is the one the button offers next time.
     expect(await browser.evaluate(() => window.localStorage.getItem("xmatrix.page-writer.space-personal"))).toBe("codex");
   });
