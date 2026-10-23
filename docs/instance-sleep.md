@@ -110,7 +110,12 @@ its Runs rest on.
 
 Every committed Human or Agent message goes through
 `dispatchProductMessagePostCommit`. With PostgreSQL launch authority that entry
-point now also runs `resting-instance-wake` for the message's Channel:
+point now also runs `resting-instance-wake` for the message's Channel.
+Committed Connector App messages enter the same wake authority directly, without
+interpreting their external bodies. Native events reach existing Channel
+Instances; action receipts restrict the wake to the authenticated calling
+Instance, recorded in Hub-only metadata. Human receipts and other system facts
+remain context. Live and catch-up App work queues behind any active turn:
 
 1. Messages that are themselves lifecycle controls (`/kill all`, `:stop`,
    `:reborn`, `:handoff:`) and Auto/harness launch requests (`@auto`, `@claude`,
@@ -204,7 +209,14 @@ A sleeping Instance's `Retained` slot is disk the pool cannot otherwise reuse.
   under disk pressure), beyond the warm budget and independently of the
   seven-day floor for other slots. Eviction keeps the existing gate: un-landed
   work is pinned to `refs/xmatrix/snapshot/<slotId>/<uuid>` first, and a slot
-  whose work cannot be preserved keeps its disk.
+  whose work cannot be preserved keeps its disk. When `git worktree remove
+  --force` fails because a process is still writing into the tree, git has
+  already deleted the slot's admin directory; the tree is then no longer a
+  linked worktree, so the pool finishes the delete itself (layout-contained,
+  no symlinks, retried briefly against the writer) and the eviction completes.
+  A slot that still cannot be evicted keeps its disk and is logged by id; the
+  sweep goes on to the pool's other slots, and a record written for a tree
+  that stays intact is retracted.
 - **Rehydrate record.** Before the tree is removed the pool records the
   binding's session, Instance, slot id, `HEAD` commit, branch and whether the
   top commit is the snapshot of a dirty tree in `rehydrate.json` beside the
@@ -224,7 +236,10 @@ A sleeping Instance's `Retained` slot is disk the pool cannot otherwise reuse.
   keeps in the slot's locked worktree entry (the slot's last base commit when
   that entry is gone). The reborn, the sweep or a new lease that finds it first
   writes the record and clears the leftover entry and residue, so the reborn
-  then rehydrates as above. Uncommitted edits went with the directory.
+  then rehydrates as above. Uncommitted edits went with the directory. A tree
+  whose `.git` names an admin directory git dropped counts as lost only when
+  the eviction that got that far already recorded it; that record is kept as
+  is. Without one, the files are kept and the reborn fails naming the tree.
 
 A slot whose recorded path is occupied, or whose recorded commit is unreachable,
 fails closed with the existing "checkout was reclaimed" refusal.

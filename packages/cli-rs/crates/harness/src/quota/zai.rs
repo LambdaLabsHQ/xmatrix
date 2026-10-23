@@ -62,7 +62,7 @@ pub async fn read_zai_coding_plan_quota_usage(force: bool) -> Option<LlmUsage> {
     usage
 }
 
-pub fn zai_coding_plan_usage_from_value(value: &Value) -> Option<LlmUsage> {
+pub(crate) fn zai_coding_plan_usage_from_value(value: &Value) -> Option<LlmUsage> {
     let mut usage = LlmUsage::default();
     append_quota_usages(
         &mut usage.quota_usages,

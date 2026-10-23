@@ -1,3 +1,4 @@
+import { publishChannelInvocationsChanged } from "./channel-live-judgment";
 import type { AppConnectorEnv } from "./app-connectors";
 import { registrationRepositoryCatalog } from "./registration-repository-catalog";
 import { registrationLaunchContextReader } from "./registration-launch-context";
@@ -58,6 +59,8 @@ export async function executeRegistrationLaunchDispatch(input: {
         ...(item.tooOld ? { tooOld: item.tooOld } : {}), ...(item.signedOut ? { signedOut: item.signedOut } : {}) })),
     });
   }
+  // A recorded refusal answers its summon now; accepted launches answer as the coordinator publishes them.
+  if (result.rejected.length && input.env) await publishChannelInvocationsChanged(input.env as Env, input.channelId);
   return { ...result, shardId: placement.shardId, channelId: input.channelId };
 }
 
@@ -76,6 +79,8 @@ interface RegistrationInputRequest {
   initialMessageId?: string; presentationMessageId?: string; tags?: AutoLaunchTags;
   /** Capabilities the work needs; those a daemon can prove gate where it runs. */
   requiredCapabilities?: readonly string[];
+  /** A handoff predecessor's conversation, handed to the successor's spawn. */
+  handoffContext?: Record<string, unknown>;
 }
 
 /** Launch from any input. Jev chooses among every authorized registration in
@@ -133,8 +138,17 @@ export async function executeFirstMessageDecision(input: {
     actorUserId: input.actorUserId, body: input.body, ...(onHarness ? { onHarness } : {}) }, choose);
   // Both authors persist the same decision before the system summon can be
   // authorized. The database gives Agent publications an immediate deadline.
-  return decideFirstMessageLaunch({ ...input, read, choices: new PostgresFirstMessageLaunchChoiceRepository(input.database, {
-    spaceId: placement.spaceId, shardId: placement.shardId, placementEpoch: placement.placementEpoch }) });
+  const choices = new PostgresFirstMessageLaunchChoiceRepository(input.database, {
+    spaceId: placement.spaceId, shardId: placement.shardId, placementEpoch: placement.placementEpoch });
+  // Each step of the decision is what the first message's chooser shows next.
+  const pushed = <T>(step: Promise<T>) => step.then(async (value) => {
+    if (input.env) await publishChannelInvocationsChanged(input.env as Env, input.channelId);
+    return value;
+  });
+  return decideFirstMessageLaunch({ ...input, read, choices: {
+    open: (request) => pushed(choices.open(request)), recommend: (request) => pushed(choices.recommend(request)),
+    claim: (request) => pushed(choices.claim(request)), fail: (request) => pushed(choices.fail(request)),
+  } });
 }
 
 type FirstMessageChoices = Pick<PostgresFirstMessageLaunchChoiceRepository, "open" | "recommend" | "claim" | "fail">;
@@ -191,7 +205,7 @@ export async function decideFirstMessageLaunch(input: {
 /** Prepares the wake of every resting Instance in a Channel; the Channel's
  * coordinator carries the prepared wakes from there. */
 export async function wakeRestingInstances(env: Env, input: {
-  commandId: string; channelId: string; sourceMessageId: string; prompt: string;
+  commandId: string; channelId: string; sourceMessageId: string; targetInstanceId?: string; prompt: string;
 }) {
   const value = await executeRestingInstanceWake({ ...runtimePlacement(env), ...input });
   if (value.woken.length > 0) await wakeAgentLaunchCoordinator(env, input.channelId, ["reborn", "launch"]);
@@ -337,7 +351,7 @@ export async function executeRegistrationRebornPrepare(input: {
  * message through its own reborn (docs/instance-sleep.md §3). */
 export async function executeRestingInstanceWake(input: {
   env?: AppConnectorEnv; database: AuthorityDatabase; directory: AuthorityDatabase; commandId: string;
-  channelId: string; sourceMessageId: string; prompt?: string;
+  channelId: string; sourceMessageId: string; targetInstanceId?: string; prompt?: string;
 }) {
   return (await placedRebornRepository(input, "reborn")).wakeResting(input);
 }

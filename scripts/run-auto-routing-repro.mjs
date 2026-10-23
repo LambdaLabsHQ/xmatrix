@@ -103,6 +103,8 @@ try {
   // Staged registration launches are rechecked while other launch work runs in
   // their Channel; only a real database interleaves the recheck with a commit.
   if (hubSuitePackages) run("node", ["--test", "packages/db/test/page-migration-postgres.test.mjs",
+    // Exercise deletion against the current schema, including registered Run dependencies.
+    "packages/db/test/space-deletion-postgres.test.mjs",
     "packages/db/test/automation-run-links-postgres.test.mjs",
     "packages/db/test/postgres-fixture-lifecycle.test.mjs",
     "packages/db/test/client-postgres.test.mjs",
@@ -122,6 +124,8 @@ try {
     "packages/db/test/apple-billing-postgres.test.mjs",
     "packages/db/test/credit-pack-postgres.test.mjs",
     "packages/db/test/paid-call-postgres.test.mjs",
+    // The official plan's Free allowance, credits and grace against the real schema.
+    "packages/billing-official/test/official-billing-postgres.test.mjs",
     "packages/db/test/outbox-retention-postgres.test.mjs",
     "packages/db/test/discord-lifecycle-postgres.test.mjs",
     "packages/db/test/sentry-event-postgres.test.mjs",
@@ -139,6 +143,11 @@ try {
   // Catalog/metadata fixtures reset their Space closure: run after the other
   // PostgreSQL files, never concurrently with their live authorities.
   if (hubSuitePackages) run("node", ["--test", "packages/db/test/channel-catalog-postgres.test.mjs"], {
+    XMATRIX_REQUIRE_POSTGRES_TEST: "true", XMATRIX_TEST_POSTGRES_URL: url.toString(),
+  });
+  // This fixture resets shared lifecycle tables. Run it alone, including the
+  // first-reply observation's Channel contention regression (XMATRIX-HUB-9A).
+  if (hubSuitePackages) run("node", ["--test", "packages/db/test/agent-launch-postgres.test.mjs"], {
     XMATRIX_REQUIRE_POSTGRES_TEST: "true", XMATRIX_TEST_POSTGRES_URL: url.toString(),
   });
   // Workspace packages whose SQL only a real database proves declare test:postgres.

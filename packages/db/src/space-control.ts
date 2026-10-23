@@ -1,5 +1,6 @@
 import { appendMetadataRevision, metadataRevision, type AboutTaskAuthor } from "./channel-metadata-revisions.js";
 import { DetailedControlError } from "./control-error.js";
+import { retireChannel } from "./channel-deletion.js";
 import type { DatabaseRequestContext } from "./context.js";
 import { readsOnly } from "./space-roles.js";
 import { lockTransfer, requireTransferAdmin, transferSnapshot, transferView, validateTransfer, type TransferRole, type TransferRow } from "./channel-transfer.js";
@@ -223,7 +224,6 @@ interface MemberRow extends QueryResultRow {
   role: string;
   email: string | null;
   display_name: string | null;
-  avatar_url: string | null;
   created_at: Date | string;
   profile_name: string | null;
   profile_handle: string | null;
@@ -417,8 +417,8 @@ function serializeSpace(
       ...(member.email ? { email: member.email } : {}),
       ...(member.profile_name || member.display_name
         ? { name: member.profile_name || member.display_name! } : {}),
-      ...(member.profile_avatar_url || member.avatar_url
-        ? { avatarUrl: member.profile_avatar_url || member.avatar_url! } : {}),
+      // A person's face is their account's picture alone (protocol faces.ts); the member row's copy is not read.
+      ...(member.profile_avatar_url ? { avatarUrl: member.profile_avatar_url } : {}),
       ...(member.profile_handle ? { handle: member.profile_handle } : {}),
       ...(member.profile_bio ? { bio: member.profile_bio } : {}),
       ...(member.profile_time_zone ? { timeZone: member.profile_time_zone } : {}),
@@ -612,11 +612,6 @@ async function releaseChannelTreeForMove(
     values: [channelIds, at], maxRows: 0,
   });
   await transaction.query({
-    name: "channel_move_remove_gmail_notifications_v1",
-    text: "DELETE FROM data.app_gmail_routes WHERE channel_id=ANY($1::text[])",
-    values: [channelIds], maxRows: 0,
-  });
-  await transaction.query({
     name: "channel_move_remove_app_relations_v1",
     text: "DELETE FROM data.app_source_relations WHERE channel_id=ANY($1::text[])",
     values: [channelIds], maxRows: 0,
@@ -805,8 +800,9 @@ export class PostgresSpaceControlRepository {
   }
 
   private async placement(requestId: string, operation: string, spaceId: string): Promise<SpacePlacement> {
-    return this.placements.resolveWritable({ requestId, operation: `${operation}.placement` }, spaceId, () =>
-      new SpaceControlError("space_placement_unavailable", 503, "Space placement is not writable", true));
+    return this.placements.resolveWritable({ requestId, operation: `${operation}.placement` }, spaceId,
+      () => new SpaceControlError("space_placement_unavailable", 503, "Space placement is not writable", true),
+      () => new SpaceControlError("space_not_found", 404, "Space not found"));
   }
 
   private async publishCurrentChannelRoutes(
@@ -1233,7 +1229,9 @@ export class PostgresSpaceControlRepository {
     const at = iso(input.at);
     // A purged Space has no placement left; to its owner it is simply gone.
     const placement = await this.placement(requestId, "space.space_restore", spaceId).catch((error: unknown) => {
-      if (missingPlacement(error)) throw new SpaceControlError("not_found", 404, "Space not found");
+      if (error instanceof SpaceControlError && error.code === "space_not_found") {
+        throw new SpaceControlError("not_found", 404, "Space not found");
+      }
       throw error;
     });
     const requestDigest = await digest(input);
@@ -1537,8 +1535,8 @@ export class PostgresSpaceControlRepository {
     if (spaces.length === 0) return [];
     const ids = spaces.map((space) => space.space_id);
     const members = await transaction.query<MemberRow>({
-      name: "space_members_hydrate_v1",
-      text: `SELECT m.space_id, m.user_id, m.role, m.email, m.display_name, m.avatar_url,
+      name: "space_members_hydrate_v2",
+      text: `SELECT m.space_id, m.user_id, m.role, m.email, m.display_name,
           m.created_at, u.name AS profile_name, u.handle AS profile_handle,
           u.image AS profile_avatar_url, u.bio AS profile_bio,
           u.time_zone AS profile_time_zone, u.profile_version
@@ -2893,6 +2891,23 @@ export class PostgresSpaceControlRepository {
       ...(stopTargets.length > 0 ? { stopTargets } : {}) };
   }
 
+  /** Human confirmation is checked at the HTTP boundary; PostgreSQL owns admission and retirement. */
+  async deleteChannel(input: { requestId: string; spaceId: string; channelId: string;
+    actorUserId: string; name: string; at: string }): Promise<Record<string, unknown>> {
+    const requestId = bounded(input.requestId, "requestId", 200);
+    const spaceId = bounded(input.spaceId, "spaceId");
+    const channelId = bounded(input.channelId, "channelId");
+    const actorUserId = bounded(input.actorUserId, "actorUserId");
+    const at = iso(input.at);
+    return this.inSpace(requestId, "channel.delete", spaceId, async tx => {
+      await requireSpaceAdmin(tx, "channel_deletion_admin_v1", spaceId, actorUserId);
+      const result = await retireChannel(tx, { ...input, spaceId, channelId, actorUserId, at });
+      // An idempotent repeat still advances the catalog, recovering a lost invalidation.
+      await requiredControlHead(tx, { name: "channel_deletion_head_v1", spaceId, at });
+      return { ...result, channelId, spaceId };
+    });
+  }
+
   async mutateChannel(
     input: PostgresChannelMutation,
     transfer?: { sourceSpaceId: string; proposalId: string },
@@ -2947,7 +2962,7 @@ export class PostgresSpaceControlRepository {
         values: [channelId], maxRows: 1,
       });
       const root = roots[0];
-      if (!root) throw new SpaceControlError("not_found", 404, "channel not found");
+      if (!root || root.mode === "deleted") throw new SpaceControlError("not_found", 404, "channel not found");
       const expectedVersion = input.expectedVersion ?? Number(root.version);
       if (Number(root.version) !== expectedVersion) {
         throw new SpaceControlError("conflict", 409, "channel version conflict");

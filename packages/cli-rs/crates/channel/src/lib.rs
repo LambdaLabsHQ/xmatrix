@@ -20,6 +20,7 @@ use xmatrix_cli_core::channel_read_context::{OpenedChannelThread, thread_root_ma
 use xmatrix_cli_core::error::{self, CliError};
 use xmatrix_cli_core::hex::sha256_hex;
 use xmatrix_cli_core::human_connection::{HumanConnectionClient, HumanConnectionEvent};
+use xmatrix_cli_core::media_cache::{CachedMedia, LocalCopy};
 use xmatrix_cli_core::protocol::{self, HubRoutes, with_route};
 use xmatrix_cli_core::route_key;
 use xmatrix_cli_core::text_input::{self, TextRoutes, TextSource};
@@ -30,7 +31,7 @@ mod read_context;
 pub use read_context::{ChannelReadContext, load_channel_read_context};
 
 const CHANNEL_FILE_ATTACHMENT_LIMIT: usize = 4;
-const CHANNEL_FILE_ATTACHMENT_MAX_BYTES: u64 = 25 * 1024 * 1024;
+const CHANNEL_FILE_ATTACHMENT_MAX_BYTES: u64 = xmatrix_cli_core::media_cache::MEDIA_MAX_BYTES;
 // Relay authority bounds one channel-history query to 200 enriched rows (older
 // Hubs clamp to 50, and any Hub may return fewer under its page byte budget).
 // Fetching history is still unbounded from the CLI's perspective, but it must
@@ -499,7 +500,7 @@ pub async fn cmd_space(hub_url: &str, token: &str, command: SpaceCommand) -> err
     }
 }
 
-pub async fn cmd_recover_send(
+pub(crate) async fn cmd_recover_send(
     hub_url: &str,
     token: &str,
     channel: &str,
@@ -538,10 +539,18 @@ pub async fn cmd_recover_send(
 
 /// What an Agent's message writes into pages (`⟦write page:<id>⟧ … ⟦/write⟧`) goes into those pages now,
 /// as its reply's words would, and the message keeps a note of where each went instead of the words.
-async fn write_message_into_pages(hub_url: &str, token: &str, channel_id: &str, message: &str) -> String {
+async fn write_message_into_pages(
+    hub_url: &str,
+    token: &str,
+    channel_id: &str,
+    message: &str,
+) -> String {
     use xmatrix_cli_core::page_co_write::{PageCoWriteConnector, PageWritePart, page_write_parts};
     let parts = page_write_parts(message);
-    if !parts.iter().any(|part| matches!(part, PageWritePart::Write { .. })) {
+    if !parts
+        .iter()
+        .any(|part| matches!(part, PageWritePart::Write { .. }))
+    {
         return message.to_string();
     }
     let connector = PageCoWriteConnector::new(
@@ -581,7 +590,7 @@ async fn write_message_into_pages(hub_url: &str, token: &str, channel_id: &str, 
     sent
 }
 
-pub struct SendOptions<'a> {
+pub(crate) struct SendOptions<'a> {
     pub message_parts: &'a [String],
     pub attachment_paths: &'a [PathBuf],
     pub read_stdin: bool,
@@ -593,7 +602,7 @@ pub struct SendOptions<'a> {
     pub wait: bool,
 }
 
-pub async fn cmd_send(
+pub(crate) async fn cmd_send(
     hub_url: &str,
     token: &str,
     channel_id: &str,
@@ -923,7 +932,7 @@ impl UploadedMessageAttachment {
     }
 }
 
-pub fn load_channel_file_attachments(
+pub(crate) fn load_channel_file_attachments(
     paths: &[PathBuf],
 ) -> error::Result<Vec<PendingFileAttachment>> {
     if paths.len() > CHANNEL_FILE_ATTACHMENT_LIMIT {
@@ -1153,7 +1162,7 @@ pub fn channel_image_mime_type(path: &Path) -> Option<&'static str> {
     }
 }
 
-pub fn channel_file_mime_type(path: &Path) -> &'static str {
+pub(crate) fn channel_file_mime_type(path: &Path) -> &'static str {
     if let Some(image) = channel_image_mime_type(path) {
         return image;
     }
@@ -1316,9 +1325,9 @@ pub fn persisted_daemon_agent_run_ancestor_pid() -> Option<u32> {
     #[cfg(windows)]
     {
         let parents = process_parent_ids()?;
-        return tracked_ancestor_pid(std::process::id(), &tracked_pids, |pid| {
+        tracked_ancestor_pid(std::process::id(), &tracked_pids, |pid| {
             parents.get(&pid).copied()
-        });
+        })
     }
     #[cfg(not(windows))]
     tracked_ancestor_pid(std::process::id(), &tracked_pids, parent_process_id)
@@ -2633,9 +2642,10 @@ pub fn format_history_message(message: &protocol::ChannelMessage) -> String {
     )
 }
 
+#[cfg(test)]
 /// Render one history line against a fixed clock, so a whole transcript shares
 /// one anchor and a test can pin the ages it asserts on.
-pub fn format_history_message_at(
+pub(crate) fn format_history_message_at(
     message: &protocol::ChannelMessage,
     read_at: Option<&str>,
 ) -> String {
@@ -2646,7 +2656,7 @@ pub fn format_history_message_at(
 /// coordinates (no data URL / signed URL), prefer a materialized local path so
 /// agents and humans do not see a false "missing data" state for successful
 /// uploads.
-pub fn format_history_message_with_local_images(
+pub(crate) fn format_history_message_with_local_images(
     message: &protocol::ChannelMessage,
     local_images: &HashMap<(String, String), PathBuf>,
     read_at: Option<&str>,
@@ -2869,171 +2879,41 @@ async fn download_message_attachment_product_media(
     expected_mime: &str,
     name: &str,
 ) -> error::Result<PathBuf> {
-    if expected_size == 0 || expected_size > CHANNEL_FILE_ATTACHMENT_MAX_BYTES {
-        return Err(CliError::Http(
-            "Channel attachment is outside the CLI media limit".into(),
-        ));
-    }
-    let stem = xmatrix_cli_core::attachment_cache::cache_stem_for_identity(
-        channel_id,
-        message_id,
-        attachment_id,
-        expected_size,
-    );
-    if let Some(bytes) =
-        xmatrix_cli_core::attachment_cache::read_cached_attachment(&stem, Some(expected_size))
-    {
-        return write_history_attachment_bytes(attachment_id, expected_mime, name, &bytes);
-    }
-    // Every history read lists the same images; one the Hub refused is not
-    // asked for again until the refusal expires.
-    if xmatrix_cli_core::attachment_cache::attachment_recently_refused(&stem) {
-        return Err(CliError::Http(
-            "Channel attachment was refused recently; not requesting it again yet".into(),
-        ));
-    }
+    let media = CachedMedia {
+        stem: xmatrix_cli_core::attachment_cache::cache_stem_for_identity(
+            channel_id,
+            message_id,
+            attachment_id,
+            expected_size,
+        ),
+        expected_size: Some(expected_size),
+        content_hash: None,
+        mime_type: expected_mime,
+        copy: LocalCopy::Named {
+            prefix: "history",
+            id: attachment_id,
+            name,
+        },
+    };
     let url = with_route(hub_url, HubRoutes::MESSAGE_ATTACHMENT_PRODUCT_MEDIA);
     let body = serde_json::json!({
         "channelId": channel_id,
         "messageId": message_id,
         "attachmentId": attachment_id,
     });
-    let broker = xmatrix_cli_core::access::requires_access(&url)
-        .then(xmatrix_cli_core::access::daemon_request_broker)
-        .flatten();
-    let response = if let Some((broker_url, capability)) = broker {
-        reqwest::Client::new()
-            .post(format!("{broker_url}/request/hub-product-media"))
-            .header("x-xmatrix-request-capability", capability)
-            .json(&serde_json::json!({
-                "url": url,
-                "token": token,
-                "expectedSize": expected_size,
-                "body": body,
-            }))
-            .send()
-            .await
-    } else {
-        let request = http::client()?
-            .post(&url)
-            .bearer_auth(token)
-            .header(reqwest::header::CONTENT_TYPE, "application/json")
-            .header(reqwest::header::CACHE_CONTROL, "no-store")
-            .json(&body);
-        http::with_access_header(request, &url)?.send().await
-    }
-    .map_err(|err| CliError::Http(format!("product-media request failed: {err}")))?;
-    if matches!(
-        response.status(),
-        reqwest::StatusCode::FORBIDDEN | reqwest::StatusCode::NOT_FOUND
-    ) {
-        let _ = xmatrix_cli_core::attachment_cache::remember_refused_attachment(&stem);
-    }
-    let response = http::require_success(response, &url).await?;
-    if let Some(length) = response.content_length()
-        && length != expected_size
-    {
-        return Err(CliError::Http(
-            "Channel image attachment length does not match authority".into(),
-        ));
-    }
-    let mime_type = response
-        .headers()
-        .get(reqwest::header::CONTENT_TYPE)
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.split(';').next())
-        .map(|value| value.trim().to_string())
-        .unwrap_or_else(|| expected_mime.to_string());
-    if !mime_type.eq_ignore_ascii_case(expected_mime) && !expected_mime.is_empty() {
-        // Prefer server content-type when present; still require image/*.
-        if !mime_type.starts_with("image/") {
-            return Err(CliError::Http(format!(
-                "Channel image attachment MIME type is not an image: {mime_type}"
-            )));
-        }
-    }
-    let bytes = response
-        .bytes()
+    media
+        .fetch(|| async {
+            http::client()?
+                .post(&url)
+                .bearer_auth(token)
+                .header(reqwest::header::CONTENT_TYPE, "application/json")
+                .header(reqwest::header::CACHE_CONTROL, "no-store")
+                .json(&body)
+                .send()
+                .await
+                .map_err(|err| CliError::Http(format!("product-media request failed: {err}")))
+        })
         .await
-        .map_err(|err| CliError::Http(format!("product-media body read failed: {err}")))?;
-    if expected_size > 0 && bytes.len() as u64 != expected_size {
-        return Err(CliError::Http(
-            "Channel attachment body length does not match authority".into(),
-        ));
-    }
-    let _ = xmatrix_cli_core::attachment_cache::write_cached_attachment(&stem, &bytes);
-    write_history_attachment_bytes(attachment_id, &mime_type, name, &bytes)
-}
-
-fn write_history_attachment_bytes(
-    attachment_id: &str,
-    mime_type: &str,
-    name: &str,
-    bytes: &[u8],
-) -> error::Result<PathBuf> {
-    let extension = channel_image_extension(mime_type, name);
-    let safe_name: String = Path::new(name)
-        .file_stem()
-        .and_then(|value| value.to_str())
-        .unwrap_or("attachment")
-        .chars()
-        .map(|ch| {
-            if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.') {
-                ch
-            } else {
-                '-'
-            }
-        })
-        .collect();
-    let path = xmatrix_cli_core::attachment_cache::attachment_cache_dir().join(format!(
-        "history-{}-{safe_name}.{extension}",
-        &attachment_id[..attachment_id.len().min(12)],
-    ));
-    xmatrix_cli_core::attachment_cache::copy_cached_attachment_to(&path, bytes)?;
-    Ok(path)
-}
-
-fn channel_image_extension(mime_type: &str, name: &str) -> &'static str {
-    let lower_mime = mime_type.to_ascii_lowercase();
-    if lower_mime.contains("png") {
-        return "png";
-    }
-    if lower_mime.contains("jpeg") || lower_mime.contains("jpg") {
-        return "jpg";
-    }
-    if lower_mime.contains("gif") {
-        return "gif";
-    }
-    if lower_mime.contains("webp") {
-        return "webp";
-    }
-    if lower_mime.contains("pdf") {
-        return "pdf";
-    }
-    if lower_mime.contains("mp4") {
-        return "mp4";
-    }
-    if lower_mime.contains("markdown") {
-        return "md";
-    }
-    Path::new(name)
-        .extension()
-        .and_then(|value| value.to_str())
-        .map(|value| match value.to_ascii_lowercase().as_str() {
-            "png" => "png",
-            "jpg" | "jpeg" => "jpg",
-            "gif" => "gif",
-            "webp" => "webp",
-            "mp4" => "mp4",
-            "webm" => "webm",
-            "md" | "markdown" => "md",
-            "txt" => "txt",
-            "pdf" => "pdf",
-            "zip" => "zip",
-            "json" => "json",
-            _ => "bin",
-        })
-        .unwrap_or("bin")
 }
 
 fn shell_quote(value: &str) -> String {
@@ -3137,7 +3017,7 @@ fn fallback_member_label(member: &str) -> String {
         .unwrap_or_else(|| member.to_string())
 }
 
-pub fn short_channel_id(channel_id: &str) -> String {
+pub(crate) fn short_channel_id(channel_id: &str) -> String {
     channel_id.chars().take(8).collect()
 }
 

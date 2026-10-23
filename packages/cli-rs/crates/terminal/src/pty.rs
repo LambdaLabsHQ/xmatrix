@@ -80,7 +80,7 @@ impl PtyWrapper {
     /// Ghost typing: inject text into the PTY's stdin as if a human typed it.
     /// Appends carriage return to simulate pressing Enter.
     #[allow(dead_code)]
-    pub fn inject(&mut self, text: &str) -> Result<()> {
+    pub(crate) fn inject(&mut self, text: &str) -> Result<()> {
         self.writer
             .write_all(text.as_bytes())
             .map_err(|e| CliError::Pty(format!("inject write failed: {e}")))?;
@@ -95,7 +95,7 @@ impl PtyWrapper {
 
     /// Write raw bytes into PTY stdin (no automatic CR).
     #[allow(dead_code)]
-    pub fn write_raw(&mut self, data: &[u8]) -> Result<()> {
+    pub(crate) fn write_raw(&mut self, data: &[u8]) -> Result<()> {
         self.writer
             .write_all(data)
             .map_err(|e| CliError::Pty(format!("write_raw failed: {e}")))?;
@@ -120,7 +120,7 @@ impl PtyWrapper {
 
     /// Check if child process is still running.
     #[allow(dead_code)]
-    pub fn try_wait(&mut self) -> Result<Option<portable_pty::ExitStatus>> {
+    pub(crate) fn try_wait(&mut self) -> Result<Option<portable_pty::ExitStatus>> {
         self.child
             .try_wait()
             .map_err(|e| CliError::Pty(format!("try_wait failed: {e}")))
@@ -128,7 +128,7 @@ impl PtyWrapper {
 
     /// Wait for the child to exit.
     #[allow(dead_code)]
-    pub fn wait(&mut self) -> Result<portable_pty::ExitStatus> {
+    pub(crate) fn wait(&mut self) -> Result<portable_pty::ExitStatus> {
         self.child
             .wait()
             .map_err(|e| CliError::Pty(format!("wait failed: {e}")))
@@ -136,7 +136,7 @@ impl PtyWrapper {
 
     /// Kill the child process.
     #[allow(dead_code)]
-    pub fn kill(&mut self) -> Result<()> {
+    pub(crate) fn kill(&mut self) -> Result<()> {
         self.child
             .kill()
             .map_err(|e| CliError::Pty(format!("kill failed: {e}")))

@@ -536,11 +536,14 @@ async function githubDelegatedRepositories(env: AppConnectorEnv, connection: App
  * administrator still administers the repository. Any failure answers no.
  */
 export async function githubRepositoryDelegated(env: AppConnectorEnv, connection: AppConnectorConnectionView,
-  installationId: string, owner: string, repo: string): Promise<boolean> {
+  installationId: string, owner: string, repo: string, readScope?: "code-scanning"): Promise<boolean> {
   if (!githubConnectionHasInstallation(connection, installationId)) return false;
   try {
+    const permissions: GitHubPermissionRequest = { metadata: "read" };
+    if (readScope === "code-scanning") permissions.security_events = "read";
     const auth = await githubInstallationAuthForId(env, installationId, { repositories: [repo],
-      permissions: { metadata: "read" } });
+      permissions });
+    if (readScope === "code-scanning" && !auth.capabilities.includes("github.code_scanning.read")) return false;
     return await githubLinkerAdministers(env, connection, installationId, owner, repo, auth.token);
   } catch {
     return false;
@@ -1590,9 +1593,7 @@ async function fetchGitHubRepositoryCapabilities(
   ref: GitHubRepositoryRef
 ): Promise<string[]> {
   const auth = await githubInstallationAuthForRepository(env, connection, ref.owner, ref.repo);
-  if (!githubAuthHasCapability(auth, connection, "github.issues.read")) {
-    throw new Error("missing_capabilities:github.issues.read");
-  }
+  // The subscription's selected features decide which permissions it needs.
   return auth.capabilities;
 }
 
@@ -2240,6 +2241,7 @@ function githubInstallationCapabilities(payload: unknown): string[] {
   if (githubPermissionAllowsWrite(permissions.pull_requests)) capabilities.push("github.pull_requests.write");
   if (githubPermissionAllowsRead(permissions.checks)) capabilities.push("github.checks.read");
   if (githubPermissionAllowsWrite(permissions.checks)) capabilities.push("github.checks.write");
+  if (githubPermissionAllowsRead(permissions.security_events)) capabilities.push("github.code_scanning.read");
   if (githubPermissionAllowsWrite(permissions.actions)) capabilities.push("github.actions.write");
   // GitHub exposes `workflows` as write-only: there is no read level to derive.
   if (githubPermissionAllowsWrite(permissions.workflows)) capabilities.push("github.workflows.write");

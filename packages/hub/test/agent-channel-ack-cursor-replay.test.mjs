@@ -300,3 +300,17 @@ test("catch-up gives lifecycle control commands as context, like live delivery",
   assert.deepEqual(replayed(batch), [16, 17, 18, 19, 20]);
   assert.deepEqual(intents(batch), ["context", "context", "context", "context", "work"]);
 });
+
+// Replay builds its own recipient from the resumed Run: a live-only fix loses
+// receipts on reconnect, while treating them as broadcast wakes a sibling.
+test("catch-up routes a Connector receipt to its retained caller after reconnect", async () => {
+  const receipt = { ...CORPUS.at(-1), from: { kind: "app", label: "Gmail", appId: "gmail" },
+    metadata: { xmatrixProvenance: "system_fact", xmatrixConnectorRequesterInstanceId: "caller" } };
+  for (const [instanceId, expected] of [["caller", "work"], ["peer", "context"]]) {
+    const batch = await port(19, [receipt]).join(session(instanceId), {
+      type: "join_channel", channelId: CHANNEL_ID, historyLimit: 0,
+    });
+    assert.deepEqual(intents(batch), [expected]);
+    assert.equal(batch.find(frame => frame.type === "channel_history_replay").interruptRequested, false);
+  }
+});

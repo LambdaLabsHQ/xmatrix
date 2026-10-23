@@ -2,7 +2,7 @@
 
 import { useCallback, useContext, useSyncExternalStore, type ComponentProps } from "react";
 import { presenceInstanceId } from "@xmatrix/protocol";
-import { IdentityAvatar } from "./identity-avatar";
+import { Face } from "./face";
 import { RealtimeChannelsContext, RealtimeEventsContext } from "./realtime-channels";
 import { agentInstanceDisplayStatus } from "./workspace-shell-presence";
 
@@ -10,7 +10,7 @@ const noEvents = [] as const;
 
 /** Only the avatar's visible status subscribes to live state. Activity is
  * read when its trace is opened, so Markdown rows never depend on it. */
-export function RealtimeMessageAvatar({ channelId, instanceId, senderId, ...props }: ComponentProps<typeof IdentityAvatar> & {
+export function RealtimeMessageAvatar({ channelId, instanceId, senderId, ...props }: ComponentProps<typeof Face> & {
   channelId?: string;
   instanceId?: string;
   senderId?: string;
@@ -23,6 +23,7 @@ export function RealtimeMessageAvatar({ channelId, instanceId, senderId, ...prop
     const global = events?.subscribeKey("", notify);
     return () => { unlisten(); own?.(); global?.(); };
   }, [store, events, channelId, instanceId, senderId]);
+  const name = props.of.name;
   const snapshot = useCallback(() => {
     const channel = channelId ? store?.get(channelId) : undefined;
     if (!channel) return props.status;
@@ -33,9 +34,9 @@ export function RealtimeMessageAvatar({ channelId, instanceId, senderId, ...prop
     const instance = channel.presence?.instances.get(presenceInstanceId(instanceId));
     return instance
       ? agentInstanceDisplayStatus({ instance, agentId: senderId,
-        events: events?.get(channelId ?? "")?.events ?? events?.get("")?.events ?? noEvents, name: props.label })
+        events: events?.get(channelId ?? "")?.events ?? events?.get("")?.events ?? noEvents, name })
       : props.status === undefined ? undefined : "offline";
-  }, [store, events, channelId, instanceId, senderId, props.status, props.label]);
+  }, [store, events, channelId, instanceId, senderId, props.status, name]);
   const status = useSyncExternalStore(subscribe, snapshot, snapshot);
-  return <IdentityAvatar {...props} status={status} />;
+  return <Face {...props} status={status} />;
 }

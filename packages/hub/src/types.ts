@@ -132,6 +132,7 @@ export interface Env {
   RATE_LIMIT_HUMAN_CONNECT?: RequestRateLimiter;
   /** Per-Human allowance of composer draft previews (Jev). Always enforced. */
   RATE_LIMIT_SUMMON_INTENT?: RequestRateLimiter;
+  RATE_LIMIT_SEARCH_RERANK?: RequestRateLimiter;
   /** Per-owner allowance of open Jev evaluations. Always enforced. */
   RATE_LIMIT_JEV_EVALUATE?: RequestRateLimiter;
   /** Over-limit requests are refused only when this is exactly "true"; otherwise only logged. */
@@ -150,6 +151,8 @@ export interface Env {
   CF_VERSION_METADATA?: { id?: string; tag?: string };
   SEND_EMAIL?: SendEmail;
   APP_URL?: string;
+  /** The Web every beta deploys (e.g. https://beta.xmatrix.sh); links still go to APP_URL. */
+  APP_BETA_URL?: string;
   /** Verified console protocol/delivery/identifiers and approved template; absent keeps company installation closed. */
   CONNECTOR_DINGTALK_COMPANY_CONFIG?: string;
   /** Server-only Stripe API key. A public Payment Link is never an entitlement. */
@@ -199,7 +202,6 @@ export interface Env {
    * Production Space whose signed-in members may enter the hosted Test app.
    * The deployment pins the id; clients and Spaces cannot widen this grant.
    */
-  TEST_ENVIRONMENT_ACCESS_SPACE_ID?: string;
   XMATRIX_MOCK_AUTH_TOKEN?: string;
   /** Runtime cell routing: exactly "dual" activates candidate cells; default shadow. */
   XMATRIX_RUNTIME_CELL_MODE?: string;

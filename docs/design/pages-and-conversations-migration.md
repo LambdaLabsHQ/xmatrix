@@ -137,6 +137,10 @@ becomes a storage placement fact only:
 | `page tree`, `page read`, `page edit` | New; they use yrs to make minimal edits with a freshness check |
 | `page link` | New |
 
+The former archive request stays retired. A later, separate Human-confirmed
+permanent [Channel deletion](../operations/channel-deletion.md) is available in
+the Web actions/details; it does not restore tree or archive semantics.
+
 **Bootstrap prompt (`core/src/bootstrap.rs`):**
 - the thread, memory and channel-organization instructions become page
   instructions;
@@ -338,7 +342,7 @@ surface:
 - import onboarding from GitHub, Slack, Notion and Feishu, which generates an
   initial page tree;
 - the GitHub App for open-source projects: project page generation, an
-  `xmatrix/claim` status check and pre-review;
+  pre-review of pull requests that name a block;
 - open-source governance: trust levels, the intake queue, claims as leases and
   cross-project reputation.
 

@@ -255,7 +255,7 @@ pub async fn ensure_workspace(
     upsert_workspace(hub_url, token, &canonical, None, None).await
 }
 
-pub async fn list_workspaces(
+pub(crate) async fn list_workspaces(
     hub_url: &str,
     token: &str,
 ) -> error::Result<Vec<protocol::SerializedWorkspace>> {

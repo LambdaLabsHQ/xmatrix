@@ -107,8 +107,8 @@ integration("racing paid calls cannot overspend or claim the same attempt twice"
     "insufficient funds leave no partial debit");
   await f.client.query("UPDATE data.space_credit_state SET grace_used=2470 WHERE space_id=$1", [f.id]);
   const [paid, page] = await Promise.allSettled([f.reserve("paid-versus-page"),
-    postgresDatabase(f.client).transaction(tx => spaceBilling.agentWrite(tx, {
-      spaceId: f.id, now: new Date().toISOString(), kind: "page_revision" }))]);
+    postgresDatabase(f.client).transaction(tx => spaceBilling.durableWrite(tx, {
+      spaceId: f.id, now: new Date().toISOString(), kind: "page_revision", author: "agent" }))]);
   assert.equal(Number(paid.status === "fulfilled") + Number(page.status === "fulfilled" && page.value === null), 1,
     "a page write and paid X reserve serialize on the same balance");
   const state = await f.counters();

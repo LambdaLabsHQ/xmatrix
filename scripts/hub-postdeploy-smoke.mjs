@@ -4,6 +4,16 @@ import process from "node:process";
 import fs from "node:fs";
 
 import { runCliMain } from "./cli-entrypoint.mjs";
+import { releaseChannel } from "./release-version-order.mjs";
+
+function isReleaseVersion(version) {
+  try {
+    releaseChannel(version);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 const compatibilityPolicy = JSON.parse(fs.readFileSync(
   new URL("../packages/protocol/src/client-compatibility-policy.json", import.meta.url),
@@ -117,8 +127,8 @@ async function verifyCompatibilityGate(target, fetchImpl, webVersion, cliVersion
   );
 
   if (cliVersion !== undefined) {
-    if (!/^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/u.test(cliVersion)) {
-      throw new Error("CLI compatibility version must be a stable semantic version");
+    if (!isReleaseVersion(cliVersion)) {
+      throw new Error("CLI compatibility version must be a release version (X.Y.Z or X.Y.Z-beta.N)");
     }
     const cliResponse = await fetchImpl(endpoint, {
       method: "GET",
@@ -136,8 +146,8 @@ async function verifyCompatibilityGate(target, fetchImpl, webVersion, cliVersion
   }
 
   if (webVersion !== undefined) {
-    if (!/^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/u.test(webVersion)) {
-      throw new Error("Web compatibility version must be a stable semantic version");
+    if (!isReleaseVersion(webVersion)) {
+      throw new Error("Web compatibility version must be a release version (X.Y.Z or X.Y.Z-beta.N)");
     }
     const webResponse = await fetchImpl(endpoint, {
       method: "GET",

@@ -316,9 +316,10 @@ export const EVENT_CONNECTOR_MANIFESTS: AppConnectorProviderManifest[] = [
       ],
     }),
     auth: { type: "oauth", scopes: ["https://mail.google.com/"], secretRefs: [] },
-    automationEvents: {
-      source: { label: "Notification ID", description: "An enabled notification owned by the Automation author.",
-        pattern: "^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$", placeholder: "Notification ID from Gmail settings" },
+    events: {
+      ingress: false,
+      source: { label: "Mailbox", description: "One of your mailboxes with notifications on in Apps → Gmail. Only its owner and their Agents subscribe it.",
+        pattern: "^[^\\s@<>(),;:\"\\\\[\\]]{1,64}@[^\\s@<>(),;:\"\\\\[\\]]{1,189}$", placeholder: "you@gmail.com" },
       features: [{ id: "message.received", label: "New mail", description: "A new incoming message ID, without email content." }],
       defaultFeatures: ["message.received"],
     },
@@ -406,6 +407,7 @@ export const EVENT_CONNECTOR_MANIFESTS: AppConnectorProviderManifest[] = [
     defaultFeatures: ["issue.created", "issue.regressed", "alert"],
     actions: [
       readAction("read_issue", "Read issue context", "Read one Sentry issue and bounded latest-event exception frames.", "<issue short id or numeric id>"),
+      readAction("list_issues", "List issues", "List up to 25 of a project's most frequent issues (or every project's, *) matching a Sentry search, such as firstRelease:<release> or firstSeen:-24h.", "<project slug or *> <Sentry search>"),
       writeAction("resolve", "Resolve issue", "Mark a Sentry issue resolved.", "<issue short id>"),
       writeAction("unresolve", "Unresolve issue", "Mark a Sentry issue unresolved.", "<issue short id>"),
       writeAction("ignore", "Ignore issue", "Mark a Sentry issue ignored.", "<issue short id>"),

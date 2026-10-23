@@ -4,10 +4,12 @@ run-name: Production Release train from ${{ github.sha }}
 # The release train. People and agents ask for a release through Production
 # Release Intent, which records the components wanted and wakes this workflow;
 # a finished Production Release wakes it too (Release Train Next). Each train
-# reconciles the intents already in flight, freezes this main revision, ships
-# the union of every open intent it contains, and chooses the version itself
-# (scripts/release-train.mjs). Trains run one at a time; one GitHub displaces
-# while pending loses nothing, because intents live in refs.
+# reconciles the intents already in flight and chooses the version itself
+# (scripts/release-train.mjs): a beta train freezes this main revision and
+# ships the union of every open beta it contains as X.Y.Z-beta.N; a stable
+# train ships one stable intent alone, rebuilding the verified beta's source as
+# X.Y.Z. Trains run one at a time; one GitHub displaces while pending loses
+# nothing, because intents live in refs.
 on:
   workflow_dispatch:
 
@@ -26,6 +28,9 @@ jobs:
       deploy_sha: ${{ steps.stamp.outputs.deploy_sha }}
       scope: ${{ steps.plan.outputs.scope }}
       tag: ${{ steps.plan.outputs.tag }}
+      channel: ${{ steps.plan.outputs.channel }}
+      source_sha: ${{ steps.plan.outputs.source_sha }}
+      codeql_languages: ${{ steps.plan.outputs.codeql_languages }}
     steps:
       - name: Require the default branch
         uses: actions/github-script@v7
@@ -47,10 +52,11 @@ jobs:
       - uses: ./.github/actions/setup-pnpm-node
         with:
           install-deps: "false"
-      # Reconcile in-flight intents, then freeze this revision for the union of
-      # the open intents it contains. The version is claimed before anything
-      # else runs (scripts/release-claim.mjs, an atomic compare-and-swap ref),
-      # and the shipped intents move to refs/release-inflight/<tag>/.
+      # Reconcile in-flight intents, then freeze the revision this train ships:
+      # this one for the union of the open betas it contains, or a verified
+      # beta's source for a stable. The version is claimed before anything else
+      # runs (scripts/release-claim.mjs, an atomic compare-and-swap ref), and
+      # the shipped intents move to refs/release-inflight/<tag>/.
       - id: plan
         name: Plan the train from open release intents
         env:
@@ -66,15 +72,29 @@ jobs:
           export GIT_CONFIG_KEY_0="http.https://github.com/.extraheader"
           export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $auth"
           node scripts/release-train.mjs plan
-      # The release is this frozen revision with the release version stamped on
+      # A stable train ships alone, so the betas it left open get the next one.
+      # GitHub holds that run pending until this one finishes.
+      - name: Wake the train for the betas this stable train left open
+        if: steps.plan.outputs.betas_waiting == 'true'
+        uses: actions/github-script@v7
+        with:
+          retries: 3
+          github-token: ${{ secrets.XMATRIX_RELEASE_GITHUB_TOKEN }}
+          script: |
+            await github.rest.actions.createWorkflowDispatch({
+              ...context.repo,
+              workflow_id: "production-release-request.yml",
+              ref: context.payload.repository.default_branch,
+            });
+      # The release is the frozen revision with the release version stamped on
       # as one child commit: main never needs a version-bump commit, and later
-      # merges to main never reach this release. When main already carries the
-      # version, the release commit is the revision itself.
+      # merges to main never reach this release. When the revision already
+      # carries the version, the release commit is the revision itself.
       - id: stamp
         name: Stamp the release commit
         if: steps.plan.outputs.scope != ''
         env:
-          SOURCE_SHA: ${{ github.sha }}
+          SOURCE_SHA: ${{ steps.plan.outputs.source_sha }}
           VERSION: ${{ steps.plan.outputs.version }}
           VERSION_TAG: ${{ steps.plan.outputs.tag }}
           RELEASE_TOKEN: ${{ secrets.XMATRIX_RELEASE_GITHUB_TOKEN }}
@@ -86,6 +106,7 @@ jobs:
           export GIT_CONFIG_COUNT=1
           export GIT_CONFIG_KEY_0="http.https://github.com/.extraheader"
           export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $auth"
+          git checkout --quiet --detach "$SOURCE_SHA"
           node scripts/version.mjs set "$VERSION" >/dev/null
           if git diff --quiet; then
             deploy_sha="$SOURCE_SHA"
@@ -105,7 +126,10 @@ jobs:
   # XMATRIX_RUNNER_FLEET selects. On the repository's own machines they take
   # the release test runners, so a train never waits behind PR CI. The release
   # commit is keyed by its source's tree (scripts/ci-ledger.mjs), so partitions
-  # main already passed are not run again.
+  # that already passed identical content are not run again. Client suites
+  # gate the stable train that ships a client, not each beta
+  # (scripts/ci-areas.mjs, releaseOutputs); the iOS simulator gate below
+  # follows the same rule.
   ci:
     needs: plan
     if: needs.plan.outputs.scope != ''
@@ -123,7 +147,7 @@ jobs:
 
   ios:
     needs: plan
-    if: contains(format(',{0},', needs.plan.outputs.scope), ',ios,')
+    if: contains(format(',{0},', needs.plan.outputs.scope), ',ios,') && needs.plan.outputs.channel == 'stable'
     runs-on: ${{ vars.XMATRIX_RUNNER_FLEET == 'self-hosted' && fromJSON('["self-hosted","xmatrix-macos-release"]') || 'macos-26' }}
     timeout-minutes: 30
     permissions:
@@ -135,22 +159,61 @@ jobs:
       - name: Build and test iOS on the exact release revision
         uses: ./.github/actions/ios-simulator-test
 
+  # Code scanning before anything ships: CodeQL's security-extended queries
+  # on the frozen source, for the languages this train's components are
+  # written in and the workflows that release them
+  # (scripts/release-train.mjs, codeqlLanguages). Pull requests and merges
+  # are not scanned. The analysis must finish before the train ships; its
+  # findings are code scanning alerts on main, not a verdict.
+  codeql:
+    needs: plan
+    if: needs.plan.outputs.scope != ''
+    name: CodeQL (${{ matrix.language }})
+    runs-on: ${{ matrix.language == 'swift' && 'macos-26' || 'ubuntu-24.04' }}
+    timeout-minutes: 45
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        language: ${{ fromJSON(needs.plan.outputs.codeql_languages) }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.plan.outputs.source_sha }}
+          persist-credentials: false
+      - uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.language == 'swift' && 'autobuild' || 'none' }}
+          queries: security-extended
+      - uses: github/codeql-action/analyze@v4
+        with:
+          category: /language:${{ matrix.language }}
+          ref: refs/heads/${{ github.event.repository.default_branch }}
+          sha: ${{ needs.plan.outputs.source_sha }}
+
   # One job whose success means every gate this train's scope selects passed.
   # ci.yml fails its own aggregate unless each selected partition passed, so
   # the deployment workflows check this job instead of CI's job layout.
   gates:
-    needs: [plan, ci, ios]
+    needs: [plan, ci, ios, codeql]
     if: >-
       always() && needs.plan.result == 'success' && needs.ci.result == 'success' &&
-      (contains(format(',{0},', needs.plan.outputs.scope), ',ios,') == (needs.ios.result == 'success')) &&
+      needs.codeql.result == 'success' &&
+      ((contains(format(',{0},', needs.plan.outputs.scope), ',ios,') && needs.plan.outputs.channel == 'stable') == (needs.ios.result == 'success')) &&
       (needs.ios.result == 'success' || needs.ios.result == 'skipped')
     runs-on: ${{ vars.XMATRIX_RUNNER_FLEET == 'self-hosted' && fromJSON('["xmatrix-ci-offload"]') || 'ubuntu-24.04' }}
     steps:
       - name: Record the passed ${{ needs.plan.outputs.scope }} gates
         run: echo "Every ${{ needs.plan.outputs.scope }} gate passed on ${{ needs.plan.outputs.deploy_sha }}"
 
+  # Its name binds this run's passed gates to the exact scope and tag; the
+  # Production Release and Hub/Web deploys look for it by that name.
   authorization:
-    name: authorize ${{ needs.plan.outputs.scope }} production
+    name: authorize ${{ needs.plan.outputs.scope }} production ${{ needs.plan.outputs.tag }}
     needs: [plan, gates]
     if: always() && needs.plan.result == 'success' && needs.gates.result == 'success'
     runs-on: ${{ vars.XMATRIX_RUNNER_FLEET == 'self-hosted' && fromJSON('["xmatrix-ci-offload"]') || 'ubuntu-24.04' }}
@@ -208,12 +271,17 @@ jobs:
               await new Promise((resolve) => setTimeout(resolve, 30_000));
             }
 
+      # The annotation records what later trains read back: the components
+      # this release shipped, the main revision it was cut from and its channel
+      # (scripts/release-train.mjs tagRecord).
       - name: Create the immutable tag and dispatch its production workflow
         uses: actions/github-script@v7
         env:
           DEPLOY_SHA: ${{ needs.plan.outputs.deploy_sha }}
           VERSION_TAG: ${{ needs.plan.outputs.tag }}
           RELEASE_SCOPE: ${{ needs.plan.outputs.scope }}
+          RELEASE_CHANNEL: ${{ needs.plan.outputs.channel }}
+          SOURCE_SHA: ${{ needs.plan.outputs.source_sha }}
           RELEASE_TOKEN: ${{ secrets.XMATRIX_RELEASE_GITHUB_TOKEN }}
         with:
           # A runner-side "fetch failed" is retried rather than failing the job.
@@ -227,7 +295,13 @@ jobs:
             const annotation = await github.rest.git.createTag({
               ...context.repo,
               tag: process.env.VERSION_TAG,
-              message: `xMatrix production ${process.env.VERSION_TAG}`,
+              message: [
+                `xMatrix production ${process.env.VERSION_TAG}`,
+                "",
+                `scope: ${process.env.RELEASE_SCOPE}`,
+                `source: ${process.env.SOURCE_SHA}`,
+                `channel: ${process.env.RELEASE_CHANNEL}`,
+              ].join("\n"),
               object: process.env.DEPLOY_SHA,
               type: "commit",
             });
@@ -242,4 +316,4 @@ jobs:
               ref: process.env.VERSION_TAG,
               inputs: { request_run_id: String(context.runId), release_scope: process.env.RELEASE_SCOPE },
             });
-            core.notice(`Dispatched ${process.env.RELEASE_SCOPE} Production Release from ${process.env.VERSION_TAG}`);
+            core.notice(`Dispatched ${process.env.RELEASE_CHANNEL} ${process.env.RELEASE_SCOPE} Production Release from ${process.env.VERSION_TAG}`);

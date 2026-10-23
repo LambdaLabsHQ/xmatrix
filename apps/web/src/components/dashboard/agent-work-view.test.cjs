@@ -7,7 +7,8 @@ const { createAgentWorkSelection } = require("./agent-work-view.ts");
 /** claude:1 at work, waiting on `count` background tasks it started. */
 function waitingOnTasks(count) {
   return {
-    key: "instance-claude-1", agentId: "agent:claude", label: "claude:1", agentLabel: "claude", avatarKind: "agent",
+    key: "instance-claude-1", agentId: "agent:claude", label: "claude:1", agentLabel: "claude",
+    face: { kind: "agent", name: "claude", harness: "claude", id: "instance-claude-1" },
     status: "busy", canStop: true,
     instance: {
       id: "instance-claude-1", channelInstanceId: "1", label: "claude:1", status: "busy",

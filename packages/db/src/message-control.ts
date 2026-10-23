@@ -1053,7 +1053,7 @@ export class PostgresMessageRepository {
               inputCte: "message_input" })}, sender_identity AS (
               SELECT jsonb_build_object('kind','user','id',member.user_id,
                 'email',member.email,'displayName',COALESCE(profile.name,member.display_name),
-                'avatarUrl',CASE WHEN profile.id IS NOT NULL THEN profile.image ELSE member.avatar_url END,
+                'avatarUrl',profile.image,
                 'version',member.version) AS value
               FROM data.space_members member
               LEFT JOIN control.auth_users profile ON profile.id=member.user_id
@@ -1240,7 +1240,7 @@ export class PostgresMessageRepository {
       const row = (await transaction.query<QueryResultRow>({
         name: "message_sender_user_identity_v2",
         text: `SELECT member.user_id,member.email,COALESCE(profile.name,member.display_name) AS display_name,
-            CASE WHEN profile.id IS NOT NULL THEN profile.image ELSE member.avatar_url END AS avatar_url,
+            profile.image AS avatar_url,
             member.version
           FROM data.space_members member
           LEFT JOIN control.auth_users profile ON profile.id=member.user_id

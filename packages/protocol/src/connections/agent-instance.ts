@@ -297,6 +297,12 @@ type AgentLiveChannelDelivery = AgentChannelDelivery & {
   type: "channel_message_received";
   /** Fresh live delivery may cancel the provider's active turn. */
   interruptRequested?: boolean;
+  /**
+   * With `interruptRequested`: a runtime that can steer joins this delivery to
+   * the active turn instead of cancelling it. A runtime that cannot, or that
+   * predates the field, interrupts as before.
+   */
+  steerAllowed?: boolean;
 };
 
 type AgentReplayChannelDelivery = AgentChannelDelivery & {
@@ -307,6 +313,8 @@ type AgentReplayChannelDelivery = AgentChannelDelivery & {
    * it; a runtime keeps its own older rule only when it is absent.
    */
   interruptRequested?: boolean;
+  /** As for live delivery: the interrupt may steer the active turn instead. */
+  steerAllowed?: boolean;
 };
 
 /** Channel-local deliveries and typed controls accepted by one running Instance. */
@@ -363,6 +371,10 @@ export type AgentInstanceServerMessage =
       attemptToken: string; input?: string; reason?: string }
   | { type: "agent_model_switch_requested"; requestId: string; model: string }
   | { type: "agent_effort_switch_requested"; requestId: string; effort: string }
+  /** The Hub's instruction that this Instance continue the turn its switches
+   * cancelled, sent to the Instance alone: it is not a Channel message. Sent
+   * only to a runtime that lists `switch_continuation_frame`. */
+  | { type: "agent_switch_continuation"; channelId: string; instanceId: string; requestIds: string[]; prompt: string }
   | { type: "channel_joined"; requestId?: string; channelId: string; agent: SerializedAgent }
   | { type: "channel_left"; requestId?: string; channelId: string; agent: SerializedAgent }
   | AgentLiveChannelDelivery
@@ -397,8 +409,9 @@ export type AgentInstanceServerMessage =
  * The instruction is exclusively the canonical message body, never a private input field. */
 /**
  * The Hub's instruction that one Instance continue the turn a live switch
- * cancelled, committed in the Channel like a capacity retry. Only the named
- * Instance, still waiting on one of the named switches, runs it.
+ * cancelled, committed in the Channel for a runtime that predates the
+ * `agent_switch_continuation` frame. Only the named Instance, still waiting
+ * on one of the named switches, runs it.
  */
 export interface ChannelSwitchContinuation {
   version: 1;

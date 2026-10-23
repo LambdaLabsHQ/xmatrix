@@ -33,13 +33,13 @@ export async function gmailPollCallback(env: Env, request: Request): Promise<Res
   else {url.searchParams.set("gmailWatchState",state);url.searchParams.set("gmailWatchCode",code);}
   return new Response(null,{status:302,headers:{location:url.toString(),"cache-control":"no-store","referrer-policy":"no-referrer"}});
 }
-export async function startGmailPolling(env: Env, request: Request, input: {spaceId:string;userId:string;channelId:string;
+export async function startGmailPolling(env: Env, request: Request, input: {spaceId:string;userId:string;
   credentialVersion:number;generation:string;mailbox:GmailMailbox}) {
   const config=gmailPollConfig(env);
   if(!config)throw new ProviderRequestError(503,"Gmail notifications are not configured");
   const nonce=crypto.randomUUID(),proof=lowercaseHex(crypto.getRandomValues(new Uint8Array(32)));
   const identity=await gmailPollIdentity(env),mailbox=input.mailbox;
-  const id=await gmailRoutingRepository(env).create({spaceId:input.spaceId,userId:input.userId,channelId:input.channelId,
+  const id=await gmailRoutingRepository(env).create({spaceId:input.spaceId,userId:input.userId,
     credentialVersion:input.credentialVersion,generation:input.generation,mailboxDigest:await sha256Hex(mailbox.address),
     tokenDigest:await sha256Hex(JSON.stringify([identity,mailbox.address])),nonceDigest:await sha256Hex(nonce),
     selection:{...mailbox,oauthVerifier:proof,appIdentity:identity},historyId:"0",mode:"poll"});

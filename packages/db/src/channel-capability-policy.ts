@@ -154,7 +154,7 @@ export function channelCapabilityPredicate(input: {
     JOIN data.run_agent_registrations channel_registration ON channel_registration.run_id=channel_instance.run_id
     WHERE channel_instance.instance_id=${id} AND channel_registration.space_id=${c}.space_id
       AND (${openChannel} OR channel_instance.channel_id=${c}.channel_id OR ${agentGrant})${ownerContributes}))` : "FALSE";
-  return `((${user}) OR (${agent}))`;
+  return `(${c}.mode IN ('open','closed') AND ((${user}) OR (${agent})))`;
 }
 
 function lockClause(lock: LifecycleLock): string {

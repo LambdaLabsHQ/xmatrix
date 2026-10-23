@@ -1229,6 +1229,167 @@ async function annAfterAPass() {
   return joined;
 }
 
+// Revision saves and awareness were the only historical signals; neither times actual text delivery.
+test("co-writing observations time CRDT text changes, excluding markers and pass, without waiting for a revision", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: 1_000_000 });
+  const h = harness();
+  const events = [];
+  h.ports.observeCoWriting = (principal, event) => {
+    assert.equal(principal.id, agent.id);
+    events.push(event);
+  };
+  const ann = await annConnected(h);
+  const writer = joinCoWriter(h);
+  writer.write(1, "⟦pass⟧");
+  writer.done(1);
+  assert.equal(events.length, 1);
+  assert.equal(events[0].firstTextMs, null);
+  assert.equal(events[0].editToTurnMs, null, "joining is not a human edit");
+  events.length = 0;
+  ann.text.insert(HEAD.indexOf("In progress"), "Still ");
+  t.mock.timers.tick(CO_WRITER_PAUSE_MS);
+  t.mock.timers.tick(300);
+  writer.write(2, '⟦after "none"⟧');
+  assert.equal(events.length, 0, "the marker and blank paragraph are not text");
+  t.mock.timers.tick(200);
+  writer.write(2, "Hello");
+  assert.match(ann.text.toString(), /Hello/u, "the client received text before the observation");
+  assert.equal(h.commits.length, 0, "no revision has been saved");
+  assert.deepEqual(events[0], { event: "first_text", outcome: "writing", turn: writer.turnId(2),
+    durationMs: 500, editToTurnMs: CO_WRITER_PAUSE_MS, firstDeltaMs: 300, firstTextMs: 500,
+    editToFirstTextMs: CO_WRITER_PAUSE_MS + 500, maxWriteGapMs: null, writes: 1 });
+  t.mock.timers.tick(700);
+  writer.write(2, " world ");
+  writer.done(2);
+  writer.done(2);
+  assert.equal(events.length, 2, "one first-text and one terminal observation, including late duplicate replies");
+  assert.deepEqual(events[1], { ...events[0], event: "turn_end", outcome: "done", durationMs: 1200,
+    maxWriteGapMs: 700, writes: 2 });
+  // A failed sink must not change whether the person's next edit is heard or the Agent writes.
+  h.ports.observeCoWriting = () => { throw new Error("sink unavailable"); };
+  ann.text.insert(HEAD.indexOf("In progress"), "Again ");
+  t.mock.timers.tick(CO_WRITER_PAUSE_MS);
+  writer.write(3, '⟦after "none"⟧More text');
+  writer.done(3);
+  assert.match(ann.text.toString(), /More text/u);
+});
+
+async function observedCoWriter(t) {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: 1_000_000 });
+  const joined = await annAfterAPass();
+  const events = [];
+  joined.h.ports.observeCoWriting = (_principal, event) => events.push(event);
+  return { ...joined, events };
+}
+
+async function afterFirstHumanEdit(t) {
+  const joined = await observedCoWriter(t);
+  const at = HEAD.indexOf("In progress");
+  joined.ann.text.insert(at, "First ");
+  t.mock.timers.tick(CO_WRITER_PAUSE_MS);
+  return { ...joined, at };
+}
+
+test("co-writing timings include queued human edits without attributing an earlier answer to them", async (t) => {
+  const { ann, writer, events, at } = await afterFirstHumanEdit(t);
+  writer.write(2, '⟦after "none"⟧Already writing');
+  t.mock.timers.tick(500);
+  ann.text.insert(at, "Second ");
+  t.mock.timers.tick(5000);
+  assert.equal(writer.turns().length, 2, "the previous turn is still answering");
+  writer.done(2);
+  assert.equal(events.length, 2);
+  assert.equal(events[0].editToFirstTextMs, CO_WRITER_PAUSE_MS, "the existing text precedes the second edit");
+  assert.equal(writer.turns().length, 3);
+  t.mock.timers.tick(200);
+  writer.write(3, '⟦after "none"⟧The next answer');
+  assert.equal(events[2].editToTurnMs, 5000);
+  assert.equal(events[2].firstTextMs, 200);
+  assert.equal(events[2].editToFirstTextMs, 5200);
+  writer.done(3);
+});
+
+test("new human input refreshes an unwritten answer once, with full current instructions, and retires late replies", async (t) => {
+  const { ann, writer, events, at } = await afterFirstHumanEdit(t);
+  t.mock.timers.tick(500);
+  ann.text.insert(at, "Second ");
+  t.mock.timers.tick(CO_WRITER_KEEP_UP_MS - 501);
+  assert.equal(writer.turns().length, 2, "a young answer has time to start writing");
+  t.mock.timers.tick(1);
+  assert.equal(writer.turns().length, 3, "new input does not wait for the unwritten answer to finish");
+  assert.ok(writer.asked.some((frame) => frame.type === "interrupt" && frame.turn === writer.turnId(2)));
+  assert.match(writer.turns()[2].text, /Second First In progress/u);
+  assert.match(writer.turns()[2].text, /Only what you write inside these markers reaches the page/u,
+    "the retired request may never have reached the harness, so instructions must travel again");
+  assert.equal(events[0].outcome, "interrupted");
+  assert.equal(events[0].durationMs, CO_WRITER_KEEP_UP_MS);
+  writer.write(2, '⟦after "none"⟧An obsolete answer');
+  writer.done(2);
+  assert.doesNotMatch(ann.text.toString(), /obsolete/u);
+  ann.text.insert(at, "Third ");
+  t.mock.timers.tick(CO_WRITER_KEEP_UP_MS + 1000);
+  assert.equal(writer.turns().length, 3, "the replacement gets to finish even while people continue typing");
+  writer.write(3, '⟦after "none"⟧The current answer');
+  writer.done(3);
+  assert.match(ann.text.toString(), /current answer/u);
+});
+
+test("an initial unwritten page answer can be refreshed without losing its startup instructions", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: 1_000_000 });
+  const { ann, writer } = await annCoWriting();
+  ann.text.insert(HEAD.indexOf("In progress"), "First edit ");
+  t.mock.timers.tick(CO_WRITER_KEEP_UP_MS);
+  assert.equal(writer.turns().length, 2);
+  assert.match(writer.turns()[1].text, /First edit In progress/u);
+  assert.match(writer.turns()[1].text, /Only what you write inside these markers reaches the page/u);
+});
+
+test("an empty replacement deletes old words without reporting newly written text", async (t) => {
+  const { ann, writer, events } = await observedCoWriter(t);
+  ann.text.insert(HEAD.indexOf("In progress"), "Still ");
+  t.mock.timers.tick(CO_WRITER_PAUSE_MS);
+  writer.write(2, '⟦replace "none"⟧');
+  writer.done(2);
+  assert.doesNotMatch(ann.text.toString(), /none/u);
+  assert.equal(events.length, 1, "only a terminal observation, no first-text event for deletion");
+  assert.equal(events[0].firstTextMs, null);
+  assert.equal(events[0].writes, 0);
+});
+
+test("another Agent's document update is not measured as a human edit", async (t) => {
+  const { h, writer, events } = await observedCoWriter(t);
+  const other = h.connect("c-other", { ...agent, id: "other-agent" });
+  other.text.insert(HEAD.indexOf("In progress"), "Also ");
+  t.mock.timers.tick(CO_WRITER_PAUSE_MS);
+  writer.write(2, '⟦after "none"⟧A response to another Agent');
+  writer.done(2);
+  assert.equal(events.length, 2);
+  assert.equal(events[0].editToTurnMs, null);
+  assert.equal(events[0].editToFirstTextMs, null);
+  other.text.insert(HEAD.indexOf("In progress"), "Next ");
+  t.mock.timers.tick(CO_WRITER_PAUSE_MS);
+  t.mock.timers.tick(500);
+  other.text.insert(HEAD.indexOf("In progress"), "More ");
+  t.mock.timers.tick(CO_WRITER_KEEP_UP_MS + 1000);
+  assert.equal(writer.turns().length, 3, "another Agent's changes do not refresh the open answer");
+  writer.done(3);
+});
+
+test("a quiet co-writing turn reports stalled once with missing text timings, and ignores its late output", async (t) => {
+  const { ann, writer, events } = await observedCoWriter(t);
+  ann.text.insert(HEAD.indexOf("In progress"), "Still ");
+  t.mock.timers.tick(CO_WRITER_PAUSE_MS);
+  t.mock.timers.tick(CO_WRITER_TURN_MS);
+  assert.deepEqual(events, [{ event: "turn_end", outcome: "stalled", turn: writer.turnId(2),
+    durationMs: CO_WRITER_TURN_MS, editToTurnMs: CO_WRITER_PAUSE_MS, firstDeltaMs: null,
+    firstTextMs: null, editToFirstTextMs: null, maxWriteGapMs: null, writes: 0 }]);
+  const before = ann.text.toString();
+  writer.write(2, '⟦after "none"⟧Too late');
+  writer.done(2);
+  assert.equal(ann.text.toString(), before);
+  assert.equal(events.length, 1);
+});
+
 test("a person takes back what a co-writing Agent last wrote, and the Agent hears so", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
   const { h, ann, writer } = await annCoWriting();
@@ -1519,4 +1680,68 @@ test("an Agent's edit typed in while someone reads the page comes a word at a ti
     ["Shipped today.", "Shipped today. Next"], ["Shipped today. Next", "Shipped today. Next week"]],
   "a word each time reading the last one, and the breath after its sentence, has passed");
   assert.equal(coWriterOf(ann).activity, "editing", "it is done writing");
+});
+
+// Co-writing lasts while the people are on the page (pages-live-document.md §4.2): once they have been gone a
+// while, each Agent co-writing it live is told to leave, and its Run rests and sleeps as any other.
+function coWritingFixture({ sockets = [], peopleLeft, ended = [{ conversationId: "conv", startedByUserId: "ann" }] } = {}) {
+  const data = new Map(peopleLeft ? [["peopleLeft", peopleLeft]] : []);
+  const told = [];
+  const endCalls = [];
+  const db = summarySessionRequire("@xmatrix/db");
+  const { RelayPageSession: Session, PAGE_CO_WRITING_PEOPLE_GONE_MS: goneMs } = summarySessionModule(name =>
+    name === "./page-co-write-instruction" ? { async tellPageCoWriter(_env, input) { told.push(input); } }
+    : name === "./page-summary" ? { async startPageSummary() { return { started: false }; } }
+    : name === "@xmatrix/db" ? { ...db, PostgresPageRepository: class {
+      async endCoWritingOnPage(input) { endCalls.push(input); return ended; } } }
+    : name === "./postgres-authority-fleet" ? { createPostgresAuthorityDatabase: () => ({}) }
+    : name === "cloudflare:workers" ? { DurableObject } : summarySessionRequire(name));
+  const connected = sockets.map((attachment) => ({ deserializeAttachment: () => ({ spaceId: "space", pageId: "page",
+    connectionId: attachment.principal.id, ...attachment }) }));
+  let alarm = null;
+  const object = Object.create(Session.prototype);
+  Object.assign(object, { spaceId: "space", pageId: "page", env: {}, rehydrated: Promise.resolve(),
+    summaryStarting: null,
+    session: { disconnect() {}, hasPendingEdits: false, async commit() {} },
+    ctx: { getWebSockets: () => connected, waitUntil: () => {}, storage: { get: async (key) => data.get(key),
+      put: async (key, value) => { data.set(key, value); }, delete: async (key) => data.delete(key),
+      getAlarm: async () => alarm, setAlarm: async (at) => { alarm = at; }, deleteAlarm: async () => { alarm = null; } } } });
+  return { object, connected, data, told, endCalls, goneMs, alarm: () => alarm };
+}
+
+const person = { principal: { kind: "user", id: "ann", label: "Ann" } };
+const coWriter = { principal: { kind: "user", id: "ann", label: "Ann" }, coWriter: true };
+
+test("co-writing: the last person leaving starts the wait; an Agent's co-writer does not hold the page", async () => {
+  const f = coWritingFixture({ sockets: [person, coWriter] });
+  const leaving = f.connected[0];
+  f.connected.splice(0, 1);
+  await f.object.webSocketClose(leaving);
+  assert.equal(f.data.get("peopleLeft").pageId, "page");
+  assert.ok(f.alarm() !== null && f.alarm() <= Date.now() + f.goneMs, "the alarm comes when the wait is over");
+  assert.equal(f.endCalls.length, 0, "a reload or a dropped connection gets time to come back");
+});
+
+test("co-writing: the people gone long enough, it ends and each Agent is told to leave", async () => {
+  const f = coWritingFixture({ sockets: [coWriter],
+    peopleLeft: { at: Date.now() - 3 * 60_000, spaceId: "space", pageId: "page" } });
+  await f.object.coWritingDue();
+  assert.deepEqual(f.endCalls.map(({ spaceId, pageId }) => [spaceId, pageId]), [["space", "page"]]);
+  assert.deepEqual(f.told.map(({ conversationId, userId, active }) => [conversationId, userId, active]),
+    [["conv", "ann", false]], "told under the authority of who started it");
+  assert.equal(f.data.has("peopleLeft"), false);
+});
+
+test("co-writing: a person back in time, or a wait not yet over, keeps it", async () => {
+  const back = coWritingFixture({ sockets: [person, coWriter],
+    peopleLeft: { at: Date.now() - 3 * 60_000, spaceId: "space", pageId: "page" } });
+  await back.object.coWritingDue();
+  assert.equal(back.endCalls.length, 0);
+  assert.equal(back.data.has("peopleLeft"), false, "they are back: nothing waits to end");
+  const waiting = coWritingFixture({ sockets: [], peopleLeft: { at: Date.now(), spaceId: "space", pageId: "page" } });
+  await waiting.object.coWritingDue();
+  assert.equal(waiting.endCalls.length, 0);
+  assert.ok(waiting.alarm() !== null, "the alarm is set for the rest of the wait");
+  await waiting.object.settle();
+  assert.ok(waiting.alarm() !== null, "an empty page keeps the alarm while co-writing waits to end");
 });

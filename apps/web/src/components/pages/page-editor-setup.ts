@@ -16,16 +16,18 @@ import {
 export { addColumnAfter, addRowAfter, deleteColumn, deleteRow, deleteTable, isInTable };
 import { Decoration, DecorationSet, type EditorView, type NodeView } from "prosemirror-view";
 import {
-  absolutePositionToRelativePosition, redo, relativePositionToAbsolutePosition, undo, yCursorPlugin, ySyncPlugin,
-  ySyncPluginKey, yUndoPlugin,
+  absolutePositionToRelativePosition, defaultDeleteFilter, defaultProtectedNodes, redo, relativePositionToAbsolutePosition,
+  undo, yCursorPlugin, ySyncPlugin, ySyncPluginKey, yUndoPlugin,
 } from "y-prosemirror";
 import type { Awareness } from "y-protocols/awareness";
 import * as Y from "yjs";
 import { automationChips } from "./page-automation-chips";
+import { PageSessionChanges, type PageChangeItems, type PageChangeWriter } from "./page-session-changes";
 import { referenceChips, type PageReferenceTargets } from "./page-reference-chips";
 import { githubFileEmbeds, type ReadGitHubFile } from "./page-github-file-embeds";
 import { imageView, pageMediaPaste, type LocalMedia, type PageMediaSource, type UploadPageMedia } from "./page-media";
 import { markdownShortcuts, syntaxPlugin, typoraKeymap } from "./page-editor-syntax";
+import { pageTriggers } from "./page-triggers";
 import { mountHeadingMenu, type HeadingMenu } from "./page-heading-menu";
 import { NEW_PAGE_TITLE } from "./page-creation";
 import { mountSectionAgents, type SectionAgent } from "./page-section-agents";
@@ -201,6 +203,70 @@ const taskShortcut = new Plugin({
       .setNodeMarkup($from.before($from.depth - 1), undefined, { ...item.attrs, checked: match[1] === "x" });
   },
 });
+
+/** The page's live session as undo sees it: the origin of the writes it brings in, and when the page it opened is in. */
+export interface PageWrites {
+  readonly synced: boolean;
+  on(listener: (notice: { type: string }) => void): () => void;
+}
+
+/**
+ * Ctrl+Z steps back through everyone's writes on the page, this person's and the others' alike, but
+ * no further than the page as this person opened it: the others' writes count from the session's
+ * first sync, which brings that page in. Each writer's run of writes is its own step.
+ */
+export function pageUndo(fragment: Y.XmlFragment, session: PageWrites, awareness: Awareness,
+  onChanges?: (changes: PageSessionChanges | null) => void): Plugin[] {
+  const undoManager = new Y.UndoManager(fragment, {
+    trackedOrigins: new Set<unknown>([ySyncPluginKey]),
+    deleteFilter: (item) => defaultDeleteFilter(item, defaultProtectedNodes),
+    captureTransaction: (tr) => tr.meta.get("addToHistory") !== false,
+  });
+  const opened = () => undoManager.addTrackedOrigin(session);
+  // This person's write is theirs; another's is named by the presence of the client that wrote it.
+  const writerOf = (origin: unknown, insertions: PageChangeItems): PageChangeWriter | null => {
+    if (origin !== session) {
+      const user = awareness.getLocalState()?.user as { color?: string } | undefined;
+      return { name: "You", color: user?.color ?? null, kind: "user", self: true };
+    }
+    for (const client of insertions.clients.keys()) {
+      const user = awareness.getStates().get(client)?.user as { name?: string; color?: string; kind?: string } | undefined;
+      if (user?.name) return { name: user.name, color: user.color ?? null, kind: user.kind === "agent" ? "agent" : "user", self: false };
+    }
+    return null;
+  };
+  let last: unknown = null;
+  const writer = (tr: Y.Transaction) => {
+    if (!undoManager.trackedOrigins.has(tr.origin)) return;
+    if (tr.origin !== last) undoManager.stopCapturing();
+    last = tr.origin;
+  };
+  return [
+    yUndoPlugin({ undoManager }),
+    new Plugin({
+      view: () => {
+        let stop = () => {};
+        if (session.synced) opened();
+        else stop = session.on((notice) => {
+          if (notice.type !== "synced") return;
+          opened();
+          stop();
+        });
+        fragment.doc!.on("beforeTransaction", writer);
+        const changes = new PageSessionChanges(undoManager, writerOf);
+        onChanges?.(changes);
+        return {
+          destroy: () => {
+            stop();
+            fragment.doc!.off("beforeTransaction", writer);
+            changes.destroy();
+            onChanges?.(null);
+          },
+        };
+      },
+    }),
+  ];
+}
 
 function editorKeymap(): Plugin {
   const hardBreak: Command = chainCommands(exitCode, (state, dispatch) => {
@@ -424,8 +490,8 @@ function presence(awareness: Awareness, onBlockChange?: (blockId: string) => voi
 }
 
 /**
- * What the page shows beside a section's heading (§3.2): who is on it, who has
- * taken it and what it owes. As in Google Docs the text itself carries nothing
+ * What the page shows beside a section's heading (§3.2): who is on it and what
+ * it owes. Who has taken it is the Agents' to know, not drawn for people. As in Google Docs the text itself carries nothing
  * else; who changed it and when is in History.
  */
 export interface SectionNote {
@@ -433,8 +499,6 @@ export interface SectionNote {
   owed?: { text: string; conversation: { id: string; name: string } | null };
   /** Agents live in a conversation linked to the section, whether or not they have the page open. */
   working?: SectionAgent[];
-  /** Who has taken the section. */
-  claim?: { label: string; pullRequestUrl: string | null; claimId: string; mine: boolean } | null;
   /** Conversations about the section, the quiet ones too (§4.4). */
   conversations?: { total: number; quiet: number };
 }
@@ -442,11 +506,6 @@ export interface SectionNote {
 /** What a heading offers when it is hovered or holds the cursor (§3.2). */
 export interface HeadingActions {
   canEdit: boolean;
-  discuss?: (blockId: string) => void;
-  copyLink?: (blockId: string) => void;
-  claim?: (blockId: string) => void;
-  release?: (claimId: string) => void;
-  attach?: (blockId: string) => void;
   /** Lists the section's conversations, the quiet ones too. */
   showConversations?: (blockId: string) => void;
   /** On a phone the tools open from one "⋯" as a menu of named actions. */
@@ -459,11 +518,7 @@ export const sectionsKey = new PluginKey<{ notes: Map<string, SectionNote>; deco
 
 // Lucide's icons, drawn here because widgets are plain DOM.
 const ICONS = {
-  discuss: '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><path d="M12 7v6"/><path d="M9 10h6"/>',
-  link: '<path d="M9 17H7A5 5 0 0 1 7 7h2"/><path d="M15 7h2a5 5 0 1 1 0 10h-2"/><line x1="8" x2="16" y1="12" y2="12"/>',
   flag: '<path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" x2="4" y1="22" y2="15"/>',
-  schedule: '<path d="M16 14v2.2l1.6 1"/><path d="M16 2v4"/><path d="M21 7.5V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h3.5"/>'
-    + '<path d="M3 10h5"/><path d="M8 2v4"/><circle cx="16" cy="16" r="6"/>',
   talk: '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>',
   more: '<circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/>',
 } as const;
@@ -493,16 +548,10 @@ const unmountAgents = new WeakMap<Element, () => void>();
 const unmountMenus = new WeakMap<Element, () => void>();
 
 /** A phone's heading tools: one "⋯" that opens them as a menu of named actions. */
-function phoneHeadingTools(tools: HTMLElement, blockId: string, title: string, current: HeadingActions,
-  claim: SectionNote["claim"] | null): HTMLElement {
+function phoneHeadingTools(tools: HTMLElement, blockId: string, title: string,
+  write: NonNullable<HeadingActions["write"]>): HTMLElement {
   tools.classList.add("is-phone");
-  const menu: HeadingMenu = {};
-  if (current.canEdit && current.write) menu.write = { label: current.write.label, run: () => current.write!.run(blockId) };
-  if (current.discuss) menu.discuss = () => current.discuss!(blockId);
-  if (current.copyLink) menu.copyLink = () => current.copyLink!(blockId);
-  if (current.canEdit && claim?.mine && current.release) menu.claim = { label: "Release", run: () => current.release!(claim.claimId) };
-  else if (current.canEdit && !claim && current.claim) menu.claim = { label: "Claim", run: () => current.claim!(blockId) };
-  if (current.canEdit && current.attach) menu.attach = () => current.attach!(blockId);
+  const menu: HeadingMenu = { write: { label: write.label, run: () => write.run(blockId) } };
   const holder = document.createElement("span");
   const close = () => {
     unmountMenus.get(holder)?.();
@@ -529,29 +578,14 @@ function sectionDecorations(doc: DocNode, notes: Map<string, SectionNote>,
     const end = block.pos + heading.nodeSize - 1;
     const note = notes.get(block.id) ?? {};
     const working = note.working ?? [];
-    const claim = note.claim ?? null;
     const owed = note.owed ?? null;
     const total = note.conversations?.total ?? 0;
     decorations.push(Decoration.widget(end, () => {
       const holder = document.createElement("span");
       holder.className = "page-section-present";
       holder.contentEditable = "false";
-      if (claim) {
-        const flag = document.createElement(claim.pullRequestUrl ? "a" : "span");
-        flag.className = "page-section-claim";
-        flag.dataset.testid = "page-claim";
-        flag.title = `${claim.label} is on this`;
-        flag.innerHTML = icon("flag", 12);
-        flag.append(claim.label);
-        if (flag instanceof HTMLAnchorElement) {
-          flag.href = claim.pullRequestUrl!;
-          flag.target = "_blank";
-          flag.rel = "noreferrer";
-        }
-        holder.append(flag);
-      }
-      // Where the claim was, once its work ended and nobody wrote it back; it opens the conversation that did it.
-      if (owed && !claim) {
+      // Where work ended and nobody wrote it back; it opens the conversation that did it.
+      if (owed) {
         const conversation = owed.conversation;
         const flag = control("page-section-owed", conversation ? `${owed.text} · open ${conversation.name}` : owed.text,
           () => { if (conversation) openConversation(conversation.id); }, icon("flag", 12), "Update owed");
@@ -571,7 +605,7 @@ function sectionDecorations(doc: DocNode, notes: Map<string, SectionNote>,
           () => actions().showConversations?.(block.id), icon("talk", 12), String(total)));
       }
       return holder;
-    }, { side: 1, ignoreSelection: true, key: `present:${block.id}:${JSON.stringify([working, claim, owed, total])}`,
+    }, { side: 1, ignoreSelection: true, key: `present:${block.id}:${JSON.stringify([working, owed, total])}`,
       destroy: (node) => {
         const agents = (node as HTMLElement).querySelector(".page-section-agents");
         if (agents) unmountAgents.get(agents)?.();
@@ -581,22 +615,12 @@ function sectionDecorations(doc: DocNode, notes: Map<string, SectionNote>,
       const tools = document.createElement("span");
       tools.className = "page-heading-tools";
       tools.contentEditable = "false";
-      if (current.phone) return phoneHeadingTools(tools, block.id, block.title, current, claim);
-      if (current.discuss) tools.append(control("", "Discuss this section", () => current.discuss!(block.id), icon("discuss")));
-      if (current.copyLink) tools.append(control("", "Copy a link to this section", () => current.copyLink!(block.id), icon("link")));
-      if (current.canEdit && claim?.mine && current.release) {
-        tools.append(control("", "Release your claim", () => current.release!(claim.claimId), icon("flag"), "Release"));
-      } else if (current.canEdit && !claim && current.claim) {
-        tools.append(control("", "Claim: tell everyone you are working on this section", () => current.claim!(block.id),
-          icon("flag")));
-      }
-      if (current.canEdit && current.attach) {
-        tools.append(control("", "Attach a schedule or a repository to this section", () => current.attach!(block.id),
-          icon("schedule")));
+      if (current.phone && current.canEdit && current.write) {
+        return phoneHeadingTools(tools, block.id, block.title, current.write);
       }
       return tools;
     }, { side: 2, ignoreSelection: true,
-      key: `tools:${block.id}:${claim?.claimId ?? ""}:${String(claim?.mine)}:${String(actions().canEdit)}:${String(actions().phone)}:${actions().write?.label ?? ""}`,
+      key: `tools:${block.id}:${String(actions().canEdit)}:${String(actions().phone)}:${actions().write?.label ?? ""}`,
       destroy: (node) => {
         for (const holder of (node as HTMLElement).querySelectorAll(":scope > span")) unmountMenus.get(holder)?.();
       } }));
@@ -643,8 +667,11 @@ function currentHeading(): Plugin {
  */
 export interface Discussion { linkId: string; conversationId: string; name: string; from: unknown; to: unknown }
 
+/** The passage a comment is being written about, before it is sent; its Yjs relative positions. */
+export interface DiscussionDraft { from: unknown; to: unknown }
+
 export const discussionsKey = new PluginKey<{ discussions: Discussion[]; focused: string | null;
-  decorations: DecorationSet }>("page-discussions");
+  draft: DiscussionDraft | null; decorations: DecorationSet }>("page-discussions");
 
 function yMapping(state: EditorState): Map<unknown, unknown> | null {
   const sync = ySyncPluginKey.getState(state) as { binding?: { mapping: Map<unknown, unknown> } } | undefined;
@@ -664,8 +691,15 @@ function anchorPosition(state: EditorState, fragment: Y.XmlFragment, position: u
 }
 
 function discussionDecorations(state: EditorState, fragment: Y.XmlFragment, discussions: Discussion[],
-  focused: string | null, openConversation: (conversationId: string) => void): DecorationSet {
+  focused: string | null, draft: DiscussionDraft | null, openConversation: (conversationId: string) => void): DecorationSet {
   const decorations: Decoration[] = [];
+  if (draft) {
+    const from = anchorPosition(state, fragment, draft.from);
+    const to = anchorPosition(state, fragment, draft.to);
+    if (from !== null && to !== null && to > from) {
+      decorations.push(Decoration.inline(from, to, { class: "page-discussion page-discussion-focus" }));
+    }
+  }
   for (const discussion of discussions) {
     const from = anchorPosition(state, fragment, discussion.from);
     const to = anchorPosition(state, fragment, discussion.to);
@@ -691,14 +725,18 @@ function discussionOverlay(fragment: Y.XmlFragment, openConversation: (conversat
     key: discussionsKey,
     state: {
       init: (_config, state) => ({ discussions: [] as Discussion[], focused: null as string | null,
-        decorations: DecorationSet.create(state.doc, []) }),
+        draft: null as DiscussionDraft | null, decorations: DecorationSet.create(state.doc, []) }),
       apply(tr, value, _old, state) {
-        const meta = tr.getMeta(discussionsKey) as { discussions?: Discussion[]; focused?: string | null } | undefined;
+        const meta = tr.getMeta(discussionsKey) as {
+          discussions?: Discussion[]; focused?: string | null; draft?: DiscussionDraft | null } | undefined;
         const discussions = meta?.discussions ?? value.discussions;
         const focused = meta && "focused" in meta ? meta.focused ?? null : value.focused;
-        if (discussions === value.discussions && focused === value.focused && !tr.docChanged) return value;
-        return { discussions, focused,
-          decorations: discussionDecorations(state, fragment, discussions, focused, openConversation) };
+        const draft = meta && "draft" in meta ? meta.draft ?? null : value.draft;
+        if (discussions === value.discussions && focused === value.focused && draft === value.draft && !tr.docChanged) {
+          return value;
+        }
+        return { discussions, focused, draft,
+          decorations: discussionDecorations(state, fragment, discussions, focused, draft, openConversation) };
       },
     },
     props: {
@@ -716,13 +754,15 @@ function discussionOverlay(fragment: Y.XmlFragment, openConversation: (conversat
 /**
  * Where each anchor the margin places a conversation by is (§4.4), as an
  * offset from the top of `frame`: discussions by their passage, sections by
- * their heading, the whole page by the start of the document. Everyone else
+ * their heading, the whole page by the start of the document, and where the
+ * document ends as `end`, which the margin does not run past. Everyone else
  * with a caret on the page is placed by it, as `client:<awareness id>`.
  */
 export function anchorOffsets(view: EditorView, fragment: Y.XmlFragment, frame: HTMLElement,
   discussions: readonly Discussion[], awareness: Awareness): Map<string, number> {
   const origin = frame.getBoundingClientRect().top;
-  const out = new Map<string, number>([["page", view.dom.getBoundingClientRect().top - origin]]);
+  const text = view.dom.getBoundingClientRect();
+  const out = new Map<string, number>([["page", text.top - origin], ["end", text.bottom - origin]]);
   for (const block of pageDocBlocks(view.state.doc)) {
     const dom = view.nodeDOM(block.pos);
     if (dom instanceof HTMLElement) out.set(`block:${block.id}`, dom.getBoundingClientRect().top - origin);
@@ -753,11 +793,23 @@ export function anchorOffsets(view: EditorView, fragment: Y.XmlFragment, frame: 
 }
 
 /** The selection as a discussion anchor: its text, and where it is in the live document. */
-export function selectionAnchor(state: EditorState, fragment: Y.XmlFragment):
-  { quote: string; from: unknown; to: unknown } | null {
+export function selectionAnchor(state: EditorState, fragment: Y.XmlFragment): DiscussionAnchor | null {
   const { from, to, empty } = state.selection;
+  return empty ? null : rangeAnchor(state, fragment, from, to);
+}
+
+type DiscussionAnchor = { quote: string; from: unknown; to: unknown };
+
+/** The paragraph (or other text block) the caret is in, as a discussion anchor. */
+export function caretBlockAnchor(state: EditorState, fragment: Y.XmlFragment): DiscussionAnchor | null {
+  const { $from } = state.selection;
+  if (!$from.parent.isTextblock) return null;
+  return rangeAnchor(state, fragment, $from.start(), $from.end());
+}
+
+function rangeAnchor(state: EditorState, fragment: Y.XmlFragment, from: number, to: number): DiscussionAnchor | null {
   const mapping = yMapping(state);
-  if (empty || !mapping) return null;
+  if (!mapping) return null;
   const quote = state.doc.textBetween(from, to, " ", " ").trim();
   if (!quote) return null;
   return {
@@ -1170,7 +1222,8 @@ function wholeBlockAt(doc: DocNode, from: number, to: number): number | null {
  * markdown, against the document the editor holds now, and says how many
  * changes that is. Without a baseline the page is shown as it is.
  */
-export function showReaderChanges(view: EditorView, fragment: Y.XmlFragment, baseline: string | null): number {
+/** Counts what changed since `baseline`, and marks it over the text only while the reader has asked to see it. */
+export function showReaderChanges(view: EditorView, fragment: Y.XmlFragment, baseline: string | null, shown: boolean): number {
   const mapping = yMapping(view.state);
   if (!mapping) return 0;
   const relative = (pos: number) => absolutePositionToRelativePosition(pos, fragment, mapping as never);
@@ -1182,34 +1235,17 @@ export function showReaderChanges(view: EditorView, fragment: Y.XmlFragment, bas
     return { id, kind: "added", block: change.block, from: relative(change.from), to: change.block ? null : relative(change.to),
       text: "" };
   });
-  view.dispatch(view.state.tr.setMeta(readerChangesKey, changes));
+  view.dispatch(view.state.tr.setMeta(readerChangesKey, shown ? changes : []));
   return changes.length;
 }
 
-/** Whether `/` opened the insert menu, and what has been typed after it. */
-export interface SlashState { from: number; to: number; query: string }
-export const slashKey = new PluginKey<SlashState | null>("page-slash");
-
-function slashMenu(): Plugin<SlashState | null> {
-  return new Plugin<SlashState | null>({
-    key: slashKey,
-    state: {
-      init: () => null,
-      apply(tr, _value, _old, state) {
-        if (tr.getMeta(slashKey) === "close") return null;
-        const { $from, empty } = state.selection;
-        if (!empty || !$from.parent.isTextblock || $from.parent.type === nodes.code_block) return null;
-        const before = $from.parent.textBetween(0, $from.parentOffset, undefined, "￼");
-        const match = /(?:^|\s)\/([^\s/]{0,24})$/u.exec(before);
-        if (!match) return null;
-        return { from: $from.pos - match[1]!.length - 1, to: $from.pos, query: match[1]! };
-      },
-    },
-  });
-}
-
 export function editorPlugins(input: {
-  fragment: Y.XmlFragment; awareness: Awareness; placeholder: () => string | undefined;
+  fragment: Y.XmlFragment; awareness: Awareness;
+  /** The live session: Ctrl+Z steps back through its writes too, as far as the page as it opened. */
+  session: PageWrites;
+  /** The changes Ctrl+Z steps back through, for the page's list of them; null once the editor is gone. */
+  onChanges?: (changes: PageSessionChanges | null) => void;
+  placeholder: () => string | undefined;
   onBlockChange?: (blockId: string) => void;
   handleKeyDown: (view: EditorView, event: KeyboardEvent) => boolean;
   openConversation: (conversationId: string) => void;
@@ -1240,10 +1276,10 @@ export function editorPlugins(input: {
     cursorActivity(input.awareness),
     cursorIdle(presenceOf),
     cursorStatus(input.awareness),
-    yUndoPlugin(),
+    ...pageUndo(input.fragment, input.session, input.awareness, input.onChanges),
     new Plugin({ props: { handleKeyDown: input.handleKeyDown } }),
     typoraKeymap(),
-    slashMenu(),
+    pageTriggers(),
     markdownShortcuts(),
     syntaxPlugin(),
     taskShortcut,

@@ -1039,12 +1039,17 @@
   }
 
   .app-attachment-lightbox {
-    -webkit-backdrop-filter: blur(18px);
-    backdrop-filter: blur(18px);
     box-shadow: none;
     -webkit-mask-image: none !important;
     mask-image: none !important;
     clip-path: none !important;
+  }
+
+  /* The blur lives on its own layer so it fades with the dim: opening grows
+     out of the page, and a dismiss drag shows the page coming back. */
+  .app-attachment-lightbox .app-attachment-lightbox-backdrop {
+    -webkit-backdrop-filter: blur(18px);
+    backdrop-filter: blur(18px);
   }
 
   .app-attachment-lightbox :is(.app-attachment-lightbox-dialog, .app-attachment-lightbox-zoom, .app-attachment-lightbox-image, .app-attachment-lightbox-close, .app-attachment-lightbox-download, .app-attachment-lightbox-copy) {
@@ -1053,6 +1058,10 @@
     box-shadow: none;
     -webkit-mask-image: none !important;
     mask-image: none !important;
+  }
+
+  /* The open image is clipped only while it morphs to and from its thumbnail. */
+  .app-attachment-lightbox :is(.app-attachment-lightbox-dialog, .app-attachment-lightbox-zoom, .app-attachment-lightbox-close, .app-attachment-lightbox-download, .app-attachment-lightbox-copy) {
     clip-path: none !important;
   }
 
@@ -4308,8 +4317,11 @@ html[data-app-theme="wood"] .xmatrix-app .app-rail button.bg-primary {
     padding-bottom: 0;
   }
 
-  .xmatrix-app .app-page-article {
-    padding-top: 0;
+  /* Nothing scrolls under the band, where the window's search floats: a
+     paper beside a list scrolls below it, as a page scrolls below its
+     controls, and its first line starts level with the list's first row. */
+  .xmatrix-app .app-below-band {
+    margin-top: var(--app-band);
   }
 
   /* The details column's planks start below the band, level with the
@@ -4405,7 +4417,7 @@ html[data-app-theme="wood"] .xmatrix-app .app-rail button.bg-primary {
     padding-right: var(--xmatrix-windows-caption-clearance);
   }
 
-  .xmatrix-app.xmatrix-desktop-windows .app-page-article {
+  .xmatrix-app.xmatrix-desktop-windows .app-page-band {
     padding-top: max(1.5rem, var(--xmatrix-windows-caption-height));
   }
 
@@ -7033,6 +7045,16 @@ html .xmatrix-app.xmatrix-app.app-hint-tooltip {
   color: var(--primary-foreground);
 }
 
+/* A connector's mark is its own artwork: it sits on the card, not a tint. */
+.xmatrix-app .app-connector-command-chip .app-mention-chip-avatar-face {
+  background: var(--card);
+}
+
+/* The arguments are prose the command carries: highlighted with it, read at body weight. */
+.xmatrix-app .app-connector-command-arguments {
+  font-weight: 400;
+}
+
 .xmatrix-app .app-mention-chip[data-read-state="unread"] .app-mention-chip-avatar-face {
   box-shadow: 0 0 0 1.25px color-mix(in oklab, oklch(0.64 0.12 235) 70%, transparent);
 }
@@ -8341,6 +8363,32 @@ html[data-app-theme] .xmatrix-app.xmatrix-app .app-paper-card .app-tool-lines in
   box-shadow: none !important;
 }
 
+/* A menu or small form floating over the paper (a page's selection menu, `/`
+   insert, a link being typed, the table tools and heading menu; Discuss on a
+   passage selected in a message) is a card of whiter paper laid on the page,
+   not glass and not a tinted slip (user 2026-10-19: 不要边框; chose A among
+   four, after a tint and an ink bar read as ugly): no edge, a little brighter
+   than the page so it stands off the text it covers, and a soft warm shadow
+   that lifts it, as Notion's and Linear's menus do. */
+.app-material-paper-popover {
+  background: oklch(0.997 0.002 85);
+  color: var(--app-panel-ink, var(--foreground));
+  border-radius: 8px;
+  box-shadow:
+    0 1px 2px oklch(0.35 0.07 60 / 0.06),
+    0 8px 24px -6px oklch(0.35 0.07 60 / 0.18);
+}
+
+/* Its items are lines of the card: a little ink under the pointer, or while
+   chosen from the keyboard or pressed, and nothing at rest. */
+.app-material-paper-popover:is([role="toolbar"], [role="listbox"], [role="menu"]) > button {
+  background: transparent;
+}
+
+.app-material-paper-popover:is([role="toolbar"], [role="listbox"], [role="menu"]) > button:is(:hover:not(:disabled), :active, [aria-selected="true"], [aria-pressed="true"]) {
+  background: color-mix(in oklch, var(--foreground) 6%, transparent);
+}
+
 /* Notices on the paper: plain white with the tone's rail, not glass. */
 html[data-app-theme] .xmatrix-app.xmatrix-app .app-tool-detail .app-notice {
   background: oklch(0.995 0.002 85) !important;
@@ -8972,25 +9020,13 @@ html[data-app-theme] .xmatrix-app.xmatrix-app .app-tool-detail .app-liquid-glass
   border-radius: inherit;
 }
 
-.xmatrix-app .app-rail-update-arrow {
-  animation: app-rail-update-cycle 4.2s 1s infinite;
-}
-
 @keyframes app-rail-update-in {
   from { opacity: 0; transform: scale(0.5); }
   to { opacity: 1; transform: scale(1); }
 }
 
-@keyframes app-rail-update-cycle {
-  0% { transform: translateY(0); opacity: 1; animation-timing-function: cubic-bezier(0.5, 0, 0.9, 0.4); }
-  10% { transform: translateY(-26px); opacity: 0; }
-  10.01% { transform: translateY(26px); opacity: 0; animation-timing-function: cubic-bezier(0.2, 0.8, 0.3, 1); }
-  26%, 100% { transform: translateY(0); opacity: 1; }
-}
-
 @media (prefers-reduced-motion: reduce) {
-  .xmatrix-app.xmatrix-app.xmatrix-app .app-rail .app-rail-update,
-  .xmatrix-app .app-rail-update-arrow {
+  .xmatrix-app.xmatrix-app.xmatrix-app .app-rail .app-rail-update {
     animation: none;
   }
 }

@@ -50,7 +50,7 @@ impl Default for ToolWaits {
 }
 
 impl ToolWaits {
-    pub(crate) fn new(threshold: Duration) -> Self {
+    pub fn new(threshold: Duration) -> Self {
         Self {
             open: HashMap::new(),
             threshold,
@@ -314,7 +314,12 @@ mod tests {
         assert_eq!(background_wait(0, &[], 5), None);
         let one = background_wait(1, &["Watch CI\n for  PR #3781"], 5).expect("a wait");
         assert_eq!(
-            (one.kind.as_str(), one.count, one.label.as_deref(), one.since_millis),
+            (
+                one.kind.as_str(),
+                one.count,
+                one.label.as_deref(),
+                one.since_millis
+            ),
             ("background", Some(1), None, 5)
         );
         assert_eq!(one.details, vec!["Watch CI for PR #3781"]);

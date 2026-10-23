@@ -78,6 +78,10 @@ export async function spaceSecretFixture() {
     async close() {
       try {
         // Exact fixture rows only; never truncate a shared integration database.
+        for (const table of ["page_revisions", "page_access", "pages", "space_control_heads"]) {
+          await client.query(`DELETE FROM data.${table} WHERE space_id=$1`, [ids.space]);
+        }
+        await client.query("DELETE FROM control.scoped_control_command_replays WHERE scope_kind='space' AND scope_id=$1", [ids.space]);
         await client.query("DELETE FROM data.run_secret_approvals WHERE space_id=$1", [ids.space]);
         await client.query("DELETE FROM data.space_secrets WHERE space_id=$1", [ids.space]);
         for (const table of ["secret_grant_audit", "machine_run_routes", "machine_daemons",

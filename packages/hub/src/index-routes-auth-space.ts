@@ -12,7 +12,7 @@ import { HUB_ROUTES, REPOSITORY_ACCESS_UNAVAILABLE, deriveHumanConnectionUrl, gi
 import { admitAttempt, loginEmailAttemptLimits } from "./auth-attempt-limit";
 import { launchTargetRepos } from "./launch-target-repositories";
 import type { Env } from "./types";
-import { platformAdminForRequest, testEnvironmentForRequest } from "./index-routes-admin";
+import { platformAdminForRequest } from "./index-routes-admin";
 import { recordAgentLaunchStage } from "./postgres-observability";
 import { mintGitHubRepositoryToken } from "./app-connectors";
 import { listOwnerWorkspaces, workspaceRepository } from "./postgres-workspace-authority";
@@ -382,21 +382,15 @@ export function registerIndexRoutesAuthSpace(app: Hono<{ Bindings: Env }>): void
   });
   app.get(HUB_ROUTES.me, (c) => jsonErrors(c, async () => {
     const authUser = await requireAuth(c.req.raw, c.env);
-    const [platformAdmin, testEnvironment] = await Promise.all([
-      platformAdminForRequest(authUser, c.env),
-      testEnvironmentForRequest(authUser, c.env),
-    ]);
+    const platformAdmin = await platformAdminForRequest(authUser, c.env);
 
     return c.json({
       user: authUser,
       hubUrl: hubOrigin(c.req.raw),
       relayUrl: deriveHumanConnectionUrl(c.req.url),
       // Clients use these only to decide what to offer. Platform-admin
-      // routes re-check authority, and Test remains an isolated deployment.
-      capabilities: {
-        platformAdmin,
-        testEnvironment,
-      },
+      // routes re-check authority.
+      capabilities: { platformAdmin },
     });
   }));
   app.all("/api/auth/*", async (c) => {

@@ -8,7 +8,8 @@ const ERROR_MAX = 256;
 /**
  * Fold a completed action's re-probe into the Machine's inventory. A refresh
  * replaces the whole observation unless a fresher one is stored; a single
- * re-probed preset replaces only its own item in an existing observation.
+ * re-probed preset replaces only its own item in an existing observation and
+ * records when it was observed, so a sign-in answers refusals made before it.
  */
 export async function recordHarnessActionInventory(tx: DatabaseTransaction, input: {
   ownerUserId: string; machineId: string; hostId: string; result: HarnessActionResult; at: string;
@@ -23,7 +24,10 @@ export async function recordHarnessActionInventory(tx: DatabaseTransaction, inpu
     values: [ownerUserId, machineId, JSON.stringify(result.inventory), result.inventory.capturedAt], maxRows: 0 });
     return;
   }
-  const item = result.item;
+  // The item was probed when its action finished: that, not the inventory's
+  // capture, is how old its sign-in answer is.
+  const observedAt = new Date(input.at).toISOString();
+  const item = result.item && { ...result.item, observedAt };
   if (!item) return;
   const rows = await tx.query<QueryResultRow>({ name: "machine_harness_action_item_lock_v2", text: `SELECT
     metadata_json->'harnesses' AS harnesses FROM data.machine_daemons
@@ -163,7 +167,7 @@ export async function readHarnessReleaseTargets(database: AuthorityDatabase, inp
   // equal share, and a daemon past it is told on a later pass.
   const limit = Math.max(1, Math.min(input.limit ?? 500, 500,
     Math.floor(RELEASE_TARGET_ROWS / input.releases.length)));
-  return database.transaction({ requestId: input.requestId, operation: "machine-control.harness-release-targets" },
+  return database.transaction({ requestId: input.requestId, operation: "machine-control.harness-release-targets", statement: "single_read" },
     async (tx) => {
       const rows = await tx.query<QueryResultRow>({ name: "machine_harness_release_targets_v3", text: `SELECT
         release.preset_id,target.owner_user_id,target.owner_email,target.machine_id,target.hostname,target.daemon_id

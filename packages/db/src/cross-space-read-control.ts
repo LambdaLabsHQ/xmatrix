@@ -105,7 +105,8 @@ export class PostgresCrossSpaceReadRepository {
     work: (tx: DatabaseTransaction) => Promise<T>): Promise<T> {
     const placement = await this.placements.resolveWritable(
       { requestId, operation: `${operation}.placement` }, spaceId, () => new CrossSpaceReadError(
-        "space_placement_unavailable", 503, "Space placement is unavailable", true));
+        "space_placement_unavailable", 503, "Space placement is unavailable", true),
+      () => new CrossSpaceReadError("space_not_found", 404, "Space not found"));
     return this.database.transaction({ requestId, operation, placement: { spaceId,
       shardId: placement.shardId, placementEpoch: placement.placementEpoch } }, work);
   }

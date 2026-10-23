@@ -95,7 +95,9 @@ test("a lost transaction conflict reaches a socket under its own retryable code"
   const { frame, logged } = await answered(Object.assign(new Error("deadlock detected"), { code: "40P01" }));
   assert.deepEqual([frame.failure.code, frame.failure.retryable, frame.failure.stage],
     ["transaction_conflict", true, "authority.request"]);
-  assert.deepEqual(logged.error.map(([message, detail]) => [message, detail.authorityCode]),
+  assert.equal(logged.error.length, 0, "the original exception owns the Sentry report");
+  assert.deepEqual(logged.warn.filter(([message]) => message === "xMatrix runtime authority rejection")
+    .map(([message, detail]) => [message, detail.authorityCode]),
     [["xMatrix runtime authority rejection", "transaction_conflict"]]);
   assert.doesNotMatch(JSON.stringify(frame), /deadlock/);
 });

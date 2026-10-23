@@ -4,8 +4,8 @@ use serde_json::{Value, json};
 
 #[derive(Clone, Default)]
 pub(crate) struct Facts {
-    pub(crate) models: Option<Vec<protocol::AgentModelInfo>>,
-    pub(crate) parameters: Vec<protocol::HarnessParameter>,
+    pub models: Option<Vec<protocol::AgentModelInfo>>,
+    pub parameters: Vec<protocol::HarnessParameter>,
     pub(crate) fast_disabled_reason: Option<String>,
     pub(crate) fast_state: Option<String>,
 }

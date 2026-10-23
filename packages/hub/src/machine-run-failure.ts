@@ -63,7 +63,7 @@ export function machineRunStartupFailureDetail(
   if (eventType === "machine_spawn_result" && payload.ok !== true) {
     return {
       detail: publicMachineStartupFailure(payload.error)?.summary
-        ?? "the Workstation could not launch the agent process",
+        ?? "the Machine could not launch the agent process",
     };
   }
   if (eventType !== "machine_run_exited") return undefined;

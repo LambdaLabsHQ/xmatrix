@@ -34,9 +34,9 @@ use xmatrix_process_tree as process_tree;
 /// materializes when the Hub marked it as a repo summon). Explicitly falsy =
 /// kill-switch (never materialize). Explicitly truthy = force for all
 /// headless spawns (testing/legacy dark-launch behavior).
-pub const RUN_WORKTREES_ENABLED_ENV: &str = "XMATRIX_RUN_WORKTREES";
+pub(crate) const RUN_WORKTREES_ENABLED_ENV: &str = "XMATRIX_RUN_WORKTREES";
 /// Override for the root directory that holds materialized run worktrees.
-pub const RUN_WORKTREES_DIR_ENV: &str = "XMATRIX_RUN_WORKTREES_DIR";
+pub(crate) const RUN_WORKTREES_DIR_ENV: &str = "XMATRIX_RUN_WORKTREES_DIR";
 /// Natural workspace identity handed to a daemon-spawned agent so the child
 /// can skip auto-register/upsert of its execution cwd.
 pub const SPAWN_WORKSPACE_MACHINE_ID_ENV: &str = "XMATRIX_WORKSPACE_MACHINE_ID";
@@ -48,15 +48,15 @@ pub const SPAWN_WORKSPACE_NAME_ENV: &str = "XMATRIX_WORKSPACE_NAME";
 /// The ref the run worktree was cut from, for run-metadata observability.
 pub const RUN_WORKTREE_BASE_REF_ENV: &str = "XMATRIX_RUN_WORKTREE_BASE_REF";
 /// GC apply switch. Unset = apply. Explicit 0/false/no/off is dry-run.
-pub const RUN_WORKTREES_GC_APPLY_ENV: &str = "XMATRIX_RUN_WORKTREES_GC";
+pub(crate) const RUN_WORKTREES_GC_APPLY_ENV: &str = "XMATRIX_RUN_WORKTREES_GC";
 /// Override for how many ended-run worktrees the LRU pool keeps.
-pub const RUN_WORKTREES_KEEP_ENV: &str = "XMATRIX_RUN_WORKTREES_KEEP";
+pub(crate) const RUN_WORKTREES_KEEP_ENV: &str = "XMATRIX_RUN_WORKTREES_KEEP";
 /// Override for how long a non-`run-*` linked worktree may sit idle.
-pub const RUN_WORKTREES_NAMED_TTL_SECS_ENV: &str = "XMATRIX_RUN_WORKTREES_NAMED_TTL_SECS";
+pub(crate) const RUN_WORKTREES_NAMED_TTL_SECS_ENV: &str = "XMATRIX_RUN_WORKTREES_NAMED_TTL_SECS";
 /// Soft watermark: run aggressive reclaim before creating new execution trees.
-pub const WORKTREE_DISK_WARN_BYTES_ENV: &str = "XMATRIX_WORKTREE_DISK_WARN_BYTES";
+pub(crate) const WORKTREE_DISK_WARN_BYTES_ENV: &str = "XMATRIX_WORKTREE_DISK_WARN_BYTES";
 /// Hard watermark: refuse new worktree/slot creation below this free space.
-pub const WORKTREE_DISK_MIN_BYTES_ENV: &str = "XMATRIX_WORKTREE_DISK_MIN_BYTES";
+pub(crate) const WORKTREE_DISK_MIN_BYTES_ENV: &str = "XMATRIX_WORKTREE_DISK_MIN_BYTES";
 
 const DEFAULT_LRU_KEEP: usize = 12;
 const DEFAULT_NAMED_TTL: Duration = Duration::from_secs(7 * 24 * 60 * 60);
@@ -870,7 +870,7 @@ pub struct RunWorktreeGcOutcome {
     pub pruned_bindings: Vec<String>,
 }
 
-pub fn gc_apply_enabled() -> bool {
+pub(crate) fn gc_apply_enabled() -> bool {
     gc_apply_from_env(std::env::var(RUN_WORKTREES_GC_APPLY_ENV).ok().as_deref())
 }
 
@@ -894,7 +894,7 @@ pub fn disk_warn_bytes() -> u64 {
     env_u64(WORKTREE_DISK_WARN_BYTES_ENV).unwrap_or(DEFAULT_DISK_WARN_BYTES)
 }
 
-pub fn disk_min_bytes() -> u64 {
+pub(crate) fn disk_min_bytes() -> u64 {
     #[cfg(test)]
     if let Some(bytes) = TEST_DISK_MIN_BYTES.with(std::cell::Cell::get) {
         return bytes;
@@ -923,7 +923,7 @@ pub fn volume_available_bytes(path: &Path) -> Option<u64> {
     }
 }
 
-pub fn storage_allows_new_worktree(available: Option<u64>, min_bytes: u64) -> bool {
+pub(crate) fn storage_allows_new_worktree(available: Option<u64>, min_bytes: u64) -> bool {
     match available {
         Some(bytes) => bytes >= min_bytes,
         None => true,

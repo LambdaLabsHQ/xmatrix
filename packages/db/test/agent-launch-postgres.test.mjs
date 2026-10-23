@@ -27,7 +27,7 @@ integration("quota probe machine lease round trip rejects stale epochs and subst
       ownerUserId: "owner", machineId: "probe-machine", hostId: "probe-host" };
     const connect = capabilities => controls.command({ ...machine, commandId: randomUUID(), action: "connect",
       principal, capabilities, payload: {}, metadata: {} });
-    const target = { profileId: "profile-a", configurationDigest: "a".repeat(64) };
+    const target = { targetId: "registration:codex", configurationDigest: "a".repeat(64) };
     const probe = { requestId: "probe-control", connectionEpoch: 1, targets: [target] };
     const issue = () => controls.command({ ...machine, commandId: randomUUID(), action: "issue",
       principal: { kind: "user", id: "owner" }, controlId: probe.requestId, commandType: "quota_probe",
@@ -49,7 +49,7 @@ integration("quota probe machine lease round trip rejects stale epochs and subst
       principal, connectionEpoch: probe.connectionEpoch, controlId: probe.requestId,
       eventType: "machine_quota_probe_result", relayLease: claimed.commands[0].payload.relayLease, payload });
     await assert.rejects(complete({ ...result, probe: { ...result.probe,
-      results: [{ ...result.probe.results[0], profileId: "other" }] } }),
+      results: [{ ...result.probe.results[0], targetId: "registration:other" }] } }),
     error => error.code === "machine_command_result_mismatch");
     await complete(result);
     const status = await controls.status({ requestId: randomUUID(), ownerUserId: "owner",
@@ -275,6 +275,52 @@ async function repository(shardId = "shard-0", observer) {
   return { repo: new PostgresRuntimeRepository(session, "shard-0"), session };
 }
 
+// The recording-database test cannot model Channel row contention. A reply is
+// already committed: recording its timestamp must not wait behind another append
+// or lifecycle command (XMATRIX-HUB-9A), and must still check current access.
+integration("first-reply observation records once past a locked Channel and retains authorization", async () => {
+  await seed();
+  const client = new Client({ connectionString });
+  await client.connect();
+  const session = createAuthorityDatabase({ connectionString, shardId: "shard-0",
+    lockTimeoutMs: 100 }).openSession();
+  const repo = new PostgresRuntimeRepository(session);
+  const input = { requestId: randomUUID(), channelId: "channel-launch", runId: "channel-launch:1#1",
+    actorUserId: "owner", at: "2026-09-04T00:00:01.250Z" };
+  try {
+    await client.query(`INSERT INTO data.agent_launches
+      (launch_id,space_id,channel_id,trigger_id,launch_kind,owner_user_id,run_id,instance_id,
+       execution_key,control_id,machine_id,hostname,state,spawn_payload_json,next_attempt_at,created_at,updated_at)
+      VALUES ('launch-reply','space-launch','channel-launch','trigger-reply','registration','owner',
+        $1,'channel-launch:1','execution-reply','control-reply','machine-1','host-1','connected','{}',$2,$2,$2)`,
+    [input.runId, at]);
+    await client.query("BEGIN");
+    // Every append advances activity_at, taking FOR NO KEY UPDATE. FOR SHARE
+    // would queue behind it and fail even though this observation changes no Channel.
+    await client.query("UPDATE data.channels SET activity_at=now() WHERE channel_id='channel-launch'");
+    assert.deepEqual(await repo.recordAgentLaunchFirstReply(input), { recorded: true, launchAgeMs: 1250 });
+    await client.query("ROLLBACK");
+    assert.deepEqual(await repo.recordAgentLaunchFirstReply({ ...input,
+      at: "2026-09-04T00:00:02.000Z" }), { recorded: false });
+    const row = (await client.query(`SELECT first_reply_at,version FROM data.agent_launches
+      WHERE launch_id='launch-reply'`)).rows[0];
+    assert.equal(row.first_reply_at.toISOString(), input.at);
+    assert.equal(Number(row.version), 2, "later replies do not rewrite the first timestamp");
+    assert.deepEqual(await repo.recordAgentLaunchFirstReply({ ...input, runId: "other-run" }), { recorded: false });
+    for (const role of ["viewer", "participant"]) {
+      await client.query("UPDATE data.space_members SET role=$1 WHERE user_id='owner'", [role]);
+      await assert.rejects(repo.recordAgentLaunchFirstReply(input), error => error.code === "channel_not_found");
+    }
+    await client.query("UPDATE data.space_members SET role='member' WHERE user_id='owner'");
+    await client.query("UPDATE data.channels SET mode='closed' WHERE channel_id='channel-launch'");
+    await assert.rejects(repo.recordAgentLaunchFirstReply(input), error => error.code === "channel_not_found");
+  } finally {
+    await client.query("ROLLBACK");
+    await session.close();
+    await client.end();
+  }
+});
+
 integration("message-id ACK preserves the summon boundary, scope and replay on PostgreSQL", async () => {
   await seed();
   const client = new Client({ connectionString });
@@ -344,7 +390,7 @@ integration("routing preflight outcomes are queryable without Runs and fence cha
     const input = { channelId: 'channel-launch', sourceMessageId, actorUserId: 'owner',
       rejected: [{ sourceMention: '@auto machine:missing', code: 'routing_no_eligible', routingDecision: {
         source: 'deterministic', evaluatedAt: new Date().toISOString(), candidateCount: 1,
-        rows: [{ profileId: 'profile-a', harness: 'codex', machineId: 'machine-a', activeRuns: 0,
+        rows: [{ harness: 'codex', machineId: 'machine-a', activeRuns: 0,
           maxConcurrent: 1, selected: false, excluded: ['machine_mismatch'] }] } }] };
     const outcomes = await Promise.all([repo.recordRoutingRejections(input), repo.recordRoutingRejections(input)]);
     assert.equal(outcomes.filter(outcome => outcome.reused).length, 1);
@@ -353,7 +399,8 @@ integration("routing preflight outcomes are queryable without Runs and fence cha
     assert.equal(view.launches.length, 0);
     assert.equal(view.rejections.length, 1);
     assert.equal(view.rejections[0].code, 'routing_no_eligible');
-    assert.equal(view.rejections[0].routingDecision.rows[0].profileId, 'profile-a');
+    assert.deepEqual(view.rejections[0].routingDecision.rows, [{ harness: 'codex', machineId: 'machine-a',
+      activeRuns: 0, selected: false, excluded: ['machine_mismatch'] }]);
     assert.equal(view.nextCursor, null);
     await assert.rejects(repo.queryAgentLaunches({ ...query, actorUserId: 'intruder' }));
     await session.transaction({ requestId: 'preflight-source-edited', operation: 'test.preflight' }, tx => tx.query({

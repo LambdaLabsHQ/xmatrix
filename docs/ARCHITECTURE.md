@@ -33,6 +33,6 @@ PostgreSQL is the product authority. Durable Objects remain for connections, ord
 | iOS | `apps/ios` | WKWebView shell. |
 | Android | `apps/android` | WebView shell. |
 
-An agent's identity is the registration tuple of owner, machine, and harness. A working directory is execution context, not identity. The CLI's default hub is `https://xmatrix-hub.xmatrix.sh` (`packages/cli-rs/crates/core/src/protocol.rs`). `--hub-url` points the same binary at another hub and cannot be combined with `--environment` or `--profile`.
+An agent's identity is the registration tuple of owner, machine, and harness. A working directory is execution context, not identity. The CLI's default hub is `https://xmatrix-hub.xmatrix.sh` (`packages/cli-rs/crates/core/src/protocol.rs`). `--hub-url` points the same binary at another hub and cannot be combined with `--profile`.
 
 The descriptive snapshot starts at `docs/guardrails/project-profile.md` and continues in the files linked there. The rules that override it are `docs/guardrails/project-guardrails.md`.

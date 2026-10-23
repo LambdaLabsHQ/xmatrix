@@ -1,60 +1,72 @@
 "use client";
-import { channelPresenceInstances } from "@xmatrix/protocol";
+import { automaticConversationName, channelPresenceInstances, pageReferenceToken } from "@xmatrix/protocol";
 
 import { startTransition, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import dynamic from "next/dynamic";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { PageDocBlock } from "@xmatrix/protocol/page-document";
 import {
-  agentPresetAvatarUrl, isLiveAgentStatus, normalizeAgentPresetRuntime, pageAuthorColor, pageAuthorLabel,
-  type SerializedAutomation, type ChannelSnapshot, type PageConversation, type PageLink,
+  faceOfSender, isLiveAgentStatus, pageAuthorColor, pageAuthorLabel,
+  type FaceOf, type ChannelSnapshot, type PageAuthor, type PageConversation, type PageLink, type SpaceMember,
 } from "@xmatrix/protocol";
 import {
-  Check, Clock, Files, FileText, History, Lock, MessageSquare, Plus, Share2, Trash2, X,
+  Check, Clock, Files, FileText, History, Lock, MessageSquare, Plus, Share, Trash2, Undo2, X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { noticeClass } from "@/components/ui/status-tone";
+import { actionClass } from "@/components/ui/action-tone";
 import { useAuth } from "@/lib/auth-context";
 import { xmatrixQueryKeys } from "@/lib/query/query-keys";
 import {
   PageLiveSession, pageApi, pageChildren,
-  type PageClaim, type PageLinkAnchor, type PagePresenceState, type PageRecentChange, type PageSummary, type PageTreeActivity, type PageTreeAgent,
+  type PageLinkAnchor, type PagePresenceState, type PageRecentChange, type PageRevisionMoment, type PageSummary, type PageTreeActivity,
+  type PageTreeAgent,
 } from "@/lib/pages/page-client";
+import type { PageBlameSource } from "./page-blame";
 import { cn } from "@/lib/utils";
 import { ListSkeleton } from "@/components/dashboard/content-skeleton";
 import { CountPill } from "@/components/dashboard/count-pill";
-import { avatarInitials } from "@/components/dashboard/completion-option-button";
-import { IdentityAvatar } from "@/components/dashboard/identity-avatar";
+import { Face } from "@/components/dashboard/face";
 import { MobileInlineActions } from "@/components/dashboard/mobile-inline-actions";
+import { useMessageReferenceCatalog } from "@/components/dashboard/message-reference-catalog";
 import { listenForOverlayDismissal } from "@/components/dashboard/use-overlay-dismiss";
 import { pagesViewPath } from "@/components/dashboard/workspace-shell-navigation";
 import type {
-  CursorPresence, Discussion, HeadingActions, PageReading, PageSectionActions, SectionNote, SuggestionControl,
+  CursorPresence, Discussion, HeadingActions, PageCompletion, PageReading, PageSectionActions, SectionNote,
+  SuggestionControl,
 } from "./page-editor";
-import { PageAttached, type PageScheduleInput } from "./page-attached";
 import {
-  ConversationList, DeletePageDialog, PageChangeMark, PageDialog, PageHistory, PagePens, PageOffscreenPeople, PageScrollMarks, PresenceStack, ShareDialog, type OffscreenPerson, type PagePen, type PresentPerson, type PageScrollMark,
+  ConversationList, DeletePageDialog, PageChangeMark, PageDialog, PageHistory, PagePens, PageScrollMarks, ShareDialog, type PagePen, type PresentPerson, type PageScrollMark,
 } from "./page-chrome";
-import { PageMargin } from "./page-margin";
+import { PageMargin, PageOffscreenCard, type MarginWriter, type OffscreenEntry } from "./page-margin";
+import type { PageSessionChanges } from "./page-session-changes";
+import { PageSessionChangesList, PageUndoNotice, useSessionChanges } from "./page-session-changes-panel";
 import { PagePhoneDock } from "./page-phone-dock";
-import { PageReaderChangeGutter, PageReaderChangeMark } from "./page-reader-changes-bar";
+import { PageReaderChangeGutter, PageReaderChangeMark, PageReaderChangesOffer } from "./page-reader-changes-bar";
 import type { SuggestionsReport } from "./page-suggestions";
 import { usePageSuggestions } from "./use-page-suggestions";
 import { PageWriteWith } from "./page-write-with";
 import { takeCoWriteRequest } from "@/lib/pages/co-write-request";
 import { useOnboardingCopy } from "@/lib/onboarding-locale";
 import { usePageWriters } from "./page-writers";
-import { marginConversations, sectionConversationCounts, withOpenConversation, type LiveConversation } from "./page-margin-model";
+import {
+  listedAgents, marginConversations, sectionConversationCounts, withOpenConversation, type LiveConversation,
+} from "./page-margin-model";
 import { formatRelativeAge, mobileChatTimeLabel } from "@/components/dashboard/time-display";
 import { ListSectionHeading } from "@/components/dashboard/list-section-heading";
 import { InlineRowPreview } from "@/components/dashboard/inline-row-preview";
 import { MORE_RECENT_CHANGES, RECENT_CHANGES, pageRecentChangePreview, pageTreeHeadKey } from "./page-recent-changes";
-import { discussionDraft, discussionTitle } from "@/components/dashboard/selection-discussion";
+import {
+  discussionQuote, discussionTitle, quotedMessage, type DiscussionQuote,
+} from "@/components/dashboard/selection-discussion";
 import { refetchUnlessHumanPush } from "@/components/dashboard/workspace-resource-push";
 import { PageMigrationReview, usePageMigration } from "./page-migration-review";
+import { commentBody, commentCall, commentTaker } from "./page-comment";
+import type { ConversationCall } from "@/components/dashboard/page-shell-actions";
 import { NEW_PAGE_ID, NEW_PAGE_TITLE, type PageCreation } from "./page-creation";
 import { PageTreeRow } from "./page-tree-row";
-import type { PageReferenceTargets } from "./page-reference-chips";
+import { pageMentions, type PageReferenceTargets } from "./page-reference-chips";
+import { avatarImageSrc } from "@/components/dashboard/identity-avatar";
 import { userErrorMessage } from "@/lib/user-facing-error";
 
 // The native shell also imports this module for its list screens. The editor
@@ -204,9 +216,8 @@ function TreeNode({ page, childrenOf, activity, depth, selectedPageId, onSelect,
             {agents.length > 0 && (
               <span className="app-channel-agent-avatars flex shrink-0 items-center -space-x-1.5 px-0.5" data-testid="page-tree-agents">
                 {[...new Map(agents.map((agent) => [agent.name, agent])).values()].slice(0, 3).map((agent) => (
-                  <IdentityAvatar key={agent.instanceId} kind="agent" label={agent.name} status={agent.status}
-                    imageUrl={agent.avatarUrl} size="sm" showKindBadge={false}
-                    className="app-channel-agent-avatar rounded-full" />
+                  <Face key={agent.instanceId} of={{ kind: "agent", name: agent.name, harness: agent.harness ?? null, id: agent.instanceId }}
+                    status={agent.status} size="sm" showKindBadge={false} className="app-channel-agent-avatar rounded-full" />
                 ))}
               </span>
             )}
@@ -286,6 +297,29 @@ export function pageDocumentQuery(userId: string | null, spaceId: string, pageId
   };
 }
 
+/**
+ * A page's discussions with the conversations they name (its margin), its section awareness and its
+ * Automations. Their keys do not carry the page's revision: the live session's commits invalidate them,
+ * so a page opens on what was read ahead and keeps it on screen while it is read again.
+ */
+function pageLinksQuery(userId: string | null, spaceId: string, pageId: string, token: string) {
+  return {
+    queryKey: xmatrixQueryKeys.domain({ userId: userId ?? "anonymous" }, "page-links", [spaceId, pageId]),
+    staleTime: 10_000,
+    queryFn: ({ signal }: { signal: AbortSignal }) => pageApi.links(spaceId, token, { pageId }, signal),
+  };
+}
+
+const PAGE_REVISION_QUERIES = ["page-links", "page-automations", "page-awareness"];
+// Co-writing commits arrive many a second; what they move beside the page is read again once they settle.
+const REVISION_REFRESH_MS = 1_000;
+
+// The editor and the preview are read ahead, so a page's first opening waits on neither.
+function preloadPageChunks() {
+  void import("./page-editor");
+  void import("./page-document-static");
+}
+
 const PREFETCHED_PAGES = 40;
 
 export function PageTreePanel({ spaceId, token, selectedPageId, onSelectPage, onOpenSection, creation,
@@ -308,7 +342,11 @@ export function PageTreePanel({ spaceId, token, selectedPageId, onSelectPage, on
   const { user } = useAuth();
   const userId = user?.id ?? null;
   const prefetch = useCallback((pageId: string) => {
-    if (spaceId) void queryClient.prefetchQuery(pageDocumentQuery(userId, spaceId, pageId, token));
+    preloadPageChunks();
+    if (!spaceId) return;
+    void queryClient.prefetchQuery(pageDocumentQuery(userId, spaceId, pageId, token));
+    // About to be opened: its margin is read with it.
+    void queryClient.prefetchQuery(pageLinksQuery(userId, spaceId, pageId, token));
   }, [queryClient, spaceId, token, userId]);
   // The Space's pages are read ahead, a few at a time, so opening one does not wait on the network.
   useEffect(() => {
@@ -420,6 +458,9 @@ function liveRunOf(state: PagePresenceState, agents: readonly PageTreeAgent[]): 
     (agent.name === user.name || agent.name.startsWith(`${user.name}:`)));
 }
 
+/** How long a page may take to connect before it says it is connecting. */
+const CONNECTING_SAID_AFTER_MS = 2_000;
+
 /** How long the page stays on screen at a new revision before it counts as read there. */
 const READ_AFTER_MS = 1_500;
 
@@ -443,10 +484,6 @@ function usePresence(session: PageLiveSession | null): Array<{ clientId: number;
 }
 
 
-function pageClaimsKey(userId: string | null, spaceId: string | null | undefined, pageId: string | null) {
-  return xmatrixQueryKeys.domain({ userId: userId ?? "anonymous" }, "page-claims", [spaceId, pageId]);
-}
-
 /** The Agents live in a conversation this client holds, from its member presence. */
 /** The time now, renewed every second while `active`. */
 function useTicking(active: boolean): number {
@@ -462,12 +499,23 @@ function useTicking(active: boolean): number {
 
 function liveAgents(channel: ChannelSnapshot): LiveConversation["agents"] {
   if (!channel.presence) return undefined;
-  return channelPresenceInstances(channel.presence).flatMap(instance => isLiveAgentStatus(instance.status)
-    ? [{ instanceId: instance.id, name: instance.label || instance.agentName, status: instance.status }] : []);
+  return channelPresenceInstances(channel.presence).flatMap(instance => {
+    if (!isLiveAgentStatus(instance.status)) return [];
+    const name = instance.label || instance.agentName;
+    // Its face is its vendor's mark, as on its card in the conversation.
+    return [{ instanceId: instance.id, name, status: instance.status,
+      face: { kind: "agent", name, harness: instance.registration.harness, id: instance.id } }];
+  });
 }
 
 /** What an Agent co-writing live is doing, as its face at the edge says it (page-co-writer.ts). */
 const CO_WRITER_DOING: Partial<Record<string, string>> = { thinking: "thinking", writing: "writing", waiting: "waiting for you" };
+
+/** A duration as a face's tag says it: "19s", "2m". */
+function briefDuration(milliseconds: number): string {
+  const seconds = Math.max(0, Math.round(milliseconds / 1000));
+  return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m`;
+}
 
 /** Room at the bottom of a phone's page that its button and capsule cover, so a line there counts as out of view. */
 const PEN_BOTTOM_ROOM = 110;
@@ -484,15 +532,19 @@ type PageDialogState =
   | "share"
   | "delete"
   | { kind: "conversations"; blockId: string | null }
-  | { kind: "attach"; blockId: string }
   | { kind: "write" }
   | { kind: "agent"; key: string };
 
+const NO_MEMBERS: readonly SpaceMember[] = [];
+
 export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpenSection, onPageDeleted, conversation, activeConversationId = null,
-  renderConversation, onConversationDockChange, onCloseConversation, onExpandConversation, onOpenConversation, onDiscuss, onConnectGitHub, canMigrate, layout = "desktop", focusSection = null,
-  creation }: {
+  renderConversation, onConversationDockChange, onCloseConversation, onExpandConversation, onOpenConversation,
+  onConversationIntent, onDiscuss, canMigrate, layout = "desktop", focusSection = null,
+  creation, members = NO_MEMBERS }: {
   spaceId: string | null;
   token: string;
+  /** The Space's members, whom an `@` in a page names. */
+  members?: readonly SpaceMember[];
   /** A made page, or NEW_PAGE_ID for the new page + opened, which its first write makes (page-creation.tsx). */
   selectedPageId: string | null;
   onSelectPage: (pageId: string) => void;
@@ -511,14 +563,15 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   onCloseConversation?: () => void;
   onExpandConversation?: (conversationId: string) => void;
   /** Opens a conversation beside the page (pages-live-document.md §4.4). */
-  onOpenConversation: (conversationId: string) => void;
+  /** Opens a conversation beside the page, at `at` when given. */
+  onOpenConversation: (conversationId: string, at?: { messageId: string; sequence: number }) => void;
+  /** The reader rests on one of the page's conversations, which may be opened next. */
+  onConversationIntent?: (conversationId: string) => void;
   onDiscuss: (input: { spaceId: string; pageId: string; blockId: string; name: string; restricted: boolean;
-    anchor?: PageLinkAnchor; firstMessage?: string; draft?: string; open?: boolean; coWrite?: boolean;
+    anchor?: PageLinkAnchor; firstMessage?: string; quote?: DiscussionQuote; open?: boolean; coWrite?: boolean;
     /** Hears the conversation's id as soon as it is known, before the Hub has made or linked it. */
-    planned?: (conversationId: string) => void }) => Promise<unknown>;
-  /** Subscribes a conversation of its own, linked to a section, to a repository's issues and pull requests. */
-  onConnectGitHub?: (input: { spaceId: string; pageId: string; blockId: string; repository: string;
-    restricted: boolean }) => Promise<void>;
+    planned?: (conversationId: string) => void;
+    call?: ConversationCall }) => Promise<unknown>;
   /** A Space owner or admin may move the Space's Channels to pages. */
   canMigrate: boolean;
   /** On a phone a page is a pushed screen, like a conversation; the shell's back bar carries its title. */
@@ -550,19 +603,37 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   const [editorReady, setEditorReady] = useState(false);
   const drawn = synced && editorReady;
   const [connected, setConnected] = useState(false);
-  // Like Google Docs: "Saving…" while this person's edits are on their way, then "Saved".
-  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "offline">("idle");
-  const connectedRef = useRef(false);
-  const saveTimer = useRef<number | undefined>(undefined);
+  // Edits are sent as they are made, so saving is never said; only edits held while the session is away are.
+  const [offline, setOffline] = useState(false);
+  const edited = useRef(false);
+  // A session still connecting says so only once it has kept the reader waiting.
+  const [slowToConnect, setSlowToConnect] = useState(false);
+  useEffect(() => {
+    if (connected) { setSlowToConnect(false); return; }
+    const timer = window.setTimeout(() => setSlowToConnect(true), CONNECTING_SAID_AFTER_MS);
+    return () => window.clearTimeout(timer);
+  }, [connected]);
   const [canEdit, setCanEdit] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   // Reads the page's waiting suggestions again; the live session calls it when one arrives.
   const waitingRefetch = useRef<() => void>(() => undefined);
   const [mode, setMode] = useState<"page" | "history">("page");
+  // Everyone's changes since the page opened, which Ctrl+Z steps back through, and whether their list is open.
+  const [sessionChanges, setSessionChanges] = useState<PageSessionChanges | null>(null);
+  const [changesOpen, setChangesOpen] = useState(false);
+  const { list: changeList, notice: undoNotice } = useSessionChanges(sessionChanges);
   const [dialog, setDialog] = useState<PageDialogState | null>(null);
   // The conversation whose card is being read, so its passage is marked (§4.4).
   const [focused, setFocused] = useState<string | null>(null);
+  // A conversation being read is about to be opened: what opening it needs is read now.
+  const conversationIntent = useRef(onConversationIntent);
+  conversationIntent.current = onConversationIntent;
+  useEffect(() => {
+    if (focused) conversationIntent.current?.(focused);
+  }, [focused]);
   const [anchorTops, setAnchorTops] = useState<ReadonlyMap<string, number>>(new Map());
+  // Where the preview's sections stand, so the margin's cards stand beside them before the editor is drawn.
+  const [previewTops, setPreviewTops] = useState<ReadonlyMap<string, number>>(new Map());
   // The margin needs room beside a full document column; narrower pages show bubbles instead (§4.4).
   const [articleWidth, setArticleWidth] = useState(0);
   const observer = useRef<ResizeObserver | null>(null);
@@ -593,6 +664,9 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     article.addEventListener("scroll", readViewport, { passive: true });
   }, [readViewport]);
   const [headRevision, setHeadRevision] = useState<number | null>(null);
+  // The head whose blame is read, for the reads the editor asks for (page-blame.tsx).
+  const blameRevision = useRef(headRevision);
+  blameRevision.current = headRevision;
   // How far this person has read the page, kept by the Hub on every device of theirs (§3.1): the newest
   // revision they have seen whole, and the page as they have seen it when they saw only part of it past that.
   // History shows a dot when the page moved past it, as Google Docs does. `opened` is where it stood as the
@@ -601,8 +675,10 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   const [opened, setOpened] = useState<{ pageId: string; revision: number | null; seen: string | null } | null>(null);
   // What the page was when this reader last read it, for showing what changed since as a diff.
   const [readerBaseline, setReaderBaseline] = useState<string | null>(null);
-  // How many changes that diff shows (null until known), and whether the reader has ticked it viewed.
+  // How many changes that diff holds (null until known), whether the reader has opened it over the page, and
+  // whether they have viewed it. The page opens as it is now; the diff is only offered until they ask for it.
   const [readerChanges, setReaderChanges] = useState<number | null>(null);
+  const [diffShown, setDiffShown] = useState(false);
   const [diffViewed, setDiffViewed] = useState(false);
   // What of the page this reader has last told the Hub they have seen past `seenRevision`.
   const sentSeen = useRef<string | null>(null);
@@ -611,6 +687,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     setOpened(null);
     setReaderBaseline(null);
     setReaderChanges(null);
+    setDiffShown(false);
     setDiffViewed(false);
     if (!spaceId || !pageId || !token) return;
     const controller = new AbortController();
@@ -659,6 +736,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   }, [headRevision, opened, pageId, spaceId, token]);
   const reading = useRef<PageReading | null>(null);
   const viewDiff = () => {
+    setDiffShown(false);
     setDiffViewed(true);
     reading.current?.seeAll();
     if (headRevision !== null) markSeen(headRevision, null);
@@ -696,6 +774,19 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   const queryClient = useQueryClient();
   const userId = user?.id ?? null;
   const userName = user?.name || user?.email || "";
+  useEffect(preloadPageChunks, []);
+  // What a commit moves beside the page is read again once commits settle; the page's opening revision
+  // is what it was read at, so the session reporting it reads nothing again.
+  const refreshedAt = useRef<{ pageId: string | null; revision: number | null }>({ pageId: null, revision: null });
+  useEffect(() => {
+    const last = refreshedAt.current;
+    refreshedAt.current = { pageId, revision: headRevision };
+    if (!spaceId || !pageId || headRevision === null || last.pageId !== pageId || last.revision === null
+      || last.revision === headRevision) return;
+    const timer = window.setTimeout(() => void queryClient.invalidateQueries({ predicate: ({ queryKey }) =>
+      PAGE_REVISION_QUERIES.some((name) => queryKey.includes(name)) && queryKey.includes(pageId) }), REVISION_REFRESH_MS);
+    return () => window.clearTimeout(timer);
+  }, [headRevision, pageId, queryClient, spaceId]);
 
   // With no page named, the first top-level page opens, and the URL names it.
   useEffect(() => {
@@ -735,7 +826,8 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     if (made && !kept) made.destroy();
     // One session per page; it must not churn when the auth context re-renders.
     const live = kept ?? new PageLiveSession({ spaceId, pageId, token: tokenRef.current,
-      user: { name: userName, color: pageAuthorColor({ kind: "user", id: userId }) },
+      // Others draw this person's own face beside their caret, by their account.
+      user: { ...(userId ? { id: userId } : {}), name: userName, color: pageAuthorColor({ kind: "user", id: userId }) },
       // A failed make says why on the page; a later write tries again.
       ...(pending ? { make: (document: Uint8Array) => make.current(document).catch((cause: unknown) => {
         setNotice(userErrorMessage(cause, "Couldn't create the page"));
@@ -747,20 +839,17 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
       // A new page has nothing to sync: it is this document until it is made.
       if (pending) { setSynced(true); setCanEdit(true); }
     }
+    let connectedNow = false;
     const off = live.on((event) => {
       if (event.type === "status") {
         setConnected(event.connected);
-        connectedRef.current = event.connected;
-        setSaveState((state) => (state === "offline" || state === "saving") && event.connected ? "saved"
-          : state !== "idle" && !event.connected ? "offline" : state);
+        connectedNow = event.connected;
+        setOffline(!event.connected && edited.current);
       }
       if (event.type === "local-edit") {
+        edited.current = true;
         // Until the page is made and its session first reached, an edit is on its way, not offline.
-        setSaveState(connectedRef.current || live.underway ? "saving" : "offline");
-        window.clearTimeout(saveTimer.current);
-        // The edit is sent as it is made; the session keeps it as it arrives.
-        saveTimer.current = window.setTimeout(() => setSaveState(connectedRef.current ? "saved"
-          : live.underway ? "saving" : "offline"), 700);
+        setOffline(!connectedNow && !live.underway);
       }
       if (event.type === "made") {
         setNotice(null);
@@ -790,13 +879,15 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
       }
       // A co-writing Agent's suggestion is laid over the page as it arrives.
       if (event.type === "suggestion") waitingRefetch.current();
-      if (event.type === "claims") {
-        queryClient.setQueryData<{ claims: PageClaim[]; competitiveBlocks: string[] }>(pageClaimsKey(userId, spaceId, pageId),
-          (current) => ({ competitiveBlocks: current?.competitiveBlocks ?? [], claims: event.claims }));
-      }
       if (event.type === "error" && event.code === "page_body_too_large") setNotice("This page is over 256 KiB.");
       if (event.type === "error" && event.code === "credits_exhausted") {
         setNotice("This Space has used this month's Agent credits; an Agent's edit is saved once someone edits the page or credits return.");
+      }
+      if (event.type === "error" && event.code === "payment_required") {
+        setNotice("This Free Space has used its 500 messages and page edits; edits on this page are kept and saved once the Space upgrades to Pro.");
+      }
+      if (event.type === "error" && event.code === "billing_grace_read_only") {
+        setNotice("This Space is read-only while a past-due payment is resolved; edits on this page are kept and saved once it is.");
       }
       if (event.type === "error" && event.code === "page_server_outdated") {
         setNotice(PAGE_SERVER_OUTDATED_NOTICE);
@@ -805,8 +896,8 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     return () => {
       off();
       if (madeSession.current === live) return;
-      live.destroy(); setSession(null); setConnected(false); setSynced(false); setEditorReady(false);
-      setSaveState("idle");
+      live.destroy(); setSession(null); setConnected(false); setSynced(false); setEditorReady(false); setChangesOpen(false);
+      setOffline(false); edited.current = false;
     };
   }, [spaceId, pageId, pending, hasToken, userId, userName, queryClient]);
   // Closed before the page it made opened: nothing keeps its session any more.
@@ -823,9 +914,8 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     [editorBlocks, session]);
   const presence = usePresence(session);
   const links = useQuery({
-    queryKey: xmatrixQueryKeys.domain({ userId: user?.id ?? "anonymous" }, "page-links", [spaceId, pageId, headRevision]),
+    ...pageLinksQuery(userId, spaceId ?? "", pageId ?? "", token),
     enabled: Boolean(spaceId && pageId), refetchInterval: 30_000,
-    queryFn: ({ signal }) => pageApi.links(spaceId!, token, { pageId: pageId! }, signal),
   });
   // Discussions this reader just started, shown where they are before the Hub has linked them.
   const [startedLinks, setStartedLinks] = useState<PageLink[]>([]);
@@ -844,7 +934,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   }, [links.data, startedLinks]);
   // The page's Automations, drawn as chips where the text references them (pages-live-document.md §6).
   const automations = useQuery({
-    queryKey: xmatrixQueryKeys.domain({ userId: user?.id ?? "anonymous" }, "page-automations", [spaceId, pageId, headRevision]),
+    queryKey: xmatrixQueryKeys.domain({ userId: user?.id ?? "anonymous" }, "page-automations", [spaceId, pageId]),
     enabled: Boolean(spaceId && pageId), refetchInterval: () => refetchUnlessHumanPush(30_000),
     queryFn: ({ signal }) => pageApi.automations(spaceId!, pageId!, token, signal).then((result) => result.automations),
   });
@@ -877,8 +967,8 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     const last = channel.lastMessage;
     return {
       name: channel.name ?? null,
-      lastMessage: last ? { from: { kind: last.from.kind === "agent" || last.from.kind === "app" ? last.from.kind : "user",
-        label: last.from.label }, bodyPreview: last.bodyPreview, sentAt: last.sentAt } : null,
+      lastMessage: last ? { face: faceOfSender(last.from), label: last.from.label, bodyPreview: last.bodyPreview,
+        sentAt: last.sentAt } : null,
       agents: liveAgents(channel),
       ...(channel.historyHeadSequence !== undefined ? { headSequence: channel.historyHeadSequence } : {}),
       ...(channel.readSequence !== undefined ? { readSequence: channel.readSequence } : {}),
@@ -890,15 +980,9 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     conversations.find((item) => item.conversationId === conversationId)?.name ?? conversation(conversationId)?.name ?? null,
   [conversation, conversations]);
   // `page:<id>` and `channel:<id>` in the text read as the names this reader's lists give them.
-  // They are drawn again only when the page list changes; the rest is read when a chip is drawn or clicked.
+  // They are drawn again only when the page list or whom an `@` names changes; the rest is read when a chip is drawn or clicked.
   const referenceActions = useRef({ conversation, onOpenConversation, onOpenSection });
   referenceActions.current = { conversation, onOpenConversation, onOpenSection };
-  const references = useMemo<PageReferenceTargets>(() => ({
-    pageTitle: (id) => tree.data?.find((item) => item.pageId === id)?.title ?? null,
-    channelName: (id) => referenceActions.current.conversation(id)?.name ?? null,
-    openPage: (id, blockId) => referenceActions.current.onOpenSection(id, blockId),
-    openChannel: (id) => referenceActions.current.onOpenConversation(id),
-  }), [tree.data]);
   // Open discussions anchored in the text, highlighted there (pages-live-document.md §4.3).
   const discussions = useMemo<Discussion[]>(() => linkList.filter((link) => link.anchor && !link.resolvedAt)
     .map((link) => ({ linkId: link.linkId, conversationId: link.conversationId, from: link.anchor!.from,
@@ -907,7 +991,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
 
   // When each section last changed, and by whom where; refreshed as revisions land.
   const awareness = useQuery({
-    queryKey: xmatrixQueryKeys.domain({ userId: user?.id ?? "anonymous" }, "page-awareness", [spaceId, pageId, headRevision]),
+    queryKey: xmatrixQueryKeys.domain({ userId: user?.id ?? "anonymous" }, "page-awareness", [spaceId, pageId]),
     enabled: Boolean(spaceId && pageId && token), refetchInterval: 30_000,
     queryFn: ({ signal }) => pageApi.awareness(spaceId!, pageId!, token, signal),
   });
@@ -938,6 +1022,17 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   const liveOnPage = useMemo(() => pageAgents.data?.agents.get(pageId ?? "") ?? [], [pageAgents.data, pageId]);
   // Who this person can call to write the page with them, and the one they last called.
   const writers = usePageWriters(spaceId, token, Boolean(page) && canEdit);
+  // An `@` in the text reads as the Agent or member it names, as a message's mention does.
+  const mentions = useMemo(() => pageMentions(
+    members.map((member) => ({ name: member.name, handle: member.handle, imageUrl: avatarImageSrc(member.avatarUrl) })),
+    writers.agents.map((agent) => agent.harness)), [members, writers.agents]);
+  const references = useMemo<PageReferenceTargets>(() => ({
+    pageTitle: (id) => tree.data?.find((item) => item.pageId === id)?.title ?? null,
+    channelName: (id) => referenceActions.current.conversation(id)?.name ?? null,
+    openPage: (id, blockId) => referenceActions.current.onOpenSection(id, blockId),
+    openChannel: (id) => referenceActions.current.onOpenConversation(id),
+    mentions,
+  }), [mentions, tree.data]);
   // An empty page someone is co-writing asks for its first line, naming who writes the next.
   const onboardingCopy = useOnboardingCopy(spaceId, token, userId ?? undefined);
   // What Agents co-writing the page suggest (§4.2), laid over it change by change.
@@ -956,7 +1051,6 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   }, [canEdit, pageId, spaceId, suggesting, token, waiting]);
   // The selection is acknowledged before any network request, including making an empty page.
   const startingWriter = useRef(false);
-  const [starting, setStarting] = useState<{ pageId: string; harness: string } | null>(null);
   // An Agent just called, from the moment it is asked until it shows on the page.
   const [called, setCalled] = useState<{ pageId: string; harness: string; conversationId: string; blockId: string | null;
     at: number } | null>(null);
@@ -978,10 +1072,15 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     const run = liveRunOf(present, liveOnPage);
     return !run ? null : run.status === "busy" ? "active" : "idle";
   }, [liveOnPage]);
-  // An Agent writing through its caret shows the face of the Run it writes from.
-  const cursorAvatar = useCallback((state: object) => {
-    const present = state as PagePresenceState;
-    return present.user?.kind === "agent" ? liveRunOf(present, liveOnPage)?.avatarUrl : undefined;
+  // Whose face someone on the page is: a person by their account, an Agent writing through its caret by the Run
+  // it writes from.
+  const presentFace = useCallback((state: PagePresenceState): FaceOf => {
+    const user = state.user!;
+    if (user.kind === "agent") {
+      const run = liveRunOf(state, liveOnPage);
+      return { kind: "agent", name: run?.name ?? user.name, harness: run?.harness ?? null, id: run?.instanceId ?? null };
+    }
+    return user.id ? { kind: "user", id: user.id, name: user.name } : { kind: "external", name: user.name };
   }, [liveOnPage]);
   const present = useMemo(() => presence.filter(({ state }) => cursorPresence(state) !== null),
     [cursorPresence, presence]);
@@ -994,16 +1093,6 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     ...present.flatMap(({ state }) => state.user?.kind === "agent" && state.user.conversationId ? [state.user.conversationId] : []),
     ...staying.map((agent) => agent.conversationId),
   ])].sort().join("\n"), [present, staying]);
-
-  // Claims arrive live from the session; the interval lets lapsed ones go.
-  const claims = useQuery({
-    queryKey: pageClaimsKey(userId, spaceId, pageId), enabled: Boolean(spaceId && pageId && token), refetchInterval: 60_000,
-    queryFn: ({ signal }) => pageApi.claims(spaceId!, pageId!, token, signal),
-  });
-  const claimBlock = (blockId: string) => pageApi.claim(spaceId!, pageId!, token, blockId)
-    .then(() => claims.refetch(), (cause: Error) => setNotice(cause.message));
-  const releaseClaim = (claimId: string) => pageApi.releaseClaim(spaceId!, pageId!, token, claimId)
-    .then(() => claims.refetch(), (cause: Error) => setNotice(cause.message));
 
   const sections = useMemo(() => {
     const notes = new Map<string, SectionNote>();
@@ -1032,18 +1121,13 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
       if (item.agents.length === 0 || edge.has(item.conversationId)) continue;
       const working = note(item.blockId).working ??= [];
       for (const agent of item.agents) {
-        working.push({ name: agent.name, busy: agent.status === "busy", avatarUrl: agent.avatarUrl,
+        working.push({ name: agent.name, busy: agent.status === "busy", face: agent.face,
           conversation: { id: item.conversationId, name: item.name } });
       }
     }
     for (const [blockId, count] of sectionConversationCounts(conversations)) note(blockId).conversations = count;
-    for (const claim of claims.data?.claims ?? []) {
-      if (note(claim.blockId).claim) continue;
-      note(claim.blockId).claim = { label: claim.holder.label, pullRequestUrl: claim.pullRequestUrl ?? null,
-        claimId: claim.claimId, mine: claim.ownerUserId === userId };
-    }
     return notes;
-  }, [atEdge, awareness.data, claims.data, conversationName, conversations, userId]);
+  }, [atEdge, awareness.data, conversationName, conversations]);
 
   const document = useQuery({
     ...pageDocumentQuery(user?.id ?? null, spaceId ?? "", pageId ?? "", token),
@@ -1108,7 +1192,14 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
       .find((harness) => harness !== quiet && writers.agents.some((agent) => agent.harness === harness));
   };
   // A page made to be co-written at once calls its Agent as it opens (co-write-request.ts).
-  const coWriteRef = useRef<((harness: string, blockId: string | null) => Promise<void>) | null>(null);
+  const coWriteRef = useRef<((harness: string, blockId: string | null, mentioned?: boolean) => Promise<void>) | null>(null);
+  // Typing `[[`, `#` and `@` on the page completes as it does in the composer; an `@` calls the Agent to the page.
+  const referenceCatalog = useMessageReferenceCatalog();
+  const completion = useMemo<PageCompletion | undefined>(() => spaceId ? {
+    spaceId, pages: tree.data ?? [], channels: referenceCatalog?.channels ?? [], agents: writers.agents,
+    readPage: (id) => queryClient.fetchQuery(pageDocumentQuery(userId ?? null, spaceId, id, token)),
+    summonAgent: (harness, blockId) => void coWriteRef.current?.(harness, blockId || null, true),
+  } : undefined, [queryClient, referenceCatalog?.channels, spaceId, token, tree.data, userId, writers.agents]);
   useEffect(() => {
     if (!page || !canEdit || !coWriteRef.current) return;
     const harness = takeCoWriteRequest(page.pageId);
@@ -1137,17 +1228,31 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   const restricted = page ? effectivelyRestricted(pending ? page.parentPageId ?? "" : page.pageId, pages) : false;
   const pageLink = () => `${window.location.origin}${
     pagesViewPath(`/app/${encodeURIComponent(spaceId)}/pages`, page?.pageId ?? null, null)}`;
-  // The link a pull request names to pass the `xmatrix/claim` check.
+  // The link a pull request names for the block it works on.
   const blockLink = (blockId: string) => `${pageLink()}#${blockId}`;
-  const claimsOn = (blockId: string) => (claims.data?.claims ?? []).filter((claim) => claim.blockId === blockId);
-  // Free, or open for competition and not already yours.
-  const claimable = (blockId: string) => claimsOn(blockId).length === 0 ||
-    (Boolean(claims.data?.competitiveBlocks.includes(blockId)) &&
-      !claimsOn(blockId).some((claim) => claim.holder.kind === "user" && claim.holder.id === userId));
-  const discuss = (blockId: string, anchor?: PageLinkAnchor) => {
+  // A discussion is where people and Agents meet alike: asking an Agent is mentioning it there.
+  const discuss: NonNullable<PageSectionActions["discuss"]> = (blockId, anchor) => startDiscussion(blockId, anchor);
+  // A comment on a passage: the discussion of the passage, started with the comment; the page stays in front of
+  // the reader, the discussion a card beside the passage. An Agent the comment mentions takes it, else the Agent at
+  // work on the page, nearest the passage first, called to it in its own conversation, where its Instance lives;
+  // else xMatrix gives it to one (`@auto`).
+  const takerOf = (blockId: string) => commentTaker(liveOnPage, blockId, (id) => Boolean(conversation(id)));
+  const commentTakerFace: NonNullable<PageSectionActions["commentTaker"]> = (blockId) => {
+    const agent = takerOf(blockId);
+    return agent && listedAgents([agent])[0];
+  };
+  const comment: NonNullable<PageSectionActions["comment"]> = (blockId, anchor, text) => {
+    const { body, taker } = commentBody(text, writers.agents.map((agent) => agent.harness), takerOf(blockId));
+    const home = taker && conversation(taker.conversationId);
+    startDiscussion(blockId, anchor, { body,
+      ...(taker && home ? { call: { channel: home, body: (discussionId) => commentCall(taker, discussionId) } } : {}) });
+  };
+  const startDiscussion = (blockId: string, anchor?: Parameters<NonNullable<PageSectionActions["discuss"]>>[1],
+    said?: { body: string; call?: ConversationCall }) => {
     if (!page) return;
     const title = blocks.find((block) => block.id === blockId)?.title;
-    // A discussion of a passage is named by the passage, and opens holding it; of a section, by the section.
+    // A discussion of a section is named by the section; of a passage, by what was written about it, and by the
+    // passage only until something is.
     const place = title ? `${page.title} › ${title}` : page.title;
     let started: string | null = null;
     const planned = (conversationId: string) => {
@@ -1156,54 +1261,41 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
       setStartedLinks((current) => [...current, { linkId: `started:${conversationId}`, conversationId,
         pageId: page.pageId, blockId, source: "manual", createdAt: now, lastSeenAt: now, anchor: anchor ?? null }]);
     };
-    void onDiscuss({ spaceId, pageId: page.pageId, blockId, name: anchor ? discussionTitle(anchor.quote) : place,
-      restricted, planned, ...(anchor ? { anchor, draft: discussionDraft(anchor.quote, { label: place, href: blockLink(blockId) }) }
-        : {}) }).then(() => links.refetch(), (cause: Error) => setNotice(cause.message))
+    const quote = anchor ? discussionQuote(anchor.quote, { label: place, href: blockLink(blockId) }, true) : undefined;
+    const firstMessage = said && (quote ? quotedMessage(quote, { body: said.body, selections: [] }).body : said.body);
+    void onDiscuss({ spaceId, pageId: page.pageId, blockId,
+      name: !anchor ? place
+        : firstMessage !== undefined ? automaticConversationName(firstMessage) : discussionTitle(anchor.quote),
+      restricted, planned, ...(anchor ? { anchor } : {}),
+      ...(firstMessage !== undefined ? { firstMessage, open: false } : quote ? { quote } : {}),
+      ...(said?.call ? { call: said.call } : {}) })
+      .then(() => links.refetch(), (cause: Error) => setNotice(cause.message))
       .finally(() => setStartedLinks((current) => current.filter((link) => link.conversationId !== started)));
   };
   const resolveDiscussion = (linkId: string) => pageApi.resolveLink(spaceId, token, linkId, true)
     .then(() => links.refetch(), (cause: Error) => setNotice(cause.message));
   const copy = (text: string) => void navigator.clipboard.writeText(text)
     .then(() => setNotice("Link copied."), (cause: Error) => setNotice(cause.message));
-  const copyLink = (blockId: string) => copy(blockLink(blockId));
-  // Asking about a passage, or asking for it to change, is a discussion on it whose first message
-  // addresses @auto, which routes to an enabled harness; it opens beside the page, where the answer arrives.
-  const ask: NonNullable<PageSectionActions["ask"]> = async (blockId, anchor, request) => {
-    if (!page) return;
-    const quote = anchor.quote.split("\n").map((line) => `> ${line}`).join("\n");
-    const where = `page:${page.pageId}${blockId ? ` (section #${blockId})` : ""}`;
-    const firstMessage = request.mode === "ask"
-      ? `@auto ${request.prompt}\n\nAbout this passage of ${where}:\n${quote}`
-      : `@auto ${request.prompt}\n\nChange this passage of ${where} with \`xmatrix page edit\`, then resolve this ` +
-        `discussion with \`xmatrix page resolve\` (its link id is under \`discussion:\` in \`xmatrix page read\`):\n${quote}`;
-    try {
-      await onDiscuss({ spaceId, pageId: page.pageId, blockId, restricted,
-        name: `${request.mode === "ask" ? "Ask" : "Change"}: ${request.prompt.slice(0, 60)}`, anchor, firstMessage });
-      void links.refetch();
-    } catch (cause) {
-      setNotice(userErrorMessage(cause, "Couldn't send the question"));
-      throw cause;
-    }
-  };
   // Co-writing with an Agent: a conversation of its own, linked to the page or a section, whose first
   // message calls the chosen runtime to infer what the page needs and write it. The page stays open,
   // and the Agent shows at the right edge beside the line it writes.
-  const coWrite = async (harness: string, blockId: string | null) => {
+  // An `@` in the page's text calls the Agent the same way, but its message is only the mention and where it
+  // was made: the page tells it nothing of what to write.
+  const coWrite = async (harness: string, blockId: string | null, mentioned = false) => {
     if (!page || startingWriter.current) return;
     coWriting();
     startingWriter.current = true;
-    setStarting({ pageId: page.pageId, harness });
     setNotice(null);
     const section = blockId ? blocks.find((block) => block.id === blockId)?.title ?? null : null;
     try {
       writers.choose(harness);
       // Calling an Agent to write a new page is writing on it: it makes the page.
       const writing = pending && session ? await session.make() : page.pageId;
-      setStarting({ pageId: writing, harness });
       const where = `page:${writing}${blockId ? ` (section #${blockId})` : ""}`;
       // The page itself tells the Agent what it needs, live, as turns its runtime hands it (§4.2).
-      const firstMessage = `@${harness} launch:force You're co-writing ${where} with me live. The page sends you ` +
-        "what changed as I write, and you answer there, in the page; nothing to do here until it does.";
+      const firstMessage = mentioned ? `@${harness} launch:force ${pageReferenceToken(writing, blockId)}`
+        : `@${harness} launch:force You're co-writing ${where} with me live. The page sends you ` +
+          "what changed as I write, and you answer there, in the page; nothing to do here until it does.";
       const conversationId = await onDiscuss({ spaceId, pageId: writing, blockId: blockId ?? "", restricted,
         name: `Co-writing ${section ? `${page.title} › ${section}` : page.title}`, firstMessage, open: false,
         coWrite: true });
@@ -1215,37 +1307,19 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
       setNotice(userErrorMessage(cause, "Couldn't start the Agent"));
     } finally {
       startingWriter.current = false;
-      setStarting(null);
     }
   };
   coWriteRef.current = coWrite;
-  const claim = (blockId: string) => (claimable(blockId) ? void claimBlock(blockId)
-    : setNotice("Someone is already on this section."));
-  // What selecting text offers, for the section the selection is in.
-  // Who last changed the section, as Show editors tells it in Google Docs (§3.2).
-  const editors = (blockId: string) => {
-    const updated = awareness.data?.blocks.find((block) => block.blockId === blockId)?.updated;
-    if (!updated) return null;
-    const conversationId = updated.conversationIds[0];
-    const name = conversationId ? conversationName(conversationId) : null;
-    return { people: updated.authors.map((author) => ({ name: author.label, color: pageAuthorColor(author) })),
-      when: formatRelativeAge(updated.createdAt) ?? new Date(updated.createdAt).toLocaleString(),
-      conversation: conversationId && name ? { id: conversationId, name } : null };
-  };
   const openHistory = () => {
     reading.current?.seeAll();
     if (headRevision !== null) markSeen(headRevision, null);
     setMode("history");
   };
-  const sectionActions: PageSectionActions = { discuss, copyLink, ask, claim, editors, history: openHistory };
+  // What selecting text offers, for the section the selection is in.
+  const sectionActions: PageSectionActions = { discuss, comment, commentTaker: commentTakerFace };
   // What a heading offers, beside it (§3.2).
   const headingActions: HeadingActions = {
     canEdit,
-    discuss: (blockId) => discuss(blockId),
-    copyLink,
-    claim,
-    release: (claimId) => void releaseClaim(claimId),
-    attach: (blockId: string) => setDialog({ kind: "attach", blockId }),
     showConversations: (blockId) => setDialog({ kind: "conversations", blockId }),
     phone,
     ...(writers.favourite ? { write: { label: `Co-write with ${writers.favourite}`,
@@ -1268,7 +1342,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   const people: PresentPerson[] = [
     ...present.map(({ clientId, state }) => ({ key: `client:${clientId}`, name: state.user!.name,
       color: state.user!.color, agent: state.user!.kind === "agent", blockId: state.block ?? "",
-      avatarUrl: cursorAvatar(state),
+      face: presentFace(state),
       idle: cursorPresence(state) === "idle",
       // Placed by their caret where they have one, so the edge hints point at the line.
       anchor: anchorTops.has(`client:${clientId}`) ? `client:${clientId}` : sectionAnchor(state.block ?? ""),
@@ -1279,7 +1353,8 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
         && conversationName(state.user!.conversationId) ? { from: conversationName(state.user!.conversationId)! } : {}),
       ...(state.user!.kind === "agent" && (CO_WRITER_DOING[state.activity ?? ""] || state.stalled === true)
         ? { doing: coWriterDoing(state) } : {}),
-      ...(state.user!.kind === "agent" && state.activity === "thinking" ? { thinking: true } : {}),
+      ...(state.user!.kind === "agent" && state.activity === "thinking" ? { thinking: true,
+        ...(typeof state.since === "number" ? { brief: briefDuration(clock - state.since) } : {}) } : {}),
       ...(state.user!.kind === "agent" && state.stalled === true ? { stalled: true } : {}),
       undoable: state.user!.kind === "agent" && state.undo === true,
       // An Agent co-writing live says what it is doing, and its note to the people on the page.
@@ -1287,8 +1362,9 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
         ? coWriterDoing(state)
         : CO_WRITER_DOING[state.activity ?? ""] ?? state.activity ?? "viewing", state.block ?? "",
         state.user!.conversationId), state.say].filter(Boolean).join(" — ") })),
-    ...staying.map((agent) => ({ key: `agent:${agent.instanceId}:${agent.conversationId}`, name: agent.name,
-      color: pageAuthorColor({ kind: "agent", id: agent.instanceId }), agent: true, avatarUrl: agent.avatarUrl, blockId: agent.blockId,
+    ...staying.map((agent): PresentPerson => ({ key: `agent:${agent.instanceId}:${agent.conversationId}`, name: agent.name,
+      color: pageAuthorColor({ kind: "agent", id: agent.instanceId }), agent: true,
+      face: { kind: "agent", name: agent.name, harness: agent.harness ?? null, id: agent.instanceId }, blockId: agent.blockId,
       idle: agent.status !== "busy",
       anchor: sectionAnchor(agent.blockId), editing: agent.status === "busy", conversationId: agent.conversationId,
       detail: whereDetail(agent.status === "busy" ? `${agent.activity}, working` : agent.activity, agent.blockId,
@@ -1298,36 +1374,48 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   // expands in place there, and docks beside the page only when the margin has no room for it (§4.4).
   const marginCards = withOpenConversation(conversations, openInMargin ? activeConversationId : null,
     activeConversationId ? conversation(activeConversationId)?.name ?? null : null);
-  const liveCount = conversations.filter((item) => item.live).length;
-  // What runs on the page, and how people change it (§6).
-  const attachedProps = page ? {
-    automations: automations.data ?? [], canEdit,
-    onSchedule: (input: PageScheduleInput) => pageApi.createAutomation(spaceId, page.pageId, token, input)
-      .then(() => { void automations.refetch(); void links.refetch(); }),
-    onPutBack: (automation: SerializedAutomation, blockId: string) =>
-      pageApi.changeAutomation(spaceId, page.pageId, token, automation, "reference", blockId)
-        .then(() => void automations.refetch()),
-    ...(onConnectGitHub ? { onConnectGitHub: (input: { blockId: string; repository: string }) =>
-      onConnectGitHub({ spaceId, pageId: page.pageId, restricted, ...input }).then(() => void links.refetch()) } : {}),
-  } : null;
-  const openConversation = (conversationId: string) => {
+  const openConversation = (conversationId: string, at?: PageRevisionMoment) => {
     setDialog(null);
-    onOpenConversation(conversationId);
+    onOpenConversation(conversationId, at ? { messageId: at.messageId, sequence: at.sequence } : undefined);
   };
-  const attachSection = dialog && typeof dialog === "object" && dialog.kind === "attach" ? dialog.blockId : null;
-  // Where an anchor is in the article's scrolled content, or null before the page is laid out.
-  const contentTop = (anchor: string): number | null => {
+  // Who wrote what (page-blame.tsx), read once per head revision when the reader first asks.
+  const blame: PageBlameSource | undefined = spaceId && pageId && !pending ? {
+    read: () => queryClient.fetchQuery({
+      queryKey: xmatrixQueryKeys.domain({ userId: userId ?? "anonymous" }, "page-blame",
+        [spaceId, pageId, blameRevision.current]),
+      queryFn: ({ signal }) => pageApi.blame(spaceId, pageId, token, signal),
+      staleTime: Infinity,
+    }),
+    head: headRevision,
+  } : undefined;
+  // Which of the page's authors is changing it now, so their face in the byline breathes (§3.2).
+  const writingNow = (author: PageAuthor) => present.some(({ state }) => {
+    const user = state.user!;
+    if (author.kind === "user") return user.kind !== "agent" && user.id === author.id && state.activity === "editing";
+    return user.kind === "agent" && (state.activity === "writing" || state.activity === "thinking")
+      && (liveRunOf(state, liveOnPage)?.name ?? user.name) === author.label;
+  });
+  // Where the document column, and the margin level with it, starts in the article's scrolled content.
+  const columnTop = (): number | null => {
     const article = articleElement.current;
     const column = docColumn.current;
+    if (!article || !column) return null;
+    return column.getBoundingClientRect().top - article.getBoundingClientRect().top + article.scrollTop;
+  };
+  // Where an anchor is in the article's scrolled content, or null before the page is laid out.
+  const contentTop = (anchor: string): number | null => {
+    const base = columnTop();
     const top = anchorTops.get(anchor);
-    if (!article || !column || top === undefined) return null;
-    return column.getBoundingClientRect().top - article.getBoundingClientRect().top + article.scrollTop + top;
+    return base === null || top === undefined ? null : base + top;
+  };
+  const scrollToContent = (top: number) => {
+    const article = articleElement.current;
+    article?.scrollTo({ top: Math.max(0, top - article.clientHeight / 3), behavior: "smooth" });
   };
   const jumpTo = (person: PresentPerson) => {
     const top = contentTop(person.anchor);
-    const article = articleElement.current;
-    if (top === null || !article) return followBlock(person.blockId);
-    article.scrollTo({ top: Math.max(0, top - article.clientHeight / 3), behavior: "smooth" });
+    if (top === null || !articleElement.current) return followBlock(person.blockId);
+    scrollToContent(top);
   };
   // Who is out of view above or below, at the page's edges (§3.2). A line of room keeps
   // someone on the very edge counted as seen.
@@ -1335,7 +1423,6 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   // Whose suggestion is in front of the reader: its face, and what to do with the change, stand beside
   // the change at the right edge, as if the Agent were writing that line.
   const suggestedBy = suggesting.count > 0 && suggesting.author ? suggesting.author : null;
-  const suggesterAvatar = suggestedBy ? agentPresetAvatarUrl(normalizeAgentPresetRuntime(suggestedBy.split(":")[0])) : undefined;
   const suggestionMark = ((): { top: number; away: "above" | "below" | null } | null => {
     const top = anchorTops.get("suggestion");
     const at = contentTop("suggestion");
@@ -1355,7 +1442,16 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
       return [{ person, top: top + 2, away }];
     });
   })();
-  const penned = new Set(pens.map((pen) => pen.person.key));
+  // With a margin beside the page, each Agent at work stands in it, beside the line it writes, its channel under
+  // it, and the cards make room (§4.4); an idle one leaves it, and its channel is a card again. Without one, each
+  // Agent on the page is its face at the right edge (§3.2).
+  const writersInMargin = marginOn && (drawn || openInMargin);
+  const marginWriters: MarginWriter[] = writersInMargin ? pens.filter((pen) => !pen.person.idle).map(({ person }) => ({
+    key: person.key, person, anchor: person.anchor,
+    conversation: marginCards.find((card) => card.conversationId === person.conversationId) ?? null,
+    channel: person.conversationId ? conversationName(person.conversationId) : null,
+  })) : [];
+  const edgePens = writersInMargin ? [] : pens;
   // Room beside the text column for a face to carry its name: from the column's edge to the article's.
   const penRoom = ((): number => {
     const article = articleElement.current;
@@ -1365,28 +1461,68 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   })();
   // The page's button: the face of the Agent the reader co-writes with, while no Agent is on the page;
   // an Agent just called shows there, starting, until it is on the page beside its line.
-  const caller = ((): { agent: { name: string; avatarUrl?: string }; starting: boolean } | null => {
+  const caller = ((): { agent: { name: string; face: FaceOf }; starting: boolean } | null => {
     if (!phone || mode !== "page" || !drawn || !canEdit || people.some((person) => person.agent && !person.idle)) return null;
-    if (called && called.pageId === pageId) {
-      const avatarUrl = writers.agents.find((agent) => agent.harness === called.harness)?.avatarUrl;
-      return { agent: { name: called.harness, ...(avatarUrl ? { avatarUrl } : {}) }, starting: true };
-    }
-    const favourite = writers.agents[0];
-    return favourite ? { agent: { name: favourite.harness, ...(favourite.avatarUrl ? { avatarUrl: favourite.avatarUrl } : {}) },
-      starting: false } : null;
+    const harness = called && called.pageId === pageId ? called.harness : writers.agents[0]?.harness;
+    return harness ? { agent: { name: harness, face: { kind: "agent", name: harness, harness } },
+      starting: Boolean(called && called.pageId === pageId) } : null;
   })();
   const tapped = dialog && typeof dialog === "object" && dialog.kind === "agent"
     ? people.find((person) => person.key === dialog.key) ?? null : null;
-  const offscreen = ((): { above: OffscreenPerson[]; below: OffscreenPerson[] } => {
-    const above: OffscreenPerson[] = [];
-    const below: OffscreenPerson[] = [];
-    if (mode !== "page" || !drawn || !viewport.height) return { above, below };
-    for (const person of people) {
-      if (penned.has(person.key)) continue;
+  // What may be done to an Agent at work on the page, from its face or its pill: end its co-writing, take back
+  // its last change while nobody changed it since, or, once it went quiet, have another Agent write instead.
+  const agentControls = (person: PresentPerson) => {
+    const conversationId = person.conversationId;
+    const instead = person.stalled ? switchWriter(person.name) : undefined;
+    return {
+      stop: page && conversationId && canEdit ? () => {
+        setDialog(null);
+        void pageApi.endCoWriting(spaceId ?? "", page.pageId, token, conversationId)
+          .catch((cause: unknown) => setNotice(userErrorMessage(cause, "Couldn't stop the Agent")));
+      } : null,
+      undo: page && conversationId && person.undoable && canEdit ? () => {
+        setDialog(null);
+        void pageApi.undoCoWriting(spaceId ?? "", page.pageId, token, conversationId)
+          .then(({ outcome }) => {
+            if (outcome === "changed") setNotice("Someone changed it since, so it stays");
+          })
+          .catch((cause: unknown) => setNotice(userErrorMessage(cause, "Couldn't undo the Agent's change")));
+      } : null,
+      switchTo: page && instead ? { label: onboardingCopy.coWrite.switchTo(instead), run: () => {
+        setDialog(null);
+        if (conversationId && canEdit) void pageApi.endCoWriting(spaceId ?? "", page.pageId, token, conversationId).catch(() => {});
+        void coWrite(instead, null);
+      } } : null,
+    };
+  };
+  const tappedControls = tapped ? agentControls(tapped) : null;
+  // People editing the page, by their caret's line: with the margin's cards, who is told at its edges when out of
+  // view (§3.2). Someone only reading is in the presence stack; an Agent is its pen or its pill in the margin.
+  const editors = mode === "page" && drawn ? people.flatMap((person) => {
+    const top = anchorTops.get(person.anchor);
+    return !person.agent && person.editing && !person.idle && top !== undefined ? [{ person, top }] : [];
+  }) : [];
+  const marginView = ((): { top: number; height: number } | null => {
+    const base = columnTop();
+    return marginOn && drawn && viewport.height && base !== null ? { top: viewport.top - base, height: viewport.height } : null;
+  })();
+  // Where the page ends without the margin: its text's end, or the window's bottom on a page shorter than the window.
+  const marginEnd = ((): number | null => {
+    const text = (drawn ? anchorTops : previewTops).get("end");
+    if (text === undefined) return null;
+    const base = columnTop();
+    return base !== null && viewport.height ? Math.max(text, viewport.height - base) : text;
+  })();
+  // Without a margin, the same card stands at the page's right edge, for the people editing out of view.
+  const edgeOffscreen = ((): { above: OffscreenEntry[]; below: OffscreenEntry[] } => {
+    const above: OffscreenEntry[] = [];
+    const below: OffscreenEntry[] = [];
+    if (marginOn || mode !== "page" || !drawn || !viewport.height) return { above, below };
+    for (const { person } of editors) {
       const top = contentTop(person.anchor);
       if (top === null) continue;
-      if (top < viewport.top + 8) above.push({ person, distance: viewport.top - top });
-      else if (top > viewport.top + viewport.height - 24) below.push({ person, distance: top - viewport.top - viewport.height });
+      if (top < viewport.top + 8) above.push({ key: person.key, top, person });
+      else if (top > viewport.top + viewport.height - 24) below.push({ key: person.key, top, person });
     }
     return { above, below };
   })();
@@ -1431,30 +1567,25 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     await queryClient.invalidateQueries({ predicate: (query) => query.queryKey.includes("page-tree") });
   };
 
-  // On a phone the diff is walked from a floating bar under the thumb instead of a line above the text.
-  const phoneDiff = phone && mode === "page" && drawn && !diffViewed && !!readerChanges;
-  const writerStarting = starting?.pageId === page?.pageId ? starting : null;
-  const writerCalled = called?.pageId === page?.pageId ? called : null;
-  const writerFeedback = writerStarting ?? (!phone ? writerCalled : null);
+  // What changed since the reader last read the page is offered above it until they view it; opened, it is marked
+  // over the text, and on a phone walked from a floating bar under the thumb.
+  const diffOffered = drawn && !diffViewed && !!readerChanges;
+  const phoneDiff = phone && mode === "page" && diffOffered && diffShown;
+  const readerOffer = (inMargin: boolean) => (
+    <PageReaderChangesOffer changes={readerChanges ?? 0} shown={diffShown} inMargin={inMargin}
+      onShow={() => setDiffShown(true)} onHide={() => setDiffShown(false)} onDone={viewDiff} />
+  );
   const controls = (
     <>
-      {/* On a phone an Agent is its face in the margin and on the page's button; the stack names the people. */}
-      <PresenceStack people={phone ? people.filter((person) => !person.agent) : people} onFollow={jumpTo} />
-      {!phone && canEdit && writers.agents[0] && (
-        <Button variant="ghost" size="sm" disabled={Boolean(starting)} onClick={() => setDialog({ kind: "write" })}
-          title={`Co-write with ${writers.agents[0].harness}`}>
-          <IdentityAvatar kind="agent" label={writers.agents[0].harness} imageUrl={writers.agents[0].avatarUrl} size="xs"
-            shape="circle" glass={false} className="pointer-events-none rounded-full" />
-          Co-write
+      {mode === "page" && drawn && changeList.length > 0 && (
+        <Button variant="ghost" size="sm" aria-pressed={changesOpen} title="Changes since you opened this page"
+          onClick={() => setChangesOpen((open) => !open)}>
+          <Undo2 /> Changes
         </Button>
       )}
       {/* What only a made page has: its conversations, history and sharing. A new page gets them on its first write. */}
       {!pending && (
         <>
-          <Button variant="ghost" size="sm" onClick={() => setDialog({ kind: "conversations", blockId: null })}
-            title="Conversations about this page" aria-label={`${conversations.length} conversations about this page`}>
-            <MessageSquare /> {liveCount || conversations.length || ""}
-          </Button>
           <Button variant="ghost" size="sm" aria-pressed={mode === "history"} title={lastEdit ?? "Version history"}
             aria-label={`Version history${unseen ? ", changed since you last looked" : ""}`}
             onClick={() => (mode === "history" ? setMode("page") : openHistory())} className="relative">
@@ -1462,7 +1593,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
             {unseen && <span className="absolute right-1 top-1 size-1.5 rounded-full bg-primary" data-testid="page-history-new" />}
           </Button>
           <Button variant="ghost" size="sm" onClick={() => setDialog("share")}>
-            <Share2 /> Share
+            <Share /> Share
           </Button>
           {canEdit && (
             <Button variant="ghost" size="sm" title="Delete page" aria-label="Delete page"
@@ -1473,171 +1604,183 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     </>
   );
 
+  // The page's column, with room for the margin beside it when there is one.
+  const column = cn("mx-auto max-w-3xl", marginOn && "max-w-[calc(48rem+21.5rem)]");
   return (
     <div className={cn("relative flex min-h-0 min-w-0 flex-1 overflow-hidden", marginOn && "pages-margin-on")}
       data-testid="pages-view">
-      <PageScrollMarks marks={scrollMarks} />
-      <div className="relative flex min-h-0 min-w-0 flex-1">
-        <PageOffscreenPeople above={offscreen.above} below={offscreen.below} onJump={jumpTo} />
-        <article ref={measureArticle} className={phone ? "app-mobile-page-article min-h-0 min-w-0 flex-1 overflow-y-auto px-6"
-          : "app-page-article min-h-0 min-w-0 flex-1 overflow-y-auto px-6 py-6 lg:px-12"}>
-          <div className={cn("mx-auto max-w-3xl", marginOn && "max-w-[calc(48rem+21.5rem)]")}>
-            {phone ? (
-              <div className="-mr-2 flex items-center justify-end gap-1 pb-3" data-testid="page-controls">{controls}</div>
-            ) : (
-              <header className="app-band-header mb-4 flex flex-wrap items-center gap-1.5" data-testid="page-controls">
-                <span className="mr-auto" />
-                <span className="mr-1 text-xs text-muted-foreground" data-testid="page-save-state"
-                  title={`Revision ${headRevision ?? page?.headRevision ?? ""}`}>
-                  {saveState === "saving" ? "Saving…" : saveState === "saved" ? "All changes saved"
-                    : saveState === "offline" ? "Offline · your changes sync when you reconnect"
-                    : pending ? "" : connected ? `r${headRevision ?? page?.headRevision ?? ""}` : "Connecting…"}
-                  {!canEdit && connected ? " · read-only" : ""}
-                </span>
-                {controls}
-              </header>
-            )}
-            {writerFeedback && (
-              <div role="status" className="mb-3 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-                <span className="page-writer-dots" aria-hidden="true"><i /><i /><i /></span>
-                <span>{writerFeedback.harness} is starting…{!writerStarting && " Write in the page; your Agent responds here."}</span>
-                {!writerStarting && writerCalled && (
-                  <Button variant="ghost" size="sm" onClick={() => openConversation(writerCalled.conversationId)}>
-                    Conversation
-                  </Button>
-                )}
-              </div>
-            )}
-            {notice && <p className={noticeClass("attention", "mb-3 rounded-md px-3 py-2 text-sm")}>{notice}</p>}
-            {migration.data?.state === "proposed" && (
-              // An Agent drafted the move; it waits for an owner or admin, however many pages exist.
-              <p className={noticeClass("secondary", "mb-3 flex items-center gap-2 rounded-md px-3 py-2 text-sm")}
-                data-testid="page-migration-notice">
-                <span className="min-w-0 flex-1">A draft moves this Space&apos;s conversations to pages.</span>
-                <Button size="xs" variant="outline" onClick={() => setReviewing(spaceId)}>Review</Button>
-              </p>
-            )}
-            {mode === "history" && page ? (
-              <PageHistory spaceId={spaceId} pageId={page.pageId} token={token}
-                headRevision={headRevision ?? page.headRevision} canEdit={canEdit}
-                conversationName={conversationName} onOpenConversation={openConversation}
-                onClose={() => setMode("page")}
-                onPromoted={() => void queryClient.invalidateQueries({ predicate: (query) =>
-                  query.queryKey.includes("page-tree") })} />
-            ) : (
-              <div className="flex gap-6">
-                <div ref={docColumn} className={cn("relative min-w-0 max-w-3xl flex-1",
-                  phone && phoneDiff && !suggestionMark && "has-reader-mark")}>
-                  <PagePens pens={pens} room={penRoom} onJump={jumpTo} onOpen={(person) => setDialog({ kind: "agent", key: person.key })} />
-                  {suggestionMark && suggestedBy && (
-                    <PageChangeMark top={suggestionMark.top} away={suggestionMark.away} testId="page-suggestions"
-                      label={`${suggestedBy} suggests this change, ${suggesting.current + 1} of ${suggesting.count}`}>
-                      {/* Its face rides its pen in the line; here it says who waits, while the line is out of view. */}
-                      {suggestionMark.away && <button type="button" className="page-change-face" aria-label={`${suggestedBy}, show its change`}
-                        title={`${suggestedBy} suggests · ${suggesting.current + 1} of ${suggesting.count}`}
-                        onClick={() => suggestionControl.current?.step(0)}>
-                        <IdentityAvatar kind="agent" label={suggestedBy} imageUrl={suggesterAvatar} size="sm" shape="circle"
-                          glass={false} initials={suggesterAvatar ? avatarInitials(suggestedBy) : undefined}
-                          className="pointer-events-none rounded-full" />
-                      </button>}
-                      <button type="button" onClick={() => suggestionControl.current?.take()} aria-label="Take this change"
-                        title={phone ? "Accept" : "Accept (Tab)"} className="page-change-button is-primary">
-                        <Check className="size-4" />
-                      </button>
-                      <button type="button" onClick={() => suggestionControl.current?.leave()} aria-label="Leave this change"
-                        title={phone ? "Skip" : "Skip (Esc)"} className="page-change-button">
-                        <X className="size-4" />
-                      </button>
-                    </PageChangeMark>
-                  )}
-                  {drawn && !!readerChanges && !diffViewed && <PageReaderChangeGutter column={docColumn} />}
-                  {phone && phoneDiff && !suggestionMark && (
-                    <PageReaderChangeMark column={docColumn} article={articleElement} changes={readerChanges ?? 0}
-                      onViewed={viewDiff} />
-                  )}
-                  {!drawn && document.data && (
-                    // Where the editor's host holds its height.
-                    <div className="min-h-[50vh]"><PageDocumentStatic body={document.data.body} testId="page-preview"
-                      references={references} mediaUrl={mediaUrl} /></div>
-                  )}
-                  {drawn && !!readerChanges && !phone && (
-                    <label className="mb-3 flex w-fit cursor-pointer items-center gap-2 text-xs text-muted-foreground"
-                      data-testid="page-reader-diff">
-                      <input type="checkbox" checked={diffViewed} onChange={(event) => {
-                        if (event.target.checked) viewDiff();
-                        else setDiffViewed(false);
-                      }} />
-                      <span className="text-foreground">Viewed</span>
-                      <span>{readerChanges === 1 ? "1 change" : `${readerChanges} changes`} since you last read this page</span>
-                    </label>
-                  )}
-                  <div className={drawn ? undefined : "hidden"}>
-                    {session && <PageEditor key={session.doc.guid} session={session} canEdit={canEdit} writeOn={writeOn}
-                      {...(coWriter ? { placeholder: onboardingCopy.coWrite.firstLine(coWriter) } : {})}
-                      onReady={() => setEditorReady(true)} readerBaseline={readerDiff} onReaderChanges={setReaderChanges}
-                      onWrite={coWriting} readFrom={readFrom} reading={reading}
-                      suggestions={drawn ? waiting.suggestions : null} onSuggestions={setSuggesting}
-                      suggestionControl={suggestionControl}
-                      actions={sectionActions} headingActions={headingActions} sections={sections}
-                      onBlocks={(next) => startTransition(() => setEditorBlocks({ session, blocks: next }))}
-                      follow={follow} onOpenConversation={openConversation} discussions={discussions}
-                      automations={automationsById} references={references}
-                      focusedConversationId={activeConversationId ?? focused} onFocusConversation={setFocused}
-                      onAnchorOffsets={setAnchorTops} cursorPresence={cursorPresence} readGitHubFile={readGitHubFile}
-                      mediaUrl={mediaUrl} uploadMedia={uploadMedia} />}
-                  </div>
-                </div>
-                {/* The margin holds its room from the start, so the text does not reflow when the page has synced;
-                    an open conversation shows from the start, and moves to its anchor once the page is drawn. */}
-                {marginOn && (
-                  <aside className="w-80 shrink-0">
-                    {(drawn || openInMargin) && <PageMargin conversations={marginCards} tops={anchorTops} focusedId={focused} canResolve={canEdit}
-                      openId={openInMargin ? activeConversationId : null}
-                      {...(renderConversation ? { renderOpen: () => renderConversation("margin") } : {})}
-                      {...(onCloseConversation ? { onClose: onCloseConversation } : {})}
-                      {...(onExpandConversation ? { onExpand: onExpandConversation } : {})}
-                      onOpen={openConversation} onResolve={(linkId) => void resolveDiscussion(linkId)}
-                      onFocus={setFocused} />}
-                  </aside>
-                )}
-              </div>
-            )}
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        {/* On a desktop the page's controls hold the band at the top, and the page scrolls below it: nothing
+            passes under the band, and whatever waits at the page's top edge waits below it, clear of the
+            window's search there. */}
+        {!phone && (
+          <div className="app-page-band shrink-0 px-6 lg:px-12">
+            <header className={cn(column, "app-band-header flex flex-wrap items-center gap-1.5")} data-testid="page-controls">
+              <span className="mr-auto" />
+              {/* The page speaks of saving only when something is wrong; who wrote it stands under its title. */}
+              <span className="mr-1 inline-flex items-center gap-1 text-xs text-muted-foreground" data-testid="page-save-state">
+                {offline ? "Offline · your changes sync when you reconnect"
+                  : !pending && slowToConnect ? "Connecting…"
+                  : connected && !canEdit ? <><Lock className="size-3" aria-hidden="true" />Read-only</> : null}
+              </span>
+              {controls}
+            </header>
           </div>
-        </article>
+        )}
+        <div className="relative flex min-h-0 min-w-0 flex-1">
+          <PageScrollMarks marks={scrollMarks} />
+          {(["above", "below"] as const).map((side) => edgeOffscreen[side].length > 0 && (
+            <div key={side} className={cn("pointer-events-none absolute right-6 z-20 w-[min(18rem,calc(100%-3rem))] lg:right-12",
+              side === "above" ? "top-2" : "bottom-3")}>
+              <PageOffscreenCard side={side} entries={edgeOffscreen[side]} onJump={scrollToContent} />
+            </div>
+          ))}
+          <article ref={measureArticle} className={phone ? "app-mobile-page-article min-h-0 min-w-0 flex-1 overflow-y-auto px-6"
+            : "app-page-article min-h-0 min-w-0 flex-1 overflow-y-auto px-6 pt-4 pb-6 lg:px-12"}>
+            <div className={column}>
+              {phone && <div className="-mr-2 flex items-center justify-end gap-1 pb-3" data-testid="page-controls">{controls}</div>}
+              {notice && <p className={noticeClass("attention", "mb-3 rounded-md px-3 py-2 text-sm")}>{notice}</p>}
+              {migration.data?.state === "proposed" && (
+                // An Agent drafted the move; it waits for an owner or admin, however many pages exist.
+                <p className={noticeClass("secondary", "mb-3 flex items-center gap-2 rounded-md px-3 py-2 text-sm")}
+                  data-testid="page-migration-notice">
+                  <span className="min-w-0 flex-1">A draft moves this Space&apos;s conversations to pages.</span>
+                  <Button size="xs" variant="outline" onClick={() => setReviewing(spaceId)}>Review</Button>
+                </p>
+              )}
+              {mode === "history" && page ? (
+                <PageHistory spaceId={spaceId} pageId={page.pageId} token={token}
+                  headRevision={headRevision ?? page.headRevision} canEdit={canEdit}
+                  conversationName={conversationName} onOpenConversation={openConversation}
+                  onClose={() => setMode("page")}
+                  onPromoted={() => void queryClient.invalidateQueries({ predicate: (query) =>
+                    query.queryKey.includes("page-tree") })} />
+              ) : (
+                <div className="flex gap-6">
+                  <div ref={docColumn} className={cn("relative min-w-0 max-w-3xl flex-1", !pending && "page-byline-room",
+                    phone && phoneDiff && !suggestionMark && "has-reader-mark")}>
+                    <PagePens pens={edgePens} room={penRoom} onJump={jumpTo}
+                      onOpen={(person) => setDialog({ kind: "agent", key: person.key })} />
+                    {suggestionMark && suggestedBy && (
+                      <PageChangeMark top={suggestionMark.top} away={suggestionMark.away} testId="page-suggestions"
+                        label={`${suggestedBy} suggests this change, ${suggesting.current + 1} of ${suggesting.count}`}>
+                        {/* Its face rides its pen in the line; here it says who waits, while the line is out of view. */}
+                        {suggestionMark.away && waiting.face && <button type="button" className="page-change-face"
+                          aria-label={`${suggestedBy}, show its change`}
+                          title={`${suggestedBy} suggests · ${suggesting.current + 1} of ${suggesting.count}`}
+                          onClick={() => suggestionControl.current?.step(0)}>
+                          <Face of={waiting.face} size="sm" shape="circle" glass={false} className="pointer-events-none rounded-full" />
+                        </button>}
+                        <button type="button" onClick={() => suggestionControl.current?.take()} aria-label="Take this change"
+                          title={phone ? "Accept" : "Accept (Tab)"} className="page-change-button is-primary">
+                          <Check className="size-4" />
+                        </button>
+                        <button type="button" onClick={() => suggestionControl.current?.leave()} aria-label="Leave this change"
+                          title={phone ? "Skip" : "Skip (Esc)"} className="page-change-button">
+                          <X className="size-4" />
+                        </button>
+                      </PageChangeMark>
+                    )}
+                    {diffOffered && diffShown && <PageReaderChangeGutter column={docColumn} />}
+                    {phone && phoneDiff && !suggestionMark && (
+                      <PageReaderChangeMark column={docColumn} article={articleElement} changes={readerChanges ?? 0}
+                        onViewed={viewDiff} />
+                    )}
+                    {!drawn && document.data && (
+                      // Where the editor's host holds its height.
+                      <div className="min-h-[50vh]"><PageDocumentStatic body={document.data.body} testId="page-preview"
+                        references={references} mediaUrl={mediaUrl} onAnchorOffsets={setPreviewTops} /></div>
+                    )}
+                    {diffOffered && !phoneDiff && !marginOn && readerOffer(false)}
+                    <div className={drawn ? undefined : "hidden"}>
+                      {session && <PageEditor key={session.doc.guid} session={session} canEdit={canEdit} writeOn={writeOn}
+                        {...(coWriter ? { placeholder: onboardingCopy.coWrite.firstLine(coWriter) } : {})}
+                        onReady={() => setEditorReady(true)} readerBaseline={readerDiff} readerShown={diffShown} commentInMargin={marginOn} onReaderChanges={setReaderChanges}
+                        onWrite={coWriting} readFrom={readFrom} reading={reading}
+                        suggestions={drawn ? waiting.suggestions : null} onSuggestions={setSuggesting}
+                        suggestionControl={suggestionControl}
+                        actions={sectionActions} headingActions={headingActions} sections={sections}
+                        onBlocks={(next) => startTransition(() => setEditorBlocks({ session, blocks: next }))}
+                        follow={follow} onOpenConversation={openConversation} discussions={discussions}
+                        automations={automationsById} references={references} completion={completion}
+                        focusedConversationId={activeConversationId ?? focused} onFocusConversation={setFocused}
+                        onAnchorOffsets={setAnchorTops} cursorPresence={cursorPresence} readGitHubFile={readGitHubFile}
+                        mediaUrl={mediaUrl} uploadMedia={uploadMedia} onChanges={setSessionChanges} blame={blame}
+                        writing={writingNow} />}
+                    </div>
+                  </div>
+                  {/* The margin holds its room from the start, so the text does not reflow when the page has synced;
+                      its cards and an open conversation show beside the preview's sections, and move to their
+                      anchors in the text once the page is drawn. */}
+                  {marginOn && (
+                    <aside className="w-80 shrink-0">
+                      {changesOpen && sessionChanges ? (
+                        <div className="sticky top-4">
+                          <PageSessionChangesList list={changeList} changes={sessionChanges} onClose={() => setChangesOpen(false)} />
+                        </div>
+                      ) : (drawn || openInMargin || (document.data && links.data)) && <PageMargin conversations={marginCards}
+                        tops={drawn ? anchorTops : previewTops} focusedId={focused} canResolve={canEdit}
+                        writers={marginWriters} editors={editors} view={marginView} end={marginEnd}
+                        onJump={(top) => { const base = columnTop(); if (base !== null) scrollToContent(base + top); }}
+                        onWriter={(writer) => setDialog({ kind: "agent", key: writer.key })}
+                        writerActions={(person) => {
+                          const controls = agentControls(person);
+                          return (
+                            <>
+                              {controls.switchTo && (
+                                <button type="button" onClick={controls.switchTo.run}
+                                  className={actionClass({ variant: "primary", size: "sm" })}>{controls.switchTo.label}</button>
+                              )}
+                              {controls.undo && (
+                                <button type="button" onClick={controls.undo}
+                                  className={actionClass({ variant: "secondary", size: "sm" })}>Undo</button>
+                              )}
+                              {controls.stop && (
+                                <button type="button" onClick={controls.stop}
+                                  className={actionClass({ variant: "secondary", size: "sm" })}>Stop</button>
+                              )}
+                            </>
+                          );
+                        }}
+                        openId={openInMargin ? activeConversationId : null}
+                        {...(renderConversation ? { renderOpen: () => renderConversation("margin") } : {})}
+                        {...(onCloseConversation ? { onClose: onCloseConversation } : {})}
+                        {...(onExpandConversation ? { onExpand: onExpandConversation } : {})}
+                        onOpen={openConversation} onResolve={(linkId) => void resolveDiscussion(linkId)}
+                        onFocus={setFocused} {...(diffOffered ? { head: readerOffer(true) } : {})} />}
+                    </aside>
+                  )}
+                </div>
+              )}
+            </div>
+          </article>
+        </div>
       </div>
       {phone && mode === "page" && drawn && (
         <PagePhoneDock caller={caller?.agent ?? null} starting={caller?.starting ?? false}
           onCall={() => setDialog({ kind: "write" })} />
       )}
       {docked && renderConversation?.("dock")}
+      {sessionChanges && mode === "page" && (
+        <>
+          <PageUndoNotice notice={undoNotice} changes={sessionChanges} onShowChanges={() => setChangesOpen(true)} />
+          {/* Without the margin beside the page, the list opens over it. */}
+          <PageDialog open={changesOpen && !marginOn} onClose={() => setChangesOpen(false)} id="page-session-changes-title"
+            title="Changes since you opened">
+            <PageSessionChangesList list={changeList} changes={sessionChanges} />
+          </PageDialog>
+        </>
+      )}
       {page && (
         <>
           {((dialog && typeof dialog === "object" && dialog.kind === "write") || tapped) && (
             <PageWriteWith agents={writers.agents} onClose={() => setDialog(null)}
-              working={tapped ? { name: tapped.name, ...(tapped.avatarUrl ? { avatarUrl: tapped.avatarUrl } : {}),
-                doing: tapped.detail } : null}
+              working={tapped ? { name: tapped.name, face: tapped.face, doing: tapped.detail } : null}
               onStart={(harness) => { setDialog(null); void coWrite(harness, null); }}
-              {...(tapped?.stalled && switchWriter(tapped.name) ? { switchTo: { label: onboardingCopy.coWrite.switchTo(switchWriter(tapped.name)!),
-                run: () => {
-                  setDialog(null);
-                  if (tapped.conversationId && canEdit) void pageApi.endCoWriting(spaceId ?? "", page.pageId, token, tapped.conversationId).catch(() => {});
-                  void coWrite(switchWriter(tapped.name)!, null);
-                } } } : {})}
+              {...(tappedControls?.switchTo ? { switchTo: tappedControls.switchTo } : {})}
               onOpenConversation={tapped?.conversationId
                 ? () => { setDialog(null); openConversation(tapped.conversationId!); } : null}
-              onStop={tapped?.conversationId && canEdit ? () => {
-                setDialog(null);
-                void pageApi.endCoWriting(spaceId ?? "", page.pageId, token, tapped.conversationId!)
-                  .catch((cause: unknown) => setNotice(userErrorMessage(cause, "Couldn't stop the Agent")));
-              } : null}
-              onUndo={tapped?.conversationId && tapped.undoable && canEdit ? () => {
-                setDialog(null);
-                void pageApi.undoCoWriting(spaceId ?? "", page.pageId, token, tapped.conversationId!)
-                  .then(({ outcome }) => {
-                    if (outcome === "changed") setNotice("Someone changed it since, so it stays");
-                  })
-                  .catch((cause: unknown) => setNotice(userErrorMessage(cause, "Couldn't undo the Agent's change")));
-              } : null} />
+              onStop={tappedControls?.stop ?? null} onUndo={tappedControls?.undo ?? null} />
           )}
           <DeletePageDialog open={dialog === "delete"} title={page.title} hasChildren={hasChildren}
             onClose={() => setDialog(null)} onDelete={removePage} />
@@ -1651,13 +1794,6 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
             <ConversationList conversations={conversations} blocks={blocks} onOpen={openConversation}
               focusBlockId={listSection?.blockId ?? null}
               {...(canEdit ? { onResolve: (linkId: string) => void resolveDiscussion(linkId) } : {})} />
-          </PageDialog>
-          <PageDialog open={attachSection !== null} onClose={() => setDialog(null)} id="page-attach-title"
-            title={`Attach to ${blocks.find((block) => block.id === attachSection)?.title ?? page.title}`}>
-            {attachSection !== null && attachedProps && (
-              <PageAttached {...attachedProps} section={attachSection}
-                onAttached={() => setDialog(null)} />
-            )}
           </PageDialog>
         </>
       )}

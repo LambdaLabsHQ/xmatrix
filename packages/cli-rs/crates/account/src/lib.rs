@@ -10,7 +10,7 @@ use xmatrix_cli_core::error::{self, CliError};
 use xmatrix_cli_core::protocol::{self, HubRoutes, with_route};
 use xmatrix_cli_core::{auth, config, daemon_auth, http};
 use xmatrix_cli_update::{
-    DEFAULT_CLI_RELEASE_API_URL, UpdateHintTarget, warn_if_cli_update_available,
+    UpdateHintTarget, default_cli_release_api_url, warn_if_cli_update_available,
 };
 
 pub async fn cmd_login(
@@ -330,7 +330,7 @@ pub async fn cmd_status(hub_url: &str) -> error::Result<()> {
     if let Some(status) = resp.get("status").and_then(|v| v.as_str()) {
         println!("  Status: {status}");
     }
-    warn_if_cli_update_available(DEFAULT_CLI_RELEASE_API_URL, UpdateHintTarget::Cli).await;
+    warn_if_cli_update_available(default_cli_release_api_url(), UpdateHintTarget::Cli).await;
 
     Ok(())
 }
@@ -339,8 +339,6 @@ fn environment_label(hub_url: &str) -> &'static str {
     let origin = config::normalized_hub_origin(hub_url);
     if origin == protocol::DEFAULT_HUB_URL {
         "production"
-    } else if origin == protocol::TEST_HUB_URL {
-        "test"
     } else {
         "custom"
     }

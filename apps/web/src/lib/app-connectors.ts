@@ -162,3 +162,22 @@ export const APP_CONNECTORS: AppConnectorManifest[] = APP_CONNECTOR_PROVIDER_MAN
   ...connector,
   agentUseCases: AGENT_USE_CASES[connector.id],
 }));
+
+/* The Apps list puts what asks for the reader's hand first, then what already
+   works, then what could still be connected; names run alphabetically inside
+   each group so an app is found where its name says. */
+export function orderConnectorsForList<T extends Pick<AppConnectorProviderManifest, "id" | "name" | "status">>(
+  connectors: readonly T[],
+  connections: readonly { providerId: string; status: string }[],
+): T[] {
+  const statusByProvider = new Map(connections.map((connection) => [connection.providerId, connection.status]));
+  const group = (connector: T) => {
+    const status = statusByProvider.get(connector.id);
+    if (status === "error") return 0;
+    if (status === "configured") return 1;
+    if (status) return 2;
+    return connector.status === "available" ? 3 : 4;
+  };
+  return [...connectors].sort((left, right) => group(left) - group(right)
+    || left.name.localeCompare(right.name, "en", { sensitivity: "base" }));
+}

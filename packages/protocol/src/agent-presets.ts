@@ -41,6 +41,7 @@ export type AgentPresetId =
   | "amp"
   | "reasonix"
   | "dimcode"
+  | "deepseek"
   | "custom";
 export type AgentPresetBackend =
   | "codex-app"
@@ -85,10 +86,6 @@ export const AGENT_PRESETS = agentPresets as AgentPreset[];
 
 export function agentPresetById(id: string | undefined | null): AgentPreset | undefined {
   return AGENT_PRESETS.find((preset) => preset.id === id);
-}
-
-export function agentPresetAvatarUrl(id: string | undefined | null): string | undefined {
-  return agentPresetById(id)?.avatarUrl;
 }
 
 /** Lowercase launcher stem: drops directories and Windows launcher extensions. */

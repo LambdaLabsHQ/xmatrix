@@ -138,7 +138,8 @@ test("a failed source lookup or stop does not silently start a successor", async
 
 test("pending, successful and failed exports keep the same launch request", async () => {
   let staged;
-  const dispatch = async request => {
+  // The conversation rides beside the request: the launch's identity leaves it out.
+  const dispatch = async ({ handoffContext: _context, ...request }) => {
     if (staged) assert.deepEqual(request, staged);
     else staged = structuredClone(request);
     return { agentName: "codex" };
@@ -148,6 +149,7 @@ test("pending, successful and failed exports keep the same launch request", asyn
     undefined,
     async (...args) => ({ stopped: true, handoffExport: { branch: args[4].branch, state: "failed", dirty: false,
       error: "push failed" } }),
+    async () => ({ stopped: true, handoffContext: { format: "xmatrix.handoff-context.v1", entries: [], omittedEntries: 0 } }),
   ]) {
     const f = fixture({ dispatch, stop });
     await launchHandoffSuccessor({}, f.input, f.dependencies);
@@ -174,4 +176,28 @@ test("a refused launch rejects with its code for the Channel notice", async () =
   const f = fixture({ dispatch: async () => { throw Object.assign(new Error("none"), { code: "registration_no_candidate" }); } });
   await assert.rejects(launchHandoffSuccessor({}, f.input, f.dependencies),
     error => error.code === "registration_no_candidate");
+});
+
+test("the source's exported conversation goes to the successor's spawn, whatever its harness", async () => {
+  const handoffContext = { format: "xmatrix.handoff-context.v1", harness: "claude", sessionId: "s-1",
+    entries: [{ role: "user", text: "订第一段住宿" }, { role: "tool_call", tool: "Bash", text: "xmatrix page read" }],
+    omittedEntries: 0 };
+  // A page co-write: a private managed directory, no repository, handed to another harness.
+  const f = fixture({ site: {}, harness: "grok", stop: async () => ({ stopped: true, handoffContext }) });
+  await launchHandoffSuccessor({}, f.input, f.dependencies);
+  const dispatch = f.calls.find(call => call[0] === "dispatch")[1];
+  assert.deepEqual(dispatch.handoffContext, handoffContext);
+  assert.deepEqual(dispatch.tags, { harness: "grok" });
+  assert.match(dispatch.body, /HANDOFF\.md/);
+  assert.match(dispatch.body, /\$XMATRIX_HANDOFF_SESSION_DIR/);
+  assert.match(dispatch.body, /untrusted prior context/);
+  assert.match(dispatch.body, /never resume it/);
+  assert.doesNotMatch(dispatch.body, /订第一段住宿/, "the conversation is not routed as the launch's text");
+});
+
+test("a stop that reports no conversation still starts the successor without one", async () => {
+  const f = fixture({ site: {}, stop: async () => ({ stopped: false }) });
+  await launchHandoffSuccessor({}, f.input, f.dependencies);
+  const dispatch = f.calls.find(call => call[0] === "dispatch")[1];
+  assert.equal(Object.hasOwn(dispatch, "handoffContext"), false);
 });

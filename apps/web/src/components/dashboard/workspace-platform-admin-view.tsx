@@ -236,6 +236,20 @@ export function AdminDailyBars({ points, label }: {
   );
 }
 
+/** Daily message bars whose tooltip splits each day into human and agent messages. */
+export function AdminMessageBars({ activity, label }: {
+  activity: Array<{ date: string; messages: number; humanMessages: number; agentMessages: number }>;
+  label: string;
+}) {
+  return (
+    <AdminDailyBars label={label} points={activity.map((point) => ({
+      date: point.date,
+      messages: point.messages,
+      title: `${point.date}: ${point.messages} messages (${point.humanMessages} human, ${point.agentMessages} agent)`,
+    }))} />
+  );
+}
+
 function ActivityChart({ overview }: { overview: AdminPlatformOverview }) {
   const share = Math.round(agentMessageShare(overview.totals) * 100);
   return (
@@ -243,14 +257,8 @@ function ActivityChart({ overview }: { overview: AdminPlatformOverview }) {
       <p className="mb-3 text-xs text-muted-foreground">
         {formatAdminCount(overview.totals.messagesLast7d)} in the last 7 days · {share}% authored by agents
       </p>
-      <AdminDailyBars
-        label={`Daily message volume for the last ${overview.activityDays} days`}
-        points={overview.activity.map((point) => ({
-          date: point.date,
-          messages: point.messages,
-          title: `${point.date}: ${point.messages} messages (${point.humanMessages} human, ${point.agentMessages} agent)`,
-        }))}
-      />
+      <AdminMessageBars label={`Daily message volume for the last ${overview.activityDays} days`}
+        activity={overview.activity} />
     </>
   );
 }

@@ -1,4 +1,5 @@
 import { ControlError } from "@xmatrix/db";
+import { reportPostgresConflict } from "../postgres-conflict-diagnostic";
 
 import { transientDurableObjectFailure } from "../durable-object-failure";
 import { postgresTransactionConflict, retryablePostgresFailure, TRANSACTION_CONFLICT } from "../postgres-error-classification";
@@ -52,7 +53,7 @@ export class RuntimeAuthorityOperationError extends Error {
     // unpublished code into `runtime.authority_rejected`, which names no cause.
     const authorityCode = typeof value.code === "string" && AUTHORITY_CODE.test(value.code)
       ? value.code : "unknown";
-    (this.committedIdentityConflict || code === SUPERSEDED_CONNECTION_CODE ? console.warn : console.error)(
+    (this.committedIdentityConflict || code === SUPERSEDED_CONNECTION_CODE || code === TRANSACTION_CONFLICT.code ? console.warn : console.error)(
       "xMatrix runtime authority rejection", { ...this.failure, authorityCode, operation, status });
   }
 }
@@ -84,6 +85,7 @@ function authorityRejection(error: object): RuntimeAuthorityOperationError | und
       : new RuntimeAuthorityOperationError(error.name, error.status, body);
   }
   if (postgresTransactionConflict(error)) {
+    reportPostgresConflict(error);
     return new RuntimeAuthorityOperationError("postgres", 503, { code: TRANSACTION_CONFLICT.code, retryable: true });
   }
   if (retryablePostgresFailure(error)) {
@@ -135,7 +137,7 @@ export function runtimeFailureOrigin(error: unknown): { errorClass: string; orig
 }
 
 const CLIENT_FAILURES = {
-  machine_activation_fenced: ["This Workstation is still recovering and is fenced from new work until activation is confirmed.", "daemon.activation"],
+  machine_activation_fenced: ["This Machine is still recovering and is fenced from new work until activation is confirmed.", "daemon.activation"],
   machine_activation_context_required: ["Machine Daemon activation requires a recovering connection", "daemon.activation"],
   machine_delivery_binding_stale: ["Machine Daemon delivery binding is stale; reconnect required", "daemon.delivery"],
   machine_credential_mismatch: ["Machine Daemon credential does not match its enrolled identity", "daemon.authenticate"],
@@ -182,16 +184,16 @@ const APPROVAL_MESSAGES: Record<string, string> = {
   request_expired: "This approval request expired after 10 minutes. Ask the agent to submit a new request.",
   request_not_found: "This approval request is no longer available. Ask the agent to submit a new request.",
   request_already_decided: "This request has already been approved or denied. Check its latest status in the channel.",
-  request_machine_mismatch: "This request belongs to a different Workstation. Open the original request card.",
+  request_machine_mismatch: "This request belongs to a different Machine. Open the original request card.",
   invalid_remember_policy: "This approval option is invalid. Refresh the request card and try again.",
   persistent_secret_approval_forbidden: "Requests with secrets can only be approved once or for this instance.",
   unsafe_request_prefix: "This command cannot use a remembered prefix. Choose Once or Remember exact.",
   request_context_unavailable: "The matching live instance or complete request context is unavailable. Ask the agent to submit a new request.",
   request_context_mismatch: "The request no longer matches its live instance. Ask the agent to submit a new request.",
-  machine_command_stale_lease: "The command lease is stale or no longer held by this Workstation. Refresh its command status before retrying.",
-  machine_command_lease_required: "This command requires its current lease. Refresh the Workstation connection before retrying.",
+  machine_command_stale_lease: "The command lease is stale or no longer held by this Machine. Refresh its command status before retrying.",
+  machine_command_lease_required: "This command requires its current lease. Refresh the Machine connection before retrying.",
   machine_command_not_leased: "This command is no longer leased. It may already be complete; check its recorded status.",
-  machine_offline: "The Workstation is offline. Reconnect it and check the original request's status.",
+  machine_offline: "The Machine is offline. Reconnect it and check the original request's status.",
 };
 
 /** The copy a socket client sees for a failure: its approval or client message, else the fallback. */
@@ -209,7 +211,7 @@ export class RuntimeApprovalOperationError extends RuntimeAuthorityOperationErro
     super(operation, status, known ? body : {});
     const code = known ? body.code as string : "runtime.authority_rejected";
     const retryable = typeof body.retryable === "boolean" ? String(this.failure.retryable) : "unknown";
-    this.publicMessage = `${known ? APPROVAL_MESSAGES[code] : "The Workstation request could not be processed."} (code=${code}, retryable=${retryable}, status=${status})`;
+    this.publicMessage = `${known ? APPROVAL_MESSAGES[code] : "The Machine request could not be processed."} (code=${code}, retryable=${retryable}, status=${status})`;
   }
 }
 

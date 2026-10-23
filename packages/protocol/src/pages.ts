@@ -1,6 +1,7 @@
 /** Wire types of the page authority (docs/design/pages-and-conversations.md). */
 
 import type { LiveAgentStatus } from "./authority-foundation.js";
+import type { MessageSender } from "./authority-runtime.js";
 import { externalAppSource, type ExternalAppSource } from "./external-app-source.js";
 
 export interface PageSummary {
@@ -37,11 +38,15 @@ export function pageAuthorLabel(author: Pick<PageAuthor, "label" | "application"
   return author.label + (application ? ` via ${application.name}` : "");
 }
 
-const PAGE_AUTHOR_COLORS = ["#2563eb", "#db2777", "#16a34a", "#ea580c", "#7c3aed", "#0891b2", "#ca8a04"];
+/**
+ * Muted inks that sit on the page's paper: terracotta, green, slate blue, plum, rose, olive and umber. Each carries
+ * white text at 4.5:1 or more, as an Agent's pill needs, and none is yellow, which is the comments' colour.
+ */
+const PAGE_AUTHOR_COLORS = ["#b85a3b", "#2f6f5e", "#4b6382", "#7a5389", "#a54960", "#5c6a2e", "#8a5a2b"];
 
 /**
  * One colour per person or Agent wherever a page shows them: their caret,
- * the ring on their avatar, and their changes in History.
+ * the ring on their avatar, their pill, and their changes in History.
  */
 export function pageAuthorColor(author: { kind: "user" | "agent"; id: string }): string {
   let hash = 0;
@@ -123,7 +128,8 @@ export interface PageTreeAgent {
   name: string;
   /** Live Instance status — same set as `isLiveAgentStatus`, not a second enum. */
   status: LiveAgentStatus;
-  avatarUrl?: string;
+  /** The harness its Run was registered with, which gives its face (faces.ts). */
+  harness?: string;
   conversationId: string;
   /** What its Run last did on the page. */
   activity: "viewing" | "editing";
@@ -170,12 +176,16 @@ export interface PageConversation {
   headSequence: number;
   readSequence: number;
   lastMessage: {
-    from: { kind: "user" | "agent" | "app" | "system"; label: string };
+    /**
+     * Who wrote it, as its message names them, for `faceOfSender` (faces.ts): a person and an Agent are drawn by
+     * these ids. `avatarUrl` is the one the message carried, the face only of an author no account stands behind.
+     */
+    from: Pick<MessageSender, "kind" | "label" | "userId" | "identityId" | "instanceId" | "registration" | "avatarUrl">;
     bodyPreview: string;
     sentAt: string;
   } | null;
   /** Agents live in it now. */
-  agents: Array<{ instanceId: string; name: string; status: LiveAgentStatus; avatarUrl?: string }>;
+  agents: Array<{ instanceId: string; name: string; status: LiveAgentStatus; harness?: string }>;
 }
 
 /** Someone on the page right now, and the section they are in. */
@@ -214,6 +224,27 @@ export interface PageChanges {
   /** The revisions after `since`, oldest first. */
   revisions: PageRevision[];
   diff: Array<{ kind: "same" | "removed" | "added"; lines: string[] }>;
+}
+
+/**
+ * Who wrote each piece of a page's newest revision (pages-live-document.md §3, Facts; page-blame.ts): `runs`
+ * are `[length, revision, …]` over `body`, and `revisions` says who wrote each revision they name, from
+ * which conversations, and when. `conversations` names those of them the reader can read.
+ */
+export interface PageBlame {
+  pageId: string;
+  revision: number;
+  body: string;
+  runs: number[];
+  revisions: PageRevision[];
+  conversations: Array<{ conversationId: string; name: string }>;
+}
+
+/** The message a revision's conversation was at when the revision was written, to open it there. */
+export interface PageRevisionMoment {
+  conversationId: string;
+  messageId: string;
+  sequence: number;
 }
 
 export interface PageAwareness {

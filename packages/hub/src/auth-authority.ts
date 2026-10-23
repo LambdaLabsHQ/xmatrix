@@ -65,6 +65,7 @@ export async function authPostgresTransaction<T>(
   env: Env,
   operation: string,
   callback: (transaction: DatabaseTransaction) => Promise<T>,
+  options: { statement?: "single_read" } = {},
 ): Promise<T> {
   if (authAuthority(env) !== "postgres") {
     throw new Error("PostgreSQL is not the Auth authority");
@@ -80,6 +81,7 @@ export async function authPostgresTransaction<T>(
   return database.transaction({
     requestId: `auth:${crypto.randomUUID()}`,
     operation,
+    ...options,
   }, callback);
 }
 

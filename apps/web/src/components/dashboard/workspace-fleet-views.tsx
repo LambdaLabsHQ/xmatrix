@@ -1,7 +1,7 @@
 "use client";
 
 import { AnimatedIcon } from "@/components/ui/animated-icon";
-import { APP_CONNECTOR_PROVIDER_MANIFESTS, agentAvatarUrlFromMetadata, agentLaunchExecutable } from "@xmatrix/protocol";
+import { APP_CONNECTOR_PROVIDER_MANIFESTS, agentLaunchExecutable } from "@xmatrix/protocol";
 import Image from "next/image";
 import { openRepositoryToStar } from "./star-prompt";
 import { registrationStatus } from "./my-agents-registrations";
@@ -27,10 +27,6 @@ import {
 } from "./workspace-shell-constants";
 
 import {
-  localManagedAgentAvatarUrl,
-} from "./workspace-shell-formatters";
-
-import {
   LocalManagedAgent,
   MachineSummary,
 } from "./workspace-shell-helpers";
@@ -43,7 +39,6 @@ import {
 } from "./workspace-shell-navigation";
 
 import {
-  avatarInitials,
   eventLabel,
   formatTime,
   relativeTime,
@@ -116,7 +111,7 @@ import { Textarea } from "@/components/ui/textarea";
 
 import { Input } from "@/components/ui/input";
 
-import { IdentityAvatar } from "@/components/dashboard/identity-avatar";
+import { Face } from "@/components/dashboard/face";
 import { ListSectionHeading } from "./list-section-heading";
 
 import {
@@ -133,7 +128,7 @@ import {
   type DesktopWorkspaceCandidate,
 } from "@/lib/desktop/bridge";
 
-import { type AppConnectorManifest } from "@/lib/app-connectors";
+import { orderConnectorsForList, type AppConnectorManifest } from "@/lib/app-connectors";
 import { ConnectorCredentials, connectorGeneratesCredentials, connectorTakesCredentials, connectorWritableCredentials } from "./connector-credentials";
 import { ConnectorPolicy, connectorWriteActions } from "./connector-policy";
 import { GmailMailboxes } from "./gmail-mailboxes";
@@ -214,8 +209,7 @@ export function MoreView({
           description: profile.handle ? `@${profile.handle}` : "Set up your @handle",
           // An icon's width, so your name starts where the other rows' names do.
           leading: (
-            <IdentityAvatar kind="human" label={profile.displayName} imageUrl={profile.avatarUrl}
-              initials={profile.displayName.slice(0, 2)} size="xs" showKindBadge={false}
+            <Face of={{ kind: "user", id: profile.userId, name: profile.displayName }} size="xs" showKindBadge={false}
               className="-mx-0.5" />
           ),
           onSelect: () => onChangeView("profile"),
@@ -274,8 +268,8 @@ export function MoreView({
   /* Settings' list on its paper: section headings over plain list rows, no
      cards, boards or glass. You are the first row, as Slack's "You" is. */
   return (
-    <div className="app-tool-detail-scroll min-h-0 flex-1 overflow-y-auto">
-      <div className="mx-auto max-w-3xl md:pt-6">
+    <div className="app-tool-detail-scroll app-below-band min-h-0 flex-1 overflow-y-auto">
+      <div className="mx-auto max-w-3xl">
         {groups.map((group) => (
           <section key={group.label} aria-label={group.label}>
             <ListSectionHeading label={group.label} />
@@ -583,8 +577,7 @@ export function LocalMacView({
                   key={agent.id}
                   quiet
                   leading={(
-                    <IdentityAvatar kind="agent" label={agent.name} imageUrl={localManagedAgentAvatarUrl(agent)}
-                      initials={avatarInitials(agent.name)} size="sm" showKindBadge={false} />
+                    <Face of={{ kind: "agent", name: agent.name, harness: agent.harness }} size="sm" showKindBadge={false} />
                   )}
                   title={(
                     <>
@@ -696,9 +689,8 @@ export function LocalMacView({
                   <ul>
                     <LocalLine
                       leading={(
-                        <IdentityAvatar kind="agent" label={discovery.displayName}
-                          imageUrl={agentAvatarUrlFromMetadata({ presetId: discovery.presetId }, discovery.presetId)}
-                          initials={avatarInitials(discovery.displayName)} size="sm" showKindBadge={false} />
+                        <Face of={{ kind: "agent", name: discovery.displayName, harness: discovery.presetId }} size="sm"
+                          showKindBadge={false} />
                       )}
                       title={(
                         <>
@@ -1083,7 +1075,7 @@ const NO_CONNECTIONS: SerializedAppConnectorConnection[] = [];
 const NO_EXECUTIONS: SerializedAppConnectorExecution[] = [];
 
 export function AppsView({
-  connectors,
+  connectors: catalog,
   currentSpace,
   token,
   channels,
@@ -1097,7 +1089,6 @@ export function AppsView({
   const queryClient = useQueryClient();
   // The connector open beside the list is named in the address, like every rail destination's item.
   const [connectorItem, selectConnector] = useToolItem();
-  const selectedConnectorId = connectorItem ?? connectors[0]?.id ?? "";
   const setSelectedConnectorId = (id: string) => selectConnector(id, { replace: true });
   const [connectionActionError, setConnectionsError] = useState<string | null>(null);
   const [setupNotice, setSetupNotice] = useState<{ tone: "success" | "warning"; message: string } | null>(null);
@@ -1157,6 +1148,8 @@ export function AppsView({
       }),
   });
   const connections = connectionsQuery.data ?? NO_CONNECTIONS;
+  const connectors = useMemo(() => orderConnectorsForList(catalog, connections), [catalog, connections]);
+  const selectedConnectorId = connectorItem ?? connectors[0]?.id ?? "";
   const executions = executionsQuery.data ?? NO_EXECUTIONS;
   const connectionsError = connectionActionError ?? userErrorMessage(connectionsQuery.error, "Couldn't load app connections");
   const executionsError = executionActionError ?? userErrorMessage(executionsQuery.error, "Couldn't load app actions");
@@ -1192,7 +1185,7 @@ export function AppsView({
       // The mailbox view consumes its single-use code after connection data loads.
       // Select it without claiming that the notification grant has completed.
       if (url.searchParams.get("gmailWatch") === "failed") {
-        setSetupNotice({ tone: "warning", message: "Gmail notification authorization did not finish. Enable notifications to try again." });
+        setSetupNotice({ tone: "warning", message: "Gmail notification authorization did not finish. Turn notifications on to try again." });
         url.searchParams.delete("gmailWatch");
       }
       url.searchParams.delete("connector");
@@ -1613,7 +1606,7 @@ export function AppsView({
       {connector.id === "gmail" && state.configured && token && currentSpace && user?.id ? (
         <ToolDetailSection title="Gmail mailboxes">
           <GmailMailboxes key={currentSpace.id} spaceId={currentSpace.id} token={token} userId={user.id}
-            members={currentSpace.members} channels={channels} adding={updatingProviderId === connector.id}
+            members={currentSpace.members} adding={updatingProviderId === connector.id}
             onAdd={() => void configureConnector(connector)} />
         </ToolDetailSection>
       ) : null}

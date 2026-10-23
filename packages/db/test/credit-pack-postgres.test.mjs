@@ -47,7 +47,7 @@ integration("credit packs admit only Pro owners and settle a payment once under 
     await client.query("DELETE FROM data.idempotency_keys WHERE space_id=$1", [id]);
     assert.equal((await packs.settle("after-normal-replays-expire", payment)).replayed, true);
     await assert.rejects(packs.settle("different-session", { ...payment, sessionId: "cs_test_other" }), error => error.code === "credit_purchase_mismatch");
-    assert.equal(Number((await client.query("SELECT pack_balance FROM data.space_credit_state WHERE space_id=$1", [id])).rows[0].pack_balance), 10_000);
+    assert.equal(Number((await client.query("SELECT pack_balance FROM data.space_credit_state WHERE space_id=$1", [id])).rows[0].pack_balance), 5_000);
     assert.equal((await client.query("SELECT status FROM data.space_credit_purchases WHERE space_id=$1", [id])).rows[0].status, "completed");
   } finally {
     for (const table of ["space_credit_purchases", "space_credit_state", "space_billing_subscriptions", "space_control_heads", "idempotency_keys", "outbox", "space_members", "spaces"]) {

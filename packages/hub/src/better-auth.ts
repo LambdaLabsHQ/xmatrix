@@ -27,7 +27,7 @@ import { runBetterAuthHandlerWithObservedHookFailure } from "./better-auth-reque
 import { mintHandleForNewAccount } from "./human-handle-mint";
 import { mcpOAuthPlugins } from "./mcp-oauth";
 import { TWO_FACTOR_REQUIRED, twoFactorPlugins } from "./two-factor";
-import { appOrigin, hubAuthBaseUrl } from "./deployment-origins";
+import { appOrigin, appOrigins, hubAuthBaseUrl } from "./deployment-origins";
 import type { Env } from "./types";
 
 /** The iOS app's bundle id, the audience of the identity tokens its Sign in with Apple returns. */
@@ -239,7 +239,7 @@ function createAuthWithDatabase(
     basePath: "/api/auth",
     secret: env.BETTER_AUTH_SECRET,
     database,
-    trustedOrigins: Array.from(new Set([appOrigin(env), hubAuthBaseUrl(env)])),
+    trustedOrigins: Array.from(new Set([...appOrigins(env), hubAuthBaseUrl(env)])),
     socialProviders,
     // A missing/consumed state cannot supply the flow's errorCallbackURL.
     // Keep that refusal recoverable through the deployment-owned login page.
@@ -351,11 +351,12 @@ function createAuthWithDatabase(
       bearer(),
       ...twoFactorPlugins(env, postgres),
       // Passkeys belong to the app's own domain, so one made on xmatrix.sh
-      // signs in on any of its pages; the Hub only checks them.
+      // signs in on any of its pages, the beta Web's included; the Hub only
+      // checks them.
       passkey({
         rpID: new URL(appOrigin(env)).hostname,
         rpName: "xMatrix",
-        origin: appOrigin(env),
+        origin: appOrigins(env),
         ...(postgres ? { schema: AUTH_POSTGRES_PASSKEY_SCHEMA } : {}),
       }),
       // Outside AI apps sign in through the PostgreSQL authority only.

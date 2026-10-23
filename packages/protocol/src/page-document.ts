@@ -6,6 +6,8 @@ import { diffIndices } from "node-diff3";
 import { Fragment, Schema, type Mark, type Node as DocNode } from "prosemirror-model";
 import { pageBlocks } from "./page-markdown.js";
 
+export * from "./page-blame.js";
+
 /**
  * Only the page session and the page editor load this module (the
  * `@xmatrix/protocol/page-document` export): the document model stays out
@@ -78,8 +80,12 @@ export const pageSchema = new Schema({
     image: {
       group: "inline", inline: true, draggable: true,
       attrs: { src: {}, alt: { default: "" }, title: { default: null } },
-      parseDOM: [{ tag: "img[src]", getAttrs: (dom) => ({ src: (dom as HTMLElement).getAttribute("src"),
-        alt: (dom as HTMLElement).getAttribute("alt") ?? "", title: (dom as HTMLElement).getAttribute("title") }) }],
+      parseDOM: [{ tag: "img[src]", getAttrs: (dom) => {
+        const src = (dom as HTMLElement).getAttribute("src") ?? "";
+        // A file on someone's machine is no image a page can show: images reach a page by being pasted into it.
+        if (/^(?:file|blob):/iu.test(src)) return false;
+        return { src, alt: (dom as HTMLElement).getAttribute("alt") ?? "", title: (dom as HTMLElement).getAttribute("title") };
+      } }],
       toDOM: (node) => ["img", { src: node.attrs.src, alt: node.attrs.alt, title: node.attrs.title }],
     },
     hard_break: { group: "inline", inline: true, selectable: false, parseDOM: [{ tag: "br" }], toDOM: () => ["br"] },
@@ -159,7 +165,8 @@ function blocksFrom(markdown: string, nodes: readonly MdNode[], definitions: Map
         out.push({ type: "blockquote", content: content.length ? content : [{ type: "paragraph" }] });
         break;
       }
-      case "code": out.push({ type: "code_block", attrs: { language: [node.lang, node.meta].filter(Boolean).join(" ") },
+      case "code": sourceText(markdown, node, node.value ?? "", true);
+        out.push({ type: "code_block", attrs: { language: [node.lang, node.meta].filter(Boolean).join(" ") },
         ...(node.value ? { content: [{ type: "text", text: node.value }] } : {}) }); break;
       case "list": {
         const items = (node.children ?? []).map((item): JsonNode => {
@@ -188,6 +195,7 @@ function blocksFrom(markdown: string, nodes: readonly MdNode[], definitions: Map
       case "definition": break; // References are resolved into their links and images.
       default: {
         const text = source(markdown, node);
+        sourceText(markdown, node, text);
         out.push({ type: "markdown", ...(text ? { content: [{ type: "text", text }] } : {}) });
       }
     }
@@ -201,24 +209,26 @@ function inlinesFrom(markdown: string, nodes: readonly MdNode[], marks: MarkSpec
   const withMarks = (node: JsonNode): JsonNode => (marks.length ? { ...node, marks } : node);
   for (const node of nodes) {
     switch (node.type) {
-      case "text": if (node.value) out.push(withMarks({ type: "text", text: node.value })); break;
+      case "text": if (node.value) { sourceText(markdown, node, node.value); out.push(withMarks({ type: "text", text: node.value })); } break;
       case "strong": out.push(...inlinesFrom(markdown, node.children ?? [], [...marks, { type: "strong" }], definitions)); break;
       case "emphasis": out.push(...inlinesFrom(markdown, node.children ?? [], [...marks, { type: "em" }], definitions)); break;
       case "delete": out.push(...inlinesFrom(markdown, node.children ?? [], [...marks, { type: "strike" }], definitions)); break;
       // A code span's line endings are spaces (CommonMark 6.1).
-      case "inlineCode": if (node.value) out.push({ type: "text", text: node.value.replace(/\n/gu, " "),
-        marks: [...marks, { type: "code" }] }); break;
-      case "break": out.push({ type: "hard_break" }); break;
+      case "inlineCode": if (node.value) { sourceText(markdown, node, node.value);
+        out.push({ type: "text", text: node.value.replace(/\n/gu, " "), marks: [...marks, { type: "code" }] }); } break;
+      case "break": sourceAtom(node); out.push({ type: "hard_break" }); break;
       case "link": out.push(...inlinesFrom(markdown, node.children ?? [],
         [...marks, { type: "link", attrs: { href: node.url ?? "", title: node.title ?? null } }], definitions)); break;
-      case "image": out.push(withMarks({ type: "image",
+      case "image": sourceAtom(node); out.push(withMarks({ type: "image",
         attrs: { src: node.url ?? "", alt: node.alt ?? "", title: node.title ?? null } })); break;
       case "linkReference":
       case "imageReference": {
         const definition = definitions.get(node.identifier ?? "");
         if (!definition) {
+          sourceAtom(node);
           out.push(withMarks({ type: "markdown_inline", attrs: { source: source(markdown, node) } }));
         } else if (node.type === "imageReference") {
+          sourceAtom(node);
           out.push(withMarks({ type: "image",
             attrs: { src: definition.url ?? "", alt: node.alt ?? "", title: definition.title ?? null } }));
         } else {
@@ -227,7 +237,7 @@ function inlinesFrom(markdown: string, nodes: readonly MdNode[], marks: MarkSpec
         }
         break;
       }
-      default: out.push(withMarks({ type: "markdown_inline", attrs: { source: source(markdown, node) } }));
+      default: sourceAtom(node); out.push(withMarks({ type: "markdown_inline", attrs: { source: source(markdown, node) } }));
     }
   }
   return out;
@@ -237,6 +247,58 @@ function collectDefinitions(node: MdNode, into: Map<string, MdNode>): Map<string
   if (node.type === "definition" && node.identifier && !into.has(node.identifier)) into.set(node.identifier, node);
   for (const child of node.children ?? []) collectDefinitions(child, into);
   return into;
+}
+
+/**
+ * Where in the markdown each inline position of the document being parsed came from, in the order the parse
+ * meets them, while `markdownToPageDocSources` collects them; null otherwise.
+ */
+let sourcing: number[] | null = null;
+
+/** `text`, as the document holds it, came from `node`'s markdown: each character from where it stands there. */
+function sourceText(markdown: string, node: MdNode, text: string, fenced = false) {
+  if (!sourcing || !text) return;
+  let from = node.position?.start.offset ?? 0;
+  const end = node.position?.end.offset ?? from;
+  // A fenced block's text starts on the line after its fence.
+  if (fenced && /^ {0,3}(?:`{3,}|~{3,})/u.test(markdown.slice(from, end))) from = markdown.indexOf("\n", from) + 1 || end;
+  // Escapes, entities and markers stand between the characters: each is matched to the next one like it.
+  let at = from;
+  for (const char of text) {
+    const found = markdown.indexOf(char, at);
+    const here = found >= 0 && found < end ? found : at;
+    for (let unit = 0; unit < char.length; unit++) sourcing.push(Math.min(here + unit, Math.max(end - 1, from)));
+    if (found >= 0 && found < end) at = found + char.length;
+  }
+}
+
+/** An inline node the document holds whole (an image, a break): it came from where it starts. */
+function sourceAtom(node: MdNode) {
+  sourcing?.push(node.position?.start.offset ?? 0);
+}
+
+/**
+ * The document a page's markdown describes, with where each of its inline positions came from in the
+ * markdown (`sources[pos]`, -1 where the position holds no text), so what is known about the markdown's
+ * characters, such as who wrote them (page-blame.ts), can be drawn on the document.
+ */
+export function markdownToPageDocSources(markdown: string): { doc: DocNode; sources: Int32Array } {
+  const collected: number[] = [];
+  sourcing = collected;
+  let doc: DocNode;
+  try {
+    doc = markdownToPageDoc(markdown);
+  } finally {
+    sourcing = null;
+  }
+  const sources = new Int32Array(doc.content.size + 1).fill(-1);
+  let next = 0;
+  doc.descendants((node, pos) => {
+    if (node.isText) for (let at = 0; at < node.text!.length; at++) sources[pos + at] = collected[next++] ?? -1;
+    else if (node.isInline) sources[pos] = collected[next++] ?? -1;
+    return true;
+  });
+  return { doc, sources };
 }
 
 /** The document a page's markdown describes. */
@@ -669,6 +731,50 @@ export function pageDocChanges(before: DocNode, after: DocNode): PageDocChange[]
     if (changes.length === before) blocks();
   }
   return changes.slice(0, MAX_DOC_CHANGES);
+}
+
+/**
+ * What is known about each inline position of `before` (`known[pos]`, -1 for nothing), carried to the same
+ * text in `after`: blocks that did not change keep it whole, and within the blocks that did, the words that
+ * stayed keep it. What `after` added is -1. Lets who wrote what, known for a revision, be read on the page
+ * as it is now, with what is being written since.
+ */
+export function carryPageDocKnown(before: DocNode, known: Int32Array, after: DocNode): Int32Array {
+  const out = new Int32Array(after.content.size + 1).fill(-1);
+  const copy = (from: number, to: number, length: number) => {
+    for (let at = 0; at < length; at++) out[to + at] = known[from + at] ?? -1;
+  };
+  const old = docUnits(before);
+  const now = docUnits(after);
+  let oldUnit = 0;
+  let newUnit = 0;
+  const keepUnits = (until: number) => {
+    for (; oldUnit < until; oldUnit++, newUnit++) copy(old[oldUnit]!.pos, now[newUnit]!.pos, old[oldUnit]!.node.nodeSize);
+  };
+  for (const hunk of diffIndices(old.map((unit) => unit.key), now.map((unit) => unit.key))) {
+    keepUnits(hunk.buffer1[0]);
+    const removed = old.slice(hunk.buffer1[0], hunk.buffer1[0] + hunk.buffer1[1]);
+    const added = now.slice(hunk.buffer2[0], hunk.buffer2[0] + hunk.buffer2[1]);
+    oldUnit = hunk.buffer1[0] + hunk.buffer1[1];
+    newUnit = hunk.buffer2[0] + hunk.buffer2[1];
+    if (!removed.length || !added.length) continue;
+    const a = unitTokens(removed);
+    const b = unitTokens(added);
+    if (a.length + b.length > MAX_WORD_DIFF_TOKENS * 5) continue;
+    let oldToken = 0;
+    let newToken = 0;
+    const keepTokens = (until: number) => {
+      for (; oldToken < until; oldToken++, newToken++) copy(a[oldToken]!.from, b[newToken]!.from, a[oldToken]!.to - a[oldToken]!.from);
+    };
+    for (const words of diffIndices(a.map((token) => token.key), b.map((token) => token.key))) {
+      keepTokens(words.buffer1[0]);
+      oldToken = words.buffer1[0] + words.buffer1[1];
+      newToken = words.buffer2[0] + words.buffer2[1];
+    }
+    keepTokens(a.length);
+  }
+  keepUnits(old.length);
+  return out;
 }
 
 /** A document's top-level blocks, each keyed by its content. */

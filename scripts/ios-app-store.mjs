@@ -1,6 +1,9 @@
 import { appendFileSync, readFileSync } from "node:fs";
 import { appleClientFromEnv, AppleApiError } from "./app-store-connect.mjs";
 import { runCliMain } from "./cli-entrypoint.mjs";
+import { releaseChannel, releaseCore } from "./release-version-order.mjs";
+import { appStoreReleaseNotes } from "./release-notes.mjs";
+import { fileURLToPath } from "node:url";
 
 const EDITABLE = new Set(["PREPARE_FOR_SUBMISSION", "REJECTED", "METADATA_REJECTED", "DEVELOPER_REJECTED", "READY_FOR_REVIEW"]);
 const SUBMITTED = new Set(["WAITING_FOR_REVIEW", "IN_REVIEW", "PENDING_DEVELOPER_RELEASE", "PENDING_APPLE_RELEASE", "PROCESSING_FOR_APP_STORE", "READY_FOR_SALE", "READY_FOR_DISTRIBUTION"]);
@@ -60,15 +63,42 @@ export async function resolveApp(api, bundleId) {
   return apps[0].id;
 }
 
-export async function submitRelease(api, { appId, version, buildNumber, metadata, privateNotes = "", waitFor = wait, attempts = 60 }) {
-  validateMetadata(metadata);
+/**
+ * The exact build once Apple has processed it as VALID, observed at most
+ * `attempts` times 20 seconds apart. An expired, INVALID or FAILED build stops
+ * at once (findBuild); one still processing at the bound fails the release.
+ */
+export async function waitForValidBuild(api, { appId, version, buildNumber, waitFor = wait, attempts = 60 }) {
   let build;
   for (let attempt = 0; attempt < attempts; attempt++) {
     build = await findBuild(api, { appId, version, buildNumber });
-    if (build?.attributes.processingState === "VALID") break;
+    if (build?.attributes.processingState === "VALID") return build;
     if (attempt + 1 < attempts) await waitFor(20_000);
   }
-  if (build?.attributes.processingState !== "VALID") throw new Error("Apple build processing timed out; retry this release to reconcile.");
+  throw new Error("Apple build processing timed out; retry this release to reconcile.");
+}
+
+/**
+ * What a release does at Apple once its build is uploaded. Either channel
+ * ships only an exact build Apple processed as VALID, so a beta that Apple
+ * rejected never counts as delivered; a beta then stays in TestFlight, and
+ * only a stable goes on to App Review. Apple's version is the release's X.Y.Z.
+ */
+export async function releaseToApple(api, { release, appId, buildNumber, metadata, releaseNotes, privateNotes = "", waitFor = wait, attempts = 60 }) {
+  const version = releaseCore(release);
+  if (releaseChannel(release) === "beta") {
+    await waitForValidBuild(api, { appId, version, buildNumber, waitFor, attempts });
+    return { outcome: "testflight-only", version, buildNumber };
+  }
+  return submitRelease(api, { appId, version, buildNumber, metadata, releaseNotes, privateNotes, waitFor, attempts });
+}
+
+export async function submitRelease(api, { appId, version, buildNumber, metadata, releaseNotes, privateNotes = "", waitFor = wait, attempts = 60 }) {
+  validateMetadata(metadata);
+  if (releaseNotes !== undefined && (typeof releaseNotes !== "string" || !releaseNotes.trim() || [...releaseNotes].length > 4_000)) {
+    throw new Error("App Store release notes must contain at most 4,000 characters.");
+  }
+  const build = await waitForValidBuild(api, { appId, version, buildNumber, waitFor, attempts });
 
   const versions = await api.list(`/v1/apps/${appId}/appStoreVersions?${query({ "filter[platform]": "IOS", include: "build", limit: "200" })}`);
   let target = versions.find((row) => row.attributes.versionString === version);
@@ -130,6 +160,7 @@ export async function submitRelease(api, { appId, version, buildNumber, metadata
   for (const entry of metadata.localizations) {
     const existing = localizations.find((row) => row.attributes.locale === entry.locale);
     const attributes = { ...entry };
+    if (releaseNotes && entry.locale === "en-US") attributes.whatsNew = releaseNotes;
     if (existing) {
       delete attributes.locale;
       await api.request(`/v1/appStoreVersionLocalizations/${existing.id}`, "PATCH", { type: "appStoreVersionLocalizations", id: existing.id, attributes });
@@ -182,20 +213,25 @@ await runCliMain(import.meta.url, async () => {
   const mode = process.argv[2];
   if (mode === "validate") { console.log("Public App Store metadata is valid."); return; }
   const env = process.env;
-  const version = JSON.parse(readFileSync(new URL("../version.json", import.meta.url), "utf8")).version;
-  if (!["check-upload", "submit"].includes(mode) || env.GITHUB_ACTIONS !== "true" || env.GITHUB_REF !== `refs/tags/xmatrix-v${version}` || !/^[a-f0-9]{40}$/.test(env.GITHUB_SHA ?? "") || !/^\d{1,18}$/.test(env.IOS_BUILD_NUMBER ?? "")) {
+  const release = JSON.parse(readFileSync(new URL("../version.json", import.meta.url), "utf8")).version;
+  if (!["check-upload", "submit"].includes(mode) || env.GITHUB_ACTIONS !== "true" || env.GITHUB_REF !== `refs/tags/xmatrix-v${release}` || !/^[a-f0-9]{40}$/.test(env.GITHUB_SHA ?? "") || !/^\d{1,18}$/.test(env.IOS_BUILD_NUMBER ?? "")) {
     throw new Error("App Store automation requires an immutable production release context.");
   }
+  // Apple's store version is the release's X.Y.Z (three numbers only); the build
+  // number tells a beta's build from its stable's.
+  const version = releaseCore(release);
   const api = appleClientFromEnv(env);
   const appId = await resolveApp(api, metadata.bundleId);
-  const args = { appId, version, buildNumber: env.IOS_BUILD_NUMBER };
   if (mode === "check-upload") {
-    const build = await findBuild(api, args);
+    const build = await findBuild(api, { appId, version, buildNumber: env.IOS_BUILD_NUMBER });
     appendFileSync(env.GITHUB_OUTPUT, `upload_required=${!build}\n`);
     console.log(build ? "Exact release build already exists; upload will be reused." : "Exact release build requires upload.");
     return;
   }
-  const result = await submitRelease(api, { ...args, metadata, privateNotes: env.ASC_REVIEW_NOTES ?? "" });
+  const result = await releaseToApple(api, {
+    release, appId, buildNumber: env.IOS_BUILD_NUMBER, metadata, privateNotes: env.ASC_REVIEW_NOTES ?? "",
+    ...(releaseChannel(release) === "stable" ? { releaseNotes: appStoreReleaseNotes(fileURLToPath(new URL("..", import.meta.url)), release) } : {}),
+  });
   // Only these allowlisted, non-secret fields are persisted publicly.
   console.log(JSON.stringify(result));
   if (env.GITHUB_STEP_SUMMARY) appendFileSync(env.GITHUB_STEP_SUMMARY, `\nApp Store: **${result.outcome}** — ${version} (${env.IOS_BUILD_NUMBER})${result.state ? `, ${result.state}` : ""}.\n`);

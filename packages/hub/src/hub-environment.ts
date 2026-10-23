@@ -117,6 +117,7 @@ export const HUB_ENVIRONMENT = {
   RATE_LIMIT_HUMAN_CONNECT: { kind: "binding", scope: "feature", summary: "Workers Rate Limiting allowance of Human socket sign-ins per user. Unset: sign-ins are not counted." },
   RATE_LIMIT_SUMMON_INTENT: { kind: "binding", scope: "feature", summary: "Workers Rate Limiting allowance of composer draft previews (Jev) per signed-in Human, refused with 429 whatever RATE_LIMIT_ENFORCED says. Unset: previews are not counted." },
   RATE_LIMIT_JEV_EVALUATE: { kind: "binding", scope: "feature", summary: "Workers Rate Limiting allowance of `POST /api/ai/jev/evaluate` per owning Human and verified Space (an Agent Run counts as its owner), refused with 429 whatever RATE_LIMIT_ENFORCED says. Unset: evaluations are not counted." },
+  RATE_LIMIT_SEARCH_RERANK: { kind: "binding", scope: "feature", summary: "Workers Rate Limiting allowance of `POST /api/search/rerank` (Jev) per signed-in Human, refused with 429 whatever RATE_LIMIT_ENFORCED says. Unset: reorderings are not counted." },
   RATE_LIMIT_ENFORCED: product("var", "Refuses over-limit request allowances (credential, anonymous, Human sign-in) with 429 and Retry-After only when \"true\"; otherwise they are only logged. Production pins true."),
   RELAY_AUTHORITY_OBSERVABILITY_ENABLED: product("var", "Writes authority observation only when \"true\"."),
   RELAY_AUTHORITY_OBSERVABILITY_SLOW_MS: tuning("Requests at or above this wall time are never sampled away."),
@@ -128,6 +129,7 @@ export const HUB_ENVIRONMENT = {
 
   // Deployment identity and policy (deployment profile).
   APP_URL: { kind: "var", scope: "deployment", summary: "Web origin; rendered from the profile's `web.origin`. Unset: links, redirects and auth fail closed." },
+  APP_BETA_URL: { kind: "var", scope: "deployment", summary: "Beta Web origin every beta deploys; rendered from the profile's `web.beta.origin`. Trusted for sign-in and direct reads exactly like APP_URL; links still go to APP_URL. Unset: only APP_URL is trusted." },
   CONNECTOR_DINGTALK_COMPANY_CONFIG: { kind: "secret", scope: "feature", summary: "Verified company-console JSON: suite-ticket protocol, sync-http delivery, numeric suiteId, developerCorpId, appId and approved templateId/templateField. Requires complete native suite keys; unset keeps company routes and actions unavailable." },
   HUB_URL: { kind: "var", scope: "deployment", summary: "Hub origin and token issuer; rendered from the profile's `hub.origin`. Unset: authentication fails closed." },
   XMATRIX_RUNTIME_LOCATION_HINT: { kind: "var", scope: "deployment", summary: "Durable Object location hint (e.g. `apac`) for Runtime cells, which must sit next to PostgreSQL. Unset: cells are created near their first caller." },
@@ -137,7 +139,6 @@ export const HUB_ENVIRONMENT = {
   XMATRIX_INVITE_EMAIL_FROM: { kind: "var", scope: "deployment", summary: "Sender address for invites; defaults to XMATRIX_EMAIL_FROM." },
   PLATFORM_ADMIN_EMAILS: { kind: "var", scope: "deployment", summary: "Operator emails allowed to read the platform overview." },
   PLATFORM_ADMIN_SPACE_ID: { kind: "var", scope: "deployment", summary: "Space whose members are platform admins. Optional." },
-  TEST_ENVIRONMENT_ACCESS_SPACE_ID: operator("var", "Space whose members may switch to the hosted Test deployment; leave unset."),
 
   // Authentication.
   BETTER_AUTH_SECRET: { kind: "secret", scope: "required", summary: "Signs sessions and tokens. Unset: the Hub cannot authenticate anyone." },

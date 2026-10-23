@@ -28,6 +28,7 @@ jobs:
   preflight:
     if: startsWith(github.ref, 'refs/tags/xmatrix-v')
     runs-on: &release_runner ${{ vars.XMATRIX_RUNNER_FLEET == 'self-hosted' && fromJSON('["self-hosted","xmatrix-us-release"]') || 'ubuntu-24.04' }}
+    timeout-minutes: 20
     permissions:
       actions: read
       contents: read
@@ -36,6 +37,7 @@ jobs:
       version: ${{ steps.identity.outputs.version }}
       tag: ${{ steps.identity.outputs.tag }}
       scope: ${{ steps.identity.outputs.scope }}
+      channel: ${{ steps.identity.outputs.channel }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -59,20 +61,40 @@ jobs:
         with:
           install-deps: "false"
 
+      # The version alone says the channel: X.Y.Z-beta.N is a beta, which
+      # deploys the Hub and the beta Web and sends clients to dev and
+      # TestFlight; X.Y.Z is a stable, which deploys the stable Web and sends
+      # clients to their stable channel and App Review. The Hub ships with
+      # every beta.
       - name: Resolve exact immutable release identity
         id: identity
+        env:
+          RELEASE_SCOPE: ${{ inputs.release_scope }}
         run: |
           set -euo pipefail
           git fetch --force origin refs/heads/main:refs/remotes/origin/main
           sha="$(git rev-parse HEAD)"
           tag="$GITHUB_REF_NAME"
           version="$(node -p "require('./version.json').version")"
+          channel="$(node --input-type=module -e 'import { releaseChannel } from "./scripts/release-version-order.mjs"; console.log(releaseChannel(process.argv[1]));' "$version")"
           test "$(git rev-parse "$tag^{commit}")" = "$sha"
           test -z "$(git status --porcelain)"
+          if [[ "$channel" == stable && ",$RELEASE_SCOPE," == *,hub,* ]]; then
+            echo "Stable $tag cannot ship $RELEASE_SCOPE: the Hub ships with every beta." >&2
+            exit 1
+          fi
           echo "deploy_sha=$sha" >> "$GITHUB_OUTPUT"
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          echo "scope=${{ inputs.release_scope }}" >> "$GITHUB_OUTPUT"
+          echo "scope=$RELEASE_SCOPE" >> "$GITHUB_OUTPUT"
+          echo "channel=$channel" >> "$GITHUB_OUTPUT"
+
+      # Every beta deploys the Hub; the stable Web keeps the last stable's
+      # build. A Hub whose client policy would answer that live Web with 426
+      # never deploys (scripts/stable-web-compatibility.mjs).
+      - name: Require the Hub to keep serving the live stable Web
+        if: contains(format(',{0},', steps.identity.outputs.scope), ',hub,')
+        run: node scripts/stable-web-compatibility.mjs "$(node scripts/deploy-config.mjs origin production web)"
 
       - name: Resolve production version floor
         id: floor
@@ -92,12 +114,16 @@ jobs:
               core.setFailed(`Production receipt ${process.env.CURRENT_TAG} already exists; use its authoritative run`);
               return;
             }
-            const versions = releases
-              .filter((release) => !release.draft && /^xmatrix-v\d+\.\d+\.\d+$/.test(release.tag_name))
-              .map((release) => release.tag_name.slice("xmatrix-v".length).split(".").map(Number))
-              .sort((a, b) => b[0] - a[0] || b[1] - a[1] || b[2] - a[2]);
-            const latest = versions[0]?.join(".") || "0.16.2";
-            core.setOutput("latest_version", latest);
+            // Betas and stables share one ascending line: X.Y.Z-beta.N < X.Y.Z.
+            const order = (tag) => {
+              const match = /^xmatrix-v(\d+)\.(\d+)\.(\d+)(?:-beta\.(\d+))?$/.exec(tag);
+              return match && [match[1], match[2], match[3], match[4] ?? Infinity].map(Number);
+            };
+            const latest = releases
+              .filter((release) => !release.draft && order(release.tag_name))
+              .map((release) => ({ version: release.tag_name.slice("xmatrix-v".length), key: order(release.tag_name) }))
+              .sort((a, b) => b.key[0] - a.key[0] || b.key[1] - a.key[1] || b.key[2] - a.key[2] || b.key[3] - a.key[3])[0];
+            core.setOutput("latest_version", latest?.version || "0.16.2");
 
       - name: Validate tag, versions, ancestry, cleanliness, and monotonicity
         env:
@@ -112,6 +138,7 @@ jobs:
           DEPLOY_SHA: ${{ steps.identity.outputs.deploy_sha }}
           REQUEST_RUN_ID: ${{ inputs.request_run_id }}
           RELEASE_SCOPE: ${{ inputs.release_scope }}
+          RELEASE_CHANNEL: ${{ steps.identity.outputs.channel }}
         with:
           # A runner-side "fetch failed" is retried rather than failing the job.
           retries: 3
@@ -125,19 +152,43 @@ jobs:
               core.setFailed("Invalid release scope");
               return;
             }
-            const productionRuns = await github.paginate(github.rest.actions.listWorkflowRuns, {
+            // Run discovery and job conclusions share one bounded evidence
+            // window. A temporarily omitted current run is not a duplicate.
+            const evidenceDeadline = Date.now() + 10 * 60_000;
+            const readEvidence = async (read, complete) => {
+              let evidence = [];
+              for (let attempt = 0; attempt < 120; attempt += 1) {
+                if (attempt) await new Promise((resolve) => setTimeout(resolve, 5000));
+                if (Date.now() >= evidenceDeadline) break;
+                evidence = await read();
+                if (complete(evidence)) break;
+              }
+              return evidence;
+            };
+            // The jobs and runs lists keep serving one cached response for the
+            // same URL. A new query on every read is what makes the next poll
+            // see a job that completed after that snapshot.
+            let runEvidenceReads = 0;
+            const productionRuns = await readEvidence(() => github.paginate(github.rest.actions.listWorkflowRuns, {
               owner: context.repo.owner,
               repo: context.repo.repo,
               workflow_id: "production-release.yml",
               branch: context.ref.replace("refs/tags/", ""),
               event: "workflow_dispatch",
               per_page: 100,
-            });
+              cachebust: `runs-${process.env.GITHUB_RUN_ATTEMPT ?? 0}-${runEvidenceReads += 1}`,
+              headers: { "Cache-Control": "no-cache" },
+              request: { timeout: 10_000 },
+            }), (runs) => runs.some((run) => run.head_sha === process.env.DEPLOY_SHA && run.id <= context.runId));
             const authoritative = productionRuns
               .filter((run) => run.head_sha === process.env.DEPLOY_SHA)
               .sort((left, right) => left.id - right.id)[0];
-            if (!authoritative || authoritative.id !== context.runId) {
-              core.setFailed(`Another authoritative production run already exists: ${authoritative?.html_url ?? "unknown"}`);
+            if (!authoritative || authoritative.id > context.runId) {
+              core.setFailed("Current Production Release run is not visible within the evidence window; retry its failed jobs");
+              return;
+            }
+            if (authoritative.id !== context.runId) {
+              core.setFailed(`Another authoritative production run already exists: ${authoritative.html_url ?? authoritative.id}`);
               return;
             }
             if (!/^\d+$/.test(process.env.REQUEST_RUN_ID || "")) {
@@ -153,30 +204,42 @@ jobs:
               core.setFailed("Production request does not authorize this exact main revision");
               return;
             }
-            // The request tested either this exact main revision or its release
-            // commit (that revision plus the stamped release version).
+            // A beta request tested either this exact main revision or its
+            // release commit (that revision plus the stamped release version). A
+            // stable request tested the release commit of a verified beta's
+            // source, which the request's main revision contains.
             try {
               require("child_process").execFileSync("node",
-                ["scripts/release-commit.mjs", "verify", process.env.DEPLOY_SHA, requestRun.head_sha],
+                ["scripts/release-commit.mjs", process.env.RELEASE_CHANNEL === "stable" ? "verify-cut" : "verify",
+                  process.env.DEPLOY_SHA, requestRun.head_sha],
                 { stdio: "inherit" });
             } catch {
               core.setFailed("Production request does not authorize this exact main revision");
               return;
             }
-            // Scope is durable job evidence, not optional step metadata. The
-            // dispatcher cannot run until this exact authorization succeeds.
-            // Re-read boundedly while GitHub publishes the job conclusion.
-            const authorityName = `authorize ${scope} production`;
-            let jobs = [];
-            let authorities = [];
-            for (let attempt = 0; attempt < 12; attempt += 1) {
-              if (attempt) await new Promise((resolve) => setTimeout(resolve, 5000));
-              jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRun, {
-                ...context.repo, run_id: requestRun.id, filter: "latest", per_page: 100,
-              });
-              authorities = jobs.filter((job) => job.name === authorityName);
-              if (authorities.length > 1 || authorities[0]?.conclusion) break;
-            }
+            // Scope and tag are durable job evidence, not optional step
+            // metadata. The dispatcher cannot run until this exact authorization
+            // succeeds. GitHub can lag several minutes behind completed jobs,
+            // and will keep returning that same jobs-list snapshot while the
+            // URL does not change. Poll for ten minutes, five seconds apart,
+            // each time with a new query, for the complete set; a successful
+            // authority alone cannot stand in for its gates.
+            const authorityName = `authorize ${scope} production ${context.ref.replace("refs/tags/", "")}`;
+            let jobEvidenceReads = 0;
+            const jobs = await readEvidence(() => github.paginate(github.rest.actions.listJobsForWorkflowRun, {
+              ...context.repo, run_id: requestRun.id, filter: "latest", per_page: 100,
+              cachebust: `jobs-${process.env.GITHUB_RUN_ATTEMPT ?? 0}-${jobEvidenceReads += 1}`,
+              headers: { "Cache-Control": "no-cache" },
+              request: { timeout: 10_000 },
+            }), (evidence) => {
+              const authorities = evidence.filter((job) => job.name === authorityName);
+              const gates = ["plan", "gates"].map(name => evidence.find(job => job.name === name));
+              const rejected = [...gates, ...authorities].some(job => job?.conclusion && job.conclusion !== "success");
+              return authorities.length > 1 || rejected ||
+                (gates.every(job => job?.conclusion === "success") &&
+                 authorities.length === 1 && authorities[0].status === "completed" && authorities[0].conclusion === "success");
+            });
+            const authorities = jobs.filter((job) => job.name === authorityName);
             // The request's `gates` job passes only when every gate its scope
             // selects passed (ci.yml's aggregate and the iOS gate).
             for (const name of ["plan", "gates"]) {
@@ -534,6 +597,7 @@ jobs:
           RELEASE_TAG: ${{ needs.preflight.outputs.tag }}
           RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
           RELEASE_SCOPE: ${{ needs.preflight.outputs.scope }}
+          RELEASE_CHANNEL: ${{ needs.preflight.outputs.channel }}
         with:
           # A runner-side "fetch failed" is retried rather than failing the job.
           retries: 3
@@ -541,13 +605,16 @@ jobs:
             const fs = require("fs");
             const origin = (component) => require("child_process")
               .execFileSync("node", ["scripts/deploy-config.mjs", "origin", "production", component], { encoding: "utf8" }).trim();
-            const origins = { XMATRIX_HUB_ORIGIN: origin("hub"), XMATRIX_APP_ORIGIN: origin("web") };
+            // A beta deploys the beta Web, a stable the stable one.
+            const web = process.env.RELEASE_CHANNEL === "beta" ? "web-beta" : "web";
+            const origins = { XMATRIX_HUB_ORIGIN: origin("hub"), XMATRIX_APP_ORIGIN: origin(web) };
             const receipt = {
               schemaVersion: 1,
               scope: process.env.RELEASE_SCOPE,
               components: process.env.RELEASE_SCOPE.split(","),
               releaseTag: process.env.RELEASE_TAG,
               version: process.env.RELEASE_VERSION,
+              channel: process.env.RELEASE_CHANNEL,
               deploySha: process.env.DEPLOY_SHA,
               ...(process.env.RELEASE_SCOPE.split(",").includes("hub") ? { hubUrl: origins.XMATRIX_HUB_ORIGIN } : {}),
               ...(process.env.RELEASE_SCOPE.split(",").includes("web") ? { webUrl: origins.XMATRIX_APP_ORIGIN } : {}),
@@ -563,13 +630,14 @@ jobs:
               .addHeading(`Production deployment completed: ${receipt.releaseTag}`)
               .addTable([
                 [{ data: "Surface", header: true }, { data: "Result", header: true }],
+                ["Channel", receipt.channel],
                 ["Scope", receipt.scope],
                 ...(receipt.hubUrl ? [["Hub", receipt.hubUrl]] : []),
                 ...(receipt.webUrl ? [["Web", receipt.webUrl]] : []),
                 ...receipt.components.filter((component) => !["hub", "web"].includes(component))
-                  .map((component) => [component, component === "cli"
-                    ? "published to dev; stable moves with Release Promote"
-                    : "published"]),
+                  .map((component) => [component, component === "ios"
+                    ? (receipt.channel === "stable" ? "TestFlight build, submitted to App Review when Apple allows" : "TestFlight build")
+                    : `published to the ${receipt.channel === "stable" ? "stable" : "dev"} channel`]),
                 ["SHA", receipt.deploySha],
               ])
               .write();
@@ -615,20 +683,20 @@ jobs:
           RELEASE_TAG: ${{ needs.preflight.outputs.tag }}
           RELEASE_TITLE: xMatrix v${{ needs.preflight.outputs.version }}
           RELEASE_NOTES: |
-            Production ${{ needs.preflight.outputs.scope }} release completed from `${{ needs.preflight.outputs.deploy_sha }}`.
+            Production ${{ needs.preflight.outputs.channel }} ${{ needs.preflight.outputs.scope }} release completed from `${{ needs.preflight.outputs.deploy_sha }}`.
 
             - Scope: `${{ needs.preflight.outputs.scope }}` (only selected components were published)
             - Components: `${{ needs.preflight.outputs.scope }}`
             - Deployment receipt: R2 `xmatrix-release-receipts/production/${{ needs.preflight.outputs.tag }}/deployment`
             - Authoritative run: `${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}`
           RELEASE_DRAFT: "false"
-          RELEASE_PRERELEASE: "false"
+          RELEASE_PRERELEASE: ${{ needs.preflight.outputs.channel == 'beta' && 'true' || 'false' }}
           RELEASE_FORCE_TAG: "false"
           RELEASE_ALLOW_EMPTY_ASSETS: "true"
           RELEASE_KEEP_STALE_ASSETS: "true"
           RELEASE_IMMUTABLE_VERSION: "true"
           RELEASE_TRANSACTION_ID: ${{ github.run_id }}:${{ github.run_attempt }}
-        run: node scripts/publish-github-release.mjs
+        run: node scripts/release-notes.mjs
 
   # Apple sends a sandbox TEST notification to the deployed Hub and reports its
   # answer (docs/operations/ios-app-store-subscriptions.md). It runs after the

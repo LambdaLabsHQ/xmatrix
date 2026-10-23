@@ -353,6 +353,7 @@ struct DaemonSpawnRequest {
     handoff_transfer: bool,
     handoff_source_instance_id: Option<String>,
     handoff_source_resume_session_key: Option<String>,
+    handoff_context: Option<MachineHandoffContext>,
     goal: Option<protocol::AgentGoalStatus>,
     run_worktree: bool,
     remote_repo: Option<String>,
@@ -406,6 +407,7 @@ impl DaemonSpawnRequest {
             handoff_transfer,
             handoff_source_instance_id,
             handoff_source_resume_session_key,
+            handoff_context,
             context,
             goal,
             run_worktree,
@@ -455,6 +457,7 @@ impl DaemonSpawnRequest {
             handoff_transfer: handoff_transfer.unwrap_or(false),
             handoff_source_instance_id,
             handoff_source_resume_session_key,
+            handoff_context,
             initial_message_source: context
                 .as_ref()
                 .and_then(|value| value.initial_message_source.clone()),
@@ -2259,7 +2262,7 @@ enum DaemonSelfUpdateOutcome {
 
 fn daemon_self_update_release_api_url() -> String {
     std::env::var("XMATRIX_RELEASE_API_URL")
-        .unwrap_or_else(|_| DEFAULT_CLI_RELEASE_API_URL.to_string())
+        .unwrap_or_else(|_| default_cli_release_api_url().to_string())
 }
 
 fn daemon_self_update_interval() -> Duration {
@@ -2829,7 +2832,7 @@ async fn handle_polled_daemon_spawn(
 /// whatever else is configured. That is the right outcome for every case we
 /// decline -- a host that is not GitHub, a request that did not say which
 /// repository, a run holding no grant -- so none of them are errors here.
-pub async fn cmd_git_credential(operation: &str) -> error::Result<()> {
+pub(crate) async fn cmd_git_credential(operation: &str) -> error::Result<()> {
     use std::io::Read as _;
 
     // Git only expects an answer to `get`. It sends `store` and `erase` so a

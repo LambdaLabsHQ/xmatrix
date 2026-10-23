@@ -62,6 +62,7 @@ import {
   mergeChannelHistory,
   sortChannelHistory,
   supersededHistoryMessage,
+  commandResultHistoryMessage,
 } from "@/components/dashboard/channel-history";
 import { sameValue } from "../../lib/same-value";
 import {
@@ -69,6 +70,7 @@ import {
   writeChannelComposerDraft,
   type ChannelComposerDraft,
 } from "@/components/dashboard/channel-composer-drafts";
+import type { DiscussionQuote } from "@/components/dashboard/selection-discussion";
 import {
   purgeAgentTraceReplicas,
   purgeThirdPartyAgentTraceReplicas,
@@ -84,7 +86,8 @@ import {
   resolveSpaceRouteKey,
   spaceAppPath,
 } from "@/components/dashboard/channel-links";
-import { searchWorkspaceMessages } from "./workspace-message-search";
+import { rerankWorkspaceSearch, searchWorkspaceMessages } from "./workspace-message-search";
+import type { WorkspaceSearchRerank } from "./use-search-rerank";
 import { useWorkspaceShellTailCache } from "./use-workspace-shell-tail-cache";
 import { removeRetiredBrowserReplica } from "@/lib/retired-browser-replica";
 import { maybePushRecipientScopedNativeMessageNotification } from "./recipient-scoped-native-message-notification";
@@ -94,7 +97,7 @@ import { invalidateWorkspaceResources, refetchUnlessHumanPush, setHumanPushConne
 import { useSelectedChannelHeadCatchUp } from "./use-selected-channel-head-catch-up";
 import { clearProductMessageAttachmentMediaCache } from "@/lib/relay-v2/product-message-attachment-media";
 import { releaseMessageAttachmentMediaStores } from "./message-attachment-media-store";
-import { channelActivityOf, DEFAULT_HUB_URL, HUMAN_AUTH_INVALID_FAILURE_CODE, HUMAN_AUTH_REQUIRED_CLOSE_CODE, HUMAN_CLIENT_PRESENCE_DIGEST, normalizeHubUrl, parseHumanChannelCatalogChangedMessage, parseHumanWorkspaceResourceChangedMessage } from "@xmatrix/protocol";
+import { channelActivityOf, isAgentInstruction, DEFAULT_HUB_URL, HUMAN_AUTH_INVALID_FAILURE_CODE, HUMAN_AUTH_REQUIRED_CLOSE_CODE, HUMAN_CLIENT_PRESENCE_DIGEST, normalizeHubUrl, parseHumanChannelCatalogChangedMessage, parseHumanWorkspaceResourceChangedMessage } from "@xmatrix/protocol";
 import type {
   ChannelAttachment,
   ChannelMessage,
@@ -495,7 +498,7 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
     update: () => void
   ) => {
     const transitionDocument = document as Document & {
-      startViewTransition?: (callback: () => void) => { finished: Promise<void> };
+      startViewTransition?: (callback: () => void) => { ready: Promise<void>; finished: Promise<void> };
     };
     const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     if (!isMobileViewportRef.current || reduceMotion || !transitionDocument.startViewTransition) {
@@ -509,6 +512,12 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
     try {
       const transition = transitionDocument.startViewTransition(() => {
         flushSync(update);
+      });
+      // Superseding an animation rejects ready even when its DOM update
+      // succeeds. Observe that promise separately from finished; update
+      // failures still surface through the native updateCallbackDone promise.
+      void transition.ready.catch((error: unknown) => {
+        if (!(error instanceof DOMException && error.name === "AbortError")) throw error;
       });
       void transition.finished.finally(() => {
         if (mobileViewTransitionTokenRef.current === token) {
@@ -639,6 +648,9 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
 
   const [replyTarget, setReplyTarget] = useState<TimelineItem | null>(null);
 
+  // The passage each discussion's composer holds until its first message carries it (selection-discussion.ts).
+  const [discussionQuotes, setDiscussionQuotes] = useState<ReadonlyMap<string, DiscussionQuote>>(() => new Map());
+
   const draftRef = useRef(draft);
 
   const draftAttachmentsRef = useRef(draftAttachments);
@@ -737,14 +749,6 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
   useEffect(() => {
     if (view !== "messages") setComposingConversation(false);
   }, [view]);
-
-  const [channelMoveOpen, setChannelMoveOpen] = useState(false);
-
-  const [channelMoveTargetSpaceId, setChannelMoveTargetSpaceId] = useState("");
-
-  const [movingChannelId, setMovingChannelId] = useState<string | null>(null);
-
-  const [channelMoveError, setChannelMoveError] = useState<string | null>(null);
 
   const isMobileViewport = useIsMobileViewport();
 
@@ -1643,6 +1647,7 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
             void queryClient.invalidateQueries({ queryKey: xmatrixQueryKeys.domain(identity, "workspace-projects") });
             void queryClient.invalidateQueries({ queryKey: xmatrixQueryKeys.domain(identity, "workspace-events") });
             invalidateWorkspaceResources(queryClient);
+            void queryClient.invalidateQueries({ queryKey: ["agent-launches"] });
           }
           connectedBefore = true;
           reconcileUnconfirmedOnReconnectRef.current?.();
@@ -1720,6 +1725,18 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
             const folded = supersededHistoryMessage(
               heldChannelWindow(channelId, false).messages, message.event.metadata);
             if (folded) mergeAndRememberChannelHistory(channelId, [folded], undefined, false);
+          }
+          // A launch, stop, continuation, execution or launch choice moved: the
+          // chips of the messages shown re-read their records. Nothing polls.
+          if (message.event.type === "channel_invocations_changed" && message.event.channelId) {
+            void queryClient.invalidateQueries({ queryKey: ["agent-launches", message.event.channelId] });
+          }
+          // The Hub recorded what a message's command came to: its chip answers now.
+          if (message.event.type === "channel_message_interactions_updated" && message.event.channelId) {
+            const channelId = message.event.channelId;
+            const answered = commandResultHistoryMessage(
+              heldChannelWindow(channelId, false).messages, message.event.metadata);
+            if (answered) mergeAndRememberChannelHistory(channelId, [answered], undefined, false);
           }
           if (message.event.type === "agent_disconnected") {
             const instanceId = message.event.metadata?.instanceId;
@@ -1983,12 +2000,14 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
              now. For any other, the rows that show it do, and the shell is
              told when the catalog window below reorders the list, instead of
              once per message (use-channel-catalog-paging.ts). */
+          // An instruction to one Agent Instance neither previews nor needs reading.
+          const instruction = isAgentInstruction(entry.metadata);
           const arrival = {
             entry,
-            preview: channelLastMessagePreviewFromEntry(entry),
+            preview: instruction ? undefined : channelLastMessagePreviewFromEntry(entry),
             known: alreadyCached,
             historyCount: historyMessageCountEstimate(merged),
-            activity: channelActivityOf(entry.metadata) !== undefined,
+            activity: instruction || channelActivityOf(entry.metadata) !== undefined,
           };
           // No read of this reader's has brought the Channel yet: the one on
           // its way may be older than this message, which is applied to it then.
@@ -2866,6 +2885,12 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
       token, spaceId: currentSpaceId, query, resumeToken, ...filters,
     });
   }, [currentSpaceId, token]);
+  const searchRerank = useMemo<WorkspaceSearchRerank | undefined>(() => {
+    if (!token || !currentSpaceId) return undefined;
+    return { spaceId: currentSpaceId, rerank: (query, candidates, signal) => rerankWorkspaceSearch({
+      token, spaceId: currentSpaceId, query, candidates, signal,
+    }) };
+  }, [currentSpaceId, token]);
 
   const persistComposerDraftSnapshot = useCallback((text: string, invocationDraft?: ComposerInvocationDraft) => {
     draftRef.current = text;
@@ -3048,6 +3073,8 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
     setDraftAttachments,
     replyTarget,
     setReplyTarget,
+    discussionQuotes,
+    setDiscussionQuotes,
     draftRef,
     draftAttachmentsRef,
     replyTargetRef,
@@ -3073,14 +3100,6 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
     channelCreationsRef,
     creatingChannelIds,
     setCreatingChannelIds,
-    channelMoveOpen,
-    setChannelMoveOpen,
-    channelMoveTargetSpaceId,
-    setChannelMoveTargetSpaceId,
-    movingChannelId,
-    setMovingChannelId,
-    channelMoveError,
-    setChannelMoveError,
     workspaceSearchOpen,
     workspaceSearchHere,
     setWorkspaceSearchOpen,
@@ -3120,6 +3139,7 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
     agentStatusEvents,
     logoutAndClearDeviceData,
     messageSearch,
+    searchRerank,
     persistComposerDraftSnapshot,
   };
 }

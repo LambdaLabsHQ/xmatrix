@@ -10,6 +10,7 @@ const {
   formatMessageDateTime,
   formatMessageTimestamp,
   mergeChannelHistory,
+  commandResultHistoryMessage,
   supersededHistoryMessage,
 } = history.exports;
 
@@ -153,4 +154,49 @@ test("a live supersession judgment folds the held message once", () => {
     { messageId: "m1", supersededBy: "m2" }), undefined);
   assert.equal(supersededHistoryMessage(window, { messageId: "m1" }), undefined);
   assert.equal(supersededHistoryMessage(window, undefined), undefined);
+});
+
+test("a send's own reply never erases the answer the Hub already pushed for it", () => {
+  const sent = { messageId: "m1", channelId: "a", sequence: 4, sentAt: "2026-10-22T08:29:03.019Z", body: "@claude:1 /effort max" };
+  const controls = [{ kind: "effort", target: "claude:1", status: "switched", selected: "max" }];
+  // The answer arrives first, on the echo the reader holds.
+  const answered = commandResultHistoryMessage([sent], { messageId: "m1", annotationId: "a1", payload: { controls } });
+  const held = mergeChannelHistory("a", [], [answered]);
+  // Then the send returns the message as committed, before any answer.
+  const [merged] = mergeChannelHistory("a", held, [{ ...sent, mentionReadStatuses: [] }]);
+  assert.deepEqual(merged.commandResult, { controls });
+  assert.deepEqual(merged.mentionReadStatuses, [], "the newer frame's own fields still apply");
+  // A recall is the one frame that does end what the Hub judged.
+  const [recalled] = mergeChannelHistory("a", [merged], [{ ...sent, body: "", recalledAt: "2026-10-22T08:30:00Z" }]);
+  assert.equal(recalled.commandResult, undefined);
+});
+
+test("partial history and live command answers converge in either order without losing a Run's result", () => {
+  const message = { messageId: "summon", channelId: "a", sentAt: "2026-10-22T00:00:00Z", body: "@auto" };
+  const fallback = { id: "fallback", text: "Trying another Machine", at: "2026-10-22T00:00:01Z", runId: "first" };
+  const failure = { id: "failure", text: "The replacement failed to start", at: "2026-10-22T00:00:02Z", runId: "second" };
+  const snapshot = { ...message, commandResult: { notes: [fallback] } };
+  const live = { messageId: message.messageId, annotationId: failure.id, payload: { note: failure } };
+  const pushed = commandResultHistoryMessage([message], live);
+  const [lateHistory] = mergeChannelHistory("a", [pushed], [snapshot]);
+  const earlyHistory = commandResultHistoryMessage([snapshot], live);
+  assert.deepEqual(lateHistory.commandResult, { notes: [fallback, failure] });
+  assert.deepEqual(lateHistory.commandResult, earlyHistory.commandResult);
+  const [replayed] = mergeChannelHistory("a", [lateHistory], [snapshot, lateHistory]);
+  assert.deepEqual(replayed.commandResult, lateHistory.commandResult, "replays never duplicate a fact");
+  assert.deepEqual(pushed.commandResult.notes, [failure], "held snapshots are not mutated");
+});
+
+test("a partial note snapshot cannot erase a switch's answer and a stale note cannot undo its correction", () => {
+  const message = { messageId: "stop", channelId: "a", sentAt: "2026-10-22T00:00:00Z" };
+  const controls = [{ kind: "effort", target: "claude:1", status: "switched", selected: "max" }];
+  const waiting = { id: "stop", text: "Waiting for the Machine", at: "2026-10-22T00:00:01Z" };
+  const confirmed = { ...waiting, text: "Stopped", at: "2026-10-22T00:00:02Z", stopOutcome: "stopped" };
+  const held = { ...message, commandResult: { controls, notes: [confirmed] } };
+  const snapshot = { ...message, commandResult: { notes: [waiting] } };
+  const [merged] = mergeChannelHistory("a", [held], [snapshot]);
+  assert.deepEqual(merged.commandResult, held.commandResult);
+  const staleEvent = commandResultHistoryMessage([merged], { messageId: message.messageId,
+    annotationId: waiting.id, payload: { note: waiting } });
+  assert.deepEqual(staleEvent.commandResult, held.commandResult, "live and history use the same fact merge");
 });

@@ -10,15 +10,16 @@ import {
   channelMatchesSearch,
   channelReadCountsStorageKey,
   normalizeChannelSearchText,
-  searchResultRank,
 } from "./workspace-shell-search-model";
+import {
+  rankSearchResults, searchActivityMs, searchMatchTier, type SearchMatchTier,
+} from "./workspace-search-rank";
 
 export type { ChannelTreeNode, WorkspaceSearchResult } from "./workspace-shell-search-model";
 export {
   channelMatchesSearch,
   channelReadCountsStorageKey,
   normalizeChannelSearchText,
-  searchResultRank,
 } from "./workspace-shell-search-model";
 
 import {
@@ -369,6 +370,19 @@ export function channelRecentActivityMs(channel: ChannelSnapshot): number {
   return channelSortTimestamps(channel).recent;
 }
 
+/**
+ * Conversations matching a search, best first by match and then by recent
+ * activity, so a wide word such as a product name still surfaces the
+ * conversation the reader was just in.
+ */
+export function searchMatchingChannels(channels: readonly ChannelSnapshot[], query: string): ChannelSnapshot[] {
+  const needle = normalizeChannelSearchText(query);
+  if (!needle) return [];
+  return rankSearchResults(channels.filter((channel) => channelMatchesSearch(channel, needle)), (channel) => ({
+    tier: searchMatchTier(needle, channelTitle(channel)), activityMs: channelRecentActivityMs(channel),
+  }));
+}
+
 export function channelIsPinned(channel: ChannelSnapshot): boolean {
   const metadata = channel.metadata;
   return (
@@ -453,16 +467,20 @@ export function buildWorkspaceSearchResults({
   const results: WorkspaceSearchResult[] = [];
   const channelById = new Map(channels.map((channel) => [channel.id, channel]));
   const seenMessages = new Set<string>();
+  /** Ranks by the title shown unless the match was only in a message's text. */
+  const push = (result: Omit<WorkspaceSearchResult, "rank">, activityMs = 0, tier?: SearchMatchTier) => {
+    results.push({ ...result, rank: { tier: tier ?? searchMatchTier(normalizedQuery, result.title), activityMs } });
+  };
 
   for (const channel of channels) {
     if (!channelMatchesSearch(channel, normalizedQuery)) continue;
-    results.push({
+    push({
       id: `channel:${channel.id}`,
       kind: "channel",
       title: `#${channelTitle(channel)}`,
       subtitle: quickOpenChannelSubtitle(channel, spaces, channels),
       channelId: channel.id,
-    });
+    }, channelRecentActivityMs(channel));
   }
 
   // Catalog last-message previews (what the mobile channel list shows under the
@@ -476,14 +494,14 @@ export function buildWorkspaceSearchResults({
     ].filter(Boolean).join(" "));
     if (!searchable.includes(normalizedQuery)) continue;
     seenMessages.add(last.messageId);
-    results.push({
+    push({
       id: `message:${last.messageId}`,
       kind: "message",
       title: (last.bodyPreview || "").trim() || "Message",
       subtitle: `${last.from?.label || "Someone"} in #${channelTitle(channel)} - ${formatDateTime(last.sentAt)}`,
       channelId: channel.id,
       messageId: last.messageId,
-    });
+    }, searchActivityMs(last.sentAt), 3);
   }
 
   for (const message of messages) {
@@ -499,25 +517,25 @@ export function buildWorkspaceSearchResults({
     ].filter(Boolean).join(" "));
     if (!searchable.includes(normalizedQuery)) continue;
     seenMessages.add(message.messageId);
-    results.push({
+    push({
       id: `message:${message.messageId}`,
       kind: "message",
       title: message.body.trim() || attachmentNames.find((name) => name.trim()) || "Attachment",
       subtitle: `${message.from.label} in #${channel ? channelTitle(channel) : shortId(message.channelId)} - ${formatDateTime(message.sentAt)}`,
       channelId: message.channelId,
       messageId: message.messageId,
-    });
+    }, searchActivityMs(message.sentAt), 3);
   }
 
   for (const page of pages) {
     if (!normalizeChannelSearchText(page.title).includes(normalizedQuery)) continue;
-    results.push({
+    push({
       id: `page:${page.pageId}`,
       kind: "page",
       title: page.title,
       subtitle: "Page",
       pageId: page.pageId,
-    });
+    }, searchActivityMs(page.updatedAt));
   }
 
   for (const space of spaces) {
@@ -535,7 +553,7 @@ export function buildWorkspaceSearchResults({
         member.email && member.email !== title ? member.email : undefined,
         member.handle && member.handle !== title ? `@${member.handle}` : undefined,
       ].filter(Boolean);
-      results.push({
+      push({
         id: `member:${space.id}:${member.userId}`,
         kind: "member",
         title,
@@ -555,7 +573,7 @@ export function buildWorkspaceSearchResults({
       agent.id,
     ].filter(Boolean).join(" "));
     if (!searchable.includes(normalizedQuery)) continue;
-    results.push({
+    push({
       id: `agent:${agent.id}`,
       kind: "agent",
       title: agent.name,
@@ -567,7 +585,7 @@ export function buildWorkspaceSearchResults({
     const searchable = normalizeChannelSearchText([space.name, space.id].join(" "));
     if (!searchable.includes(normalizedQuery)) continue;
     const channel = channels.find((item) => item.spaceId === space.id);
-    results.push({
+    push({
       id: `space:${space.id}`,
       kind: "space",
       title: space.name,
@@ -584,7 +602,7 @@ export function buildWorkspaceSearchResults({
       project.canonicalCwd,
     ].filter(Boolean).join(" "));
     if (!searchable.includes(normalizedQuery)) continue;
-    results.push(workspaceSearchResult(project));
+    push(workspaceSearchResult(project));
   }
 
   for (const daemon of machineDaemons) {
@@ -598,7 +616,7 @@ export function buildWorkspaceSearchResults({
       hostName,
     ].filter(Boolean).join(" "));
     if (!searchable.includes(normalizedQuery)) continue;
-    results.push(machineSearchResult(daemon));
+    push(machineSearchResult(daemon));
   }
 
   for (const event of events) {
@@ -610,20 +628,16 @@ export function buildWorkspaceSearchResults({
       eventMetadataString(event, "summary"),
     ].filter(Boolean).join(" "));
     if (!searchable.includes(normalizedQuery)) continue;
-    results.push({
+    push({
       id: `event:${event.id}`,
       kind: "event",
       title: eventLabel(event),
       subtitle: `${channel ? `#${channelTitle(channel)} - ` : ""}${formatDateTime(event.timestamp)}`,
       channelId: event.channelId,
-    });
+    }, searchActivityMs(event.timestamp), 3);
   }
 
-  return results
-    .sort((left, right) =>
-      searchResultRank(left.kind) - searchResultRank(right.kind) || left.id.localeCompare(right.id)
-    )
-    .slice(0, 80);
+  return rankSearchResults(results, (result) => result.rank).slice(0, 80);
 }
 
 export function searchResultIcon(kind: WorkspaceSearchResult["kind"]): React.ComponentType<{ className?: string }> {
@@ -960,14 +974,14 @@ export function channelMentionClearedStorageKey(userId: string): string {
    was momentarily incomplete, and a second copy of the same fact could only
    re-introduce that. */
 
-export function workspaceSearchResult(project: SerializedWorkspace): WorkspaceSearchResult {
+export function workspaceSearchResult(project: SerializedWorkspace): Omit<WorkspaceSearchResult, "rank"> {
   return {
     id: `workspace:${workspaceKey(project)}`, kind: "machine", title: project.displayName,
     subtitle: [project.hostName || project.hostId, project.canonicalCwd].filter(Boolean).join(" - "),
   };
 }
 
-export function machineSearchResult(daemon: SerializedMachineDaemon): WorkspaceSearchResult {
+export function machineSearchResult(daemon: SerializedMachineDaemon): Omit<WorkspaceSearchResult, "rank"> {
   const hostName = daemon.hostName || metadataString(daemon.metadata, "hostName");
   return {
     id: `machine:${daemon.id}`, kind: "machine", title: daemon.name,

@@ -1,7 +1,7 @@
 import type { QueryResultRow } from "pg";
 import type { AuthorityDatabase, DatabaseTransaction } from "./contracts.js";
 import { AppControlError } from "./app-control.js";
-import { requireChannelCapability } from "./channel-capability-policy.js";
+import { retryBeforeCommit } from "./transaction-recovery.js";
 import { decryptSecretValue, encryptSecretValue } from "./secret-value-control.js";
 
 export interface GmailRoutingSelection {
@@ -11,7 +11,7 @@ export interface GmailRoutingSelection {
 }
 export interface GmailRoutingJob {
   id: string; spaceId: string; connectionId: string; credentialVersion: number; generation: string;
-  userId: string; channelId: string; selection: GmailRoutingSelection; historyId: string;
+  userId: string; selection: GmailRoutingSelection; historyId: string;
   pageToken?: string; leaseId?: string; wakeVersion: number; pendingWake: boolean; lastSignalAt?: string;
   lastVerifiedAt?: string; error?: string; enabled: boolean; expiresAt?: string; renewAt?: string;
   mode: "native" | "poll"; nextSearchAt?: string;
@@ -23,8 +23,8 @@ export class PostgresGmailRoutingRepository {
   constructor(private readonly database: AuthorityDatabase, private readonly material: string) {
     if (database.cacheMode !== "disabled" || !material) throw fail();
   }
-  private transaction<T>(operation: string, run: (tx: DatabaseTransaction) => Promise<T>) {
-    return this.database.transaction({ requestId: crypto.randomUUID(), operation: `app.gmail-routing.${operation}` }, run);
+  private transaction<T>(operation: string, run: (tx: DatabaseTransaction) => Promise<T>, statement?: "single_read") {
+    return this.database.transaction({ requestId: crypto.randomUUID(), operation: `app.gmail-routing.${operation}`, statement }, run);
   }
   private async row(row: QueryResultRow): Promise<GmailRoutingJob> {
     const selection = JSON.parse(await decryptSecretValue(this.material, { encrypted_value_json: row.encrypted_value_json,
@@ -32,7 +32,7 @@ export class PostgresGmailRoutingRepository {
     const date = (value: unknown) => value ? new Date(value as string).toISOString() : undefined;
     return { id: String(row.route_id), spaceId: String(row.space_id), connectionId: String(row.connection_id),
       credentialVersion: Number(row.credential_version), generation: String(row.connection_generation),
-      userId: String(row.created_by), channelId: String(row.channel_id), selection,
+      userId: String(row.created_by), selection,
       historyId: String(row.history_id), pageToken: row.page_token ? String(row.page_token) : undefined,
       leaseId: row.lease_id ? String(row.lease_id) : undefined, wakeVersion: Number(row.wake_version), pendingWake:Number(row.wake_version)>Number(row.processed_version),
       lastSignalAt: date(row.last_signal_at), lastVerifiedAt: date(row.last_verified_at),
@@ -40,17 +40,12 @@ export class PostgresGmailRoutingRepository {
       error: row.error_code ? String(row.error_code) : undefined, enabled: row.enabled === true,
       mode: row.notification_mode === "poll" ? "poll" : "native", nextSearchAt: date(row.next_search_at) };
   }
-  private async authorize(tx: DatabaseTransaction, spaceId: string, userId: string, channelId?: string) {
+  private async authorize(tx: DatabaseTransaction, spaceId: string, userId: string) {
     const roles = await tx.query<QueryResultRow>({ name: "gmail_route_admin_v1", text: `SELECT role FROM data.space_members
       WHERE space_id=$1 AND user_id=$2 AND NOT EXISTS (SELECT 1 FROM data.space_deletions WHERE space_id=$1)
       AND NOT EXISTS (SELECT 1 FROM data.account_deletion_fences WHERE user_id=$2 AND (committed OR expires_at>clock_timestamp()))
       LIMIT 1 FOR SHARE`, values: [spaceId, userId], maxRows: 1 });
     if (!["owner", "admin"].includes(String(roles[0]?.role))) throw fail();
-    if (channelId) {
-      const grant = await requireChannelCapability(tx, { channelId, principal: { kind: "user", id: userId },
-        capability: "app_new_work", error: failure => new AppControlError(failure.code, failure.status, failure.message) });
-      if (grant.spaceId !== spaceId) throw fail();
-    }
   }
   async list(spaceId: string, userId: string) {
     return this.transaction("list", async tx => {
@@ -68,7 +63,7 @@ export class PostgresGmailRoutingRepository {
       values: [id,userId,nonceDigest], maxRows: 1 });
       if (!rows[0]) throw fail();
       const job = await this.row(rows[0]);
-      await this.authorize(tx,job.spaceId,userId,job.channelId);
+      await this.authorize(tx,job.spaceId,userId);
       return job;
     });
   }
@@ -76,7 +71,7 @@ export class PostgresGmailRoutingRepository {
     poll?: { token: NonNullable<GmailRoutingSelection["pollToken"]>; fingerprint: string }) {
     if((job.mode==="poll")!==!!poll || (job.mode==="native" && !expiresAt))throw fail();
     return this.transaction("activate", async tx => {
-      await this.authorize(tx,job.spaceId,job.userId,job.channelId);
+      await this.authorize(tx,job.spaceId,job.userId);
       const current = await tx.query<QueryResultRow>({ name: "gmail_route_activation_grant_v1", text: `SELECT c.connection_id
         FROM data.app_connector_connections c JOIN data.app_connector_credentials k USING(connection_id,space_id)
         WHERE c.connection_id=$1 AND c.status='configured' AND c.search_rank_sequence=$2 AND k.version=$3
@@ -104,13 +99,13 @@ export class PostgresGmailRoutingRepository {
       SET expires_at=$3,renew_at=now()+interval '1 day' WHERE route_id=$1 AND enabled AND lease_id=$2::uuid`,
     values:[job.id,job.leaseId,expiresAt],maxRows:0}));
   }
-  async create(input: { spaceId: string; userId: string; channelId: string; credentialVersion: number;
+  async create(input: { spaceId: string; userId: string; credentialVersion: number;
     generation: string; mailboxDigest: string; tokenDigest: string; nonceDigest: string; selection: GmailRoutingSelection; historyId: string;
     mode?: "native" | "poll" }) {
     const id = crypto.randomUUID();
     const envelope = await encryptSecretValue(this.material, `gmail-route:${id}`, "selection", 1, JSON.stringify(input.selection));
     return this.transaction("create", async tx => {
-      await this.authorize(tx, input.spaceId, input.userId, input.channelId);
+      await this.authorize(tx, input.spaceId, input.userId);
       const connectionId = `${input.spaceId}:gmail`;
       const rows = await tx.query<QueryResultRow>({ name: "gmail_route_grant_v1", text: `SELECT c.connection_id
         FROM data.app_connector_connections c JOIN data.app_connector_credentials k USING(connection_id,space_id)
@@ -126,11 +121,11 @@ export class PostgresGmailRoutingRepository {
       const count = await tx.query<QueryResultRow>({ name: "gmail_route_count_v1", text: `SELECT count(*) AS count FROM
         (SELECT 1 FROM data.app_gmail_routes WHERE connection_id=$1 LIMIT 20) r`, values: [connectionId], maxRows: 1 });
       if (Number(count[0]?.count) >= 20) throw fail();
-      await tx.query({ name: "gmail_route_create_v1", text: `INSERT INTO data.app_gmail_routes
-        (route_id,space_id,connection_id,credential_version,connection_generation,created_by,channel_id,
+      await tx.query({ name: "gmail_route_create_v2", text: `INSERT INTO data.app_gmail_routes
+        (route_id,space_id,connection_id,credential_version,connection_generation,created_by,
          mailbox_digest,token_digest,encrypted_value_json,history_id,oauth_nonce_digest,notification_mode)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,$12,$13)`, values: [id, input.spaceId, connectionId,
-      input.credentialVersion, input.generation, input.userId, input.channelId, input.mailboxDigest, input.tokenDigest,
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10,$11,$12)`, values: [id, input.spaceId, connectionId,
+      input.credentialVersion, input.generation, input.userId, input.mailboxDigest, input.tokenDigest,
       JSON.stringify(envelope), input.historyId,input.nonceDigest,input.mode ?? "native"], maxRows: 0 });
       return id;
     });
@@ -153,12 +148,22 @@ export class PostgresGmailRoutingRepository {
     });
   }
   async cleanup() {
-    return this.transaction("cleanup", tx => tx.query({ name: "gmail_route_cleanup_v1", text: `DELETE FROM data.app_gmail_routes
+    // No provider calls or delivery happen here; an uncommitted deletion can
+    // safely be attempted once more, skipping any rows the old session holds.
+    return retryBeforeCommit(() => this.transaction("cleanup", tx => tx.query({ name: "gmail_route_cleanup_v1", text: `DELETE FROM data.app_gmail_routes
       WHERE route_id IN (SELECT route_id FROM data.app_gmail_routes WHERE NOT enabled
         AND (encrypted_value_json='{}'::jsonb OR (expires_at IS NULL AND error_code IS NULL AND created_at<now()-interval '10 minutes'))
-        ORDER BY created_at LIMIT 100 FOR UPDATE SKIP LOCKED)`, values: [], maxRows: 0 }));
+        ORDER BY created_at LIMIT 100 FOR UPDATE SKIP LOCKED)`, values: [], maxRows: 0 })));
   }
+  /**
+   * Claiming has no effect outside its transaction, so a response lost before COMMIT
+   * (a Hyperdrive round-trip stall, XMATRIX-HUB-90) claims again on a fresh checkout.
+   * Rows the lost UPDATE may still lock are skipped and claimed on a later tick.
+   */
   async claim() {
+    return retryBeforeCommit(() => this.claimOnce());
+  }
+  private claimOnce() {
     return this.transaction("claim", async tx => {
       const rows = await tx.query<QueryResultRow>({ name: "gmail_route_claim_v1", text: `WITH due AS
         (SELECT route_id FROM data.app_gmail_routes WHERE enabled AND (wake_version>processed_version OR renew_at<=now() OR next_poll_at<=now())
@@ -172,7 +177,7 @@ export class PostgresGmailRoutingRepository {
   }
   async current(job: GmailRoutingJob) {
     return this.transaction("current", async tx => {
-      try { await this.authorize(tx, job.spaceId, job.userId, job.channelId); } catch (error) {
+      try { await this.authorize(tx, job.spaceId, job.userId); } catch (error) {
         if (error instanceof AppControlError && [403,404,409].includes(error.status)) return false;
         throw error;
       }
@@ -191,7 +196,7 @@ export class PostgresGmailRoutingRepository {
         FROM data.app_gmail_notifications WHERE route_id=$1 AND delivered_at IS NULL ORDER BY message_id LIMIT 50`,
       values: [job.id], maxRows: 50 });
       return rows.map(row => String(row.message_id));
-    });
+    }, "single_read");
   }
   async cachePollToken(job: GmailRoutingJob, token: NonNullable<GmailRoutingSelection["pollToken"]>, refreshToken?: string) {
     const selection={...job.selection,pollToken:token,...(refreshToken ? {refreshToken} : {})};
@@ -249,7 +254,9 @@ export class PostgresGmailRoutingRepository {
   async finish(job: GmailRoutingJob, outcome: "done" | "continue" | "retry" | "blocked") {
     const retired=outcome==="blocked" ? await encryptSecretValue(this.material,`gmail-route:${job.id}`,"selection",1,
       JSON.stringify({...job.selection,oauthVerifier:"",refreshToken:undefined,pollToken:undefined})) : undefined;
-    return this.transaction("finish", tx => tx.query({ name: "gmail_route_finish_v1", text: `UPDATE data.app_gmail_routes
+    // The fenced database-only completion is replayable before COMMIT. An
+    // unknown commit still escapes; expiry and the durable cursor reconcile it.
+    return retryBeforeCommit(() => this.transaction("finish", tx => tx.query({ name: "gmail_route_finish_v1", text: `UPDATE data.app_gmail_routes
       SET lease_id=NULL,lease_until=NULL,processed_version=CASE WHEN $3='done' THEN $4 ELSE processed_version END,
         last_verified_at=CASE WHEN $3='done' THEN now() ELSE last_verified_at END,
         next_poll_at=CASE WHEN notification_mode='poll' AND $3='done' THEN date_trunc('minute',now())+interval '1 minute' ELSE next_poll_at END,
@@ -258,6 +265,6 @@ export class PostgresGmailRoutingRepository {
         attempts=CASE WHEN $3 IN ('done','continue') THEN 0 ELSE attempts END,
         error_code=CASE WHEN $3 IN ('done','continue') THEN NULL WHEN $3='retry' AND attempts>=8 THEN 'paused' ELSE $3 END,
         available_at=now()+interval '15 seconds'*CASE WHEN $3 IN ('done','continue') THEN 1 ELSE least(60,power(2,attempts)) END,updated_at=now()
-      WHERE route_id=$1 AND lease_id=$2::uuid AND lease_until>now()`, values: [job.id, job.leaseId, outcome, job.wakeVersion, retired ? JSON.stringify(retired):null], maxRows: 0 }));
+      WHERE route_id=$1 AND lease_id=$2::uuid AND lease_until>now()`, values: [job.id, job.leaseId, outcome, job.wakeVersion, retired ? JSON.stringify(retired):null], maxRows: 0 })));
   }
 }

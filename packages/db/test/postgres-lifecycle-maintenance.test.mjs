@@ -49,10 +49,11 @@ test("lifecycle options enforce the reviewed batch, total, and time ceilings", (
     dryRun: false, batchSize: 1_000, maxRows: 10_000, budgetMs: 30_000,
   });
   assert.deepEqual(parseLifecycleOptions([
-    "--dry-run", "--batch-size=1000", "--max-rows=100000", "--budget-ms=90000",
-  ]), { dryRun: true, batchSize: 1_000, maxRows: 100_000, budgetMs: 90_000 });
+    "--dry-run", "--batch-size=1000", "--max-rows=1000000", "--budget-ms=300000",
+  ]), { dryRun: true, batchSize: 1_000, maxRows: 1_000_000, budgetMs: 300_000 });
   assert.throws(() => parseLifecycleOptions(["--batch-size=1001"]), /between 1 and 1000/u);
-  assert.throws(() => parseLifecycleOptions(["--max-rows=100001"]), /between 1 and 100000/u);
+  assert.throws(() => parseLifecycleOptions(["--max-rows=1000001"]), /between 1 and 1000000/u);
+  assert.throws(() => parseLifecycleOptions(["--budget-ms=300001"]), /between 1 and 300000/u);
   assert.throws(() => parseLifecycleOptions(["--sql=DELETE"]), /Unknown or duplicate/u);
 });
 
@@ -106,7 +107,7 @@ test("maintenance deletes expired PostgreSQL sequence reservations with the same
 
 test("maintenance stops starting batches when its wall-time budget is exhausted", async () => {
   const fake = client([1_000, 1_000]);
-  const ticks = [0, 0, 30_001, 30_001];
+  const ticks = [0, 0, 0, 30_001];
   const result = await runLifecycleMaintenance(fake, parseLifecycleOptions([]), {
     monotonicNow: () => ticks.shift() ?? 30_001,
   });
@@ -154,14 +155,42 @@ test("maintenance purges only expired sign-in sessions, in bounded batches", asy
   assert.deepEqual(deletes.map(value => value.values[0]), [1_000, 1_000]); assertBoundedExpiryDeletes(deletes);
 });
 
-test("maintenance expires scoped command replays last, in bounded batches", async () => {
+test("maintenance expires scoped command replays in bounded batches", async () => {
   const fake = clientWithExpired("control.scoped_control_command_replays", 2_500);
   const result = await runLifecycleMaintenance(fake, parseLifecycleOptions(["--max-rows=2000"]));
   assert.equal(result.deletedExpiredScopedCommandReplays, 2_000);
   const deletes = fake.calls.filter(value => value.text.includes("DELETE FROM control.scoped_control_command_replays"));
   assert.deepEqual(deletes.map(value => value.values[0]), [1_000, 1_000]); assertBoundedExpiryDeletes(deletes);
-  const lastDelete = fake.calls.findLastIndex(value => /DELETE FROM/u.test(value.text));
-  assert.match(fake.calls[lastDelete].text, /control\.scoped_control_command_replays/u);
+});
+
+test("relations share the time budget one batch each, so none is starved", async () => {
+  // Production on 2026-10-20: the outbox and sign-in sessions filled the whole
+  // budget and the replay table, run last, got no batch on three days running.
+  const fake = clientWithExpired("data.outbox", 50_000);
+  const original = fake.query;
+  let replays = 50_000;
+  let now = 0;
+  fake.query = async (text, values) => {
+    if (text.includes("DELETE FROM")) now += 1_000;
+    if (!text.includes("DELETE FROM control.scoped_control_command_replays")) return original(text, values);
+    fake.calls.push({ text, values });
+    const rowCount = Math.min(replays, values[0]); replays -= rowCount;
+    return { rows: Array.from({ length: rowCount }), rowCount };
+  };
+  const result = await runLifecycleMaintenance(fake, parseLifecycleOptions(["--max-rows=100000"]),
+    { monotonicNow: () => now });
+  assert.ok(result.deletedExpiredScopedCommandReplays >= 10_000);
+  assert.ok(Math.abs(result.deletedRetainedOutboxRows - result.deletedExpiredScopedCommandReplays) <= 1_000);
+  assert.ok(result.elapsedMs <= 31_000);
+});
+
+test("each batch is one statement, with no transaction round trips around it", async () => {
+  const fake = clientWithExpired("control.scoped_control_command_replays", 1_500);
+  await runLifecycleMaintenance(fake, parseLifecycleOptions([]));
+  const texts = fake.calls.map(({ text }) => text);
+  const firstDelete = texts.findIndex(text => text.includes("DELETE FROM"));
+  const lastDelete = texts.findLastIndex(text => text.includes("DELETE FROM"));
+  assert.deepEqual(texts.slice(firstDelete, lastDelete + 1).filter(text => !text.includes("DELETE FROM")), []);
 });
 
 test("the snapshot reads one statement at a time under its own read-only timeout", async () => {

@@ -38,7 +38,7 @@ export type UsageScope = { spaceId: string } | { ownerUserId: string };
 
 /** What a Jev call was for. */
 export type JevFeature = "summon_intent" | "launch_choice" | "input_launch" | "start_intent" | "supersession"
-  | "page_attachment" | "evaluate";
+  | "page_attachment" | "evaluate" | "search_rerank";
 
 export type UpstreamSource = "composio" | "x";
 

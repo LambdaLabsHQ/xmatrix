@@ -37,6 +37,12 @@ const HEARTBEAT_INTERVAL_MS: u64 = 60_000;
 const HEARTBEAT_RETRY_BASE_MS: u64 = 500;
 const HEARTBEAT_RETRY_MAX_MS: u64 = 4_000;
 const HEARTBEAT_TIMEOUT_MS: u64 = 90_000;
+/// The Relay Runtime answers this exact frame itself (its WebSocket
+/// auto-response, shared with the web's heartbeat) without waking the Durable
+/// Object that owns this socket. It must match the Hub's `HUMAN_HEARTBEAT_PING`
+/// byte for byte. Its answer carries no `ts`, so it never parses as a reply:
+/// like any server frame it only proves the socket, which is all this probe asks.
+const EDGE_HEARTBEAT_FRAME: &str = r#"{"type":"ping","requestId":"web-heartbeat"}"#;
 const TRACE_REAP_INTERVAL_MS: u64 = HEARTBEAT_INTERVAL_MS;
 const CONNECT_TIMEOUT_MS: u64 = 15_000;
 const REGISTER_RESPONSE_TIMEOUT_SECS: u64 = 20;
@@ -53,9 +59,10 @@ const CLIENT_NETWORK_SAMPLE_FAILURE_LOG_INTERVAL_MS: u64 = 60_000;
 static LAST_CLIENT_NETWORK_SAMPLE_FAILURE_LOG_MS: AtomicU64 = AtomicU64::new(0);
 const CHANNEL_ATTACHMENT_PRODUCT_MEDIA_MAX_BYTES: u64 = 64 * 1024 * 1024;
 const CHANNEL_ATTACHMENT_PRODUCT_MEDIA_NOT_FOUND_RETRY_MS: [u64; 2] = [100, 250];
-// Live delivery is at-least-once: a retry can race the first successful frame
-// on the same WebSocket. Keep only a bounded per-socket identity window so an
-// unacknowledged message is still eligible for replay after reconnect.
+// Delivery is at-least-once: a retry can race the first successful frame, and
+// a reconnect replays everything after the last ack, including what this
+// process already holds. A bounded identity window of what it was handed keeps
+// each message one runtime turn.
 const CHANNEL_DELIVERY_DEDUP_CAPACITY: usize = 1_024;
 
 #[derive(Debug, Clone, Default)]
@@ -329,7 +336,7 @@ fn derive_http_base_url(hub_url: &str) -> String {
     format!("{}://{host}", if secure { "https" } else { "http" })
 }
 
-pub fn derive_connection_url(hub_url: &str) -> String {
+pub(crate) fn derive_connection_url(hub_url: &str) -> String {
     let (secure, host) = connection_host(hub_url);
     format!(
         "{}://{host}/ws/agent-instances",
@@ -473,6 +480,8 @@ pub struct AgentInstanceConnectionClient {
     /// `max(acked_sequence, sequence)`, so replaying the newest ack per channel
     /// on reconnect subsumes every ack lost that way, whatever the count.
     last_channel_acks: Arc<Mutex<HashMap<String, AgentInstanceClientMessage>>>,
+    /// The channel messages this process handed to its runtime, across reconnects.
+    channel_deliveries: Arc<Mutex<ChannelDeliveryDeduper>>,
 }
 
 impl AgentInstanceConnectionClient {
@@ -529,6 +538,7 @@ impl AgentInstanceConnectionClient {
             pending_acks: Arc::new(Mutex::new(VecDeque::new())),
             unanswered_reports: Arc::default(),
             last_channel_acks: Arc::new(Mutex::new(HashMap::new())),
+            channel_deliveries: Arc::default(),
         }
     }
 
@@ -734,6 +744,7 @@ impl AgentInstanceConnectionClient {
                     write_tx: write_tx.clone(),
                     registered_author: self.registered_author.clone(),
                     spawn_initial_message_id: spawn_initial_message_id(),
+                    channel_deliveries: self.channel_deliveries.clone(),
                 },
             ),
         );
@@ -803,6 +814,7 @@ impl AgentInstanceConnectionClient {
         let channel_waterlines = self.channel_waterlines.clone();
         let pending_acks = self.pending_acks.clone();
         let last_channel_acks = self.last_channel_acks.clone();
+        let channel_deliveries = self.channel_deliveries.clone();
         let unanswered_reports = self.unanswered_reports.clone();
         let latest_presence = self.latest_presence.clone();
         let instance_resume_key = self.instance_resume_key.clone();
@@ -1156,6 +1168,7 @@ impl AgentInstanceConnectionClient {
                                 write_tx: new_write_tx.clone(),
                                 registered_author: registered_author.clone(),
                                 spawn_initial_message_id: spawn_initial_message_id(),
+                                channel_deliveries: channel_deliveries.clone(),
                             },
                         ),
                     );
@@ -1309,7 +1322,7 @@ impl AgentInstanceConnectionClient {
         );
     }
 
-    pub fn write_tx_clone(&self) -> Option<mpsc::Sender<String>> {
+    pub(crate) fn write_tx_clone(&self) -> Option<mpsc::Sender<String>> {
         self.write_tx.lock().ok().and_then(|slot| slot.clone())
     }
 
@@ -1403,7 +1416,7 @@ impl AgentInstanceConnectionClient {
                     "messageId": message_id,
                     "attachmentId": attachment_id,
                 }));
-            let response = http::with_access_header(request, &url)?.send().await?;
+            let response = request.send().await?;
             if response.status() != reqwest::StatusCode::NOT_FOUND
                 || not_found_attempt >= CHANNEL_ATTACHMENT_PRODUCT_MEDIA_NOT_FOUND_RETRY_MS.len()
             {
@@ -1421,7 +1434,7 @@ impl AgentInstanceConnectionClient {
         ) {
             let _ = crate::attachment_cache::remember_refused_attachment(&stem);
         }
-        let response = http::require_success(response, &url).await?;
+        let response = http::require_success(response).await?;
         if response.content_length() != Some(expected_size) {
             return Err(CliError::Relay(
                 "Channel image attachment length does not match authority".into(),
@@ -1487,51 +1500,6 @@ impl AgentInstanceConnectionClient {
                 message, failure, ..
             } => Err(agent_operation_error(message, failure)),
             _ => Err(CliError::Relay("Unexpected join_channel response".into())),
-        }
-    }
-
-    pub fn replay_channel_history(
-        &self,
-        channel_id: String,
-        history_limit: u32,
-        after_sequence: Option<u64>,
-    ) -> Result<()> {
-        if let Ok(mut history) = self.history_channels.lock() {
-            history.clear();
-            history.insert(channel_id.clone());
-        }
-        self.send(AgentInstanceClientMessage::ReplayChannelHistory {
-            request_id: None,
-            channel_id,
-            history_limit,
-            after_sequence,
-        })
-    }
-
-    pub async fn get_channel_history(
-        &self,
-        channel_id: String,
-        limit: Option<u32>,
-        before: Option<String>,
-        after_sequence: Option<u64>,
-    ) -> Result<Vec<ChannelMessage>> {
-        match self
-            .request(AgentInstanceClientMessage::GetChannelHistory {
-                request_id: None,
-                channel_id,
-                limit,
-                before,
-                after_sequence,
-            })
-            .await?
-        {
-            AgentInstanceServerMessage::ChannelHistory { messages, .. } => Ok(messages),
-            AgentInstanceServerMessage::Error {
-                message, failure, ..
-            } => Err(agent_operation_error(message, failure)),
-            _ => Err(CliError::Relay(
-                "Unexpected get_channel_history response".into(),
-            )),
         }
     }
 
@@ -2189,6 +2157,7 @@ struct ReaderContext {
     registered_author: Arc<Mutex<Option<RegisteredAuthor>>>,
     /// Set for daemon-spawned runs; see `spawn_initial_message_id`.
     spawn_initial_message_id: Option<String>,
+    channel_deliveries: Arc<Mutex<ChannelDeliveryDeduper>>,
 }
 
 impl ReaderContext {
@@ -2228,9 +2197,11 @@ struct ChannelDeliveryDeduper {
 }
 
 impl ChannelDeliveryDeduper {
-    /// Returns false when this WebSocket already handed the exact committed
-    /// message to its runtime. The state intentionally belongs to one reader:
-    /// a reconnect must still recover any message that was never acknowledged.
+    /// Returns false when this process already handed the exact committed
+    /// message to its runtime. A reconnect's catch-up replays what was never
+    /// acknowledged; what the runtime was handed is still queued there or was
+    /// delivered and acked, so its replay would be the same work twice. A
+    /// message this process never received is not here, and is recovered.
     fn accept(&mut self, server_msg: &AgentInstanceServerMessage) -> bool {
         let key = match server_msg {
             AgentInstanceServerMessage::ChannelMessageReceived { message, .. }
@@ -2254,7 +2225,6 @@ impl ChannelDeliveryDeduper {
 
 fn spawn_reader(mut read: WsRead, ctx: ReaderContext) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
-        let mut delivery_deduper = ChannelDeliveryDeduper::default();
         while let Some(result) = read.next().await {
             if ctx
                 .signals
@@ -2307,7 +2277,12 @@ fn spawn_reader(mut read: WsRead, ctx: ReaderContext) -> tokio::task::JoinHandle
                 Ok(m) => m,
                 Err(_) => continue,
             };
-            if !delivery_deduper.accept(&server_msg) {
+            // A poisoned window delivers: a duplicate turn is better than a lost message.
+            let first_delivery = match ctx.channel_deliveries.lock() {
+                Ok(mut deliveries) => deliveries.accept(&server_msg),
+                Err(_) => true,
+            };
+            if !first_delivery {
                 continue;
             }
             if let AgentInstanceServerMessage::Error {
@@ -2920,12 +2895,7 @@ fn spawn_ping(
                 continue;
             }
 
-            let ping = AgentInstanceClientMessage::Ping {
-                request_id: Some(uuid::Uuid::new_v4().to_string()),
-            };
-            if let Ok(json) = serde_json::to_string(&ping)
-                && write_tx.try_send(json).is_err()
-            {
+            if write_tx.try_send(EDGE_HEARTBEAT_FRAME.to_string()).is_err() {
                 signals.disconnect(generation_id, &event_tx, "Write channel closed".into());
                 return;
             }
@@ -3158,6 +3128,21 @@ pub(crate) mod tests {
         (listener, address)
     }
 
+    /// A client registered with the fake Hub listening at `address`.
+    async fn registered_test_client(
+        address: std::net::SocketAddr,
+    ) -> AgentInstanceConnectionClient {
+        let mut client = AgentInstanceConnectionClient::new(
+            format!("ws://{address}/ws/agent-instances"),
+            "token".into(),
+            "builder".into(),
+            "codex".into(),
+            None,
+        );
+        client.register().await.expect("fake hub registration");
+        client
+    }
+
     fn presence_test_client() -> Arc<AgentInstanceConnectionClient> {
         Arc::new(AgentInstanceConnectionClient::new(
             "ws://127.0.0.1:1/ws/agent-instances".into(),
@@ -3266,6 +3251,37 @@ pub(crate) mod tests {
         commit.abort();
         assert!(commit.await.unwrap_err().is_cancelled());
         assert!(client.pending.lock().await.is_empty());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn the_idle_heartbeat_is_the_frame_the_relay_runtime_answers_itself() {
+        let (write_tx, mut frames) = tokio::sync::mpsc::channel::<String>(4);
+        let (event_tx, _events) = tokio::sync::mpsc::unbounded_channel();
+        let signals = super::ConnectionSignals {
+            generation: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(7)),
+            intentional_close: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            disconnect_notify: std::sync::Arc::new(tokio::sync::Notify::new()),
+            disconnect_generation: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0)),
+        };
+        let activity = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(super::now_ms()));
+        let ping = super::spawn_ping(write_tx, 7, activity, signals, event_tx);
+        tokio::time::advance(std::time::Duration::from_millis(
+            super::HEARTBEAT_INTERVAL_MS + 1,
+        ))
+        .await;
+        let frame = frames.recv().await.unwrap();
+        ping.abort();
+        // Any other frame wakes the Durable Object that owns this socket.
+        assert_eq!(frame, super::EDGE_HEARTBEAT_FRAME);
+        let hub = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../../protocol/src/connections/human.ts"),
+        )
+        .unwrap();
+        assert!(
+            hub.contains(&format!("HUMAN_HEARTBEAT_PING = '{frame}'")),
+            "the Hub must auto-answer exactly this frame"
+        );
     }
 
     #[tokio::test(start_paused = true)]
@@ -3518,14 +3534,7 @@ pub(crate) mod tests {
             }
         });
 
-        let mut client = AgentInstanceConnectionClient::new(
-            format!("ws://{address}/ws/agent-instances"),
-            "token".into(),
-            "builder".into(),
-            "codex".into(),
-            None,
-        );
-        client.register().await.expect("fake hub registration");
+        let client = registered_test_client(address).await;
         // What the Hub listed on connect is what this client may send.
         assert!(client.hub_accepts("channel_activity"));
         assert!(!client.hub_accepts("channel_unknown"));
@@ -3944,6 +3953,7 @@ pub(crate) mod tests {
             client_message_id: None,
             ack_required: Some(true),
             interrupt_requested: Some(true),
+            steer_allowed: None,
             delivery_intent: None,
         };
 
@@ -3952,6 +3962,92 @@ pub(crate) mod tests {
             !deduper.accept(&replay_frame(message, None)),
             "a history handoff racing the live frame must not create a second runtime turn",
         );
+    }
+
+    /// End to end over two real WebSockets: the connection drops before the
+    /// runtime has acknowledged a message, and the reconnect's catch-up replays
+    /// it with one the first connection never carried.
+    #[tokio::test]
+    async fn a_reconnect_hands_the_runtime_only_what_it_does_not_already_hold() {
+        use futures_util::SinkExt as _;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let connected = AgentInstanceServerMessage::AgentInstanceConnected {
+            agent: trace_test_agent("instance:1"),
+            peers: Vec::new(),
+            hub_capabilities: None,
+        };
+        let message = |id: &str, sequence| {
+            test_channel_message(
+                id,
+                Some(sequence),
+                "user",
+                Some("user:1"),
+                "do the thing",
+                "2026-08-04T00:00:00Z",
+            )
+        };
+        let frame = |server_msg: AgentInstanceServerMessage| {
+            tokio_tungstenite::tungstenite::Message::Text(
+                serde_json::to_string(&server_msg).unwrap().into(),
+            )
+        };
+        let hub = tokio::spawn(async move {
+            let mut first =
+                agent_socket_fixture::registered_agent_socket(&listener, &connected).await;
+            first
+                .send(frame(AgentInstanceServerMessage::ChannelMessageReceived {
+                    message: message("message-1", 7),
+                    client_message_id: None,
+                    ack_required: Some(true),
+                    interrupt_requested: None,
+                    steer_allowed: None,
+                    delivery_intent: None,
+                }))
+                .await
+                .unwrap();
+            drop(first);
+            let mut second =
+                agent_socket_fixture::registered_agent_socket(&listener, &connected).await;
+            for (id, sequence) in [("message-1", 7), ("message-2", 8)] {
+                second
+                    .send(frame(replay_frame(message(id, sequence), None)))
+                    .await
+                    .unwrap();
+            }
+            second
+        });
+        let mut client = registered_test_client(address).await;
+        let mut events = client.event_rx.take().unwrap();
+        let mut handed: Vec<String> = Vec::new();
+        // What the runtime is handed, until the connection is quiet a moment after the catch-up.
+        loop {
+            let quiet = if handed.iter().any(|id| id == "message-2") {
+                300
+            } else {
+                10_000
+            };
+            let Ok(Some(event)) =
+                tokio::time::timeout(Duration::from_millis(quiet), events.recv()).await
+            else {
+                break;
+            };
+            if let AgentInstanceConnectionEvent::Server(
+                AgentInstanceServerMessage::ChannelMessageReceived { message, .. }
+                | AgentInstanceServerMessage::ChannelHistoryReplay { message, .. },
+            ) = event
+            {
+                handed.push(message.message_id);
+            }
+        }
+        assert_eq!(
+            handed,
+            ["message-1", "message-2"],
+            "the held message is one runtime turn; the one only the catch-up carried still arrives"
+        );
+        let second = hub.await.unwrap();
+        client.disconnect();
+        drop(second);
     }
 
     #[test]

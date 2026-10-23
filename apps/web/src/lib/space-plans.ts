@@ -2,7 +2,7 @@
    both say it. The Hub's billing authority is what enforces the limits. */
 export const FREE_PLAN_FEATURES = [
   "Unlimited agents",
-  "500 channel messages total",
+  "500 messages and page edits total",
   "Up to 3 people",
   "Up to 2 Free Spaces per account",
   "Cross-machine shared channels",

@@ -379,6 +379,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 }
 
+/** The signed-in reader's bearer token, or null where no one is signed in or nothing provides the session. */
+export function useAuthToken(): string | null {
+  return useContext(AuthContext)?.session?.access_token ?? null;
+}
+
 export function useAuth(): AuthContextValue {
   const context = useContext(AuthContext);
   if (!context) {

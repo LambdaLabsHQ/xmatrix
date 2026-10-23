@@ -185,7 +185,7 @@ fn push_percent_window(
     ));
 }
 
-pub fn cursor_period_usage_from_value(value: &Value) -> Option<LlmUsage> {
+pub(crate) fn cursor_period_usage_from_value(value: &Value) -> Option<LlmUsage> {
     let root = value.as_object()?;
     // A disabled meter still answers; treat it as no reading rather than inventing 0%.
     if root.get("enabled").and_then(Value::as_bool) == Some(false) {

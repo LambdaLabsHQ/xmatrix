@@ -1,4 +1,5 @@
 import { daemonClientCompatibility as agentInstanceCompatibility } from "../legacy-client-compatibility";
+import { SWITCH_CONTINUATION_FRAME_CAPABILITY } from "../product-agent-model-effort";
 import { plainDeliveryRecord } from "./delivery-record";
 import type {
   AgentInstanceClientMessage,
@@ -40,6 +41,7 @@ import {
 import {
   agentChannelMessageDeliveryIntent,
   agentChannelMessageRequestsInterrupt,
+  agentChannelMessageMaySteer,
   channelMessage,
 } from "./channel-message-frame";
 import {
@@ -317,7 +319,11 @@ export class AgentInstanceRuntimeTransport {
     }
     this.sockets.restore(ws, attachment.session);
     void this.bindLiveDelivery(ws, attachment.session);
-    void this.onPresenceChange?.({ reason: "connect", session: attachment.session });
+    // Hibernation kept the socket, so the Instance never left: its viewers
+    // already have its card, and what a status report needs to reach them is
+    // kept in the cell's storage. Announcing a join on every wake read the
+    // whole Channel and fanned out across cells for each Instance, and any
+    // frame wakes the object.
     return true;
   }
   accept(ws: WebSocket): void { this.controller.socket.accept(ws); }
@@ -392,18 +398,21 @@ export class AgentInstanceRuntimeTransport {
       // the transport facts an Instance needs are added around it.
       const recipient = {
         agentName: session.principal.agentName,
+        instanceId: session.run.instanceId,
         nameIsAmbiguous: (profilesByName.get(session.principal.agentName.trim().toLowerCase())?.size ?? 0) > 1,
         agentId: session.principal.agentId,
         channelInstanceId: session.run.channelInstanceId,
       };
       const deliveryIntent = answerIsAnothers ? "context" : agentChannelMessageDeliveryIntent(message, recipient);
       const interruptRequested = !answerIsAnothers && agentChannelMessageRequestsInterrupt(message, recipient);
+      const steerAllowed = interruptRequested && agentChannelMessageMaySteer(message, recipient);
       const outbound: Extract<AgentInstanceServerMessage, { type: "channel_message_received" }> = {
         type: "channel_message_received",
         message,
         ackRequired: true,
         ...(deliveryIntent === "context" ? { deliveryIntent } : {}),
         ...(interruptRequested ? { interruptRequested: true as const } : {}),
+        ...(steerAllowed ? { steerAllowed: true as const } : {}),
       };
       try {
         this.sockets.send(socket, outbound);
@@ -434,6 +443,22 @@ export class AgentInstanceRuntimeTransport {
       session.clientCapabilities?.includes("agent_turn_retry"));
     if (targets.length !== 1) return false;
     this.sockets.send(targets[0]![0], input.message);
+    return true;
+  }
+
+  /**
+   * Hand one Instance the instruction to continue the turn its switches
+   * cancelled, on its own socket. False when this cell holds no socket for it
+   * or its runtime predates the frame; the caller then commits the legacy
+   * Channel instruction instead.
+   */
+  deliverSwitchContinuation(input: { channelId: string; instanceId: string; requestIds: string[]; prompt: string }): boolean {
+    const targets = Array.from(this.sockets.entries()).filter(([, session]) =>
+      session.run.instanceId === input.instanceId && session.run.channelId === input.channelId &&
+      session.clientCapabilities?.includes(SWITCH_CONTINUATION_FRAME_CAPABILITY));
+    if (targets.length !== 1) return false;
+    this.sockets.send(targets[0]![0], { type: "agent_switch_continuation", channelId: input.channelId,
+      instanceId: input.instanceId, requestIds: input.requestIds, prompt: input.prompt });
     return true;
   }
 

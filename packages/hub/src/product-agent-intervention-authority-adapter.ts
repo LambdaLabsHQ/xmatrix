@@ -1,4 +1,6 @@
-import { plainRecord as record } from "@xmatrix/protocol";
+import { recordCommandResult } from "./command-result";
+import { publishChannelInvocationsChanged } from "./channel-live-judgment";
+import { HANDOFF_CONTEXT_MAX_CHARS, plainRecord as record } from "@xmatrix/protocol";
 import {
   orchestrateProductAgentIntervention,
   parseProductAgentStopCommand,
@@ -91,7 +93,8 @@ export function createProductAgentInterventionAuthorityPort(input: {
   // and returned this exact live target. The command is queued for the
   // Machine owner's daemon, which is where it claims commands.
   async function issueDaemonStop(target: ProductAgentKillTarget, controlId: string, reason: string,
-    channelId: string | undefined, handoffExport?: ProductAgentHandoffExport): Promise<void> {
+    channelId: string | undefined, handoff?: { export?: ProductAgentHandoffExport }): Promise<void> {
+    const handoffExport = handoff?.export;
     await retryTransient(() =>
       machineDaemonCommand(input.env, {
         commandId: stableCommandId("machine-stop", controlId),
@@ -112,8 +115,11 @@ export function createProductAgentInterventionAuthorityPort(input: {
           instanceId: target.instanceId,
           reason,
           worktreeDisposition: "retain",
-          ...(handoffExport ? { handoffExport, preserveInstanceForReborn: true, resumeSessionKey: target.resumeSessionKey,
-            ...target.repoPool } : {}),
+          // A handoff's stop names the session it ends, whether or not a
+          // checkout travels: its status is read back under those fields.
+          ...(handoff ? { resumeSessionKey: target.resumeSessionKey, ...target.repoPool,
+            handoffContext: { maxChars: HANDOFF_CONTEXT_MAX_CHARS } } : {}),
+          ...(handoffExport ? { handoffExport, preserveInstanceForReborn: true } : {}),
         },
         metadata: {},
         capabilities: [],
@@ -271,10 +277,11 @@ export function createProductAgentInterventionAuthorityPort(input: {
       // before the successor can reply and wake it; its checkout stays retained.
       await runtime().stopRestingInstances({ requestId: stableCommandId("handoff-rest-stop", controlId),
         channelId, actorUserId: input.actorUserId, handoffSource: { instanceId: target.instanceId, runId: target.runId } });
-      await issueDaemonStop(target, controlId, reason, channelId, handoffExport);
+      await issueDaemonStop(target, controlId, reason, channelId, { export: handoffExport });
       const result = await awaitDaemonStopResult(target, controlId, timeoutMs, true);
       if (!result) return { stopped: false };
-      return { stopped: true, ...(record(result.handoffExport) ? { handoffExport: record(result.handoffExport)! } : {}) };
+      return { stopped: true, ...(record(result.handoffExport) ? { handoffExport: record(result.handoffExport)! } : {}),
+        ...(record(result.handoffContext) ? { handoffContext: record(result.handoffContext)! } : {}) };
     },
 
     async stopResting(channelId, target) {
@@ -292,20 +299,21 @@ export function createProductAgentInterventionAuthorityPort(input: {
       });
     },
 
-    async publishSystemNotice(channelId, body, key) {
-      const messageId = `system:${input.sourceMessageId}:kill-all${key ? `:${key}` : ""}`.slice(0, 200);
+    async publishSystemNotice(channelId, body) {
+      const messageId = `system:${input.sourceMessageId}:kill-all`.slice(0, 200);
       const response = await retryTransientAuthorityResponse(() =>
         dispatchProductMessageAppend(input.env, channelId, {
           commandId: stableCommandId("kill-all-notice", messageId),
           messageId,
           channelId,
           body,
+          messageKind: "xmatrix.system.stop-result",
           principal,
           senderSnapshot: productAgentSystemNoticeSenderSnapshot(input.actorUserId),
           residual: {
             appMetadata: {
-              // Stop summaries are control-plane facts. They must never become
-              // fresh Human work when history is replayed to an Agent.
+              // A control-plane fact. It must never become fresh Human work
+              // when history is replayed to an Agent.
               xmatrixProvenance: "system_fact",
               xmatrixSystemNotice: true,
               sourceMessageId: input.sourceMessageId,
@@ -314,6 +322,11 @@ export function createProductAgentInterventionAuthorityPort(input: {
         }));
       const result = await payload(response);
       if (!response.ok) throw responseError("kill-all notice", response, result);
+    },
+
+    async recordResult(channelId, text, key, outcome) {
+      await recordCommandResult(input.env, { channelId, messageId: input.sourceMessageId,
+        key: key ?? "stop", entry: { note: { text, ...(outcome ? { stopOutcome: outcome } : {}) } } });
     },
   };
 }
@@ -326,7 +339,7 @@ export async function dispatchProductAgentInterventionAfterAuthorityMessage(inpu
   actorUserId: string;
 }): Promise<ProductAgentInterventionResult | undefined> {
   if (!parseProductAgentStopCommand(input.body)) return undefined;
-  return orchestrateProductAgentIntervention({
+  const result = await orchestrateProductAgentIntervention({
     channelId: input.channelId,
     sourceMessageId: input.messageId,
     body: input.body,
@@ -336,6 +349,9 @@ export async function dispatchProductAgentInterventionAfterAuthorityMessage(inpu
       sourceMessageId: input.messageId,
     }),
   });
+  // The stops it issued are the command chip's next answer.
+  await publishChannelInvocationsChanged(input.env, input.channelId);
+  return result;
 }
 
 /** Validated daemon stop targets from an Authority result that terminalized live Runs. */

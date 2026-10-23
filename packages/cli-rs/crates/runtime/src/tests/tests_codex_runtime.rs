@@ -1054,10 +1054,9 @@ async fn finished_daemon_child_terminates_owned_job_before_reporting_exit() {
     let descendant = {
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
         loop {
-            if let Ok(value) = std::fs::read_to_string(&pid_file) {
-                if let Ok(pid) = value.trim().parse::<u32>() {
-                    break pid;
-                }
+            if let Ok(value) = std::fs::read_to_string(&pid_file)
+                && let Ok(pid) = value.trim().parse::<u32>() {
+                break pid;
             }
             assert!(
                 std::time::Instant::now() < deadline,
@@ -1527,6 +1526,7 @@ fn daemon_test_spawn_request() -> super::DaemonSpawnRequest {
         handoff_transfer: false,
         handoff_source_instance_id: None,
         handoff_source_resume_session_key: None,
+        handoff_context: None,
         goal: None,
         run_worktree: false,
         remote_repo: None,
@@ -1757,30 +1757,104 @@ async fn codex_vendor_error_survives_combined_bootstrap_turn() {
 
 #[tokio::test]
 async fn codex_channel_interrupt_yields_without_provider_completion() {
-    tokio::time::timeout(Duration::from_secs(3), async {
-        let mut codex = initialized_codex_fixture("codex-interrupt-no-completion").await;
-
-        let mut event_rx = test_event_after(
-            Duration::from_millis(100),
+    // A steer Codex refuses, as when its turn just ended, interrupts the same
+    // way, so the message is never lost.
+    for (mode, event) in [
+        (
+            "codex-interrupt-no-completion",
             interrupting_channel_message_event("m2", "chan-a", "continue now"),
-            "deliver interrupting channel message",
-        );
+        ),
+        (
+            "codex-steer-rejected",
+            steering_channel_message_event("m2", "chan-a", "also check the docs"),
+        ),
+    ] {
+        tokio::time::timeout(Duration::from_secs(3), async {
+            let mut codex = initialized_codex_fixture(mode).await;
+            let mut event_rx = test_event_after(
+                Duration::from_millis(100),
+                event,
+                "deliver interrupting channel message",
+            );
+            let mut pending = VecDeque::new();
+            let agent = test_serialized_agent(mode);
+            let result =
+                submit_old_codex_test_turn(&mut codex, &mut event_rx, &mut pending, &agent).await;
+            assert_interrupted_for(&result, &pending, "m2");
+            codex.shutdown().await;
+        })
+        .await
+        .expect("wrapper waited for turn/completed after native interruption");
+    }
+}
+
+/// The turn yielded to `message_id`, which waits as the next input.
+fn assert_interrupted_for(
+    result: &super::InterruptibleCodexTurn,
+    pending: &VecDeque<AgentInstanceConnectionEvent>,
+    message_id: &str,
+) {
+    assert!(matches!(result, super::InterruptibleCodexTurn::Interrupted));
+    assert!(matches!(
+        pending.front(),
+        Some(AgentInstanceConnectionEvent::Server(
+            AgentInstanceServerMessage::ChannelMessageReceived { message, .. }
+        )) if message.message_id == message_id
+    ));
+}
+
+fn steering_channel_message_event(
+    message_id: &str,
+    channel_id: &str,
+    body: &str,
+) -> AgentInstanceConnectionEvent {
+    let AgentInstanceConnectionEvent::Server(AgentInstanceServerMessage::ChannelMessageReceived {
+        message,
+        ack_required,
+        ..
+    }) = interrupting_channel_message_event(message_id, channel_id, body)
+    else {
+        unreachable!("a channel message");
+    };
+    AgentInstanceConnectionEvent::Server(AgentInstanceServerMessage::ChannelMessageReceived {
+        message,
+        client_message_id: None,
+        ack_required,
+        interrupt_requested: Some(true),
+        steer_allowed: Some(true),
+        delivery_intent: None,
+    })
+}
+
+#[tokio::test]
+async fn codex_steered_message_joins_the_running_turn() {
+    tokio::time::timeout(Duration::from_secs(5), async {
+        let mut codex = initialized_codex_fixture("codex-steer").await;
+        // The relay stays open after the message, as a live one does.
+        let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            event_tx
+                .send(steering_channel_message_event("m2", "chan-a", "also check the docs"))
+                .expect("deliver steering channel message");
+            tokio::time::sleep(Duration::from_secs(10)).await;
+        });
         let mut pending = VecDeque::new();
-        let agent = test_serialized_agent("codex-interrupt-no-completion");
+        let agent = test_serialized_agent("codex-steer");
         let result =
             submit_old_codex_test_turn(&mut codex, &mut event_rx, &mut pending, &agent).await;
 
-        assert!(matches!(result, super::InterruptibleCodexTurn::Interrupted));
-        assert!(matches!(
-            pending.front(),
-            Some(AgentInstanceConnectionEvent::Server(
-                AgentInstanceServerMessage::ChannelMessageReceived { message, .. }
-            )) if message.message_id == "m2"
-        ));
+        let turn = match result {
+            super::InterruptibleCodexTurn::Completed(Ok(turn)) => turn,
+            super::InterruptibleCodexTurn::Completed(Err(err)) => panic!("turn failed: {err}"),
+            _ => panic!("the steered turn did not complete"),
+        };
+        assert_eq!(turn.local_output, "answered the steer");
+        assert!(pending.is_empty(), "the steered message was queued: {pending:?}");
         codex.shutdown().await;
     })
     .await
-    .expect("wrapper waited for turn/completed after native interruption");
+    .expect("steered Codex turn timed out");
 }
 
 #[tokio::test]
@@ -2328,6 +2402,26 @@ async fn generic_acp_session_retries_auth_with_advertised_method() {
     })
     .await
     .expect("cursor_login ACP fixture should not hang");
+}
+
+/// Qwen Code without a configured provider answers authRequired, then refuses
+/// the only method it advertises: the start fails as a sign-in problem, in the
+/// harness's own words, whatever its error code.
+#[tokio::test]
+async fn generic_acp_refused_credentials_read_as_signed_out() {
+    require_node_fixture_runtime();
+    let mut session = spawn_generic_acp_fixture("acp-missing-key", "qwen").await;
+    let refused = tokio::time::timeout(
+        Duration::from_secs(10),
+        session.initialize(Some(env!("CARGO_MANIFEST_DIR")), None, false, None),
+    )
+    .await
+    .expect("missing-key ACP fixture should not hang")
+    .expect_err("no provider means no session");
+    session.shutdown().await;
+    let detail = refused.to_string();
+    assert!(crate::harness_signed_out_error(&detail), "{detail}");
+    assert!(detail.contains("Missing API key for openai auth"), "{detail}");
 }
 
 #[test]
@@ -3070,6 +3164,7 @@ fn inbound_event_backfills_attachment_channel_and_message_id() {
             client_message_id: None,
             ack_required: Some(true),
             interrupt_requested: None,
+            steer_allowed: None,
             delivery_intent: None,
         });
 

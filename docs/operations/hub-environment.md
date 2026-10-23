@@ -22,6 +22,7 @@ Set under `hub.vars` (or derived from the origins) in `deploy/profiles/<name>.js
 
 | Name | Kind | What it does |
 | --- | --- | --- |
+| `APP_BETA_URL` | var | Beta Web origin every beta deploys; rendered from the profile's `web.beta.origin`. Trusted for sign-in and direct reads exactly like APP_URL; links still go to APP_URL. Unset: only APP_URL is trusted. |
 | `APP_URL` | var | Web origin; rendered from the profile's `web.origin`. Unset: links, redirects and auth fail closed. |
 | `AUTH_COOKIE_DOMAIN` | var | Shared cookie domain for the Web and Hub origins (e.g. `.example.com`). Unset: cookies stay host-only, which suits localhost only. |
 | `AUTH_COOKIE_PREFIX` | var | Cookie name prefix, for a deployment nested under another's cookie domain. |
@@ -62,6 +63,7 @@ Leave unset to keep the feature off.
 | `RATE_LIMIT_CREDENTIAL` | binding | Workers Rate Limiting allowance per bearer credential. Unset: credentialed requests are not counted. |
 | `RATE_LIMIT_HUMAN_CONNECT` | binding | Workers Rate Limiting allowance of Human socket sign-ins per user. Unset: sign-ins are not counted. |
 | `RATE_LIMIT_JEV_EVALUATE` | binding | Workers Rate Limiting allowance of `POST /api/ai/jev/evaluate` per owning Human and verified Space (an Agent Run counts as its owner), refused with 429 whatever RATE_LIMIT_ENFORCED says. Unset: evaluations are not counted. |
+| `RATE_LIMIT_SEARCH_RERANK` | binding | Workers Rate Limiting allowance of `POST /api/search/rerank` (Jev) per signed-in Human, refused with 429 whatever RATE_LIMIT_ENFORCED says. Unset: reorderings are not counted. |
 | `RATE_LIMIT_SUMMON_INTENT` | binding | Workers Rate Limiting allowance of composer draft previews (Jev) per signed-in Human, refused with 429 whatever RATE_LIMIT_ENFORCED says. Unset: previews are not counted. |
 | `RELAY_AUTHORITY_OBSERVABILITY_AE` | binding | Analytics Engine dataset for authority and PostgreSQL timing. Unset: observation is off. |
 | `RELAY_POSTGRES_SHARD_1` | binding | Hyperdrive binding to a second database shard. Unset: every Space is placed on the primary shard. |
@@ -143,7 +145,6 @@ Used only by the operators of the hosted xMatrix deployment. Leave unset.
 | Name | Kind | What it does |
 | --- | --- | --- |
 | `CONTROL_PLANE_OPERATOR_TOKEN` | secret | Machine credential for control-plane partition operator routes. |
-| `TEST_ENVIRONMENT_ACCESS_SPACE_ID` | var | Space whose members may switch to the hosted Test deployment; leave unset. |
 | `XMATRIX_ADMIN_TOKEN` | secret | Legacy internal admin bearer. |
 
 ## Local and test deployments

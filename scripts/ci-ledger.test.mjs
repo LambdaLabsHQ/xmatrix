@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { deflateRawSync } from "node:zlib";
+import { parse } from "yaml";
 
 import {
   HUB_SUITE_LEDGER_JOB,
@@ -120,6 +121,14 @@ test("every ledgered job gates on its lookup and CI never holds a write token", 
     assert.ok(block.includes(`run: node scripts/ci-ledger.mjs lookup ${job}\n`), job);
     const steps = block.split("\n      - ").slice(1);
     const lookup = steps.findIndex((step) => step.includes("ci-ledger.mjs lookup"));
+    // This first-wave job cannot use the selector's result. Its cache hit
+    // must avoid dependency installation as well as validation; otherwise
+    // the no-op gate still holds a runner and delays the release train.
+    if (job === "node-checks") {
+      const bootstrap = steps.findIndex((step) => step.includes("uses: ./.github/actions/setup-pnpm-node"));
+      assert.ok(bootstrap > lookup, "look up Node evidence before installing dependencies");
+      assert.match(steps[bootstrap], /if: steps\.ledger\.outputs\.hit != 'true'/u);
+    }
     // Every step after the lookup that runs a check is skipped on a hit.
     for (const step of steps.slice(lookup + 1)) {
       if (/\n        run: /u.test(step) || step.startsWith("name:")) {
@@ -146,6 +155,26 @@ test("a selector-gated ledgered job is never scheduled for content that already 
     assert.ok(changes.includes(`jobs+=(`) && new RegExp(`jobs\\+=\\([^)]*\\b${job}\\b`, "u").test(changes), `selector looks up ${job}`);
   }
   assert.ok(changes.includes("node scripts/ci-ledger.mjs reused"));
+});
+
+test("CI selects a release ref only after verifying its stamp with triggering-revision code", () => {
+  const ci = parse(readFileSync(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8"));
+  for (const [name, job] of Object.entries(ci.jobs)) {
+    const checkout = job.steps.findIndex((step) => step.uses === "actions/checkout@v6");
+    assert.equal(job.steps[checkout].with.ref, "${{ github.sha }}", name);
+    const select = job.steps.findIndex((step) => step.name === "Select the verified release revision");
+    assert.ok(select > checkout, name);
+    const step = job.steps[select];
+    assert.equal(step.if, "inputs.ref != ''", name);
+    assert.equal(step.env.CI_SOURCE_SHA, "${{ github.sha }}", name);
+    assert.equal(step.env.CI_RELEASE_REF, "${{ inputs.ref }}", name);
+    // The existing release-commit tests own rejection of non-stamp changes.
+    // This workflow boundary must invoke that verifier before switching code.
+    assert.match(step.run, /set -euo pipefail/u);
+    const verify = step.run.indexOf('node scripts/release-commit.mjs verify-release "$CI_RELEASE_REF" "$CI_SOURCE_SHA"');
+    assert.ok(verify >= 0 && verify < step.run.indexOf('git checkout --detach "$CI_RELEASE_REF"'), name);
+    assert.ok(job.steps.slice(checkout + 1, select).every((entry) => !entry.uses?.startsWith("./")), name);
+  }
 });
 
 test("the recorder runs for every workflow whose runs it accepts", () => {
@@ -189,10 +218,16 @@ test("the Hub suite is recorded only from a run that passed all of it", () => {
   assert.deepEqual(passedLedgerJobs([job(HUB_SUITE_LEDGER_JOB)]), [], "no job can claim the suite by name");
 });
 
+test("pull request jobs never vouch for the full tier a release reuses", () => {
+  const fast = ["node-static", "web-unit", "web-build", "web-check", "hub-check", "rust-clippy"];
+  assert.deepEqual(passedLedgerJobs(fast.map((name) => ({ name, conclusion: "success" }))), []);
+});
+
 test("a job split over a matrix is recorded only when every entry passed", () => {
   const job = (name, conclusion = "success") => ({ name, conclusion });
   const hub = ["hub (static)", ...[1, 2, 3, 4, 5, 6].map((shard) => `hub (${shard}/6)`)];
-  const web = ["web", ...[1, 2, 3, 4].map((shard) => `web (browser ${shard}/4)`)];
+  const web = ["web", "web (performance)",
+    ...[1, 2, 3, 4].map((shard) => `web (browser ${shard}/4)`)];
   const rust = ["rust-cli (clippy)", "rust-cli (test)"];
   assert.deepEqual(
     passedLedgerJobs([...hub, ...web, ...rust, "rust-cli-windows"].map((name) => job(name))).sort(),
@@ -200,6 +235,9 @@ test("a job split over a matrix is recorded only when every entry passed", () =>
   );
   assert.deepEqual(passedLedgerJobs([...hub.slice(0, 6).map((name) => job(name)), job("hub (6/6)", "failure")]), []);
   assert.deepEqual(passedLedgerJobs([job("web"), job("web (browser 2/4)", "cancelled")]), []);
+  for (const performance of web.filter((name) => name.includes("performance"))) {
+    assert.deepEqual(passedLedgerJobs(web.map((name) => job(name, name === performance ? "failure" : "success"))), []);
+  }
   assert.deepEqual(passedLedgerJobs([job("rust-cli (clippy)"), job("rust-cli (test)", "skipped")]), []);
   assert.equal(ledgerJobOf("rust-cli-windows"), "rust-cli-windows");
   assert.equal(ledgerJobOf("hub (static)"), HUB_SUITE_LEDGER_JOB);

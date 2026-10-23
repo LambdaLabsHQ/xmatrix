@@ -156,6 +156,10 @@ jobs:
           git fetch --force origin "refs/tags/$production_tag:refs/tags/$production_tag"
           test "$(git rev-parse "$production_tag^{commit}")" = "$SOURCE_SHA"
           echo "version=$version" >> "$GITHUB_OUTPUT"
+          # A beta's GitHub Releases are prereleases, so GitHub's "latest" stays the last stable.
+          prerelease=false
+          if [[ "$version" == *-beta.* ]]; then prerelease=true; fi
+          echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
 
       - name: Read back and verify the missing production deployment receipt
         if: steps.source.outputs.recover_receipt == 'true'
@@ -187,7 +191,7 @@ jobs:
             - Deployment receipt: R2 `xmatrix-release-receipts/production/xmatrix-v${{ steps.identity.outputs.version }}/deployment`
             - Authoritative run: `${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ inputs.source_run_id }}`
           RELEASE_DRAFT: "false"
-          RELEASE_PRERELEASE: "false"
+          RELEASE_PRERELEASE: ${{ steps.identity.outputs.prerelease }}
           RELEASE_FORCE_TAG: "false"
           RELEASE_ALLOW_EMPTY_ASSETS: "true"
           RELEASE_KEEP_STALE_ASSETS: "true"
@@ -202,6 +206,7 @@ jobs:
         shell: bash
         env:
           RELEASE_VERSION: ${{ steps.identity.outputs.version }}
+          RELEASE_PRERELEASE: ${{ steps.identity.outputs.prerelease }}
         run: |
           set -euo pipefail
 
@@ -247,7 +252,7 @@ jobs:
             RELEASE_TAG="$tag" \
             RELEASE_TITLE="$title" \
             RELEASE_NOTES="$notes" \
-            RELEASE_PRERELEASE=false \
+            RELEASE_PRERELEASE="$RELEASE_PRERELEASE" \
             RELEASE_DRAFT=true \
             RELEASE_PUBLISH_AFTER_UPLOAD=true \
             RELEASE_FORCE_TAG=false \

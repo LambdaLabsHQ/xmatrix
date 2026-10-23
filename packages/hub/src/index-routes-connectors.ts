@@ -47,7 +47,7 @@ function credentialPolicy(providerId: string) {
   if (!manifest || manifest.status !== "available") return undefined;
   const declared = manifest.credentials ?? [];
   const generated = [...declared.filter((field) => field.generated && !field.managed).map((field) => field.id),
-    ...(manifest.events && !["googlechat", "wecom", "teams"].includes(providerId) ? [INGRESS_KEY_FIELD] : [])];
+    ...(manifest.events && manifest.events.ingress !== false && !["googlechat", "wecom", "teams"].includes(providerId) ? [INGRESS_KEY_FIELD] : [])];
   const writable = declared.filter((field) => !field.generated && !field.managed).map((field) => field.id);
   if (generated.length === 0 && writable.length === 0) return undefined;
   return { manifest, generated, writable, allowed: [...writable, ...generated] };

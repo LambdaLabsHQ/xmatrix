@@ -61,15 +61,49 @@ test("turn-failure notice copy is Hub-owned and names the agent", () => {
   assert.match(notice, /opencode turn/);
   assert.match(notice, /unknown certificate verification error/);
   assert.doesNotMatch(notice, /silently dropping/);
-  assert.equal(
-    agentTurnFailureNoticeBody({ agentName: "  ", detail: "" }),
-    "xMatrix could not complete this agent turn.",
-  );
+  assert.match(agentTurnFailureNoticeBody({ agentName: "  ", detail: "" }), /harness supplied no error detail/u);
+  assert.match(agentTurnFailureNoticeBody({ agentName: "  ", detail: "" }), /HTTP status: not reported/u);
 });
 
 test("turn-failure detail is compact and bounded", () => {
   assert.equal(boundAgentTurnFailureDetail("  a\n\nb  "), "a b");
   assert.equal(boundAgentTurnFailureDetail("x".repeat(2000)).length, 600);
+});
+
+test("all HTTP status classes survive a long error and are not inferred from unlabeled numbers", () => {
+  for (let status = 100; status <= 599; status++) {
+    const notice = agentTurnFailureNoticeBody({
+      agentName: "custom",
+      detail: "context ".repeat(100) + "httpStatusCode=" + status + "; requestId=req-123",
+    });
+    assert.ok(notice.includes("HTTP status: " + status + "."), notice);
+    assert.match(notice, /Upstream request: req-123/u);
+  }
+  const unknown = agentTurnFailureNoticeBody({ agentName: "codex", detail: "workspace routing discovery failed (attempt 403)" });
+  assert.match(unknown, /HTTP status: not reported/u);
+  assert.doesNotMatch(unknown, /HTTP status: 403/u);
+});
+
+test("network, RPC, WebSocket and process evidence stay distinct", () => {
+  const notice = (detail) => agentTurnFailureNoticeBody({ agentName: "any-harness", detail });
+  assert.match(notice("DNS lookup failed: ENOTFOUND"), /Failure category: dns/u);
+  assert.match(notice("unknown certificate verification error"), /Failure category: tls/u);
+  assert.match(notice("connection reset by peer"), /Failure category: connection/u);
+  assert.match(notice("request timed out"), /Failure category: timeout/u);
+  assert.match(notice("code=-32603; Internal error"), /Failure category: rpc/u);
+  assert.match(notice("connection closed (WebSocket close code: Some(1006))"), /WebSocket close code: 1006/u);
+  assert.match(notice("Headless runtime exited: exit status: 7"), /Process exit code: 7/u);
+  assert.match(notice("code=-32603"), /HTTP status: not reported/u);
+});
+
+test("shared failure notices remove credentials before bounding and cannot summon an agent", () => {
+  const notice = agentTurnFailureNoticeBody({ agentName: "claude", detail:
+    "HTTP 403; requestId=req-safe\nAuthorization: Bearer PRIVATE_HEADER\n" +
+    'url=https://user:PRIVATE_PASSWORD@example.com/api?token=PRIVATE_QUERY\n{"api_key":"PRIVATE_KEY"}\n' +
+    "cause=@auto restart\n/local/private/file" });
+  assert.match(notice, /HTTP status: 403/u);
+  assert.match(notice, /req-safe/u);
+  assert.doesNotMatch(notice, /PRIVATE_|@auto|\/local\/private/u);
 });
 
 test("usage_limited is a turn failure that also asks Hub for a handoff", () => {

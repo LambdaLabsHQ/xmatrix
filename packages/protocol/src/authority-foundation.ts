@@ -1,4 +1,5 @@
 import { APP_CONNECTOR_PROVIDER_MANIFESTS } from "./app-connector-manifests.js";
+import { agentFailureEvidence, agentFailureStatusLines, safeAgentFailureDetail } from "./agent-failure-detail.js";
 export const DEFAULT_HUB_URL = "https://xmatrix-hub.xmatrix.sh";
 
 export * from "./agent-status-tags.js";
@@ -12,13 +13,13 @@ import type {
 } from "./authority-runtime.js";
 
 import { AGENT_PRESETS, agentPresetForLauncher } from "./agent-presets.js";
+import { agentFaceUrl } from "./faces.js";
 
 export {
   AGENT_PRESETS,
   agentHarnessSpec,
   agentLaunchExecutable,
   withMachineSpawnHarness,
-  agentPresetAvatarUrl,
   agentPresetById,
   agentPresetForLauncher,
   normalizeAgentPresetRuntime,
@@ -53,7 +54,8 @@ export function agentAvatarUrlFromMetadata(
       AGENT_PRESETS.find(
         (item) => item.backend === candidate && item.backend !== "acp" && item.backend !== "pty",
       );
-    if (preset?.avatarUrl) return preset.avatarUrl;
+    const face = agentFaceUrl(preset?.id);
+    if (face) return face;
   }
 
   return undefined;
@@ -173,6 +175,8 @@ export const HUB_ROUTES = {
   me_session_revoke: "/api/me/sessions/revoke",
   me_sessions_revoke_others: "/api/me/sessions/revoke-others",
   account_deletion: "/api/account-deletion",
+  channel_deletion: (spaceId: string, channelId: string) =>
+    `/api/spaces/${encodeURIComponent(spaceId)}/channels/${encodeURIComponent(channelId)}/deletion`,
   account_deletion_status: "/api/account-deletion/status",
   account_deletion_cancel: "/api/account-deletion/cancel",
   account_deletion_leave: "/api/account-deletion/leave-space",
@@ -313,6 +317,7 @@ export const HUB_ROUTES = {
   channels: "/api/channels",
   channel_catalog_page: "/api/channels/page",
   message_search: "/api/messages/search",
+  search_rerank: "/api/search/rerank",
   channel_catalog_resolve: "/api/channels/resolve",
   channel: (channelId: string) =>
     `/api/channels/${encodeURIComponent(channelId)}`,
@@ -378,6 +383,9 @@ export const HUB_ROUTES = {
     `/api/spaces/${encodeURIComponent(spaceId)}/governance${subpath ? `/${subpath}` : ""}`,
   space_page_links: (spaceId: string, subpath = "") =>
     `/api/spaces/${encodeURIComponent(spaceId)}/page-links${subpath ? `/${subpath}` : ""}`,
+  /** The pictures of people and Agent Instances (faces.ts), read by id. */
+  space_faces: (spaceId: string, subpath = "") =>
+    `/api/spaces/${encodeURIComponent(spaceId)}/faces${subpath ? `/${subpath}` : ""}`,
 } as const;
 
 export const WEB_PROXY_ROUTES = {
@@ -393,6 +401,7 @@ export const WEB_PROXY_ROUTES = {
   space_page_promote: (spaceId: string, pageId: string, revision: number) =>
     `/api/xmatrix/spaces/${encodeURIComponent(spaceId)}/pages/${encodeURIComponent(pageId)}/revisions/${revision}/promote`,
   space_page_links: (spaceId: string) => `/api/xmatrix/spaces/${encodeURIComponent(spaceId)}/page-links`,
+  space_faces: (spaceId: string) => `/api/xmatrix/spaces/${encodeURIComponent(spaceId)}/faces`,
   space_page_migration: (spaceId: string) => `/api/xmatrix/spaces/${encodeURIComponent(spaceId)}/page-migration`,
   space_governance: (spaceId: string) => `/api/xmatrix/spaces/${encodeURIComponent(spaceId)}/governance`,
   login: "/api/xmatrix/login",
@@ -413,6 +422,8 @@ export const WEB_PROXY_ROUTES = {
   me_session_revoke: "/api/xmatrix/me/sessions/revoke",
   me_sessions_revoke_others: "/api/xmatrix/me/sessions/revoke-others",
   account_deletion: "/api/xmatrix/account-deletion",
+  channel_deletion: (spaceId: string, channelId: string) =>
+    `/api/xmatrix/spaces/${encodeURIComponent(spaceId)}/channels/${encodeURIComponent(channelId)}/deletion`,
   account_deletion_status: "/api/xmatrix/account-deletion/status",
   account_deletion_cancel: "/api/xmatrix/account-deletion/cancel",
   account_deletion_leave: "/api/xmatrix/account-deletion/leave-space",
@@ -538,6 +549,7 @@ export const WEB_PROXY_ROUTES = {
   channels: "/api/xmatrix/channels",
   channel_catalog_page: "/api/xmatrix/channels/page",
   message_search: "/api/xmatrix/messages/search",
+  search_rerank: "/api/xmatrix/search/rerank",
   channel_catalog_resolve: "/api/xmatrix/channels/resolve",
   channel: (channelId: string) =>
     `/api/xmatrix/channels/${encodeURIComponent(channelId)}`,
@@ -860,11 +872,12 @@ export function agentTurnFailureNoticeBody(input: {
   detail?: string | null;
 }): string {
   const name = input.agentName.trim() || "agent";
-  const detail = boundAgentTurnFailureDetail(input.detail);
-  if (!detail) {
-    return `xMatrix could not complete this ${name} turn.`;
-  }
-  return `xMatrix could not complete this ${name} turn: ${detail}`;
+  const detail = boundAgentTurnFailureDetail(safeAgentFailureDetail(input.detail));
+  const cause = detail
+    ? `xMatrix could not complete this ${name} turn: ${detail}`
+    : `xMatrix could not complete this ${name} turn.`;
+  return [cause, ...(!detail ? ["The harness supplied no error detail."] : []),
+    ...agentFailureStatusLines(agentFailureEvidence(input.detail))].join("\n");
 }
 
 export interface AgentLifecycleSnapshot {
@@ -1035,7 +1048,7 @@ const TRIGGER_TEXT = /^[^\s][^\n]{0,199}$/u;
 function connectorEventTrigger(trigger: Record<string, unknown>): AutomationTrigger {
   const providerId = typeof trigger.provider === "string" ? trigger.provider.trim().toLowerCase() : "";
   const manifest = APP_CONNECTOR_PROVIDER_MANIFESTS.find((candidate) => candidate.id === providerId);
-  const events = manifest?.events ?? manifest?.automationEvents;
+  const events = manifest?.events;
   if (!manifest || !events) throw new Error("an event trigger names a connector that delivers events");
   const source = typeof trigger.source === "string" && trigger.source.trim() ? trigger.source.trim().toLowerCase() : "*";
   if (source !== "*" && !new RegExp(events.source.pattern, "u").test(source)) {

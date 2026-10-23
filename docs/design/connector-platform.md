@@ -553,8 +553,14 @@ and are refreshed near expiry; revocation and stop erase them with the grant.
 Optional native notifications use a separate Google OAuth client requesting
 only `gmail.metadata`. They do not replace the Composio content grant or its
 send/reply approval contract. Apps → Gmail lets a Human mailbox owner who is
-also a Space admin choose a destination conversation and authorize notification
-access. Agent-owned mailboxes are not supported by this first notification flow.
+also a Space admin turn notifications on for each of their mailboxes, which
+authorizes notification access; it does not pick a destination. Like any
+connector event, a conversation receives a mailbox's notifications after it runs
+`@gmail:subscribe:<mailbox>` (or `*` for all of the member's mailboxes). Only the
+mailbox's member and their Agents may subscribe it, and delivery takes only
+subscriptions whose authority root is that member. Gmail events are produced by
+the Hub, so the manifest declares `events.ingress: false` and no ingress URL is
+minted. Agent-owned mailboxes are not supported by this first notification flow.
 No Gmail forwarding configuration is needed.
 
 Google watch publishes an email address and history ID to Pub/Sub; the Hub
@@ -571,13 +577,15 @@ Old mail is not replayed as new work.
 The primary App authority stores the native refresh token and pending PKCE
 verifier in an encrypted notification envelope bound to the route identity.
 Configuration fingerprints, captured connection generation, credential version,
-mailbox ownership, current Space admin and conversation capability fence work.
+mailbox ownership and current Space admin fence work; each append is checked
+against its subscribing member's conversation capability.
 Mailbox removal, reconnection or ownership changes retire that mailbox's
 notification rows and encrypted grants. Unchanged account/address/owner tuples
 survive another mailbox's addition or edit only when all shared credentials are
 also unchanged. The credential transaction advances retained rows to the new
 credential version and clears old worker leases, preserving cursors and pending
-IDs. A shared credential replacement, disconnect, Channel move, account erasure
+IDs. A Channel move removes its subscriptions like any other source relation.
+A shared credential replacement, disconnect, account erasure
 or Space erasure retires all affected grants. Stop clears one local grant immediately;
 it does not revoke a Google grant another Space might still use. Abandoned
 OAuth attempts expire after ten minutes and bounded maintenance removes them.
@@ -585,10 +593,8 @@ OAuth attempts expire after ten minutes and bounded maintenance removes them.
 Durable Gmail-ID receipts coalesce duplicate signals and make conversation
 append idempotent. Notifications contain only a mail ID reference, never sender,
 subject, snippet or body. Reading one is an ordinary `@gmail:read:<id>` command.
-The private `automationEvents` manifest allows `gmail:message.received:<id>`
-Page Automations without exposing the private source as a generic Channel
-subscription. Only Automations whose authority root is the mailbox owner fire.
-The UI exposes the notification ID for that source. Credentials must be supplied
+Page Automations use `gmail:message.received:<mailbox>`; only Automations whose
+authority root is the mailbox owner fire. Credentials must be supplied
 as an atomic optional group; partial configuration fails closed. Provisioning,
 Google verification and production activation are separate operator steps in
 [Gmail notifications](../operations/gmail-notifications.md).
@@ -656,7 +662,8 @@ See [PagerDuty's official REST schema](https://github.com/PagerDuty/api-schema/b
 
 Sentry `read_issue:WEB-1A` (or a numeric group id) reads one issue and its latest
 event from the configured organization. Short ids require one lookup; numeric
-ids use two GETs. The excerpt includes title/status/culprit/platform, event UTC
+ids use two GETs. The excerpt includes title/status/culprit/platform, occurrence
+count and first/last-seen UTC times when valid, event UTC
 time, release version, component/environment, SDK and browser/runtime name/version,
 and whether the browser defect endpoint captured it. Its action is included only
 when it is one of protocol's closed `ClientDefectAction` set, the same set the web
@@ -666,7 +673,12 @@ and line/column only). Exception `type` and `value` are included when they are
 strings (including Sentry's annotated truncated-string form); a missing type or
 value does not fail the read, and frames still copy. Each exception also includes
 its mechanism type and handled/synthetic flags when present. Only these bounded
-diagnostic fields are copied; arbitrary tags, contexts and mechanism data remain
+diagnostic fields are copied. When mapped frames exist, up to eight terminal
+generated asset locations and line/column positions are retained separately so
+the deployed script can still be identified. URL credentials, query strings,
+fragments and inline script schemes are excluded from these generated locations.
+A missing or empty mapped stack falls back to raw file locations and positions
+with the same filtering. Arbitrary tags, contexts and mechanism data remain
 private. Incomplete exception values
 or frames are omitted. It is fenced as untrusted and capped at 12,000 characters;
 omissions are explicit. Request bodies/headers, local variables, source context,
@@ -1049,8 +1061,17 @@ GitHub triggers may use either spelling.
     with an own executor whose read/write effect matches the declaration;
     prototype properties and undeclared executors are unknown actions. GitHub
     keeps its specialized command handler for the same `@github:` commands.
-  - The receipt is a system fact replying to the command's message: context
-    for every Instance, never a turn, so it cannot interrupt the sender's turn.
+  - The receipt replies to the command's message. Hub-only metadata records
+    the authenticated calling Instance, separately from the stable Agent id;
+    approvals and durable execution retain that exact caller. Live delivery
+    and catch-up queue work only for that Instance, without interrupting its
+    active turn. Other Instances and receipts without a retained Agent caller
+    receive context. Older receipts without that metadata remain context.
+  - Subscribed native events queue work for the Channel's existing Instances.
+    App receipt/event text is external data, never mention or lifecycle syntax.
+    After commit the existing bounded wake authority resumes sleeping or
+    interrupted recipients; a receipt restricts that query to its caller.
+    Stopped Instances stay stopped and no new Agent identity is allocated.
 - Staging ask writes one request and a Channel receipt. The approved dispatch
   writes the normal `app_connector_executions` row and a separate terminal receipt.
   Denial clears the encrypted input and its original command reference. Its

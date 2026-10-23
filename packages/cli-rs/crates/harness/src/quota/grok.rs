@@ -215,7 +215,7 @@ fn grok_quota_cache_key(grok_home: &Path, content_fingerprint: &str) -> String {
 /// would and passes it in; the process environment (including
 /// `GROK_CLI_OAUTH_TOKEN`) is never consulted here, and two targets share a
 /// cache slot only when they share the home and the exact credential bytes.
-pub async fn read_grok_build_billing_usage_for_home(
+pub(crate) async fn read_grok_build_billing_usage_for_home(
     grok_home: &Path,
     force: bool,
 ) -> Option<LlmUsage> {

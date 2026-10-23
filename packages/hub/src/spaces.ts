@@ -190,6 +190,16 @@ export async function listSpaces(env: SpacesEnv, principal: Principal): Promise<
 
 // Channels
 
+export async function deleteChannel(env: SpacesEnv, input: {
+  commandId: string; spaceId: string; channelId: string; actorUserId: string;
+  name: string; at: string;
+}, dependencies: SpacesDependencies = {}) {
+  const { repository, requestId } = spaces(env, dependencies, input.commandId);
+  const result = await repository.deleteChannel({ ...input, requestId });
+  await publishCatalogChanges(env, dependencies, repository, requestId, [input.spaceId]);
+  return result;
+}
+
 export async function createChannel(env: SpacesEnv, input: {
   commandId: string; channelId: string; spaceId: string; name: string; mode: "open" | "closed";
   principal: Principal; metadata?: Record<string, unknown>; creatorAgentInstanceId?: string;

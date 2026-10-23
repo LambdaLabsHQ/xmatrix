@@ -6,6 +6,45 @@ import { actionRefusal, isPolicyAction } from "../src/connectors/connector-comma
 import { stubFetchResponses } from "./support/fetch-responses.mjs";
 
 const read = SENTRY_ACTIONS.read_issue;
+// WEB-M/WEB-N: mapped dependency frames alone cannot identify the deployed chunk.
+test("mapped Sentry stacks retain bounded generated locations and occurrence evidence", async () => {
+  const { result, calls } = await run([{ body: { ...issue, count: "7",
+    firstSeen: "2026-10-18T16:18:04Z", lastSeen: "2026-10-18T16:19:07Z" } }, { body: { ...event,
+    entries: [{ type: "exception", data: { values: [{ type: "TypeError", value: "missing module",
+      stacktrace: { frames: [{ filename: "webpack://_N_E/webpack/bootstrap", lineNo: 21 }] },
+      rawStacktrace: { frames: Array.from({ length: 9 }, (_, n) => ({
+        filename: `https://xmatrix.sh/_next/static/chunks/${n}-abcdef123.js?private-query#private-fragment`,
+        absPath: "https://private-host.example/private-path", function: "private-function",
+        lineNo: 1, colNo: n + 10, vars: { token: "private-local" }, context: [[1, "private-source"]],
+      })) },
+    }] } }],
+  } }], undefined, "123");
+  assert.match(result.summary, /Occurrences: 7/);
+  assert.match(result.summary, /First seen: 2026-10-18T16:18:04Z/);
+  assert.match(result.summary, /Last seen: 2026-10-18T16:19:07Z/);
+  assert.match(result.summary, /Frame: webpack:\/\/_N_E\/webpack\/bootstrap · line 21/);
+  assert.match(result.summary, /Generated frame: https:\/\/xmatrix.sh\/_next\/static\/chunks\/8-abcdef123.js · line 1 · column 18/);
+  assert.equal((result.summary.match(/Generated frame:/g) ?? []).length, 8);
+  assert.match(result.summary, /rich content omitted or bounded/);
+  assert.doesNotMatch(result.summary, /private-|chunks\/0-/);
+  assert.equal(calls.length, 2, "no extra events are fetched");
+});
+
+test("malformed occurrence evidence and non-asset generated locations stay out of Sentry context", async () => {
+  const { result } = await run([{ body: { ...issue, count: "7 private-count",
+    firstSeen: "private-first", lastSeen: "2026-10-18T16:19:07Z\nprivate-last" } }, { body: { ...event,
+    entries: [{ type: "exception", data: { values: [{ type: "Error", value: "kept",
+      stacktrace: { frames: [{ filename: "src/owner.ts", lineNo: 3 }] },
+      rawStacktrace: { frames: [null, { filename: "data:text/javascript,private-source" },
+        { filename: "https://private-user:private-password@xmatrix.sh/chunk.js" },
+        { filename: "blob:https://xmatrix.sh/private-id" }, { filename: "private-file\nsource" },
+        { filename: "x".repeat(2049) }] },
+    }] } }],
+  } }], undefined, "123");
+  assert.match(result.summary, /Frame: src\/owner.ts · line 3/);
+  assert.doesNotMatch(result.summary, /Occurrences:|First seen:|Last seen:|Generated frame:|private-/);
+});
+
 // WEB-F: dependency frames hid the application effect that entered the loop.
 test("long Sentry stacks retain application callers before the dependency tail", async () => {
   const caller = { module: "src/components/pages/page-editor", function: "refreshSections",
@@ -106,11 +145,11 @@ test("a stackless event retains bounded provenance without copying private paylo
       { key: "user.email", value: "private-user-tag" }, { key: "request", value: "private-request-tag" }],
     entries: [{ type: "exception", data: { values: [{ type: "Error", value: "Request Canceled",
       mechanism: { type: "auto.browser.global_handlers.onunhandledrejection", handled: false, synthetic: true,
-        data: { secret: "private-mechanism-data" }, meta: { secret: "private-mechanism-meta" } } }] } }] };
+        data: { secret: "private-mechanism-data", stack_origin: "capture_boundary" }, meta: { secret: "private-mechanism-meta" } } }] } }] };
   const { result, calls } = await run([{ body: issue }, { body: diagnosticEvent }], undefined, "123");
   for (const expected of ["Event time: 2026-10-09T09:59:39.498000Z", "Release: xmatrix-v1.0.149",
     "Component: web", "Environment: production", "SDK: sentry.javascript.browser 11.4.0",
-    "Mechanism: auto.browser.global_handlers.onunhandledrejection · handled=false · synthetic=true"]) {
+    "Mechanism: auto.browser.global_handlers.onunhandledrejection · handled=false · synthetic=true · stack=capture boundary (origin unavailable)"]) {
     assert.ok(result.summary.includes(expected), expected);
   }
   assert.doesNotMatch(result.summary, /private-|Frame:/);
@@ -122,7 +161,7 @@ test("malformed or oversized diagnostic metadata is omitted and does not fail an
     release: "x".repeat(161), sdk: { name: "private-sdk\nsecret", version: "private-version" },
     tags: [{ key: "component", value: "private-component" }, { key: "environment", value: "private-environment\nsecret" }],
     entries: [{ type: "exception", data: { values: [{ type: "Error", value: "Request Canceled",
-      mechanism: { type: "x".repeat(161), handled: "private-handled", synthetic: "private-synthetic" } }] } }],
+      mechanism: { type: "x".repeat(161), handled: "private-handled", synthetic: "private-synthetic", data: { stack_origin: "private-origin" } } }] } }],
   } }], undefined, "123");
   assert.match(result.summary, /Request Canceled/);
   assert.doesNotMatch(result.summary, /private-|Event time:|Release:|SDK:|Component:|Environment:|Mechanism:/);
@@ -189,6 +228,10 @@ test("optional exception type and value still return issue title and confirmed f
       include: [/TypeError: truncated/, /index\.js/], exclude: /private-local/ },
     { values: [{ type: null, value: null, rawStacktrace: { frames: [{ filename: "chunk.js", lineno: 9, colno: 3 }] } }],
       include: [/Exception 1\n/, /chunk\.js · line 9 · column 3/], exclude: /null/ },
+    { values: [{ stacktrace: { frames: [] }, rawStacktrace: { frames: [{
+      filename: "https://xmatrix.sh/chunk.js?private-query#private-fragment", lineno: 9,
+      module: "private-module", function: "private-function", vars: { token: "private-local" },
+    }] } }], include: [/Frame: https:\/\/xmatrix.sh\/chunk\.js · line 9/], exclude: /Generated frame:|private-/ },
     { values: [{ type: "Error", value: "kept", stacktrace: { frames: [null, frame] } }],
       include: [/Error: kept/, /index\.js/], exclude: /private-local/ },
     { values: [null, { type: "Error", value: "second", stacktrace: { frames: [frame] } }],
@@ -241,4 +284,102 @@ test("resolve uses the same pinned OAuth origin and cannot write after malformed
       { issue: "WEB-1A" }), /selected issue id/);
     assert.equal(malformed.calls.length, 1);
   } finally { malformed.restore(); }
+});
+
+const list = SENTRY_ACTIONS.list_issues;
+
+async function listIssues(responses, target, text) {
+  const stub = stubFetchResponses(responses);
+  try {
+    const input = list.parse({ target, text });
+    const result = await list.execute({ credentials: { authToken: "test-token", organization: "made-by-robot" } }, input);
+    return { result, calls: stub.calls };
+  } finally { stub.restore(); }
+}
+
+test("a release's new issues are listed from Sentry's own fields, most frequent first and bounded", async () => {
+  const row = (n, extra = {}) => ({ id: String(n), shortId: `HUB-${n}`, title: `Failure ${n}`, level: "error",
+    status: "unresolved", count: String(100 - n), userCount: 3, firstSeen: "2026-10-19T13:20:00Z",
+    lastSeen: "2026-10-19T13:50:00Z", culprit: "private-culprit", metadata: { value: "private-metadata" }, ...extra });
+  const { result, calls } = await listIssues([{ body: [row(1, { title: "Hub\nwedged   on\tstartup" }),
+    row(2, { count: "7 private-count", userCount: "private" })] }],
+  "xmatrix-hub", "firstRelease:xmatrix-v1.0.611-beta.1");
+  const url = new URL(calls[0].url);
+  assert.equal(url.origin + url.pathname, "https://sentry.io/api/0/projects/made-by-robot/xmatrix-hub/issues/");
+  assert.deepEqual(Object.fromEntries(url.searchParams), { query: "firstRelease:xmatrix-v1.0.611-beta.1", sort: "freq",
+    limit: "26", statsPeriod: "14d" });
+  assert.equal(calls[0].method, "GET");
+  assert.equal(result.summary, [
+    "Sentry issues in xmatrix-hub matching `firstRelease:xmatrix-v1.0.611-beta.1` (last 14 days, most frequent first):",
+    "- HUB-1: Hub wedged on startup · error · unresolved · 99 events · 3 users · first seen 2026-10-19T13:20:00Z · last seen 2026-10-19T13:50:00Z",
+    "- HUB-2: Failure 2 · error · unresolved · first seen 2026-10-19T13:20:00Z · last seen 2026-10-19T13:50:00Z",
+  ].join("\n"));
+  assert.doesNotMatch(result.summary, /private-/);
+
+  const many = await listIssues([{ body: Array.from({ length: 26 }, (_, n) => row(n + 1)) }], "*", "firstSeen:-24h");
+  assert.match(many.calls[0].url, /^https:\/\/sentry\.io\/api\/0\/organizations\/made-by-robot\/issues\/\?/u);
+  assert.match(many.result.summary, /^Sentry issues in all projects matching `firstSeen:-24h` \(last 14 days, most frequent first, first 25\):/u);
+  assert.equal(many.result.summary.split("\n").length, 26);
+  const none = await listIssues([{ body: [] }], "xmatrix-web", "firstRelease:xmatrix-v1.0.611-beta.1");
+  assert.equal(none.result.summary, "No Sentry issue in xmatrix-web matches `firstRelease:xmatrix-v1.0.611-beta.1` (last 14 days).");
+});
+
+test("a listing names one project or * and one line of search, and is a read under channel policy", async () => {
+  for (const [target, text] of [["../hub", "is:unresolved"], ["", "is:unresolved"], ["hub", ""], ["hub", "a\nb"],
+    ["hub", "x".repeat(301)], ["hub proj", "is:unresolved"]]) {
+    assert.equal(typeof list.parse({ target, text }), "string", JSON.stringify([target, text]));
+  }
+  assert.deepEqual(list.parse({ target: "XMatrix-Web", text: " is:unresolved " }), { project: "xmatrix-web", search: "is:unresolved" });
+  await assert.rejects(listIssues([{ body: { detail: "not a list" } }], "hub", "is:unresolved"), /did not return an issue list/u);
+  const manifest = APP_CONNECTOR_PROVIDER_MANIFESTS.find(provider => provider.id === "sentry");
+  assert.equal(manifest.actions.find(action => action.id === "list_issues").effect, "read");
+  assert.match(actionRefusal({ providerId: "sentry", actionId: "list_issues", effect: "read", mode: "deny",
+    senderKind: "agent" }), /denied/);
+});
+
+test("an issue list Sentry answered but that cannot be read is refused, never reported as no issue", async () => {
+  const good = { shortId: "HUB-1", title: "Failure", level: "error" };
+  for (const body of [[{ shortId: "../x", title: "An actual matching issue" }], [{ shortId: "HUB-2" }],
+    [good, { shortId: "HUB-3", title: 7 }]]) {
+    await assert.rejects(listIssues([{ body }], "*", "firstRelease:xmatrix-v1.1.0"), /unreadable issue/u, JSON.stringify(body));
+  }
+});
+
+// HUB-9N/9P/9Q/9R/9S/9T/9V/9W: read_issue must expose the new
+// diagnostics at the actual connector boundary without opening arbitrary extras.
+test("scheduled failures expose bounded retry phases and keep unrelated event extras private", async () => {
+  const failure = { operation: "app.gmail-routing.finish", shardId: "shard-0", statement: "transaction",
+    phase: "begin", queryName: "database_phase_begin_v1", code: "QUERY_READ_TIMEOUT", durationMs: 5000 };
+  const { result } = await run([{ body: issue }, { body: { ...event,
+    tags: [{ key: "operation", value: "scheduled: Gmail notification recovery and renewal" }],
+    context: { database_failure_attempts: JSON.stringify([failure, { ...failure, phase: "commit", queryName: "database_phase_commit_v1" }]),
+      user: "private-user", sql: "private-sql", arguments: ["private-argument"] },
+  } }], undefined, "123");
+  assert.match(result.summary, /Scheduled task: Gmail notification recovery and renewal/);
+  assert.match(result.summary, /Database failure 1: app.gmail-routing.finish · shard-0 · transaction · begin · database_phase_begin_v1 · QUERY_READ_TIMEOUT · 5000 ms/);
+  assert.match(result.summary, /Database failure 2: .* · commit · database_phase_commit_v1/);
+  assert.doesNotMatch(result.summary, /private-/);
+  for (const invalid of ["private-invalid-json", JSON.stringify(Array(5).fill(failure)),
+    JSON.stringify([{ ...failure, sql: "private-sql" }]), JSON.stringify([{ ...failure, code: "private-code" }]),
+    JSON.stringify([{ ...failure, durationMs: Infinity }]), JSON.stringify([{ ...failure, phase: "private-phase" }])]) {
+    const { result: malformed } = await run([{ body: issue }, { body: { ...event,
+      tags: [{ key: "operation", value: "scheduled: private-task" }], context: { database_failure_attempts: invalid },
+    } }], undefined, "123");
+    assert.doesNotMatch(malformed.summary, /Database failure|Scheduled task:|private-/);
+  }
+});
+
+test("harness watch transport stages are readable without arbitrary extras or response content", async () => {
+  const evidence = { phase: "runtime_fetch", durationMs: 123, responseStatus: 0, retryable: true, overloaded: false };
+  for (const [value, valid] of [[evidence, true], [{ ...evidence, phase: "response_body", responseStatus: 200 }, true],
+    [{ ...evidence, body: "private-body" }, false], [{ ...evidence, phase: "private-phase" }, false],
+    [{ ...evidence, responseStatus: 999 }, false], [{ ...evidence, durationMs: -1 }, false],
+    [{ ...evidence, durationMs: 120001 }, false], [{ ...evidence, retryable: "private-flag" }, false]]) {
+    const { result } = await run([{ body: issue }, { body: { ...event, context: {
+      harness_release_watch_failure: JSON.stringify(value), body: "private-body", daemon: "private-daemon" },
+    } }], undefined, "123");
+    assert.equal(result.summary.includes("Harness release watch failure:"), valid);
+    if (valid) assert.match(result.summary, /Harness release watch failure: (runtime_fetch|response_body) · 123 ms · HTTP (unavailable|200) · retryable=true · overloaded=false/);
+    assert.doesNotMatch(result.summary, /private-/);
+  }
 });

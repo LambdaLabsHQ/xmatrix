@@ -684,6 +684,44 @@ test("a routed exit report is recorded for the coordinator in the report transac
   assert.equal(unrouted.db.calls.some((call) => call.name === "machine_run_terminal_report_record_v1"), false);
 });
 
+test("a progress snapshot or online check without a caller id keeps no replay", async () => {
+  const command = (input) => {
+    const db = database((query) => query.name === "machine_control_daemon_lock_v1"
+      ? [{ ...daemon, connection_epoch: 3 }] : []);
+    return { db, value: new PostgresMachineControlRepository(db).command({
+      ownerUserId: "user-1", ownerEmail: "one@example.com", machineId: "machine-1", hostId: "host-1",
+      daemonId: "daemon-1", connectionEpoch: 3, metadata: {}, capabilities: [], principal: machinePrincipal(),
+      ...input,
+    }) };
+  };
+  const replays = (db) => db.calls.filter((call) => call.name === "machine_control_replay_read_v1" ||
+    call.name === "machine_control_replay_write_v1").length;
+  const progress = { type: "machine_run_snapshot", snapshotComplete: false, runs: [],
+    machineResources: { observedAt: new Date().toISOString(), cpuUsagePercent: 12 } };
+  // The daemon's minute load report: no caller can retry it by the id the Hub minted.
+  const minted = command({ commandId: "machine-report:minted", action: "report", replayable: false,
+    eventType: progress.type, payload: progress });
+  await minted.value;
+  assert.equal(replays(minted.db), 0);
+  assert.ok(minted.db.calls.some((call) => call.name === "machine_resource_observation_v2"));
+  const online = command({ commandId: "machine-confirm-online:minted", action: "confirm-online",
+    replayable: false, payload: {} });
+  await online.value;
+  assert.equal(replays(online.db), 0);
+  // A full snapshot reconciles Runs, so it keeps its replay even without a caller id;
+  // a report the daemon named keeps one too.
+  for (const input of [
+    { commandId: "machine-report:full", replayable: false, eventType: progress.type,
+      payload: { ...progress, snapshotComplete: true, capturedAt: new Date().toISOString() } },
+    { commandId: "machine-report:exit-1", eventType: "machine_run_exited",
+      payload: { type: "machine_run_exited", requestId: "exit-1", runId: "run-1" } },
+  ]) {
+    const kept = command({ action: "report", ...input });
+    await kept.value;
+    assert.equal(replays(kept.db), 2, input.commandId);
+  }
+});
+
 test("Machine stop issue persists a canonical lifecycle route for legacy ghosts", async () => {
   const db = database((query) => query.name === "machine_control_issue_v1"
     ? [{ command_id: "stop-1" }]
@@ -919,6 +957,71 @@ test("required naming rejects enrollment before daemon mutation and never uses t
   assert.deepEqual(db.calls.find(query => query.name === "machine_name_require_v1").values, ["owner",input.machineId]);
   assert.equal(db.calls.some(query => query.name === "machine_names_owner_lock_v1"), false);
   assert.equal(db.calls.some(query => query.text?.includes("INSERT") || query.text?.includes("UPDATE")), false);
+});
+
+test("failed delivery does not offline a daemon that has since reconnected", async () => {
+  const offline = { ...daemon, status: "offline", connection_epoch: 4 };
+  const replaced = database(query => query.name === "machine_control_daemon_lock_v1" ? [offline] : []);
+  const result = await new PostgresMachineControlRepository(replaced).command({
+    commandId: "issue-1:failed-deliver", action: "failed-deliver", ownerUserId: "user-1",
+    ownerEmail: "one@example.com", machineId: "machine-1", hostId: "host-1", daemonId: "daemon-1",
+    connectionEpoch: 3, payload: {}, principal: { kind: "user", id: "user-1" },
+  });
+  assert.equal(result.stale, true);
+  assert.equal(result.daemon.status, "offline");
+  assert.equal(result.connectionEpoch, 4);
+  assert.equal(replaced.calls.some(call => call.name === "machine_control_daemon_update_v3"), false);
+  const current = database(query => {
+    if (query.name === "machine_control_daemon_lock_v1") return [daemon];
+    if (query.name === "machine_control_daemon_update_v3") return [{ ...daemon, status: "offline" }];
+    return [];
+  });
+  const projected = await new PostgresMachineControlRepository(current).command({
+    commandId: "issue-2:failed-deliver", action: "failed-deliver", ownerUserId: "user-1",
+    ownerEmail: "one@example.com", machineId: "machine-1", hostId: "host-1", daemonId: "daemon-1",
+    connectionEpoch: 1, payload: {}, principal: { kind: "user", id: "user-1" },
+  });
+  assert.equal(projected.stale, undefined);
+  assert.equal(projected.daemon.status, "offline");
+  const update = current.calls.find(call => call.name === "machine_control_daemon_update_v3");
+  assert.equal(update.values[3], "offline");
+  assert.equal(update.values[6], 0);
+});
+
+test("a live socket confirms the catalog online without replacing the connection", async () => {
+  const principal = { kind: "machine", id: "machine-daemon:user-1:machine-1", ownerUserId: "user-1",
+    machineId: "machine-1", hostId: "host-1" };
+  const offline = { ...daemon, status: "offline" };
+  const healing = database(query => {
+    if (query.name === "machine_control_daemon_lock_v1") return [offline];
+    if (query.name === "machine_control_daemon_update_v3") return [{ ...offline, status: "online" }];
+    return [];
+  });
+  const healed = await new PostgresMachineControlRepository(healing).command({
+    commandId: "confirm-1", action: "confirm-online", ownerUserId: "user-1", ownerEmail: "one@example.com",
+    machineId: "machine-1", hostId: "host-1", daemonId: "daemon-1", connectionEpoch: 1, payload: {},
+    capabilities: [], metadata: {}, principal,
+  });
+  assert.equal(healed.daemon.status, "online");
+  assert.equal(healed.connectionEpoch, 1);
+  const update = healing.calls.find(call => call.name === "machine_control_daemon_update_v3");
+  assert.equal(update.values[3], "online");
+  assert.equal(update.values[6], 0, "confirming the same socket does not bump the epoch");
+  const already = database(query => query.name === "machine_control_daemon_lock_v1" ? [daemon] : []);
+  const unchanged = await new PostgresMachineControlRepository(already).command({
+    commandId: "confirm-2", action: "confirm-online", ownerUserId: "user-1", ownerEmail: "one@example.com",
+    machineId: "machine-1", hostId: "host-1", daemonId: "daemon-1", connectionEpoch: 1, payload: {},
+    capabilities: [], metadata: {}, principal,
+  });
+  assert.equal(unchanged.daemon.status, "online");
+  assert.equal(already.calls.some(call => call.name === "machine_control_daemon_update_v3"), false);
+  const replaced = database(query => query.name === "machine_control_daemon_lock_v1"
+    ? [{ ...daemon, connection_epoch: 2 }] : []);
+  await assert.rejects(new PostgresMachineControlRepository(replaced).command({
+    commandId: "confirm-3", action: "confirm-online", ownerUserId: "user-1", ownerEmail: "one@example.com",
+    machineId: "machine-1", hostId: "host-1", daemonId: "daemon-1", connectionEpoch: 1, payload: {},
+    capabilities: [], metadata: {}, principal,
+  }), error => error.code === "machine_daemon_stale_epoch");
 });
 
 function enrollmentRequest(overrides = {}) {

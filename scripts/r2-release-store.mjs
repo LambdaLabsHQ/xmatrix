@@ -12,6 +12,7 @@ import { GetObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { Upload } from "@aws-sdk/lib-storage";
 
 import { digestFile } from "./file-digests.mjs";
+import { compareSemver, releaseChannel } from "./release-version-order.mjs";
 
 export const R2_RELEASE_MANIFEST = "xmatrix-r2-manifest.json";
 const MANIFEST_SCHEMA_VERSION = 1;
@@ -496,7 +497,7 @@ export async function buildManifest({ bucket, prefix, directory }) {
     prefix,
     releaseTag: process.env.XMATRIX_RELEASE_TAG || null,
     component: process.env.XMATRIX_RELEASE_COMPONENT || null,
-    channel: process.env.XMATRIX_RELEASE_CHANNEL || null,
+    channel: releaseChannelOf(process.env.XMATRIX_RELEASE_TAG),
     commitSha: process.env.XMATRIX_RELEASE_SHA || process.env.GITHUB_SHA || null,
     runId: process.env.GITHUB_RUN_ID || null,
     files,
@@ -733,7 +734,7 @@ export async function sealRelease(
       prefix,
       releaseTag: process.env.XMATRIX_RELEASE_TAG || null,
       component: process.env.XMATRIX_RELEASE_COMPONENT || null,
-      channel: process.env.XMATRIX_RELEASE_CHANNEL || null,
+      channel: releaseChannelOf(process.env.XMATRIX_RELEASE_TAG),
       commitSha: process.env.XMATRIX_RELEASE_SHA || process.env.GITHUB_SHA || null,
       runId: runId || null,
       files,
@@ -753,21 +754,33 @@ export async function sealRelease(
   }
 }
 
+/** The channel a client release belongs to by its version, or null for anything else. */
+function releaseChannelOf(tag) {
+  const version = /^(?:cli|desktop|android)-v(.+)$/u.exec(tag ?? "")?.[1];
+  try {
+    return releaseChannel(version) === "stable" ? "stable" : "dev";
+  } catch {
+    return null;
+  }
+}
+
 function releaseVersion(tag) {
-  const version = /-v(\d+\.\d+\.\d+)$/u.exec(tag ?? "")?.[1];
-  if (!version) fail(`Release tag has no version: ${tag}`);
-  return version.split(".").map(Number);
+  const version = /^(?:cli|desktop|android)-v(.+)$/u.exec(tag ?? "")?.[1];
+  try {
+    releaseChannel(version);
+  } catch {
+    fail(`Release tag has no release version: ${tag}`);
+  }
+  return version;
 }
 
-function isOlderRelease(candidate, current) {
-  const [left, right] = [releaseVersion(candidate), releaseVersion(current)];
-  const index = left.findIndex((part, position) => part !== right[position]);
-  return index >= 0 && left[index] < right[index];
-}
-
-// Point a channel at a sealed release. A train publishes to dev; promoting to
-// stable points stable at the same sealed bytes. A channel never moves to an
-// older release than the one it already names.
+// Point a channel at a sealed release. The version alone says which channel a
+// release belongs to: a beta X.Y.Z-beta.N goes to dev, a stable X.Y.Z to
+// stable, so no caller can put a beta in front of stable users or a stable
+// rebuild in front of dev users ahead of their newer betas. A channel never
+// moves to an older release (SemVer precedence) than the one it names; a dev
+// pointer may still name a release from before channels had their own
+// versions, and the first beta moves it on.
 export async function publishChannel({ bucket, component, channel, prefix }, uploadOptions = {}) {
   shouldUseR2Multipart(0, uploadOptions.configuration);
   bucket = required(bucket, "--bucket");
@@ -783,11 +796,13 @@ export async function publishChannel({ bucket, component, channel, prefix }, upl
     });
     if (manifest.component && manifest.component !== component)
       fail(`Manifest component ${manifest.component} does not match ${component}`);
+    const owner = releaseChannel(releaseVersion(manifest.releaseTag)) === "stable" ? "stable" : "dev";
+    if (channel !== owner) fail(`${manifest.releaseTag} belongs on the ${owner} channel, not ${channel}`);
     const channelKey = `channels/${component}/${channel}.json`;
     const currentPath = path.join(staging, "current.json");
     if (await getObject(bucket, channelKey, currentPath, { allowMissing: true })) {
       const current = JSON.parse(await readFile(currentPath, "utf8"));
-      if (isOlderRelease(manifest.releaseTag, current.releaseTag)) {
+      if (compareSemver(releaseVersion(manifest.releaseTag), releaseVersion(current.releaseTag)) < 0) {
         fail(`${component} ${channel} already names ${current.releaseTag}; refusing to move it back to ${manifest.releaseTag}`);
       }
     }

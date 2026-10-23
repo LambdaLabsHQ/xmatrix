@@ -177,7 +177,7 @@ test("instance_connect atomically promotes Instance, Run, and Launch", async () 
 
 test("the first Agent reply is recorded once against its exact Launch", async () => {
   const db = database((query) => placedChannel(query) ?? (
-    query.name === "channel_capability_runtime_terminalize_v3" ? [channel]
+    query.name === "channel_capability_runtime_check_v3" ? [channel]
         : query.name === "runtime_agent_launch_first_reply_v1" ? [{ launch_age_ms: "1250" }] : []));
   const value = await new PostgresRuntimeRepository(db).recordAgentLaunchFirstReply({
     requestId: "first-reply-1", channelId: "channel-1", runId: "run-1",
@@ -286,13 +286,14 @@ test("a pre-spawn failure still owes a notice when launch update already failed 
   const run = { status: "failed", version: 3, metadata_json: {
     machineId: "machine-1", hostId: "host-1", executionKey: "execution-1" } };
   const context = { run_id: "run-1", channel_id: "channel-1", owner_user_id: "user-1",
-    agent_name: "Codex", status: "failed", startup_failed: true, metadata_json: run.metadata_json };
-  const db = lifecycleDatabase(run, { machine_lifecycle_notice_context_v6: [context],
+    agent_name: "Codex", harness: "codex", status: "failed", startup_failed: true, metadata_json: run.metadata_json };
+  const db = lifecycleDatabase(run, { machine_lifecycle_notice_context_v9: [context],
     machine_lifecycle_head_advance_v1: [{ commit_sequence: 15 }] });
   const value = await new PostgresMachineLifecycleRepository(db).apply(machineReport("spawn-failed", "machine_spawn_result",
     { ...spawnedPayload, ok: false, error: "base_ref_unresolved" }));
   assert.deepEqual(value.changedRunIds, [], "an already failed Run requires no new status transition");
   assert.equal(value.startupFailureNoticeContext?.runId, "run-1");
+  assert.equal(value.startupFailureNoticeContext?.harness, "codex", "the notice carries its Agent's face");
   const replay = db.calls.find(q => q.name === "machine_lifecycle_replay_write_v1");
   assert.ok(JSON.stringify(replay.values).includes("startupFailureNoticeContext"), "notice delivery survives report replay");
   assert.equal(Date.parse(replay.values[7]) - Date.parse(replay.values[6]), 30 * 24 * 60 * 60 * 1_000,
@@ -304,7 +305,7 @@ for (const [status, recoverableLaunchFailure, executionCancellation] of [["stopp
   test(`late spawn failure does not announce ${executionCancellation ? "cancelled" : status} as a new startup failure`, async () => {
     const body = { machineId: "machine-1", hostId: "host-1", executionKey: "execution-1", executionCancellation };
     const db = lifecycleDatabase({ status, version: 3, metadata_json: body }, {
-      machine_lifecycle_notice_context_v6: [{ run_id: "run-1", channel_id: "channel-1", owner_user_id: "user-1",
+      machine_lifecycle_notice_context_v9: [{ run_id: "run-1", channel_id: "channel-1", owner_user_id: "user-1",
         agent_name: "Codex", status, metadata_json: body }],
       machine_lifecycle_head_advance_v1: [{ commit_sequence: 15 }],
     });
@@ -319,7 +320,7 @@ for (const cancelled of [false, true]) {
     const body = { machineId: "machine-1", hostId: "host-1", executionKey: "execution-1",
       ...(cancelled ? { executionCancellation: { reason: "timeout", processCleanup: { status: "pending" } } } : {}) };
     const db = lifecycleDatabase({ status: "failed", version: 3, metadata_json: body }, {
-      machine_lifecycle_notice_context_v6: [{ run_id: "run-1", channel_id: "channel-1", owner_user_id: "user-1",
+      machine_lifecycle_notice_context_v9: [{ run_id: "run-1", channel_id: "channel-1", owner_user_id: "user-1",
         agent_name: "Codex", status: "failed", startup_failed: true, metadata_json: body }],
       machine_lifecycle_head_advance_v1: [{ commit_sequence: 15 }],
     });
@@ -336,7 +337,7 @@ test("a confirmed channel stop leaves the receipt on the command instead of a Ch
   const body = { machineId: "machine-1", hostId: "host-1", executionKey: "execution-1",
     stopRequest: { sourceMessageId: "message-1", requestedAt: "2026-10-06T08:46:35.000Z" } };
   const db = lifecycleDatabase({ status: "stopping", version: 4, metadata_json: body, finished_at: null, instance_id: null }, {
-    machine_lifecycle_notice_context_v6: [{ run_id: "run-1", channel_id: "channel-1", owner_user_id: "user-1",
+    machine_lifecycle_notice_context_v9: [{ run_id: "run-1", channel_id: "channel-1", owner_user_id: "user-1",
       agent_name: "Codex", status: "stopping", metadata_json: body }],
     machine_lifecycle_run_update_v1: [{ run_id: "run-1" }],
     machine_lifecycle_head_advance_v1: [{ commit_sequence: 16 }],
@@ -350,7 +351,7 @@ test("a confirmed channel stop leaves the receipt on the command instead of a Ch
 test("a confirmed stop with no channel command still posts its notice", async () => {
   const body = { machineId: "machine-1", hostId: "host-1", executionKey: "execution-1" };
   const db = lifecycleDatabase({ status: "running", version: 4, metadata_json: body, finished_at: null, instance_id: null }, {
-    machine_lifecycle_notice_context_v6: [{ run_id: "run-1", channel_id: "channel-1", owner_user_id: "user-1",
+    machine_lifecycle_notice_context_v9: [{ run_id: "run-1", channel_id: "channel-1", owner_user_id: "user-1",
       agent_name: "Codex", status: "running", metadata_json: body }],
     machine_lifecycle_run_update_v1: [{ run_id: "run-1" }],
     machine_lifecycle_head_advance_v1: [{ commit_sequence: 16 }],
@@ -361,11 +362,40 @@ test("a confirmed stop with no channel command still posts its notice", async ()
   assert.equal(value.stopResultNoticeContext.startupFailed, undefined);
 });
 
+test("a stop from a withdrawn registration carries why and who withdrew it", async () => {
+  const body = { machineId: "machine-1", hostId: "host-1", executionKey: "execution-1" };
+  const db = lifecycleDatabase({ status: "stopping", version: 4, metadata_json: body, finished_at: null, instance_id: null }, {
+    machine_lifecycle_notice_context_v9: [{ run_id: "run-1", channel_id: "channel-1", owner_user_id: "user-1",
+      agent_name: "claude", status: "stopping", metadata_json: body, stop_reason_code: "registration_disabled",
+      access_actor_name: "Daniel", owner_name: "Daniel", launcher_name: null }],
+    machine_lifecycle_run_update_v1: [{ run_id: "run-1" }],
+    machine_lifecycle_head_advance_v1: [{ commit_sequence: 16 }],
+  });
+  const value = await new PostgresMachineLifecycleRepository(db).apply(machineReport("registration-stop", "machine_stop_result",
+    { runId: "run-1", executionKey: "execution-1", requestId: "registration-stop:1", ok: true }));
+  assert.deepEqual(value.stopResultNoticeContext.stopCause,
+    { code: "registration_disabled", actorName: "Daniel", ownerName: "Daniel" });
+});
+
+test("a stop from a deleted Instance says the Instance was deleted", async () => {
+  const body = { machineId: "machine-1", hostId: "host-1", executionKey: "execution-1",
+    instanceDeletion: { schemaVersion: 1, state: "pending" } };
+  const db = lifecycleDatabase({ status: "running", version: 4, metadata_json: body, finished_at: null, instance_id: null }, {
+    machine_lifecycle_notice_context_v9: [{ run_id: "run-1", channel_id: "channel-1", owner_user_id: "user-1",
+      agent_name: "claude", status: "running", metadata_json: body, owner_name: "Ada" }],
+    machine_lifecycle_run_update_v1: [{ run_id: "run-1" }],
+    machine_lifecycle_head_advance_v1: [{ commit_sequence: 16 }],
+  });
+  const value = await new PostgresMachineLifecycleRepository(db).apply(machineReport("delete-stop", "machine_stop_result",
+    { runId: "run-1", executionKey: "execution-1", requestId: "delete-1", ok: true }));
+  assert.deepEqual(value.stopResultNoticeContext.stopCause, { code: "instance_deleted", ownerName: "Ada" });
+});
+
 test("a failed channel stop still posts because acceptance is not termination", async () => {
   const body = { machineId: "machine-1", hostId: "host-1", executionKey: "execution-1",
     stopRequest: { sourceMessageId: "message-1" } };
   const db = lifecycleDatabase({ status: "stopping", version: 4, metadata_json: body, finished_at: null, instance_id: null }, {
-    machine_lifecycle_notice_context_v6: [{ run_id: "run-1", channel_id: "channel-1", owner_user_id: "user-1",
+    machine_lifecycle_notice_context_v9: [{ run_id: "run-1", channel_id: "channel-1", owner_user_id: "user-1",
       agent_name: "Codex", status: "stopping", metadata_json: body }],
     machine_lifecycle_head_advance_v1: [{ commit_sequence: 16 }],
   });

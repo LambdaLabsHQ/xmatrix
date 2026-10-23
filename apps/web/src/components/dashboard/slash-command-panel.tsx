@@ -3,10 +3,9 @@
 import { Pin, SlashSquare, Wrench } from "lucide-react";
 import {
   CompletionOptionButton,
-  avatarInitials,
   stopTouchPropagation,
 } from "@/components/dashboard/completion-option-button";
-import { IdentityAvatar } from "@/components/dashboard/identity-avatar";
+import { Face } from "@/components/dashboard/face";
 import type {
   SlashCommandCandidate,
   SlashCommandTarget,
@@ -104,14 +103,7 @@ export function SlashCommandPanel({
               onSelect={() => onSelectTarget(target)}
               className="min-h-10 border-b border-border/30 last:border-b-0"
             >
-              <IdentityAvatar
-                kind="agent"
-                label={target.label}
-                initials={avatarInitials(target.label)}
-                imageUrl={target.avatarUrl}
-                size="sm"
-                shape="circle"
-              />
+              <Face of={target.face} size="sm" shape="circle" />
               <span className="min-w-0 flex-1 truncate">
                 <span className="font-semibold">{target.label}</span>
                 <span className="ml-1.5 text-foreground/50">@{target.mention}</span>

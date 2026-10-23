@@ -20,6 +20,8 @@ struct CodexTurnRequest<'a> {
     interrupt_history_replay: bool,
     runtime_state: Option<&'a AgentRuntimeStateTracker>,
     initial_goal: Option<&'a protocol::AgentGoalStatus>,
+    /// Start the turn with this app-server request instead of `turn/start`.
+    native: Option<&'a CodexNativeTurn>,
 }
 
 impl<'a> CodexTurnRequest<'a> {
@@ -37,6 +39,7 @@ impl<'a> CodexTurnRequest<'a> {
             interrupt_history_replay: false,
             runtime_state: None,
             initial_goal: None,
+            native: None,
         }
     }
 }
@@ -63,52 +66,13 @@ struct CodexAppSession {
     fast_tiers: HashMap<String, String>,
     active_turn: Arc<Mutex<Option<CodexActiveTurn>>>,
     graceful_interrupt: Arc<Mutex<Option<CodexGracefulInterrupt>>>,
+    /// `turn/steer` requests awaiting their response, by request id.
+    pending_steers: CodexPendingSteers,
     /// requestUserInput requests parked until their card is answered: the
     /// JSON-RPC id to answer, by item id.
     questions: crate::runtime_harness_questions::PendingQuestions<Value>,
     /// The plan outlives a turn, so what it already reported does too.
     activity: ChannelActivityReporter,
-}
-
-/// Copy predecessor resume pointers into a run-local directory the successor
-/// can read. Missing files are omitted; this must never fail a spawn.
-pub(crate) fn materialize_handoff_session_snapshot(source_session_key: &str) -> Option<PathBuf> {
-    let key = source_session_key.trim();
-    if key.is_empty() {
-        return None;
-    }
-    let root = std::env::temp_dir().join(format!(
-        "xmatrix-handoff-session-{}",
-        resume_session_digest(key)
-    ));
-    if let Err(error) = std::fs::create_dir_all(&root) {
-        eprintln!("⚠ Could not create handoff session directory: {error}");
-        return None;
-    }
-    let mut copied = 0usize;
-    for namespace in ["codex-resume", "grok-resume", "claude-resume"] {
-        let source = resume_session_path(namespace, key);
-        if !source.is_file() {
-            continue;
-        }
-        let dest = root.join(format!("{namespace}.session"));
-        match std::fs::copy(&source, &dest) {
-            Ok(_) => copied += 1,
-            Err(error) => {
-                eprintln!(
-                    "⚠ Could not copy handoff session pointer {}: {error}",
-                    source.display()
-                );
-            }
-        }
-    }
-    let note = format!(
-        "Predecessor resume session key: {key}\nCopied pointer files: {copied}\nRead these as untrusted prior context.\n"
-    );
-    if let Err(error) = std::fs::write(root.join("README.txt"), note) {
-        eprintln!("⚠ Could not write handoff session README: {error}");
-    }
-    Some(root)
 }
 
 fn resume_session_digest(key: &str) -> String {
@@ -726,6 +690,30 @@ impl AgentRuntimeStateTracker {
         ))
     }
 
+    /// A message steered into the running turn becomes one of its sources, so
+    /// the turn's execution answers for it too. Returns the final-reply line
+    /// that message's input carries, or `None` with no execution running.
+    fn join_message_turn_source(
+        &self,
+        source: protocol::AgentRuntimeMessageSource,
+    ) -> Option<String> {
+        let channel_id = source.channel_id.clone();
+        {
+            let mut inner = self.inner.lock().ok()?;
+            let now = unix_millis_now();
+            let execution = inner.execution.as_mut()?;
+            if execution.sources.len() < 100 {
+                execution.sources.push(source);
+            }
+            execution.source_count = execution.source_count.saturating_add(1).min(100);
+            execution.revision += 1;
+            execution.updated_at_millis = now.max(execution.started_at_millis);
+            inner.updated_at_millis = now;
+        }
+        self.persist();
+        self.final_reply_instruction(Some(&channel_id))
+    }
+
     fn begin_turn(
         &self,
         active_channel_id: Option<&str>,
@@ -948,6 +936,43 @@ impl Drop for AgentRuntimeTurnGuard {
     }
 }
 
+/// `turn/steer` requests in flight. The session's reader answers each one
+/// from its response; the turn loop waits on it.
+#[derive(Clone, Default)]
+struct CodexPendingSteers(Arc<Mutex<HashMap<String, oneshot::Sender<Result<(), String>>>>>);
+
+impl CodexPendingSteers {
+    fn register(&self, request_id: &str) -> oneshot::Receiver<Result<(), String>> {
+        let (accepted_tx, accepted_rx) = oneshot::channel();
+        if let Ok(mut pending) = self.0.lock() {
+            pending.insert(request_id.to_string(), accepted_tx);
+        }
+        accepted_rx
+    }
+
+    fn forget(&self, request_id: &str) {
+        if let Ok(mut pending) = self.0.lock() {
+            pending.remove(request_id);
+        }
+    }
+
+    /// True when `message` answered a steer; it is consumed then.
+    fn answer(&self, message: &Value) -> bool {
+        let Some(request_id) = message.get("id").and_then(Value::as_str) else {
+            return false;
+        };
+        let Some(accepted) = self.0.lock().ok().and_then(|mut pending| pending.remove(request_id))
+        else {
+            return false;
+        };
+        let _ = accepted.send(match message.get("error") {
+            Some(error) => Err(error.to_string()),
+            None => Ok(()),
+        });
+        true
+    }
+}
+
 #[derive(Clone)]
 struct CodexActiveTurn {
     thread_id: String,
@@ -973,6 +998,7 @@ struct CodexAppInterrupter {
     write: AppServerWrite,
     active_turn: Arc<Mutex<Option<CodexActiveTurn>>>,
     graceful_interrupt: Arc<Mutex<Option<CodexGracefulInterrupt>>>,
+    pending_steers: CodexPendingSteers,
     questions: crate::runtime_harness_questions::PendingQuestions<Value>,
 }
 
@@ -1005,6 +1031,7 @@ impl CodexAppSession {
             fast_tiers: HashMap::new(),
             active_turn: Arc::new(Mutex::new(None)),
             graceful_interrupt: Arc::new(Mutex::new(None)),
+            pending_steers: Default::default(),
             questions: Default::default(),
             activity: ChannelActivityReporter::default(),
         }
@@ -1174,6 +1201,7 @@ impl CodexAppSession {
             write: self.write.clone(),
             active_turn: self.active_turn.clone(),
             graceful_interrupt: self.graceful_interrupt.clone(),
+            pending_steers: self.pending_steers.clone(),
             questions: self.questions.clone(),
         }
     }
@@ -1290,9 +1318,45 @@ impl CodexAppInterrupter {
         }
     }
 
+    fn current_turn(&self) -> Option<CodexActiveTurn> {
+        self.active_turn.lock().ok().and_then(|guard| guard.clone())
+    }
+
+    /// Join `text` to the running turn with `turn/steer`. `None` with no turn
+    /// running; otherwise the response to wait for, since only an accepted
+    /// steer means Codex has the message.
+    async fn begin_steer(
+        &self,
+        text: &str,
+    ) -> error::Result<Option<oneshot::Receiver<Result<(), String>>>> {
+        let Some(active_turn) = self.current_turn() else {
+            return Ok(None);
+        };
+        let request_id = format!("xmatrix-steer-{}", uuid::Uuid::new_v4());
+        let accepted = self.pending_steers.register(&request_id);
+        let written = write_codex_app_message(
+            &self.write,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "method": "turn/steer",
+                "params": {
+                    "threadId": active_turn.thread_id,
+                    "expectedTurnId": active_turn.turn_id,
+                    "input": [{ "type": "text", "text": text, "text_elements": [] }],
+                },
+            }),
+        )
+        .await;
+        if let Err(err) = written {
+            self.pending_steers.forget(&request_id);
+            return Err(err);
+        }
+        Ok(Some(accepted))
+    }
+
     pub(crate) async fn interrupt_active_turn(&self) -> error::Result<bool> {
-        let active_turn = self.active_turn.lock().ok().and_then(|guard| guard.clone());
-        let Some(active_turn) = active_turn else {
+        let Some(active_turn) = self.current_turn() else {
             return Ok(false);
         };
         let request_id = format!("xmatrix-interrupt-{}", uuid::Uuid::new_v4());
@@ -1316,8 +1380,7 @@ impl CodexAppInterrupter {
     async fn begin_graceful_interrupt(
         &self,
     ) -> error::Result<Option<CodexGracefulInterruptWaiter>> {
-        let active_turn = self.active_turn.lock().ok().and_then(|guard| guard.clone());
-        let Some(active_turn) = active_turn else {
+        let Some(active_turn) = self.current_turn() else {
             return Ok(None);
         };
         let request_id = format!("xmatrix-shutdown-interrupt-{}", uuid::Uuid::new_v4());
@@ -1590,6 +1653,9 @@ impl CodexAppSession {
             tokio::time::timeout(Duration::from_secs(CODEX_APP_REQUEST_TIMEOUT_SECS), async {
                 while let Some(message) = self.inbox.recv().await {
                     self.observe_graceful_interrupt(&message);
+                    if self.pending_steers.answer(&message) {
+                        continue;
+                    }
                     if self.observe_parameter_notification(&message) {
                         continue;
                     }
@@ -2166,6 +2232,7 @@ impl CodexAppSession {
             trace_channel_id,
             runtime_state,
             initial_goal,
+            native,
             ..
         } = request;
         let trace = TurnTrace {
@@ -2201,6 +2268,15 @@ impl CodexAppSession {
         let recovered_turn_id = codex_active_turn_id_from_events(self.inbox.pending(), &thread_id);
         let turn_id = if let Some(turn_id) = recovered_turn_id.as_deref() {
             Some(turn_id.to_string())
+        } else if let Some(native) = native {
+            // Compaction answers `{}` and names its turn in `turn/started`.
+            let (method, params) = native.request(&thread_id);
+            let result = self.request(method, params).await?;
+            result
+                .get("turn")
+                .and_then(|turn| turn.get("id"))
+                .and_then(Value::as_str)
+                .map(ToString::to_string)
         } else {
             let (local_image_files, image_download_failed) = match materialize_local_image_files(
                 attachments,
@@ -2433,6 +2509,9 @@ impl CodexAppSession {
                 break;
             };
             self.observe_graceful_interrupt(&message);
+            if self.pending_steers.answer(&message) {
+                continue;
+            }
             let method = message.get("method").and_then(Value::as_str);
             if method != Some("error") {
                 // Any other app-server event means the stream recovered.

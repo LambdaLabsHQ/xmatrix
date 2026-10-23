@@ -151,7 +151,7 @@ pub(crate) struct WakeObserver {
 }
 
 impl WakeObserver {
-    pub(crate) fn new(
+    pub fn new(
         harness: String,
         resumed: bool,
         started_with_input: bool,

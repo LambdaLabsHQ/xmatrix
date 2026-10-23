@@ -483,7 +483,9 @@ export function startAgentTraceHistorySync(
       waitMs,
       reportLoading: false,
       onState: (state) => {
-        if (state.phase === "error") failed = true;
+        // A host that cannot serve its trace answers at once, so asking again
+        // every second would be a loop: it backs off like a failed read.
+        if (state.phase === "error" || state.phase === "unavailable" || state.phase === "expired") failed = true;
         trackSince.onState(state);
       },
       onEvents: (id, events) => {

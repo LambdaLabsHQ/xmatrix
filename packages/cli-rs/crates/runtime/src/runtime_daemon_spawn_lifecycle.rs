@@ -765,6 +765,7 @@ async fn handle_daemon_spawn_request(
             resume_instance_id: intent.resume_instance_id.as_deref(),
             resume_session_key: intent.resume_session_key.as_deref(),
             handoff_source_resume_session_key: intent.handoff_source_resume_session_key.as_deref(),
+            handoff_context: intent.handoff_context.as_ref(),
             goal: intent.goal.as_ref(),
             initial_message_source: intent.initial_message_source.as_ref(),
             requested_model: intent.requested_model.as_deref(),
@@ -1251,9 +1252,7 @@ async fn renew_daemon_command_lease_http(
             "requestId": request_id,
             "relayLease": relay_lease,
         }));
-    let request = http::with_access_header(request, &url)
-        .map_err(|error| DaemonCommandLeaseRenewalError::FenceLost(error.to_string()))?
-        .send();
+    let request = request.send();
     let response = tokio::time::timeout(
         Duration::from_secs(DAEMON_COMMAND_LEASE_RENEW_REQUEST_TIMEOUT_SECS),
         request,
@@ -1529,8 +1528,7 @@ async fn report_daemon_control_result_http(
     let mut retry = 0;
     loop {
         let client = http::client()?;
-        let request =
-            http::with_access_header(client.post(&url).bearer_auth(token).json(&body), &url)?;
+        let request = client.post(&url).bearer_auth(token).json(&body);
         let response = match tokio::time::timeout(
             Duration::from_secs(DAEMON_CONTROL_RESULT_REQUEST_TIMEOUT_SECS),
             request.send(),
@@ -2023,6 +2021,7 @@ struct HeadlessAgentSpawn<'a> {
     resume_instance_id: Option<&'a str>,
     resume_session_key: Option<&'a str>,
     handoff_source_resume_session_key: Option<&'a str>,
+    handoff_context: Option<&'a MachineHandoffContext>,
     goal: Option<&'a protocol::AgentGoalStatus>,
     initial_message_source: Option<&'a protocol::AgentRuntimeMessageSource>,
     requested_model: Option<&'a str>,
@@ -2071,6 +2070,7 @@ async fn spawn_headless_agent(
         resume_instance_id,
         resume_session_key,
         handoff_source_resume_session_key,
+        handoff_context,
         goal,
         initial_message_source,
         requested_model,
@@ -2256,7 +2256,6 @@ async fn spawn_headless_agent(
         .args(&runtime_args)
         .current_dir(&workspace.canonical_cwd)
         .env("XMATRIX_HUB_URL", hub_url)
-        .env_remove("XMATRIX_ENVIRONMENT")
         .env("XMATRIX_HEADLESS", "1")
         .env("XMATRIX_AGENT_NAME_OVERRIDE", agent_name)
         .env("XMATRIX_AGENT_NAME", agent_name)
@@ -2316,10 +2315,15 @@ async fn spawn_headless_agent(
     if let Some(resume_session_key) = resume_session_key {
         command.env("XMATRIX_RESUME_SESSION_KEY", resume_session_key);
     }
-    if let Some(source_session_key) = handoff_source_resume_session_key
-        && let Some(dir) = materialize_handoff_session_snapshot(source_session_key) {
-            command.env("XMATRIX_HANDOFF_SESSION_DIR", dir.display().to_string());
-        }
+    // A cross-machine handoff carries the predecessor's conversation; the
+    // same-machine path still points at its session files.
+    if let Some(dir) = handoff_context
+        .and_then(|context| runtime_handoff_context::materialize_handoff_context(
+            context, run_id.or(execution_key).unwrap_or(agent_name)))
+        .or_else(|| handoff_source_resume_session_key.and_then(runtime_handoff_context::materialize_handoff_session_snapshot))
+    {
+        command.env("XMATRIX_HANDOFF_SESSION_DIR", dir.display().to_string());
+    }
     if goal.is_some()
         || initial_message_source.is_some()
         || requested_model.is_some()

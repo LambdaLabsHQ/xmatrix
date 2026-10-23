@@ -4,10 +4,11 @@ const path = require("node:path");
 const test = require("node:test");
 require("./typescript-require.cjs").installTypeScriptRequire();
 const {
-  summonView, invocationPollInterval, invocationVendorIcon, splitMentionRejections,
-  continuationView, splitMentionContinuations, splitHandoffMentions, handoffView,
+  summonView, invocationVendorHarness, addressedAgentFace, launchFace, continuationFaces,
+  splitMentionRejections, continuationView, splitMentionContinuations, splitHandoffMentions, handoffView,
   handoffSuccessorLaunch, segmentMessageInteraction,
 } = require("./mention-invocation-state.ts");
+const { agentFaceUrl, staticFace } = require("@xmatrix/protocol");
 
 const at = "2026-09-12T15:31:05.470Z";
 const base = { launchId: "launch:one", sourceMessageId: "message:one", channelId: "channel:one",
@@ -15,28 +16,45 @@ const base = { launchId: "launch:one", sourceMessageId: "message:one", channelId
   sourceMention: "@codex:new:owner/repo", runId: "run:one", instanceId: "instance:one",
   state: "connected", attempt: 0, retryable: false, createdAt: at, updatedAt: at, connectedAt: at };
 const step = (view, label) => view.steps.find(entry => entry.label === label);
-test("a summon chip leads with the harness vendor icon", () => {
-  assert.equal(invocationVendorIcon({ sourceMention: "@grok machine:Workstation", targetName: "grok" }),
-    "/agent-vendors/grok.svg");
-  assert.equal(invocationVendorIcon({ sourceMention: "@auto machine:Workstation harness:codex", targetName: "Agent" }),
-    "/agent-vendors/openai.svg");
-  assert.equal(invocationVendorIcon({
-    sourceMention: "@auto machine:Workstation", targetName: "Reviewer",
-    routingDecision: { rows: [{ harness: "claude", selected: true }] },
+test("a summon chip leads with the face of the harness its address names", () => {
+  const mark = (input) => agentFaceUrl(invocationVendorHarness(input));
+  assert.equal(mark({ sourceMention: "@grok machine:Workstation" }), "/agent-vendors/grok.svg");
+  assert.equal(mark({ sourceMention: "@auto machine:Workstation harness:codex" }), "/agent-vendors/openai.svg");
+  assert.equal(mark({
+    sourceMention: "@auto machine:Workstation", routingDecision: { rows: [{ harness: "claude", selected: true }] },
   }), "/agent-vendors/claude.svg");
-  // The bound registration's mark wins once the launch carries it.
-  assert.equal(invocationVendorIcon({
-    sourceMention: "@grok machine:Workstation", targetAvatarUrl: "/agent-vendors/grok.svg",
-  }), "/agent-vendors/grok.svg");
-  assert.equal(invocationVendorIcon({ sourceMention: "@auto machine:Workstation", targetName: "Agent" }), undefined);
-  assert.equal(invocationVendorIcon({ sourceMention: "@auto harness:agent", targetName: "Agent" }),
-    "/agent-vendors/cursor.png");
-  assert.equal(invocationVendorIcon({ sourceMention: "@auto harness:cursor-agent", targetName: "Agent" }),
-    "/agent-vendors/cursor.png");
+  assert.equal(invocationVendorHarness({ sourceMention: "@auto machine:Workstation" }), undefined);
+  assert.equal(mark({ sourceMention: "@auto harness:agent" }), "/agent-vendors/cursor.png");
+  assert.equal(mark({ sourceMention: "@auto harness:cursor-agent" }), "/agent-vendors/cursor.png");
   // Read with the launch grammar: `harness:` after prose is not a condition.
-  assert.equal(invocationVendorIcon({ sourceMention: "@auto review harness:codex", targetName: "Agent" }), undefined);
-  assert.equal(invocationVendorIcon({ sourceMention: '@auto harness:"claude_code"', targetName: "Agent" }),
-    "/agent-vendors/claude.svg");
+  assert.equal(invocationVendorHarness({ sourceMention: "@auto review harness:codex" }), undefined);
+  assert.equal(mark({ sourceMention: '@auto harness:"claude_code"' }), "/agent-vendors/claude.svg");
+});
+
+test("an Agent whose address names no harness is drawn by its Instance, never by its name", () => {
+  // A name an Agent goes by is not a harness, even one that looks like it.
+  const named = addressedAgentFace({ name: "grok" });
+  assert.deepEqual(named, { kind: "agent", name: "grok", harness: null, id: null });
+  const launched = launchFace({ ...base, sourceMention: "@auto machine:Workstation", targetName: "Reviewer" });
+  assert.deepEqual(launched, { kind: "agent", name: "Reviewer", harness: null, id: "instance:one" });
+  assert.equal(staticFace(launched), null, "its picture is read through the face directory");
+  assert.equal(staticFace(launchFace({ ...base, sourceMention: "@codex machine:Workstation" })).imageUrl,
+    "/agent-vendors/openai.svg", "`@codex` names Codex");
+  // A renamed Agent keeps its vendor's mark: the harness the Hub recorded wins over what its name or address say.
+  assert.equal(staticFace(launchFace({ ...base, sourceMention: "@auto", targetName: "Reviewer", targetHarness: "claude_code" }))
+    .imageUrl, "/agent-vendors/claude.svg");
+});
+
+test("a handoff's faces are the Instance it left and the harness it names, a reborn's its own Instance", () => {
+  const record = { schemaVersion: 1, kind: "handoff", sourceMessageId: "message:one", sourceMessageVersion: 1,
+    sourceMention: "@claude:3:handoff:@codex", sourceInstanceId: "channel:one:3", sourceRunId: "run:old",
+    sourceName: "claude", sourceOrdinal: 3, targetInstanceId: "channel:one:4", runId: "run:new", channelId: "channel:one",
+    targetName: "codex", createdAt: at };
+  const faces = continuationFaces(record);
+  assert.deepEqual(faces.source, { kind: "agent", name: "claude", harness: null, id: "channel:one:3" });
+  assert.deepEqual(faces.successor, { kind: "agent", name: "codex", harness: "codex", id: "channel:one:4" });
+  const reborn = continuationFaces({ ...record, kind: "reborn", sourceMention: "@claude:3:reborn" });
+  assert.deepEqual(reborn.successor, reborn.source);
 });
 test("a summon lists every step on one level", () => {
   const chosen = summonView({ ...base, routingDecision: { source: "jev", evaluatedAt: "2026-09-22T18:00:00Z" } });
@@ -66,7 +84,6 @@ test("a server connection claim is not a joined channel", () => {
   assert.equal(view.tone, "active");
   assert.equal(step(view, "Joined channel").state, "current");
   assert.match(view.detail, /client to confirm/);
-  assert.equal(invocationPollInterval([base], 0, Date.now(), false), 2000);
 });
 test("a later checkpoint proves every earlier sub-step", () => {
   const view = summonView({ ...base, connectedAt: undefined, activity: { runStatus: "running", phase: "runtime_ready",
@@ -93,7 +110,6 @@ test("reasoning started settles the summon; the Run's later outcome never rewrit
     { runStatus: "exited", phase: "turn_failed" }, { runStatus: "running", phase: "run_delivery_failed" }, { runStatus: "failed", phase: "turn_unknown" }]) {
     assert.equal(summonView({ ...base, activity: { ...activity, updatedAt: at } }).label, "Started", JSON.stringify(activity));
   }
-  assert.equal(invocationPollInterval([incident], 0, Date.now(), false), false);
 });
 test("an execution record for the summoning message is reasoning evidence", () => {
   const execution = { id: "record", executionId: "initial", channelId: base.channelId, sourceMessageId: base.sourceMessageId,
@@ -103,8 +119,6 @@ test("an execution record for the summoning message is reasoning evidence", () =
   assert.equal(summonView(base, [execution]).executionId, "initial");
   assert.equal(summonView(base, [{ ...execution, sourceMessageId: "other" }]).label, "Starting");
   assert.equal(summonView(base, [{ ...execution, runId: "other" }]).executionId, undefined);
-  assert.equal(invocationPollInterval([base], 0, Date.now(), false, [], [{ ...execution, state: "completed", finishedAt: at }]), 15000,
-    "executions still refresh so a saved reply can be recovered");
 });
 test("startup failure names the stuck sub-step and its typed cause", () => {
   const failure = { code: "agent_run_binding_mismatch", stage: "relay.authenticate", originStage: "authority.request",
@@ -115,7 +129,6 @@ test("startup failure names the stuck sub-step and its typed cause", () => {
   assert.match(view.detail, /credentials do not match/);
   assert.equal(step(view, "Joined channel").state, "failed");
   assert.equal(step(view, "Process started").state, "done");
-  assert.equal(invocationPollInterval([{ ...base, activity: { runStatus: "exited", phase: "wrapper_startup_failed" } }], 0, Date.now(), false), false);
   assert.match(summonView({ ...base, activity: { runStatus: "exited" } }).detail, /Joined channel/);
   assert.equal(summonView({ ...base, state: "cancelled" }).label, "Stopped");
   assert.equal(require("./mention-invocation-state.ts").operationFailureStageLabel("constructor"), "Runtime session");
@@ -131,7 +144,6 @@ test("stale or unrefreshed evidence keeps its answer but stops spinning", () => 
   const cached = summonView({ ...base, firstReplyAt: at }, [], true);
   assert.equal(cached.label, "Started");
   assert.match(cached.detail, /could not be refreshed/);
-  assert.equal(invocationPollInterval([base], 0, Date.now(), true), 10000);
 });
 test("reborn and handoff read as the same startup", () => {
   const record = { schemaVersion: 1, kind: "handoff", sourceMessageId: "message", sourceMessageVersion: 1,
@@ -153,7 +165,6 @@ test("reborn and handoff read as the same startup", () => {
   assert.equal(step(view, "Handoff recorded").state, "done");
   assert.equal(step(view, "Successor Run created").state, "done");
   assert.equal(step(view, "Process started").state, "current");
-  assert.equal(invocationPollInterval([], 0, Date.now(), false, [record]), 2000);
   assert.equal(continuationView({ ...record, activity: { ...record.activity, runStatus: "exited", phase: undefined } }).label, "Failed");
   assert.equal(continuationView({ ...record, activity: { ...record.activity, phase: "turn_running" } }).label, "Started");
   assert.equal(continuationView({ ...record, activity: { ...record.activity, runStatus: "stopped", phase: undefined } }).label, "Stopped");
@@ -173,7 +184,6 @@ test("a reborn reads like a summon from the moment it is accepted", () => {
   assert.equal(step(stopping, "Reborn requested").state, "done");
   assert.equal(step(stopping, "Previous process stopped").state, "current");
   assert.match(stopping.detail, /Stopping the previous process/);
-  assert.equal(invocationPollInterval([], 0, Date.now(), false, [accepted]), 2000);
   assert.match(continuationView({ ...accepted, reborn: { ...accepted.reborn, stopRequired: false } }).detail,
     /Preparing to resume/);
 
@@ -195,7 +205,6 @@ test("a reborn reads like a summon from the moment it is accepted", () => {
   assert.equal(step(failed, "Previous process stopped").state, "failed");
   assert.match(continuationView({ ...accepted, reborn: { ...accepted.reborn, state: "failed", errorCode: "internal_secret" } }).detail,
     /\[reborn_failed\]/);
-  assert.equal(invocationPollInterval([], 0, Date.now(), false, [{ ...accepted, reborn: { ...accepted.reborn, state: "failed" } }]), false);
 });
 
 test("preparation failures match the exact address and preserve the surrounding message", () => {
@@ -319,4 +328,17 @@ test("the segmenter keeps non-operational addresses and unreadable handoffs as p
   assert.deepEqual(pending.map(segment => [segment.presentationRef, segment.launch, segment.rejection]),
     [[null, undefined, undefined], ["launch.v1", undefined, undefined]]);
   assert.deepEqual(segmentMessageInteraction("", {}), []);
+});
+
+test("a connector command is one connector.v1 segment, whole or by its command", () => {
+  const { parseConnectorInvocation } = require("@xmatrix/protocol");
+  const body = "@github:comment:o/r#7 ship it";
+  const connector = parseConnectorInvocation(body);
+  assert.deepEqual(segmentMessageInteraction(body, { connector }).map(part => [part.presentationRef, part.text]),
+    [["connector.v1", body]]);
+  // Markdown split the statement: the command still lights up, the rest stays prose.
+  assert.deepEqual(segmentMessageInteraction("@github:comment:o/r#7 ship ", { connector })
+    .map(part => [part.presentationRef, part.text]),
+  [["connector.v1", "@github:comment:o/r#7"], [null, " ship "]]);
+  assert.deepEqual(segmentMessageInteraction(body, {}).map(part => part.presentationRef), [null]);
 });

@@ -3,7 +3,7 @@
 import { useState, type ReactNode } from "react";
 import type { HarnessSignedOut } from "@xmatrix/protocol";
 import { useOnboardingCopy } from "@/lib/onboarding-locale";
-import { HarnessSignInSection } from "./harness-sign-in";
+import { HarnessSignedOutBody } from "./harness-sign-in";
 import { useInstalledHarnesses } from "./use-installed-harnesses";
 
 /* A notice whose program is signed out on its machine: a summon refused for
@@ -25,15 +25,13 @@ export function HarnessSignedOutNotice({ signedOut, spaceId, token, userId, onSi
   if (!registration || !token) return <>{notice}</>;
   return (
     <div className="app-paper-card max-w-[34rem] text-[15px] leading-6" data-testid="harness-signed-out-notice">
-      <p>{copy.signedOut(signedOut.program, signedOut.machineName ?? registration.machineName)}</p>
-      <div className="mt-2">
-        <HarnessSignInSection registration={registration} token={token} userId={userId} bare signInLabel={copy.signIn}
-          onSignedIn={() => {
-            // A refused summon is sent again; a failed turn is the person's to ask again.
-            if (!onSignedIn) { setResent("again"); return; }
-            void onSignedIn().then((sent) => setResent(sent ? "sent" : "again"), () => setResent("failed"));
-          }} />
-      </div>
+      <HarnessSignedOutBody registration={registration} token={token} userId={userId} copy={copy}
+        program={signedOut.program} machine={signedOut.machineName ?? registration.machineName}
+        onSignedIn={() => {
+          // A refused summon is sent again; a failed turn is the person's to ask again.
+          if (!onSignedIn) { setResent("again"); return; }
+          void onSignedIn().then((sent) => setResent(sent ? "sent" : "again"), () => setResent("failed"));
+        }} />
       {resent && <p role="status" className="mt-2 text-[13px] leading-5 text-muted-foreground">
         {resent === "sent" ? copy.signedInResent : resent === "again" ? copy.sendAgain : copy.resendFailed}</p>}
     </div>

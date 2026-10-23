@@ -19,12 +19,12 @@ export async function GET(request: Request) {
   const refreshToken = cookies.get(NATIVE_REFRESH_COOKIE);
   const authProvider = normalizeAuthProvider(cookies.get(NATIVE_PROVIDER_COOKIE));
 
-  if (!accessToken || !refreshToken) {
+  if (!refreshToken) {
     return NextResponse.json({ session: null });
   }
 
-  const current = await loadUserFromAccessToken(accessToken);
-  if (current) {
+  const current = accessToken ? await loadUserFromAccessToken(accessToken) : null;
+  if (current && accessToken) {
     return NextResponse.json({
       session: sessionResponse({
         token: accessToken,

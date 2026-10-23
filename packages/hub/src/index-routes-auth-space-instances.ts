@@ -27,20 +27,23 @@ async function readDaemonControlStatus(
 
 const INSTANCE_ROUTE = "/api/spaces/:spaceId/channels/:channelId/agent-instances/:instanceId";
 
-/** The caller's own membership row carries their current profile, not the stored copy. */
 /** "Ada Lovelace's Space"; "My Space" while the account has no name its person chose. */
 export function personalSpaceName(user: Pick<AuthUser, "id" | "name">): string {
   const name = user.name?.trim() ?? "";
   return isPlaceholderHumanName(name, user.id) ? "My Space" : `${name.slice(0, 60)}'s Space`;
 }
 
+/**
+ * The caller's own membership row carries their current name and email, not the stored copy. Their picture is not
+ * among them: a face is read from the account by id (protocol faces.ts), never from a session's copy of it.
+ */
 function withCallerMemberProfile(space: Record<string, unknown>, authUser: AuthUser): Record<string, unknown> {
   return {
     ...space,
     members: Array.isArray(space.members)
       ? (space.members as Array<Record<string, unknown>>).map((member) =>
           member.userId === authUser.id
-            ? { ...member, email: authUser.email, name: authUser.name, avatarUrl: authUser.avatarUrl }
+            ? { ...member, email: authUser.email, name: authUser.name }
             : member
         )
       : [],
@@ -589,7 +592,6 @@ export function registerIndexRoutesAuthSpaceInstances(app: Hono<{ Bindings: Env 
           userId: authUser.id,
           email: authUser.email,
           name: authUser.name,
-          avatarUrl: authUser.avatarUrl,
           role: "owner",
           joinedAt: space.createdAt,
         }],

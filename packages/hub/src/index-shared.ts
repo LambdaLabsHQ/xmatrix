@@ -19,7 +19,7 @@ import {
 import type {
   ChannelAppMention,
 } from "@xmatrix/protocol";
-import { appOrigin, hubAuthBaseUrl } from "./deployment-origins";
+import { appOrigins, hubAuthBaseUrl } from "./deployment-origins";
 import type { Env } from "./types";
 import { relayRuntimeSingleCell } from "./relay-authority-locator";
 import {
@@ -171,7 +171,7 @@ export function authCorsOrigin(request: Request, env: Env): string | null {
   }
 
   const allowedOrigins = new Set(
-    [appOrigin(env), hubAuthBaseUrl(env)]
+    [...appOrigins(env), hubAuthBaseUrl(env)]
       .map((value) => normalizeOrigin(value))
       .filter((value): value is string => Boolean(value))
   );
@@ -474,7 +474,7 @@ export function agentRunHttpRouteAllowed(
   // the owner's alone, so the decision route never admits a Run.
   // Pages authorize the exact Run in the repository, with its owner's page
   // access: Agents read, edit, arrange, restore and publish pages as the owner may.
-  if (request.method === "GET" && /^\/api\/spaces\/[^/]+\/pages(?:\/[^/]+(?:\/history|\/awareness|\/changes|\/github-file)?)?$/u.test(path)) return true;
+  if (request.method === "GET" && /^\/api\/spaces\/[^/]+\/pages(?:\/[^/]+(?:\/history|\/awareness|\/changes|\/github-file|\/media\/[^/]+)?)?$/u.test(path)) return true;
   if (request.method === "POST" && /^\/api\/spaces\/[^/]+\/pages$/u.test(path)) return true;
   // The page route authorizes the live Run and edit access before issuing a
   // co-writer ticket; Runs cannot join as raw document-sync clients.

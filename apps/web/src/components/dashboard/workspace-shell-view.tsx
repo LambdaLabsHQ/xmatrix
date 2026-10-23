@@ -2,6 +2,7 @@
 
 import { AnimatedIcon } from "@/components/ui/animated-icon";
 import { AnimationActivityScope } from "@/components/ui/decoration-animation";
+import { ChannelDeletionDialog } from "./channel-deletion-dialog";
 import { ChannelTransferQueue } from "./channel-transfer-queue";
 import { spaceRoleFor as transferSpaceRole } from "./workspace-shell-recovered";
 
@@ -17,6 +18,7 @@ import { useQueries } from "@tanstack/react-query";
 import { cn } from "@/lib/utils";
 
 import { AttachmentDropZoneProvider } from "./composer-attachment-drop-zone";
+import { FaceSpaceContext } from "./face";
 import { realtimeCollectionAny } from "./realtime-collection";
 import { RealtimeChannelsContext, RealtimeEventsContext } from "./realtime-channels";
 import { PresentedChannelTailContext } from "./presented-channel-tail";
@@ -35,6 +37,7 @@ import {
   spaceJoinRequestsQueryOptions,
 } from "@/components/dashboard/space-join-requests";
 import { canInviteToSpace } from "@/components/dashboard/workspace-shell-recovered";
+import { channelWithOutgoing } from "./channel-outgoing-preview";
 import { issueReportUrl } from "@/lib/issue-report";
 import { channelSidebarError } from "@/components/dashboard/workspace-sidebar-error";
 import { ConnectorActionApproval, useConnectorActionApprovals } from "./connector-action-approval";
@@ -47,7 +50,6 @@ import {
   AgentWorkDetailsDock,
   ChannelDetails,
   ChannelHeader,
-  ChannelMoveDialog,
   ChannelSidebar,
   Composer,
   GlobalSearchBar,
@@ -120,6 +122,7 @@ function dockTabOf(view: AppView): AppView {
 const NO_PAGES: NonNullable<ReturnType<typeof usePageTree>["data"]> = [];
 
 export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
+  const [deletingChannel, setDeletingChannel] = useState<typeof model.selectedChannel>(null);
   const [desktopUpdateConfirmOpen, setDesktopUpdateConfirmOpen] = useState(false);
   const [pageConversationDocked, setPageConversationDocked] = useState(false);
   const {
@@ -143,6 +146,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     highlightedMessageId,
     channels,
     setChannels,
+    outgoingMessages,
     spaces,
     projects,
     setProjects,
@@ -204,6 +208,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     setDraftAttachments,
     replyTarget,
     setReplyTarget,
+    discussionQuotes,
     draftRef,
     draftAttachmentsRef,
     replyTargetRef,
@@ -217,13 +222,6 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     savingAgentConfig,
     composingConversation,
     setComposingConversation,
-    channelMoveOpen,
-    setChannelMoveOpen,
-    channelMoveTargetSpaceId,
-    setChannelMoveTargetSpaceId,
-    movingChannelId,
-    channelMoveError,
-    setChannelMoveError,
     workspaceSearchOpen,
     workspaceSearchHere,
     setWorkspaceSearchOpen,
@@ -246,6 +244,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     canUseSelectedChannel,
     logoutAndClearDeviceData,
     messageSearch,
+    searchRerank,
     persistComposerDraftSnapshot,
     handleTimelineScrollPositionChange,
     handleTimelineScrollGesture,
@@ -312,6 +311,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     openPage,
     closePage,
     openPageConversation,
+    dropDiscussionQuote,
     closePageConversation,
     updateSpaceMemberPermissions,
     updateSpacePreferredLanguage,
@@ -322,8 +322,6 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     createNewConversation,
     sendNewConversationMessage,
     updateChannelVisibility,
-    openChannelMove,
-    moveChannel,
     createSpace,
     createSpaceInviteCode,
     inviteSpaceMembers,
@@ -586,10 +584,23 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
   // A conversation and a new one are pushed screens over the dock track.
   const mobileDockCovered = view === "messages" && (Boolean(selectedChannel) || composingConversation);
   // What the shell holds live about a conversation linked to a page (pages-live-document.md §4.4).
-  const pageConversation = useCallback(
-    (conversationId: string) => channels.find((channel) => channel.id === conversationId) ?? null,
-    [channels],
-  );
+  // A message on its way is its last one already, so a page's card for it shows the comment as it is sent.
+  const pageConversation = useCallback((conversationId: string) => {
+    const channel = channels.find((item) => item.id === conversationId);
+    return channel ? channelWithOutgoing(channel, outgoingMessages, user) : null;
+  }, [channels, outgoingMessages, user]);
+  // A page's conversation the loaded catalog has not got is resolved while the reader rests on it, so opening
+  // it beside the page does not wait on that read; once asked, it is not asked again on this page view.
+  const pageConversationLookup = useRef({ pageConversation, paging: channelCatalogPaging, spaceId: currentSpaceId });
+  pageConversationLookup.current = { pageConversation, paging: channelCatalogPaging, spaceId: currentSpaceId };
+  const askedPageConversations = useRef(new Set<string>());
+  const resolvePageConversation = useCallback((conversationId: string) => {
+    const { pageConversation: known, paging, spaceId } = pageConversationLookup.current;
+    if (!spaceId || known(conversationId) || askedPageConversations.current.has(conversationId)) return;
+    askedPageConversations.current.add(conversationId);
+    void paging.forSpace(spaceId).resolve([conversationId])
+      .catch(() => askedPageConversations.current.delete(conversationId));
+  }, []);
   // A phone's page is a pushed screen like a conversation: its back bar
   // replaces the dock, and its details are one more screen.
   const phonePageOpen = isMobileViewport && view === "pages" && Boolean(selectedPageId);
@@ -848,6 +859,9 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     void rebornAgentInstance(...args));
   const handoffDockInstance = useStableCallback((...args: Parameters<typeof handoffAgentInstance>) =>
     void handoffAgentInstance(...args));
+  const removeComposerQuote = useStableCallback(() => {
+    if (selectedChannel) dropDiscussionQuote(selectedChannel.id);
+  });
   const cancelComposerReply = useStableCallback(() => {
     replyTargetRef.current = null;
     replyTargetHistoryRevisionRef.current = -1;
@@ -877,9 +891,17 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
   const changeSelectedVisibility = useStableCallback((mode: Parameters<typeof updateChannelVisibility>[1]) => {
     if (selectedChannel) void updateChannelVisibility(selectedChannel, mode);
   });
-  const moveSelectedChannel = useStableCallback(() => {
-    if (selectedChannel) openChannelMove(selectedChannel);
+  const openSelectedChannelDeletion = useStableCallback(() => {
+    if (selectedChannel) { closeMobileChannelDetails(); setDeletingChannel(selectedChannel); }
   });
+  const channelDeleted = useStableCallback((id: string) => {
+    setDeletingChannel(null);
+    setChannels(current => current.filter(channel => channel.id !== id));
+    if (selectedChannelId === id) setSelectedChannelId(null);
+    window.dispatchEvent(new CustomEvent("xmatrix:channel-catalog-change", { detail: { kind: "structure" } }));
+  });
+  const canDeleteSelectedChannel = Boolean(selectedChannel && spaces.some(space => space.id === selectedChannel.spaceId &&
+    ["owner", "admin"].includes(transferSpaceRole(space, user?.id ?? "") ?? "")));
   const toggleSelectedMembers = useStableCallback(() => {
     if (mobileChannelDetailsOpen) closeMobileChannelDetails();
     else openMobileChannelDetails();
@@ -940,13 +962,6 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     startResize: startDesktopSidebarResize,
     onKeyDown: handleDesktopSidebarResizeKey,
   }), [desktopSidebarWidth, handleDesktopSidebarResizeKey, resizingDesktopSidebar, startDesktopSidebarResize]);
-  const submitChannelMove = useStableCallback(() => {
-    if (selectedChannel) void moveChannel(selectedChannel);
-  });
-  const cancelChannelMove = useStableCallback(() => {
-    setChannelMoveOpen(false);
-    setChannelMoveError(null);
-  });
   const ownMember = user ? currentSpace?.members.find((member) => member.userId === user.id) : undefined;
   const railProfile = useMemo(() => user ? humanProfileFromSpaceMember(user, ownMember) : null, [ownMember, user]);
   const railUpdateControl = useMemo(() => desktopBridge ? (
@@ -984,7 +999,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     (installedFleet.ready && installedFleet.candidates.length > 0) ||
     (spaceAgentSetup.kind === "no-local-machine" && spaceChannelCount === 0));
   const renderSpaceAgentSetup = (phone: boolean) => (
-        <div className="app-tool-paper app-tool-detail min-h-0 flex-1 overflow-y-auto">
+        <div className="app-tool-paper app-tool-detail app-below-band min-h-0 flex-1 overflow-y-auto">
           <SpaceAgentSetupCard
             phone={phone}
             state={spaceAgentSetup}
@@ -1088,10 +1103,9 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
           onOpenSearch={openWorkspaceSearch}
           onRename={renameSelectedChannel}
           onVisibilityChange={changeSelectedVisibility}
-          onMove={moveSelectedChannel}
+          onDelete={canDeleteSelectedChannel ? openSelectedChannelDeletion : undefined}
           renaming={renamingChannelId === selectedChannel.id}
           updatingVisibility={updatingChannelVisibilityId === selectedChannel.id}
-          moving={movingChannelId === selectedChannel.id}
           onToggleMembers={toggleSelectedMembers}
           actions={placement === "beside-page" ? (
             <>
@@ -1111,11 +1125,12 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       )}
       {selectedChannel && token && placement !== "page-margin" && (
         <ConversationPageCards spaceId={selectedChannel.spaceId} conversationId={selectedChannel.id} token={token}
-          onOpenPage={openPage} excludePageId={placement === "beside-page" ? selectedPageId : null} />
+          conversationName={selectedChannel.name ?? null} onOpenPage={openPage}
+          excludePageId={placement === "beside-page" ? selectedPageId : null} />
       )}
       {showSpaceAgentSetup && !showMobileAgentSetup && renderSpaceAgentSetup(false)}
       {showSpaceFirstTask && (
-        <div className="app-tool-paper app-tool-detail min-h-0 flex-1 overflow-y-auto">
+        <div className="app-tool-paper app-tool-detail app-below-band min-h-0 flex-1 overflow-y-auto">
           <SpaceFirstTaskCard
             state={spaceFirstTask}
             spaceName={currentSpace?.name}
@@ -1185,6 +1200,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
         onMessageExposed={handleTimelineMessageExposed}
         threadRootMessage={selectedThreadRootContext?.message}
         threadRootChannel={selectedThreadRootContext?.channel}
+        foldsDiscussionHead={placement === "page-margin"}
       />
       )}
       <AgentWorkDetailsDock
@@ -1241,6 +1257,8 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
           onDraftChange={persistComposerDraftSnapshot}
           onWorkspaceSelect={setDraftWorkspaceTarget}
           onCancelReply={cancelComposerReply}
+          quote={discussionQuotes.get(selectedChannel.id) ?? null}
+          onRemoveQuote={removeComposerQuote}
           onAttachmentsChange={changeDraftAttachments}
           onSend={sendComposerMessage}
           onOpenAppsForSpace={openComposerApps}
@@ -1259,6 +1277,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       onOpenAgentTrace={openAgentTrace}
       onRunChannelCommand={canUseSelectedChannel ? runSelectedChannelCommand : undefined}
       onManageApps={manageSelectedApps}
+      onDeleteChannel={canDeleteSelectedChannel ? openSelectedChannelDeletion : undefined}
       automations={automations}
       automationExecutionEnabled={automationExecutionEnabled}
       automationBusy={automationBusy}
@@ -1287,6 +1306,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
   // page not made until it is first written on.
   const pagesViewSurface = (
     <PagesView spaceId={currentSpaceId} token={token ?? ""} selectedPageId={selectedPageId} creation={pageCreation}
+      members={currentSpace?.members}
       onSelectPage={openPage} onOpenSection={openPageAt} onPageDeleted={closePage} conversation={pageConversation} focusSection={pageSectionRequest}
       activeConversationId={selectedPageId ? selectedChannelId : null}
       {...(selectedChannel && selectedPageId ? { renderConversation: (placement: "margin" | "dock") =>
@@ -1294,16 +1314,12 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       onConversationDockChange={setPageConversationDocked}
       onCloseConversation={closePageConversation}
       onExpandConversation={(conversationId) => navigateToChannel(conversationId)}
-      onOpenConversation={(conversationId) => openPageConversation(conversationId)}
-      onDiscuss={({ firstMessage, draft, open, coWrite, planned, ...input }) => startPageConversation(input,
-        { ...(firstMessage ? { firstMessage } : {}), ...(draft ? { draft } : {}), ...(open === false ? { open } : {}),
-          ...(coWrite ? { coWrite } : {}), ...(planned ? { planned } : {}) })}
-      onConnectGitHub={async (input) => {
-        // The repository's issues and pull requests arrive in a conversation linked to the page.
-        await startPageConversation({ spaceId: input.spaceId, pageId: input.pageId, blockId: input.blockId,
-          restricted: input.restricted, name: `GitHub · ${input.repository}` },
-        { open: false, firstMessage: `@github:subscribe:${input.repository} issues pulls` });
-      }}
+      onOpenConversation={(conversationId, at) => openPageConversation(conversationId, at ? { at } : {})}
+      onConversationIntent={resolvePageConversation}
+      onDiscuss={({ firstMessage, quote, open, coWrite, planned, call, ...input }) => startPageConversation(input,
+        { ...(firstMessage ? { firstMessage } : {}), ...(quote ? { quote } : {}),
+          ...(open === false ? { open } : {}), ...(coWrite ? { coWrite } : {}), ...(planned ? { planned } : {}),
+          ...(call ? { call } : {}) })}
       canMigrate={canMovePages}
       layout={isMobileViewport ? "phone" : "desktop"} />
   );
@@ -1324,7 +1340,6 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
         id: user.id,
         email: user.email,
         name: user.name,
-        avatarUrl: user.avatarUrl,
       }}
       channels={channels}
       machines={machines}
@@ -1404,6 +1419,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       spaceName={currentSpace?.name ?? "this Space"}
       channels={channels}
       pages={pageTree.data ?? []}
+      catalogPaging={currentSpaceCatalog}
       searchMessages={messageSearch}
       searchPages={searchPages}
       onChangeRequest={(request) => openSearchResults(searchRequestParams(request).toString())}
@@ -1425,7 +1441,10 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     // Files are accepted by the whole window, not by the composer element, so
     // the drop surface has to sit above the app's isolate stacking context.
     <AttachmentDropZoneProvider>
+    {deletingChannel && <ChannelDeletionDialog key={deletingChannel.id} channel={deletingChannel} token={token}
+      onCancel={() => setDeletingChannel(null)} onDeleted={channelDeleted} />}
     <OnboardingActionsContext.Provider value={onboardingActions}>
+    <FaceSpaceContext.Provider value={currentSpaceId}>
     <RealtimeChannelsContext.Provider value={model.realtimeChannels}>
     <RealtimeEventsContext.Provider value={model.realtimeEventViews}>
     <PresentedChannelTailContext.Provider value={model.presentedChannelTail}>
@@ -1450,6 +1469,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
         pages={pageTree.data ?? NO_PAGES}
         searchMessages={messageSearch}
         searchPages={searchPages}
+        searchRerank={searchRerank}
         catalogPaging={currentSpaceCatalog}
         onOpenResults={openSearchResultsFor}
         onSelectChannel={selectSearchChannel}
@@ -1458,17 +1478,6 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
         onSelectMember={selectSearchMember}
         onChangeView={changeSearchView}
         onCancel={cancelSearch}
-      />
-      <ChannelMoveDialog
-        open={channelMoveOpen}
-        channel={selectedChannel}
-        spaces={spaces}
-        targetSpaceId={channelMoveTargetSpaceId}
-        busy={Boolean(movingChannelId)}
-        error={channelMoveError}
-        onTargetSpaceChange={setChannelMoveTargetSpaceId}
-        onSubmit={submitChannelMove}
-        onCancel={cancelChannelMove}
       />
       <div
         className={cn(
@@ -1722,6 +1731,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     </PresentedChannelTailContext.Provider>
     </RealtimeEventsContext.Provider>
     </RealtimeChannelsContext.Provider>
+    </FaceSpaceContext.Provider>
     </OnboardingActionsContext.Provider>
     </AttachmentDropZoneProvider>
   );

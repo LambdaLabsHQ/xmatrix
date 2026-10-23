@@ -580,7 +580,6 @@ fn configure_supervised_daemon(command: &mut std::process::Command, hub_url: &st
         .arg("daemon")
         .env("XMATRIX_SUPERVISOR_PARENT", "1")
         .env("XMATRIX_HUB_URL", hub_url)
-        .env_remove("XMATRIX_ENVIRONMENT")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());

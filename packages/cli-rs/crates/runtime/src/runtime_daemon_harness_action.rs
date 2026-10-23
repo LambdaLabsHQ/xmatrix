@@ -594,6 +594,8 @@ pub(crate) async fn execute(preset_id: &str, action: HarnessAction) -> HarnessAc
         for preset in agent_presets() {
             read_latest_version(preset).await;
         }
+        // The owner asks again after setting a harness up on this machine.
+        crate::runtime_daemon_harness_inventory::refresh_readiness().await;
         let inventory = inventory().await;
         let mut result = result(preset_id, action, HarnessActionStatus::Succeeded);
         result.item = preset.and_then(|preset| {

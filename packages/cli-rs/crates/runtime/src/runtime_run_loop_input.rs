@@ -114,7 +114,7 @@ pub(crate) struct RunLoopEvents<'a> {
 impl<'a> RunLoopEvents<'a> {
     /// Events for a loop that also ends on SIGTERM, SIGHUP or Ctrl-C. The
     /// signals are taken over only once the loop first waits for input.
-    pub(crate) fn new(
+    pub fn new(
         rx: mpsc::UnboundedReceiver<ConnectionEvent>,
         relay: &'a agent_instance_connection::AgentInstanceConnectionClient,
         auto_join_channel_id: Option<&'a str>,
@@ -172,39 +172,80 @@ impl<'a> RunLoopEvents<'a> {
     }
 
     /// The Hub's instruction to continue a turn a switch cancelled, when
-    /// `event` is one for this Instance. It runs only while this loop still
-    /// owes that turn (one of its switches is named) and no newer input waits;
-    /// otherwise it is acknowledged and dropped. `None` for any other event.
+    /// `event` is one for this Instance: an `agent_switch_continuation` frame,
+    /// or, from an older Hub, a Channel message carrying it. It runs only while
+    /// this loop still owes that turn (one of its switches is named) and no
+    /// newer input waits; otherwise it is dropped (a Channel message is
+    /// acknowledged first). `None` for any other event.
     fn continuation(&mut self, event: &ConnectionEvent) -> Option<Option<RunLoopInput>> {
-        let ConnectionEvent::Server(
-            protocol::AgentInstanceServerMessage::ChannelMessageReceived { message, .. }
-            | protocol::AgentInstanceServerMessage::ChannelHistoryReplay { message, .. },
-        ) = event
-        else {
-            return None;
+        let (channel_id, request_ids, prompt) = match event {
+            ConnectionEvent::Server(
+                protocol::AgentInstanceServerMessage::AgentSwitchContinuation {
+                    channel_id,
+                    instance_id,
+                    request_ids,
+                    prompt,
+                },
+            ) => {
+                // The frame is addressed to this Instance alone; anything else
+                // about it is malformed or stale, and is no turn either way.
+                if self.agent.instance_id.as_deref() != Some(instance_id.as_str())
+                    || !protocol::switch_continuation_names_valid(instance_id, request_ids)
+                {
+                    return Some(None);
+                }
+                (channel_id, request_ids, prompt)
+            }
+            ConnectionEvent::Server(
+                protocol::AgentInstanceServerMessage::ChannelMessageReceived { message, .. }
+                | protocol::AgentInstanceServerMessage::ChannelHistoryReplay { message, .. },
+            ) => {
+                let instruction = protocol::channel_switch_continuation(message)?;
+                if self.agent.instance_id.as_deref() != Some(instruction.instance_id.as_str()) {
+                    return None;
+                }
+                let _ = self.relay.ack_channel_message(
+                    message.message_id.clone(),
+                    message.channel_id.clone(),
+                    message.sequence,
+                );
+                return Some(self.resume_if_owed(
+                    &message.channel_id,
+                    &instruction.request_ids,
+                    &message.body,
+                ));
+            }
+            _ => return None,
         };
-        let instruction = protocol::channel_switch_continuation(message)?;
-        if self.agent.instance_id.as_deref() != Some(instruction.instance_id.as_str()) {
-            return None;
-        }
-        let _ = self.relay.ack_channel_message(
-            message.message_id.clone(),
-            message.channel_id.clone(),
-            message.sequence,
-        );
-        let owed = self.awaiting_continuation.as_ref().is_some_and(|(channel_id, switches)| {
-            channel_id == &message.channel_id
-                && switches.iter().any(|id| instruction.request_ids.contains(id))
-        });
-        let superseded = self.pending.iter().any(is_channel_delivery_connection_event);
+        Some(self.resume_if_owed(channel_id, request_ids, prompt))
+    }
+
+    /// The resume a continuation names, while this loop still owes that turn
+    /// in `channel_id` and no newer channel delivery waits.
+    fn resume_if_owed(
+        &mut self,
+        channel_id: &str,
+        request_ids: &[String],
+        prompt: &str,
+    ) -> Option<RunLoopInput> {
+        let owed = self
+            .awaiting_continuation
+            .as_ref()
+            .is_some_and(|(awaited, switches)| {
+                awaited == channel_id && switches.iter().any(|id| request_ids.contains(id))
+            });
+        let superseded = self
+            .pending
+            .iter()
+            .any(is_channel_delivery_connection_event);
         if !owed || superseded {
-            return Some(None);
+            return None;
         }
         self.awaiting_continuation = None;
-        Some(Some(RunLoopInput::Resume {
-            channel_id: message.channel_id.clone(),
-            prompt: message.body.clone(),
-        }))
+        Some(RunLoopInput::Resume {
+            channel_id: channel_id.to_string(),
+            prompt: prompt.to_string(),
+        })
     }
 
     /// The Hub's instruction that this conversation co-write a page, or stop:
@@ -263,6 +304,15 @@ impl<'a> RunLoopEvents<'a> {
                     turn,
                     prompt,
                 }) => {
+                    // The page asked again while other work ran: only its newest ask is
+                    // answered, since each one says how the page is now.
+                    if self.pending.iter().any(|event| {
+                        matches!(event, ConnectionEvent::PageCoWrite(PageCoWriteEvent::Turn {
+                            channel_id: newer, ..
+                        }) if *newer == channel_id)
+                    }) {
+                        continue;
+                    }
                     crate::runtime_page_co_write::turn_queued(&channel_id, turn);
                     return Some(RunLoopInput::Resume { channel_id, prompt });
                 }
@@ -339,7 +389,10 @@ impl<'a> RunLoopEvents<'a> {
                     &messages[0].message_id,
                     &requested,
                     &runtime.parameter_catalog(),
-                    requested.as_ref().ok().and_then(|(id, _)| runtime.pending_parameter_selection(id)),
+                    requested
+                        .as_ref()
+                        .ok()
+                        .and_then(|(id, _)| runtime.pending_parameter_selection(id)),
                     outcome,
                 )
                 .await;
@@ -372,6 +425,10 @@ enum SwitchAnswer {
 
 /// The Hub capability that decides and words a switch's continuation.
 const SWITCH_CONTINUATION: &str = "switch_continuation";
+
+/// The runtime capability that takes that continuation as an
+/// `agent_switch_continuation` frame rather than a Channel message.
+pub(crate) const SWITCH_CONTINUATION_FRAME: &str = "switch_continuation_frame";
 
 /// Answer a model or effort switch request; any other event is handed back.
 ///
@@ -439,7 +496,8 @@ async fn answer_switch_request<R: ChannelControlledRuntime>(
 /// Await a turn while relay events keep arriving. Each event goes to
 /// `on_event` first, which may act on it at once (interrupting the turn, say);
 /// unless it reports the event consumed, the event stays queued for the run
-/// loop.
+/// loop. Keep polling the turn while the handler waits: an interrupt can need
+/// the stdin writer still held by the turn's pending write.
 pub(crate) async fn await_turn_with_events<T>(
     turn: impl Future<Output = T>,
     event_rx: &mut mpsc::UnboundedReceiver<ConnectionEvent>,
@@ -454,8 +512,20 @@ pub(crate) async fn await_turn_with_events<T>(
             result = &mut turn => return result,
             event = event_rx.recv(), if relay_events_open => match event {
                 Some(event) => {
-                    if !on_event(&event).await {
+                    let (consumed, completed) = {
+                        let handling = on_event(&event);
+                        tokio::pin!(handling);
+                        tokio::select! {
+                            biased;
+                            consumed = &mut handling => (consumed, None),
+                            result = &mut turn => (handling.await, Some(result)),
+                        }
+                    };
+                    if !consumed {
                         pending_events.push_back(event);
+                    }
+                    if let Some(result) = completed {
+                        return result;
                     }
                 }
                 None => relay_events_open = false,

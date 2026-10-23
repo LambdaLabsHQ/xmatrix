@@ -37,6 +37,17 @@ browser-session release path.
 
 ## Version and retry behavior
 
+Apple's store version is the release's `X.Y.Z`: a beta `X.Y.Z-beta.N` and the
+stable `X.Y.Z` it precedes upload under the same store version, told apart by
+build number. The archive carries the channel in the Web it loads, set from the
+release version: a beta's build loads `https://beta.xmatrix.sh/app`, a
+stable's `https://xmatrix.sh/app` (`XMATRIX_WEB_URL` in
+`scripts/ios-testflight.sh`). A beta stops after TestFlight (`testflight-only`
+in the job summary); only a stable continues to App Store metadata and review
+submission.
+The stable release Agent verifies the stable's own TestFlight build and keeps
+the review state (submitted, deferred, approved, live) on the release Page.
+
 The build number is the Production Release run ID. It is stable across attempts of
 that run and unique across release runs. Before archiving, the workflow queries
 Apple by app, iOS marketing version, and that build number. An existing exact build
@@ -69,7 +80,7 @@ Outcomes in the Actions job summary:
   the script does not declare issues resolved or fabricate a reviewer demonstration.
 
 Deferred outcomes do not turn a successful binary upload into a failed production
-release. The next iOS release re-evaluates the app record and submits its own exact
+release. The next stable iOS release re-evaluates the app record and submits its own exact
 build when possible. There is no hidden background queue that will later submit a
 stale deferred binary. Operators must not describe a deferred result as submitted.
 

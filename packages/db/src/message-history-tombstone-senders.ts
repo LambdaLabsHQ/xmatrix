@@ -28,10 +28,11 @@ export async function hydrateTombstoneSenders(
     author_kind: string; author_id: string; label: string | null; avatar_url: string | null;
     agent_name: string | null; channel_instance_id: string | number | null;
   }>({
-    name: "message_history_tombstone_senders_v1",
+    name: "message_history_tombstone_senders_v2",
     text: `SELECT 'user' AS author_kind, m.user_id AS author_id, m.display_name AS label,
-          m.avatar_url, NULL::text AS agent_name, NULL::bigint AS channel_instance_id
-        FROM data.space_members m WHERE m.space_id=$1 AND m.user_id=ANY($2::text[])
+          profile.image AS avatar_url, NULL::text AS agent_name, NULL::bigint AS channel_instance_id
+        FROM data.space_members m LEFT JOIN control.auth_users profile ON profile.id=m.user_id
+        WHERE m.space_id=$1 AND m.user_id=ANY($2::text[])
       UNION ALL
       SELECT 'agent', instance.instance_id,
           registration.display_name||':'||instance.channel_instance_id::text,

@@ -14,8 +14,6 @@ import {
 import {
   WEB_PROXY_ROUTES,
   AGENT_PRESETS,
-  agentPresetAvatarUrl,
-  normalizeAgentPresetRuntime,
   type AgentRegistrationDetails,
   type AgentRegistrationSummary,
   type AgentWorkingMode,
@@ -42,8 +40,8 @@ import { AgentListGroups, agentHarnessItemId, agentListGroups } from "./agent-li
 import { AGENT_USAGE_REFRESH_MS, agentUsageReadings } from "./agent-quota-usage";
 import { useNow } from "./agent-work-intent";
 import { channelTitle } from "./channel-links";
-import { HarnessSignInSection } from "./harness-sign-in";
-import { IdentityAvatar } from "./identity-avatar";
+import { HarnessSetUpSection, HarnessSignInSection } from "./harness-sign-in";
+import { Face } from "./face";
 import { MeterReadingList } from "./machine-load-panel";
 import {
   MY_AGENT_ACTION_LABEL,
@@ -191,8 +189,7 @@ export function MyAgentsView({
         onBack={() => select(null)}
         backLabel="Agents"
         context={<span className="flex items-center gap-1.5">
-          <IdentityAvatar kind="agent" label={harness}
-            imageUrl={agentPresetAvatarUrl(normalizeAgentPresetRuntime(harness))} initials={harness.slice(0, 2)} size="xs" />
+          <Face of={{ kind: "agent", name: harness, harness }} size="xs" />
           <span>{machineInLine ? `${harness} · ${registration.machineName}` : harness}</span>
         </span>}
         title={title}
@@ -290,6 +287,7 @@ export function MyAgentsView({
           </ToolDetailSection>
         )}
         {token && <HarnessSignInSection registration={registration} token={token} userId={currentUserId} />}
+        {token && <HarnessSetUpSection registration={registration} token={token} userId={currentUserId} copy={copy} />}
         <ToolDetailSection title="Where it runs">
           <ToolFacts>
             <ToolFact label="Runtime">{harness}</ToolFact>
@@ -309,9 +307,11 @@ export function MyAgentsView({
     /* A browser cannot find anything on a machine, so with nothing installed
        anywhere yet this shows where agents come from. */
     detail = (
-      <SetupCardShell>
-        <BringAgentsIn spaceId={spaceId} token={token} userId={currentUserId} surface="agents" />
-      </SetupCardShell>
+      <div className="app-below-band min-h-0 flex-1 overflow-y-auto">
+        <SetupCardShell>
+          <BringAgentsIn spaceId={spaceId} token={token} userId={currentUserId} surface="agents" />
+        </SetupCardShell>
+      </div>
     );
   } else if (catalog.data && rows.length === 0) {
     detail = (

@@ -25,6 +25,7 @@ import { type AppView } from "./workspace-shell-navigation";
 
 import { WORKING_SPACE_KV_KEY } from "./workspace-shell-constants";
 import { useLatestComponentRelease, type ReleaseComponent } from "./latest-component-releases";
+import { releaseNotesPath } from "@xmatrix/protocol";
 
 import {
   accountQuotaUsageFromCandidates,
@@ -59,13 +60,6 @@ import {
 } from "@/lib/relay-v2/channel-content-revision";
 import type { SpaceJoinRequest } from "@/components/dashboard/space-join-requests";
 import { HumanProfileSummary } from "@/components/dashboard/human-profile-summary";
-import {
-  XMATRIX_CLIENT_ENVIRONMENTS,
-  clientAppUrl,
-  clientEnvironmentForHostname,
-  type XMatrixClientEnvironment,
-} from "@/lib/client-environment";
-import { useAuthCapability } from "@/components/dashboard/use-platform-admin-capability";
 import {
 } from "@/components/dashboard/human-profile-editor";
 import {
@@ -117,7 +111,6 @@ import {
   CreditCard,
   Trash2,
   UserRound,
-  Globe,
   Monitor,
   X,
   Bell,
@@ -171,7 +164,6 @@ import {
 } from "@/components/dashboard/secret-catalog";
 
 import {
-  getDesktopBridge,
   type DesktopContext,
   type DesktopDaemonStatus,
   type DesktopUpdateStatus,
@@ -180,13 +172,15 @@ import {
 
 import { cn } from "@/lib/utils";
 
-import { tagClass } from "./status-tag";
+import { BetaTag, tagClass } from "./status-tag";
+import canonicalVersion from "../../../../../version.json" with { type: "json" };
 import { errorFromResponse, xmatrixApiRequest, requireResponseOk, xmatrixRawResponse, unexpectedResponse, requireField, requireJson } from "@/lib/query/api-client";
+import { hubReadResponse } from "@/lib/query/hub-read";
 import { userErrorMessage } from "@/lib/user-facing-error";
 import { xmatrixQueryKeys } from "@/lib/query/query-keys";
 
 import { recordOnboardingStep } from "@/lib/onboarding-funnel";
-import { ChannelPresenceConflict, decodeChannelSnapshot, emptyChannelPresence, presenceInstanceId, reduceChannelPresence, WEB_PROXY_ROUTES, type AgentInstancePresence, type ChannelPresence, type SerializedChannel } from "@xmatrix/protocol";
+import { ChannelPresenceConflict, decodeChannelSnapshot, emptyChannelPresence, HUB_ROUTES, presenceInstanceId, reduceChannelPresence, WEB_PROXY_ROUTES, type AgentInstancePresence, type ChannelPresence, type SerializedChannel } from "@xmatrix/protocol";
 
 import type {
   ChannelAttentionSnapshot,
@@ -267,7 +261,7 @@ export function SettingsView({
   onInstallDesktopUpdate,
   onLogout,
 }: {
-  user: { id: string; email: string; name?: string; avatarUrl?: string };
+  user: { id: string; email: string; name?: string };
   /** The Space whose secrets this lists; secrets belong to a Space. */
   space: { id: string; name: string } | null;
   projectedProfile: HumanProfile;
@@ -297,7 +291,6 @@ export function SettingsView({
     error: string | null;
   } | null>(null);
   const [confirmingSecretRef, setConfirmingSecretRef] = useState<string | null>(null);
-  const [clientEnvironment, setClientEnvironment] = useState<XMatrixClientEnvironment>("production");
   // A browser tab has no native notifications: it can be pushed to instead.
   const [pushState, setPushState] = useState<BrowserPushState | null>(null);
   useEffect(() => {
@@ -306,9 +299,6 @@ export function SettingsView({
     void browserPushState(token).then((state) => { if (current) setPushState(state); }).catch(() => undefined);
     return () => { current = false; };
   }, [desktopAvailable, token]);
-  const [environmentSwitchError, setEnvironmentSwitchError] = useState<string | null>(null);
-  const [environmentSwitching, setEnvironmentSwitching] = useState(false);
-  const testEnvironmentAllowed = useAuthCapability("testEnvironment", token);
   const secretKey = xmatrixQueryKeys.domain({ userId: user.id }, "space-secrets", [space?.id ?? ""]);
   const secretQuery = useQuery({
     queryKey: secretKey,
@@ -338,29 +328,6 @@ export function SettingsView({
   const secretSaving = secretMutation.isPending && secretMutation.variables?.kind === "save";
   const deletingSecretRef = secretMutation.isPending && secretMutation.variables?.kind === "delete"
     ? secretMutation.variables.secretRef ?? null : null;
-
-  useEffect(() => {
-    setClientEnvironment(clientEnvironmentForHostname(window.location.hostname));
-  }, []);
-
-  async function switchEnvironment(environment: XMatrixClientEnvironment) {
-    if (environment === clientEnvironment || environmentSwitching) return;
-    if (environment === "test" && !testEnvironmentAllowed) return;
-    const confirmed = window.confirm(
-      `Switch to ${XMATRIX_CLIENT_ENVIRONMENTS[environment].label}? This opens a separate account and data environment.`,
-    );
-    if (!confirmed) return;
-
-    setEnvironmentSwitchError(null);
-    setEnvironmentSwitching(true);
-    try {
-      await getDesktopBridge()?.switchEnvironment?.(environment);
-      window.location.assign(clientAppUrl(environment));
-    } catch (error) {
-      setEnvironmentSwitchError(userErrorMessage(error, "Couldn't switch environments"));
-      setEnvironmentSwitching(false);
-    }
-  }
 
   useEffect(() => {
     setProfile((current) => {
@@ -486,39 +453,6 @@ export function SettingsView({
           </ToolDetailSection>
         </div>
       ) },
-    ...(testEnvironmentAllowed || clientEnvironment === "test" ? [{
-      key: "environment", label: "Environment", icon: Globe,
-      summary: XMATRIX_CLIENT_ENVIRONMENTS[clientEnvironment].label, content: (
-        <div className="app-settings-section min-w-0">
-          <ToolDetailSection title="Environment">
-            {(Object.keys(XMATRIX_CLIENT_ENVIRONMENTS) as XMatrixClientEnvironment[]).map((environment) => (
-              <ToolSettingRow
-                key={environment}
-                title={XMATRIX_CLIENT_ENVIRONMENTS[environment].label}
-                description={environment === "test"
-                  ? "Isolated from Production, with its own accounts, sessions and data. May require Cloudflare Access."
-                  : "Your real accounts, sessions and data."}
-                control={clientEnvironment === environment ? (
-                  <span className={tagClass()}>In use</span>
-                ) : (
-                  <button
-                    type="button"
-                    disabled={environmentSwitching || (environment === "test" && !testEnvironmentAllowed)}
-                    onClick={() => void switchEnvironment(environment)}
-                    className={actionClass({ variant: "secondary" })}
-                  >
-                    {environmentSwitching ? "Switching…" : `Switch to ${XMATRIX_CLIENT_ENVIRONMENTS[environment].label}`}
-                  </button>
-                )}
-              />
-            ))}
-            {environmentSwitchError ? (
-              <p className="mt-3 text-sm text-destructive">{environmentSwitchError}</p>
-            ) : null}
-          </ToolDetailSection>
-        </div>
-      ),
-    }] : []),
     { key: "secrets", label: "Secrets", icon: Key,
       summary: secretCatalogLoaded ? `${secretCatalogEntries.length} in ${space?.name ?? "this Space"}` : "Stored values are never shown", content: (
         <div className="app-settings-section min-w-0">
@@ -730,11 +664,15 @@ export function SettingsView({
     { key: "desktop", label: "Desktop app", icon: Monitor, summary: desktopAvailable ? "Connected" : "Browser", content: (
         <div className="app-settings-section min-w-0 space-y-10">
           <ToolDetailSection title="This app" action={
-            <span className={tagClass()}>
-              {desktopAvailable ? "Connected" : "Browser"}
+            <span className="flex items-center gap-1.5">
+              <BetaTag />
+              <span className={tagClass()}>
+                {desktopAvailable ? "Connected" : "Browser"}
+              </span>
             </span>
           }>
             <div className="py-2 text-sm">
+              <DetailRow label="Web version" value={canonicalVersion.version} />
               <DetailRow label="App version" value={desktopContext?.version || "-"} />
               <DetailRow label="Platform" value={desktopContext ? desktopContext.platform : "-"} />
               <DetailRow label="Updates" value={desktopUpdateLabel(desktopUpdateStatus, desktopAvailable, desktopUpdateBridgeAvailable)} />
@@ -759,6 +697,7 @@ export function SettingsView({
                 />
               ) : null}
             />
+            <ReleaseNotesLink version={desktopUpdateStatus?.version || desktopContext?.version} />
           </ToolDetailSection>
           <ToolDetailSection title="Local daemon">
             <ToolSettingRow
@@ -895,7 +834,7 @@ export function TeamView({
   onSelectSpace,
 }: {
   token?: string;
-  user: { id: string; email: string; name?: string; avatarUrl?: string };
+  user: { id: string; email: string; name?: string };
   currentSpace: SerializedSpace | null;
   error: string | null;
   joinRequestsBySpace: Record<string, SpaceJoinRequest[]>;
@@ -1520,8 +1459,16 @@ export function MachineVersionValue({ version, component, className }: {
           Update
         </span>
       )}
+      <ReleaseNotesLink version={status === "outdated" ? latestVersion : version} />
     </span>
   );
+}
+
+function ReleaseNotesLink({ version }: { version?: string }) {
+  const href = releaseNotesPath(version);
+  return href ? <a href={href} target="_blank" rel="noreferrer" className="text-xs text-primary underline underline-offset-2">
+    Release notes{version ? ` ${version}` : ""}
+  </a> : null;
 }
 
 export type FetchedChannelCatalog = {
@@ -1862,9 +1809,11 @@ export async function fetchChannelHistory(
   if (options.afterSequence !== undefined) {
     params.set("afterSequence", String(options.afterSequence));
   }
-  const res = await xmatrixRawResponse(`${WEB_PROXY_ROUTES.channel_history(channelId)}?${params.toString()}`, {
-    headers: { Authorization: `Bearer ${token}` },
-    cache: "no-store",
+  // From the Hub straight when it answers this page (lib/query/hub-read.ts), else through the Web.
+  const res = await hubReadResponse({
+    hubPath: `${HUB_ROUTES.channel_history(channelId)}?${params.toString()}`,
+    webUrl: `${WEB_PROXY_ROUTES.channel_history(channelId)}?${params.toString()}`,
+    token,
     signal: options.signal
       ? AbortSignal.any([options.signal, AbortSignal.timeout(CHANNEL_HISTORY_FETCH_TIMEOUT_MS)])
       : AbortSignal.timeout(CHANNEL_HISTORY_FETCH_TIMEOUT_MS),

@@ -31,7 +31,9 @@ export interface ConnectorProvider {
  * last Channel unsubscribes. A returned string refuses the subscription.
  */
 export interface ConnectorSubscriptionSync {
-  sync(input: { env: Env; spaceId: string; credentials: Readonly<Record<string, string>>; source: string; subscribed: boolean }):
+  sync(input: { env: Env; spaceId: string; credentials: Readonly<Record<string, string>>; source: string; subscribed: boolean;
+    /** The Human the command acts for: its writer, or the owner of the Agent's Run. */
+    actorUserId: string }):
     Promise<string | undefined>;
 }
 

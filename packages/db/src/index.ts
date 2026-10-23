@@ -253,11 +253,12 @@ export type {
   PageSummary, PublicPage,
 } from "./page-control.js";
 export {
-  MAX_PAGE_CONVERSATIONS, readPageConversations,
+  describePageConversations, MAX_PAGE_CONVERSATIONS,
 } from "./page-conversations.js";
 export type {
   PageConversationRecord,
 } from "./page-conversations.js";
+export { FaceControlError, readAgentFaces, readUserFaces, userFacesOf } from "./faces.js";
 export {
   migratedPageId, PageMigrationError, PostgresPageMigrationRepository, revisedDraft, validDraft,
 } from "./page-migration.js";
@@ -321,6 +322,8 @@ export {
 } from "./push-devices.js";
 
 export { PostgresAccountDeletionRepository, AccountDeletionError, accountIdentityRevoked } from "./account-deletion.js";
+export { CHANNEL_PURGE_STEPS, channelPurgeObjects, purgeChannelRows, recordChannelPurgeObjects } from "./channel-deletion.js";
+export { retryBeforeCommit } from "./transaction-recovery.js";
 export type { AccountMessageProfileRow, PrepareErasedMessageProfile } from "./account-message-profile-erasure.js";
 export type { AccountDeletionBlocker, AccountDeletionState } from "./account-deletion.js";
 export type { AccountSpaceClosureAuthorization } from "./account-space-closure-authorization.js";
@@ -328,3 +331,5 @@ export type { AccountSpaceClosureAuthorization } from "./account-space-closure-a
 export { PostgresAppActionRequestRepository, type AppActionRequestPayload,
   type XUploadReference, type XExecutingUpload, type XUploadOutcome } from "./app-action-request-control.js";
 export { PostgresGmailRoutingRepository, type GmailRoutingJob, type GmailRoutingSelection } from "./gmail-routing-control.js";
+
+export { databaseFailureEvidence, parseDatabaseFailureEvidence } from "./database-failure-evidence.js";

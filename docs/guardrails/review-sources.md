@@ -1,5 +1,31 @@
 # Guardrail Review Sources
 
+- 2026-10-21 Web per release channel (P0#4 text): maintainer direction (Daniel)
+  that beta and stable are told apart by version for the Web too, not only for
+  clients. Every beta now deploys the beta Web (`beta.xmatrix.sh`); a stable
+  rebuilds a verified beta's source and deploys the stable Web (`xmatrix.sh`),
+  which desktop, iOS and Android stable builds load. The Hub stays one service
+  with one dataset that every beta deploys, so beta and stable users share
+  Channels; it trusts both exact Web origins and must keep serving the older
+  stable Web until a stable ships the newer one. Reviewed Better Auth trusted
+  origins, credentialed and direct-read CORS, the shared `.xmatrix.sh` session
+  cookie, passkey origins, native shell origin trust, receipts and SEO. Same
+  direction as 2026-10-21 #851: pull requests run a fast tier, client suites
+  and CodeQL gate releases instead of merges.
+
+- 2026-10-19 steer instead of interrupt: maintainer direction (Daniel) that an
+  ordinary Human message steers a busy Instance and only a message that
+  @-addresses it interrupts. It supersedes the 2026-07-13 rule that every fresh
+  message directly interrupts the current turn. Reviewed Hub live and catch-up
+  verdicts, how Claude Code 2.1.303 and Codex 0.163 take input mid-turn
+  (`isReplay` at a tool boundary or a second result; `turn/steer`), Raft's
+  per-runtime in-flight wake contract and Multica's opt-in steer, and the
+  co-write requests that cancelled unrelated turns every few seconds. Hub adds
+  `steerAllowed` beside `interruptRequested`; a runtime that cannot steer, or
+  predates the field, interrupts as before, so no message is lost. Claude
+  steers now; Codex follows. A co-write request stops only a turn answering
+  its page. Issue #737.
+
 - 2026-10-14 Channel retry instructions: maintainer direction requires the
   continuation itself to be a durable Channel message. Reviewed append replay,
   canonical history/live identity, reserved metadata, exact pending-report

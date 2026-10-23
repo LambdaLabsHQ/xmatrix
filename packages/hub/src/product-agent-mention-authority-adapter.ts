@@ -1,8 +1,10 @@
 /** PostgreSQL-backed port for agent mention orchestration. */
 
+import { recordCommandResult } from "./command-result";
 import type { ChannelAttachment } from "@xmatrix/protocol";
 import type { HubAuthorityEnv } from "./postgres-authority-fleet";
 import { appendChannelMessage } from "./channel-messages";
+import { deliverCommittedProductMessage } from "./product-message-append";
 import type { Env } from "./types";
 import { decideNewConversationLaunch,
   prepareRegistrationReborn } from "./registration-launch-dispatch";
@@ -91,6 +93,7 @@ export async function dispatchProductAgentSystemNotice(input: {
     messageId,
     channelId: input.channelId,
     body: input.body,
+    messageKind: "xmatrix.system.runtime-failure",
     principal: { kind: "user", id: input.actorUserId },
     senderSnapshot: productAgentSystemNoticeSenderSnapshot(input.actorUserId),
     residual: {
@@ -104,7 +107,8 @@ export async function dispatchProductAgentSystemNotice(input: {
     },
   };
   try {
-    await (input.append ?? appendChannelMessage)(input.env as Env, input.channelId, noticeCommand);
+    const committed = await (input.append ?? appendChannelMessage)(input.env as Env, input.channelId, noticeCommand);
+    await deliverCommittedProductMessage(input.env as Env, input.channelId, noticeCommand, committed);
   } catch (error) {
     // Carry the authority's code so a caller can tell a Channel that can never
     // take the notice (archived, gone) from a transient outage.
@@ -239,10 +243,9 @@ export function createProductAgentMentionAuthorityPort(input: {
       return this.getRebornTarget(input);
     },
 
-    async publishSystemNotice(channelId, body) {
-      await dispatchProductAgentSystemNotice({ env: input.env,
-        actorUserId: input.actorUserId, sourceMessageId: input.sourceMessageId,
-        channelId, body });
+    async recordResult(channelId, text, key) {
+      await recordCommandResult(input.env as Env, { channelId, messageId: input.sourceMessageId,
+        key, entry: { note: { text } } });
     },
 
     reportDiagnostic({ stage, error, ...where }) {

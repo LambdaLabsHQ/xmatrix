@@ -1,18 +1,44 @@
 name: Production Release Intent
-run-name: Production Release Intent ${{ inputs.release_components }} from ${{ github.sha }}
+run-name: Production Release Intent ${{ inputs.channel }} ${{ inputs.release_components }}${{ inputs.candidate != '' && format(' from {0}', inputs.candidate) || '' }} at ${{ github.sha }}
 
-# Asking for a production release records an intent and wakes the train. The
-# train (Production Release Request) is serialized repository-wide, chooses the
-# version itself, and ships the union of every open intent its frozen main
-# revision contains (scripts/release-train.mjs). Intents live in refs, so a
-# train that GitHub displaces while pending loses nothing.
+# Asking for a release records an intent and wakes the train. The train
+# (Production Release Request) is serialized repository-wide and chooses the
+# version itself; the version says the channel (scripts/release-train.mjs):
+#
+# - beta, the default: any Agent, after merging. The train ships the union of
+#   every open beta its frozen main revision contains as X.Y.Z-beta.N: the Hub
+#   and the beta Web to production, clients to their dev channel and TestFlight.
+# - stable: the stable release Agent, naming a beta it verified and the patch,
+#   minor or major bump its changes call for. The train rebuilds exactly that
+#   beta's source as X.Y.Z and ships what it names: the stable Web, and clients
+#   to their stable channel and App Review. The Hub runs every beta.
+#
+# Intents live in refs, so a train that GitHub displaces while pending loses nothing.
 on:
   workflow_dispatch:
     inputs:
       release_components:
-        description: Comma-separated hub,web,cli,desktop,android,ios or all
+        description: Comma-separated hub,web,cli,desktop,android,ios or all (a stable names web and clients only)
         required: true
         default: hub
+        type: string
+      channel:
+        description: beta, or stable for the stable release Agent
+        required: true
+        default: beta
+        type: choice
+        options:
+          - beta
+          - stable
+      candidate:
+        description: "Stable only: the verified beta tag, xmatrix-vX.Y.Z-beta.N"
+        required: false
+        default: ""
+        type: string
+      bump:
+        description: "Stable only: patch, minor or major over the last stable, as its changes call for"
+        required: false
+        default: ""
         type: string
 
 permissions:
@@ -26,10 +52,38 @@ jobs:
       actions: write
       contents: read
     steps:
+      - name: Require the default branch
+        if: github.ref != format('refs/heads/{0}', github.event.repository.default_branch)
+        run: |
+          echo "A production release intent must be dispatched from the default branch" >&2
+          exit 1
+      # A stable intent reads the candidate's release commit and the last
+      # stable's source, so it needs the history; a beta needs only scripts.
+      # (`x && 0 || 1` would always be 1: 0 is falsy in expressions.)
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: ${{ inputs.channel == 'stable' && '0' || '1' }}
+          persist-credentials: false
+      - uses: ./.github/actions/setup-pnpm-node
+        with:
+          install-deps: "false"
+      - id: intent
+        name: Check the intent against its evidence
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          RELEASE_COMPONENTS: ${{ inputs.release_components }}
+          RELEASE_CHANNEL: ${{ inputs.channel }}
+          RELEASE_CANDIDATE: ${{ inputs.candidate }}
+          RELEASE_BUMP: ${{ inputs.bump }}
+        run: >-
+          node scripts/release-train.mjs intent "$GITHUB_RUN_ID" "$RELEASE_CHANNEL" "$RELEASE_COMPONENTS"
+          "$RELEASE_CANDIDATE" "$RELEASE_BUMP"
       - name: Record the intent and wake the train
         uses: actions/github-script@v7
         env:
-          RELEASE_COMPONENTS: ${{ inputs.release_components }}
+          INTENT_REF: ${{ steps.intent.outputs.ref }}
+          INTENT_SHA: ${{ steps.intent.outputs.sha }}
           RELEASE_TOKEN: ${{ secrets.XMATRIX_RELEASE_GITHUB_TOKEN }}
         with:
           # A runner-side "fetch failed" is retried rather than failing the job.
@@ -40,29 +94,20 @@ jobs:
               core.setFailed("XMATRIX_RELEASE_GITHUB_TOKEN is required to record a release intent");
               return;
             }
-            if (context.ref !== `refs/heads/${context.payload.repository.default_branch}`) {
-              core.setFailed("A production release intent must be dispatched from the default branch");
+            const ref = process.env.INTENT_REF;
+            const sha = process.env.INTENT_SHA;
+            if (!/^refs\/release-intents\/[1-9]\d*\//.test(ref ?? "") || !/^[0-9a-f]{40}$/.test(sha ?? "")) {
+              core.setFailed("The intent check produced no intent to record");
               return;
             }
-            const components = ["hub", "web", "cli", "desktop", "android", "ios"];
-            const requested = process.env.RELEASE_COMPONENTS === "all"
-              ? components : process.env.RELEASE_COMPONENTS.split(",");
-            if (!requested.length || requested.some((item) => !components.includes(item)) ||
-                new Set(requested).size !== requested.length ||
-                (requested.includes("desktop") && !requested.includes("cli"))) {
-              core.setFailed("release_components must name unique supported components; desktop requires cli");
-              return;
-            }
-            const scope = components.filter((item) => requested.includes(item));
-            const ref = `refs/release-intents/${context.runId}/${scope.join("+")}`;
-            await github.rest.git.createRef({ ...context.repo, ref, sha: context.sha });
+            await github.rest.git.createRef({ ...context.repo, ref, sha });
             await github.rest.actions.createWorkflowDispatch({
               ...context.repo,
               workflow_id: "production-release-request.yml",
               ref: context.payload.repository.default_branch,
             });
-            core.notice(`Recorded ${scope.join(",")} at ${context.sha} as ${ref} and woke the release train`);
+            core.notice(`Recorded ${ref} at ${sha} and woke the release train`);
             await core.summary
               .addHeading("Production release intent recorded")
-              .addRaw(`Components: ${scope.join(", ")}\n\nMain revision: ${context.sha}\n\nIntent: ${ref}\n`)
+              .addRaw(`Intent: ${ref}\n\nRevision: ${sha}\n`)
               .write();

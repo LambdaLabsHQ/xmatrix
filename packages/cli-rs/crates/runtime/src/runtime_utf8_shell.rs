@@ -98,7 +98,7 @@ pub fn maybe_run_utf8_shell() -> Option<Result<i32, String>> {
             "pwsh.exe" => "XMATRIX_UTF8_PWSH_REAL",
             _ => return None,
         };
-        return Some((|| {
+        Some((|| {
             let real = std::env::var_os(key).ok_or("UTF-8 shell target is missing")?;
             let real = std::path::PathBuf::from(real);
             if !real.is_absolute()
@@ -121,7 +121,7 @@ pub fn maybe_run_utf8_shell() -> Option<Result<i32, String>> {
                 .status()
                 .map_err(|_| "Failed to start UTF-8 PowerShell")?;
             Ok(status.code().unwrap_or(1))
-        })());
+        })())
     }
     #[cfg(not(windows))]
     None

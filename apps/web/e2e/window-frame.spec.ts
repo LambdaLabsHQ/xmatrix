@@ -162,6 +162,29 @@ test("macOS full screen drops the lights' band when the shell reports it", async
   expect((await box(page, ".app-rail")).width).toBe(LIGHTS.x * 2 + LIGHTS.width);
 });
 
+test("the update arrow returns after leaving its disc on successive cycles", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await openAsMacDesktop(page);
+  const arrowIsVisible = () => page.locator(".app-rail-update-window").evaluate((disc) => {
+    const arrow = disc.querySelector("svg")!;
+    const frame = disc.getBoundingClientRect();
+    const glyph = arrow.getBoundingClientRect();
+    let opacity = 1;
+    for (let node: Element | null = arrow; node && node !== disc; node = node.parentElement) {
+      opacity *= Number(getComputedStyle(node).opacity);
+    }
+    return opacity > 0.5 && glyph.top >= frame.top && glyph.bottom <= frame.bottom;
+  });
+  for (let cycle = 0; cycle < 2; cycle++) {
+    await expect.poll(arrowIsVisible, { intervals: [50] }).toBe(true);
+    await expect.poll(arrowIsVisible, { intervals: [50], timeout: 7000 }).toBe(false);
+    await expect.poll(arrowIsVisible, { intervals: [50], timeout: 7000 }).toBe(true);
+  }
+
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await expect.poll(arrowIsVisible).toBe(true);
+});
+
 test("a window already in full screen opens without the lights' band", async ({ page }) => {
   await openAsMacDesktop(page, { fullScreen: true });
   await expect(page.locator(".xmatrix-app.xmatrix-desktop-macos").first()).toHaveClass(/xmatrix-desktop-fullscreen/);

@@ -4,7 +4,7 @@ import { AnimatedIcon } from "@/components/ui/animated-icon";
 import { useRealtimeChannel } from "./realtime-channels";
 import { useAgentRegistrationCatalog } from "./agent-capability-select";
 import { registrationMachineBusy, registrationMachineName } from "./machine-name-presentation";
-import { ZoomableAttachmentImage } from "./zoomable-attachment-image";
+import { ImageGalleryLightbox } from "./attachment-lightbox";
 import { useAndroidBackHandler } from "./use-android-back";
 import { useComposerHint } from "./composer-hints";
 import { useDraftSummonIntents } from "./use-draft-summon-intents";
@@ -113,7 +113,6 @@ import {
   PendingAttachmentCard,
   AttachmentOriginalOption,
   attachVideoMetadata,
-  avatarInitials,
   channelAttachmentKindForFile,
   channelOnlineAgentAvatarItems,
   cleanStatusChips,
@@ -164,13 +163,13 @@ import { ChannelSubscriptionsBlock } from "./channel-subscriptions-block";
 
 import {
   ChevronLeft,
-  ChevronRight,
   FileText,
   Loader2,
   Paperclip,
   Pause,
   Pencil,
   Play,
+  Quote,
   RefreshCw,
   Reply,
   Trash2,
@@ -182,7 +181,7 @@ import { Textarea } from "@/components/ui/textarea";
 
 import { Input } from "@/components/ui/input";
 
-import { IdentityAvatar } from "@/components/dashboard/identity-avatar";
+import { Face } from "@/components/dashboard/face";
 
 import {
   type MentionInstanceTargetScope,
@@ -274,6 +273,7 @@ export type ComposerMentionInsertRequest =
 
 export type { AgentTraceTarget } from "./workspace-shell-message-model";
 import type { AgentTraceTarget, ComposerSendSnapshot } from "./workspace-shell-message-model";
+import { foldedDiscussionBody, quotedMessage, type DiscussionQuote } from "./selection-discussion";
 
 export type AgentTraceHistoryPanelState = {
   targetKey: string;
@@ -323,6 +323,7 @@ export const Composer = memo(function Composer({
   invocationDraft,
   selectedWorkspaceId,
   replyTarget,
+  quote = null,
   attachments,
   mentionInsertRequest,
   autoFocusRequest,
@@ -331,6 +332,7 @@ export const Composer = memo(function Composer({
   onDraftChange,
   onWorkspaceSelect,
   onCancelReply,
+  onRemoveQuote,
   onAttachmentsChange,
   onOpenAppsForSpace,
   onSend,
@@ -368,6 +370,11 @@ export const Composer = memo(function Composer({
   invocationDraft?: ComposerInvocationDraft;
   selectedWorkspaceId: string | null;
   replyTarget: TimelineItem | null;
+  /**
+   * The passage a discussion is about, which its first message carries
+   * (selection-discussion.ts); shown here unless its thread shows it.
+   */
+  quote?: DiscussionQuote | null;
   attachments: ChannelAttachment[];
   mentionInsertRequest: ComposerMentionInsertRequest | null;
   autoFocusRequest: number;
@@ -376,6 +383,7 @@ export const Composer = memo(function Composer({
   onDraftChange: (value: string, invocationDraft?: ComposerInvocationDraft) => void;
   onWorkspaceSelect: (workspaceTarget: string | null) => void;
   onCancelReply: () => void;
+  onRemoveQuote?: () => void;
   onAttachmentsChange: (
     value: ChannelAttachment[] | ((current: ChannelAttachment[]) => ChannelAttachment[])
   ) => void;
@@ -429,6 +437,8 @@ export const Composer = memo(function Composer({
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
   const [openComposerImageId, setOpenComposerImageId] = useState<string | null>(null);
+  // Draft images open out of their cards here and return into them.
+  const attachmentStripRef = useRef<HTMLDivElement | null>(null);
   // Object URLs behind pending image previews, revoked when their card goes.
   const pendingPreviewUrlsRef = useRef(new Map<string, string>());
   const [preparingSend, setPreparingSend] = useState(false);
@@ -480,30 +490,12 @@ export const Composer = memo(function Composer({
     return true;
   });
 
-  const navigateComposerImage = useCallback((direction: -1 | 1) => {
-    if (!openComposerImageId) return;
-    if (composerImages.length < 2) return;
-    const currentIndex = composerImages.findIndex((image) => image.id === openComposerImageId);
-    const nextIndex = (Math.max(0, currentIndex) + direction + composerImages.length) % composerImages.length;
-    setOpenComposerImageId(composerImages[nextIndex].id);
-  }, [composerImages, openComposerImageId]);
-
   useEffect(() => {
-    if (!openComposerImageId) return;
-    if (!composerImages.some((image) => image.id === openComposerImageId)) {
+    // A removed draft image takes its preview with it.
+    if (openComposerImageId && !composerImages.some((image) => image.id === openComposerImageId)) {
       setOpenComposerImageId(null);
-      return;
     }
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setOpenComposerImageId(null);
-      if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
-        event.preventDefault();
-        navigateComposerImage(event.key === "ArrowLeft" ? -1 : 1);
-      }
-    };
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [composerImages, navigateComposerImage, openComposerImageId]);
+  }, [composerImages, openComposerImageId]);
 
   useLayoutEffect(() => {
     if (!writable || autoFocusRequest <= 0) return;
@@ -876,9 +868,13 @@ export const Composer = memo(function Composer({
   }
 
   // Jev reads each summon as the author types; the hint shows it and the send carries it.
-  const outgoingDraft = useMemo(() => composerSendDraft(invocationDraftRef.current, localDraft),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [localDraft, invocationDraftRef.current]);
+  // Picked channels and pages are shown by name and sent as their id tokens; a discussion's passage goes first.
+  const sendDraft = () => {
+    const typed = composerSendDraft(invocationDraftRef.current, localDraft);
+    return quote ? quotedMessage(quote, typed) : typed;
+  };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const outgoingDraft = useMemo(sendDraft, [localDraft, invocationDraftRef.current, quote]);
   const draftIntents = useDraftSummonIntents({ token, channelId: startsConversation ? undefined : channel?.id,
     body: outgoingDraft.body, selections: outgoingDraft.selections });
 
@@ -891,8 +887,7 @@ export const Composer = memo(function Composer({
     setAttachmentError(null);
     const sendScope = invocationScope;
     try {
-      // Picked channels and pages are shown by name and sent as their id tokens.
-      const { body, selections } = composerSendDraft(invocationDraftRef.current, localDraft);
+      const { body, selections } = sendDraft();
       const sourceBodyHash = selections.length ? await digestCanonicalCloneCborV1(body) : undefined;
       const invocationSelections = sourceBodyHash ? parseAgentInvocationSelections({ schemaVersion: 1,
         sourceRevision: 1, sourceBodyHash, selections }, {
@@ -1295,6 +1290,27 @@ export const Composer = memo(function Composer({
           }
           boxHeader={
             <>
+              {quote && !quote.anchored && (
+                <div data-testid="composer-quote"
+                  className="flex items-start gap-2 border-b border-border/70 px-3 py-2 text-xs text-muted-foreground">
+                  <Quote className="mt-0.5 size-3.5 shrink-0" />
+                  <div className="min-w-0 flex-1">
+                    <div className="line-clamp-2 text-foreground [overflow-wrap:anywhere]">{quote.text}</div>
+                    <div className="truncate">{quote.label}</div>
+                  </div>
+                  {onRemoveQuote && (
+                    <button
+                      type="button"
+                      title="Remove quote"
+                      aria-label="Remove quote"
+                      onClick={onRemoveQuote}
+                      className="flex size-7 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
+                    >
+                      <X className="size-3.5" />
+                    </button>
+                  )}
+                </div>
+              )}
               {replyTarget && (
                 <div className="flex items-start gap-2 border-b border-border/70 px-3 py-2 text-xs text-muted-foreground">
                   <Reply className="mt-0.5 size-3.5 shrink-0" />
@@ -1303,7 +1319,7 @@ export const Composer = memo(function Composer({
                       Replying to {replyTarget.author}
                     </div>
                     <div className="line-clamp-2 [overflow-wrap:anywhere]">
-                      {replyTarget.body || "Attachment"}
+                      {foldedDiscussionBody(replyTarget.body) || "Attachment"}
                     </div>
                     {replyTarget.linkOrigin?.kind === "link" && (
                       <div className="mt-1 font-medium">
@@ -1325,7 +1341,7 @@ export const Composer = memo(function Composer({
                 </div>
               )}
               {(attachments.length > 0 || pendingAttachments.length > 0) && (
-                <div className="flex gap-2 overflow-x-auto px-3 py-3">
+                <div ref={attachmentStripRef} className="flex gap-2 overflow-x-auto px-3 py-3">
                   {pendingAttachments.filter((attachment) => !attachment.replacesId).map((attachment) => renderPendingAttachment(attachment))}
                   {attachments.map((attachment) => {
                     const replacement = pendingAttachments.find((pending) => pending.replacesId === attachment.id);
@@ -1368,6 +1384,7 @@ export const Composer = memo(function Composer({
                           type="button"
                           aria-label={`Open ${attachment.name}`}
                           className="block h-full w-full cursor-zoom-in rounded-md"
+                          data-lightbox-origin={attachment.id}
                           onClick={() => setOpenComposerImageId(attachment.id)}
                         >
                           <LoadingImage
@@ -1391,65 +1408,14 @@ export const Composer = memo(function Composer({
                   })}
                 </div>
               )}
-              {openComposerImage && typeof document !== "undefined" && createPortal(
-                <div
-                  className="app-attachment-lightbox fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-3 text-white backdrop-blur-md sm:p-5"
-                  role="presentation"
-                  onMouseDown={(event) => {
-                    if (event.target === event.currentTarget) setOpenComposerImageId(null);
-                  }}
-                >
-                  <div
-                    role="dialog"
-                    aria-modal="true"
-                    aria-label={openComposerImage.name}
-                    className="app-attachment-lightbox-dialog relative flex h-full max-h-[94dvh] w-full max-w-[96vw] items-center justify-center"
-                  >
-                    <button
-                      type="button"
-                      title="Close attachment"
-                      aria-label="Close attachment"
-                      autoFocus
-                      onClick={() => setOpenComposerImageId(null)}
-                      className="app-attachment-lightbox-close absolute right-1 top-1 z-20 flex size-10 items-center justify-center rounded-full bg-black/55 text-white shadow-lg transition hover:bg-black/75"
-                    >
-                      <X className="size-5" />
-                    </button>
-                    <ZoomableAttachmentImage
-                      src={openComposerImage.src}
-                      alt={openComposerImage.name}
-                      resetKey={openComposerImage.id}
-                      onRequestClose={() => setOpenComposerImageId(null)}
-                      onNavigate={navigateComposerImage}
-                    />
-                    {composerImages.length > 1 && (
-                      <>
-                        <button
-                          type="button"
-                          title="Previous image"
-                          aria-label="Previous image"
-                          onClick={() => navigateComposerImage(-1)}
-                          className="app-attachment-lightbox-previous absolute left-1 top-1/2 z-20 flex size-11 -translate-y-1/2 items-center justify-center rounded-full bg-black/55 text-white shadow-lg transition hover:bg-black/75"
-                        >
-                          <ChevronLeft className="size-6" />
-                        </button>
-                        <button
-                          type="button"
-                          title="Next image"
-                          aria-label="Next image"
-                          onClick={() => navigateComposerImage(1)}
-                          className="app-attachment-lightbox-next absolute right-1 top-1/2 z-20 flex size-11 -translate-y-1/2 items-center justify-center rounded-full bg-black/55 text-white shadow-lg transition hover:bg-black/75"
-                        >
-                          <ChevronRight className="size-6" />
-                        </button>
-                        <div className="absolute bottom-1 left-1/2 z-20 -translate-x-1/2 rounded-full bg-black/55 px-3 py-1 text-xs font-bold">
-                          {composerImages.findIndex((attachment) => attachment.id === openComposerImage.id) + 1} / {composerImages.length}
-                        </div>
-                      </>
-                    )}
-                  </div>
-                </div>,
-                document.body
+              {openComposerImage && (
+                <ImageGalleryLightbox
+                  images={composerImages}
+                  activeId={openComposerImage.id}
+                  onActiveChange={setOpenComposerImageId}
+                  onClose={() => setOpenComposerImageId(null)}
+                  originFor={(id) => attachmentStripRef.current?.querySelector<HTMLElement>(`[data-lightbox-origin="${CSS.escape(id)}"]`) ?? null}
+                />
               )}
             </>
           }
@@ -1513,6 +1479,7 @@ export const ChannelDetails = memo(function ChannelDetails({
   onOpenAgentTrace,
   onRunChannelCommand,
   onManageApps,
+  onDeleteChannel,
   automations,
   automationExecutionEnabled,
   automationBusy,
@@ -1541,6 +1508,7 @@ export const ChannelDetails = memo(function ChannelDetails({
    */
   onRunChannelCommand?: (body: string) => void;
   onManageApps: () => void;
+  onDeleteChannel?: () => void;
   automations: SerializedAutomation[];
   automationExecutionEnabled: boolean | null;
   automationBusy: string | null;
@@ -1720,12 +1688,9 @@ export const ChannelDetails = memo(function ChannelDetails({
                               )}
                               className="app-detail-agent-avatar-button shrink-0 rounded-full"
                             >
-                              <IdentityAvatar
-                                kind="agent"
-                                label={label}
+                              <Face
+                                of={{ kind: "agent", name: label, harness: registration?.harness ?? null, id: instance.id }}
                                 status={instance.status}
-                                imageUrl={presence.avatarUrl}
-                                initials={avatarInitials(label)}
                                 size="sm"
                               />
                             </button>
@@ -1957,6 +1922,9 @@ export const ChannelDetails = memo(function ChannelDetails({
             </div>
           </DetailBlock>
           )}
+          {/* The desktop title carries delete; the phone has no title icons. */}
+          {onDeleteChannel && mobileOverlayOpen && <button type="button" onClick={onDeleteChannel}
+            className="text-sm font-medium text-destructive hover:underline">Delete Channel…</button>}
         </div>
       </div>
   );
@@ -2316,7 +2284,7 @@ export function ToolSurface({
   view: Exclude<AppView, "messages">;
   /** Whose profile the Profile view shows; null is the viewer's own. */
   profileUserId: string | null;
-  user: { id: string; email: string; name?: string; avatarUrl?: string };
+  user: { id: string; email: string; name?: string };
   /** Hub-reported operator capability; the admin route re-checks it. */
   platformAdmin?: boolean;
   channels: ChannelSnapshot[];

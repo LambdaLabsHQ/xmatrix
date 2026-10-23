@@ -486,12 +486,15 @@ test("a historical instance reborn mention reuses its durable session key after 
       worker,
       MOCK_TOKEN,
       channelId,
-      // The stop message fences the Run in its own append, so the Channel is
-      // told at once. The daemon is offline, so it is told the stop is queued,
-      // never that it happened; the host's termination is reported below.
-      (message) => message.body === "Stop queued for @codex-reborn-route:1. Its machine's daemon is offline, " +
-        "so the process keeps running until the daemon reconnects and applies the stop.",
-      "message-driven stop confirmation",
+      // The stop message fences the Run in its own append, and the answer is
+      // recorded on that command at once, not posted as another message. The
+      // daemon is offline, so it says the stop is queued, never that it
+      // happened; the host's termination is reported below.
+      (message) => message.messageId === stopMessage.message.messageId &&
+        (message.commandResult?.notes ?? []).some((note) => note.text ===
+          "Stop queued for @codex-reborn-route:1. Its machine's daemon is offline, " +
+          "so the process keeps running until the daemon reconnects and applies the stop."),
+      "stop command result",
     );
 
     // The reborn predecessor stop earlier in this test must not have produced a
@@ -547,7 +550,7 @@ test("a historical instance reborn mention reuses its durable session key after 
       if (confirmed?.phase === "confirmed") break;
       await sleep(25);
     }
-    assert.equal(confirmed?.phase, "confirmed", "the command's receipt is the Workstation confirmation");
+    assert.equal(confirmed?.phase, "confirmed", "the command's receipt is the Machine confirmation");
     const history = await json(await worker.fetch(
       `/api/channels/${encodeURIComponent(channelId)}/history?limit=50`,
       { headers: auth },

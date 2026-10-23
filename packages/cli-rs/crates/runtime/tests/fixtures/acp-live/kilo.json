@@ -1,0 +1,103 @@
+{
+ "session/new": {
+  "configOptions": [
+   {
+    "id": "model",
+    "name": "Model",
+    "category": "model",
+    "type": "select",
+    "currentValue": "kilo/google/gemini-3-pro-image",
+    "options": [
+     {
+      "value": "kilo/google/gemini-3-pro-image",
+      "name": "Kilo Gateway/Google: Nano Banana Pro (Gemini 3 Pro Image)"
+     },
+     {
+      "value": "kilo/aion-labs/aion-3.5",
+      "name": "Kilo Gateway/AionLabs: Aion 3.5"
+     },
+     {
+      "value": "kilo/aion-labs/aion-3.5-mini",
+      "name": "Kilo Gateway/AionLabs: Aion 3.5 Mini"
+     },
+     {
+      "value": "kilo/aion-labs/aion-2.0",
+      "name": "Kilo Gateway/AionLabs: Aion-2.0"
+     }
+    ]
+   },
+   {
+    "id": "effort",
+    "name": "Effort",
+    "description": "Available effort levels for this model",
+    "category": "thought_level",
+    "type": "select",
+    "currentValue": "thinking",
+    "options": [
+     {
+      "value": "thinking",
+      "name": "Thinking"
+     }
+    ]
+   },
+   {
+    "id": "mode",
+    "name": "Session Mode",
+    "category": "mode",
+    "type": "select",
+    "currentValue": "code",
+    "options": [
+     {
+      "value": "code",
+      "name": "code",
+      "description": "The default agent. Executes tools based on configured permissions."
+     },
+     {
+      "value": "ask",
+      "name": "ask",
+      "description": "Get answers and explanations without making changes to the codebase."
+     },
+     {
+      "value": "debug",
+      "name": "debug",
+      "description": "Diagnose and fix software issues with systematic debugging methodology."
+     },
+     {
+      "value": "orchestrator",
+      "name": "orchestrator",
+      "description": "Coordinate complex tasks by delegating to specialized agents in parallel."
+     }
+    ]
+   }
+  ]
+ },
+ "session/update": {
+  "sessionUpdate": "available_commands_update",
+  "availableCommands": [
+   {
+    "name": "goal",
+    "description": "Keep working toward a session goal. /goal <objective> or pause, resume, clear. A goal may wait on a scheduled wakeup, a cron task, or a background process: the wait suspends the goal until it fires and the goal resumes itself; /goal pause and /goal clear cancel its armed timers. If the objective is to wait for a deploy, build, or CI job, schedule that wait immediately; do not explore the repository first."
+   },
+   {
+    "name": "init",
+    "description": "guided AGENTS.md setup"
+   },
+   {
+    "name": "kilo-config",
+    "description": "Guide for Kilo configuration: config paths, kilo.json fields, commands, agents, skills, permissions, MCPs, providers, TUI settings, plus Agent Manager worktree setup/run scripts, workflows, and state. Use for Kilo config questions, locating loaded config, changing settings, or Agent Manager questions about run/setup scripts, worktree setup/workflows, apply/merge/PR/conflicts, missing sessions/worktrees, and agent-manager.json recovery."
+   },
+   {
+    "name": "resume-claude",
+    "description": "import a Claude Code session transcript"
+   },
+   {
+    "name": "resume-codex",
+    "description": "import an OpenAI Codex session transcript"
+   },
+   {
+    "name": "review",
+    "description": "review changes [uncommitted|staged|unpushed|branch|commit|pr]"
+   }
+  ]
+ }
+}

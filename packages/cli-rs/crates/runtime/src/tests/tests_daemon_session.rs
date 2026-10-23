@@ -439,11 +439,6 @@ use super::{
     zcode_app_error_message, zcode_cancel_notification, zcode_goal_active_input_id,
     zcode_goal_state_from_value, zcode_is_session_event, zcode_message_id_matches,
 };
-#[cfg(target_os = "macos")]
-use super::{
-    agent_sandbox_temp_grants, agent_sandbox_temp_grants_from_candidates,
-    reject_agent_sandbox_temp_grant,
-};
 #[cfg(unix)]
 use super::{daemon_capability_key, take_daemon_agent_auth_grant};
 #[cfg(unix)]
@@ -768,62 +763,6 @@ fn grok_resume_session_path_is_stable_for_key() {
     assert_ne!(a, c);
     assert!(a.to_string_lossy().contains("grok-resume"));
 }
-
-// macOS-only temp-grant allow-roots logic; rejects e.g. /tmp on Linux CI.
-#[cfg(target_os = "macos")]
-#[test]
-fn macos_sandbox_temp_grants_are_narrow_and_deduplicated() {
-    let temp_root = fs::canonicalize(std::env::temp_dir()).unwrap();
-    let tmp_root = fs::canonicalize("/tmp").unwrap();
-    let grants = agent_sandbox_temp_grants_from_candidates([
-        temp_root.clone(),
-        tmp_root.clone(),
-        tmp_root.clone(),
-    ])
-    .unwrap();
-
-    assert!(grants.rw_dirs.contains(&temp_root));
-    assert!(grants.rw_dirs.contains(&tmp_root));
-    assert_eq!(
-        grants
-            .rw_dirs
-            .iter()
-            .filter(|path| **path == tmp_root)
-            .count(),
-        1
-    );
-    for broad in [
-        "/",
-        "/var",
-        "/private",
-        "/private/var",
-        "/private/var/folders",
-        "/private/var/tmp",
-        "/opt",
-    ] {
-        assert!(
-            reject_agent_sandbox_temp_grant(Path::new(broad)).is_err(),
-            "{broad} should not be accepted as a temp grant"
-        );
-    }
-}
-
-// macOS-only temp-grant allow-roots logic; rejects e.g. /tmp on Linux CI.
-#[cfg(target_os = "macos")]
-#[test]
-fn macos_sandbox_temp_grants_reject_existing_non_temp_dirs() {
-    let root = std::env::current_dir()
-        .unwrap()
-        .join("target")
-        .join(format!("xmatrix-sandbox-non-temp-{}", uuid::Uuid::new_v4()));
-    fs::create_dir_all(&root).unwrap();
-    let result = agent_sandbox_temp_grants_from_candidates([root.clone()]);
-
-    assert!(result.is_err());
-    let _ = fs::remove_dir_all(root);
-}
-
-// macOS-only temp-grant allow-roots logic; rejects e.g. /tmp on Linux CI.
 
 fn test_serialized_agent(name: &str) -> SerializedAgent {
     SerializedAgent {
@@ -1895,7 +1834,7 @@ fn terminal_report_rejection_survives_the_hub_rewriting_the_authority_code() {
     // code with its generic one. Recognising this is the difference between
     // dropping a dead run and re-sending its exit forever.
     assert!(daemon_report_terminal_rejection(&CliError::Http(
-        "The Workstation request could not be processed. \
+        "The Machine request could not be processed. \
          (code=runtime.authority_rejected, retryable=false, status=404)"
             .into()
     )));
@@ -1905,14 +1844,14 @@ fn terminal_report_rejection_survives_the_hub_rewriting_the_authority_code() {
 fn a_report_that_could_still_succeed_is_never_treated_as_terminal() {
     // Retryable, so the run is still ours and the report must be re-sent.
     assert!(!daemon_report_terminal_rejection(&CliError::Http(
-        "The Workstation request could not be processed. \
+        "The Machine request could not be processed. \
          (code=runtime.authority_rejected, retryable=true, status=503)"
             .into()
     )));
     // Non-retryable, but not a missing run: an authorization change must not
     // silently discard the exit of a run that still exists.
     assert!(!daemon_report_terminal_rejection(&CliError::Http(
-        "The Workstation request could not be processed. \
+        "The Machine request could not be processed. \
          (code=runtime.authority_rejected, retryable=false, status=403)"
             .into()
     )));

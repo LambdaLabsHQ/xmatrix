@@ -46,7 +46,7 @@ test("Reborn lookup refusal publishes a visible error instead of rejecting silen
   const result = await orchestrateProductAgentMentions({ channelId: "ch-1", messageId: "refused-reborn",
     body: "@codex:1:reborn", actorUserId: "user-1", port: {
       async getRebornTarget() { throw Object.assign(new Error("private diagnostic"), { code: "forbidden" }); },
-      async publishSystemNotice(channelId, body) { assert.equal(channelId, "ch-1"); notices.push(body); },
+      async recordResult(channelId, body) { assert.equal(channelId, "ch-1"); notices.push(body); },
     } });
   assert.equal(result.spawned, 0);
   assert.equal(notices.length, 1);
@@ -59,7 +59,7 @@ test("a Reborn refusal whose notice cannot be published remains an error", async
   await assert.rejects(orchestrateProductAgentMentions({ channelId: "ch-1", messageId: "refused-reborn-notice",
     body: "@codex:1:reborn", actorUserId: "user-1", port: {
       async getRebornTarget() { return null; },
-      async publishSystemNotice() { throw new Error("notice transport unavailable"); },
+      async recordResult() { throw new Error("notice transport unavailable"); },
     } }), /notice transport unavailable/);
 });
 
@@ -109,7 +109,7 @@ function basePort(overrides = {}) {
     async getRebornTarget() {
       return null;
     },
-    async publishSystemNotice(_channelId, body) {
+    async recordResult(_channelId, body) {
       notices.push(body);
     },
     ...overrides,
@@ -203,6 +203,7 @@ test("Agent rejection notice appends through current channel message authority",
   assert.equal(appends[0].channelId, "ch-rejected");
   assert.equal(appends[0].command.channelId, "ch-rejected");
   assert.equal(appends[0].command.body, "xMatrix could not start @agent.");
+  assert.equal(appends[0].command.messageKind, "xmatrix.system.runtime-failure");
   assert.equal(appends[0].command.residual.appMetadata.xmatrixSystemNotice, true);
 });
 
@@ -367,4 +368,35 @@ test("a new conversation's first message asks Jev which harness to summon and a 
   assert.equal(diagnostics.length, 0);
   assert.deepEqual(await orchestrateProductNewConversationStart({ ...input, port: port(true, "registration_not_found") }), {});
   assert.deepEqual(diagnostics.map(value => value.error), ["registration_not_found"]);
+});
+
+test("page and message discussions use the first-message choice despite their passage title", async () => {
+  const body = "> Fill Pantry\n\n— [Fill Pantry › Fill Pantry](https://xmatrix.sh/app/space/pages?page=page-1)\n\n这个项目是怎么决策要做的";
+  const decisions = [];
+  for (const metadata of [
+    { fromPageId: "page-1" },
+    { fromChannelId: "source-channel", fromMessageId: "source-message" },
+  ]) {
+    const port = {
+      async getChannel(id) { return { id, name: "“Fill Pantry”", metadata }; },
+      async decideFirstMessageLaunch(input) { decisions.push(input); return { claimed: true, harness: "codex" }; },
+    };
+    assert.deepEqual(await orchestrateProductNewConversationStart({ channelId: "discussion", messageId: "first",
+      body, authorKind: "user", port }), { harness: "codex" });
+    assert.deepEqual(decisions.at(-1), { channelId: "discussion", messageId: "first", body, window: true });
+  }
+  assert.equal(decisions.length, 2);
+
+  // A title alone, malformed origin, archived Channel, or empty draft is not a discussion launch.
+  for (const channel of [null, { metadata: {} }, { metadata: { fromPageId: true } },
+    { metadata: { fromPageId: " " } }, { metadata: { fromMessageId: "source-message" } },
+    { metadata: { fromChannelId: "source-channel" } },
+    { archivedAt: "2026-10-19T00:00:00Z", metadata: { fromPageId: "page-1" } }]) {
+    assert.deepEqual(await orchestrateProductNewConversationStart({ channelId: "discussion", messageId: "first",
+      body, authorKind: "user", port: { async getChannel() { return channel; },
+        async decideFirstMessageLaunch() { assert.fail("ineligible Channel must not ask Jev"); } } }), {});
+  }
+  assert.deepEqual(await orchestrateProductNewConversationStart({ channelId: "discussion", messageId: "first",
+    body: " \n ", authorKind: "user", port: { async getChannel() { return { metadata: { fromPageId: "page-1" } }; },
+      async decideFirstMessageLaunch() { assert.fail("empty draft must not ask Jev"); } } }), {});
 });

@@ -4,12 +4,47 @@ require("../components/dashboard/typescript-require.cjs").installTypeScriptRequi
 
 const {
   findDesktopReleaseAssetByAlias,
+  fetchPublishedReleaseNotes,
+  getLatestReleaseManifest,
   hasCompleteDesktopMacReleaseAssets,
   hasCompleteDesktopWindowsReleaseAssets,
   parseReleaseAssetRange,
   releaseFromR2ChannelPointer,
   selectLatestPublishedGitHubReleaseByTagPrefix,
 } = require("./github-release.ts");
+
+test("update manifests link to the component's release rather than the Web build", () => {
+  const manifest = getLatestReleaseManifest({ tag_name: "cli-v1.1.1-beta.4", assets: [] }, "https://xmatrix.sh", "/api/cli/releases/dev");
+  assert.equal(manifest.releaseNotesUrl, "https://xmatrix.sh/releases/1.1.1-beta.4");
+});
+
+test("public notes resolve an exact published tag, excluding drafts, receipts and mismatches", async (t) => {
+  const original = global.fetch;
+  t.after(() => { global.fetch = original; });
+  const notes = "<!-- xmatrix-release-notes:v1 -->\nImproved updates.\n\n## Deployment receipt\n\nEvidence.";
+  let payload = { tag_name: "xmatrix-v1.2.0", body: notes };
+  global.fetch = async (url) => {
+    assert.match(url, /\/releases\/tags\/xmatrix-v1\.2\.0$/u);
+    return Response.json(payload);
+  };
+  assert.equal(await fetchPublishedReleaseNotes("1.2.0"), "Improved updates.");
+  payload = { ...payload, draft: true };
+  assert.equal(await fetchPublishedReleaseNotes("1.2.0"), undefined);
+  payload = { tag_name: "xmatrix-v1.2.1", body: notes };
+  assert.equal(await fetchPublishedReleaseNotes("1.2.0"), undefined);
+  payload = { tag_name: "xmatrix-v1.2.0", body: "Production receipt" };
+  assert.equal(await fetchPublishedReleaseNotes("1.2.0"), undefined);
+  global.fetch = async () => new Response(null, { status: 404 });
+  assert.equal(await fetchPublishedReleaseNotes("1.2.0"), undefined);
+  global.fetch = async (url) => {
+    if (url.endsWith("/releases/tags/xmatrix-v1.2.0")) return new Response(null, { status: 404 });
+    assert.match(url, /\/contents\/docs\/releases\/1\.2\.0\.md\?ref=xmatrix-v1\.2\.0$/u);
+    return new Response("# xMatrix 1.2.0\n\nRead these notes before the final receipt.");
+  };
+  assert.equal(await fetchPublishedReleaseNotes("1.2.0"), "Read these notes before the final receipt.");
+  global.fetch = async () => new Response(null, { status: 503 });
+  await assert.rejects(fetchPublishedReleaseNotes("1.2.0"), /503/u);
+});
 
 function release(tagName, options = {}) {
   return {
@@ -260,4 +295,30 @@ test("release asset ranges reject multipart and unsatisfiable requests", () => {
   assert.throws(() => parseReleaseAssetRange("bytes=0-1,4-5", 10_000));
   assert.throws(() => parseReleaseAssetRange("bytes=10000-", 10_000));
   assert.throws(() => parseReleaseAssetRange("bytes=-0", 10_000));
+});
+
+test("a channel pointer is read by its version: stable refuses a beta, dev may name either", () => {
+  const pointer = (channel, releaseTag) => ({
+    schemaVersion: 1,
+    component: "cli",
+    channel,
+    releaseTag,
+    prefix: `releases/${releaseTag}`,
+    files: [{ name: "xmatrix-linux-x64", key: `releases/${releaseTag}/xmatrix-linux-x64`, size: 42, sha256: "a".repeat(64) }],
+  });
+  assert.throws(() => releaseFromR2ChannelPointer(pointer("stable", "cli-v1.0.606-beta.3"), "cli", "stable"),
+    /stable channel names beta cli-v1\.0\.606-beta\.3/u);
+  assert.equal(releaseFromR2ChannelPointer(pointer("dev", "cli-v1.0.606-beta.3"), "cli", "dev").prerelease, true);
+  // A dev pointer from before betas had their own versions still resolves.
+  assert.equal(releaseFromR2ChannelPointer(pointer("dev", "cli-v1.0.602"), "cli", "dev").prerelease, false);
+  assert.equal(releaseFromR2ChannelPointer(pointer("stable", "cli-v1.1.0"), "cli", "stable").prerelease, false);
+  assert.throws(() => releaseFromR2ChannelPointer(pointer("stable", "cli-vlatest"), "cli", "stable"), /Invalid R2 cli stable/u);
+});
+
+test("the stable GitHub fallback never picks a beta, even one published without the prerelease flag", () => {
+  const selected = selectLatestPublishedGitHubReleaseByTagPrefix(
+    [release("cli-v1.0.606-beta.3"), release("cli-v1.0.605"), release("cli-v1.0.606-beta.2", { prerelease: true })],
+    "cli-v"
+  );
+  assert.equal(selected.tag_name, "cli-v1.0.605");
 });

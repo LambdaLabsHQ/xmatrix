@@ -67,13 +67,17 @@ test("message galleries open the selected image and wrap in both directions", as
   await expect(dialog.getByRole("img", { name: "second.png" })).toBeVisible();
   await dialog.getByRole("button", { name: "Next image" }).click();
   await expect(dialog.getByRole("img", { name: "first.png" })).toBeVisible();
-  const viewport = dialog.locator(".app-attachment-lightbox-zoom");
-  await viewport.evaluate((target) => {
-    const touch = (clientX: number) => new Touch({ identifier: 1, target, clientX, clientY: 300 });
-    target.dispatchEvent(new TouchEvent("touchstart", { bubbles: true, touches: [touch(250)] }));
-    target.dispatchEvent(new TouchEvent("touchmove", { bubbles: true, touches: [touch(100)] }));
-    target.dispatchEvent(new TouchEvent("touchend", { bubbles: true, touches: [], changedTouches: [touch(100)] }));
-  });
+  // Let the slide in from "Next image" finish, then swipe left with a real touch: CDP touches
+  // arrive as the pointer events a phone sends. One burst, so a loaded machine cannot turn
+  // the flick into a drag that stops before lifting.
+  await expect.poll(() => page.locator(".app-image-viewer-track").evaluate((element) => getComputedStyle(element).transform))
+    .toBe("matrix(1, 0, 0, 1, 0, 0)");
+  const client = await page.context().newCDPSession(page);
+  await Promise.all([
+    ...([["touchStart", 340], ["touchMove", 200], ["touchMove", 60]] as const).map(([type, x]) =>
+      client.send("Input.dispatchTouchEvent", { type, touchPoints: [{ x, y: 300 }] })),
+    client.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] }),
+  ]);
   await expect(dialog.getByRole("img", { name: "second.png" })).toBeVisible();
   await dialog.getByRole("button", { name: "Next image" }).click();
   await page.keyboard.press("ArrowLeft");

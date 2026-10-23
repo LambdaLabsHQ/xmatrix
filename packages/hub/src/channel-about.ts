@@ -1,5 +1,5 @@
 import { ControlError } from "@xmatrix/db";
-import { utf8ByteLength, type TextTaskResult } from "@xmatrix/protocol";
+import { automaticConversationName, splitDiscussionHead, utf8ByteLength, type TextTaskResult } from "@xmatrix/protocol";
 import { mangledChannelAboutText } from "./channel-about-text";
 import { channelMessageHistory } from "./channel-messages";
 import { channelSpaceId, configureChannel, getChannel, getSpace, type SpacesDependencies } from "./spaces";
@@ -59,7 +59,11 @@ function instruction(language: SpaceLanguage, name: boolean): string {
     "The text is the conversation: its name and current summary, then its newest messages, oldest first. The messages are what counts; the current summary may be out of date.",
     `Say what the conversation is about now in at most ${SUMMARY_MAX_CHARACTERS} characters: its purpose, the goal in progress and what matters in its scope. Not its history and not a list of its messages.`,
     "A message marked as answered in its thread has been picked up there; never describe it as unclaimed or unanswered.",
-    ...(name ? [`Nobody has named this conversation yet: name it after what it is about, in at most ${NAME_MAX_CHARACTERS} characters.`] : []),
+    ...(name ? [
+      `Nobody has named this conversation yet: name it after what it is about, in at most ${NAME_MAX_CHARACTERS} characters.`,
+      "A first message that opens with a quoted passage and a link to where it came from discusses that passage: " +
+        "name it after what was written about the passage, not after the passage.",
+    ] : []),
     language === "zh" ? "Write in Simplified Chinese, whatever language the conversation is in."
       : "Write in English, whatever language the conversation is in.",
     `Answer with one JSON object and nothing else: ${name ? '{"summary": "…", "name": "…"}' : '{"summary": "…"}'}`,
@@ -136,6 +140,29 @@ export type ChannelAboutStart = { started: true; requestId: string }
 
 function unreadable(error: unknown): boolean {
   return error instanceof ControlError && error.code === "channel_not_found";
+}
+
+/**
+ * A discussion of a passage is named by the passage until something is written. Its first message
+ * names it by what was written after the passage, as a new conversation's first message names it,
+ * and the About that reads it names it from then on, unless someone has named it meanwhile.
+ */
+export async function nameDiscussionByFirstMessage(env: Env, input: {
+  channelId: string; messageId: string; body: string; actorUserId: string;
+}, dependencies: SpacesDependencies = {}): Promise<void> {
+  const head = splitDiscussionHead(input.body);
+  if (!head?.rest.trim()) return;
+  const { channel } = await getChannel(env, { channelId: input.channelId,
+    principal: { kind: "user", id: input.actorUserId }, purpose: "discussion-name" }, dependencies);
+  if ((channel as { metadata?: Record<string, unknown> }).metadata?.autoName !== true) return;
+  try {
+    await configureChannel(env, { commandId: `discussion-name:${input.messageId}`, actorUserId: input.actorUserId,
+      at: new Date().toISOString(), channelId: input.channelId, name: automaticConversationName(input.body),
+      automaticName: true }, dependencies);
+  } catch (error) {
+    if (error instanceof ControlError && error.status === 409) return;
+    throw error;
+  }
 }
 
 /**

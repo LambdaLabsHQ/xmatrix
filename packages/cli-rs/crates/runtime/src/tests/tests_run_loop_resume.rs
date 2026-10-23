@@ -47,6 +47,75 @@ fn effort_switch_event(effort: &str) -> AgentInstanceConnectionEvent {
     })
 }
 
+#[tokio::test]
+async fn a_control_write_keeps_polling_the_turn_holding_the_writer() {
+    let writer = tokio::sync::Mutex::new(());
+    let controlled = tokio::sync::Notify::new();
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let mut pending = std::collections::VecDeque::new();
+    let turn = async {
+        let guard = writer.lock().await;
+        tx.send(model_switch_event("sonnet")).unwrap();
+        // A Windows stdin write yields while its turn still owns the writer.
+        tokio::task::yield_now().await;
+        drop(guard);
+        controlled.notified().await;
+        7
+    };
+    let result = tokio::time::timeout(
+        Duration::from_secs(1),
+        crate::await_turn_with_events(turn, &mut rx, &mut pending, async |_| {
+            let _guard = writer.lock().await;
+            controlled.notify_one();
+            false
+        }),
+    )
+    .await
+    .expect("the control must not stop polling the turn that releases its writer");
+    assert_eq!(result, 7);
+    assert!(matches!(
+        pending.pop_front(),
+        Some(AgentInstanceConnectionEvent::Server(
+            AgentInstanceServerMessage::AgentModelSwitchRequested { model, .. }
+        )) if model == "sonnet"
+    ));
+    assert!(pending.is_empty());
+}
+
+#[tokio::test]
+async fn a_completed_turn_finishes_its_control_before_leaving_later_events_queued() {
+    let ended = tokio::sync::Notify::new();
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let mut pending = std::collections::VecDeque::new();
+    let mut handled = 0;
+    let turn = async {
+        tx.send(model_switch_event("opus")).unwrap();
+        tx.send(effort_switch_event("high")).unwrap();
+        tokio::task::yield_now().await;
+        ended.notify_one();
+        "finished"
+    };
+    let result = tokio::time::timeout(
+        Duration::from_secs(1),
+        crate::await_turn_with_events(turn, &mut rx, &mut pending, async |_| {
+            ended.notified().await;
+            handled += 1;
+            true
+        }),
+    )
+    .await
+    .expect("a completed turn must settle its in-flight control");
+    assert_eq!(result, "finished");
+    assert_eq!(handled, 1);
+    assert!(pending.is_empty());
+    assert!(matches!(
+        rx.try_recv(),
+        Ok(AgentInstanceConnectionEvent::Server(
+            AgentInstanceServerMessage::AgentEffortSwitchRequested { effort, .. }
+        )) if effort == "high"
+    ));
+}
+
 /// The first two inputs a run loop takes once its last turn ended the given
 /// way with `queued` waiting; `None` where it would wait for more input.
 async fn run_loop_inputs_after_turn(
@@ -241,6 +310,58 @@ async fn a_continuation_for_another_switch_runs_nothing() {
     assert!(first.is_none());
 }
 
+/// The Hub's continuation as its own frame to `instance`, naming `switches`.
+fn continuation_frame(instance: &str, switches: &[&str]) -> AgentInstanceConnectionEvent {
+    AgentInstanceConnectionEvent::Server(
+        serde_json::from_value(serde_json::json!({
+            "type": "agent_switch_continuation",
+            "channelId": "channel",
+            "instanceId": instance,
+            "requestIds": switches,
+            "prompt": "[xMatrix] Hub-worded frame continuation",
+        }))
+        .unwrap(),
+    )
+}
+
+#[tokio::test]
+async fn the_hubs_continuation_frame_resumes_the_turn_it_owes() {
+    let ([first, second], _) = inputs_with_hub_continuation(vec![
+        model_switch_event("sonnet"),
+        continuation_frame("inst-claude-test", &["req-sonnet"]),
+    ])
+    .await;
+    let Some(crate::RunLoopInput::Resume { channel_id, prompt }) = first else {
+        panic!("expected the Hub's continuation frame to resume the turn");
+    };
+    assert_eq!(channel_id, "channel");
+    assert_eq!(prompt, "[xMatrix] Hub-worded frame continuation");
+    assert!(second.is_none(), "resumed once");
+}
+
+#[tokio::test]
+async fn a_continuation_frame_for_another_instance_runs_nothing() {
+    let ([first, second], _) = inputs_with_hub_continuation(vec![
+        model_switch_event("sonnet"),
+        continuation_frame("inst-someone-else", &["req-sonnet"]),
+    ])
+    .await;
+    assert!(first.is_none(), "the frame is no turn and no event for the loop");
+    assert!(second.is_none());
+}
+
+#[tokio::test]
+async fn a_newer_message_supersedes_the_hubs_continuation_frame() {
+    let ([first, second], _) = inputs_with_hub_continuation(vec![
+        model_switch_event("sonnet"),
+        channel_message_event("m1", "channel", "do this instead"),
+        continuation_frame("inst-claude-test", &["req-sonnet"]),
+    ])
+    .await;
+    assert!(matches!(first, Some(crate::RunLoopInput::Delivery { .. })));
+    assert!(second.is_none(), "the continuation frame is dropped");
+}
+
 #[tokio::test]
 async fn the_hubs_continuation_reaches_the_run_loop_over_the_socket() {
     let (mut relay, _) = continuation_hub_relay().await;
@@ -262,4 +383,23 @@ async fn the_hubs_continuation_reaches_the_run_loop_over_the_socket() {
         panic!("expected the Hub's continuation to resume the turn");
     };
     assert_eq!(prompt, "[xMatrix] Hub-worded continuation");
+}
+
+#[tokio::test]
+async fn a_page_that_asked_again_behind_other_work_is_answered_once() {
+    let ask = |turn: u64| {
+        AgentInstanceConnectionEvent::PageCoWrite(
+            xmatrix_cli_core::page_co_write::PageCoWriteEvent::Turn {
+                channel_id: "channel".to_string(),
+                turn,
+                prompt: format!("the page at turn {turn}"),
+            },
+        )
+    };
+    let [first, second] = run_loop_inputs_after_turn(false, vec![ask(3), ask(4), ask(5)]).await;
+    let Some(crate::RunLoopInput::Resume { prompt, .. }) = first else {
+        panic!("expected the page's turn");
+    };
+    assert_eq!(prompt, "the page at turn 5");
+    assert!(second.is_none(), "stale asks were answered too");
 }

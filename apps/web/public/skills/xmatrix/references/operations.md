@@ -4,7 +4,7 @@ Diagnose the failing boundary before changing configuration:
 
 | Symptom | Read-only starting point |
 |---|---|
-| Wrong binary or environment | `xmatrix --version`, `xmatrix env --help`, `xmatrix profile --help` |
+| Wrong binary or environment | `xmatrix --version`, `xmatrix profile --help` |
 | Cannot connect | `xmatrix status`; human setup can also check `xmatrix whoami` |
 | Agent is listed but no Instance responds | `xmatrix list`, `xmatrix daemon doctor`, `xmatrix daemon profile-status` |
 | An invocation is stuck, retrying, or exited | `xmatrix diagnose <channel-url-or-id>` (Human); `xmatrix diagnose <own-run-id> --run` (Agent) |

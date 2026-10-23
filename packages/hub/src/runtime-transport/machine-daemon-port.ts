@@ -17,6 +17,7 @@ import {
 import { RuntimeClientOperationError, supersededMachineDaemonConnection } from "./runtime-operation-failure";
 import { RuntimeSocketState } from "./ordered-socket-dispatch";
 import {
+  MACHINE_DAEMON_CATALOG_HEAL_INTERVAL_MS,
   parseMachineDaemonHibernationAttachment,
   serializeMachineDaemonHibernationAttachment,
   type MachineDaemonHibernationAttachment,
@@ -103,6 +104,12 @@ export interface MachineDaemonRuntimeSession {
   lastSeenAt: string;
   /** Present only while a replacement daemon is fenced from route ownership. */
   activationPhase?: MachineDaemonActivationReceipt["phase"];
+  /**
+   * When this socket may next correct a catalog row that says offline. It rides
+   * the hibernation attachment: waking the object for a frame is not by itself a
+   * reason to read the catalog again.
+   */
+  catalogHealNotBefore?: string;
 }
 
 export interface MachineDaemonRouteIdentity {
@@ -147,6 +154,11 @@ export interface MachineDaemonSocketBackend {
     session: Readonly<MachineDaemonRuntimeSession>,
     details: { code?: number; reason?: string; wasClean?: boolean },
   ): void | Promise<void>;
+  /**
+   * A live socket is proof this connection is online. Catalog offline left
+   * behind by a missed wake is corrected without replacing the socket.
+   */
+  confirmOnline?(session: Readonly<MachineDaemonRuntimeSession>): Promise<void>;
 }
 
 export class MachineDaemonAuthorityCapabilityError extends Error {
@@ -253,9 +265,46 @@ export class MachineDaemonRuntimeTransport {
     const input = decodeMachineDaemonConnectionInput(frame, this.controller.socket.isConnected(ws));
     if (input.ok && input.message.type === "ping") {
       this.controller.handleFrame(ws, frame);
+      this.scheduleCatalogHeal(ws);
       return Promise.resolve();
     }
+    this.scheduleCatalogHeal(ws);
     return this.sockets.ordered.run(ws, () => this.controller.handleFrame(ws, frame));
+  }
+
+  /**
+   * The socket is attached, so this connection is online even if a missed
+   * wake wrote the catalog offline. The pong and the caller's frame are not
+   * delayed on the catalog write. A heal that finishes after the socket is
+   * gone unregisters that same generation, so it cannot resurrect a replaced
+   * connection. One check per interval is enough: the daemon's probes wake
+   * this object every minute, and each wake would otherwise cost a catalog
+   * transaction that almost always finds the row already online.
+   */
+  private scheduleCatalogHeal(ws: WebSocket): void {
+    const confirm = this.backend.confirmOnline;
+    if (!confirm) return;
+    const session = this.sockets.get(ws);
+    if (!session || session.activationPhase) return;
+    const now = Date.now();
+    if (session.catalogHealNotBefore && Date.parse(session.catalogHealNotBefore) > now) return;
+    session.catalogHealNotBefore = new Date(now + MACHINE_DAEMON_CATALOG_HEAL_INTERVAL_MS).toISOString();
+    void confirm(session).then(() => {
+      if (this.sockets.get(ws) === session) return;
+      return this.backend.disconnected(session, {
+        code: MACHINE_DAEMON_ROUTE_CLOSE.failedDeliver.code,
+        reason: "catalog heal lost its socket",
+        wasClean: false,
+      });
+    }).catch((error: unknown) => {
+      // The socket's next frame tries again.
+      delete session.catalogHealNotBefore;
+      console.warn("Machine Daemon catalog heal failed", {
+        ownerUserId: session.principal.ownerUserId,
+        machineId: session.principal.machineId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
   }
 
   /**
@@ -445,7 +494,7 @@ export class MachineDaemonRuntimeTransport {
       ws.close(CLIENT_UPGRADE_REQUIRED_CLOSE_CODE, "Client upgrade required");
       return;
     }
-    await this.sockets.answerOperation(ws, message.requestId, "Workstation request could not be completed", async () => {
+    await this.sockets.answerOperation(ws, message.requestId, "Machine request could not be completed", async () => {
       const authentication = await this.backend.authenticate(message);
       assertMachineBinding(message, authentication);
       const now = new Date().toISOString();
@@ -478,7 +527,7 @@ export class MachineDaemonRuntimeTransport {
   private async dispatch(ws: WebSocket, message: ExecutableMachineDaemonMessage): Promise<void> {
     const requestId = "requestId" in message ? message.requestId : undefined;
     let superseded = false;
-    await this.sockets.authenticatedOperation(ws, requestId, "Machine Daemon", "Workstation request could not be completed", async (session) => {
+    await this.sockets.authenticatedOperation(ws, requestId, "Machine Daemon", "Machine request could not be completed", async (session) => {
       const activationMessage = message.type === "machine_activation_prepare" ||
         message.type === "machine_activation_advance";
       if (session.activationPhase && !activationMessage) {
@@ -534,7 +583,7 @@ export class MachineDaemonRuntimeTransport {
   }
 
   private async refresh(ws: WebSocket, message: Message<"refresh_auth">): Promise<void> {
-    await this.sockets.authenticatedOperation(ws, message.requestId, "Machine Daemon", "Workstation request could not be completed", async (session) => {
+    await this.sockets.authenticatedOperation(ws, message.requestId, "Machine Daemon", "Machine request could not be completed", async (session) => {
       const principal = await this.backend.refresh(message.token, session);
       assertSamePrincipal(session.principal, principal);
       session.principal = { ...principal, hostId: session.principal.hostId, hostName: session.principal.hostName };

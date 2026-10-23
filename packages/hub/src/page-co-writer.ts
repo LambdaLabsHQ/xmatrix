@@ -10,6 +10,7 @@ import {
 } from "y-prosemirror";
 import * as Y from "yjs";
 import { readingMs, readingStep, type PageReaderPace } from "./page-reader-pace";
+import { PageCoWriteTiming, type PageCoWriteObservation } from "./page-co-write-timing";
 
 /**
  * An Agent co-writing a page live (docs/design/pages-live-document.md §4.2),
@@ -81,6 +82,7 @@ export interface PageCoWriterHost {
   pace(): PageReaderPace | null;
   /** To the Agent's runtime. */
   send(request: PageCoWriteRequest): void;
+  observe?(event: PageCoWriteObservation): void;
 }
 
 /** The live document as ProseMirror reads it, with the mapping between its nodes and the CRDT's. */
@@ -108,6 +110,11 @@ type Written = Pick<Action, "before" | "written" | "replaced">;
 
 interface Turn {
   id: number;
+  askedAt: number;
+  /** At most one consecutive refresh: a replacement must get a chance to answer. */
+  refreshable: boolean;
+  wroteText: boolean;
+  timing?: PageCoWriteTiming;
   parser: PageCoWriteParser;
   action: Action | null;
   /** Someone edited what it was writing, so the rest of its answer is not written. */
@@ -121,7 +128,8 @@ interface Turn {
 }
 
 function newTurn(id: number, atOnce = false): Turn {
-  return { id, parser: new PageCoWriteParser(), action: null, stopped: false, queue: [], sent: null, atOnce };
+  return { id, askedAt: Date.now(), refreshable: true, wroteText: false,
+    parser: new PageCoWriteParser(), action: null, stopped: false, queue: [], sent: null, atOnce };
 }
 
 /** Queues what the parser made of the Agent's words, text that follows text as one. */
@@ -145,6 +153,11 @@ function blocksOf(markdown: string): DocNode[] {
   const nodes: DocNode[] = [];
   doc.forEach((node) => nodes.push(node));
   return nodes;
+}
+
+/** Rendered words only: finishing a streamed action may merely trim its trailing whitespace. */
+function writtenText(nodes: DocNode[]): string {
+  return nodes.map((node) => node.textContent).join("").trim();
 }
 
 function shortened(text: string): string {
@@ -206,6 +219,8 @@ export class PageCoWriter {
   private timer: ReturnType<typeof setTimeout> | null = null;
   /** When the first change the Agent has not yet heard was made. */
   private unheardSince: number | null = null;
+  /** Only authenticated human edits count toward human-response timing; other Agents also change the page. */
+  private unheardHumanSince: number | null = null;
   /** What its presence last said it was doing, and since when. */
   private shownActivity: PageCoWriterActivity | null = null;
   private activitySince = Date.now();
@@ -262,6 +277,7 @@ export class PageCoWriter {
   }
 
   stop(): void {
+    this.active?.timing?.end("disconnected");
     this.ended = true;
     this.waiting = [];
     if (this.timer) clearTimeout(this.timer);
@@ -295,6 +311,7 @@ export class PageCoWriter {
         : "Your last answer went quiet and was given up.", true);
       // The people on the page see it went quiet, and may ask someone else to write.
       this.stalled = true;
+      turn.timing?.end("stalled");
       this.host.send({ type: "interrupt", turn: turn.id });
       this.finished(turn);
       this.close();
@@ -306,8 +323,9 @@ export class PageCoWriter {
   }
 
   /** Someone else changed the page. If it touched what the Agent is writing, the Agent stops there. */
-  othersEdited(): void {
+  othersEdited(human = false): void {
     if (this.ended || !this.writable) return;
+    if (human) this.unheardHumanSince ??= Date.now();
     this.changed = true;
     if (this.active?.action && !this.active.action.skipped && !this.intact(this.active.action)) {
       this.yieldTurn("someone edited what you were writing");
@@ -345,6 +363,7 @@ export class PageCoWriter {
     const turn = this.active?.id === reply.turn ? this.active : this.waiting.find((item) => item.id === reply.turn);
     if (this.ended || !this.writable || !turn || turn.stopped || turn.sent) return;
     if (reply.type === "delta") {
+      turn.timing?.delta();
       if (turn === this.active) this.awaitTurn(turn);
       enqueue(turn, turn.parser.push(reply.text));
     } else {
@@ -392,6 +411,7 @@ export class PageCoWriter {
 
   /** The Agent's turn has reached the page whole: it ends, and the next one it opened goes on. */
   private complete(turn: Turn): void {
+    turn.timing?.end(turn.sent?.failed ? "failed" : "done");
     if (turn.sent?.failed) this.told(`Your last answer failed${turn.sent.reason ? `: ${turn.sent.reason}` : ""}.`);
     this.finished(turn);
     this.close();
@@ -460,20 +480,37 @@ export class PageCoWriter {
 
   private paused(): void {
     this.timer = null;
-    if (this.ended || this.active || !this.changed) return;
+    if (this.ended || !this.writable || !this.changed) return;
+    const turn = this.active;
+    if (turn) {
+      if (!turn.refreshable || turn.wroteText || turn.sent || this.unheardHumanSince === null) return;
+      // Give a new answer time to begin. If it still has no text, hear the latest human input instead
+      // of keeping it behind a stale answer for tens of seconds. Never repeatedly restart the replacement.
+      const wait = turn.askedAt + CO_WRITER_KEEP_UP_MS - Date.now();
+      if (wait > 0) {
+        this.timer = setTimeout(() => this.paused(), wait);
+        return;
+      }
+      this.halt("people changed the page before you wrote; follow the latest text");
+      this.ask(true);
+      return;
+    }
     this.ask();
   }
 
   /** Sends the Agent what it needs to answer now. */
-  private ask(): void {
+  private ask(refreshed = false): void {
+    const edited = this.unheardHumanSince;
+    this.unheardHumanSince = null;
     this.unheardSince = null;
     const now = this.host.markdown();
     const first = this.readCount === 0;
     const changedIds = first ? [] : pageChangedBlocks(this.seen, now);
-    const full = first || this.readCount % FULL_PAGE_EVERY === 0 || changedIds.length > FULL_PAGE_CHANGES;
+    const full = refreshed || first || this.readCount % FULL_PAGE_EVERY === 0 || changedIds.length > FULL_PAGE_CHANGES;
     const lines: string[] = [];
     lines.push(first ? "[Live co-writing] You joined this page." : "[Live co-writing] People paused.");
-    if (first) lines.push("", INSTRUCTIONS);
+    // The retired request may have been queued behind other work and never reached the harness.
+    if (first || refreshed) lines.push("", INSTRUCTIONS);
     if (full) {
       lines.push("", "The page now:", "<<<PAGE", now.replace(/\n+$/u, ""), "PAGE>>>");
     } else if (changedIds.length) {
@@ -497,6 +534,8 @@ export class PageCoWriter {
     this.readCount++;
     this.changed = false;
     const turn = newTurn(++this.turns);
+    turn.refreshable = !refreshed;
+    turn.timing = new PageCoWriteTiming(turn.id, edited, (event) => this.host.observe?.(event));
     this.active = turn;
     this.awaitTurn(turn);
     this.show({ activity: "thinking" });
@@ -694,6 +733,10 @@ export class PageCoWriter {
     if (!children.length) children.push(pageSchema.nodes.paragraph!.create());
     const intended = pageSchema.topNodeType.create(live.doc.attrs, Fragment.fromArray(children));
     this.host.write(() => updateYFragment(this.host.doc, this.host.fragment, intended, live.meta));
+    if (text.trim() && writtenText(nodes) !== writtenText(action.written)) {
+      turn.wroteText = true;
+      turn.timing?.wrote();
+    }
     action.written = nodes;
     const end = region.from + nodes.length;
     this.remember(action, intended, region.from, end, live.meta.mapping);
@@ -750,6 +793,7 @@ export class PageCoWriter {
     const turn = this.active;
     if (!turn || turn.stopped) return false;
     turn.stopped = true;
+    turn.timing?.end("interrupted");
     turn.action = null;
     // Its turn ends here: what it still sends for it is not written, and the next pause asks again.
     this.close();

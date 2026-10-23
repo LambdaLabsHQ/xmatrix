@@ -9,12 +9,25 @@ import {
 
 const sha = "a".repeat(40);
 
-test("production tags accept stable SemVer only", () => {
+test("production tags are a stable X.Y.Z or a beta X.Y.Z-beta.N, nothing else", () => {
   assert.equal(productionVersionFromTag("xmatrix-v0.16.3"), "0.16.3");
+  assert.equal(productionVersionFromTag("xmatrix-v1.0.606-beta.12"), "1.0.606-beta.12");
   assert.equal(productionTagFromVersion("1.2.3"), "xmatrix-v1.2.3");
-  for (const tag of ["v0.16.3", "xmatrix-v0.16.3-rc.1", "xmatrix-v0.16.3+build", "xmatrix-v01.2.3"]) {
+  for (const tag of ["v0.16.3", "xmatrix-v0.16.3-rc.1", "xmatrix-v0.16.3+build", "xmatrix-v01.2.3",
+    "xmatrix-v0.16.3-beta.0", "xmatrix-v0.16.3-beta", "xmatrix-v0.16.3-beta.1+build"]) {
     assert.throws(() => productionVersionFromTag(tag), /Invalid production tag/);
   }
+});
+
+test("betas and stables share one ascending production line", () => {
+  const release = (tag, lastProductionVersion) => validateProductionRelease({
+    tag, version: tag.slice("xmatrix-v".length), tagSha: sha, checkoutSha: sha, lastProductionVersion,
+  });
+  assert.doesNotThrow(() => release("xmatrix-v1.0.606-beta.2", "1.0.606-beta.1"));
+  assert.doesNotThrow(() => release("xmatrix-v1.0.606", "1.0.606-beta.9"));
+  assert.doesNotThrow(() => release("xmatrix-v1.0.607-beta.1", "1.0.606"));
+  assert.throws(() => release("xmatrix-v1.0.606-beta.9", "1.0.606"), /rollback releases are not supported/u);
+  assert.throws(() => release("xmatrix-v1.0.606-beta.2", "1.0.606-beta.10"), /rollback releases are not supported/u);
 });
 
 test("the first candidate must be newer than the 0.16.2 baseline", () => {

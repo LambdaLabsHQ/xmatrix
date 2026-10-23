@@ -2,7 +2,7 @@
 //! abandon transitions, and the per-run worktrees it hands out.
 #![deny(warnings)]
 
-mod failure_detail;
+use xmatrix_cli_core::failure_detail;
 pub mod machine_worktree_actions;
 pub mod machine_worktrees;
 pub mod repo_pool;

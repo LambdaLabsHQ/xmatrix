@@ -236,14 +236,44 @@ that offers the chosen location. Each has a fit (Jev's score for its harness ÷ 
   Whether to spend credits is the provider account's setting, not xMatrix's.
 
 A machine without a current sample has unknown headroom, counted as none.
-Environments another one beats on fit, headroom, quota pace and network quality
-drop out (the Pareto frontier). Of the rest, the strongest weakest side wins:
-`min(fit, headroom, networkQuality)`. Ties compare network quality, quota pace,
+
+Response quality is how fast the harness answers: the fastest offered
+harness's median time from a connected Run to its first reply, divided by this
+harness's, measured over every launch in the last 30 days and only with at least
+20 samples (`RESPONSE_LATENCY_WINDOW_DAYS`, `RESPONSE_LATENCY_MIN_SAMPLES`). A
+person waits for that reply, so a harness that takes three times as long weighs
+a third. Without enough samples it counts as 1.
+
+Environments another one beats on fit, headroom, quota pace, network quality and
+response quality drop out (the Pareto frontier). The rest are ranked leximin
+over `fit`, `headroom`, `networkQuality` and `responseQuality`: the strongest
+weakest side wins; level there, the next-weakest decides, and so on. A slow
+network that levels every environment of a machine still leaves fit and reply
+time to choose among them. Remaining ties compare network quality, quota pace,
 complete bandwidth, then `balance + 0.001 × (fit + headroom)`, fewer outstanding
 Runs on the machine and candidate order. The network factor and bandwidth
 uncertainty are defined below. When the
 chosen model's quota is exhausted there (Cursor's per-model pools), the
 next-ranked environment of the same harness offering it runs the work.
+
+An environment whose latest Run in the Space failed to start within the last 30
+minutes (`STARTUP_FAILURE_WINDOW_MINUTES`) ranks after every environment that did
+not, and is compared only with others that also failed; stops and
+cancellations do not count. If it is the only option it still runs, and the
+summon reason says it failed to start recently. When a Run from an `@auto`
+summon, or from the summon of a first message that named nobody, fails to start
+unrecoverably, the same message is handed once to the next-ranked environment
+(`startup-fallback:<runId>`): the failed environment is excluded, the author's
+conditions still apply, and the retry gets no fallback of its own. An Agent the
+author named is never replaced.
+
+A harness that its machine reports as signed out, or that refused a start or
+turn as signed out within the last 24 hours with no later report answering it
+(`SIGNED_OUT_FAILURE_WINDOW_HOURS`), is not offered, like a harness that is too
+old. When nothing else can take the work, the launch is refused with
+`registration_harness_signed_out`, naming the program and machine, and the
+machine's owner can sign in from that notice. An unknown or unchecked sign-in
+is not judged.
 
 ### Machine network measurement
 
@@ -813,8 +843,8 @@ by the invocation deadline; they do not create a second source of launch authori
 
 Native one-click installation currently supports Codex, OpenCode, Pi, GitHub
 Copilot CLI, Gemini CLI, Qwen Code, Junie, OpenClaw, Qoder CLI, CodeBuddy Code,
-Auggie, Cline, Kilo, Factory Droid, Command Code, Autohand Code, Reasonix and
-DimCode via a native-owned npm package allowlist. It requires installed Node.js/npm, runs as
+Auggie, Cline, Kilo, Factory Droid, Command Code, Autohand Code, Reasonix,
+DimCode and DeepSeek Harness via a native-owned npm package allowlist. It requires installed Node.js/npm, runs as
 the current user, has a bounded process-tree lifetime and never enrolls or signs
 in the runtime automatically. Other presets retain their existing manual setup.
 The [official Codex CLI documentation](https://developers.openai.com/codex/cli)

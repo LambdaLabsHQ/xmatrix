@@ -12,10 +12,12 @@ Select the `xMatrix` scheme, choose an iPhone simulator or device, then run.
 
 ## Web URL
 
-The app loads `https://xmatrix.sh/app` by default. For local development, edit `XMatrixWebURL` in `xMatrix/Info.plist` to a reachable URL such as:
+The app loads the Web named by its `XMatrixWebURL`, which is the `XMATRIX_WEB_URL` build setting (`https://xmatrix.sh/app` by default). It trusts only that Web's exact https host with in-place navigation and the bridge; the stable Web is also trusted under `www.xmatrix.sh`. `scripts/ios-testflight.sh` sets the build setting from the release version: a beta `X.Y.Z-beta.N` loads `https://beta.xmatrix.sh/app`, a stable `X.Y.Z` loads `https://xmatrix.sh/app`. The App Store version drops `-beta.N`, so the archive is the only place a build learns its channel.
 
-```xml
-<string>http://localhost:3001/app</string>
+For local development, set `XMATRIX_WEB_URL` to a reachable URL, either under the xMatrix target's User-Defined build settings or on the command line:
+
+```sh
+xcodebuild -project apps/ios/xMatrix.xcodeproj -scheme xMatrix XMATRIX_WEB_URL=http://localhost:3001/app build
 ```
 
 When running on a physical device, use the Mac LAN IP instead of `localhost`.
@@ -23,8 +25,9 @@ When running on a physical device, use the Mac LAN IP instead of `localhost`.
 ## App Store continuous delivery
 
 Production Release Intent with `release_components=ios` runs the existing immutable
-release train, simulator gate, signing, and TestFlight upload, followed by App Store
-version metadata and review submission. The app icon is bundled by Xcode; selecting
+release train, simulator gate, signing, and TestFlight upload. A beta stops at
+TestFlight; a stable continues with App Store version metadata and review
+submission. Both use the release's `X.Y.Z` as the store version and the run ID as the build number. The app icon is bundled by Xcode; selecting
 the exact uploaded build updates the store icon as part of that version.
 
 Public listing text lives in `app-store/metadata.json`. Contact information, review

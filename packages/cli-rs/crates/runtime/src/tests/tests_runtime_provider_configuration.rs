@@ -515,6 +515,13 @@ fn acp_generic_vendor_config_is_hook_free_and_tool_scoped() {
             ".reasonix",
         ),
         ("dimcode", "dimcode", "DimCode", &["acp"][..], ".dimcode"),
+        (
+            "dsh",
+            "deepseek",
+            "DeepSeek Harness",
+            &["--profile", "acp"][..],
+            ".dsh",
+        ),
     ] {
         let config = AcpVendorConfig::generic(tool);
         assert_eq!(config.display_name, display_name, "{tool}");

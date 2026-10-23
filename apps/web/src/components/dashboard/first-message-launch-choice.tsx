@@ -2,13 +2,14 @@
 
 import { useEffect, useState } from "react";
 import { preparationFailureSummary, type InteractionDecisionWindow, type InteractionLaunchOption } from "@xmatrix/protocol";
+import { useFace } from "./face";
 import { avatarImageSrc } from "./identity-avatar";
 import { launchChoiceRead, launchChoiceView, type LaunchChoiceView } from "./first-message-launch-choice-state";
 import { userErrorMessage } from "@/lib/user-facing-error";
 
-/** The option's own icon, from its launch option; never rebuilt from the harness name here. */
+/** The face of the harness the option starts (protocol faces.ts); blank for one with no mark. */
 function OptionMark({ option }: { option: InteractionLaunchOption }) {
-  const icon = avatarImageSrc(option.iconRef);
+  const icon = avatarImageSrc(useFace({ kind: "agent", name: option.displayName, harness: option.harness }).imageUrl);
   return icon
     // eslint-disable-next-line @next/next/no-img-element -- an 18px harness preset icon, as on summon chips.
     ? <img src={icon} alt="" aria-hidden="true" className="launch-choice-icon" />

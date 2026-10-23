@@ -1,5 +1,7 @@
+import { captureErrorReports, exceptionEvents } from "./support/error-reports.mjs";
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { sendErrorReports } from "@xmatrix/protocol/error-reporting";
 
 import {
   captureServerErrorDiagnostic,
@@ -7,9 +9,9 @@ import {
 } from "../src/server-error-diagnostic.ts";
 
 test("server diagnostics correlate a safe id with a bounded cause chain", () => {
-  const original = console.error;
+  const original = console.warn;
   const writes = [];
-  console.error = (...args) => writes.push(args);
+  console.warn = (...args) => writes.push(args);
   try {
     const root = Object.assign(new Error(`root\u0000${"x".repeat(1_200)}`), {
       code: "SQLITE_CONSTRAINT",
@@ -29,7 +31,7 @@ test("server diagnostics correlate a safe id with a bounded cause chain", () => 
     assert.equal(writes[0][1].diagnosticId, diagnostic.diagnosticId);
     assert.equal(writes[0][1].phase, "idempotency commit");
   } finally {
-    console.error = original;
+    console.warn = original;
   }
 });
 
@@ -41,8 +43,8 @@ test("only canonical opaque diagnostic ids cross response boundaries", () => {
 });
 
 test("server diagnostics stop cyclic and overlong cause chains", () => {
-  const original = console.error;
-  console.error = () => {};
+  const original = console.warn;
+  console.warn = () => {};
   try {
     const errors = Array.from({ length: 6 }, (_, index) => new Error(`error-${index}`));
     for (let index = 0; index < errors.length - 1; index += 1) {
@@ -57,6 +59,26 @@ test("server diagnostics stop cyclic and overlong cause chains", () => {
       "error-3",
     ]);
   } finally {
-    console.error = original;
+    console.warn = original;
   }
+});
+
+// A console-spy test cannot catch Sentry replacing the nested causes with [Array].
+test("launch diagnostics send one original exception chain with their correlation id", async (t) => {
+  const envelopes = captureErrorReports(t);
+  t.mock.method(console, "warn", () => {});
+  const root = Object.assign(new Error("launch root failure"), { code: "40P01" });
+  root.stack = "Error: launch root failure\n    at registrationLaunch (index.js:123:4)";
+  const outer = new Error("launch wrapper", { cause: root });
+  const diagnostic = captureServerErrorDiagnostic("launch.dispatch.registration", outer);
+  await sendErrorReports();
+  const events = exceptionEvents(envelopes);
+  assert.equal(events.length, 1, "the console must not produce a second synthetic exception");
+  const event = events[0];
+  assert.equal(event.tags.operation, "launch.dispatch.registration");
+  assert.equal(event.extra.diagnosticId, diagnostic.diagnosticId);
+  const cause = event.exception.values.find(value => value.value === "launch root failure");
+  assert.ok(cause, "the original cause must survive Sentry normalization");
+  assert.equal(cause.stacktrace.frames[0].function, "registrationLaunch");
+  assert.equal(cause.stacktrace.frames[0].filename, "app:///index.js");
 });

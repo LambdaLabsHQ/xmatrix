@@ -1,12 +1,15 @@
 import { providerJson, providerUrl, ProviderRequestError } from "../http";
 import type { ConnectorAction } from "../provider";
 import { taskContextExcerpt } from "./task-context";
-import { sentryEventMetadata, sentryExceptionMechanism } from "./sentry-event-metadata";
+import { sentryEventMetadata, sentryExceptionMechanism, sentryIssueMetadata } from "./sentry-event-metadata";
 import { isSentryInstallationGrant, sentryOrganization, validateSentryInstallationCredentials,
   verifySentryInstallation } from "../sentry-installation";
 
 const SHORT_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,60}$/u;
 const GROUP_ID = /^[1-9][0-9]{0,31}$/u;
+const PROJECT_SLUG = /^[a-z0-9][a-z0-9_-]{0,99}$/u;
+const SEARCH = /^[^\p{Cc}]{1,300}$/u;
+const LIST_LIMIT = 25;
 
 function api(credentials: Readonly<Record<string, string>>, path: string): URL {
   if (isSentryInstallationGrant(credentials)) validateSentryInstallationCredentials(credentials);
@@ -37,6 +40,20 @@ function fieldString(value: unknown): string | undefined {
   }
 }
 
+/** Generated locations identify deployed scripts, never inline code or URL credentials. */
+function generatedLocation(value: unknown): string | undefined {
+  if (typeof value !== "string" || value.length > 2048 || /[\s\p{Cc}]/u.test(value)) return undefined;
+  try {
+    const url = new URL(value);
+    if (!["http:", "https:", "app:"].includes(url.protocol) || url.username || url.password) return undefined;
+    url.search = "";
+    url.hash = "";
+    return url.href;
+  } catch {
+    return /^[A-Za-z0-9_./@+-]{1,512}$/u.test(value) ? value : undefined;
+  }
+}
+
 /** Exception metadata only: never export request headers/bodies, local variables, users or breadcrumbs. */
 function exceptionContext(entries: unknown): { lines: string[]; partial: boolean } {
   if (!Array.isArray(entries)) throw new ProviderRequestError(502, "Sentry did not confirm event entries");
@@ -52,8 +69,9 @@ function exceptionContext(entries: unknown): { lines: string[]; partial: boolean
       if (!value || typeof value !== "object" || Array.isArray(value)) continue;
       const type = fieldString(value.type);
       const message = fieldString(value.value);
-      const frames = Array.isArray(value.stacktrace?.frames) ? value.stacktrace.frames
-        : Array.isArray(value.rawStacktrace?.frames) ? value.rawStacktrace.frames : [];
+      const mapped = Array.isArray(value.stacktrace?.frames) ? value.stacktrace.frames : [];
+      const raw = Array.isArray(value.rawStacktrace?.frames) ? value.rawStacktrace.frames : [];
+      const frames = mapped.length ? mapped : raw;
       if (!type && !message && !frames.length) continue;
       exceptions++;
       const headline = [type, message].filter(Boolean).join(": ");
@@ -71,12 +89,30 @@ function exceptionContext(entries: unknown): { lines: string[]; partial: boolean
       }).slice(-8);
       for (const frame of [...callers, ...frames.slice(-20)]) {
         if (!frame || typeof frame !== "object") continue;
-        const label = [frame.module, frame.function, frame.filename].filter(field => typeof field === "string");
+        const label: string[] = mapped.length
+          ? [frame.module, frame.function, frame.filename].filter(field => typeof field === "string")
+          : [generatedLocation(frame.filename ?? frame.absPath)].filter((field): field is string => field !== undefined);
+        if (!label.length) continue;
         const line = frame.lineNo ?? frame.lineno;
         const column = frame.colNo ?? frame.colno;
         if (Number.isSafeInteger(line)) label.push(`line ${line}`);
         if (Number.isSafeInteger(column)) label.push(`column ${column}`);
         if (label.length) lines.push(`Frame: ${label.join(" · ")}`);
+      }
+      // Source maps replace filenames and positions. Keep a small, separate
+      // generated tail so a dependency frame still identifies its shipped asset.
+      if (mapped.length) {
+        partial ||= raw.length > 8;
+        for (const frame of raw.slice(-8)) {
+          const location = generatedLocation(frame?.filename ?? frame?.absPath);
+          if (!location) continue;
+          const label = [location];
+          const line = frame.lineNo ?? frame.lineno;
+          const column = frame.colNo ?? frame.colno;
+          if (Number.isSafeInteger(line)) label.push(`line ${line}`);
+          if (Number.isSafeInteger(column)) label.push(`column ${column}`);
+          lines.push(`Generated frame: ${label.join(" · ")}`);
+        }
       }
     }
     if (exceptions === 3) { partial ||= entries.indexOf(entry) < entries.length - 1; break; }
@@ -105,12 +141,73 @@ const READ_ISSUE: ConnectorAction = {
       throw new ProviderRequestError(502, "Sentry did not confirm the issue event");
     }
     const stack = exceptionContext(event.entries);
-    const context = [`Issue ${issue.shortId || id}: ${issue.title}`, `Status: ${issue.status}`,
+    const context = [`Issue ${issue.shortId || id}: ${issue.title}`, `Status: ${issue.status}`, ...sentryIssueMetadata(issue),
       typeof issue.culprit === "string" ? `Culprit: ${issue.culprit}` : "",
       typeof event.platform === "string" ? `Platform: ${event.platform}` : "",
       `Latest event: ${event.eventID}`, ...sentryEventMetadata(event), ...stack.lines].filter(Boolean).join("\n\n");
     return { summary: taskContextExcerpt("Sentry", context, false, stack.partial) +
       "\nRequest data, local variables, breadcrumbs and user profiles omitted." };
+  },
+};
+
+/** One issue as Sentry summarizes it: its own fields only, never event payloads, users or request data. */
+function issueLine(issue: unknown): string | undefined {
+  if (!issue || typeof issue !== "object" || Array.isArray(issue)) return undefined;
+  const field = (name: string) => {
+    const value = (issue as Record<string, unknown>)[name];
+    return typeof value === "string" ? value.replace(/\s+/gu, " ").trim() : undefined;
+  };
+  const shortId = field("shortId");
+  const title = field("title");
+  if (!shortId || !SHORT_ID.test(shortId) || !title) return undefined;
+  const count = field("count");
+  const users = (issue as Record<string, unknown>).userCount;
+  return [
+    `${shortId}: ${title.slice(0, 200)}`,
+    field("level"),
+    field("status"),
+    count && /^\d+$/u.test(count) ? `${count} events` : undefined,
+    Number.isSafeInteger(users) ? `${users} users` : undefined,
+    field("firstSeen") ? `first seen ${field("firstSeen")}` : undefined,
+    field("lastSeen") ? `last seen ${field("lastSeen")}` : undefined,
+  ].filter(Boolean).join(" · ");
+}
+
+/**
+ * The most frequent issues of one project (or the whole organization, `*`)
+ * matching a Sentry search, such as everything first seen in a release
+ * (`firstRelease:xmatrix-v1.2.3`) or since an hour (`firstSeen:-24h`).
+ */
+const LIST_ISSUES: ConnectorAction = {
+  effect: "read",
+  requires: ["authToken|oauthToken", "organization|oauthOrganization"],
+  parse(statement) {
+    const project = statement.target.toLowerCase();
+    const search = statement.text.trim();
+    return (project === "*" || PROJECT_SLUG.test(project)) && SEARCH.test(search)
+      ? { project, search }
+      : "name a project (or *) and one line of Sentry search: @sentry:list_issues:web firstRelease:xmatrix-v1.2.3";
+  },
+  async execute({ credentials }, input) {
+    const organization = encodeURIComponent(sentryOrganization(credentials));
+    const path = input.project === "*" ? `api/0/organizations/${organization}/issues/`
+      : `api/0/projects/${organization}/${encodeURIComponent(input.project!)}/issues/`;
+    const url = api(credentials, path);
+    url.search = new URLSearchParams({ query: input.search!, sort: "freq", limit: String(LIST_LIMIT + 1),
+      statsPeriod: "14d" }).toString();
+    // providerJson returns a top-level JSON array as `items`.
+    const issues = (await providerJson(url, { headers: headers(credentials) })).items;
+    if (!Array.isArray(issues)) throw new ProviderRequestError(502, "Sentry did not return an issue list");
+    const shown = issues.slice(0, LIST_LIMIT);
+    const lines = shown.map(issueLine).filter((line): line is string => line !== undefined);
+    // An answer it cannot read is no evidence that nothing matched: refuse it whole.
+    if (lines.length !== shown.length) {
+      throw new ProviderRequestError(502, `Sentry returned ${shown.length - lines.length} unreadable issue(s) of ${shown.length}`);
+    }
+    const scope = input.project === "*" ? "all projects" : input.project;
+    if (!lines.length) return { summary: `No Sentry issue in ${scope} matches \`${input.search}\` (last 14 days).` };
+    return { summary: [`Sentry issues in ${scope} matching \`${input.search}\` (last 14 days, most frequent first` +
+      `${issues.length > LIST_LIMIT ? `, first ${LIST_LIMIT}` : ""}):`, ...lines.map(line => `- ${line}`)].join("\n") };
   },
 };
 
@@ -134,6 +231,7 @@ function statusAction(status: "resolved" | "unresolved" | "ignored", verb: strin
 
 export const SENTRY_ACTIONS: Record<string, ConnectorAction> = {
   read_issue: READ_ISSUE,
+  list_issues: LIST_ISSUES,
   resolve: statusAction("resolved", "resolve"),
   unresolve: statusAction("unresolved", "unresolve"),
   ignore: statusAction("ignored", "ignore"),

@@ -75,3 +75,20 @@ export const LiquidGlassPill = React.forwardRef<HTMLElement, LiquidPillProps>(
   }
 );
 
+
+/** A menu or small form floating over the paper: a card of white paper laid on it, never glass. */
+export const PaperPopover = React.forwardRef<HTMLElement, MaterialElementProps>(function PaperPopover(
+  { as, className, ...props },
+  ref
+) {
+  const Component = as || "div";
+
+  return (
+    <Component
+      ref={ref}
+      data-material="paper-popover"
+      className={cn("app-material-paper-popover", className)}
+      {...props}
+    />
+  );
+});

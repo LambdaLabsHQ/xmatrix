@@ -33,8 +33,9 @@ async function welcomeOnFirstOpen(page: import("@playwright/test").Page) {
    (with the message `sent`, when given, as the Hub stores it), and the
    conversation open. Returns the agents-in step. */
 async function welcomeWithAgentIn(page: import("@playwright/test").Page,
-  { harness = "codex", channel = {}, funnel = false, sent, login, repositories }:
-  { harness?: string | string[]; channel?: object; funnel?: boolean; sent?: string; login?: string; repositories?: object } = {}) {
+  { harness = "codex", channel = {}, funnel = false, sent, login, repositories, firstStepOnly = false }:
+  { harness?: string | string[]; channel?: object; funnel?: boolean; sent?: string; login?: string; repositories?: object;
+    firstStepOnly?: boolean } = {}) {
   const harnesses = Array.isArray(harness) ? harness : [harness];
   // With `login`, the agent is the person's own and its machine reports that sign-in state.
   const registrations = harnessRegistrations(harnesses).map((registration) => login
@@ -46,8 +47,9 @@ async function welcomeWithAgentIn(page: import("@playwright/test").Page,
       harnesses: { schemaVersion: 1, capturedAt: E2E_NOW, items:
         harnesses.map((id) => ({ id, installed: true, probeStatus: "ok", version: "2.1.170", login })) } } }] : undefined;
   await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], registrations, machineDaemons,
-    channels: [{ ...WELCOME, messageCount: 2, lastMessageSequence: 2, ...channel }] });
-  await fixtureJson(page, "history", `**/api/xmatrix/channels/${WELCOME.id}/history**`, { messages: [BRING, IN], hasMore: false });
+    channels: [{ ...WELCOME, messageCount: firstStepOnly ? 1 : 2, lastMessageSequence: firstStepOnly ? 1 : 2, ...channel }] });
+  await fixtureJson(page, "history", `**/api/xmatrix/channels/${WELCOME.id}/history**`,
+    { messages: firstStepOnly ? [BRING] : [BRING, IN], hasMore: false });
   await fixtureJson(page, "send", `**/api/xmatrix/channels/${WELCOME.id}/messages`, { message: sent === undefined ? { id: "sent" }
     : { messageId: "sent", channelId: WELCOME.id, sequence: 3, body: sent, sentAt: E2E_NOW,
       from: { ...E2E_USER_SENDER, identityId: "user:e2e-user" } } }, { method: "POST" });
@@ -56,6 +58,31 @@ async function welcomeWithAgentIn(page: import("@playwright/test").Page,
     responder: { kind: "static", status: 202, json: {} } });
   await page.goto("/app/personal-sspaceperso/channels/welcome-to-xmatrix-cchannelwel");
   return page.locator('[data-onboarding-stage="agents-in"]');
+}
+
+for (const [name, context] of [["desktop", E2E_DESKTOP_CONTEXT], ["phone", E2E_MOBILE_CONTEXT]] as const) {
+  test.describe(`${name} first welcome`, () => {
+    test.use(context);
+
+    test("an enabled agent can be signed in before any agent can take work", async ({ page }) => {
+      await welcomeWithAgentIn(page, { harness: "claude", login: "signed_out", firstStepOnly: true });
+      const welcome = page.getByTestId("connect-machine");
+      await expect(welcome).toContainText("Claude Code on Workstation is not signed in, so it cannot take work yet.");
+      await expect(welcome.getByRole("listitem").last()).toContainText("claude");
+      await expect(welcome.locator("pre")).toHaveCount(0);
+      await expect(page.locator('[data-onboarding-stage="agents-in"]')).toHaveCount(0);
+      const start = "harness:00000000-0000-4000-8000-0000000000c1";
+      await fixtureJson(page, "welcome-sign-in", "**/api/xmatrix/machine-daemons/harness-actions",
+        { controlId: start, status: "queued" }, { method: "POST" });
+      await fixtureJson(page, "welcome-sign-in-status", `**/api/xmatrix/machine-daemons/harness-actions/${start}`,
+        { controlId: start, presetId: "claude", action: "login_start", status: "queued" });
+      await welcome.getByRole("button", { name: "Sign in", exact: true }).click();
+      await expect(welcome.getByRole("button", { name: "Starting sign-in…", exact: true })).toBeVisible();
+      expect(await fixtureRequestBodies(page, "welcome-sign-in")).toEqual([
+        { machineId: "machine", hostId: "host-1", presetId: "claude", action: "login_start" },
+      ]);
+    });
+  });
 }
 
 test.describe("desktop", () => {

@@ -17,7 +17,7 @@ pub struct Cli {
         long,
         env = "XMATRIX_PROFILE",
         global = true,
-        conflicts_with_all = ["environment", "hub_url"]
+        conflicts_with = "hub_url"
     )]
     pub profile: Option<String>,
     /// Hub URL override for a custom deployment
@@ -25,36 +25,12 @@ pub struct Cli {
         long,
         env = "XMATRIX_HUB_URL",
         global = true,
-        conflicts_with_all = ["environment", "profile"]
+        conflicts_with = "profile"
     )]
     pub hub_url: Option<String>,
-    /// Select the built-in production or test environment
-    #[arg(
-        long,
-        env = "XMATRIX_ENVIRONMENT",
-        global = true,
-        value_enum,
-        conflicts_with_all = ["hub_url", "profile"]
-    )]
-    pub environment: Option<CliEnvironmentArg>,
     /// Auth token override
     #[arg(long, env = "XMATRIX_TOKEN")]
     pub token: Option<String>,
-}
-
-#[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
-pub enum CliEnvironmentArg {
-    Production,
-    Test,
-}
-
-impl CliEnvironmentArg {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Production => "production",
-            Self::Test => "test",
-        }
-    }
 }
 
 #[derive(Subcommand)]
@@ -106,19 +82,6 @@ pub enum SessionCommand {
         /// Include the access token (for a local client that owns the store)
         #[arg(long)]
         with_token: bool,
-    },
-}
-
-#[derive(Subcommand)]
-pub enum EnvironmentCommand {
-    /// List the built-in environments and the active selection
-    List,
-    /// Print the active environment
-    Current,
-    /// Change the environment used by commands and the local daemon
-    Use {
-        #[arg(value_enum)]
-        environment: CliEnvironmentArg,
     },
 }
 
@@ -225,11 +188,6 @@ pub enum Commands {
         #[command(subcommand)]
         command: BillingCommand,
     },
-    /// Inspect or change the active Hub environment
-    Env {
-        #[command(subcommand)]
-        command: EnvironmentCommand,
-    },
     /// Manage local connection profiles
     Profile {
         #[command(subcommand)]
@@ -269,16 +227,12 @@ pub enum Commands {
         #[arg(long)]
         json: bool,
     },
-    /// Update this xMatrix CLI binary from the latest release
+    /// Update this xMatrix CLI binary from the latest release of its channel
     Update {
-        /// Release metadata URL
-        #[arg(
-            long,
-            env = "XMATRIX_RELEASE_API_URL",
-            default_value = "https://xmatrix.sh/api/cli/releases/latest"
-        )]
-        release_api_url: String,
-        /// Reinstall even when the latest version matches this binary
+        /// Release metadata URL (default: the dev feed for a beta, the stable feed otherwise)
+        #[arg(long, env = "XMATRIX_RELEASE_API_URL")]
+        release_api_url: Option<String>,
+        /// Reinstall when the latest release is this binary's own version
         #[arg(long)]
         force: bool,
     },
@@ -604,35 +558,6 @@ mod tests {
     }
 
     #[test]
-    fn built_in_environment_and_custom_hub_are_mutually_exclusive() {
-        assert!(
-            Cli::try_parse_from([
-                "xmatrix",
-                "--environment",
-                "test",
-                "--hub-url",
-                "https://hub.example",
-                "status",
-            ])
-            .is_err()
-        );
-    }
-
-    #[test]
-    fn environment_use_parses_the_named_target() {
-        let cli = Cli::try_parse_from(["xmatrix", "env", "use", "test"])
-            .expect("environment command should parse");
-        assert!(matches!(
-            cli.command,
-            Some(Commands::Env {
-                command: EnvironmentCommand::Use {
-                    environment: CliEnvironmentArg::Test,
-                },
-            })
-        ));
-    }
-
-    #[test]
     fn explicit_profile_is_global_and_conflicts_with_legacy_selectors() {
         let cli = Cli::try_parse_from(["xmatrix", "--profile", "isolated", "status"])
             .expect("profile selector should parse");
@@ -642,8 +567,8 @@ mod tests {
                 "xmatrix",
                 "--profile",
                 "isolated",
-                "--environment",
-                "test",
+                "--hub-url",
+                "https://hub.example",
                 "status",
             ])
             .is_err()
@@ -1357,7 +1282,6 @@ mod tests {
             .is_ok()
         );
     }
-
 }
 
 #[derive(Subcommand)]
@@ -2274,7 +2198,7 @@ pub enum PageCommand {
         #[arg(long)]
         conversation: Option<String>,
     },
-    /// Claim a section you are working on, so others see it is taken; claiming again renews it
+    /// Say you are on a section, so other Agents see who is on what (it locks nothing); claiming again renews it
     Claim {
         /// Page ID
         page: String,

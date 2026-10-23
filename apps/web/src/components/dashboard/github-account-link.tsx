@@ -17,9 +17,8 @@ function linkGitHub(): Promise<void> {
 }
 
 /**
- * The GitHub account that is this person's. Their pull requests pass the
- * `xmatrix/claim` check when they, or their Agents, hold the claim on the page
- * block the pull request links.
+ * The GitHub account that is this person's. Their pull requests that link a
+ * page block count as theirs: a member's is pre-reviewed there.
  */
 export function GitHubAccountLink() {
   const queryClient = useQueryClient();

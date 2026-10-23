@@ -95,9 +95,9 @@ export interface AppConnectorProviderManifest {
    * `@<provider>:subscribe:<source> <feature…|all>`; each delivery is routed to
    * the Channels subscribed to its source and feature.
    */
-  /** Private, owner-bound event sources that may fire Automations but do not support general Channel subscriptions. */
-  automationEvents?: NonNullable<AppConnectorProviderManifest["events"]>;
   events?: {
+    /** False when the Hub produces the events itself, so there is no ingress URL to paste into the provider. */
+    ingress?: false;
     source: { label: string; description: string; pattern: string; placeholder: string };
     features: Array<{ id: string; label: string; description: string }>;
     defaultFeatures: string[];
@@ -163,7 +163,7 @@ const GITHUB_ORGANIZATION_REPOSITORY_REF_ARGUMENT = githubOrganizationArgument(
    these names and the web app offers them as the per-channel subscription
    controls, so both sides have to read the same list. */
 export const GITHUB_REPOSITORY_FEATURES = [
-  "issues", "pulls", "comments", "reviews", "commits", "checks", "status", "releases",
+  "issues", "pulls", "comments", "reviews", "commits", "checks", "status", "releases", "code-scanning",
 ] as const;
 
 export type GitHubRepositoryFeature = (typeof GITHUB_REPOSITORY_FEATURES)[number];
@@ -177,6 +177,7 @@ export const GITHUB_REPOSITORY_FEATURE_LABELS: Record<GitHubRepositoryFeature, s
   checks: "Checks",
   status: "Status & workflows",
   releases: "Releases",
+  "code-scanning": "Code scanning alerts",
 };
 
 /** The feature set `@github:subscribe:<owner>/<repo>` applies when none is named. */
@@ -197,6 +198,7 @@ export function githubRequiredCapabilities(
     result.add("github.pull_requests.read");
   }
   if (features.includes("checks")) result.add("github.checks.read");
+  if (features.includes("code-scanning")) result.add("github.code_scanning.read");
   return [...result];
 }
 
@@ -206,7 +208,7 @@ export const APP_CONNECTOR_PROVIDER_MANIFESTS: AppConnectorProviderManifest[] = 
     name: "GitHub",
     kind: "code-host",
     status: "available",
-    description: "Route repository commits, issues, pull requests, checks, and release events into xMatrix channels.",
+    description: "Route repository commits, issues, pull requests, checks, code scanning alerts, and release events into xMatrix channels.",
     auth: {
       type: "oauth",
       scopes: [
@@ -219,6 +221,7 @@ export const APP_CONNECTOR_PROVIDER_MANIFESTS: AppConnectorProviderManifest[] = 
         "pull_requests:write",
         "checks:read",
         "checks:write",
+        "security_events:read",
         "actions:write",
         "workflows:write",
       ],
@@ -283,6 +286,12 @@ export const APP_CONNECTOR_PROVIDER_MANIFESTS: AppConnectorProviderManifest[] = 
           label: "Write checks",
           description: "Report agent review outcomes as check runs so a protected branch can require them.",
           scopes: ["checks:write"],
+        },
+        {
+          id: "github.code_scanning.read",
+          label: "Read code scanning alerts",
+          description: "Receive code scanning alert changes in subscribed channels.",
+          scopes: ["security_events:read"],
         },
         {
           id: "github.actions.write",

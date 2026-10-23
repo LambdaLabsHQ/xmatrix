@@ -1,28 +1,14 @@
-import { CHANNEL_CREATE_KEY_HEADER, WEB_PROXY_ROUTES, channelCreateId, type ChannelSnapshot } from "@xmatrix/protocol";
+import {
+  CHANNEL_CREATE_KEY_HEADER, WEB_PROXY_ROUTES, automaticConversationName, channelCreateId, type ChannelSnapshot,
+} from "@xmatrix/protocol";
 import { errorFromResponse, xmatrixRawResponse, requireField } from "../../lib/query/api-client";
 import { UserFacingProblem } from "../../lib/user-facing-error";
-
-/**
- * A conversation's name until xMatrix names it from what it is about: the
- * first line of its first message, without addresses or markup.
- */
-export function automaticConversationName(body: string): string {
-  const line = body.split("\n").map((value) => value
-    .replace(/[@＠][^\s]+/gu, "")
-    .replace(/[`*_#>[\]()]/gu, "")
-    .replace(/\s+/gu, " ")
-    .trim()).find(Boolean) ?? "";
-  if (line.length <= 60) return line || "New conversation";
-  const cut = line.slice(0, 60);
-  const space = cut.lastIndexOf(" ");
-  return `${space > 30 ? cut.slice(0, space) : cut}…`;
-}
 
 export type ConversationRequest = {
   spaceId: string;
   memberName: string;
   mode: "open" | "closed";
-} & ({ body: string } | { name: string; metadata: Record<string, string> });
+} & ({ body: string } | { name: string; metadata: Record<string, string | boolean> });
 
 function conversationFields(input: ConversationRequest) {
   return {
@@ -37,8 +23,10 @@ function conversationFields(input: ConversationRequest) {
  * Creates the conversation a first message will start, named from that
  * message until xMatrix names it from what it is about. The message itself is
  * sent like any other, so it keeps its attachments and Agent selections.
- * A conversation about something already named (a page section, a passage)
- * passes that `name` instead, with `metadata` saying where it started.
+ * A conversation about something already named (a page section) passes that
+ * `name` instead, with `metadata` saying where it started; a discussion of a
+ * passage is named by it only until its first message names it
+ * (`autoName` in its `metadata`).
  */
 export async function createConversation(input: ConversationRequest & {
   token: string;

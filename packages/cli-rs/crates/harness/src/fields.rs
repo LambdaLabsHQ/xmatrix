@@ -7,7 +7,7 @@
 use serde_json::{Map, Value};
 
 /// A number, or a string that parses as one.
-pub fn json_f64(value: &Value) -> Option<f64> {
+pub(crate) fn json_f64(value: &Value) -> Option<f64> {
     value
         .as_f64()
         .or_else(|| value.as_str()?.trim().parse::<f64>().ok())
@@ -31,7 +31,7 @@ pub fn first_string(map: &Map<String, Value>, keys: &[&str]) -> Option<String> {
 
 /// The first key holding a reset instant: a non-blank string as given, or a
 /// positive epoch number rendered as its decimal text.
-pub fn first_reset_at(map: &Map<String, Value>, keys: &[&str]) -> Option<String> {
+pub(crate) fn first_reset_at(map: &Map<String, Value>, keys: &[&str]) -> Option<String> {
     keys.iter().find_map(|key| {
         let value = map.get(*key)?;
         if let Some(text) = value
@@ -54,7 +54,7 @@ pub fn first_reset_at(map: &Map<String, Value>, keys: &[&str]) -> Option<String>
 
 /// The first key holding a number either directly or wrapped as
 /// `{ "val" | "value" | "amount" | "total": n }` (proto3 money/credit JSON).
-pub fn nested_val_number(map: &Map<String, Value>, keys: &[&str]) -> Option<f64> {
+pub(crate) fn nested_val_number(map: &Map<String, Value>, keys: &[&str]) -> Option<f64> {
     for key in keys {
         let Some(value) = map.get(*key) else {
             continue;

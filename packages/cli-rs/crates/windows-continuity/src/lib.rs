@@ -78,6 +78,96 @@ pub fn release_sequence_from_version(version: &str) -> Result<u64, ContinuityErr
         ))
 }
 
+/// SemVer precedence of two release versions, ignoring build metadata; None
+/// when either is not one. A beta `X.Y.Z-beta.N` precedes the stable `X.Y.Z`,
+/// which precedes `X.Y.(Z+1)-beta.1`. A release sequence carries only
+/// `X.Y.Z`, so this is what orders the betas of one core.
+pub fn release_version_precedence(left: &str, right: &str) -> Option<std::cmp::Ordering> {
+    use std::cmp::Ordering;
+
+    fn parse(version: &str) -> Option<(Vec<u64>, Vec<&str>)> {
+        let version = version.split_once('+').map_or(version, |(value, _)| value);
+        let (core, prerelease) = match version.split_once('-') {
+            Some((core, prerelease)) => (core, Some(prerelease)),
+            None => (version, None),
+        };
+        let core = core
+            .split('.')
+            .map(|part| {
+                (!part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit()))
+                    .then(|| part.parse::<u64>().ok())
+                    .flatten()
+            })
+            .collect::<Option<Vec<_>>>()?;
+        let prerelease = match prerelease {
+            None => Vec::new(),
+            Some(text) => {
+                let identifiers = text.split('.').collect::<Vec<_>>();
+                if identifiers.iter().any(|identifier| {
+                    identifier.is_empty()
+                        || !identifier
+                            .bytes()
+                            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+                }) {
+                    return None;
+                }
+                identifiers
+            }
+        };
+        (!core.is_empty()).then_some((core, prerelease))
+    }
+
+    let (left_core, left_prerelease) = parse(left)?;
+    let (right_core, right_prerelease) = parse(right)?;
+    for index in 0..left_core.len().max(right_core.len()) {
+        let ordering = left_core
+            .get(index)
+            .copied()
+            .unwrap_or(0)
+            .cmp(&right_core.get(index).copied().unwrap_or(0));
+        if ordering != Ordering::Equal {
+            return Some(ordering);
+        }
+    }
+    let numeric = |value: &str| {
+        value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit())
+            .then(|| value.parse::<u64>().ok())
+            .flatten()
+    };
+    let ordering = match (left_prerelease.is_empty(), right_prerelease.is_empty()) {
+        (true, true) => Ordering::Equal,
+        (true, false) => Ordering::Greater,
+        (false, true) => Ordering::Less,
+        (false, false) => left_prerelease
+            .iter()
+            .zip(&right_prerelease)
+            .map(|(left, right)| match (numeric(left), numeric(right)) {
+                (Some(left), Some(right)) => left.cmp(&right),
+                (Some(_), None) => Ordering::Less,
+                (None, Some(_)) => Ordering::Greater,
+                (None, None) => left.cmp(right),
+            })
+            .find(|ordering| *ordering != Ordering::Equal)
+            .unwrap_or_else(|| left_prerelease.len().cmp(&right_prerelease.len())),
+    };
+    Some(ordering)
+}
+
+/// Whether a binary's `--version` output says it is exactly `version`. The
+/// release envelope signs a binary's bytes and release sequence, not its full
+/// version, so the version an artifact claims is proven by running it.
+pub fn verify_reported_version(output: &str, version: &str) -> Result<(), ContinuityError> {
+    if output.lines().next().map(str::trim_end) == Some(format!("xmatrix {version}").as_str()) {
+        Ok(())
+    } else {
+        Err(ContinuityError::Invalid(
+            "artifact does not run as the release version it claims",
+        ))
+    }
+}
+
 pub fn read_embedded_release_envelope(
     path: &Path,
 ) -> Result<EmbeddedReleaseEnvelope, ContinuityError> {
@@ -726,6 +816,7 @@ impl ActivationKernel {
         &self.payload
     }
 
+    #[cfg(test)]
     pub fn admission_open(&self) -> bool {
         self.payload
             .transaction
@@ -816,6 +907,15 @@ impl ActivationKernel {
                 {
                     return Err(ContinuityError::Invalid(
                         "candidate violates release floor or quarantine",
+                    ));
+                }
+                // One core's betas share a release sequence: their versions order them.
+                if !matches!(
+                    release_version_precedence(&artifact.version, &self.payload.committed.version),
+                    Some(std::cmp::Ordering::Greater | std::cmp::Ordering::Equal)
+                ) {
+                    return Err(ContinuityError::Invalid(
+                        "candidate version precedes the committed release",
                     ));
                 }
                 self.payload.candidate = Some(artifact.clone());
@@ -1055,41 +1155,6 @@ impl RunEvidence {
             ));
         }
         Ok(())
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RunAccounting {
-    pub expected: BTreeSet<String>,
-    pub adopted: BTreeMap<String, RunEvidence>,
-    pub natural_terminal: BTreeSet<String>,
-    pub quarantined: BTreeSet<String>,
-}
-
-impl RunAccounting {
-    pub fn validate_complete(&self) -> Result<String, ContinuityError> {
-        if !self.quarantined.is_empty() {
-            return Err(ContinuityError::RunConflict);
-        }
-        let accounted = self
-            .adopted
-            .keys()
-            .cloned()
-            .chain(self.natural_terminal.iter().cloned())
-            .collect::<BTreeSet<_>>();
-        if accounted != self.expected {
-            return Err(ContinuityError::RunSetIncomplete);
-        }
-        for (run_id, evidence) in &self.adopted {
-            evidence.validate()?;
-            if run_id != &evidence.run_id {
-                return Err(ContinuityError::RunConflict);
-            }
-        }
-        let bytes =
-            serde_json::to_vec(&(self.expected.clone(), &self.adopted, &self.natural_terminal))?;
-        Ok(hex_sha256(&bytes))
     }
 }
 
@@ -2161,22 +2226,6 @@ mod tests {
     }
 
     #[test]
-    fn run_accounting_requires_exact_complete_set() {
-        let mut accounting = RunAccounting {
-            expected: BTreeSet::from(["run-1".into()]),
-            adopted: BTreeMap::new(),
-            natural_terminal: BTreeSet::new(),
-            quarantined: BTreeSet::new(),
-        };
-        assert!(matches!(
-            accounting.validate_complete(),
-            Err(ContinuityError::RunSetIncomplete)
-        ));
-        accounting.natural_terminal.insert("run-1".into());
-        assert!(accounting.validate_complete().is_ok());
-    }
-
-    #[test]
     fn frames_are_bounded_and_typed() {
         let message = ControlMessage::Hello {
             protocol_major: 1,
@@ -2547,6 +2596,80 @@ mod tests {
             release_sequence_from_version("1.0.0").unwrap()
                 > release_sequence_from_version("0.999999.999999").unwrap()
         );
+    }
+
+    #[test]
+    fn release_versions_order_betas_before_their_stable() {
+        use std::cmp::Ordering::{Equal, Greater, Less};
+        let order = |left, right| release_version_precedence(left, right);
+        assert_eq!(order("1.0.606-beta.10", "1.0.606-beta.2"), Some(Greater));
+        assert_eq!(order("1.0.606", "1.0.606-beta.10"), Some(Greater));
+        assert_eq!(order("1.0.606-beta.1", "1.0.606"), Some(Less));
+        assert_eq!(order("1.0.607-beta.1", "1.0.606"), Some(Greater));
+        assert_eq!(order("1.0.606+build.2", "1.0.606"), Some(Equal));
+        assert_eq!(order("1.2", "1.2.0"), Some(Equal));
+        for invalid in [
+            "",
+            "1..2",
+            "v1.0.0",
+            "1.0.0-",
+            "1.0.0-beta..1",
+            "1.0.x",
+            "+1.0.0",
+        ] {
+            assert_eq!(order(invalid, "1.0.0"), None, "{invalid}");
+        }
+    }
+
+    #[test]
+    fn a_candidate_never_stages_below_the_committed_version_of_its_release_sequence() {
+        let stage = |committed: &str, candidate: &str| {
+            let mut current = artifact("daemon-committed", 'a');
+            current.version = committed.into();
+            current.release_sequence = release_sequence_from_version(committed).unwrap();
+            let mut kernel = ActivationKernel::new(test_journal_payload(current)).unwrap();
+            let mut next = artifact("daemon-candidate", 'b');
+            next.version = candidate.into();
+            // An unreadable version gets a sequence above every floor, so only
+            // the version check can refuse it.
+            next.release_sequence = release_sequence_from_version(candidate).unwrap_or(u64::MAX);
+            kernel
+                .apply(KernelEvent::StageCandidate {
+                    transaction_id: "update".into(),
+                    nonce: "n".repeat(32),
+                    kind: TransactionKind::Update,
+                    source_hub_epoch: Some(1),
+                    artifact: next,
+                })
+                .map(|_| ())
+        };
+        assert!(stage("1.0.606-beta.2", "1.0.606-beta.10").is_ok());
+        assert!(stage("1.0.606-beta.10", "1.0.606").is_ok());
+        assert!(
+            stage("1.0.606", "1.0.606").is_ok(),
+            "the same release reinstalls"
+        );
+        // Same release sequence, older version: the sequence floor alone admits these.
+        assert!(stage("1.0.606-beta.10", "1.0.606-beta.2").is_err());
+        assert!(stage("1.0.606", "1.0.606-beta.10").is_err());
+        assert!(stage("1.0.606", "not-a-version").is_err());
+    }
+
+    #[test]
+    fn a_binary_proves_its_version_only_by_reporting_it_exactly() {
+        assert!(verify_reported_version("xmatrix 1.0.606-beta.1\n", "1.0.606-beta.1").is_ok());
+        assert!(verify_reported_version("xmatrix 1.0.606-beta.1\r\n", "1.0.606-beta.1").is_ok());
+        for output in [
+            "xmatrix 1.0.606-beta.10\n",
+            "xmatrix 1.0.606\n",
+            "",
+            "1.0.606-beta.1\n",
+        ] {
+            assert!(
+                verify_reported_version(output, "1.0.606-beta.1").is_err(),
+                "{output:?}"
+            );
+        }
     }
 
     #[test]

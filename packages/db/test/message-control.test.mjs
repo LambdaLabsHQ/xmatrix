@@ -676,7 +676,7 @@ test("Message acknowledge serializes an exact command before its idempotency rea
 test("a billing notice goes back with its commit, never into the stored receipt", async () => {
   const noticing = { id: "noticing", metered: true,
     async spaceCreated() {}, async spaceDeletion() { return null; }, async seatAdmission() { return null; },
-    async agentWrite() { return null; },
+    async durableWrite() { return null; },
     message: { ctes: "admission AS MATERIALIZED (SELECT TRUE AS raised)", accepts: "TRUE", rejection: () => null,
       notice: (row) => row.raised ? { key: "credits:2026-09-01:1", body: "80% used" } : null } };
   const db = database((query) => placement(query) ?? appendReservation(query) ?? (

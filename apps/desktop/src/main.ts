@@ -1,5 +1,6 @@
 import { execFile, spawn, type ChildProcess } from "node:child_process";
 import fs from "node:fs";
+import { releaseNotesPath } from "@xmatrix/protocol";
 import { installAgentPreset } from "./agent-preset-install";
 import os from "node:os";
 import path from "node:path";
@@ -70,6 +71,7 @@ import {
   type DesktopNotificationPayload,
 } from "./notifications";
 import { readableUpdateErrorMessage, shouldShowUpdateRecovery } from "./update-errors";
+import { desktopUpdateFeedUrl, desktopWebUrl, isDesktopWebOrigin } from "./release-channel";
 import { daemonFailureNeedsLogin, redactDaemonDetail } from "./daemon-failure";
 import { DEFAULT_SHELL_BACKGROUND_COLOR, desktopTitleBarOptions } from "./window-chrome";
 import { planWindowOpen } from "./window-navigation";
@@ -91,7 +93,6 @@ import {
 } from "./window-registry";
 
 const APP_PROTOCOL = "xmatrix";
-const DEFAULT_WEB_URL = "https://xmatrix.sh/app";
 const CLI_INSTALL_URL = "https://xmatrix.sh/docs";
 const MANUAL_DOWNLOAD_URL = "https://xmatrix.sh/download";
 const UPDATE_CHECK_DELAY_MS = 15_000;
@@ -197,11 +198,12 @@ if (!singleInstanceLock) {
 
 app.setName("xMatrix");
 
+/** The page a window opens: this build's channel's Web, unless a development override names another. */
 function getStartUrl(): string {
   return normalizeAppUrl(
     process.env.XMATRIX_DESKTOP_DEV_URL ||
       process.env.XMATRIX_DESKTOP_WEB_URL ||
-      DEFAULT_WEB_URL
+      desktopWebUrl(app.getVersion())
   );
 }
 
@@ -235,12 +237,9 @@ function isTrustedAppUrl(value: string): boolean {
   }
 }
 
+/** This build's own channel's Web; an override of the start page never widens this. */
 function isTrustedWebOrigin(url: URL): boolean {
-  return url.protocol === "https:" && (
-    url.hostname === "xmatrix.sh" ||
-    url.hostname === "www.xmatrix.sh" ||
-    url.hostname === "test.xmatrix.sh"
-  );
+  return isDesktopWebOrigin(url, app.getVersion());
 }
 
 function isLocalDevOrigin(url: URL): boolean {
@@ -1343,6 +1342,8 @@ function showUpdateNotification(payload?: DesktopNotificationPayload) {
 function configureAutoUpdates() {
   autoUpdater.autoDownload = true;
   autoUpdater.autoInstallOnAppQuit = true;
+  // The packaged app-update.yml names the stable feed; a beta build follows dev.
+  autoUpdater.setFeedURL({ provider: "generic", url: desktopUpdateFeedUrl(app.getVersion()) });
 
   autoUpdater.on("checking-for-update", () => {
     checkingForUpdates = true;
@@ -1361,7 +1362,10 @@ function configureAutoUpdates() {
         type: "info",
         message: "xMatrix update found",
         detail: `Version ${info.version} is downloading in the background.`,
-        buttons: ["OK"],
+        buttons: ["OK", "Release notes"],
+      }).then((response) => {
+        const notesPath = releaseNotesPath(info.version);
+        if (response.response === 1 && notesPath) openExternalUrl(`https://xmatrix.sh${notesPath}`);
       });
     }
     manualUpdateCheck = false;
@@ -1406,12 +1410,15 @@ function configureAutoUpdates() {
         type: "info",
         message: "xMatrix update is ready",
         detail: `Version ${info.version} has been downloaded. Restart xMatrix to install it now.`,
-        buttons: ["Restart", "Later"],
+        buttons: ["Restart", "Later", "Release notes"],
         defaultId: 0,
         cancelId: 1,
       }).then((response) => {
         if (response.response === 0) {
           installDownloadedUpdate();
+        } else if (response.response === 2) {
+          const notesPath = releaseNotesPath(info.version);
+          if (notesPath) openExternalUrl(`https://xmatrix.sh${notesPath}`);
         }
       });
     }
@@ -1644,26 +1651,6 @@ async function installCliFromDesktopSeed(): Promise<DesktopCliInstallResult> {
     setDaemonStatus("error", seedInstallFailure);
   }
   return result;
-}
-
-function switchClientEnvironment(environment: unknown): Promise<{ environment: "production" | "test" }> {
-  if (environment !== "production" && environment !== "test") {
-    return Promise.reject(new Error("Unknown xMatrix environment."));
-  }
-  const executable = resolveCliExecutable();
-  if (!executable) {
-    return Promise.reject(new Error("Install or update the xMatrix CLI before switching environments."));
-  }
-  return new Promise((resolve, reject) => {
-    execFile(executable, ["environment", "use", environment], { timeout: 15_000 }, (error, stdout, stderr) => {
-      if (error) {
-        reject(new Error((stderr || stdout || error.message).trim()));
-        return;
-      }
-      void publishDefaultProfileChanged();
-      resolve({ environment });
-    });
-  });
 }
 
 function augmentPath(value?: string) {
@@ -2950,9 +2937,6 @@ function registerIpcHandlers() {
   ipcMain.handle("desktop:start-daemon", secureIpc(() => retryDaemonStart()));
   ipcMain.handle("desktop:stop-daemon", secureIpc(() => stopDaemon()));
   ipcMain.handle("desktop:restart-daemon", secureIpc(() => restartDaemon()));
-  ipcMain.handle("desktop:switch-environment", secureIpc((_event, environment: unknown) =>
-    switchClientEnvironment(environment)
-  ));
   ipcMain.handle("desktop:get-setup-status", secureIpc(() => getDesktopSetupStatus()));
   ipcMain.handle("desktop:save-setup-status", secureIpc((_event, status: DesktopSetupStatus) =>
     saveDesktopSetupStatus(status)

@@ -3,7 +3,7 @@
 //! edit against the revision they read, and every read or edit from a Run is
 //! linked to the Run's conversation so a page shows who is working on it.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
 
 use colored::Colorize;
@@ -11,13 +11,16 @@ use serde::Deserialize;
 use serde_json::json;
 use xmatrix_cli_args::{PageCommand, PageMigrationCommand};
 use xmatrix_cli_core::error::{self, CliError};
+use xmatrix_cli_core::hex::sha256_hex;
 use xmatrix_cli_core::http;
+use xmatrix_cli_core::media_cache::{CachedMedia, LocalCopy};
+use xmatrix_cli_core::page_media;
 use xmatrix_cli_core::protocol::{channel_pages_route, with_route};
 use xmatrix_cli_core::text_input::{self, TextRoutes, TextSource};
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct PageSummary {
+pub(crate) struct PageSummary {
     pub page_id: String,
     pub parent_page_id: Option<String>,
     pub title: String,
@@ -34,14 +37,14 @@ pub struct PageSummary {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct PageAuthor {
+pub(crate) struct PageAuthor {
     pub kind: String,
     pub label: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct PageRevision {
+pub(crate) struct PageRevision {
     pub revision: u64,
     #[serde(default)]
     pub kind: String,
@@ -54,7 +57,7 @@ pub struct PageRevision {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct PageDocument {
+pub(crate) struct PageDocument {
     #[serde(flatten)]
     pub summary: PageSummary,
     pub body: String,
@@ -65,14 +68,14 @@ pub struct PageDocument {
 /// where it last changed, who has claimed it, who is on it now.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct PageAwareness {
+pub(crate) struct PageAwareness {
     #[serde(default)]
     pub blocks: Vec<PageBlockAwareness>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct PageBlockAwareness {
+pub(crate) struct PageBlockAwareness {
     pub block_id: String,
     #[serde(default)]
     pub updated: Option<PageRevision>,
@@ -92,7 +95,7 @@ pub struct PageBlockAwareness {
 /// the page open.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct PageWorkingAgent {
+pub(crate) struct PageWorkingAgent {
     pub name: String,
     pub status: String,
     pub conversation_id: String,
@@ -101,7 +104,7 @@ pub struct PageWorkingAgent {
 /// Claimed work on a section ended after its last change and was not written back.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct PageOwedUpdate {
+pub(crate) struct PageOwedUpdate {
     pub reason: String,
     pub at: String,
     pub holder: String,
@@ -114,7 +117,7 @@ pub struct PageOwedUpdate {
 /// An open discussion anchored in a section's text.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct PageDiscussion {
+pub(crate) struct PageDiscussion {
     pub link_id: String,
     pub conversation_id: String,
     pub quote: String,
@@ -122,7 +125,7 @@ pub struct PageDiscussion {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct PagePresent {
+pub(crate) struct PagePresent {
     pub name: String,
     pub kind: String,
     #[serde(default)]
@@ -203,7 +206,7 @@ fn render_edit_effects(page: &str, base: u64, edited: &EditResponse) -> String {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct PageClaim {
+pub(crate) struct PageClaim {
     pub claim_id: String,
     pub block_id: String,
     pub holder: PageAuthor,
@@ -236,7 +239,7 @@ struct ReleaseResponse {
 }
 
 /// One line per claim: where, who, until when, and its id to release it.
-pub fn render_page_claim(claim: &PageClaim) -> String {
+pub(crate) fn render_page_claim(claim: &PageClaim) -> String {
     let block = if claim.block_id.is_empty() {
         "(whole page)".to_string()
     } else {
@@ -317,7 +320,7 @@ pub(crate) fn page_route(space: &str, page: &str) -> String {
 }
 
 /// Children listed under their parent, in sibling order.
-pub fn render_page_tree(pages: &[PageSummary]) -> String {
+pub(crate) fn render_page_tree(pages: &[PageSummary]) -> String {
     let mut children: BTreeMap<Option<String>, Vec<&PageSummary>> = BTreeMap::new();
     for page in pages {
         children
@@ -384,7 +387,7 @@ pub fn render_page_tree(pages: &[PageSummary]) -> String {
 /// What changed on a page since a revision someone read.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct PageChanges {
+pub(crate) struct PageChanges {
     pub page_id: String,
     pub since: u64,
     pub head_revision: u64,
@@ -395,13 +398,13 @@ pub struct PageChanges {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct PageDiffPart {
+pub(crate) struct PageDiffPart {
     pub kind: String,
     pub lines: Vec<String>,
 }
 
 /// The revisions after `since` and a diff of the page since then, with a line of context around each change.
-pub fn render_page_changes(changes: &PageChanges) -> String {
+pub(crate) fn render_page_changes(changes: &PageChanges) -> String {
     let mut out = format!(
         "---\npageId: {}\nsince: {}\nheadRevision: {}\n",
         changes.page_id, changes.since, changes.head_revision
@@ -468,7 +471,10 @@ pub fn render_page_changes(changes: &PageChanges) -> String {
 /// The `blocks:` front matter: per section, its last change, claims and who is on it.
 /// A claim held for `own_conversation` is marked as the reader's, so a Run whose
 /// Automation claimed the section on its behalf does not mistake it for another Run's.
-pub fn render_page_awareness(awareness: &PageAwareness, own_conversation: Option<&str>) -> String {
+pub(crate) fn render_page_awareness(
+    awareness: &PageAwareness,
+    own_conversation: Option<&str>,
+) -> String {
     let mut out = String::new();
     for block in &awareness.blocks {
         let mut lines = Vec::new();
@@ -568,12 +574,15 @@ pub fn render_page_awareness(awareness: &PageAwareness, own_conversation: Option
     }
 }
 
-pub fn render_page_document(page: &PageDocument) -> String {
+pub(crate) fn render_page_document(page: &PageDocument) -> String {
     render_page_document_with(page, None)
 }
 
 /// The page with its header; the header carries each section's awareness when it is known.
-pub fn render_page_document_with(page: &PageDocument, awareness: Option<&PageAwareness>) -> String {
+pub(crate) fn render_page_document_with(
+    page: &PageDocument,
+    awareness: Option<&PageAwareness>,
+) -> String {
     let authors = page
         .revision_info
         .authors
@@ -601,6 +610,98 @@ pub fn render_page_document_with(page: &PageDocument, awareness: Option<&PageAwa
     }
     header.push_str("---\n");
     format!("{header}{}", page.body)
+}
+
+/// The page's text as the Agent reads it (`page_media`): each image pasted
+/// into the page is saved on this machine, as Channel images are, and named
+/// by its local path where it stands. A video, or an image that could not be
+/// saved, keeps the page's reference.
+async fn page_text_for_agent(
+    hub_url: &str,
+    token: &str,
+    space: &str,
+    page: &str,
+    body: &str,
+) -> String {
+    let mut saved = HashMap::new();
+    for file in page_media::page_media_images(body) {
+        let Some(mime_type) = file
+            .rsplit_once('.')
+            .and_then(|(_, extension)| page_media::page_media_type(extension))
+            .filter(|mime_type| mime_type.starts_with("image/"))
+        else {
+            continue;
+        };
+        let url = with_route(
+            hub_url,
+            &format!("{}/media/{file}", page_route(space, page)),
+        );
+        let media = CachedMedia {
+            stem: sha256_hex(format!("page-media\0{space}\0{page}\0{file}").as_bytes()),
+            expected_size: None,
+            content_hash: Some(&file[..64]),
+            mime_type,
+            copy: LocalCopy::At(page_media::local_page_media_path(&file)),
+        };
+        let fetched = media
+            .fetch(|| async {
+                http::client()?
+                    .get(&url)
+                    .bearer_auth(token)
+                    .send()
+                    .await
+                    .map_err(|err| CliError::Http(format!("page image request failed: {err}")))
+            })
+            .await;
+        match fetched {
+            Ok(path) => {
+                saved.insert(file, path);
+            }
+            Err(err) => eprintln!(
+                "{} failed to save the page's image {file}: {err}",
+                "⚠".yellow().bold()
+            ),
+        }
+    }
+    page_media::to_local(body, &saved)
+}
+
+/// Text the Agent writes into a page, as the page takes it (`page_media`):
+/// the images it read are the page's own again, and an image of a local file
+/// is refused — one the page already showed at `base` is not the Agent's to
+/// answer for.
+async fn page_text_from_agent(
+    hub_url: &str,
+    token: &str,
+    space: &str,
+    base: Option<(&str, u64)>,
+    text: &str,
+) -> error::Result<String> {
+    let (written, refused) = page_media::to_page(text, HashSet::new());
+    let Some((page, revision)) = base.filter(|_| !refused.is_empty()) else {
+        return refused_or(written, &refused);
+    };
+    let url = with_route(
+        hub_url,
+        &format!("{}?revision={revision}", page_route(space, page)),
+    );
+    let response: PageResponse = http::request_json(&url, "GET", Some(token), None).await?;
+    let existing = page_media::image_destinations(&response.page.body)
+        .into_iter()
+        .collect();
+    let (written, refused) = page_media::to_page(text, existing);
+    refused_or(written, &refused)
+}
+
+fn refused_or(written: String, refused: &[String]) -> error::Result<String> {
+    if refused.is_empty() {
+        Ok(written)
+    } else {
+        Err(CliError::Launch(format!(
+            "Nothing was written: {}.",
+            page_media::refused_images_note(refused)
+        )))
+    }
 }
 
 /// How a Run writes into the page as it replies, said where it reads the page.
@@ -702,6 +803,16 @@ pub async fn cmd_page(hub_url: &str, token: &str, command: PageCommand) -> error
             } else {
                 (None, Vec::new())
             };
+            let mut page_read = response.page;
+            page_read.body = page_text_for_agent(
+                hub_url,
+                token,
+                &space,
+                &page_read.summary.page_id,
+                &page_read.body,
+            )
+            .await;
+            let response = PageResponse { page: page_read };
             let document = render_page_document_with(&response.page, awareness.as_ref());
             // A page's Automations are live references: the header says what each one is now.
             let mut header = crate::page_automation::render_page_automations_header(&automations);
@@ -735,6 +846,8 @@ pub async fn cmd_page(hub_url: &str, token: &str, command: PageCommand) -> error
         } => {
             let space = resolve_space(hub_url, token, space).await?;
             let text = read_body(body, file, stdin)?;
+            let text =
+                page_text_from_agent(hub_url, token, &space, Some((&page, base)), &text).await?;
             let conversations: Vec<String> =
                 conversation.or_else(run_conversation).into_iter().collect();
             let url = with_route(hub_url, &page_route(&space, &page));
@@ -808,7 +921,9 @@ pub async fn cmd_page(hub_url: &str, token: &str, command: PageCommand) -> error
             let space = resolve_space(hub_url, token, space).await?;
             let mut request = json!({ "title": title });
             if body.is_some() || file.is_some() || stdin {
-                request["body"] = json!(read_body(body, file, stdin)?);
+                let text = read_body(body, file, stdin)?;
+                request["body"] =
+                    json!(page_text_from_agent(hub_url, token, &space, None, &text).await?);
             }
             if let Some(parent) = parent {
                 request["parentPageId"] = json!(parent);
@@ -1104,7 +1219,7 @@ pub async fn cmd_page(hub_url: &str, token: &str, command: PageCommand) -> error
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct PageMigrationView {
+pub(crate) struct PageMigrationView {
     pub state: String,
     pub version: u64,
     pub drafter: Option<PageAuthor>,
@@ -1112,13 +1227,13 @@ pub struct PageMigrationView {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct PageMigrationDraftView {
+pub(crate) struct PageMigrationDraftView {
     pub pages: Vec<PageMigrationDraftPageView>,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct PageMigrationDraftPageView {
+pub(crate) struct PageMigrationDraftPageView {
     pub key: String,
     pub parent_key: Option<String>,
     pub title: String,
@@ -1126,7 +1241,7 @@ pub struct PageMigrationDraftPageView {
 }
 
 /// The drafted tree as an outline: each page's key, title and source count.
-pub fn render_page_migration(view: &PageMigrationView) -> String {
+pub(crate) fn render_page_migration(view: &PageMigrationView) -> String {
     let mut out = format!("state: {} · version: {}", view.state, view.version);
     if let Some(drafter) = &view.drafter {
         out.push_str(&format!(" · drafted by {}", drafter.label));

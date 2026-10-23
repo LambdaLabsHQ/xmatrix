@@ -99,7 +99,7 @@ async function completeOAuthConnect(env: Env, request: Request, verified: Verifi
     }
     const manifest = getAppConnectorProvider(providerId)!;
     const generated = [...(manifest.credentials ?? []).filter(field => field.generated && !field.managed)
-      .map(field => field.id), ...(manifest.events ? [INGRESS_KEY_FIELD] : [])];
+      .map(field => field.id), ...(manifest.events && manifest.events.ingress !== false ? [INGRESS_KEY_FIELD] : [])];
     await connectorCredentialRepository(env).put({ requestId: crypto.randomUUID(), spaceId: verified.spaceId,
       providerId, actorUserId: verified.userId, fields: grant.fields, oauthInstallation: grant.installation,
       ...(providerId === "discord" ? { expectedInstallationSnapshot: verified.connectionSnapshot } : {}),

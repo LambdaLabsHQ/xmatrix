@@ -247,7 +247,8 @@ async function verifyBetterAuthOtp(email: string, otp: string): Promise<SignInSt
  * Verify a login code through a connection that may drop. A request that got
  * no answer is sent again; the code stays valid until one is answered. When a
  * retry is refused, an earlier attempt may have signed in and lost only its
- * reply, so the code is spent: the session decides.
+ * reply, so the code is spent: only a session for the requested account can
+ * confirm that sign-in. Another tab may have signed into a different account.
  */
 export async function verifyBetterAuthOtpWithRetry(email: string, otp: string): Promise<SignInStep> {
   let unanswered: unknown;
@@ -257,19 +258,19 @@ export async function verifyBetterAuthOtpWithRetry(email: string, otp: string): 
       return await verifyBetterAuthOtp(email, otp);
     } catch (error) {
       if (!isTransientAuthSessionError(error)) {
-        if (unanswered && await hasBetterAuthSession()) return "signed_in";
+        if (unanswered && await hasBetterAuthSessionFor(email)) return "signed_in";
         throw error;
       }
       unanswered = error;
     }
   }
-  if (await hasBetterAuthSession()) return "signed_in";
+  if (await hasBetterAuthSessionFor(email)) return "signed_in";
   throw unanswered;
 }
 
-async function hasBetterAuthSession(): Promise<boolean> {
+async function hasBetterAuthSessionFor(email: string): Promise<boolean> {
   const current = await loadBetterAuthSession().catch(() => null);
-  return Boolean(current?.session);
+  return current?.session?.user.email?.trim().toLowerCase() === email.trim().toLowerCase();
 }
 
 export type SocialSignInProvider = "google" | "github";

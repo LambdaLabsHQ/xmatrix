@@ -1,3 +1,4 @@
+import { reportPostgresConflict } from "./postgres-conflict-diagnostic";
 import {
   DatabaseCommitUnknownError,
   ContentControlError,
@@ -19,7 +20,7 @@ import {
 
 import type { AppendMessageCommand, AuthorityPrincipal } from "./product-message-command";
 import { agentAvatarUrlFromMetadata, CHANNEL_ACTIVITY_MESSAGE_KIND, messagePublicationEvidence, normalizeAgentPresetRuntime,
-  questionnaireStateOf, supersededByOf, sha256Hex , utf8ByteLength, type MessageSearchHit, type MessageSearchPage,
+  questionnaireStateOf, supersededByOf, commandResultOf, sha256Hex , utf8ByteLength, type MessageSearchHit, type MessageSearchPage,
   type QuestionnaireState } from "@xmatrix/protocol";
 import { REDACTED_CONTENT_HASH, productGatewayAttachmentKind } from "./product-message-command";
 import { XMATRIX_SYSTEM_AVATAR_URL, XMATRIX_SYSTEM_LABEL } from "./xmatrix-system-identity";
@@ -349,10 +350,11 @@ export function postgresMessageFailure(error: unknown): {
     return { status: error.status, body: { error: error.message, code: error.code, retryable: error.retryable },
       outage: error.retryable && error.status === 503 };
   }
-  console.error("PostgreSQL message authority failed", error);
   if (postgresTransactionConflict(error)) {
+    reportPostgresConflict(error);
     return { status: 503, outage: true, body: { ...TRANSACTION_CONFLICT, retryable: true } };
   }
+  console.error("PostgreSQL message authority failed", error);
   const outage = retryablePostgresFailure(error);
   return outage
     ? { status: 503, outage, body: { error: "PostgreSQL message authority is unavailable",
@@ -793,6 +795,8 @@ export function postgresProductMessage(message: Record<string, unknown>): Record
         ? { supersededBy: supersededByOf(message.annotations) } : {}),
       ...(!message.recalledAt && questionnaireStateOf(message.annotations)
         ? { questionnaireState: questionnaireStateOf(message.annotations) } : {}),
+      ...(!message.recalledAt && commandResultOf(message.annotations)
+        ? { commandResult: commandResultOf(message.annotations) } : {}),
       // A withdrawn message withdraws its files too: their bytes already answer 404.
       attachments: message.recalledAt || message.deletedAt ? [] : Array.isArray(message.attachments)
         ? message.attachments.map((attachment: Record<string, unknown>) => ({

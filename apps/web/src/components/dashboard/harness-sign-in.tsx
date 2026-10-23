@@ -14,7 +14,8 @@ import { Input } from "@/components/ui/input";
 import { noticeClass } from "@/components/ui/status-tone";
 import { xmatrixQueryKeys } from "@/lib/query/query-keys";
 
-import { queueHarnessAction, readHarnessAction } from "./machine-harness-api";
+import type { OnboardingCopy } from "@/lib/onboarding-copy";
+import { queueHarnessAction, readHarnessAction, refreshHarnessInventory } from "./machine-harness-api";
 import { ToolDetailSection } from "./tool-split";
 import { fetchMachineDaemons } from "./workspace-admin-views";
 import { UserFacingProblem, userErrorMessage } from "@/lib/user-facing-error";
@@ -45,6 +46,10 @@ export function harnessSignInView(input: {
     canCancelStart: Array.isArray(capabilities) && capabilities.includes(MACHINE_HARNESS_LOGIN_START_CANCEL_CAPABILITY),
     flow: login?.flow,
     state: item?.login,
+    /** Its own words, when started like a launch, for why it cannot take work. */
+    detail: item?.login === "signed_out" ? item.loginDetail : undefined,
+    /** Signed out with no sign-in xMatrix can run: it is set up on its machine. */
+    setUpThere: owner && !login && item?.login === "signed_out",
     installed: item?.installed,
     daemon,
     blocker: !daemon ? "Connect this machine to sign in from here."
@@ -236,4 +241,78 @@ export function HarnessSignInSection({ registration, token, userId, bare = false
       </div>
   );
   return bare ? body : <ToolDetailSection title="Sign-in">{body}</ToolDetailSection>;
+}
+
+/** The owner's Machine daemons, shared with the sign-in's own reading. */
+function useOwnerDaemons(token: string, userId: string) {
+  return useQuery({ queryKey: xmatrixQueryKeys.domain({ userId }, "machine-daemons", []),
+    queryFn: ({ signal }) => fetchMachineDaemons(token, signal), staleTime: 15_000 });
+}
+
+/** Starts the machine's check of its harnesses again and answers whether this
+ * one can take work now. */
+async function checkHarnessAgain(token: string, daemon: { machineId?: string; hostId?: string }, harness: string) {
+  if (!daemon.machineId) throw new UserFacingProblem("This machine is offline.", true);
+  const { controlId } = await refreshHarnessInventory(token, daemon.machineId, daemon.hostId, AbortSignal.timeout(30_000));
+  for (const started = Date.now(); Date.now() - started < 2 * 60_000;) {
+    await new Promise((resolve) => setTimeout(resolve, 2_000));
+    const status = await readHarnessAction(token, controlId);
+    if (!SETTLED(status.status)) continue;
+    const item = status.result?.inventory?.items.find((entry) => entry.id === harness);
+    return item?.login === "signed_in";
+  }
+  return false;
+}
+
+/** What an owner reads about an agent whose program cannot take work on its
+ * machine, and the one thing to do: sign it in from here, or, for a program
+ * set up only on its machine, its own words and a check after setting it up. */
+export function HarnessSignedOutBody({ registration, token, userId, copy, program, machine, onSignedIn }: {
+  registration: AgentRegistrationSummary; token: string; userId: string; copy: OnboardingCopy;
+  program: string; machine: string; onSignedIn?: () => void;
+}) {
+  const queryClient = useQueryClient();
+  const view = harnessSignInView({ registration, userId, daemons: useOwnerDaemons(token, userId).data });
+  const check = useMutation({
+    mutationFn: () => checkHarnessAgain(token, view.daemon ?? {}, registration.key.harness),
+    onSuccess: (ready) => {
+      void queryClient.invalidateQueries({ queryKey: xmatrixQueryKeys.domain({ userId }, "machine-daemons", []) });
+      if (ready) onSignedIn?.();
+    },
+  });
+  if (!view.setUpThere) {
+    return <>
+      <p>{copy.signedOut(program, machine)}</p>
+      <div className="mt-2"><HarnessSignInSection registration={registration} token={token} userId={userId} bare
+        signInLabel={copy.signIn} onSignedIn={onSignedIn} /></div>
+    </>;
+  }
+  const command = agentPresetById(registration.key.harness)?.runtime ?? registration.key.harness;
+  return <>
+    <p>{copy.cannotTakeWork(program, machine)}</p>
+    {view.detail && <p className="mt-1 text-muted-foreground">{copy.itSays} <q>{view.detail}</q></p>}
+    <p className="mt-1">{copy.setUpThere(command)}</p>
+    <div className="mt-2 flex items-center gap-2">
+      <Button size="sm" variant="outline" disabled={check.isPending || !view.daemon} onClick={() => check.mutate()}>
+        {check.isPending ? <AnimatedIcon icon={Loader2} className="animate-spin" /> : null}{copy.checkAgain}
+      </Button>
+      {check.data === false && <p role="status" className="text-[13px] text-muted-foreground">{copy.stillCannot}</p>}
+      {check.isError && <p role="status" className="text-[13px] text-destructive">
+        {userErrorMessage(check.error, "Couldn't send that to the machine")}</p>}
+    </div>
+  </>;
+}
+
+/** The Agents page's place for a program set up only on its machine that
+ * cannot take work: nothing when it can, or when xMatrix can sign it in. */
+export function HarnessSetUpSection({ registration, token, userId, copy }: {
+  registration: AgentRegistrationSummary; token: string; userId: string; copy: OnboardingCopy;
+}) {
+  const daemons = useOwnerDaemons(token, userId);
+  if (!harnessSignInView({ registration, userId, daemons: daemons.data }).setUpThere) return null;
+  return <ToolDetailSection title="Set-up">
+    <div className="text-sm"><HarnessSignedOutBody registration={registration} token={token} userId={userId} copy={copy}
+      program={agentPresetById(registration.key.harness)?.displayName ?? registration.displayName}
+      machine={registration.machineName} /></div>
+  </ToolDetailSection>;
 }

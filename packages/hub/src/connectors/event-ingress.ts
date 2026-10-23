@@ -194,7 +194,7 @@ export async function deliverEvent(
   return appendToRoutes(env, append, providerId, event, [...routes.values()]);
 }
 
-async function appendToRoutes(
+export async function appendToRoutes(
   env: Env,
   append: typeof dispatchProductMessageAppend,
   providerId: string,

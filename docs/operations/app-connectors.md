@@ -319,12 +319,36 @@ Unicode code points; the action's full bounded context remains in the Channel
 receipt. Multibyte issue titles and stack metadata therefore
 do not prevent an otherwise successful read from finalizing.
 
+`@sentry:list_issues:<project slug or *> <Sentry search>` lists up to 25 of the
+most frequent issues seen in the last 14 days that match one line of Sentry
+search, such as everything first seen in a release
+(`firstRelease:xmatrix-v1.2.3`, the tag every Hub and Web event carries) or
+since an hour ago (`firstSeen:-24h`). Each line keeps Sentry's own issue fields
+(short id, title, level, status, event and user counts, first and last seen),
+never event payloads, users or request data.
+
 Sentry issue reads include the latest event's terminal twenty exception frames
 and up to eight earlier `src/` callers outside `node_modules`, in stack order.
 This keeps application entry points visible when dependency frames fill the
-tail. Only frame names, paths and positions are returned; local variables,
+tail. When source maps replaced the generated locations, up to eight terminal
+generated asset paths and positions are included separately, without URL
+credentials, queries, fragments or inline script schemes. Issue occurrence
+count and first/last-seen UTC times support recurrence checks; these are issue
+totals, not release-specific counts. Only frame names, paths and positions are returned; local variables,
 source context, requests and breadcrumbs remain excluded. The full receipt
-still has the shared 12,000-character context limit.
+still has the shared 12,000-character context limit. When the Worker reporter
+could only retain a capture stack for a stackless platform Error, its fixed
+mechanism label is shown as `stack=capture boundary (origin unavailable)`;
+arbitrary mechanism data remains excluded. See [runtime delivery errors](runtime-delivery-errors.md).
+
+Scheduled Harness release watch failures retain the original rejection and
+distinguish the Runtime fetch, response body and response contract phases.
+`read_issue` exposes only their bounded duration, HTTP status (or unavailable)
+and the platform's retryable/overloaded flags. A lost response never replays
+the entire pass: notices may already have committed, so the next scheduled
+pass reads current targets again. The target lookup is a `single_read`, whose
+lost SQL response can be retried once on a fresh checkout independently of
+notice issuance. Request, registry, daemon and response content stay private.
 
 Gmail search/read answer in the Channel receipt that replies to the command,
 like every other action, so everyone who can read the Channel reads the mail.
@@ -570,9 +594,9 @@ deployment profile (`deploy/profiles/production.json` → `hub.vars`) and ships
 with each release. Connect answers 503 and names every `GITHUB_APP_*` value a
 deployment left unset; it does not look any of them up at runtime.
 
-The page claim check (`xmatrix/claim`, see
+Pull requests that name page blocks (pre-review and owed updates, see
 [`pages-and-conversations.md`](../design/pages-and-conversations.md) §5.6)
-needs these GitHub App settings:
+need these GitHub App settings:
 - the **Checks: write** and **Pull requests: read** repository permissions
   (pre-review reads the change and posts `xmatrix/pre-review`);
 - the **Email addresses: read** account permission;
@@ -624,8 +648,8 @@ to the Space's GitHub App installation. Repository names are loaded only for the
 selected owner and only when the connector is enabled for the current channel.
 
 Repository subscriptions support `issues`, `pulls`, `comments`, `reviews`,
-`commits`, `checks`, `status`, and `releases`. The `all` shorthand expands to
-all eight features for both
+`commits`, `checks`, `status`, `releases`, and `code-scanning`. The `all` shorthand expands to
+all features for both
 `subscribe` and `unsubscribe`; use the individual names when only some event
 types are wanted.
 `comments` follows the selected source kinds: with `issues` it includes Issue
@@ -636,6 +660,24 @@ backward-compatible `issues comments` default. Repository subscriptions do not
 backfill existing items or commits; they deliver future matching webhook events.
 The `commits` feature summarizes each GitHub `push` delivery with its branch or
 tag, pusher, commit range, compare URL, and up to 8 commit SHA/message entries.
+
+`@github:subscribe:OWNER/REPO code-scanning` delivers signed GitHub
+`code_scanning_alert` webhooks (created, reopened, appeared in another branch,
+fixed, or closed by a user). The GitHub App must have **Code scanning alerts:
+read** (`security_events`) and subscribe to **Code scanning alert**; existing
+installations must accept the permission upgrade on GitHub. The subscription
+requires the installation's effective permission, not a retained connection
+capability. Each delivery rechecks that exact installation with a token narrowed
+to the repository and `security_events:read`; revoked or unconfirmed access
+blocks the message and Agent wake, even if another linked installation has access.
+Alert messages contain only the alert reference and lifecycle action;
+the Agent fetches details through its current repository grant. Security alerts
+reach only Channels allowed to carry private content, including for public
+repositories. Delivery uses the existing idempotent append and wakes resting
+Instances; stopped Instances remain stopped. A Channel can therefore handle
+alerts as events without a cadence or polling Automation. Its linked Page holds
+the standing handling instructions and outstanding alert-to-PR work. Existing
+alerts need a one-time initial audit because subscriptions do not backfill.
 
 The product model follows a Slack-style feature subscription approach: users
 choose which channel features such as commits, issues, pulls, comments, reviews, checks,
@@ -979,3 +1021,15 @@ Result delivery retries at most twelve times with backoff capped at sixty
 seconds. Re-admitting the same executing request resumes recovery/delivery,
 never a provider transfer. Encrypted outcomes are cleared after confirmed
 publication and expire with the request's twenty-four-hour retention window.
+
+### Connector Instance wake
+
+Agent action receipts queue a new turn only for the authenticated calling
+Instance; they never interrupt its active turn. Native subscription events
+queue for existing Channel Instances. The same committed messages resume
+sleeping/interrupted recipients through the existing bounded wake authority;
+stopped Instances stay stopped. Other Instances see action receipts as context.
+Older receipts without a retained caller remain context. To diagnose delivery,
+check the App author, reply reference, Hub-only
+`xmatrixConnectorRequesterInstanceId` metadata, and the recipient's rest state;
+mutable Agent names and provider text are not routing authority.

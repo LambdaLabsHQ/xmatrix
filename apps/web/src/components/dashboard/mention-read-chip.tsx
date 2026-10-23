@@ -18,10 +18,10 @@
 import { listenForOverlayDismissal } from "./use-overlay-dismiss";
 import { createContext, Fragment, memo, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Check } from "lucide-react";
-import { LoadingImage } from "@/components/dashboard/content-skeleton";
 
-import { parseAgentStopInvocation, type ChannelMentionReadStatus, type SerializedAgentLaunch, type SerializedAgentInvocationRejection, type SerializedAgentStop } from "@xmatrix/protocol";
-import { avatarImageSrc } from "./identity-avatar";
+import type { CommandNotice } from "./command-notices";
+import { parseAgentStopInvocation, type AgentControlInvocation, type ChannelMentionReadStatus, type ConnectorInvocation, type SerializedAgentLaunch, type SerializedAgentInvocationRejection, type SerializedAgentStop } from "@xmatrix/protocol";
+import { MentionChipFace } from "./mention-chip-face";
 import {
   mentionChipLabel,
   mentionReadResolution,
@@ -33,7 +33,8 @@ import {
 } from "./mention-read-state";
 import { cn } from "@/lib/utils";
 import { MentionInvocationChip, MentionInvocationRejectionChip, MentionContinuationChip, InvocationPopoverGroup,
-  MentionIntentDeclinedChip, MentionLaunchHintChip, MentionStopChip, MentionSummonPending } from "./mention-invocation-chip";
+  MentionIntentDeclinedChip, MentionLaunchHintChip, MentionStopChip, MentionSummonPending, MentionControlChip,
+  MentionRefusedLifecycleChip } from "./mention-invocation-chip";
 import { declinedIntent, readingIntentUntil } from "./summon-intent";
 import { handoffSuccessorLaunch, segmentMessageInteraction, type InteractionSegment } from "./mention-invocation-state";
 import { HandoffCard } from "./handoff-arrow";
@@ -59,6 +60,12 @@ export type MentionReadMessageScope = {
   /** False while the invocation query has not answered. Absent hides the stop chip. */
   stopReceiptsLoaded?: boolean;
   rejections?: readonly SerializedAgentInvocationRejection[];
+  /** The connector command this message is. Absent on a quote of it. */
+  connector?: ConnectorInvocation;
+  /** The model and effort statements this message is. Absent on a quote of it. */
+  controls?: readonly AgentControlInvocation[];
+  /** Hub receipts for this message's command, drawn on it instead of as rows. */
+  notices?: readonly CommandNotice[];
   continuations?: readonly import("@xmatrix/protocol").SerializedAgentContinuation[];
   executions?: readonly import("@xmatrix/protocol").SerializedAgentMessageExecution[];
   sourceBody?: string;
@@ -208,11 +215,14 @@ export const MentionRichText = memo(function MentionRichText({ text, rawMarkdown
     return segmentMessageInteraction<MentionReadTarget>(text, {
       continuations: scope?.continuations, rejections: scope?.rejections, launches,
       ...(stop ? { stop } : {}),
+      ...(scope?.connector ? { connector: scope.connector } : {}),
+      ...(scope?.controls ? { controls: scope.controls } : {}),
+      ...(scope?.notices ? { notices: scope.notices } : {}),
       launchStatusUnavailable: scope?.launchStatusUnavailable,
       mentions: run => splitMentionSegments(run, index ? index(run) : null),
     }, allowed);
   }, [text, allowed, base, scope?.continuations, scope?.rejections, scope?.launches,
-    scope?.stops, scope?.stopReceiptsLoaded, scope?.sourceBody, scope?.launchStatusUnavailable]);
+    scope?.stops, scope?.stopReceiptsLoaded, scope?.connector, scope?.controls, scope?.notices, scope?.sourceBody, scope?.launchStatusUnavailable]);
   if (!operational) return <PageReferenceRichText text={text} />;
   return <>{segments.map((segment, index) =>
     <InteractionSegmentView key={index} segment={segment} scope={scope} reading={reading} />)}</>;
@@ -230,8 +240,13 @@ function InteractionSegmentView({ segment, scope, reading }: {
     case null:
       return <PageReferenceRichText text={segment.text} />;
     case "reborn.v1":
-      return <MentionContinuationChip record={segment.record} unavailable={scope?.launchStatusUnavailable} />;
+      return "refused" in segment
+        ? <MentionRefusedLifecycleChip kind="reborn" text={segment.text} agentName={segment.agentName}
+          ordinal={segment.ordinal} notices={segment.refused} />
+        : <MentionContinuationChip record={segment.record} unavailable={scope?.launchStatusUnavailable} />;
     case "handoff.v1":
+      if ("refused" in segment) return <MentionRefusedLifecycleChip kind="handoff" text={segment.text}
+        agentName={segment.agentName} ordinal={segment.ordinal} notices={segment.refused} />;
       return "record" in segment
         ? <MentionContinuationChip record={segment.record} unavailable={scope?.launchStatusUnavailable} />
         : <HandoffCard sourceName={segment.written.sourceName} sourceOrdinal={segment.written.sourceOrdinal}
@@ -253,9 +268,13 @@ function InteractionSegmentView({ segment, scope, reading }: {
       const fillKey = scope?.sequence !== undefined ? `${scope.sequence}:${segment.mention.start}` : undefined;
       const expression = <SummonExpression mention={segment.mention} filled={filled} fillKey={fillKey} />;
       const announcement = jevFilledAnnouncement(filled);
+      // What the Hub said about any Run this summon started: a failed start, a fallback.
+      const runIds = new Set((scope?.launches ?? []).filter(item => item.sourceMention === segment.mention!.text)
+        .map(item => item.runId));
+      const notes = scope?.notices?.filter(notice => notice.runId && runIds.has(notice.runId));
       return segment.launch
         ? <MentionInvocationChip label={segment.mention.text.replace(/^[@＠]/u, "")} labelContent={expression}
-          announcement={announcement}
+          announcement={announcement} notes={notes}
           launch={segment.launch} shared={false}
           unavailable={scope?.launchStatusUnavailable} executions={scope?.executions ?? []} />
         : segment.rejection ? <RecordedRejectionChip rejection={segment.rejection} labelContent={expression} announcement={announcement} scope={scope} />
@@ -264,9 +283,14 @@ function InteractionSegmentView({ segment, scope, reading }: {
     case "stop.v1":
       return <MentionStopChip invocation={segment.invocation} receipts={segment.receipts}
         sentAt={scope?.sentAt} pending={scope?.stopReceiptsLoaded === false}
-        unavailable={scope?.launchStatusUnavailable} />;
+        unavailable={scope?.launchStatusUnavailable} notices={scope?.notices} />;
+    case "runtime-control.v1":
+      return <MentionControlChip invocation={segment.invocation} outcome={segment.outcome}
+        notice={segment.notice} sentAt={scope?.sentAt} />;
     case "mention.v1":
       return <MentionReadChip target={segment.target} text={segment.text} token={segment.token} />;
+    case "connector.v1":
+      return <ConnectorCommandChip invocation={segment.invocation} text={segment.text} />;
     default:
       // A contract this client does not know stays the text it was written as.
       return <PageReferenceRichText text={(segment as { text: string }).text} />;
@@ -331,7 +355,6 @@ export function MentionReadChip({
     channelScope?.currentUserIdentityId &&
     channelScope.currentUserIdentityId === target.subjectId
   );
-  const imageSrc = avatarImageSrc(target.avatarUrl);
   const label = mentionChipLabel(text, target.label, token);
   // The existing unread receipt is the delivery indicator; it only adds why
   // this one will not be read until the machine comes back.
@@ -358,20 +381,7 @@ export function MentionReadChip({
     >
       <span className="app-mention-chip-avatar">
         <span className="app-mention-chip-avatar-face" aria-hidden="true">
-          {imageSrc ? (
-            <LoadingImage
-              src={imageSrc}
-              alt=""
-              announce={false}
-              retain
-              referrerPolicy="no-referrer"
-              draggable={false}
-              className="size-full object-cover"
-              fallback={<span className="app-mention-chip-initial">{mentionInitial(label)}</span>}
-            />
-          ) : (
-            <span className="app-mention-chip-initial">{mentionInitial(label)}</span>
-          )}
+          <MentionChipFace of={target.face} />
         </span>
         <span ref={receiptRef} className="app-mention-chip-receipt">
           <button
@@ -408,12 +418,35 @@ export function MentionReadChip({
   );
 }
 
+/**
+ * A connector command, highlighted whole like the `@` it is: the connector's
+ * mark, then the command and its arguments exactly as written, with the
+ * target marked where it sits, the way a summon's conditions are. Its result
+ * is the connector's reply.
+ */
+function ConnectorCommandChip({ invocation, text }: { invocation: ConnectorInvocation; text: string }) {
+  const at = (offset: number) => Math.min(text.length, offset - invocation.start);
+  const target = invocation.target;
+  return (
+    <span className="app-mention-chip app-connector-command-chip" data-connector={invocation.provider}>
+      <span className="app-mention-chip-avatar" aria-hidden="true">
+        <span className="app-mention-chip-avatar-face">
+          <MentionChipFace of={{ kind: "app", id: invocation.provider, name: invocation.provider }} contain />
+        </span>
+      </span>
+      <span className="app-mention-chip-label">
+        {text.slice(0, at(target?.start ?? invocation.commandEnd))}
+        {target ? <span className="app-summon-condition">{text.slice(at(target.start), at(target.end))}</span> : null}
+        {at(invocation.commandEnd) < text.length
+          ? <span className="app-connector-command-arguments">{text.slice(at(invocation.commandEnd))}</span> : null}
+      </span>
+    </span>
+  );
+}
+
 export function mentionReadStateCopy(state: "read" | "unread" | "unknown", machineOffline = false): string {
   if (state === "read") return "Read";
   if (state === "unread") return machineOffline ? "Unread · machine offline" : "Unread";
   return "Unknown";
 }
 
-function mentionInitial(label: string): string {
-  return Array.from(label.trim())[0]?.toUpperCase() || "@";
-}

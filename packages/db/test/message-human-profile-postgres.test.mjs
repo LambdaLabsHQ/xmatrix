@@ -36,7 +36,7 @@ integration("Human message senders use the current account profile while members
     await f.run("UPDATE data.space_members SET display_name='Historical member' WHERE user_id='owner'");
     for (const read of readers) {
       assert.equal((await read()).displayName, "Historical member");
-      assert.equal((await read()).avatarUrl, "https://example.test/old-avatar.png");
+      assert.equal((await read()).avatarUrl, null, "an account that is gone has no face; its membership copy is not one");
     }
     await f.run("INSERT INTO control.auth_users(id,name,email,email_verified,created_at,updated_at) VALUES ('outsider','Named outsider','outsider@example.test',true,now(),now())");
     await assert.rejects(repository.senderIdentity({ ...input(), principal: { kind: "user", id: "outsider" } }),

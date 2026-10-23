@@ -8,7 +8,8 @@
 import type { AdminAuditEvent, AdminSpaceSummary } from "@xmatrix/protocol";
 
 import { AdminTable, type AdminColumn } from "./admin-table";
-import { useAdminAudit, usePlatformOverview } from "./platform-admin-data";
+import { useAdminAudit, useAdminParam, usePlatformOverview } from "./platform-admin-data";
+import { AdminSpaceDetailView } from "./platform-admin-space";
 import { adminTime, formatAdminAge, formatAdminCount } from "./platform-admin-overview";
 import { AdminQueryView } from "./workspace-platform-admin-view";
 
@@ -39,6 +40,14 @@ const SPACE_COLUMNS: AdminColumn<AdminSpaceSummary>[] = [
 ];
 
 export function PlatformAdminSpaces({ token }: { token?: string }) {
+  const [openSpaceId, setOpenSpaceId] = useAdminParam("space");
+  if (openSpaceId) {
+    return <AdminSpaceDetailView token={token} spaceId={openSpaceId} onBack={() => setOpenSpaceId("", { push: true })} />;
+  }
+  return <SpacesList token={token} onOpen={(spaceId) => setOpenSpaceId(spaceId, { push: true })} />;
+}
+
+function SpacesList({ token, onOpen }: { token?: string; onOpen: (spaceId: string) => void }) {
   return (
     <AdminQueryView title="Spaces" query={usePlatformOverview(token)} generatedAt={(overview) => overview.generatedAt}
       emptyTitle="No Spaces yet" emptyBody="Spaces appear here once someone creates one.">
@@ -52,6 +61,7 @@ export function PlatformAdminSpaces({ token }: { token?: string }) {
           search={(space) => [space.id, space.name, space.ownerEmail, space.ownerUserId].filter(Boolean).join(" ")}
           searchPlaceholder="Space, owner, id"
           defaultSort="active"
+          onRowClick={(space) => onOpen(space.id)}
           empty="No Space matches this search."
           note={overview.truncated.spaces ? "Showing the most recently created Spaces only; the Hub caps one read." : undefined}
         />
@@ -63,6 +73,8 @@ export function PlatformAdminSpaces({ token }: { token?: string }) {
 const ACTION_LABELS: Record<AdminAuditEvent["action"], string> = {
   "overview.read": "Read the overview",
   "user.read": "Opened a user",
+  "space.read": "Opened a Space",
+  "operations.read": "Read operations",
   "audit.read": "Read the audit trail",
   "handles.backfill": "Backfilled handles",
   "agent-senders.repair": "Repaired Agent senders",
