@@ -176,6 +176,12 @@ provider failover or restart.
 
 ## Channel catalogue counts
 
+A Space-scoped control request (including the Channel list) with no placement
+answers `space_not_found` (404), before opening a shard transaction. A moving or
+blocked placement still answers retryable `space_placement_unavailable` (503).
+Malformed placement rows and database failures remain unexpected failures;
+a missing caller-selected Space is not a storage contract violation.
+
 Catalogue counters aggregate the selected principal's attention once per Space,
 then join the per-Channel result to the freshly authorized Channel set and read
 cursors. A Channel needs attention when any declared wait still stands or its
