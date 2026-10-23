@@ -6,7 +6,7 @@ import { HarnessReleaseWatchFailure } from "./harness-release-watch-failure";
 export function scheduledTaskFailed(name: string, error: unknown): void {
   const attempts = databaseFailureEvidence(error);
   reportError(error, { operation: `scheduled: ${name}`,
-    ...(error instanceof HarnessReleaseWatchFailure ? { fingerprint: ["harness-release-watch", error.evidence.phase] } : {}),
+    ...(error instanceof HarnessReleaseWatchFailure ? { fingerprint: ["{{ default }}", "harness-release-watch", error.evidence.phase] } : {}),
     ids: {
       ...(attempts.length ? { database_failure_attempts: JSON.stringify(attempts) } : {}),
       ...(error instanceof HarnessReleaseWatchFailure ? { harness_release_watch_failure: JSON.stringify(error.evidence) } : {}),
