@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ConnectivityBreaker, createAuthorityDatabase, DatabaseCircuitOpenError,
+import { ConnectivityBreaker, createAuthorityDatabase, databaseFailureEvidence, DatabaseCircuitOpenError,
   DatabaseCommitUnknownError, PostgresGmailRoutingRepository, PostgresSentryEventRepository,
   PostgresGoogleChatRoomRepository, PostgresFeishuRoomRepository, PostgresTelegramRoomRepository,
   PostgresTeamsRoomRepository } from "../dist/index.js";
@@ -31,7 +31,7 @@ function fixture(stage, failures, breaker = new ConnectivityBreaker("fixture")) 
             pool.queries.push(text);
             const phase = text.startsWith("BEGIN;") ? "begin" : text === "COMMIT" ? "commit" :
               /DELETE FROM data\.app_\w+_room_lifecycle/u.test(text) ? "second-delete" : "sql";
-            if (phase === stage && failures[index]) throw failures[index];
+            if (phase === stage && failures[index]) { const error = failures[index]; failures[index] = undefined; throw error; }
             return { rows: /SELECT count\(\*\)/u.test(text) ? [{ count: "0" }] : [], rowCount: 0 };
           }, release(destroy) { pool.releases.push(destroy); } };
         },
@@ -65,7 +65,13 @@ for (const [name, run] of Object.entries(operations)) {
       const failure = () => new Error(stage === "checkout" ? "timeout exceeded when trying to connect" : "Query read timeout");
       const second = failure();
       const { database, pools } = fixture(stage, [failure(), second]);
-      await assert.rejects(run(database), error => error === second);
+      await assert.rejects(run(database), error => {
+        assert.equal(error, second);
+        const attempts = databaseFailureEvidence(error);
+        assert.equal(attempts.length, 2);
+        assert.ok(attempts.every(item => item.phase === (stage === "checkout" ? "pool_checkout" : stage === "sql" || stage === "second-delete" ? "sql" : stage)));
+        return true;
+      });
       assert.equal(pools.length, 2, stage);
       assert.equal(pools.every(pool => pool.ended), true);
     }
@@ -74,7 +80,11 @@ for (const [name, run] of Object.entries(operations)) {
   test(`${name} never replays an unknown COMMIT, answered SQL rejection or open breaker`, async () => {
     for (const message of ["Query read timeout", "Connection terminated due to connection timeout"]) {
       const { database, pools } = fixture("commit", [new Error(message)]);
-      await assert.rejects(run(database), DatabaseCommitUnknownError);
+      await assert.rejects(run(database), error => {
+        assert.ok(error instanceof DatabaseCommitUnknownError);
+        assert.equal(databaseFailureEvidence(error).at(-1)?.phase, "commit");
+        return true;
+      });
       assert.equal(pools.length, 1);
       assert.deepEqual(pools[0].releases, [true]);
     }
@@ -91,3 +101,25 @@ for (const [name, run] of Object.entries(operations)) {
     assert.deepEqual(blocked.pools[0].queries, []);
   });
 }
+
+// HUB-9T: a failed completion must not strand a successfully processed mailbox
+// for its full lease. This exercises the same wire owner as the claim tests.
+test("Gmail completion retries only before COMMIT", async () => {
+  const job = { id: "route", leaseId: "00000000-0000-4000-8000-000000000002", wakeVersion: 3 };
+  for (const stage of ["begin", "sql", "commit"]) {
+    const { database, pools } = fixture(stage, [new Error("Query read timeout")]);
+    const finish = new PostgresGmailRoutingRepository(database, "fixture-key").finish(job, "done");
+    if (stage === "commit") await assert.rejects(finish, DatabaseCommitUnknownError);
+    else await finish;
+    assert.equal(pools.length, stage === "commit" ? 1 : 2);
+  }
+});
+
+test("Gmail pending IDs recover a lost read without opening a transaction", async () => {
+  const { database, pools } = fixture("sql", [new Error("Query read timeout")]);
+  assert.deepEqual(await new PostgresGmailRoutingRepository(database, "fixture-key").pending({ id: "route" }), []);
+  assert.equal(pools.length, 1, "a single-read retry replaces the checkout within its session");
+  assert.equal(pools[0].queries.length, 2);
+  assert.ok(pools[0].queries.every(sql => sql.startsWith("SELECT single_read.*")));
+  assert.equal(pools[0].ended, true);
+});

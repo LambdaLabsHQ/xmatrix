@@ -3,7 +3,7 @@ import "./error-reporting";
 import { drainGmailNotifications } from "./connectors/gmail-notification-drain";
 import { registerAccountDeletionRoutes, maintainAccountDeletions } from "./index-routes-account-deletion";
 import { maintainChannelDeletions } from "./channel-deletion-maintenance";
-import { reportError, sendErrorReports } from "@xmatrix/protocol/error-reporting";
+import { sendErrorReports } from "@xmatrix/protocol/error-reporting";
 import { drainSentryEvents } from "./connectors/sentry-event-drain";
 import { watchHarnessReleasesBesidePostgres } from "./harness-release-watch";
 import { connectorGoogleChatRoomRepository, connectorFeishuRoomRepository, connectorTelegramRoomRepository, connectorTeamsRoomRepository } from "./connectors/credentials";
@@ -32,7 +32,7 @@ import { registerGooglePickerRoutes } from "./index-routes-google-picker";
 import { registerGmailMailboxRoutes } from "./index-routes-gmail-mailboxes";
 import { registerCloudflareLoginRoutes } from "./index-routes-cloudflare-logins";
 import { redirectInsecureRequest } from "./https-redirect";
-import { retryablePostgresFailure } from "./postgres-error-classification";
+import { scheduledTaskFailed } from "./scheduled-task-failure";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { requestErrorResponse } from "./index-shared";
@@ -170,9 +170,3 @@ export default {
   },
   queue: (batch: MessageBatch<unknown>) => ackRetiredExportQueue(batch),
 } satisfies ExportedHandler<Env>;
-
-/** A failed cron task names its cause; a database outage is logged, a defect is also reported. */
-function scheduledTaskFailed(name: string, error: unknown): void {
-  console.error(`${name} failed`, error);
-  if (!retryablePostgresFailure(error)) reportError(error, { operation: `scheduled: ${name}` });
-}

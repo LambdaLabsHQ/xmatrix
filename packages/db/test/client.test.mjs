@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   ConnectivityBreaker,
   createAuthorityDatabase,
+  databaseFailureEvidence,
   DatabaseCircuitOpenError,
   DatabaseCommitUnknownError,
   DatabaseContractError,
@@ -542,6 +543,8 @@ test("an open breaker refuses the retry and the original timeout surfaces", asyn
     connectivityBreaker: breaker, observer: (point) => observations.push(point),
   }).openSession();
   await assert.rejects(session.transaction(singleRead, readOne), (error) => error === failure);
+  assert.deepEqual(databaseFailureEvidence(failure).map(item => item.phase), ["sql", "pool_checkout"]);
+  assert.equal(databaseFailureEvidence(failure)[1].code, "DATABASE_CIRCUIT_OPEN");
   assert.equal(fake.clients.length, 1, "no second checkout");
   assert.deepEqual(fake.clients[0].releases, [true]);
   assert.equal(observations.at(-1).queryName, "database_phase_pool_checkout_v1");
@@ -808,4 +811,24 @@ test("account-deletion admission surfaces a second lost read and destroys both c
   await assert.rejects(repository.pending(), error => error === second);
   assert.equal(fake.clients.length, 2, "one retry, with no third checkout");
   assert.deepEqual(fake.clients.map(client => client.releases), [[true], [true]]);
+});
+
+// HUB-9P/9R: retries already exist, but the thrown error lost the first
+// attempt and whether this path was a single read. Check the real owner.
+test("exhausted single reads retain both failed attempts without SQL or parameters", async () => {
+  const first = new Error("Query read timeout");
+  const second = new Error("Query read timeout");
+  const fake = retryPool(/single_read/u, [first, second]);
+  const db = createAuthorityDatabase({ connectionString: "postgres://fixture", shardId: "shard-0", poolFactory: fake.factory });
+  await assert.rejects(db.transaction(singleRead, tx => tx.query({ name: "read_evidence_v1",
+    text: "SELECT $1 AS private_sql", values: ["private-parameter"], maxRows: 1 })), error => {
+    assert.equal(error, second);
+    const attempts = databaseFailureEvidence(error);
+    assert.equal(attempts.length, 2);
+    assert.ok(attempts.every(item => item.operation === "read" && item.statement === "single_read" &&
+      item.phase === "sql" && item.queryName === "read_evidence_v1" && item.code === "QUERY_READ_TIMEOUT" &&
+      Number.isSafeInteger(item.durationMs)));
+    assert.doesNotMatch(JSON.stringify(attempts), /private-|postgres:\/\//);
+    return true;
+  });
 });

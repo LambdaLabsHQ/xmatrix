@@ -1,3 +1,4 @@
+import { parseDatabaseFailureEvidence } from "@xmatrix/db";
 import { clientDefectAction } from "@xmatrix/protocol";
 
 /** Diagnostic provenance only; never copy arbitrary tags, contexts or mechanism data. */
@@ -18,6 +19,10 @@ export function sentryEventMetadata(event: Record<string, unknown>): string[] {
       if (!tag || typeof tag !== "object") continue;
       if (tag.key === "component" && ["hub", "web"].includes(tag.value)) lines.push(`Component: ${tag.value}`);
       if (tag.key === "environment" && token(tag.value)) lines.push(`Environment: ${tag.value}`);
+      if (tag.key === "operation" && typeof tag.value === "string" &&
+          /^scheduled: (?:Account deletion maintenance|Channel deletion maintenance|Sentry event recovery|Gmail notification recovery and renewal|Harness release watch|Machine load history maintenance|(?:Teams|Google Chat|Feishu|Telegram) lifecycle maintenance)$/u.test(tag.value)) {
+        lines.push(`Scheduled task: ${tag.value.slice("scheduled: ".length)}`);
+      }
       // The browser defect endpoint sets this prefix. Only fixed application copy is readable.
       if (tag.key === "operation" && typeof tag.value === "string" && tag.value.startsWith("browser: ")) {
         lines.push("Capture boundary: browser defect endpoint");
@@ -25,6 +30,17 @@ export function sentryEventMetadata(event: Record<string, unknown>): string[] {
         if (action) lines.push("Browser action: " + action);
       }
     }
+  }
+  // Sentry serializes SDK `extra` as `context` in its issue-event API.
+  const extra = event.context;
+  const attempts = extra && typeof extra === "object" ? (extra as Record<string, unknown>).database_failure_attempts : undefined;
+  if (typeof attempts === "string" && attempts.length <= 4096) {
+    try {
+      for (const [index, failure] of parseDatabaseFailureEvidence(JSON.parse(attempts)).entries()) {
+        lines.push(`Database failure ${index + 1}: ${failure.operation} · ${failure.shardId} · ${failure.statement} · ` +
+          `${failure.phase} · ${failure.queryName} · ${failure.code} · ${failure.durationMs} ms`);
+      }
+    } catch { /* Malformed optional diagnostics do not fail the issue read. */ }
   }
   const sdk = event.sdk;
   if (sdk && typeof sdk === "object") {

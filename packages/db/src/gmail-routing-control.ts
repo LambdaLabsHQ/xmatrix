@@ -23,8 +23,8 @@ export class PostgresGmailRoutingRepository {
   constructor(private readonly database: AuthorityDatabase, private readonly material: string) {
     if (database.cacheMode !== "disabled" || !material) throw fail();
   }
-  private transaction<T>(operation: string, run: (tx: DatabaseTransaction) => Promise<T>) {
-    return this.database.transaction({ requestId: crypto.randomUUID(), operation: `app.gmail-routing.${operation}` }, run);
+  private transaction<T>(operation: string, run: (tx: DatabaseTransaction) => Promise<T>, statement?: "single_read") {
+    return this.database.transaction({ requestId: crypto.randomUUID(), operation: `app.gmail-routing.${operation}`, statement }, run);
   }
   private async row(row: QueryResultRow): Promise<GmailRoutingJob> {
     const selection = JSON.parse(await decryptSecretValue(this.material, { encrypted_value_json: row.encrypted_value_json,
@@ -196,7 +196,7 @@ export class PostgresGmailRoutingRepository {
         FROM data.app_gmail_notifications WHERE route_id=$1 AND delivered_at IS NULL ORDER BY message_id LIMIT 50`,
       values: [job.id], maxRows: 50 });
       return rows.map(row => String(row.message_id));
-    });
+    }, "single_read");
   }
   async cachePollToken(job: GmailRoutingJob, token: NonNullable<GmailRoutingSelection["pollToken"]>, refreshToken?: string) {
     const selection={...job.selection,pollToken:token,...(refreshToken ? {refreshToken} : {})};
@@ -254,7 +254,9 @@ export class PostgresGmailRoutingRepository {
   async finish(job: GmailRoutingJob, outcome: "done" | "continue" | "retry" | "blocked") {
     const retired=outcome==="blocked" ? await encryptSecretValue(this.material,`gmail-route:${job.id}`,"selection",1,
       JSON.stringify({...job.selection,oauthVerifier:"",refreshToken:undefined,pollToken:undefined})) : undefined;
-    return this.transaction("finish", tx => tx.query({ name: "gmail_route_finish_v1", text: `UPDATE data.app_gmail_routes
+    // The fenced database-only completion is replayable before COMMIT. An
+    // unknown commit still escapes; expiry and the durable cursor reconcile it.
+    return retryBeforeCommit(() => this.transaction("finish", tx => tx.query({ name: "gmail_route_finish_v1", text: `UPDATE data.app_gmail_routes
       SET lease_id=NULL,lease_until=NULL,processed_version=CASE WHEN $3='done' THEN $4 ELSE processed_version END,
         last_verified_at=CASE WHEN $3='done' THEN now() ELSE last_verified_at END,
         next_poll_at=CASE WHEN notification_mode='poll' AND $3='done' THEN date_trunc('minute',now())+interval '1 minute' ELSE next_poll_at END,
@@ -263,6 +265,6 @@ export class PostgresGmailRoutingRepository {
         attempts=CASE WHEN $3 IN ('done','continue') THEN 0 ELSE attempts END,
         error_code=CASE WHEN $3 IN ('done','continue') THEN NULL WHEN $3='retry' AND attempts>=8 THEN 'paused' ELSE $3 END,
         available_at=now()+interval '15 seconds'*CASE WHEN $3 IN ('done','continue') THEN 1 ELSE least(60,power(2,attempts)) END,updated_at=now()
-      WHERE route_id=$1 AND lease_id=$2::uuid AND lease_until>now()`, values: [job.id, job.leaseId, outcome, job.wakeVersion, retired ? JSON.stringify(retired):null], maxRows: 0 }));
+      WHERE route_id=$1 AND lease_id=$2::uuid AND lease_until>now()`, values: [job.id, job.leaseId, outcome, job.wakeVersion, retired ? JSON.stringify(retired):null], maxRows: 0 })));
   }
 }

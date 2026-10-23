@@ -119,7 +119,7 @@ Channel catalog pages, counts, participant reads and exact-ID resolution use
 the same per-statement recovery, with authorization still checked by their SQL.
 
 Sentry event claiming (including receipt cleanup), Gmail route cleanup and
-claiming, and Bot room expiry cleanup (Google Chat, Feishu, Telegram and Teams)
+claiming and fenced completion, and Bot room expiry cleanup (Google Chat, Feishu, Telegram and Teams)
 each replay once on a fresh request session after a connection timeout
 or lost response before COMMIT. These transactions have no provider or delivery
 side effects. The failed session closes first; locked candidates use SKIP LOCKED,
@@ -128,6 +128,22 @@ connectivity breaker or an answered database rejection still fails the pass.
 Once COMMIT has been sent, connection loss is an unknown result: no immediate
 replay occurs, and the next bounded cleanup pass or expired-lease recovery
 reconciles it. Provider calls and notification delivery are outside the replay.
+
+Gmail pending notification IDs use one lock-free `single_read`; retrying a
+completion never reruns provider calls or delivery. Its lease ID and expiry
+remain the write fence, and an unknown completion commit retains cursor/lease
+reconciliation.
+
+Scheduled failures send one Sentry event with a fixed task tag, including
+stackless platform errors and transient PostgreSQL failures. The database client
+retains at most four failed attempts across its bounded retry, causes and
+aggregate shard failures: static operation, shard, statement mode, phase, query
+name, normalized error code and duration. `read_issue` exposes only that validated
+projection from Sentry's event context; SQL, parameters, request IDs, credentials
+and arbitrary extra fields remain omitted. Two SQL/BEGIN failures show retry
+exhaustion; a COMMIT phase indicates uncertainty and must not authorize replay.
+A missing database projection means the task failed outside an observed database
+call; use the task and mapped stack rather than inferring a database outage.
 
 ## Agent lifecycle locks
 

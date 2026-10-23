@@ -331,3 +331,5 @@ export type { AccountSpaceClosureAuthorization } from "./account-space-closure-a
 export { PostgresAppActionRequestRepository, type AppActionRequestPayload,
   type XUploadReference, type XExecutingUpload, type XUploadOutcome } from "./app-action-request-control.js";
 export { PostgresGmailRoutingRepository, type GmailRoutingJob, type GmailRoutingSelection } from "./gmail-routing-control.js";
+
+export { databaseFailureEvidence, parseDatabaseFailureEvidence } from "./database-failure-evidence.js";

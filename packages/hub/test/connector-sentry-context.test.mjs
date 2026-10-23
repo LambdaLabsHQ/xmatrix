@@ -344,3 +344,27 @@ test("an issue list Sentry answered but that cannot be read is refused, never re
     await assert.rejects(listIssues([{ body }], "*", "firstRelease:xmatrix-v1.1.0"), /unreadable issue/u, JSON.stringify(body));
   }
 });
+
+// HUB-9N/9P/9Q/9R/9S/9T/9V/9W: read_issue must expose the new
+// diagnostics at the actual connector boundary without opening arbitrary extras.
+test("scheduled failures expose bounded retry phases and keep unrelated event extras private", async () => {
+  const failure = { operation: "app.gmail-routing.finish", shardId: "shard-0", statement: "transaction",
+    phase: "begin", queryName: "database_phase_begin_v1", code: "QUERY_READ_TIMEOUT", durationMs: 5000 };
+  const { result } = await run([{ body: issue }, { body: { ...event,
+    tags: [{ key: "operation", value: "scheduled: Gmail notification recovery and renewal" }],
+    context: { database_failure_attempts: JSON.stringify([failure, { ...failure, phase: "commit", queryName: "database_phase_commit_v1" }]),
+      user: "private-user", sql: "private-sql", arguments: ["private-argument"] },
+  } }], undefined, "123");
+  assert.match(result.summary, /Scheduled task: Gmail notification recovery and renewal/);
+  assert.match(result.summary, /Database failure 1: app.gmail-routing.finish · shard-0 · transaction · begin · database_phase_begin_v1 · QUERY_READ_TIMEOUT · 5000 ms/);
+  assert.match(result.summary, /Database failure 2: .* · commit · database_phase_commit_v1/);
+  assert.doesNotMatch(result.summary, /private-/);
+  for (const invalid of ["private-invalid-json", JSON.stringify(Array(5).fill(failure)),
+    JSON.stringify([{ ...failure, sql: "private-sql" }]), JSON.stringify([{ ...failure, code: "private-code" }]),
+    JSON.stringify([{ ...failure, durationMs: Infinity }]), JSON.stringify([{ ...failure, phase: "private-phase" }])]) {
+    const { result: malformed } = await run([{ body: issue }, { body: { ...event,
+      tags: [{ key: "operation", value: "scheduled: private-task" }], context: { database_failure_attempts: invalid },
+    } }], undefined, "123");
+    assert.doesNotMatch(malformed.summary, /Database failure|Scheduled task:|private-/);
+  }
+});

@@ -25,6 +25,8 @@ import type { SpacePlacementHints } from "./placement.js";
 import { dingtalkPreparation, dingtalkDecision, dingtalkPreparedPlan, registerDingTalkPreparedPort, registerDingTalkPreparedTransaction,
   type DingTalkPreparedPlan, type DingTalkPreparedDecision } from "./dingtalk-prepared-port.js";
 
+import { recordDatabaseFailure, linkDatabaseFailures } from "./database-failure-evidence.js";
+
 const MAX_QUERY_NAME_BYTES = 160;
 const MAX_QUERY_BYTES = 64 * 1024;
 const MAX_QUERY_VALUES = 256;
@@ -354,6 +356,9 @@ class PgDatabaseTransaction implements DatabaseTransaction {
         const durationMs = performance.now() - startedAt;
         this.stats.query(durationMs, 0);
         this.stats.fail(errorCode(error), this.context.operation, query.name);
+        recordDatabaseFailure(error, { operation: this.context.operation, shardId: this.options.shardId,
+          statement: this.context.statement ?? "transaction", phase: "sql", queryName: query.name,
+          code: errorCode(error), durationMs });
         observe(this.options.observer, this.observation(
           query.name,
           durationMs,
@@ -633,7 +638,12 @@ function observePhase(
 ): void {
   const durationMs = performance.now() - startedAt;
   stats.phase(phase, durationMs);
-  if (error) stats.fail(errorCode(error), context.operation, `database_phase_${phase}_v1`);
+  if (error) {
+    stats.fail(errorCode(error), context.operation, `database_phase_${phase}_v1`);
+    recordDatabaseFailure(error, { operation: context.operation, shardId: options.shardId,
+      statement: context.statement ?? "transaction", phase, queryName: `database_phase_${phase}_v1`,
+      code: errorCode(error), durationMs });
+  }
   // A checkout through a reachable Hyperdrive can still stall on the origin,
   // so only a completed statement, never the checkout, closes the breaker.
   else if (phase !== "pool_checkout") stats.connectivity.reached();
@@ -801,14 +811,16 @@ class PgAuthorityDatabaseSession implements AuthorityDatabaseSession {
     let client: PgClientPort;
     try {
       client = await this.connection(context);
-    } catch {
+    } catch (error) {
       this.connectionUnusable = true;
+      linkDatabaseFailures(failure, failure, error);
       throw failure;
     }
     try {
       return await attempt(client);
     } catch (error) {
       this.connectionUnusable = true;
+      linkDatabaseFailures(error, failure);
       throw error;
     }
   }

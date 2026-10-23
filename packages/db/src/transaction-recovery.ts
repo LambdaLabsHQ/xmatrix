@@ -1,3 +1,4 @@
+import { linkDatabaseFailures } from "./database-failure-evidence.js";
 import { lostBeforeCommit } from "./client.js";
 
 /**
@@ -9,6 +10,7 @@ export async function retryBeforeCommit<T>(run: () => Promise<T>): Promise<T> {
   try { return await run(); }
   catch (error) {
     if (!lostBeforeCommit(error)) throw error;
-    return run();
+    try { return await run(); }
+    catch (retryError) { linkDatabaseFailures(retryError, error); throw retryError; }
   }
 }
