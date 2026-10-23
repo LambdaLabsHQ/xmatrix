@@ -332,8 +332,8 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
   const wrote = useRef(onWrite);
   wrote.current = onWrite;
   const view = useRef<EditorView | null>(null);
-  // The editor once it is drawn, for what is placed by it as it appears (the byline).
-  const [drawnView, setDrawnView] = useState<EditorView | null>(null);
+  // Publish immutable document changes to overlays; the view itself keeps the same identity.
+  const [drawn, setDrawn] = useState<{ view: EditorView; doc: DocNode } | null>(null);
   const placeholderText = useRef(placeholder);
   useEffect(() => {
     placeholderText.current = placeholder;
@@ -546,7 +546,10 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
         // Collaboration can still deliver a transaction after the page unmounted the editor.
         if (this.isDestroyed) return;
         this.updateState(this.state.apply(tr));
-        if (tr.docChanged) readBlocks(this);
+        if (tr.docChanged) {
+          readBlocks(this);
+          setDrawn({ view: this, doc: this.state.doc });
+        }
         // What the shared document brings (others' writes, its first sync) carries the sync's meta.
         if (tr.docChanged && tr.getMeta(ySyncPluginKey) === undefined) wrote.current?.();
         const next = readToolbar(this);
@@ -593,7 +596,7 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
       },
     });
     view.current = editor;
-    setDrawnView(editor);
+    setDrawn({ view: editor, doc: editor.state.doc });
     showToolbar(readToolbar(editor));
     readBlocks(editor);
     const resized = new ResizeObserver(() => measure());
@@ -610,7 +613,7 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
       window.clearTimeout(commentTimer.current);
       editor.destroy();
       view.current = null;
-      setDrawnView(null);
+      setDrawn(null);
     };
     // The editor binds one session for its lifetime; the parent remounts it per page.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -911,7 +914,8 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
         </div>
       )}
       {blame && <PageBlameLayer view={view} frame={frame} source={blame} inMargin={commentInMargin} />}
-      {blame && drawnView && <PageByline view={drawnView} frame={frame} source={blame} writing={writing ?? (() => false)} />}
+      {blame && drawn && <PageByline view={drawn.view} doc={drawn.doc} frame={frame} source={blame}
+        writing={writing ?? (() => false)} />}
       {trigger && menuAt && (
         <div className="absolute z-20 w-64" style={{ left: menuAt.left, top: menuAt.bottom + 4 }}>
         <PaperPopover role="listbox" aria-label={MENU_LABELS[trigger.kind]} data-testid={`page-${trigger.kind}-menu`}

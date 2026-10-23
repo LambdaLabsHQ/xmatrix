@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import type { EditorView } from "prosemirror-view";
 import { carryPageDocKnown } from "@xmatrix/protocol/page-document";
 import { faceOfPageAuthor, pageAuthorLabel, type PageAuthor, type PageBlame } from "@xmatrix/protocol";
@@ -8,7 +8,7 @@ import { Face } from "@/components/dashboard/face";
 import type { Node as DocNode } from "prosemirror-model";
 import { formatRelativeAge } from "@/components/dashboard/time-display";
 import { MARGIN_ITEM } from "./page-margin";
-import { blameDoc, blameOf, pageWriters, type BlameDoc, type BlameSummary, type BlameWriter, type PageWriter } from "./page-blame-model";
+import { blameDoc, blameOf, pageWriters, type BlameDoc, type BlameSummary, type BlameWriter } from "./page-blame-model";
 
 /** Where a page reads who wrote it. */
 export interface PageBlameSource {
@@ -199,15 +199,23 @@ function domRange(view: EditorView, from: number, to: number): Range | null {
  * The page's byline (pages-live-document.md §3.2): under its title, each author whose words stand in the page,
  * by face and name, most words first. Pointing at one marks their words in the text; an author writing now breathes.
  */
-export function PageByline({ view, frame, source, writing }: {
+export function PageByline({ view, doc, frame, source, writing }: {
   view: EditorView;
+  /** The immutable document on screen; a saved revision alone cannot identify its current positions. */
+  doc: DocNode;
   frame: RefObject<HTMLElement | null>;
   source: PageBlameSource;
   /** Whether an author is changing the page now. */
   writing: (author: PageAuthor) => boolean;
 }) {
-  const [writers, setWriters] = useState<PageWriter[]>([]);
+  const [blame, setBlame] = useState<PageBlame | null>(null);
+  const [pointedAt, setPointedAt] = useState<PageAuthor | null>(null);
   const [top, setTop] = useState<number | null>(null);
+  const writers = useMemo(() => {
+    if (!blame) return [];
+    const { base, carried } = carriedBlame(blame, doc);
+    return pageWriters(base, carried, doc);
+  }, [blame, doc]);
 
   const reader = useRef(source);
   reader.current = source;
@@ -218,9 +226,8 @@ export function PageByline({ view, frame, source, writing }: {
     let live = true;
     const read = () => void reader.current.read().then((blame) => {
       if (!live || typeof blame?.body !== "string") return;
-      const { base, carried } = carriedBlame(blame, view.state.doc);
       shownOnce.current = true;
-      setWriters(pageWriters(base, carried, view.state.doc));
+      setBlame(blame);
     }).catch(() => undefined);
     const timer = window.setTimeout(read, shownOnce.current ? HEAD_SETTLE_MS : 0);
     return () => { live = false; window.clearTimeout(timer); };
@@ -250,15 +257,16 @@ export function PageByline({ view, frame, source, writing }: {
     return () => { sizes.disconnect(); children.disconnect(); };
   }, [frame, view]);
 
-  const mark = (writer: PageWriter | null) => {
-    if (typeof CSS === "undefined" || !("highlights" in CSS)) return;
-    if (!writer) { CSS.highlights.delete(AUTHOR_HIGHLIGHT); return; }
+  // Keep only the pointed-at identity. Its ranges belong to this exact document,
+  // including while another editor moves or removes the words under the pointer.
+  useEffect(() => {
+    if (typeof CSS === "undefined" || !("highlights" in CSS) || typeof Highlight === "undefined") return;
+    const writer = writers.find(({ author }) => author.kind === pointedAt?.kind && author.id === pointedAt.id);
+    if (!writer) return;
     const ranges = writer.ranges.map((range) => domRange(view, range.from, range.to)).filter((range) => range !== null);
     CSS.highlights.set(AUTHOR_HIGHLIGHT, new Highlight(...ranges));
-  };
-  useEffect(() => () => {
-    if (typeof CSS !== "undefined" && "highlights" in CSS) CSS.highlights.delete(AUTHOR_HIGHLIGHT);
-  }, []);
+    return () => { CSS.highlights.delete(AUTHOR_HIGHLIGHT); };
+  }, [pointedAt, view, writers]);
 
   if (top === null || writers.length === 0) return null;
   return (
@@ -266,7 +274,7 @@ export function PageByline({ view, frame, source, writing }: {
       data-testid="page-byline" aria-label="Written by">
       {writers.map((writer, index) => (
         <span key={`${writer.author.kind}:${writer.author.id}`} className="flex shrink-0 items-center"
-          onMouseEnter={() => mark(writer)} onMouseLeave={() => mark(null)}>
+          onMouseEnter={() => setPointedAt(writer.author)} onMouseLeave={() => setPointedAt(null)}>
           {index > 0 && <span aria-hidden="true" className="page-byline-rule" />}
           <Face of={faceOfPageAuthor(writer.author)} size="xs" shape="circle" glass={false}
             className={writing(writer.author) ? "page-byline-writing rounded-full" : "rounded-full"} />

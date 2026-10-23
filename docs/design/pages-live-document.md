@@ -199,6 +199,10 @@ fact is about.
   text, and an author changing the page now breathes. The title keeps the
   byline's room in the preview as in the editor, so nothing moves when the
   authors arrive.
+  The saved blame is carried to the live document: edits before the next
+  revision immediately move each author's highlighted words and remove
+  authors whose words have gone. The byline retains the pointed-at identity,
+  never positions from an earlier document; live edits need no new blame read.
 - **Cursors**, as in Google Docs: a line in the person's colour with their
   name above it. The name shows while they move or type and hides about five
   seconds later, leaving a square at the caret's top; hovering the caret

@@ -1537,7 +1537,8 @@ test("paragraph attribution stays in the margin and selecting text leaves only d
   });
   // Their faces: Daniel's own picture, and the mark of the harness claude:1's Instance runs.
   await fixtureFaces(browser, { "user:u-daniel": "/role-avatars/default.svg", "agent:a": "/agent-vendors/claude.svg" });
-  const editor = await openLivePage(browser);
+  const live = pageDocument(BODY);
+  const editor = await openLivePage(browser, live);
 
   // Under the title, its authors by face and name, most words first, as a column's byline.
   const byline = browser.getByTestId("page-byline");
@@ -1578,6 +1579,20 @@ test("paragraph attribution stays in the margin and selecting text leaves only d
   await editor.getByText("none", { exact: true }).click();
   await editor.getByText("none", { exact: true }).hover();
   await expect(line).toContainText("Daniel");
+
+  // A live edit can move or remove an author's words before there is a new saved revision.
+  // Hovering must resolve against the document on screen, without another blame request.
+  editPageMarkdown(live, () => BODY.replace("In progress", "Waiting for review. In progress"), "agent");
+  await expect(editor).toContainText("Waiting for review. In progress");
+  await byline.getByText("claude:1", { exact: true }).hover();
+  await expect.poll(() => browser.evaluate(() =>
+    [...(CSS.highlights.get("page-author") ?? [])].map((range) => range.toString()).join("")))
+    .toBe("In progress");
+  editPageMarkdown(live, () => BODY.replace("In progress", "Waiting for review."), "agent");
+  await expect(editor).not.toContainText("In progress");
+  await expect(byline).toHaveText("Daniel");
+  await expect.poll(() => browser.evaluate(() => CSS.highlights.has("page-author"))).toBe(false);
+  expect((await fixtureRequestRecords(browser, "page-blame")).length).toBe(1);
 });
 
 test("two people co-edit a page live: each sees the other's typing and cursor, and the session gets both", async ({ page: first, browser }) => {
