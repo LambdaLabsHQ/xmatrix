@@ -15,6 +15,9 @@ const WEB_PRODUCT_MEDIA_PATH =
   "/api/xmatrix/relay-v2/message-attachments/product-media";
 const PRODUCT_MEDIA_CACHE_NAME = "xmatrix-product-media-v1";
 
+/** Bytes of one attachment received so far; `total` is null when the response does not say. */
+export type ProductMessageAttachmentProgress = (received: number, total: number | null) => void;
+
 export interface ProductMessageAttachmentCache {
   match(request: string): Promise<Response | undefined>;
   put(request: string, response: Response): Promise<void>;
@@ -45,6 +48,7 @@ export class ProductMessageAttachmentMediaClient {
   async loadMessageAttachment(
     accessToken: string,
     messageAttachment: { channelId: string; messageId: string; attachmentId: string },
+    onProgress?: ProductMessageAttachmentProgress,
   ): Promise<ProductMessageAttachmentResult> {
     const cacheKey = productMediaCacheKey(messageAttachment);
     const cached = await this.cache?.match(cacheKey);
@@ -71,7 +75,8 @@ export class ProductMessageAttachmentMediaClient {
       error.status = response.status;
       throw error;
     }
-    const stored = await retainProductMediaResponse(this.cache, cacheKey, response);
+    const counted = onProgress ? countProductMediaResponse(response, onProgress) : response;
+    const stored = await retainProductMediaResponse(this.cache, cacheKey, counted);
     const result = await resultFromProductMediaResponse(stored, messageAttachment);
     return { ...result, source: "network", retained: this.cache !== null };
   }
@@ -105,6 +110,32 @@ function browserProductMediaCache(): ProductMessageAttachmentCache | null {
       await cache.put(request, response);
     },
   };
+}
+
+/**
+ * The same response, reporting bytes as they arrive. Counting sits before the
+ * cache copy, so progress follows the network rather than whichever reader
+ * finishes last.
+ */
+function countProductMediaResponse(
+  response: Response,
+  onProgress: ProductMessageAttachmentProgress,
+): Response {
+  if (!response.body) return response;
+  const declared = Number(
+    response.headers.get("x-xmatrix-attachment-size") || response.headers.get("content-length"),
+  );
+  const total = Number.isSafeInteger(declared) && declared >= 1 ? declared : null;
+  let received = 0;
+  onProgress(received, total);
+  const body = response.body.pipeThrough(new TransformStream<Uint8Array, Uint8Array>({
+    transform(chunk, controller) {
+      received += chunk.byteLength;
+      onProgress(received, total);
+      controller.enqueue(chunk);
+    },
+  }));
+  return new Response(body, { status: response.status, statusText: response.statusText, headers: response.headers });
 }
 
 async function retainProductMediaResponse(

@@ -161,3 +161,27 @@ test("ProductMessageAttachmentMediaClient retains bodies and reuses them on late
   assert.equal(second.body.size, bytes.byteLength);
   assert.equal(fetches, 1);
 });
+
+test("ProductMessageAttachmentMediaClient reports download progress against the declared size", async () => {
+  const { ProductMessageAttachmentMediaClient } = require("./product-message-attachment-media.ts");
+  const chunks = [new Uint8Array([1, 2, 3]), new Uint8Array([4, 5])];
+  const client = new ProductMessageAttachmentMediaClient(async () =>
+    new Response(new ReadableStream({
+      start(controller) {
+        for (const chunk of chunks) controller.enqueue(chunk);
+        controller.close();
+      },
+    }), {
+      status: 200,
+      headers: { "content-type": "video/mp4", "x-xmatrix-attachment-size": "5" },
+    }),
+  null);
+  const reports = [];
+  const result = await client.loadMessageAttachment(
+    "tok",
+    { channelId: "c", messageId: "m", attachmentId: "a" },
+    (received, total) => reports.push([received, total]),
+  );
+  assert.deepEqual(reports, [[0, 5], [3, 5], [5, 5]]);
+  assert.equal(result.body.size, 5);
+});

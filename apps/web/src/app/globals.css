@@ -4700,6 +4700,56 @@ html[data-app-theme="wood"] .xmatrix-app .app-rail button.bg-primary {
   min-height: 0 !important;
 }
 
+.media-download-progress {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  width: 100%;
+  min-height: 6rem;
+  padding: 1rem;
+}
+
+.message-video-attachment > .media-download-progress {
+  position: absolute;
+  inset: 0;
+  color: rgb(255 255 255 / 0.9);
+}
+
+.media-download-progress-track {
+  position: relative;
+  display: block;
+  width: min(100%, 16rem);
+  height: 4px;
+  overflow: hidden;
+  border-radius: 9999px;
+  background: color-mix(in oklch, currentColor 22%, transparent);
+}
+
+.media-download-progress-bar {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: currentColor;
+  transition: width 200ms linear;
+}
+
+.media-download-progress-bar[data-indeterminate] {
+  width: 30%;
+  animation: media-download-indeterminate 1.2s ease-in-out infinite;
+}
+
+@keyframes media-download-indeterminate {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(340%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .media-download-progress-bar { transition: none; }
+  .media-download-progress-bar[data-indeterminate] { animation: none; width: 100%; opacity: 0.4; }
+}
+
 .app-loading-image {
   position: relative;
   display: block;
