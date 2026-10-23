@@ -200,7 +200,7 @@ function domRange(view: EditorView, from: number, to: number): Range | null {
  * by face and name, most words first. Pointing at one marks their words in the text; an author writing now breathes.
  */
 export function PageByline({ view, frame, source, writing }: {
-  view: RefObject<EditorView | null>;
+  view: EditorView;
   frame: RefObject<HTMLElement | null>;
   source: PageBlameSource;
   /** Whether an author is changing the page now. */
@@ -217,21 +217,20 @@ export function PageByline({ view, frame, source, writing }: {
   useEffect(() => {
     let live = true;
     const read = () => void reader.current.read().then((blame) => {
-      const current = view.current;
-      if (!live || !current) return;
-      const { base, carried } = carriedBlame(blame, current.state.doc);
+      if (!live || typeof blame?.body !== "string") return;
+      const { base, carried } = carriedBlame(blame, view.state.doc);
       shownOnce.current = true;
-      setWriters(pageWriters(base, carried, current.state.doc));
-    }, () => undefined);
+      setWriters(pageWriters(base, carried, view.state.doc));
+    }).catch(() => undefined);
     const timer = window.setTimeout(read, shownOnce.current ? HEAD_SETTLE_MS : 0);
     return () => { live = false; window.clearTimeout(timer); };
   }, [head, view]);
 
   // It stands under the title, wherever the title's lines end.
   useEffect(() => {
-    const current = view.current;
+    const current = view;
     const box = frame.current;
-    if (!current || !box) return;
+    if (!box) return;
     let title: Element | null = null;
     const place = () => {
       const first = current.dom.firstElementChild;
@@ -252,10 +251,9 @@ export function PageByline({ view, frame, source, writing }: {
   }, [frame, view]);
 
   const mark = (writer: PageWriter | null) => {
-    const current = view.current;
     if (typeof CSS === "undefined" || !("highlights" in CSS)) return;
-    if (!writer || !current) { CSS.highlights.delete(AUTHOR_HIGHLIGHT); return; }
-    const ranges = writer.ranges.map((range) => domRange(current, range.from, range.to)).filter((range) => range !== null);
+    if (!writer) { CSS.highlights.delete(AUTHOR_HIGHLIGHT); return; }
+    const ranges = writer.ranges.map((range) => domRange(view, range.from, range.to)).filter((range) => range !== null);
     CSS.highlights.set(AUTHOR_HIGHLIGHT, new Highlight(...ranges));
   };
   useEffect(() => () => {

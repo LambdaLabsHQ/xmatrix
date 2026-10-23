@@ -332,6 +332,8 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
   const wrote = useRef(onWrite);
   wrote.current = onWrite;
   const view = useRef<EditorView | null>(null);
+  // The editor once it is drawn, for what is placed by it as it appears (the byline).
+  const [drawnView, setDrawnView] = useState<EditorView | null>(null);
   const placeholderText = useRef(placeholder);
   useEffect(() => {
     placeholderText.current = placeholder;
@@ -591,6 +593,7 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
       },
     });
     view.current = editor;
+    setDrawnView(editor);
     showToolbar(readToolbar(editor));
     readBlocks(editor);
     const resized = new ResizeObserver(() => measure());
@@ -607,6 +610,7 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
       window.clearTimeout(commentTimer.current);
       editor.destroy();
       view.current = null;
+      setDrawnView(null);
     };
     // The editor binds one session for its lifetime; the parent remounts it per page.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -907,7 +911,7 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
         </div>
       )}
       {blame && <PageBlameLayer view={view} frame={frame} source={blame} inMargin={commentInMargin} />}
-      {blame && <PageByline view={view} frame={frame} source={blame} writing={writing ?? (() => false)} />}
+      {blame && drawnView && <PageByline view={drawnView} frame={frame} source={blame} writing={writing ?? (() => false)} />}
       {trigger && menuAt && (
         <div className="absolute z-20 w-64" style={{ left: menuAt.left, top: menuAt.bottom + 4 }}>
         <PaperPopover role="listbox" aria-label={MENU_LABELS[trigger.kind]} data-testid={`page-${trigger.kind}-menu`}

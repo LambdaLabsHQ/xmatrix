@@ -105,7 +105,7 @@ test("the page tree leads with New page, and Ctrl+N there makes a page", async (
   await expect(page).toHaveURL(/page=p-new/u);
 });
 
-test("a new page's header is empty, and calling an Agent with @ makes it", async ({ page }) => {
+test("a new page's header is empty, and an Agent is called to it with @", async ({ page }) => {
   await installPageTreeStubs(page, ["Home"]);
   const registrations = harnessRegistrations(["claude", "codex"]);
   await fixtureJson(page, "registration-catalog", "**/agent-registrations", { registrations,
@@ -127,13 +127,14 @@ test("a new page's header is empty, and calling an Agent with @ makes it", async
   // Its header is a page's; what needs a made page (History, Share) comes with the first write.
   const controls = page.getByTestId("page-controls");
   await expect(controls.getByRole("button")).toHaveCount(0);
-  await page.keyboard.type("@cod");
-  await page.getByTestId("page-agent-menu").getByRole("option", { name: /codex/u }).click();
-  // Calling an Agent to write it is a write: the page is made for the Agent to write.
+  await page.keyboard.type("Plan");
   await expect.poll(async () => (await fixtureRequestBodies(page, "page-create")).length).toBe(1);
   const [made] = await fixtureRequestBodies(page, "page-create");
   expect(made).toMatchObject({ parentPageId: null });
   await expect(page).toHaveURL(/page=p-new/u);
+  await page.keyboard.press("Enter");
+  await page.keyboard.type("@cod");
+  await page.getByTestId("page-agent-menu").getByRole("option", { name: /codex/u }).click();
   await expect.poll(async () => (await fixtureRequestBodies(page, "writer-message"))[0]?.body)
     .toMatch(/^@codex launch:force page:p-new/u);
   expect(await fixtureRequestBodies(page, "co-writing")).toEqual([{
