@@ -1,3 +1,4 @@
+import { runtimeDeliveryFetchIngress, withRuntimeDeliveryIngress } from "./runtime-transport/runtime-delivery-diagnostics";
 import { TURN_RETRY_RUNTIME_PATH } from "./agent-turn-retry-policy";
 import { plainDeliveryRecord as plainObject } from "./runtime-transport/delivery-record";
 import { reportError, sendErrorReports } from "@xmatrix/protocol/error-reporting";
@@ -207,19 +208,21 @@ export class RelayRuntimeLive extends DurableObject<Env> {
   }
 
   async fetch(request: Request): Promise<Response> {
-    try {
-      return await this.routeFetch(request);
-    } catch (error) {
-      // Record the receiving stack before the platform transports the exception
-      // to another DO. A failed delivery may already have reached some sockets.
+    return withRuntimeDeliveryIngress(runtimeDeliveryFetchIngress(request), async () => {
       try {
-        reportError(error, { operation: "RelayRuntime.fetch" });
-        this.ctx.waitUntil(sendErrorReports());
-      } catch {
-        // Reporting must not replace the originating delivery failure.
+        return await this.routeFetch(request);
+      } catch (error) {
+        // Record the receiving stack before the platform transports the exception
+        // to another DO. A failed delivery may already have reached some sockets.
+        try {
+          reportError(error, { operation: "RelayRuntime.fetch" });
+          this.ctx.waitUntil(sendErrorReports());
+        } catch {
+          // Reporting must not replace the originating delivery failure.
+        }
+        throw error;
       }
-      throw error;
-    }
+    });
   }
 
   private async routeFetch(request: Request): Promise<Response> {
@@ -504,26 +507,32 @@ export class RelayRuntimeLive extends DurableObject<Env> {
   }
 
   async webSocketMessage(socket: WebSocket, message: string | ArrayBuffer): Promise<void> {
-    if (!this.productAdapter?.owns(socket)) {
-      socket.close(1008, "Runtime accepts only product sockets");
-      return;
-    }
-    await this.productAdapter.webSocketMessage(socket, message);
-    this.refreshProductOccupancy();
+    return withRuntimeDeliveryIngress("socket_message", async () => {
+      if (!this.productAdapter?.owns(socket)) {
+        socket.close(1008, "Runtime accepts only product sockets");
+        return;
+      }
+      await this.productAdapter.webSocketMessage(socket, message);
+      this.refreshProductOccupancy();
+    });
   }
 
   async webSocketClose(socket: WebSocket, code?: number, reason?: string, wasClean?: boolean): Promise<void> {
-    if (!this.productAdapter?.owns(socket)) return;
-    await this.productAdapter.webSocketClose(socket, code, reason, wasClean);
-    this.refreshProductOccupancy();
+    return withRuntimeDeliveryIngress("socket_close", async () => {
+      if (!this.productAdapter?.owns(socket)) return;
+      await this.productAdapter.webSocketClose(socket, code, reason, wasClean);
+      this.refreshProductOccupancy();
+    });
   }
 
   async webSocketError(socket: WebSocket): Promise<void> {
-    if (this.productAdapter?.owns(socket)) {
-      await this.productAdapter.webSocketError(socket);
-      return;
-    }
-    socket.close(1011, "Runtime socket error");
+    return withRuntimeDeliveryIngress("socket_error", async () => {
+      if (this.productAdapter?.owns(socket)) {
+        await this.productAdapter.webSocketError(socket);
+        return;
+      }
+      socket.close(1011, "Runtime socket error");
+    });
   }
 
   /** The Worker names the owner cell it routed a socket to; remember it. */

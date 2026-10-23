@@ -402,6 +402,7 @@ function scheduleAgentPresenceAcrossCells(input: {
     channelId: input.channelId,
     body,
     exceptCell: input.runtimeSelf?.cellName() ?? RELAY_RUNTIME_SELECTED_CELL,
+    reason: input.reason,
   }).catch((error: unknown) => {
     console.error("Agent presence cross-cell delivery failed", error);
   });

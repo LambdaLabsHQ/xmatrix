@@ -174,6 +174,8 @@ Runtime delivery errors retain the sending cause chain and report the original
 receiving exception before it crosses a Durable Object boundary. Reporting
 preserves rejection and never replays a potentially partial broadcast. See
 [Runtime delivery errors](../operations/runtime-delivery-errors.md).
+Routed failures also retain invocation-local ingress, hop roles, route, phase
+and attempt diagnostics as fixed labels, without cell or recipient identities.
 
 Agent turn failures share one reconnect-safe lifecycle reporter across native,
 ACP, stream and headless adapters. Channel notices retain credential-redacted

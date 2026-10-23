@@ -22,6 +22,21 @@ deployed head sampling rate is one; an empty query is not proof of no failure.
 Keep unresolved incidents open until the originating failure is understood and
 any fix is verified in production.
 
+HUB-9Y exhausted the platform's subrequest depth while sending Agent presence;
+the receiving presence handler only writes local Human sockets and does not
+republish. The original event does not establish where the depth accumulated.
+Routed failures now retain fixed hop diagnostics in their exception messages:
+invocation ingress, delivery kind, direct-directory/fanout/legacy route, source
+and target roles, presence reason, fetch/response phase, and attempt count.
+Invocation-local context keeps concurrent socket and RPC provenance separate.
+No cell names, principals, payloads, request URLs or headers enter those fields.
+The first failed hop appears on the outer error and up to four failed hops on
+its aggregate cause; all original exceptions remain in the cause chain.
+The next depth-limit event should distinguish a socket-originated direct hop
+from an internally received delivery or fanout hop before choosing recovery.
+Sentry's existing duplicate suppression remains in force. Delivery and its
+overload-only retry policy are unchanged; do not replay a partial broadcast.
+
 A platform or RPC Error can arrive without a JavaScript stack. The Worker
 reporter then retains the SDK's synchronous capture stack and labels its
 mechanism `stack_origin=capture_boundary`; Sentry issue reads show
