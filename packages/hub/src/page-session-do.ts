@@ -11,6 +11,10 @@ import {
 import { tellPageAutomationChannels } from "./page-automation-wake";
 import { startPageSummary } from "./page-summary";
 import type { Env } from "./types";
+import { platformAdminSpaceId } from "./admin-platform-access";
+import { base64UrlDecodeBytes } from "./relay-v2-primitives";
+import { pageCoWriteDataPoint } from "./page-co-write-diagnostics";
+import { tellPageCoWriter } from "./page-co-write-instruction";
 
 /**
  * One Durable Object per page hosts its live session (page-session.ts). It
@@ -31,6 +35,14 @@ const TICKET_TTL_MS = 60_000;
 const COMMIT_IDLE_MS = 5_000;
 const REVALIDATE_MS = 60_000;
 const MAX_CONNECTIONS = 64;
+/**
+ * The people gone from the page this long, its Agents co-writing live leave it too (pages-live-document.md §4.2).
+ * Long enough for a reload or a dropped connection to come back first.
+ */
+export const PAGE_CO_WRITING_PEOPLE_GONE_MS = 2 * 60_000;
+
+/** When the last person left the page, while its co-writing waits to end. */
+type PeopleLeft = { at: number; spaceId: string; pageId: string };
 
 interface Attachment {
   connectionId: string;
@@ -38,6 +50,10 @@ interface Attachment {
   pageId: string;
   principal: PageSessionPrincipal;
   canEdit: boolean;
+  /** An Agent's runtime co-writing the page live, not a replica of the document. */
+  coWriter?: boolean;
+  /** A co-writer streaming what its Agent writes from a conversation; the session asks it nothing. */
+  streams?: boolean;
 }
 
 interface Ticket extends Omit<Attachment, "connectionId"> { expiresAt: number }
@@ -57,8 +73,15 @@ function pages(env: Env): PostgresPageRepository {
     applicationName: "xmatrix-page-session", connectTimeoutMs: POSTGRES_MESSAGE_CONNECT_TIMEOUT_MS,
     statementTimeoutMs: 5_000,
     transactionTimeoutMs: 10_000, lockTimeoutMs: 2_000,
-  }));
+  }), { creditsWaivedSpaceId: platformAdminSpaceId(env) });
 }
+
+/**
+ * A commit the Space's plan refuses: an Agent's when the month's credits are
+ * gone, anyone's when a Free Space has used its allowance or a past-due Space
+ * is read-only.
+ */
+const PLAN_REFUSALS = new Set(["credits_exhausted", "payment_required", "billing_grace_read_only"]);
 
 /** The summary being written for this page, so a second one does not start beside it. */
 type SummaryExecution = { requestId: string; revision: number; startedAt: number; ended?: true };
@@ -71,6 +94,7 @@ export class RelayPageSession extends DurableObject<Env> {
   private spaceId: string | null = null;
   private pageId: string | null = null;
   private rehydrated: Promise<void> | null = null;
+  private summaryStarting: Promise<void> | null = null;
 
   constructor(state: DurableObjectState, env: Env) {
     super(state, env);
@@ -80,6 +104,13 @@ export class RelayPageSession extends DurableObject<Env> {
 
   private newSession(): PageSession {
     const ports: PageSessionPorts = {
+      observeCoWriting: (principal, event) => {
+        const sink = this.env.DIAGNOSTICS_AE;
+        if (!sink) return;
+        this.later(pageCoWriteDataPoint(principal, this.need("page"), event,
+          this.env.DIAGNOSTICS_HASH_SECRET || this.env.BETTER_AUTH_SECRET)
+          .then((point) => sink.writeDataPoint(point)).catch(() => { /* never block the page on diagnostics */ }));
+      },
       loadHead: async (principal) => {
         const { page } = await pages(this.env).read({ requestId: crypto.randomUUID(), spaceId: this.need("space"),
           pageId: this.need("page"), principal: pagePrincipalFromSession(principal) });
@@ -96,10 +127,15 @@ export class RelayPageSession extends DurableObject<Env> {
             pageId: this.need("page"), principal: pagePrincipalFromSession(principal), ...input });
           await tellPageAutomationChannels(this.env, result.automationChannels);
           return { revision: result.revision.revision, kind: result.revision.kind, headRevision: result.page.headRevision,
-            detachedAutomations: result.detachedAutomations, attachedAutomations: result.attachedAutomations };
+            detachedAutomations: result.detachedAutomations, attachedAutomations: result.attachedAutomations,
+            agentSuggestOnly: result.page.agentSuggestOnly };
         } catch (error) {
           if (error instanceof PageControlError && error.code === "page_revision_conflict") {
             throw new PageSessionConflict(Number(error.detail?.headRevision ?? 0), String(error.detail?.body ?? ""));
+          }
+          // Pending text stays in the session for the next commit the Space's plan admits.
+          if (error instanceof PageControlError && PLAN_REFUSALS.has(error.code)) {
+            ports.broadcast(encodeNotice({ type: "error", code: error.code }));
           }
           throw error;
         }
@@ -116,10 +152,18 @@ export class RelayPageSession extends DurableObject<Env> {
       },
       broadcast: (data, except) => {
         for (const socket of this.ctx.getWebSockets()) {
-          if ((socket.deserializeAttachment() as Attachment | null)?.connectionId === except) continue;
+          const attachment = socket.deserializeAttachment() as Attachment | null;
+          // A co-writer is told what it needs in its turns, not every keystroke.
+          if (attachment?.connectionId === except || attachment?.coWriter) continue;
           try { socket.send(data); } catch { /* closed */ }
         }
       },
+      // An Agent's edit is typed in over about two seconds at most (40 steps), as a person types. Each step
+      // is a small insertion into the document (page-typing.ts), so a long page costs no more than one.
+      writePaceMs: 45,
+      // While someone has the page open, an Agent's words come as fast as they read along: a word at a time,
+      // 12 characters a second (6 of Han), with a breath after each sentence and line.
+      readerPace: { charsPerSecond: 12, sentencePauseMs: 700 },
     };
     return new PageSession(ports);
   }
@@ -153,7 +197,8 @@ export class RelayPageSession extends DurableObject<Env> {
         for (const socket of sockets) {
           const attachment = socket.deserializeAttachment() as Attachment | null;
           if (attachment) this.session.connect({ id: attachment.connectionId, principal: attachment.principal,
-            canEdit: attachment.canEdit });
+            canEdit: attachment.canEdit, coWriter: attachment.coWriter === true, streams: attachment.streams === true },
+          { resumed: true });
         }
       })();
       this.rehydrated.catch(() => { this.rehydrated = null; });
@@ -177,7 +222,8 @@ export class RelayPageSession extends DurableObject<Env> {
         await this.ctx.storage.put("identity", { spaceId: body.spaceId, pageId: body.pageId });
         for (const [key, ticket] of this.tickets) if (ticket.expiresAt < Date.now()) this.tickets.delete(key);
         this.tickets.set(body.ticket, { spaceId: body.spaceId, pageId: body.pageId, principal: body.principal,
-          canEdit: body.canEdit, expiresAt: Date.now() + TICKET_TTL_MS });
+          canEdit: body.canEdit, ...(body.coWriter === true ? { coWriter: true } : {}),
+          ...(body.coWriter === true && body.streams === true ? { streams: true } : {}), expiresAt: Date.now() + TICKET_TTL_MS });
         return Response.json({ ok: true });
       }
       if (url.pathname === "/ws") return await this.accept(request);
@@ -200,9 +246,22 @@ export class RelayPageSession extends DurableObject<Env> {
           throw error;
         }
       }
+      if (request.method === "POST" && url.pathname === "/internal/seed") {
+        // A page just made from the document its author is writing: the session starts from that
+        // document, which their editor goes on syncing. Only a session that never loaded takes one.
+        const body = await request.json() as { spaceId: string; pageId: string; principal: PageSessionPrincipal;
+          document: string };
+        this.bind(body.spaceId, body.pageId);
+        await this.ctx.storage.put("identity", { spaceId: body.spaceId, pageId: body.pageId });
+        await this.ready();
+        if (this.session.loaded || await this.ctx.storage.get("state")) return Response.json({ seeded: false });
+        await this.session.ensureLoaded(body.principal, null, base64UrlDecodeBytes(body.document));
+        return Response.json({ seeded: true });
+      }
       if (request.method === "POST" && url.pathname === "/internal/summary-ended") {
         const body = await request.json() as { spaceId: string; pageId: string; requestId: string };
         this.bind(body.spaceId, body.pageId);
+        await this.summaryStarting;
         const running = await this.ctx.storage.get<SummaryExecution>("summary");
         if (running?.requestId === body.requestId) await this.ctx.storage.put("summary", { ...running, ended: true });
         // The page may have moved on while that one ran: the next one reads the new head.
@@ -225,6 +284,16 @@ export class RelayPageSession extends DurableObject<Env> {
         if (typeof body.agentSuggestOnly === "boolean") this.session.setAgentSuggestOnly(body.agentSuggestOnly);
         else await this.session.reload(body.principal, body.redact);
         return Response.json({ ok: true });
+      }
+      if (request.method === "POST" && url.pathname === "/internal/co-write-undo") {
+        const body = await request.json() as { spaceId: string; pageId: string; principal: PageSessionPrincipal;
+          conversationId: string };
+        this.bind(body.spaceId, body.pageId);
+        if (!this.ctx.getWebSockets().length) return Response.json({ outcome: "nothing" });
+        await this.ready(body.principal);
+        const outcome = this.session.loaded ? this.session.undoCoWriting(body.conversationId, body.principal.label) : "nothing";
+        if (this.session.hasPendingEdits) await this.scheduleAlarm(COMMIT_IDLE_MS);
+        return Response.json({ outcome });
       }
       if (request.method === "GET" && url.pathname === "/internal/presence") {
         if (!this.ctx.getWebSockets().length) return Response.json({ present: [] });
@@ -268,10 +337,13 @@ export class RelayPageSession extends DurableObject<Env> {
     const pair = new WebSocketPair();
     const [client, server] = [pair[0], pair[1]];
     const attachment: Attachment = { connectionId: crypto.randomUUID(), spaceId: ticket.spaceId,
-      pageId: ticket.pageId, principal: ticket.principal, canEdit: ticket.canEdit };
+      pageId: ticket.pageId, principal: ticket.principal, canEdit: ticket.canEdit,
+      ...(ticket.coWriter ? { coWriter: true } : {}), ...(ticket.streams ? { streams: true } : {}) };
     server.serializeAttachment(attachment);
     this.ctx.acceptWebSocket(server);
-    this.session.connect({ id: attachment.connectionId, principal: attachment.principal, canEdit: attachment.canEdit });
+    if (isPerson(attachment)) await this.ctx.storage.delete("peopleLeft");
+    this.session.connect({ id: attachment.connectionId, principal: attachment.principal, canEdit: attachment.canEdit,
+      coWriter: attachment.coWriter === true, streams: attachment.streams === true });
     await this.scheduleAlarm(REVALIDATE_MS);
     const protocol = request.headers.get("sec-websocket-protocol")?.split(",")[0]?.trim();
     return new Response(null, { status: 101, webSocket: client,
@@ -295,6 +367,11 @@ export class RelayPageSession extends DurableObject<Env> {
     const attachment = socket.deserializeAttachment() as Attachment | null;
     await this.ready();
     if (attachment) this.session.disconnect(attachment.connectionId);
+    if (attachment && isPerson(attachment) && !this.people(socket)) {
+      await this.ctx.storage.put("peopleLeft", { at: Date.now(), spaceId: attachment.spaceId,
+        pageId: attachment.pageId } satisfies PeopleLeft);
+      await this.scheduleAlarm(PAGE_CO_WRITING_PEOPLE_GONE_MS);
+    }
     await this.settle();
     // The last person leaving is when a page they edited gets its summary.
     this.later(this.summaryDue(socket));
@@ -312,12 +389,16 @@ export class RelayPageSession extends DurableObject<Env> {
     try { this.ctx.waitUntil(task); } catch { void task; }
   }
 
-  private async summaryDue(leaving?: WebSocket): Promise<void> {
+  private summaryDue(leaving?: WebSocket): Promise<void> {
+    if (this.summaryStarting) return this.summaryStarting.then(() => this.summaryDue(leaving));
+    this.summaryStarting = this.startSummaryDue(leaving).finally(() => { this.summaryStarting = null; });
+    return this.summaryStarting;
+  }
+
+  private async startSummaryDue(leaving?: WebSocket): Promise<void> {
     try {
       if (!this.spaceId || !this.pageId) return;
-      const people = this.ctx.getWebSockets().some((socket) => socket !== leaving &&
-        (socket.deserializeAttachment() as Attachment | null)?.principal.kind === "user");
-      if (people) return;
+      if (this.people(leaving)) return;
       const last = await this.ctx.storage.get<SummaryExecution>("summary");
       if (last && !last.ended && Date.now() - last.startedAt < SUMMARY_EXECUTION_MS) return;
       const started = await startPageSummary(this.env, { spaceId: this.spaceId, pageId: this.pageId,
@@ -332,6 +413,40 @@ export class RelayPageSession extends DurableObject<Env> {
     }
   }
 
+  /** Whether a person (not an Agent's co-writer) is on the page, besides one leaving. */
+  private people(leaving?: WebSocket): boolean {
+    return this.ctx.getWebSockets().some((socket) => {
+      const attachment = socket.deserializeAttachment() as Attachment | null;
+      return socket !== leaving && attachment !== null && isPerson(attachment);
+    });
+  }
+
+  /**
+   * Once the people have been gone a while, ends the page's live co-writing and tells each Agent to leave; a
+   * person back on the page in time keeps it. Until then the alarm stays set for it.
+   */
+  private async coWritingDue(): Promise<void> {
+    const left = await this.ctx.storage.get<PeopleLeft>("peopleLeft");
+    if (!left) return;
+    if (this.people()) {
+      await this.ctx.storage.delete("peopleLeft");
+      return;
+    }
+    const remaining = left.at + PAGE_CO_WRITING_PEOPLE_GONE_MS - Date.now();
+    if (remaining > 0) {
+      await this.scheduleAlarm(remaining);
+      return;
+    }
+    const ended = await pages(this.env).endCoWritingOnPage({ requestId: crypto.randomUUID(), spaceId: left.spaceId,
+      pageId: left.pageId });
+    await this.ctx.storage.delete("peopleLeft");
+    for (const co of ended) {
+      await tellPageCoWriter(this.env, { spaceId: left.spaceId, pageId: left.pageId, conversationId: co.conversationId,
+        userId: co.startedByUserId, active: false }).catch((error: unknown) => console.error("Page co-writer was not told to leave",
+        { pageId: left.pageId, conversationId: co.conversationId, error: error instanceof Error ? error.message : String(error) }));
+    }
+  }
+
   override async webSocketError(socket: WebSocket): Promise<void> {
     await this.webSocketClose(socket);
   }
@@ -343,8 +458,25 @@ export class RelayPageSession extends DurableObject<Env> {
    */
   private async settle(): Promise<void> {
     if (this.ctx.getWebSockets().length) return;
-    await this.session.commit();
-    if (!this.session.hasPendingEdits) await this.ctx.storage.deleteAlarm();
+    await this.commitPending();
+    // Co-writing waiting to end when the people have been gone a while keeps its alarm.
+    if (!this.session.hasPendingEdits && !await this.ctx.storage.get<PeopleLeft>("peopleLeft")) {
+      await this.ctx.storage.deleteAlarm();
+    }
+  }
+
+  /**
+   * A refused commit (no Agent credits left, a Free allowance used up, a page
+   * over its size) keeps its edits pending for a later commit; it never stops
+   * the alarm that re-authorizes open connections.
+   */
+  private async commitPending(): Promise<void> {
+    try {
+      await this.session.commit();
+    } catch (error) {
+      console.error("Page session commit failed", { pageId: this.pageId,
+        error: error instanceof Error ? error.message : String(error) });
+    }
   }
 
   /**
@@ -384,8 +516,10 @@ export class RelayPageSession extends DurableObject<Env> {
       return;
     }
     await this.ready();
-    await this.session.commit();
+    await this.commitPending();
+    await this.coWritingDue();
     // Access changes reach open connections: re-authorize each distinct principal.
+    // Access is the read check without the page's text, which a verdict never needs.
     const repository = pages(this.env);
     const verdicts = new Map<string, { canRead: boolean; canEdit: boolean }>();
     for (const socket of this.ctx.getWebSockets()) {
@@ -394,9 +528,9 @@ export class RelayPageSession extends DurableObject<Env> {
       const key = `${attachment.principal.kind}:${attachment.principal.id}:${attachment.principal.runProof?.runId ?? ""}`;
       if (!verdicts.has(key)) {
         try {
-          const { page } = await repository.read({ requestId: crypto.randomUUID(), spaceId: attachment.spaceId,
+          const { canEdit } = await repository.access({ requestId: crypto.randomUUID(), spaceId: attachment.spaceId,
             pageId: attachment.pageId, principal: pagePrincipalFromSession(attachment.principal) });
-          verdicts.set(key, { canRead: true, canEdit: page.canEdit });
+          verdicts.set(key, { canRead: true, canEdit });
         } catch (error) {
           if (!(error instanceof PageControlError) || error.status >= 500) continue;
           verdicts.set(key, { canRead: false, canEdit: false });
@@ -415,7 +549,13 @@ export class RelayPageSession extends DurableObject<Env> {
         this.session.setCanEdit(attachment.connectionId, verdict.canEdit);
       }
     }
-    if (this.ctx.getWebSockets().length) await this.ctx.storage.setAlarm(Date.now() + REVALIDATE_MS);
+    // The fired alarm is spent; one set above for co-writing that waits to end may come sooner.
+    if (this.ctx.getWebSockets().length) await this.scheduleAlarm(REVALIDATE_MS);
     else await this.settle();
   }
+}
+
+/** A person on the page, as against an Agent's runtime co-writing it. */
+function isPerson(attachment: Attachment): boolean {
+  return attachment.principal.kind === "user" && attachment.coWriter !== true;
 }

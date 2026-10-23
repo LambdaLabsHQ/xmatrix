@@ -1,34 +1,9 @@
 import { expect, test } from "./fixtures";
+import { videoFixture } from "./recorded-video";
 import { E2E_CHANNEL, E2E_NOW, E2E_USER_SENDER, openGeneralChannelWithHistory } from "./workspace-fixtures";
 
 test("generic MIME WebM plays inline and in the lightbox; audio files have native controls", async ({ page }) => {
-  // Generate a real VP8 WebM in Chromium rather than asserting only the tag.
-  const encoded = await page.evaluate(async () => {
-    const canvas = document.createElement("canvas");
-    canvas.width = canvas.height = 32;
-    const context = canvas.getContext("2d")!;
-    context.fillStyle = "green";
-    context.fillRect(0, 0, 32, 32);
-    const stream = canvas.captureStream(10);
-    const recorder = new MediaRecorder(stream, { mimeType: "video/webm;codecs=vp8" });
-    const chunks: Blob[] = [];
-    const stopped = new Promise<void>((resolve) => { recorder.onstop = () => resolve(); });
-    recorder.ondataavailable = (event) => chunks.push(event.data);
-    recorder.start();
-    let frame = 0;
-    const animation = setInterval(() => {
-      context.fillStyle = frame++ % 2 ? "green" : "blue";
-      context.fillRect(0, 0, 32, 32);
-    }, 50);
-    await new Promise((resolve) => setTimeout(resolve, 500));
-    clearInterval(animation);
-    recorder.stop();
-    await stopped;
-    stream.getTracks().forEach((track) => track.stop());
-    const bytes = new Uint8Array(await new Blob(chunks).arrayBuffer());
-    return btoa(String.fromCharCode(...bytes));
-  });
-  const video = Buffer.from(encoded, "base64");
+  const video = videoFixture();
   const wav = Buffer.alloc(44 + 8000);
   wav.write("RIFF"); wav.writeUInt32LE(wav.length - 8, 4); wav.write("WAVEfmt ", 8);
   wav.writeUInt32LE(16, 16); wav.writeUInt16LE(1, 20); wav.writeUInt16LE(1, 22);
@@ -77,4 +52,31 @@ test("Internet media loads only after Preview and playback failures retain the o
   await expect(page.getByRole("link", { name: "https://media.example/clip.webm?download=1" })).toBeVisible();
   await page.getByRole("button", { name: "Close media" }).click();
   await expect(page.getByText("This media could not be played.", { exact: false })).toHaveCount(0);
+});
+
+test("a file attachment is a slip of tinted paper, not a glass card", async ({ page }) => {
+  await openGeneralChannelWithHistory(page, { ...E2E_CHANNEL, messageCount: 1, lastMessageSequence: 1 }, [{
+    messageId: "file-message", channelId: E2E_CHANNEL.id, sequence: 1,
+    body: "Repro files", sentAt: E2E_NOW, from: E2E_USER_SENDER,
+    attachments: [
+      { id: "repro", kind: "file", name: "review817-repro.mjs", mimeType: "application/octet-stream", size: 5530, url: "/e2e-media/repro.mjs" },
+    ],
+  }]);
+  const card = page.getByRole("button", { name: "Download review817-repro.mjs" });
+  await expect(card).toBeVisible();
+  const material = await card.evaluate((element) => {
+    const style = getComputedStyle(element);
+    const icon = getComputedStyle(element.firstElementChild!);
+    return {
+      boxShadow: style.boxShadow,
+      backdropFilter: style.backdropFilter,
+      borderWidth: style.borderTopWidth,
+      background: style.backgroundColor,
+      before: getComputedStyle(element, "::before").content,
+      iconBackground: icon.backgroundColor,
+      iconShadow: icon.boxShadow,
+    };
+  });
+  expect(material).toMatchObject({ boxShadow: "none", backdropFilter: "none", borderWidth: "0px", before: "none", iconBackground: "rgba(0, 0, 0, 0)", iconShadow: "none" });
+  expect(material.background).not.toBe("rgba(0, 0, 0, 0)");
 });

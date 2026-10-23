@@ -57,7 +57,7 @@ test("a Sentry read with multibyte stack metadata finalizes and returns the enti
   assert.ok(Buffer.byteLength(finalized.resultSummary) <= 1000);
   assert.ok(summary.startsWith(finalized.resultSummary));
   assert.ok(!finalized.resultSummary.includes("\ufffd"));
-  assert.ok(result.includes(summary), "persisted excerpt does not truncate the tool's context");
+  assert.ok(result.includes(summary), "the persisted excerpt does not truncate the receipt");
 });
 
 test("failed and blocked multibyte reasons respect the existing 500-byte authority bound", async () => {

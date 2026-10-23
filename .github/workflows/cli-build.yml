@@ -10,11 +10,12 @@ on:
         description: "The CLI version the build uploaded"
         value: ${{ jobs.prepare-release.outputs.version }}
 
-# Builds and signs every CLI binary, and each build machine uploads its own
-# binary straight into the release as a run-attempt part. Nothing here is
-# reachable: client-publish.yml seals the release and moves the stable channel
-# only after the train's client-readiness gate, so the builds may run while Hub
-# and Web are still deploying.
+# Builds and signs every CLI binary, and each build machine checks the binary
+# it built reports exactly the release version before uploading it straight
+# into the release as a run-attempt part. Nothing here is reachable:
+# client-publish.yml seals the release and moves the channel its version names
+# (dev for a beta, stable for a stable) only after the train's client-readiness
+# gate, so the builds may run while Hub and Web are still deploying.
 concurrency:
   group: cli-build-${{ github.ref }}
   cancel-in-progress: false
@@ -415,6 +416,37 @@ jobs:
             "$MACOS_CLI_IDENTIFIER" \
             "$MACOS_RELEASE_TEAM_ID" \
             "${{ matrix.asset }}"
+
+      # The bytes this machine uploads are the bytes users run, so they must
+      # report exactly the release version: its channel and update source follow
+      # from it. The Intel macOS binary runs under Rosetta on the Apple Silicon host.
+      - name: Verify the binary reports the release version
+        if: runner.os != 'Windows'
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ needs.prepare-release.outputs.version }}
+        run: |
+          set -euo pipefail
+          run=("./${{ matrix.asset }}")
+          if [[ "${{ matrix.target }}" == x86_64-apple-darwin ]]; then run=(arch -x86_64 "./${{ matrix.asset }}"); fi
+          reported="$("${run[@]}" --version | head -n 1)"
+          if [[ "$reported" != "xmatrix $RELEASE_VERSION" ]]; then
+            echo "${{ matrix.asset }} reports '$reported'; expected 'xmatrix $RELEASE_VERSION'." >&2
+            exit 1
+          fi
+
+      - name: Verify the binary reports the release version
+        if: runner.os == 'Windows'
+        shell: powershell
+        env:
+          RELEASE_VERSION: ${{ needs.prepare-release.outputs.version }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $reported = (& ".\${{ matrix.asset }}" --version | Select-Object -First 1)
+          if ($LASTEXITCODE -ne 0) { throw '${{ matrix.asset }} --version failed' }
+          if ($reported -cne "xmatrix $env:RELEASE_VERSION") {
+            throw "${{ matrix.asset }} reports '$reported'; expected 'xmatrix $env:RELEASE_VERSION'."
+          }
 
       - name: Stage CLI release part
         if: runner.os != 'Windows'

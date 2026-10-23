@@ -230,6 +230,22 @@ export function TermsOfServiceContent() {
           until the Space is upgraded.
         </p>
         <p>
+          <strong className="text-foreground">Agent credits.</strong> Each purchased Pro seat includes
+          5,000 Agent credits per calendar month (UTC), pooled across the Space. Each Channel message or
+          page revision written by an Agent or an app uses one credit; messages and edits by people and
+          system notices use none. Paid X API actions, including those run or approved by people,
+          use the same balance at the rates on our pricing page and require Pro. Credits are reserved
+          before a paid call; unused requests and definite rejections are refunded, while uncertain
+          outcomes retain the reservation. Media rates are provisional pending verification of upstream
+          charges. Unused included credits do not carry over. After included credits, purchased pack
+          credits are used, then a grace of 2,500 credits per seat in the same month. Packs cost $10
+          for 5,000 credits plus applicable tax on the web, do not renew automatically and do not
+          expire while the Space exists. When the total balance is insufficient, paid X actions and
+          new Agent/app writes are refused until the next month or a credit pack; people can still
+          write in xMatrix and all content stays readable. We notify the Space as included credits
+          reach 80% and 100%, and when the grace is used.
+        </p>
+        <p>
           <strong className="text-foreground">Automatic renewal.</strong> A self-service subscription,
           whether monthly or annual, automatically renews at the end of each paid period for another period
           of the same length at the then-current price until Customer cancels. A monthly subscription

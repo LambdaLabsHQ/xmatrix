@@ -1,5 +1,8 @@
 "use client";
+
+import { AnimatedIcon } from "@/components/ui/animated-icon";
 import { PrivateSignInEmail } from "./private-sign-in-email";
+import { SignedInSessions } from "./signed-in-sessions";
 
 import { actionClass } from "@/components/ui/action-tone";
 import { ChannelTransferQueue } from "./channel-transfer-queue";
@@ -7,6 +10,7 @@ import { spaceSummary, TeamNewSpace, TeamOtherSpace } from "./team-spaces";
 import { SpaceDangerZone } from "./space-deletion-panel";
 import { SpaceOpenParticipation } from "./space-open-participation";
 import { withChannelReadState, type ChannelReadStateUpdate } from "./channel-read-state";
+import type { RealtimeCollectionCommit } from "./realtime-collection";
 import type {
   AgentConfigForm,
 } from "./workspace-shell-agent-config-types";
@@ -21,11 +25,12 @@ import { type AppView } from "./workspace-shell-navigation";
 
 import { WORKING_SPACE_KV_KEY } from "./workspace-shell-constants";
 import { useLatestComponentRelease, type ReleaseComponent } from "./latest-component-releases";
+import { releaseNotesPath } from "@xmatrix/protocol";
 
 import {
+  accountQuotaUsageFromCandidates,
   agentPresetOrCustom,
   formatVersion,
-  hasQuotaMeterUsage,
   isChannelAttentionSummary,
   mergeAccountLevelLlmUsage,
   releaseVersionStatus,
@@ -34,7 +39,6 @@ import {
 } from "./workspace-shell-formatters";
 
 import {
-  LlmUsage,
   SpaceInviteResult,
   SpaceInviteRole,
   SpaceMemberActionResult,
@@ -42,9 +46,7 @@ import {
 } from "./workspace-shell-helpers";
 
 import {
-  earliestTimestamp,
   compareChannelsForSidebar,
-  latestTimestamp,
   sortChannels,
   sortProjects,
   sortAutomations,
@@ -58,13 +60,6 @@ import {
 } from "@/lib/relay-v2/channel-content-revision";
 import type { SpaceJoinRequest } from "@/components/dashboard/space-join-requests";
 import { HumanProfileSummary } from "@/components/dashboard/human-profile-summary";
-import {
-  XMATRIX_CLIENT_ENVIRONMENTS,
-  clientAppUrl,
-  clientEnvironmentForHostname,
-  type XMatrixClientEnvironment,
-} from "@/lib/client-environment";
-import { useAuthCapability } from "@/components/dashboard/use-platform-admin-capability";
 import {
 } from "@/components/dashboard/human-profile-editor";
 import {
@@ -116,7 +111,6 @@ import {
   CreditCard,
   Trash2,
   UserRound,
-  Globe,
   Monitor,
   X,
   Bell,
@@ -125,6 +119,7 @@ import { BrowserPushSetting, browserPushSummary } from "./browser-push-setting";
 import { browserPushState, type BrowserPushState } from "@/lib/push-subscription";
 import { SectionedToolView, ToolDetailSection, ToolSettingRow, type ToolSection } from "./tool-split";
 import { spacePlansAbsent } from "./space-plan-mark";
+import { sameValue } from "../../lib/same-value";
 import {
   SPACE_BILLING_SECTION,
   SpaceBillingSection,
@@ -169,7 +164,6 @@ import {
 } from "@/components/dashboard/secret-catalog";
 
 import {
-  getDesktopBridge,
   type DesktopContext,
   type DesktopDaemonStatus,
   type DesktopUpdateStatus,
@@ -178,22 +172,23 @@ import {
 
 import { cn } from "@/lib/utils";
 
-import { tagClass } from "./status-tag";
+import { BetaTag, tagClass } from "./status-tag";
+import canonicalVersion from "../../../../../version.json" with { type: "json" };
 import { errorFromResponse, xmatrixApiRequest, requireResponseOk, xmatrixRawResponse, unexpectedResponse, requireField, requireJson } from "@/lib/query/api-client";
+import { hubReadResponse } from "@/lib/query/hub-read";
 import { userErrorMessage } from "@/lib/user-facing-error";
 import { xmatrixQueryKeys } from "@/lib/query/query-keys";
 
-import { WEB_PROXY_ROUTES } from "@xmatrix/protocol";
+import { recordOnboardingStep } from "@/lib/onboarding-funnel";
+import { ChannelPresenceConflict, decodeChannelSnapshot, emptyChannelPresence, HUB_ROUTES, presenceInstanceId, reduceChannelPresence, WEB_PROXY_ROUTES, type AgentInstancePresence, type ChannelPresence, type SerializedChannel } from "@xmatrix/protocol";
 
 import type {
   ChannelAttentionSnapshot,
   ChannelCatalogSyncMetadata,
   ChannelMessage,
-  ChannelMemberPresence,
   ObservabilityEvent,
   SerializedAgent,
-  SerializedAgentInstance,
-  SerializedChannel,
+  ChannelSnapshot,
   SerializedMachineDaemon,
   SerializedAutomation,
   SerializedAutomationCatalog,
@@ -204,47 +199,6 @@ import type {
   SerializedWorkspace,
   HumanProfile,
 } from "@xmatrix/protocol";
-
-// Semantic module extracted from workspace-app-shell (AST-safe)
-
-export function mergeLlmUsagePreferringQuotas(
-  current?: LlmUsage,
-  update?: LlmUsage
-): LlmUsage | undefined {
-  if (!update) return current;
-  if (!current) return update;
-  if (update.quotaState || current.quotaState) {
-    return mergeAccountLevelLlmUsage(current, update);
-  }
-  if (hasQuotaMeterUsage(update)) {
-    const previousTime = Date.parse(current.quotaObservedAt ?? "");
-    const incomingTime = Date.parse(update.quotaObservedAt ?? "");
-    // Concurrent frames can arrive out of order. Token counters may advance
-    // without replacing a newer provider sample.
-    if (Number.isFinite(previousTime) && Number.isFinite(incomingTime) && incomingTime < previousTime) {
-      const {
-        quotaSource: _quotaSource,
-        quotaUsages: _quotaUsages,
-        quotaObservedAt: _quotaObservedAt,
-        quotaAccount: _quotaAccount,
-        ...localUsage
-      } = update;
-      return { ...current, ...localUsage };
-    }
-    return update;
-  }
-  if (hasQuotaMeterUsage(current)) {
-    return {
-      ...current,
-      ...update,
-      quotaSource: "provider_api",
-      quotaUsages: current.quotaUsages,
-      quotaAccount: current.quotaAccount,
-      ...(current.quotaObservedAt ? { quotaObservedAt: current.quotaObservedAt } : {}),
-    };
-  }
-  return update;
-}
 
 /* Access is told in ink on the chip material the call site already wears:
    `auto` is the resting state, `ask` asks a person each time. */
@@ -270,7 +224,7 @@ function DesktopUpdateAction({
     const version = status.version ? ` ${status.version}` : "";
     return (
       <button type="button" onClick={onInstall} disabled={installing} className={className}>
-        {installing ? <Loader2 className="size-4 animate-spin" /> : <CircleArrowUp className="size-4" />}
+        {installing ? <AnimatedIcon icon={Loader2} className="size-4 animate-spin" /> : <CircleArrowUp className="size-4" />}
         {installing
           ? "Restarting"
           : status.state === "available"
@@ -282,7 +236,7 @@ function DesktopUpdateAction({
   const busy = checking || status.state === "checking" || status.state === "downloading";
   return (
     <button type="button" onClick={onCheck} disabled={busy} className={className}>
-      <RefreshCw className={cn("size-4", busy && "animate-spin")} />
+      <AnimatedIcon icon={RefreshCw} className={cn("size-4", busy && "animate-spin")} />
       Check for updates
     </button>
   );
@@ -307,7 +261,7 @@ export function SettingsView({
   onInstallDesktopUpdate,
   onLogout,
 }: {
-  user: { id: string; email: string; name?: string; avatarUrl?: string };
+  user: { id: string; email: string; name?: string };
   /** The Space whose secrets this lists; secrets belong to a Space. */
   space: { id: string; name: string } | null;
   projectedProfile: HumanProfile;
@@ -337,7 +291,6 @@ export function SettingsView({
     error: string | null;
   } | null>(null);
   const [confirmingSecretRef, setConfirmingSecretRef] = useState<string | null>(null);
-  const [clientEnvironment, setClientEnvironment] = useState<XMatrixClientEnvironment>("production");
   // A browser tab has no native notifications: it can be pushed to instead.
   const [pushState, setPushState] = useState<BrowserPushState | null>(null);
   useEffect(() => {
@@ -346,9 +299,6 @@ export function SettingsView({
     void browserPushState(token).then((state) => { if (current) setPushState(state); }).catch(() => undefined);
     return () => { current = false; };
   }, [desktopAvailable, token]);
-  const [environmentSwitchError, setEnvironmentSwitchError] = useState<string | null>(null);
-  const [environmentSwitching, setEnvironmentSwitching] = useState(false);
-  const testEnvironmentAllowed = useAuthCapability("testEnvironment", token);
   const secretKey = xmatrixQueryKeys.domain({ userId: user.id }, "space-secrets", [space?.id ?? ""]);
   const secretQuery = useQuery({
     queryKey: secretKey,
@@ -378,29 +328,6 @@ export function SettingsView({
   const secretSaving = secretMutation.isPending && secretMutation.variables?.kind === "save";
   const deletingSecretRef = secretMutation.isPending && secretMutation.variables?.kind === "delete"
     ? secretMutation.variables.secretRef ?? null : null;
-
-  useEffect(() => {
-    setClientEnvironment(clientEnvironmentForHostname(window.location.hostname));
-  }, []);
-
-  async function switchEnvironment(environment: XMatrixClientEnvironment) {
-    if (environment === clientEnvironment || environmentSwitching) return;
-    if (environment === "test" && !testEnvironmentAllowed) return;
-    const confirmed = window.confirm(
-      `Switch to ${XMATRIX_CLIENT_ENVIRONMENTS[environment].label}? This opens a separate account and data environment.`,
-    );
-    if (!confirmed) return;
-
-    setEnvironmentSwitchError(null);
-    setEnvironmentSwitching(true);
-    try {
-      await getDesktopBridge()?.switchEnvironment?.(environment);
-      window.location.assign(clientAppUrl(environment));
-    } catch (error) {
-      setEnvironmentSwitchError(userErrorMessage(error, "Couldn't switch environments"));
-      setEnvironmentSwitching(false);
-    }
-  }
 
   useEffect(() => {
     setProfile((current) => {
@@ -526,39 +453,6 @@ export function SettingsView({
           </ToolDetailSection>
         </div>
       ) },
-    ...(testEnvironmentAllowed || clientEnvironment === "test" ? [{
-      key: "environment", label: "Environment", icon: Globe,
-      summary: XMATRIX_CLIENT_ENVIRONMENTS[clientEnvironment].label, content: (
-        <div className="app-settings-section min-w-0">
-          <ToolDetailSection title="Environment">
-            {(Object.keys(XMATRIX_CLIENT_ENVIRONMENTS) as XMatrixClientEnvironment[]).map((environment) => (
-              <ToolSettingRow
-                key={environment}
-                title={XMATRIX_CLIENT_ENVIRONMENTS[environment].label}
-                description={environment === "test"
-                  ? "Isolated from Production, with its own accounts, sessions and data. May require Cloudflare Access."
-                  : "Your real accounts, sessions and data."}
-                control={clientEnvironment === environment ? (
-                  <span className={tagClass()}>In use</span>
-                ) : (
-                  <button
-                    type="button"
-                    disabled={environmentSwitching || (environment === "test" && !testEnvironmentAllowed)}
-                    onClick={() => void switchEnvironment(environment)}
-                    className={actionClass({ variant: "secondary" })}
-                  >
-                    {environmentSwitching ? "Switching…" : `Switch to ${XMATRIX_CLIENT_ENVIRONMENTS[environment].label}`}
-                  </button>
-                )}
-              />
-            ))}
-            {environmentSwitchError ? (
-              <p className="mt-3 text-sm text-destructive">{environmentSwitchError}</p>
-            ) : null}
-          </ToolDetailSection>
-        </div>
-      ),
-    }] : []),
     { key: "secrets", label: "Secrets", icon: Key,
       summary: secretCatalogLoaded ? `${secretCatalogEntries.length} in ${space?.name ?? "this Space"}` : "Stored values are never shown", content: (
         <div className="app-settings-section min-w-0">
@@ -583,7 +477,7 @@ export function SettingsView({
               disabled={!token || secretCatalogLoading}
               className={actionClass({ variant: "quiet" })}
             >
-              <RefreshCw className={cn("size-4", secretCatalogLoading && "animate-spin")} />
+              <AnimatedIcon icon={RefreshCw} className={cn("size-4", secretCatalogLoading && "animate-spin")} />
               Refresh
             </button>
           </div>
@@ -669,7 +563,7 @@ export function SettingsView({
                   disabled={secretSaving}
                   className={actionClass({ variant: "primary" })}
                 >
-                  {secretSaving ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />}
+                  {secretSaving ? <AnimatedIcon icon={Loader2} className="size-4 animate-spin" /> : <Check className="size-4" />}
                   Save secret
                 </button>
               </div>
@@ -709,7 +603,7 @@ export function SettingsView({
                           className={actionClass({ variant: "danger", size: "sm" })}
                         >
                           {deletingSecretRef === entry.secretRef ? (
-                            <Loader2 className="size-3.5 animate-spin" />
+                            <AnimatedIcon icon={Loader2} className="size-3.5 animate-spin" />
                           ) : (
                             <Trash2 className="size-3.5" />
                           )}
@@ -770,11 +664,15 @@ export function SettingsView({
     { key: "desktop", label: "Desktop app", icon: Monitor, summary: desktopAvailable ? "Connected" : "Browser", content: (
         <div className="app-settings-section min-w-0 space-y-10">
           <ToolDetailSection title="This app" action={
-            <span className={tagClass()}>
-              {desktopAvailable ? "Connected" : "Browser"}
+            <span className="flex items-center gap-1.5">
+              <BetaTag />
+              <span className={tagClass()}>
+                {desktopAvailable ? "Connected" : "Browser"}
+              </span>
             </span>
           }>
             <div className="py-2 text-sm">
+              <DetailRow label="Web version" value={canonicalVersion.version} />
               <DetailRow label="App version" value={desktopContext?.version || "-"} />
               <DetailRow label="Platform" value={desktopContext ? desktopContext.platform : "-"} />
               <DetailRow label="Updates" value={desktopUpdateLabel(desktopUpdateStatus, desktopAvailable, desktopUpdateBridgeAvailable)} />
@@ -799,6 +697,7 @@ export function SettingsView({
                 />
               ) : null}
             />
+            <ReleaseNotesLink version={desktopUpdateStatus?.version || desktopContext?.version} />
           </ToolDetailSection>
           <ToolDetailSection title="Local daemon">
             <ToolSettingRow
@@ -826,7 +725,7 @@ export function SettingsView({
                   disabled={!desktopAvailable || daemonBusy}
                   className={actionClass({ variant: "secondary" })}
                 >
-                  <RefreshCw className={cn("size-4", daemonBusy && "animate-spin")} />
+                  <AnimatedIcon icon={RefreshCw} className={cn("size-4", daemonBusy && "animate-spin")} />
                   Restart
                 </button>
               </>}
@@ -862,12 +761,15 @@ export function SettingsView({
           </p>
         </div>
       ) },
-    { key: "session", label: "Session", icon: LogOut, summary: "Sign out of this browser", content: (
+    { key: "session", label: "Session", icon: LogOut, summary: "Where you're signed in", content: (
         <div className="app-settings-section min-w-0">
+          <ToolDetailSection title="Signed in">
+            <SignedInSessions token={token} />
+          </ToolDetailSection>
           <ToolDetailSection title="Session">
             <ToolSettingRow
               title="Sign out"
-              description="Sign out of this browser session. CLI sessions remain separate."
+              description="Sign out of this browser. Your computers and agents stay signed in."
               control={
                 <button onClick={onLogout} className={actionClass({ variant: "danger" })}>
                   <LogOut className="size-4" />
@@ -932,7 +834,7 @@ export function TeamView({
   onSelectSpace,
 }: {
   token?: string;
-  user: { id: string; email: string; name?: string; avatarUrl?: string };
+  user: { id: string; email: string; name?: string };
   currentSpace: SerializedSpace | null;
   error: string | null;
   joinRequestsBySpace: Record<string, SpaceJoinRequest[]>;
@@ -1158,7 +1060,7 @@ export function TeamView({
                     title={title}
                     description={`${open ? `Any member may ${verb}` : `Only owners and admins ${verb}`}. Existing ones keep working.`}
                     control={<>
-                      {permissionBusy ? <Loader2 className="size-4 animate-spin text-muted-foreground" /> : null}
+                      {permissionBusy ? <AnimatedIcon icon={Loader2} className="size-4 animate-spin text-muted-foreground" /> : null}
                       <Switch
                         label={label}
                         checked={open}
@@ -1203,7 +1105,7 @@ export function TeamView({
                     disabled={invitingSpaceId === space.id}
                     className={actionClass({ variant: "primary", size: "md" }, "shrink-0")}
                   >
-                    {invitingSpaceId === space.id ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
+                    {invitingSpaceId === space.id ? <AnimatedIcon icon={Loader2} className="size-4 animate-spin" /> : <Send className="size-4" />}
                     Invite
                   </button>
                 </form>
@@ -1278,7 +1180,7 @@ export function TeamView({
                             className={actionClass({ variant: "quiet", size: "icon" }, "shrink-0")}
                           >
                             {memberActionKey === removeActionKey ? (
-                              <Loader2 className="size-4 animate-spin" />
+                              <AnimatedIcon icon={Loader2} className="size-4 animate-spin" />
                             ) : (
                               <Trash2 className="size-4" />
                             )}
@@ -1349,7 +1251,7 @@ export function TeamView({
                       onClick={() => void submitInviteCode(space)}
                       className={actionClass({ variant: "secondary", size: "md" })}
                     >
-                      {creatingCodeSpaceId === space.id ? <Loader2 className="size-3.5 animate-spin" /> : <LinkIcon className="size-3.5" />}
+                      {creatingCodeSpaceId === space.id ? <AnimatedIcon icon={Loader2} className="size-3.5 animate-spin" /> : <LinkIcon className="size-3.5" />}
                       Create link
                     </button>
                   }
@@ -1439,6 +1341,7 @@ export function TeamView({
             token={token}
             userId={user.id}
             creatingSpace={creatingSpace}
+            error={error}
             onCreateSpace={onCreateSpace}
             onRestoreSpace={onRestoreSpace}
           />
@@ -1556,12 +1459,20 @@ export function MachineVersionValue({ version, component, className }: {
           Update
         </span>
       )}
+      <ReleaseNotesLink version={status === "outdated" ? latestVersion : version} />
     </span>
   );
 }
 
+function ReleaseNotesLink({ version }: { version?: string }) {
+  const href = releaseNotesPath(version);
+  return href ? <a href={href} target="_blank" rel="noreferrer" className="text-xs text-primary underline underline-offset-2">
+    Release notes{version ? ` ${version}` : ""}
+  </a> : null;
+}
+
 export type FetchedChannelCatalog = {
-  channels: SerializedChannel[];
+  channels: ChannelSnapshot[];
   catalogSync?: ChannelCatalogSyncMetadata;
   attentionSnapshot?: ChannelAttentionSnapshot;
 };
@@ -1634,7 +1545,7 @@ export async function fetchChannelCatalog(
     throw new Error("Channel attention snapshot is invalid");
   }
   return {
-    channels: sortChannels(data.channels || []),
+    channels: sortChannels((data.channels || []).map(decodeChannelSnapshot)),
     ...(catalogSync ? { catalogSync } : {}),
     ...(attentionSnapshot ? { attentionSnapshot } : {}),
   };
@@ -1643,7 +1554,7 @@ export async function fetchChannelCatalog(
 export async function fetchChannels(
   token: string,
   options: { spaceId?: string } = {}
-): Promise<SerializedChannel[]> {
+): Promise<ChannelSnapshot[]> {
   return (await fetchChannelCatalog(token, options)).channels;
 }
 
@@ -1722,17 +1633,22 @@ export async function fetchSpaces(token: string, signal?: AbortSignal): Promise<
 
 /* The Spaces a signed-in person lands with. Someone with none is given their
    own, so the first screen is a Space they can act in rather than an empty
-   app; the Hub creates it only for an account that has no Space at all. */
+   app; the Hub creates it only for an account that has no Space at all.
+   Only such a person counts `app_loaded` and `space_ready`, so the funnel
+   tells a first load that never got this far from a Space that failed. */
 export async function fetchSpacesForLanding(
   token: string,
   signal?: AbortSignal,
 ): Promise<SerializedSpace[]> {
   const spaces = await fetchSpaces(token, signal);
   if (spaces.length > 0) return spaces;
+  recordOnboardingStep(token, { step: "app_loaded", surface: "shell" });
   const data = await xmatrixApiRequest<{ space?: SerializedSpace | null }>({
     url: WEB_PROXY_ROUTES.personal_space, token, method: "POST", signal,
   });
-  return data.space ? [data.space] : fetchSpaces(token, signal);
+  const landed = data.space ? [data.space] : await fetchSpaces(token, signal);
+  if (landed.length > 0) recordOnboardingStep(token, { step: "space_ready", surface: "shell" });
+  return landed;
 }
 
 export async function fetchProjects(
@@ -1893,9 +1809,11 @@ export async function fetchChannelHistory(
   if (options.afterSequence !== undefined) {
     params.set("afterSequence", String(options.afterSequence));
   }
-  const res = await xmatrixRawResponse(`${WEB_PROXY_ROUTES.channel_history(channelId)}?${params.toString()}`, {
-    headers: { Authorization: `Bearer ${token}` },
-    cache: "no-store",
+  // From the Hub straight when it answers this page (lib/query/hub-read.ts), else through the Web.
+  const res = await hubReadResponse({
+    hubPath: `${HUB_ROUTES.channel_history(channelId)}?${params.toString()}`,
+    webUrl: `${WEB_PROXY_ROUTES.channel_history(channelId)}?${params.toString()}`,
+    token,
     signal: options.signal
       ? AbortSignal.any([options.signal, AbortSignal.timeout(CHANNEL_HISTORY_FETCH_TIMEOUT_MS)])
       : AbortSignal.timeout(CHANNEL_HISTORY_FETCH_TIMEOUT_MS),
@@ -2033,25 +1951,47 @@ export async function recallChannelMessage(
   return requireMessageResponse(res);
 }
 
-export function replaceChannel(channels: SerializedChannel[], channel: SerializedChannel): SerializedChannel[] {
+export function replaceChannel(channels: ChannelSnapshot[], channel: ChannelSnapshot | SerializedChannel): ChannelSnapshot[] {
   const index = channels.findIndex((current) => current.id === channel.id);
   const merged = mergeChannelListHydratedFields(index >= 0 ? channels[index] : undefined, channel);
   if (index < 0) return sortChannels([...channels, merged]);
+  return placeChannel(channels, index, merged);
+}
+
+/** `channels` with the one at `index` replaced, and moved to where it now sorts when it left its place. */
+export function placeChannel(channels: ChannelSnapshot[], index: number, channel: ChannelSnapshot): ChannelSnapshot[] {
   const next = channels.slice();
-  next[index] = merged;
+  next[index] = channel;
   // Most replacements (presence, read state, topic) leave a Channel where it
   // sorts; re-sorting a thousand Channels per realtime frame is what costs.
   const before = next[index - 1];
   const after = next[index + 1];
-  const stillSorted = (!before || compareChannelsForSidebar(before, merged) <= 0) &&
-    (!after || compareChannelsForSidebar(merged, after) <= 0);
-  return stillSorted ? next : sortChannels(next);
+  if ((!before || compareChannelsForSidebar(before, channel) <= 0) &&
+      (!after || compareChannelsForSidebar(channel, after) <= 0)) {
+    return next;
+  }
+  // The others keep their order: only this one is taken out and put back
+  // where a sort would leave it, among its equals as near as it stood.
+  next.splice(index, 1);
+  const bound = (afterEquals: boolean) => {
+    let low = 0;
+    let high = next.length;
+    while (low < high) {
+      const middle = (low + high) >>> 1;
+      const order = compareChannelsForSidebar(next[middle]!, channel);
+      if (order < 0 || (afterEquals && order === 0)) low = middle + 1;
+      else high = middle;
+    }
+    return low;
+  };
+  next.splice(Math.min(Math.max(index, bound(false)), bound(true)), 0, channel);
+  return next;
 }
 
 export function mergeChannelListSnapshot(
-  current: SerializedChannel[],
-  incoming: SerializedChannel[],
-): SerializedChannel[] {
+  current: ChannelSnapshot[],
+  incoming: (ChannelSnapshot | SerializedChannel)[],
+): ChannelSnapshot[] {
   const currentById = new Map(current.map((channel) => [channel.id, channel]));
   return sortChannels(incoming.map((channel) =>
     mergeChannelListHydratedFields(
@@ -2063,10 +2003,11 @@ export function mergeChannelListSnapshot(
 }
 
 export function mergeChannelListHydratedFields(
-  prior: SerializedChannel | undefined,
-  channel: SerializedChannel,
+  prior: ChannelSnapshot | undefined,
+  incoming: ChannelSnapshot | SerializedChannel,
   viewerStateAuthority: ChannelViewerStateAuthority = "partial",
-): SerializedChannel {
+): ChannelSnapshot {
+  const channel = decodeChannelSnapshot(incoming);
   if (!prior) return channel;
   /* partial and realtime payloads omit list-hydrated fields — keep what we knew */
   return {
@@ -2090,20 +2031,17 @@ export function mergeChannelListHydratedFields(
     // channel_updated can briefly re-serialize token-only usage; keep
     // subscription quota meters from the previous snapshot until hub
     // reports a real quota update again.
-    memberPresence: mergeChannelMemberPresencePreferringQuotas(
-      prior.memberPresence,
-      channel.memberPresence
-    ),
+    presence: mergeChannelPresence(prior.presence, channel.presence),
   };
 }
 
 export function mergeChannelMemberReadSequences(
-  prior: SerializedChannel["memberReadSequences"] | undefined,
-  next: SerializedChannel["memberReadSequences"] | undefined
-): SerializedChannel["memberReadSequences"] | undefined {
+  prior: ChannelSnapshot["memberReadSequences"] | undefined,
+  next: ChannelSnapshot["memberReadSequences"] | undefined
+): ChannelSnapshot["memberReadSequences"] | undefined {
   if (!next) return prior;
   if (!prior) return next;
-  const merged: NonNullable<SerializedChannel["memberReadSequences"]> = { ...prior };
+  const merged: NonNullable<ChannelSnapshot["memberReadSequences"]> = { ...prior };
   for (const [subjectId, sequence] of Object.entries(next)) {
     const previous = merged[subjectId];
     if (previous === undefined || sequence > previous) merged[subjectId] = sequence;
@@ -2111,358 +2049,284 @@ export function mergeChannelMemberReadSequences(
   return merged;
 }
 
-export function mergeChannelMemberPresencePreferringQuotas(
-  prior: SerializedChannel["memberPresence"] | undefined,
-  next: SerializedChannel["memberPresence"] | undefined
-): SerializedChannel["memberPresence"] | undefined {
+/** Presence-only snapshots do not change the conversation catalog, reference
+ * names, history audience or trace access. Every other field still does. */
+export function sameChannelCatalogState(left: ChannelSnapshot, right: ChannelSnapshot): boolean {
+  const { presence: _leftPresence, ...leftState } = left;
+  const { presence: _rightPresence, ...rightState } = right;
+  if (!sameValue(leftState, rightState)) return false;
+  const ids = (channel: ChannelSnapshot) => new Set(channel.presence?.instances.keys() ?? []);
+  const before = ids(left);
+  const after = ids(right);
+  return before.size === after.size && [...after].every(id => before.has(id));
+}
+
+export function mergeChannelPresence(prior: ChannelPresence | undefined,
+  next: ChannelPresence | undefined): ChannelPresence | undefined {
   if (!next) return prior;
   if (!prior) return next;
-  const merged: NonNullable<SerializedChannel["memberPresence"]> = { ...next };
-  for (const [memberId, nextPresence] of Object.entries(next)) {
-    const priorPresence = prior[memberId];
-    if (!priorPresence || nextPresence.kind !== "agent" || priorPresence.kind !== "agent") {
-      continue;
-    }
-    const priorInstances = priorPresence.instances || [];
-    const priorInstancesById = new Map(priorInstances.map((instance) => [instance.id, instance]));
-    // channelInstanceId is the stable per-channel birth slot. Reborns change
-    // global instance id but must keep the original birth connectedAt.
-    const priorInstancesByChannelId = new Map(
-      priorInstances
-        .filter((instance) => instance.channelInstanceId)
-        .map((instance) => [instance.channelInstanceId!, instance])
-    );
-    const nextInstances = (nextPresence.instances || []).map((instance) => {
-      const previous =
-        priorInstancesById.get(instance.id) ||
-        (instance.channelInstanceId
-          ? priorInstancesByChannelId.get(instance.channelInstanceId)
-          : undefined);
-      return previous
-        ? mergeAgentInstancePresence(previous, instance)
-        : instance;
-    });
-    merged[memberId] = {
-      ...nextPresence,
-      usage: mergeLlmUsagePreferringQuotas(priorPresence.usage, nextPresence.usage),
-      instances: nextInstances.length > 0 ? nextInstances : nextPresence.instances,
+  const merged = reduceChannelPresence(prior, { type: "snapshot", snapshot: next });
+  return sameValue(prior, merged) ? prior : sameValue(next, merged) ? next : merged;
+}
+
+type ChannelPresenceRouting = {
+  byInstance: Map<string, Set<string>>;
+  positions: Map<string, number>;
+  ordered: boolean;
+};
+
+/** Apply ordered presence and partial snapshots in one state-frame run. The
+ * Channel table and routing indices are built once, rather than once per
+ * alternating Agent/Channel pair. Snapshots still merge in their socket order. */
+export function createChannelPresenceBatch(channels: ChannelSnapshot[], routing?: ChannelPresenceRouting) {
+  const positionsFor = (items: ChannelSnapshot[]) => {
+    const positions = new Map<string, number>();
+    items.forEach((channel, index) => positions.set(channel.id, index));
+    return positions;
+  };
+  // The private position index belongs to this exact input array and passes
+  // to only one successor. Published arrays and commit indices never share it.
+  // Ordinary reports stage only changed cards, without copying the catalog.
+  const channelPositions = routing?.positions ?? positionsFor(channels);
+  const updates = new Map<string, ChannelSnapshot>();
+  const get = (id: string) => {
+    const updated = updates.get(id);
+    if (updated) return updated;
+    const position = channelPositions.get(id);
+    return position === undefined ? undefined : channels[position];
+  };
+  const values = function* () {
+    for (const id of channelPositions.keys()) yield get(id)!;
+    for (const [id, channel] of updates) if (!channelPositions.has(id)) yield channel;
+  };
+  let committed: RealtimeCollectionCommit<ChannelSnapshot> | undefined;
+  let liveUpdates: ChannelSnapshot[] | undefined;
+  let published: ChannelSnapshot[] | undefined;
+  let publishedFromBasis = true;
+  let sealed = false;
+  const byInstance = routing?.byInstance ?? new Map<string, Set<string>>();
+  let indexed = routing !== undefined;
+  let routesTaken = false;
+  const inputOrdered = routing?.ordered ?? false;
+  let outputOrdered = inputOrdered;
+  const reordered = new Set<string>();
+  let appendedOnly = false;
+  const routes = (channel: ChannelSnapshot) => ({ instances: [...(channel.presence?.instances.keys() ?? [])] });
+  const route = (id: string, keys: ReturnType<typeof routes>, add: boolean) => {
+    const update = (index: Map<string, Set<string>>, key: string) => {
+      if (add) {
+        let ids = index.get(key);
+        if (!ids) index.set(key, ids = new Set());
+        ids.add(id);
+      } else {
+        const ids = index.get(key);
+        ids?.delete(id);
+        if (!ids?.size) index.delete(key);
+      }
     };
-  }
-  return merged;
-}
-
-export function patchChannelsAgentPresenceFromAgent(
-  channels: SerializedChannel[],
-  agent: SerializedAgent
-): SerializedChannel[] {
-  if (!agent.id) return channels;
-  let changed = false;
-  const next = channels.map((channel) => {
-    const patched = patchChannelAgentPresenceFromAgent(channel, agent);
-    if (patched !== channel) changed = true;
-    return patched;
-  });
-  return changed ? next : channels;
-}
-
-export function patchChannelAgentPresenceFromAgent(
-  channel: SerializedChannel,
-  agent: SerializedAgent
-): SerializedChannel {
-  return patchChannelInstancesById(patchChannelAgentMemberFromAgent(channel, agent), agent);
-}
-
-/**
- * Catalog snapshots key each Instance by its own id, while live frames name
- * the socket's principal Agent, so one Instance can sit under a member the
- * frame does not name. An Instance id is globally unique: whichever member
- * holds it hears its report.
- */
-export function patchChannelInstancesById(
-  channel: SerializedChannel,
-  agent: SerializedAgent
-): SerializedChannel {
-  const updatesById = new Map((agent.instances || []).map((instance) => [instance.id, instance]));
-  if (updatesById.size === 0 || !channel.memberPresence) return channel;
-  let next = channel;
-  for (const [member, presence] of Object.entries(channel.memberPresence)) {
-    if (member === agent.id || presence.kind !== "agent" || !presence.instances?.length) continue;
-    let changed = false;
-    const instances = presence.instances.map((instance) => {
-      const update = updatesById.get(instance.id);
-      if (!update) return instance;
-      const merged = mergeAgentInstancePresence(instance, update);
-      if (merged !== instance) changed = true;
-      return merged;
-    });
-    if (changed) next = replaceChannelMemberPresence(next, member, { ...presence, instances });
-  }
-  return next;
-}
-
-function patchChannelAgentMemberFromAgent(
-  channel: SerializedChannel,
-  agent: SerializedAgent
-): SerializedChannel {
-  const presence = channel.memberPresence?.[agent.id];
-  if (!presence || presence.kind !== "agent") return channel;
-
-  const agentInstances = agent.instances || [];
-  const agentInstancesById = new Map(agentInstances.map((instance) => [instance.id, instance]));
-  // channelInstanceId is a per-channel slot ordinal (sibling threads all count
-  // from 1), so slot fallback may only match updates that declare this exact
-  // channel; unscoped updates merge by global instance id alone.
-  const agentInstancesByChannelId = new Map(
-    agentInstances
-      .filter((instance) => instance.channelInstanceId && instance.channelId === channel.id)
-      .map((instance) => [instance.channelInstanceId!, instance])
-  );
-  const priorInstances = presence.instances || [];
-  let instanceChanged = false;
-  // enhanced_presence often omits instances (workspace-wide broadcast). Still
-  // push agent-level usage onto every known channel instance so quota chips stay live.
-  const nextInstances = priorInstances.map((instance) => {
-    const update =
-      agentInstancesById.get(instance.id) ||
-      (instance.channelInstanceId ? agentInstancesByChannelId.get(instance.channelInstanceId) : undefined);
-    if (update) {
-      // Receiving a frame is not the same as being told something new. Marking
-      // the instance changed on arrival alone made the no-op short circuit
-      // below unreachable for every frame that carried instances.
-      const merged = mergeAgentInstancePresence(instance, update);
-      if (merged !== instance) instanceChanged = true;
-      return merged;
-    }
-    if (agent.usage) {
-      const mergedUsage = mergeAccountLevelLlmUsage(instance.usage, agent.usage);
-      if (mergedUsage !== instance.usage) {
-        instanceChanged = true;
-        return { ...instance, usage: mergedUsage };
+    for (const instance of keys.instances) update(byInstance, instance);
+  };
+  const put = (channel: ChannelSnapshot, rankMayChange = false) => {
+    const previous = get(channel.id);
+    if (previous === channel) return;
+    // Validate the sort inputs too, including a new Channel: a later sort may
+    // otherwise fail outside this frame's error boundary after staging it.
+    if (rankMayChange) compareChannelsForSidebar(channel, channel);
+    const rankChanged = rankMayChange && (!previous || compareChannelsForSidebar(previous, channel) !== 0);
+    const before = indexed && previous ? routes(previous) : undefined;
+    const after = routes(channel);
+    if (before) route(channel.id, before, false);
+    if (indexed) route(channel.id, after, true);
+    // Presence leaves the sidebar rank alone. A new or renamed/reordered
+    // snapshot gets the same comparator as replaceChannel, once at publication.
+    if (rankChanged) reordered.add(channel.id);
+    updates.set(channel.id, channel);
+  };
+  const snapshot = () => {
+    if (published) return published;
+    appendedOnly = false;
+    if (!updates.size) return channels;
+    const next = channelPositions.size === channels.length ? channels.slice() : [...values()];
+    if (channelPositions.size === channels.length) {
+      for (const [id, channel] of updates) {
+        const position = channelPositions.get(id);
+        if (position === undefined) next.push(channel);
+        else next[position] = channel;
       }
     }
-    return instance;
-  });
-
-  const nextUsage = mergeAccountLevelLlmUsage(presence.usage, agent.usage);
-  const usageChanged = nextUsage !== presence.usage;
-  if (!instanceChanged && !usageChanged && priorInstances.length > 0) {
-    const activity = agent.activity || presence.activity;
-    const lastSeenAt = latestTimestamp([presence.lastSeenAt, agent.lastSeenAt]);
-    if (
-      activity === presence.activity &&
-      lastSeenAt === presence.lastSeenAt
-    ) {
-      return channel;
+    if (!reordered.size) return next;
+    outputOrdered = true;
+    if (!inputOrdered || reordered.size > Math.max(8, next.length / 16)) return sortChannels(next);
+    // The inherited order is already sorted. Move only the added/re-ranked
+    // rows, keeping the full comparator and its original stable tie order.
+    const ordered = next.filter(channel => !reordered.has(channel.id));
+    appendedOnly = [...reordered].every(id => !channelPositions.has(id));
+    let positions: Map<string, number> | undefined;
+    const compare = (left: ChannelSnapshot, right: ChannelSnapshot) => {
+      const rank = compareChannelsForSidebar(left, right);
+      if (rank) return rank;
+      positions ??= new Map(next.map((channel, index) => [channel.id, index]));
+      return positions.get(left.id)! - positions.get(right.id)!;
+    };
+    for (const id of reordered) {
+      const channel = get(id)!;
+      let low = 0;
+      let high = ordered.length;
+      while (low < high) {
+        const middle = (low + high) >>> 1;
+        if (compare(ordered[middle], channel) <= 0) low = middle + 1;
+        else high = middle;
+      }
+      if (low < channels.length) appendedOnly = false;
+      ordered.splice(low, 0, channel);
     }
-  }
-
-  const nextPresence: ChannelMemberPresence = {
-    ...presence,
-    label: presence.label || agent.name,
-    email: presence.email || agent.email,
-    avatarUrl: presence.avatarUrl || agent.avatarUrl,
-    lastSeenAt: latestTimestamp([presence.lastSeenAt, agent.lastSeenAt]),
-    activity: agent.activity || presence.activity,
-    files: instanceChanged ? presence.files : agent.files || presence.files,
-    intent: instanceChanged ? presence.intent : agent.intent || presence.intent,
-    runtimeState: instanceChanged ? presence.runtimeState : agent.runtimeState || presence.runtimeState,
-    usage: nextUsage,
-    instances: instanceChanged ? nextInstances : presence.instances,
+    return ordered;
   };
-
-  return replaceChannelMemberPresence(channel, agent.id, nextPresence);
-}
-
-export function patchChannelAgentPresenceFromMessage(
-  channel: SerializedChannel,
-  entry: ChannelMessage
-): SerializedChannel {
-  if (entry.from.kind !== "agent" || !entry.from.identityId) return channel;
-
-  const member = entry.from.identityId;
-  const presence = channel.memberPresence?.[member];
-  const agentPresence = presence?.kind === "agent" ? presence : undefined;
-  const currentInstances = agentPresence?.instances || [];
-  const senderInstanceId = entry.from.instanceId;
-  const senderChannelInstanceId = entry.from.channelInstanceId;
-  const instanceIndex = currentInstances.findIndex(
-    (instance) =>
-      (senderInstanceId && instance.id === senderInstanceId) ||
-      (senderChannelInstanceId && instance.channelInstanceId === senderChannelInstanceId)
-  );
-  const nextInstances = [...currentInstances];
-  if (instanceIndex >= 0) {
-    nextInstances[instanceIndex] = mergeAgentInstancePresence(nextInstances[instanceIndex], {
-      id: nextInstances[instanceIndex].id,
-      channelInstanceId: senderChannelInstanceId || nextInstances[instanceIndex].channelInstanceId,
-      label: entry.from.instanceLabel || nextInstances[instanceIndex].label,
-      connectedAt: nextInstances[instanceIndex].connectedAt,
-      lastSeenAt: entry.sentAt,
-      status: "busy",
-      activity: nextInstances[instanceIndex].activity || "Processing",
-      goal: entry.from.goal || nextInstances[instanceIndex].goal,
-    });
-  } else if (senderInstanceId && senderChannelInstanceId) {
-    nextInstances.push({
-      id: senderInstanceId,
-      channelInstanceId: senderChannelInstanceId,
-      label: entry.from.instanceLabel || entry.from.label,
-      connectedAt: entry.sentAt,
-      lastSeenAt: entry.sentAt,
-      status: "busy",
-      activity: "Processing",
-      goal: entry.from.goal,
-    });
-  }
-
-  const nextPresence: ChannelMemberPresence = {
-    kind: "agent",
-    ...agentPresence,
-    label: agentPresence?.label || entry.from.agentName || entry.from.label,
-    email: agentPresence?.email || entry.from.email,
-    lastSeenAt: entry.sentAt,
-    activity: agentPresence?.activity,
-    goal: entry.from.goal || agentPresence?.goal,
-    instances: nextInstances.length > 0 ? nextInstances : agentPresence?.instances,
+  const requireUnpublished = () => {
+    if (sealed) throw new Error("A published presence batch cannot be changed");
   };
-
-  return replaceChannelMemberPresence(channel, member, nextPresence);
-}
-
-export function agentMessageInstanceIdentityIncomplete(entry: ChannelMessage): boolean {
-  return entry.from.kind === "agent" &&
-    Boolean(entry.from.instanceId) &&
-    !entry.from.channelInstanceId;
-}
-
-/**
- * Compares two presence values by what they say rather than by identity.
- *
- * Presence frames mostly repeat themselves, and the transport hands over a
- * freshly parsed object every time, so `===` cannot tell a real change from a
- * restatement. A key carrying `undefined` says nothing, so it reads the same
- * as an absent key.
- */
-export function sameReportedPresenceValue(left: unknown, right: unknown): boolean {
-  if (left === right) return true;
-  if (typeof left !== "object" || typeof right !== "object") return false;
-  if (left === null || right === null) return false;
-  if (Array.isArray(left) !== Array.isArray(right)) return false;
-  const leftEntries = reportedPresenceEntries(left as Record<string, unknown>);
-  const rightEntries = reportedPresenceEntries(right as Record<string, unknown>);
-  if (leftEntries.length !== rightEntries.length) return false;
-  return leftEntries.every(([key, value]) =>
-    Object.prototype.hasOwnProperty.call(right, key) &&
-    sameReportedPresenceValue(value, (right as Record<string, unknown>)[key])
-  );
-}
-
-function reportedPresenceEntries(value: Record<string, unknown>): [string, unknown][] {
-  return Object.entries(value).filter(([, entry]) => entry !== undefined);
-}
-
-/**
- * Whether a report about an Instance is newer than what we hold, judged on
- * the Instance's lifecycle (status, rest and offlineReason) together with the
- * `lastSeenAt` it was observed at.
- *
- * Gone and machine-offline are only ever reported live, after everything the
- * Instance said before them, so they apply whatever their clock says. Every
- * other report, a resting snapshot included, applies only if it is not older
- * than the one we hold: a catalog page read before a wake must not put a
- * live Instance back to sleep, and a live report from before a sleep must not
- * wake it.
- */
-export function instanceLifecycleReportApplies(
-  current: SerializedAgentInstance,
-  update: SerializedAgentInstance
-): boolean {
-  if (update.status === "offline" && !update.rest) return true;
-  return timestampMs(update.lastSeenAt) >= timestampMs(current.lastSeenAt);
-}
-
-export function mergeAgentInstancePresence(
-  current: SerializedAgentInstance,
-  update: SerializedAgentInstance
-): SerializedAgentInstance {
-  // Catalog pages, resolve reads, realtime frames, messages and cached
-  // snapshots replayed from the query cache all arrive here, often behind
-  // newer state. One rule orders them all.
-  if (!instanceLifecycleReportApplies(current, update)) return current;
-  const connectedAt = earliestTimestamp([current.connectedAt, update.connectedAt]) ||
-    update.connectedAt || current.connectedAt;
-  // A reborn can retain its channel slot, but its runtime facts belong to the
-  // new global instance. Only the slot's birth order crosses that boundary.
-  if (current.id !== update.id) return { ...update, connectedAt };
-  const merged: SerializedAgentInstance = {
-    ...current,
-    ...update,
-    // The lifecycle is one fact: whether the Instance is live, resting or
-    // offline, and why. It is taken whole from the report that won above and
-    // never assembled field by field, so no report's rest can outlive the
-    // status it came with (a wake must not keep the sleep's moon).
-    status: update.status,
-    rest: update.rest,
-    offlineReason: update.offlineReason,
-    // Presence updates are patches. Runtime heartbeats deliberately omit the
-    // slower-changing presentation fields, so an omitted field must retain
-    // its last reported value instead of erasing every visible tag.
-    model: update.model ?? current.model,
-    models: update.models ?? current.models,
-    effort: update.effort ?? current.effort,
-    commands: update.commands ?? current.commands,
-    statusChips: update.statusChips ?? current.statusChips,
-    gitBranch: update.gitBranch ?? current.gitBranch,
-    channelInstanceId: update.channelInstanceId || current.channelInstanceId,
-    label: update.label || current.label,
-    // Keep the original birth clock so Agents detail order does not jump when
-    // a live presence frame carries a newer socket connectedAt.
-    connectedAt,
-    lastSeenAt: latestTimestamp([current.lastSeenAt, update.lastSeenAt]) || current.lastSeenAt,
-    activity: update.activity ?? (update.status === current.status ? current.activity : undefined),
-    files: update.files || current.files,
-    intent: update.intent || current.intent,
-    runtimeState: update.runtimeState ?? (update.status === "busy" ? current.runtimeState : undefined),
-    goal: update.goal || current.goal,
-    // Never let a token-only usage patch wipe subscription quota meters.
-    usage: mergeLlmUsagePreferringQuotas(current.usage, update.usage),
-  };
-  // A frame that restates what we already hold must hand back the object we
-  // already hold. The Channel tree re-renders on Channel identity, so a new
-  // instance object for an unchanged report moves the sidebar and the
-  // timeline under the reader for no reported reason.
-  return sameReportedPresenceValue(current, merged) ? current : merged;
-}
-
-export function replaceChannelMemberPresence(
-  channel: SerializedChannel,
-  member: string,
-  presence: ChannelMemberPresence
-): SerializedChannel {
   return {
-    ...channel,
-    memberPresence: {
-      ...channel.memberPresence,
-      [member]: presence,
+    applyChannel(channel: ChannelSnapshot | SerializedChannel,
+      beforeApply?: (previous: ChannelSnapshot | undefined, updated: ChannelSnapshot) => void) {
+      requireUnpublished();
+      const previous = get(channel.id);
+      const updated = mergeChannelListHydratedFields(previous, channel);
+      // Classification and access/history invalidation may fail. Keep the
+      // prior state in that case, as replaceChannel's unpublished array did.
+      beforeApply?.(previous, updated);
+      put(updated, true);
+      return { previous, updated };
+    },
+    applyPresence(agents: readonly SerializedAgent[]) {
+      requireUnpublished();
+      if (!agents.length) return;
+      if (!indexed) {
+        for (const channel of values()) {
+          try {
+            route(channel.id, routes(channel), true);
+          } catch {
+            // A malformed resident from an earlier hydration cannot block
+            // reports for unrelated, valid Channels.
+          }
+        }
+        indexed = true;
+      }
+      const positions = new Map<string, Set<number>>();
+      const target = (id: string, position: number) => {
+        if (!get(id)) return;
+        let reports = positions.get(id);
+        if (!reports) positions.set(id, reports = new Set());
+        reports.add(position);
+      };
+      agents.forEach((agent, position) => {
+        const instances = agent.instances ?? [];
+        for (const instance of instances) {
+          if (instance.channelId) target(instance.channelId, position);
+          for (const id of byInstance.get(instance.id) ?? []) target(id, position);
+        }
+        if (!instances.length) for (const id of byInstance.get(agent.instanceId || agent.id) ?? []) target(id, position);
+      });
+      for (const [id, reports] of positions) {
+        let patched = get(id)!;
+        for (const position of reports) patched = patchChannelAgentPresenceFromAgent(patched, agents[position]);
+        put(patched);
+      }
+    },
+    getSnapshot: snapshot,
+    /** Seal a rank-preserving live run for the collection's keyed receive. */
+    getLiveUpdates(): readonly ChannelSnapshot[] | undefined {
+      if (liveUpdates) return liveUpdates;
+      requireUnpublished();
+      if (reordered.size) return undefined;
+      sealed = true;
+      return liveUpdates = [...updates.values()];
+    },
+    /** Called by receive before subscribers: reentrant writes cannot change
+     * which immutable snapshot this run's routing belongs to. */
+    acceptLiveSnapshot(items: ChannelSnapshot[], previous: ChannelSnapshot[]) {
+      if (!liveUpdates || published) throw new Error("A live presence snapshot must be accepted once after sealing");
+      // Another collection can synchronously notify a writer before this run
+      // reaches receive. Its result is valid, but the old routes/positions are
+      // no longer an index of the snapshot against which receive merged.
+      publishedFromBasis = previous === channels;
+      published = items;
+    },
+    /** Catalog/rank changes retain a complete, immutable indexed fallback. */
+    getCommit() {
+      if (committed) return committed;
+      requireUnpublished();
+      const items = snapshot();
+      const byId = new Map(items.map(channel => [channel.id, channel]));
+      committed = { basis: channels, items, byId, changedKeys: [...updates.keys()] };
+      published = items;
+      sealed = true;
+      return committed;
+    },
+    /** Only the exact next live snapshot can inherit a completed run's routes.
+     * Taking consumes them even on mismatch; other writers force a rebuild. */
+    takeRouting(basis: ChannelSnapshot[]) {
+      const reusable = !routesTaken && indexed && publishedFromBasis && published === basis;
+      routesTaken = true;
+      if (!reusable) return undefined;
+      let positions: Map<string, number>;
+      if (!reordered.size && basis.length === channels.length) positions = channelPositions;
+      else if (appendedOnly) {
+        // Older first-seen Channels often append to a known catalog order.
+        // The unchanged prefix needs no fresh index or key allocation.
+        positions = channelPositions;
+        for (let index = channels.length; index < basis.length; index += 1) positions.set(basis[index].id, index);
+      } else positions = positionsFor(basis);
+      return { byInstance, positions, ordered: outputOrdered };
     },
   };
 }
 
+export function patchChannelAgentPresenceFromAgent(channel: ChannelSnapshot,
+  agent: SerializedAgent): ChannelSnapshot {
+  let presence = channel.presence ?? emptyChannelPresence(channel.id);
+  const knownActor = presence.instances.get(presenceInstanceId(agent.instanceId || agent.id));
+  const reports = agent.instances?.length ? agent.instances : knownActor ? [knownActor] : [];
+  const quota = accountQuotaUsageFromCandidates(agent.usage);
+  for (const report of reports) {
+    const id = presenceInstanceId(report.id);
+    const current = presence.instances.get(id);
+    if ((report.channelId && report.channelId !== channel.id) || (!current && report.channelId !== channel.id)) continue;
+    if (!current) throw new ChannelPresenceConflict(channel.id, id);
+    const next: AgentInstancePresence = { ...report, id, channelId: channel.id,
+      agentName: current?.agentName || agent.name, registration: current.registration,
+      email: current.email || agent.email,
+      usage: mergeAccountLevelLlmUsage(report.usage ?? current?.usage, quota) };
+    presence = reduceChannelPresence(presence, { type: "upsert", source: "live", instance: next });
+  }
+  return sameValue(presence, channel.presence) ? channel : { ...channel, presence };
+}
+
+/** A message is evidence of activity, never evidence of Channel residency. */
+export function patchChannelAgentPresenceFromMessage(channel: ChannelSnapshot,
+  entry: ChannelMessage): ChannelSnapshot {
+  if (entry.from.kind !== "agent" || !entry.from.instanceId ||
+      (entry.from.originChannelId && entry.from.originChannelId !== channel.id)) return channel;
+  const id = presenceInstanceId(entry.from.instanceId);
+  const current = channel.presence?.instances.get(id);
+  if (!current) return channel;
+  const presence = reduceChannelPresence(channel.presence!, { type: "patch_known", source: "message", instanceId: id,
+    patch: { lastSeenAt: entry.sentAt, status: "busy", rest: undefined, offlineReason: undefined,
+      goal: entry.from.goal || current.goal } });
+  if (presence === channel.presence) return channel;
+  return { ...channel, presence };
+}
+
 export function channelsAfterAgentInstanceOffline(
-  channels: SerializedChannel[],
+  channels: ChannelSnapshot[],
   input: {
     channelId?: string;
     agentId?: string;
     instanceId?: string;
     channelInstanceId?: string;
   }
-): SerializedChannel[] {
-  if (!input.channelId || !input.agentId) return channels;
-  const target = {
-    agentId: input.agentId,
-    instanceId: input.instanceId,
-    channelInstanceId: input.channelInstanceId,
-  };
+): ChannelSnapshot[] {
+  if (!input.channelId || !input.instanceId) return channels;
+  const target = { instanceId: input.instanceId };
   let changed = false;
   const next = channels.map((channel) => {
     if (channel.id !== input.channelId) return channel;
@@ -2474,45 +2338,25 @@ export function channelsAfterAgentInstanceOffline(
 }
 
 export function removeChannelAgentInstancePresence(
-  channel: SerializedChannel,
+  channel: ChannelSnapshot,
   input: {
-    agentId: string;
-    instanceId?: string;
-    channelInstanceId?: string;
+    instanceId: string;
   }
-): SerializedChannel {
-  const presence = channel.memberPresence?.[input.agentId];
-  if (!presence || presence.kind !== "agent") return channel;
-  const prior = presence.instances || [];
-  const nextInstances = prior.filter((instance) => {
-    if (input.instanceId && instance.id === input.instanceId) return false;
-    if (
-      !input.instanceId &&
-      input.channelInstanceId &&
-      instance.channelInstanceId === input.channelInstanceId
-    ) {
-      return false;
-    }
-    return true;
-  });
-  if (nextInstances.length === prior.length) return channel;
-  if (nextInstances.length === 0) {
-    const { [input.agentId]: _removed, ...rest } = channel.memberPresence || {};
-    return { ...channel, memberPresence: rest };
-  }
-  return replaceChannelMemberPresence(channel, input.agentId, {
-    ...presence,
-    instances: nextInstances,
-  });
+): ChannelSnapshot {
+  if (!input.instanceId) throw new TypeError("An exact Instance identity is required for removal");
+  if (!channel.presence) return channel;
+  const presence = reduceChannelPresence(channel.presence,
+    { type: "remove", instanceId: presenceInstanceId(input.instanceId) });
+  return presence === channel.presence ? channel : { ...channel, presence };
 }
 
 export type { ChannelReadStateUpdate } from "./channel-read-state";
 
 export function updateChannelReadState(
-  channels: SerializedChannel[],
+  channels: ChannelSnapshot[],
   channelId: string,
   update: ChannelReadStateUpdate
-): SerializedChannel[] {
+): ChannelSnapshot[] {
   return channels.map((channel) => (
     channel.id === channelId ? withChannelReadState(channel, update) : channel
   ));
@@ -2526,14 +2370,6 @@ export function replaceSpace(spaces: SerializedSpace[], space: SerializedSpace):
       )
     : [...spaces, space];
   return sortSpaces(next);
-}
-
-export function replaceAgent(agents: SerializedAgent[], agent: SerializedAgent): SerializedAgent[] {
-  const exists = agents.some((current) => current.id === agent.id);
-  const next = exists
-    ? agents.map((current) => (current.id === agent.id ? agent : current))
-    : [...agents, agent];
-  return next.sort((left, right) => left.name.localeCompare(right.name));
 }
 
 export function replaceWorkspace(

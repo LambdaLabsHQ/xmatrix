@@ -6,7 +6,7 @@ import {
   billingReadSubject,
   agentSpaceStatus,
 } from "../src/billing-read-access.ts";
-const principal = { ownerUserId: "owner-1", spaceId: "space-1", runId: "run-1", runKind: "channel-instance" };
+const principal = { ownerUserId: "owner-1", spaceId: "space-1", runId: "run-1" };
 const agent = { id: "agent-run:run-1", email: "unused@example.com", agentRun: principal };
 const request = (path, method = "GET") => new Request(`https://hub.example${path}`, { method });
 
@@ -16,7 +16,6 @@ test("Agent billing route admission is GET-only, exact and birth-Space bound", (
     for (const method of ["POST", "PUT", "PATCH", "DELETE"]) {
       assert.equal(agentBillingReadRoute(request(path, method), principal), false);
     }
-    assert.equal(agentBillingReadRoute(request(path), { ...principal, runKind: "channel-about-session" }), false);
   }
   for (const path of ["/api/ai-subscription", "/api/ai-subscription/plans", "/api/ai-subscription/usage", "/api/ai-subscription/trial", "/api/ai-subscription/checkout", "/api/ai-subscription/portal",
     "/api/spaces/space-2/billing", "/api/spaces/%ZZ/billing", "/api/spaces/space-1/billing/reconcile"]) {
@@ -32,7 +31,6 @@ test("billing subject comes from revalidated signed owner, never Agent subject o
   await assert.rejects(billingReadSubject(agent, async () => { throw new Error("Run ended or revoked"); }));
   await assert.rejects(billingReadSubject(agent, async () => principal, "space-2"));
   await assert.rejects(billingReadSubject(agent, async () => ({ ...principal, ownerUserId: "" })));
-  await assert.rejects(billingReadSubject(agent, async () => ({ ...principal, runKind: "channel-about-session" })));
   assert.equal((await billingReadSubject(agent, async () => principal, "space-1")).userId, "owner-1");
 });
 

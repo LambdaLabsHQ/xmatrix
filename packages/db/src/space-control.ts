@@ -1,5 +1,6 @@
-import { appendMetadataRevision, metadataRevision } from "./channel-metadata-revisions.js";
+import { appendMetadataRevision, metadataRevision, type AboutTaskAuthor } from "./channel-metadata-revisions.js";
 import { DetailedControlError } from "./control-error.js";
+import { retireChannel } from "./channel-deletion.js";
 import type { DatabaseRequestContext } from "./context.js";
 import { readsOnly } from "./space-roles.js";
 import { lockTransfer, requireTransferAdmin, transferSnapshot, transferView, validateTransfer, type TransferRole, type TransferRow } from "./channel-transfer.js";
@@ -49,6 +50,7 @@ const MAX_PAGE = 200;
 const IDEMPOTENCY_TTL_MS = 30 * 24 * 60 * 60 * 1_000;
 const CHANNEL_TREE_MAX = 10_000;
 const ARCHIVE_STOP_TARGET_MAX = 200;
+const SERIALIZATION_RETRIES = 5;
 const CHANNEL_MOVE_FACT_SQL = `SET space_id = $2
           WHERE space_id = $1 AND channel_id = ANY($3::text[])`;
 export type SpaceControlPrincipal = { kind: "user" | "agent"; id: string };
@@ -89,6 +91,8 @@ export interface CreatePostgresSpace {
   ownerUserId: string;
   name: string;
   metadata?: Record<string, unknown>;
+  /** The Spaces the product makes for the owner on its own, for the billing policy. */
+  personalSpaceIds?: readonly string[];
 }
 
 export interface CreatePostgresChannel {
@@ -129,10 +133,10 @@ export type PostgresChannelMutation = PostgresChannelMutationBase & {
   topic?: string | null;
   summary?: string | null;
   /**
-   * The Run writing `summary`. The summary's source is recorded from it; a
+   * The one-shot task writing `summary`. The summary's source is recorded from it; a
    * summary written without one keeps no source rather than an earlier one.
    */
-  summaryAuthor?: { runId: string; agentName: string; throughMessageId?: string };
+  summaryAuthor?: AboutTaskAuthor;
   spaceId?: string;
   moveTree?: Array<{ channelId: string; expectedVersion: number }>;
 };
@@ -220,7 +224,6 @@ interface MemberRow extends QueryResultRow {
   role: string;
   email: string | null;
   display_name: string | null;
-  avatar_url: string | null;
   created_at: Date | string;
   profile_name: string | null;
   profile_handle: string | null;
@@ -414,8 +417,8 @@ function serializeSpace(
       ...(member.email ? { email: member.email } : {}),
       ...(member.profile_name || member.display_name
         ? { name: member.profile_name || member.display_name! } : {}),
-      ...(member.profile_avatar_url || member.avatar_url
-        ? { avatarUrl: member.profile_avatar_url || member.avatar_url! } : {}),
+      // A person's face is their account's picture alone (protocol faces.ts); the member row's copy is not read.
+      ...(member.profile_avatar_url ? { avatarUrl: member.profile_avatar_url } : {}),
       ...(member.profile_handle ? { handle: member.profile_handle } : {}),
       ...(member.profile_bio ? { bio: member.profile_bio } : {}),
       ...(member.profile_time_zone ? { timeZone: member.profile_time_zone } : {}),
@@ -569,35 +572,18 @@ async function terminalizeArchivedChannelTree(
 
 /**
  * Record who wrote a Channel's summary, when, and the sequence of the newest
- * message they read. The sequence is looked up here, so only a message of this
- * Channel counts; a cleared or unattributed summary keeps no source at all.
+ * message they read; a cleared or unattributed summary keeps no source at all.
  */
-async function recordSummarySource(
-  transaction: DatabaseTransaction,
+function recordSummarySource(
   metadata: Record<string, unknown>,
-  spaceId: string,
-  channelId: string,
   input: Pick<Extract<PostgresChannelMutation, { kind: "channel_configure" }>, "summary" | "summaryAuthor">,
   at: string,
-): Promise<void> {
+): void {
   delete metadata.summarySource;
   const author = input.summaryAuthor;
   if (input.summary === null || input.summary === undefined || !author) return;
-  let throughSequence: number | undefined;
-  if (author.throughMessageId) {
-    const rows = await transaction.query<QueryResultRow & { timeline_sequence: string | number }>({
-      name: "channel_summary_through_sequence_v1",
-      text: `SELECT timeline_sequence FROM data.messages
-        WHERE space_id = $1 AND message_id = $2 AND channel_id = $3`,
-      values: [spaceId, author.throughMessageId, channelId], maxRows: 1,
-    });
-    if (rows[0]) throughSequence = Number(rows[0].timeline_sequence);
-  }
-  metadata.summarySource = {
-    author: { kind: "run", runId: author.runId, agentName: author.agentName },
-    generatedAt: at,
-    ...(throughSequence ? { throughSequence } : {}),
-  };
+  metadata.summarySource = { author: { kind: "task", agentName: author.agentName }, generatedAt: at,
+    ...(author.throughSequence > 0 ? { throughSequence: author.throughSequence } : {}) };
 }
 
 /**
@@ -631,6 +617,11 @@ async function releaseChannelTreeForMove(
     values: [channelIds], maxRows: 0,
   });
   await transaction.query({
+    name: "channel_move_remove_app_action_requests_v1",
+    text: "DELETE FROM data.app_connector_action_requests WHERE channel_id=ANY($1::text[])",
+    values: [channelIds], maxRows: 0,
+  });
+  await transaction.query({
     name: "channel_move_remove_app_action_policies_v1",
     text: "DELETE FROM data.app_connector_action_policies WHERE channel_id=ANY($1::text[])",
     values: [channelIds], maxRows: 0,
@@ -656,10 +647,8 @@ async function moveChannelSpaceFacts(
   channelIds: readonly string[],
 ): Promise<void> {
   const values = [sourceSpaceId, targetSpaceId, channelIds];
-  for (const table of ["channel_metadata_revisions", "channel_about_inputs"] as const) {
-    await transaction.query({ name: `channel_move_${table}_v1`,
-      text: `UPDATE data.${table} ${CHANNEL_MOVE_FACT_SQL}`, values, maxRows: 0 });
-  }
+  await transaction.query({ name: "channel_move_channel_metadata_revisions_v1",
+    text: `UPDATE data.channel_metadata_revisions ${CHANNEL_MOVE_FACT_SQL}`, values, maxRows: 0 });
   // Reborn history follows its Channel; releaseChannelTreeForMove has already
   // ended any of it that was still in progress.
   await transaction.query({
@@ -800,17 +789,20 @@ export class PostgresSpaceControlRepository {
     for (let attempt = 0; ; attempt++) {
       try { return await this.database.transaction(context, operation); }
       catch (error) {
-        if (attempt >= 2 || !error || typeof error !== "object" ||
+        if (attempt >= SERIALIZATION_RETRIES || !error || typeof error !== "object" ||
             !("code" in error) || error.code !== "40001") throw error;
       }
-      // Writers of one Space advance the same control head; an immediate replay meets them again.
-      await new Promise(resolve => setTimeout(resolve, (attempt + 1) * (20 + Math.random() * 40)));
+      // Writers of one Space advance the same control head, and Run state commits
+      // there in bursts (2026-10-13: eight in 670 ms), so the wait doubles until
+      // it outlasts one: up to about 1.9 s in all.
+      await new Promise(resolve => setTimeout(resolve, 2 ** attempt * (20 + Math.random() * 40)));
     }
   }
 
   private async placement(requestId: string, operation: string, spaceId: string): Promise<SpacePlacement> {
-    return this.placements.resolveWritable({ requestId, operation: `${operation}.placement` }, spaceId, () =>
-      new SpaceControlError("space_placement_unavailable", 503, "Space placement is not writable", true));
+    return this.placements.resolveWritable({ requestId, operation: `${operation}.placement` }, spaceId,
+      () => new SpaceControlError("space_placement_unavailable", 503, "Space placement is not writable", true),
+      () => new SpaceControlError("space_not_found", 404, "Space not found"));
   }
 
   private async publishCurrentChannelRoutes(
@@ -1024,6 +1016,10 @@ export class PostgresSpaceControlRepository {
         values: [spaceId], maxRows: 1,
       });
       if (existing[0]) throw new SpaceControlError("space_exists", 409, "space id already exists");
+      const now = new Date().toISOString();
+      rejectBilling(await this.billing.spaceCreation(transaction, {
+        ownerUserId, now, personalSpaceIds: input.personalSpaceIds ?? [],
+      }));
       const admission = await transaction.query<QueryResultRow & { state: string }>({
         name: "space_shard_admission_v1",
         text: `SELECT state FROM control.postgres_shards
@@ -1045,7 +1041,6 @@ export class PostgresSpaceControlRepository {
         maxRows: 1,
       });
       const searchRankSeq = ranks[0]!.value;
-      const now = new Date().toISOString();
       await transaction.query({
         name: "space_placement_create_v1",
         text: `INSERT INTO control.space_placement
@@ -1234,7 +1229,9 @@ export class PostgresSpaceControlRepository {
     const at = iso(input.at);
     // A purged Space has no placement left; to its owner it is simply gone.
     const placement = await this.placement(requestId, "space.space_restore", spaceId).catch((error: unknown) => {
-      if (missingPlacement(error)) throw new SpaceControlError("not_found", 404, "Space not found");
+      if (error instanceof SpaceControlError && error.code === "space_not_found") {
+        throw new SpaceControlError("not_found", 404, "Space not found");
+      }
       throw error;
     });
     const requestDigest = await digest(input);
@@ -1538,8 +1535,8 @@ export class PostgresSpaceControlRepository {
     if (spaces.length === 0) return [];
     const ids = spaces.map((space) => space.space_id);
     const members = await transaction.query<MemberRow>({
-      name: "space_members_hydrate_v1",
-      text: `SELECT m.space_id, m.user_id, m.role, m.email, m.display_name, m.avatar_url,
+      name: "space_members_hydrate_v2",
+      text: `SELECT m.space_id, m.user_id, m.role, m.email, m.display_name,
           m.created_at, u.name AS profile_name, u.handle AS profile_handle,
           u.image AS profile_avatar_url, u.bio AS profile_bio,
           u.time_zone AS profile_time_zone, u.profile_version
@@ -1782,37 +1779,21 @@ export class PostgresSpaceControlRepository {
   }
 
   async metadataHistory(input: { requestId: string; spaceId: string; channelId: string;
-    principal: SpaceControlPrincipal; beforeRevision?: number; revision?: number; inputId?: string; limit?: number }) {
+    principal: SpaceControlPrincipal; beforeRevision?: number; revision?: number; limit?: number }) {
     const { requestId, spaceId, principalId } = principalScope(input);
     const limit = input.limit ?? 20;
-    if ([input.beforeRevision,input.revision,input.inputId].filter(value => value !== undefined).length > 1 ||
-        (input.inputId !== undefined && (!input.inputId || input.inputId.length > 300)) ||
+    if ([input.beforeRevision,input.revision].filter(value => value !== undefined).length > 1 ||
         !Number.isSafeInteger(limit) || limit < 1 || limit > 100 ||
         [input.beforeRevision,input.revision].some((n) => n !== undefined && (!Number.isSafeInteger(n) || n < 0))) {
       throw new SpaceControlError("invalid_command", 400, "Invalid metadata history bounds");
     }
     return this.inSpace(requestId, "channel.metadata-history", spaceId, async (tx) => {
-      const visible = await tx.query<ChannelRow>({ name: "channel_metadata_history_access_v1",
+      const visible = await tx.query<ChannelRow>({ name: "channel_metadata_history_access_v2",
         text: `SELECT c.* FROM data.channels c WHERE c.space_id=$1 AND c.channel_id=$2
           AND ${channelCapabilityPredicate({ capability: "message_content_read", channelAlias: "c",
-            principalKindSql: "$3", principalIdSql: "$4", channelAboutSessionRead: true })} FOR SHARE OF c`,
+            principalKindSql: "$3", principalIdSql: "$4" })} FOR SHARE OF c`,
         values: [spaceId,input.channelId,input.principal.kind,principalId], maxRows: 1 });
       if (!visible[0]) throw new SpaceControlError("channel_not_found", 404, "Channel not found");
-      if (input.inputId) {
-        const sources = await tx.query({ name: "channel_metadata_input_read_v1",
-          text: `SELECT input.space_id,input.origin_space_id,input.channel_id,input.input_id,input.run_id,
-            input.metadata_revision,input.snapshot_json,input.created_at,
-            (SELECT COALESCE(jsonb_agg(CASE WHEN EXISTS (SELECT 1 FROM data.messages current
-              WHERE current.channel_id=input.channel_id AND current.message_id=ref->>'messageId'
-                AND current.content_hash=ref->>'contentHash'
-                AND current.deleted_at IS NULL AND current.recalled_at IS NULL)
-              THEN ref ELSE (ref-'payloadBundleBase64'-'payloadRef') || '{"contentUnavailable":true}'::jsonb END
-              ORDER BY ordinal),'[]'::jsonb)
-              FROM jsonb_array_elements(input.references_json) WITH ORDINALITY refs(ref,ordinal)) AS references_json
-            FROM data.channel_about_inputs input WHERE input.channel_id=$1 AND input.input_id=$2`,
-          values: [input.channelId,input.inputId], maxRows: 1 });
-        return { input: sources[0] ?? null };
-      }
       const revisions = await tx.query({ name: "channel_metadata_history_read_v1",
         text: `SELECT * FROM data.channel_metadata_revisions WHERE channel_id=$1
           AND ($2::bigint IS NULL OR revision<$2) AND ($3::bigint IS NULL OR revision=$3)
@@ -2910,6 +2891,23 @@ export class PostgresSpaceControlRepository {
       ...(stopTargets.length > 0 ? { stopTargets } : {}) };
   }
 
+  /** Human confirmation is checked at the HTTP boundary; PostgreSQL owns admission and retirement. */
+  async deleteChannel(input: { requestId: string; spaceId: string; channelId: string;
+    actorUserId: string; name: string; at: string }): Promise<Record<string, unknown>> {
+    const requestId = bounded(input.requestId, "requestId", 200);
+    const spaceId = bounded(input.spaceId, "spaceId");
+    const channelId = bounded(input.channelId, "channelId");
+    const actorUserId = bounded(input.actorUserId, "actorUserId");
+    const at = iso(input.at);
+    return this.inSpace(requestId, "channel.delete", spaceId, async tx => {
+      await requireSpaceAdmin(tx, "channel_deletion_admin_v1", spaceId, actorUserId);
+      const result = await retireChannel(tx, { ...input, spaceId, channelId, actorUserId, at });
+      // An idempotent repeat still advances the catalog, recovering a lost invalidation.
+      await requiredControlHead(tx, { name: "channel_deletion_head_v1", spaceId, at });
+      return { ...result, channelId, spaceId };
+    });
+  }
+
   async mutateChannel(
     input: PostgresChannelMutation,
     transfer?: { sourceSpaceId: string; proposalId: string },
@@ -2964,27 +2962,26 @@ export class PostgresSpaceControlRepository {
         values: [channelId], maxRows: 1,
       });
       const root = roots[0];
-      if (!root) throw new SpaceControlError("not_found", 404, "channel not found");
+      if (!root || root.mode === "deleted") throw new SpaceControlError("not_found", 404, "channel not found");
       const expectedVersion = input.expectedVersion ?? Number(root.version);
       if (Number(root.version) !== expectedVersion) {
         throw new SpaceControlError("conflict", 409, "channel version conflict");
       }
-      const admins = await transaction.query({
-        name: "channel_mutation_admin_v1",
-        text: `SELECT user_id FROM data.space_members
-          WHERE space_id = $1 AND user_id = $2 AND role IN ('owner', 'admin') LIMIT 1`,
+      const actors = await transaction.query<QueryResultRow & { role: string }>({
+        name: "channel_mutation_actor_role_v1",
+        text: `SELECT role FROM data.space_members WHERE space_id = $1 AND user_id = $2 LIMIT 1`,
         values: [root.space_id, actorUserId], maxRows: 1,
       });
-      if (!admins[0] && !transfer) throw new SpaceControlError("forbidden", 403, "Space admin required");
+      // xMatrix writes a task's About itself; the task ran on a member's Machine, as that member.
+      const admitted = actors[0] && (["owner", "admin"].includes(actors[0].role) || input.summaryAuthor !== undefined);
+      if (!admitted && !transfer) throw new SpaceControlError("forbidden", 403, "Space admin required");
 
       if (input.actorRunId) {
-        const actor = await transaction.query<QueryResultRow & { metadata_json: Record<string, unknown> }>({
-          name: "channel_metadata_actor_run_v1", text: `SELECT metadata_json FROM data.runs
+        const actor = await transaction.query({
+          name: "channel_metadata_actor_run_v2", text: `SELECT 1 FROM data.runs
             WHERE run_id=$1 AND owner_user_id=$2 AND status IN (${ACTIVE_RUN_STATUS_SQL}) FOR SHARE`,
           values: [input.actorRunId,actorUserId], maxRows: 1 });
-        if (!actor[0] || (actor[0].metadata_json.routedAs === "management_channel_about" &&
-            input.summaryAuthor?.runId !== input.actorRunId)) throw new SpaceControlError(
-          "channel_about_scope_invalid", 403, "Run cannot use an unscoped metadata writer");
+        if (!actor[0]) throw new SpaceControlError("agent_run_forbidden", 403, "The acting Agent Run is not live");
       }
       if (input.summaryAuthor && (input.mode !== undefined || input.topic !== undefined ||
           input.spaceId !== undefined ||
@@ -3101,7 +3098,7 @@ export class PostgresSpaceControlRepository {
           if (input.summary !== undefined) {
             if (input.summary === null) delete rootMetadata.summary;
             else rootMetadata.summary = input.summary.trim();
-            await recordSummarySource(transaction, rootMetadata, root.space_id, channelId, input, at);
+            recordSummarySource(rootMetadata, input, at);
           }
           explicitProjectionMutations = [];
           for (const row of moveRows) {
@@ -3194,7 +3191,7 @@ export class PostgresSpaceControlRepository {
         if (input.summary !== undefined) {
           if (input.summary === null) delete nextMetadata.summary;
           else nextMetadata.summary = input.summary.trim();
-          await recordSummarySource(transaction, nextMetadata, root.space_id, channelId, input, at);
+          recordSummarySource(nextMetadata, input, at);
         }
         if (input.name !== undefined || input.summary !== undefined || input.restoreRevision !== undefined) {
           await appendMetadataRevision(transaction, root,

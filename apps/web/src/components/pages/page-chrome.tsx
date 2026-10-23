@@ -1,25 +1,24 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { pageAuthorColor, pageAuthorLabel, pageLineDiff, type PageLineDiff } from "@xmatrix/protocol";
+import { pageAuthorColor, pageAuthorLabel, pageLineDiff, type FaceOf, type PageLineDiff } from "@xmatrix/protocol";
 import type { PageDocBlock } from "@xmatrix/protocol/page-document";
-import { ArrowDown, ArrowLeft, ArrowUp } from "lucide-react";
+import { ArrowLeft, ChevronDown, ChevronUp } from "lucide-react";
 import {
   CenteredDialogShell, DialogButton, DialogInset, DialogPanelFooter, DialogPanelHeader,
 } from "@/components/dashboard/centered-dialog-shell";
-import { avatarInitials } from "@/components/dashboard/completion-option-button";
-import { IdentityAvatar } from "@/components/dashboard/identity-avatar";
-import { COUNT_CHIP_MATERIAL_CLASS } from "@/components/dashboard/workspace-shell-constants";
 import { formatRelativeAge } from "@/components/dashboard/time-display";
+import { InlineRowPreview } from "@/components/dashboard/inline-row-preview";
 import { Button } from "@/components/ui/button";
-import { actionClass } from "@/components/ui/action-tone";
+import { LiquidGlassPill } from "@/components/ui/material-surfaces";
 import { noticeClass, statusInkClass } from "@/components/ui/status-tone";
 import { useAuth } from "@/lib/auth-context";
 import { xmatrixQueryKeys } from "@/lib/query/query-keys";
 import { pageApi, type PageRevision } from "@/lib/pages/page-client";
 import { cn } from "@/lib/utils";
 import { agentState } from "./page-margin";
+import { PenContent } from "./page-pen";
 import type { MarginConversation } from "./page-margin-model";
 import { userErrorMessage } from "@/lib/user-facing-error";
 
@@ -35,7 +34,8 @@ export interface PresentPerson {
   name: string;
   color: string;
   agent: boolean;
-  avatarUrl?: string;
+  /** Their face: a person's own picture, an Agent's vendor mark. */
+  face: FaceOf;
   /** What they are doing, where, and in which conversation. */
   detail: string;
   blockId: string;
@@ -45,82 +45,91 @@ export interface PresentPerson {
   editing: boolean;
   /** Away from the page, or an Agent whose Run is not working: dimmed, as Google Docs dims idle people. */
   idle?: boolean;
+  /** The conversation an Agent works from, where it is talked to. */
+  conversationId?: string | null;
+  /** An Agent co-writing live whose last change can still be taken back. */
+  undoable?: boolean;
+  /** What an Agent co-writing live is doing now, in a word or two. */
+  doing?: string;
+  /** The conversation an Agent's words come from while it writes, by name. */
+  from?: string;
+  /** An Agent co-writing live whose last answer went quiet and was given up: another may write instead. */
+  stalled?: boolean;
+  /** An Agent co-writing live is thinking: its `doing` says for how long. */
+  thinking?: boolean;
+  /** How long it has thought, as briefly as a face's tag can say it: "19s", "2m". */
+  brief?: string;
 }
 
-/** Everyone on the page, as in Google Docs: hover says who and where, a click goes there. */
-export function PresenceStack({ people, onFollow }: { people: PresentPerson[]; onFollow: (person: PresentPerson) => void }) {
-  if (people.length === 0) return null;
-  const shown = people.slice(0, 5);
+/** Room a face needs to carry its name beside it. */
+const NAMED_PEN_ROOM = 110;
+
+/** An Agent on the page, by the line it is at: its top in the document column, and whether that is out of view. */
+export interface PagePen { person: PresentPerson; top: number; away: "above" | "below" | null }
+
+/**
+ * Each Agent on the page, on a phone and a desktop alike, is its face at the right edge beside the line its pen is at, where
+ * Google Docs keeps what others do to the text (§3.2). The face travels with the text, and when the line
+ * is scrolled out of view it waits at the top or bottom of the edge, pointing the way. A tap on a face
+ * that is away goes back to its line; on one beside its line, it opens what the Agent is doing.
+ */
+export function PagePens({ pens, room = 0, onJump, onOpen }: {
+  pens: PagePen[];
+  /** Room beside the text column. Where a face fits with its name (a desktop), it carries its name and what it
+   *  is doing, filled in its colour; on a phone it is the face alone. */
+  room?: number;
+  onJump: (person: PresentPerson) => void; onOpen: (person: PresentPerson) => void;
+}) {
+  if (pens.length === 0) return null;
+  const named = room >= NAMED_PEN_ROOM;
   return (
-    <div className="flex items-center -space-x-0.5" data-testid="page-now" aria-label="On this page now">
-      {shown.map((person) => (
-        <button key={person.key} type="button" onClick={() => onFollow(person)}
-          title={`${person.name} · ${person.detail}`} aria-label={`${person.name}, ${person.detail}`}
-          className={cn("inline-flex rounded-full focus-visible:outline-2 focus-visible:outline-primary",
-            person.idle && "opacity-45")}
-          // Ringed in the colour of their caret in the text.
-          style={{ boxShadow: `0 0 0 2px var(--background), 0 0 0 3.5px ${person.color}` }}>
-          <IdentityAvatar kind={person.agent ? "agent" : "human"} label={person.name} title={`${person.name} · ${person.detail}`}
-            imageUrl={person.avatarUrl} initials={!person.agent || person.avatarUrl ? avatarInitials(person.name) : undefined}
-            size="xs" shape="circle" className="rounded-full" />
-        </button>
-      ))}
-      {people.length > shown.length && (
-        <span className={cn("app-overflow-count inline-flex h-5 min-w-5 items-center justify-center px-1 text-[10px] font-bold",
-          COUNT_CHIP_MATERIAL_CLASS)}>
-          +{people.length - shown.length}
-        </span>
-      )}
+    <div className={cn("page-pens pointer-events-none absolute inset-y-0", named ? "is-named left-full ml-2.5" : "-right-6 w-8")}
+      style={named ? { width: room - 18 } : undefined} data-testid="page-pens">
+      {pens.map(({ person, top, away }) => {
+        const Chevron = away === "above" ? ChevronUp : ChevronDown;
+        return (
+          // A spacer, not a margin, sets the line: a sticky face may not leave its own margin box.
+          <div key={person.key} className="absolute inset-0">
+            {/* Its height eases, so the face glides to the line the Agent moves on to. */}
+            <div className="page-pen-spacer" style={{ height: Math.max(0, top) }} />
+            <button type="button" onClick={() => (away ? onJump(person) : onOpen(person))} data-away={away ?? undefined}
+              className={cn("page-pen pointer-events-auto", person.idle && "is-idle", person.editing && "is-writing")}
+              style={{ "--page-pen-color": person.color } as CSSProperties}
+              aria-label={`${person.name} is ${person.editing ? "writing" : "here"}${away ? `, ${away}` : ""}`}
+              title={`${person.name} · ${person.detail}`}>
+              <PenContent person={person} named={named} />
+              {away && <Chevron className="page-pen-way" aria-hidden="true" strokeWidth={2.5} />}
+            </button>
+          </div>
+        );
+      })}
     </div>
   );
 }
 
-/** Someone out of view, and which way to scroll to them. */
-export interface OffscreenPerson { person: PresentPerson; distance: number }
-
 /**
- * Who is working above or below what this person can see (§3.2), at the top
- * and bottom edges of the page as in Google Docs; clicking scrolls to the
- * nearest of them.
+ * The change in front of the reader, held at the right edge beside its line, where Google Docs keeps
+ * what others do to the text: whose change it is and what to do with it, travelling with the line and
+ * waiting at the top or bottom of the edge, pointing the way, while the line is out of view.
  */
-export function PageOffscreenPeople({ above, below, onJump }: {
-  above: OffscreenPerson[]; below: OffscreenPerson[]; onJump: (person: PresentPerson) => void;
+export function PageChangeMark({ top, away, label, testId, children }: {
+  top: number; away: "above" | "below" | null; label: string; testId: string; children: ReactNode;
 }) {
-  const edge = (side: "above" | "below", entries: OffscreenPerson[]) => {
-    if (entries.length === 0) return null;
-    const sorted = [...entries].sort((a, b) => a.distance - b.distance);
-    const people = sorted.map((entry) => entry.person);
-    const nearest = people[0]!;
-    const verb = nearest.editing ? "editing" : "reading";
-    const label = people.length === 1 ? `${nearest.name} is ${verb} ${side}`
-      : `${nearest.name} and ${people.length - 1} ${people.length === 2 ? "other" : "others"} ${side}`;
-    const Arrow = side === "above" ? ArrowUp : ArrowDown;
-    return (
-      <div className={cn("pointer-events-none absolute inset-x-0 z-20 flex justify-center",
-        side === "above" ? "top-2" : "bottom-3")}>
-        <button type="button" onClick={() => onJump(nearest)} data-testid={`page-people-${side}`}
-          title={people.map((person) => `${person.name} · ${person.detail}`).join("\n")}
-          className={actionClass({ variant: "secondary", size: "sm" },
-            "page-offscreen-people pointer-events-auto max-w-[min(22rem,90%)] rounded-full")}>
-          <span className="flex -space-x-1">
-            {people.slice(0, 3).map((person) => (
-              <span key={person.key} className="inline-flex rounded-full"
-                style={{ boxShadow: `0 0 0 1.5px var(--background), 0 0 0 3px ${person.color}` }}>
-                <IdentityAvatar kind={person.agent ? "agent" : "human"} label={person.name} imageUrl={person.avatarUrl}
-                  initials={!person.agent || person.avatarUrl ? avatarInitials(person.name) : undefined}
-                  size="xs" shape="circle" className="rounded-full" />
-              </span>
-            ))}
-          </span>
-          {nearest.editing && <span className="page-offscreen-typing size-1.5 shrink-0 rounded-full"
-            style={{ backgroundColor: nearest.color }} aria-hidden="true" />}
-          <span className="truncate">{label}</span>
-          <Arrow className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
-        </button>
+  const Chevron = away === "above" ? ChevronUp : ChevronDown;
+  return (
+    <div className="page-change-lane pointer-events-none absolute inset-y-0" data-testid={testId}>
+      {/* A spacer, not a margin, sets the line: a sticky mark may not leave its own margin box. */}
+      <div style={{ height: Math.max(0, top) }} />
+      <div className="page-change-mark" data-away={away ?? undefined}>
+        {away === "above" && <Chevron className="page-change-way" aria-hidden="true" strokeWidth={2.5} />}
+        <LiquidGlassPill role="toolbar" aria-label={label}
+          className="pointer-events-auto flex w-10 flex-col items-center gap-1 rounded-full p-1">
+          {children}
+        </LiquidGlassPill>
+        {away === "below" && <Chevron className="page-change-way" aria-hidden="true" strokeWidth={2.5} />}
       </div>
-    );
-  };
-  return <>{edge("above", above)}{edge("below", below)}</>;
+    </div>
+  );
 }
 
 /** A place on the page worth finding, drawn along its scrollbar (§3.2). */
@@ -262,7 +271,7 @@ export function ConversationList({ conversations, blocks, onOpen, focusBlockId =
                     )}
                     {conversation.lastMessage && (
                       <span className="block truncate text-xs text-muted-foreground">
-                        {conversation.lastMessage.from.label}: {conversation.lastMessage.bodyPreview}
+                        {conversation.lastMessage.label}: <InlineRowPreview text={conversation.lastMessage.bodyPreview} />
                       </span>
                     )}
                     {conversation.agents.length > 0 && (

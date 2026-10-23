@@ -1,18 +1,15 @@
 "use client";
+import { decodeChannelSnapshot } from "@xmatrix/protocol";
+import type { UnsentMessageAction } from "./message-unsent-notice";
 import { loadImage as loadImageForClipboard, canvasToBlob as canvasToBlobForClipboard } from "./image-canvas";
 import { timelineLayoutMoved } from "./timeline-send-rise";
 
 import type {
   AgentTraceTarget,
-  ChannelNavItemProps,
   ComposerSendSnapshot,
   TimelineItem,
 } from "./workspace-shell-message-model";
 import type { MessageAttachmentMediaStore } from "./message-attachment-media-store";
-
-import {
-  timelineMessagesEqual,
-} from "./workspace-shell-message-model";
 
 export type {
   AgentTraceTarget,
@@ -22,11 +19,7 @@ export type {
   ThreadReplyParticipant,
 } from "./workspace-shell-message-model";
 
-export {
-  replyPreviewSequence,
-  replyPreviewsEqual,
-  timelineMessagesEqual,
-} from "./workspace-shell-message-model";
+export { replyPreviewSequence } from "./workspace-shell-message-model";
 
 import {
   AGENT_BUSY_TRACE_STALE_MS,
@@ -66,7 +59,6 @@ import {
   useState,
   type MutableRefObject,
   type PointerEvent as ReactPointerEvent,
-  type TouchEvent as ReactTouchEvent,
 } from "react";
 
 import { parseAppMentions } from "@/components/dashboard/mention-complete";
@@ -91,7 +83,7 @@ import type {
   MessageSender,
   ObservabilityEvent,
   SerializedAgentInstance,
-  SerializedChannel,
+  ChannelSnapshot,
   SerializedMachineDaemon,
   SerializedSpace,
   SerializedWorkspace,
@@ -247,7 +239,7 @@ export type HistoryRenderAuthority = {
 };
 
 export type MobileListFixture = {
-  channels: SerializedChannel[];
+  channels: ChannelSnapshot[];
   spaces: SerializedSpace[];
   readCounts: Record<string, number>;
   history: Record<string, ChannelMessage[]>;
@@ -307,12 +299,12 @@ export function createMobileListFixture(pathname: string): MobileListFixture | n
     name: string,
     minutesAgo: number,
     preview: string,
-    options: Partial<SerializedChannel> & {
+    options: Partial<ChannelSnapshot> & {
       from?: string;
       unread?: number;
       members?: Record<string, ChannelMemberPresence>;
     } = {}
-  ): SerializedChannel => ({
+  ): ChannelSnapshot => decodeChannelSnapshot({
     id,
     spaceId: space.id,
     name,
@@ -335,7 +327,7 @@ export function createMobileListFixture(pathname: string): MobileListFixture | n
         }
       : undefined,
     memberPresence: options.members || {
-      "agent:codex": {
+      "agent:codex": { registration: { ownerUserId: "owner-1", machineId: "machine-1", harness: "codex" },
         kind: "agent",
         label: "Codex",
         activity: "Reviewing mobile UX",
@@ -352,15 +344,15 @@ export function createMobileListFixture(pathname: string): MobileListFixture | n
           },
         ],
       },
-      "agent:claude": {
+      "agent:claude": { registration: { ownerUserId: "owner-1", machineId: "machine-1", harness: "claude" },
         kind: "agent",
         label: "Claude",
         activity: "Watching review",
         instances: [
           {
-            id: `${id}:claude:1`,
-            channelInstanceId: "1",
-            label: "claude:1",
+            id: `${id}:claude:2`,
+            channelInstanceId: "2",
+            label: "claude:2",
             connectedAt: iso(minutesAgo + 12),
             lastSeenAt: iso(3),
             status: "online",
@@ -476,21 +468,6 @@ export function usePointerFirstSelect(select: () => void) {
   };
 }
 
-export function areChannelNavItemPropsEqual(previous: ChannelNavItemProps, next: ChannelNavItemProps): boolean {
-  return (
-    previous.channel === next.channel &&
-    previous.events === next.events &&
-    previous.active === next.active &&
-    previous.unreadCount === next.unreadCount &&
-    previous.hasUnreadMention === next.hasUnreadMention &&
-    previous.isPinnedRoot === next.isPinnedRoot &&
-    previous.onSelect === next.onSelect &&
-    previous.onTogglePinned === next.onTogglePinned &&
-    previous.onMarkDone === next.onMarkDone &&
-    previous.onOpenContextMenu === next.onOpenContextMenu
-  );
-}
-
 export const productMessageAttachmentMediaClient = new ProductMessageAttachmentMediaClient();
 
 /** Where each timeline stood right after it was last landed on its newest message. */
@@ -539,7 +516,7 @@ export function restoreTimelineScrollTop(scrollContainer: HTMLDivElement | null,
   scrollContainer.scrollTop = Math.min(scrollTop, scrollContainer.scrollHeight);
 }
 
-export function channelHasAgentMembers(channel: SerializedChannel | null): boolean {
+export function channelHasAgentMembers(channel: ChannelSnapshot | null): boolean {
   if (!channel) return false;
   return channelMembersByPresence(channel).some(
     (member) => memberPresence(channel, member).kind === "agent"
@@ -642,22 +619,10 @@ export function useIsMobileViewport() {
   return isMobile;
 }
 
-export function touchPoints(touches: ReactTouchEvent<HTMLDivElement>["touches"]) {
-  return Array.from(touches, (touch) => ({ x: touch.clientX, y: touch.clientY }));
-}
-
-export function pointerDistance(first: { x: number; y: number }, second: { x: number; y: number }) {
-  return Math.hypot(first.x - second.x, first.y - second.y);
-}
-
-export function pointerMidpoint(first: { x: number; y: number }, second: { x: number; y: number }) {
-  return { x: (first.x + second.x) / 2, y: (first.y + second.y) / 2 };
-}
-
 /** What a message row reads of its conversation: never the catalog's whole, ever-changing record. */
-export type MessageRowChannel = Pick<SerializedChannel, "id" | "spaceId">;
+export type MessageRowChannel = Pick<ChannelSnapshot, "id" | "spaceId">;
 
-export type MessageRowComparableProps = {
+export type MessageRowProps = {
   message: TimelineItem;
   contextOnly?: boolean;
   currentUserIdentityId: string;
@@ -668,6 +633,7 @@ export type MessageRowComparableProps = {
   onReact: (message: TimelineItem, emoji: string) => void;
   onEdit: (message: TimelineItem, body: string) => void;
   onRecall: (message: TimelineItem) => void;
+  onUnsentAction: (message: TimelineItem, action: UnsentMessageAction) => void;
   onReply: (message: TimelineItem) => void;
   onOpenThread: (message: TimelineItem) => void;
   onMentionSender: (message: TimelineItem) => void;
@@ -678,33 +644,6 @@ export type MessageRowComparableProps = {
   onOpenInternalAppLink: (href: string) => boolean;
   onJumpToMessage: (messageId: string, sequence?: number) => void;
 };
-
-export function areMessageRowPropsEqual(
-  previous: MessageRowComparableProps,
-  next: MessageRowComparableProps
-): boolean {
-  return (
-    previous.contextOnly === next.contextOnly &&
-    previous.currentUserIdentityId === next.currentUserIdentityId &&
-    previous.channel === next.channel &&
-    previous.token === next.token &&
-    previous.mediaStore === next.mediaStore &&
-    previous.isJoined === next.isJoined &&
-    previous.onReact === next.onReact &&
-    previous.onEdit === next.onEdit &&
-    previous.onRecall === next.onRecall &&
-    previous.onReply === next.onReply &&
-    previous.onOpenThread === next.onOpenThread &&
-    previous.onMentionSender === next.onMentionSender &&
-    previous.onRebornSender === next.onRebornSender &&
-    previous.reborningSender === next.reborningSender &&
-    previous.onQuestionnaireAnswer === next.onQuestionnaireAnswer &&
-    previous.onOpenAgentTrace === next.onOpenAgentTrace &&
-    previous.onOpenInternalAppLink === next.onOpenInternalAppLink &&
-    previous.onJumpToMessage === next.onJumpToMessage &&
-    timelineMessagesEqual(previous.message, next.message)
-  );
-}
 
 export function clearMessageLongPress(
   timerRef: MutableRefObject<number | null>,

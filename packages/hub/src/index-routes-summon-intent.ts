@@ -9,6 +9,8 @@ import { evaluateRoutingChoices, type RoutingEvaluator } from "./agent-routing-e
 import { registrationLaunchContextReader } from "./registration-launch-context";
 import { SUMMON_INTENT_QUESTION } from "./registration-launch-choice";
 import { runtimePlacement } from "./runtime";
+import { meterJev } from "./usage-cost-metering";
+import { admitRequest, rateLimitedResponse } from "./request-rate-limit";
 
 const NO_STORE = { "cache-control": "private, no-store" };
 const MAX_DRAFT = 20_000;
@@ -38,6 +40,9 @@ export function registerSummonIntentRoutes(app: Hono<{ Bindings: Env }>,
      allocates nothing and records no decision; the send carries the reading. */
   app.post("/api/channels/:channelId/summon-intent", (c) => jsonErrors(c, async () => {
     const authUser = requireHumanAuth(await authenticate(c.req.raw, c.env));
+    // One preview asks Jev up to eight times, so a Human's previews are bounded
+    // before any work. A refused one shows no reading; the send still asks Jev.
+    if (!await admitRequest(c.env, "summon_intent", authUser.id)) return rateLimitedResponse();
     const input = await c.req.json().catch(() => null) as { body?: unknown; summons?: unknown } | null;
     const body = input?.body;
     const summons = input?.summons;
@@ -60,7 +65,8 @@ export function registerSummonIntentRoutes(app: Hono<{ Bindings: Env }>,
       sourceMessageId: "draft", actorUserId: actorUserId(authUser) })(Number.MAX_SAFE_INTEGER);
     const readings = await readDraftSummonIntents({ body, channelContext,
       summons: summons.map(item => ({ start: Number(item.start), end: Number(item.end) })),
-      evaluate: createJevClient({ apiKey, timeoutMs: 5_000 }).evaluate });
+      evaluate: meterJev(c.env, { feature: "summon_intent", scope: { spaceId: route.spaceId } },
+        createJevClient({ apiKey, timeoutMs: 5_000 }).evaluate) });
     return c.json({ readings }, 200, NO_STORE);
   }));
 }

@@ -1,6 +1,13 @@
 import type { RequestRateLimiter } from "./request-rate-limit";
 
 export interface Env {
+  /** Dedicated native Gmail metadata notification application, separate from Composio. */
+  GMAIL_WATCH_CLIENT_ID?: string;
+  GMAIL_WATCH_CLIENT_SECRET?: string;
+  GMAIL_WATCH_TOPIC?: string;
+  GMAIL_WATCH_PUSH_EMAIL?: string;
+  GMAIL_WATCH_PUSH_AUDIENCE?: string;
+  GMAIL_WATCH_SUBSCRIPTION?: string;
   /** Per-Space clock for PostgreSQL-owned decision retention. */
   RELAY_SUMMON_DECISION_CLOCK?: DurableObjectNamespace;
   /** Per-Space clock for PostgreSQL-owned Space deletion purges. */
@@ -21,6 +28,8 @@ export interface Env {
   /** One Agent Launch coordinator per Channel, addressed by Channel id. */
   RELAY_POSTGRES_AGENT_LAUNCH_CHANNEL?: DurableObjectNamespace;
   GITHUB_SUBSCRIPTION_INDEX?: DurableObjectNamespace<import("./github-subscription-index").GitHubSubscriptionIndex>;
+  /** One reference-only durable executor per approved X video upload. */
+  RELAY_X_UPLOAD_EXECUTOR?: DurableObjectNamespace<import("./connectors/x-upload-executor-do").RelayXUploadExecutor>;
   /** Per-shard permits bounding concurrent background passes; holds no work. */
   RELAY_POSTGRES_BACKGROUND_ADMISSION?: DurableObjectNamespace;
   /** Concurrent Channel coordinator passes admitted per PostgreSQL shard (default 8). */
@@ -109,12 +118,23 @@ export interface Env {
    * profile and its query contract. Absent binding means observation is off.
    */
   RELAY_AUTHORITY_OBSERVABILITY_AE?: AnalyticsEngineDataset;
+  /**
+   * Operator-paid usage per Space: one point per Jev, Composio or X call
+   * (usage-cost-metering.ts). Its own dataset because it indexes on the Space
+   * id. Absent binding means metering is off.
+   */
+  XMATRIX_USAGE_COST_AE?: AnalyticsEngineDataset;
   /** Per-credential request allowance (Workers Rate Limiting). Absent: unlimited. */
   RATE_LIMIT_CREDENTIAL?: RequestRateLimiter;
   /** Per-client-IP allowance for requests without a credential. */
   RATE_LIMIT_ANONYMOUS?: RequestRateLimiter;
   /** Per-user allowance of Human socket sign-ins. */
   RATE_LIMIT_HUMAN_CONNECT?: RequestRateLimiter;
+  /** Per-Human allowance of composer draft previews (Jev). Always enforced. */
+  RATE_LIMIT_SUMMON_INTENT?: RequestRateLimiter;
+  RATE_LIMIT_SEARCH_RERANK?: RequestRateLimiter;
+  /** Per-owner allowance of open Jev evaluations. Always enforced. */
+  RATE_LIMIT_JEV_EVALUATE?: RequestRateLimiter;
   /** Over-limit requests are refused only when this is exactly "true"; otherwise only logged. */
   RATE_LIMIT_ENFORCED?: string;
   /** Observation writes only when this is exactly "true". */
@@ -131,6 +151,8 @@ export interface Env {
   CF_VERSION_METADATA?: { id?: string; tag?: string };
   SEND_EMAIL?: SendEmail;
   APP_URL?: string;
+  /** The Web every beta deploys (e.g. https://beta.xmatrix.sh); links still go to APP_URL. */
+  APP_BETA_URL?: string;
   /** Verified console protocol/delivery/identifiers and approved template; absent keeps company installation closed. */
   CONNECTOR_DINGTALK_COMPANY_CONFIG?: string;
   /** Server-only Stripe API key. A public Payment Link is never an entitlement. */
@@ -180,7 +202,6 @@ export interface Env {
    * Production Space whose signed-in members may enter the hosted Test app.
    * The deployment pins the id; clients and Spaces cannot widen this grant.
    */
-  TEST_ENVIRONMENT_ACCESS_SPACE_ID?: string;
   XMATRIX_MOCK_AUTH_TOKEN?: string;
   /** Runtime cell routing: exactly "dual" activates candidate cells; default shadow. */
   XMATRIX_RUNTIME_CELL_MODE?: string;

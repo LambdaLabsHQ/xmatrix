@@ -1,5 +1,6 @@
 "use client";
 
+import { AnimatedIcon } from "@/components/ui/animated-icon";
 import { useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import Link from "next/link";
@@ -127,7 +128,7 @@ export function SpaceInviteClient({ token }: { token: string }) {
               <Button className="w-full" onClick={acceptInvite} disabled={disabled}>
                 {accepting ? (
                   <>
-                    <Loader2 className="mr-2 size-4 animate-spin" />
+                    <AnimatedIcon icon={Loader2} className="mr-2 size-4 animate-spin" />
                     Joining
                   </>
                 ) : (

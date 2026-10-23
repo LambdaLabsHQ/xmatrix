@@ -6,7 +6,7 @@ import {
   parseHarnessInventory, parseHarnessActionRequest, parseHarnessActionResult, parseRoutingQuotaProbeRequest, parseRoutingQuotaProbeResponse,
   MACHINE_WORKTREE_ACTION_CAPABILITY, parseWorktreeActionRequest, parseWorktreeActionResult, WORKTREE_ACTION_CLAIM_TTL_MS,
   MACHINE_TEXT_TASK_CAPABILITY, parseTextTaskRequest, parseTextTaskResult, TEXT_TASK_CLAIM_TTL_MS,
-  stableMachineDaemonId,
+  MACHINE_SLEEP_CAPABILITY, stableMachineDaemonId,
   sha256Hex } from "@xmatrix/protocol";
 import { commandDigest as digest, commandJson as stable } from "./command-digest.js";
 
@@ -24,10 +24,10 @@ import { commandFields } from "./command-fields.js";
 import { ControlError } from "./control-error.js";
 
 const ACTIONS = new Set(["enroll", "connect", "report", "unregister", "issue", "issue_batch", "claim",
-  "renew", "complete", "retry", "failed-deliver", "migration_preflight", "migration_fence", "recover_connect",
-  "activation_begin", "activation_prepare", "activation_advance"]);
+  "renew", "complete", "retry", "failed-deliver", "confirm-online", "migration_preflight", "migration_fence",
+  "recover_connect", "activation_begin", "activation_prepare", "activation_advance"]);
 const COMMAND_TYPES = new Set(["spawn", "stop", "cleanup", "request_resolve", "recover_reply", "quota_probe",
-  "harness_action", "worktree_action", "text_task"]);
+  "harness_action", "worktree_action", "text_task", "sleep"]);
 const RESULT_TYPES: Record<string, string> = {
   spawn: "machine_spawn_result", stop: "machine_stop_result",
   recover_reply: "machine_recover_reply_result",
@@ -35,9 +35,18 @@ const RESULT_TYPES: Record<string, string> = {
   harness_action: "machine_harness_action_result",
   worktree_action: "machine_worktree_action_result",
   text_task: "machine_text_task_result",
+  sleep: "machine_sleep_result",
   cleanup: "machine_worktree_cleanup_result", request_resolve: "machine_request_resolve_result",
 };
 const REPLAY_TTL_MS = 30 * 24 * 60 * 60 * 1_000;
+/**
+ * A report sent on an older connection is refused by the epoch fence before
+ * its replay is read, and every report has a fresh command id, so a report's
+ * replay only answers a retry of the same request, which comes within
+ * seconds. Reports are most of the daemon's commands and each stores the
+ * whole daemon record, so a month of them was over half the database.
+ */
+const REPORT_REPLAY_TTL_MS = 24 * 60 * 60 * 1_000;
 const COMMAND_TTL_MS = 30 * 24 * 60 * 60 * 1_000;
 const QUOTA_PROBE_WINDOW_MS = 15_000;
 /**
@@ -186,11 +195,25 @@ async function replay(tx: DatabaseTransaction, ownerUserId: string, commandId: s
   return { ...(rows[0].result_json as Record<string, unknown>), reused: true };
 }
 
+/**
+ * A command no caller asks about again (the Hub marks it `replayable: false`)
+ * would store a replay nothing reads. Only commands that are safe to apply
+ * twice may skip it: an online confirmation, and a partial Run snapshot
+ * (resources, harnesses and Run progress, all of which only move forward).
+ * Partial snapshots are most of a daemon's commands: on 2026-10-22 about
+ * 70,000 of the roughly 80,000 replay rows written a day.
+ */
+function storesReplay(action: string, input: Record<string, unknown>, payload: Record<string, unknown>): boolean {
+  if (input.replayable !== false) return true;
+  if (action === "confirm-online") return false;
+  return !(action === "report" && input.eventType === "machine_run_snapshot" && payload.snapshotComplete !== true);
+}
+
 async function storeReplay(tx: DatabaseTransaction, input: { ownerUserId: string; commandId: string;
-  requestDigest: string; value: Record<string, unknown>; at: string }) {
+  requestDigest: string; value: Record<string, unknown>; at: string; ttlMs: number }) {
   await storeScopedCommandReplay(tx, "machine_control_replay_write_v1", {
     scopeKind: "user", scopeId: input.ownerUserId, commandId: input.commandId,
-    commandKind: "machine-daemon-control", requestDigest: input.requestDigest, result: input.value, at: input.at, ttlMs: REPLAY_TTL_MS,
+    commandKind: "machine-daemon-control", requestDigest: input.requestDigest, result: input.value, at: input.at, ttlMs: input.ttlMs,
   });
 }
 
@@ -298,6 +321,12 @@ function exactResult(commandType: string, issued: Record<string, unknown>, event
       throw new MachineControlError("machine_command_result_mismatch", 409, "Text task result differs from the issued task");
     }
   }
+  if (commandType === "sleep" && (typeof payload.slept !== "boolean" ||
+      (payload.reason !== undefined && !["not_idle", "not_running", "not_resumable"].includes(String(payload.reason))) ||
+      Object.keys(payload).some(key =>
+        !["type", "requestId", "runId", "executionKey", "instanceId", "slept", "reason", "relayLease"].includes(key)))) {
+    throw new MachineControlError("machine_command_result_mismatch", 409, "Sleep result differs from the issued command");
+  }
   const identityFields = commandType === "spawn"
     ? ["launchId", "runId", "executionKey", "instanceId", "channelId", "agentName", "identityId"]
     : ["runId", "executionKey", "agentId", "instanceId", "resumeSessionKey",
@@ -351,7 +380,8 @@ export class PostgresMachineControlRepository {
         "invalid_machine_command", 400, "Machine Daemon stop cleanup reason is invalid");
     }
     const at = new Date().toISOString();
-    const requestDigest = await digest(input);
+    const replayable = storesReplay(action, input, payload);
+    const requestDigest = replayable ? await digest(input) : "";
     return this.database.transaction({ requestId: commandId,
       operation: `machine-control.${action}` }, async (tx) => {
       await tx.query({ name: "machine_control_scope_lock_v2",
@@ -397,6 +427,17 @@ export class PostgresMachineControlRepository {
         "machine_identity_conflict", 409, "Machine Daemon identity is already bound");
       if (action === "failed-deliver") {
         if (!current) return { delivered: 0, owners: 0, deliverable: false };
+        // The epoch is the generation the failed wake observed. A reconnect
+        // that already replaced it must stay online; this delivery belonged
+        // to the socket that is gone.
+        if (input.connectionEpoch !== undefined &&
+            Number(current.connection_epoch) !== integer(input.connectionEpoch, "connectionEpoch", 1)) {
+          return {
+            commandId, action, daemon: daemon(current),
+            connectionEpoch: Number(current.connection_epoch),
+            delivered: 0, owners: 0, deliverable: false, stale: true,
+          };
+        }
         current = await this.commitDaemon(tx, { action, current, daemonId, ownerUserId, ownerEmail,
           machineId, hostId, input, at });
         return {
@@ -431,7 +472,7 @@ export class PostgresMachineControlRepository {
         throw new MachineControlError("idempotency_mismatch", 409,
           "Machine Daemon enrollment exists without its exact idempotency result");
       }
-      if (!current && ["report", "claim", "renew", "complete", "retry", "unregister"].includes(action)) {
+      if (!current && ["report", "claim", "renew", "complete", "retry", "unregister", "confirm-online"].includes(action)) {
         throw new MachineControlError("machine_daemon_not_registered", 409,
           "Machine Daemon must connect before this operation");
       }
@@ -470,9 +511,13 @@ export class PostgresMachineControlRepository {
         throw new MachineControlError("machine_daemon_activation_fenced", 409,
           "Machine Daemon cannot claim commands before Supervisor StableGranted");
       }
-      if (action !== "claim" && action !== "complete") {
+      if (replayable && action !== "claim" && action !== "complete") {
         const prior = await replay(tx, ownerUserId, commandId, requestDigest);
         if (prior) return prior;
+      }
+      if (action === "confirm-online" && String(current!.status) === "online") {
+        return { commandId, action, daemon: daemon(current!),
+          connectionEpoch: Number(current!.connection_epoch) };
       }
       if (action === "claim") return this.claim(tx, input, current!, connectionEpoch!, at);
       if (action === "renew") return this.renew(tx, input, current!, connectionEpoch!, at);
@@ -491,11 +536,6 @@ export class PostgresMachineControlRepository {
         connectionEpoch!);
       current = await this.commitDaemon(tx, { action, current, daemonId, ownerUserId, ownerEmail,
         machineId, hostId, input, at });
-      if (action === "connect" || action === "report" && connectionEpoch !== undefined) {
-        await tx.query({ name: "machine_routing_observation_v1", text: `UPDATE data.machine_daemons
-          SET routing_observed_at=clock_timestamp() WHERE daemon_id=$1 AND status='online'
-            AND connection_epoch=$2`, values: [daemonId, Number(current.connection_epoch)], maxRows: 0 });
-      }
       if (action === "enroll") await tx.query({ name: "machine_control_enrollment_audit_v1", text: `INSERT INTO
         data.machine_daemon_control_audit
         (command_id,daemon_id,owner_user_id,action,event_type,payload_json,created_at)
@@ -596,8 +636,9 @@ export class PostgresMachineControlRepository {
         ...(completion?.stopPurpose
           ? { runLifecycleStopPurpose: completion.stopPurpose }
           : {}) };
-      if (completion?.reused !== true) {
-        await storeReplay(tx, { ownerUserId, commandId, requestDigest, value, at });
+      if (replayable && completion?.reused !== true) {
+        await storeReplay(tx, { ownerUserId, commandId, requestDigest, value, at,
+          ttlMs: action === "report" ? REPORT_REPLAY_TTL_MS : REPLAY_TTL_MS });
       }
       return value;
     });
@@ -913,11 +954,11 @@ export class PostgresMachineControlRepository {
   private async commitDaemon(tx: DatabaseTransaction, input: { action: string; current?: QueryResultRow;
     daemonId: string; ownerUserId: string; ownerEmail: string; machineId: string; hostId: string;
     input: Record<string, unknown>; at: string }) {
-    const status = input.action === "connect" ? "online"
+    const status = input.action === "connect" || input.action === "confirm-online" ? "online"
       : input.action === "unregister" || input.action === "failed-deliver" ? "offline"
       : input.current ? String(input.current.status) : "enrolled";
-    const projectsReachability = input.action === "connect" || input.action === "unregister" ||
-      input.action === "failed-deliver" || input.action === "enroll";
+    const projectsReachability = input.action === "connect" || input.action === "confirm-online" ||
+      input.action === "unregister" || input.action === "failed-deliver" || input.action === "enroll";
     if (input.current && !projectsReachability) return input.current;
     const capabilities = Array.isArray(input.input.capabilities) ? input.input.capabilities : [];
     const body: Record<string, unknown> = input.input.metadata && typeof input.input.metadata === "object" &&
@@ -937,12 +978,16 @@ export class PostgresMachineControlRepository {
       ownerUserId: input.ownerUserId, machineId: input.machineId, hostName, hostId: input.hostId,
       parentMachineId: (body as Record<string, unknown>).parentMachineId });
     if (input.current) {
-      const rows = await tx.query<QueryResultRow>({ name: "machine_control_daemon_update_v2", text: `UPDATE
+      // An offline daemon stays offline since the moment it went offline: a
+      // repeated unregister or failed delivery does not move that moment, which
+      // is when a launch stops waiting for the daemon to reconnect.
+      const rows = await tx.query<QueryResultRow>({ name: "machine_control_daemon_update_v3", text: `UPDATE
         data.machine_daemons SET owner_email=$1,hostname=COALESCE($2,hostname),
         display_name=COALESCE($3,display_name),status=$4,
         capabilities_json=CASE WHEN jsonb_array_length($5::jsonb)>0 THEN $5::jsonb ELSE capabilities_json END,
         metadata_json=CASE WHEN $6::jsonb<>'{}'::jsonb THEN $6::jsonb ELSE metadata_json END,
-        connection_epoch=connection_epoch+$7,version=version+1,updated_at=$8
+        connection_epoch=connection_epoch+$7,version=version+1,
+        updated_at=CASE WHEN status='offline' AND $4='offline' THEN updated_at ELSE $8 END
         WHERE daemon_id=$9 RETURNING *`, values: [input.ownerEmail, hostName, displayName, status,
       JSON.stringify(capabilities), JSON.stringify(hostnameMetadata(body)), input.action === "connect" ? 1 : 0,
       input.at, input.daemonId], maxRows: 1 });
@@ -1049,6 +1094,21 @@ export class PostgresMachineControlRepository {
       if (!capable[0]) throw new MachineControlError("text_task_unavailable", 409,
         "The Machine is offline or its xMatrix daemon cannot take text tasks yet");
     }
+    if (commandType === "sleep") {
+      if (payload.type !== "machine_sleep_agent" ||
+          !["runId", "executionKey", "instanceId"].every(key => typeof payload[key] === "string" && String(payload[key]).trim()) ||
+          !Number.isSafeInteger(payload.idleForMillis) || Number(payload.idleForMillis) < 0 ||
+          Object.keys(payload).some(key =>
+            !["type", "requestId", "runId", "executionKey", "instanceId", "idleForMillis"].includes(key))) {
+        throw new MachineControlError("invalid_sleep_command", 400, "Sleep command is invalid");
+      }
+      const capable = await tx.query({ name: "machine_sleep_daemon_v1", text: `SELECT 1
+        FROM data.machine_daemons WHERE owner_user_id=$1 AND machine_id=$2
+          AND status='online' AND capabilities_json ? $3 FOR SHARE`,
+      values: [ownerUserId, machineId, MACHINE_SLEEP_CAPABILITY], maxRows: 1 });
+      if (!capable[0]) throw new MachineControlError("sleep_unavailable", 409,
+        "The Machine is offline or its xMatrix daemon does not sleep Runs on the Hub's word yet");
+    }
     if (commandType === "worktree_action") {
       try {
         const action = parseWorktreeActionRequest(payload);
@@ -1131,7 +1191,13 @@ export class PostgresMachineControlRepository {
       const payload = record(command.payload, `commands[${index}].payload`);
       if (commandType !== "spawn" || payload.requestId !== controlId) throw new MachineControlError(
         "invalid_machine_command", 400, "Batch publication accepts exact spawn commands only");
-      return { controlId, commandType, payload,
+      // A spawn may be given a shorter life than the default (a launch that
+      // waits a bounded time for its daemon to reconnect); never a longer one.
+      const expiresAt = command.expiresAt === undefined ? undefined
+        : typeof command.expiresAt === "string" && Number.isFinite(Date.parse(command.expiresAt))
+          ? new Date(command.expiresAt).toISOString() : (() => { throw new MachineControlError(
+            "invalid_machine_command", 400, `commands[${index}].expiresAt is invalid`); })();
+      return { controlId, commandType, payload, expiresAt,
         spaceId: text(payload.spaceId, "payload.spaceId", 300),
         runId: text(payload.runId, "payload.runId", 300),
         channelId: text(payload.channelId, "payload.channelId", 180),
@@ -1144,7 +1210,7 @@ export class PostgresMachineControlRepository {
     }
     const encoded = commands.map((command) => ({ command_id: command.controlId,
       command_type: command.commandType, payload: command.payload, run_id: command.runId,
-      channel_id: command.channelId, execution_key: command.executionKey }));
+      channel_id: command.channelId, execution_key: command.executionKey, expires_at: command.expiresAt ?? null }));
     const authorized = await tx.query<QueryResultRow>({ name: "machine_control_issue_batch_channels_v3",
       text: `SELECT c.channel_id FROM data.channels c
         JOIN jsonb_to_recordset($1::jsonb) AS requested(channel_id text,space_id text)
@@ -1160,14 +1226,15 @@ export class PostgresMachineControlRepository {
       throw new MachineControlError("channel_not_found", 404, "Channel not found");
     }
     const expiresAt = new Date(Date.parse(at) + COMMAND_TTL_MS).toISOString();
-    const inserted = await tx.query<QueryResultRow>({ name: "machine_control_issue_batch_v1", text: `INSERT INTO
+    const inserted = await tx.query<QueryResultRow>({ name: "machine_control_issue_batch_v2", text: `INSERT INTO
         data.machine_daemon_commands
         (command_id,owner_user_id,machine_id,hostname,command_type,payload_json,status,attempts,
          lease_until,result_json,version,created_at,updated_at,lease_owner,lease_generation,
          available_at,expires_at,completed_at)
-      SELECT x.command_id,$2,$3,$4,x.command_type,x.payload,'pending',0,NULL,NULL,1,$5,$5,NULL,0,$5,$6,NULL
+      SELECT x.command_id,$2,$3,$4,x.command_type,x.payload,'pending',0,NULL,NULL,1,$5,$5,NULL,0,$5,
+        LEAST(COALESCE(x.expires_at,$6::timestamptz),$6::timestamptz),NULL
       FROM jsonb_to_recordset($1::jsonb)
-        AS x(command_id text,command_type text,payload jsonb,run_id text,channel_id text,execution_key text)
+        AS x(command_id text,command_type text,payload jsonb,run_id text,channel_id text,execution_key text,expires_at timestamptz)
       ON CONFLICT (command_id) DO NOTHING RETURNING command_id`,
     values: [JSON.stringify(encoded), ownerUserId, machineId, hostId, at, expiresAt],
     maxRows: commands.length });
@@ -1222,7 +1289,7 @@ export class PostgresMachineControlRepository {
       WHERE owner_user_id=$1 AND machine_id=$2 AND attempts>=$4
         AND (status='pending' OR (status='leased' AND lease_until<=clock_timestamp()))`,
     values: [current.owner_user_id, current.machine_id, UNANSWERED_FAILURE, MAX_UNANSWERED_DELIVERIES], maxRows: 0 });
-    const rows = await tx.query<QueryResultRow>({ name: "machine_control_claim_candidates_v8", text: `SELECT
+    const rows = await tx.query<QueryResultRow>({ name: "machine_control_claim_candidates_v9", text: `SELECT
       command.command_id,command.command_type,
       CASE WHEN command.command_type='spawn' AND launch.launch_id IS NOT NULL
         THEN command.payload_json || jsonb_build_object(
@@ -1249,8 +1316,9 @@ export class PostgresMachineControlRepository {
           (command.payload_json->>'action' NOT LIKE 'login%' OR $10::boolean)))
         AND (command.command_type<>'worktree_action' OR $11::boolean)
         AND (command.command_type<>'text_task' OR $12::boolean)
+        AND (command.command_type<>'sleep' OR $13::boolean)
       ORDER BY command.created_at,command.command_id LIMIT 5
-      FOR UPDATE OF command SKIP LOCKED`, values: [current.owner_user_id, current.machine_id, types, Array.isArray(current.capabilities_json) && current.capabilities_json.includes("machine_quota_probe_v2"), String(connectionEpoch), Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_HARNESS_ACTION_CAPABILITY), Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_HARNESS_CURSOR_LAUNCHER_CAPABILITY), Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_HARNESS_UNINSTALL_CAPABILITY), Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_HARNESS_RELEASE_CAPABILITY), Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_HARNESS_LOGIN_CAPABILITY), Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_WORKTREE_ACTION_CAPABILITY), Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_TEXT_TASK_CAPABILITY)],
+      FOR UPDATE OF command SKIP LOCKED`, values: [current.owner_user_id, current.machine_id, types, Array.isArray(current.capabilities_json) && current.capabilities_json.includes("machine_quota_probe_v2"), String(connectionEpoch), Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_HARNESS_ACTION_CAPABILITY), Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_HARNESS_CURSOR_LAUNCHER_CAPABILITY), Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_HARNESS_UNINSTALL_CAPABILITY), Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_HARNESS_RELEASE_CAPABILITY), Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_HARNESS_LOGIN_CAPABILITY), Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_WORKTREE_ACTION_CAPABILITY), Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_TEXT_TASK_CAPABILITY), Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_SLEEP_CAPABILITY)],
     maxRows: 5 });
     const commands = [];
     for (const row of rows) {
@@ -1470,8 +1538,11 @@ export class PostgresMachineControlRepository {
     const machineId = text(input.machineId, "machineId", 160);
     return this.database.transaction({ requestId: text(input.requestId, "requestId", 200),
       operation: "machine-control.get-daemon" }, async (tx) => {
-      const rows = await tx.query<QueryResultRow>({ name: "machine_control_get_daemon_v3", text: `SELECT *
-        FROM data.machine_daemons WHERE owner_user_id=$1 AND machine_id=$2 LIMIT 2`,
+      // The Machine's automatic assignment rides along: it decides what may start there unnamed.
+      const rows = await tx.query<QueryResultRow>({ name: "machine_control_get_daemon_v4", text: `SELECT
+        daemon.*,machine.auto_assign FROM data.machine_daemons daemon
+        LEFT JOIN data.machines machine ON machine.owner_user_id=daemon.owner_user_id AND machine.machine_id=daemon.machine_id
+        WHERE daemon.owner_user_id=$1 AND daemon.machine_id=$2 LIMIT 2`,
       values: [ownerUserId, machineId], maxRows: 2 });
       if (rows.length > 1) throw new MachineControlError("machine_identity_conflict", 409,
         "Machine has conflicting daemon records");
@@ -1516,8 +1587,11 @@ export class PostgresMachineControlRepository {
     }
     return this.database.transaction({ requestId: text(input.requestId, "requestId", 200),
       operation: "machine-control.status-batch" }, async (tx) => {
-      const rows = await tx.query<QueryResultRow>({ name: "machine_control_status_batch_v2", text: `SELECT
-          command_id,command_type,payload_json,status,result_json,created_at,completed_at
+      // A pending command past its expiry can no longer be claimed (claim
+      // checks the same expiry under its row lock), so it never will run.
+      const rows = await tx.query<QueryResultRow>({ name: "machine_control_status_batch_v3", text: `SELECT
+          command_id,command_type,payload_json,status,result_json,created_at,completed_at,
+          status='pending' AND expires_at<=clock_timestamp() AS expired
           FROM data.machine_daemon_commands WHERE owner_user_id=$1 AND machine_id=$2
             AND command_id=ANY($3::text[]) ORDER BY command_id`,
         values: [ownerUserId, machineId, commands.map((item) => item.controlId)],
@@ -1531,6 +1605,7 @@ export class PostgresMachineControlRepository {
           const row = byId.get(item.controlId);
           if (!row) return { controlId: item.controlId, status: "missing" };
           return { ...commandStatus(row, item.controlId, "spawn", item.expected),
+            ...(row.expired === true ? { expired: true } : {}),
             createdAt: new Date(row.created_at as Date | string).toISOString() };
         }) };
     });

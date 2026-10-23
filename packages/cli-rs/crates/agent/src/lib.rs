@@ -77,7 +77,7 @@ impl AgentPreset {
     }
 
     /// The harness's own config / credential directories, `~` expanded.
-    pub fn config_dirs(&self) -> Vec<PathBuf> {
+    pub(crate) fn config_dirs(&self) -> Vec<PathBuf> {
         self.classic_config_dirs
             .iter()
             .map(|dir| expand_home_path(dir))
@@ -180,7 +180,7 @@ fn known_agent_preset_ids() -> String {
         .join(", ")
 }
 
-pub fn expand_home_path(value: &str) -> PathBuf {
+pub(crate) fn expand_home_path(value: &str) -> PathBuf {
     if value == "~" {
         return dirs::home_dir().unwrap_or_else(|| PathBuf::from(value));
     }
@@ -732,7 +732,6 @@ pub async fn ensure_local_daemon_started(hub_url: &str, token: &str) -> error::R
     command
         .arg("daemon")
         .env("XMATRIX_HUB_URL", hub_url)
-        .env_remove("XMATRIX_ENVIRONMENT")
         // Login has already persisted the canonical session. Starting from
         // disk keeps the daemon reloadable and avoids pinning its lifecycle to
         // the one-hour access token inherited by this short-lived CLI process.

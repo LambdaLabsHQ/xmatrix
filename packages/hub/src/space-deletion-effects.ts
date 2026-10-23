@@ -5,8 +5,8 @@ import type { Env } from "./types";
 
 /** Spaces the deployment configuration names cannot be closed from the product. */
 export function deploymentPinnedSpace(env: Env, spaceId: string): boolean {
-  return [env.PLATFORM_ADMIN_SPACE_ID, env.TEST_ENVIRONMENT_ACCESS_SPACE_ID]
-    .some(pinned => typeof pinned === "string" && pinned.trim() === spaceId);
+  const pinned = env.PLATFORM_ADMIN_SPACE_ID;
+  return typeof pinned === "string" && pinned.trim() === spaceId;
 }
 
 /** Apply the same after-commit effects for ordinary and account-related closure. */

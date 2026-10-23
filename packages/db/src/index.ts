@@ -142,9 +142,11 @@ export {
 } from "./app-action-policy-control.js";
 export {
   PostgresAppCredentialRepository,
+  appCredentialValueLimit,
   type ResolvedAppCredentials,
   type AppOAuthInstallation,
 } from "./app-credential-control.js";
+export { SLACK_WORKSPACE_TAKEN } from "./app-control.js";
 export {
   HumanProfileControlError,
   PostgresHumanProfileRepository,
@@ -224,9 +226,11 @@ export { PostgresRegistrationExecutionRepository } from "./agent-registration-ex
 export { firstMessageSummonId, readMessageInvocationSelections, XMATRIX_SYSTEM_AUTHOR_ID } from "./message-invocation-selections.js";
 export { PostgresRegistrationRevocationRepository, type RegistrationStopIntent } from "./agent-registration-revocation.js";
 
-export type { RegistrationLaunchCandidate, RegistrationLaunchChooser, RegistrationAboutSession, ChannelAboutSessionStopTarget } from "./agent-registration-launch.js";
+export type { RegistrationLaunchCandidate, RegistrationLaunchChooser } from "./agent-registration-launch.js";
 export { PostgresRegistrationLaunchRepository, reconcileRegistrationPreparationCancellations } from "./agent-registration-launch.js";
-export { PostgresFirstMessageLaunchChoiceRepository, readFirstMessageLaunchChoices, type FirstMessageLaunchChooser } from "./first-message-launch-choice.js";
+export { PostgresFirstMessageLaunchChoiceRepository, readFirstMessageLaunchChoices, readDueFirstMessageSummons,
+  FIRST_MESSAGE_SUMMON_PENDING_SQL, FIRST_MESSAGE_SUMMON_DUE_AT_SQL, type PendingFirstMessageSummon,
+  type FirstMessageLaunchChooser } from "./first-message-launch-choice.js";
 export { readRegistrationQuotaProbeTargets, REGISTRATION_QUOTA_PROBE_TARGET_PREFIX,
   type RegistrationQuotaProbeTarget } from "./agent-registration-quota-probe.js";
 
@@ -241,19 +245,20 @@ export { PostgresRegistrationRebornRepository, WAKE_FAILED_SQL } from "./registr
 
 export type { RegistrationRepositoryCatalog, RegistrationRepositoryReader } from "./registration-repository-authority.js";
 export {
-  inActiveSpace, pageAccess, pageAccessMap, pageActor, pageBody, PageControlError,
-  pagePositionBetween, pageTitle, PostgresPageRepository,
+  inActiveSpace, namedPageBody, pageAccess, pageAccessMap, pageActor, pageBody, PageControlError, pageNameFrom,
+  pagePositionBetween, pageTitle, PostgresPageRepository, renamedPageBody, UNNAMED_PAGE,
 } from "./page-control.js";
 export type {
   PageActor, PageAuthor, PageClaim, PageCommit, PageDocument, PageLink, PagePrincipal, PageRevision,
   PageSummary, PublicPage,
 } from "./page-control.js";
 export {
-  MAX_PAGE_CONVERSATIONS, readPageConversations,
+  describePageConversations, MAX_PAGE_CONVERSATIONS,
 } from "./page-conversations.js";
 export type {
   PageConversationRecord,
 } from "./page-conversations.js";
+export { FaceControlError, readAgentFaces, readUserFaces, userFacesOf } from "./faces.js";
 export {
   migratedPageId, PageMigrationError, PostgresPageMigrationRepository, revisedDraft, validDraft,
 } from "./page-migration.js";
@@ -309,12 +314,22 @@ export type { DingTalkEffectAuthority, DingTalkEffectDestination } from "./dingt
 export { DingTalkEffectCoordinator,type DingTalkCoordinationNativeProof } from "./dingtalk-effect-coordinator.js";
 export type { DingTalkPreparedPathCapability } from "./dingtalk-prepared-port.js";
 
-export { PostgresAppleBillingRepository, type AppleAccountBinding } from "./apple-billing-control.js";
+export { PostgresAppleBillingRepository, type AppleAccountBinding, type AppleAssignedSeat, type AppleSeatGroupState } from "./apple-billing-control.js";
+export { PostgresCreditPackRepository, type CreditPackPayment } from "./credit-pack-control.js";
+export { PostgresPaidCallRepository, type PaidCallReceipt } from "./paid-call-control.js";
 export {
   MAX_PUSH_DEVICES_PER_USER, PostgresPushDeviceRepository, PushDeviceError, type PushDevice, type PushPlatform,
 } from "./push-devices.js";
 
 export { PostgresAccountDeletionRepository, AccountDeletionError, accountIdentityRevoked } from "./account-deletion.js";
+export { CHANNEL_PURGE_STEPS, channelPurgeObjects, purgeChannelRows, recordChannelPurgeObjects } from "./channel-deletion.js";
+export { retryBeforeCommit } from "./transaction-recovery.js";
 export type { AccountMessageProfileRow, PrepareErasedMessageProfile } from "./account-message-profile-erasure.js";
 export type { AccountDeletionBlocker, AccountDeletionState } from "./account-deletion.js";
 export type { AccountSpaceClosureAuthorization } from "./account-space-closure-authorization.js";
+
+export { PostgresAppActionRequestRepository, type AppActionRequestPayload,
+  type XUploadReference, type XExecutingUpload, type XUploadOutcome } from "./app-action-request-control.js";
+export { PostgresGmailRoutingRepository, type GmailRoutingJob, type GmailRoutingSelection } from "./gmail-routing-control.js";
+
+export { databaseFailureEvidence, parseDatabaseFailureEvidence } from "./database-failure-evidence.js";

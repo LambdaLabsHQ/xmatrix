@@ -39,7 +39,6 @@ pub(super) async fn recover(
     let request = DaemonLocalHttpRequest {
         method: "POST".into(),
         path: "/internal/recover-reply".into(),
-        query: Default::default(),
         headers: std::collections::HashMap::from([(
             "x-xmatrix-request-capability".into(),
             capability,

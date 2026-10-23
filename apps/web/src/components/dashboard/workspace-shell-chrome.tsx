@@ -1,11 +1,16 @@
 "use client";
 
+import { AnimatedIcon } from "@/components/ui/animated-icon";
+import { useDecorationAnimationGroup } from "@/components/ui/decoration-animation";
+import { useRealtimeChannelValue } from "./realtime-channels";
+
 import { normalizeChannelSearchText } from "./workspace-shell-search-model";
 import type { LiquidGlassMaterial } from "@/components/ui/liquid-glass-material";
 import { LiquidGlassCard, LiquidGlassPill, WoodPanel } from "@/components/ui/material-surfaces";
 import type { CreateAction } from "./list-create";
 import { useGlobalSearchClearance } from "./global-search-clearance";
 import { StarAsk, openRepositoryToStar, useStarPrompt } from "./star-prompt";
+import { BetaTag } from "./status-tag";
 
 import {
   agentInstanceDisplayName,
@@ -27,24 +32,24 @@ import {
 import {
   AppView,
   DOCK_TAB_VIEWS,
+  mobileBackState,
   MORE_TAB_VIEWS,
   viewLabels,
 } from "./workspace-shell-navigation";
 
 import {
-  avatarInitials,
   channelOnlineAgentAvatarItems,
   formatMember,
-  initialsFor,
   memberPresence,
   memberPresenceSummary,
-  presenceAvatarUrl,
   spaceRoleFor,
   visibleHumanChannelMembers,
 } from "./workspace-shell-recovered";
 import type { SpaceChannelCatalog } from "./use-channel-catalog-paging";
 
 import {
+  memo,
+  useCallback,
   useEffect,
   useLayoutEffect,
   useRef,
@@ -78,18 +83,16 @@ import {
   LogOut,
   MessageSquareText,
   MoreHorizontal,
-  MoveRight,
   Pencil,
   FileText,
   PlugZap,
   Plus,
   Settings,
   Share,
-  Share2,
   Shield,
   Star,
+  Trash2,
   Users,
-  X,
 } from "lucide-react";
 import { SearchGlyph } from "@/components/ui/search-glyph";
 import { useConversationPages } from "@/components/pages/conversation-page-cards";
@@ -104,7 +107,7 @@ import {
 
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 
-import { IdentityAvatar } from "@/components/dashboard/identity-avatar";
+import { Face } from "@/components/dashboard/face";
 
 
 import {
@@ -117,22 +120,22 @@ import {
 } from "@/lib/desktop/bridge";
 
 import { cn } from "@/lib/utils";
-import { GlassSelect } from "@/components/ui/glass-select";
 
-import type {
-  ChannelMemberPresence,
-  ObservabilityEvent,
-  SerializedAgentInstance,
-  HumanProfile,
-  SerializedChannel,
-  SerializedSpace,
+import {
+  faceInitials,
+  type ChannelMemberPresence,
+  type ObservabilityEvent,
+  type SerializedAgentInstance,
+  type HumanProfile,
+  type ChannelSnapshot,
+  type SerializedSpace,
 } from "@xmatrix/protocol";
 
 // Semantic module extracted from workspace-app-shell (AST-safe)
 
 export type { WorkspaceSearchResult } from "./workspace-shell-search-model";
 
-export function WorkspaceRail({
+export const WorkspaceRail = memo(function WorkspaceRail({
   activeView,
   profile,
   platformAdmin,
@@ -176,16 +179,14 @@ export function WorkspaceRail({
         onClick={onOpenProfile}
         className="flex size-11 items-center justify-center rounded-full"
       >
-        <IdentityAvatar
-          kind="human"
-          label={profile.displayName}
-          imageUrl={profile.avatarUrl}
-          initials={profile.displayName.slice(0, 2)}
+        <Face
+          of={{ kind: "user", id: profile.userId, name: profile.displayName }}
           size="md"
           showKindBadge={false}
           className="app-rail-user-avatar"
         />
       </button>
+      <BetaTag className="mt-2" />
       <div className="mt-5 flex flex-1 flex-col items-center gap-2">
         <RailButton active={activeView === "pages"} icon={BookOpen} label="Pages" onClick={() => onChangeView("pages")} />
         <RailButton
@@ -219,7 +220,7 @@ export function WorkspaceRail({
       </div>
     </aside>
   );
-}
+});
 
 type StarAskPlace = { left: number; bottom: number; width: number };
 
@@ -336,7 +337,7 @@ function HelpRailMenu({ onReportIssue }: { onReportIssue?: () => void }) {
 
 /** The phone's +, a wood plank just above the web or native tab bar, on a
     dock tab's own screen only. */
-export function CreateFab({ action }: { action: CreateAction | null }) {
+export const CreateFab = memo(function CreateFab({ action }: { action: CreateAction | null }) {
   if (!action) return null;
   return (
     <WoodPanel
@@ -351,9 +352,9 @@ export function CreateFab({ action }: { action: CreateAction | null }) {
       <Plus className="size-6" />
     </WoodPanel>
   );
-}
+});
 
-export function MobileTabDock({
+export const MobileTabDock = memo(function MobileTabDock({
   activeView,
   hidden,
   statusLive,
@@ -408,7 +409,7 @@ export function MobileTabDock({
       })}
     </LiquidGlassPill>
   );
-}
+});
 
 /**
  * The global search entry for destinations without a conversation header: the
@@ -441,8 +442,17 @@ export function GlobalSearchBar({ searching, onOpenSearch }: {
   );
 }
 
-/** Lucide's Activity line, drawn by hand so its trace can run. */
+/** Lucide's Activity line, used as a static mask so its moving break can composite. */
 const STATUS_PULSE_PATH = "M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2";
+const STATUS_PULSE_MASK = `url("data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="${STATUS_PULSE_PATH}" fill="none" stroke="black" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`)}")`;
+
+function createStatusPulseEffects(element: HTMLElement): readonly KeyframeEffect[] {
+  const sweep = element.querySelector<HTMLElement>(".app-status-pulse-sweep");
+  return sweep ? [new KeyframeEffect(sweep, [
+    { transform: "translateX(0)" },
+    { transform: "translateX(58.333333%)" },
+  ], { duration: 2000, iterations: Infinity, easing: "linear" })] : [];
+}
 
 /**
  * Status: a pulse line. While an Agent in the Space works, a break runs along
@@ -450,12 +460,13 @@ const STATUS_PULSE_PATH = "M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 
  * whole.
  */
 export function StatusPulseIcon({ className, live = false }: { className?: string; live?: boolean }) {
+  const animationRef = useDecorationAnimationGroup(createStatusPulseEffects, live);
   return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round"
-      strokeLinejoin="round" className={cn("app-status-pulse", className)} data-live={live || undefined}
+    <span ref={animationRef} className={cn("app-status-pulse", className)} data-live={live || undefined}
+      style={{ maskImage: STATUS_PULSE_MASK, WebkitMaskImage: STATUS_PULSE_MASK }}
       aria-hidden="true">
-      <path d={STATUS_PULSE_PATH} pathLength={1} />
-    </svg>
+      <span className="app-status-pulse-sweep" />
+    </span>
   );
 }
 
@@ -538,7 +549,7 @@ export function TopWorkspaceBar({
   /** A new conversation on a phone: a pushed screen with its own back bar. */
   composing?: boolean;
   onCloseComposing?: () => void;
-  channel: SerializedChannel | null;
+  channel: ChannelSnapshot | null;
   spaces: SerializedSpace[];
   currentSpaceId: string | null;
   view: AppView;
@@ -552,11 +563,9 @@ export function TopWorkspaceBar({
 }) {
   const [spaceMenuOpen, setSpaceMenuOpen] = useState(false);
   const [shareCopied, setShareCopied] = useState(false);
-  const conversationOverPage = view === "pages" && Boolean(channel) && Boolean(onClosePageConversation);
-  const pageOpen = view === "pages" && Boolean(page) && !conversationOverPage;
-  const composingOpen = view === "messages" && composing;
-  const conversationOpen = (view === "messages" || conversationOverPage) && Boolean(channel);
-  const showBack = conversationOpen || pageOpen || composingOpen;
+  const { conversationOverPage, pageOpen, composingOpen, conversationOpen, showBack } = mobileBackState(view, {
+    channel: Boolean(channel), page: Boolean(page), composing, conversationOverPage: Boolean(onClosePageConversation),
+  });
   const showMoreBack = view !== "messages" && view !== "more" && MORE_TAB_VIEWS.includes(view);
   const currentSpace = currentSpaceId
     ? spaces.find((space) => space.id === currentSpaceId) || null
@@ -854,7 +863,18 @@ export function MobileSpaceSheet({
 }
 
 function SpinningLoader({ className }: { className?: string }) {
-  return <Loader2 className={cn(className, "animate-spin")} />;
+  return <AnimatedIcon icon={Loader2} className={cn(className, "animate-spin")} />;
+}
+
+function createUpdateArrowEffects(element: HTMLElement): readonly KeyframeEffect[] {
+  const arrow = element.querySelector(".app-rail-update-arrow");
+  return arrow ? [new KeyframeEffect(arrow, [
+    { offset: 0, transform: "translateY(0)", opacity: 1, easing: "cubic-bezier(0.5, 0, 0.9, 0.4)" },
+    { offset: 0.1, transform: "translateY(-26px)", opacity: 0 },
+    { offset: 0.1001, transform: "translateY(26px)", opacity: 0, easing: "cubic-bezier(0.2, 0.8, 0.3, 1)" },
+    { offset: 0.26, transform: "translateY(0)", opacity: 1 },
+    { offset: 1, transform: "translateY(0)", opacity: 1 },
+  ], { duration: 4200, delay: 1000, iterations: Infinity })] : [];
 }
 
 /**
@@ -871,6 +891,8 @@ export function DesktopUpdateRailButton({
   onInstall: () => void;
 }) {
   const state = status?.state;
+  // Observe the fixed window: the arrow itself leaves its clip each cycle.
+  const arrowRef = useDecorationAnimationGroup(createUpdateArrowEffects, state === "downloaded" || state === "available");
   // "available" comes only from shells that do not download on their own;
   // the button downloads first there.
   if (state !== "downloaded" && state !== "available" && state !== "installing") return null;
@@ -897,8 +919,10 @@ export function DesktopUpdateRailButton({
       {state === "installing"
         ? <SpinningLoader className="size-[18px]" />
         : (
-          <span className="app-rail-update-window">
-            <ArrowUp className="app-rail-update-arrow size-[18px]" strokeWidth={2.25} />
+          <span ref={arrowRef} className="app-rail-update-window">
+            <span className="app-rail-update-arrow inline-flex size-[18px]">
+              <ArrowUp className="size-full" strokeWidth={2.25} />
+            </span>
           </span>
         )}
     </LiquidGlassPill>
@@ -908,7 +932,7 @@ export function DesktopUpdateRailButton({
 const UPDATE_GLASS: LiquidGlassMaterial = { veil: "oklch(1 0 0 / 0.72)" };
 
 /** Restarting closes every window, so the rail and Settings ask first. */
-export function DesktopUpdateRestartDialog({
+export const DesktopUpdateRestartDialog = memo(function DesktopUpdateRestartDialog({
   status,
   open,
   onCancel,
@@ -947,37 +971,57 @@ export function DesktopUpdateRestartDialog({
       </DialogPanelFooter>
     </CenteredDialogShell>
   );
-}
+});
 
-export function ChannelActionsMenu({
+const channelTitleIconClassName = "flex size-7 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-50";
+
+/** The channel's own glyph: # when public, a lock when private. Whoever may
+ * change visibility clicks it to switch; everyone else reads it. */
+export function ChannelVisibilityGlyph({
   channel,
-  shareUrl,
-  moving,
   canManageVisibility,
   updatingVisibility,
-  onMove,
   onVisibilityChange,
 }: {
-  channel: SerializedChannel;
-  shareUrl: string;
-  moving: boolean;
+  channel: ChannelSnapshot;
   canManageVisibility: boolean;
   updatingVisibility: boolean;
-  /** Moves the conversation to another Space. */
-  onMove: () => void;
   onVisibilityChange: (mode: ChannelCreateMode) => void;
 }) {
-  const [open, setOpen] = useState(false);
-  const [copied, setCopied] = useState(false);
-  const [pos, setPos] = useState<{ right: number; top: number } | null>(null);
-  const buttonRef = useRef<HTMLButtonElement | null>(null);
-  const menuRef = useRef<HTMLDivElement | null>(null);
   const title = channelTitle(channel);
-  const busy = moving;
+  const isPublic = channel.mode === "open";
+  const Glyph = isPublic ? Hash : Lock;
+  const glyph = updatingVisibility
+    ? <AnimatedIcon icon={Loader2} className="size-5 animate-spin" />
+    : <Glyph className="size-5" />;
+  if (!canManageVisibility) {
+    return (
+      <span title={isPublic ? "Public" : "Private"} aria-label={`#${title} is ${isPublic ? "public" : "private"}`}
+        className="flex shrink-0 items-center text-muted-foreground">{glyph}</span>
+    );
+  }
+  const label = isPublic ? `Make #${title} private` : `Make #${title} public`;
+  return (
+    <button type="button" title={label} aria-label={label} disabled={updatingVisibility}
+      onClick={() => onVisibilityChange(isPublic ? "closed" : "open")}
+      className={cn(channelTitleIconClassName, "-ml-1")}>
+      {glyph}
+    </button>
+  );
+}
 
-  useEffect(() => {
-    setOpen(false);
-  }, [channel.id]);
+/** Copy link and delete, as icons right after the channel's name. */
+export function ChannelTitleActions({
+  channel,
+  shareUrl,
+  onDelete,
+}: {
+  channel: ChannelSnapshot;
+  shareUrl: string;
+  onDelete?: () => void;
+}) {
+  const [copied, setCopied] = useState(false);
+  const title = channelTitle(channel);
 
   useEffect(() => {
     if (!copied) return;
@@ -985,300 +1029,72 @@ export function ChannelActionsMenu({
     return () => window.clearTimeout(timeout);
   }, [copied]);
 
-  useLayoutEffect(() => {
-    if (!open) return;
-    const rect = buttonRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    const menuHeight = canManageVisibility ? 248 : 196;
-    const below = rect.bottom + 8;
-    setPos({
-      right: Math.max(12, Math.min(window.innerWidth - 224 - 12, window.innerWidth - rect.right)),
-      top: below + menuHeight <= window.innerHeight
-        ? below
-        : Math.max(12, rect.top - menuHeight - 8),
-    });
-  }, [open, canManageVisibility]);
-
-  useEffect(() => {
-    if (!open) return;
-    const closeOnOutside = (event: PointerEvent) => {
-      const target = event.target instanceof Node ? event.target : null;
-      if (!target) return;
-      if (buttonRef.current?.contains(target) || menuRef.current?.contains(target)) return;
-      setOpen(false);
-    };
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setOpen(false);
-    };
-    window.addEventListener("pointerdown", closeOnOutside, true);
-    window.addEventListener("keydown", closeOnEscape);
-    return () => {
-      window.removeEventListener("pointerdown", closeOnOutside, true);
-      window.removeEventListener("keydown", closeOnEscape);
-    };
-  }, [open]);
-
   async function handleCopy() {
     try {
       await copyTextToClipboard(shareUrl);
       setCopied(true);
-      setOpen(false);
     } catch {
       /* clipboard unavailable; leave label unchanged */
     }
   }
 
-  function runAction(action: () => void) {
-    setOpen(false);
-    action();
-  }
-
-  function selectVisibility(mode: ChannelCreateMode) {
-    setOpen(false);
-    if (mode !== channel.mode) onVisibilityChange(mode);
-  }
-
-  const itemClassName = "flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-sm font-medium text-popover-foreground hover:bg-muted disabled:pointer-events-none disabled:opacity-50";
-
+  const copyLabel = copied ? "Copied link" : "Copy channel link";
   return (
     <>
-      <button
-        ref={buttonRef}
-        type="button"
-        title={`Actions for #${title}`}
-        aria-label={`Actions for #${title}`}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        onClick={() => setOpen((next) => !next)}
-        className="flex size-8 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
-      >
-        {updatingVisibility ? <Loader2 className="size-5 animate-spin" /> : <MoreHorizontal className="size-5" />}
+      <button type="button" title={copyLabel} aria-label={copyLabel} aria-live="polite"
+        onClick={() => void handleCopy()} className={channelTitleIconClassName}>
+        {copied ? <Check className="size-4 text-primary" /> : <Share className="size-4" />}
       </button>
-      {open && typeof document !== "undefined" && pos &&
-        createPortal(
-          <div className="pointer-events-none fixed inset-0 z-[var(--z-popover)]">
-            <div
-              ref={menuRef}
-              role="menu"
-              aria-label={`Actions for #${title}`}
-              className="xmatrix-app pointer-events-auto fixed w-56 rounded-lg border border-border bg-popover p-1.5 text-popover-foreground shadow-xl"
-              style={{ right: pos.right, top: pos.top }}
-            >
-              <button
-                type="button"
-                role="menuitem"
-                disabled={busy}
-                onClick={() => runAction(onMove)}
-                className={itemClassName}
-              >
-                {moving ? <Loader2 className="size-4 shrink-0 animate-spin" /> : <MoveRight className="size-4 shrink-0 text-muted-foreground" />}
-                <span>Move to another Space</span>
-              </button>
-              <button
-                type="button"
-                role="menuitem"
-                disabled={busy}
-                onClick={() => void handleCopy()}
-                className={itemClassName}
-              >
-                {copied ? <Check className="size-4 shrink-0 text-primary" /> : <Share2 className="size-4 shrink-0 text-muted-foreground" />}
-                <span>{copied ? "Copied link" : "Copy channel link"}</span>
-              </button>
-              <div className="my-1 border-t border-border" role="separator" />
-              <div className="px-2.5 pb-1 pt-0.5 text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
-                Visibility
-              </div>
-              {canManageVisibility ? (
-                <>
-                  <button
-                    type="button"
-                    role="menuitemradio"
-                    aria-checked={channel.mode === "open"}
-                    disabled={busy || updatingVisibility}
-                    onClick={() => selectVisibility("open")}
-                    className={cn(itemClassName, channel.mode === "open" && "bg-muted")}
-                  >
-                    {updatingVisibility && channel.mode === "open" ? (
-                      <Loader2 className="size-4 shrink-0 animate-spin" />
-                    ) : (
-                      <Hash className="size-4 shrink-0 text-muted-foreground" />
-                    )}
-                    <span>Public</span>
-                    {channel.mode === "open" && <Check className="ml-auto size-4 text-primary" />}
-                  </button>
-                  <button
-                    type="button"
-                    role="menuitemradio"
-                    aria-checked={channel.mode === "closed"}
-                    disabled={busy || updatingVisibility}
-                    onClick={() => selectVisibility("closed")}
-                    className={cn(itemClassName, channel.mode === "closed" && "bg-muted")}
-                  >
-                    {updatingVisibility && channel.mode === "closed" ? (
-                      <Loader2 className="size-4 shrink-0 animate-spin" />
-                    ) : (
-                      <Lock className="size-4 shrink-0 text-muted-foreground" />
-                    )}
-                    <span>Private</span>
-                    {channel.mode === "closed" && <Check className="ml-auto size-4 text-primary" />}
-                  </button>
-                </>
-              ) : (
-                <div className="flex items-center gap-2 px-2.5 py-2 text-sm font-medium text-popover-foreground">
-                  {channel.mode === "open" ? (
-                    <Hash className="size-4 shrink-0 text-muted-foreground" />
-                  ) : (
-                    <Lock className="size-4 shrink-0 text-muted-foreground" />
-                  )}
-                  <span>{channel.mode === "open" ? "Public" : "Private"}</span>
-                </div>
-              )}
-            </div>
-          </div>,
-          document.body
-        )}
-      {copied && typeof document !== "undefined" &&
-        createPortal(
-          <div
-            aria-live="polite"
-            className="xmatrix-app pointer-events-none fixed bottom-5 right-5 z-[var(--z-toast)] rounded-md border border-border bg-popover px-3 py-2 text-sm font-medium text-popover-foreground shadow-xl"
-          >
-            Copied link
-          </div>,
-          document.body
-        )}
+      {onDelete && (
+        <button type="button" title="Delete Channel…" aria-label={`Delete #${title}…`}
+          onClick={onDelete} className={cn(channelTitleIconClassName, "hover:text-destructive")}>
+          <Trash2 className="size-4" />
+        </button>
+      )}
     </>
   );
 }
 
-export function ChannelMoveDialog({
-  open,
-  channel,
-  spaces,
-  targetSpaceId,
-  busy,
-  error,
-  onTargetSpaceChange,
-  onSubmit,
-  onCancel,
-}: {
-  open: boolean;
-  channel: SerializedChannel | null;
-  spaces: SerializedSpace[];
-  targetSpaceId: string;
-  busy: boolean;
-  error: string | null;
-  onTargetSpaceChange: (spaceId: string) => void;
-  onSubmit: () => void;
-  onCancel: () => void;
-}) {
-  useAndroidBackDismiss(open && Boolean(channel), onCancel, busy);
-
-  if (!open || !channel) return null;
-
-  return createPortal(
-    <div className="fixed inset-0 z-[var(--z-overlay)] flex items-center justify-center bg-background/55 p-4 backdrop-blur-sm">
-      <div className="w-full max-w-md rounded-lg border border-border bg-card p-4 shadow-xl">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <h2 className="truncate text-base font-bold">Move #{channelTitle(channel)}</h2>
-            <p className="mt-1 text-sm text-muted-foreground">Move this conversation to another workspace.</p>
-          </div>
-          <button
-            type="button"
-            title="Close"
-            onClick={onCancel}
-            disabled={busy}
-            className="flex size-8 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
-          >
-            <X className="size-4" />
-          </button>
-        </div>
-
-        <div className="mt-4 space-y-3">
-          <label className="block text-sm font-semibold">
-            <span className="mb-1 block">Workspace</span>
-            <GlassSelect
-              value={targetSpaceId}
-              onChange={onTargetSpaceChange}
-              disabled={busy}
-              aria-label="Workspace"
-              className="rounded px-2 font-normal"
-              options={spaces.map((space) => ({ value: space.id, label: space.name || "Workspace" }))}
-            />
-          </label>
-
-          <p className="rounded border border-border bg-muted/45 px-3 py-2 text-xs leading-relaxed text-muted-foreground">
-            A move creates a proposal. Source and destination admins must separately confirm outbound and inbound, even when one person holds both roles. Review access changes on the confirmation card.
-          </p>
-
-          {error && (
-            <p className="rounded border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-              {error}
-            </p>
-          )}
-        </div>
-
-        <div className="mt-4 flex justify-end gap-2">
-          <button
-            type="button"
-            onClick={onCancel}
-            disabled={busy}
-            className="h-9 rounded border border-border px-3 text-sm font-semibold text-muted-foreground hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            onClick={onSubmit}
-            disabled={busy || !targetSpaceId}
-            className="flex h-9 items-center gap-2 rounded bg-primary px-3 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50"
-          >
-            {busy ? <Loader2 className="size-4 animate-spin" /> : <MoveRight className="size-4" />}
-            {targetSpaceId !== channel.spaceId ? "Create transfer proposal" : "Move"}
-          </button>
-        </div>
-      </div>
-    </div>,
-    document.body
-  );
-}
-
-export function ChannelHeader({
-  channel,
+export const ChannelHeader = memo(function ChannelHeader({
+  channel: catalogChannel,
   spaces,
   currentUserId,
   onRename,
   onVisibilityChange,
-  onMove,
+  onDelete,
   renaming,
   updatingVisibility,
-  moving,
   onToggleMembers,
   onOpenSearch,
   actions,
 }: {
-  channel: SerializedChannel | null;
+  channel: ChannelSnapshot | null;
   spaces: SerializedSpace[];
   currentUserId: string;
   onRename: (name: string) => void;
   onVisibilityChange: (mode: ChannelCreateMode) => void;
-  onMove: () => void;
+  onDelete?: () => void;
   renaming: boolean;
   updatingVisibility: boolean;
-  moving: boolean;
   onToggleMembers: () => void;
   onOpenSearch: () => void;
   /** Controls of where the conversation is shown, such as closing it beside a page. */
   actions?: React.ReactNode;
 }) {
+  const channel = catalogChannel;
   const [editingName, setEditingName] = useState(false);
   const [draftName, setDraftName] = useState("");
   const channelSpace = channel
     ? spaces.find((space) => space.id === channel.spaceId) || null
     : null;
-  const presenceSummary = channel ? memberPresenceSummary(channel, channelSpace) : null;
+  const humanPresenceLabel = useCallback((live: ChannelSnapshot | null) => {
+    if (!live) return null;
+    const summary = memberPresenceSummary(live, channelSpace);
+    return `${summary.online}/${summary.total}`;
+  }, [channelSpace]);
+  const presenceLabel = useRealtimeChannelValue(channel, humanPresenceLabel);
   const channelHeading = channel ? channelTitle(channel) : "channels";
+  const editableName = channel ? channelHeading : null;
   const currentUserRole = channelSpace ? spaceRoleFor(channelSpace, currentUserId) : "viewer";
   const canManageVisibility = Boolean(
     channel &&
@@ -1286,10 +1102,10 @@ export function ChannelHeader({
   );
 
   useEffect(() => {
-    if (!editingName && channel) {
-      setDraftName(channelTitle(channel));
+    if (!editingName && editableName !== null) {
+      setDraftName(editableName);
     }
-  }, [channel, editingName]);
+  }, [editableName, editingName]);
 
   function submitRename() {
     if (!channel || renaming) return;
@@ -1339,25 +1155,30 @@ export function ChannelHeader({
               disabled={renaming || draftName.trim().length === 0}
               className="flex size-8 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
             >
-              {renaming ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />}
+              {renaming ? <AnimatedIcon icon={Loader2} className="size-4 animate-spin" /> : <Check className="size-4" />}
             </button>
           </form>
         ) : (
           <div className="group flex max-w-full items-center gap-1 text-[18px] font-black leading-none md:text-[18px]">
-            <Hash className="size-5 shrink-0 text-muted-foreground" />
+            {channel ? (
+              <ChannelVisibilityGlyph
+                channel={channel}
+                canManageVisibility={canManageVisibility}
+                updatingVisibility={updatingVisibility}
+                onVisibilityChange={onVisibilityChange}
+              />
+            ) : (
+              <Hash className="size-5 shrink-0 text-muted-foreground" />
+            )}
             <span className="truncate">
               {channelHeading}
             </span>
             {channel && (
-              <div className="flex shrink-0 items-center gap-1 font-normal">
-                <ChannelActionsMenu
+              <div className="ml-2 flex shrink-0 items-center gap-1.5 font-normal">
+                <ChannelTitleActions
                   channel={channel}
                   shareUrl={absoluteChannelUrl(channel, spaces)}
-                  moving={moving}
-                  canManageVisibility={canManageVisibility}
-                  updatingVisibility={updatingVisibility}
-                  onMove={onMove}
-                  onVisibilityChange={onVisibilityChange}
+                  onDelete={onDelete}
                 />
               </div>
             )}
@@ -1369,10 +1190,10 @@ export function ChannelHeader({
                   setDraftName(channelTitle(channel));
                   setEditingName(true);
                 }}
-                disabled={renaming || moving}
+                disabled={renaming}
                 className="flex size-7 shrink-0 items-center justify-center rounded text-muted-foreground opacity-100 hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-50 md:opacity-0 md:group-hover:opacity-100"
               >
-                {renaming ? <Loader2 className="size-4 animate-spin" /> : <Pencil className="size-4" />}
+                {renaming ? <AnimatedIcon icon={Loader2} className="size-4 animate-spin" /> : <Pencil className="size-4" />}
               </button>
             )}
           </div>
@@ -1392,8 +1213,8 @@ export function ChannelHeader({
           className="flex h-8 items-center gap-1 rounded px-2 text-sm text-muted-foreground hover:bg-muted xl:hidden"
         >
           <MoreHorizontal className="size-4" />
-          {presenceSummary
-            ? `${presenceSummary.online}/${presenceSummary.total}`
+          {presenceLabel !== null
+            ? presenceLabel
             : channel
               ? visibleHumanChannelMembers(channel, channelSpace).length
               : 0}
@@ -1414,7 +1235,7 @@ export function ChannelHeader({
       </div>
     </div>
   );
-}
+});
 
 export function ChannelPresenceAvatars({
   channel,
@@ -1423,7 +1244,7 @@ export function ChannelPresenceAvatars({
   avatarItems,
   maxVisible,
 }: {
-  channel: SerializedChannel;
+  channel: ChannelSnapshot;
   events: readonly ObservabilityEvent[];
   humanMembers: string[];
   avatarItems: ChannelAgentAvatarItem[];
@@ -1446,16 +1267,12 @@ export function ChannelPresenceAvatars({
       onClick={(event) => event.stopPropagation()}
     >
       {visibleHumans.map((member) => {
-        const presence = memberPresence(channel, member);
         const label = formatMember(channel, member);
         return (
-          <IdentityAvatar
+          <Face
             key={member}
-            kind="human"
-            label={label}
+            of={member.startsWith("user:") ? { kind: "user", id: member.slice(5), name: label } : { kind: "external", name: label }}
             status="online"
-            imageUrl={presenceAvatarUrl(presence)}
-            initials={avatarInitials(label)}
             size="sm"
             showKindBadge={false}
             className="app-channel-human-avatar rounded-full"
@@ -1467,16 +1284,12 @@ export function ChannelPresenceAvatars({
         if (presence.kind !== "agent") return null;
         const label = agentInstanceDisplayName(item.instance);
         const status = channelAgentAvatarStatus(channel, item.member, presence, events, item.instance);
-        const imageUrl = presenceAvatarUrl(presence);
 
         return (
-          <IdentityAvatar
+          <Face
             key={item.key}
-            kind="agent"
-            label={label}
+            of={{ kind: "agent", name: label, harness: presence.registration?.harness ?? null, id: item.instance.id }}
             status={status}
-            imageUrl={imageUrl}
-            initials={imageUrl ? avatarInitials(label) : undefined}
             size="sm"
             showKindBadge={false}
             className="app-channel-agent-avatar rounded-full"
@@ -1498,7 +1311,7 @@ export function ChannelPresenceAvatars({
 }
 
 export function channelAgentAvatarStatus(
-  channel: SerializedChannel,
+  channel: ChannelSnapshot,
   member: string,
   presence: ChannelMemberPresence,
   events: readonly ObservabilityEvent[],
@@ -1516,7 +1329,7 @@ export function channelAgentAvatarStatus(
 }
 
 /** The conversation's Instances with work in hand, as its row's avatars show: busy, or waiting on something. */
-export function channelWorkInHand(channel: SerializedChannel, events: readonly ObservabilityEvent[]) {
+export function channelWorkInHand(channel: ChannelSnapshot, events: readonly ObservabilityEvent[]) {
   return channelOnlineAgentAvatarItems(channel).flatMap((item) => {
     const presence = memberPresence(channel, item.member);
     if (presence.kind !== "agent" || !item.instance) return [];
@@ -1526,11 +1339,11 @@ export function channelWorkInHand(channel: SerializedChannel, events: readonly O
   });
 }
 
-export function channelWorkInHandInstanceIds(channel: SerializedChannel, events: ObservabilityEvent[]): string[] {
+export function channelWorkInHandInstanceIds(channel: ChannelSnapshot, events: readonly ObservabilityEvent[]): string[] {
   return channelWorkInHand(channel, events).map((item) => item.instance.id);
 }
 
-export function channelHasWorkInHand(channel: SerializedChannel, events: ObservabilityEvent[]): boolean {
+export function channelHasWorkInHand(channel: ChannelSnapshot, events: readonly ObservabilityEvent[]): boolean {
   return channelWorkInHandInstanceIds(channel, events).length > 0;
 }
 
@@ -1546,7 +1359,7 @@ export function SpaceAvatar({ space }: { space: SerializedSpace }) {
       style={spaceAvatarStyle(space)}
       aria-hidden="true"
     >
-      {initialsFor(space.name) || "W"}
+      {faceInitials(space.name)}
     </span>
   );
 }

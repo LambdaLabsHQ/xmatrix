@@ -5,7 +5,11 @@ import {
   AgentInstanceRuntimeTransport,
   AGENT_INSTANCE_AUTHORITY_REQUIRED_CAPABILITIES,
 } from "../src/runtime-transport/agent-instance-port.ts";
-import { agentInstanceAttachment, FakeSocket } from "./support/runtime-transport.mjs";
+import {
+  agentInstanceAttachment,
+  FakeSocket,
+  productionAgentInstanceTransport,
+} from "./support/runtime-transport.mjs";
 
 const MODELS = [
   { id: "fable", model: "fable", isDefault: true, supportedReasoningEfforts: [
@@ -44,9 +48,11 @@ test("a stable Profile address switches the selected Instance without relying on
 
 test("a switch reaches the addressed instance and reports what it confirmed", async () => {
   let seen;
+  let timeoutMs;
   const { transport, socket } = liveTransport({
-    awaitControlResult: (binding) => {
+    awaitControlResult: (binding, timeout) => {
       seen = binding;
+      timeoutMs = timeout;
       return Promise.resolve({ value: "fable" });
     },
   });
@@ -66,6 +72,37 @@ test("a switch reaches the addressed instance and reports what it confirmed", as
   assert.equal(seen.instanceId, "instance-1");
   // The waiter must be keyed by the same request the socket was told to answer.
   assert.equal(seen.requestId, socket.sent[0].requestId);
+  // Cancellation and provider confirmation are separate phases for Claude.
+  assert.equal(timeoutMs, 30_000);
+});
+
+test("the production waiter preserves a cancelled turn for continuation", async () => {
+  const { transport } = productionAgentInstanceTransport();
+  const socket = new FakeSocket();
+  assert.equal(transport.rehydrate(socket, attachment({
+    presentation: { model: "fable", effort: "medium", models: MODELS },
+  })), true);
+
+  const switching = transport.switchInstanceControl({
+    channelId: "channel-1",
+    target: "claude:1",
+    kind: "effort",
+    value: "high",
+  });
+  const request = socket.sent[0];
+  assert.equal(request.type, "agent_effort_switch_requested");
+  await transport.handleFrame(socket, JSON.stringify({
+    type: "agent_effort_switch_result",
+    requestId: request.requestId,
+    effort: "high",
+    interruptedTurn: true,
+  }));
+
+  assert.deepEqual(await switching, {
+    status: "switched",
+    selected: "high",
+    continuation: { instanceId: "instance-1", requestId: request.requestId },
+  });
 });
 
 test("the channel-instance ordinal selects which instance is addressed", async () => {

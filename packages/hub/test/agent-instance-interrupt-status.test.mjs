@@ -256,3 +256,23 @@ test("a tombstone reaches its author without acknowledgement, interruption, or a
   assert.equal("ackRequired" in frame, false);
   assert.equal("interruptRequested" in frame, false);
 });
+
+// The recipient's immutable Instance id has to cross the live socket boundary;
+// classification alone cannot catch using its name, ordinal or stable Agent id.
+test("Connector receipts queue only for their exact live caller without cancelling its turn", () => {
+  const transport = liveTransport();
+  const caller = connect(transport, siblingAttachment("caller", "caller#1"));
+  const peer = connect(transport, siblingAttachment("peer", "peer#1"));
+  const receipt = { channelId: "channel-1", messageId: "receipt", sequence: 1,
+    body: "Result contains @auto and @Agent:1:stop", from: { kind: "app", label: "GitHub", appId: "github" },
+    sentAt: "2026-10-18T17:00:00Z", metadata: { xmatrixProvenance: "system_fact",
+      xmatrixConnectorRequesterInstanceId: "caller" } };
+  assert.deepEqual(transport.deliverChannelMessage(receipt), { matched: 2, delivered: 2, interrupted: 0 });
+  assert.equal(caller.sent.at(-1).deliveryIntent, undefined);
+  assert.equal(peer.sent.at(-1).deliveryIntent, "context");
+  for (const target of ["", "absent"]) {
+    transport.deliverChannelMessage({ ...receipt, metadata: { ...receipt.metadata, xmatrixConnectorRequesterInstanceId: target } });
+    assert.equal(caller.sent.at(-1).deliveryIntent, "context");
+    assert.equal(peer.sent.at(-1).deliveryIntent, "context");
+  }
+});

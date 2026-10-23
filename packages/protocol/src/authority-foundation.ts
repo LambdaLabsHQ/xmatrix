@@ -1,4 +1,5 @@
 import { APP_CONNECTOR_PROVIDER_MANIFESTS } from "./app-connector-manifests.js";
+import { agentFailureEvidence, agentFailureStatusLines, safeAgentFailureDetail } from "./agent-failure-detail.js";
 export const DEFAULT_HUB_URL = "https://xmatrix-hub.xmatrix.sh";
 
 export * from "./agent-status-tags.js";
@@ -12,13 +13,13 @@ import type {
 } from "./authority-runtime.js";
 
 import { AGENT_PRESETS, agentPresetForLauncher } from "./agent-presets.js";
+import { agentFaceUrl } from "./faces.js";
 
 export {
   AGENT_PRESETS,
   agentHarnessSpec,
   agentLaunchExecutable,
   withMachineSpawnHarness,
-  agentPresetAvatarUrl,
   agentPresetById,
   agentPresetForLauncher,
   normalizeAgentPresetRuntime,
@@ -53,7 +54,8 @@ export function agentAvatarUrlFromMetadata(
       AGENT_PRESETS.find(
         (item) => item.backend === candidate && item.backend !== "acp" && item.backend !== "pty",
       );
-    if (preset?.avatarUrl) return preset.avatarUrl;
+    const face = agentFaceUrl(preset?.id);
+    if (face) return face;
   }
 
   return undefined;
@@ -78,6 +80,10 @@ function appConnectionRoutes<Api extends "/api" | "/api/xmatrix">(api: Api) {
       `${api}/spaces/${encodeURIComponent(spaceId)}/app-connections/${encodeURIComponent(providerId)}/check`,
     space_app_connection_credentials: (spaceId: string, providerId: string) =>
       `${api}/spaces/${encodeURIComponent(spaceId)}/app-connections/${encodeURIComponent(providerId)}/credentials`,
+    channel_connector_action_requests: (channelId: string) =>
+      `${api}/channels/${encodeURIComponent(channelId)}/connector-action-requests`,
+    channel_connector_action_request: (channelId: string, requestId: string) =>
+      `${api}/channels/${encodeURIComponent(channelId)}/connector-action-requests/${encodeURIComponent(requestId)}`,
     space_app_connection_policies: (spaceId: string, providerId: string) =>
       `${api}/spaces/${encodeURIComponent(spaceId)}/app-connections/${encodeURIComponent(providerId)}/policies`,
     space_app_connection_oauth_start: (spaceId: string, providerId: string) =>
@@ -91,8 +97,18 @@ function appConnectionRoutes<Api extends "/api" | "/api/xmatrix">(api: Api) {
     space_app_connection_dingtalk_install: (spaceId: string) =>
       `${api}/spaces/${encodeURIComponent(spaceId)}/app-connections/dingtalk/install`,
     connector_dingtalk_install_prepare: `${api}/connectors/dingtalk/install/prepare` as const,
+    space_app_connection_gmail_notifications: (spaceId: string) =>
+      `${api}/spaces/${encodeURIComponent(spaceId)}/app-connections/gmail/notifications`,
     space_app_connection_gmail_mailboxes: (spaceId: string) =>
       `${api}/spaces/${encodeURIComponent(spaceId)}/app-connections/gmail/mailboxes`,
+    space_app_connection_cloudflare_logins: (spaceId: string) =>
+      `${api}/spaces/${encodeURIComponent(spaceId)}/app-connections/cloudflare/logins`,
+    space_app_connection_cloudflare_login: (spaceId: string, loginId: string) =>
+      `${api}/spaces/${encodeURIComponent(spaceId)}/app-connections/cloudflare/logins/${encodeURIComponent(loginId)}`,
+    space_app_connection_x_accounts: (spaceId: string) =>
+      `${api}/spaces/${encodeURIComponent(spaceId)}/app-connections/x/accounts`,
+    space_app_connection_x_account: (spaceId: string, accountId: string) =>
+      `${api}/spaces/${encodeURIComponent(spaceId)}/app-connections/x/accounts/${encodeURIComponent(accountId)}`,
     space_app_connection_google_picker: (spaceId: string) =>
       `${api}/spaces/${encodeURIComponent(spaceId)}/app-connections/google/picker`,
     space_app_connection_teams_link: (spaceId: string) =>
@@ -130,17 +146,37 @@ function appConnectionRoutes<Api extends "/api" | "/api/xmatrix">(api: Api) {
   };
 }
 
+/** Where an app's Google or GitHub sign-in comes back to the Hub before the app gets its code. */
+export const APP_SIGN_IN_FINISH_PATH = "/api/auth/app/finish";
+
 export const HUB_ROUTES = {
   login: "/api/auth/cli/login",
   otp_verify: "/api/auth/cli/otp-verify",
   device_start: "/api/auth/cli/device/start",
   device_approve: "/api/auth/cli/device/approve",
   device_token: "/api/auth/cli/device/token",
+  /** What a waiting request says about itself; both of its codes name it. */
+  device_describe: "/api/auth/cli/device/describe",
+  /** The person in the browser says a waiting request is not theirs. */
+  device_decline: "/api/auth/cli/device/decline",
   exchange_session: "/api/auth/cli/exchange-session",
+  /** A signed-out app or terminal ends the session its refresh token names. */
+  sign_out: "/api/auth/cli/sign-out",
+  /** An app opens this in the system sign-in sheet or browser to sign in at Google or GitHub. */
+  app_sign_in_start: "/api/auth/app/start",
+  app_sign_in_finish: APP_SIGN_IN_FINISH_PATH,
+  /** The app trades its one-time code and PKCE verifier for a session. */
+  app_sign_in_token: "/api/auth/app/token",
   refresh: "/api/auth/refresh",
   me: "/api/auth/me",
   me_profile: "/api/me/profile",
+  /** Where this person is signed in, and ending any of it. */
+  me_sessions: "/api/me/sessions",
+  me_session_revoke: "/api/me/sessions/revoke",
+  me_sessions_revoke_others: "/api/me/sessions/revoke-others",
   account_deletion: "/api/account-deletion",
+  channel_deletion: (spaceId: string, channelId: string) =>
+    `/api/spaces/${encodeURIComponent(spaceId)}/channels/${encodeURIComponent(channelId)}/deletion`,
   account_deletion_status: "/api/account-deletion/status",
   account_deletion_cancel: "/api/account-deletion/cancel",
   account_deletion_leave: "/api/account-deletion/leave-space",
@@ -171,7 +207,8 @@ export const HUB_ROUTES = {
   /** An Agent Run saves a credential it holds into its Space. */
   secrets: "/api/secrets",
   run_secrets: "/api/run-secrets",
-  connectors_mcp: "/api/connectors/mcp",
+  /** An Agent Run reads its Channel's connected apps and their commands. */
+  connector_usage: "/api/connectors/usage",
   space_secrets: (spaceId: string) => `/api/spaces/${encodeURIComponent(spaceId)}/secrets`,
   space_secret: (spaceId: string, secretRef: string) =>
     `/api/spaces/${encodeURIComponent(spaceId)}/secrets/${encodeURIComponent(secretRef)}`,
@@ -211,6 +248,7 @@ export const HUB_ROUTES = {
   spaces: "/api/spaces",
   space: (spaceId: string) => `/api/spaces/${encodeURIComponent(spaceId)}`,
   space_restore: (spaceId: string) => `/api/spaces/${encodeURIComponent(spaceId)}/restore`,
+  space_welcome: (spaceId: string) => `/api/spaces/${encodeURIComponent(spaceId)}/welcome`,
   space_deletions: "/api/space-deletions",
   personal_space: "/api/personal-space",
   setup_intents: "/api/setup-intents",
@@ -220,6 +258,8 @@ export const HUB_ROUTES = {
   setup_intent_machine: (intentId: string) => `/api/setup-intents/${encodeURIComponent(intentId)}/machine`,
   space_billing: (spaceId: string) => `/api/spaces/${encodeURIComponent(spaceId)}/billing`,
   space_billing_checkout: (spaceId: string) => `/api/spaces/${encodeURIComponent(spaceId)}/billing/checkout`,
+  space_billing_credit_checkout: (spaceId: string) => `/api/spaces/${encodeURIComponent(spaceId)}/billing/credits/checkout`,
+  space_billing_credit_reconcile: (spaceId: string) => `/api/spaces/${encodeURIComponent(spaceId)}/billing/credits/reconcile`,
   space_billing_portal: (spaceId: string) => `/api/spaces/${encodeURIComponent(spaceId)}/billing/portal`,
   space_billing_reconcile: (spaceId: string) => `/api/spaces/${encodeURIComponent(spaceId)}/billing/reconcile`,
   space_billing_apple: (spaceId: string) => `/api/spaces/${encodeURIComponent(spaceId)}/billing/apple`,
@@ -277,6 +317,7 @@ export const HUB_ROUTES = {
   channels: "/api/channels",
   channel_catalog_page: "/api/channels/page",
   message_search: "/api/messages/search",
+  search_rerank: "/api/search/rerank",
   channel_catalog_resolve: "/api/channels/resolve",
   channel: (channelId: string) =>
     `/api/channels/${encodeURIComponent(channelId)}`,
@@ -324,6 +365,8 @@ export const HUB_ROUTES = {
   cross_space_read_grant_decision: (spaceId: string, grantId: string) =>
     `/api/spaces/${encodeURIComponent(spaceId)}/cross-space-read-grants/${encodeURIComponent(grantId)}/decision`,
   observable_client_metrics: "/api/observable/client-metrics",
+  observable_onboarding_step: "/api/observable/onboarding-step",
+  observable_desktop_daemon_failure: "/api/observable/desktop-daemon-failure",
   context_feed: "/api/context/feed",
   assistant_memory: "/api/assistant-memory",
   shared_memory: "/api/shared-memory",
@@ -340,6 +383,9 @@ export const HUB_ROUTES = {
     `/api/spaces/${encodeURIComponent(spaceId)}/governance${subpath ? `/${subpath}` : ""}`,
   space_page_links: (spaceId: string, subpath = "") =>
     `/api/spaces/${encodeURIComponent(spaceId)}/page-links${subpath ? `/${subpath}` : ""}`,
+  /** The pictures of people and Agent Instances (faces.ts), read by id. */
+  space_faces: (spaceId: string, subpath = "") =>
+    `/api/spaces/${encodeURIComponent(spaceId)}/faces${subpath ? `/${subpath}` : ""}`,
 } as const;
 
 export const WEB_PROXY_ROUTES = {
@@ -355,6 +401,7 @@ export const WEB_PROXY_ROUTES = {
   space_page_promote: (spaceId: string, pageId: string, revision: number) =>
     `/api/xmatrix/spaces/${encodeURIComponent(spaceId)}/pages/${encodeURIComponent(pageId)}/revisions/${revision}/promote`,
   space_page_links: (spaceId: string) => `/api/xmatrix/spaces/${encodeURIComponent(spaceId)}/page-links`,
+  space_faces: (spaceId: string) => `/api/xmatrix/spaces/${encodeURIComponent(spaceId)}/faces`,
   space_page_migration: (spaceId: string) => `/api/xmatrix/spaces/${encodeURIComponent(spaceId)}/page-migration`,
   space_governance: (spaceId: string) => `/api/xmatrix/spaces/${encodeURIComponent(spaceId)}/governance`,
   login: "/api/xmatrix/login",
@@ -362,10 +409,21 @@ export const WEB_PROXY_ROUTES = {
   cli_exchange_session: "/api/xmatrix/cli/exchange-session",
   cli_device_start: "/api/xmatrix/cli/device/start",
   cli_device_token: "/api/xmatrix/cli/device/token",
+  cli_device_approve: "/api/xmatrix/cli/device/approve",
+  cli_device_describe: "/api/xmatrix/cli/device/describe",
+  cli_device_decline: "/api/xmatrix/cli/device/decline",
+  app_sign_in_token: "/api/xmatrix/app-sign-in/token",
   native_session: "/api/xmatrix/native-session",
+  /** A native app page's account calls, sent on with the app's own session cookie. */
+  native_auth: "/api/xmatrix/native-auth",
   me: "/api/xmatrix/me",
   me_profile: "/api/xmatrix/me/profile",
+  me_sessions: "/api/xmatrix/me/sessions",
+  me_session_revoke: "/api/xmatrix/me/sessions/revoke",
+  me_sessions_revoke_others: "/api/xmatrix/me/sessions/revoke-others",
   account_deletion: "/api/xmatrix/account-deletion",
+  channel_deletion: (spaceId: string, channelId: string) =>
+    `/api/xmatrix/spaces/${encodeURIComponent(spaceId)}/channels/${encodeURIComponent(channelId)}/deletion`,
   account_deletion_status: "/api/xmatrix/account-deletion/status",
   account_deletion_cancel: "/api/xmatrix/account-deletion/cancel",
   account_deletion_leave: "/api/xmatrix/account-deletion/leave-space",
@@ -423,6 +481,7 @@ export const WEB_PROXY_ROUTES = {
   spaces: "/api/xmatrix/spaces",
   space: (spaceId: string) => `/api/xmatrix/spaces/${encodeURIComponent(spaceId)}`,
   space_restore: (spaceId: string) => `/api/xmatrix/spaces/${encodeURIComponent(spaceId)}/restore`,
+  space_welcome: (spaceId: string) => `/api/xmatrix/spaces/${encodeURIComponent(spaceId)}/welcome`,
   space_deletions: "/api/xmatrix/space-deletions",
   personal_space: "/api/xmatrix/personal-space",
   setup_intents: "/api/xmatrix/setup-intents",
@@ -431,6 +490,8 @@ export const WEB_PROXY_ROUTES = {
   setup_intent_decline: (intentId: string) => `/api/xmatrix/setup-intents/${encodeURIComponent(intentId)}/decline`,
   space_billing: (spaceId: string) => `/api/xmatrix/spaces/${encodeURIComponent(spaceId)}/billing`,
   space_billing_checkout: (spaceId: string) => `/api/xmatrix/spaces/${encodeURIComponent(spaceId)}/billing/checkout`,
+  space_billing_credit_checkout: (spaceId: string) => `/api/xmatrix/spaces/${encodeURIComponent(spaceId)}/billing/credits/checkout`,
+  space_billing_credit_reconcile: (spaceId: string) => `/api/xmatrix/spaces/${encodeURIComponent(spaceId)}/billing/credits/reconcile`,
   space_billing_portal: (spaceId: string) => `/api/xmatrix/spaces/${encodeURIComponent(spaceId)}/billing/portal`,
   space_billing_reconcile: (spaceId: string) => `/api/xmatrix/spaces/${encodeURIComponent(spaceId)}/billing/reconcile`,
   space_billing_apple: (spaceId: string) => `/api/xmatrix/spaces/${encodeURIComponent(spaceId)}/billing/apple`,
@@ -488,6 +549,7 @@ export const WEB_PROXY_ROUTES = {
   channels: "/api/xmatrix/channels",
   channel_catalog_page: "/api/xmatrix/channels/page",
   message_search: "/api/xmatrix/messages/search",
+  search_rerank: "/api/xmatrix/search/rerank",
   channel_catalog_resolve: "/api/xmatrix/channels/resolve",
   channel: (channelId: string) =>
     `/api/xmatrix/channels/${encodeURIComponent(channelId)}`,
@@ -514,6 +576,8 @@ export const WEB_PROXY_ROUTES = {
   slack_oauth_approve: "/api/xmatrix/migrations/slack/oauth/approve",
   slack_oauth_token: "/api/xmatrix/migrations/slack/oauth/token",
   observable_events: "/api/xmatrix/observable/events",
+  observable_onboarding_step: "/api/xmatrix/observable/onboarding-step",
+  observable_desktop_daemon_failure: "/api/xmatrix/observable/desktop-daemon-failure",
   trace_instance_events: (instanceId: string) =>
     `/api/xmatrix/trace/instances/${encodeURIComponent(instanceId)}/events`,
   channel_pending_cross_space_reads: (channelId: string) =>
@@ -662,10 +726,12 @@ export interface AgentRuntimeWaiting {
   kind: AgentRuntimeWaitingKind;
   /**
    * What it waits on, as the harness says it: a tool call's own description,
-   * else its command, URL, query or tool name; for background tasks, their
-   * count ("2 tasks").
+   * else its command, URL, query or tool name. An older runtime also put the
+   * background count here as text ("2 tasks").
    */
   label?: string;
+  /** For background tasks, how many are still running; clients word it. */
+  count?: number;
   /**
    * The rest of what the harness says: the command under a described call,
    * or each background task's description.
@@ -741,6 +807,7 @@ export type AgentLifecycleReason =
   | "stopped"
   | "turn_failed"
   | "usage_limited"
+  | "harness_signed_out"
   | "background_tasks_interrupted"
   | "unknown";
 
@@ -750,6 +817,8 @@ export const AGENT_TURN_FAILURE_LIFECYCLE_STATUS: AgentLifecycleStatus = "failed
 export const AGENT_TURN_FAILURE_LIFECYCLE_REASON: AgentLifecycleReason = "turn_failed";
 /** A turn failure because the provider account's usage limit is used up. */
 export const AGENT_USAGE_LIMIT_LIFECYCLE_REASON: AgentLifecycleReason = "usage_limited";
+/** A turn failure because the harness's own sign-in is missing or expired on its Machine. */
+export const AGENT_SIGNED_OUT_LIFECYCLE_REASON: AgentLifecycleReason = "harness_signed_out";
 
 const AGENT_TURN_FAILURE_DETAIL_MAX_CHARS = 600;
 
@@ -760,7 +829,8 @@ export function isAgentTurnFailureLifecycle(message: {
 }): boolean {
   return message.layer === AGENT_TURN_FAILURE_LIFECYCLE_LAYER
     && message.status === AGENT_TURN_FAILURE_LIFECYCLE_STATUS
-    && (message.reason === AGENT_TURN_FAILURE_LIFECYCLE_REASON || message.reason === AGENT_USAGE_LIMIT_LIFECYCLE_REASON);
+    && (message.reason === AGENT_TURN_FAILURE_LIFECYCLE_REASON || message.reason === AGENT_USAGE_LIMIT_LIFECYCLE_REASON
+      || message.reason === AGENT_SIGNED_OUT_LIFECYCLE_REASON);
 }
 
 /** The turn failed because the provider account's usage limit is used up. */
@@ -770,6 +840,25 @@ export function isAgentUsageLimitLifecycle(message: {
   reason?: string | null;
 }): boolean {
   return isAgentTurnFailureLifecycle(message) && message.reason === AGENT_USAGE_LIMIT_LIFECYCLE_REASON;
+}
+
+/**
+ * A turn failure whose provider error says the account's usage limit or quota
+ * is used up. Hub reads this from the original error, so every host that
+ * reports a failed turn gets the same handoff. Plain rate limiting (`429`,
+ * "rate limit", "overloaded") is retried by the provider CLIs and is not a
+ * usage limit.
+ */
+export function agentUsageLimitFromError(error: string | undefined | null): { resetsAt?: string } | undefined {
+  const lower = (error ?? "").toLowerCase();
+  const limited = ["usage limit", "usage_limit", "usagelimitexceeded", "hit your limit", "hit your session limit",
+    "hit your weekly limit", "insufficient_quota", "exceeded your current quota", "quota exceeded"]
+    .some((phrase) => lower.includes(phrase)) || (lower.includes("limit reached") && lower.includes("reset"));
+  if (!limited) return undefined;
+  // Claude Code's legacy result text `Claude AI usage limit reached|<unix seconds>`.
+  const seconds = /usage limit reached\|(\d{1,12})/u.exec(error ?? "")?.[1];
+  const reset = seconds ? new Date(Number(seconds) * 1000) : undefined;
+  return reset && Number.isFinite(reset.getTime()) ? { resetsAt: reset.toISOString().replace(/\.000Z$/u, "Z") } : {};
 }
 
 export function boundAgentTurnFailureDetail(detail: string | undefined | null): string {
@@ -783,11 +872,12 @@ export function agentTurnFailureNoticeBody(input: {
   detail?: string | null;
 }): string {
   const name = input.agentName.trim() || "agent";
-  const detail = boundAgentTurnFailureDetail(input.detail);
-  if (!detail) {
-    return `xMatrix could not complete this ${name} turn.`;
-  }
-  return `xMatrix could not complete this ${name} turn: ${detail}`;
+  const detail = boundAgentTurnFailureDetail(safeAgentFailureDetail(input.detail));
+  const cause = detail
+    ? `xMatrix could not complete this ${name} turn: ${detail}`
+    : `xMatrix could not complete this ${name} turn.`;
+  return [cause, ...(!detail ? ["The harness supplied no error detail."] : []),
+    ...agentFailureStatusLines(agentFailureEvidence(input.detail))].join("\n");
 }
 
 export interface AgentLifecycleSnapshot {
@@ -958,15 +1048,16 @@ const TRIGGER_TEXT = /^[^\s][^\n]{0,199}$/u;
 function connectorEventTrigger(trigger: Record<string, unknown>): AutomationTrigger {
   const providerId = typeof trigger.provider === "string" ? trigger.provider.trim().toLowerCase() : "";
   const manifest = APP_CONNECTOR_PROVIDER_MANIFESTS.find((candidate) => candidate.id === providerId);
-  if (!manifest?.events) throw new Error("an event trigger names a connector that delivers events");
+  const events = manifest?.events;
+  if (!manifest || !events) throw new Error("an event trigger names a connector that delivers events");
   const source = typeof trigger.source === "string" && trigger.source.trim() ? trigger.source.trim().toLowerCase() : "*";
-  if (source !== "*" && !new RegExp(manifest.events.source.pattern, "u").test(source)) {
-    throw new Error(`an event trigger's source is a ${manifest.name} ${manifest.events.source.label.toLowerCase()} or *`);
+  if (source !== "*" && !new RegExp(events.source.pattern, "u").test(source)) {
+    throw new Error(`an event trigger's source is a ${manifest.name} ${events.source.label.toLowerCase()} or *`);
   }
   const feature = typeof trigger.feature === "string" && trigger.feature.trim() && trigger.feature.trim() !== "*"
     ? trigger.feature.trim().toLowerCase() : undefined;
-  if (feature && !manifest.events.features.some((candidate) => candidate.id === feature)) {
-    throw new Error(`${manifest.name} events are ${manifest.events.features.map((candidate) => candidate.id).join(", ")}`);
+  if (feature && !events.features.some((candidate) => candidate.id === feature)) {
+    throw new Error(`${manifest.name} events are ${events.features.map((candidate) => candidate.id).join(", ")}`);
   }
   return { kind: "event", provider: manifest.id, source, ...(feature ? { feature } : {}) };
 }
@@ -1013,6 +1104,9 @@ export function automationTriggersFrom(value: unknown): AutomationTrigger[] {
 }
 
 export interface AutomationExecutionStatus {
+  /** Exact persisted Runs of this occurrence. Older Hubs omit this projection.
+   * Empty means no provable Run, independently of message delivery status. */
+  runs?: Array<{ runId: string; instanceId: string | null; channelId: string; status: RunStatus }>;
   status: "pending" | "leased" | "prepared" | "dispatched" | "failed" | "cancelled";
   attempts: number;
   scheduledFor: string;

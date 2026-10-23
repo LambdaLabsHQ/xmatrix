@@ -9,6 +9,8 @@ export interface AgentInstanceRuntime {
   /** Records that the Instance's harness hit its usage limit, so the Channel hands off. */
   holdUsageLimit(input: { commandId: string; actorUserId: string; channelId: string;
     sourceInstanceId: string; resetsAt?: string }): Promise<unknown>;
+  /** Records whether the Run rests, which starts or withdraws its idle sleep (instance-idle-sleep.ts). */
+  markResting?(input: { runId: string; channelId: string; ownerUserId: string; resting: boolean }): Promise<unknown>;
 }
 
 /**

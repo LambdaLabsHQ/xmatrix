@@ -71,14 +71,18 @@ test("CI speaks once, when every check has settled", () => {
 });
 
 function harness({ routes, verdict = { state: "passed", failed: [], settledAt: "2026-10-08T22:00:00Z" },
-  features = ["pulls", "comments", "reviews", "checks"], repositoryFeatures = ["commits"] } = {}) {
+  features = ["pulls", "comments", "reviews", "checks"], repositoryFeatures = ["commits"],
+  delegatedSpaces = ["space-1"] } = {}) {
   const appended = [];
   const woken = [];
   const commands = [];
   const verdicts = [];
+  const delegations = [];
   return {
-    appended, woken, commands, verdicts,
+    appended, woken, commands, verdicts, delegations,
     dependencies: {
+      /* Whether the Space's linking administrator administers the repository now. */
+      delegated: async (_env, input) => { delegations.push(input); return delegatedSpaces.includes(input.spaceId); },
       exposure: { channel: async () => ({ id: "channel-1", spaceId: "space-1", mode: "closed" }),
         openParticipation: async () => false },
       /* The route read answers by source and feature (githubSubscriptionRoutes). */
@@ -103,6 +107,49 @@ const issueRoute = { relationId: "imported-pull-request-relation", installationI
   createdAt: "2026-10-08T22:00:00.000Z",
   spaceId: "space-1", channelId: "channel-1", connectionId: "connection-1", authorityRootUserId: "user-1" };
 const base = { installation: { id: 42 }, repository: { name: "app", owner: { login: "acme" }, private: true } };
+
+// Code scanning used to be dropped before route lookup, so a security-only
+// subscription could never wake its Agent when a new alert appeared.
+test("code scanning reaches its subscribed Channel and wakes its Agent through the existing event boundary", async () => {
+  const route = { ...issueRoute, sourceRef: "github:repo:acme/app", sourceKind: "repository" };
+  const input = { env: {}, event: "code_scanning_alert", delivery: "security-delivery", payload: {
+    ...base, action: "created", alert: { number: 97 } } };
+  const h = harness({ routes: [route], repositoryFeatures: ["code-scanning"] });
+  assert.equal((await dispatchProductGitHubWebhook(input, h.dependencies)).delivered, 1);
+  assert.equal(h.appended[0].appAuthorId, "github");
+  assert.equal(h.appended[0].body,
+    "GitHub code scanning alert [acme/app#97](https://github.com/acme/app/security/code-scanning/97): created.");
+  assert.equal(h.woken[0].sourceMessageId, h.appended[0].messageId);
+  await dispatchProductGitHubWebhook(input, h.dependencies);
+  assert.equal(h.appended[0].messageId, h.appended[1].messageId, "redelivery retains the durable append's identity");
+  for (const options of [{ repositoryFeatures: ["commits"] }, { delegatedSpaces: [] }]) {
+    const denied = harness({ routes: [route], repositoryFeatures: ["code-scanning"], ...options });
+    assert.equal((await dispatchProductGitHubWebhook(input, denied.dependencies)).delivered, 0);
+    assert.equal(denied.woken.length, 0);
+  }
+  const foreign = harness({ routes: [route], repositoryFeatures: ["code-scanning"] });
+  assert.equal((await dispatchProductGitHubWebhook({ ...input, payload: { ...input.payload, installation: { id: 43 } } },
+    foreign.dependencies)).delivered, 0);
+});
+
+// A Space whose GitHub link no administrator of this repository stands behind
+// now (a repository added to the installation later, or one its linker no
+// longer administers) takes nothing from the delivery; another Space linking
+// the same installation still does. Each Space is asked once per delivery.
+test("a delivery reaches only the Spaces whose linking administrator administers the repository", async () => {
+  const repositoryRoute = { ...issueRoute, relationId: "repository", sourceRef: "github:repo:acme/app",
+    sourceKind: "repository" };
+  const other = { ...repositoryRoute, relationId: "other", spaceId: "space-2", channelId: "channel-2",
+    authorityRootUserId: "user-2" };
+  const second = { ...repositoryRoute, relationId: "second", channelId: "channel-3" };
+  const h = harness({ routes: [repositoryRoute, other, second], delegatedSpaces: ["space-1"] });
+  const payload = { ...base, ref: "refs/heads/main", commits: [{ id: "abcdef1234567", message: "change" }] };
+  await dispatchProductGitHubWebhook({ env: {}, event: "push", delivery: "d-delegation", payload }, h.dependencies);
+  assert.deepEqual(h.appended.map((message) => message.channelId).sort(), ["channel-1", "channel-3"]);
+  assert.deepEqual(h.delegations.map((input) => input.spaceId).sort(), ["space-1", "space-2"]);
+  assert.deepEqual(h.delegations.find((input) => input.spaceId === "space-2"),
+    { spaceId: "space-2", actorUserId: "user-2", installationId: "42", owner: "acme", repo: "app" });
+});
 
 test("a settled verdict reaches the pull request's conversation once and wakes it", async () => {
   const h = harness({ routes: [issueRoute] });

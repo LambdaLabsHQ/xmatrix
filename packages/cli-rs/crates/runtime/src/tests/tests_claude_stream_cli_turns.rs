@@ -404,12 +404,9 @@ exit 0
     let frame = fixture.frames.lock().unwrap()[index].clone();
     assert_eq!(frame["channelId"], "channel-1");
     assert_eq!(frame["status"], "blocked");
-    assert!(
-        frame["detail"]
-            .as_str()
-            .unwrap()
-            .contains("outcome is unknown")
-    );
+    // The host reports the fact; Hub words the notice.
+    assert_eq!(frame["pendingTasks"], 1);
+    assert!(frame.get("detail").is_none());
     assert!(!frame.to_string().contains("PRIVATE_TASK_INPUT"));
     assert!(uuid::Uuid::parse_str(frame["requestId"].as_str().unwrap()).is_ok());
     fixture.finish().await;
@@ -447,11 +444,12 @@ sleep 30
 }
 
 /// A background task finishes after the account is used up: the turn Claude
-/// starts for it fails on the limit, and that limit reaches the Hub so the
-/// Instance is handed off, even though no channel message started the turn.
+/// starts for it fails, and that failure reaches the Hub with the provider's
+/// own error (Hub reads the usage limit from it and hands the Instance off),
+/// even though no channel message started the turn.
 #[cfg(unix)]
 #[tokio::test]
-async fn claude_self_started_turn_reports_its_usage_limit() {
+async fn claude_self_started_turn_reports_its_failure_with_the_original_error() {
     let mut fixture = ClaudeCliTurnFixture::start(&format!(
         "{CLAUDE_CLI_TURN_PRELUDE}{}",
         r#"emit '{"type":"assistant","message":{"id":"m2","model":"<synthetic>","role":"assistant","content":[{"type":"text","text":"You have hit your weekly limit · resets Oct 4, 11pm (UTC)"}]},"session_id":"s1"}'
@@ -463,7 +461,7 @@ sleep 30
     fixture.submit("start the suite in the background").await;
     let index = fixture
         .wait_for(0, |frame| {
-            frame["type"] == "agent_lifecycle" && frame["reason"] == "usage_limited"
+            frame["type"] == "agent_lifecycle" && frame["reason"] == "turn_failed"
         })
         .await;
     let frame = fixture.frames.lock().unwrap()[index].clone();
@@ -473,8 +471,9 @@ sleep 30
         frame["detail"]
             .as_str()
             .unwrap()
-            .contains("hit your weekly limit")
+            .ends_with("You have hit your weekly limit · resets Oct 4, 11pm (UTC)")
     );
+    assert!(uuid::Uuid::parse_str(frame["requestId"].as_str().unwrap()).is_ok());
     fixture.finish().await;
 }
 
@@ -549,7 +548,7 @@ async fn claude_reports_a_long_tool_call_and_its_background_tasks_as_waits() {
         .expect("a background wait outlives the turn");
     let waiting = between.waiting.expect("waiting");
     assert_eq!(waiting.kind, "background");
-    assert_eq!(waiting.label.as_deref(), Some("1 task"));
+    assert_eq!(waiting.count, Some(1));
     assert_eq!(waiting.details, vec!["Tail the deploy log".to_string()]);
 
     // The task's own turn starts: nothing is waited on any more.

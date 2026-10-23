@@ -19,10 +19,14 @@ const legalLinks = [
 export function LegalDocument({
   title,
   description,
+  version = LEGAL_VERSION,
+  effectiveDate = LEGAL_EFFECTIVE_DATE,
   children,
 }: {
   title: string;
   description: string;
+  version?: string;
+  effectiveDate?: string;
   children: ReactNode;
 }) {
   return (
@@ -50,8 +54,8 @@ export function LegalDocument({
           <h1 className="mt-3 text-4xl font-black tracking-tight sm:text-5xl">{title}</h1>
           <p className="mt-4 max-w-2xl text-base leading-7 text-muted-foreground">{description}</p>
           <div className="mt-4 space-y-1 text-sm font-medium text-muted-foreground">
-            <p>Version {LEGAL_VERSION}</p>
-            <p>Effective date: {LEGAL_EFFECTIVE_DATE}</p>
+            <p>Version {version}</p>
+            <p>Effective date: {effectiveDate}</p>
           </div>
         </div>
 

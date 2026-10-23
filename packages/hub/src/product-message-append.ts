@@ -1,7 +1,9 @@
 import { messagePublicationEvidence } from "@xmatrix/protocol";
-import { appendChannelMessage, channelMessageResult, publishChannelLiveDelivery } from "./channel-messages";
+import { appendChannelMessage, channelMessageResult, committedLiveRouting, publishChannelLiveDelivery } from "./channel-messages";
 import { productMessageSenderPresentation } from "./message-sender-presentation";
 import type { Env } from "./types";
+import { connectorMessageWakeTarget } from "./connector-message-delivery";
+import { wakeRestingInstances } from "./registration-launch-dispatch";
 
 function record(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -45,7 +47,7 @@ export async function deliverCommittedProductMessage(
       ...(metadata ? { metadata } : {}),
       ...(Array.isArray(committed.attachments) && committed.attachments.length
         ? { attachments: committed.attachments } : {}),
-    });
+    }, undefined, committedLiveRouting(committed));
   } catch (error) {
     console.error("Product message live delivery failed", {
       channelId, messageId, error: error instanceof Error ? error.message : String(error),
@@ -62,5 +64,11 @@ export async function dispatchProductMessageAppend(
   const result = await channelMessageResult(() => appendChannelMessage(env, channelId, command));
   if (!result.ok) return result.response;
   await deliverCommittedProductMessage(env, channelId, command, result.payload);
+  const snapshot = record(result.payload.senderSnapshot);
+  const target = connectorMessageWakeTarget({ from: snapshot ?? {},
+    metadata: record(command.residual)?.appMetadata });
+  if (target) await wakeRestingInstances(env, { commandId: `connector-wake:${command.messageId}`.slice(0, 200),
+    channelId, sourceMessageId: String(command.messageId), prompt: String(command.body ?? ""),
+    ...(target.instanceId ? { targetInstanceId: target.instanceId } : {}) });
   return Response.json(result.payload, { headers: { "cache-control": "no-store" } });
 }

@@ -78,6 +78,96 @@ pub fn release_sequence_from_version(version: &str) -> Result<u64, ContinuityErr
         ))
 }
 
+/// SemVer precedence of two release versions, ignoring build metadata; None
+/// when either is not one. A beta `X.Y.Z-beta.N` precedes the stable `X.Y.Z`,
+/// which precedes `X.Y.(Z+1)-beta.1`. A release sequence carries only
+/// `X.Y.Z`, so this is what orders the betas of one core.
+pub fn release_version_precedence(left: &str, right: &str) -> Option<std::cmp::Ordering> {
+    use std::cmp::Ordering;
+
+    fn parse(version: &str) -> Option<(Vec<u64>, Vec<&str>)> {
+        let version = version.split_once('+').map_or(version, |(value, _)| value);
+        let (core, prerelease) = match version.split_once('-') {
+            Some((core, prerelease)) => (core, Some(prerelease)),
+            None => (version, None),
+        };
+        let core = core
+            .split('.')
+            .map(|part| {
+                (!part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit()))
+                    .then(|| part.parse::<u64>().ok())
+                    .flatten()
+            })
+            .collect::<Option<Vec<_>>>()?;
+        let prerelease = match prerelease {
+            None => Vec::new(),
+            Some(text) => {
+                let identifiers = text.split('.').collect::<Vec<_>>();
+                if identifiers.iter().any(|identifier| {
+                    identifier.is_empty()
+                        || !identifier
+                            .bytes()
+                            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+                }) {
+                    return None;
+                }
+                identifiers
+            }
+        };
+        (!core.is_empty()).then_some((core, prerelease))
+    }
+
+    let (left_core, left_prerelease) = parse(left)?;
+    let (right_core, right_prerelease) = parse(right)?;
+    for index in 0..left_core.len().max(right_core.len()) {
+        let ordering = left_core
+            .get(index)
+            .copied()
+            .unwrap_or(0)
+            .cmp(&right_core.get(index).copied().unwrap_or(0));
+        if ordering != Ordering::Equal {
+            return Some(ordering);
+        }
+    }
+    let numeric = |value: &str| {
+        value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit())
+            .then(|| value.parse::<u64>().ok())
+            .flatten()
+    };
+    let ordering = match (left_prerelease.is_empty(), right_prerelease.is_empty()) {
+        (true, true) => Ordering::Equal,
+        (true, false) => Ordering::Greater,
+        (false, true) => Ordering::Less,
+        (false, false) => left_prerelease
+            .iter()
+            .zip(&right_prerelease)
+            .map(|(left, right)| match (numeric(left), numeric(right)) {
+                (Some(left), Some(right)) => left.cmp(&right),
+                (Some(_), None) => Ordering::Less,
+                (None, Some(_)) => Ordering::Greater,
+                (None, None) => left.cmp(right),
+            })
+            .find(|ordering| *ordering != Ordering::Equal)
+            .unwrap_or_else(|| left_prerelease.len().cmp(&right_prerelease.len())),
+    };
+    Some(ordering)
+}
+
+/// Whether a binary's `--version` output says it is exactly `version`. The
+/// release envelope signs a binary's bytes and release sequence, not its full
+/// version, so the version an artifact claims is proven by running it.
+pub fn verify_reported_version(output: &str, version: &str) -> Result<(), ContinuityError> {
+    if output.lines().next().map(str::trim_end) == Some(format!("xmatrix {version}").as_str()) {
+        Ok(())
+    } else {
+        Err(ContinuityError::Invalid(
+            "artifact does not run as the release version it claims",
+        ))
+    }
+}
+
 pub fn read_embedded_release_envelope(
     path: &Path,
 ) -> Result<EmbeddedReleaseEnvelope, ContinuityError> {
@@ -726,6 +816,7 @@ impl ActivationKernel {
         &self.payload
     }
 
+    #[cfg(test)]
     pub fn admission_open(&self) -> bool {
         self.payload
             .transaction
@@ -816,6 +907,15 @@ impl ActivationKernel {
                 {
                     return Err(ContinuityError::Invalid(
                         "candidate violates release floor or quarantine",
+                    ));
+                }
+                // One core's betas share a release sequence: their versions order them.
+                if !matches!(
+                    release_version_precedence(&artifact.version, &self.payload.committed.version),
+                    Some(std::cmp::Ordering::Greater | std::cmp::Ordering::Equal)
+                ) {
+                    return Err(ContinuityError::Invalid(
+                        "candidate version precedes the committed release",
                     ));
                 }
                 self.payload.candidate = Some(artifact.clone());
@@ -1058,41 +1158,6 @@ impl RunEvidence {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RunAccounting {
-    pub expected: BTreeSet<String>,
-    pub adopted: BTreeMap<String, RunEvidence>,
-    pub natural_terminal: BTreeSet<String>,
-    pub quarantined: BTreeSet<String>,
-}
-
-impl RunAccounting {
-    pub fn validate_complete(&self) -> Result<String, ContinuityError> {
-        if !self.quarantined.is_empty() {
-            return Err(ContinuityError::RunConflict);
-        }
-        let accounted = self
-            .adopted
-            .keys()
-            .cloned()
-            .chain(self.natural_terminal.iter().cloned())
-            .collect::<BTreeSet<_>>();
-        if accounted != self.expected {
-            return Err(ContinuityError::RunSetIncomplete);
-        }
-        for (run_id, evidence) in &self.adopted {
-            evidence.validate()?;
-            if run_id != &evidence.run_id {
-                return Err(ContinuityError::RunConflict);
-            }
-        }
-        let bytes =
-            serde_json::to_vec(&(self.expected.clone(), &self.adopted, &self.natural_terminal))?;
-        Ok(hex_sha256(&bytes))
-    }
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum EffectPhase {
@@ -1134,6 +1199,10 @@ pub struct CommandEffect {
     pub admitted_monotonic_ms: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effect_committed_monotonic_ms: Option<u64>,
+    /// Wall-clock receipt (Unix milliseconds). It only ages an effect out of
+    /// the bounded journal; Hub stays the authority on command expiry.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub received_unix_ms: Option<u64>,
 }
 
 impl CommandEffect {
@@ -1209,6 +1278,7 @@ impl CommandEffectJournal {
             received_monotonic_ms: Some(process_monotonic_millis()),
             admitted_monotonic_ms: None,
             effect_committed_monotonic_ms: None,
+            received_unix_ms: Some(unix_millis()),
         };
         let stable_id = candidate.stable_id();
         if let Some(existing) = payload.effects.get(&stable_id) {
@@ -1366,7 +1436,12 @@ impl CommandEffectJournal {
         self.load_or_empty()?
             .effects
             .into_values()
-            .filter(|effect| effect.phase == EffectPhase::EffectCommitted)
+            // Hub refuses an expired command's result; replaying it after a
+            // restart is only refused again.
+            .filter(|effect| {
+                effect.phase == EffectPhase::EffectCommitted
+                    && !expired_effect(effect, unix_millis())
+            })
             .map(|effect| {
                 effect.result.ok_or(ContinuityError::Invalid(
                     "committed command effect has no result",
@@ -1440,17 +1515,85 @@ impl CommandEffectJournal {
         }
     }
 
+    /// Write the journal within its size budget. Every effect rolls out once
+    /// Hub can no longer deliver its command again (see `effect_retention_ms`);
+    /// one an older CLI wrote without a receipt time is dated from the first
+    /// write that sees it. Over budget, acknowledged effects and quota probes
+    /// (a probe only reads, so answering it again is harmless) go next, oldest
+    /// first. Any other unacknowledged effect stays until it rolls out: it
+    /// fences a redelivery against running twice.
     fn store(&self, payload: &EffectJournalPayload) -> Result<(), ContinuityError> {
-        let envelope = EffectJournalEnvelope {
-            checksum_sha256: payload_checksum(payload)?,
-            payload: payload.clone(),
-        };
-        let bytes = serde_json::to_vec_pretty(&envelope)?;
-        if bytes.len() > MAX_EFFECT_JOURNAL_BYTES {
-            return Err(ContinuityError::FrameTooLarge(bytes.len()));
+        let mut payload = payload.clone();
+        let now = unix_millis();
+        payload
+            .effects
+            .retain(|_, effect| !expired_effect(effect, now));
+        loop {
+            let mut dated = payload.clone();
+            for effect in dated.effects.values_mut() {
+                effect.received_unix_ms.get_or_insert(now);
+            }
+            let envelope = EffectJournalEnvelope {
+                checksum_sha256: payload_checksum(&dated)?,
+                payload: dated,
+            };
+            let bytes = serde_json::to_vec_pretty(&envelope)?;
+            if bytes.len() <= MAX_EFFECT_JOURNAL_BYTES {
+                return atomic_replace(&self.path, &bytes);
+            }
+            let mut evictable = payload
+                .effects
+                .iter()
+                .filter(|(_, effect)| {
+                    effect.phase == EffectPhase::HubCompletionAcked || quota_probe(effect)
+                })
+                .map(|(id, effect)| (effect.received_unix_ms.unwrap_or(0), id.clone()))
+                .collect::<Vec<_>>();
+            if evictable.is_empty() {
+                return Err(ContinuityError::FrameTooLarge(bytes.len()));
+            }
+            evictable.sort();
+            let evict = (evictable.len() / 8).max(1);
+            for (_, id) in evictable.into_iter().take(evict) {
+                payload.effects.remove(&id);
+            }
         }
-        atomic_replace(&self.path, &bytes)
     }
+}
+
+const HOUR_MS: u64 = 60 * 60 * 1000;
+const DAY_MS: u64 = 24 * HOUR_MS;
+
+/// How long an effect is kept after receipt. Hub never delivers a command
+/// again once it expires: a quota probe within a minute, a harness, text or
+/// worktree action within 10 minutes, anything else within 30 days. The
+/// margin past that covers an action still renewing its lease to report.
+fn effect_retention_ms(effect: &CommandEffect) -> u64 {
+    // A profile daemon journals `<profile>:<type>`.
+    match effect.command_type.rsplit(':').next() {
+        Some("quota_probe") => HOUR_MS,
+        Some("harness_action" | "text_task" | "worktree_action") => DAY_MS,
+        _ => 31 * DAY_MS,
+    }
+}
+
+fn quota_probe(effect: &CommandEffect) -> bool {
+    // A profile daemon journals `<profile>:<type>`.
+    effect.command_type.rsplit(':').next() == Some("quota_probe")
+}
+
+fn expired_effect(effect: &CommandEffect, now_unix_ms: u64) -> bool {
+    effect
+        .received_unix_ms
+        .is_some_and(|at| now_unix_ms.saturating_sub(at) > effect_retention_ms(effect))
+}
+
+fn unix_millis() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| {
+            elapsed.as_millis().try_into().unwrap_or(u64::MAX)
+        })
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -2083,22 +2226,6 @@ mod tests {
     }
 
     #[test]
-    fn run_accounting_requires_exact_complete_set() {
-        let mut accounting = RunAccounting {
-            expected: BTreeSet::from(["run-1".into()]),
-            adopted: BTreeMap::new(),
-            natural_terminal: BTreeSet::new(),
-            quarantined: BTreeSet::new(),
-        };
-        assert!(matches!(
-            accounting.validate_complete(),
-            Err(ContinuityError::RunSetIncomplete)
-        ));
-        accounting.natural_terminal.insert("run-1".into());
-        assert!(accounting.validate_complete().is_ok());
-    }
-
-    #[test]
     fn frames_are_bounded_and_typed() {
         let message = ControlMessage::Hello {
             protocol_major: 1,
@@ -2151,6 +2278,173 @@ mod tests {
             EffectPhase::HubCompletionAcked
         );
         assert!(journal.pending_completion_results().unwrap().is_empty());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// Write a journal as an older CLI left it: no dating, no budget.
+    fn write_as_older_cli(path: &Path, payload: EffectJournalPayload) {
+        let envelope = EffectJournalEnvelope {
+            checksum_sha256: payload_checksum(&payload).unwrap(),
+            payload,
+        };
+        fs::write(path, serde_json::to_vec(&envelope).unwrap()).unwrap();
+    }
+
+    #[test]
+    fn effect_journal_rolls_each_effect_out_after_hub_can_no_longer_deliver_it() {
+        let root = std::env::temp_dir().join(format!(
+            "xmatrix-effect-journal-roll-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let journal = CommandEffectJournal::new(root.join("effects.json"));
+        let commit = |control_id: &str, command_type: &str| {
+            let effect = journal
+                .receive(control_id, command_type, &"a".repeat(64))
+                .unwrap();
+            journal.admit(&effect.stable_id()).unwrap();
+            journal
+                .commit_result(&effect.stable_id(), serde_json::json!({"id": control_id}))
+                .unwrap();
+        };
+        for (control_id, command_type) in [
+            ("probe-2h", "p:quota_probe"),
+            ("harness-2h", "harness_action"),
+            ("harness-2d", "harness_action"),
+            ("spawn-2d", "spawn"),
+            ("spawn-32d", "spawn"),
+            ("legacy-spawn", "spawn"),
+        ] {
+            commit(control_id, command_type);
+        }
+        let now = unix_millis();
+        let mut payload = journal.load_or_empty().unwrap();
+        for effect in payload.effects.values_mut() {
+            effect.received_unix_ms = match effect.control_id.as_str() {
+                "probe-2h" | "harness-2h" => Some(now - 2 * HOUR_MS),
+                "harness-2d" | "spawn-2d" => Some(now - 2 * DAY_MS),
+                "spawn-32d" => Some(now - 32 * DAY_MS),
+                _ => None,
+            };
+        }
+        // Written without dating, as an older CLI left it.
+        write_as_older_cli(&root.join("effects.json"), payload);
+        commit("fresh", "quota_probe");
+        let kept = journal.load_or_empty().unwrap().effects;
+        let ids = kept
+            .values()
+            .map(|effect| effect.control_id.clone())
+            .collect::<BTreeSet<_>>();
+        assert_eq!(
+            ids,
+            BTreeSet::from([
+                "harness-2h".to_string(),
+                "spawn-2d".to_string(),
+                "legacy-spawn".to_string(),
+                "fresh".to_string(),
+            ])
+        );
+        // An undated effect is dated from this write and rolls out on schedule.
+        assert!(
+            kept.values()
+                .all(|effect| effect.received_unix_ms.is_some())
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn a_full_effect_journal_drops_quota_probes_but_keeps_other_fences() {
+        let root = std::env::temp_dir().join(format!(
+            "xmatrix-effect-journal-full-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let journal = CommandEffectJournal::new(root.join("effects.json"));
+        let bulk = "x".repeat(MAX_EFFECT_JOURNAL_BYTES / 5);
+        let commit = |control_id: &str, command_type: &str| {
+            let effect = journal.receive(control_id, command_type, &"a".repeat(64))?;
+            journal.admit(&effect.stable_id())?;
+            journal.commit_result(&effect.stable_id(), serde_json::json!({"bulk": bulk}))
+        };
+        commit("spawn-1", "spawn").unwrap();
+        commit("spawn-2", "spawn").unwrap();
+        for index in 0..2 {
+            commit(&format!("probe-{index}"), "quota_probe").unwrap();
+        }
+        // Journaled by an older CLI: no wall-clock receipt.
+        let mut payload = journal.load_or_empty().unwrap();
+        for effect in payload.effects.values_mut() {
+            if effect.command_type == "quota_probe" {
+                effect.received_unix_ms = None;
+            }
+        }
+        // Older-CLI actions of unknown age may have acted; they stay.
+        for (control_id, command_type) in [
+            ("harness-old", "harness_action"),
+            ("worktree-old", "worktree_action"),
+        ] {
+            let effect = CommandEffect {
+                control_id: control_id.into(),
+                command_type: command_type.into(),
+                payload_digest: "c".repeat(64),
+                phase: EffectPhase::Admitted,
+                result_digest: None,
+                result: None,
+                received_monotonic_ms: None,
+                admitted_monotonic_ms: None,
+                effect_committed_monotonic_ms: None,
+                received_unix_ms: None,
+            };
+            payload.effects.insert(effect.stable_id(), effect);
+        }
+        write_as_older_cli(&root.join("effects.json"), payload);
+        commit("probe-new", "quota_probe").unwrap();
+        commit("probe-newer", "quota_probe").unwrap();
+        let kept = journal
+            .load_or_empty()
+            .unwrap()
+            .effects
+            .into_values()
+            .map(|effect| effect.control_id)
+            .collect::<BTreeSet<_>>();
+        assert!(kept.contains("spawn-1") && kept.contains("spawn-2"));
+        assert!(kept.contains("harness-old") && kept.contains("worktree-old"));
+        assert!(kept.contains("probe-newer"));
+        assert!(!kept.contains("probe-0"));
+        // A probe gives way to a spawn; with only fences left, a command is
+        // refused and no fence is lost.
+        commit("spawn-3", "spawn").unwrap();
+        let refused = (4..8)
+            .map(|index| commit(&format!("spawn-{index}"), "spawn"))
+            .find(Result::is_err);
+        assert!(matches!(
+            refused,
+            Some(Err(ContinuityError::FrameTooLarge(_)))
+        ));
+        let kept = journal.load_or_empty().unwrap().effects;
+        assert!(
+            !kept
+                .values()
+                .any(|effect| effect.command_type == "quota_probe")
+        );
+        for fence in [
+            "spawn-1",
+            "spawn-2",
+            "spawn-3",
+            "harness-old",
+            "worktree-old",
+        ] {
+            assert!(
+                kept.values().any(|effect| effect.control_id == fence),
+                "{fence}"
+            );
+        }
+        let replayed = journal
+            .receive("spawn-1", "spawn", &"a".repeat(64))
+            .unwrap();
+        assert_eq!(replayed.phase, EffectPhase::EffectCommitted);
+        assert!(
+            fs::metadata(root.join("effects.json")).unwrap().len()
+                <= MAX_EFFECT_JOURNAL_BYTES as u64
+        );
         let _ = std::fs::remove_dir_all(root);
     }
 
@@ -2302,6 +2596,80 @@ mod tests {
             release_sequence_from_version("1.0.0").unwrap()
                 > release_sequence_from_version("0.999999.999999").unwrap()
         );
+    }
+
+    #[test]
+    fn release_versions_order_betas_before_their_stable() {
+        use std::cmp::Ordering::{Equal, Greater, Less};
+        let order = |left, right| release_version_precedence(left, right);
+        assert_eq!(order("1.0.606-beta.10", "1.0.606-beta.2"), Some(Greater));
+        assert_eq!(order("1.0.606", "1.0.606-beta.10"), Some(Greater));
+        assert_eq!(order("1.0.606-beta.1", "1.0.606"), Some(Less));
+        assert_eq!(order("1.0.607-beta.1", "1.0.606"), Some(Greater));
+        assert_eq!(order("1.0.606+build.2", "1.0.606"), Some(Equal));
+        assert_eq!(order("1.2", "1.2.0"), Some(Equal));
+        for invalid in [
+            "",
+            "1..2",
+            "v1.0.0",
+            "1.0.0-",
+            "1.0.0-beta..1",
+            "1.0.x",
+            "+1.0.0",
+        ] {
+            assert_eq!(order(invalid, "1.0.0"), None, "{invalid}");
+        }
+    }
+
+    #[test]
+    fn a_candidate_never_stages_below_the_committed_version_of_its_release_sequence() {
+        let stage = |committed: &str, candidate: &str| {
+            let mut current = artifact("daemon-committed", 'a');
+            current.version = committed.into();
+            current.release_sequence = release_sequence_from_version(committed).unwrap();
+            let mut kernel = ActivationKernel::new(test_journal_payload(current)).unwrap();
+            let mut next = artifact("daemon-candidate", 'b');
+            next.version = candidate.into();
+            // An unreadable version gets a sequence above every floor, so only
+            // the version check can refuse it.
+            next.release_sequence = release_sequence_from_version(candidate).unwrap_or(u64::MAX);
+            kernel
+                .apply(KernelEvent::StageCandidate {
+                    transaction_id: "update".into(),
+                    nonce: "n".repeat(32),
+                    kind: TransactionKind::Update,
+                    source_hub_epoch: Some(1),
+                    artifact: next,
+                })
+                .map(|_| ())
+        };
+        assert!(stage("1.0.606-beta.2", "1.0.606-beta.10").is_ok());
+        assert!(stage("1.0.606-beta.10", "1.0.606").is_ok());
+        assert!(
+            stage("1.0.606", "1.0.606").is_ok(),
+            "the same release reinstalls"
+        );
+        // Same release sequence, older version: the sequence floor alone admits these.
+        assert!(stage("1.0.606-beta.10", "1.0.606-beta.2").is_err());
+        assert!(stage("1.0.606", "1.0.606-beta.10").is_err());
+        assert!(stage("1.0.606", "not-a-version").is_err());
+    }
+
+    #[test]
+    fn a_binary_proves_its_version_only_by_reporting_it_exactly() {
+        assert!(verify_reported_version("xmatrix 1.0.606-beta.1\n", "1.0.606-beta.1").is_ok());
+        assert!(verify_reported_version("xmatrix 1.0.606-beta.1\r\n", "1.0.606-beta.1").is_ok());
+        for output in [
+            "xmatrix 1.0.606-beta.10\n",
+            "xmatrix 1.0.606\n",
+            "",
+            "1.0.606-beta.1\n",
+        ] {
+            assert!(
+                verify_reported_version(output, "1.0.606-beta.1").is_err(),
+                "{output:?}"
+            );
+        }
     }
 
     #[test]

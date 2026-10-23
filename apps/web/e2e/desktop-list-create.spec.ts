@@ -2,7 +2,9 @@ import type { Page } from "@playwright/test";
 
 import { expect, test } from "./fixtures";
 import { fixtureJson, fixtureRequestBodies } from "./in-page-api-fixtures";
-import { E2E_CHANNEL, E2E_DESKTOP_CONTEXT, E2E_SPACE, installPageTreeStubs, openWorkspaceWithStubs } from "./workspace-fixtures";
+import { startedMarkdown } from "./page-document-fixture";
+import { E2E_CHANNEL, E2E_DESKTOP_CONTEXT, E2E_SPACE, installPageTreeStubs, openWorkspaceWithStubs }
+  from "./workspace-fixtures";
 
 /* A desktop list leads with its +: its first row, full width and square like
    the rows, set apart by its tone. Nothing floats over what is open. */
@@ -77,12 +79,32 @@ test("the page tree leads with New page, and Ctrl+N there makes a page", async (
   expect(headingBox!.y - (createBox!.y + createBox!.height)).toBeCloseTo(0, 0);
   expect(rowBox!.y - (headingBox!.y + headingBox!.height)).toBeCloseTo(0, 0);
 
-  // Ctrl+N makes an untitled page at once, as Notion does; it is named on the page.
+  // Ctrl+N opens an untitled page at once, as Notion does, as any page opens; it is named on the page.
   await stubPageCreate(page);
   await page.keyboard.press("Control+n");
-  await expect.poll(() => fixtureRequestBodies(page, "page-create")).toEqual([{ title: "Untitled", parentPageId: null }]);
+  await expect(page).toHaveURL(/page=new/u);
+  await expect(page.getByTestId("page-editor").locator(".page-document")).toBeFocused();
+  await expect(page.getByTestId("page-editor")).toBeVisible();
   await expect(page.getByRole("dialog")).toHaveCount(0);
   await expect(page.getByTestId("new-conversation")).toBeHidden();
+  // Left with nothing written, it is not kept.
+  await page.locator(".app-sidebar").getByText("Home", { exact: true }).click();
+  await expect(page).not.toHaveURL(/page=new/u);
+  expect(await fixtureRequestBodies(page, "page-create")).toEqual([]);
+
+  // Its first write makes it, copy-on-write, from what is written; Enter goes on into its text.
+  await page.keyboard.press("Control+n");
+  await expect(page.getByTestId("page-editor").locator(".page-document")).toBeFocused();
+  await expect(page.getByTestId("page-title")).toHaveAttribute("data-placeholder", "Untitled");
+  // Its header has nothing until then: no Co-write (an Agent is called with @ in the text), no History or Share.
+  await expect(page.getByTestId("page-controls").getByRole("button")).toHaveCount(0);
+  await page.keyboard.type("Plans");
+  await page.keyboard.press("Enter");
+  await expect.poll(async () => (await fixtureRequestBodies(page, "page-create")).length).toBe(1);
+  const [made] = await fixtureRequestBodies(page, "page-create");
+  expect(made).toMatchObject({ parentPageId: null });
+  expect(startedMarkdown(made!.document)).toBe("# P\n");
+  await expect(page).toHaveURL(/page=p-new/u);
 });
 
 test("the agent list leads with Manage machines, and an agent, its machines and the + are one height", async ({ page }) => {
@@ -116,6 +138,12 @@ test("a page row makes a page under it from its own +, shown while the row is ho
 
   await stubPageCreate(page);
   await create.click();
-  await expect.poll(() => fixtureRequestBodies(page, "page-create")).toEqual([{ title: "Untitled", parentPageId: "p-home" }]);
+  await expect(page.getByTestId("page-editor").locator(".page-document")).toBeFocused();
   await expect(page.getByRole("dialog")).toHaveCount(0);
+  await page.keyboard.type("Child");
+  // Named, it is made under that row, from its document as its first letter left it.
+  await expect.poll(async () => (await fixtureRequestBodies(page, "page-create")).length).toBe(1);
+  const [made] = await fixtureRequestBodies(page, "page-create");
+  expect(made).toMatchObject({ parentPageId: "p-home" });
+  expect(startedMarkdown(made!.document)).toBe("# C\n");
 });

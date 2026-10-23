@@ -1,19 +1,21 @@
+export { agentFailureEvidence, safeAgentFailureDetail } from "./agent-failure-detail.js";
 export {
-  ACTIVE_RUN_STATUS_SQL, ACTIVE_RUN_STATUSES, AGENT_HANDOFF_ACTION_COMPLETION_SCHEMA, AGENT_INSTANCE_COMMAND_COMPLETION_SCHEMA, AGENT_INSTANCE_OFFLINE_REASONS, AGENT_INSTANCE_RESTS, AGENT_PRESETS, AGENT_RUNTIME_ISSUE_KINDS, AGENT_RUNTIME_NOTICE_SEVERITIES, AGENT_RUNTIME_WAITING_KINDS, AGENT_STATUSES, AGENT_TURN_FAILURE_LIFECYCLE_LAYER, AGENT_TURN_FAILURE_LIFECYCLE_REASON, AGENT_TURN_FAILURE_LIFECYCLE_STATUS, AGENT_USAGE_LIMIT_LIFECYCLE_REASON, agentAvatarUrlFromMetadata, agentHarnessSpec, agentLaunchExecutable, agentPresetAvatarUrl, agentPresetById, agentPresetForLauncher, agentTurnFailureNoticeBody, automationTriggersFrom, boundAgentTurnFailureDetail, DEFAULT_HUB_URL, deriveHumanConnectionUrl, HUB_ROUTES, isActiveRunStatus, isAgentInstanceOfflineReason, isAgentInstanceRest, isAgentRuntimeIssueKind, isAgentRuntimeNoticeSeverity, isAgentRuntimeWaitingKind, isAgentStatus, isAgentTurnFailureLifecycle, isAgentUsageLimitLifecycle, isChannelResidentInstance, isLiveAgentStatus, isRunStatus, isSpaceSecretAccess, isTerminalRunStatus, LIVE_AGENT_STATUS_SQL, LIVE_AGENT_STATUSES, localLlmUsage, MENTION_COMMAND_COMPLETION_SCHEMA, normalizeAgentPresetRuntime, normalizeHubUrl, parseLlmQuotaAccount, parseQuotaObservedAt, parseSecretAccessRequestCard, parseSecretRequestCard, RUN_STATUSES, SECRET_ENV_NAME_PATTERN, SECRET_ACCESS_REQUEST_MAX, SECRET_ACCESS_REQUEST_MESSAGE_KIND, SECRET_REQUEST_MESSAGE_KIND, SPACE_SECRET_ACCESS, TERMINAL_RUN_STATUS_SQL, TERMINAL_RUN_STATUSES, WEB_PROXY_ROUTES, withMachineSpawnHarness, withRegistrationQuota, withRoute,
+  ACTIVE_RUN_STATUS_SQL, ACTIVE_RUN_STATUSES, AGENT_HANDOFF_ACTION_COMPLETION_SCHEMA, AGENT_INSTANCE_COMMAND_COMPLETION_SCHEMA, AGENT_INSTANCE_OFFLINE_REASONS, AGENT_INSTANCE_RESTS, AGENT_PRESETS, AGENT_RUNTIME_ISSUE_KINDS, AGENT_RUNTIME_NOTICE_SEVERITIES, AGENT_RUNTIME_WAITING_KINDS, AGENT_STATUSES, AGENT_TURN_FAILURE_LIFECYCLE_LAYER, AGENT_TURN_FAILURE_LIFECYCLE_REASON, AGENT_TURN_FAILURE_LIFECYCLE_STATUS, AGENT_USAGE_LIMIT_LIFECYCLE_REASON, AGENT_SIGNED_OUT_LIFECYCLE_REASON, agentAvatarUrlFromMetadata, agentHarnessSpec, agentLaunchExecutable, agentPresetById, agentPresetForLauncher, agentTurnFailureNoticeBody, agentUsageLimitFromError, automationTriggersFrom, boundAgentTurnFailureDetail, APP_SIGN_IN_FINISH_PATH, DEFAULT_HUB_URL, deriveHumanConnectionUrl, HUB_ROUTES, isActiveRunStatus, isAgentInstanceOfflineReason, isAgentInstanceRest, isAgentRuntimeIssueKind, isAgentRuntimeNoticeSeverity, isAgentRuntimeWaitingKind, isAgentStatus, isAgentTurnFailureLifecycle, isAgentUsageLimitLifecycle, isChannelResidentInstance, isLiveAgentStatus, isRunStatus, isSpaceSecretAccess, isTerminalRunStatus, LIVE_AGENT_STATUS_SQL, LIVE_AGENT_STATUSES, localLlmUsage, MENTION_COMMAND_COMPLETION_SCHEMA, normalizeAgentPresetRuntime, normalizeHubUrl, parseLlmQuotaAccount, parseQuotaObservedAt, parseSecretAccessRequestCard, parseSecretRequestCard, RUN_STATUSES, SECRET_ENV_NAME_PATTERN, SECRET_ACCESS_REQUEST_MAX, SECRET_ACCESS_REQUEST_MESSAGE_KIND, SECRET_REQUEST_MESSAGE_KIND, SPACE_SECRET_ACCESS, TERMINAL_RUN_STATUS_SQL, TERMINAL_RUN_STATUSES, WEB_PROXY_ROUTES, withMachineSpawnHarness, withRegistrationQuota, withRoute,
 } from "./authority.js";
 export type {
   ActiveRunStatus, AgentGoalStatus, AgentHarnessSpec, AgentInstanceCommand, AgentInstanceCommandMode, AgentInstanceOfflineReason, AgentInstanceRest, AgentLifecycleLayer, AgentLifecycleReason, AgentLifecycleSnapshot, AgentLifecycleStatus, AgentLifetime, AgentModelInfo, AgentModelReasoningEffort, AgentPresentationSnapshot, AgentPreset, AgentPresetBackend, AgentPresetId, AgentRuntimeExecutionEvidence, AgentRuntimeIssue, AgentRuntimeIssueKind, AgentRuntimeMessageSource, AgentRuntimeNotice, AgentRuntimeNoticeSeverity, AgentRuntimeState, AgentRuntimeWaiting, AgentRuntimeWaitingKind, AgentRuntimeWorkStatus, AgentSandboxMode, AgentSkill, AgentStatus, AgentStatusChip, AnnotationTarget, AnnotationTargetKind, AppConnectorCompletionDynamicSource, AppConnectorCompletionOption, AppConnectorCompletionResponse, AppConnectorConnectionStatus, AppConnectorExecutionStatus, AppConnectorProviderId, AppConnectorProviderKind, AppConnectorProviderStatus, AuthProvider, AuthResponse, AuthUser, AutomationCapabilities, AutomationExecutionStatus, AutomationExpression, AutomationExpressionInput, AutomationMessage, AutomationTrigger, AutomationTriggerEvent, AutomationUpdateRequest, ChannelAgentMemberPresence, ChannelAppMention, ChannelAttachment, ChannelAttentionBroadcastScope, ChannelAttentionSnapshot, ChannelAttentionSnapshotSpace, ChannelAttentionSummary, ChannelAttentionTargetKind, ChannelAttentionTriggerKind, ChannelCatalogPage, ChannelCatalogPageCounts, ChannelCatalogPageFilter, ChannelCatalogPageRow, ChannelCatalogPageView, ChannelCatalogResolveResult, ChannelCatalogSyncMetadata, ChannelHumanMemberPresence, ChannelMemberPresence, ChannelMentionReadState, ChannelMentionReadStatus, ChannelMentionReadTargetKind, ChannelMessageNotification, ChannelMessageNotificationReason, ChannelMode, ChannelProjectionCacheAuthority, ChannelProjectionCacheManifest, ChannelProjectionCacheScope, ChannelReaction, ChannelReactionActor, ChannelReplyContext, ClientNetworkSample, ClientNetworkSampleKind, ClientNetworkSampleMode, ClientNetworkSampleResult, ClientNetworkState, CommandCompletionArgumentSchema, CommandCompletionDelimiter, CommandCompletionDynamicSource, CommandCompletionSchemaNode, EvalExpression, EvalExpressionKind, EvalLanguage, EvalResumeCondition, LaunchTargetRepo, LaunchTargetRepoStatus, LiveAgentStatus, LlmQuotaAccount, LlmQuotaUsage, LlmUsage, MachineRequestNoticeAcceptedMessage, MachineRequestNoticeMessage, MachineRequestRememberPolicy, MessageSender, ObservabilityEvent, ObservabilityEventType, PersistedEvalEnvironmentRef, PersistedEvalInput, RunStatus, SecretAccessRequestCard, SecretRequestCard, SerializedAgent, SerializedAgentInstance, SerializedAppConnectorChannelState, SerializedAppConnectorChannelSubscription, SerializedAppConnectorConnection, SerializedAppConnectorExecution, SerializedAutomation, SerializedAutomationCatalog, SerializedChannel, SerializedChannelCreatorAgent, SerializedMachineDaemon, SerializedSpace, SerializedSpaceInvite, SerializedWorkspace, SpaceLaunchTargetsResponse, SpaceMember, SpaceMemberCreationPolicy, SpaceMemberPermissions, SpaceRole, SpaceSecretAccess, SpaceSecretEntry, TerminalRunStatus, TraceAccessDuration, TraceAccessGrant, TraceAccessStatus, TraceInstanceHistoryAvailability, UpsertAppConnectorConnectionRequest, WorkspaceRef, WorkspaceVisibility,
 } from "./authority.js";
 export {
   HARNESS_ACTION_CLAIM_TTL_MS, HARNESS_ACTION_SETTLE_MS, HARNESS_ACTION_TIMEOUT_MS, HARNESS_ACTIONS, HARNESS_LOGIN_ACTIONS, HARNESS_LOGIN_STATES, harnessActionAvailable, harnessOutputTail,
-  MACHINE_HARNESS_ACTION_CAPABILITY, MACHINE_HARNESS_CURSOR_LAUNCHER_CAPABILITY, MACHINE_HARNESS_LOGIN_CAPABILITY,
+  MACHINE_HARNESS_ACTION_CAPABILITY, MACHINE_HARNESS_CURSOR_LAUNCHER_CAPABILITY, MACHINE_HARNESS_LOGIN_CAPABILITY, MACHINE_HARNESS_LOGIN_START_CANCEL_CAPABILITY,
   MACHINE_HARNESS_RELEASE_CAPABILITY, MACHINE_HARNESS_UNINSTALL_CAPABILITY,
-  parseHarnessActionRequest, validHarnessLoginCode, parseHarnessActionResult, parseHarnessInventory,
+  parseHarnessActionRequest, validHarnessLoginCode, parseHarnessActionResult, parseHarnessInventory, harnessItemObservedAt,
+  compareHarnessVersions, harnessCommandLabel, harnessCommandLine, harnessDisplayVersion, harnessTooOld, harnessTooOldSentence,
 } from "./harness-management.js";
 export type {
   HarnessAction, HarnessActionRequest, HarnessActionResult, HarnessActionStatus, HarnessAutoUpdate,
   HarnessCommand, HarnessInventory, HarnessInventoryItem, HarnessLogin, HarnessLoginProgress, HarnessLoginState,
-  HarnessManagement,
+  HarnessManagement, HarnessTooOld,
 } from "./harness-management.js";
 export {
   MACHINE_WORKTREE_ACTION_CAPABILITY, parseWorktreeActionRequest, parseWorktreeActionResult,
@@ -29,6 +31,13 @@ export {
   TEXT_TASK_INPUT_MAX_BYTES, TEXT_TASK_INSTRUCTION_MAX_BYTES, TEXT_TASK_OUTPUT_MAX_BYTES, TEXT_TASK_STATUSES,
 } from "./text-task.js";
 export type { TextTaskRequest, TextTaskResult, TextTaskStatus } from "./text-task.js";
+export { PAGE_AGENT_INK_MS, PAGE_MESSAGE_CO_WRITE, PageCoWriteParser, parsePageCoWriteReply } from "./page-co-writing.js";
+export { discussionHead, splitDiscussionHead } from "./discussion-head.js";
+export { automaticConversationName } from "./conversation-name.js";
+export type { DiscussionHead, DiscussionSource } from "./discussion-head.js";
+export type {
+  PageCoWriteAction, PageCoWriteEvent, PageCoWriteReply, PageCoWriteRequest,
+} from "./page-co-writing.js";
 export {
   APP_CONNECTOR_PROVIDER_MANIFESTS, GITHUB_DEFAULT_REPOSITORY_FEATURES,
   GITHUB_REPOSITORY_FEATURE_LABELS, GITHUB_REPOSITORY_FEATURES, githubRequiredCapabilities,
@@ -55,10 +64,13 @@ export {
   CHANNEL_ACTIVITY_MAX_STEPS, CHANNEL_ACTIVITY_MESSAGE_KIND, CHANNEL_ACTIVITY_PROVENANCE,
   ChannelActivityInvalid, channelActivityLine, channelActivityOf, isReservedAnnotationNamespace,
   isReservedMessageMetadataKey, normalizeChannelActivity, SUPERSEDED_ANNOTATION_NAMESPACE,
-  supersededByOf, SYSTEM_ANNOTATION_AUTHOR,
+  supersededByOf, SYSTEM_ANNOTATION_AUTHOR, QUESTIONNAIRE_STATE_ANNOTATION_NAMESPACE, questionnaireStateOf,
+  COMMAND_RESULT_ANNOTATION_NAMESPACE, commandResultOf, mergeCommandResult, mergeCommandResults,
+  AGENT_INSTRUCTION_MESSAGE_KINDS, isAgentInstruction,
 } from "./channel-activity.js";
 export type {
-  ChannelActivity, ChannelActivityPlanStep, ChannelActivityPlanStepStatus,
+  ChannelActivity, ChannelActivityPlanStep, ChannelActivityPlanStepStatus, QuestionnaireState,
+  CommandResult, CommandResultNote,
 } from "./channel-activity.js";
 export {
   channelSummarySource,
@@ -102,10 +114,22 @@ export {
   ADMIN_USER_DETAIL_MAX_ROWS, ADMIN_USER_DETAIL_WEB_ROUTE, adminUserDetailHubRoute,
   adminUserDetailWebRoute,
 } from "./admin-overview.js";
+export {
+  ADMIN_OPERATIONS_DAYS, ADMIN_OPERATIONS_HUB_ROUTE, ADMIN_OPERATIONS_MAX_ROWS,
+  ADMIN_OPERATIONS_WEB_ROUTE, ADMIN_SPACE_DETAIL_DAYS, ADMIN_SPACE_DETAIL_HUB_ROUTE,
+  ADMIN_SPACE_DETAIL_MAX_ROWS, ADMIN_SPACE_DETAIL_WEB_ROUTE, adminSpaceDetailHubRoute,
+  adminSpaceDetailWebRoute,
+} from "./admin-operations.js";
+export type {
+  AdminBillingWebhookEvent, AdminOperations, AdminOperationsHarness, AdminOperationsMachine,
+  AdminOperationsRunDay, AdminOperationsSubscription, AdminPaidCallKind, AdminSpaceAgent,
+  AdminSpaceAutomationSummary, AdminSpaceBillingDetail, AdminSpaceConnector, AdminSpaceDetail,
+  AdminSpaceMember,
+} from "./admin-operations.js";
 export type {
   AdminActivityPoint, AdminPlatformOverview, AdminPlatformTotals, AdminSpaceSummary,
   AdminStorageCategory, AdminUserAccessSummary, AdminUserSummary, AdminAuditAction,
-  AdminAuditEvent, AdminSpaceBilling, AdminUserAgentRegistration, AdminUserConnector,
+  AdminAuditEvent, AdminConnectorUsage, AdminSpaceBilling, AdminUserAgentRegistration, AdminUserConnector,
   AdminUserDetail, AdminUserMachine, AdminUserMessageSummary, AdminUserRunSummary,
   AdminUserSession, AdminUserSpaceMembership,
 } from "./admin-overview.js";
@@ -113,7 +137,7 @@ export {
   canonicalHumanHandle, HUMAN_DISPLAY_NAME_MAX_LENGTH, HUMAN_HANDLE_MAX_LENGTH,
   HUMAN_HANDLE_MIN_LENGTH, HUMAN_TIME_ZONE_MAX_LENGTH, humanDisplayNameRefusal,
   humanHandleMintCandidates, humanHandleRefusal, humanHandleShortCode, humanTimeZoneRefusal,
-  isReservedHumanHandle, isUnusableHumanIdentitySource, isValidHumanHandle, neutralHumanIdentity,
+  isPlaceholderHumanName, isReservedHumanHandle, isUnusableHumanIdentitySource, isValidHumanHandle, neutralHumanIdentity,
   RESERVED_HUMAN_HANDLES, suggestHumanHandle,
 } from "./human-profile-identity.js";
 export type {
@@ -182,14 +206,15 @@ export type {
   SerializedFirstMessageLaunchChoice,
 } from "./agent-launch.js";
 export {
-  DECISION_ANSWER_ISSUES, launchRefusalCode, parameterFailureCodeFromDecisionRecord, parseDecisionAnswerFailure,
-  PREPARATION_REJECTION_MESSAGES, preparationFailureSummary, preparationRejectionMessage,
+  DECISION_ANSWER_ISSUES, launchRefusal, parameterFailureCodeFromDecisionRecord, parseDecisionAnswerFailure, parseHarnessTooOld,
+  HARNESS_SIGNED_OUT_NOTICE_KIND, harnessSignedOutNoticeOf, harnessSignedOutSentence, parseHarnessSignedOut,
+  PREPARATION_REJECTION_MESSAGES, preparationFailureSummary, preparationRejectionMessage, rejectionCause,
   REGISTRATION_PREPARATION_REJECTION_CODES, START_INTENT_CATEGORIES, START_INTENT_INSTRUCTIONS,
   isLaunchHintRejection, LAUNCH_HINT_REJECTION_CODES,
   SUMMON_INTENT_CATEGORIES, SUMMON_INTENT_INSTRUCTIONS, SUMMON_INTENT_REJECTION_CODES, parseDraftSummonIntents,
 } from "./invocation-failure.js";
 export type {
-  DecisionAnswerFailure, DecisionAnswerIssue, DraftSummonIntent, LaunchMachineBlock, SummonIntentCategory,
+  DecisionAnswerFailure, DecisionAnswerIssue, DraftSummonIntent, HarnessSignedOut, LaunchMachineBlock, SummonIntentCategory,
 } from "./invocation-failure.js";
 export {
   boundedRoutingLabel, HOST_OBSERVED_CAPABILITIES, hostObservedRequirements, machineResourceObservation, parseAgentRoutingDeclaration, parseAgentRoutingRequirements, parsePresentedRoutingDecision, parseRoutingFailureCode, ROUTING_DECISION_SOURCES, ROUTING_EXCLUSIONS, ROUTING_QUOTA_MAX_AGE_MS, cursorQuotaBucketForModel, routingChoiceIdentity, routingDecisionCopy, routingExclusionText, routingFailureText, routingHarnessLabel, routingModelCatalogObservation, routingQuotaObservation, routingQuotaResetTime, routingQuotaText, visibleRoutingChoiceRows,
@@ -250,6 +275,7 @@ export type {
   PublicMachineStartupFailure,
 } from "./machine-startup-failure.js";
 export { clientDefectAction } from "./client-defect-actions.js";
+export { CHANNEL_CREATE_KEY_HEADER, channelCreateId } from "./channel-create-id.js";
 export type { ClientDefectAction } from "./client-defect-actions.js";
 export {
   hmacBytes, hmacHex, lowercaseHex, sha256BytesSync, sha256Hex, timingSafeEqual, utf8ByteLength,
@@ -258,8 +284,9 @@ export {
   isHostDerivedMachineId, legacyMachineDaemonId, sha256HexSync, stableMachineDaemonId,
 } from "./machine-daemon-id.js";
 export {
-  HANDOFF_BRANCH_PREFIX, } from "./handoff-export.js";
+  HANDOFF_BRANCH_PREFIX, HANDOFF_CONTEXT_FORMAT, HANDOFF_CONTEXT_MAX_CHARS, } from "./handoff-export.js";
 export type {
+  MachineHandoffContext, MachineHandoffContextEntry, MachineHandoffContextRequest,
   MachineHandoffExport, MachineHandoffExportResult,
 } from "./handoff-export.js";
 export {
@@ -300,6 +327,7 @@ export type {
   HumanClientMessage,
   HumanChannelCatalogChangedMessage,
   HumanWorkspaceResourceChangedMessage,
+  WorkspaceResourceKind,
   HumanConnectMessage,
   HumanFocusChannelMessage,
   HumanPresenceDigestMessage,
@@ -312,6 +340,7 @@ export {
   HUMAN_HEARTBEAT_PONG,
   HUMAN_AUTH_INVALID_FAILURE_CODE,
   HUMAN_AUTH_REQUIRED_CLOSE_CODE,
+  WORKSPACE_RESOURCE_KINDS,
   parseHumanChannelCatalogChangedMessage,
   parseHumanWorkspaceResourceChangedMessage,
   parseHumanTraceAccessServerMessage,
@@ -388,7 +417,10 @@ export type {
   MachineDaemonWorktreeCleanupCommand as MachineWorktreeCleanupMessage,
   MachineDaemonWorktreeCleanupResultReport,
   MachineDaemonWorktreeCleanupResultReport as MachineWorktreeCleanupResultMessage,
+  MachineDaemonSleepCommand,
+  MachineDaemonSleepResultReport,
 } from "./connections/machine-daemon.js";
+export { MACHINE_SLEEP_CAPABILITY } from "./connections/machine-daemon.js";
 
 
 export type {
@@ -402,7 +434,7 @@ export type {
   RuntimeOperationFailure,
 } from "./runtime-operation-failure.js";
 export {
-  createInstanceMentions, deriveHarnessInvocationSelections, parseAgentInvocationSelections,
+  createInstanceMentions, deriveHarnessInvocationSelections, isOperationalInvocationSpan, parseAgentInvocationSelections,
   selectionLaunchConditions,
 } from "./agent-invocation-selection.js";
 export type {
@@ -453,13 +485,15 @@ export {
 export {
   AUTOMATION_REFERENCE_SCHEME, automationReferenceMarkdown,
   automationReferences, GITHUB_FILE_REFERENCE_SCHEME, gitHubFileReferenceFrom, gitHubFileReferenceHref,
-  gitHubFileReferences, gitHubFileUrl, insertAutomationReference, mergePageText,
+  gitHubFileReferences, gitHubFileUrl, insertAutomationReference, mergePageText, mergePageWords,
+  PAGE_MEDIA_OWNER_KIND, PAGE_MEDIA_SCHEME, PAGE_MEDIA_TYPES, pageMediaFile, pageMediaReference, pageMediaReferences,
+  pageMediaRefId, parsePageMedia,
   pageBlockAt, pageBlocks, pageChangedBlocks, pageChangeGist, pageHeadingSlug, pageLineDiff,
   pageReferencesIn, pageReferenceSpans, pageReferenceToken, pageRemovedSections, parseGitHubFileReference,
   removeAutomationReference, replaceAutomationReference,
 } from "./page-markdown.js";
 export type {
-  GitHubFileReference, PageBlock, PageLineDiff, PageMergeResult, PageReferenceSpan,
+  GitHubFileReference, PageBlock, PageLineDiff, PageMedia, PageMediaExtension, PageMergeResult, PageReferenceSpan,
 } from "./page-markdown.js";
 export {
   channelReferenceSpans, channelReferenceToken, loneMessageReference,
@@ -475,10 +509,10 @@ export {
 export { externalAppSource, messageExternalAppSource } from "./external-app-source.js";
 export type { ExternalAppSource } from "./external-app-source.js";
 export type {
-  PageAuthor, PageAutomationAnchorChange, PageAwareness, PageBlockAwareness, PageChanges, PageEditResult, PageClaim, PageConversation,
+  PageAuthor, PageAutomationAnchorChange, PageAwareness, PageBlame, PageBlockAwareness, PageChanges, PageEditResult, PageClaim, PageConversation,
   PageDocument, PageGitHubFile, PageLink, PageLinkAnchor, PageMigration, PageMigrationApplied, PageMigrationDraft,
   PageMigrationDraftPage, PageMigrationReport, PageMigrationSource, PageOwedUpdate, PagePresent,
-  PageRecentChange, PageRevision, PageSearchHit, PageSummary, PageTreeActivity, PageTreeAgent, PageWorkingAgent, PublicPage,
+  PageRecentChange, PageRevision, PageRevisionMoment, PageSearchHit, PageSummary, PageTreeActivity, PageTreeAgent, PageWorkingAgent, PublicPage,
 } from "./pages.js";
 
 export {
@@ -491,10 +525,10 @@ export type {
 } from "./harness-parameters.js";
 
 export {
-  parseAgentControlCommands,
+  parseAgentControlCommands, parseAgentControlInvocations,
 } from "./agent-control-command.js";
 export type {
-  AgentControlCommand, AgentControlKind,
+  AgentControlCommand, AgentControlInvocation, AgentControlKind, AgentControlOutcomeRecord,
 } from "./agent-control-command.js";
 export {
   parseHandoffInstanceMentions, parseRebornInstanceMentions,
@@ -527,10 +561,10 @@ export {
   agentInteractionTarget, connectorInteractionTarget, humanInteractionTarget, interactionRegistry,
   } from "./message-interaction-targets.js";
 export {
-  parseConnectorActionCommand,
+  connectorOperationIds, parseConnectorActionCommand, parseConnectorInvocation,
 } from "./connector-command.js";
 export type {
-  ParsedConnectorActionCommand,
+  ConnectorInvocation, ParsedConnectorActionCommand,
 } from "./connector-command.js";
 export {
   isUnlistedParameterTag, PARAMETER_TAG_PREFIX, PARAMETER_TAG_RULES, parameterTagRule,
@@ -543,20 +577,28 @@ export type {
 export { plainRecord, isPlainRecord } from "./plain-record.js";
 export { validRunTransition } from "./run-lifecycle.js";
 export { compareBytes, concatenateBytes } from "./bytes.js";
+export { dropHtmlElements, stripHtmlTags } from "./html-text.js";
 export { legacyCanonicalJson } from "./legacy-canonical-json.js";
 export {
-  hasControlCharacter, replaceControlCharacters, requireLowercaseSha256, requireSafeIntegerRange,
+  hasControlCharacter, replaceControlCharacters, requireLowercaseSha256, requireSafeIntegerRange, trimEdges, trimEnd,
 } from "./field-validation.js";
 export type {
   DesktopAgentPresetDiscoveryShape, DesktopAgentPresetInput, DesktopBadgeState,
   DesktopCliInstallResult, DesktopClipboardImage, DesktopCliSessionPayload, DesktopDaemonState,
   DesktopDaemonStatus, DesktopNotification, DesktopNotificationReply, DesktopSetupStatus,
   DesktopUpdateState, DesktopUpdateStatus, DesktopWorkspaceCandidateFields,
+  DesktopDaemonFailure, DesktopDaemonFailureReport, DesktopDaemonFailureStage,
+} from "./desktop-bridge.js";
+export {
+  DESKTOP_DAEMON_FAILURE_DETAIL_MAX, DESKTOP_DAEMON_FAILURE_STAGES, parseDesktopDaemonFailureReport,
 } from "./desktop-bridge.js";
 export {
   readBoundedStream,
 } from "./read-bounded-stream.js";
 export * from "./setup-intent.js";
+export * from "./onboarding-message.js";
+export * from "./onboarding-funnel.js";
+export * from "./faces.js";
 export { cleanRepositoryBaseline } from "./repository-baseline.js";
 export type { RepositoryBaseline } from "./repository-baseline.js";
 
@@ -568,3 +610,25 @@ export { ACCOUNT_REVOKED_STATES, isAccountRevoked } from "./account-deletion.js"
 export { erasedAccountMessageSender } from "./account-message-sender.js";
 
 export { agentTraceOrderCursor, parseAgentTraceOrder, parseAgentTraceOrderCursor, type AgentTraceOrder } from "./trace-order.js";
+
+export { connectorActionPolicy, type ConnectorActionPolicy } from "./app-connector-policy.js";
+
+export { parseGmailWatchConfig, GMAIL_WATCH_KEYS } from "./gmail-watch-config.js";
+export { machineNetworkObservation, type MachineNetworkObservation, type NetworkTransferObservation } from "./machine-network.js";
+
+export type { AgentBootstrapPrompts } from "./agent-bootstrap.js";
+
+export { ChannelPresenceConflict, channelPresenceInstances, emptyChannelPresence, presenceInstanceId,
+  reduceChannelPresence } from "./channel-presence.js";
+export type { AgentInstancePresence, ChannelPresence, ChannelPresenceChange, ChannelSnapshot,
+  HumanDevicePresence, HumanPresence, PresenceInstanceId } from "./channel-presence.js";
+export { decodeChannelSnapshot, encodeChannelPresence, encodeChannelSnapshot } from "./channel-presence-codec.js";
+
+export { agentInstanceMemberPresence, channelPresenceMember } from "./channel-presence-selectors.js";
+export type { ChannelSnapshotCatalogPage, ChannelSnapshotCatalogPageRow, ChannelSnapshotCatalogResolveResult } from "./channel-presence.js";
+export { decodeChannelCatalogPage, decodeChannelCatalogResolve } from "./channel-presence-codec.js";
+
+export { sameValue } from "./same-value.js";
+export { mergeAgentInstancePresence } from "./instance-presence-merge.js";
+export { usageWithoutQuota, mergeLlmUsagePreferringQuotas, accountQuotaUsageFromCandidates, mergeAccountLevelLlmUsage, mergeUsageAttributes } from "./presence-usage.js";
+export { releaseNotesPath, publishedReleaseNotes } from "./release-notes.js";

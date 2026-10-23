@@ -272,6 +272,37 @@ test("checked-in PostgreSQL migration manifest is contiguous and names every con
     { id: "0184_expand_registration_launch_cancel_index", phase: "expand" },
     { id: "0185_expand_space_harness_profiles", phase: "expand" },
     { id: "0186_expand_run_capacity_retry", phase: "expand" },
+    { id: "0187_expand_connector_action_approval", phase: "expand" },
+    { id: "0188_expand_gmail_routing", phase: "expand" },
+    // Co-writing: a conversation whose Agent suggests on a page, and how far its suggestions were reviewed.
+    { id: "0189_expand_page_co_writing", phase: "expand" },
+    { id: "0190_expand_sleep_commands", phase: "expand" },
+    { id: "0191_expand_run_idle_sleep", phase: "expand" },
+    { id: "0192_expand_page_names_in_documents", phase: "expand" },
+    { id: "0193_contract_page_names_in_documents", phase: "contract" },
+    { id: "0194_expand_apple_organization_seats", phase: "expand" },
+    { id: "0195_contract_retire_about_inputs_and_page_titles", phase: "contract" },
+    { id: "0196_expand_space_credit_state", phase: "expand" },
+    { id: "0197_expand_space_credit_purchases", phase: "expand" },
+    { id: "0198_expand_auth_two_factor", phase: "expand" },
+    { id: "0199_expand_paid_call_receipts", phase: "expand" },
+    { id: "0200_expand_automation_run_links", phase: "expand" },
+    { id: "0201_expand_github_installation_links", phase: "expand" },
+    { id: "0202_expand_slack_workspace_claims", phase: "expand" },
+    { id: "0203_expand_first_message_summons", phase: "expand" },
+    { id: "0204_expand_auth_passkeys", phase: "expand" },
+    { id: "0205_expand_gmail_polling", phase: "expand" },
+    { id: "0206_expand_page_seen_text", phase: "expand" },
+    { id: "0207_expand_channel_deletions", phase: "expand" },
+    { id: "0208_expand_gmail_notification_subscriptions", phase: "expand" },
+    { id: "0209_contract_drop_gmail_route_channel", phase: "contract" },
+    // What each page revision changed, kept so a page's awareness compares no documents once derived.
+    { id: "0210_expand_page_revision_changed_sections", phase: "expand" },
+    // Who wrote each piece of a page revision, kept so a page's blame compares only newer revisions.
+    { id: "0211_expand_page_revision_blame", phase: "expand" },
+    { id: "0212_expand_channel_replay_lookup", phase: "expand" },
+    { id: "0213_expand_channel_replay_online_indexes", phase: "expand" },
+    { id: "0214_expand_channel_purge_plan_cursor", phase: "expand" },
   ]);
   assert.equal(manifest.every(({ checksumSha256 }) => /^[0-9a-f]{64}$/u.test(checksumSha256)), true);
 });

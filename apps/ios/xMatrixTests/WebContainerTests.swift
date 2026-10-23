@@ -13,6 +13,16 @@ final class WebContainerTests: XCTestCase {
         }
     }
 
+    final class DownloadLinkAction: WKNavigationAction {
+        let link: URLRequest
+        init(_ url: URL) {
+            link = URLRequest(url: url)
+            super.init()
+        }
+        override var request: URLRequest { link }
+        override var shouldPerformDownload: Bool { true }
+    }
+
     private func makeCoordinator(
         runScript: @escaping (WKWebView, String) -> Void = { _, _ in }
     ) -> (WebContainerView.Coordinator, UIView) {
@@ -264,4 +274,71 @@ final class WebContainerTests: XCTestCase {
         return platters.max { $0.bounds.width < $1.bounds.width } ?? bar
     }
 
+
+    func testAttachmentDownloadLinkBecomesANativeDownload() async {
+        let (coordinator, container) = makeCoordinator()
+        coordinator.load(AppConfiguration.mobileTabURL(.messages))
+        XCTAssertEqual(container.subviews.count, 1)
+        let webView = page(coordinator)
+        let delegate = webView.navigationDelegate as! WebContainerView.PageCoordinator
+        let action = DownloadLinkAction(URL(string: "blob:https://xmatrix.sh/5f0c1d2e")!)
+        let policy = await delegate.webView(webView, decidePolicyFor: action)
+        XCTAssertEqual(policy, .download)
+    }
+
+    func testDownloadedMediaGoesToPhotosAndEverythingElseToFiles() {
+        func destination(_ name: String) -> WebContainerView.PageCoordinator.DownloadDestination {
+            WebContainerView.PageCoordinator.destination(for: URL(fileURLWithPath: "/tmp/\(name)"))
+        }
+        XCTAssertEqual(destination("clip.mp4"), .photos(.video))
+        XCTAssertEqual(destination("clip.MOV"), .photos(.video))
+        XCTAssertEqual(destination("shot.png"), .photos(.photo))
+        XCTAssertEqual(destination("clip.webm"), .files)
+        XCTAssertEqual(destination("notes.pdf"), .files)
+    }
+
+    func testABuildLoadsAndTrustsOnlyItsOwnChannelsWeb() {
+        let stable = "https://xmatrix.sh/app"
+        let beta = AppWeb(configured: "https://beta.xmatrix.sh/app")
+        XCTAssertEqual(beta.startURL.absoluteString, "https://beta.xmatrix.sh/app")
+        // This build's own configuration, and a build without a usable one, load the stable Web.
+        let stableBuilds = [AppConfiguration.web, AppWeb(configured: stable), AppWeb(configured: nil),
+                            AppWeb(configured: ""), AppWeb(configured: "beta.xmatrix.sh/app")]
+        for web in stableBuilds {
+            XCTAssertEqual(web.startURL.absoluteString, stable)
+        }
+        // Plain http, another port, the Hub, siblings and lookalikes of either Web.
+        let neverTrusted = ["http://xmatrix.sh/app", "http://beta.xmatrix.sh/app", "https://xmatrix.sh:8443/app",
+                            "https://beta.xmatrix.sh:8443/app", "https://xmatrix-hub.xmatrix.sh/",
+                            "https://www.beta.xmatrix.sh/app", "https://beta.xmatrix.sh.evil.example/app",
+                            "https://xmatrix.sh.evil.example/app", "https://evilxmatrix.sh/app"]
+        let builds: [(AppWeb, [String], [String])] =
+            [(beta, ["https://beta.xmatrix.sh/app?view=pages", "https://BETA.xmatrix.sh/login"],
+              ["https://xmatrix.sh/app", "https://www.xmatrix.sh/app"])]
+            + stableBuilds.map { ($0, ["https://xmatrix.sh/app?view=pages", "https://www.xmatrix.sh/login"],
+                                  ["https://beta.xmatrix.sh/app"]) }
+        for (web, trusted, refused) in builds {
+            for page in [web.startURL.absoluteString] + trusted {
+                let url = URL(string: page)!
+                XCTAssertTrue(web.isTrustedAppPage(url), page)
+                XCTAssertTrue(web.isTrustedNavigation(url), page)
+            }
+            for page in refused + neverTrusted {
+                let url = URL(string: page)!
+                XCTAssertFalse(web.isTrustedAppPage(url), page)
+                XCTAssertFalse(web.isTrustedNavigation(url), page)
+            }
+        }
+    }
+
+    func testInPlaceSignInOpensOnlyTheHubSignInStartPage() {
+        XCTAssertTrue(AppSignIn.isHubSignInStart(URL(string: "https://xmatrix-hub.xmatrix.sh/api/auth/app/start?state=s")!))
+        // The Hub itself only: neither Web, no other host under xmatrix.sh, no other port or scheme.
+        for page in ["https://xmatrix.sh/api/auth/app/start", "https://beta.xmatrix.sh/api/auth/app/start",
+                     "https://other.xmatrix.sh/api/auth/app/start", "https://xmatrix-hub.xmatrix.sh.evil.example/api/auth/app/start",
+                     "http://xmatrix-hub.xmatrix.sh/api/auth/app/start", "https://xmatrix-hub.xmatrix.sh:8443/api/auth/app/start",
+                     "https://user@xmatrix-hub.xmatrix.sh/api/auth/app/start", "https://xmatrix-hub.xmatrix.sh/login"] {
+            XCTAssertFalse(AppSignIn.isHubSignInStart(URL(string: page)!), page)
+        }
+    }
 }

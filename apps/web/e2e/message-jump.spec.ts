@@ -84,6 +84,13 @@ async function expectLandedOn(page: Page, sequence: number) {
     return rect.top < window.innerHeight && rect.bottom > 0;
   });
   expect(inViewport).toBe(true);
+  // The tint closes with room below the message instead of touching its last
+  // line or attachment card (user 2026-10-15).
+  const roomBelow = await row.evaluate((element) => {
+    const message = element.querySelector(".app-message-row");
+    return message ? element.getBoundingClientRect().bottom - message.getBoundingClientRect().bottom : 0;
+  });
+  expect(roomBelow).toBeGreaterThanOrEqual(10);
 }
 
 /* Virtuoso's imperative index space is the data index. Passing an index from

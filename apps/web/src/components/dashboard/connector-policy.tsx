@@ -1,9 +1,10 @@
 "use client";
 
+import { AnimatedIcon } from "@/components/ui/animated-icon";
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2, Plus, Trash2 } from "lucide-react";
-import { WEB_PROXY_ROUTES, type SerializedChannel } from "@xmatrix/protocol";
+import { WEB_PROXY_ROUTES, type ConnectorActionPolicy, type ChannelSnapshot } from "@xmatrix/protocol";
 import { Button } from "@/components/ui/button";
 import { GlassSelect } from "@/components/ui/glass-select";
 import { type AppConnectorManifest } from "@/lib/app-connectors";
@@ -12,10 +13,10 @@ import { xmatrixQueryKeys } from "@/lib/query/query-keys";
 import { channelTitle } from "@/components/dashboard/channel-links";
 
 /* Per-Channel action policy (docs/design/connector-platform.md §3.5): which
-   write actions are allowed or denied in which Channel. Space admins edit it;
+   write actions are allowed, ask for approval, or are disallowed in a Channel. Space admins edit it;
    the Hub reads it at execution time. */
 
-interface PolicyRow { channelId: string; actionId: string; mode: "allow" | "deny" }
+interface PolicyRow { channelId: string; actionId: string; mode: ConnectorActionPolicy }
 
 export function connectorWriteActions(connector: AppConnectorManifest) {
   return connector.actions.filter((action) => action.effect === "write");
@@ -23,7 +24,7 @@ export function connectorWriteActions(connector: AppConnectorManifest) {
 
 export function ConnectorPolicy({ connector, channels, spaceId, token, userId }: {
   connector: AppConnectorManifest;
-  channels: SerializedChannel[];
+  channels: ChannelSnapshot[];
   spaceId: string;
   token: string;
   userId: string;
@@ -38,15 +39,15 @@ export function ConnectorPolicy({ connector, channels, spaceId, token, userId }:
   });
   const write = useMutation({
     mutationKey: [...key, "put"],
-    mutationFn: (body: { channelId: string; actionId: string; mode: "allow" | "deny" | null }) =>
+    mutationFn: (body: { channelId: string; actionId: string; mode: ConnectorActionPolicy | null }) =>
       xmatrixApiRequest({ url, method: "PUT", token, body }),
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: key }),
   });
   const actions = connectorWriteActions(connector);
-  const offByDefault = actions.filter((candidate) => candidate.defaultPolicy === "deny");
+  const offByDefault = actions.filter((candidate) => candidate.defaultPolicy === "disallow");
   const [actionId, setActionId] = useState(actions[0]?.id ?? "");
   const [channelId, setChannelId] = useState("");
-  const [mode, setMode] = useState<"allow" | "deny">("allow");
+  const [mode, setMode] = useState<ConnectorActionPolicy>(connector.id === "gmail" ? "ask" : "allow");
   const channelName = (id: string) => { const channel = channels.find((candidate) => candidate.id === id); return channel ? channelTitle(channel) : id; };
   const action = (id: string) => actions.find((candidate) => candidate.id === id);
   const selectClassName = "h-9 w-full rounded-md border border-border bg-background px-3 text-sm";
@@ -54,9 +55,10 @@ export function ConnectorPolicy({ connector, channels, spaceId, token, userId }:
   return (
     <div className="space-y-3">
       <p className="text-xs leading-5 text-muted-foreground">
-        {offByDefault.length > 0
-          ? `${offByDefault.map((candidate) => candidate.label).join(" and ")} stay off until you allow them in a channel. Every other action runs for people and Agents by default; deny it here to turn it off in one channel.`
-          : "Every action runs for people and Agents by default. Deny an action here to turn it off in one channel."}
+        {connector.id === "gmail"
+          ? "Send and reply ask for approval each time by default. Allow runs immediately; Ask approves only one request; Disallow blocks it."
+          : "Allow runs immediately; Ask requires approval for each request; Disallow blocks the action in this channel."}
+        {offByDefault.length > 0 && ` ${offByDefault.map(candidate => candidate.label).join(" and ")} are disallowed by default.`}
       </p>
       {write.error || policies.error ? (
         <p className="text-sm font-medium text-destructive">{(write.error ?? policies.error)?.message}</p>
@@ -68,7 +70,7 @@ export function ConnectorPolicy({ connector, channels, spaceId, token, userId }:
               <span className="font-bold">{action(row.actionId)?.label ?? row.actionId}</span>
               {" · "}#{channelName(row.channelId)}
             </span>
-            <span className={row.mode === "deny" ? "text-destructive" : "text-foreground"}>{row.mode}</span>
+            <span className={row.mode === "disallow" ? "text-destructive" : "text-foreground"}>{row.mode}</span>
             <Button size="xs" variant="ghost" aria-label={`Reset ${row.actionId} in ${channelName(row.channelId)}`}
               disabled={write.isPending}
               onClick={() => write.mutate({ channelId: row.channelId, actionId: row.actionId, mode: null })}>
@@ -84,11 +86,11 @@ export function ConnectorPolicy({ connector, channels, spaceId, token, userId }:
         <GlassSelect className={selectClassName} value={channelId} placeholder="Channel" aria-label="Channel"
           onChange={setChannelId} options={channels.map((channel) => ({ value: channel.id, label: `#${channelTitle(channel)}` }))} />
         <GlassSelect className={selectClassName} value={mode} aria-label="Policy"
-          onChange={(value) => setMode(value === "deny" ? "deny" : "allow")}
-          options={[{ value: "allow", label: "Allow" }, { value: "deny", label: "Deny" }]} />
+          onChange={(value) => setMode(value as ConnectorActionPolicy)}
+          options={[{ value: "allow", label: "Allow" }, ...(connector.id === "github" ? [] : [{ value: "ask", label: "Ask" }]), { value: "disallow", label: "Disallow" }]} />
         <Button size="sm" type="button" disabled={!actionId || !channelId || write.isPending}
           onClick={() => write.mutate({ channelId, actionId, mode })}>
-          {write.isPending ? <Loader2 className="animate-spin" /> : <Plus />} Set
+          {write.isPending ? <AnimatedIcon icon={Loader2} className="animate-spin" /> : <Plus />} Set
         </Button>
       </div>
     </div>

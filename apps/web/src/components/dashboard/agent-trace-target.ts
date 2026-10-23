@@ -43,6 +43,7 @@ export function agentTraceScopeMatchesTarget(
 ): boolean {
   if (channelId && scope.channelId !== channelId) return false;
   if (target.channelId && scope.channelId !== target.channelId) return false;
+  if (target.instanceScoped && agentTraceExactInstanceIds(target).includes(scope.instanceId)) return true;
   if (target.id && scope.agentId !== target.id) return false;
   if (target.instanceScoped) {
     if (!target.instanceIds || target.instanceIds.length === 0) return false;

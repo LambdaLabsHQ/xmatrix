@@ -10,6 +10,7 @@ import {
 } from "./channel-capability-policy.js";
 import { commandFields } from "./command-fields.js";
 import { spaceMemberRole } from "./space-members.js";
+import { readsOnly } from "./space-roles.js";
 import { readScopedCommandReplay, storeScopedCommandReplay, COMMAND_REPLAY_TTL_MS as REPLAY_TTL_MS } from "./command-replay.js";
 
 
@@ -88,9 +89,9 @@ function pageCursor(value: unknown, arity: number): string[] | null {
   }
 }
 
-async function requireSpace(tx: DatabaseTransaction, spaceId: string, userId: string, write: boolean) {
+async function requireSpace(tx: DatabaseTransaction, spaceId: string, userId: string, write: boolean, use = false) {
   const role = await spaceMemberRole(tx, "app_space_role_v1", spaceId, userId);
-  if (!role || (write && role !== "owner" && role !== "admin")) {
+  if (!role || (write && role !== "owner" && role !== "admin") || (use && readsOnly(role))) {
     throw new AppControlError("space_not_found", 404, "Space not found");
   }
 }
@@ -101,6 +102,14 @@ async function appChannelCapability(tx: DatabaseTransaction, channelId: string,
 ): Promise<ChannelCapabilityGrant> {
   return requireChannelCapability(tx, { channelId, principal, capability,
     error: (failure) => new AppControlError(failure.code, failure.status, failure.message) });
+}
+
+/** The Channel a Human reads a Space's connections in, or acts with them in (`use`). */
+async function connectionChannel(tx: DatabaseTransaction, channelId: string, userId: string, spaceId: string,
+  use: boolean | undefined): Promise<void> {
+  const grant = await appChannelCapability(tx, channelId, { kind: "user", id: userId },
+    use ? "app_new_work" : "app_history_read");
+  if (use && grant.spaceId !== spaceId) throw new AppControlError("channel_not_found", 404, "Channel not found");
 }
 
 /** Subscriptions shown per connection; a batch query reads this many connections at once. */
@@ -145,12 +154,35 @@ async function credentialFieldsByConnection(tx: DatabaseTransaction, connectionI
     Array.isArray(row.field_names_json) ? (row.field_names_json as unknown[]).map(String) : []]));
 }
 
-/** Connection rows as the App authority returns them, reading their details in two queries. */
+/** A Space links at most this many GitHub installations; each has at most one link record. */
+const GITHUB_LINKS_PER_CONNECTION = 32;
+
+/** Who handed each linked GitHub installation to its Space, as GitHub Connect recorded it. */
+async function githubLinksByConnection(tx: DatabaseTransaction, connectionIds: string[]) {
+  const byConnection = new Map<string, { installationId: string; githubUserId: number }[]>();
+  if (connectionIds.length === 0) return byConnection;
+  const rows = await tx.query<QueryResultRow>({ name: "app_connection_github_links_v1", text: `SELECT
+    connection_id,installation_id,github_user_id FROM (SELECT connection_id,installation_id,github_user_id,
+      row_number() OVER (PARTITION BY connection_id ORDER BY installation_id) AS position
+      FROM data.app_github_installation_links WHERE connection_id=ANY($1::text[])) ranked
+    WHERE position<=$2 ORDER BY connection_id,installation_id`,
+  values: [connectionIds, GITHUB_LINKS_PER_CONNECTION], maxRows: connectionIds.length * GITHUB_LINKS_PER_CONNECTION });
+  for (const row of rows) {
+    const id = String(row.connection_id);
+    byConnection.set(id, [...byConnection.get(id) ?? [],
+      { installationId: String(row.installation_id), githubUserId: Number(row.github_user_id) }]);
+  }
+  return byConnection;
+}
+
+/** Connection rows as the App authority returns them, reading their details in a few queries. */
 async function connectionViews(tx: DatabaseTransaction, rows: QueryResultRow[], channelId?: string) {
   if (rows.length === 0) return [];
   const ids = rows.map((row) => String(row.connection_id));
   const subscriptions = channelId ? await relationsByConnection(tx, ids, channelId) : new Map<string, Subscription[]>();
   const credentials = await credentialFieldsByConnection(tx, ids);
+  const githubLinks = await githubLinksByConnection(tx,
+    rows.filter((row) => row.provider_id === "github").map((row) => String(row.connection_id)));
   return rows.map((row) => {
     const id = String(row.connection_id);
     const subscribed = subscriptions.get(id) ?? [];
@@ -163,6 +195,7 @@ async function connectionViews(tx: DatabaseTransaction, rows: QueryResultRow[], 
       ...(row.last_checked_at ? { lastCheckedAt: iso(row.last_checked_at as string | Date) } : {}),
       ...(row.error ? { error: String(row.error) } : {}),
       ...(row.metadata_json ? { metadata: row.metadata_json } : {}), version: Number(row.version),
+      ...(row.provider_id === "github" ? { githubLinks: githubLinks.get(id) ?? [] } : {}),
       ...(channelId ? { channelState: { channelId,
         enabled: true,
         bound: subscribed.length > 0, subscriptions: subscribed } } : {}) };
@@ -245,10 +278,36 @@ function routeRead(input: { sourceRef: string; limit: number }): { sourceRef: st
  * returns needs no second check, and a lapsed subscriber's route is skipped
  * rather than failing the append for every other Channel.
  */
+// A subscription delivers while its creator may still subscribe there now: one
+// made before they lost that (a member turned participant) stays, but is silent.
 const LIVE_SOURCE_RELATION_SQL = `c.status='configured'
           AND NOT EXISTS (SELECT 1 FROM data.space_deletions d WHERE d.space_id=r.space_id)
-          AND ${channelCapabilityPredicate({ capability: "message_append", channelAlias: "channel",
+          AND ${channelCapabilityPredicate({ capability: "app_new_work", channelAlias: "channel",
             principalKindSql: "'user'", principalIdSql: "r.created_by" })}`;
+
+/** A Slack workspace connected here is already another Space's. */
+export const SLACK_WORKSPACE_TAKEN = "workspace_connected_elsewhere";
+
+/**
+ * Joins `connection` and `credential` to OAuth binding `binding` while the
+ * binding still holds its workspace: its credential version is current and
+ * its connection is not disconnected (a failed check keeps the hold).
+ */
+export const SLACK_WORKSPACE_HELD_SQL = (binding: string, connection: string, credential: string) =>
+  `${connection}.connection_id=${binding}.connection_id AND ${connection}.space_id=${binding}.space_id
+      AND ${connection}.provider_id=${binding}.provider_id AND ${connection}.status<>'disconnected'
+    JOIN data.app_connector_credentials ${credential} ON ${credential}.connection_id=${binding}.connection_id
+      AND ${credential}.space_id=${binding}.space_id AND ${credential}.version=${binding}.credential_version`;
+
+/**
+ * Binding `binding` speaks for its Slack workspace: its Space holds the
+ * workspace's claim (claimSlackWorkspace) and, when `eventAt` is given, held it
+ * by then, so content from before an uninstall never reaches a later claimant.
+ */
+export const SLACK_WORKSPACE_OWNED_SQL = (binding: string, eventAt?: string) => `EXISTS (SELECT 1
+    FROM data.app_slack_workspace_claims w WHERE w.app_client_id=${binding}.app_client_id
+      AND w.installation_id=${binding}.installation_id AND w.space_id=${binding}.space_id${eventAt
+        ? ` AND ${eventAt} IS NOT NULL AND w.claimed_at<=${eventAt}` : ""})`;
 
 /** A connection `c` linked to GitHub App installation `$1`, by its one id or its list. */
 const GITHUB_INSTALLATION_LINKED_SQL = `(c.metadata_json->>'installationId'=$1 OR EXISTS (
@@ -283,8 +342,9 @@ export class PostgresAppRepository {
     );
   }
 
+  /** `use` lists them for acting with, in the Space or its Channel, which needs a member, not a reader. */
   async listConnections(input: { requestId: string; spaceId: string; actorUserId: string;
-    channelId?: string; cursor?: string | null; limit: number }) {
+    channelId?: string; use?: boolean; cursor?: string | null; limit: number }) {
     const requestId = text(input.requestId, "requestId", 200);
     const spaceId = text(input.spaceId, "spaceId", 300);
     const actorUserId = text(input.actorUserId, "actorUserId", 300);
@@ -293,9 +353,8 @@ export class PostgresAppRepository {
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 500) throw new AppControlError(
       "invalid_app_request", 400, "limit is invalid");
     return this.database.transaction({ requestId, operation: "app.connections.list" }, async (tx) => {
-      await requireSpace(tx, spaceId, actorUserId, false);
-      if (input.channelId) await appChannelCapability(
-        tx, input.channelId, { kind: "user", id: actorUserId }, "app_history_read");
+      await requireSpace(tx, spaceId, actorUserId, false, input.use);
+      if (input.channelId) await connectionChannel(tx, input.channelId, actorUserId, spaceId, input.use);
       const rows = await tx.query<QueryResultRow>({ name: "app_connections_list_v1", text: `SELECT *
         FROM data.app_connector_connections WHERE space_id=$1
           AND ($2::text IS NULL OR (provider_id,connection_id)>($2,$3))
@@ -309,7 +368,7 @@ export class PostgresAppRepository {
   }
 
   async getConnection(input: { requestId: string; connectionId: string; actorUserId: string;
-    channelId?: string; allowMissing?: boolean }) {
+    channelId?: string; use?: boolean; allowMissing?: boolean }) {
     const requestId = text(input.requestId, "requestId", 200);
     const connectionId = text(input.connectionId, "connectionId", 300);
     const actorUserId = text(input.actorUserId, "actorUserId", 300);
@@ -321,10 +380,48 @@ export class PostgresAppRepository {
         if (input.allowMissing) return { connection: null };
         throw new AppControlError("app_connection_not_found", 404, "App connection not found");
       }
-      await requireSpace(tx, String(rows[0].space_id), actorUserId, false);
-      if (input.channelId) await appChannelCapability(
-        tx, input.channelId, { kind: "user", id: actorUserId }, "app_history_read");
+      await requireSpace(tx, String(rows[0].space_id), actorUserId, false, input.use);
+      if (input.channelId) await connectionChannel(tx, input.channelId, actorUserId, String(rows[0].space_id), input.use);
       return { connection: await connection(tx, rows[0], input.channelId) };
+    });
+  }
+
+  /**
+   * Record who handed these GitHub installations to the Space: the GitHub user
+   * the Hub's own Connect completion read from `/user` after confirming they
+   * administer each one. Only installations the connection links now are
+   * recorded, and records of ones it no longer links are dropped. Connection
+   * metadata, which Space admins edit, never supplies a record.
+   */
+  async recordGitHubInstallationLinks(input: { requestId: string; spaceId: string; actorUserId: string;
+    githubUserId: number; installationIds: string[]; at: string }) {
+    const requestId = text(input.requestId, "requestId", 200);
+    const spaceId = text(input.spaceId, "spaceId", 300);
+    const actorUserId = text(input.actorUserId, "actorUserId", 300);
+    const at = iso(input.at);
+    if (!Number.isSafeInteger(input.githubUserId) || input.githubUserId < 1 || !Array.isArray(input.installationIds) ||
+        input.installationIds.length > 100 ||
+        input.installationIds.some((id) => typeof id !== "string" || !/^[1-9][0-9]{0,19}$/u.test(id))) {
+      throw new AppControlError("invalid_app_request", 400, "Invalid GitHub installation link record");
+    }
+    const connectionId = `${spaceId}:github`;
+    return this.database.transaction({ requestId, operation: "app.github-links.record" }, async (tx) => {
+      await requireSpace(tx, spaceId, actorUserId, true);
+      const rows = await tx.query<QueryResultRow>({ name: "app_github_links_connection_v1", text: `SELECT metadata_json
+        FROM data.app_connector_connections WHERE connection_id=$1 AND space_id=$2 FOR UPDATE`,
+      values: [connectionId, spaceId], maxRows: 1 });
+      if (!rows[0]) return { recorded: [] as string[] };
+      const linked = githubInstallationIds(rows[0]);
+      const recorded = [...new Set(input.installationIds)].filter((id) => linked.includes(id));
+      await tx.query({ name: "app_github_links_prune_v1", text: `DELETE FROM data.app_github_installation_links
+        WHERE connection_id=$1 AND NOT (installation_id=ANY($2::text[]))`, values: [connectionId, linked], maxRows: 0 });
+      if (recorded.length > 0) await tx.query({ name: "app_github_links_record_v1", text: `INSERT INTO
+        data.app_github_installation_links (connection_id,space_id,installation_id,github_user_id,linked_by,linked_at)
+        SELECT $1,$2,installation_id,$4,$5,$6 FROM unnest($3::text[]) AS installation_id
+        ON CONFLICT (connection_id,installation_id) DO UPDATE SET github_user_id=EXCLUDED.github_user_id,
+          linked_by=EXCLUDED.linked_by,linked_at=EXCLUDED.linked_at`,
+      values: [connectionId, spaceId, recorded, input.githubUserId, actorUserId, at], maxRows: 0 });
+      return { recorded };
     });
   }
 
@@ -392,8 +489,8 @@ export class PostgresAppRepository {
     const sourceRefs = input.sourceRefs.map((sourceRef) => routeRead({ sourceRef, limit: input.limit }).sourceRef);
     const { limit } = routeRead({ sourceRef: sourceRefs[0]!, limit: input.limit });
     return this.database.transaction({ requestId: text(input.requestId, "requestId", 200),
-      operation: "app.github-subscription-routes" }, async (tx) => {
-      const rows = await tx.query<QueryResultRow>({ name: "app_github_subscription_routes_v7", text: `SELECT
+      operation: "app.github-subscription-routes", statement: "single_read" }, async (tx) => {
+      const rows = await tx.query<QueryResultRow>({ name: "app_github_subscription_routes_v8", text: `SELECT
         r.relation_id,r.space_id,r.channel_id,r.connection_id,r.created_by,r.created_at,r.source_kind,lower(r.source_ref) AS source_ref
         FROM data.app_source_relations r JOIN data.app_connector_connections c
           ON c.connection_id=r.connection_id AND c.space_id=r.space_id
@@ -444,7 +541,7 @@ export class PostgresAppRepository {
   /** The Hub has authenticated the application's signature and workspace id.
    * Only current OAuth grants from that application may receive its events. */
   async oauthEventConnections(input: { requestId: string; providerId: string; appClientId: string;
-    installationId: string; limit: number }) {
+    installationId: string; limit: number; /** Slack's own time for the event; a Slack event without one routes nowhere. */ eventAt?: string }) {
     const providerId = text(input.providerId, "providerId", 80);
     const appClientId = text(input.appClientId, "appClientId", 256);
     const installationId = text(input.installationId, "installationId", 128);
@@ -452,19 +549,24 @@ export class PostgresAppRepository {
         input.limit < 1 || input.limit > 100) throw new AppControlError("invalid_app_request", 400, "Invalid OAuth event route");
     return this.database.transaction({ requestId: text(input.requestId, "requestId", 200),
       operation: "app.oauth-event-connections" }, async (tx) => {
-      const rows = await tx.query<QueryResultRow>({ name: "app_oauth_event_connections_v1", text: `SELECT
-        i.connection_id,i.space_id FROM data.app_connector_oauth_installations i
-        JOIN data.app_connector_connections c ON c.connection_id=i.connection_id AND c.space_id=i.space_id
-          AND c.provider_id=i.provider_id AND c.status='configured'
-        JOIN data.app_connector_credentials k ON k.connection_id=i.connection_id AND k.space_id=i.space_id
-          AND k.version=i.credential_version
+      const rows = await tx.query<QueryResultRow>({ name: "app_oauth_event_connections_v3", text: `SELECT
+        i.connection_id,i.space_id,i.credential_version,i.grant_generation,c.status,
+        (i.provider_id<>'slack' OR ${SLACK_WORKSPACE_OWNED_SQL("i", "$5::timestamptz")}) AS owned
+        FROM data.app_connector_oauth_installations i
+        JOIN data.app_connector_connections c ON ${SLACK_WORKSPACE_HELD_SQL("i", "c", "k")}
         WHERE i.provider_id=$1 AND i.app_client_id=$2 AND i.installation_id=$3
           AND NOT EXISTS (SELECT 1 FROM data.space_deletions d WHERE d.space_id=i.space_id)
-        ORDER BY i.connection_id LIMIT $4`, values: [providerId, appClientId, installationId, input.limit + 1],
-      maxRows: input.limit + 1 });
+        ORDER BY i.connection_id LIMIT $4`, values: [providerId, appClientId, installationId, input.limit + 1,
+        input.eventAt === undefined ? null : iso(input.eventAt)], maxRows: input.limit + 1 });
       if (rows.length > input.limit) throw new AppControlError("too_many_installations", 503,
         "OAuth installation routing exceeds its bound", true);
-      return rows.map(row => ({ connectionId: String(row.connection_id), spaceId: String(row.space_id) }));
+      // A Slack workspace speaks for the one Space that claims it
+      // (claimSlackWorkspace), and only for what Slack dates from that claim on:
+      // another Space's binding, however current, and an event from before an
+      // uninstall get nothing. Only a configured connection is delivered to.
+      return rows.filter(row => row.owned === true && row.status === "configured").map(row => ({ connectionId: String(row.connection_id), spaceId: String(row.space_id),
+        credentialVersion: Number(row.credential_version),
+        grantGeneration: row.grant_generation === null ? null : String(row.grant_generation) }));
     });
   }
 
@@ -530,9 +632,57 @@ export class PostgresAppRepository {
     });
   }
 
+  /**
+   * Only a verified Slack delivery that the app was uninstalled from the
+   * workspace, or that its bot token was revoked, retires that workspace's
+   * bindings made before Slack's event: they disconnect, keeping encrypted
+   * credentials until an administrator reconnects, and the workspace may then
+   * be connected again. A Connect after the event is a newer grant, untouched
+   * by a delayed or replayed delivery of it.
+   */
+  async retireSlackWorkspace(input: { requestId: string; appClientId: string; installationId: string; at: string;
+    eventAt: string; limit: number; uninstalled: boolean }): Promise<number> {
+    const appClientId = text(input.appClientId, "appClientId", 256);
+    const installationId = text(input.installationId, "installationId", 128);
+    const at = iso(input.at);
+    const eventAt = iso(input.eventAt);
+    if (!/^[A-Za-z0-9_-]{1,128}$/u.test(installationId) || !Number.isSafeInteger(input.limit) || input.limit < 1 ||
+        input.limit > 100) throw new AppControlError("invalid_app_request", 400, "Invalid Slack retirement");
+    return this.database.transaction({ requestId: text(input.requestId, "requestId", 200),
+      operation: "app.slack-workspace-retire" }, async tx => {
+      await tx.query({ name: "slack_workspace_lock_v1", text: "SELECT pg_advisory_xact_lock(hashtextextended($1,0))",
+        values: [`slack:${appClientId}:${installationId}`], maxRows: 1 });
+      // Only an uninstall takes the bot out of the workspace's channels, so only
+      // it frees the workspace for another Space (claimSlackWorkspace); a
+      // revoked token disconnects its bindings and keeps the claim.
+      if (input.uninstalled) {
+        await tx.query({ name: "app_slack_claim_release_v1", text: `DELETE FROM data.app_slack_workspace_claims
+          WHERE app_client_id=$1 AND installation_id=$2 AND claimed_at<$3`, values: [appClientId, installationId, eventAt], maxRows: 0 });
+      }
+      const rows = await tx.query<QueryResultRow>({ name: "app_slack_retirement_lock_v1", text: `SELECT i.connection_id
+        FROM data.app_connector_oauth_installations i
+        JOIN data.app_connector_connections c ON c.connection_id=i.connection_id AND c.space_id=i.space_id
+          AND c.provider_id=i.provider_id
+        WHERE i.provider_id='slack' AND i.app_client_id=$1 AND i.installation_id=$2 AND i.updated_at<$4
+        ORDER BY i.connection_id LIMIT $3 FOR UPDATE OF c,i`,
+      values: [appClientId, installationId, input.limit + 1, eventAt], maxRows: input.limit + 1 });
+      if (rows.length > input.limit) throw new AppControlError("too_many_installations", 503,
+        "Slack retirement exceeds its bound", true);
+      if (!rows.length) return 0;
+      const ids = rows.map(row => String(row.connection_id));
+      await tx.query({ name: "app_slack_retirement_state_v1", text: `UPDATE data.app_connector_connections
+        SET status='disconnected',version=version+1,updated_at=$2 WHERE connection_id=ANY($1::text[])
+          AND status<>'disconnected'`, values: [ids, at], maxRows: 0 });
+      await tx.query({ name: "app_slack_retirement_binding_v1", text: `DELETE FROM
+        data.app_connector_oauth_installations WHERE connection_id=ANY($1::text[])`, values: [ids], maxRows: 0 });
+      return rows.length;
+    });
+  }
+
   /** Subscription authority, read only after authenticating the provider delivery. */
   async connectorEventRoutes(input: { requestId: string; connectionId: string; sourceRef: string;
-    limit: number; oauthBinding?: { providerId: string; appClientId: string; installationId: string; credentialVersion?: number; grantGeneration?: string };
+    limit: number; oauthBinding?: { providerId: string; appClientId: string; installationId: string; credentialVersion?: number; grantGeneration?: string;
+      /** Slack's own time for the event, fenced to the workspace's current claim. */ eventAt?: string };
     googleChatBinding?: { appIdentity: string; chatSpace: string; grantGeneration: string };
     feishuBinding?: { appIdentity: string; chatSpace: string; grantGeneration: string };
     teamsBinding?: { appIdentity: string; chatSpace: string; grantGeneration: string };
@@ -563,7 +713,7 @@ export class PostgresAppRepository {
     }
     return this.database.transaction({ requestId: text(input.requestId, "requestId", 200),
       operation: "app.connector-event-routes" }, async (tx) => {
-      const rows = await tx.query<QueryResultRow>({ name: "app_connector_event_routes_v9", text: `SELECT
+      const rows = await tx.query<QueryResultRow>({ name: "app_connector_event_routes_v11", text: `SELECT
         r.space_id,r.channel_id,r.created_by,r.features_json
         FROM data.app_source_relations r JOIN data.app_connector_connections c
           ON c.connection_id=r.connection_id AND c.space_id=r.space_id
@@ -576,7 +726,8 @@ export class PostgresAppRepository {
             WHERE i.connection_id=c.connection_id AND i.space_id=c.space_id AND i.provider_id=c.provider_id
               AND i.provider_id=$4 AND i.app_client_id=$5 AND i.installation_id=$6
               AND ($7::bigint IS NULL OR i.credential_version=$7)
-              AND ($8::uuid IS NULL OR i.grant_generation=$8::uuid)))
+              AND ($8::uuid IS NULL OR i.grant_generation=$8::uuid)
+              AND (i.provider_id<>'slack' OR ${SLACK_WORKSPACE_OWNED_SQL("i", "$16::timestamptz")})))
           AND ($9::text IS NULL OR ($12='googlechat' AND EXISTS (SELECT 1 FROM data.app_googlechat_room_bindings g
             WHERE g.connection_id=c.connection_id AND g.space_id=c.space_id AND c.provider_id='googlechat'
               AND g.active AND g.app_identity=$9 AND g.chat_space=$10 AND g.grant_generation=$11::uuid
@@ -608,7 +759,8 @@ export class PostgresAppRepository {
         ORDER BY r.channel_id LIMIT $3`, values: [connectionId, sourceRef, bounded ? limit + 1 : limit, binding?.providerId ?? null,
           binding?.appClientId ?? null, binding?.installationId ?? null, binding?.credentialVersion ?? null,
           binding?.grantGeneration ?? null, chat?.appIdentity ?? null, chat?.chatSpace ?? null,
-          chat?.grantGeneration ?? null, roomProvider, wecom?.appIdentity ?? null, wecom?.companyDigest ?? null, wecom?.grantGeneration ?? null], maxRows: bounded ? limit + 1 : limit });
+          chat?.grantGeneration ?? null, roomProvider, wecom?.appIdentity ?? null, wecom?.companyDigest ?? null, wecom?.grantGeneration ?? null,
+          binding?.eventAt === undefined ? null : iso(binding.eventAt)], maxRows: bounded ? limit + 1 : limit });
       if (bounded && rows.length > limit) throw new AppControlError("too_many_routes", 503,
         chat ? "Google Chat event routing exceeds its bound" : "Sentry event routing exceeds its bound", true);
       return rows.map((row) => ({ spaceId: String(row.space_id), channelId: String(row.channel_id),
@@ -746,6 +898,9 @@ export class PostgresAppRepository {
       values: [rows[0].connection_id], maxRows: 0 });
     await tx.query({ name: "app_credential_delete_connection_v1",
       text: "DELETE FROM data.app_connector_credentials WHERE connection_id=$1",
+      values: [rows[0].connection_id], maxRows: 0 });
+    await tx.query({ name: "app_action_request_delete_connection_v1",
+      text: "DELETE FROM data.app_connector_action_requests WHERE connection_id=$1",
       values: [rows[0].connection_id], maxRows: 0 });
     await tx.query({ name: "app_action_policy_delete_connection_v1",
       text: "DELETE FROM data.app_connector_action_policies WHERE connection_id=$1",

@@ -9,6 +9,8 @@ import { APP_STORE_CONNECT_TESTFLIGHT_ACTIONS } from "./actions/app-store-connec
 import { APP_STORE_CONNECT_UPLOAD_ACTIONS } from "./actions/app-store-connect-uploads";
 import { APP_STORE_CONNECT_SUBSCRIPTIONS, verifyAppStoreConnect } from "./app-store-connect-api";
 import { receiveAppStoreConnectDelivery } from "./app-store-connect-events";
+import { APP_STORE_CONNECT_WEB_ACTIONS } from "./app-store-connect-web";
+import { APP_STORE_CONNECT_WEB_RECORD_ACTIONS } from "./app-store-connect-web-records";
 import { BITBUCKET_ACTIONS, verifyBitbucket } from "./actions/bitbucket";
 import { DISCORD_ACTIONS, verifyDiscord } from "./actions/discord";
 import { FEISHU_ACTIONS } from "./actions/feishu";
@@ -21,9 +23,12 @@ import { GOOGLE_SEARCH_CONSOLE_ACTIONS, verifyGoogleSearchConsole } from "./acti
 import { BING_WEBMASTER_ACTIONS, verifyBingWebmaster } from "./actions/bing-webmaster";
 import { GOOGLE_ADSENSE_ACTIONS, verifyGoogleAdsense } from "./actions/google-adsense";
 import { GOOGLE_ANALYTICS_ACTIONS, verifyGoogleAnalytics } from "./actions/google-analytics";
+import { GOOGLE_ADS_ACTIONS, verifyGoogleAds } from "./actions/google-ads";
 import { GOOGLE_BUSINESS_PROFILE_ACTIONS, verifyGoogleBusinessProfile } from "./actions/google-business-profile";
 import { PAGESPEED_ACTIONS, verifyPageSpeed } from "./actions/pagespeed";
 import { GMAIL_ACTIONS, verifyGmail } from "./actions/gmail";
+import { GMAIL_SUBSCRIPTIONS } from "./gmail-mailboxes";
+import { X_ACTIONS } from "./actions/x";
 import { OPENCONNECTOR_ACTIONS, verifyOpenConnector } from "./actions/openconnector";
 import { YANDEX_WEBMASTER_ACTIONS, verifyYandexWebmaster } from "./actions/yandex-webmaster";
 import { PAGERDUTY_ACTIONS, verifyPagerDuty } from "./actions/pagerduty";
@@ -74,7 +79,7 @@ const PROVIDERS: Record<string, {
   appstoreconnect: { receive: (delivery) => receiveAppStoreConnectDelivery(delivery),
     actions: { ...APP_STORE_CONNECT_READ_ACTIONS, ...APP_STORE_CONNECT_LISTING_ACTIONS, ...APP_STORE_CONNECT_RELEASE_ACTIONS,
       ...APP_STORE_CONNECT_UPLOAD_ACTIONS, ...APP_STORE_CONNECT_MEDIA_ACTIONS, ...APP_STORE_CONNECT_SIGNING_ACTIONS,
-      ...APP_STORE_CONNECT_TESTFLIGHT_ACTIONS },
+      ...APP_STORE_CONNECT_TESTFLIGHT_ACTIONS, ...APP_STORE_CONNECT_WEB_ACTIONS, ...APP_STORE_CONNECT_WEB_RECORD_ACTIONS },
     verify: verifyAppStoreConnect, subscriptions: APP_STORE_CONNECT_SUBSCRIPTIONS },
   feishu: { receive: receiveFeishuDelivery, actions: FEISHU_ACTIONS, verify: verifyFeishu },
   discord: { actions: DISCORD_ACTIONS, verify: verifyDiscord },
@@ -84,9 +89,11 @@ const PROVIDERS: Record<string, {
   bingwebmaster: { actions: BING_WEBMASTER_ACTIONS, verify: verifyBingWebmaster },
   googleadsense: { actions: GOOGLE_ADSENSE_ACTIONS, verify: verifyGoogleAdsense },
   googleanalytics: { actions: GOOGLE_ANALYTICS_ACTIONS, verify: verifyGoogleAnalytics },
+  googleads: { actions: GOOGLE_ADS_ACTIONS, verify: verifyGoogleAds },
   googlebusinessprofile: { actions: GOOGLE_BUSINESS_PROFILE_ACTIONS, verify: verifyGoogleBusinessProfile },
   pagespeed: { actions: PAGESPEED_ACTIONS, verify: verifyPageSpeed },
-  gmail: { actions: GMAIL_ACTIONS, verify: verifyGmail },
+  gmail: { actions: GMAIL_ACTIONS, verify: verifyGmail, subscriptions: GMAIL_SUBSCRIPTIONS },
+  x: { actions: X_ACTIONS },
   bitbucket: { receive: receiveBitbucketDelivery, actions: BITBUCKET_ACTIONS, verify: verifyBitbucket },
   circleci: { receive: receiveCircleCiDelivery },
   buildkite: { receive: receiveBuildkiteDelivery },

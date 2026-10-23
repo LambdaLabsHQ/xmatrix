@@ -1,8 +1,8 @@
 "use client";
 
-import { type MouseEvent } from "react";
+import { memo, type MouseEvent } from "react";
 import { AlertTriangle, Boxes, Bot, Moon, Server, UserRound } from "lucide-react";
-import { LoadingImage } from "@/components/dashboard/content-skeleton";
+import { LoadingImage, MediaSkeleton } from "@/components/dashboard/content-skeleton";
 import { LiquidGlassPill } from "@/components/ui/material-surfaces";
 import { cn } from "@/lib/utils";
 
@@ -57,6 +57,8 @@ interface IdentityAvatarProps {
   status?: string;
   initials?: string;
   imageUrl?: string;
+  /** Its picture is still being read (face.tsx): it waits for it rather than showing letters it may not need. */
+  pending?: boolean;
   size?: IdentityAvatarSize;
   shape?: IdentityAvatarShape;
   showKindBadge?: boolean;
@@ -68,12 +70,13 @@ interface IdentityAvatarProps {
   onClick?: (event: MouseEvent<HTMLElement>) => void;
 }
 
-export function IdentityAvatar({
+export const IdentityAvatar = memo(function IdentityAvatar({
   kind,
   label,
   status,
   initials,
   imageUrl,
+  pending = false,
   size = "md",
   shape = "rounded",
   showKindBadge = false,
@@ -119,15 +122,17 @@ export function IdentityAvatar({
           sizeClasses[size],
           toneClasses[kind],
           // A resting Instance is still the Channel's, greyed until a message wakes it.
-          rest && "opacity-55 grayscale",
-          rest === "waking" && "animate-pulse"
+          rest && "opacity-55 grayscale"
         )}
       >
-        {imageSrc ? (
+        {pending ? (
+          <MediaSkeleton announce={false} className="app-media-skeleton-image size-full" />
+        ) : imageSrc ? (
           <LoadingImage
             src={imageSrc}
             alt=""
             announce={false}
+            retain
             referrerPolicy="no-referrer"
             draggable={false}
             className={cn(
@@ -174,7 +179,7 @@ export function IdentityAvatar({
       )}
     </AvatarRoot>
   );
-}
+});
 
 function avatarTone(label: string): number {
   return Array.from(label || "xmatrix").reduce(
@@ -226,17 +231,17 @@ export function identityRestStatus(
 
 /**
  * A presence dot: the one place the vivid status colours live (see
- * status-vocabulary.test). Yellow means work in hand: solid and breathing
- * while the Agent itself is working, a still ring while it waits on CI, the
+ * status-vocabulary.test). Yellow means work in hand: solid
+ * while the Agent itself is working, a ring while it waits on CI, the
  * network or its background tasks. Green is free to take work; online and
  * idle say the same thing to a reader, so they look the same
  * (docs/design/agent-status.md).
  */
 export function identityStatusDotClass(status: string): string {
-  if (status === "busy") return "bg-amber-500 text-amber-500 motion-safe:animate-pulse";
+  if (status === "busy") return "bg-amber-500 text-amber-500";
   if (status === "waiting") return "bg-amber-500 text-amber-500 app-status-dot-ring";
   if (status === "online" || status === "idle") return "bg-emerald-500 text-emerald-500";
-  if (status === "waking") return "bg-muted-foreground text-muted-foreground app-status-dot-ring motion-safe:animate-pulse";
+  if (status === "waking") return "bg-muted-foreground text-muted-foreground app-status-dot-ring";
   if (status === "machine offline") return "bg-red-500 text-red-500";
   return "bg-muted-foreground text-muted-foreground";
 }

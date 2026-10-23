@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { markdownToPageDoc, pageDocChanges } from "../dist/page-document.js";
+import { markdownToPageDoc, pageDocChanges, pageDocToMarkdown, pageSeenDoc } from "../dist/page-document.js";
 
 /** The changes as text a reader would see: what is new, and what was taken out. */
 function described(before, after) {
@@ -54,4 +54,48 @@ test("a rewritten page stays bounded", () => {
 
 test("a rewritten phrase is one change, not word by word around the spaces it kept", () => {
   assert.deepEqual(described("Planned for next week\n", "Shipped this week\n"), ["+Shipped this", "-Planned for next@"]);
+});
+
+test("text taken out of a line reads as it did, drawn back in where it was", () => {
+  // The document's text with each piece taken out back in its place, in brackets.
+  const reread = (before, after) => {
+    const doc = markdownToPageDoc(after);
+    let text = "";
+    let from = 0;
+    for (const change of pageDocChanges(markdownToPageDoc(before), doc)) {
+      if (change.kind !== "removed") continue;
+      text += `${doc.textBetween(from, change.at)}[${change.text}]`;
+      from = change.at;
+    }
+    return text + doc.textBetween(from, doc.content.size);
+  };
+  assert.equal(reread("Ship it now\n", "Ship it\n"), "Ship it[ now]");
+  assert.equal(reread("Ship the relay now\n", "Ship now\n").replace(/[[\]]/gu, ""), "Ship the relay now");
+  assert.equal(reread("Status: next\n", "Status: shipped\n"), "Status: [next]shipped");
+});
+
+/** What the reader has seen of `after`, having seen `before`, when the blocks holding `visible` were on screen. */
+function seenOf(before, after, visible) {
+  const doc = markdownToPageDoc(after);
+  const inView = (pos, end) => visible.some((text) => doc.textBetween(pos, end, "\n").includes(text));
+  return pageDocToMarkdown(pageSeenDoc(markdownToPageDoc(before), doc, inView));
+}
+
+test("a reader has seen what was on screen as it is now, and what was not as they last saw it", () => {
+  const before = "# Plan\n\nGoal: ten users\n\nOld channel\n\nNotes\n";
+  const after = "# Plan\n\nGoal: a hundred users\n\nNew paragraph\n\nNotes\n\nMetrics later\n";
+  // Seen at the top only: the goal is read, the rest below waits as it was.
+  assert.equal(seenOf(before, after, ["Plan", "Goal"]), "# Plan\n\nGoal: a hundred users\n\nOld channel\n\nNotes\n");
+  // All of it seen, it is the page as it is.
+  assert.equal(seenOf(before, after, ["Plan", "Goal", "New", "Notes", "Metrics"]), after);
+  // Nothing seen, nothing is read.
+  assert.equal(seenOf(before, after, []), before);
+});
+
+test("a block taken out is gone for the reader once where it stood was on screen", () => {
+  const before = "Intro\n\nGone soon\n\nOutro\n";
+  assert.equal(seenOf(before, "Intro\n\nOutro\n", ["Outro"]), "Intro\n\nOutro\n");
+  assert.equal(seenOf(before, "Intro\n\nOutro\n", []), before);
+  // A new block seen in the place of one taken out reads as replacing it.
+  assert.equal(seenOf(before, "Intro\n\nArrived\n\nOutro\n", ["Arrived"]), "Intro\n\nArrived\n\nOutro\n");
 });

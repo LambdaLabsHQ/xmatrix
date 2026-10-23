@@ -1,3 +1,4 @@
+import { trimEnd } from "@xmatrix/protocol";
 import { googleChatAppIdentity } from "@xmatrix/db";
 import { readBoundedRequestBody } from "../index-shared";
 import type { Env } from "../types";
@@ -19,7 +20,7 @@ export async function handleGoogleChatAppDelivery(env: Env, request: Request,
   dependencies = GOOGLECHAT_INGRESS_DEPENDENCIES): Promise<Response> {
   const native = dependencies.native(env);
   if (!native) return Response.json({ error: "Google Chat app is not configured" }, { status: 503 });
-  const origin = env.HUB_URL?.trim().replace(/\/+$/u, "");
+  const origin = trimEnd(env.HUB_URL?.trim() ?? "", "/");
   if (!origin) return Response.json({ error: "Google Chat endpoint is not configured" }, { status: 503 });
   try {
     await dependencies.verify(request, { endpoint: origin + "/api/connectors/googlechat/events",

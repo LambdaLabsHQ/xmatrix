@@ -13,11 +13,13 @@ function keyOptions(statement: ConnectorActionStatement): Record<string, string>
   return { project: statement.target, showDeleted: String(raw.showDeleted ?? false), ...(raw.pageToken ? { pageToken: String(raw.pageToken) } : {}) };
 }
 
+const AUDITED_SERVICES = new Set(["generativelanguage.googleapis.com", "apikeys.googleapis.com"]);
+
 function auditOptions(statement: ConnectorActionStatement): Record<string, string> | string {
   const raw = optionsJson(statement, ["from", "to", "service", "pageToken"]);
   if (typeof raw === "string") return raw;
   const service = raw.service ?? "generativelanguage.googleapis.com";
-  if (typeof service !== "string" || !["generativelanguage.googleapis.com", "apikeys.googleapis.com"].includes(service)) return "service must be generativelanguage.googleapis.com or apikeys.googleapis.com";
+  if (typeof service !== "string" || !AUDITED_SERVICES.has(service)) return "service must be generativelanguage.googleapis.com or apikeys.googleapis.com";
   const base = usageOptions({ ...statement, text: JSON.stringify({ from: raw.from, to: raw.to, ...(raw.pageToken !== undefined ? { pageToken: raw.pageToken } : {}) }) }, 400);
   return typeof base === "string" ? base : { ...base, service };
 }

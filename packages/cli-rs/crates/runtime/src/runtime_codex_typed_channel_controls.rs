@@ -94,3 +94,48 @@ fn apply_codex_typed_channel_command(
     write_current_run_status("typed_control_failed", false, Some(&detail));
     false
 }
+
+/// Codex commands that exist only as app-server requests. Sent as turn text
+/// the model would merely improvise an answer; these start the real thing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum CodexNativeTurn {
+    Compact,
+    Review { instructions: Option<String> },
+}
+
+fn parse_codex_native_turn(command: &str) -> Option<CodexNativeTurn> {
+    let command = command.trim();
+    let (token, argument) = command
+        .split_once(char::is_whitespace)
+        .map_or((command, ""), |(token, argument)| (token, argument.trim()));
+    if token.eq_ignore_ascii_case("/compact") {
+        return Some(CodexNativeTurn::Compact);
+    }
+    token
+        .eq_ignore_ascii_case("/review")
+        .then(|| CodexNativeTurn::Review {
+            instructions: (!argument.is_empty()).then(|| argument.to_string()),
+        })
+}
+
+impl CodexNativeTurn {
+    fn request(&self, thread_id: &str) -> (&'static str, Value) {
+        match self {
+            Self::Compact => (
+                "thread/compact/start",
+                serde_json::json!({ "threadId": thread_id }),
+            ),
+            Self::Review { instructions } => (
+                "review/start",
+                serde_json::json!({
+                    "threadId": thread_id,
+                    "delivery": "inline",
+                    "target": match instructions {
+                        Some(instructions) => serde_json::json!({ "type": "custom", "instructions": instructions }),
+                        None => serde_json::json!({ "type": "uncommittedChanges" }),
+                    },
+                }),
+            ),
+        }
+    }
+}

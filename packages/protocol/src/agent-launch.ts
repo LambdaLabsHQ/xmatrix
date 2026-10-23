@@ -1,3 +1,5 @@
+import type { HarnessSignedOut } from "./invocation-failure.js";
+
 export const AGENT_LAUNCH_STATES = [
   "prepared",
   "queued",
@@ -15,7 +17,8 @@ export interface SerializedAgentLaunch {
   channelId: string;
   sourceMessageId: string;
   targetName?: string;
-  targetAvatarUrl?: string;
+  /** The harness of the Agent it starts, which gives its face (faces.ts). */
+  targetHarness?: string;
   launchKind: string;
   /** Original invocation address, presentation only; never execution authority. */
   sourceMention?: string;
@@ -29,6 +32,10 @@ export interface SerializedAgentLaunch {
   attempt: number;
   retryable: boolean;
   daemonOffline?: boolean;
+  /** Queued on a daemon that dropped moments before this launch was prepared
+   * (a restart, such as a self-update): it starts when that daemon reconnects,
+   * or fails as `machine_reconnect_expired`. Presentation only. */
+  machineReconnecting?: boolean;
   errorStage?: string;
   errorCode?: string;
   errorMessage?: string;
@@ -78,6 +85,8 @@ export interface SerializedAgentInvocationRejection {
   code: string;
   message: string;
   routingDecision?: RoutingDecisionEvidence;
+  /** For `registration_harness_signed_out`: the program to sign in, and where. */
+  signedOut?: HarnessSignedOut;
   rejectedAt: string;
   evidenceExpiresAt: string;
 }
@@ -136,9 +145,9 @@ export interface InvocationDiagnosticsReport {
   sourceMessageIds: string[];
   selection: { kind: "recent-messages" | "messages" | "run"; limit: number; hasOlderMessages: boolean };
   run?: { runId: string; instanceId?: string; name?: string; activity: AgentLaunchActivity };
-  launches: Array<Omit<SerializedAgentLaunch, "sourceMention" | "errorMessage" | "targetAvatarUrl">>;
+  launches: Array<Omit<SerializedAgentLaunch, "sourceMention" | "errorMessage" | "targetHarness">>;
   rejections: Array<Omit<SerializedAgentInvocationRejection, "sourceMention">>;
-  continuations: Array<Omit<import("./agent-continuation.js").SerializedAgentContinuation, "sourceMention" | "targetAvatarUrl">>;
+  continuations: Array<Omit<import("./agent-continuation.js").SerializedAgentContinuation, "sourceMention" | "targetHarness">>;
   targets?: Array<Omit<import("./agent-message-target.js").SerializedAgentMessageTarget, "sourceBodyHash" | "sourceMention">>;
   executions?: Array<Omit<import("./agent-message-execution.js").SerializedAgentMessageExecution, "sourceBodyHash">>;
   nextCursor: string | null;

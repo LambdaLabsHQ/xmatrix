@@ -3,14 +3,17 @@ import { WoodPanel } from "@/components/ui/material-surfaces";
 import { agentDocFiles, aiAskLinks } from "@/lib/agent-docs";
 import { REPOSITORY_URL } from "@/lib/star-prompt";
 
+// X verifies the organization by this link back to its account.
+const X_ACCOUNT_URL = "https://x.com/xMatrix_hq";
+
 const links = {
   Product: [
     { label: "Online App", href: "/app" },
     { label: "Download", href: "/download" },
-    { label: "Setup", href: "/#how-it-works" },
     { label: "Pricing", href: "/#pricing" },
     { label: "Docs", href: "/docs" },
     { label: "GitHub", href: REPOSITORY_URL },
+    { label: "X", href: X_ACCOUNT_URL },
     { label: "Console", href: "/console" },
     { label: "Sign In", href: "/login" },
   ],
@@ -97,7 +100,6 @@ export function Footer() {
             &copy; {new Date().getFullYear()} MadeByRobot, LLC. xMatrix and its related marks are reserved.
           </p>
           <div className="flex items-center gap-4">
-             {/* Optional: Add social links here in the future */}
              <div className="size-1.5 rounded-full bg-primary/50 shadow-[0_0_18px_rgba(255,255,255,0.35)]" />
              <span className="text-xs font-medium text-muted-foreground/40">Built for coordinated agent work</span>
           </div>

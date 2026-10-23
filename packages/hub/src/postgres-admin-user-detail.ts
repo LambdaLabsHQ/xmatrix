@@ -19,15 +19,22 @@ import {
 import type { AuthorityDatabase } from "@xmatrix/db";
 import type { QueryResultRow } from "pg";
 
+import { POSTGRES_ADMIN_MESSAGE_FACTS_QUERY } from "./postgres-admin-message-facts";
 import { adminActivityUtcWindow } from "./admin-overview-merge";
+import {
+  adminCount as count,
+  adminIso as iso,
+  adminListBound,
+  adminOptionalIso as optionalIso,
+  type AdminCountValue as Count,
+  type AdminTimeValue as Time,
+} from "./postgres-admin-values";
 import {
   createPostgresAuthorityFleet,
   type PostgresAuthorityFleet,
 } from "./postgres-authority-fleet";
 import type { Env } from "./types";
 
-type Count = string | number;
-type Time = Date | string;
 
 interface MembershipRow extends QueryResultRow {
   space_id: string; name: string; role: string; owner_user_id: string; joined_at: Time;
@@ -48,6 +55,11 @@ interface MachineRow extends QueryResultRow {
 interface ConnectorRow extends QueryResultRow {
   space_id: string; provider_id: string; provider_name: string; status: string;
   created_at: Time; last_checked_at: Time | null;
+  requests: Count; requests_last_30d: Count;
+  queued: Count; completed: Count; failed: Count; blocked: Count; planned: Count;
+  last_request_at: Time | null;
+  event_deliveries: Count; event_deliveries_last_30d: Count; last_event_at: Time | null;
+  subscribed_channels: Count; subscriptions: Count;
 }
 
 interface RunRow extends QueryResultRow {
@@ -61,22 +73,6 @@ interface MessageRow extends QueryResultRow {
 interface ActivityRow extends QueryResultRow { day: string; messages: Count }
 
 const ACTIVE_RUN_STATUSES = new Set(["starting", "running"]);
-
-function count(value: Count | null | undefined): number {
-  const parsed = Number(value ?? 0);
-  if (!Number.isSafeInteger(parsed) || parsed < 0) {
-    throw new Error("PostgreSQL admin user detail returned an invalid count");
-  }
-  return parsed;
-}
-
-function iso(value: Time): string {
-  return (value instanceof Date ? value : new Date(value)).toISOString();
-}
-
-function optionalIso(value: Time | null | undefined): string | undefined {
-  return value == null ? undefined : iso(value);
-}
 
 /** The shard-local part of one user's detail, before identity is joined in. */
 export type AdminUserShardDetail = Omit<AdminUserDetail, "generatedAt" | "user" | "sessions">;
@@ -133,11 +129,42 @@ async function readShard(
     }) : [];
 
     const connectors = await transaction.query<ConnectorRow>({
-      name: "postgres_admin_user_connectors_v1",
-      text: `SELECT space_id, provider_id, provider_name, status, created_at, last_checked_at
-        FROM data.app_connector_connections WHERE created_by = $1
-        ORDER BY created_at DESC, connection_id LIMIT $2`,
-      values: [userId, bound + 1],
+      name: "postgres_admin_user_connectors_v2",
+      text: `WITH connections AS MATERIALIZED (
+          SELECT connection_id, space_id, provider_id, provider_name, status, created_at, last_checked_at
+          FROM data.app_connector_connections WHERE created_by = $1
+          ORDER BY created_at DESC, connection_id LIMIT $2
+        )
+        SELECT c.space_id, c.provider_id, c.provider_name, c.status, c.created_at, c.last_checked_at,
+          executions.*, events.*,
+          (SELECT COUNT(DISTINCT relation.channel_id) FROM data.app_source_relations relation
+            WHERE relation.connection_id = c.connection_id AND relation.space_id = c.space_id) AS subscribed_channels,
+          (SELECT COUNT(*) FROM data.app_source_relations relation
+            WHERE relation.connection_id = c.connection_id AND relation.space_id = c.space_id) AS subscriptions
+        FROM connections c
+        CROSS JOIN LATERAL (
+          SELECT COUNT(*) AS requests, COUNT(*) FILTER (WHERE created_at >= $3) AS requests_last_30d,
+            COUNT(*) FILTER (WHERE status = 'queued') AS queued,
+            COUNT(*) FILTER (WHERE status = 'completed') AS completed,
+            COUNT(*) FILTER (WHERE status = 'failed') AS failed,
+            COUNT(*) FILTER (WHERE status = 'blocked') AS blocked,
+            COUNT(*) FILTER (WHERE status = 'planned') AS planned,
+            MAX(created_at) AS last_request_at
+          FROM data.app_connector_executions execution
+          WHERE execution.space_id = c.space_id AND execution.provider_id = c.provider_id
+            AND execution.connection_id = c.connection_id
+        ) executions
+        CROSS JOIN LATERAL (
+          SELECT COUNT(*) AS event_deliveries,
+            COUNT(*) FILTER (WHERE created_at >= $3) AS event_deliveries_last_30d,
+            MAX(created_at) AS last_event_at
+          FROM data.messages message
+          WHERE message.space_id = c.space_id AND message.author_kind = 'app'
+            AND message.author_id = c.provider_id AND message.deleted_at IS NULL
+            AND starts_with(message.message_id, 'app:' || c.provider_id || ':')
+        ) events
+        ORDER BY c.created_at DESC, c.connection_id`,
+      values: [userId, bound + 1, since30d],
       maxRows: bound + 1,
     });
 
@@ -153,12 +180,12 @@ async function readShard(
 
     const messages = spaceIds.length ? (await transaction.query<MessageRow>({
       name: "postgres_admin_user_messages_v1",
-      text: `SELECT COUNT(*) AS total,
-          COUNT(*) FILTER (WHERE created_at >= $3) AS last_7d,
-          COUNT(*) FILTER (WHERE created_at >= $4) AS last_30d,
+      text: `WITH admin_message_facts AS (${POSTGRES_ADMIN_MESSAGE_FACTS_QUERY})
+        SELECT COUNT(*) FILTER (WHERE author_kind = 'user') AS total,
+          COUNT(*) FILTER (WHERE author_kind = 'user' AND created_at >= $3) AS last_7d,
+          COUNT(*) FILTER (WHERE author_kind = 'user' AND created_at >= $4) AS last_30d,
           MAX(created_at) AS last_message_at
-        FROM data.messages WHERE space_id = ANY($1::text[]) AND author_kind = 'user'
-          AND author_id = $2 AND deleted_at IS NULL`,
+        FROM admin_message_facts WHERE space_id = ANY($1::text[]) AND activity_user_id = $2`,
       values: [spaceIds, userId, since7d, since30d],
       maxRows: 1,
     }))[0] : undefined;
@@ -181,11 +208,7 @@ async function readShard(
       maxRows: 1,
     }))[0];
 
-    const truncated: string[] = [];
-    const cut = <T>(rows: readonly T[], key: string): T[] => {
-      if (rows.length > bound) truncated.push(key);
-      return rows.slice(0, bound);
-    };
+    const { truncated, cut } = adminListBound(bound);
     const byStatus: Record<string, number> = {};
     let lastRunAt: string | undefined;
     for (const row of runs) {
@@ -232,6 +255,20 @@ async function readShard(
         spaceId: row.space_id,
         providerId: row.provider_id,
         providerName: row.provider_name,
+        usage: {
+          requests: count(row.requests),
+          requestsLast30d: count(row.requests_last_30d),
+          byStatus: {
+            queued: count(row.queued), completed: count(row.completed), failed: count(row.failed),
+            blocked: count(row.blocked), planned: count(row.planned),
+          },
+          ...(optionalIso(row.last_request_at) ? { lastRequestAt: optionalIso(row.last_request_at) } : {}),
+          eventDeliveries: count(row.event_deliveries),
+          eventDeliveriesLast30d: count(row.event_deliveries_last_30d),
+          ...(optionalIso(row.last_event_at) ? { lastEventAt: optionalIso(row.last_event_at) } : {}),
+          subscribedChannels: count(row.subscribed_channels),
+          subscriptions: count(row.subscriptions),
+        },
         status: row.status,
         createdAt: iso(row.created_at),
         ...(optionalIso(row.last_checked_at) ? { lastCheckedAt: optionalIso(row.last_checked_at) } : {}),

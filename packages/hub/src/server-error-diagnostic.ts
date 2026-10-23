@@ -1,4 +1,6 @@
 import { replaceControlCharacters } from "@xmatrix/protocol";
+import { reportError } from "@xmatrix/protocol/error-reporting";
+import { databaseFailureEvidence } from "@xmatrix/db";
 const DIAGNOSTIC_TEXT_LIMIT = 1_000;
 const DIAGNOSTIC_STACK_LIMIT = 4_000;
 const DIAGNOSTIC_CAUSE_LIMIT = 4;
@@ -62,7 +64,14 @@ export function captureServerErrorDiagnostic(
     });
     current = errorCause(current);
   }
-  console.error("xMatrix server operation failed", {
+  const attempts = databaseFailureEvidence(error);
+  // Capture the exception itself: console normalization replaces nested causes
+  // with [Array] and retains only this reporting function's synthetic stack.
+  reportError(error, { operation: boundedDiagnosticText(event, 160), ids: {
+    diagnosticId,
+    ...(attempts.length ? { database_failure_attempts: JSON.stringify(attempts) } : {}),
+  } });
+  console.warn("xMatrix server operation failed", {
     event: boundedDiagnosticText(event, 160),
     ...safeContext,
     diagnosticId,

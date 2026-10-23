@@ -5,6 +5,11 @@ The Hub requires an actual login session created within ten minutes, the account
 the literal `DELETE`, and explicit acknowledgement. Refreshing a JWT is not reauthentication.
 Agents cannot initiate deletion. All verification and erasure tests use isolated accounts.
 
+Space owners/admins can separately delete a Channel and its data through its
+confirmed deletion action; see [Channel deletion](channel-deletion.md). This does
+not automatically erase personal data copied into independently retained Pages
+or other shared content, and does not close the acceptance gap below.
+
 ## Authority and ordering
 
 `control.account_deletion_requests` on the directory database is the sole decision authority.

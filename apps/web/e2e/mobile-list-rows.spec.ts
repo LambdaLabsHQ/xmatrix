@@ -1,3 +1,4 @@
+import { FIXTURE_AGENT_REGISTRATION } from "./workspace-fixtures";
 import { expect, test, type Locator, type Page } from "./fixtures";
 import { fixtureJson } from "./in-page-api-fixtures";
 import { E2E_CHANNEL, E2E_DESKTOP_CONTEXT, E2E_MOBILE_CONTEXT, E2E_NOW, E2E_SPACE, installWorkspaceStubs } from "./workspace-fixtures";
@@ -96,7 +97,7 @@ test.describe("a phone's list rows", () => {
         ...E2E_CHANNEL,
         members: ["agent:codex"],
         lastMessage: { from: { kind: "user", label: "Yiming" }, bodyPreview: "Keep the message preview", sentAt: now },
-        memberPresence: { "agent:codex": { kind: "agent", label: "codex", instances: [1, 2].map(id => ({
+        memberPresence: { "agent:codex": { registration: FIXTURE_AGENT_REGISTRATION, kind: "agent", label: "codex", instances: [1, 2].map(id => ({
           id: `instance-${id}`, channelInstanceId: String(id), label: `codex:${id}`, channelId: E2E_CHANNEL.id,
           connectedAt: now, lastSeenAt: now, status: "busy", intent,
           runtimeState: { status: "running", activeChannelId: E2E_CHANNEL.id },
@@ -214,7 +215,7 @@ test.describe("a phone's list rows", () => {
     expect((await edges(setting.locator("svg").first())).left).toBeCloseTo(line.start, 0);
   });
   test("carry who is here as 20px faces on the second line, under a time centred on the title line", async ({ page }) => {
-    const presence = Object.fromEntries([0, 1, 2, 3].map((index) => [`agent:codex-${index}`, { kind: "agent", status: "busy",
+    const presence = Object.fromEntries([0, 1, 2, 3].map((index) => [`agent:codex-${index}`, { registration: FIXTURE_AGENT_REGISTRATION, kind: "agent", status: "busy",
       label: `Codex ${index}`, instances: [{ id: `instance-codex-${index}`, channelInstanceId: `${index + 1}`,
         label: `codex:${index + 1}`, connectedAt: E2E_NOW, lastSeenAt: E2E_NOW, status: "busy" }] }]));
     await installWorkspaceStubs(page, { spaces: [E2E_SPACE], channels: [{ ...E2E_CHANNEL, memberPresence: presence }] } as never);

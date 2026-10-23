@@ -158,14 +158,17 @@ export class PostgresSpacePlacementDirectory {
 
   /**
    * The Space's placement when its own shard accepts writes: active and not
-   * moving to another shard. Otherwise throws `unavailable()`.
+   * moving to another shard. Otherwise throws `unavailable()`, or
+   * `notFound()` when the Space has no directory row.
    */
   async resolveWritable(
     context: Omit<DatabaseRequestContext, "placement">,
     spaceIdValue: string,
     unavailable: () => Error,
+    notFound: () => Error = () => new DatabaseContractError("Space placement is unavailable"),
   ): Promise<SpacePlacement> {
-    const found = await this.resolve(context, spaceIdValue);
+    const found = await this.find(context, spaceIdValue);
+    if (!found) throw notFound();
     if (found.state !== "active" || found.targetShardId !== null) throw unavailable();
     return found;
   }

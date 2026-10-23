@@ -1,5 +1,7 @@
-import type { Page } from "@playwright/test";
+import { FIXTURE_AGENT_REGISTRATION } from "./workspace-fixtures";
+import type { Locator, Page } from "@playwright/test";
 import { expect, test } from "./fixtures";
+import { channelHistory, openWorkingAgentsSpace, workingAgentsSpace } from "./working-agents-fixtures";
 import {
   E2E_CHANNEL,
   E2E_DESKTOP_CONTEXT,
@@ -69,7 +71,7 @@ test("activity folds per run, anyone else's entry breaks the run, and talk stays
     lastMessageSequence: messages.length,
     updatedAt: at(36),
     memberPresence: {
-      "agent:claude": { kind: "agent", status: "busy", label: "claude", instances: [{
+      "agent:claude": { registration: FIXTURE_AGENT_REGISTRATION, kind: "agent", status: "busy", label: "claude", instances: [{
         id: "instance-claude-1", channelInstanceId: "1", label: "claude:1", connectedAt: at(0),
         lastSeenAt: at(36), status: "busy", intent: "Writing the Web part" }] },
     },
@@ -109,7 +111,7 @@ async function openWaitingChannel(page: Page, waiting: Record<string, unknown>, 
     lastMessageSequence: 1,
     updatedAt: seen,
     memberPresence: {
-      "agent:claude": { kind: "agent", status: "busy", label: "claude", instances: [{
+      "agent:claude": { registration: FIXTURE_AGENT_REGISTRATION, kind: "agent", status: "busy", label: "claude", instances: [{
         id: "instance-claude-1", channelInstanceId: "1", label: "claude:1", connectedAt: seen,
         lastSeenAt: seen, status: "busy", runtimeState: { status: "running", waiting },
         ...(usage ? { usage } : {}) }] },
@@ -124,6 +126,93 @@ function boxesOverlap(a: { x: number; y: number; width: number; height: number }
     && a.y < b.y + b.height - 1 && a.y + a.height > b.y + 1;
 }
 
+function runningLoops(decoration: Locator) {
+  return decoration.evaluate(node => node.getAnimations().filter(animation =>
+    animation.playState === "running" && animation.effect?.getTiming().iterations === Infinity).length);
+}
+
+/** Compare painted phases without coupling the owner to CSS or native clocks. */
+async function paintedLoopFrames(decoration: Locator, times: [number, number]): Promise<[Buffer, Buffer]> {
+  const loops = await decoration.evaluateHandle(node => node.getAnimations().filter(animation =>
+    animation.playState === "running" && animation.effect?.getTiming().iterations === Infinity));
+  const frames: Buffer[] = [];
+  try {
+    expect(await loops.evaluate(animations => animations.length)).toBeGreaterThan(0);
+    for (const time of times) {
+      await loops.evaluate((animations, time) => {
+        for (const animation of animations) {
+          animation.pause();
+          animation.currentTime = time;
+        }
+      }, time);
+      frames.push(await decoration.screenshot({ animations: "allow" }));
+    }
+    return [frames[0]!, frames[1]!];
+  } finally {
+    await loops.evaluate(animations => { for (const animation of animations) animation.play(); });
+    await loops.dispose();
+  }
+}
+
+test("avatar status stays still while live work and rest states change", async ({ page }) => {
+  const space = workingAgentsSpace(1, "static-status");
+  const agent = space.agents[0]!;
+  const messages = channelHistory(1, "static-status", () => "Working now").map(message => ({ ...message,
+    from: { kind: "agent", identityId: agent.id, label: agent.name, userId: agent.userId, email: agent.email,
+      instanceId: agent.instances[0]!.id, instanceLabel: agent.instances[0]!.label, channelInstanceId: "1" },
+  }));
+  const send = await openWorkingAgentsSpace(page, space, messages, "Working now");
+  const avatar = page.locator(".app-message-timeline .message-author-avatar");
+  const dot = avatar.locator(".identity-avatar-status");
+  const face = avatar.locator(".identity-avatar-face");
+  const still = async () => {
+    await expect.poll(() => avatar.evaluate(node =>
+      Array.from(node.querySelectorAll(".identity-avatar-face, .identity-avatar-status"))
+        .flatMap(element => element.getAnimations())
+        .filter(animation => animation.effect?.getTiming().iterations === Infinity).length)).toBe(0);
+    await expect(dot).toHaveCSS("opacity", "1");
+  };
+  const report = (status: string, extra: object = {}) => {
+    const instance = { ...agent.instances[0]!, status, ...extra, lastSeenAt: new Date().toISOString() };
+    send({ type: "enhanced_presence", agent: { ...agent, status, instances: [instance] } });
+    send({ type: "channel_updated", channel: { ...space.channels[0], memberPresence: {
+      [agent.id]: { registration: FIXTURE_AGENT_REGISTRATION, kind: "agent", label: agent.name, status, instances: [instance] },
+    } } });
+  };
+
+  await expect(dot).toBeVisible();
+  await expect(avatar).toHaveAttribute("aria-label", /busy/);
+  await expect(dot).toHaveCSS("background-color", "oklch(0.769 0.188 70.08)");
+  await still();
+  report("busy", { runtimeState: { status: "running", waiting: { kind: "tool", sinceMillis: Date.now() } } });
+  await expect(avatar).toHaveAttribute("aria-label", /waiting on a tool/);
+  expect(await dot.evaluate(node => getComputedStyle(node).boxShadow)).not.toBe("none");
+  await still();
+
+  report("offline", { rest: "waking" });
+  await expect(avatar).toHaveAttribute("data-rest", "waking");
+  await expect(face).toHaveCSS("opacity", "0.55");
+  expect(await dot.evaluate(node => getComputedStyle(node).boxShadow)).not.toBe("none");
+  expect(await face.evaluate(node => getComputedStyle(node).filter)).toContain("grayscale(1)");
+  await still();
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await still();
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await still();
+
+  report("idle");
+  await expect(avatar).toHaveAttribute("aria-label", /idle/);
+  await expect(dot).toHaveCSS("background-color", "oklch(0.696 0.17 162.48)");
+  await expect(face).toHaveCSS("opacity", "1");
+  await expect(face).toHaveCSS("filter", "none");
+  await still();
+  send({ type: "channel_updated", channel: { ...space.channels[0], memberPresence: {} } });
+  send({ type: "agent_lifecycle", channelId: space.channelId(0), agentId: agent.id,
+    instanceId: agent.instances[0]!.id, status: "offline", layer: "agent", ts: new Date().toISOString() });
+  await expect(avatar).toBeVisible();
+  await expect(dot).toHaveCount(0);
+});
+
 test("a waiting Instance grows into an island that says what it waits on and for how long", async ({ page }) => {
   await openWaitingChannel(page, { kind: "tool", label: "Wait for CI on PR #3781", details: ["gh pr checks 3781 --watch"],
     sinceMillis: Date.now() - 8 * 60_000 - 5_000 });
@@ -136,7 +225,11 @@ test("a waiting Instance grows into an island that says what it waits on and for
   await expect(island.locator(".app-agent-work-intent")).toHaveAttribute("aria-label", "Waiting: Wait for CI on PR #3781 · 8m");
   // The words say what it waits on, so the face drops its hollow waiting ring.
   await expect(island.locator(".identity-avatar-status")).toBeHidden();
-  await expect(island.locator(".app-agent-work-intent-ring")).toBeVisible();
+  const ring = island.locator(".app-agent-work-intent-ring");
+  await expect(ring).toBeVisible();
+  await expect.poll(() => runningLoops(ring)).toBe(1);
+  const [earlyRing, laterRing] = await paintedLoopFrames(ring, [0, 400]);
+  expect(earlyRing.equals(laterRing)).toBe(false);
 
   const disc = await island.locator(".app-agent-work-avatar").boundingBox();
   const face = await island.locator(".identity-avatar-face").boundingBox();
@@ -154,18 +247,121 @@ test("a waiting Instance grows into an island that says what it waits on and for
     const own = getComputedStyle(node);
     const disc = getComputedStyle(node.querySelector(".app-agent-work-avatar")!);
     const face = getComputedStyle(node.querySelector(".identity-avatar-face")!);
-    const words = getComputedStyle(node.querySelector(".app-agent-work-intent-main > .truncate")!);
     return { islandImage: own.backgroundImage, islandBackdrop: own.backdropFilter,
-      discBackdrop: disc.backdropFilter, discShadow: disc.boxShadow, faceBackdrop: face.backdropFilter,
-      wordsImage: words.backgroundImage, wordsClip: words.backgroundClip, wordsAnimation: words.animationName };
+      discBackdrop: disc.backdropFilter, discShadow: disc.boxShadow, faceBackdrop: face.backdropFilter };
   });
   expect(material.islandImage).not.toContain("url(");
   expect(material.islandBackdrop).not.toBe("none");
-  expect(material).toMatchObject({ discBackdrop: "none", discShadow: "none", faceBackdrop: "none",
-    wordsClip: "text", wordsAnimation: "app-agent-work-intent-shimmer" });
-  expect(material.wordsImage).toContain("linear-gradient");
+  expect(material).toMatchObject({ discBackdrop: "none", discShadow: "none", faceBackdrop: "none" });
+
+  const words = island.locator(".app-agent-work-intent-main > .truncate");
+  await expect(words).toHaveText("Wait for CI on PR #3781");
+  const wordBox = await words.boundingBox();
+  let inkPass = 0;
+  const inkFrames = async () => {
+    const pass = inkPass++;
+    const frames: Buffer[] = [];
+    for (const time of [550, 1100]) {
+      await words.evaluate((node, at) => {
+        for (const animation of node.getAnimations({ subtree: true })) {
+          animation.pause();
+          animation.currentTime = at;
+        }
+      }, time);
+      frames.push(await words.screenshot({ animations: "allow", path: test.info().outputPath(`ink-${pass}-${time}.png`) }));
+    }
+    return frames;
+  };
+  // The illumination moves over stationary, clipped words. Its CSS/SVG
+  // mechanism is deliberately free to change without changing this behavior.
+  const [earlyInk, middleInk] = await inkFrames();
+  expect(earlyInk.equals(middleInk)).toBe(false);
+  expect(await words.boundingBox()).toEqual(wordBox);
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await expect.poll(() => runningLoops(ring)).toBe(0);
+  const [steadyInk, laterInk] = await inkFrames();
+  expect(steadyInk.equals(laterInk)).toBe(true);
+  expect(await words.boundingBox()).toEqual(wordBox);
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await expect.poll(() => runningLoops(ring)).toBe(1);
 
   await page.locator(".app-agent-work-dock").screenshot({ path: test.info().outputPath("waiting-island.png") });
+});
+
+test("off-strip work islands rest and resume as scrolling brings them into view", async ({ page }) => {
+  const space = workingAgentsSpace(10, "island-scroll", {
+    focusedInstances: 10, intent: "Review channel rendering and message performance",
+  });
+  await openWorkingAgentsSpace(page, space, channelHistory(40, "island-scroll", row => `Work message ${row}`),
+    "Work message 40");
+  const strip = page.locator(".app-agent-work-scroller");
+  const items = strip.locator(":scope > .app-agent-work-item");
+  await expect(items).toHaveCount(10);
+  const running = (index: number) => items.nth(index).evaluate(node =>
+    node.getAnimations({ subtree: true }).filter(animation => animation.playState === "running" &&
+      animation.effect?.getTiming().iterations === Infinity).length);
+  const ringRunning = (index: number) => runningLoops(items.nth(index).locator(".app-agent-work-intent-ring"));
+  const ink = (index: number) => items.nth(index).locator(".app-agent-work-intent-ink");
+  const inkClocks = (index: number) => ink(index).evaluate(node => node.getAnimations({ subtree: true }).map(animation => ({
+    state: animation.playState, pending: animation.pending,
+    currentTime: typeof animation.currentTime === "number" ? animation.currentTime : null,
+    startTime: typeof animation.startTime === "number" ? animation.startTime : null,
+  })));
+  const expectInkClock = async (index: number, state: "running" | "paused") => {
+    await expect.poll(() => inkClocks(index)).toEqual([0, 1].map(() => ({
+      state, pending: false, currentTime: expect.any(Number),
+      startTime: state === "running" ? expect.any(Number) : null,
+    })));
+    const clocks = await inkClocks(index);
+    expect(clocks[0]!.startTime).toBe(clocks[1]!.startTime);
+    expect(clocks[0]!.currentTime).toBe(clocks[1]!.currentTime);
+    return clocks;
+  };
+  const expectActiveEnd = async (visible: number, clipped: number) => {
+    await expect.poll(() => running(visible)).toBeGreaterThan(0);
+    await expect.poll(() => running(clipped)).toBe(0);
+    await expect.poll(() => ringRunning(visible)).toBe(1);
+    await expect.poll(() => ringRunning(clipped)).toBe(0);
+  };
+  await expectActiveEnd(0, 9);
+  await expectInkClock(0, "running");
+  const firstInk = await ink(0).evaluateHandle(node => ({ node, animations: node.getAnimations({ subtree: true }) }));
+  const stripBox = await strip.boundingBox();
+  const lastBox = await items.last().boundingBox();
+  if (!stripBox || !lastBox) throw new Error("work strip is not laid out");
+  expect(lastBox.x).toBeGreaterThanOrEqual(stripBox.x + stripBox.width);
+
+  // Reveal half of the last timer. A partially painted decoration runs; an
+  // entirely clipped one rests. The strip keeps its overflowing controls.
+  await strip.evaluate(node => {
+    const ring = node.lastElementChild!.querySelector(".app-agent-work-intent-ring")!.getBoundingClientRect();
+    node.scrollLeft += ring.right - node.getBoundingClientRect().left - node.clientWidth - ring.width / 2;
+  });
+  await expectActiveEnd(9, 0);
+  // The previously visible pair keeps one held phase while the strip paints
+  // twice. The last island may create its clocks only on this first reveal.
+  const heldInk = await expectInkClock(0, "paused");
+  await page.evaluate(() => new Promise<void>(resolve => {
+    requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+  }));
+  expect(await inkClocks(0)).toEqual(heldInk);
+  await expectInkClock(9, "running");
+  const partial = await items.last().boundingBox();
+  expect(partial!.x).toBeLessThan(stripBox.x + stripBox.width);
+  expect(partial!.x + partial!.width).toBeGreaterThan(stripBox.x + stripBox.width);
+  await items.last().locator(".app-agent-work-avatar").hover();
+  await expect(items.last().locator(".app-agent-work-actions")).toHaveCSS("visibility", "visible");
+
+  await page.mouse.move(0, 0);
+  await strip.evaluate(node => { node.scrollLeft = 0; });
+  await expectActiveEnd(0, 9);
+  const resumedInk = await expectInkClock(0, "running");
+  expect(resumedInk[0]!.currentTime!).toBeGreaterThanOrEqual(heldInk[0]!.currentTime!);
+  expect(await firstInk.evaluate(({ node, animations }) => {
+    const current = node.getAnimations({ subtree: true });
+    return node.isConnected && current.length === animations.length && current.every((animation, index) => animation === animations[index]);
+  })).toBe(true);
+  await firstInk.dispose();
 });
 
 test("a usage limit sits on the face, clear of the island's words", async ({ page }) => {
@@ -206,7 +402,7 @@ test("three limited Instances keep the limit word under the face and the status 
     lastMessageSequence: 1,
     updatedAt: seen,
     memberPresence: {
-      "agent:claude": {
+      "agent:claude": { registration: { ownerUserId: "owner-1", machineId: "machine-1", harness: "claude" },
         kind: "agent", status: "online", label: "claude", avatarUrl: "/agent-vendors/claude.svg",
         instances: [1, 2, 3].map((number) => ({
           id: `instance-claude-${number}`, channelInstanceId: String(number), label: `claude:${number}`,

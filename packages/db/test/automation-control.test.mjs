@@ -359,7 +359,7 @@ test("Automation projection distinguishes delivered message IDs from Agent Run I
     assert.equal(task.lastMessageId, expected);
     assert.equal(Object.hasOwn(task, "lastMessageId"), expected !== undefined);
     assert.equal(task.deliveryCount, lastRunId ? 1 : 0);
-    assert.equal(task.lastRunId, lastRunId ?? undefined);
+    assert.equal(task.lastRunId, payloadVersion === 1 ? lastRunId ?? undefined : undefined);
   }
 });
 
@@ -420,8 +420,8 @@ test("scheduled occurrence maintenance materializes one due cadence in PostgreSQ
   const insert = db.calls.find((call) => call.name === "scheduled_occurrence_insert_v3");
   assert.ok(insert);
   assert.equal(insert.values[1], "task-1");
-  // The occurrence records the natural key it reserved in the Automation's Channel.
-  assert.deepEqual([insert.values[6], insert.values[7]], ["channel-1:7#1", "channel-1:7"]);
+  // Message delivery reserves no Run in the Automation's source Channel.
+  assert.deepEqual([insert.values[6], insert.values[7]], [null, null]);
   assert.equal(insert.values[9], "message");
   assert.equal(db.calls.some((call) => call.name === "automation_advance_v2"), true);
 });

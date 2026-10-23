@@ -92,7 +92,8 @@ it is not a mention, so it reads as the prose it looks like and starts nothing.
 ## A new conversation's first message
 
 A new conversation (a Channel still automatically named: the web's New
-conversation, or `xmatrix channel create` without a name) needs no mention to
+conversation, or `xmatrix channel create` without a name), or a discussion
+started from a page or selected message passage, needs no mention to
 start an Agent. People and Agents are treated alike: when its first message,
 whoever wrote it, summons nobody, the Hub asks Jev whether the author wants an
 Agent to start now (`START_INTENT_CATEGORIES`: `summon` or `conversation`) in
@@ -105,12 +106,21 @@ and it launches as the first message's author: the launch authority accepts a
 for the author of that message's recorded `start` decision. The message goes
 through the same post-commit pipeline as any summon: Jev chooses the model,
 directory and machine, the launch is prepared and delivered, and the reply
-shows the launch status and any refusal. There is no separate first-message
-launch path. `conversation`, missing Jev configuration and every refusal start
-nothing and post nothing, because the author never asked for an Agent;
-refusals other than `start_intent_declined` go to the Worker diagnostic log. A
+shows the launch status and any refusal. A preparation refusal also posts an
+idempotent Channel notice whose source is the system summon, without replying
+to that system message: only Human and Agent messages are reply targets.
+Once that notice commits, reconciliation can finish the summon. There is no
+separate first-message launch path. Committed notices also use the ordinary
+live Channel delivery path; a delivery failure does not undo the durable
+receipt or replay launch preparation. Before a harness is decided, `conversation`,
+missing Jev configuration and decision refusals start nothing and post nothing,
+because the author never asked for an Agent; decision refusals other than
+`start_intent_declined` go to the Worker diagnostic log. A
 first message with a mention or picker selection keeps the ordinary summon
-path, a named Channel is never asked, and later messages are never asked. The
+path, an ordinary named Channel is never asked, and later messages are never asked.
+Discussions keep their page or passage title: the recorded `fromPageId`, or
+`fromChannelId` together with `fromMessageId`, includes them in this same flow
+without enabling automatic renaming. The
 send answers first; Jev reads the message in the post-commit background work,
 so the author never waits on a judgement they did not ask for.
 
@@ -140,6 +150,17 @@ refusal's cause instead. Only a fresh first message, within the hold limit,
 opens its author's window: reopening an older conversation shows how its choice
 ended and never counts down or reports `shown` again. An Agent-authored first
 message has no window: Jev's reading decides at once and posts the same reply.
+
+The decision and its reply run in the background of the request that sent
+the first message, and that budget can run out before the reply's launch
+dispatches. So once the decision's row exists, the Channel's launch
+coordinator is told about it. A row that is not marked `summoned_at` 20
+seconds after its decision (or, if still undecided, after its deadline) is
+finished by the coordinator's `firstMessageSummon` step. The step posts the
+decided reply, or decides again from the message's own body and then posts.
+The decision is still written once and the reply keeps its derived id, so
+this never starts a second Agent. A row still unsummoned 15 minutes after it
+was created is given up.
 
 ## Routing and rollout
 

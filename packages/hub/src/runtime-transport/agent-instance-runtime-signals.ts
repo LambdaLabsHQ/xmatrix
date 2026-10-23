@@ -1,5 +1,4 @@
 import type { AgentInstanceClientMessage } from "@xmatrix/protocol/connections/agent-instance";
-import type { LiveAgentStatus } from "@xmatrix/protocol";
 
 import type { AgentInstanceRuntimeSession } from "./agent-instance-port";
 import { agentRuntimePresentation } from "./agent-instance-presentation";
@@ -44,6 +43,8 @@ export interface AgentInstanceControlResultBinding {
 export interface AgentInstanceControlResult extends AgentInstanceControlResultBinding {
   value?: string;
   error?: string;
+  /** The switch cancelled a turn that was running. */
+  interruptedTurn?: boolean;
 }
 
 export class AgentInstanceControlWaiterError extends Error {
@@ -101,23 +102,15 @@ export class AgentInstanceControlResultWaiterRegistry {
   }
 }
 
-export interface AgentInstanceEphemeralPresence {
-  status: LiveAgentStatus;
-  updatedAt: string;
-  payload: Readonly<Message<"presence_update">>;
-}
-
 /**
  * Zero-Authority-storage router for live Agent Instance signals.
  *
- * Network samples go only to Analytics Engine, presence is process-memory
- * state, and lifecycle/event messages are live fanout. Model/effort results
- * complete an exact process-memory waiter; this router never treats an
- * observability ledger as current-state authority.
+ * Network samples go only to Analytics Engine; presence, lifecycle and event
+ * messages are live fanout. Model/effort results complete an exact
+ * process-memory waiter; this router never treats an observability ledger as
+ * current-state authority.
  */
 export class AgentInstanceRuntimeSignalRouter {
-  private readonly presence = new Map<string, AgentInstanceEphemeralPresence>();
-
   constructor(
     private readonly analytics: RuntimeAnalyticsSink,
     private readonly fanout: AgentInstanceRuntimeFanout,
@@ -140,24 +133,19 @@ export class AgentInstanceRuntimeSignalRouter {
         // Human fan-out is done in AgentInstanceRuntimeTransport after execute
         // (needs the shared Human transport owned by product composition).
         return;
-      case "presence_update": {
-        const status = message.status ?? "online";
-        this.presence.set(session.run.instanceId, {
-          status,
-          updatedAt: new Date().toISOString(),
-          payload: Object.freeze({ ...message }),
-        });
+      case "presence_update":
         // Per-message execution sources require publication/Run validation on
         // the dedicated read path; generic presence must not expose their hashes.
         await this.fanout.publish(session, { ...message,
           ...(message.runtimeState ? { runtimeState: agentRuntimePresentation(message.runtimeState) } : {}) });
         return;
-      }
       case "agent_model_switch_result":
-        await this.completeControl(session, "model", message.requestId, message.model, message.error);
+        await this.completeControl(session, "model", message.requestId, message.model, message.error,
+          message.interruptedTurn === true);
         return;
       case "agent_effort_switch_result":
-        await this.completeControl(session, "effort", message.requestId, message.effort, message.error);
+        await this.completeControl(session, "effort", message.requestId, message.effort, message.error,
+          message.interruptedTurn === true);
         return;
       case "agent_lifecycle":
         if (message.channelId) this.assertChannel(session, message.channelId);
@@ -168,10 +156,6 @@ export class AgentInstanceRuntimeSignalRouter {
         await this.fanout.publish(session, message);
         return;
     }
-  }
-
-  disconnected(instanceId: string): void {
-    this.presence.delete(instanceId);
   }
 
   private assertChannel(session: Readonly<AgentInstanceRuntimeSession>, channelId: string): void {
@@ -186,6 +170,7 @@ export class AgentInstanceRuntimeSignalRouter {
     requestId: string,
     value: string | undefined,
     error: string | undefined,
+    interruptedTurn: boolean,
   ): Promise<void> {
     if ((!value || !value.trim()) && (!error || !error.trim())) {
       throw new Error(`${kind} switch result requires a value or error`);
@@ -199,6 +184,7 @@ export class AgentInstanceRuntimeSignalRouter {
       requestId,
       ...(value ? { value } : {}),
       ...(error ? { error } : {}),
+      ...(interruptedTurn ? { interruptedTurn } : {}),
     });
   }
 }

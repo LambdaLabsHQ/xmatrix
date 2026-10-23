@@ -18,6 +18,7 @@ use crate::{
 };
 
 type ConnectionEvent = agent_instance_connection::AgentInstanceConnectionEvent;
+use xmatrix_cli_core::page_co_write::PageCoWriteEvent;
 
 /// A runtime whose model, effort and harness parameters the channel controls.
 pub(crate) trait ChannelControlledRuntime {
@@ -40,6 +41,14 @@ pub(crate) trait ChannelControlledRuntime {
 
     /// The presence reported once a parameter control is answered.
     fn parameter_presence(&self) -> PresencePatch;
+
+    /// The harness parameters as the session holds them now.
+    fn parameter_catalog(&self) -> Vec<protocol::HarnessParameter>;
+
+    /// A local selection still awaiting provider confirmation.
+    fn pending_parameter_selection(&self, _id: &str) -> Option<String> {
+        None
+    }
 }
 
 /// What a vendor run loop acts on next.
@@ -95,14 +104,17 @@ pub(crate) struct RunLoopEvents<'a> {
     /// The channel whose last turn ended cancelled, until something answers it.
     interrupted_turn: Option<String>,
     /// A resume owed to `interrupted_turn` once a switch landed, with what was
-    /// selected.
+    /// selected. Only for a Hub that does not decide continuations.
     owed_resume: Option<(String, Vec<String>)>,
+    /// The turn a switch cancelled, by channel and the switches since, while
+    /// this loop waits for the Hub's continuation instruction.
+    awaiting_continuation: Option<(String, Vec<String>)>,
 }
 
 impl<'a> RunLoopEvents<'a> {
     /// Events for a loop that also ends on SIGTERM, SIGHUP or Ctrl-C. The
     /// signals are taken over only once the loop first waits for input.
-    pub(crate) fn new(
+    pub fn new(
         rx: mpsc::UnboundedReceiver<ConnectionEvent>,
         relay: &'a agent_instance_connection::AgentInstanceConnectionClient,
         auto_join_channel_id: Option<&'a str>,
@@ -118,6 +130,7 @@ impl<'a> RunLoopEvents<'a> {
             termination_signals: None,
             interrupted_turn: None,
             owed_resume: None,
+            awaiting_continuation: None,
         }
     }
 
@@ -158,6 +171,105 @@ impl<'a> RunLoopEvents<'a> {
         })
     }
 
+    /// The Hub's instruction to continue a turn a switch cancelled, when
+    /// `event` is one for this Instance: an `agent_switch_continuation` frame,
+    /// or, from an older Hub, a Channel message carrying it. It runs only while
+    /// this loop still owes that turn (one of its switches is named) and no
+    /// newer input waits; otherwise it is dropped (a Channel message is
+    /// acknowledged first). `None` for any other event.
+    fn continuation(&mut self, event: &ConnectionEvent) -> Option<Option<RunLoopInput>> {
+        let (channel_id, request_ids, prompt) = match event {
+            ConnectionEvent::Server(
+                protocol::AgentInstanceServerMessage::AgentSwitchContinuation {
+                    channel_id,
+                    instance_id,
+                    request_ids,
+                    prompt,
+                },
+            ) => {
+                // The frame is addressed to this Instance alone; anything else
+                // about it is malformed or stale, and is no turn either way.
+                if self.agent.instance_id.as_deref() != Some(instance_id.as_str())
+                    || !protocol::switch_continuation_names_valid(instance_id, request_ids)
+                {
+                    return Some(None);
+                }
+                (channel_id, request_ids, prompt)
+            }
+            ConnectionEvent::Server(
+                protocol::AgentInstanceServerMessage::ChannelMessageReceived { message, .. }
+                | protocol::AgentInstanceServerMessage::ChannelHistoryReplay { message, .. },
+            ) => {
+                let instruction = protocol::channel_switch_continuation(message)?;
+                if self.agent.instance_id.as_deref() != Some(instruction.instance_id.as_str()) {
+                    return None;
+                }
+                let _ = self.relay.ack_channel_message(
+                    message.message_id.clone(),
+                    message.channel_id.clone(),
+                    message.sequence,
+                );
+                return Some(self.resume_if_owed(
+                    &message.channel_id,
+                    &instruction.request_ids,
+                    &message.body,
+                ));
+            }
+            _ => return None,
+        };
+        Some(self.resume_if_owed(channel_id, request_ids, prompt))
+    }
+
+    /// The resume a continuation names, while this loop still owes that turn
+    /// in `channel_id` and no newer channel delivery waits.
+    fn resume_if_owed(
+        &mut self,
+        channel_id: &str,
+        request_ids: &[String],
+        prompt: &str,
+    ) -> Option<RunLoopInput> {
+        let owed = self
+            .awaiting_continuation
+            .as_ref()
+            .is_some_and(|(awaited, switches)| {
+                awaited == channel_id && switches.iter().any(|id| request_ids.contains(id))
+            });
+        let superseded = self
+            .pending
+            .iter()
+            .any(is_channel_delivery_connection_event);
+        if !owed || superseded {
+            return None;
+        }
+        self.awaiting_continuation = None;
+        Some(RunLoopInput::Resume {
+            channel_id: channel_id.to_string(),
+            prompt: prompt.to_string(),
+        })
+    }
+
+    /// The Hub's instruction that this conversation co-write a page, or stop:
+    /// acknowledged and acted on here; it is no turn. Whether `event` was one.
+    fn page_co_write(&mut self, event: &ConnectionEvent) -> bool {
+        let ConnectionEvent::Server(
+            protocol::AgentInstanceServerMessage::ChannelMessageReceived { message, .. }
+            | protocol::AgentInstanceServerMessage::ChannelHistoryReplay { message, .. },
+        ) = event
+        else {
+            return false;
+        };
+        let Some(instruction) = protocol::channel_page_co_write(message) else {
+            return false;
+        };
+        let _ = self.relay.ack_channel_message(
+            message.message_id.clone(),
+            message.channel_id.clone(),
+            message.sequence,
+        );
+        crate::runtime_page_co_write::follow(self.relay, &message.channel_id, &instruction);
+        true
+    }
+
     async fn next_event(&mut self) -> Option<ConnectionEvent> {
         if self.watch_termination {
             let signals = self
@@ -183,12 +295,56 @@ impl<'a> RunLoopEvents<'a> {
             if let Some(resume) = self.take_ready_resume() {
                 return Some(resume);
             }
-            let event = self.next_event().await?;
-            let event = match answer_switch_request(relay, runtime, event).await {
+            let event = match self.next_event().await? {
+                // The page this conversation co-writes asks for the Agent's next turn: it runs
+                // as a resume of that conversation, whatever the harness. An interrupt that
+                // arrives with no turn running has nothing to stop.
+                ConnectionEvent::PageCoWrite(PageCoWriteEvent::Turn {
+                    channel_id,
+                    turn,
+                    prompt,
+                }) => {
+                    // The page asked again while other work ran: only its newest ask is
+                    // answered, since each one says how the page is now.
+                    if self.pending.iter().any(|event| {
+                        matches!(event, ConnectionEvent::PageCoWrite(PageCoWriteEvent::Turn {
+                            channel_id: newer, ..
+                        }) if *newer == channel_id)
+                    }) {
+                        continue;
+                    }
+                    crate::runtime_page_co_write::turn_queued(&channel_id, turn);
+                    return Some(RunLoopInput::Resume { channel_id, prompt });
+                }
+                ConnectionEvent::PageCoWrite(PageCoWriteEvent::Interrupt { .. }) => continue,
+                // What the Agent wrote into a page from this conversation did not all reach it:
+                // it hears why, as the conversation's next turn.
+                ConnectionEvent::PageCoWrite(PageCoWriteEvent::Outcome { channel_id, prompt }) => {
+                    return Some(RunLoopInput::Resume { channel_id, prompt });
+                }
+                event => event,
+            };
+            if self.page_co_write(&event) {
+                continue;
+            }
+            let interrupted = self.interrupted_turn.is_some();
+            let event = match answer_switch_request(relay, runtime, event, interrupted).await {
                 SwitchAnswer::NotASwitch(event) => *event,
+                // The Hub decides whether the cancelled turn continues and
+                // words its input; this loop waits for that instruction.
+                SwitchAnswer::Switched { request_id, .. }
+                    if relay.hub_accepts(SWITCH_CONTINUATION) =>
+                {
+                    if let Some(channel_id) = self.interrupted_turn.take() {
+                        self.awaiting_continuation = Some((channel_id, vec![request_id]));
+                    } else if let Some((_, switches)) = self.awaiting_continuation.as_mut() {
+                        switches.push(request_id);
+                    }
+                    continue;
+                }
                 // A refused switch cancelled the turn all the same, so the
                 // work resumes either way, on whatever is selected now.
-                SwitchAnswer::Switched(selection) => {
+                SwitchAnswer::Switched { selection, .. } => {
                     if let Some(channel_id) = self.interrupted_turn.take() {
                         self.owed_resume = Some((channel_id, Vec::new()));
                     }
@@ -200,6 +356,12 @@ impl<'a> RunLoopEvents<'a> {
                     continue;
                 }
             };
+            if let Some(continuation) = self.continuation(&event) {
+                match continuation {
+                    Some(resume) => return Some(resume),
+                    None => continue,
+                }
+            }
             if !is_channel_delivery_connection_event(&event) {
                 return Some(RunLoopInput::Event(Box::new(event)));
             }
@@ -215,14 +377,25 @@ impl<'a> RunLoopEvents<'a> {
                 continue;
             };
             if let Some(command) = crate::single_message_parameter_control(&messages, agent) {
+                let requested = command.clone();
                 let outcome = runtime
                     .parameter_control(command, &messages[0], agent)
                     .await;
                 ack_inbound_channel_messages(relay, &messages);
                 send_presence(relay, Some("idle"), runtime.parameter_presence());
-                let notice =
-                    outcome.unwrap_or_else(|error| format!("Parameter control failed: {error}"));
-                let _ = relay.send_channel_message(channel_id, notice).await;
+                crate::harness_parameters::report_parameter_control(
+                    relay,
+                    &channel_id,
+                    &messages[0].message_id,
+                    &requested,
+                    &runtime.parameter_catalog(),
+                    requested
+                        .as_ref()
+                        .ok()
+                        .and_then(|(id, _)| runtime.pending_parameter_selection(id)),
+                    outcome,
+                )
+                .await;
                 continue;
             }
             let passthrough = crate::single_message_slash_passthrough(&messages, agent);
@@ -230,6 +403,7 @@ impl<'a> RunLoopEvents<'a> {
             // resumed behind it.
             self.interrupted_turn = None;
             self.owed_resume = None;
+            self.awaiting_continuation = None;
             return Some(RunLoopInput::Delivery {
                 channel_id,
                 messages,
@@ -242,9 +416,19 @@ impl<'a> RunLoopEvents<'a> {
 enum SwitchAnswer {
     NotASwitch(Box<ConnectionEvent>),
     /// A switch was answered; carries what it selected, e.g. "model `x`",
-    /// or nothing when it was refused.
-    Switched(Option<String>),
+    /// or nothing when it was refused, and the request it answered.
+    Switched {
+        selection: Option<String>,
+        request_id: String,
+    },
 }
+
+/// The Hub capability that decides and words a switch's continuation.
+const SWITCH_CONTINUATION: &str = "switch_continuation";
+
+/// The runtime capability that takes that continuation as an
+/// `agent_switch_continuation` frame rather than a Channel message.
+pub(crate) const SWITCH_CONTINUATION_FRAME: &str = "switch_continuation_frame";
 
 /// Answer a model or effort switch request; any other event is handed back.
 ///
@@ -256,6 +440,7 @@ async fn answer_switch_request<R: ChannelControlledRuntime>(
     relay: &agent_instance_connection::AgentInstanceConnectionClient,
     runtime: &mut R,
     event: ConnectionEvent,
+    interrupted_turn: bool,
 ) -> SwitchAnswer {
     let (is_model, request_id, outcome) = match event {
         ConnectionEvent::Server(
@@ -283,22 +468,26 @@ async fn answer_switch_request<R: ChannelControlledRuntime>(
         }
         Err(error) => (None, Some(error)),
     };
-    let answer = SwitchAnswer::Switched(
-        selected
+    let answer = SwitchAnswer::Switched {
+        selection: selected
             .as_ref()
             .map(|selected| format!("{} `{selected}`", if is_model { "model" } else { "effort" })),
-    );
+        request_id: request_id.clone(),
+    };
+    let interrupted_turn = interrupted_turn.then_some(true);
     let _ = relay.send_message(if is_model {
         protocol::AgentInstanceClientMessage::AgentModelSwitchResult {
             request_id,
             model: selected,
             error,
+            interrupted_turn,
         }
     } else {
         protocol::AgentInstanceClientMessage::AgentEffortSwitchResult {
             request_id,
             effort: selected,
             error,
+            interrupted_turn,
         }
     });
     answer
@@ -307,7 +496,8 @@ async fn answer_switch_request<R: ChannelControlledRuntime>(
 /// Await a turn while relay events keep arriving. Each event goes to
 /// `on_event` first, which may act on it at once (interrupting the turn, say);
 /// unless it reports the event consumed, the event stays queued for the run
-/// loop.
+/// loop. Keep polling the turn while the handler waits: an interrupt can need
+/// the stdin writer still held by the turn's pending write.
 pub(crate) async fn await_turn_with_events<T>(
     turn: impl Future<Output = T>,
     event_rx: &mut mpsc::UnboundedReceiver<ConnectionEvent>,
@@ -322,8 +512,20 @@ pub(crate) async fn await_turn_with_events<T>(
             result = &mut turn => return result,
             event = event_rx.recv(), if relay_events_open => match event {
                 Some(event) => {
-                    if !on_event(&event).await {
+                    let (consumed, completed) = {
+                        let handling = on_event(&event);
+                        tokio::pin!(handling);
+                        tokio::select! {
+                            biased;
+                            consumed = &mut handling => (consumed, None),
+                            result = &mut turn => (handling.await, Some(result)),
+                        }
+                    };
+                    if !consumed {
                         pending_events.push_back(event);
+                    }
+                    if let Some(result) = completed {
+                        return result;
                     }
                 }
                 None => relay_events_open = false,

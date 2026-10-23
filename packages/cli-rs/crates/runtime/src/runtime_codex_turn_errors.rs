@@ -1,14 +1,10 @@
 // Codex/ZCode turn failures: which errors are fatal, which are worth retrying,
 // what the operator is told when one lands, and the reconnect accounting.
 
-use colored::Colorize;
 use serde_json::Value;
 
 use crate::runtime_presence_updates::TurnTrace;
-use crate::runtime_usage_limit::{UsageLimit, usage_limit_from_error};
-use crate::{
-    AgentLifecycleNotice, agent_instance_connection, protocol, truncate_chars, unix_millis_now,
-};
+use crate::{protocol, unix_millis_now};
 
 pub(crate) async fn send_codex_turn_failed_trace(
     trace: TurnTrace<'_>,
@@ -88,181 +84,8 @@ pub(crate) fn codex_turn_error_retryable_before_start(error: &str) -> bool {
         || lower.contains("codex app-server thread not initialized")
 }
 
-const TURN_FAILURE_DETAIL_MAX_CHARS: usize = 600;
-
-pub(crate) const AGENT_TURN_FAILURE_LIFECYCLE_LAYER: &str = "application";
-pub(crate) const AGENT_TURN_FAILURE_LIFECYCLE_STATUS: &str = "failed";
-pub(crate) const AGENT_TURN_FAILURE_LIFECYCLE_REASON: &str = "turn_failed";
-/// A turn failure because the provider account's usage limit is used up. Hub
-/// posts the same notice and hands the Instance's work to another harness.
-pub(crate) const AGENT_USAGE_LIMIT_LIFECYCLE_REASON: &str = "usage_limited";
-
-fn compact_notice_line(value: &str, max_chars: usize) -> String {
-    let compact = value
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .collect::<Vec<_>>()
-        .join(" ");
-    truncate_chars(&compact, max_chars)
-}
-
-/// The only runtime path that may mark a provider turn failed.
-///
-/// Hub persists the user-visible channel notice from this typed lifecycle
-/// signal. Adapters must not post a channel body themselves for turn failures.
-pub(crate) fn report_turn_failure(
-    relay: &agent_instance_connection::AgentInstanceConnectionClient,
-    channel_id: Option<&str>,
-    agent: &protocol::SerializedAgent,
-    error: &str,
-    runtime_restarting: bool,
-) {
-    report_turn_failure_with_usage_limit(relay, channel_id, agent, error, runtime_restarting, None);
-}
-
-/// The last usage-limited turn failure, until a turn completes again.
-///
-/// Hub hands the Instance off when it handles this signal, but the signal is
-/// sent once over a socket the Hub may drop mid-handling (a deploy resets its
-/// Durable Objects). A reconnect sends it again; Hub keys the notice and the
-/// handoff on its content, so a repeat that was already handled changes nothing.
-#[derive(Clone)]
-struct PendingUsageLimit {
-    agent_id: String,
-    channel_id: Option<String>,
-    detail: String,
-    resets_at: Option<String>,
-}
-
-static PENDING_USAGE_LIMIT: std::sync::Mutex<Option<PendingUsageLimit>> =
-    std::sync::Mutex::new(None);
-
-/// A completed turn shows the provider account runs again.
-pub(crate) fn clear_pending_usage_limit() {
-    if let Ok(mut pending) = PENDING_USAGE_LIMIT.lock() {
-        *pending = None;
-    }
-}
-
-/// Send this Agent's unresolved usage limit again on a new connection.
-pub(crate) fn resend_pending_usage_limit(
-    relay: &agent_instance_connection::AgentInstanceConnectionClient,
-    agent: &protocol::SerializedAgent,
-) {
-    let Some(pending) = PENDING_USAGE_LIMIT
-        .lock()
-        .ok()
-        .and_then(|pending| pending.clone())
-        .filter(|pending| pending.agent_id == agent.id)
-    else {
-        return;
-    };
-    crate::send_agent_lifecycle_with_reset(
-        relay,
-        pending.channel_id.as_deref(),
-        agent,
-        AgentLifecycleNotice {
-            layer: AGENT_TURN_FAILURE_LIFECYCLE_LAYER,
-            status: AGENT_TURN_FAILURE_LIFECYCLE_STATUS,
-            reason: Some(AGENT_USAGE_LIMIT_LIFECYCLE_REASON),
-            detail: (!pending.detail.is_empty()).then_some(pending.detail.as_str()),
-            snapshot: Some(protocol::AgentLifecycleSnapshot {
-                presence: None,
-                run: Some("failed".to_string()),
-                process: Some("online".to_string()),
-            }),
-            resets_at: pending.resets_at.as_deref(),
-        },
-    );
-}
-
-/// [`report_turn_failure`] for an adapter that observed the provider's own
-/// usage-limit signal; without one, the error text is classified.
-pub(crate) fn report_turn_failure_with_usage_limit(
-    relay: &agent_instance_connection::AgentInstanceConnectionClient,
-    channel_id: Option<&str>,
-    agent: &protocol::SerializedAgent,
-    error: &str,
-    runtime_restarting: bool,
-    usage_limit: Option<UsageLimit>,
-) {
-    let usage_limit = usage_limit.or_else(|| usage_limit_from_error(error));
-    let detail = compact_notice_line(error, TURN_FAILURE_DETAIL_MAX_CHARS);
-    crate::write_current_run_status(
-        "turn_failed",
-        false,
-        Some(if detail.is_empty() {
-            error
-        } else {
-            detail.as_str()
-        }),
-    );
-    if detail.is_empty() {
-        eprintln!("{} {error}", "⚠".yellow().bold());
-    } else {
-        eprintln!("{} {detail}", "⚠".yellow().bold());
-    }
-    if let Some(limit) = usage_limit.as_ref()
-        && let Ok(mut pending) = PENDING_USAGE_LIMIT.lock()
-    {
-        *pending = Some(PendingUsageLimit {
-            agent_id: agent.id.clone(),
-            channel_id: channel_id.map(str::to_string),
-            detail: detail.clone(),
-            resets_at: limit.resets_at.clone(),
-        });
-    }
-    crate::send_agent_lifecycle_with_reset(
-        relay,
-        channel_id,
-        agent,
-        AgentLifecycleNotice {
-            layer: AGENT_TURN_FAILURE_LIFECYCLE_LAYER,
-            status: AGENT_TURN_FAILURE_LIFECYCLE_STATUS,
-            reason: Some(if usage_limit.is_some() {
-                AGENT_USAGE_LIMIT_LIFECYCLE_REASON
-            } else {
-                AGENT_TURN_FAILURE_LIFECYCLE_REASON
-            }),
-            detail: (!detail.is_empty()).then_some(detail.as_str()),
-            snapshot: Some(protocol::AgentLifecycleSnapshot {
-                presence: None,
-                run: Some("failed".to_string()),
-                process: Some(
-                    if runtime_restarting {
-                        "reconnecting"
-                    } else {
-                        "online"
-                    }
-                    .to_string(),
-                ),
-            }),
-            resets_at: usage_limit
-                .as_ref()
-                .and_then(|limit| limit.resets_at.as_deref()),
-        },
-    );
-}
-
 pub(crate) fn codex_app_error_message(params: &Value) -> String {
-    for key in ["message", "error", "detail", "reason"] {
-        if let Some(message) = params.get(key).and_then(Value::as_str) {
-            let message = message.trim();
-            if !message.is_empty() {
-                return message.to_string();
-            }
-        }
-    }
-    if let Some(error) = params.get("error")
-        && let Some(message) = codex_app_error_message_from_value(error)
-    {
-        return message;
-    }
-    if let Some(message) = codex_app_error_message_from_value(params) {
-        return message;
-    }
-    params.to_string()
+    crate::runtime_failure_detail::provider_error_detail(params)
 }
 
 pub(crate) fn zcode_message_id_matches(value: Option<&Value>, expected: &str) -> bool {
@@ -391,27 +214,6 @@ pub(crate) fn zcode_goal_active_input_id(value: &Value) -> Option<String> {
 
 pub(crate) fn zcode_app_error_message(params: &Value) -> String {
     codex_app_error_message(params)
-}
-
-fn codex_app_error_message_from_value(value: &Value) -> Option<String> {
-    match value {
-        Value::String(message) => {
-            let message = message.trim();
-            (!message.is_empty()).then(|| message.to_string())
-        }
-        Value::Object(map) => {
-            for key in ["message", "error", "detail", "reason"] {
-                if let Some(message) = map.get(key).and_then(Value::as_str) {
-                    let message = message.trim();
-                    if !message.is_empty() {
-                        return Some(message.to_string());
-                    }
-                }
-            }
-            None
-        }
-        _ => None,
-    }
 }
 
 pub(crate) fn codex_app_error_is_transient_transport(error: &str) -> bool {

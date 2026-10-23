@@ -10,6 +10,7 @@ import {
   SpaceControlError,
 } from "../dist/space-control.js";
 import { activePlacementRow, recordingDatabase as database } from "./recording-database.fixture.mjs";
+import { spaceBilling } from "@xmatrix/billing";
 
 function spaceMutationRow(version) {
   return { space_id: "space-1", owner_user_id: "owner-1", name: "One", metadata_json: {},
@@ -62,6 +63,26 @@ test("Space authority closes only new-Space admission while the shard drains", a
   assert.equal(db.calls.some((call) => call.name === "space_search_rank_allocate_v1"), false);
 });
 
+test("a Space the billing policy refuses is not created, and the policy is told whose it would be", async () => {
+  const db = database((query) => query.name === "space_shard_admission_v1" ? [{ state: "active" }] : []);
+  const asked = [];
+  const repository = new PostgresSpaceControlRepository(db, "shard-0", { ...spaceBilling,
+    async spaceCreation(_transaction, input) {
+      asked.push(input);
+      return { code: "free_space_limit", status: 402, message: "Upgrade an existing Space to Pro or delete one to create another Free Space" };
+    } });
+  await assert.rejects(repository.createSpace({
+    requestId: "request-refused", commandId: "command-refused", spaceId: "space-new",
+    ownerUserId: "user-1", name: "New", personalSpaceIds: ["personal-1"],
+  }), (error) => error instanceof SpaceControlError && error.code === "free_space_limit" && error.status === 402 &&
+    error.message === "Upgrade an existing Space to Pro or delete one to create another Free Space");
+  assert.deepEqual(asked.map(({ ownerUserId, personalSpaceIds }) => ({ ownerUserId, personalSpaceIds })),
+    [{ ownerUserId: "user-1", personalSpaceIds: ["personal-1"] }]);
+  for (const name of ["space_search_rank_allocate_v1", "space_placement_create_v1", "space_create_v2"]) {
+    assert.equal(db.calls.some((call) => call.name === name), false, name);
+  }
+});
+
 test("Space authority rejects a reused command id with another digest", async () => {
   const db = database((query) => query.name === "space_control_idempotency_read_v1"
     ? [{ command_kind: "create-space", request_digest: "0".repeat(64), result_json: { id: "space-1" } }]
@@ -79,6 +100,28 @@ test("Space authority rejects cached databases", () => {
     () => new PostgresSpaceControlRepository({ cacheMode: "cached" }, "shard-0"),
     (error) => error instanceof SpaceControlError && error.code === "cached_authority_forbidden",
   );
+});
+
+test("Channel listing preserves placement corruption, database failures and migration fences", async () => {
+  const driverError = Object.assign(new Error("query failed"), { code: "QUERY_READ_TIMEOUT" });
+  for (const scenario of ["blocked", "moving", "target", "malformed", "database"]) {
+    const db = database(() => {
+      if (scenario === "database") throw driverError;
+      const row = activePlacementRow();
+      if (scenario === "target") row.target_shard_id = "shard-1";
+      else if (scenario === "malformed") row.placement_epoch = 0;
+      else row.state = scenario;
+      return [row];
+    });
+    const repository = new PostgresSpaceControlRepository(db, "shard-0");
+    await assert.rejects(repository.listChannels({
+      requestId: "unavailable-space", spaceId: "space-1", principal: { kind: "user", id: "reader" },
+    }), (error) => scenario === "database" ? error === driverError
+      : scenario === "malformed" ? error instanceof DatabaseContractError
+      : error instanceof SpaceControlError && error.code === "space_placement_unavailable" &&
+        error.status === 503 && error.retryable === true);
+    assert.equal(db.calls.some((call) => call.context?.placement), false);
+  }
 });
 
 test("Channel catalog change audiences bind one revision to exact current Space members", async () => {
@@ -423,10 +466,10 @@ test("Space listing fans the global membership page into the routed physical sha
           metadata_json: {}, created_at: "2026-08-30T00:00:00.000Z",
           updated_at: "2026-08-30T00:00:00.000Z",
         }]
-    : query.name === "space_members_hydrate_v1"
+    : query.name === "space_members_hydrate_v2"
       ? [{
             space_id: "space-1", user_id: "user-1", role: "owner", version: 1,
-            email: null, display_name: null, avatar_url: null,
+            email: null, display_name: null,
             created_at: "2026-08-30T00:00:00.000Z",
           }]
         : query.name === "space_join_request_counts_hydrate_v1"
@@ -490,9 +533,8 @@ function channelMutationDatabase(respond) {
     if (query.name === "transfer_members_snapshot_v1") return transferTestSnapshot.members;
     if (query.name === "transfer_access_snapshot_v1") return [];
     if (query.name === "transfer_target_placement_fence_v1") return [{ space_id: "target" }];
-    if (query.name === "channel_mutation_admin_v1" || query.name === "channel_move_target_admin_v1") {
-      return [{ user_id: "u" }];
-    }
+    if (query.name === "channel_mutation_actor_role_v1") return [{ role: "admin" }];
+    if (query.name === "channel_move_target_admin_v1") return [{ user_id: "u" }];
     if (query.name === "channel_mutation_tree_v1") {
       return [{ ...channelRoot }];
     }

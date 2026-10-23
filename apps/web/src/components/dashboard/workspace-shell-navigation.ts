@@ -1,5 +1,17 @@
 "use client";
 
+/** One pushed-screen state for the mobile title bar and its layout clearance. */
+export function mobileBackState(view: AppView, input: {
+  channel: boolean; page: boolean; composing: boolean; conversationOverPage: boolean;
+}) {
+  const conversationOverPage = view === "pages" && input.channel && input.conversationOverPage;
+  const pageOpen = view === "pages" && input.page && !conversationOverPage;
+  const composingOpen = view === "messages" && input.composing;
+  const conversationOpen = (view === "messages" || conversationOverPage) && input.channel;
+  return { conversationOverPage, pageOpen, composingOpen, conversationOpen,
+    showBack: conversationOpen || pageOpen || composingOpen };
+}
+
 import {
   decodePathSegment,
 } from "./workspace-shell-path";
@@ -75,7 +87,7 @@ import {
 
 import type {
   ObservabilityEvent,
-  SerializedChannel,
+  ChannelSnapshot,
   SerializedSpace,
 } from "@xmatrix/protocol";
 
@@ -102,8 +114,8 @@ export const PENDING_CHANNEL_NAVIGATION_TTL_MS = 15_000;
    channel arrives. The pending id is returned so the row can stay highlighted
    while it waits. */
 export function usePendingChannelNavigation(
-  channels: SerializedChannel[],
-  channelsRef: MutableRefObject<SerializedChannel[]>,
+  channels: ChannelSnapshot[],
+  channelsRef: MutableRefObject<ChannelSnapshot[]>,
   navigateToChannel: (channelId: string, messageId?: string) => void
 ): {
   requestChannelNavigation: (channelId: string, messageId?: string) => void;
@@ -337,8 +349,9 @@ export function toolItemPath(viewPath: string, item: string | null): string {
 }
 
 /**
- * Platform admin's address also names its open user and each table's search,
- * sort, and page, so a filtered view can be shared: it keeps its whole query.
+ * Admin/search filters and Settings/Apps provider return parameters live in the
+ * query. Canonicalizing their Space path must preserve those parameters until
+ * the owning view consumes them.
  */
 export function adminViewPath(viewPath: string, location: string): string {
   const query = parseAppLocation(location).searchParams.toString();
@@ -362,7 +375,7 @@ export function pagesViewSelection(location: string): { pageId: string | null; c
 
 
 export function appViewPath(
-  channel: SerializedChannel | null,
+  channel: ChannelSnapshot | null,
   view: AppView,
   routeSpaceId: string | null,
   spaces: SerializedSpace[]
@@ -459,7 +472,7 @@ export function parseAppLocation(location: string): URL {
 
 export function notificationPathForEvent(
   event: ObservabilityEvent,
-  channels: SerializedChannel[],
+  channels: ChannelSnapshot[],
   spaces: SerializedSpace[],
   routeSpaceId: string | null
 ): string {

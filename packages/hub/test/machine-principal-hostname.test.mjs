@@ -30,7 +30,7 @@ test("new Machine credentials contain only owner and Machine scope, and legacy c
 test("Run credentials omit hostname while retaining their exact execution and permission scope", async () => {
   const scope = { agentId: "instance:one", agentName: "codex", runId: "run:one", executionKey: "execution:one",
     instanceId: "instance:one", spaceId: "space:one", channelId: "channel:one", machineId: "machine:one",
-    hostId: "old-host", permissions: [], runKind: "channel-instance", channelWriteAllowed: true };
+    hostId: "old-host", permissions: [] };
   const token = await signAgentRunToken(env, { id: "owner", email: principal.ownerEmail }, scope);
   const claims = decodeJwt(token).xmatrixAgentRun;
   assert.equal(Object.hasOwn(claims, "hostId"), false);

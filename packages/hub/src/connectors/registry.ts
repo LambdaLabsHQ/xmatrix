@@ -1,4 +1,4 @@
-import { connectorInteractionTarget, MessageInteractionRegistry, parseConnectorActionCommand } from "@xmatrix/protocol";
+import { connectorInteractionTarget, connectorOperationIds, MessageInteractionRegistry, parseConnectorActionCommand } from "@xmatrix/protocol";
 import { getAppConnectorProvider } from "../app-connectors";
 import type { ConnectorProvider } from "./provider";
 import { PLATFORM_CONNECTOR_PROVIDERS } from "./platform-providers";
@@ -11,12 +11,9 @@ const CONNECTOR_PROVIDERS: readonly ConnectorProvider[] = [githubConnectorProvid
  * store. Policy and credentials are rechecked by the selected executor. */
 export function connectorInteractionRegistry(): MessageInteractionRegistry {
   return new MessageInteractionRegistry(CONNECTOR_PROVIDERS.filter(provider => provider.commands).map(provider => {
-    const manifest = getAppConnectorProvider(provider.id);
     /* The registry keeps a bounded number of operations per target. The ones that control a connector come
        first, so no number of actions can push a Space admin's `policy` out of reach. */
-    const operations = new Set(["policy", ...(manifest?.events ? ["subscribe", "unsubscribe"] : []),
-      ...(manifest?.actions.map(action => action.id) ?? [])]);
-    return connectorInteractionTarget(provider.id, [...operations]);
+    return connectorInteractionTarget(provider.id, connectorOperationIds(getAppConnectorProvider(provider.id)));
   }));
 }
 

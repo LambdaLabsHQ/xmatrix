@@ -38,7 +38,7 @@ Channel message wakes it.
 | `interrupted` | A persistent, resumable registration Run exited without a stop and without a sleep (crash, machine or wrapper restart) | Yes | Greyed avatar with a warning badge |
 | `wake_failed` | A wake was refused or its resume failed; `rest_reason` holds the failure code and what the failing step said | No; only `:reborn` | Greyed avatar with a red warning badge; the dock tooltip shows the reason |
 | `stopped` | An exact stop succeeded (`@name:N:stop`, the dock Stop, `/kill all`, from a Human or an Agent), or a stop targeted an Instance that was already resting | No; only `:reborn` | Not in the dock or Channel list |
-| `NULL` | The Instance is live, or its offline state predates rest states, or its Run was never resumable (automation, the retired management agent, Channel About, startup failure) | No | Not shown |
+| `NULL` | The Instance is live, or its offline state predates rest states, or its Run was never resumable (automation, the retired management agent and Channel About Runs, startup failure) | No | Not shown |
 
 A live connection claim clears `rest_state` and `rest_reason`. A wake or reborn
 keeps them until the successor connects, so a waking Instance stays visible.
@@ -47,51 +47,75 @@ keeps them until the successor connects, so a waking Instance stays visible.
 or an Automation occurrence, and got past wrapper startup (its exit phase is not
 a startup-failure phase).
 
-## 2. Sleep (Machine Daemon)
+## 2. Sleep (Hub decides, daemon carries it out)
 
-The daemon already reads every managed Run's status sidecar on its two-second
-monitor tick. It puts a Run to sleep when all of the following hold:
+When an Instance sleeps is the Hub's decision; the daemon reports facts and
+carries the decision out after its own check.
 
-- the Run is persistent and resumable (has a resume session key). Every harness
-  is covered by default — Claude, Codex, Grok, Cursor, ACP, OpenCode, and any
-  other registration Run with a resume key;
-- its sidecar phase is a resting phase (`turn_completed`, `turn_failed`,
-  `turn_interrupted`, `relay_registered`, `channel_joined`, `model_selected`,
-  `effort_selected`, or any `*_app_ready`) and no task execution is in flight;
-- nothing happened for `XMATRIX_INSTANCE_IDLE_SLEEP_SECS` (default `1800`;
-  `0` disables sleep): the newest task-execution update, the wrapper-ready time
-  and the daemon-observed phase change are all older than the window;
-- the provider does not report an open watch / wait. The wrapper keeps the
-  count in the sidecar's `backgroundTasks`: Claude's stream opens a task with
-  `system/task_started` and closes it with its `system/task_notification`
-  (completed, failed or stopped); a CI wait or `Monitor` the Agent left running
-  keeps the count above zero and blocks sleep. Nonterminal `system/task_updated`
-  frames also open tasks, even when the stream never saw their start (for
-  example a resumed watch or pending task); only a terminal status closes them.
-  Outstanding work resets the idle window, and the daemon checks the current
-  task state again before stamping a sleep. Only an explicit positive count
-  holds the Run awake. `None` or `0` means no reported watch (Codex, Cursor,
-  ACP, Grok never emit task events; Claude writes `0` when its stream ends with
-  none open) and the Run may sleep. Nothing is inferred from the process tree,
-  because a background wait and a long-lived MCP server look the same there.
+The resting write and the Channel coordinator handoff are separate commits.
+If the handoff fails, the next presence retries it for the retained sleep
+deadline, even when the database write was already committed. It does not
+restart the idle window. A successful handoff deduplicates repeated presence;
+failures retain their original cause for diagnosis.
 
-Sleeping terminates the Run's process tree exactly like a retained stop
-(`worktreeDisposition: retain`), then reports `machine_run_exited` with
-`restReason: "sleeping"` and `statusPhase: "sleeping"`. A repo-pool slot becomes
-`Retained` on that exit as it does for any persistent Run.
+**Facts.** Every presence update the Run sends carries its live status and
+`runtimeState` (whether a turn runs, and the open waits it reports). The Hub
+treats the Run as resting when its status is not `busy`, no turn runs and
+nothing waits (`presenceRests` in `instance-idle-sleep.ts`). A watch, Monitor
+or CI wait the Agent left running keeps a wait open and the Run awake. The
+wrapper replays its latest presence on every reconnect, so a Hub restart
+re-learns every Run's state.
 
-A wrapper whose sidecar says `wrapper_startup_failed` and whose process is still
-alive has already failed; once it has sat there for 60 seconds the daemon
-terminates it and reports an ordinary exit (never `sleeping`).
+**Decision.** On a change of that resting fact, or of the runtime's own update
+time, the Hub writes `data.runs.idle_sleep_at` (migration
+`0191_expand_run_idle_sleep`, `markRunResting`):
 
-Older daemons never sleep a Run. Their exits classify as `interrupted` or `NULL`
-under §1, so a Hub update alone changes no running Instance.
+- resting, and the Run is running, resumable (§1) and not being stopped: the
+  sleep falls due 30 minutes later (`INSTANCE_IDLE_SLEEP_MS`). A Run that
+  already has a due time keeps it;
+- anything else (a new turn, a wait, a stop): the due time is withdrawn.
+
+The Channel's launch coordinator keeps its alarm at the earliest due time (the
+`idleSleep` step). When it fires, `reconcileIdleSleeps` reads at most 100 due
+Runs and hands each sleep to the existing durable machine command queue,
+fenced by Run id, execution key and Instance id. The complete Run id and
+deadline name one resting period; retries repeat the same command and the
+same 30-minute minimum idle duration. Only acceptance clears that exact
+deadline. Failed or uncertain handoffs remain due for coordinator recovery;
+a late acceptance cannot clear a newer resting period. Ended Runs and
+offline or incapable daemons keep the existing behavior of discarding the
+due sleep without issuing work.
+
+**Execution.** A daemon that advertises `machine_sleep_agent_v1` claims the
+command and checks its own facts first (`verify_hub_sleep`): the Run is the
+same execution and still resumable, its sidecar phase is a resting phase,
+no task execution is in flight, no background task count is positive, and its
+newest execution update and wrapper-ready time are not more recent than the
+Hub's idle time (60 seconds of slack). Any new work declines the sleep and the
+daemon reports why (`machine_sleep_result` with `slept: false`); the next turn
+re-arms the due time. Otherwise the daemon ends the process tree like a
+retained stop (`worktreeDisposition: retain`) and reports `machine_run_exited`
+with `restReason: "sleeping"` and `statusPhase: "sleeping"`. A repo-pool slot
+becomes `Retained` on that exit as it does for any persistent Run.
+
+The daemon decides one thing alone: a wrapper whose sidecar says
+`wrapper_startup_failed` and whose process is still alive has already failed;
+once it has sat there for 60 seconds the daemon terminates it and reports an
+ordinary exit (never `sleeping`).
+
+A daemon without the sleep capability gets no command (`sleep_unavailable`);
+its Runs rest on.
 
 ## 3. Wake (Hub)
 
 Every committed Human or Agent message goes through
 `dispatchProductMessagePostCommit`. With PostgreSQL launch authority that entry
-point now also runs `resting-instance-wake` for the message's Channel:
+point now also runs `resting-instance-wake` for the message's Channel.
+Committed Connector App messages enter the same wake authority directly, without
+interpreting their external bodies. Native events reach existing Channel
+Instances; action receipts restrict the wake to the authenticated calling
+Instance, recorded in Hub-only metadata. Human receipts and other system facts
+remain context. Live and catch-up App work queues behind any active turn:
 
 1. Messages that are themselves lifecycle controls (`/kill all`, `:stop`,
    `:reborn`, `:handoff:`) and Auto/harness launch requests (`@auto`, `@claude`,
@@ -135,7 +159,8 @@ reaches the closing socket rather than a resting Instance; it is caught up by
 the next wake, not the current one.
 
 A wake puts no chip on the waking message: that message did not ask for it.
-The Instance's own avatar pulses while it wakes.
+The Instance's own avatar stays greyed with a hollow grey status mark while
+it wakes.
 
 ## Launch requests are not broadcast assignments
 
@@ -171,8 +196,8 @@ The Web work dock (`buildAgentWorkItems`) and the Channel list avatars
 (`channelOnlineAgentAvatarItems`) use one predicate, `isChannelResidentInstance`
 (live, or resting). Resting avatars keep their birth-order position, render
 greyed with a moon (sleeping), amber warning (interrupted) or red warning
-(wake failed) badge, and pulse while waking. Their tooltip says that any message wakes them. Stopped Instances leave
-both surfaces.
+(wake failed) badge, and a hollow grey status mark while waking. Their tooltip
+says that any message wakes them. Stopped Instances leave both surfaces.
 
 ## 6. Worktree reclaim and rehydrate
 
@@ -184,7 +209,14 @@ A sleeping Instance's `Retained` slot is disk the pool cannot otherwise reuse.
   under disk pressure), beyond the warm budget and independently of the
   seven-day floor for other slots. Eviction keeps the existing gate: un-landed
   work is pinned to `refs/xmatrix/snapshot/<slotId>/<uuid>` first, and a slot
-  whose work cannot be preserved keeps its disk.
+  whose work cannot be preserved keeps its disk. When `git worktree remove
+  --force` fails because a process is still writing into the tree, git has
+  already deleted the slot's admin directory; the tree is then no longer a
+  linked worktree, so the pool finishes the delete itself (layout-contained,
+  no symlinks, retried briefly against the writer) and the eviction completes.
+  A slot that still cannot be evicted keeps its disk and is logged by id; the
+  sweep goes on to the pool's other slots, and a record written for a tree
+  that stays intact is retracted.
 - **Rehydrate record.** Before the tree is removed the pool records the
   binding's session, Instance, slot id, `HEAD` commit, branch and whether the
   top commit is the snapshot of a dirty tree in `rehydrate.json` beside the
@@ -204,20 +236,25 @@ A sleeping Instance's `Retained` slot is disk the pool cannot otherwise reuse.
   keeps in the slot's locked worktree entry (the slot's last base commit when
   that entry is gone). The reborn, the sweep or a new lease that finds it first
   writes the record and clears the leftover entry and residue, so the reborn
-  then rehydrates as above. Uncommitted edits went with the directory.
+  then rehydrates as above. Uncommitted edits went with the directory. A tree
+  whose `.git` names an admin directory git dropped counts as lost only when
+  the eviction that got that far already recorded it; that record is kept as
+  is. Without one, the files are kept and the reborn fails naming the tree.
 
 A slot whose recorded path is occupied, or whose recorded commit is unreachable,
 fails closed with the existing "checkout was reclaimed" refusal.
 
 ## 7. Compatibility and rollout
 
-- Hub and database first (release train order). The migration is additive; old
-  daemons send no `restReason`, so nothing sleeps until the CLI update.
+- Hub and database first (release train order). The migrations are additive.
+  Daemons from before the sleep command still decide sleep themselves; the Hub
+  issues them nothing.
 - The CLI update is picked up by daemon self-update; running wrappers need no
-  restart. Old wrappers are put to sleep by the updated daemon like new ones,
+  restart. Old wrappers are put to sleep on the Hub's word like new ones,
   and wake with the updated binary through reborn.
-- Rolling back the CLI stops new sleeps; resting Instances still wake through
-  the Hub. Rolling back the Hub leaves `rest_state` unread.
+- Rolling back the CLI returns sleep to the daemon; resting Instances still
+  wake through the Hub. Rolling back the Hub leaves `idle_sleep_at` and
+  `rest_state` unread, and nothing sleeps until the daemon is rolled back too.
 
 ### Background-task interruption evidence
 

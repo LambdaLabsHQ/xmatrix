@@ -75,26 +75,19 @@ export const LiquidGlassPill = React.forwardRef<HTMLElement, LiquidPillProps>(
   }
 );
 
-export type MaterialChipTone = "neutral" | "success" | "warning" | "muted";
 
-type MaterialChipProps = React.HTMLAttributes<HTMLElement> & {
-  as?: React.ElementType;
-  tone?: MaterialChipTone;
-  type?: React.ButtonHTMLAttributes<HTMLButtonElement>["type"];
-};
-
-export const MaterialChip = React.forwardRef<HTMLElement, MaterialChipProps>(function MaterialChip(
-  { as, className, tone = "neutral", ...props },
+/** A menu or small form floating over the paper: a card of white paper laid on it, never glass. */
+export const PaperPopover = React.forwardRef<HTMLElement, MaterialElementProps>(function PaperPopover(
+  { as, className, ...props },
   ref
 ) {
-  const Component = as || "span";
+  const Component = as || "div";
 
   return (
     <Component
       ref={ref}
-      data-material="chip"
-      data-tone={tone}
-      className={cn("app-material-chip", className)}
+      data-material="paper-popover"
+      className={cn("app-material-paper-popover", className)}
       {...props}
     />
   );

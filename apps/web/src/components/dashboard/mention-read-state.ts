@@ -1,7 +1,8 @@
+import { channelPresenceInstances } from "@xmatrix/protocol";
 /**
  * Mention read state, resolved where the `@` is written.
  *
- * A Channel member's read cursor (`SerializedChannel.memberReadSequences`) is
+ * A Channel member's read cursor (`ChannelSnapshot.memberReadSequences`) is
  * the same durable fact the caller sees as `readSequence`, projected for every
  * member. A mention is read exactly when the mentioned member's cursor has
  * reached the message's sequence, so this module holds the two pure pieces the
@@ -14,20 +15,23 @@
 import type {
   ChannelMentionReadState,
   ChannelMentionReadStatus,
+  FaceOf,
   SerializedAgentLaunch,
-  SerializedChannel,
+  ChannelSnapshot,
 } from "@xmatrix/protocol";
 import { MENTION_BROADCAST_NAMES, isChannelResidentInstance, isOperationalMentionStart, mentionAddressTokens, nonOperationalMentionRanges, parseAutoLaunchMentions,
   parseHarnessCapabilityMentions, scanMentionAddresses } from "@xmatrix/protocol";
 
 import type { MentionCandidate } from "./mention-complete";
+import { addressedAgentFace, launchFace } from "./mention-invocation-state";
 
 export type MentionReadTarget = {
   /** Durable subject identity used by delivery cursors. */
   subjectId: string;
   kind: "user" | "agent";
   label: string;
-  avatarUrl?: string;
+  /** Whose face the chip shows (protocol faces.ts). */
+  face: FaceOf;
   /** A written lifecycle phrase the Channel index could not resolve yet. It
       still gets the `@` highlight, but it must never borrow a real member's
       read cursor, so its read state is always `unknown`. */
@@ -103,16 +107,17 @@ function mentionReadTarget(candidate: MentionCandidate): MentionReadTarget | und
   const label = candidate.name?.trim();
   if (!label) return undefined;
   if (candidate.kind === "user") {
-    // Human candidates already carry the channel identity form `user:<id>`.
+    // Human candidates already carry the channel identity form `user:<id>`, which names their account.
     const subjectId = candidate.id.startsWith("user:") ? candidate.id : `user:${candidate.id}`;
-    return { subjectId, kind: "user", label, ...(candidate.avatarUrl ? { avatarUrl: candidate.avatarUrl } : {}) };
+    return { subjectId, kind: "user", label,
+      face: candidate.face ?? { kind: "user", id: subjectId.slice("user:".length), name: label } };
   }
   if (candidate.kind !== "agent" || !candidate.id) return undefined;
   return {
     subjectId: candidate.id.startsWith("agent:") ? candidate.id : `agent:${candidate.id}`,
     kind: "agent",
     label,
-    ...(candidate.avatarUrl ? { avatarUrl: candidate.avatarUrl } : {}),
+    face: candidate.face ?? { kind: "agent", name: label },
   };
 }
 
@@ -186,17 +191,15 @@ export function mentionReadResolution(input: {
  * Agent off this set. Presence only: it says why a mention stays unread.
  */
 export function machineOfflineMentionSubjects(
-  channel: Pick<SerializedChannel, "memberPresence"> | null | undefined,
+  channel: Pick<ChannelSnapshot, "presence"> | null | undefined,
 ): ReadonlySet<string> {
   const subjects = new Set<string>();
-  for (const [memberId, presence] of Object.entries(channel?.memberPresence || {})) {
-    if (presence.kind !== "agent") continue;
-    const subject = memberId.startsWith("agent:") ? memberId : `agent:${memberId}`;
-    const resident = (presence.instances || []).filter(isChannelResidentInstance);
-    const unreachable = resident.filter((instance) =>
-      instance.status === "offline" && instance.offlineReason === "machine_offline");
-    for (const instance of unreachable) subjects.add(`${subject}:${instance.id}`);
-    if (unreachable.length > 0 && unreachable.length === resident.length) subjects.add(subject);
+  for (const instance of channelPresenceInstances(channel?.presence)) {
+    if (isChannelResidentInstance(instance) && instance.status === "offline" && instance.offlineReason === "machine_offline") {
+      const subject = instance.id.startsWith("agent:") ? instance.id : `agent:${instance.id}`;
+      subjects.add(`${subject}:${instance.id}`);
+      subjects.add(subject);
+    }
   }
   return subjects;
 }
@@ -212,10 +215,10 @@ function mentionStatusSubjectId(status: ChannelMentionReadStatus): string {
  * member's read state back.
  */
 export function withMemberReadSequence(
-  channel: SerializedChannel,
+  channel: ChannelSnapshot,
   subjectId: string,
   readSequence: number,
-): SerializedChannel {
+): ChannelSnapshot {
   if (!subjectId || !Number.isSafeInteger(readSequence) || readSequence <= 0) return channel;
   const current = channel.memberReadSequences?.[subjectId];
   if (current !== undefined && current >= readSequence) return channel;
@@ -231,9 +234,9 @@ export function withMemberReadSequence(
  * caller can apply it unconditionally.
  */
 export function applyMemberReadEvent(
-  channels: SerializedChannel[],
+  channels: ChannelSnapshot[],
   event: { channelId?: string; metadata?: Record<string, unknown> },
-): SerializedChannel[] {
+): ChannelSnapshot[] {
   const channelId = typeof event.channelId === "string" ? event.channelId : "";
   const subjectId = typeof event.metadata?.subjectId === "string" ? event.metadata.subjectId : "";
   const readSequence = Number(event.metadata?.readSequence);
@@ -250,9 +253,11 @@ export function applyMemberReadEvent(
  * shared name unresolved, so callers overlay one message's launches. */
 export function withInvocationMentionTargets(index: MentionReadIndex,
   launches: readonly SerializedAgentLaunch[]): MentionReadIndex {
+  // Most messages launch nobody: the index is the answer, and is not copied per text run.
+  if (launches.length === 0) return index;
   const byToken = new Map(index.byToken);
   const ambiguous = new Set(index.tokens.filter(token => !byToken.has(token)));
-  const launchByToken = new Map<string, { profile: string; label: string; avatarUrl?: string }>();
+  const launchByToken = new Map<string, { profile: string; label: string; face: FaceOf }>();
   const launchConflict = new Set<string>();
   for (const launch of launches) {
     if (!launch.targetName) continue;
@@ -271,11 +276,7 @@ export function withInvocationMentionTargets(index: MentionReadIndex,
         launchConflict.add(token);
         continue;
       }
-      launchByToken.set(token, {
-        profile,
-        label: launch.targetName,
-        ...(launch.targetAvatarUrl ? { avatarUrl: launch.targetAvatarUrl } : {}),
-      });
+      launchByToken.set(token, { profile, label: launch.targetName, face: launchFace(launch, launch.targetName) });
     }
   }
   for (const token of launchConflict) {
@@ -285,12 +286,7 @@ export function withInvocationMentionTargets(index: MentionReadIndex,
   for (const [token, bound] of launchByToken) {
     if (launchConflict.has(token)) continue;
     ambiguous.delete(token);
-    byToken.set(token, {
-      subjectId: bound.profile,
-      kind: "agent",
-      label: bound.label,
-      ...(bound.avatarUrl ? { avatarUrl: bound.avatarUrl } : {}),
-    });
+    byToken.set(token, { subjectId: bound.profile, kind: "agent", label: bound.label, face: bound.face });
   }
   return { byToken, tokens: mentionAddressTokens([...byToken.keys(), ...ambiguous]) };
 }
@@ -311,7 +307,8 @@ export function withWrittenInvocationTargets(index: MentionReadIndex, text: stri
   for (const shout of parseHarnessCapabilityMentions(text)) {
     const token = shout.text.replace(/^[@＠]/u, "").trim().toLowerCase();
     if (!token || byToken.has(token) || MENTION_BROADCAST_NAMES.includes(token)) continue;
-    byToken.set(token, { subjectId: `written:${token}`, kind: "agent", label: token, unresolved: true });
+    byToken.set(token, { subjectId: `written:${token}`, kind: "agent", label: token,
+      face: addressedAgentFace({ name: token, address: shout.text }), unresolved: true });
     ambiguous.delete(token);
   }
   return { byToken, tokens: mentionAddressTokens([...byToken.keys(), ...ambiguous]) };

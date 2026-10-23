@@ -1,13 +1,15 @@
 import { plainRecord as record } from "@xmatrix/protocol";
+import type { ChannelSwitchContinuation } from "@xmatrix/protocol/connections/agent-instance";
 import {
   orchestrateProductAgentControlCommands,
   parseProductAgentControlCommands,
   RELAY_RUNTIME_AGENT_CONTROL_SWITCH_PATH,
+  RELAY_RUNTIME_AGENT_SWITCH_CONTINUATION_PATH,
   type ProductAgentControlOutcome,
   type ProductAgentControlPort,
   type ProductAgentControlResult,
 } from "./product-agent-model-effort";
-import { productAgentSystemNoticeSenderSnapshot } from "./product-agent-mention-authority-adapter";
+import { recordCommandResult } from "./command-result";
 import { runtimeCellsForChannel } from "./runtime-transport/runtime-route-directory-delivery";
 import { dispatchProductMessageAppend } from "./product-message-append";
 import type { Env } from "./types";
@@ -21,11 +23,15 @@ import type { Env } from "./types";
  */
 function outcomeFromRuntime(value: unknown): ProductAgentControlOutcome {
   const outcome = record(value);
+  const owed = record(outcome?.continuation);
+  const continuation = typeof owed?.instanceId === "string" && owed.instanceId &&
+      typeof owed.requestId === "string" && owed.requestId
+    ? { continuation: { instanceId: owed.instanceId, requestId: owed.requestId } } : {};
   switch (outcome?.status) {
     case "switched":
       return typeof outcome.selected === "string" && outcome.selected.trim()
-        ? { status: "switched", selected: outcome.selected.trim() }
-        : { status: "error", message: "the Runtime confirmed no selection." };
+        ? { status: "switched", selected: outcome.selected.trim(), ...continuation }
+        : { status: "error", message: "the Runtime confirmed no selection.", ...continuation };
     case "catalog": {
       const options = Array.isArray(outcome.options)
         ? outcome.options.filter((option): option is string => typeof option === "string")
@@ -46,6 +52,7 @@ function outcomeFromRuntime(value: unknown): ProductAgentControlOutcome {
         message: typeof outcome.message === "string" && outcome.message.trim()
           ? outcome.message.trim()
           : "the Runtime reported an unspecified failure.",
+        ...continuation,
       };
     default:
       return { status: "error", message: "the Runtime returned an unreadable result." };
@@ -89,33 +96,48 @@ export function createProductAgentControlAuthorityPort(input: {
         outcomes[0] ?? { status: "no_instance" };
     },
 
-    async publishSystemNotice(channelId, body) {
-      const messageId = `system:${input.sourceMessageId}:control-switch`.slice(0, 200);
+    async recordOutcomes(channelId, outcomes) {
+      await recordCommandResult(input.env, { channelId, messageId: input.sourceMessageId,
+        key: "controls", entry: { controls: outcomes } });
+    },
+
+    /* The continuation is an instruction to one Instance, not something
+       anyone says in the Channel: its own socket carries it, and the Instance,
+       still waiting on one of these switches, runs it unless newer input
+       waits. A runtime that predates the frame reads it as a committed
+       Channel instruction instead. */
+    async continueTurn(channelId, { instanceId, requestIds, body }) {
+      const cells = await runtimeCellsForChannel(input.env, channelId);
+      const delivered = await Promise.all(cells.map(async (runtime) => {
+        const response = await runtime.fetch(
+          new Request(`https://relay-runtime.internal${RELAY_RUNTIME_AGENT_SWITCH_CONTINUATION_PATH}`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ channelId, instanceId, requestIds, prompt: body }),
+          }),
+        ).catch(() => undefined);
+        return response?.ok === true && record(await response.json().catch(() => undefined))?.delivered === true;
+      }));
+      if (delivered.some(Boolean)) return;
+      const messageId = `system:${input.sourceMessageId}:switch-continuation:${instanceId}`.slice(0, 200);
       const response = await dispatchProductMessageAppend(input.env, channelId, {
-        commandId: `product:control-switch-notice:${messageId}`.slice(0, 200),
+        commandId: `product:switch-continuation:${messageId}`.slice(0, 200),
         messageId,
         channelId,
         body,
+        messageKind: "xmatrix.switch-continuation",
         principal,
-        senderSnapshot: productAgentSystemNoticeSenderSnapshot(input.actorUserId),
+        xmatrixAuthor: true,
         residual: {
           appMetadata: {
-            // The receipt is a control-plane fact. Committing it without this
-            // provenance would hand the switch confirmation back to the very
-            // Instance that was switched, as fresh work.
             xmatrixProvenance: "system_fact",
             xmatrixSystemNotice: true,
             sourceMessageId: input.sourceMessageId,
+            xmatrixSwitchContinuation: { version: 1, instanceId, requestIds } satisfies ChannelSwitchContinuation,
           },
         },
       });
-      if (!response.ok) {
-        const result = record(await response.json().catch(() => undefined));
-        const detail = typeof result?.error === "string" && result.error.trim()
-          ? `: ${result.error.trim()}`
-          : "";
-        throw new Error(`control switch notice failed (${response.status})${detail}`);
-      }
+      if (!response.ok) throw new Error(`switch continuation failed (${response.status})`);
     },
   };
 }

@@ -8,7 +8,7 @@ use std::sync::{Mutex, OnceLock};
 
 use crate::protocol::{
     AgentInstanceServerMessage, CHANNEL_ACTIVITY_PROVENANCE, ChannelMessage, SerializedAgent,
-    cross_channel_reply_source,
+    channel_page_co_write, cross_channel_reply_source,
 };
 
 /// Who this connection is as a channel author.
@@ -22,6 +22,12 @@ use crate::protocol::{
 pub(crate) struct RegisteredAuthor {
     identity_id: String,
     instance_id: String,
+}
+
+impl RegisteredAuthor {
+    pub(crate) fn is_instance(&self, instance_id: &str) -> bool {
+        self.instance_id == instance_id
+    }
 }
 
 /// The author registration assigned, when it assigned one.
@@ -197,6 +203,14 @@ pub(crate) fn delivery_is_acknowledged_and_dropped(
     registered_author: Option<&RegisteredAuthor>,
     spawn_initial_message_id: Option<&str>,
 ) -> bool {
+    // These Hub-authored controls start no harness turn, but the run loop must
+    // consume them to join/leave the page. This includes context replay at startup.
+    if let AgentInstanceServerMessage::ChannelMessageReceived { message, .. }
+    | AgentInstanceServerMessage::ChannelHistoryReplay { message, .. } = server_msg
+        && channel_page_co_write(message).is_some()
+    {
+        return false;
+    }
     live_channel_delivery_is_own_echo(server_msg, registered_author)
         || delivery_is_own_cross_channel_reply(server_msg, registered_author)
         || delivery_is_spawn_summon_echo(server_msg, spawn_initial_message_id)
@@ -407,6 +421,7 @@ pub(crate) mod tests {
             client_message_id: None,
             ack_required: Some(true),
             interrupt_requested: Some(true),
+            steer_allowed: None,
             delivery_intent: None,
         }
     }
@@ -421,6 +436,8 @@ pub(crate) mod tests {
             message,
             ack_required: Some(true),
             delivery_intent: delivery_intent.map(str::to_string),
+            interrupt_requested: None,
+            steer_allowed: None,
         }
     }
 
@@ -505,6 +522,7 @@ pub(crate) mod tests {
                 client_message_id: None,
                 ack_required: Some(true),
                 interrupt_requested: Some(true),
+                steer_allowed: None,
                 delivery_intent: None,
             };
         assert!(delivery_is_acknowledged_and_dropped(
@@ -718,9 +736,46 @@ pub(crate) mod tests {
             client_message_id: None,
             ack_required: Some(true),
             interrupt_requested: Some(true),
+            steer_allowed: None,
             delivery_intent: Some("context".into()),
         };
         assert!(delivery_is_context_only(&live_notice));
+    }
+
+    /// Co-writing controls are consumed by the run loop without a harness turn.
+    /// Dropping them as orientation leaves the real Agent disconnected from its page.
+    #[test]
+    fn page_co_write_controls_reach_the_runtime_on_live_and_replayed_context() {
+        for live in [false, true] {
+            for active in [false, true] {
+                let mut frame =
+                    context_frame("page-control", "ch-page", 7, "Co-writing page live.", live);
+                let message = match &mut frame {
+                    AgentInstanceServerMessage::ChannelMessageReceived { message, .. }
+                    | AgentInstanceServerMessage::ChannelHistoryReplay { message, .. } => message,
+                    _ => unreachable!(),
+                };
+                message.from.kind = "system".into();
+                message.metadata = Some(serde_json::json!({
+                    "xmatrixProvenance": "system_fact", "xmatrixSystemNotice": true,
+                    "xmatrixPageCoWrite": { "version": 1, "spaceId": "space-qa", "pageId": "page-qa", "active": active }
+                }));
+                assert!(
+                    !delivery_is_acknowledged_and_dropped(&frame, None, None),
+                    "the run loop must receive the Hub's start/stop instruction"
+                );
+                let message = match &mut frame {
+                    AgentInstanceServerMessage::ChannelMessageReceived { message, .. }
+                    | AgentInstanceServerMessage::ChannelHistoryReplay { message, .. } => message,
+                    _ => unreachable!(),
+                };
+                message.from.kind = "user".into();
+                assert!(
+                    delivery_is_acknowledged_and_dropped(&frame, None, None),
+                    "a person's lookalike metadata remains ordinary context"
+                );
+            }
+        }
     }
 
     fn context_frame(
@@ -747,6 +802,7 @@ pub(crate) mod tests {
             client_message_id: None,
             ack_required: Some(true),
             interrupt_requested: None,
+            steer_allowed: None,
             delivery_intent: Some("context".into()),
         }
     }
@@ -908,6 +964,7 @@ pub(crate) mod tests {
                 client_message_id: None,
                 ack_required: Some(true),
                 interrupt_requested: Some(true),
+                steer_allowed: None,
                 delivery_intent: None,
             },
             Some(&registered_author("agent:1", "instance-1")),

@@ -85,7 +85,7 @@ export const MACHINE_COMMAND_EXPECTATIONS = {
     resumeSessionKey: input.resumeSessionKey, worktreeDisposition: input.worktreeDisposition,
     repoIdentity: input.repoIdentity, repoKeyId: input.repoKeyId, slotId: input.slotId,
   }),
-  /* A reborn stop keeps the Instance; a handoff stop retires it and carries no such field. */
+  /* Continuation stops retain the Instance; legacy handoffs omitted the flag. */
   rebornStop: (controlId: string, input: Fields) => ({
     type: "machine_stop_agent", requestId: controlId,
     runId: input.runId, instanceId: input.instanceId,
@@ -137,8 +137,9 @@ function runtimeIssueWake(env: MachineCommandEnv): MachineIssueWake | undefined 
 /**
  * Applies one daemon control command — enroll, connect, issue, claim, renew,
  * complete and the rest — to the owner's Machine. An issued command wakes the
- * owner's daemon; one no daemon could receive is recorded as failed delivery
- * and the daemon reads as offline.
+ * owner's daemon. A wake Runtime actually answered with no owner is recorded
+ * as failed delivery and that connection reads as offline. A wake that never
+ * got an answer, or a daemon that has since reconnected, is left alone.
  */
 export async function machineDaemonCommand(
   env: MachineCommandEnv,
@@ -152,22 +153,30 @@ export async function machineDaemonCommand(
   const hostId = observation === undefined || observation === "" ? "" : commandText(observation, "hostname", 160);
   const current = !hostId && !input.daemonId
     ? await repository.getDaemon({ requestId: crypto.randomUUID(), ownerUserId, machineId, hostId: "" }) : null;
+  const daemonId = typeof input.daemonId === "string" && input.daemonId.trim()
+    ? input.daemonId.trim() : current?.daemon?.id ?? stableMachineDaemonId(ownerUserId, machineId, hostId);
   let value = await repository.command({ ...input, requireMachineName: env.MACHINE_NAME_REQUIRED === "true",
-    daemonId: typeof input.daemonId === "string" && input.daemonId.trim()
-      ? input.daemonId.trim() : current?.daemon?.id ?? stableMachineDaemonId(ownerUserId, machineId, hostId) });
+    daemonId });
   if (input.action !== "issue" && input.action !== "issue_batch") return value;
   const wake = dependencies.wake ?? runtimeIssueWake(env);
   const woken = wake ? await wake(input, value) : undefined;
   if (!woken) return value;
   value = { ...value, delivered: woken.delivered, owners: woken.owners, deliverable: woken.deliverable };
-  if (machineDaemonReachable(woken)) return value;
+  // A Runtime that did not answer is not a dead daemon. A daemon that
+  // reconnected while this wake was in flight is fenced by connectionEpoch.
+  if (woken.unavailable || machineDaemonReachable(woken)) return value;
   try {
-    await repository.command({
+    const observedEpoch = value.connectionEpoch;
+    const failed = await repository.command({
       ...input,
+      daemonId,
       commandId: `${String(input.commandId || "machine-issue")}:failed-deliver`.slice(0, 200),
       action: "failed-deliver",
       payload: {},
+      ...(typeof observedEpoch === "number" ? { connectionEpoch: observedEpoch } : {}),
     });
+    // The row kept the newer connection. The answer must not say offline.
+    if (failed.stale === true) return value;
     if (value.daemon && typeof value.daemon === "object" && !Array.isArray(value.daemon)) {
       value.daemon = { ...value.daemon, status: "offline" };
     }

@@ -28,6 +28,11 @@ const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(2);
 /// Silence that makes the cheap protocol ping inconclusive, so liveness has to
 /// be settled by a reply this repository actually guarantees.
 const HEARTBEAT_PROBE_AFTER: Duration = Duration::from_secs(4);
+/// How long the Hub itself may stay silent while the edge keeps answering
+/// protocol pings. Those pongs never reach the Durable Object, so they must
+/// not postpone this probe: a dropped session would otherwise look healthy
+/// and the catalog would stay offline until the process was restarted.
+const HUB_SESSION_PROBE_AFTER: Duration = Duration::from_secs(60);
 /// A written probe gets the same response budget as connection admission.
 /// Four seconds mistook brief network/edge delays for a dead control socket.
 const HEARTBEAT_PROBE_TIMEOUT: Duration = CONNECT_TIMEOUT;
@@ -110,6 +115,12 @@ fn machine_report_at_rfc3339() -> String {
     time::OffsetDateTime::now_utc()
         .format(&time::format_description::well_known::Rfc3339)
         .unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_string())
+}
+
+/// A text frame is the Hub. Protocol ping and pong are the edge, which
+/// answers them without waking the Durable Object that owns this session.
+fn frame_proves_hub_session(message: &Message) -> bool {
+    !message.is_ping() && !message.is_pong()
 }
 
 fn machine_daemon_heartbeat_frame() -> Message {
@@ -238,7 +249,7 @@ async fn abort_machine_daemon_writer(writer: tokio::task::JoinHandle<()>) {
     let _ = writer.await;
 }
 
-pub fn derive_connection_url(hub_url: &str) -> String {
+pub(crate) fn derive_connection_url(hub_url: &str) -> String {
     crate::websocket::domain_connection_url(hub_url, "/ws/machine-daemons")
 }
 
@@ -399,6 +410,50 @@ pub struct MachineHandoffExportResult {
     pub error: Option<String>,
 }
 
+/// A handoff stop's request for the source's conversation, so a successor
+/// of any harness or model can read what the predecessor saw and did.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MachineHandoffContextRequest {
+    /// The most text the exported entries may carry, summed over entries.
+    pub max_chars: usize,
+}
+
+/// One turn of a predecessor's conversation in a harness-neutral form: the
+/// vendor's tool-call blocks, reasoning and signatures are not carried.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MachineHandoffContextEntry {
+    /// `summary` (what the harness compacted away), `user`, `assistant`,
+    /// `tool_call` or `tool_result`.
+    pub role: String,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub tool: Option<String>,
+    pub text: String,
+}
+
+/// The predecessor's conversation as its machine exported it on a handoff
+/// stop; the Hub hands it to the successor's spawn unchanged.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MachineHandoffContext {
+    /// `xmatrix.handoff-context.v1`.
+    pub format: String,
+    /// `claude`, `codex` or `grok`; absent when no session was found.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub harness: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub session_id: Option<String>,
+    #[serde(default)]
+    pub entries: Vec<MachineHandoffContextEntry>,
+    /// Entries left out to stay within the request's size.
+    #[serde(default)]
+    pub omitted_entries: usize,
+    /// Why there is no conversation, when there is none.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub error: Option<String>,
+}
+
 impl MachineWorktreeDisposition {
     pub fn as_str(self) -> &'static str {
         match self {
@@ -486,6 +541,9 @@ pub enum MachineDaemonCommand {
         /// ignored rather than rejected.
         #[serde(default)]
         role_initial_prompt: Option<String>,
+        /// Official Hub prompt documents; unknown fields are ignored by old daemons.
+        #[serde(default)]
+        bootstrap_prompts: Option<crate::bootstrap_prompts::BootstrapPrompts>,
         /// The registration's working mode, `autonomous` or `cautious`.
         /// Absent means autonomous, which is also what an older Hub gets.
         #[serde(default)]
@@ -493,6 +551,9 @@ pub enum MachineDaemonCommand {
         /// The Space's rules page, which the Agent reads on demand.
         #[serde(default)]
         space_rules_page_id: Option<String>,
+        /// Names of the apps connected to the Space, for the launch prompt.
+        #[serde(default)]
+        connected_apps: Vec<String>,
         #[serde(default)]
         resume: Option<bool>,
         #[serde(default)]
@@ -513,6 +574,10 @@ pub enum MachineDaemonCommand {
         handoff_source_instance_id: Option<String>,
         #[serde(default)]
         handoff_source_resume_session_key: Option<String>,
+        /// The predecessor's conversation, exported by its machine as it
+        /// stopped for this handoff.
+        #[serde(default)]
+        handoff_context: Option<MachineHandoffContext>,
         #[serde(default)]
         context: Option<MachineSpawnContext>,
         #[serde(default)]
@@ -560,6 +625,8 @@ pub enum MachineDaemonCommand {
         worktree_disposition: Option<MachineWorktreeDisposition>,
         #[serde(default)]
         handoff_export: Option<MachineHandoffExport>,
+        #[serde(default)]
+        handoff_context: Option<MachineHandoffContextRequest>,
         #[serde(default)]
         relay_lease: Option<MachineDaemonCommandLease>,
     },
@@ -630,6 +697,20 @@ pub enum MachineDaemonCommand {
         preset_id: String,
         instruction: String,
         input: String,
+        #[serde(default)]
+        relay_lease: Option<MachineDaemonCommandLease>,
+    },
+    /// The Hub decided a resting Run has been idle long enough to sleep. The
+    /// daemon verifies its own facts first: the Run still rests, with no task
+    /// execution, background task or other activity for at least
+    /// `idle_for_millis` by its own clock; only then does it end the process
+    /// as a sleep. Otherwise it declines.
+    MachineSleepAgent {
+        request_id: String,
+        run_id: String,
+        execution_key: String,
+        instance_id: String,
+        idle_for_millis: u64,
         #[serde(default)]
         relay_lease: Option<MachineDaemonCommandLease>,
     },
@@ -857,6 +938,18 @@ pub enum MachineDaemonReport {
         #[serde(skip_serializing_if = "Option::is_none", default)]
         relay_lease: Option<MachineDaemonCommandLease>,
     },
+    /// Whether the daemon put the Run to sleep, or why it declined.
+    MachineSleepResult {
+        request_id: String,
+        run_id: String,
+        execution_key: String,
+        instance_id: String,
+        slept: bool,
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        reason: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        relay_lease: Option<MachineDaemonCommandLease>,
+    },
     /// The protocol's `WorktreeActionResult`, built by the repo-pool inventory.
     MachineWorktreeActionResult {
         request_id: String,
@@ -893,6 +986,8 @@ pub enum MachineDaemonReport {
         error: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none", default)]
         handoff_export: Option<MachineHandoffExportResult>,
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        handoff_context: Option<MachineHandoffContext>,
         #[serde(skip_serializing_if = "Option::is_none", default)]
         relay_lease: Option<MachineDaemonCommandLease>,
     },
@@ -1087,6 +1182,7 @@ impl MachineDaemonCommand {
             | Self::MachineQuotaProbe { relay_lease, .. }
             | Self::MachineHarnessAction { relay_lease, .. }
             | Self::MachineTextTask { relay_lease, .. }
+            | Self::MachineSleepAgent { relay_lease, .. }
             | Self::MachineWorktreeAction { relay_lease, .. } => relay_lease.as_ref(),
         }
     }
@@ -1124,7 +1220,7 @@ pub enum MachineDaemonConnectionEvent {
 }
 
 /// Report identities the daemon request broker gives its approval cards.
-pub const MACHINE_REQUEST_NOTICE_REPORT_PREFIX: &str = "machine-request-notice:";
+pub(crate) const MACHINE_REQUEST_NOTICE_REPORT_PREFIX: &str = "machine-request-notice:";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -1667,7 +1763,7 @@ impl MachineDaemonConnectionClient {
         (epoch > 0 && self.is_connected()).then_some(epoch)
     }
 
-    pub fn claim_connection_epoch(&self) -> Option<u64> {
+    pub(crate) fn claim_connection_epoch(&self) -> Option<u64> {
         let epoch = self.connection_epoch.load(Ordering::Acquire);
         (epoch > 0).then_some(epoch)
     }
@@ -2224,6 +2320,7 @@ async fn run_machine_daemon_connection<Dial: MachineDaemonDial>(
         // inbound traffic proves the Hub is still there. Writes run on a dedicated
         // task so a hung send cannot stall that read/heartbeat select.
         let mut last_server_activity = Instant::now();
+        let mut last_hub_activity = Instant::now();
         let mut pending_probe: Option<MachineDaemonProbe> = None;
         let mut pending_renews: HashMap<
             String,
@@ -2448,10 +2545,15 @@ async fn run_machine_daemon_connection<Dial: MachineDaemonDial>(
                 incoming = read.next() => {
                     match incoming {
                         Some(Ok(message)) => {
-                            // Any frame at all — including a pong the edge answers
-                            // below the Durable Object — proves the socket is live.
+                            // Any frame proves the TCP path. Only a Hub frame
+                            // proves the Durable Object still has this session.
+                            // An edge pong must not cancel a probe that is
+                            // waiting on that session.
                             last_server_activity = Instant::now();
-                            pending_probe = None;
+                            if frame_proves_hub_session(&message) {
+                                last_hub_activity = Instant::now();
+                                pending_probe = None;
+                            }
                             if let Message::Close(frame) = &message
                                 && http::is_upgrade_required_close(frame.as_ref())
                             {
@@ -2525,7 +2627,8 @@ async fn run_machine_daemon_connection<Dial: MachineDaemonDial>(
                         continue;
                     }
                     let silence = last_server_activity.elapsed();
-                    let probe = silence >= HEARTBEAT_PROBE_AFTER;
+                    let probe = silence >= HEARTBEAT_PROBE_AFTER
+                        || last_hub_activity.elapsed() >= HUB_SESSION_PROBE_AFTER;
                     let (frame, queued_probe) = if probe {
                         let (frame, queued) = MachineDaemonProbe::queued();
                         (frame, Some(queued))
@@ -3045,6 +3148,7 @@ fn parse_machine_daemon_server_event(text: &str) -> Option<MachineDaemonConnecti
         | "machine_quota_probe"
         | "machine_harness_action"
         | "machine_text_task"
+        | "machine_sleep_agent"
         | "machine_worktree_action"
         | "machine_recover_reply"
         | "machine_worktree_cleanup" => Some(
@@ -3307,9 +3411,20 @@ mod tests {
     #[test]
     fn probe_escalation_stays_off_the_steady_state_path() {
         // A protocol ping that Cloudflare answers below the Durable Object keeps
-        // silence under the escalation threshold, so a healthy idle connection
-        // never wakes a hibernated Relay Runtime.
+        // edge silence under the fast threshold. The Hub session has its own,
+        // slower probe: edge pongs are not that session.
         assert!(HEARTBEAT_PROBE_AFTER > HEARTBEAT_INTERVAL);
+        assert!(HUB_SESSION_PROBE_AFTER > HEARTBEAT_PROBE_AFTER);
+        assert_eq!(HUB_SESSION_PROBE_AFTER, Duration::from_secs(60));
+    }
+
+    #[test]
+    fn an_edge_pong_does_not_prove_the_hub_session() {
+        assert!(!frame_proves_hub_session(&Message::Ping(Default::default())));
+        assert!(!frame_proves_hub_session(&Message::Pong(Default::default())));
+        assert!(frame_proves_hub_session(&Message::Text(
+            r#"{"type":"pong","requestId":"probe-1"}"#.into(),
+        )));
     }
 
     #[test]
@@ -4149,6 +4264,7 @@ mod tests {
             cleanup_reason: Some("process_terminated".to_string()),
             error: None,
             handoff_export: None,
+            handoff_context: None,
             relay_lease: None,
         };
         let value = serde_json::to_value(report).expect("serialize stop result");
@@ -4201,12 +4317,63 @@ mod tests {
                 dirty: true,
                 error: None,
             }),
+            handoff_context: None,
             relay_lease: None,
         };
         let value = serde_json::to_value(report).expect("serialize stop result");
         assert_eq!(value["handoffExport"]["state"], "pushed");
         assert_eq!(value["handoffExport"]["dirty"], true);
         assert_eq!(value["handoffExport"]["commit"], "c".repeat(40));
+    }
+
+    #[test]
+    fn a_handoff_stop_asks_for_and_returns_the_conversation_and_a_spawn_carries_it() {
+        let command: MachineDaemonCommand = serde_json::from_value(serde_json::json!({
+            "type": "machine_stop_agent", "requestId": "stop-1", "runId": "run-1",
+            "resumeSessionKey": "resume:a", "handoffContext": { "maxChars": 60000 },
+        }))
+        .expect("parse stop with a context request");
+        let MachineDaemonCommand::MachineStopAgent {
+            handoff_context, ..
+        } = command
+        else {
+            panic!("not a stop");
+        };
+        assert_eq!(
+            handoff_context,
+            Some(MachineHandoffContextRequest { max_chars: 60_000 })
+        );
+        let context = MachineHandoffContext {
+            format: "xmatrix.handoff-context.v1".to_string(),
+            harness: Some("claude".to_string()),
+            session_id: Some("s-1".to_string()),
+            entries: vec![MachineHandoffContextEntry {
+                role: "tool_call".to_string(),
+                tool: Some("Bash".to_string()),
+                text: "ls".to_string(),
+            }],
+            omitted_entries: 2,
+            error: None,
+        };
+        let value = serde_json::to_value(&context).expect("serialize context");
+        assert_eq!(value["omittedEntries"], 2);
+        assert_eq!(value["sessionId"], "s-1");
+        assert_eq!(value["entries"][0]["tool"], "Bash");
+        let spawn: MachineDaemonCommand = serde_json::from_value(serde_json::json!({
+            "type": "machine_spawn_agent", "requestId": "spawn-1", "spaceId": "space-1", "channelId": "channel-1",
+            "runtime": "grok", "agentName": "grok", "prompt": "continue",
+            "workspace": { "ownerUserId": "u", "machineId": "m", "hostId": "h", "canonicalCwd": "/tmp/w",
+                "displayName": "w", "visibility": "private", "createdAt": "t", "updatedAt": "t", "lastSeenAt": "t" },
+            "handoffContext": value,
+        }))
+        .expect("parse spawn with a context");
+        let MachineDaemonCommand::MachineSpawnAgent {
+            handoff_context, ..
+        } = spawn
+        else {
+            panic!("not a spawn");
+        };
+        assert_eq!(handoff_context, Some(context));
     }
 
     #[test]
@@ -4456,7 +4623,7 @@ mod tests {
         ));
 
         let rejected = parse_machine_daemon_server_event(
-            r#"{"type":"error","requestId":"machine-request-notice:req:1:pending","message":"The Workstation request could not be processed. (code=runtime.authority_rejected, retryable=false, status=409)","failure":{"code":"runtime.authority_rejected","diagnosticId":"diag_1"}}"#,
+            r#"{"type":"error","requestId":"machine-request-notice:req:1:pending","message":"The Machine request could not be processed. (code=runtime.authority_rejected, retryable=false, status=409)","failure":{"code":"runtime.authority_rejected","diagnosticId":"diag_1"}}"#,
         );
         assert!(matches!(
             rejected,

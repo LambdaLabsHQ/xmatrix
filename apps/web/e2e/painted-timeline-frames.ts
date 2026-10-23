@@ -18,12 +18,31 @@ type PaintedTimelineFrame = {
   /** How far the timeline is scrolled, and how tall its content is. */
   scrollTop: number;
   scrollHeight: number;
+  /** The virtualizer's viewport position in the scrollable layout, without scrolling. */
+  viewportOffsetTop: number | null;
   tops: Record<string, number>;
   /** Each visible message's bottom edge, by its row id. */
   bottoms: Record<string, number>;
 };
 
 type RecordingWindow = Window & { __paintedTimelineFrames?: PaintedTimelineFrame[] };
+
+/** The pushed screen's content edge after paint, below its floating title bar. */
+export async function paintedMainTop(page: Page) {
+  return page.evaluate(() => new Promise<{ contentTop: number; titleBottom: number }>(resolve => {
+    const painted = new MessageChannel();
+    painted.port1.onmessage = () => {
+      const main = document.querySelector(".app-main")!;
+      const title = document.querySelector(".app-topbar")!;
+      const contentTop = main.getBoundingClientRect().top + parseFloat(getComputedStyle(main).paddingTop);
+      const titleBottom = title.getBoundingClientRect().bottom;
+      painted.port1.close();
+      painted.port2.close();
+      resolve({ contentTop, titleBottom });
+    };
+    requestAnimationFrame(() => painted.port2.postMessage(null));
+  }));
+}
 
 /** Starts recording; `openSelector` marks the frames a spec cares about. */
 export async function recordPaintedTimelineFrames(page: Page, openSelector = ".app-message-timeline") {
@@ -34,6 +53,7 @@ export async function recordPaintedTimelineFrames(page: Page, openSelector = ".a
     painted.port1.onmessage = () => {
       const timeline = document.querySelector(".app-message-timeline");
       const view = timeline?.getBoundingClientRect();
+      const viewport = timeline?.querySelector("[data-viewport-type]");
       const tops: Record<string, number> = {};
       const bottoms: Record<string, number> = {};
       for (const row of timeline?.querySelectorAll<HTMLElement>("[id^='message:']") ?? []) {
@@ -49,6 +69,9 @@ export async function recordPaintedTimelineFrames(page: Page, openSelector = ".a
         opening: Boolean(timeline?.querySelector(".app-message-timeline-opening-tail")),
         scrollTop: timeline?.scrollTop ?? 0,
         scrollHeight: timeline?.scrollHeight ?? 0,
+        viewportOffsetTop: viewport && view
+          ? viewport.getBoundingClientRect().top - view.top + (timeline?.scrollTop ?? 0)
+          : null,
         tops,
         bottoms,
       });

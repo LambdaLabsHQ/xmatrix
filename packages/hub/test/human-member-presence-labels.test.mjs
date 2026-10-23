@@ -14,7 +14,7 @@ test("offline Humans remain directory membership instead of presence rows", () =
     "channel-1",
   );
 
-  assert.deepEqual(presence, {});
+  assert.equal(presence.size, 0);
 });
 
 test("live Human presence carries session identity and liveness", () => {
@@ -31,11 +31,11 @@ test("live Human presence carries session identity and liveness", () => {
     "channel-1",
   );
 
-  assert.equal(presence["user:online"].status, "online");
-  assert.equal(presence["user:online"].focused, true);
-  assert.equal(presence["user:online"].label, "Online Person");
-  assert.equal(presence["user:online"].email, "online@example.com");
-  assert.equal(presence["user:online"].avatarUrl, "https://example.com/online.png");
+  assert.equal(presence.get("user:online").status, "online");
+  assert.equal(presence.get("user:online").focused, true);
+  assert.equal(presence.get("user:online").label, "Online Person");
+  assert.equal(presence.get("user:online").email, "online@example.com");
+  assert.equal(presence.get("user:online").avatarUrl, "https://example.com/online.png");
 });
 
 test("live sessions cannot add Humans outside the visible membership projection", () => {
@@ -50,7 +50,7 @@ test("live sessions cannot add Humans outside the visible membership projection"
     "channel-1",
   );
 
-  assert.deepEqual(presence, {});
+  assert.equal(presence.size, 0);
 });
 
 test("visible Human recipients come only from canonical user identities", () => {

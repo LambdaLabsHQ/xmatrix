@@ -1,8 +1,9 @@
 "use client";
 
 import { createAuthClient } from "better-auth/client";
-import { emailOTPClient } from "better-auth/client/plugins";
-import { WEB_PROXY_ROUTES } from "@xmatrix/protocol";
+import { emailOTPClient, twoFactorClient } from "better-auth/client/plugins";
+import { passkeyClient } from "@better-auth/passkey/client";
+import { trimEnd, WEB_PROXY_ROUTES } from "@xmatrix/protocol";
 
 import type { AuthUser } from "@/lib/auth-context";
 import { classifyAuthClientFailure } from "@/lib/auth-error-policy";
@@ -47,15 +48,54 @@ class AuthClientError extends UserFacingProblem {
   }
 }
 
+/**
+ * A desktop or phone app signed in with a session of its own, kept in an
+ * HTTP-only cookie the page cannot read. Its account calls go through the
+ * web's native-auth route, which adds that session on the way to the Hub.
+ */
+let accountCallsThroughApp = false;
+
+export function routeAccountCallsThroughApp(on: boolean): void {
+  accountCallsThroughApp = on;
+}
+
+/** Where an account call goes: straight to the Hub, or through the app's own session route. */
+function accountUrl(hubUrl: string): string {
+  const prefix = `${getAuthBaseUrl()}/api/auth/`;
+  return accountCallsThroughApp && hubUrl.startsWith(prefix)
+    ? `${WEB_PROXY_ROUTES.native_auth}/${hubUrl.slice(prefix.length)}` : hubUrl;
+}
+
 const authClient = createAuthClient({
   baseURL: getAuthBaseUrl(),
-  plugins: [emailOTPClient()],
+  plugins: [emailOTPClient(), twoFactorClient(), passkeyClient()],
+  fetchOptions: {
+    customFetchImpl: (input, init) => {
+      const href = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      return xmatrixRawResponse(accountUrl(href), init);
+    },
+  },
 });
+
+/**
+ * Where a first factor left the sign-in: done, or waiting for the code from
+ * the authenticator app because this account turned two-step verification on.
+ */
+export type SignInStep = "signed_in" | "two_factor";
+
+function signInStep(data: unknown): SignInStep {
+  return (data as { twoFactorRedirect?: unknown } | null)?.twoFactorRedirect === true ? "two_factor" : "signed_in";
+}
+
+/** The Hub origin that serves sign-in. */
+export function authBaseUrl(): string {
+  return getAuthBaseUrl();
+}
 
 function getAuthBaseUrl(): string {
   return (
-    process.env.NEXT_PUBLIC_AUTH_BASE_URL?.trim().replace(/\/+$/, "") ||
-    process.env.NEXT_PUBLIC_XMATRIX_HUB_URL?.trim().replace(/\/+$/, "") ||
+    trimEnd(process.env.NEXT_PUBLIC_AUTH_BASE_URL?.trim() ?? "", "/") ||
+    trimEnd(process.env.NEXT_PUBLIC_XMATRIX_HUB_URL?.trim() ?? "", "/") ||
     "https://xmatrix-hub.xmatrix.sh"
   );
 }
@@ -189,7 +229,7 @@ async function postAuthRequest(
   );
 }
 
-export async function verifyBetterAuthOtp(email: string, otp: string): Promise<void> {
+async function verifyBetterAuthOtp(email: string, otp: string): Promise<SignInStep> {
   const response = await authClient.signIn.emailOtp({
     email,
     otp,
@@ -200,26 +240,170 @@ export async function verifyBetterAuthOtp(email: string, otp: string): Promise<v
   if (response.error) {
     throwAuthClientError(response.error, "Invalid verification code", response.error.status);
   }
+  return signInStep(response.data);
 }
 
-export async function signInWithBetterAuthGoogle(callbackURL: string): Promise<void> {
+/**
+ * Verify a login code through a connection that may drop. A request that got
+ * no answer is sent again; the code stays valid until one is answered. When a
+ * retry is refused, an earlier attempt may have signed in and lost only its
+ * reply, so the code is spent: only a session for the requested account can
+ * confirm that sign-in. Another tab may have signed into a different account.
+ */
+export async function verifyBetterAuthOtpWithRetry(email: string, otp: string): Promise<SignInStep> {
+  let unanswered: unknown;
+  for (const waitMs of [0, 700, 1500]) {
+    if (waitMs) await new Promise((resolve) => setTimeout(resolve, waitMs));
+    try {
+      return await verifyBetterAuthOtp(email, otp);
+    } catch (error) {
+      if (!isTransientAuthSessionError(error)) {
+        if (unanswered && await hasBetterAuthSessionFor(email)) return "signed_in";
+        throw error;
+      }
+      unanswered = error;
+    }
+  }
+  if (await hasBetterAuthSessionFor(email)) return "signed_in";
+  throw unanswered;
+}
+
+async function hasBetterAuthSessionFor(email: string): Promise<boolean> {
+  const current = await loadBetterAuthSession().catch(() => null);
+  return current?.session?.user.email?.trim().toLowerCase() === email.trim().toLowerCase();
+}
+
+export type SocialSignInProvider = "google" | "github";
+
+export async function signInWithBetterAuthSocial(
+  provider: SocialSignInProvider,
+  callbackURL: string,
+  errorCallbackURL: string,
+  newUserCallbackURL: string,
+): Promise<void> {
   const response = await authClient.signIn.social({
-    provider: "google",
+    provider,
     callbackURL,
+    // A sign-in that made a new account says so where it lands (NewAccountStep).
+    newUserCallbackURL,
     // Without this, a failed sign-in redirects to the Hub's own error URL and
-    // the person is left on a JSON document with no way back.
-    errorCallbackURL: `${window.location.origin}/login`,
+    // the person is left on a JSON document with no way back. It returns to
+    // the page the sign-in started on, so a device waiting for approval or a
+    // page to return to is not lost with the attempt.
+    errorCallbackURL,
   });
   if (response.error) {
-    throw new AuthClientError(response.error.message || "Google sign-in failed", response.error.code, response.error.status);
+    throw new AuthClientError(response.error.message || "Sign-in failed", response.error.code, response.error.status);
   }
 }
 
-export async function verifyBetterAuthPassword(email: string, password: string): Promise<void> {
+/**
+ * Signs in with the identity token the iOS app's Sign in with Apple returned.
+ * Apple shares the person's name only the first time, so it travels along.
+ */
+export async function signInWithAppleIdToken(input: {
+  identityToken: string; nonce: string; givenName?: string; familyName?: string;
+}): Promise<SignInStep> {
+  const name = input.givenName || input.familyName
+    ? { name: { firstName: input.givenName ?? "", lastName: input.familyName ?? "" } } : {};
+  const response = await authClient.signIn.social({
+    provider: "apple",
+    idToken: { token: input.identityToken, nonce: input.nonce, ...(Object.keys(name).length ? { user: name } : {}) },
+  }).catch(() => { throw new TransientAuthSessionError(); });
+  if (response.error) throwAuthClientError(response.error, "Couldn't sign in with Apple");
+  return signInStep(response.data);
+}
+
+/**
+ * Signs in with a passkey. `autoFill` waits quietly for the browser to offer
+ * one in the email field instead of asking at once. A dismissed prompt is a
+ * cancellation, not a failure.
+ */
+export async function signInWithBetterAuthPasskey(autoFill = false): Promise<void> {
+  const response = await authClient.signIn.passkey({ autoFill }).catch(() => { throw new TransientAuthSessionError(); });
+  if (response?.error) throwPasskeyError(response.error, "Couldn't sign in with that passkey");
+}
+
+/** A passkey prompt the person dismissed is a cancellation; anything else is the refusal it says. */
+function throwPasskeyError(error: { code?: string; message?: string; status?: number }, fallback: string): never {
+  if (error.code === "AUTH_CANCELLED" || error.code === "ERROR_CEREMONY_ABORTED") {
+    throw new DOMException("The passkey prompt was dismissed.", "AbortError");
+  }
+  throwAuthClientError(error, fallback);
+}
+
+export interface AccountPasskey { id: string; name?: string | null; createdAt?: string | Date | null; aaguid?: string | null }
+
+export async function listAccountPasskeys(): Promise<AccountPasskey[]> {
+  const response = await authClient.passkey.listUserPasskeys();
+  if (response.error) throwAuthClientError(response.error, "Couldn't read your passkeys");
+  return (response.data ?? []) as AccountPasskey[];
+}
+
+/** Makes a passkey for this account on this device, or in the password manager the browser offers. */
+export async function addAccountPasskey(name: string): Promise<void> {
+  const response = await authClient.passkey.addPasskey({ name });
+  if (response?.error) throwPasskeyError(response.error, "Couldn't add a passkey");
+}
+
+export async function deleteAccountPasskey(id: string): Promise<void> {
+  const response = await authClient.passkey.deletePasskey({ id });
+  if (response.error) throwAuthClientError(response.error, "Couldn't remove that passkey");
+}
+
+export async function verifyBetterAuthPassword(email: string, password: string): Promise<SignInStep> {
   const response = await authClient.signIn.email({ email, password }).catch(() => {
     throw new TransientAuthSessionError();
   });
   if (response.error) throwAuthClientError(response.error, "Couldn't sign in");
+  return signInStep(response.data);
+}
+
+/** Finishes a waiting sign-in with the authenticator app's code, or one backup code. */
+export async function verifyBetterAuthSecondFactor(
+  code: string,
+  { backup, trustDevice }: { backup: boolean; trustDevice: boolean },
+): Promise<void> {
+  const response = await (backup
+    ? authClient.twoFactor.verifyBackupCode({ code, trustDevice })
+    : authClient.twoFactor.verifyTotp({ code, trustDevice })
+  ).catch(() => { throw new TransientAuthSessionError(); });
+  if (response.error) throwAuthClientError(response.error, "That code didn't work");
+}
+
+/** Whether this account asks for an authenticator code after its first factor. */
+export async function twoFactorEnabled(): Promise<boolean> {
+  const response = await authClient.getSession();
+  if (response.error) throw new AuthClientError(response.error.message || "Could not read your account", response.error.code, response.error.status);
+  return (response.data?.user as { twoFactorEnabled?: boolean | null } | undefined)?.twoFactorEnabled === true;
+}
+
+/**
+ * Starts turning two-step verification on: the authenticator secret and the
+ * backup codes. Nothing changes at sign-in until a code from the app confirms it.
+ * An account that also has a password confirms with it.
+ */
+export async function startTwoFactorSetup(password?: string): Promise<{ totpURI: string; backupCodes: string[] }> {
+  const response = await authClient.twoFactor.enable(password ? { password } : {});
+  if (response.error || !response.data) throwAuthClientError(response.error ?? {}, "Couldn't start two-step verification");
+  return response.data;
+}
+
+export async function confirmTwoFactorSetup(code: string): Promise<void> {
+  const response = await authClient.twoFactor.verifyTotp({ code });
+  if (response.error) throwAuthClientError(response.error, "That code didn't match");
+}
+
+export async function turnOffTwoFactor(password?: string): Promise<void> {
+  const response = await authClient.twoFactor.disable(password ? { password } : {});
+  if (response.error) throwAuthClientError(response.error, "Couldn't turn off two-step verification");
+}
+
+/** Replaces every backup code; the old ones stop working. */
+export async function replaceBackupCodes(password?: string): Promise<string[]> {
+  const response = await authClient.twoFactor.generateBackupCodes(password ? { password } : {});
+  if (response.error || !response.data) throwAuthClientError(response.error ?? {}, "Couldn't make new backup codes");
+  return response.data.backupCodes;
 }
 
 export async function requestAccountPassword(email: string): Promise<void> {
@@ -280,9 +464,12 @@ export function oauthAuthorizeUrl(signedQuery: URLSearchParams): string {
 export interface OAuthClientSummary { name: string }
 
 async function oauthRequest(path: string, init: RequestInit = {}): Promise<Record<string, unknown>> {
-  const response = await xmatrixRawResponse(`${getAuthBaseUrl()}/api/auth${path}`, {
+  const response = await xmatrixRawResponse(accountUrl(`${getAuthBaseUrl()}/api/auth${path}`), {
     ...init, credentials: "include", cache: "no-store",
-    headers: { accept: "application/json", ...(init.body ? { "content-type": "application/json" } : {}) },
+    headers: {
+      accept: "application/json",
+      ...(init.body ? { "content-type": "application/json" } : {}),
+    },
   });
   const payload = (await response.json().catch(() => ({}))) as Record<string, unknown>;
   if (!response.ok) {

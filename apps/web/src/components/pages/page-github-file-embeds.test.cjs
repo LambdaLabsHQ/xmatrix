@@ -1,13 +1,11 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
-require("../dashboard/typescript-require.cjs").installTypeScriptRequire();
-const { EditorState } = require("prosemirror-state");
-const { markdownToPageDoc, pageSchema } = require("@xmatrix/protocol/page-document");
+const { pluginState } = require("./page-plugin-state.cjs");
 const { githubFileEmbeds } = require("./page-github-file-embeds.ts");
 
 function embeds(markdown) {
   const plugin = githubFileEmbeds(() => undefined);
-  const state = EditorState.create({ doc: markdownToPageDoc(markdown), schema: pageSchema, plugins: [plugin] });
+  const state = pluginState(markdown, plugin);
   const decorations = plugin.getState(state).find();
   return {
     state,

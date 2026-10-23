@@ -65,7 +65,8 @@ test("default Windows cache dir isolates concurrent GitHub runners", () => {
 });
 
 test("resolveKacheBinary trusts an absolute RUSTC_WRAPPER path", () => {
-  const marker = path.join(os.tmpdir(), `kache-wrapper-test-${process.pid}.exe`);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kache-wrapper-"));
+  const marker = path.join(dir, "kache.exe");
   fs.writeFileSync(marker, "");
   try {
     assert.equal(
@@ -73,7 +74,7 @@ test("resolveKacheBinary trusts an absolute RUSTC_WRAPPER path", () => {
       path.resolve(marker),
     );
   } finally {
-    fs.unlinkSync(marker);
+    fs.rmSync(dir, { recursive: true, force: true });
   }
 });
 

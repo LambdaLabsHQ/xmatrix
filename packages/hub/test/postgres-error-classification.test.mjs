@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   postgresRetryAfterSeconds,
+  postgresTransactionConflict,
   retryablePostgresFailure,
 } from "../src/postgres-error-classification.ts";
 import { postgresMessageErrorResponse } from "../src/postgres-message-authority.ts";
@@ -46,6 +47,25 @@ test("pg's exact code-less transport failures retry without masking explicit SQL
   }
   for (const message of ["Connection terminated", "SQL query timeout defect", "Query read timeout: bad SQL"]) {
     assert.equal(retryablePostgresFailure(new Error(message)), false);
+  }
+});
+
+test("a lost transaction conflict is told apart from an outage and replays at once", async (t) => {
+  t.mock.method(console, "error", () => {});
+  for (const [message, code] of [
+    ["could not serialize access due to concurrent update", "40001"], ["deadlock detected", "40P01"],
+  ]) {
+    const conflict = Object.assign(new Error(message), { code });
+    assert.equal(postgresTransactionConflict(conflict), true, code);
+    const response = postgresMessageErrorResponse(conflict);
+    assert.deepEqual([response.status, response.headers.get("retry-after")], [503, "1"], code);
+    assert.deepEqual(await response.json(),
+      { error: "xMatrix was busy with a conflicting change; try again", code: "transaction_conflict", retryable: true });
+  }
+  for (const outage of [new Error("Connection terminated unexpectedly"),
+    Object.assign(new Error("the database system is starting up"), { code: "57P03" })]) {
+    assert.equal(postgresTransactionConflict(outage), false);
+    assert.equal(retryablePostgresFailure(outage), true);
   }
 });
 

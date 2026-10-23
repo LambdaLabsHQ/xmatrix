@@ -22,9 +22,9 @@ function harness(hold = async () => ({ limitedUntil: "2026-10-01T13:00:00.000Z" 
   const session = {
     principal: {
       ownerUserId: "owner", spaceId: "space", channelId: "channel", agentId: "agent-1", agentName: "claude",
-      runId: "run-1", executionKey: "execution-1", channelWriteAllowed: true,
+      runId: "run-1", executionKey: "execution-1",
     },
-    run: { kind: "channel-instance", instanceId: "instance-1", channelId: "channel", channelInstanceId: "3" },
+    run: { instanceId: "instance-1", channelId: "channel", channelInstanceId: "3" },
     presentation: { model: "claude-opus-5-5" },
   };
   return { commands, port, session };
@@ -75,18 +75,6 @@ test("an ordinary turn failure never starts a handoff", async () => {
   assert.deepEqual(commands.map(command => command.family), ["append-message"]);
 });
 
-test("a read-only or About session neither posts nor hands off", async () => {
-  for (const change of [
-    (session) => { session.principal.channelWriteAllowed = false; },
-    (session) => { session.run.kind = "channel-about-session"; },
-  ]) {
-    const { commands, port, session } = harness();
-    change(session);
-    await port.execute(session, limited);
-    assert.deepEqual(commands, []);
-  }
-});
-
 test("a refused hold still hands the work off", async () => {
   const { commands, port, session } = harness(async () => {
     throw new RuntimeAuthorityOperationError("registration-usage-limit-hold", 409, { code: "forbidden" });
@@ -106,17 +94,40 @@ function appendRefusedWith(code) {
   return { commands, port, session };
 }
 
-test("a turn-failure notice whose id is already committed is not an error (XMATRIX-HUB-66, XMATRIX-HUB-67)", async () => {
+test("a replayed failure whose notice is committed is not an error and still completes its handoff (XMATRIX-HUB-66, XMATRIX-HUB-67)", async () => {
   for (const code of ["idempotency_conflict", "message_exists"]) {
     const { commands, port, session } = appendRefusedWith(code);
     const logged = await capturingConsole(() => port.execute(session, limited));
     assert.deepEqual(logged.error, [], code);
-    assert.equal(logged.warn.length, 1, code);
-    assert.equal(logged.warn[0][0], "xMatrix runtime authority rejection");
-    assert.equal(logged.warn[0][1].status, 409);
-    // The committed notice already started its own hold and handoff.
-    assert.deepEqual(commands.map(command => command.family), ["append-message"], code);
+    assert.ok(logged.warn.every(([message, detail]) => message === "xMatrix runtime authority rejection" && detail.status === 409), code);
+    // Hub may have stopped after the notice committed: the replay resumes the
+    // hold and handoff, whose own ids make a repeat change nothing.
+    assert.deepEqual(commands.map(command => command.family),
+      ["append-message", "registration-usage-limit-hold", "append-message"], code);
+    assert.equal(commands[2].input.body, "@claude:3:handoff:@auto", code);
   }
+});
+
+test("each failure has its own notice: a named failure by its id, an unnamed one by its whole error", async () => {
+  const messageIds = async (...signals) => {
+    const { commands, port, session } = harness();
+    for (const signal of signals) await port.execute(session, signal);
+    return commands.filter(command => command.family === "append-message").map(command => command.input.messageId);
+  };
+  const failure = { ...limited, reason: "turn_failed", detail: "stream disconnected" };
+  const prefix = "x".repeat(200);
+  const [first, second] = await messageIds({ ...failure, detail: `${prefix} first` }, { ...failure, detail: `${prefix} second` });
+  assert.notEqual(first, second, "two errors that open the same way are two notices");
+  const [named, replayed] = await messageIds({ ...failure, requestId: "failure-1" }, { ...failure, requestId: "failure-1", detail: "other" });
+  assert.equal(named, replayed, "a resent failure keeps its notice");
+  const [again] = await messageIds({ ...failure, requestId: "failure-2" });
+  assert.notEqual(named, again);
+});
+
+test("Hub reads a usage limit from the original error even when the host said only turn_failed", async () => {
+  const { commands, port, session } = harness();
+  await port.execute(session, { ...limited, reason: "turn_failed", resetsAt: undefined });
+  assert.deepEqual(commands.map(command => command.family), ["append-message", "registration-usage-limit-hold", "append-message"]);
 });
 
 test("any other refused turn-failure notice is still reported as an error", async () => {

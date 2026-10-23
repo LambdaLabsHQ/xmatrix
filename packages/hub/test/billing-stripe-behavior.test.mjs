@@ -14,8 +14,33 @@ import {
   verifyStripeWebhookSignature,
 } from "../src/billing-stripe.ts";
 import { capturingConsole } from "./support/capturing-console.mjs";
+import { creditPackPayment } from "../src/billing-credit-packs.ts";
 
 const checkoutReturn = stripeCheckoutReturnUrls("https://app.test.example", "space-1");
+
+test("credit checkout fixes a one-time card price and verified settlement rejects unpaid or altered sessions", async () => {
+  let form;
+  await withFetch(async (_url, init) => {
+    form = new URLSearchParams(init.body);
+    return Response.json({ id: "cs_test_pack", url: "https://checkout.stripe.com/c/pay/cs_test_pack" });
+  }, () => createStripeCheckoutSession({ ...checkoutInput(), creditPack: { credits: 10_000, amountCents: 1_000, productId: "prod_xmatrix" },
+    seatQuantity: 1, allowPromotionCodes: false }));
+  assert.equal(form.get("mode"), "payment");
+  assert.equal(form.get("line_items[0][price_data][unit_amount]"), "1000");
+  assert.equal(form.get("line_items[0][price_data][currency]"), "usd");
+  assert.equal(form.get("line_items[0][price_data][product]"), "prod_xmatrix");
+  assert.equal(form.get("payment_method_types[0]"), "card");
+  assert.equal(form.has("subscription_data[metadata][xmatrix_space_id]"), false);
+  const paid = { id: "cs_test_pack", mode: "payment", status: "complete", payment_status: "paid",
+    currency: "usd", amount_subtotal: 1_000, client_reference_id: "purchase",
+    metadata: { xmatrix_purchase_kind: "credit_pack", xmatrix_checkout_intent_id: "purchase",
+      xmatrix_space_id: "space", xmatrix_billing_owner_user_id: "owner" } };
+  assert.equal(creditPackPayment(paid).purchaseId, "purchase");
+  for (const changed of [{ payment_status: "unpaid" }, { status: "open" }, { currency: "eur" },
+    { amount_subtotal: 1 }, { mode: "subscription" }, { client_reference_id: "other" }]) {
+    assert.throws(() => creditPackPayment({ ...paid, ...changed }), StripeBillingError);
+  }
+});
 
 function withFetch(stub, callback) {
   const previous = globalThis.fetch;

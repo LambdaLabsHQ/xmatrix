@@ -27,7 +27,7 @@ pub(crate) async fn send_llm_trace(
 /// Where a turn reports its trace: the channel it serves, when it has one.
 #[derive(Clone, Copy)]
 pub(crate) struct TurnTrace<'a> {
-    pub(crate) relay: Option<&'a Arc<agent_instance_connection::AgentInstanceConnectionClient>>,
+    pub relay: Option<&'a Arc<agent_instance_connection::AgentInstanceConnectionClient>>,
     pub(crate) channel_id: Option<&'a str>,
     pub(crate) source: &'a str,
     pub(crate) agent: &'a protocol::SerializedAgent,
@@ -77,6 +77,10 @@ pub(crate) async fn send_llm_trace_with_source(
     model: Option<String>,
     payload: serde_json::Value,
 ) {
+    // A conversation co-writing a page streams the harness's text to it as well,
+    // and a reply may write into a page as it comes.
+    crate::runtime_page_co_write::observe_trace(channel_id, phase, &payload);
+    crate::runtime_page_stream_write::observe(relay, channel_id, phase, &payload);
     let trace_payload = protocol::LlmTracePayload {
         schema_version: 1,
         phase: phase.to_string(),

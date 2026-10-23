@@ -965,47 +965,11 @@ fn codex_turn_start_uses_selected_model_override() {
         vec![serde_json::json!({ "type": "text", "text": "continue" })],
         Some(" gpt-5.5 "),
         Some(" high "),
-        None,
     );
     assert_eq!(params["effort"], "high");
     assert_eq!(params["threadId"], "thread-1");
     assert_eq!(params["model"], "gpt-5.5");
     assert_eq!(params["input"][0]["text"], "continue");
-}
-
-#[test]
-fn codex_turn_start_injects_trusted_developer_instructions() {
-    let params = codex_turn_start_params(
-        "thread-1",
-        vec![serde_json::json!({ "type": "text", "text": "continue" })],
-        None,
-        None,
-        Some("follow the trusted channel contract"),
-    );
-    assert!(
-        params["developerInstructions"]
-            .as_str()
-            .is_some_and(|value| value.contains("follow the trusted channel contract"))
-    );
-    assert_eq!(params["input"][0]["text"], "continue");
-}
-
-#[test]
-fn codex_channel_turn_injects_channel_send_contract_as_developer_instruction() {
-    let instructions =
-        super::codex_channel_developer_instructions(Some("channel-123")).expect("channel contract");
-    let params = codex_turn_start_params(
-        "thread-1",
-        vec![serde_json::json!({ "type": "text", "text": "reply READY" })],
-        None,
-        None,
-        Some(&instructions),
-    );
-    let developer = params["developerInstructions"]
-        .as_str()
-        .expect("developer instructions");
-    assert!(developer.contains("Channel-visible replies are explicit"));
-    assert!(developer.contains("xmatrix send channel-123"));
 }
 
 #[test]
@@ -1090,10 +1054,9 @@ async fn finished_daemon_child_terminates_owned_job_before_reporting_exit() {
     let descendant = {
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
         loop {
-            if let Ok(value) = std::fs::read_to_string(&pid_file) {
-                if let Ok(pid) = value.trim().parse::<u32>() {
-                    break pid;
-                }
+            if let Ok(value) = std::fs::read_to_string(&pid_file)
+                && let Ok(pid) = value.trim().parse::<u32>() {
+                break pid;
             }
             assert!(
                 std::time::Instant::now() < deadline,
@@ -1549,8 +1512,10 @@ fn daemon_test_spawn_request() -> super::DaemonSpawnRequest {
         agent_name: "codex-a".to_string(),
         identity_id: None,
         role_initial_prompt: None,
+        bootstrap_prompts: None,
         working_mode: None,
         space_rules_page_id: None,
+        connected_apps: Vec::new(),
         resume: false,
         resume_instance_id: None,
         resume_session_key: Some("session-a".to_string()),
@@ -1561,6 +1526,7 @@ fn daemon_test_spawn_request() -> super::DaemonSpawnRequest {
         handoff_transfer: false,
         handoff_source_instance_id: None,
         handoff_source_resume_session_key: None,
+        handoff_context: None,
         goal: None,
         run_worktree: false,
         remote_repo: None,
@@ -1791,30 +1757,104 @@ async fn codex_vendor_error_survives_combined_bootstrap_turn() {
 
 #[tokio::test]
 async fn codex_channel_interrupt_yields_without_provider_completion() {
-    tokio::time::timeout(Duration::from_secs(3), async {
-        let mut codex = initialized_codex_fixture("codex-interrupt-no-completion").await;
-
-        let mut event_rx = test_event_after(
-            Duration::from_millis(100),
+    // A steer Codex refuses, as when its turn just ended, interrupts the same
+    // way, so the message is never lost.
+    for (mode, event) in [
+        (
+            "codex-interrupt-no-completion",
             interrupting_channel_message_event("m2", "chan-a", "continue now"),
-            "deliver interrupting channel message",
-        );
+        ),
+        (
+            "codex-steer-rejected",
+            steering_channel_message_event("m2", "chan-a", "also check the docs"),
+        ),
+    ] {
+        tokio::time::timeout(Duration::from_secs(3), async {
+            let mut codex = initialized_codex_fixture(mode).await;
+            let mut event_rx = test_event_after(
+                Duration::from_millis(100),
+                event,
+                "deliver interrupting channel message",
+            );
+            let mut pending = VecDeque::new();
+            let agent = test_serialized_agent(mode);
+            let result =
+                submit_old_codex_test_turn(&mut codex, &mut event_rx, &mut pending, &agent).await;
+            assert_interrupted_for(&result, &pending, "m2");
+            codex.shutdown().await;
+        })
+        .await
+        .expect("wrapper waited for turn/completed after native interruption");
+    }
+}
+
+/// The turn yielded to `message_id`, which waits as the next input.
+fn assert_interrupted_for(
+    result: &super::InterruptibleCodexTurn,
+    pending: &VecDeque<AgentInstanceConnectionEvent>,
+    message_id: &str,
+) {
+    assert!(matches!(result, super::InterruptibleCodexTurn::Interrupted));
+    assert!(matches!(
+        pending.front(),
+        Some(AgentInstanceConnectionEvent::Server(
+            AgentInstanceServerMessage::ChannelMessageReceived { message, .. }
+        )) if message.message_id == message_id
+    ));
+}
+
+fn steering_channel_message_event(
+    message_id: &str,
+    channel_id: &str,
+    body: &str,
+) -> AgentInstanceConnectionEvent {
+    let AgentInstanceConnectionEvent::Server(AgentInstanceServerMessage::ChannelMessageReceived {
+        message,
+        ack_required,
+        ..
+    }) = interrupting_channel_message_event(message_id, channel_id, body)
+    else {
+        unreachable!("a channel message");
+    };
+    AgentInstanceConnectionEvent::Server(AgentInstanceServerMessage::ChannelMessageReceived {
+        message,
+        client_message_id: None,
+        ack_required,
+        interrupt_requested: Some(true),
+        steer_allowed: Some(true),
+        delivery_intent: None,
+    })
+}
+
+#[tokio::test]
+async fn codex_steered_message_joins_the_running_turn() {
+    tokio::time::timeout(Duration::from_secs(5), async {
+        let mut codex = initialized_codex_fixture("codex-steer").await;
+        // The relay stays open after the message, as a live one does.
+        let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            event_tx
+                .send(steering_channel_message_event("m2", "chan-a", "also check the docs"))
+                .expect("deliver steering channel message");
+            tokio::time::sleep(Duration::from_secs(10)).await;
+        });
         let mut pending = VecDeque::new();
-        let agent = test_serialized_agent("codex-interrupt-no-completion");
+        let agent = test_serialized_agent("codex-steer");
         let result =
             submit_old_codex_test_turn(&mut codex, &mut event_rx, &mut pending, &agent).await;
 
-        assert!(matches!(result, super::InterruptibleCodexTurn::Interrupted));
-        assert!(matches!(
-            pending.front(),
-            Some(AgentInstanceConnectionEvent::Server(
-                AgentInstanceServerMessage::ChannelMessageReceived { message, .. }
-            )) if message.message_id == "m2"
-        ));
+        let turn = match result {
+            super::InterruptibleCodexTurn::Completed(Ok(turn)) => turn,
+            super::InterruptibleCodexTurn::Completed(Err(err)) => panic!("turn failed: {err}"),
+            _ => panic!("the steered turn did not complete"),
+        };
+        assert_eq!(turn.local_output, "answered the steer");
+        assert!(pending.is_empty(), "the steered message was queued: {pending:?}");
         codex.shutdown().await;
     })
     .await
-    .expect("wrapper waited for turn/completed after native interruption");
+    .expect("steered Codex turn timed out");
 }
 
 #[tokio::test]
@@ -2282,23 +2322,27 @@ async fn provider_goal_adapters_round_trip_offline() {
     .expect("offline provider goal adapters should not hang");
 }
 
+/// The ACP wire fixture in `mode`, driven through `tool`'s generic adapter.
+async fn spawn_generic_acp_fixture(mode: &str, tool: &str) -> AcpSession {
+    AcpSession::spawn_stdio_with_prefix_args(
+        "node",
+        &[goal_runtime_fixture_path(), mode.to_string()],
+        &[],
+        Some(env!("CARGO_MANIFEST_DIR")),
+        AcpVendorConfig::generic(tool),
+    )
+    .await
+    .expect("spawn generic ACP fixture")
+}
+
 /// Kimi adapter against its ACP wire fixture: configOptions presentation,
 /// streaming output/usage, and kind-driven permission auto-approval.
 #[tokio::test]
 async fn generic_acp_session_streams_and_auto_approves_permission() {
     tokio::time::timeout(Duration::from_secs(10), async {
         require_node_fixture_runtime();
-        let fixture = goal_runtime_fixture_path();
         let cwd = env!("CARGO_MANIFEST_DIR");
-        let mut session = AcpSession::spawn_stdio_with_prefix_args(
-            "node",
-            &[fixture, "acp".to_string()],
-            &[],
-            Some(cwd),
-            AcpVendorConfig::generic("kimi"),
-        )
-        .await
-        .expect("spawn generic ACP fixture");
+        let mut session = spawn_generic_acp_fixture("acp", "kimi").await;
         let presentation = session
             .initialize(Some(cwd), None, false, None)
             .await
@@ -2340,6 +2384,52 @@ async fn generic_acp_session_streams_and_auto_approves_permission() {
     })
     .await
     .expect("generic ACP fixture should not hang");
+}
+
+/// Current Cursor CLI answers authRequired until `authenticate` names the
+/// method it advertised (`cursor_login`); `login` is rejected outright.
+#[tokio::test]
+async fn generic_acp_session_retries_auth_with_advertised_method() {
+    tokio::time::timeout(Duration::from_secs(10), async {
+        require_node_fixture_runtime();
+        let cwd = env!("CARGO_MANIFEST_DIR");
+        let mut session = spawn_generic_acp_fixture("acp-cursor-login", "cursor").await;
+        session
+            .initialize(Some(cwd), None, false, None)
+            .await
+            .expect("initialize authenticates with the advertised method");
+        session.shutdown().await;
+    })
+    .await
+    .expect("cursor_login ACP fixture should not hang");
+}
+
+/// Qwen Code without a configured provider answers authRequired, then refuses
+/// the only method it advertises: the start fails as a sign-in problem, in the
+/// harness's own words, whatever its error code.
+#[tokio::test]
+async fn generic_acp_refused_credentials_read_as_signed_out() {
+    require_node_fixture_runtime();
+    let mut session = spawn_generic_acp_fixture("acp-missing-key", "qwen").await;
+    let refused = tokio::time::timeout(
+        Duration::from_secs(10),
+        session.initialize(Some(env!("CARGO_MANIFEST_DIR")), None, false, None),
+    )
+    .await
+    .expect("missing-key ACP fixture should not hang")
+    .expect_err("no provider means no session");
+    session.shutdown().await;
+    let detail = refused.to_string();
+    assert!(crate::harness_signed_out_error(&detail), "{detail}");
+    assert!(detail.contains("Missing API key for openai auth"), "{detail}");
+}
+
+#[test]
+fn acp_retry_auth_method_prefers_login_then_the_advertised_one() {
+    let ids = |values: &[&str]| values.iter().map(|v| v.to_string()).collect::<Vec<_>>();
+    assert_eq!(crate::acp_retry_auth_method(&[]), "login");
+    assert_eq!(crate::acp_retry_auth_method(&ids(&["login", "other"])), "login");
+    assert_eq!(crate::acp_retry_auth_method(&ids(&["cursor_login"])), "cursor_login");
 }
 
 /// Live end-to-end check that the runtime's own `CodexAppSession` goal
@@ -2508,44 +2598,31 @@ async fn claude_stream_set_model_switch_live() {
 
 #[test]
 fn daemon_run_exit_from_status_file_recovers_terminal_run() {
-    let marker = DaemonRunStatusMarker {
-        phase: "turn_completed".to_string(),
-        completed: true,
-        delivered: true,
-        pid: i32::MAX as u32,
-        updated_at_millis: super::unix_millis_now(),
-        ..test_daemon_status_marker()
-    };
-    let status_path = PathBuf::from("/tmp/run-recovered.status.json");
+    let (status_path, marker) = orphan_terminal_status_fixture("turn_completed", true);
 
     let exit = daemon_run_exit_from_status_file(&status_path, &marker)
         .expect("terminal status should produce a recovered run exit");
 
     assert_eq!(exit.registry_key, None);
-    assert_eq!(exit.run_id.as_deref(), Some("run-recovered"));
-    assert_eq!(exit.execution_key, None);
+    assert_eq!(exit.run_id.as_deref(), Some("channel:instance#execution"));
+    assert_eq!(exit.execution_key.as_deref(), Some("exact-execution-key"));
     assert_eq!(exit.pid, i32::MAX as u32);
     assert_eq!(exit.exit_code, Some(0));
     assert_eq!(exit.completed, Some(true));
     assert_eq!(exit.delivered, Some(true));
     assert_eq!(exit.status_phase.as_deref(), Some("turn_completed"));
+    fs::remove_dir_all(status_path.parent().unwrap()).unwrap();
 }
 
 #[test]
 fn daemon_run_exit_from_status_file_preserves_failed_run_outcome() {
-    let marker = DaemonRunStatusMarker {
-        phase: "turn_failed".to_string(),
-        detail: Some("Reconnecting... 2/5".to_string()),
-        pid: i32::MAX as u32,
-        updated_at_millis: super::unix_millis_now(),
-        ..test_daemon_status_marker()
-    };
-    let status_path = PathBuf::from("/tmp/run-failed.status.json");
+    let (status_path, mut marker) = orphan_terminal_status_fixture("turn_failed", false);
+    marker.detail = Some("Reconnecting... 2/5".to_string());
 
     let exit = daemon_run_exit_from_status_file(&status_path, &marker)
         .expect("failed terminal status should produce a recovered run exit");
 
-    assert_eq!(exit.run_id.as_deref(), Some("run-failed"));
+    assert_eq!(exit.run_id.as_deref(), Some("channel:instance#execution"));
     assert_eq!(exit.exit_code, None);
     assert_eq!(exit.completed, Some(false));
     assert_eq!(exit.delivered, Some(false));
@@ -2554,6 +2631,98 @@ fn daemon_run_exit_from_status_file_preserves_failed_run_outcome() {
         exit.run_status_detail.as_deref(),
         Some("Reconnecting... 2/5")
     );
+    fs::remove_dir_all(status_path.parent().unwrap()).unwrap();
+}
+
+fn orphan_terminal_status_fixture(
+    phase: &str,
+    completed: bool,
+) -> (PathBuf, DaemonRunStatusMarker) {
+    let dir =
+        std::env::temp_dir().join(format!("xmatrix-orphan-terminal-{}", uuid::Uuid::new_v4()));
+    fs::create_dir_all(&dir).unwrap();
+    super::set_daemon_private_dir_permissions(&dir);
+    let run_id = "channel:instance#execution";
+    let label = super::daemon_run_file_label(Some(run_id), None, "codex");
+    let status_path = dir.join(format!("{label}.status.json"));
+    let marker = DaemonRunStatusMarker {
+        phase: phase.to_string(),
+        completed,
+        delivered: completed,
+        pid: i32::MAX as u32,
+        updated_at_millis: super::unix_millis_now(),
+        ..test_daemon_status_marker()
+    };
+    assert!(persist_daemon_run_status_marker(&status_path, &marker));
+    assert!(super::persist_daemon_run_sidecar(
+        &super::PersistedDaemonRun {
+            pid: marker.pid,
+            run_id: Some(run_id.to_string()),
+            execution_key: Some("exact-execution-key".to_string()),
+            status_file_path: Some(status_path.clone()),
+            ..test_empty_persisted_daemon_run()
+        }
+    ));
+    (status_path, marker)
+}
+
+// The receipt handler removes the recovery sidecar, while diagnostics retain
+// status/log files. Reconnect must not turn those retained files into new exits.
+#[test]
+fn orphan_terminal_report_stays_recoverable_until_receipt_then_stops_replaying() {
+    let (status_path, marker) = orphan_terminal_status_fixture("turn_completed", true);
+    for _ in 0..2 {
+        assert!(
+            super::daemon_run_exit_from_orphan_status_file(&status_path, &marker, &HashSet::new())
+                .is_some()
+        );
+    }
+    let sidecar = super::daemon_run_sidecar_path_for_status(&status_path).unwrap();
+    assert_eq!(
+        super::remove_daemon_run_sidecar_path(&sidecar, marker.pid),
+        super::DaemonRunSidecarRemoval::Removed
+    );
+    let retained = read_daemon_run_status_marker(Some(&status_path)).unwrap();
+    assert!(
+        super::daemon_run_exit_from_orphan_status_file(&status_path, &retained, &HashSet::new())
+            .is_none()
+    );
+    assert_eq!(retained.phase, "turn_completed");
+    fs::remove_dir_all(status_path.parent().unwrap()).unwrap();
+}
+
+#[test]
+fn orphan_terminal_report_refuses_mismatched_or_unknown_recovery_identity() {
+    for invalid in ["pid", "path", "identity", "malformed"] {
+        let (status_path, marker) = orphan_terminal_status_fixture("turn_failed", false);
+        let sidecar = super::daemon_run_sidecar_path_for_status(&status_path).unwrap();
+        let mut run: super::PersistedDaemonRun =
+            serde_json::from_slice(&fs::read(&sidecar).unwrap()).unwrap();
+        match invalid {
+            "pid" => run.pid -= 1,
+            "path" => {
+                run.status_file_path = Some(status_path.with_file_name("another.status.json"))
+            }
+            "identity" => {
+                run.run_id = None;
+                run.execution_key = None;
+            }
+            "malformed" => {}
+            _ => unreachable!(),
+        }
+        let bytes = if invalid == "malformed" {
+            b"{".to_vec()
+        } else {
+            serde_json::to_vec(&run).unwrap()
+        };
+        fs::write(&sidecar, bytes).unwrap();
+        assert!(
+            daemon_run_exit_from_status_file(&status_path, &marker).is_none(),
+            "{invalid}"
+        );
+        assert!(sidecar.exists(), "invalid recovery evidence is preserved");
+        fs::remove_dir_all(status_path.parent().unwrap()).unwrap();
+    }
 }
 
 #[test]
@@ -2995,6 +3164,7 @@ fn inbound_event_backfills_attachment_channel_and_message_id() {
             client_message_id: None,
             ack_required: Some(true),
             interrupt_requested: None,
+            steer_allowed: None,
             delivery_intent: None,
         });
 

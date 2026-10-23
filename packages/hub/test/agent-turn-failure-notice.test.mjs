@@ -43,9 +43,30 @@ test("turn-failure append is an agent-attributed system_fact, not a new task", (
   assert.match(command.body, /unknown certificate verification error/);
   assert.equal(command.payload.principal.kind, "agent");
   assert.equal(command.payload.principal.id, "agent-1");
+  assert.equal(command.payload.messageKind, "xmatrix.system.runtime-failure",
+    "a Hub-authored lifecycle fact must remain writable when the Space's allowance is exhausted");
   assert.equal(command.payload.residual.appMetadata.xmatrixProvenance, "system_fact");
   assert.equal(command.payload.residual.appMetadata.xmatrixTurnFailure, true);
   assert.equal(command.payload.agentRunProof.runId, "run-1");
+  assert.equal(command.messageId,
+    "turn-failure:instance-1:xMatrix could not complete this opencode turn: Internal error: unknown certificate verification error");
+});
+
+test("every harness gets correlated HTTP evidence without changing notice replay authority", () => {
+  for (const agentName of ["codex", "claude", "custom-acp", "terminal-agent"]) {
+    const input = { runId: "run-1", instanceId: "instance-1", executionKey: "exec-1",
+      agentId: "agent-1", agentName, ownerUserId: "owner", channelId: "channel-1",
+      noticeId: "failure-123", senderSnapshot: {}, detail: "code=access_denied; httpStatusCode=403; requestId=req-safe" };
+    const command = agentTurnFailureAppendCommand(input);
+    assert.match(command.body, /HTTP status: 403/u);
+    assert.match(command.body, /Failure reference: failure-123/u);
+    assert.deepEqual(command.payload.residual.appMetadata.xmatrixFailureEvidence, {
+      version: 1, category: "http", httpStatuses: [403], codes: ["access_denied"],
+      requestIds: ["req-safe"], websocketCloseCodes: [], exitCodes: [],
+    });
+    assert.equal(agentTurnFailureAppendCommand(input).messageId, command.messageId);
+    assert.equal(command.payload.residual.appMetadata.xmatrixProvenance, "system_fact");
+  }
 });
 
 test("background interruption is a scoped idempotent fact without claiming task failure", () => {
@@ -66,4 +87,31 @@ test("background interruption is a scoped idempotent fact without claiming task 
   assert.notEqual(agentTurnFailureAppendCommand({ ...input, channelId: "other-channel" }).commandId, first.commandId);
   assert.equal(agentTurnFailureAppendCommand({ ...input, noticeId: undefined }), null);
   assert.equal(agentTurnFailureAppendCommand({ ...input, noticeId: "bad key" }), null);
+});
+
+test("Hub words a background interruption from the host's count", () => {
+  const input = { runId: "run", instanceId: "instance", executionKey: "execution",
+    agentId: "agent", agentName: "Claude", ownerUserId: "owner", channelId: "channel",
+    senderSnapshot: {}, reason: "background_tasks_interrupted", noticeId: "provider-generation-1" };
+  assert.equal(agentTurnFailureAppendCommand({ ...input, pendingTasks: 2 }).body,
+    "xMatrix lost background-task tracking for Claude. The provider stream ended with 2 tasks still pending. " +
+    "Their outcome is unknown; verify external operations before continuing.");
+  assert.match(agentTurnFailureAppendCommand({ ...input, pendingTasks: 1 }).body, /with 1 task still pending/u);
+  // An older host sent the sentence itself.
+  assert.match(agentTurnFailureAppendCommand({ ...input, detail: "legacy sentence" }).body, /tracking for Claude\. legacy sentence$/u);
+});
+
+test("a turn its program refused as signed out carries what to sign in; any other failure does not", () => {
+  const signedOut = { harness: "claude", program: "Claude Code", machineId: "machine:mac", machineName: "mac-mini" };
+  const failure = (reason) => agentTurnFailureAppendCommand({
+    runId: "run-1", instanceId: "instance-1", executionKey: "exec-1", agentId: "agent-1", agentName: "claude",
+    ownerUserId: "user-1", channelId: "channel-1", reason, signedOut, senderSnapshot: {},
+    detail: "Failed to authenticate: OAuth session expired and could not be refreshed",
+  }).payload.residual.appMetadata;
+  const signedOutNotice = failure("harness_signed_out");
+  assert.equal(signedOutNotice.kind, "xmatrix.harness-signed-out.v1");
+  assert.deepEqual(signedOutNotice.signedOut, signedOut);
+  assert.equal(signedOutNotice.xmatrixTurnFailure, true);
+  assert.equal(failure("turn_failed").kind, undefined);
+  assert.equal(failure("turn_failed").signedOut, undefined);
 });

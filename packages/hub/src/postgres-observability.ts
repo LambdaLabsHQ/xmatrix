@@ -1,4 +1,4 @@
-import { analyticsPointDuration as safeDuration } from "./analytics-sampling";
+import { analyticsPointDuration as safeDuration, sampledAnalyticsPoint } from "./analytics-sampling";
 import type {
   DatabaseObservation,
   DatabaseObserver,
@@ -30,8 +30,8 @@ const QUERY_NAME = /^[a-z][a-z0-9_]{0,95}$/u;
 const OPERATION_NAME = /^[a-z][a-z0-9_.:-]{0,119}$/u;
 /** Leading segments of code-defined operation names; anything else is "other". */
 const OPERATION_FAMILIES = new Set([
-  "admin", "agent", "agent-profile", "app", "assistant-memory", "automation", "billing",
-  "billing-checkout", "channel", "channel-catalog", "content", "cross-space-read", "decision",
+  "account-deletion", "admin", "agent", "agent-profile", "app", "assistant-memory", "auth", "automation", "billing",
+  "billing-checkout", "channel", "channel-catalog", "channel-purge", "content", "cross-space-read", "decision",
   "governance", "human-profile", "launch", "machine",
   "machine-control", "machine-lifecycle", "machine-request",
   "membership", "message", "page", "postgres", "preference-canary",
@@ -58,6 +58,7 @@ const TRANSIENT_ERROR_CODES = new Set([
   "CONNECTION_UNUSABLE",
   "CONNECT_TIMEOUT",
   "DATABASE_CONTRACT_ERROR",
+  "DATABASE_CIRCUIT_OPEN",
 ]);
 const AGENT_LAUNCH_STAGES = new Set([
   "message_commit_to_interpret", "launch_resolve", "launch_prepare", "directory_publish",
@@ -163,8 +164,7 @@ function retention(rate: number, outcome: string, slow: boolean): { reason: stri
   if (outcome !== "ok") return { reason: "error", weight: 1 };
   if (slow) return { reason: "slow", weight: 1 };
   if (rate === 1) return { reason: "all", weight: 1 };
-  const value = crypto.getRandomValues(new Uint32Array(1))[0] ?? 0;
-  return value % rate === 0 ? { reason: "sampled", weight: rate } : null;
+  return sampledAnalyticsPoint(rate) ? { reason: "sampled", weight: rate } : null;
 }
 
 function operationName(value: string): string {
@@ -212,9 +212,16 @@ export function recordPostgresQueryObservation(
       QUERY_NAME.test(input.queryName) ? input.queryName : "other",
       kept.reason,
       operationName(input.operation),
+      ...(input.connectivity ? [
+        input.connectivity.state === "open" || input.connectivity.state === "half_open" ? input.connectivity.state : "other",
+        safeErrorCode(input.connectivity.failureCode), operationName(input.connectivity.failureOperation),
+        QUERY_NAME.test(input.connectivity.failureQuery) ? input.connectivity.failureQuery : "other",
+      ] : []),
     ],
     doubles: [
       safeDuration(input.durationMs), safeRowCount(input.rowCount), input.slow ? 1 : 0, kept.weight,
+      ...(input.connectivity ? [safeDuration(input.connectivity.retryAfterMs),
+        safeDuration(input.connectivity.failureAgeMs), safeRowCount(input.connectivity.failureCount)] : []),
     ],
   });
 }

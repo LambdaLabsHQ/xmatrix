@@ -9,7 +9,7 @@ import {
  * in `commands` and answers it with `respond`; history is inert.
  */
 export function recordingAgentInstancePort({ respond = () => ({}), signals = { async publish() {} },
-  pullRequestOpened } = {}) {
+  pullRequestOpened, settleQuestionnaire, markResting, recordSignedOut } = {}) {
   const commands = [];
   const port = new PostgresAgentInstancePort({
     atomicInstanceConnect: true,
@@ -34,9 +34,27 @@ export function recordingAgentInstancePort({ respond = () => ({}), signals = { a
         commands.push({ family: "registration-usage-limit-hold", input });
         return respond("registration-usage-limit-hold", input);
       },
+      ...(markResting ? { markResting } : {}),
     },
     signals,
     ...(pullRequestOpened ? { pullRequestOpened } : {}),
+    ...(recordSignedOut ? { recordSignedOut: async (session) => {
+      commands.push({ family: "record-signed-out", input: session.principal.runId });
+      return recordSignedOut(session);
+    } } : {}),
+    ...(settleQuestionnaire ? { settleQuestionnaire: async (input) => {
+      commands.push({ family: "settle-questionnaire", input });
+      return settleQuestionnaire(input);
+    } } : {}),
   });
   return { port, commands };
+}
+
+/** A writing Channel Instance session of a Run named codex:2, owned by "owner". */
+export function channelInstanceSession() {
+  return {
+    principal: { ownerUserId: "owner", spaceId: "space", channelId: "channel", agentId: "agent-1",
+      agentName: "codex", runId: "run-1", executionKey: "execution-1" },
+    run: { instanceId: "instance-1", channelId: "channel", channelInstanceId: "2" },
+  };
 }

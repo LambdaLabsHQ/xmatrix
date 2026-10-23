@@ -18,9 +18,12 @@ jobs:
         with:
           script: |
             const pr = context.payload.pull_request;
+            const repositoryUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}`;
             const body = [
-              "This repository accepts prompt requests, not external pull requests.",
-              "Open an issue with the Prompt request template: the outcome, the current behavior, and a prompt a maintainer can run.",
+              "Community contributions are welcome through Prompt request issues.",
+              `Open a [Prompt request](${repositoryUrl}/issues/new?template=prompt-request.yml) with the current behavior, reproduction, desired outcome and acceptance checks. A prompt or reference patch is optional.`,
+              "Maintainers triage requests, then an agent implements accepted changes in a regular PR that links back to and credits the request.",
+              `Team members and their agents must use the [repository branch workflow](${repositoryUrl}/blob/main/AGENTS.md#branches) for implementation PRs; branches in personal forks are still fork PRs.`,
               "This pull request will be closed.",
             ].join(" ");
             await github.rest.issues.createComment({

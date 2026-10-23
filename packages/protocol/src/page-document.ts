@@ -3,8 +3,10 @@ import { gfmFromMarkdown, gfmToMarkdown } from "mdast-util-gfm";
 import { toMarkdown } from "mdast-util-to-markdown";
 import { gfm } from "micromark-extension-gfm";
 import { diffIndices } from "node-diff3";
-import { Schema, type Mark, type Node as DocNode } from "prosemirror-model";
+import { Fragment, Schema, type Mark, type Node as DocNode } from "prosemirror-model";
 import { pageBlocks } from "./page-markdown.js";
+
+export * from "./page-blame.js";
 
 /**
  * Only the page session and the page editor load this module (the
@@ -78,8 +80,12 @@ export const pageSchema = new Schema({
     image: {
       group: "inline", inline: true, draggable: true,
       attrs: { src: {}, alt: { default: "" }, title: { default: null } },
-      parseDOM: [{ tag: "img[src]", getAttrs: (dom) => ({ src: (dom as HTMLElement).getAttribute("src"),
-        alt: (dom as HTMLElement).getAttribute("alt") ?? "", title: (dom as HTMLElement).getAttribute("title") }) }],
+      parseDOM: [{ tag: "img[src]", getAttrs: (dom) => {
+        const src = (dom as HTMLElement).getAttribute("src") ?? "";
+        // A file on someone's machine is no image a page can show: images reach a page by being pasted into it.
+        if (/^(?:file|blob):/iu.test(src)) return false;
+        return { src, alt: (dom as HTMLElement).getAttribute("alt") ?? "", title: (dom as HTMLElement).getAttribute("title") };
+      } }],
       toDOM: (node) => ["img", { src: node.attrs.src, alt: node.attrs.alt, title: node.attrs.title }],
     },
     hard_break: { group: "inline", inline: true, selectable: false, parseDOM: [{ tag: "br" }], toDOM: () => ["br"] },
@@ -159,7 +165,8 @@ function blocksFrom(markdown: string, nodes: readonly MdNode[], definitions: Map
         out.push({ type: "blockquote", content: content.length ? content : [{ type: "paragraph" }] });
         break;
       }
-      case "code": out.push({ type: "code_block", attrs: { language: [node.lang, node.meta].filter(Boolean).join(" ") },
+      case "code": sourceText(markdown, node, node.value ?? "", true);
+        out.push({ type: "code_block", attrs: { language: [node.lang, node.meta].filter(Boolean).join(" ") },
         ...(node.value ? { content: [{ type: "text", text: node.value }] } : {}) }); break;
       case "list": {
         const items = (node.children ?? []).map((item): JsonNode => {
@@ -188,6 +195,7 @@ function blocksFrom(markdown: string, nodes: readonly MdNode[], definitions: Map
       case "definition": break; // References are resolved into their links and images.
       default: {
         const text = source(markdown, node);
+        sourceText(markdown, node, text);
         out.push({ type: "markdown", ...(text ? { content: [{ type: "text", text }] } : {}) });
       }
     }
@@ -201,24 +209,26 @@ function inlinesFrom(markdown: string, nodes: readonly MdNode[], marks: MarkSpec
   const withMarks = (node: JsonNode): JsonNode => (marks.length ? { ...node, marks } : node);
   for (const node of nodes) {
     switch (node.type) {
-      case "text": if (node.value) out.push(withMarks({ type: "text", text: node.value })); break;
+      case "text": if (node.value) { sourceText(markdown, node, node.value); out.push(withMarks({ type: "text", text: node.value })); } break;
       case "strong": out.push(...inlinesFrom(markdown, node.children ?? [], [...marks, { type: "strong" }], definitions)); break;
       case "emphasis": out.push(...inlinesFrom(markdown, node.children ?? [], [...marks, { type: "em" }], definitions)); break;
       case "delete": out.push(...inlinesFrom(markdown, node.children ?? [], [...marks, { type: "strike" }], definitions)); break;
       // A code span's line endings are spaces (CommonMark 6.1).
-      case "inlineCode": if (node.value) out.push({ type: "text", text: node.value.replace(/\n/gu, " "),
-        marks: [...marks, { type: "code" }] }); break;
-      case "break": out.push({ type: "hard_break" }); break;
+      case "inlineCode": if (node.value) { sourceText(markdown, node, node.value);
+        out.push({ type: "text", text: node.value.replace(/\n/gu, " "), marks: [...marks, { type: "code" }] }); } break;
+      case "break": sourceAtom(node); out.push({ type: "hard_break" }); break;
       case "link": out.push(...inlinesFrom(markdown, node.children ?? [],
         [...marks, { type: "link", attrs: { href: node.url ?? "", title: node.title ?? null } }], definitions)); break;
-      case "image": out.push(withMarks({ type: "image",
+      case "image": sourceAtom(node); out.push(withMarks({ type: "image",
         attrs: { src: node.url ?? "", alt: node.alt ?? "", title: node.title ?? null } })); break;
       case "linkReference":
       case "imageReference": {
         const definition = definitions.get(node.identifier ?? "");
         if (!definition) {
+          sourceAtom(node);
           out.push(withMarks({ type: "markdown_inline", attrs: { source: source(markdown, node) } }));
         } else if (node.type === "imageReference") {
+          sourceAtom(node);
           out.push(withMarks({ type: "image",
             attrs: { src: definition.url ?? "", alt: node.alt ?? "", title: definition.title ?? null } }));
         } else {
@@ -227,7 +237,7 @@ function inlinesFrom(markdown: string, nodes: readonly MdNode[], marks: MarkSpec
         }
         break;
       }
-      default: out.push(withMarks({ type: "markdown_inline", attrs: { source: source(markdown, node) } }));
+      default: sourceAtom(node); out.push(withMarks({ type: "markdown_inline", attrs: { source: source(markdown, node) } }));
     }
   }
   return out;
@@ -237,6 +247,58 @@ function collectDefinitions(node: MdNode, into: Map<string, MdNode>): Map<string
   if (node.type === "definition" && node.identifier && !into.has(node.identifier)) into.set(node.identifier, node);
   for (const child of node.children ?? []) collectDefinitions(child, into);
   return into;
+}
+
+/**
+ * Where in the markdown each inline position of the document being parsed came from, in the order the parse
+ * meets them, while `markdownToPageDocSources` collects them; null otherwise.
+ */
+let sourcing: number[] | null = null;
+
+/** `text`, as the document holds it, came from `node`'s markdown: each character from where it stands there. */
+function sourceText(markdown: string, node: MdNode, text: string, fenced = false) {
+  if (!sourcing || !text) return;
+  let from = node.position?.start.offset ?? 0;
+  const end = node.position?.end.offset ?? from;
+  // A fenced block's text starts on the line after its fence.
+  if (fenced && /^ {0,3}(?:`{3,}|~{3,})/u.test(markdown.slice(from, end))) from = markdown.indexOf("\n", from) + 1 || end;
+  // Escapes, entities and markers stand between the characters: each is matched to the next one like it.
+  let at = from;
+  for (const char of text) {
+    const found = markdown.indexOf(char, at);
+    const here = found >= 0 && found < end ? found : at;
+    for (let unit = 0; unit < char.length; unit++) sourcing.push(Math.min(here + unit, Math.max(end - 1, from)));
+    if (found >= 0 && found < end) at = found + char.length;
+  }
+}
+
+/** An inline node the document holds whole (an image, a break): it came from where it starts. */
+function sourceAtom(node: MdNode) {
+  sourcing?.push(node.position?.start.offset ?? 0);
+}
+
+/**
+ * The document a page's markdown describes, with where each of its inline positions came from in the
+ * markdown (`sources[pos]`, -1 where the position holds no text), so what is known about the markdown's
+ * characters, such as who wrote them (page-blame.ts), can be drawn on the document.
+ */
+export function markdownToPageDocSources(markdown: string): { doc: DocNode; sources: Int32Array } {
+  const collected: number[] = [];
+  sourcing = collected;
+  let doc: DocNode;
+  try {
+    doc = markdownToPageDoc(markdown);
+  } finally {
+    sourcing = null;
+  }
+  const sources = new Int32Array(doc.content.size + 1).fill(-1);
+  let next = 0;
+  doc.descendants((node, pos) => {
+    if (node.isText) for (let at = 0; at < node.text!.length; at++) sources[pos + at] = collected[next++] ?? -1;
+    else if (node.isInline) sources[pos] = collected[next++] ?? -1;
+    return true;
+  });
+  return { doc, sources };
 }
 
 /** The document a page's markdown describes. */
@@ -454,18 +516,35 @@ export function canonicalPageMarkdown(markdown: string): string {
  */
 export function pageChangedDocBlocks(before: string, after: string,
   canonical: (markdown: string) => string = canonicalPageMarkdown, among?: ReadonlySet<string>): string[] {
+  const changed: string[] = [];
+  for (const { id, old, section } of pageDocBlockChanges(before, after, among)) {
+    if (old === undefined || section === undefined || canonical(old) !== canonical(section)) changed.push(id);
+  }
+  return changed;
+}
+
+/** The same document comparison, allowing a caller to yield between expensive parses. */
+export async function pageChangedDocBlocksAsync(before: string, after: string,
+  canonical: (markdown: string) => Promise<string>, among?: ReadonlySet<string>): Promise<string[]> {
+  const changed: string[] = [];
+  for (const { id, old, section } of pageDocBlockChanges(before, after, among)) {
+    if (old === undefined || section === undefined || await canonical(old) !== await canonical(section)) changed.push(id);
+  }
+  return changed;
+}
+
+function* pageDocBlockChanges(before: string, after: string, among?: ReadonlySet<string>):
+  Generator<{ id: string; old?: string; section?: string }> {
   const sections = (markdown: string) => new Map(pageBlocks(markdown)
     .map((block) => [block.id, markdown.slice(block.start, block.end)]));
   const a = sections(before);
   const b = sections(after);
-  const changed: string[] = [];
   for (const [id, section] of b) {
     if (among && !among.has(id)) continue;
     const old = a.get(id);
-    if (old === undefined || (old !== section && canonical(old) !== canonical(section))) changed.push(id);
+    if (old !== section) yield { id, old, section };
   }
-  for (const id of a.keys()) if (!b.has(id) && (!among || among.has(id))) changed.push(id);
-  return changed;
+  for (const id of a.keys()) if (!b.has(id) && (!among || among.has(id))) yield { id };
 }
 
 /** A page's sections as its document holds them: top-level headings, with the ids `pageBlocks` gives. */
@@ -507,7 +586,9 @@ export function pageDocBlockAt(doc: DocNode, pos: number): string {
 /**
  * What changed between a revision a reader last had on screen and the document
  * now (pages-live-document.md §3.1), in the current document's positions: text
- * and blocks that are new, and what was taken out, at where it was.
+ * and blocks that are new, and what was taken out, at where it was. Text taken
+ * out of a line keeps the space that parted it from the words beside it, so it
+ * reads as it did drawn back in at `at`.
  */
 export type PageDocChange =
   | { kind: "added"; from: number; to: number; block: boolean }
@@ -570,8 +651,9 @@ function unitTokens(units: readonly DocUnit[]): DocToken[] {
   return tokens;
 }
 
+/** Text that is not in the document, as it read: runs of space as one, and a space at its edge kept. */
 function removedText(tokens: readonly DocToken[]): string {
-  return tokens.map((token) => token.text).join("").replace(/\s+/gu, " ").trim();
+  return tokens.map((token) => token.text).join("").replace(/\s+/gu, " ");
 }
 
 /**
@@ -606,7 +688,7 @@ export function pageDocChanges(before: DocNode, after: DocNode): PageDocChange[]
     const removed = old.slice(removedStart, removedStart + removedLength);
     const added = now.slice(addedStart, addedStart + addedLength);
     if (!added.length) {
-      const text = removedText(unitTokens(removed));
+      const text = removedText(unitTokens(removed)).trim();
       if (text) changes.push({ kind: "removed", at: blockGap(addedStart), text, block: true });
       continue;
     }
@@ -639,13 +721,257 @@ export function pageDocChanges(before: DocNode, after: DocNode): PageDocChange[]
       for (const range of shown) changes.push({ kind: "added", from: range.from, to: range.to, block: false });
       const text = removedText(a.slice(takenStart, takenStart + takenLength));
       // A word that only changed its marks shows as new, not as also taken out.
-      if (text && text !== removedText(put)) {
+      if (text.trim() && text.trim() !== removedText(put).trim()) {
         const at = putStart > 0 ? b[putStart - 1]!.to : b[0]!.from;
-        changes.push({ kind: "removed", at, text, block: false });
+        // Beside what took its place it reads whole; alone, it keeps the space that parts it from its neighbours.
+        changes.push({ kind: "removed", at, text: put.length ? text.trim() : text, block: false });
       }
     }
     // The blocks changed only in kind or place, as a paragraph that became a list item.
     if (changes.length === before) blocks();
   }
   return changes.slice(0, MAX_DOC_CHANGES);
+}
+
+/**
+ * What is known about each inline position of `before` (`known[pos]`, -1 for nothing), carried to the same
+ * text in `after`: blocks that did not change keep it whole, and within the blocks that did, the words that
+ * stayed keep it. What `after` added is -1. Lets who wrote what, known for a revision, be read on the page
+ * as it is now, with what is being written since.
+ */
+export function carryPageDocKnown(before: DocNode, known: Int32Array, after: DocNode): Int32Array {
+  const out = new Int32Array(after.content.size + 1).fill(-1);
+  const copy = (from: number, to: number, length: number) => {
+    for (let at = 0; at < length; at++) out[to + at] = known[from + at] ?? -1;
+  };
+  const old = docUnits(before);
+  const now = docUnits(after);
+  let oldUnit = 0;
+  let newUnit = 0;
+  const keepUnits = (until: number) => {
+    for (; oldUnit < until; oldUnit++, newUnit++) copy(old[oldUnit]!.pos, now[newUnit]!.pos, old[oldUnit]!.node.nodeSize);
+  };
+  for (const hunk of diffIndices(old.map((unit) => unit.key), now.map((unit) => unit.key))) {
+    keepUnits(hunk.buffer1[0]);
+    const removed = old.slice(hunk.buffer1[0], hunk.buffer1[0] + hunk.buffer1[1]);
+    const added = now.slice(hunk.buffer2[0], hunk.buffer2[0] + hunk.buffer2[1]);
+    oldUnit = hunk.buffer1[0] + hunk.buffer1[1];
+    newUnit = hunk.buffer2[0] + hunk.buffer2[1];
+    if (!removed.length || !added.length) continue;
+    const a = unitTokens(removed);
+    const b = unitTokens(added);
+    if (a.length + b.length > MAX_WORD_DIFF_TOKENS * 5) continue;
+    let oldToken = 0;
+    let newToken = 0;
+    const keepTokens = (until: number) => {
+      for (; oldToken < until; oldToken++, newToken++) copy(a[oldToken]!.from, b[newToken]!.from, a[oldToken]!.to - a[oldToken]!.from);
+    };
+    for (const words of diffIndices(a.map((token) => token.key), b.map((token) => token.key))) {
+      keepTokens(words.buffer1[0]);
+      oldToken = words.buffer1[0] + words.buffer1[1];
+      newToken = words.buffer2[0] + words.buffer2[1];
+    }
+    keepTokens(a.length);
+  }
+  keepUnits(old.length);
+  return out;
+}
+
+/** A document's top-level blocks, each keyed by its content. */
+function topBlocks(node: DocNode): Array<{ node: DocNode; pos: number; key: string }> {
+  const out: Array<{ node: DocNode; pos: number; key: string }> = [];
+  node.forEach((child, pos) => out.push({ node: child, pos, key: JSON.stringify(child.toJSON()) }));
+  return out;
+}
+
+/**
+ * The page as its reader has seen it (pages-live-document.md §3.1), after they had `now` on screen where
+ * `inView` says: each top-level block of `now` in view is seen as it is, one out of view keeps what they
+ * saw of it in `seen`, and a block taken out is gone for them once where it stood is in view.
+ */
+export function pageSeenDoc(seen: DocNode, now: DocNode, inView: (pos: number, end: number) => boolean): DocNode {
+  const old = topBlocks(seen);
+  const current = topBlocks(now);
+  const out: DocNode[] = [];
+  let kept = 0;
+  const shown = (block: { node: DocNode; pos: number }) => inView(block.pos, block.pos + block.node.nodeSize);
+  for (const hunk of diffIndices(old.map((block) => block.key), current.map((block) => block.key))) {
+    const [removedStart, removedLength] = hunk.buffer1;
+    const [addedStart, addedLength] = hunk.buffer2;
+    for (const block of old.slice(kept, removedStart)) out.push(block.node);
+    kept = removedStart + removedLength;
+    const removed = old.slice(removedStart, kept);
+    const added = current.slice(addedStart, addedStart + addedLength);
+    // Where a block was taken out: the blocks either side of the gap it left.
+    const gap = () => [current[addedStart - 1], current[addedStart]].some((block) => block !== undefined && shown(block));
+    // A block that took another's place is paired with it: seen, it replaces it; unseen, the old one stays.
+    for (let index = 0; index < Math.max(removed.length, added.length); index++) {
+      const was = removed[index];
+      const is = added[index];
+      if (is) {
+        if (shown(is)) out.push(is.node);
+        else if (was) out.push(was.node);
+      } else if (was && !(added.length ? shown(added[added.length - 1]!) : gap())) {
+        out.push(was.node);
+      }
+    }
+  }
+  for (const block of old.slice(kept)) out.push(block.node);
+  return now.type.create(now.attrs, out);
+}
+
+/**
+ * A suggestion against the document as it is now, as the changes a person
+ * takes or leaves one at a time (pages-live-document.md §4.2). Each replaces a
+ * run of whole top-level blocks of the document with the suggested blocks, so
+ * taking one is always a well-formed edit, whatever was typed meanwhile.
+ * `changes` say what it does word by word, in the document's positions: text it
+ * takes out is `added` (in the document, not the suggestion) and text it puts
+ * in is `removed` (in the suggestion, not the document).
+ */
+export interface PageDocHunk {
+  from: number;
+  to: number;
+  content: Fragment;
+  changes: PageDocChange[];
+}
+
+/** At most this many changes are offered one by one; past it the suggestion is a rewrite. */
+const MAX_DOC_HUNKS = 200;
+
+export function pageDocHunks(doc: DocNode, suggested: DocNode): PageDocHunk[] {
+  const now = topBlocks(doc);
+  const next = topBlocks(suggested);
+  const hunks: PageDocHunk[] = [];
+  const offer = (taken: typeof now, put: typeof next, at: number) => {
+    const last = taken[taken.length - 1];
+    const from = taken[0]?.pos ?? at;
+    const to = last ? last.pos + last.node.nodeSize : from;
+    // Word by word within the run: what is in the document's blocks and not the suggestion's is taken out.
+    const changes = pageDocChanges(pageSchema.topNodeType.create(null, put.map((block) => block.node)),
+      pageSchema.topNodeType.create(null, taken.map((block) => block.node)))
+      .map((change) => change.kind === "added" ? { ...change, from: change.from + from, to: change.to + from }
+        : { ...change, at: change.at + from });
+    hunks.push({ from, to, content: Fragment.fromArray(put.map((block) => block.node)), changes });
+  };
+  for (const hunk of diffIndices(now.map((block) => block.key), next.map((block) => block.key))) {
+    const [takenStart, takenLength] = hunk.buffer1;
+    const [putStart, putLength] = hunk.buffer2;
+    const taken = now.slice(takenStart, takenStart + takenLength);
+    const put = next.slice(putStart, putStart + putLength);
+    const before = takenStart > 0 ? now[takenStart - 1]! : null;
+    let at = before ? before.pos + before.node.nodeSize : 0;
+    // A run of changed blocks is offered block by block, so each is taken on its own; what one side has
+    // more of is offered after them, as one.
+    const paired = Math.min(taken.length, put.length);
+    for (let index = 0; index < paired; index++) {
+      offer(taken.slice(index, index + 1), put.slice(index, index + 1), at);
+      at = taken[index]!.pos + taken[index]!.node.nodeSize;
+    }
+    if (taken.length > paired || put.length > paired) offer(taken.slice(paired), put.slice(paired), at);
+    if (hunks.length >= MAX_DOC_HUNKS) break;
+  }
+  return hunks.slice(0, MAX_DOC_HUNKS);
+}
+
+/** A word an Agent writes into the page, with the marks it carries. */
+export interface PageWrittenWord { text: string; marks: readonly Mark[] }
+
+/** Words an Agent writes in at one place of the document it starts from, in reading order. */
+export interface PageWritingRun { pos: number; words: PageWrittenWord[] }
+
+/**
+ * How an Agent writes `after` into a page that reads as `before`, as a person
+ * types it: `start` is `after` with the words it adds left out (what it
+ * removes, restructures or re-marks is done, and a new block stands with its
+ * first word), and `runs` are the words it then types, each run at one
+ * position of `start`, in reading order. Opaque source stays whole. Typing
+ * the runs into `start` in order gives `after`; at every moment in between,
+ * the page reads back from Markdown as itself, so no block ever stands empty.
+ */
+export function pageWritingPlan(before: DocNode, after: DocNode): { start: DocNode; runs: PageWritingRun[] } {
+  const additions = pageDocChanges(before, after).filter((change) => change.kind === "added");
+  const runs: PageWritingRun[] = [];
+  // How much added text, earlier in reading order, `start` leaves out: positions in `after` past it sit
+  // that much earlier in `start`.
+  let left = 0;
+  let open: { at: number; run: PageWritingRun } | null = null;
+  const added = (from: number, to: number) => additions.some((change) => change.from < to && change.to > from);
+  const textblock = (node: DocNode, content: number): DocNode => {
+    const words: Array<{ child: number; from: number; text: string; marks: readonly Mark[]; added: boolean }> = [];
+    let shown = false;
+    const breaks: number[] = [];
+    node.forEach((child, offset, index) => {
+      if (!child.isText) {
+        if (child.type.name === "hard_break") breaks.push(words.length);
+        else shown = true;
+        return;
+      }
+      for (const word of child.text!.matchAll(WORD)) {
+        const from = content + offset + word.index!;
+        const isAdded = added(from, from + word[0].length);
+        if (!isAdded && word[0].trim()) shown = true;
+        words.push({ child: index, from, text: word[0], marks: child.marks, added: isAdded });
+      }
+    });
+    const keepFirst = (from: number) => {
+      const first = words.slice(from).find((word) => word.text.trim());
+      if (first) first.added = false;
+    };
+    // A block's first word, and the first after each line break, stays: a block or line with nothing of
+    // its own at its start would read as no block, no break, or, when inline source opens it, as another
+    // kind of block.
+    if (!shown || node.type.name !== "code_block") keepFirst(0);
+    for (const at of breaks) keepFirst(at);
+    // A space beside new words is typed with them, so no line ever starts or ends in one, nor holds two
+    // where the words between are still to come. Code keeps its spaces as they are.
+    if (node.type.name !== "code_block") {
+      const space = (word: (typeof words)[number] | undefined) => word !== undefined && !word.added && !word.text.trim();
+      for (let at = 0; at < words.length; at++) {
+        if (!words[at]!.added || words[at - 1]?.added) continue;
+        let end = at;
+        while (words[end + 1]?.added) end++;
+        if (space(words[at - 1])) words[at - 1]!.added = true;
+        else if (!words.slice(0, at).some((word) => !word.added && word.text.trim()) && space(words[end + 1])) {
+          words[end + 1]!.added = true;
+        }
+        at = end;
+      }
+    }
+    const children: DocNode[] = [];
+    let at = 0;
+    node.forEach((child, _offset, index) => {
+      if (!child.isText) {
+        children.push(child);
+        return;
+      }
+      let kept = "";
+      for (; at < words.length && words[at]!.child === index; at++) {
+        const word = words[at]!;
+        if (!word.added) {
+          kept += word.text;
+          continue;
+        }
+        const pos = word.from - left;
+        if (open && open.at === pos) open.run.words.push({ text: word.text, marks: word.marks });
+        else {
+          const run = { pos, words: [{ text: word.text, marks: word.marks }] };
+          runs.push(run);
+          open = { at: pos, run };
+        }
+        left += word.text.length;
+      }
+      if (kept) children.push(pageSchema.text(kept, child.marks));
+    });
+    return node.copy(Fragment.from(children));
+  };
+  const reveal = (node: DocNode, pos: number): DocNode => {
+    if (node.type.name === "markdown") return node;
+    const content = node.type === pageSchema.topNodeType ? pos : pos + 1;
+    if (node.isTextblock) return textblock(node, content);
+    const children: DocNode[] = [];
+    node.forEach((child, offset) => children.push(reveal(child, content + offset)));
+    return node.copy(Fragment.from(children));
+  };
+  return { start: reveal(after, 0), runs };
 }

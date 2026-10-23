@@ -1,7 +1,8 @@
+import { POSTGRES_ADMIN_MESSAGE_FACTS_QUERY } from "./postgres-admin-message-facts";
+
 /** One metadata-only scan and one SQL round trip per physical shard. */
 export const POSTGRES_ADMIN_OVERVIEW_QUERY = `WITH admin_message_facts AS MATERIALIZED (
-  SELECT space_id, author_id, author_kind, created_at
-  FROM data.messages WHERE deleted_at IS NULL
+  ${POSTGRES_ADMIN_MESSAGE_FACTS_QUERY}
 ),
 totals AS (
 WITH space_totals AS (
@@ -68,8 +69,10 @@ WITH membership_users AS (
           SELECT owner_user_id AS user_id, COUNT(*) AS agent_registrations
            FROM data.space_agent_registrations GROUP BY owner_user_id
         ), message_counts AS (
-          SELECT author_id AS user_id, COUNT(*) AS messages, MAX(created_at) AS last_message_at
-           FROM admin_message_facts WHERE author_kind = 'user' GROUP BY author_id
+          SELECT activity_user_id AS user_id,
+            COUNT(*) FILTER (WHERE author_kind = 'user') AS messages,
+            MAX(created_at) AS last_message_at
+           FROM admin_message_facts WHERE activity_user_id IS NOT NULL GROUP BY activity_user_id
         )
        SELECT membership_users.*, COALESCE(agent_counts.agent_registrations, 0) AS agent_registrations,
         COALESCE(message_counts.messages, 0) AS messages, message_counts.last_message_at,

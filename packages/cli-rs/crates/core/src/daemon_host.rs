@@ -114,15 +114,15 @@ impl<T> DaemonHostQueryOutcome<T> {
     }
 }
 
-pub fn control_state_path(installation: &InstallationRoot) -> PathBuf {
+pub(crate) fn control_state_path(installation: &InstallationRoot) -> PathBuf {
     installation.daemon_host_root().join("control.json")
 }
 
-pub fn host_state_path(installation: &InstallationRoot) -> PathBuf {
+pub(crate) fn host_state_path(installation: &InstallationRoot) -> PathBuf {
     installation.daemon_host_root().join("state.json")
 }
 
-pub fn update_recovery_state_path(installation: &InstallationRoot) -> PathBuf {
+pub(crate) fn update_recovery_state_path(installation: &InstallationRoot) -> PathBuf {
     installation.daemon_host_root().join("update-recovery.json")
 }
 
@@ -337,7 +337,7 @@ fn valid_capability(value: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
 }
 
-pub fn normalize_loopback_control_url(value: &str) -> Option<String> {
+pub(crate) fn normalize_loopback_control_url(value: &str) -> Option<String> {
     let mut url = reqwest::Url::parse(value.trim()).ok()?;
     if url.scheme() != "http"
         || !url.username().is_empty()

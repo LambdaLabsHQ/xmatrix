@@ -19,14 +19,14 @@ final class TrustedWebBridge {
     WebViewCompat.addWebMessageListener(
       webView,
       JAVASCRIPT_OBJECT_NAME,
-      AppConfiguration.trustedBridgeOriginRules(BuildConfig.DEBUG),
+      AppConfiguration.trustedBridgeOriginRules(),
       (view, message, sourceOrigin, isMainFrame, replyProxy) ->
         handleMessage(bridge, message, sourceOrigin, isMainFrame, replyProxy)
     );
     WebViewCompat.addDocumentStartJavaScript(
       webView,
       BridgeScript.source(BuildConfig.VERSION_NAME),
-      AppConfiguration.trustedBridgeOriginRules(BuildConfig.DEBUG)
+      AppConfiguration.trustedBridgeOriginRules()
     );
     return true;
   }
@@ -50,6 +50,12 @@ final class TrustedWebBridge {
         // The token arrives later, so this one method answers when it does.
         String id = request.id;
         bridge.pushDevice(response -> replyProxy.postMessage(BridgeProtocol.reply(id, response)));
+        return;
+      }
+      if ("authorizeInBrowser".equals(request.method)) {
+        // Answered when the sign-in tab returns to the app, or is closed.
+        String id = request.id;
+        bridge.authorizeInBrowser(request.payload, response -> replyProxy.postMessage(BridgeProtocol.reply(id, response)));
         return;
       }
       String response = bridge.invoke(request.method, request.payload.toString());

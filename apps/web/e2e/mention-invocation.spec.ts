@@ -1,7 +1,7 @@
 import { test, expect } from "./fixtures";
 import type { Page } from "@playwright/test";
 import { E2E_CHANNEL, E2E_NOW, E2E_SPACE, E2E_USER_SENDER,
-  fixtureJson, fixtureRequestBodies, fixtureRequests, installWorkspaceStubs } from "./workspace-fixtures";
+  fixtureJson, fixtureRequestBodies, fixtureRequests, installWorkspaceStubs, routeInvocationPush } from "./workspace-fixtures";
 
 const messageId = "message-invocations";
 const source = "@codex repo:LambdaLabsHQ/xmatrix review this; @claude repo:LambdaLabsHQ/xmatrix check tests. @auto model:reviewer check coverage.";
@@ -48,12 +48,14 @@ async function openChip(chip: ReturnType<Page["locator"]>) {
 }
 
 async function installInvocationFixture(page: Page, launches: unknown[], body = source, continuations: unknown[] = []) {
+  const push = await routeInvocationPush(page);
   await installWorkspaceStubs(page, { spaces: [E2E_SPACE], channels: [{ ...E2E_CHANNEL, messageCount: 1, historyHeadSequence: 1 }] });
   await fixtureJson(page, "invocation-history", "**/api/xmatrix/channels/channel-general/history**", {
     messages: [{ messageId, channelId: E2E_CHANNEL.id, sequence: 1, body,
       sentAt: E2E_NOW, from: E2E_USER_SENDER }], hasMore: false,
   });
   await fixtureJson(page, "invocation-launches", "**/api/xmatrix/channels/channel-general/agent-launches/query", { launches, rejections: [rejection], continuations });
+  return push;
 }
 
 test("repository baseline remains in finished invocation details with UTC and unknown evidence", async ({ page }) => {
@@ -76,7 +78,7 @@ test("repository baseline remains in finished invocation details with UTC and un
 
 test("each mention has independent live progress and a keyboard-accessible timeline", async ({ page }) => {
   await page.clock.install({ time: new Date(E2E_NOW) });
-  await installInvocationFixture(page, [codex, claude]);
+  const push = await installInvocationFixture(page, [codex, claude]);
   await page.goto("/app/personal-sspaceperso/channels/general-cchannelgen", { waitUntil: "domcontentloaded" });
   const chips = page.locator(".app-mention-invocation");
   await expect(chips).toHaveCount(3);
@@ -129,6 +131,7 @@ test("each mention has independent live progress and a keyboard-accessible timel
       startupSteps: ["cwd_ready", "relay_registered", "runtime_ready", "turn_running"].map(phase => ({ phase, at: E2E_NOW })) } }, claude],
     rejections: [rejection], executions: [initialExecution("running")],
   });
+  await push();
   await expect(chips.nth(0)).toContainText("Started", { timeout: 15000 });
   await openChip(chips.nth(0));
   await expect(page.getByRole("dialog").getByRole("list", { name: "Invocation progress" }).locator("li", { hasText: "Runtime ready" })).toHaveAttribute("data-state", "done");
@@ -138,17 +141,19 @@ test("each mention has independent live progress and a keyboard-accessible timel
   await fixtureJson(page, "invocation-launches", "**/api/xmatrix/channels/channel-general/agent-launches/query", {
     error: "Channel not found",
   }, { status: 403 });
+  await push();
   // Without launch evidence a summon keeps the words as written and claims no status.
   await expect(page.locator(".app-mention-summon-written")).toHaveCount(3, { timeout: 15000 });
   await expect(chips.locator(".app-mention-invocation-status")).toHaveCount(0);
   await fixtureJson(page, "invocation-launches", "**/api/xmatrix/channels/channel-general/agent-launches/query", {
     launches: [codex, claude], rejections: [rejection],
   });
-  await page.clock.fastForward(11000);
+  await push();
   await expect(chips).toHaveCount(3, { timeout: 15000 });
   await fixtureJson(page, "invocation-launches", "**/api/xmatrix/channels/channel-general/agent-launches/query", {
     launches: [{ ...codex, activity: { ...codex.activity, phase: "wrapper_startup_failed", runStatus: "exited" } }, claude], rejections: [rejection],
   });
+  await push();
   await expect(chips.nth(0)).toContainText("Failed", { timeout: 15000 });
   await expect(chips.nth(1)).toContainText("Started");
   await page.emulateMedia({ reducedMotion: "reduce" });
@@ -195,7 +200,7 @@ test("a started summon stays started whatever its Run does next", async ({ page 
 });
 
 test("reborn and handoff phrases show their own successor without requiring current membership", async ({ page }) => {
-  await installInvocationFixture(page, [], `${reborn.sourceMention} restart; ${handoff.sourceMention} continue.`, [reborn, handoff]);
+  const push = await installInvocationFixture(page, [], `${reborn.sourceMention} restart; ${handoff.sourceMention} continue.`, [reborn, handoff]);
   await page.goto("/app/personal-sspaceperso/channels/general-cchannelgen", { waitUntil: "domcontentloaded" });
   // A handoff draws both of its Agents as invocation chips joined by an arrow.
   const chips = page.locator(".app-mention-invocation");
@@ -229,6 +234,8 @@ test("reborn and handoff phrases show their own successor without requiring curr
   await page.screenshot({ path: "test-results/mention-invocation-continuations-mobile.png", fullPage: true });
   await page.keyboard.press("Escape");
   await fixtureJson(page, "invocation-launches", "**/api/xmatrix/channels/channel-general/agent-launches/query", { error: "Access revoked" }, { status: 403 });
+  // Access is lost between reads; the next change the Hub pushes finds it gone.
+  await push();
   await expect(chips).toHaveCount(0, { timeout: 15000 });
 });
 
@@ -296,7 +303,7 @@ test("an elsewhere handoff shows the parameters Jev picked on the successor chip
 test("a fresh @auto handoff stays on Picking until the picked launch arrives", async ({ page }) => {
   const mention = "@claude:4:handoff:@auto";
   await page.clock.install({ time: new Date(E2E_NOW) });
-  await installInvocationFixture(page, [], `${mention} continue`);
+  const push = await installInvocationFixture(page, [], `${mention} continue`);
   await page.goto("/app/personal-sspaceperso/channels/general-cchannelgen", { waitUntil: "domcontentloaded" });
   const card = page.locator(".app-mention-handoff");
   await expect(card.locator(".app-mention-invocation").nth(1)).toContainText("Picking");
@@ -304,12 +311,54 @@ test("a fresh @auto handoff stays on Picking until the picked launch arrives", a
   await fixtureJson(page, "invocation-launches", "**/api/xmatrix/channels/channel-general/agent-launches/query", {
     launches: [handoffPick(mention, "auto")], rejections: [], continuations: [],
   });
+  await push();
   await expect(card.locator('[data-jev="true"]')).toHaveText([
     "harness:grok", "model:grok-4", "effort:high", "repo:LambdaLabsHQ/xmatrix",
   ], { timeout: 10_000 });
   await expect(card.locator('[data-routing="true"]')).toHaveText(["machine:Workstation"]);
   await expect(card.locator(".app-mention-invocation").nth(1)).toContainText("Starting");
   await expect(card.locator(".app-mention-invocation").nth(1)).not.toContainText("Picking");
+});
+
+test("a flowing handoff keeps its arrow geometry and motion on compositor surfaces", async ({ page }) => {
+  await page.clock.install({ time: new Date(E2E_NOW) });
+  await installInvocationFixture(page, [], "@claude:4:handoff:@auto continue");
+  await page.goto("/app/personal-sspaceperso/channels/general-cchannelgen", { waitUntil: "domcontentloaded" });
+  const arrow = page.locator('.app-handoff-arrow[data-flowing="true"]');
+  await expect(arrow).toBeVisible();
+  const geometry = await arrow.evaluate((element) => {
+    const animations = element.getAnimations({ subtree: true });
+    for (const animation of animations) animation.pause();
+    const comet = element.querySelector<HTMLElement>(".app-handoff-comet")!;
+    const head = element.querySelector<HTMLElement>(".app-handoff-head")!;
+    const cometAnimation = comet.getAnimations()[0];
+    const headAnimation = head.getAnimations()[0];
+    cometAnimation.currentTime = 0;
+    headAnimation.currentTime = 0;
+    const box = element.getBoundingClientRect();
+    const cometStart = comet.getBoundingClientRect();
+    const headStart = head.getBoundingClientRect();
+    cometAnimation.currentTime = 1299;
+    headAnimation.currentTime = 1040;
+    return {
+      aspect: box.width / box.height,
+      cometWidth: cometStart.width / box.width,
+      cometTravel: (comet.getBoundingClientRect().x - cometStart.x) / box.width,
+      headTravel: (head.getBoundingClientRect().x - headStart.x) / box.width,
+      durations: animations.map((animation) => animation.effect!.getTiming().duration),
+      htmlTargets: animations.every((animation) =>
+        (animation.effect as KeyframeEffect).target instanceof HTMLElement),
+    };
+  });
+  expect(geometry.aspect).toBeCloseTo(44 / 12, 1);
+  expect(geometry.cometWidth).toBeCloseTo(12.1 / 44, 2);
+  expect(geometry.cometTravel).toBeCloseTo(47.5 / 44, 2);
+  expect(geometry.headTravel).toBeCloseTo(1.5 / 44, 2);
+  expect(geometry.durations).toEqual([1300, 1300]);
+  expect(geometry.htmlTargets).toBe(true);
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await expect.poll(() => arrow.evaluate((element) => element.getAnimations({ subtree: true }).length)).toBe(0);
+  await expect(arrow.locator(".app-handoff-head")).toHaveCSS("opacity", "1");
 });
 
 test("invalid workspace syntax remains on its own mention beside a valid call to the same Agent", async ({ page }) => {
@@ -392,7 +441,7 @@ test("typed startup failures explain their stage and clear after confirmed recov
     diagnosticId: "diag_11111111-1111-4111-8111-111111111111", retryable: true };
   const retrying = { ...codex, activity: { ...codex.activity, operationFailure: failure,
     errorCode: failure.code, diagnosticId: failure.diagnosticId } };
-  await installInvocationFixture(page, [retrying], `${codex.sourceMention} inspect`);
+  const push = await installInvocationFixture(page, [retrying], `${codex.sourceMention} inspect`);
   await page.goto("/app/personal-sspaceperso/channels/general-cchannelgen", { waitUntil: "domcontentloaded" });
   const chip = page.locator(".app-mention-invocation");
   await expect(chip).toContainText("Connecting");
@@ -413,7 +462,7 @@ test("typed startup failures explain their stage and clear after confirmed recov
     launches: [{ ...codex, activity: { runStatus: "running", phase: "runtime_ready", updatedAt: E2E_NOW,
       wrapperReadyAt: E2E_NOW } }], nextCursor: null,
   });
-  await page.clock.fastForward(3000);
+  await push();
   await expect(chip).toContainText("Initializing");
   await expect(chip).not.toContainText("Starting");
   await expect(dialog).not.toContainText("Checking credentials");
@@ -550,6 +599,8 @@ test("tagged preflight rejection shows candidate evidence without a fabricated l
   const dialog = page.getByRole('dialog');
   await expect(dialog).toContainText('Rejected before launch allocation');
   await expect(dialog).toContainText('No eligible environment matched this summon.');
+  // The subtitle says it; the cause does not repeat it.
+  await expect(dialog).not.toContainText('No launch was allocated');
   await expect(dialog.getByText('Candidate observations')).toBeVisible();
   await expect(dialog.locator('.app-routing-row')).toHaveCount(0);
   await expect(dialog).not.toContainText('profile-a');
@@ -618,10 +669,14 @@ test("the summon chip lists every checked environment, including Grok past the o
   await expect(dialog).toContainText("candidate_1: 80.0%");
   await expect(dialog).toContainText("Environment input digest: " + "b".repeat(64));
   await page.setViewportSize({ width: 393, height: 852 });
-  const box = await dialog.boundingBox();
-  expect(box!.x).toBeGreaterThanOrEqual(0);
-  expect(box!.width).toBeGreaterThan(0);
-  expect(box!.x + box!.width).toBeLessThanOrEqual(393);
+  // The open panel is repositioned on the frame after the resize, not inside
+  // setViewportSize: a box read at once is still the desktop placement.
+  await expect(async () => {
+    const box = await dialog.boundingBox();
+    expect(box!.x).toBeGreaterThanOrEqual(0);
+    expect(box!.width).toBeGreaterThan(0);
+    expect(box!.x + box!.width).toBeLessThanOrEqual(393);
+  }).toPass({ timeout: 5000 });
 });
 
 test("a refusal notice hides environments outside explicit constraints", async ({ page }) => {
@@ -788,7 +843,7 @@ test("a confirmed stop sits on the command instead of another message", async ({
   await expect(page.getByText("Stop requested for")).toHaveCount(0);
   await openChip(chip);
   const dialog = page.getByRole("dialog");
-  await expect(dialog).toContainText("The Workstation confirmed the process tree is terminated.");
+  await expect(dialog).toContainText("The Machine confirmed the process tree is terminated.");
   await expect(dialog).toContainText("build-box-1");
   await expect(dialog).toContainText("Stopped");
   await page.screenshot({ path: "test-results/mention-stop-confirmed-desktop.png" });
@@ -815,13 +870,13 @@ test("a stop's reason stays prose beside the command chip", async ({ page }) => 
   await page.screenshot({ path: "test-results/mention-stop-reason.png" });
 });
 
-test("an accepted stop says Stopping until the Workstation confirms it", async ({ page }) => {
+test("an accepted stop says Stopping until the Machine confirms it", async ({ page }) => {
   const chip = await openStopChip(page, "@claude:1:stop", [stopReceipt("accepted")], "stop-receipts-accepted");
   await expect(chip).toContainText("Stopping");
   await expect(chip.locator(".app-invocation-spinner")).toBeVisible();
   await expect(page.getByText("xMatrix is reading")).toHaveCount(0);
   await openChip(chip);
-  await expect(page.getByRole("dialog")).toContainText("Waiting for the Workstation to confirm the process has terminated.");
+  await expect(page.getByRole("dialog")).toContainText("Waiting for the Machine to confirm the process has terminated.");
 });
 
 /* After "Jev is reading", the parameters Jev chose enter the mention one per
@@ -837,7 +892,7 @@ test("Jev's choices enter the mention one by one, taking no space before they ar
       choices: [{ key: "modelEffort", selected: "model_0", probabilities: { model_0: .68, model_1: .32 } },
         { key: "workspace", selected: "workspace_0", probabilities: { workspace_0: 1 } }] },
       rows: [{ harness: "codex", machineId: "machine-bobos", label: "bobos", machineLabel: "build01", activeRuns: 0, selected: true }] } };
-  await installInvocationFixture(page, [], `${mention} fix the flaky registration tests`);
+  const push = await installInvocationFixture(page, [], `${mention} fix the flaky registration tests`);
   await fixtureJson(page, "invocation-launches", "**/api/xmatrix/channels/channel-general/agent-launches/query",
     { launches: [], rejections: [], continuations: [] });
   await page.goto("/app/personal-sspaceperso/channels/general-cchannelgen", { waitUntil: "domcontentloaded" });
@@ -845,6 +900,7 @@ test("Jev's choices enter the mention one by one, taking no space before they ar
   await page.clock.pauseAt(new Date(Date.parse(E2E_NOW) + 20_000));
   await fixtureJson(page, "invocation-launches", "**/api/xmatrix/channels/channel-general/agent-launches/query",
     { launches: [auto], rejections: [], continuations: [] });
+  await push();
   const chip = page.locator(".app-mention-invocation").first();
   const filled = chip.locator('[data-jev="true"]');
   // Step the clock in small slices until the decision lands, so the reveal's own beats stay ahead.
@@ -878,13 +934,18 @@ const fitLevels = ["Unsuitable: it lacks a capability this work needs, or its de
   "Strong fit: its description, its models or the discussion give a concrete reason it suits this work.",
   "Asked for: the message or the discussion explicitly wants this agent to do the work."];
 const fitQuestion = (harness: string) => ({ type: "score", instructions: `Rate how well the one harness below suits the work. Harness: ${JSON.stringify({ harness, descriptions: [], models: [] })}`, criteria: fitLevels });
+const placementNetwork = { observedAt: E2E_NOW, target: "cloudflare-speed", protocol: "https", attempts: 10, failures: 0,
+  latencyMedianMs: 50, latencyP95Ms: 100, jitterMs: 12,
+  packetLoss: { protocol: "icmp", target: "1.1.1.1", sent: 100, received: 99 },
+  download: { observedAt: E2E_NOW, bytes: 1_000_000, durationMs: 100, mbps: 80, shortSample: true },
+  upload: { observedAt: E2E_NOW, bytes: 1_000_000, durationMs: 1000, mbps: 8, shortSample: false, loadedLatencyMs: 200 } };
 const autoParameters = { rubricVersion: "registration-parameters-v10", evaluatedAt: E2E_NOW, inputDigest: "a".repeat(64),
   fit: { inputDigest: "b".repeat(64), scores: {
     codex: { score: 0.97, probabilities: { 0: 0.2, 1: 0.71, 2: 0.02, 3: 0.07 } },
     claude: { score: 2.05, probabilities: { 0: 0.1, 1: 0.32, 2: 0.01, 3: 0.57 } },
     opencode: { score: 0.77, probabilities: { 0: 0.34, 1: 0.59, 2: 0.02, 3: 0.05 } } } },
   placement: { profile: "balanced", ranking: [
-    { harness: "codex", machineId: "m-idle", machineName: "build-idle", fit: 0.323, headroom: 0.85, frontier: true, utility: 0.324 },
+    { harness: "codex", machineId: "m-idle", machineName: "build-idle", fit: 0.323, headroom: 0.85, frontier: true, utility: 0.324, network: placementNetwork, networkQuality: 1 },
     { harness: "claude", machineId: "m-busy", machineName: "build-busy", fit: 0.683, headroom: -0.045, frontier: true, utility: -0.044 },
     { harness: "opencode", machineId: "m-grok", machineName: "grok-box", fit: 0.257, headroom: 0.411, frontier: false, utility: 0.258 },
     { harness: "codex", machineId: "m-busy", machineName: "build-busy", fit: 0.323, headroom: -0.045, frontier: false, utility: -0.044 }] },
@@ -898,7 +959,8 @@ const autoLaunch = { launchId: "launch:auto", channelId: E2E_CHANNEL.id, sourceM
   activity: { runStatus: "running", phase: "turn_running", updatedAt: E2E_NOW, hostName: "build-idle" },
   routingDecision: { source: "jev", parameters: autoParameters, rows: [], machine: { id: "m-idle", name: "build-idle" } } };
 
-test("@auto shows the Agent and machine routing chose, and why, in one row", async ({ page }) => {
+for (const mobile of [false, true]) test(`@auto shows the Agent, machine and measured network without overflow on ${mobile ? "mobile" : "desktop"}`, async ({ page }) => {
+  await page.setViewportSize(mobile ? { width: 393, height: 852 } : { width: 1280, height: 900 });
   await installWorkspaceStubs(page, { spaces: [E2E_SPACE], channels: [{ ...E2E_CHANNEL, messageCount: 1, historyHeadSequence: 1 }] });
   await fixtureJson(page, "h", "**/api/xmatrix/channels/channel-general/history**", { messages: [{ messageId: autoMessageId, channelId: E2E_CHANNEL.id,
     sequence: 1, body: autoBody, sentAt: E2E_NOW, from: E2E_USER_SENDER }], hasMore: false });
@@ -925,6 +987,17 @@ test("@auto shows the Agent and machine routing chose, and why, in one row", asy
   const agent = jev.getByRole("list", { name: "Agent options" });
   await expect(agent.locator("li[data-selected]")).toContainText("codex · build-idle");
   await expect(agent.locator("li[data-selected]")).toContainText("Capable · 85% room");
+  const selected = agent.locator("li[data-selected]");
+  await expect(selected).toContainText("Cloudflare HTTPS p50/p95 50 ms/100 ms");
+  await expect(selected).toContainText("ICMP loss 1.0% (100 ICMP probes)");
+  await expect(selected).toContainText("↓ 80.0 Mbps (short sample)");
+  await expect(selected).toContainText("↑ 8.0 Mbps");
+  await expect(selected).toContainText("loaded RTT ↓ unknown / ↑ 200 ms");
+  expect(await selected.evaluate(element => element.scrollWidth <= element.clientWidth + 1),
+    "network measurements fit the option width").toBe(true);
+  const caption = selected.getByText("codex · build-idle", { exact: true });
+  expect(await caption.evaluate(element => element.clientWidth > 0 && element.scrollWidth <= element.clientWidth + 1),
+    "network measurements never hide the selected machine name").toBe(true);
   await expect(agent.getByRole("listitem").nth(1)).toContainText("claude · build-busy");
   await expect(agent.getByRole("listitem").nth(1)).toContainText("Strong fit · overloaded");
   await expect(jev).toContainText("claude fits better, but build-busy is overloaded");

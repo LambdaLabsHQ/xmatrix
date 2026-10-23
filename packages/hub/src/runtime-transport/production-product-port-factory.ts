@@ -1,6 +1,6 @@
 import { readOwnerRegistrationQuotaState, readRegistrationQuotaState, registrationQuotaKey,
   type RegistrationQuotaReading } from "@xmatrix/db";
-import { withRegistrationQuota } from "@xmatrix/protocol";
+import { decodeChannelSnapshot, encodeChannelSnapshot, presenceInstanceId, withRegistrationQuota } from "@xmatrix/protocol";
 import type {
   AgentInstanceOfflineReason,
   AgentRegistrationKey,
@@ -31,10 +31,9 @@ import {
   mergeAgentInstancePresentation,
 } from "./agent-instance-presentation";
 import {
-  overlayAgentPresenceOnChannel,
+  overlayAgentPresenceOnChannel, overlayAgentPresenceSnapshot,
   serializeAgentFromSession,
 } from "./agent-instance-live-presentation";
-import { channelHasComputedAgentInstance } from "./agent-presence-snapshot";
 import { AgentChannelHistory, type ReadAgentChannelHistory } from "./agent-channel-history";
 import { PostgresHumanPort } from "./postgres-human-port";
 import type { AgentInstanceRuntime } from "./agent-instance-run-query";
@@ -53,6 +52,7 @@ import {
   type ChannelAgentPresenceRecipient,
 } from "./channel-agent-presence-delivery";
 import { publishRuntimeChannelAgentPresence } from "./runtime-route-directory-delivery";
+import { RuntimeClientOperationError, runtimeFailureOrigin } from "./runtime-operation-failure";
 import {
   PRESENCE_AUDIENCE_TTL_MS, PresenceAudiences, type PresenceAudience, type PresenceStorage,
 } from "./presence-audiences";
@@ -156,10 +156,10 @@ export function createProductionRelayRuntimeProductPortFactory(
 
   return {
     human: () => PostgresHumanPort.fromEnv({ env }),
-    machineDaemon: (terminateInstance, deliverPending, quotaChanged) => PostgresMachineDaemonPort.fromEnv({
+    machineDaemon: (terminateInstance, quotaChanged) => PostgresMachineDaemonPort.fromEnv({
       env, terminateInstance,
+      ...(options.runtimeSelf ? { runtimeSelf: options.runtimeSelf } : {}),
       ...(quotaChanged ? { quotaChanged } : {}),
-      ...(deliverPending ? { deliverPending } : {}),
       ...(options.scheduleBackground ? { keepAlive: options.scheduleBackground } : {}),
     }),
     agentInstance: () => PostgresAgentInstancePort.fromEnv({
@@ -236,16 +236,16 @@ export function createProductionRelayRuntimeProductPortFactory(
         session.principal.spaceId);
       const accountQuota = payload ? channelInstanceQuota(payload.channel, session.run.instanceId) : undefined;
       const overlayLiveChannel = (channel: SerializedChannel, channelId: string) => {
+        let snapshot = decodeChannelSnapshot(channel);
         for (const liveSession of live) {
-          if (liveSession.run.channelId !== channelId || !channelHasComputedAgentInstance(channel, liveSession.run.instanceId)) continue;
-          channel = overlayAgentPresenceOnChannel(channel, { reason: "update", session: liveSession,
+          if (liveSession.run.channelId !== channelId || !snapshot.presence?.instances.has(presenceInstanceId(liveSession.run.instanceId))) continue;
+          snapshot = overlayAgentPresenceSnapshot(snapshot, { reason: "update", session: liveSession,
             ...shown(liveSession, liveSession.run.instanceStatus) });
         }
-        return channel;
+        return encodeChannelSnapshot(snapshot);
       };
-      const registration = payload && Object.values(payload.channel.memberPresence ?? {}).flatMap(presence =>
-        presence.kind === "agent" && presence.instances?.some(instance => instance.id === session.run.instanceId)
-          ? [presence.registration] : [])[0];
+      const registration = payload && decodeChannelSnapshot(payload.channel).presence?.instances
+        .get(presenceInstanceId(session.run.instanceId))?.registration;
       // This read is the registration's current reading; the owner's other Agents under it take it too.
       if (registration) {
         await audiences.rememberQuota(registration, accountQuota);
@@ -402,6 +402,7 @@ function scheduleAgentPresenceAcrossCells(input: {
     channelId: input.channelId,
     body,
     exceptCell: input.runtimeSelf?.cellName() ?? RELAY_RUNTIME_SELECTED_CELL,
+    reason: input.reason,
   }).catch((error: unknown) => {
     console.error("Agent presence cross-cell delivery failed", error);
   });
@@ -427,13 +428,14 @@ function createSignalPort(
       return {
         ...(result.value ? { value: result.value } : {}),
         ...(result.error ? { error: result.error } : {}),
+        ...(result.interruptedTurn ? { interruptedTurn: true } : {}),
       };
     },
     connected(session, deliver) {
       fanout.connected(session, deliver);
     },
     disconnected(session) {
-      if (fanout.disconnected(session)) router.disconnected(session.run.instanceId);
+      fanout.disconnected(session);
     },
   };
 }
@@ -454,10 +456,8 @@ class LiveAgentInstanceFanout implements AgentInstanceRuntimeFanout {
     this.targets.set(session.run.instanceId, { session, deliver });
   }
 
-  disconnected(session: Readonly<AgentInstanceRuntimeSession>): boolean {
-    const current = this.targets.get(session.run.instanceId);
-    if (current?.session !== session) return false;
-    return this.targets.delete(session.run.instanceId);
+  disconnected(session: Readonly<AgentInstanceRuntimeSession>): void {
+    if (this.targets.get(session.run.instanceId)?.session === session) this.targets.delete(session.run.instanceId);
   }
 
   sessions(): readonly Readonly<AgentInstanceRuntimeSession>[] {
@@ -474,10 +474,23 @@ class LiveAgentInstanceFanout implements AgentInstanceRuntimeFanout {
       candidate.principal.ownerUserId === session.principal.ownerUserId &&
       candidate.principal.channelId === session.principal.channelId
     );
-    const results = await Promise.allSettled(recipients.map(({ deliver }) => deliver(outbound)));
-    if (results.some((result) => result.status === "rejected")) {
-      throw new Error("Agent Instance live signal fanout failed");
-    }
+    // Best-effort live fanout: a peer that cannot be reached is that peer's
+    // state, never the sender's failure.
+    await Promise.all(recipients.map(async (recipient) => {
+      try {
+        await recipient.deliver(outbound);
+      } catch (error) {
+        const instanceId = recipient.session.run.instanceId;
+        if (error instanceof RuntimeClientOperationError && error.failure.code === "agent_delivery_binding_stale") {
+          // Its transport gave the socket up without releasing the binding,
+          // which the rejection has already reported; nothing can reach it again.
+          if (this.targets.get(instanceId) === recipient) this.targets.delete(instanceId);
+          return;
+        }
+        // A socket that refused the frame is closing; its close releases the binding.
+        console.warn("Agent Instance live signal was not delivered", { instanceId, ...runtimeFailureOrigin(error) });
+      }
+    }));
   }
 }
 

@@ -119,11 +119,20 @@ test("the hub frame builder ships exactly the shared message fields", () => {
   const judgment = [{ namespace: "xmatrix.superseded", authorUserId: "system:xmatrix",
     payload: { supersededBy: "message-5" } }];
   assert.equal(channelMessage({ ...framed, annotations: judgment }).supersededBy, undefined);
+  // A questionnaire card's settled state is likewise the Hub's own annotation.
+  const settled = [{ namespace: "xmatrix.questionnaire", authorUserId: "system:xmatrix",
+    payload: { state: "answered", answers: { branch: ["main"] } } }];
+  // So is what a command the message wrote came to.
+  const answered = [{ id: "xmatrix.command-result:message-1:controls", namespace: "xmatrix.command-result",
+    authorUserId: "system:xmatrix",
+    payload: { controls: [{ kind: "effort", target: "claude:1", status: "switched", selected: "max" }] } }];
   const published = channelMessage({ ...framed, recalledAt: undefined, recalledBy: undefined,
-    entityVersion: 2, bodyHash: "a".repeat(64), annotations: judgment });
+    entityVersion: 2, bodyHash: "a".repeat(64), annotations: [...judgment, ...settled, ...answered] });
   assert.equal(published.bodyHash, "a".repeat(64));
   assert.equal(published.entityVersion, 2);
   assert.equal(published.supersededBy, "message-5");
+  assert.deepEqual(published.questionnaireState, { state: "answered", answers: { branch: ["main"] } });
+  assert.deepEqual(published.commandResult, { controls: answered[0].payload.controls });
   const deleted = channelMessage({ ...framed, body: "", recalledAt: undefined, recalledBy: undefined,
     deletedAt: "2026-08-04T12:07:00.000Z", entityVersion: 3, bodyHash: "a".repeat(64) });
   assert.equal(deleted.deletedAt, "2026-08-04T12:07:00.000Z");

@@ -96,7 +96,6 @@ async fn spawn_daemon_request_broker(
 struct DaemonLocalHttpRequest {
     method: String,
     path: String,
-    query: HashMap<String, String>,
     headers: HashMap<String, String>,
     body: Vec<u8>,
 }
@@ -158,46 +157,13 @@ fn validate_daemon_hub_json_request(
     Ok(())
 }
 
-fn validate_daemon_hub_upload_request(
-    hub_url: &str,
-    url: &str,
-    token: &str,
-    content_type: &str,
-    checksum_sha256: &str,
-    body_len: usize,
-) -> Result<(), String> {
-    let configured = reqwest::Url::parse(hub_url).map_err(|_| "invalid daemon Hub URL")?;
-    let requested = reqwest::Url::parse(url).map_err(|_| "invalid Hub upload URL")?;
-    if !same_bare_hub_origin(&configured, &requested)
-        || !requested
-            .path()
-            .starts_with("/api/relay-v2/private-r2/uploads/")
-    {
-        return Err("Hub upload target is outside the allowed Agent route".into());
-    }
-    if token.trim().is_empty() {
-        return Err("Hub upload is missing the run-scoped token".into());
-    }
-    if content_type.trim().is_empty() || content_type.len() > 255 {
-        return Err("Hub upload content type is invalid".into());
-    }
-    if checksum_sha256.len() != 64 || !checksum_sha256.bytes().all(|byte| byte.is_ascii_hexdigit())
-    {
-        return Err("Hub upload checksum is invalid".into());
-    }
-    if body_len > DAEMON_HUB_UPLOAD_INPUT_LIMIT {
-        return Err("Hub upload exceeds the Agent broker size limit".into());
-    }
-    Ok(())
-}
-
 async fn read_daemon_local_http_request<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin>(
     stream: &mut S,
 ) -> Option<DaemonLocalHttpRequest> {
     let mut buffer = Vec::new();
     let mut temp = [0_u8; 4096];
     let mut content_len = None;
-    let mut input_limit = DAEMON_REQUEST_OUTPUT_LIMIT;
+    let input_limit = DAEMON_REQUEST_OUTPUT_LIMIT;
     loop {
         let read = tokio::time::timeout(Duration::from_secs(5), stream.read(&mut temp))
             .await
@@ -210,14 +176,6 @@ async fn read_daemon_local_http_request<S: tokio::io::AsyncRead + tokio::io::Asy
         if content_len.is_none()
             && let Some(header_end) = find_http_header_end(&buffer) {
                 let headers = String::from_utf8_lossy(&buffer[..header_end]).to_string();
-                let is_hub_upload = headers
-                    .lines()
-                    .next()
-                    .and_then(|line| line.split_whitespace().nth(1))
-                    .is_some_and(|path| path.starts_with("/request/hub-bytes?"));
-                if is_hub_upload {
-                    input_limit = DAEMON_HUB_UPLOAD_INPUT_LIMIT;
-                }
                 let declared = http_content_length(&headers).unwrap_or(0);
                 if declared > input_limit {
                     return None;
@@ -240,7 +198,7 @@ async fn read_daemon_local_http_request<S: tokio::io::AsyncRead + tokio::io::Asy
     let mut parts = request_line.split_whitespace();
     let method = parts.next()?.to_string();
     let raw_path = parts.next()?.to_string();
-    let (path, query) = parse_local_http_path(&raw_path);
+    let path = raw_path.split_once('?').map_or(raw_path.as_str(), |(path, _)| path).to_string();
     let mut headers = HashMap::new();
     for line in lines {
         let Some((key, value)) = line.split_once(':') else {
@@ -251,7 +209,6 @@ async fn read_daemon_local_http_request<S: tokio::io::AsyncRead + tokio::io::Asy
     Some(DaemonLocalHttpRequest {
         method,
         path,
-        query,
         headers,
         body: body_bytes.to_vec(),
     })
@@ -272,22 +229,6 @@ fn http_content_length(headers: &str) -> Option<usize> {
     })
 }
 
-fn parse_local_http_path(raw_path: &str) -> (String, HashMap<String, String>) {
-    let (path, query_text) = raw_path.split_once('?').unwrap_or((raw_path, ""));
-    let query = query_text
-        .split('&')
-        .filter_map(|part| {
-            if part.is_empty() {
-                return None;
-            }
-            let (key, value) = part.split_once('=').unwrap_or((part, ""));
-            let key = urlencoding::decode(key).ok()?.to_string();
-            let value = urlencoding::decode(value).ok()?.to_string();
-            Some((key, value))
-        })
-        .collect();
-    (path.to_string(), query)
-}
 
 fn daemon_request_header<'a>(request: &'a DaemonLocalHttpRequest, name: &str) -> Option<&'a str> {
     request
@@ -395,53 +336,7 @@ async fn handle_daemon_request_broker_request<
         .await;
         return;
     };
-    if request.method == "POST" && request.path == "/request/hub-bytes" {
-        let Some(hub_url) = authorized_daemon_request_hub(&mut stream, &broker, &request).await
-        else {
-            return;
-        };
-        let url = request.query.get("url").cloned().unwrap_or_default();
-        let token = daemon_request_header(&request, "x-xmatrix-hub-token")
-            .unwrap_or_default()
-            .to_string();
-        let content_type = daemon_request_header(&request, "x-xmatrix-content-type")
-            .unwrap_or_default()
-            .to_string();
-        let checksum = daemon_request_header(&request, "x-xmatrix-content-sha256")
-            .unwrap_or_default()
-            .to_string();
-        let response = match validate_daemon_hub_upload_request(
-            hub_url,
-            &url,
-            &token,
-            &content_type,
-            &checksum,
-            request.body.len(),
-        ) {
-            Ok(()) => {
-                match http::put_bytes::<Value>(&url, &token, &content_type, &checksum, request.body)
-                    .await
-                {
-                    Ok(value) => serde_json::json!({ "value": value }).to_string(),
-                    Err(err) => daemon_request_error_body(&err.to_string(), None),
-                }
-            }
-            Err(err) => daemon_request_error_body(&err, None),
-        };
-        return write_daemon_auth_broker_response(&mut stream, "200 OK", &response).await;
-    }
-
     let request_body = request.body_text().unwrap_or_default();
-
-    if request.method == "POST" && request.path == "/request/hub-product-media" {
-        return handle_daemon_hub_product_media_request(
-            &mut stream,
-            &broker,
-            &request,
-            request_body,
-        )
-        .await;
-    }
 
     // These arms all used to be written out as `200 OK`, which made a failed
     // operation indistinguishable from a successful one on the status line and
@@ -615,7 +510,6 @@ mod daemon_request_outcome_tests {
         let missing = DaemonLocalHttpRequest {
             method: "POST".into(),
             path: "/request/hub-json".into(),
-            query: HashMap::new(),
             headers: HashMap::new(),
             body: Vec::new(),
         };
@@ -627,7 +521,6 @@ mod daemon_request_outcome_tests {
         let malformed = DaemonLocalHttpRequest {
             method: "POST".into(),
             path: "/request/hub-json".into(),
-            query: HashMap::new(),
             headers: HashMap::from([(
                 "x-xmatrix-request-capability".into(),
                 "sha256:not-hex".into(),
@@ -646,7 +539,6 @@ mod daemon_request_outcome_tests {
         let never_granted = DaemonLocalHttpRequest {
             method: "POST".into(),
             path: "/request/hub-json".into(),
-            query: HashMap::new(),
             headers: HashMap::from([(
                 "x-xmatrix-request-capability".into(),
                 "spawn-time-raw-capability-that-diverged".into(),

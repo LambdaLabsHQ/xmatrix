@@ -6,8 +6,10 @@ This is the canonical entrypoint for repository policy. The repository has exact
 
 ## Finishing work
 
-Carry a change on this repository all the way: open its pull request, merge it once required CI passes, request the production release through the Production Release Intent workflow, and verify the result live. Do not stop to ask whether to merge, release, or fix a related problem you found; guardrail P0#4 makes the automated gates the review and release authority here.
+Carry a change on this repository all the way: open its pull request, merge it once required CI passes, request a beta release through the Production Release Intent workflow (the Hub and the beta Web reach production, clients their dev channel and TestFlight), and verify the result live. Stable releases (the stable Web and clients) belong to the stable release Agent, which verifies a beta and releases it as stable (`docs/release-updates.md`). Do not stop to ask whether to merge, release, or fix a related problem you found; guardrail P0#4 makes the automated gates the review and release authority here.
 
 ## Branches
 
 Branches on this repository are created with `gh workflow run new-branch.yml -f name=<branch>`, which makes the branch at the current main; a push cannot create one. A branch then moves only by fast-forward, so bring in main with a merge, not a rebase and force push. This keeps a checkout that still holds the private history from publishing it.
+
+Maintainers and their Agents use those upstream branches for implementation pull requests. If branch creation or a push is refused, resolve that workflow or permission failure; do not fall back to a personal fork, whose pull requests are closed as external contributions.

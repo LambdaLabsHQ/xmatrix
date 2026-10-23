@@ -5,6 +5,7 @@ import type {
   CommandCompletionArgumentSchema,
   CommandCompletionDelimiter,
 } from "./authority.js";
+import type { ConnectorActionPolicy } from "./app-connector-policy.js";
 import { EVENT_CONNECTOR_MANIFESTS } from "./app-connector-event-manifests.js";
 
 // Public Integration Issue Read & Write includes both event scopes in Sentry's native UI.
@@ -82,6 +83,12 @@ export interface AppConnectorProviderManifest {
     /** Written only by the Hub itself (OAuth tokens); never shown, minted, or typed. */
     managed?: boolean;
     required?: boolean;
+    /**
+     * The xMatrix desktop app can fill this field by signing in to the service
+     * in a window of its own (apps/desktop/src/sign-in-services.ts); typing the
+     * value stays possible everywhere else.
+     */
+    signIn?: "appstoreconnect";
   }>;
   /**
    * Inbound events (§3.3). A Channel subscribes with
@@ -89,6 +96,8 @@ export interface AppConnectorProviderManifest {
    * the Channels subscribed to its source and feature.
    */
   events?: {
+    /** False when the Hub produces the events itself, so there is no ingress URL to paste into the provider. */
+    ingress?: false;
     source: { label: string; description: string; pattern: string; placeholder: string };
     features: Array<{ id: string; label: string; description: string }>;
     defaultFeatures: string[];
@@ -105,10 +114,10 @@ export interface AppConnectorProviderManifest {
      */
     effect?: "read" | "write";
     /**
-     * `deny`: the action is off in every Channel until a Space admin allows it
-     * there (a write the provider's grant permits but xMatrix holds back).
+     * `ask` requires approval of each request; `disallow` refuses the action.
+     * Missing means `allow`. Overrides are set by a Space admin.
      */
-    defaultPolicy?: "deny";
+    defaultPolicy?: ConnectorActionPolicy;
     /** How to write the command after `@<provider>:<action>`, shown in completion and help. */
     usage?: string;
     completion?: {
@@ -154,7 +163,7 @@ const GITHUB_ORGANIZATION_REPOSITORY_REF_ARGUMENT = githubOrganizationArgument(
    these names and the web app offers them as the per-channel subscription
    controls, so both sides have to read the same list. */
 export const GITHUB_REPOSITORY_FEATURES = [
-  "issues", "pulls", "comments", "reviews", "commits", "checks", "status", "releases",
+  "issues", "pulls", "comments", "reviews", "commits", "checks", "status", "releases", "code-scanning",
 ] as const;
 
 export type GitHubRepositoryFeature = (typeof GITHUB_REPOSITORY_FEATURES)[number];
@@ -168,6 +177,7 @@ export const GITHUB_REPOSITORY_FEATURE_LABELS: Record<GitHubRepositoryFeature, s
   checks: "Checks",
   status: "Status & workflows",
   releases: "Releases",
+  "code-scanning": "Code scanning alerts",
 };
 
 /** The feature set `@github:subscribe:<owner>/<repo>` applies when none is named. */
@@ -188,6 +198,7 @@ export function githubRequiredCapabilities(
     result.add("github.pull_requests.read");
   }
   if (features.includes("checks")) result.add("github.checks.read");
+  if (features.includes("code-scanning")) result.add("github.code_scanning.read");
   return [...result];
 }
 
@@ -197,7 +208,7 @@ export const APP_CONNECTOR_PROVIDER_MANIFESTS: AppConnectorProviderManifest[] = 
     name: "GitHub",
     kind: "code-host",
     status: "available",
-    description: "Route repository commits, issues, pull requests, checks, and release events into xMatrix channels.",
+    description: "Route repository commits, issues, pull requests, checks, code scanning alerts, and release events into xMatrix channels.",
     auth: {
       type: "oauth",
       scopes: [
@@ -210,6 +221,7 @@ export const APP_CONNECTOR_PROVIDER_MANIFESTS: AppConnectorProviderManifest[] = 
         "pull_requests:write",
         "checks:read",
         "checks:write",
+        "security_events:read",
         "actions:write",
         "workflows:write",
       ],
@@ -274,6 +286,12 @@ export const APP_CONNECTOR_PROVIDER_MANIFESTS: AppConnectorProviderManifest[] = 
           label: "Write checks",
           description: "Report agent review outcomes as check runs so a protected branch can require them.",
           scopes: ["checks:write"],
+        },
+        {
+          id: "github.code_scanning.read",
+          label: "Read code scanning alerts",
+          description: "Receive code scanning alert changes in subscribed channels.",
+          scopes: ["security_events:read"],
         },
         {
           id: "github.actions.write",

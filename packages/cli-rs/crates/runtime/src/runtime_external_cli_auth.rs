@@ -171,7 +171,14 @@ async fn cmd_external_inner(
     );
     let mut runtime_capabilities = goal_runtime_capabilities(tool, cmd, cmd_args);
     runtime_capabilities.push("harness_parameters_v1".to_string());
-    if use_codex_app_backend(tool) { runtime_capabilities.push("agent_turn_retry".into()); }
+    // Every backend co-writes a page live (runtime_page_co_write).
+    runtime_capabilities.push("page_co_write_v1".to_string());
+    // Every backend's run loop takes a switch continuation as its own frame
+    // (RunLoopEvents::continuation), so the Hub need not post it to the Channel.
+    runtime_capabilities.push(crate::SWITCH_CONTINUATION_FRAME.to_string());
+    if use_codex_app_backend(tool) {
+        runtime_capabilities.extend(["agent_turn_retry".into(), "agent_turn_retry_channel_message".into()]);
+    }
     relay.set_runtime_capabilities(runtime_capabilities);
     let auto_join_channel_id = non_empty_env("XMATRIX_AUTO_JOIN_CHANNEL_ID");
     // Every backend receives the channel through its own delivery, so the join
@@ -213,7 +220,8 @@ async fn cmd_external_inner(
     let event_rx = relay.event_rx.take().unwrap();
 
     if let Some(channel_id) = auto_join_channel_id {
-        join_long_lived_initial_channel(&relay, channel_id, history_limit).await?;
+        join_long_lived_initial_channel(&relay, channel_id.clone(), history_limit).await?;
+        runtime_channel_history_bootstrap::follow_bootstrap_co_write(&relay, &channel_id);
     }
     // Registered with the Hub and in the channel: this wrapper is serving. A
     // live-update handoff waits for this stamp before retiring the wrapper
@@ -312,7 +320,7 @@ pub(crate) struct ExternalRun<'a> {
     pub(crate) cmd_args: &'a [String],
     pub(crate) hub_url: &'a str,
     pub(crate) cwd: Option<&'a str>,
-    pub(crate) relay: Arc<agent_instance_connection::AgentInstanceConnectionClient>,
+    pub relay: Arc<agent_instance_connection::AgentInstanceConnectionClient>,
     pub(crate) event_rx:
         mpsc::UnboundedReceiver<agent_instance_connection::AgentInstanceConnectionEvent>,
     pub(crate) agent: protocol::SerializedAgent,
@@ -1054,7 +1062,7 @@ async fn run_zcode_app_external(run: ExternalRun<'_>) -> error::Result<()> {
 
     if let Some(initial_message) = initial_message {
         let initial_prompt =
-            format!("Message from xMatrix chat:\n{initial_message}\n{initial_attachment_lines}");
+            format!("{initial_message}\n{initial_attachment_lines}");
         let payload = prompt_with_optional_bootstrap(&mut bootstrap, &initial_prompt);
         write_current_run_status("turn_running", false, None);
         let trace = TurnTrace {
@@ -1104,24 +1112,31 @@ async fn run_zcode_app_external(run: ExternalRun<'_>) -> error::Result<()> {
                 };
                 let passthrough = single_message_slash_passthrough(&inbound_messages, &agent);
                 ack_inbound_channel_messages(&relay, &inbound_messages);
-                if passthrough
+                if let Some(requested) = passthrough
                     .as_deref()
                     .and_then(crate::harness_parameters::command)
-                    .is_some()
                 {
-                    let _ = relay
-                        .send_channel_message(
-                            primary_channel_id,
-                            "ZCode app-server does not advertise configurable parameters"
-                                .to_string(),
-                        )
-                        .await;
+                    crate::harness_parameters::report_parameter_control(
+                        &relay,
+                        &primary_channel_id,
+                        &inbound_messages[0].message_id,
+                        &requested,
+                        &[],
+                        None,
+                        Err("ZCode app-server does not advertise configurable parameters".into()),
+                    )
+                    .await;
                     continue;
                 }
                 let goal_command = passthrough.as_deref().and_then(parse_goal_command);
-                let payload = goal_command.is_none().then(|| {
-                    let payload = inbound_channel_batch_prompt(&inbound_messages, &agent);
-                    prompt_with_optional_bootstrap(&mut bootstrap, &payload)
+                // An addressed slash command must lead the prompt for ZCode to
+                // run it; the channel preamble would turn it into prose.
+                let payload = goal_command.is_none().then(|| match passthrough {
+                    Some(command) => command,
+                    None => prompt_with_optional_bootstrap(
+                        &mut bootstrap,
+                        &inbound_channel_batch_prompt(&inbound_messages, &agent),
+                    ),
                 });
                 let primary_message_id = primary_inbound_message_id(&inbound_messages);
                 run.publish("busy");
@@ -1437,9 +1452,9 @@ impl InitialMessageLaunch {
     pub(crate) fn take_first_prompt(&mut self) -> Option<String> {
         let attachment_lines = &self.initial_attachment_lines;
         match (self.bootstrap.take(), self.initial_message.take()) {
-            (Some(prompt), Some(message)) => Some(format!(
-                "{prompt}\n\nMessage from xMatrix chat:\n{message}\n{attachment_lines}"
-            )),
+            (Some(prompt), Some(message)) => {
+                Some(format!("{prompt}\n\n{message}\n{attachment_lines}"))
+            }
             (Some(prompt), None) => Some(prompt),
             (None, Some(message)) => Some(format!("{message}\n{attachment_lines}")),
             (None, None) => None,
@@ -1964,7 +1979,7 @@ impl ZcodeAppSession {
 }
 
 /// Grok ACP backend: a thin shell over the generic ACP runner with the full
-/// Grok vendor config (WebSocket serve, billing quota, goal grammar, skill
+/// Grok vendor config (ACP over stdio, billing quota, goal grammar, skill
 /// overlay, `_meta.rules`).
 async fn run_grok_app_external(run: ExternalRun<'_>) -> error::Result<()> {
     run_acp_app_external(AcpVendorConfig::grok(), run).await
@@ -2020,7 +2035,7 @@ async fn run_acp_app_external(config: AcpVendorConfig, run: ExternalRun<'_>) -> 
     // `_meta.rules`) consume trusted rules here; other vendors keep the
     // bootstrap and deliver it as a prefix on the first user prompt.
     let trusted_rules = if config.session_new_meta_rules && (!resume_requested || role_active) {
-        grok_acp_trusted_rules(bootstrap.as_deref())
+        grok_acp_trusted_rules(auto_join_channel_id.as_deref())
     } else {
         None
     };
@@ -2033,12 +2048,8 @@ async fn run_acp_app_external(config: AcpVendorConfig, run: ExternalRun<'_>) -> 
             trusted_rules.as_deref(),
         )
         .await?;
-    if trusted_rules.is_some() {
-        // The ACP agent accepted these as session/new `_meta.rules`, which the
-        // provider appends to its system prompt. Do not repeat them in user
-        // content on the first turn.
-        bootstrap = None;
-    }
+    // Keep bootstrap/history in ordinary user content even when the vendor
+    // accepted separate trusted rules. History must never become system text.
     latest_goal = app.loaded_goal.take().or(latest_goal);
     let skill_overlay = config.slash_overlay.map(|scan| scan()).unwrap_or_default();
     let available_models = initial_presentation.models.unwrap_or_default();
@@ -2124,6 +2135,7 @@ async fn run_acp_app_external(config: AcpVendorConfig, run: ExternalRun<'_>) -> 
     };
     let mut events = RunLoopEvents::new(event_rx, &relay, auto_join_channel_id.as_deref(), &agent);
 
+    run.sync();
     if let Some(requested) =
         read_initial_spawn_context_from_env().and_then(|context| context.requested_parameters)
     {
@@ -2145,7 +2157,7 @@ async fn run_acp_app_external(config: AcpVendorConfig, run: ExternalRun<'_>) -> 
     }
     if let Some(initial_message) = initial_message {
         let initial_prompt =
-            format!("Message from xMatrix chat:\n{initial_message}\n{initial_attachment_lines}");
+            format!("{initial_message}\n{initial_attachment_lines}");
         let initial_prompt =
             match runtime_state.final_reply_instruction(auto_join_channel_id.as_deref()) {
                 Some(instruction) => format!("{initial_prompt}\n\n{instruction}"),
@@ -2574,6 +2586,10 @@ impl ChannelControlledRuntime for AcpRun<'_> {
     fn parameter_presence(&self) -> PresencePatch {
         PresencePatch::presentation(self.presentation())
     }
+
+    fn parameter_catalog(&self) -> Vec<protocol::HarnessParameter> {
+        self.presentation().parameters.unwrap_or_default()
+    }
 }
 
 impl AcpRun<'_> {
@@ -2709,12 +2725,6 @@ fn sync_acp_presentation_state(
     write_current_run_effort(latest_effort.as_deref());
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum AcpTransportKind {
-    WebSocket,
-    Stdio,
-}
-
 #[derive(Clone)]
 struct AcpInterrupter {
     write: AppServerWrite,
@@ -2787,7 +2797,7 @@ type AcpGoalStatusFromTextHook =
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum AcpVendorFlavor {
-    /// Grok Build: WebSocket serve transport, `grok agent` argv, and every
+    /// Grok Build: `grok agent ... stdio` argv and every
     /// vendor hook (billing quota, goal grammar, skill overlay, `_meta.rules`).
     Grok,
     /// Vendor-neutral ACP over stdio (e.g. Kimi Code via `kimi acp`): no
@@ -2914,15 +2924,9 @@ impl AcpVendorConfig {
         self.display_name.to_ascii_lowercase()
     }
 
-    fn acp_spawn_args(
-        &self,
-        cmd_args: &[String],
-        transport: AcpTransportKind,
-        bind: Option<&str>,
-        secret: Option<&str>,
-    ) -> Vec<String> {
+    fn acp_spawn_args(&self, cmd_args: &[String]) -> Vec<String> {
         match self.flavor {
-            AcpVendorFlavor::Grok => grok_acp_spawn_args(cmd_args, transport, bind, secret),
+            AcpVendorFlavor::Grok => grok_acp_spawn_args(cmd_args),
             AcpVendorFlavor::Generic => {
                 generic_acp_spawn_args(cmd_args, self.preset_acp_args.as_deref())
             }
@@ -2997,10 +3001,14 @@ struct AcpSession {
     inbox: ProviderInbox,
     process_tree: process_tree::ProcessTreeGuard,
     child: Child,
+    /// The agent's last stderr lines, still echoed to the Run's own stderr.
+    stderr_tail: StderrTail,
     next_id: u64,
     session_id: Option<String>,
     /// Latest structured goal from a successful session/load history replay.
     loaded_goal: Option<protocol::AgentGoalStatus>,
+    /// `authMethods` ids the agent advertised in its initialize result.
+    auth_method_ids: Vec<String>,
     presentation: AgentPresentationFacts,
     config: AcpVendorConfig,
     /// The plan outlives a turn, so what it already reported does too.
@@ -3013,7 +3021,7 @@ struct AcpSession {
 fn acp_session_new_params(workspace_path: &str, trusted_rules: Option<&str>) -> Value {
     let mut params = serde_json::json!({
         "cwd": workspace_path,
-        "mcpServers": crate::runtime_connector_mcp::acp_connector_mcp_servers(),
+        "mcpServers": [],
     });
     if let Some(rules) = trusted_rules
         .map(str::trim)

@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { generateKeyPairSync } from "node:crypto";
 import test from "node:test";
-import { appleSubscriptionConfig, AppleBillingError, subscriptionFact, appleBillingFact, retrieveAppleSubscription, verifyAppleNotification } from "../src/apple/subscriptions.ts";
+import { appleRefusal, appleTestNotificationRoundTrip } from "../scripts/apple-notification-smoke.ts";
+import { appleSubscriptionConfig, AppleBillingError, subscriptionFact, appleBillingFact, appleOrganizationGroup, appleSeatGroupFact, retrieveAppleSubscription, verifyAppleNotification } from "../src/apple/subscriptions.ts";
 
 const privateKey = generateKeyPairSync("ec", { namedCurve: "prime256v1" }).privateKey.export({ type: "pkcs8", format: "pem" });
 const config = { keyId: "TESTKEY000", issuerId: "00000000-0000-4000-8000-000000000001", privateKey,
@@ -22,7 +23,7 @@ test("configuration is atomic and rejects unknown fields without exposing the su
   }
 });
 
-test("verified renewal has one seat, exact owner/Space and a namespaced immutable original transaction", () => {
+test("a single-seat renewal has one seat, exact owner/Space and a namespaced immutable original transaction", () => {
   const verified = subscriptionFact(config, "Production", 1, transaction, renewal);
   assert.equal(verified.active, true);
   assert.equal(verified.appAccountToken, token);
@@ -32,6 +33,15 @@ test("verified renewal has one seat, exact owner/Space and a namespaced immutabl
   assert.equal(fact.quantity, 1);
   assert.equal(fact.spaceId, "space");
   assert.equal(fact.billingOwnerUserId, "owner");
+});
+
+test("a multiseat purchase gives its Space as many seats as Apple says were bought", () => {
+  const verified = subscriptionFact(config, "Production", 1, { ...transaction, quantity: 5 }, renewal);
+  assert.equal(verified.seats, 5);
+  assert.equal(appleBillingFact(verified, { spaceId: "space", ownerUserId: "owner" }).quantity, 5);
+  for (const quantity of [0, 100, 2.5]) {
+    assert.throws(() => subscriptionFact(config, "Production", 1, { ...transaction, quantity }, renewal), AppleBillingError, String(quantity));
+  }
 });
 
 test("expiry, refunds, retry and grace use Apple facts, not the client's success screen", () => {
@@ -99,4 +109,85 @@ test("signing failures are distinguished from transport failures without reflect
     throw new Error("private sentinel");
   }), (error) => error.code === "apple_request_failed" && error.retryable && !error.message.includes("sentinel"));
   assert.equal(transportCalls, 1);
+});
+
+test("an organization's assigned seat is verified without an account token and only counts with its group", () => {
+  const assigned = subscriptionFact(config, "Production", 1, { ...transaction, inAppOwnershipType: "ASSIGNED", appAccountToken: undefined }, renewal);
+  assert.equal(assigned.assigned, true);
+  assert.equal(assigned.appAccountToken, "");
+  assert.equal(subscriptionFact(config, "Production", 1, transaction, renewal).assigned, false);
+  assert.throws(() => appleBillingFact(assigned, { spaceId: "space", ownerUserId: "owner" }), { code: "invalid_apple_transaction" });
+  const group = { groupKey: "org:900000000000000000", spaceId: "space", ownerUserId: "owner", holderRole: null,
+    activeSeats: 4, productId: config.annualProductId, periodEnd: new Date(now + 3600_000).toISOString() };
+  assert.deepEqual(appleSeatGroupFact("Production", group), { billingProvider: "apple", id: "apple:Production:org:900000000000000000",
+    customerId: "org:900000000000000000", priceId: config.annualProductId, status: "active", quantity: 4,
+    currentPeriodEnd: group.periodEnd, cancelAtPeriodEnd: false, spaceId: "space", billingOwnerUserId: "owner" });
+  const lapsed = appleSeatGroupFact("Production", { ...group, activeSeats: 0 });
+  assert.equal(lapsed.status, "canceled");
+  assert.equal(lapsed.quantity, 1, "a group with no seats left still names one seat, as every fact must");
+  assert.equal(appleSeatGroupFact("Production", { ...group, activeSeats: 250 }).quantity, 99);
+});
+
+test("the organization group comes from Apple's customer groups, and Apple not naming one is no error", async () => {
+  const answer = (body, status = 200) => async (url, init) => {
+    assert.equal(url, "https://api.storekit-sandbox.apple.com/groups/v1/currentGroups/101");
+    assert.equal(init.redirect, "manual");
+    assert.match(init.headers.authorization, /^Bearer eyJ/);
+    return new Response(typeof body === "string" ? body : JSON.stringify(body), { status });
+  };
+  const placeholder = { groups: [{ groupId: "900000000000000000", groupType: "ORGANIZATION",
+    roles: [{ productId: config.monthlyProductId, role: "ADMIN" }] }] };
+  assert.equal(await appleOrganizationGroup(config, "Sandbox", "101", answer(placeholder)), "900000000000000000");
+  assert.equal(await appleOrganizationGroup(config, "Sandbox", "101", answer({ groups: [{ groupId: "7", groupType: "CONSUMER" }] })), null);
+  assert.equal(await appleOrganizationGroup(config, "Sandbox", "101", answer({ groups: [] })), null);
+  assert.equal(await appleOrganizationGroup(config, "Sandbox", "101", answer("not found", 404)), null);
+  assert.equal(await appleOrganizationGroup(config, "Sandbox", "101", answer({ groups: [{ groupId: "../x", groupType: "ORGANIZATION" }] })), null);
+  assert.equal(await appleOrganizationGroup(config, "Sandbox", "../101", async () => { throw new Error("must not fetch"); }), null);
+});
+
+test("a TEST notification round trip reports what our server answered Apple", async () => {
+  const calls = [];
+  let polls = 0;
+  const apple = (attempts) => async (url, init) => {
+    calls.push(`${init.method} ${url}`);
+    assert.match(init.headers.authorization, /^Bearer eyJ/);
+    if (init.method === "POST") return Response.json({ testNotificationToken: "token-1" });
+    polls += 1;
+    return Response.json({ signedPayload: "x", sendAttempts: polls < 2 ? [] : attempts });
+  };
+  assert.deepEqual(await appleTestNotificationRoundTrip(config, "Sandbox", { fetchImpl: apple([{ sendAttemptResult: "SUCCESS" }]), delayMs: 1 }), ["SUCCESS"]);
+  assert.deepEqual(calls, ["POST https://api.storekit-sandbox.apple.com/inApps/v1/notifications/test",
+    "GET https://api.storekit-sandbox.apple.com/inApps/v1/notifications/test/token-1",
+    "GET https://api.storekit-sandbox.apple.com/inApps/v1/notifications/test/token-1"]);
+  polls = 0;
+  assert.deepEqual(await appleTestNotificationRoundTrip(config, "Sandbox", { fetchImpl: apple([{ sendAttemptResult: "UNSUCCESSFUL_HTTP_RESPONSE_CODE" }]), delayMs: 1 }),
+    ["UNSUCCESSFUL_HTTP_RESPONSE_CODE"]);
+  await assert.rejects(appleTestNotificationRoundTrip(config, "Sandbox", { fetchImpl: async () => new Response("down", { status: 503 }) }),
+    (error) => error.code === "apple_request_failed" && error.retryable);
+  await assert.rejects(appleTestNotificationRoundTrip(config, "Sandbox", { fetchImpl: async () => Response.json({}) }),
+    { code: "apple_response_invalid" });
+});
+
+test("Apple's refusals are classified: an outage may be retried, a configuration fault names what to fix", async () => {
+  const refused = (status, body) => async () => Response.json(body, { status });
+  await assert.rejects(appleTestNotificationRoundTrip(config, "Sandbox", { fetchImpl: refused(404, { errorCode: 4040007, errorMessage: "x" }) }),
+    (error) => !error.retryable && /no App Store Server Notifications URL for this environment \(errorCode 4040007\); set it in App Store Connect/u.test(error.message));
+  await assert.rejects(appleTestNotificationRoundTrip(config, "Sandbox", { fetchImpl: refused(401, {}) }),
+    (error) => !error.retryable && /rejected the In-App Purchase key/u.test(error.message));
+  await assert.rejects(appleTestNotificationRoundTrip(config, "Sandbox", { fetchImpl: refused(429, { errorCode: 4290000 }) }),
+    (error) => error.retryable);
+  assert.equal(appleRefusal(400, 4000002), "Apple's test notification service returned 400 (errorCode 4000002)");
+  assert.equal(appleRefusal(404, 0), "Apple's test notification service returned 404", "a 404 alone does not claim a missing URL");
+  let polls = 0;
+  const early = async (url, init) => {
+    if (init.method === "POST") return Response.json({ testNotificationToken: "token-2" });
+    polls += 1;
+    return polls < 3 ? Response.json({ errorCode: 4040008, errorMessage: "not found" }, { status: 404 })
+      : Response.json({ sendAttempts: [{ sendAttemptResult: "SUCCESS" }] });
+  };
+  assert.deepEqual(await appleTestNotificationRoundTrip(config, "Sandbox", { fetchImpl: early, delayMs: 1 }), ["SUCCESS"],
+    "a status Apple has not recorded yet is asked for again");
+  await assert.rejects(appleTestNotificationRoundTrip(config, "Sandbox", { delayMs: 1, attempts: 2, fetchImpl: async (url, init) => init.method === "POST"
+    ? Response.json({ testNotificationToken: "token-3" }) : Response.json({ errorCode: 4040008 }, { status: 404 }) }),
+    (error) => error.retryable && /no attempt/u.test(error.message), "never recorded is a warning, not a configuration fault");
 });

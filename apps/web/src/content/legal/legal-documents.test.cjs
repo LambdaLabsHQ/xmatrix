@@ -14,7 +14,7 @@ const termsPageSource = read("app/terms/page.tsx");
 const cookiesPageSource = read("app/cookies/page.tsx");
 const subprocessorsPageSource = read("app/subprocessors/page.tsx");
 const footerSource = read("components/landing/footer.tsx");
-const loginSource = read("app/login/page.tsx");
+const loginSource = read("components/auth/auth-shell.tsx");
 const settingsSource = read("components/dashboard/workspace-admin-views.tsx");
 
 test("legal pages render repository-owned policy sources", () => {
@@ -38,7 +38,7 @@ test("published policies identify the operator, contact, version, and language",
   assert.match(legalDocumentSource, /contact@madebyrobot\.net/);
   assert.match(legalDocumentSource, /LEGAL_VERSION = "2026-10-12"/);
   assert.match(legalDocumentSource, /LEGAL_EFFECTIVE_DATE = "12 October 2026"/);
-  assert.match(legalDocumentSource, /Version \{LEGAL_VERSION\}/);
+  assert.match(legalDocumentSource, /Version \{version\}/);
   assert.doesNotMatch(legalDocumentSource, /not yet effective|Pre-launch draft|Formal public launch date/);
   assert.doesNotMatch(legalDocumentSource, /August 10, 2026|hello@madebyrobot\.net/);
   assert.match(privacySource, /English is the controlling version/);

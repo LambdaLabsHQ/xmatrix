@@ -21,3 +21,10 @@ export function adminQueryDatabase(resultByQuery, inspect = () => {}) {
     },
   };
 }
+
+/* Columns that hold user content or private detail. No operator query may name them. */
+export const ADMIN_CONTENT_COLUMNS = [
+  /\bbody\b/u, /\bmetadata_json\b/u, /\bconfiguration_json\b/u, /\bsecret_refs_json\b/u,
+  /\bencrypted_value_json\b/u, /\bcapabilities_json\b/u, /\berror\b/u, /\bhostname\b/u,
+  /\bip_address\b/u, /\buser_agent\b/u, /\btitle\b/u, /\btoken\b/u,
+];

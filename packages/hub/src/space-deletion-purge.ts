@@ -27,6 +27,7 @@ export async function purgeDeletedSpace(input: {
     const step = await input.spaces.purgeSpaceStep({ requestId: crypto.randomUUID(), spaceId: input.spaceId, now: at });
     if (step.status === "absent" || step.status === "completed") return { nextAt: null, rows, objects };
     if (step.status === "restorable") return { nextAt: Date.parse(step.purgeAfter), rows, objects };
+    if (step.status === "waiting") return { nextAt: Date.parse(step.retryAt), rows, objects };
     if (step.status === "rows") { rows += step.purgedRows; continue; }
     if (step.status === "objects") {
       if (step.objectKeys.length) {

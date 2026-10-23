@@ -1,4 +1,8 @@
+import { publishChannelInvocationsChanged } from "../channel-live-judgment";
 import { reportAgentTurnRetry } from "../agent-turn-retry";
+import { postgresSettleQuestionnaire } from "../postgres-message-authority";
+import { INSTANCE_IDLE_SLEEP_MS, presenceRests } from "../instance-idle-sleep";
+import { wakeAgentLaunchCoordinator } from "../agent-launch-coordinator-wake";
 import { subscribeConversationToPullRequest } from "../github-pull-request-subscription";
 import { RuntimeAuthorityOperationError, RuntimeClientOperationError } from "./runtime-operation-failure";
 import type {
@@ -6,8 +10,16 @@ import type {
   AgentInstanceConnectMessage,
   AgentInstanceServerMessage,
 } from "@xmatrix/protocol/connections/agent-instance";
-import type { LiveAgentStatus, SerializedAgent } from "@xmatrix/protocol";
+import type { HarnessSignedOut, LiveAgentStatus, SerializedAgent } from "@xmatrix/protocol";
 import {
+  AGENT_SIGNED_OUT_LIFECYCLE_REASON,
+  AGENT_TURN_FAILURE_LIFECYCLE_LAYER,
+  AGENT_TURN_FAILURE_LIFECYCLE_REASON,
+  AGENT_TURN_FAILURE_LIFECYCLE_STATUS,
+  AGENT_USAGE_LIMIT_LIFECYCLE_REASON,
+  agentUsageLimitFromError,
+  boundAgentTurnFailureDetail,
+  safeAgentFailureDetail,
   callerMessageMetadata,
   ChannelActivityInvalid,
   CHANNEL_ACTIVITY_MESSAGE_KIND,
@@ -17,6 +29,7 @@ import {
   isLiveAgentStatus,
   normalizeChannelActivity,
   repoSummonReference,
+  sha256Hex,
 } from "@xmatrix/protocol";
 
 import { InvalidAuthTokenError, verifyAuthToken, type AgentRunPrincipal, type AuthUser } from "../auth";
@@ -80,7 +93,8 @@ type HistoryMessage = Message<"join_channel"> | Message<"leave_channel"> |
 type RuntimeSignalMessage = Exclude<
   PortMessage,
   HistoryMessage | Message<"unregister"> | Message<"channel_message"> | Message<"channel_activity"> |
-  Message<"channel_message_ack"> | Message<"agent_turn_retry">
+  Message<"channel_message_ack"> | Message<"agent_turn_retry"> | Message<"harness_question_closed"> |
+  Message<"agent_parameter_control_result">
 >;
 type AuthorityOutput = AgentInstanceServerMessage | readonly AgentInstanceServerMessage[] | undefined;
 
@@ -89,10 +103,13 @@ type AuthorityOutput = AgentInstanceServerMessage | readonly AgentInstanceServer
  * connect: a Hub closes the socket on an unknown type, so a newer runtime
  * sends one only when its Hub lists it.
  */
-export const AGENT_INSTANCE_HUB_CAPABILITIES = ["channel_activity", "agent_turn_retry"] as const;
+export const AGENT_INSTANCE_HUB_CAPABILITIES = ["channel_activity", "agent_turn_retry", "agent_turn_retry_channel_message",
+  "harness_question_closed", "agent_parameter_control_result", "agent_parameter_control_pending_v1", "switch_continuation"] as const;
 
 /** The card a Run posts when its harness asks its own question (runtime_harness_questions.rs). */
 const HARNESS_QUESTIONNAIRE_KIND = "xmatrix.questionnaire.v1";
+/** The Hub's notice that a card's question was withdrawn: a fact, not anyone's speech. */
+const QUESTIONNAIRE_WITHDRAWN_KIND = "xmatrix.questionnaire.withdrawn";
 
 /** Channel history for an Agent Instance socket: join, leave, catch-up replay and paged reads. */
 export interface AgentChannelHistoryPort {
@@ -132,7 +149,13 @@ export interface PostgresAgentInstancePortDependencies {
   pullRequestOpened?(input: { spaceId: string; channelId: string; ownerUserId: string; repository: string;
     number: number; commandId: string }): Promise<unknown>;
   turnRetry?(session: Readonly<AgentInstanceRuntimeSession>, message: Message<"agent_turn_retry">): Promise<AuthorityOutput>;
+  /** Records a turn its program refused as signed out; the Run's registered program and machine. */
+  recordSignedOut?(session: Readonly<AgentInstanceRuntimeSession>): Promise<HarnessSignedOut | undefined>;
+  /** Settle a questionnaire card once (postgresSettleQuestionnaire). */
+  settleQuestionnaire?(input: Parameters<typeof postgresSettleQuestionnaire>[1]): ReturnType<typeof postgresSettleQuestionnaire>;
   observeAgentLaunchStage?(stage: string, outcome: "ok" | "error", durationMs: number): void;
+  /** Tell the Channel's people its summon chips changed (publishChannelInvocationsChanged). */
+  invocationsChanged?(channelId: string): Promise<void>;
 }
 
 export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
@@ -166,8 +189,19 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
             at: String(command.at) })
           : runtimeRepository(input.env).mutate(command),
         holdUsageLimit: (hold) => holdRegistrationUsageLimit(input.env, hold),
+        markResting: async ({ runId, channelId, ownerUserId, resting }) => {
+          const marked = await runtimeRepository(input.env).markRunResting({ requestId: crypto.randomUUID(),
+            actorUserId: ownerUserId, runId, channelId, resting, windowMs: INSTANCE_IDLE_SLEEP_MS });
+          // A previous mark may have committed before its wake failed. Re-hand
+          // the retained deadline to the coordinator on retry, without moving it.
+          if (marked.idleSleepAt) await wakeAgentLaunchCoordinator(input.env, channelId, ["idleSleep"]);
+          return marked;
+        },
       },
       turnRetry: (session, message) => reportAgentTurnRetry(input.env, session, message),
+      recordSignedOut: (session) => runtimeRepository(input.env).recordRunSignedOut({ requestId: crypto.randomUUID(),
+        runId: session.principal.runId, actorUserId: session.principal.ownerUserId }),
+      settleQuestionnaire: (settle) => postgresSettleQuestionnaire(input.env, settle),
       history: input.history,
       signals: input.signals,
       atomicInstanceConnect: true,
@@ -176,10 +210,38 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
       observeAgentLaunchStage: (stage, outcome, durationMs) => recordAgentLaunchStage({
         env: input.env, stage, outcome, durationMs,
       }),
+      invocationsChanged: (channelId) => publishChannelInvocationsChanged(input.env, channelId),
       ...(input.env.RELAY_RUNTIME
         ? { runtimeCells: (ownerUserId: string) => relayRuntimeCellsForOwners(input.env, [ownerUserId]) }
         : {}),
     });
+  }
+
+  /** What each Instance's Run last reported about resting, so idle sleep is written only on a change. */
+  private readonly restingByInstance = new Map<string, string>();
+
+  /**
+   * Start or withdraw a Run's idle sleep as its presence turns resting or
+   * busy. Written only when the rest state or the runtime's own update time
+   * changes, so a repeated presence costs nothing while a newly finished turn
+   * re-arms a sleep the daemon declined. A failed write is forgotten so the
+   * next presence tries again.
+   */
+  private async recordResting(session: Readonly<AgentInstanceRuntimeSession>, resting: boolean,
+    runtimeUpdatedAt: number | undefined): Promise<void> {
+    if (!this.dependencies.runtime.markResting) return;
+    const key = `${session.run.runId}:${session.run.instanceId}`;
+    const observed = `${resting}:${runtimeUpdatedAt ?? ""}`;
+    if (this.restingByInstance.get(key) === observed) return;
+    this.restingByInstance.set(key, observed);
+    try {
+      await this.dependencies.runtime.markResting({ runId: session.run.runId, channelId: session.run.channelId,
+        ownerUserId: session.principal.ownerUserId, resting });
+    } catch (error) {
+      this.restingByInstance.delete(key);
+      console.error("Run rest state could not be recorded", {
+        runId: session.run.runId, error: error instanceof Error ? error.message : String(error) }, error);
+    }
   }
 
   /** Last presentation persisted per Instance by this cell, to keep the write
@@ -232,20 +294,6 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
     message: PortMessage,
   ): Promise<AuthorityOutput> {
     assertBoundChannel(session, message);
-    if (session.run.kind === "channel-about-session") {
-      if (message.type === "channel_message" || message.type === "channel_activity") {
-        throw new RuntimeClientOperationError("agent_read_only_session");
-      }
-      if (message.type === "channel_message_ack" ||
-          message.type === "presence_update" ||
-          message.type === "agent_model_switch_result" ||
-          message.type === "agent_effort_switch_result" ||
-          message.type === "agent_lifecycle" ||
-          message.type === "client_network_sample" ||
-          message.type === "event_publish") {
-        return undefined;
-      }
-    }
     switch (message.type) {
       case "join_channel": {
         const result = await this.dependencies.history.join(session, message);
@@ -268,25 +316,48 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
         // call that host directly, so Runtime never stores or forwards them.
         if (message.eventType === "llm_trace") return undefined;
         return this.dependencies.signals.publish(session, message);
-      case "agent_turn_retry":
+      case "agent_turn_retry": {
         if (!this.dependencies.turnRetry) throw new Error("Hub retry authority is unavailable");
-        return this.dependencies.turnRetry(session, message);
+        const decision = await this.dependencies.turnRetry(session, message);
+        // A host hands Hub every failed turn and stays silent once Hub
+        // answers. An error Hub does not retry is still Hub's to report: the
+        // same turn failure a host would have sent, with the original error.
+        if (message.action === "failed" && message.errorMessage && decision && "type" in decision &&
+            decision.type === "agent_turn_retry_decision" && decision.action === "stop" && decision.reason === "ineligible") {
+          const failure = turnFailureLifecycle(session.run.channelId, message.errorMessage);
+          await this.dependencies.signals.publish(session, failure);
+          await this.persistTurnFailureNotice(session, failure,
+            await sha256Hex(`${message.operationId}\0${message.turnId}`));
+        }
+        return decision;
+      }
+      case "harness_question_closed": return this.withdrawQuestion(session, message);
+      case "agent_parameter_control_result": return this.reportParameterControl(session, message);
       case "agent_lifecycle": {
-        const published = await this.dependencies.signals.publish(session, message);
-        await this.persistTurnFailureNotice(session, message);
+        const failure = classifiedTurnFailure(message);
+        const published = await this.dependencies.signals.publish(session, failure);
+        // A host names each failure by its requestId and repeats it on a
+        // resend. One that names none is keyed by its whole error, so two
+        // different errors never share a notice.
+        await this.persistTurnFailureNotice(session, failure,
+          await sha256Hex(failure.requestId ?? `${failure.reason ?? ""}\0${failure.detail ?? ""}`));
         return published;
       }
       case "presence_update": {
         // The transport merges this into the session after `execute` returns,
         // so resolve the next presentation here rather than reading a stale one.
         const output = await this.dependencies.signals.publish(session, message);
+        const presentation = mergeAgentInstancePresentation(session.presentation, message);
+        const status = isLiveAgentStatus(message.status) ? message.status : session.run.instanceStatus;
         await this.persistInstancePresentation(
           session,
-          mergeAgentInstancePresentation(session.presentation, message),
+          presentation,
           Object.prototype.hasOwnProperty.call(message, "models"),
           Object.prototype.hasOwnProperty.call(message, "parameters"),
-          isLiveAgentStatus(message.status) ? message.status : session.run.instanceStatus,
+          status,
         );
+        await this.recordResting(session, presenceRests(status, presentation?.runtimeState),
+          presentation?.runtimeState?.updatedAtMillis);
         return output;
       }
       default: return this.dependencies.signals.publish(session, message);
@@ -327,7 +398,6 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
     status?: string,
   ): Promise<void> {
     if (!this.dependencies.atomicInstanceConnect) return;
-    if (session.run.kind !== "channel-instance") return;
     const instanceId = session.run.instanceId;
     // Routing reads provider observations from this Instance row. Message
     // headers intentionally omit usage, so their projection is insufficient
@@ -363,8 +433,6 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
   }
 
   async disconnected(session: Readonly<AgentInstanceRuntimeSession>): Promise<void> {
-    if (session.run.kind === "channel-about-session" ||
-        session.run.channelDeliveryEnabled === false) return;
     // Drop this connection's ephemeral state before awaiting the database. A
     // successor may register while its predecessor's offline CAS is in flight.
     this.persistedPresentationDigests.delete(session.run.instanceId);
@@ -404,8 +472,6 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
     session: Readonly<AgentInstanceRuntimeSession>,
     deliver: (message: AgentInstanceServerMessage) => Promise<void>,
   ): void | Promise<void> {
-    if (session.run.kind === "channel-about-session" ||
-        session.run.channelDeliveryEnabled === false) return;
     // Presentation is deliberately not written here. Registration is a fenced
     // critical path that reports its own failing phase, and a display-state
     // write has no business being able to fail it or to slow it by a round
@@ -447,31 +513,20 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
     if (!liveRunIsAdmitted(snapshotLiveRunFromProductGateway(value), principal, LIVE_RUN_ROUTED_FIELDS)) {
       throw new RuntimeClientOperationError("agent_run_binding_mismatch");
     }
-    // The retired management delegate; a Run started before it was retired never connects.
-    if (metadata.routedAs === "management_assistant_mention") {
-      throw new RuntimeClientOperationError("management_agent_retired");
-    }
     // Every PostgreSQL handshake claims its own version before becoming live,
     // including a reconnect that races the predecessor's offline write.
-    const channelAboutSession = metadata.routedAs === "management_channel_about";
-    const channelDeliveryEnabled = !channelAboutSession;
-    const runtimeSessionId = channelAboutSession
-      ? requiredString(metadata.runtimeSessionId, "run.metadata.runtimeSessionId")
-      : undefined;
     let instanceStatus = value.instanceStatus;
-    if (refreshSession && !channelAboutSession &&
+    if (refreshSession &&
         (refreshSession.run.connectionVersion === undefined ||
          value.instanceId !== refreshSession.run.instanceId ||
          Number(value.instanceVersion) !== refreshSession.run.connectionVersion)) {
       throw new AgentInstanceReconnectRequiredError("Agent Instance connection claim is missing or superseded; reconnect required");
     }
     let connectionVersion = refreshSession?.run.connectionVersion ?? (
-      connectMessage && !channelAboutSession
-        ? requiredNonnegativeInteger(value.instanceVersion, "run.instanceVersion")
-        : undefined
+      connectMessage ? requiredNonnegativeInteger(value.instanceVersion, "run.instanceVersion") : undefined
     );
     if (
-      connectMessage && !channelAboutSession &&
+      connectMessage &&
       (this.dependencies.atomicInstanceConnect || instanceStatus === "offline") &&
       (value.status === "starting" || value.status === "running") &&
       typeof value.instanceId === "string" &&
@@ -494,6 +549,10 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
         if (connectionVersion < 1) throw new Error("Agent connection version is invalid");
         if (this.dependencies.atomicInstanceConnect) this.dependencies.observeAgentLaunchStage?.(
           "instance_connect", "ok", performance.now() - connectStarted);
+        // Connected is the summon's next step: its chip reads it now.
+        const connectedChannelId = typeof value.channelId === "string" ? value.channelId : undefined;
+        const pushed = connectedChannelId ? this.dependencies.invocationsChanged?.(connectedChannelId) : undefined;
+        if (pushed) this.dependencies.runInBackground?.(pushed);
       } catch (error) {
         if (this.dependencies.atomicInstanceConnect) this.dependencies.observeAgentLaunchStage?.(
           "instance_connect", "error", performance.now() - connectStarted);
@@ -529,30 +588,24 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
         ? metadata.canonicalCwd.trim()
         : undefined;
     const run: AgentInstanceAuthorityRunBinding = {
-      kind: channelAboutSession ? "channel-about-session" : "channel-instance",
       runId: requiredString(value.runId ?? value.id, "run.runId"),
-      // A Run acts as its Instance (a background session as its session).
-      agentId: requiredString(value.instanceId ?? runtimeSessionId, "run.instanceId"),
-      instanceId: channelAboutSession
-        ? runtimeSessionId!
-        : requiredString(value.instanceId, "run.instanceId"),
+      // A Run acts as its Instance.
+      agentId: requiredString(value.instanceId, "run.instanceId"),
+      instanceId: requiredString(value.instanceId, "run.instanceId"),
       executionKey: requiredString(metadata.executionKey, "run.metadata.executionKey"),
       channelId: requiredString(value.channelId, "run.channelId"),
       machineId: requiredString(metadata.machineId, "run.metadata.machineId"),
       hostId: typeof metadata.hostId === "string" ? metadata.hostId : "",
       status: liveRunStatus(value.status),
-      instanceStatus: channelAboutSession ? "online" : liveInstanceStatus(instanceStatus),
+      instanceStatus: liveInstanceStatus(instanceStatus),
       ...(connectionVersion !== undefined ? { connectionVersion } : {}),
-      channelDeliveryEnabled,
       ...(channelInstanceId ? { channelInstanceId } : {}),
       ...(cwd ? { cwd } : {}),
       ...(typeof metadata.remoteRepo === "string" && repoSummonReference(metadata.remoteRepo)
         ? { repository: repoSummonReference(metadata.remoteRepo) } : {}),
     };
     if (run.runId !== principal.runId ||
-        !liveRunIsAdmitted(run, principal, LIVE_RUN_ROUTED_FIELDS) ||
-        run.kind !== principal.runKind ||
-        (run.kind === "channel-about-session" && principal.channelWriteAllowed)) {
+        !liveRunIsAdmitted(run, principal, LIVE_RUN_ROUTED_FIELDS)) {
       throw new RuntimeClientOperationError("agent_run_binding_mismatch");
     }
     const presentation = connectMessage
@@ -565,14 +618,102 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
     return { user, principal, run, presentation };
   }
 
+  /**
+   * A fact the Hub states in the Instance's Channel, replying to what it is
+   * about: shown as xMatrix under the owner, of its own kind so it is nobody's
+   * speech, and keyed so a resent report posts nothing new.
+   */
+  private async appendHubNotice(session: Readonly<AgentInstanceRuntimeSession>, notice: {
+    noticeId: string; body: string; messageKind: string; replyToMessageId: string;
+    appMetadata?: Record<string, unknown>;
+  }): Promise<void> {
+    const ownerUserId = session.principal.ownerUserId;
+    await this.dependencies.messages.append({
+      commandId: runtimeCommandId("agent-append", notice.noticeId),
+      messageId: notice.noticeId,
+      channelId: session.run.channelId,
+      body: notice.body,
+      messageKind: notice.messageKind,
+      principal: { kind: "user", id: ownerUserId },
+      senderSnapshot: productAgentSystemNoticeSenderSnapshot(ownerUserId),
+      residual: { replyToMessageId: notice.replyToMessageId,
+        appMetadata: { xmatrixProvenance: "system_fact", xmatrixSystemNotice: true, ...notice.appMetadata } },
+    }, { actorUserId: ownerUserId }).catch((error) => {
+      if (!(error instanceof RuntimeAuthorityOperationError && error.committedIdentityConflict)) throw error;
+    });
+  }
+
+  /**
+   * The asking Instance's harness withdrew a card's question. Hub settles the
+   * card (only this Instance's own), which ends its wait, and says so in the
+   * Channel, so an answer sent later is refused with a reason rather than
+   * becoming a new task.
+   */
+  private async withdrawQuestion(
+    session: Readonly<AgentInstanceRuntimeSession>,
+    message: Message<"harness_question_closed">,
+  ): Promise<AuthorityOutput> {
+    if (typeof message.cardRequestId !== "string" || !/^[a-zA-Z0-9_-]{1,160}$/u.test(message.cardRequestId)) {
+      throw new RuntimeClientOperationError("invalid_agent_message_fields");
+    }
+    if (!this.dependencies.settleQuestionnaire) throw new Error("Questionnaire authority is unavailable");
+    const channelId = session.run.channelId;
+    const cardMessageId = runtimeCommandId("message", message.cardRequestId);
+    const settled = await this.dependencies.settleQuestionnaire({
+      channelId, messageId: cardMessageId, settlement: { state: "cancelled" },
+      askedByInstanceId: session.run.instanceId,
+    });
+    // The host keeps this report until Hub answers it under its requestId.
+    const receipt: AuthorityOutput = message.requestId
+      ? { type: "pong", requestId: message.requestId, ts: new Date().toISOString() } : undefined;
+    if (!settled?.changed) return receipt;
+    const label = session.principal.agentName.replace(/[@＠`\r\n]/gu, " ").trim() || "The agent";
+    await this.appendHubNotice(session, {
+      noticeId: runtimeCommandId("questionnaire-withdrawn", cardMessageId),
+      body: `${label} withdrew this question and is no longer waiting for an answer here.`,
+      messageKind: QUESTIONNAIRE_WITHDRAWN_KIND,
+      replyToMessageId: cardMessageId,
+      appMetadata: { xmatrixQuestionnaireState: { messageId: cardMessageId, state: "cancelled" } },
+    });
+    return receipt;
+  }
+
+  /**
+   * The Instance applied (or refused) a `/config` or `/fast` control and
+   * reported what it did. Hub words the notice and posts it as its own fact,
+   * replying to the control, rather than the Instance posting prose as speech.
+   */
+  private async reportParameterControl(
+    session: Readonly<AgentInstanceRuntimeSession>,
+    message: Message<"agent_parameter_control_result">,
+  ): Promise<AuthorityOutput> {
+    if (message.channelId !== session.run.channelId || typeof message.sourceMessageId !== "string" ||
+        !message.sourceMessageId.trim() || message.sourceMessageId.length > 300) {
+      throw new RuntimeClientOperationError("invalid_agent_message_fields");
+    }
+    const label = `${session.principal.agentName}${session.run.channelInstanceId ? `:${session.run.channelInstanceId}` : ""}`;
+    await this.appendHubNotice(session, {
+      noticeId: runtimeCommandId("parameter-control", `${session.run.instanceId}:${message.sourceMessageId}`),
+      body: parameterControlNotice(label, message),
+      messageKind: "xmatrix.system.parameter-control",
+      replyToMessageId: message.sourceMessageId.trim(),
+    });
+    return undefined;
+  }
+
   private async persistTurnFailureNotice(
     session: Readonly<AgentInstanceRuntimeSession>,
     message: Message<"agent_lifecycle">,
+    noticeId: string | undefined,
   ): Promise<void> {
     if (!shouldPersistAgentTurnFailureNotice(message)) return;
-    if (!session.principal.channelWriteAllowed || session.run.kind === "channel-about-session") {
-      return;
-    }
+    // A program that refused the turn as signed out is named with its sign-in.
+    // An unreadable registration still posts the failure, as written.
+    const signedOut = message.reason === AGENT_SIGNED_OUT_LIFECYCLE_REASON && this.dependencies.recordSignedOut
+      ? await this.dependencies.recordSignedOut(session).catch((error: unknown) => {
+        console.error("Signed-out harness could not be read for the turn-failure notice", error);
+        return undefined;
+      }) : undefined;
     const command = agentTurnFailureAppendCommand({
       runId: session.principal.runId,
       instanceId: session.run.instanceId,
@@ -582,8 +723,10 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
       ownerUserId: session.principal.ownerUserId,
       channelId: message.channelId || session.principal.channelId,
       detail: message.detail,
+      pendingTasks: message.pendingTasks,
       reason: message.reason,
-      noticeId: message.requestId,
+      ...(signedOut ? { signedOut } : {}),
+      noticeId,
       senderSnapshot: agentMessagePresentation(session.presentation) ?? {},
     });
     if (!command) return;
@@ -592,15 +735,15 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
         actorUserId: session.principal.ownerUserId,
       });
     } catch (error) {
-      // The notice id is the Instance and the notice's opening text, so a
-      // later failure that opens the same way (or the same one reported by a
-      // later Run of the Instance) finds its notice already posted. That
-      // notice, and any handoff it started, stand; this one adds nothing.
-      if (error instanceof RuntimeAuthorityOperationError && error.committedIdentityConflict) return;
-      console.error("Agent turn-failure notice could not be committed", error);
-      return;
+      // A replayed failure finds its notice already posted. The handoff after
+      // it may not have committed before Hub was interrupted, so a replay
+      // continues to it; its own ids make the repeat change nothing.
+      if (!(error instanceof RuntimeAuthorityOperationError && error.committedIdentityConflict)) {
+        console.error("Agent turn-failure notice could not be committed", error);
+        return;
+      }
     }
-    if (isAgentUsageLimitLifecycle(message) && session.run.kind === "channel-instance") {
+    if (isAgentUsageLimitLifecycle(message)) {
       await this.handOffUsageLimitedInstance(session, message, command.messageId);
     }
   }
@@ -648,6 +791,7 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
           xmatrixUsageLimitHandoff: true, sourceMessageId } },
       }, { actorUserId: ownerUserId });
     } catch (error) {
+      if (error instanceof RuntimeAuthorityOperationError && error.committedIdentityConflict) return;
       console.error("Agent usage-limit handoff could not be posted", error);
     }
   }
@@ -656,9 +800,6 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
     session: Readonly<AgentInstanceRuntimeSession>,
     message: Message<"channel_message">,
   ): Promise<AgentInstanceServerMessage> {
-    if (!session.principal.channelWriteAllowed || session.run.kind === "channel-about-session") {
-      throw new RuntimeClientOperationError("agent_read_only_session");
-    }
     assertAgentAppendEnvelope(message);
     const appMetadata: Record<string, unknown> = {
       ...callerMessageMetadata(message.metadata),
@@ -689,9 +830,6 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
     session: Readonly<AgentInstanceRuntimeSession>,
     message: Message<"channel_activity">,
   ): Promise<AgentInstanceServerMessage> {
-    if (!session.principal.channelWriteAllowed) {
-      throw new RuntimeClientOperationError("agent_read_only_session");
-    }
     const allowed = new Set(["activity", "channelId", "requestId", "type"]);
     if (Object.keys(message).some((field) => !allowed.has(field))) {
       throw new RuntimeClientOperationError("invalid_agent_message_fields");
@@ -879,9 +1017,6 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
     session: Readonly<AgentInstanceRuntimeSession>,
     requestId?: string,
   ): Promise<AgentInstanceServerMessage> {
-    if (session.run.kind === "channel-about-session") {
-      return { type: "unregistered", requestId };
-    }
     const response = await queryAgentInstanceRun(this.dependencies.runtime, {
       runId: session.run.runId,
       ownerUserId: session.principal.ownerUserId,
@@ -908,6 +1043,10 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
       // Agent unregisters retain their existing terminal semantics.
       terminal: agentInstanceUnregisterIsTerminal(metadata),
     });
+    // The transport forgets this socket without a close callback, so release
+    // the live binding here: a kept one fails every peer's next live signal.
+    this.persistedPresentationDigests.delete(session.run.instanceId);
+    await this.dependencies.signals.disconnected?.(session);
     return { type: "unregistered", requestId };
   }
 }
@@ -923,10 +1062,6 @@ function runPrincipal(value: AgentRunPrincipal): AgentInstanceRunPrincipal {
     channelId: value.channelId,
     machineId: value.machineId,
     hostId: value.hostId,
-    runKind: value.runKind === "channel-about-session"
-      ? "channel-about-session"
-      : "channel-instance",
-    channelWriteAllowed: value.channelWriteAllowed !== false,
   };
 }
 
@@ -1074,4 +1209,47 @@ function requiredString(value: unknown, field: string): string {
 function requiredNonnegativeInteger(value: unknown, field: string): number {
   if (!Number.isSafeInteger(value) || Number(value) < 0) throw new Error(`${field} is invalid`);
   return Number(value);
+}
+
+/** Hub reads a usage limit from the original error, whatever the host said. */
+function classifiedTurnFailure(message: Message<"agent_lifecycle">): Message<"agent_lifecycle"> {
+  if (shouldPersistAgentTurnFailureNotice(message)) {
+    message = { ...message, detail: safeAgentFailureDetail(message.detail) };
+  }
+  if (message.layer !== AGENT_TURN_FAILURE_LIFECYCLE_LAYER || message.status !== AGENT_TURN_FAILURE_LIFECYCLE_STATUS ||
+      message.reason !== AGENT_TURN_FAILURE_LIFECYCLE_REASON) return message;
+  const limit = agentUsageLimitFromError(message.detail);
+  return limit ? { ...message, reason: AGENT_USAGE_LIMIT_LIFECYCLE_REASON,
+    ...(limit.resetsAt && !message.resetsAt ? { resetsAt: limit.resetsAt } : {}) } : message;
+}
+
+function turnFailureLifecycle(channelId: string, error: string): Message<"agent_lifecycle"> {
+  return classifiedTurnFailure({ type: "agent_lifecycle", channelId,
+    layer: AGENT_TURN_FAILURE_LIFECYCLE_LAYER, status: AGENT_TURN_FAILURE_LIFECYCLE_STATUS,
+    reason: AGENT_TURN_FAILURE_LIFECYCLE_REASON, detail: safeAgentFailureDetail(error),
+    snapshot: { run: "failed", process: "online" } });
+}
+
+/** Hub's words for what a parameter control did, from the Instance's facts. */
+export function parameterControlNotice(label: string,
+  result: Pick<Message<"agent_parameter_control_result">, "parameter" | "action" | "current" | "pending" | "choices" | "notice" | "error">): string {
+  const who = label.replace(/[@＠`\r\n]/gu, " ").trim() || "The agent";
+  const text = (value: unknown) => typeof value === "string" ? boundAgentTurnFailureDetail(value).replace(/[@＠]/gu, "﹫") : "";
+  const parameter = text(result.parameter);
+  const named = parameter ? `\`${parameter}\`` : "a parameter";
+  if (text(result.error)) {
+    return `Could not ${result.action === "query" ? "read" : "change"} ${named} for ${who}: ${text(result.error)}`;
+  }
+  const current = text(result.current) || "not reported";
+  const pending = text(result.pending);
+  const choices = Array.isArray(result.choices) ? result.choices.slice(0, 25).map(text).filter(Boolean) : [];
+  const providerNote = text(result.notice) ? ` (${text(result.notice)})` : "";
+  if (result.action === "query") {
+    return `${who} ${named}: \`${current}\`${providerNote}.${pending ? ` Pending selection: \`${pending}\`.` : ""}${choices.length ? ` Choices: ${choices.join(", ")}.` : ""}`;
+  }
+  if (pending) {
+    return `Selected ${named} to \`${pending}\` for ${who}; awaiting provider confirmation (current: \`${current}\`)${providerNote}.`;
+  }
+  if (!text(result.current)) return `The provider has not reported ${named} for ${who}${providerNote}.`;
+  return `Set ${named} to \`${current}\` for ${who}${providerNote}.`;
 }

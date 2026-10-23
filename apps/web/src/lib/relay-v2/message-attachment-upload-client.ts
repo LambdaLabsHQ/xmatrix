@@ -325,36 +325,51 @@ export async function commitMessageAttachmentRefs(input: {
   /** Overridden by tests; defaults to `UPLOAD_CONTROL_DEADLINE_MS`. */
   controlDeadlineMs?: number;
 }): Promise<void> {
-  await Promise.all(input.attachments.map(async (attachment) => {
-    const deadline = deadlineSignal(input.controlDeadlineMs ?? UPLOAD_CONTROL_DEADLINE_MS);
-    try {
-      // Armed across the body read too — see the intent hop above.
-      const body = JSON.stringify({
-        requestId: randomId(),
-        intentId: attachment.intentId,
-        refId: attachment.attachmentId,
-        ownerKind: "message_attachment",
-        ownerId: input.messageId,
-        visibilityScopeId: input.visibilityScopeId,
-      });
-      await replayTransient(async () => jsonResponse(
-        await xmatrixRawResponse(webProxyPath(RELAY_V2_BLOB_REF_PATH), {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${input.token}`,
-            "content-type": "application/json",
-          },
-          body,
-          cache: "no-store",
-          signal: deadline.signal,
-        }),
-        "Failed to commit attachment",
-        deadline.signal,
-      ), deadline.signal);
-    } catch (error) {
-      throw deadlineError(error, "Committing the attachment");
-    } finally {
-      deadline.done();
-    }
-  }));
+  await Promise.all(input.attachments.map((attachment) => commitBlobRef({
+    token: input.token, intentId: attachment.intentId, refId: attachment.attachmentId,
+    ownerKind: "message_attachment", ownerId: input.messageId, visibilityScopeId: input.visibilityScopeId,
+    controlDeadlineMs: input.controlDeadlineMs,
+  })));
+}
+
+/** Makes an uploaded object part of what its owner holds, visible in `visibilityScopeId`. */
+export async function commitBlobRef(input: {
+  token: string;
+  intentId: string;
+  refId: string;
+  ownerKind: string;
+  ownerId: string;
+  visibilityScopeId: string;
+  controlDeadlineMs?: number;
+}): Promise<void> {
+  const deadline = deadlineSignal(input.controlDeadlineMs ?? UPLOAD_CONTROL_DEADLINE_MS);
+  try {
+    // Armed across the body read too — see the intent hop above.
+    const body = JSON.stringify({
+      requestId: randomId(),
+      intentId: input.intentId,
+      refId: input.refId,
+      ownerKind: input.ownerKind,
+      ownerId: input.ownerId,
+      visibilityScopeId: input.visibilityScopeId,
+    });
+    await replayTransient(async () => jsonResponse(
+      await xmatrixRawResponse(webProxyPath(RELAY_V2_BLOB_REF_PATH), {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${input.token}`,
+          "content-type": "application/json",
+        },
+        body,
+        cache: "no-store",
+        signal: deadline.signal,
+      }),
+      "Failed to commit attachment",
+      deadline.signal,
+    ), deadline.signal);
+  } catch (error) {
+    throw deadlineError(error, "Committing the attachment");
+  } finally {
+    deadline.done();
+  }
 }

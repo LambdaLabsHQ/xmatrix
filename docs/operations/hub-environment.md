@@ -22,6 +22,7 @@ Set under `hub.vars` (or derived from the origins) in `deploy/profiles/<name>.js
 
 | Name | Kind | What it does |
 | --- | --- | --- |
+| `APP_BETA_URL` | var | Beta Web origin every beta deploys; rendered from the profile's `web.beta.origin`. Trusted for sign-in and direct reads exactly like APP_URL; links still go to APP_URL. Unset: only APP_URL is trusted. |
 | `APP_URL` | var | Web origin; rendered from the profile's `web.origin`. Unset: links, redirects and auth fail closed. |
 | `AUTH_COOKIE_DOMAIN` | var | Shared cookie domain for the Web and Hub origins (e.g. `.example.com`). Unset: cookies stay host-only, which suits localhost only. |
 | `AUTH_COOKIE_PREFIX` | var | Cookie name prefix, for a deployment nested under another's cookie domain. |
@@ -48,6 +49,12 @@ Leave unset to keep the feature off.
 | `GITHUB_APP_PRIVATE_KEY` | secret | GitHub App private key (PEM). |
 | `GITHUB_APP_SLUG` | var | GitHub App slug used for install links. |
 | `GITHUB_WEBHOOK_SECRET` | secret | GitHub App webhook signing secret. |
+| `GMAIL_WATCH_CLIENT_ID` | secret | Dedicated Google notification OAuth client; unset disables setup. |
+| `GMAIL_WATCH_CLIENT_SECRET` | secret | Dedicated notification OAuth secret, separate from Composio. |
+| `GMAIL_WATCH_PUSH_AUDIENCE` | secret | Exact JWT audience for the Gmail notification endpoint. |
+| `GMAIL_WATCH_PUSH_EMAIL` | secret | Expected verified Google service account in Pub/Sub push JWTs. |
+| `GMAIL_WATCH_SUBSCRIPTION` | secret | Exact Pub/Sub push subscription accepted by notification ingress. |
+| `GMAIL_WATCH_TOPIC` | secret | Pub/Sub topic in the same Google project as the OAuth application. |
 | `GOOGLE_CLIENT_ID` | secret | Google OAuth client id. Unset with its secret: Google sign-in is hidden. |
 | `GOOGLE_CLIENT_SECRET` | secret | Google OAuth client secret. |
 | `JEV_AI_GATEWAY_API_KEY` | secret | Vercel AI Gateway key for Jev, the model that picks which Agent answers. Unset: message-triggered launches run without Jev's choice, while launches that need a choice (registration input dispatch) answer 503 `registration_selection_unconfigured`. |
@@ -55,6 +62,9 @@ Leave unset to keep the feature off.
 | `RATE_LIMIT_ANONYMOUS` | binding | Workers Rate Limiting allowance per client IP for requests without a credential. Unset: they are not counted. |
 | `RATE_LIMIT_CREDENTIAL` | binding | Workers Rate Limiting allowance per bearer credential. Unset: credentialed requests are not counted. |
 | `RATE_LIMIT_HUMAN_CONNECT` | binding | Workers Rate Limiting allowance of Human socket sign-ins per user. Unset: sign-ins are not counted. |
+| `RATE_LIMIT_JEV_EVALUATE` | binding | Workers Rate Limiting allowance of `POST /api/ai/jev/evaluate` per owning Human and verified Space (an Agent Run counts as its owner), refused with 429 whatever RATE_LIMIT_ENFORCED says. Unset: evaluations are not counted. |
+| `RATE_LIMIT_SEARCH_RERANK` | binding | Workers Rate Limiting allowance of `POST /api/search/rerank` (Jev) per signed-in Human, refused with 429 whatever RATE_LIMIT_ENFORCED says. Unset: reorderings are not counted. |
+| `RATE_LIMIT_SUMMON_INTENT` | binding | Workers Rate Limiting allowance of composer draft previews (Jev) per signed-in Human, refused with 429 whatever RATE_LIMIT_ENFORCED says. Unset: previews are not counted. |
 | `RELAY_AUTHORITY_OBSERVABILITY_AE` | binding | Analytics Engine dataset for authority and PostgreSQL timing. Unset: observation is off. |
 | `RELAY_POSTGRES_SHARD_1` | binding | Hyperdrive binding to a second database shard. Unset: every Space is placed on the primary shard. |
 | `RELAY_POSTGRES_SHARD_1_ID` | var | Shard id served by RELAY_POSTGRES_SHARD_1; set with it in the deployment profile. |
@@ -70,6 +80,7 @@ Leave unset to keep the feature off.
 | `STRIPE_PRO_MONTHLY_PRICE_ID` | var | Stripe price for the monthly Pro seat. |
 | `STRIPE_SECRET_KEY` | secret | Stripe API key for paid plans. Unset with the webhook secret: checkout and the billing portal answer 503. |
 | `STRIPE_WEBHOOK_SECRET` | secret | Stripe webhook signing secret. |
+| `XMATRIX_USAGE_COST_AE` | binding | Analytics Engine dataset metering operator-paid Jev, Composio and X calls per Space. Unset: metering is off. |
 
 ## Tuning
 
@@ -100,7 +111,7 @@ Declared by the committed `packages/hub/wrangler.toml`. Deployments do not chang
 | `GITHUB_REPOSITORY_TOKEN_LEGACY_UNBOUND_ENABLED` | var | Mints repository tokens for daemons that name no Run (pre-binding CLI); refused unless "true". |
 | `GITHUB_SUBSCRIPTION_INDEX` | binding | Per-installation index of subscribed GitHub sources; a delivery nobody subscribed to reads no routes. |
 | `MACHINE_NAME_REQUIRED` | var | Require a recorded owner-chosen Machine name before enrollment, connect or recovery; production pins true. |
-| `RATE_LIMIT_ENFORCED` | var | Refuses over-limit requests with 429 and Retry-After only when "true"; otherwise they are only logged. |
+| `RATE_LIMIT_ENFORCED` | var | Refuses over-limit request allowances (credential, anonymous, Human sign-in) with 429 and Retry-After only when "true"; otherwise they are only logged. Production pins true. |
 | `RELAY_AGENT_APP_POLICY_LOCATOR` | binding | Retired Durable Object namespace, kept bound as a 410 shell over its historical rows. |
 | `RELAY_AUTHORITY_OBSERVABILITY_ENABLED` | var | Writes authority observation only when "true". |
 | `RELAY_AUTOMATION_EXECUTION_ENABLED` | var | Runs Automation occurrences; off when unset. |
@@ -124,6 +135,7 @@ Declared by the committed `packages/hub/wrangler.toml`. Deployments do not chang
 | `RELAY_SPACE_DELETION_CLOCK` | binding | Per-Space clock for Space deletion purges. |
 | `RELAY_SPACE_PROJECTION` | binding | Retired Durable Object namespace, kept bound as a 410 shell over its historical rows. |
 | `RELAY_SUMMON_DECISION_CLOCK` | binding | Per-Space clock for decision retention. |
+| `RELAY_X_UPLOAD_EXECUTOR` | binding | Per-upload durable X video executor; stores only references and scheduling state. |
 | `XMATRIX_RUNTIME_CELL_MODE` | var | Runtime cell routing; "dual" activates candidate cells. |
 
 ## Official deployment operations
@@ -133,7 +145,6 @@ Used only by the operators of the hosted xMatrix deployment. Leave unset.
 | Name | Kind | What it does |
 | --- | --- | --- |
 | `CONTROL_PLANE_OPERATOR_TOKEN` | secret | Machine credential for control-plane partition operator routes. |
-| `TEST_ENVIRONMENT_ACCESS_SPACE_ID` | var | Space whose members may switch to the hosted Test deployment; leave unset. |
 | `XMATRIX_ADMIN_TOKEN` | secret | Legacy internal admin bearer. |
 
 ## Local and test deployments

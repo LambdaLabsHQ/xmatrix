@@ -1,5 +1,5 @@
 import type { MutableRefObject } from "react";
-import type { SerializedChannel, SerializedSpace } from "@xmatrix/protocol";
+import type { ChannelSnapshot, SerializedSpace } from "@xmatrix/protocol";
 import { spaceAppPath } from "./channel-links";
 import {
   MOBILE_CHANNEL_DETAILS_HASH,
@@ -16,7 +16,7 @@ import {
 export function createMobileChannelHistoryNavigation(options: {
   mobileChannelDetailsOpen: boolean;
   setMobileChannelDetailsOpen: (open: boolean) => void;
-  selectedChannel: SerializedChannel | null;
+  selectedChannel: ChannelSnapshot | null;
   selectedChannelIdRef: MutableRefObject<string | null>;
   currentSpaceId: string | null;
   spaces: SerializedSpace[];

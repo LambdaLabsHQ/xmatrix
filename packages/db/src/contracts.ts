@@ -2,6 +2,7 @@ import type { QueryResultRow } from "pg";
 
 import type { DatabaseRequestContext } from "./context.js";
 import type { SpacePlacementHints } from "./placement.js";
+import type { ConnectivityRejection } from "./connectivity-breaker.js";
 
 export interface DatabaseQuery {
   /** Stable low-cardinality name used for telemetry; never include user input. */
@@ -53,6 +54,8 @@ export interface DatabaseObservation {
   outcome: "ok" | "error" | "row_limit";
   slow: boolean;
   errorCode?: string;
+  /** Present only when checkout was refused by the shard connectivity breaker. */
+  connectivity?: ConnectivityRejection;
 }
 
 export type DatabaseObserver = (observation: DatabaseObservation) => void;

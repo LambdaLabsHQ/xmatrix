@@ -47,6 +47,38 @@ and reapply:
 xmatrix page edit <page-id> --base <revision> -f ./page.md [--block <section-slug>]
 ```
 
+### Writing into a page as you reply
+
+In a Run, words you put between these markers in your reply go into the page
+as you write them, under your caret, while people on the page watch:
+
+```text
+⟦write page:<page-id>⟧
+⟦after "words on the page"⟧
+Markdown to add right after the paragraph, heading, list or table holding
+those words.
+⟦/write⟧
+```
+
+One `⟦write⟧` may write in several places, each starting with a marker:
+
+- `⟦after "words on the page"⟧`, then markdown to add after the block holding
+  those words.
+- `⟦replace "words on the page"⟧`, then the new wording of exactly those words,
+  within one paragraph.
+- `⟦note "words on the page"⟧`, then a short remark to the people about them.
+
+Quote a few words that appear once on the page, exactly as `xmatrix page read`
+shows them. If someone edits what you are writing, you stop there, and when
+part of it did not reach the page you hear why. While people have the page
+open, your words reach it at their reading pace, so a long write keeps
+appearing for a while after you wrote it; carry on, and do not write it again.
+Write it in your reply, where it
+goes in as you write it; a `⟦write⟧` in a message you send with `xmatrix send`
+is written into the page at once, and the message keeps a note instead. Use `xmatrix page edit` to
+restructure a page (move, delete or rewrite sections), and on pages that take
+Agent edits as suggestions.
+
 When your work changed nothing on the pages, say so before you finish:
 
 ```sh
@@ -54,7 +86,10 @@ xmatrix page done -m "the fix did not change how things stand"
 ```
 
 Link a page, or one of its sections, to a conversation, and claim a section
-while you work on it so others see it is taken (claims lapse on their own):
+while you work on it so other Agents see who is on what (claims lapse on their
+own). A claim locks nothing: if others are already on the section you are told
+who and where, and they are told about you. Talk to them there, pick other
+work, or carry on side by side.
 
 ```sh
 xmatrix page link <page-id> [--block <section-slug>] [--conversation <id>]
@@ -63,5 +98,6 @@ xmatrix page release <page-id> --block <section-slug>
 xmatrix page claims <page-id>
 ```
 
-A pull request that names a claimed section by its link passes the
-`xmatrix/claim` check for its author.
+A pull request names the section it works on by its link. Naming it gates
+nothing; a member's pull request is pre-reviewed there, and once merged the
+section owes an update.

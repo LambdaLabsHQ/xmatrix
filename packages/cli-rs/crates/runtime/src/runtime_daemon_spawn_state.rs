@@ -62,6 +62,27 @@ const RETIRED_ROLE_ENV: [&str; 5] = [
     "XMATRIX_AGENT_AVATAR_URL",
 ];
 
+/// Only the Hub's separate spawn field supplies official prompt text. Never
+/// inherit an override from the daemon environment or use the task body.
+fn apply_spawn_bootstrap_prompts(
+    mut local_env: BTreeMap<String, String>,
+    prompts: Option<&xmatrix_cli_core::bootstrap_prompts::BootstrapPrompts>,
+) -> error::Result<BTreeMap<String, String>> {
+    use xmatrix_cli_core::bootstrap_prompts::ENV;
+    for key in [
+        ENV,
+        "XMATRIX_BOOTSTRAP_PROMPT",
+        "XMATRIX_DISABLE_BOOTSTRAP_PROMPT",
+    ] {
+        local_env.remove(key);
+    }
+    if let Some(prompts) = prompts {
+        prompts.validate().map_err(CliError::Launch)?;
+        local_env.insert(ENV.into(), serde_json::to_string(prompts)?);
+    }
+    Ok(local_env)
+}
+
 /// Applies the registration's own instructions as the trusted initial prompt.
 /// The env name predates the retired Role feature and is kept for
 /// compatibility between daemon and wrapper builds.
@@ -121,6 +142,27 @@ fn apply_spawn_space_rules(
             )));
         }
         local_env.insert(SPACE_RULES_PAGE_ENV.to_string(), page_id.to_string());
+    }
+    Ok(local_env)
+}
+
+/// Names the Space's connected apps for the Run's launch prompt, replacing
+/// any value a local profile left behind. Each name sits in the prompt as
+/// written, so a name that is blank, long or not a single line fails the
+/// launch.
+fn apply_spawn_connected_apps(
+    mut local_env: BTreeMap<String, String>,
+    apps: &[String],
+) -> error::Result<BTreeMap<String, String>> {
+    use xmatrix_cli_core::bootstrap::{CONNECTED_APPS_ENV, is_app_name};
+    local_env.remove(CONNECTED_APPS_ENV);
+    if let Some(name) = apps.iter().find(|name| !is_app_name(name)) {
+        return Err(CliError::Launch(format!(
+            "the connected app name `{name}` is not a short single-line name"
+        )));
+    }
+    if !apps.is_empty() {
+        local_env.insert(CONNECTED_APPS_ENV.to_string(), apps.join("\n"));
     }
     Ok(local_env)
 }
@@ -362,32 +404,32 @@ fn orphan_sidecar_removed_audit_event(
 
 fn read_daemon_run_sidecars_from_dir(dir: &Path) -> Vec<PersistedDaemonRun> {
     config::daemon_run_sidecar_paths(dir)
-        .filter_map(|path| {
-            let raw = std::fs::read_to_string(&path).ok()?;
-            match serde_json::from_str::<PersistedDaemonRun>(&raw) {
-                Ok(run) if daemon_run_sidecar_path(&run).as_deref() == Some(path.as_path()) => {
-                    Some(run)
-                }
-                Ok(run) => {
-                    append_daemon_registry_audit(&format!(
-                        "sidecar_path_mismatch path={} expected={}",
-                        path.display(),
-                        daemon_run_sidecar_path(&run)
-                            .map(|expected| expected.display().to_string())
-                            .unwrap_or_else(|| "none".to_string())
-                    ));
-                    None
-                }
-                Err(err) => {
-                    append_daemon_registry_audit(&format!(
-                        "sidecar_parse_failed path={} error={err}",
-                        path.display()
-                    ));
-                    None
-                }
-            }
-        })
+        .filter_map(|path| read_daemon_run_sidecar(&path))
         .collect()
+}
+
+fn read_daemon_run_sidecar(path: &Path) -> Option<PersistedDaemonRun> {
+    let raw = std::fs::read_to_string(path).ok()?;
+    match serde_json::from_str::<PersistedDaemonRun>(&raw) {
+        Ok(run) if daemon_run_sidecar_path(&run).as_deref() == Some(path) => Some(run),
+        Ok(run) => {
+            append_daemon_registry_audit(&format!(
+                "sidecar_path_mismatch path={} expected={}",
+                path.display(),
+                daemon_run_sidecar_path(&run)
+                    .map(|expected| expected.display().to_string())
+                    .unwrap_or_else(|| "none".to_string())
+            ));
+            None
+        }
+        Err(err) => {
+            append_daemon_registry_audit(&format!(
+                "sidecar_parse_failed path={} error={err}",
+                path.display()
+            ));
+            None
+        }
+    }
 }
 
 fn daemon_run_sidecar_is_recoverable(run: &PersistedDaemonRun) -> bool {

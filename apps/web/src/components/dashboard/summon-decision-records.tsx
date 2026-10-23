@@ -91,7 +91,7 @@ const percent = (value: number | undefined) => value === undefined ? "" : `${Mat
 /** A routing question is a choice, not a step: its options are listed with
  *  radio marks, the chosen one filled, so it never reads like the ticked
  *  startup timeline below it. */
-type ChoiceOption = { key: string; title: string; meta?: string; chosen: boolean; hint?: string };
+type ChoiceOption = { key: string; title: string; meta?: string; detail?: string; chosen: boolean; hint?: string };
 const SHOWN_OPTIONS = 3;
 // Arbitrary edge width: the app-wide `.rounded-*.border` rules would turn a chip into glass.
 const CHIP = "inline-flex max-w-full items-center gap-1.5 rounded-full border-[1px] border-solid px-2 py-0.5 text-xs";
@@ -107,9 +107,12 @@ function RoutingChoice({ label, options, note, hint }: { label: string; options:
     <div className="min-w-0">
       <ul className="m-0 flex list-none flex-wrap gap-1 p-0" aria-label={`${label} options`}>
         {shown.map(option => <li key={option.key} data-selected={option.chosen || undefined} title={option.hint}
-          className={`${CHIP} ${option.chosen ? "border-foreground/45 bg-foreground/[0.05] text-foreground" : "border-border text-muted-foreground"}`}>
-          <span className={`truncate ${option.chosen ? "font-semibold" : ""}`}>{option.title}</span>
-          {option.meta && <span className="shrink-0 text-[11px] tabular-nums opacity-75">{option.meta}</span>}
+          className={`min-w-0 max-w-full ${option.detail ? "basis-full" : ""}`}>
+          <span className={`${CHIP} ${option.chosen ? "border-foreground/45 bg-foreground/[0.05] text-foreground" : "border-border text-muted-foreground"}`}>
+            <span className={`${option.detail ? "min-w-0 break-words" : "truncate"} ${option.chosen ? "font-semibold" : ""}`}>{option.title}</span>
+            {option.meta && <span className="shrink-0 text-[11px] tabular-nums opacity-75">{option.meta}</span>}
+          </span>
+          {option.detail && <p className="m-0 mt-1 break-words text-[11px] leading-snug text-muted-foreground">{option.detail}</p>}
         </li>)}
         {hidden > 0 && <li className="contents"><button type="button" onClick={() => setAll(true)}
           className={`${CHIP} cursor-pointer border-dashed border-border text-muted-foreground hover:text-foreground`}>+{hidden}</button></li>}
@@ -145,7 +148,8 @@ export function JevDecisionSection({ decisions, parameters }: { decisions: JevRe
         {placed && <RoutingChoice label="Agent" note={placementReason(placed, fits.length > 0)}
           options={placed.map((item, index) => ({ key: `${item.harness}:${item.machineId}`,
             title: `${item.harness} · ${item.machineName || "unnamed machine"}`, chosen: index === 0,
-            meta: `${fits.length > 0 ? `${fitLevel(item.fit)} · ` : ""}${roomText(item.headroom)}` }))} />}
+            meta: `${fits.length > 0 ? `${fitLevel(item.fit)} · ` : ""}${roomText(item.headroom)}`,
+            detail: machineNetworkText(item.network) }))} />}
         {decision.failure && <li className="grid grid-cols-[4.75rem_minmax(0,1fr)] gap-x-2 py-1.5"><span className="text-muted-foreground">Failed</span>
           <span className="truncate text-destructive">{decision.failure}</span></li>}
       </ol>
@@ -184,3 +188,4 @@ export function JevDecisionFiles({ state }: { state: JevDecisionState }) {
       {state.busy ? "loading…" : "load earlier"}</button></>}
   </p>;
 }
+import { machineNetworkText } from "./machine-network";

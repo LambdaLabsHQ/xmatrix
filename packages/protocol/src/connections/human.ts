@@ -72,6 +72,8 @@ export interface HumanFocusChannelMessage {
  * The web client's heartbeat. The Hub answers this exact frame with
  * `HUMAN_HEARTBEAT_PONG` itself (a WebSocket auto-response) without waking the
  * Durable Object that holds the socket, so the web can probe often for free.
+ * The CLI's Agent Instance heartbeat sends the same frame: a Relay Runtime has
+ * one auto-response for all its sockets.
  * Both are compared byte for byte: never build them any other way.
  */
 export const HUMAN_HEARTBEAT_PING = '{"type":"ping","requestId":"web-heartbeat"}';
@@ -96,6 +98,17 @@ export type HumanChannelCatalogChangedMessage = {
 };
 
 /**
+ * The workspace lists whose changes the Human socket announces. A list a
+ * client must keep current is named here once: the Hub announces a committed
+ * change of it, and the client re-reads it on that frame instead of on a timer.
+ */
+export const WORKSPACE_RESOURCE_KINDS = [
+  "automations", "channel_transfers", "cross_space_reads", "connector_action_requests",
+] as const;
+
+export type WorkspaceResourceKind = (typeof WORKSPACE_RESOURCE_KINDS)[number];
+
+/**
  * "Re-read this workspace list." The frame carries no row facts. While the
  * Human socket is up, the web client stops polling these lists and invalidates
  * the named one. `revision` is only the committed-event watermark.
@@ -103,7 +116,7 @@ export type HumanChannelCatalogChangedMessage = {
 export type HumanWorkspaceResourceChangedMessage = {
   type: "workspace_resource_changed";
   spaceId: string;
-  resource: "automations" | "channel_transfers" | "cross_space_reads";
+  resource: WorkspaceResourceKind;
   channelId?: string;
   revision: number;
 };
@@ -238,9 +251,7 @@ export function parseHumanChannelCatalogChangedMessage(
   };
 }
 
-const WORKSPACE_RESOURCE_KINDS = new Set([
-  "automations", "channel_transfers", "cross_space_reads",
-]);
+const ANNOUNCED_WORKSPACE_RESOURCES: ReadonlySet<string> = new Set(WORKSPACE_RESOURCE_KINDS);
 
 export function parseHumanWorkspaceResourceChangedMessage(
   value: unknown,
@@ -250,7 +261,7 @@ export function parseHumanWorkspaceResourceChangedMessage(
       !hasOnlyKeys(value, ["type", "spaceId", "resource", "channelId", "revision"]) ||
       typeof value.spaceId !== "string" || value.spaceId.length === 0 ||
       value.spaceId.length > 200 ||
-      typeof value.resource !== "string" || !WORKSPACE_RESOURCE_KINDS.has(value.resource) ||
+      typeof value.resource !== "string" || !ANNOUNCED_WORKSPACE_RESOURCES.has(value.resource) ||
       !Number.isSafeInteger(value.revision) || (value.revision as number) < 1) {
     return undefined;
   }
@@ -261,7 +272,7 @@ export function parseHumanWorkspaceResourceChangedMessage(
   return {
     type: "workspace_resource_changed",
     spaceId: value.spaceId,
-    resource: value.resource as HumanWorkspaceResourceChangedMessage["resource"],
+    resource: value.resource as WorkspaceResourceKind,
     revision: value.revision as number,
     ...("channelId" in value ? { channelId: value.channelId as string } : {}),
   };

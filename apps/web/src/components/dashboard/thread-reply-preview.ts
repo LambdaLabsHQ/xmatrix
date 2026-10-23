@@ -1,9 +1,9 @@
-import type { ChannelMessage } from "@xmatrix/protocol";
+import { faceOfSender, type ChannelMessage, type FaceOf } from "@xmatrix/protocol";
 
 export type ThreadReplyPreview = {
   id: string;
   author: string;
-  avatarUrl?: string;
+  face: FaceOf;
   body: string;
 };
 
@@ -32,7 +32,7 @@ export function threadReplyPreviews(
     .map((reply) => ({
       id: reply.messageId,
       author: reply.from.label,
-      avatarUrl: reply.from.avatarUrl,
+      face: faceOfSender(reply.from),
       body: reply.recalledAt ? "Message recalled" : reply.body ||
         (reply.attachments?.length ? `${reply.attachments.length} attachment${reply.attachments.length === 1 ? "" : "s"}` : ""),
     }));

@@ -4,10 +4,8 @@ import { MessageAuthorityError } from "@xmatrix/db";
 
 import {
   orchestrateProductAgentMentions,
-  orchestrateProductChannelAbout,
   orchestrateProductNewConversationStart,
   parseProductHandoffInstanceMentions,
-  productSpacePreferredLanguage,
 } from "../src/product-agent-mention.ts";
 // The mention grammar the Hub executes is the same module the composer completes
 // against, so these assertions run directly against the shared definition.
@@ -48,7 +46,7 @@ test("Reborn lookup refusal publishes a visible error instead of rejecting silen
   const result = await orchestrateProductAgentMentions({ channelId: "ch-1", messageId: "refused-reborn",
     body: "@codex:1:reborn", actorUserId: "user-1", port: {
       async getRebornTarget() { throw Object.assign(new Error("private diagnostic"), { code: "forbidden" }); },
-      async publishSystemNotice(channelId, body) { assert.equal(channelId, "ch-1"); notices.push(body); },
+      async recordResult(channelId, body) { assert.equal(channelId, "ch-1"); notices.push(body); },
     } });
   assert.equal(result.spawned, 0);
   assert.equal(notices.length, 1);
@@ -61,7 +59,7 @@ test("a Reborn refusal whose notice cannot be published remains an error", async
   await assert.rejects(orchestrateProductAgentMentions({ channelId: "ch-1", messageId: "refused-reborn-notice",
     body: "@codex:1:reborn", actorUserId: "user-1", port: {
       async getRebornTarget() { return null; },
-      async publishSystemNotice() { throw new Error("notice transport unavailable"); },
+      async recordResult() { throw new Error("notice transport unavailable"); },
     } }), /notice transport unavailable/);
 });
 
@@ -91,37 +89,27 @@ test("agent new local-path syntax requires an absolute path", () => {
 
 function basePort(overrides = {}) {
   const notices = [];
-  const registrationLaunches = [];
   const reborns = [];
   const handoffs = [];
   const port = {
-    registrationLaunches,
     reborns,
     handoffs,
     notices,
-    async launchRegistrationInput(input) {
-      registrationLaunches.push(input);
-      return { runId: input.runId ?? `run:${input.commandId}`, instanceId: input.instanceId ?? `instance:${input.commandId}`,
-        launchId: `launch:${input.commandId}`, agentName: "codex", hostId: "host-1" };
-    },
     async prepareRegisteredReborn(input) {
       reborns.push(input);
       return { intentId: `intent:${input.sourceInstanceId}`, state: "waiting" };
     },
-    async prepareRegisteredHandoff(input) {
+    async handOff(input) {
       handoffs.push(input);
-      return { intentId: `intent:handoff:${input.sourceInstanceId}`, state: "waiting" };
+      return { agentName: input.harness ?? "codex" };
     },
     async getChannel() {
       return { id: "ch-1", spaceId: "space-1", mode: "open" };
     },
-    async getSpacePreferredLanguage() {
-      return "en";
-    },
     async getRebornTarget() {
       return null;
     },
-    async publishSystemNotice(_channelId, body) {
+    async recordResult(_channelId, body) {
       notices.push(body);
     },
     ...overrides,
@@ -215,6 +203,7 @@ test("Agent rejection notice appends through current channel message authority",
   assert.equal(appends[0].channelId, "ch-rejected");
   assert.equal(appends[0].command.channelId, "ch-rejected");
   assert.equal(appends[0].command.body, "xMatrix could not start @agent.");
+  assert.equal(appends[0].command.messageKind, "xmatrix.system.runtime-failure");
   assert.equal(appends[0].command.residual.appMetadata.xmatrixSystemNotice, true);
 });
 
@@ -249,161 +238,6 @@ test("handoff mention parse uses the shared existing-to-new grammar", () => {
   );
 });
 
-test("implicit Channel About starts a silent one-shot session through ordinary registration, with no Space config", async () => {
-  // The port has no management configuration to read: About is gated by nothing but its Channel.
-  const port = basePort({
-    async getSpacePreferredLanguage() {
-      return "zh";
-    },
-  });
-  const result = await orchestrateProductChannelAbout({
-    channelId: "ch-1",
-    requestId: "channel-about:ch-1:20",
-    triggerMessageId: "m-trigger",
-    actorUserId: "user-1",
-    port,
-  });
-
-  assert.equal(result.spawned, 1);
-  assert.equal(port.notices.length, 0, "implicit About work never posts a Channel notice");
-  const [launch] = port.registrationLaunches;
-  assert.equal(launch.commandId, "about:channel-about:ch-1:20");
-  assert.equal(Object.hasOwn(launch, "oneshot"), false);
-  assert.deepEqual(launch.aboutSession, { triggerRequestId: "channel-about:ch-1:20", triggerMessageId: "m-trigger" });
-  assert.deepEqual(launch.runMetadata, { routedAs: "management_channel_about",
-    channelAboutTriggerMessageId: "m-trigger", managementSpaceId: "space-1" });
-  // Only the About session itself selects its private directory; no management launch or summon tags ride along.
-  assert.equal(Object.hasOwn(launch, "management"), false);
-  assert.equal(Object.hasOwn(launch, "coalesce"), false);
-  assert.equal(Object.hasOwn(launch, "tags"), false);
-  assert.match(launch.body, /^You keep this Channel's About current\.\n/u);
-  assert.doesNotMatch(launch.body, /xMatrix system agent/u);
-  assert.match(launch.body, /Task context .*"channelId":"ch-1".*"triggerMessageId":"m-trigger"/);
-  assert.match(launch.body, /Other channels, pages, local transcripts, caches/);
-  assert.match(launch.body, /--expected-revision/);
-  // It reads its own Channel on demand; it never mirrors the Space.
-  assert.match(launch.body, /`xmatrix channel history ch-1 --authoritative`/u);
-  // The summary goes directly to the owning Hub; no local file can be reused.
-  assert.match(launch.body, /`xmatrix channel about ch-1 --stdin --through </u);
-  assert.match(launch.body, /`xmatrix channel about ch-1 --summary "<summary>" --through </u);
-  assert.match(launch.body, /If this CLI's help advertises --stdin/u);
-  assert.match(launch.body, /pipe one JSON object containing "summary"/u);
-  assert.match(launch.body, /do not write or read any intermediate file/u);
-  assert.match(launch.body, /JSON Unicode escapes/u);
-  assert.doesNotMatch(launch.body, /--summary-file|--name-file|xmatrix-about-/u);
-  assert.equal(launch.runMetadata.routedAs, "management_channel_about");
-  assert.equal(launch.initialMessageId, undefined);
-  assert.match(launch.body, /Always recompute and apply the About/u);
-  assert.match(launch.body, /Do not post an acknowledgement/u);
-  assert.match(launch.body, /entirely in Simplified Chinese \(zh\)/u);
-  assert.match(launch.body, /only source of the About output language/u);
-  assert.match(
-    launch.body,
-    /has been picked up in its thread\. Never describe such a message as unclaimed/u,
-    "the About must not call a thread's root unclaimed",
-  );
-});
-
-test("a conversation's first message names it only while nobody has named it", async () => {
-  const run = async (metadata) => {
-    const port = basePort({
-      async getChannel() { return { id: "ch-1", spaceId: "space-1", mode: "open", metadata }; },
-    });
-    const result = await orchestrateProductChannelAbout({ channelId: "ch-1", requestId: "channel-about:ch-1:0",
-      actorUserId: "user-1", automaticNameOnly: true, port });
-    return { result, launches: port.registrationLaunches };
-  };
-  const named = await run({});
-  assert.equal(named.result.spawned, 0, "a conversation a person named waits for the usual cadence");
-  assert.equal(named.launches.length, 0);
-  const automatic = await run({ autoName: true });
-  assert.equal(automatic.result.spawned, 1);
-  assert.match(automatic.launches[0].body, /Nobody has named this Channel yet/u);
-  assert.match(automatic.launches[0].body, /--summary "<summary>" --name "<name>"/u);
-  assert.match(automatic.launches[0].body, /pipe one JSON object containing "summary" and "name"/u);
-  assert.doesNotMatch(automatic.launches[0].body, /--summary-file|--name-file/u);
-});
-
-test("implicit Channel About joins the session already serving the Channel", async () => {
-  const port = basePort({
-    async launchRegistrationInput(input) {
-      this.registrationLaunches.push(input);
-      return { runId: "run:about", instanceId: "session:about", launchId: "", agentName: "codex",
-        hostId: "host-1", coalesced: true };
-    },
-  });
-  const result = await orchestrateProductChannelAbout({
-    channelId: "ch-1",
-    requestId: "channel-about:ch-1:21",
-    actorUserId: "user-1",
-    port,
-  });
-
-  assert.equal(result.spawned, 0);
-  assert.equal(result.coalesced, 1);
-});
-
-test("a Channel About session that finished its turn is ended by its daemon, not kept", async () => {
-  const retired = [{ runId: "run:about-done", channelId: "ch-1", sessionId: "session:done",
-    machineOwnerUserId: "owner-1", machineId: "machine-1", hostId: "host-1", executionKey: "execution:done" }];
-  const stopped = [];
-  const port = basePort({
-    async launchRegistrationInput(input) {
-      this.registrationLaunches.push(input);
-      return { runId: "run:about-next", instanceId: "session:next", launchId: "launch-1", agentName: "codex",
-        hostId: "host-1", retiredAboutSessions: retired };
-    },
-    async stopChannelAboutSessions(targets, attempt) { stopped.push(...targets); attempts.push(attempt); },
-  });
-  const attempts = [];
-  const result = await orchestrateProductChannelAbout({
-    channelId: "ch-1", requestId: "channel-about:ch-1:23", actorUserId: "user-1", port,
-  });
-
-  assert.equal(result.spawned, 1, "the trigger starts a fresh session");
-  assert.deepEqual(stopped, retired);
-  assert.deepEqual(attempts, ["about:channel-about:ch-1:23"], "each trigger is its own stop attempt");
-});
-
-test("a Channel About successor follows its exact predecessor", async () => {
-  const port = basePort({
-  });
-  await orchestrateProductChannelAbout({
-    channelId: "ch-1", requestId: "channel-about:ch-1:22", successorOfRunId: "run:about-prior",
-    actorUserId: "user-1", port,
-  });
-  const [launch] = port.registrationLaunches;
-  assert.equal(launch.commandId, "about-successor:run:about-prior");
-  assert.deepEqual(launch.aboutSession, { triggerRequestId: "channel-about:ch-1:22",
-    successorOfRunId: "run:about-prior" });
-});
-
-test("Channel About language comes only from the explicit Space preference", () => {
-  assert.equal(productSpacePreferredLanguage({
-    locale: { defaultLocale: "zh-CN", supportedLocales: ["zh-CN", "en"] },
-    preferredLanguage: "en",
-  }), "zh", "the versioned Space policy takes precedence");
-  assert.equal(productSpacePreferredLanguage({ preferredLanguage: "en" }), "en");
-  assert.equal(productSpacePreferredLanguage({ locale: { defaultLocale: "fr" } }), "en");
-  assert.equal(productSpacePreferredLanguage({ name: "中文频道", messages: ["English"] }), "en");
-});
-
-test("implicit Channel About uses the stable Space default without inferring from Channel content", async () => {
-  const port = basePort({
-  });
-  const result = await orchestrateProductChannelAbout({
-    channelId: "ch-1",
-    requestId: "channel-about:ch-1:25",
-    actorUserId: "user-1",
-    port,
-  });
-
-  assert.equal(result.spawned, 1);
-  assert.match(port.registrationLaunches[0].body, /entirely in English \(en\)/u);
-  assert.match(port.registrationLaunches[0].body, /only source of the About output language/u);
-  assert.equal(port.notices.length, 0, "missing language remains silent in the Channel");
-});
-
 test("a reborn mention prepares a registration reborn of the addressed Instance", async () => {
   const port = basePort({
     async getRebornTarget({ agentName, channelInstanceId }) {
@@ -418,7 +252,6 @@ test("a reborn mention prepares a registration reborn of the addressed Instance"
   assert.equal(result.spawned, 1);
   assert.deepEqual(port.reborns.map(({ sourceInstanceId, sourceMention }) => ({ sourceInstanceId, sourceMention })),
     [{ sourceInstanceId: "ch-1:1", sourceMention: "@codex:1:reborn" }]);
-  assert.equal(port.registrationLaunches.length, 0);
 });
 
 test("a refused registration reborn names its code in the Channel", async () => {
@@ -439,37 +272,6 @@ test("a refused registration reborn names its code in the Channel", async () => 
   assert.match(port.notices[0], /registration_reborn_unregistered.*No recovery was queued/);
 });
 
-test("a handoff hands the source's directory to the named harness through its registration", async () => {
-  const port = basePort({
-    async getRebornTarget(input) {
-      return handoffTarget(input, { workspace: { machineId: "machine-1", canonicalCwd: "/tmp/project" }, metadata: { runtime: "codex" } });
-    },
-  });
-  const result = await orchestrateProductAgentMentions({ channelId: "ch-1", messageId: "m-3",
-    body: "@codex:2:handoff:@claude finish the refactor", actorUserId: "user-1", port });
-  assert.equal(result.spawned, 1);
-  assert.equal(port.handoffs.length, 1);
-  const [handoff] = port.handoffs;
-  assert.equal(handoff.sourceInstanceId, "ch-1:2");
-  assert.equal(handoff.successorHarness, "claude");
-  assert.equal(handoff.sourceMention, "@codex:2:handoff:@claude");
-  assert.match(handoff.prompt, /Inherited working directory: \/tmp\/project/);
-  assert.match(handoff.prompt, /finish the refactor/);
-});
-
-test("a refused handoff names its code in the Channel", async () => {
-  const port = basePort({
-    getRebornTarget: handoffTarget,
-    async prepareRegisteredHandoff() {
-      throw Object.assign(new Error("refused"), { code: "registration_not_found" });
-    },
-  });
-  const result = await orchestrateProductAgentMentions({ channelId: "ch-1", messageId: "m-4",
-    body: "@codex:2:handoff:@grok", actorUserId: "user-1", port });
-  assert.equal(result.spawned, 0);
-  assert.match(port.notices[0], /could not hand off @codex:2 to @grok \(registration_not_found\)/);
-});
-
 function repoSource(overrides = {}) {
   return async ({ channelInstanceId }) => ({ instanceId: "ch-1:2", instanceStatus: "online", channelId: "ch-1",
     channelInstanceId, runId: "run-2", runStatus: "running", agentName: "claude", harness: "claude",
@@ -477,69 +279,59 @@ function repoSource(overrides = {}) {
     metadata: { runtime: "claude", remoteRepo: "acme/app" }, ...overrides });
 }
 
-test("a handoff to the source's own harness moves to another machine through the repository", async () => {
-  const elsewhere = [];
-  const port = basePort({
-    getRebornTarget: repoSource(),
-    async prepareRegisteredHandoff() { throw Object.assign(new Error("same"), { code: "handoff_same_agent" }); },
-    async handOffElsewhere(input) { elsewhere.push(input); return { agentName: "claude" }; },
-  });
-  const result = await orchestrateProductAgentMentions({ channelId: "ch-1", messageId: "m-5",
-    body: "@claude:2:handoff:@claude keep going", actorUserId: "user-1", port });
+test("a named handoff is an ordinary launch of that harness through the source's repository", async () => {
+  // The named harness may be the source's own: the same harness elsewhere is eligible.
+  for (const [body, harness] of [["@claude:2:handoff:@codex keep going", "codex"], ["@claude:2:handoff:@claude keep going", "claude"]]) {
+    const port = basePort({ getRebornTarget: repoSource() });
+    const result = await orchestrateProductAgentMentions({ channelId: "ch-1", messageId: "m-5", body,
+      actorUserId: "user-1", port });
+    assert.equal(result.spawned, 1);
+    assert.deepEqual(port.notices, []);
+    const [handoff] = port.handoffs;
+    assert.match(handoff.commandId, /^handoff-elsewhere:[0-9a-f]{64}$/u);
+    assert.deepEqual({ ...handoff, commandId: undefined }, { commandId: undefined, actorUserId: "user-1", channelId: "ch-1",
+      sourceMessageId: "m-5", sourceRunId: "run-2", sourceInstanceId: "ch-1:2", sourceAddress: "@claude:2",
+      repository: "acme/app", harness, request: "keep going", sourceMention: body.split(" ")[0] });
+  }
+});
+
+test("@auto leaves the harness to routing, with no same-machine preference", async () => {
+  const port = basePort({ getRebornTarget: repoSource() });
+  const result = await orchestrateProductAgentMentions({ channelId: "ch-1", messageId: "m-6",
+    body: "@claude:2:handoff:@auto", actorUserId: "user-1", port });
   assert.equal(result.spawned, 1);
-  assert.deepEqual(port.notices, []);
-  assert.equal(elsewhere.length, 1);
-  const [handoff] = elsewhere;
-  assert.match(handoff.commandId, /^handoff-elsewhere:[0-9a-f]{64}$/u);
-  assert.deepEqual({ ...handoff, commandId: undefined }, { commandId: undefined, actorUserId: "user-1", channelId: "ch-1",
-    sourceMessageId: "m-5", sourceRunId: "run-2", sourceInstanceId: "ch-1:2", sourceAddress: "@claude:2",
-    repository: "acme/app", harness: "claude", request: "keep going",
-    sourceMention: "@claude:2:handoff:@claude" });
+  assert.equal(port.handoffs[0].harness, undefined, "routing picks the harness");
+  assert.equal(port.handoffs[0].repository, "acme/app");
+  assert.equal(port.handoffs[0].sourceMention, "@claude:2:handoff:@auto");
 });
 
-test("@auto takes a same-machine successor when there is one, and any machine otherwise", async () => {
-  const autos = [], elsewhere = [];
-  const port = (outcome) => basePort({
-    getRebornTarget: repoSource(),
-    async prepareRegisteredAutoHandoff(input) { autos.push(input); return outcome; },
-    async handOffElsewhere(input) { elsewhere.push(input); return { agentName: "codex" }; },
-  });
-  const here = await orchestrateProductAgentMentions({ channelId: "ch-1", messageId: "m-6",
-    body: "@claude:2:handoff:@auto", actorUserId: "user-1",
-    port: port({ outcome: "handed_off", successorHarness: "codex" }) });
-  assert.equal(here.spawned, 1);
-  assert.equal(autos[0].sourceMention, "@claude:2:handoff:@auto");
-  assert.match(autos[0].prompt, /Inherited working directory: \/repo/);
-  assert.equal(elsewhere.length, 0);
-
-  const away = await orchestrateProductAgentMentions({ channelId: "ch-1", messageId: "m-7",
-    body: "@claude:2:handoff:@auto", actorUserId: "user-1",
-    port: port({ outcome: "no_successor", repository: "acme/app" }) });
-  assert.equal(away.spawned, 1);
-  assert.equal(elsewhere.length, 1);
-  assert.equal(elsewhere[0].harness, undefined, "routing picks the harness");
-  assert.equal(elsewhere[0].repository, "acme/app");
-  assert.equal(elsewhere[0].sourceMention, "@claude:2:handoff:@auto");
-});
-
-test("a handoff that cannot leave its machine says why, once", async () => {
-  for (const [body, overrides, code] of [
-    ["@claude:2:handoff:@codex", { getRebornTarget: repoSource({ metadata: { runtime: "claude" } }),
-      async prepareRegisteredHandoff() { throw Object.assign(new Error("none"), { code: "registration_not_found" }); } },
-    "registration_not_found"],
-    ["@claude:2:handoff:@codex", { getRebornTarget: repoSource(),
-      async prepareRegisteredHandoff() { throw Object.assign(new Error("pending"), { code: "reborn_pending" }); } },
-    "reborn_pending"],
-    ["@claude:2:handoff:@auto", { getRebornTarget: repoSource(),
-      async prepareRegisteredAutoHandoff() { return { outcome: "no_successor" }; } }, "handoff_no_successor"],
-    ["@claude:2:handoff:@codex", { getRebornTarget: repoSource(),
-      async prepareRegisteredHandoff() { throw Object.assign(new Error("same"), { code: "registration_not_found" }); },
-      async handOffElsewhere() { throw Object.assign(new Error("none"), { code: "registration_no_candidate" }); } },
-    "registration_no_candidate"],
+test("a source without a repository hands off its registered directory, or none for a managed one", async () => {
+  for (const [workspace, metadata, site] of [
+    [{ machineId: "machine-1", canonicalCwd: "/srv/notes" }, { runtime: "codex" }, { directory: "/srv/notes" }],
+    [{ machineId: "machine-1", canonicalCwd: "/home/u/.xmatrix-managed/k" }, { managedWorkspaceKey: "k" }, {}],
   ]) {
-    const elsewhere = [];
-    const port = basePort({ async handOffElsewhere(input) { elsewhere.push(input); return { agentName: "x" }; },
-      ...overrides });
+    const port = basePort({ getRebornTarget: input => handoffTarget(input, { workspace, metadata }) });
+    await orchestrateProductAgentMentions({ channelId: "ch-1", messageId: "m-3",
+      body: "@codex:2:handoff:@claude finish the refactor", actorUserId: "user-1", port });
+    const [handoff] = port.handoffs;
+    assert.equal(handoff.repository, site.repository);
+    assert.equal(handoff.directory, site.directory);
+    assert.equal(handoff.harness, "claude");
+    assert.equal(handoff.request, "finish the refactor");
+  }
+});
+
+test("a handoff that cannot start says why, once", async () => {
+  for (const [body, overrides, code] of [
+    ["@claude:2:handoff:@codex", { getRebornTarget: repoSource({ metadata: { routedAs: "management_space" } }) },
+      "handoff_source_not_transferable"],
+    ["@claude:2:handoff:@codex", { getRebornTarget: repoSource(),
+      async handOff() { throw Object.assign(new Error("none"), { code: "registration_quota_exhausted" }); } },
+    "registration_quota_exhausted"],
+    ["@claude:2:handoff:@codex", { getRebornTarget: repoSource(),
+      async handOff() { throw new Error("transport"); } }, "registration_handoff_failed"],
+  ]) {
+    const port = basePort(overrides);
     const result = await orchestrateProductAgentMentions({ channelId: "ch-1", messageId: "m-8", body,
       actorUserId: "user-1", port });
     assert.equal(result.spawned, 0, body);
@@ -558,7 +350,6 @@ test("a new conversation's first message asks Jev which harness to summon and a 
       if (typeof outcome === "string") throw Object.assign(new Error(outcome), { code: outcome });
       return outcome ?? { claimed: true, harness: "codex" };
     },
-    async launchRegistrationInput() { throw new Error("a first message never launches directly"); },
     reportDiagnostic(value) { diagnostics.push(value); },
   });
   const input = { channelId: "ch-1", messageId: "m-1", body: "fix the flaky login test" };
@@ -577,4 +368,35 @@ test("a new conversation's first message asks Jev which harness to summon and a 
   assert.equal(diagnostics.length, 0);
   assert.deepEqual(await orchestrateProductNewConversationStart({ ...input, port: port(true, "registration_not_found") }), {});
   assert.deepEqual(diagnostics.map(value => value.error), ["registration_not_found"]);
+});
+
+test("page and message discussions use the first-message choice despite their passage title", async () => {
+  const body = "> Fill Pantry\n\n— [Fill Pantry › Fill Pantry](https://xmatrix.sh/app/space/pages?page=page-1)\n\n这个项目是怎么决策要做的";
+  const decisions = [];
+  for (const metadata of [
+    { fromPageId: "page-1" },
+    { fromChannelId: "source-channel", fromMessageId: "source-message" },
+  ]) {
+    const port = {
+      async getChannel(id) { return { id, name: "“Fill Pantry”", metadata }; },
+      async decideFirstMessageLaunch(input) { decisions.push(input); return { claimed: true, harness: "codex" }; },
+    };
+    assert.deepEqual(await orchestrateProductNewConversationStart({ channelId: "discussion", messageId: "first",
+      body, authorKind: "user", port }), { harness: "codex" });
+    assert.deepEqual(decisions.at(-1), { channelId: "discussion", messageId: "first", body, window: true });
+  }
+  assert.equal(decisions.length, 2);
+
+  // A title alone, malformed origin, archived Channel, or empty draft is not a discussion launch.
+  for (const channel of [null, { metadata: {} }, { metadata: { fromPageId: true } },
+    { metadata: { fromPageId: " " } }, { metadata: { fromMessageId: "source-message" } },
+    { metadata: { fromChannelId: "source-channel" } },
+    { archivedAt: "2026-10-19T00:00:00Z", metadata: { fromPageId: "page-1" } }]) {
+    assert.deepEqual(await orchestrateProductNewConversationStart({ channelId: "discussion", messageId: "first",
+      body, authorKind: "user", port: { async getChannel() { return channel; },
+        async decideFirstMessageLaunch() { assert.fail("ineligible Channel must not ask Jev"); } } }), {});
+  }
+  assert.deepEqual(await orchestrateProductNewConversationStart({ channelId: "discussion", messageId: "first",
+    body: " \n ", authorKind: "user", port: { async getChannel() { return { metadata: { fromPageId: "page-1" } }; },
+      async decideFirstMessageLaunch() { assert.fail("empty draft must not ask Jev"); } } }), {});
 });

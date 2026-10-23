@@ -1,3 +1,4 @@
+const { FIXTURE_AGENT_REGISTRATION, decodeChannelSnapshot } = require("./channel-presence-test-fixture.cjs");
 const assert = require("node:assert/strict");
 
 const test = require("node:test");
@@ -15,9 +16,11 @@ const {
   withInvocationMentionTargets,
   withWrittenInvocationTargets,
 } = require("./mention-read-state.ts");
+const { sameValue } = require("../../lib/same-value.ts");
 
 const CANDIDATES = [
-  { id: "user:u-yiming", name: "Yiming Hu", handle: "yiming-hu", kind: "user", status: "online", avatarUrl: "/a.png" },
+  { id: "user:u-yiming", name: "Yiming Hu", handle: "yiming-hu", kind: "user", status: "online",
+    face: { kind: "user", id: "u-yiming", name: "Yiming Hu" } },
   // Same display-name token as the member above, different person. Indexing
   // display names made `@Yiming` a coin flip between the two.
   { id: "user:u-legend", name: "Yiming", handle: "legend", kind: "user", status: "online" },
@@ -38,21 +41,21 @@ test("a mention of an Agent whose machine is unreachable is marked as such", () 
   const instance = (id, status, extra = {}) => ({
     id, status, label: id, connectedAt: "2026-10-01T02:00:00Z", lastSeenAt: "2026-10-01T02:30:00Z", ...extra,
   });
-  const subjects = machineOfflineMentionSubjects({
-    memberPresence: {
-      "agent:claude": { kind: "agent", instances: [
+  const subjects = machineOfflineMentionSubjects(decodeChannelSnapshot({
+    id: "channel", memberPresence: {
+      "agent:claude": { registration: FIXTURE_AGENT_REGISTRATION, kind: "agent", instances: [
         instance("i-1", "offline", { offlineReason: "machine_offline" }),
       ] },
       // Another Instance still reads, so the Agent itself is reachable.
-      "agent:codex": { kind: "agent", instances: [
+      "agent:codex": { registration: FIXTURE_AGENT_REGISTRATION, kind: "agent", instances: [
         instance("i-2", "offline", { offlineReason: "machine_offline" }),
         instance("i-3", "idle"),
       ] },
-      "agent:grok": { kind: "agent", instances: [instance("i-4", "idle")] },
+      "agent:grok": { registration: FIXTURE_AGENT_REGISTRATION, kind: "agent", instances: [instance("i-4", "idle")] },
       "user:u-1": { kind: "user", status: "offline" },
     },
-  });
-  assert.deepEqual([...subjects].sort(), ["agent:claude", "agent:claude:i-1", "agent:codex:i-2"]);
+  }));
+  assert.deepEqual([...subjects].sort(), ["agent:i-1", "agent:i-1:i-1", "agent:i-2", "agent:i-2:i-2"]);
   assert.equal(machineOfflineMentionSubjects(undefined).size, 0);
 });
 
@@ -405,4 +408,27 @@ test("a summon paints its whole written expression, flagging force and malformed
   ]);
   assert.equal(spans[0].invalid, undefined);
   assert.equal(spans[1].invalid, true);
+});
+
+test("an index is the same only while every written name resolves to the same member drawn the same way", () => {
+  const rebuilt = (change = (candidate) => candidate) => buildMentionReadIndex(CANDIDATES.map((candidate) => change({ ...candidate })));
+  // A Channel replaced by a message or a presence report: same members, new objects.
+  assert.equal(sameValue(INDEX, rebuilt()), true);
+  assert.equal(sameValue(INDEX, rebuilt((candidate) => ({ ...candidate, status: "busy" }))), true);
+  // A rename, a different face, a different person behind a name, a new or lost member. A new picture is not a
+  // change here: the face directory carries pictures, the index only whose face each mention draws.
+  const yiming = (change) => (candidate) => (candidate.id === "user:u-yiming" ? { ...candidate, ...change } : candidate);
+  assert.equal(sameValue(INDEX, rebuilt(yiming({ name: "Yiming H" }))), false);
+  assert.equal(sameValue(INDEX, rebuilt(yiming({ face: { kind: "external", name: "Yiming Hu", imageUrl: "/b.png" } }))), false);
+  assert.equal(sameValue(INDEX, rebuilt(yiming({ id: "user:u-other" }))), false);
+  assert.equal(sameValue(INDEX, buildMentionReadIndex(CANDIDATES.slice(1))), false);
+  // `@Yiming` is ambiguous in INDEX; once one of the two is gone it names the other.
+  const unambiguous = buildMentionReadIndex(CANDIDATES.filter((candidate) => candidate.id !== "user:u-yiming"));
+  assert.equal(sameValue(unambiguous, buildMentionReadIndex(CANDIDATES.filter((candidate) => candidate.id !== "user:u-legend"))), false);
+  // A written fallback is unresolved; the launch that names it is not.
+  const written = withWrittenInvocationTargets(INDEX, "@claude 看一下");
+  const launched = withInvocationMentionTargets(INDEX, [{ instanceId: "written:claude", targetName: "claude", sourceMention: "@claude" }]);
+  assert.equal(sameValue(written, launched), false);
+  // No launches: the index is the answer itself, not a copy per text run.
+  assert.equal(withInvocationMentionTargets(INDEX, []), INDEX);
 });

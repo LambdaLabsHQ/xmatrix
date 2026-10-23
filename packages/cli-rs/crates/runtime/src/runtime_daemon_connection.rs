@@ -116,6 +116,10 @@ fn replay_result_matches_command(
         Some("machine_quota_probe") => ("machine_quota_probe_result", &["requestId"]),
         Some("machine_harness_action") => ("machine_harness_action_result", &["requestId"]),
         Some("machine_text_task") => ("machine_text_task_result", &["requestId"]),
+        Some("machine_sleep_agent") => (
+            "machine_sleep_result",
+            &["requestId", "runId", "executionKey", "instanceId"],
+        ),
         Some("machine_worktree_action") => ("machine_worktree_action_result", &["requestId"]),
         _ => return Ok(false),
     };
@@ -178,6 +182,7 @@ fn command_admission_report(command: &MachineDaemonCommand) -> error::Result<Mac
         MachineDaemonCommand::MachineQuotaProbe { request_id, .. }
         | MachineDaemonCommand::MachineHarnessAction { request_id, .. }
         | MachineDaemonCommand::MachineTextTask { request_id, .. }
+        | MachineDaemonCommand::MachineSleepAgent { request_id, .. }
         | MachineDaemonCommand::MachineWorktreeAction { request_id, .. } => {
             (request_id.clone(), None, None)
         }
@@ -250,6 +255,7 @@ fn prepare_command_effect(
             (request_id, "harness_action")
         }
         MachineDaemonCommand::MachineTextTask { request_id, .. } => (request_id, "text_task"),
+        MachineDaemonCommand::MachineSleepAgent { request_id, .. } => (request_id, "sleep"),
         MachineDaemonCommand::MachineWorktreeAction { request_id, .. } => {
             (request_id, "worktree_action")
         }
@@ -578,6 +584,43 @@ async fn execute_leased_text_task(
     Some(MachineDaemonReport::MachineTextTaskResult {
         request_id,
         result,
+        relay_lease,
+    })
+}
+
+/// The Hub decided a resting Run sleeps; this daemon checks its own facts and
+/// either ends the process as a sleep or says why it would not.
+async fn execute_sleep_on_hub_word(
+    registry: &DaemonRunRegistry,
+    command: MachineDaemonCommand,
+) -> Option<MachineDaemonReport> {
+    let MachineDaemonCommand::MachineSleepAgent {
+        request_id,
+        run_id,
+        execution_key,
+        instance_id,
+        idle_for_millis,
+        relay_lease,
+    } = command
+    else {
+        return None;
+    };
+    let declined = crate::sleep_daemon_child_on_hub_word(
+        registry,
+        &run_id,
+        &execution_key,
+        &instance_id,
+        std::time::Duration::from_millis(idle_for_millis),
+    )
+    .await
+    .err();
+    Some(MachineDaemonReport::MachineSleepResult {
+        request_id,
+        run_id,
+        execution_key,
+        instance_id,
+        slept: declined.is_none(),
+        reason: declined.map(str::to_string),
         relay_lease,
     })
 }
@@ -2081,10 +2124,15 @@ fn current_time_millis() -> Option<u64> {
         .map(|duration| duration.as_millis() as u64)
 }
 
+/// One connection of the daemon. Its own session (exchanged for it) ends with
+/// it, however it ends: a connection that fails before it is online (an
+/// unnamed Machine, a refused registration) is retried by the supervisor, and
+/// each retry exchanges a fresh session, so leaving them open left one live
+/// session per attempt, one a minute for as long as it kept failing.
 async fn cmd_daemon_connected(
     hub_url: &str,
     token_override: Option<&str>,
-    mut supervisor_control: Option<&mut SupervisorControlSession>,
+    supervisor_control: Option<&mut SupervisorControlSession>,
     activation: Option<MachineDaemonActivationConnect>,
     profile_manager: &ProfileManager,
     update_authority: bool,
@@ -2092,6 +2140,35 @@ async fn cmd_daemon_connected(
 ) -> error::Result<ProfileRuntimeExit> {
     let token_override = token_override.map(str::to_string);
     let daemon_session = resolve_daemon_session_state(hub_url, token_override.as_deref()).await?;
+    let result = run_daemon_connection(
+        hub_url,
+        token_override,
+        supervisor_control,
+        activation,
+        profile_manager,
+        update_authority,
+        shutdown,
+        daemon_session.clone(),
+    )
+    .await;
+    if let Some(state) = daemon_session.as_ref() {
+        let ended = state.read().await.session.clone();
+        end_daemon_session(ended).await;
+    }
+    result
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn run_daemon_connection(
+    hub_url: &str,
+    token_override: Option<String>,
+    mut supervisor_control: Option<&mut SupervisorControlSession>,
+    activation: Option<MachineDaemonActivationConnect>,
+    profile_manager: &ProfileManager,
+    update_authority: bool,
+    shutdown: &mut tokio::sync::watch::Receiver<bool>,
+    daemon_session: Option<DaemonSessionState>,
+) -> error::Result<ProfileRuntimeExit> {
     let token =
         current_daemon_access_token(token_override.as_deref(), daemon_session.as_ref()).await?;
     // A Machine id is per owner: the daemon's session names the owner.
@@ -2143,6 +2220,8 @@ async fn cmd_daemon_connected(
             "machine_harness_action_v1",
             // The daemon answers one bounded text task with a fresh, tool-less harness process.
             "machine_text_task_v1",
+            // The daemon sleeps a resting Run on the Hub's word, after its own check.
+            "machine_sleep_agent_v1",
             "machine_harness_cursor_launcher_v1",
             // The daemon parses and runs the `uninstall` harness action.
             "machine_harness_uninstall_v1",
@@ -2150,6 +2229,7 @@ async fn cmd_daemon_connected(
             "machine_harness_release_v1",
             // The daemon parses and runs the `login_*` harness actions.
             "machine_harness_login_v1",
+            "machine_harness_login_start_cancel_v1",
             // A stop may push the Run's whole checkout to a handoff branch.
             "machine_handoff_export_v1",
             // The owner lists and reclaims this machine's git worktrees.
@@ -2196,10 +2276,12 @@ async fn cmd_daemon_connected(
             "machine_harness_inventory_v1".to_string(),
             "machine_harness_action_v1".to_string(),
             "machine_text_task_v1".to_string(),
+            "machine_sleep_agent_v1".to_string(),
             "machine_harness_cursor_launcher_v1".to_string(),
             "machine_harness_uninstall_v1".to_string(),
             "machine_harness_release_v1".to_string(),
             "machine_harness_login_v1".to_string(),
+            "machine_harness_login_start_cancel_v1".to_string(),
             "machine_handoff_export_v1".to_string(),
             "machine_worktree_action_v1".to_string(),
         ],
@@ -2761,6 +2843,19 @@ async fn cmd_daemon_connected(
                             }
                         });
                     }
+                    MachineDaemonConnectionEvent::Command(command @ MachineDaemonCommand::MachineSleepAgent { .. }) => {
+                        let (effect_id, _) = command_effect.expect("command has admitted effect");
+                        let registry = run_registry.clone();
+                        spawn_admitted_daemon_command(hub_url, &relay, &effect_journal, effect_id, command, move |context, command| async move {
+                            let DeferredDaemonCommandContext { relay, effect_journal, effect_id, .. } = context;
+                            let Some(report) = execute_sleep_on_hub_word(&registry, command).await else {
+                                return;
+                            };
+                            if let Err(error) = send_command_effect_result(&effect_journal, &effect_id, &relay, report) {
+                                eprintln!("{} failed to report sleep result: {error}", "⚠".yellow().bold());
+                            }
+                        });
+                    }
                     MachineDaemonConnectionEvent::Command(command @ MachineDaemonCommand::MachineWorktreeAction { .. }) => {
                         let (effect_id, _) = command_effect.expect("command has admitted effect");
                         let live_cwds: std::collections::HashSet<std::path::PathBuf> = run_registry
@@ -2913,6 +3008,12 @@ async fn cmd_daemon_connected(
     };
 
     Ok(exit)
+}
+
+/// Ends a daemon session nothing will use again, briefly: a Hub that cannot
+/// answer must not hold up the daemon, and the session expires on its own.
+async fn end_daemon_session(session: CliSession) {
+    let _ = tokio::time::timeout(Duration::from_secs(3), auth::end_hub_session(&session)).await;
 }
 
 fn daemon_access_token_from_saved_session(session: &CliSession) -> String {
@@ -3098,22 +3199,25 @@ async fn reload_daemon_session_from_saved_session(
         expires_at: saved.expires_at,
     };
 
-    let result = {
+    let (result, unused) = {
         let mut guard = session_state.write().await;
         if guard.session.user.id != daemon_session.user.id
             || !saved_daemon_session_source_is_newer(guard.source.as_ref(), &candidate_source)
         {
-            DaemonSessionReloadResult::AlreadyCurrent
+            (DaemonSessionReloadResult::AlreadyCurrent, daemon_session)
         } else {
             let generation = guard.generation.saturating_add(1);
             let saved_session_reload_gate = guard.saved_session_reload_gate.clone();
-            *guard = DaemonSessionValue {
-                session: daemon_session,
-                source: Some(candidate_source),
-                generation,
-                saved_session_reload_gate,
-            };
-            DaemonSessionReloadResult::Reloaded
+            let replaced = std::mem::replace(
+                &mut *guard,
+                DaemonSessionValue {
+                    session: daemon_session,
+                    source: Some(candidate_source),
+                    generation,
+                    saved_session_reload_gate,
+                },
+            );
+            (DaemonSessionReloadResult::Reloaded, replaced.session)
         }
     };
 
@@ -3123,6 +3227,9 @@ async fn reload_daemon_session_from_saved_session(
             "⚠".yellow().bold()
         );
     }
+    // Whichever session lost (the one replaced, or the fresh one a concurrent reload made
+    // redundant) is used by nothing now, so it ends rather than lingering until it expires.
+    tokio::spawn(end_daemon_session(unused));
     Ok(result)
 }
 

@@ -94,17 +94,20 @@ test("a member clones, pulls and pushes their Space's pages over git", async () 
     git("-C", clone, "push", "-q", "origin", "main");
     const imported = (await json(await worker.fetch(pages, { headers: auth }))).pages;
     const byTitle = (title) => imported.find((page) => page.title === title);
+    // A page is named by the top-level heading its document opens with, over its frontmatter title.
     assert.equal(byTitle("sales").parentPageId, null);
     assert.equal(byTitle("tables").parentPageId, byTitle("sales").pageId);
-    assert.equal(byTitle("Customer Orders").parentPageId, byTitle("tables").pageId);
+    assert.equal(byTitle("Schema").parentPageId, byTitle("tables").pageId);
     assert.equal(imported.filter((page) => page.title === "index").length, 0, "index.md is never a page");
-    const orders = await json(await worker.fetch(`${pages}/${encodeURIComponent(byTitle("Customer Orders").pageId)}`, { headers: auth }));
+    const orders = await json(await worker.fetch(`${pages}/${encodeURIComponent(byTitle("Schema").pageId)}`, { headers: auth }));
     assert.equal(orders.page.body, `# Schema\n\nJoined with [customers](page:${byTitle("Customers").pageId}).\n`);
     const customers = await json(await worker.fetch(`${pages}/${encodeURIComponent(byTitle("Customers").pageId)}`, { headers: auth }));
-    assert.equal(customers.page.body, `One row per customer; see [orders](page:${byTitle("Customer Orders").pageId}).\n`);
+    // A file that opens with no heading is named by its frontmatter title, written into its document.
+    assert.equal(customers.page.body,
+      `# Customers\n\nOne row per customer; see [orders](page:${byTitle("Schema").pageId}).\n`);
     git("-C", clone, "fetch", "-q");
     git("-C", clone, "reset", "-q", "--hard", "origin/main");
-    assert.equal(textOf(path.join(clone, "sales", "tables", "customer-orders.md")),
+    assert.equal(textOf(path.join(clone, "sales", "tables", "schema.md")),
       "# Schema\n\nJoined with [customers](/sales/tables/customers.md).\n");
 
     // Removing a page is done in xMatrix, and a push that is behind is refused until it pulls.

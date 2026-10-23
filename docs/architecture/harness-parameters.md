@@ -27,6 +27,18 @@ catalog. The Fast alias maps only to an advertised tier identified as Fast;
 `off` sends a native null override. Conflicting `fast` and `serviceTier` launch
 selections fail rather than choosing an order.
 
+Cursor exposes model-dependent effort through native ACP `configOptions`:
+for example `reasoning`, `reasoning_effort`, or `effort`. The adapter retains
+the advertised config ID and uses its returned choices and current value.
+Opening and restoring a session combine the native model inventory with the
+config-derived effort levels after the complete response is parsed.
+When a model picker is advertised, model changes use `session/set_config_option`
+so its full response refreshes the model-dependent controls before effort is
+applied. Both selections require confirmation in the returned snapshot;
+an empty RPC success cannot confirm effort. Legacy ACP providers without a
+model config option retain `session/set_model`. Auto or models without an
+effort control do not acquire one from other models' capabilities.
+
 Automatic discovery requires a provider-owned machine-readable interface.
 A harness that does not expose one cannot acquire new controls safely by
 scraping help text or guessing RPC methods. Extending those adapters requires
@@ -72,6 +84,15 @@ value was unknown and no change notification arrives, keep the selection pending
 without inventing current state or closing the process. Known changed values still
 require notification. Model switches clear model-dependent selections. Process recovery refreshes
 catalogs and revalidates/restores selections before work resumes.
+
+Parameter-control results keep `current` (provider observation) separate from
+`pending` (a retained local selection). Hub notices name the pending selection
+and the observed value separately, and never announce a missing observation as
+an applied setting. The `agent_parameter_control_pending_v1` Hub capability
+enables this additive result field; a new runtime uses its existing text-result
+compatibility path for pending selections against an older Hub. Existing
+runtimes keep their original result contract until upgraded. Deploy Hub and CLI
+together through the release train to complete the rollout.
 
 ## Type coverage
 

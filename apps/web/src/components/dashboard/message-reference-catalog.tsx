@@ -6,12 +6,29 @@
  * list: a channel missing from it renders as one they cannot open.
  */
 import { createContext, useContext, type ReactNode } from "react";
-import type { SerializedChannel } from "@xmatrix/protocol";
+import type { ChannelSnapshot } from "@xmatrix/protocol";
+import { shareByKey } from "../../lib/same-value";
+
+/** What a reference to a channel shows of it: what `#` completion and chips read. */
+export type ChannelReference = Pick<ChannelSnapshot, "id" | "spaceId" | "name" | "topic" | "summary">;
 
 export type MessageReferenceCatalog = {
-  channels: readonly SerializedChannel[];
+  channels: readonly ChannelReference[];
   onOpenChannel: (channelId: string) => void;
 };
+
+/**
+ * The channels as references, keeping the ones that read the same: a message
+ * changes its channel many times a minute and none of what a reference shows.
+ * The same list comes back while every reference does.
+ */
+export function channelReferences(
+  previous: readonly ChannelReference[],
+  channels: readonly ChannelSnapshot[],
+): readonly ChannelReference[] {
+  return shareByKey(previous, channels.map(({ id, spaceId, name, topic, summary }) => ({ id, spaceId, name, topic, summary })),
+    (reference) => reference.id);
+}
 
 const MessageReferenceCatalogContext = createContext<MessageReferenceCatalog | null>(null);
 

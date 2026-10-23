@@ -82,7 +82,7 @@ test('test-mode keys, invalid price references, and whitespace cannot reach prod
   }
 });
 
-const connectorProviders = ['NOTION', 'SLACK', 'LINEAR', 'SENTRY', 'GITLAB', 'JIRA', 'NETLIFY', 'VERCEL', 'GOOGLE', 'BITBUCKET', 'PAGERDUTY', 'CLOUDFLARE'];
+const connectorProviders = ['NOTION', 'X', 'SLACK', 'LINEAR', 'SENTRY', 'GITLAB', 'JIRA', 'NETLIFY', 'VERCEL', 'GOOGLE', 'BITBUCKET', 'PAGERDUTY', 'CLOUDFLARE'];
 
 test('registered connector applications rotate complete pairs through the deployment payload', () => {
   const connectors = Object.fromEntries(connectorProviders.flatMap((provider) => [
@@ -306,4 +306,27 @@ test('DingTalk company routes require explicit suite-ticket SyncHTTP console and
     const result=run({...suite,CONNECTOR_DINGTALK_COMPANY_CONFIG:invalid});assert.notEqual(result.status,0);assert.equal(result.stdout,'');
   }
   assert.notEqual(run({CONNECTOR_DINGTALK_COMPANY_CONFIG:value}).status,0);
+});
+
+const gmailWatch = {
+  GMAIL_WATCH_CLIENT_ID: '123456-fixture.apps.googleusercontent.com',
+  GMAIL_WATCH_CLIENT_SECRET: 'fixture-notification-secret',
+  GMAIL_WATCH_TOPIC: 'projects/xmatrix-notify/topics/mail-events',
+  GMAIL_WATCH_SUBSCRIPTION: 'projects/xmatrix-notify/subscriptions/mail-push',
+  GMAIL_WATCH_PUSH_EMAIL: 'mail-push@xmatrix-notify.iam.gserviceaccount.com',
+  GMAIL_WATCH_PUSH_AUDIENCE: 'https://hub.example.com/api/connectors/gmail-watch/events',
+};
+test('native Gmail notification rotation is atomic and validates the same-project authenticated push contract', () => {
+  const configured = run(gmailWatch);
+  assert.equal(configured.status, 0, configured.stderr);
+  assert.deepEqual(JSON.parse(configured.stdout), { ...base, ...gmailWatch });
+  for (const key of Object.keys(gmailWatch)) {
+    const partial = run({ ...gmailWatch, [key]: '' });
+    assert.notEqual(partial.status, 0);
+    assert.equal(partial.stdout, '');
+    assert.ok(!partial.stderr.includes(gmailWatch.GMAIL_WATCH_CLIENT_SECRET));
+  }
+  const wrongProject = run({ ...gmailWatch, GMAIL_WATCH_SUBSCRIPTION: 'projects/other-project/subscriptions/mail-push' });
+  assert.notEqual(wrongProject.status, 0);
+  assert.equal(wrongProject.stdout, '');
 });

@@ -50,18 +50,21 @@ chosen registration lists an authorized repository, Jev chooses its workspace
 among the repositories only, and the launch evidence names the chosen
 repository. Only when no repository is listed are registered directories and,
 for input that needs no repository, a private managed directory offered. An
-explicit `pwd:` still names its own directory. A Space management
-Run (the @xMatrix delegate) is only ever offered that directory, which the daemon opens
-as the Space management workspace; its Run metadata carries the management
-Space and configuration generation, and authorization binds the Run's own
-Instance rather than a configured Agent Profile.
+explicit `pwd:` still names its own directory.
 
-No Space configures a management Agent. Each Space has its own management
-prompt, written like a summon: a leading `@auto` or `@<harness>` with
-`machine:`, `harness:`, `model:` and `effort:` conditions constrains which
-registration Jev may choose for the @xMatrix delegate and Channel About. A
-management Run always works in its Space management directory, so
-`repo:` and `pwd:` are refused when the prompt is saved.
+Ordinary `@<harness>`, registration and `@auto` summons without `repo:` or
+`pwd:` offer the same private managed directory as other input launches. An
+owner need not register or grant a local directory before the first conversation.
+The Hub still admits the current Space registration, model and daemon capability
+(`registration_managed_v1`), then issues a bounded managed key. The daemon creates
+the cwd under `~/.xmatrix-management/`; it grants no registered local directory
+and does not create a Space management projection. Explicit repository or
+`pwd:` targets retain their authorization checks and cannot silently become an
+internal cwd. Replaying the message reuses its original Run and managed key.
+
+The management Agent, the `@xMatrix` delegate and Channel About Runs are
+retired. A conversation's About is a text task, not a Run
+(`docs/design/channel-metadata-revisions.md`); no Run acquires a Space mirror.
 
 Registered workspace references may also name a canonical repository as
 `repo:<repository-reference>`. Such a reference must be present in the Space
@@ -95,7 +98,7 @@ append that commits it also moves the Runs it addresses to `stopping`. For
 Channel (up to 200). For `@<agent>:<N>:stop` or `/stop <agent>:<N>`, it is the
 one Run that the message's own exact-address resolver resolves; an ambiguous
 or unknown address fences nothing. For `@xMatrix:stop`, it is the Channel's
-management delegate. About Runs are never addressed. The append
+management delegate. The append
 records `stopRequest` on each Run, cancels its unfinished launch, and expires its
 one-shot trace grants, provided the Human holds `runtime_terminalize`.
 `stopping` is not an active Run, so from that commit on the Run cannot append a
@@ -123,6 +126,15 @@ untouched. No synthetic default option or model tag is emitted. A non-empty
 list is the complete set of allowed models, compared literally; without a
 matching observed catalog entry, the declared models themselves are offered.
 An explicit `model:` or `effort:` tag still requires a matching allowed option.
+An explicit effort is a feasibility constraint before fit or headroom ranking:
+the daemon must support forwarding it and a fresh runtime model catalog must
+list that value for the selected model. With no declared model override, the
+catalog must identify the currently observed default model through
+`parameterModel`. Missing observations and empty effort lists do not prove
+support; they return `registration_effort_unavailable` when no candidate remains.
+Summons without an effort retain runtime defaults, including harnesses with no
+effort control. The runtime still validates the selection during startup in
+case provider capabilities changed after observation.
 The runtime reports the actual model after startup. The environment that runs
 the work offers the model/effort (when chosen) and location Jev chose. When
 environments of one harness mix empty and non-empty model lists, only declared
@@ -180,7 +192,23 @@ field is additive; existing consumers may omit it.
 Jev never sees machine load, provider quota or allocation counts. Explicit
 machine, workspace and parameter constraints still narrow the candidates first,
 and a measured exhausted quota still excludes an environment. When the chosen
-environment declares models, a second call chooses its model and effort.
+environment declares models, Jev chooses its model and effort. If one harness
+remains and all its environments offer the same models, it chooses them in the
+first call, because the location changes nothing about the options. Otherwise a
+second call chooses them for the environment that runs the work.
+
+A question with one option is answered by that option. A call in which every
+question has one option is not made, so it costs no model round trip and stores
+no decision evidence. Typical cases are a `launch:force` summon of one harness
+into a single location, using the runtime's own model or a model the message
+names. From `registration-parameters-v11`, such a choice is recorded `only`: its
+answer, with certainty 1, as a fact rather than a reading. A launch for which
+Jev read nothing records its decision as `deterministic`.
+
+A launch from a conversation that co-writes a page (an active
+`data.page_co_writing` row) is offered only the private managed directory. No
+repository list is read and nothing is checked out, so the Agent starts at
+once. A `repo:` or `pwd:` in the message still gets what it names.
 
 An owner can keep a Machine out of automatic assignment (`data.machines.auto_assign`
 false; the Machine page switch or `xmatrix machine auto-assign off`). Its
@@ -198,21 +226,131 @@ that offers the chosen location. Each has a fit (Jev's score for its harness ÷ 
 - **CPU:** `1 − 1-minute load ÷ logical CPUs` or `1 − CPU usage`, whichever is
   smaller. Windows reports no load average. An overloaded machine goes below zero.
 - **Memory:** available ÷ total.
-- **Provider quota:** the remaining percentage. The provider's own verdict on
+- **Provider quota:** quota pace (remaining share divided by the remaining
+  fraction of its reset window), capped at one for resource headroom. The
+  tightest active window wins; unknown window duration falls back to the
+  remaining share. The provider's own verdict on
   the account, read with the windows (Codex `rate_limit.allowed`), outranks
   them: a refused account has none, and one still served past a used-up window
   on credits keeps 1%, eligible but after every account with window headroom.
   Whether to spend credits is the provider account's setting, not xMatrix's.
 
 A machine without a current sample has unknown headroom, counted as none.
-Environments another one beats on both fit and headroom drop out (the Pareto
-frontier). Of the rest, the one whose weaker side is strongest wins:
-`min(fit, headroom) + 0.001 × (fit + headroom)`, the "balanced" profile, where
-either side satisfies at 1. A weighted sum is not used: it cannot reach every
-point of a non-convex frontier. Ties go to the fewest outstanding Runs on the
-machine, whose load may not show yet, and then to candidate order. When the
+
+Response quality is how fast the harness answers: the fastest offered
+harness's median time from a connected Run to its first reply, divided by this
+harness's, measured over every launch in the last 30 days and only with at least
+20 samples (`RESPONSE_LATENCY_WINDOW_DAYS`, `RESPONSE_LATENCY_MIN_SAMPLES`). A
+person waits for that reply, so a harness that takes three times as long weighs
+a third. Without enough samples it counts as 1.
+
+Environments another one beats on fit, headroom, quota pace, network quality and
+response quality drop out (the Pareto frontier). The rest are ranked leximin
+over `fit`, `headroom`, `networkQuality` and `responseQuality`: the strongest
+weakest side wins; level there, the next-weakest decides, and so on. A slow
+network that levels every environment of a machine still leaves fit and reply
+time to choose among them. Remaining ties compare network quality, quota pace,
+complete bandwidth, then `balance + 0.001 × (fit + headroom)`, fewer outstanding
+Runs on the machine and candidate order. The network factor and bandwidth
+uncertainty are defined below. When the
 chosen model's quota is exhausted there (Cursor's per-model pools), the
 next-ranked environment of the same harness offering it runs the work.
+
+An environment whose latest Run in the Space failed to start within the last 30
+minutes (`STARTUP_FAILURE_WINDOW_MINUTES`) ranks after every environment that did
+not, and is compared only with others that also failed; stops and
+cancellations do not count. If it is the only option it still runs, and the
+summon reason says it failed to start recently. When a Run from an `@auto`
+summon, or from the summon of a first message that named nobody, fails to start
+unrecoverably, the same message is handed once to the next-ranked environment
+(`startup-fallback:<runId>`): the failed environment is excluded, the author's
+conditions still apply, and the retry gets no fallback of its own. An Agent the
+author named is never replaced.
+
+A harness that its machine reports as signed out, or that refused a start or
+turn as signed out within the last 24 hours with no later report answering it
+(`SIGNED_OUT_FAILURE_WINDOW_HOURS`), is not offered, like a harness that is too
+old. When nothing else can take the work, the launch is refused with
+`registration_harness_signed_out`, naming the program and machine, and the
+machine's owner can sign in from that notice. An unknown or unchecked sign-in
+is not judged.
+
+### Machine network measurement
+
+Machine selection uses active network measurements, not Agent turn time or
+token throughput. The daemon performs warmed HTTPS zero-byte requests to
+`https://speed.cloudflare.com/__down?bytes=0`: ten attempts about every five
+minutes report median/p95 request RTT, consecutive-success jitter and the
+separate request-failure count. Request RTT includes HTTP service time; it is
+not an ICMP RTT, one-way delay or a model provider's latency.
+
+On startup and about once an hour, adaptive transfers use the same download
+endpoint and `https://speed.cloudflare.com/__up`. Sizes progress from 256 KiB
+to 1 MiB to 4 MiB and stop after a transfer lasts 250 ms. The maximum per cycle
+is 5.25 MiB in each direction, not a sustained line-saturation test. Bytes divided
+by full request duration give effective HTTPS Mbps; samples still below 250 ms
+at the byte limit are explicitly marked short and excluded from bandwidth
+ranking. Concurrent small requests measure median latency under transfer load;
+loaded RTTs from short transfers also stay diagnostic rather than affect ranking.
+Each direction retains its original timestamp, including its loaded RTT.
+
+One hundred bounded OS `ping` probes to fixed target `1.1.1.1` report ICMP round-trip
+probe loss. Missing tools/permissions and total silence produce unknown loss:
+filtered ICMP cannot establish 100% path loss. The count is shown because one hundred
+probes cannot resolve sub-percent loss. Probe launches are spaced by at least
+100 ms, with at most five child processes at once. This direct path may differ from HTTPS
+through a proxy, so ICMP loss is diagnostic and never substituted for HTTPS
+reliability in placement. No elevated permissions or raw sockets are requested.
+
+All work runs in one daemon-owned background task with fixed endpoints,
+redirects disabled, bounded responses, per-request timeouts and a 90-second
+cycle deadline. Probes carry synthetic bytes without credentials, source code,
+model requests or private provider URLs. Standard daemon HTTP proxy settings
+apply to HTTPS. Reports contain only bounded typed measurements; IPs, geography,
+proxy configuration and response headers are discarded. Tests do not contact
+public probe endpoints.
+
+The existing authenticated live daemon's `machineResources.network` is the
+source of truth, retaining the resource connection-epoch check. Network batches
+expire after fifteen minutes; transfer samples after two hours. Heartbeats and
+reconnects do not refresh measurement times. Old hosts/clients omit or ignore
+the optional field. Older inference-throughput facts are ignored; their
+collection and placement use have been removed.
+
+The balanced selector includes a network factor in its Pareto/maximin choice.
+For the fixed HTTPS target it multiplies request success fraction by the
+fastest comparable observed tail/loaded RTT divided by that machine's RTT
+(at least five successes are needed for RTT comparison). Unknown is neutral,
+not fabricated zero latency. After balance, network quality precedes quota
+pace; complete, non-short bidirectional bandwidth breaks later ties. This is
+the product's explicit ranking policy, not a standardized Internet quality
+score. CPU/memory pressure, authorization, provider quota and explicit machine
+constraints still apply. Decision evidence and Machine details show the
+measurements, target, sampling uncertainty and timestamps.
+
+Machine details add a compact quality glyph beside each reading: check for
+Good, minus for Fair, warning for Poor, and question mark for Unrated. The
+HTTPS availability dot is separate from these per-metric guides. Bands apply
+to the displayed, rounded value so a visible number agrees with its grade:
+
+| Displayed metric | Good | Fair | Poor |
+| --- | --- | --- | --- |
+| HTTPS median latency | <50 ms | 50–<100 ms | ≥100 ms |
+| ICMP probe loss | <1% | 1–<5% | ≥5% |
+| Download or upload | ≥10 Mbps | 1–<10 Mbps | <1 Mbps |
+
+These are presentation guides adapted from [Cloudflare AIM's metric
+breakpoints](https://github.com/cloudflare/speedtest/blob/40dd87a4cc144cedaf5f3d4ffe88077d5e092bae/src/config/internalConfig.ts),
+not an AIM experience score or a change to placement. Unknown/expired values
+and short transfer samples are Unrated. The info control reveals the guide,
+protocol targets, sample times and diagnostic evidence; the default view
+keeps only icons and readings.
+
+The methodology follows [Cloudflare Speedtest's](https://github.com/cloudflare/speedtest)
+adaptive HTTP/loaded-latency measurements and the [IPPM round-trip loss
+definitions](https://www.rfc-editor.org/rfc/rfc6673.html). A nearby Cloudflare
+edge measurement is general path evidence, not proof of a particular LLM
+provider's path or inference speed.
 
 Evidence from `registration-parameters-v10` records `fit` (each harness's score
 and level distribution) and `placement` (the eight best-ranked environments with
@@ -231,12 +369,10 @@ auto-assign switch off; naming the machine, or a directory registered on it,
 still selects it. Evidence from `registration-parameters-v7` may record a
 `placement` choice. `registration-parameters-v8` does not ask one.
 
-The Hub also refuses Channel About text that arrived already destroyed. A
-PATCH from the Channel's About session whose `summary` or `name` contains
-U+FFFD, consists only of `?` (two or more), or has a run of three or more `?`
-that is at least 30% of its non-space characters answers 422
-`channel_about_text_mangled` naming the field. Nothing is saved and the session
-keeps running, so it can write the text again from a UTF-8 shell.
+The Hub also refuses About text that arrived already destroyed: an answer whose
+`summary` or `name` contains U+FFFD, consists only of `?` (two or more), or has
+a run of three or more `?` that is at least 30% of its non-space characters is
+not written, and the next reading writes the About again.
 
 Machine resources, concurrency, observed usage and provider quota are numerical
 decision facts. They do not impose a Profile capacity ceiling or Profile
@@ -248,6 +384,17 @@ reading as unknown and retains unknown/stale observation provenance. This is a p
 assumption, not a provider measurement: it does not refresh timestamps, write a
 synthetic provider observation, or replace a valid measured zero. The headroom
 ranking reads this default like any other quota reading.
+
+A Machine whose daemon went offline at most two minutes ago, with no daemon of
+it online, is reconnecting (a restart such as a self-update): its registrations
+are still offered, but only when no online Machine can take the summon. Its
+launch is prepared and queued, and the spawn is delivered when the daemon
+reconnects; the invocation shows "Machine reconnecting — starts when it's
+back." The wait is bounded: the spawn command expires five minutes after the
+daemon went offline, and the Launch then fails as `machine_reconnect_expired`.
+When the daemon went offline is the Hub's own record of the offline transition;
+a repeated unregister or failed delivery does not move it. After the grace a
+summon is refused as `registration_daemon_offline`, as before.
 
 The daemon samples machine resources about every 30 seconds with its run
 snapshot: logical CPU count and usage, memory, swap, the 1/5/15-minute load
@@ -276,7 +423,9 @@ execution binding. A replay restores the committed selection before consulting
 Jev again. Composite launch preparation stores the exact selected request in
 `registration_launch_intents.launch_request_json` (expand migration 0073), without
 copying the message body. Recovery validates the original message hash and revision
-before restoring that request. A preparation interrupted before Run creation
+before restoring that request. Recovery overlays only the command, actor, Channel,
+source message, selection index and body; caller services and transient picker
+state do not enter the stored request's identity. A preparation interrupted before Run creation
 continues with the same identities and parameters; a committed launch is reused.
 Historical intents without a stored request are reported as recovery unavailable
 rather than reconstructed from current configuration. Adding a new tag requires an explicit information source, option
@@ -694,8 +843,8 @@ by the invocation deadline; they do not create a second source of launch authori
 
 Native one-click installation currently supports Codex, OpenCode, Pi, GitHub
 Copilot CLI, Gemini CLI, Qwen Code, Junie, OpenClaw, Qoder CLI, CodeBuddy Code,
-Auggie, Cline, Kilo, Factory Droid, Command Code, Autohand Code, Reasonix and
-DimCode via a native-owned npm package allowlist. It requires installed Node.js/npm, runs as
+Auggie, Cline, Kilo, Factory Droid, Command Code, Autohand Code, Reasonix,
+DimCode and DeepSeek Harness via a native-owned npm package allowlist. It requires installed Node.js/npm, runs as
 the current user, has a bounded process-tree lifetime and never enrolls or signs
 in the runtime automatically. Other presets retain their existing manual setup.
 The [official Codex CLI documentation](https://developers.openai.com/codex/cli)

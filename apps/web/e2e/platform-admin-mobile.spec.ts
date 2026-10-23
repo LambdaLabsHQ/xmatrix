@@ -55,6 +55,8 @@ test("a phone shares a filtered user list, opens a user, and Back restores the f
   await expect(users.getByRole("textbox")).toHaveCSS("border-radius", "0px");
   await expect(users.getByRole("button", { name: "Export Registered users as CSV" })).toHaveCSS("box-shadow", "none");
   await expect(users.locator("table")).toHaveCount(0);
+  await expect(users.getByText("Last message", { exact: true })).toBeVisible();
+  await expect(users.locator('[title="2026-08-04T11:00:00.000Z"]')).toBeVisible();
   await expectPaperFits(page);
   await page.screenshot({ path: testInfo.outputPath("mobile-users.png") });
   await users.getByRole("button", { name: /owner@example.com/ }).click();
@@ -67,6 +69,11 @@ test("a phone shares a filtered user list, opens a user, and Back restores the f
   const machines = page.getByRole("region", { name: "Machines (1)" });
   await machines.scrollIntoViewIfNeeded();
   await expect(machines.getByText("online", { exact: true })).toBeVisible();
+  const connectors = page.getByRole("region", { name: "Connectors added (1)" });
+  await connectors.scrollIntoViewIfNeeded();
+  await expect(connectors.getByText("17 / 24", { exact: true })).toBeVisible();
+  await expect(connectors.getByText("31 / 48", { exact: true })).toBeVisible();
+  await expectPaperFits(page);
   await page.screenshot({ path: testInfo.outputPath("mobile-user-lists.png") });
   await page.goBack();
   await expect(users.getByRole("textbox")).toHaveValue("owner");
@@ -135,4 +142,25 @@ test("320px paper fits storage, long identities, user sublists, and the audit tr
   await expect(page.getByRole("region", { name: "Audit trail" }).getByText("Opened a user")).toBeVisible();
   await expectPaperFits(page);
   await page.screenshot({ path: testInfo.outputPath("mobile-audit.png") });
+});
+
+test("320px paper fits a Space detail, Operations, and Billing", async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 320, height: 800 });
+  await openWorkspaceAs(page, true);
+  await page.goto(`${ADMIN}?item=spaces&space=space%3Alambda`);
+  await expect(page.getByRole("heading", { name: "Lambda Labs" })).toBeVisible();
+  await expectPaperFits(page);
+  await page.screenshot({ path: testInfo.outputPath("mobile-space-detail.png"), fullPage: true });
+  await page.getByRole("region", { name: "Members (2)" }).getByRole("button", { name: /member@example.com/ }).click();
+  await expect(page).toHaveURL(/user=user%3A3/);
+
+  await page.goto(`${ADMIN}?item=operations`);
+  await expect(page.getByRole("region", { name: "Machines", exact: true }).getByText("machine:1")).toBeVisible();
+  await expectPaperFits(page);
+  await page.screenshot({ path: testInfo.outputPath("mobile-operations.png"), fullPage: true });
+
+  await page.goto(`${ADMIN}?item=billing`);
+  await expect(page.getByText("1 Space is in a payment grace period.")).toBeVisible();
+  await expectPaperFits(page);
+  await page.screenshot({ path: testInfo.outputPath("mobile-billing.png"), fullPage: true });
 });

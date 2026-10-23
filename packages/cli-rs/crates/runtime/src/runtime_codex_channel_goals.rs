@@ -1,3 +1,6 @@
+/// How long a steer waits for Codex to accept it before the message interrupts.
+const CODEX_STEER_RESPONSE_TIMEOUT_SECS: u64 = 10;
+
 async fn submit_codex_turn_interruptible(
     app: &mut CodexAppSession,
     event_rx: &mut mpsc::UnboundedReceiver<agent_instance_connection::AgentInstanceConnectionEvent>,
@@ -101,6 +104,63 @@ async fn submit_codex_turn_interruptible(
                             }
                             continue;
                         }
+                        // A Human message that does not @-address this Instance
+                        // joins the turn. Only Codex accepting the steer means it
+                        // has the message; otherwise it interrupts as before.
+                        if let Some(message) = active_turn_steer_message(
+                            &other,
+                            trace_channel_id,
+                            agent,
+                            interrupt_history_replay,
+                        ) {
+                            interrupter.cancel_questions().await;
+                            let instruction = runtime_state.and_then(|state| {
+                                inbound_execution_sources(std::slice::from_ref(&message))
+                                    .into_iter()
+                                    .next()
+                                    .and_then(|source| state.join_message_turn_source(source))
+                            });
+                            let input = steered_turn_input(
+                                &message.prompt_text(agent, None),
+                                instruction.as_deref(),
+                            );
+                            let accepted = match interrupter.begin_steer(&input).await {
+                                Ok(Some(mut accepted)) => {
+                                    tokio::select! {
+                                        biased;
+                                        answer = tokio::time::timeout(
+                                            Duration::from_secs(CODEX_STEER_RESPONSE_TIMEOUT_SECS),
+                                            &mut accepted,
+                                        ) => matches!(answer, Ok(Ok(Ok(())))),
+                                        // The turn ended first. Codex can accept the steer
+                                        // in the same read that ends the turn: then the
+                                        // message is already in this turn. Otherwise it is
+                                        // the next one.
+                                        result = &mut turn => {
+                                            if matches!(accepted.try_recv(), Ok(Ok(()))) {
+                                                if let Some(relay) = trace_relay {
+                                                    ack_inbound_channel_messages(relay, std::slice::from_ref(&message));
+                                                }
+                                            } else {
+                                                pending_events.push_back(other);
+                                            }
+                                            return InterruptibleCodexTurn::Completed(result);
+                                        }
+                                    }
+                                }
+                                Ok(None) => false,
+                                Err(err) => {
+                                    eprintln!("{} codex steer failed: {err}; interrupting instead", "⚠".yellow().bold());
+                                    false
+                                }
+                            };
+                            if accepted {
+                                if let Some(relay) = trace_relay {
+                                    ack_inbound_channel_messages(relay, std::slice::from_ref(&message));
+                                }
+                                continue;
+                            }
+                        }
                         if event_requests_active_turn_interrupt_with_replay(
                             &other,
                             trace_channel_id,
@@ -136,38 +196,22 @@ fn runtime_accepts_channel_delivery(bound_channel_id: Option<&str>, channel_id: 
 
 /// Whether a delivery should cancel the turn that is running right now.
 ///
-/// Live deliveries say so themselves: the hub sets `interrupt_requested` on
-/// every one. Catch-up cannot, because it arrives as `ChannelHistoryReplay`,
-/// which carries no such field — yet the hub describes that window as "exactly
-/// the work the cursor says this principal never received". Matching only the
-/// live frame therefore made the interrupt an accident of which hop delivered
-/// the message: one that missed live fanout lost its urgency for good and
-/// waited out the current turn, however long that ran.
+/// Hub decides, for live delivery (`interrupt_requested`) and catch-up replay
+/// alike, so the same message means the same thing whichever hop carried it:
+/// steering cancels, an ordinary Agent peer reply queues behind the active
+/// turn, and a stop or switch the Hub already carried out is context. A replay
+/// from a Hub that predates its verdict falls back to the older host rule
+/// (replay interrupts unless an Agent wrote it).
 ///
-/// Replay needs no equivalent of the flag. Orientation frames are acknowledged
-/// and dropped in the connection before any runtime sees them, so every replay
-/// that arrives here is already work. Agent-authored replay is queued rather
-/// than interrupting: unlike live delivery, replay has no exact-target hint,
-/// and treating every peer reply as steering cancels slower multi-Agent turns.
-///
-/// One exception, and the connection cannot cover it: this instance's own
-/// messages are filtered out of live delivery but deliberately kept in replay,
-/// where they stay valid context. That was safe only while replay carried no
-/// interrupt. Now that it does, an instance reconnecting mid-turn would meet
-/// its own earlier `xmatrix send` and cancel the turn that produced it, so own
-/// authorship is excluded here rather than dropped there.
+/// This instance's own messages never interrupt it: they are filtered out of
+/// live delivery but kept in replay as context, and an instance reconnecting
+/// mid-turn must not cancel the turn that produced its own `xmatrix send`.
 ///
 /// A live model/effort switch steers just as hard and cancels the turn too. It
-/// cannot say so through `interrupt_requested`, because it does not arrive as a
-/// channel message at all: the hub delivers a control command as `context` so it
-/// cannot burn the addressed Instance's turn, then dispatches the switch on its
-/// own `agent_*_switch_requested` frame. Left out of this predicate the switch
-/// was neither applied nor interrupting — it sat in `pending_events` until the
-/// turn ended, by which point the hub's 10s control waiter had already reported
-/// `timeout`. Naming it here is the whole fix: the cancelled turn hands control
-/// straight back to the run loop that already knows how to apply a switch, so
-/// no runtime needs a second, mid-turn way to do it. The run loop then resumes
-/// the cancelled work on the new selection (`RunLoopInput::Resume`).
+/// does not arrive as a channel message: the hub delivers a control command as
+/// `context` and dispatches the switch on its own `agent_*_switch_requested`
+/// frame. The cancelled turn hands control back to the run loop, which applies
+/// the switch and resumes the cancelled work on the new selection.
 fn event_requests_active_turn_interrupt(
     event: &agent_instance_connection::AgentInstanceConnectionEvent,
     bound_channel_id: Option<&str>,
@@ -182,21 +226,36 @@ fn event_requests_active_turn_interrupt_with_replay(
     own_identity_id: Option<&str>,
     interrupt_history_replay: bool,
 ) -> bool {
-    let (message, replayed) = match event {
+    let (message, replayed, hub_verdict) = match event {
         agent_instance_connection::AgentInstanceConnectionEvent::Server(
             protocol::AgentInstanceServerMessage::AgentModelSwitchRequested { .. }
             | protocol::AgentInstanceServerMessage::AgentEffortSwitchRequested { .. },
         ) => return true,
+        // The page this conversation co-writes asks again, or someone edited what the Agent was
+        // writing: the turn still running stops there. What became of words it wrote into a page
+        // from the conversation waits for the turn to end.
+        // Only a turn answering the page stops: the page's request is context to any other work,
+        // which it would otherwise cut short every few seconds while people type. It waits for
+        // that turn to end.
+        agent_instance_connection::AgentInstanceConnectionEvent::PageCoWrite(request) => {
+            return !matches!(request, xmatrix_cli_core::page_co_write::PageCoWriteEvent::Outcome { .. })
+                && bound_channel_id.is_none_or(|bound| bound == request.channel_id())
+                && crate::runtime_page_co_write::answering(request.channel_id());
+        }
         agent_instance_connection::AgentInstanceConnectionEvent::Server(
             protocol::AgentInstanceServerMessage::ChannelMessageReceived {
                 message,
                 interrupt_requested: Some(true),
                 ..
             },
-        ) => (message, false),
+        ) => (message, false, None),
         agent_instance_connection::AgentInstanceConnectionEvent::Server(
-            protocol::AgentInstanceServerMessage::ChannelHistoryReplay { message, .. },
-        ) if interrupt_history_replay => (message, true),
+            protocol::AgentInstanceServerMessage::ChannelHistoryReplay {
+                message,
+                interrupt_requested,
+                ..
+            },
+        ) if interrupt_history_replay => (message, true, *interrupt_requested),
         _ => return false,
     };
     if bound_channel_id.is_some_and(|bound| bound != message.channel_id) {
@@ -205,7 +264,63 @@ fn event_requests_active_turn_interrupt_with_replay(
     let authored_here = message.from.kind == "agent"
         && own_identity_id
             .is_some_and(|identity| message.from.identity_id.as_deref() == Some(identity));
-    !(authored_here || (replayed && message.from.kind == "agent"))
+    if authored_here {
+        return false;
+    }
+    // Hub decides catch-up exactly as it decides live delivery. Only a Hub
+    // that predates that verdict leaves it to this host's older rule.
+    hub_verdict.unwrap_or(!(replayed && message.from.kind == "agent"))
+}
+
+/// The message an interrupting delivery may join to the running turn instead
+/// of cancelling it: Hub allowed it (`steer_allowed`, a Human message that does
+/// not @-address this Instance) and it would interrupt. A slash command keeps
+/// its own turn. `None` leaves the interrupt as it is.
+fn active_turn_steer_message(
+    event: &agent_instance_connection::AgentInstanceConnectionEvent,
+    bound_channel_id: Option<&str>,
+    agent: &protocol::SerializedAgent,
+    interrupt_history_replay: bool,
+) -> Option<InboundChannelMessage> {
+    let steer_allowed = match event {
+        agent_instance_connection::AgentInstanceConnectionEvent::Server(
+            protocol::AgentInstanceServerMessage::ChannelMessageReceived {
+                steer_allowed: Some(true),
+                ..
+            },
+        ) => true,
+        agent_instance_connection::AgentInstanceConnectionEvent::Server(
+            protocol::AgentInstanceServerMessage::ChannelHistoryReplay {
+                steer_allowed: Some(true),
+                ..
+            },
+        ) => interrupt_history_replay,
+        _ => false,
+    };
+    if !steer_allowed
+        || !event_requests_active_turn_interrupt_with_replay(
+            event,
+            bound_channel_id,
+            Some(agent.id.as_str()),
+            interrupt_history_replay,
+        )
+    {
+        return None;
+    }
+    let message = inbound_channel_message_from_event(event.clone()).ok()?;
+    (!is_instance_slash_passthrough_message(&message, agent)).then_some(message)
+}
+
+/// What the harness reads for a message joined to its running turn.
+fn steered_turn_input(message_text: &str, final_reply_instruction: Option<&str>) -> String {
+    let mut input = format!(
+        "[xMatrix] This message arrived while you were working. It joins your current turn and did not interrupt it: finish or adjust the work in progress as it asks.\n\n{message_text}"
+    );
+    if let Some(instruction) = final_reply_instruction {
+        input.push_str("\n\n");
+        input.push_str(instruction);
+    }
+    input
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -542,11 +657,6 @@ fn codex_goal_status_from_get_response(value: &Value) -> Option<protocol::AgentG
         .map(codex_goal_status_from_value)
 }
 
-fn codex_goal_is_paused(goal: Option<&protocol::AgentGoalStatus>) -> bool {
-    goal.and_then(|goal| goal.status.as_deref())
-        .is_some_and(|status| status.eq_ignore_ascii_case("paused"))
-}
-
 fn codex_goal_is_active(goal: Option<&protocol::AgentGoalStatus>) -> bool {
     goal.is_some_and(|goal| match goal.active {
         Some(active) => active,
@@ -555,19 +665,6 @@ fn codex_goal_is_active(goal: Option<&protocol::AgentGoalStatus>) -> bool {
             .as_deref()
             .is_some_and(|status| status.eq_ignore_ascii_case("active")),
     })
-}
-
-fn codex_paused_goal_notice(goal: Option<&protocol::AgentGoalStatus>) -> String {
-    let objective = goal
-        .and_then(|goal| goal.objective.as_deref())
-        .map(str::trim)
-        .filter(|objective| !objective.is_empty());
-    match objective {
-        Some(objective) => {
-            format!("Goal is paused: {objective}\nSend `/goal resume` to continue it.")
-        }
-        None => "Goal is paused. Send `/goal resume` to continue it.".to_string(),
-    }
 }
 
 fn codex_goal_status_from_app_event(value: &Value) -> Option<protocol::AgentGoalStatus> {

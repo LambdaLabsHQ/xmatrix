@@ -38,18 +38,19 @@ export interface ProductAgentInterventionPort {
     waitForTermination?: boolean,
   ): Promise<void>;
   /**
-   * Stop the target so its daemon carries its checkout to a handoff branch,
-   * and wait up to `timeoutMs` for the daemon's report. `handoffExport` is the
-   * daemon's export outcome; a daemon that predates exports reports none.
+   * Stop the target, with `handoffExport` so its daemon carries its checkout
+   * to a handoff branch, and wait up to `timeoutMs` for the daemon's report.
+   * The reported `handoffExport` is the export outcome, and `handoffContext`
+   * the source's conversation; a daemon that predates either reports none.
    */
   issueHandoffStop?(
     target: ProductAgentKillTarget,
     controlId: string,
     reason: string,
     channelId: string,
-    handoffExport: ProductAgentHandoffExport,
+    handoffExport: ProductAgentHandoffExport | undefined,
     timeoutMs: number,
-  ): Promise<{ stopped: boolean; handoffExport?: Record<string, unknown> }>;
+  ): Promise<{ stopped: boolean; handoffExport?: Record<string, unknown>; handoffContext?: Record<string, unknown> }>;
   /**
    * Whether the target's machine daemon is online to receive a stop now;
    * `undefined` when that could not be read. A stop to an offline daemon
@@ -57,7 +58,11 @@ export interface ProductAgentInterventionPort {
    */
   daemonOnline?(target: ProductAgentKillTarget): Promise<boolean | undefined>;
   /** `key` distinguishes this command's notices; each key posts at most once. */
-  publishSystemNotice(channelId: string, body: string, key?: "host-cleanup"): Promise<void>;
+  /** A Channel fact that answers no command, such as an Agent leaving. */
+  publishSystemNotice(channelId: string, body: string): Promise<void>;
+  /** What the stop command came to, recorded on the command. `outcome` is set
+   * on a note that is the stop's whole answer, because no Run was fenced. */
+  recordResult(channelId: string, text: string, key?: "host-cleanup", outcome?: "stopped" | "not_stopped"): Promise<void>;
   /**
    * Stop resting Instances, which have no process to terminate: they simply
    * stop waking (docs/instance-sleep.md §4). `mention` selects one
@@ -121,9 +126,9 @@ export async function orchestrateProductAgentIntervention(input: {
     targets = await input.port.listKillTargets(input.channelId);
   } catch (error) {
     try {
-      await input.port.publishSystemNotice(
+      await input.port.recordResult(
         input.channelId,
-        "xMatrix could not resolve live Agent Instances. No stop request was issued.",
+        "xMatrix could not resolve live Agent Instances. No stop request was issued.", undefined, "not_stopped",
       );
     } catch {
       // Preserve the authority failure that prevented the stop. The caller logs
@@ -141,20 +146,22 @@ export async function orchestrateProductAgentIntervention(input: {
   let stopped = 0;
 
   if (!command.all && selected.length > 1) {
-    await input.port.publishSystemNotice(input.channelId,
-      "More than one Agent matches this name. Select the owner and machine before stopping an Instance.");
+    await input.port.recordResult(input.channelId,
+      "More than one Agent matches this name. Select the owner and machine before stopping an Instance.",
+      undefined, "not_stopped");
     return { considered: 1, stopped: 0, failures: ["ambiguous_agent_name"] };
   }
 
   if (!command.all && selected.length === 0) {
     const resting = await input.port.stopResting?.(input.channelId, { mention: command.target, exclude: [] }) ?? [];
     if (resting.length > 0) {
-      await input.port.publishSystemNotice(input.channelId,
-        `Stopped @${resting[0]!.mentionTarget}. It was resting and will no longer wake for new messages.`);
+      await input.port.recordResult(input.channelId,
+        `Stopped @${resting[0]!.mentionTarget}. It was resting and will no longer wake for new messages.`,
+        undefined, "stopped");
       return { considered: 1, stopped: resting.length, failures: [] };
     }
     const notice = `xMatrix could not find a live instance for \`@${command.target}\`.`;
-    await input.port.publishSystemNotice(input.channelId, notice);
+    await input.port.recordResult(input.channelId, notice, undefined, "not_stopped");
     return { considered: 1, stopped: 0, failures: [] };
   }
   // `/kill all` also ends every resting Instance's rest; a live target is
@@ -176,7 +183,7 @@ export async function orchestrateProductAgentIntervention(input: {
     // "Stop requested" is the chip on the command. A notice is only for what
     // that chip cannot see yet: an offline daemon, or resting Instances.
     const note = [queued.length > 0 ? queuedForOfflineDaemon(queued) : "", restingSummary].filter(Boolean).join(" ");
-    if (note) await input.port.publishSystemNotice(input.channelId, note);
+    if (note) await input.port.recordResult(input.channelId, note);
   }
 
   await Promise.all(selected.map(async (target) => {
@@ -209,7 +216,7 @@ export async function orchestrateProductAgentIntervention(input: {
         ? `Host cleanup failed for ${failures.length}: ${failures.join("; ")}.`
         : "",
     ].filter(Boolean).join(" ");
-    if (cleanup) await input.port.publishSystemNotice(input.channelId, cleanup, "host-cleanup");
+    if (cleanup) await input.port.recordResult(input.channelId, cleanup, "host-cleanup");
     return { considered: selected.length, stopped, failures,
       ...(pending.length ? { pending: pending.length } : {}) };
   }
@@ -226,7 +233,8 @@ export async function orchestrateProductAgentIntervention(input: {
       ? `Failed ${failures.length}: ${failures.join("; ")}.`
       : "",
   ].filter(Boolean).join(" ") || (selected.length === 0 ? "No live agent instances to stop in this channel." : "");
-  if (summary) await input.port.publishSystemNotice(input.channelId, summary);
+  if (summary) await input.port.recordResult(input.channelId, summary, undefined,
+    selected.length === 0 ? restingStopped > 0 ? "stopped" : "not_stopped" : undefined);
   return { considered: selected.length, stopped, failures,
     ...(pending.length ? { pending: pending.length } : {}) };
 }

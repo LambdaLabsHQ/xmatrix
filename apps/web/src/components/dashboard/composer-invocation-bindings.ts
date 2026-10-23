@@ -1,4 +1,5 @@
-import type { AgentInvocationSelection } from "@xmatrix/protocol";
+import { isOperationalInvocationSpan, nonOperationalMentionRanges,
+  type AgentInvocationSelection } from "@xmatrix/protocol";
 
 export type ComposerAgentBinding = AgentInvocationSelection & { label?: string };
 /** A picked channel or page shown by name in the draft; the message carries `reference` in its place. */
@@ -16,7 +17,7 @@ export function isAgentBinding(binding: ComposerInvocationBinding): binding is C
 export function updateComposerInvocationDraft(previous: ComposerInvocationDraft | undefined,
   body: string): ComposerInvocationDraft {
   if (!previous || !body) return { body, bindings: [] };
-  if (previous.body === body) return structuredClone(previous);
+  if (previous.body === body) return { body, bindings: operationalBindings(body, structuredClone(previous.bindings)) };
   const before = previous.body;
   let start = 0, end = before.length, nextEnd = body.length;
   while (start < end && start < nextEnd && before[start] === body[start]) start++;
@@ -38,15 +39,25 @@ export function updateComposerInvocationDraft(previous: ComposerInvocationDraft 
     // leaves only the written text.
     return [];
   });
-  return { body, bindings };
+  return { body, bindings: operationalBindings(body, bindings) };
+}
+
+/** Surrounding punctuation or Markdown can retire a pick without touching its
+ * letters. Once retired, later edits must not resurrect that target. */
+function operationalBindings<T extends ComposerInvocationBinding>(body: string, bindings: T[]): T[] {
+  if (!bindings.some(isAgentBinding)) return bindings;
+  const ranges = nonOperationalMentionRanges(body);
+  return bindings.filter(binding => !isAgentBinding(binding) ||
+    isOperationalInvocationSpan(body, binding.start, binding.end, ranges));
 }
 
 function selectBinding(previous: ComposerInvocationDraft | undefined, body: string,
   selected: ComposerInvocationBinding): ComposerInvocationDraft {
   if (body.slice(selected.start, selected.end) !== selected.text) throw new Error("Selection does not match the draft");
   const next = updateComposerInvocationDraft(previous, body);
-  return { body, bindings: [...next.bindings.filter(binding => binding.end <= selected.start || binding.start >= selected.end),
-    structuredClone(selected)].sort((a, b) => a.start - b.start) };
+  return { body, bindings: operationalBindings(body,
+    [...next.bindings.filter(binding => binding.end <= selected.start || binding.start >= selected.end),
+      structuredClone(selected)].sort((a, b) => a.start - b.start)) };
 }
 
 export function selectComposerInvocation(previous: ComposerInvocationDraft | undefined,
@@ -81,5 +92,6 @@ export function composerSendDraft(draft: ComposerInvocationDraft | undefined,
       sent += binding.text;
     } else sent += binding.reference;
   }
-  return { body: sent + body.slice(cursor), selections };
+  const sentBody = sent + body.slice(cursor);
+  return { body: sentBody, selections: operationalBindings(sentBody, selections) };
 }

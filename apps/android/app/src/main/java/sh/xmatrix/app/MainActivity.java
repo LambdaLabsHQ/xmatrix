@@ -97,11 +97,26 @@ public final class MainActivity extends ComponentActivity {
     setIntent(intent);
     if (bridgeInstalled) {
       Uri uri = intent == null ? null : intent.getData();
-      if (!AppConfiguration.isNativeLoginResume(uri)) {
+      if (AppConfiguration.isSignInCallback(uri)) {
+        // An in-place sign-in came back: its page is still open and takes the code.
+        bridge.signInReturned(uri);
+      } else if (!AppConfiguration.isNativeLoginResume(uri)) {
         loadInitialUrl(intent);
       }
     } else {
       showUnsupportedWebView();
+    }
+  }
+
+  @Override
+  protected void onResume() {
+    super.onResume();
+    if (bridge != null && bridge.signInPending() && webView != null) {
+      // A returning sign-in arrives through onNewIntent first; anything still waiting
+      // a moment later means the tab was closed.
+      webView.postDelayed(() -> {
+        if (bridge != null && bridge.signInPending()) bridge.signInClosed();
+      }, 600);
     }
   }
 
@@ -179,6 +194,10 @@ public final class MainActivity extends ComponentActivity {
     settings.setSupportZoom(false);
     settings.setBuiltInZoomControls(false);
     settings.setDisplayZoomControls(false);
+    // Packaged assets arrive through WebViewAssetLoader over https, so pages
+    // never need file:// or content:// URLs.
+    settings.setAllowFileAccess(false);
+    settings.setAllowContentAccess(false);
     return TrustedWebBridge.install(view, bridge);
   }
 

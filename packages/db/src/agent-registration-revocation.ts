@@ -67,7 +67,7 @@ export class PostgresRegistrationRevocationRepository {
       key.machineId === String(row.machine_id) && key.harness === String(row.harness));
     const batch = await this.database.transaction({ requestId: `registration-revoke:${crypto.randomUUID()}`,
       operation: "registration.revocation.prepare" }, async tx => {
-      const candidates = await tx.query({ name: "registration_revocation_candidates_v5", text: `SELECT
+      const candidates = await tx.query({ name: "registration_revocation_candidates_v7", text: `SELECT
         r.run_id,r.channel_id,r.owner_user_id,r.status,r.version,r.metadata_json,COALESCE(i.instance_id,l.instance_id) AS instance_id,
         b.space_id,b.machine_id,b.harness,b.allocation_id
         FROM data.run_agent_registrations b JOIN data.runs r ON r.run_id=b.run_id AND r.owner_user_id=b.owner_user_id
@@ -88,6 +88,7 @@ export class PostgresRegistrationRevocationRepository {
       for (const row of candidates) {
         let reason = "registration_run_terminal";
         const terminal = isTerminalRunStatus(row.status);
+        const metadata = row.metadata_json as Record<string, unknown> | null;
         try {
           if (terminal) throw new RegistrationAccessError(reason, 403);
           if (isDisabled(row)) throw new RegistrationAccessError("registration_environment_disabled", 403);
@@ -100,7 +101,6 @@ export class PostgresRegistrationRevocationRepository {
               ![403,404].includes(error.status)) throw error;
           reason = error.code;
         }
-        const metadata = row.metadata_json as Record<string, unknown> | null;
         const observation = metadata?.hostname ?? metadata?.hostId;
         const hostId = typeof observation === "string" && observation.trim() && observation.length <= 160
           ? observation : null;

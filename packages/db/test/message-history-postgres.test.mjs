@@ -132,8 +132,8 @@ integration("one fenced statement reads the authorized page, its Thread summarie
   assert.equal(newest.messages[0].threadSummary, undefined, "a closed Thread stays hidden");
   assert.equal(newest.messages[1].attachments[0].version, 3, "a legacy attachment edge recovers its version");
   assert.equal(newest.messages[2].tombstoneSender.label, "Ada Author", "a recalled row names its author");
-  assert.deepEqual(counted.names, ["message_history_page_v3",
-    "message_history_attachment_versions_v1", "message_history_tombstone_senders_v1"]);
+  assert.deepEqual(counted.names, ["message_history_page_v4",
+    "message_history_attachment_versions_v1", "message_history_tombstone_senders_v2"]);
 
   counted.names.length = 0;
   const oldest = await repository.history({ ...scope, afterSequence: 0, limit: 1 });
@@ -143,7 +143,7 @@ integration("one fenced statement reads the authorized page, its Thread summarie
   assert.equal(summary.channelId, seeded.thread);
   assert.equal(summary.replyCount, 3, "the root copy is not a reply");
   assert.deepEqual(summary.replies.map((reply) => reply.messageId), [`${seeded.thread}-3`, `${seeded.thread}-4`]);
-  assert.deepEqual(counted.names, ["message_history_page_v3"],
+  assert.deepEqual(counted.names, ["message_history_page_v4"],
     "a page without legacy attachments or tombstones is one statement");
 
   const before = await repository.history({ ...scope, beforeSequence: 2 });

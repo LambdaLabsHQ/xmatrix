@@ -112,8 +112,8 @@ export function AppleSpaceBillingSection({ userId, space }: { userId: string; sp
   const canPurchase = billing?.canManage && billing.seats.used === 1 && !active &&
     (!billing.subscription || ["canceled", "incomplete_expired"].includes(billing.subscription.status));
   return <div className="app-settings-section space-y-4" data-testid="apple-billing">
-    <div><h3 className="font-semibold">{space.name}</h3><p>{active ? "Pro" : "Free"} · {billing?.seats.used ?? "–"} human seats</p></div>
-    <p>App Store Pro includes one human seat and unmetered collaboration messages. Agents do not occupy seats. Model-provider subscriptions are separate.</p>
+    <div><h3 className="font-semibold">{space.name}</h3><p>{active ? "Pro" : "Free"} · {billing ? `${billing.seats.used} / ${billing.seats.limit}` : "–"} human seats</p></div>
+    <p>App Store Pro covers as many human seats as were bought through the App Store (a purchase here is one seat) and 5,000 Agent credits per seat each month for Agent/app writing and paid X actions; people write in xMatrix for free. Agents do not occupy seats. Model-provider subscriptions are separate.</p>
     <p>The subscription is bound to this Space. Switching Spaces or restoring purchases does not move it. Rebinding is not supported.</p>
     {canPurchase && <div className="flex flex-wrap gap-2">{products.map((product) => <button key={product.id} disabled={busy}
       className={actionClass({ variant: "primary", size: "md" })} onClick={() => void purchase(product)}>

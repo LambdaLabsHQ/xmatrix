@@ -10,6 +10,7 @@ import { ArrowUp, Check, Circle, CircleDot, CircleHelp, Pencil, Square, SquareCh
 import { cn } from "@/lib/utils";
 import { actionClass } from "@/components/ui/action-tone";
 import { AskCard } from "./ask-card";
+import type { QuestionnaireState } from "@xmatrix/protocol";
 import type { TimelineItem } from "./workspace-shell-message-model";
 
 const QUESTIONNAIRE_KIND = "xmatrix.questionnaire.v1";
@@ -104,8 +105,12 @@ export function questionnaireMetadata(metadata: Record<string, unknown> | undefi
   };
 }
 
-/** The answers each card in the loaded timeline already got, by card message id. */
-const AnsweredQuestionnaires = createContext<ReadonlyMap<string, Record<string, string[]>>>(new Map());
+/**
+ * How each card in the loaded timeline was settled since it was read: the
+ * answer sent from it, or the Hub's notice that its question was withdrawn.
+ * A history read already carries the Hub's state on the card itself.
+ */
+const SettledQuestionnaires = createContext<ReadonlyMap<string, QuestionnaireState>>(new Map());
 
 function answersOf(value: unknown): Record<string, string[]> {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
@@ -115,18 +120,28 @@ function answersOf(value: unknown): Record<string, string[]> {
   ]));
 }
 
+/* A timeline that settled no card hands its cards the same empty map, so a
+   new message does not ask every card in it again. */
+const NO_SETTLEMENTS: ReadonlyMap<string, QuestionnaireState> = new Map();
+
 export function AnsweredQuestionnairesProvider({ timeline, children }: { timeline: readonly TimelineItem[]; children: ReactNode }) {
-  const answered = useMemo(() => {
-    const map = new Map<string, Record<string, string[]>>();
+  const settled = useMemo(() => {
+    const map = new Map<string, QuestionnaireState>();
     for (const item of timeline) {
       const metadata = item.metadata;
-      if (metadata?.kind !== QUESTIONNAIRE_ANSWER_KIND) continue;
-      const cardId = trimmed(metadata.questionnaireMessageId);
-      if (cardId && !map.has(cardId)) map.set(cardId, answersOf(metadata.answers));
+      if (metadata?.kind === QUESTIONNAIRE_ANSWER_KIND) {
+        const cardId = trimmed(metadata.questionnaireMessageId);
+        if (cardId && !map.has(cardId)) map.set(cardId, { state: "answered", answers: answersOf(metadata.answers) });
+        continue;
+      }
+      // Only the Hub writes this key; a sender's own metadata cannot carry it.
+      const withdrawn = metadata?.xmatrixQuestionnaireState as { messageId?: unknown; state?: unknown } | undefined;
+      const cardId = trimmed(withdrawn?.messageId);
+      if (cardId && withdrawn?.state === "cancelled" && !map.has(cardId)) map.set(cardId, { state: "cancelled" });
     }
-    return map;
+    return map.size > 0 ? map : NO_SETTLEMENTS;
   }, [timeline]);
-  return <AnsweredQuestionnaires.Provider value={answered}>{children}</AnsweredQuestionnaires.Provider>;
+  return <SettledQuestionnaires.Provider value={settled}>{children}</SettledQuestionnaires.Provider>;
 }
 
 export function QuestionnaireMessage({
@@ -138,12 +153,15 @@ export function QuestionnaireMessage({
   message: TimelineItem;
   onAnswer: (message: TimelineItem, answer: QuestionnaireAnswer) => Promise<boolean>;
 }) {
-  const recorded = useContext(AnsweredQuestionnaires).get(message.messageId ?? "");
+  const seen = useContext(SettledQuestionnaires).get(message.messageId ?? "");
   const [selected, setSelected] = useState<Record<string, string[]>>({});
   const [other, setOther] = useState<Record<string, string>>({});
   const [sent, setSent] = useState<Record<string, string[]> | null>(null);
+  // The Hub's state wins; a card settled after this read shows what settled it.
+  const settled = message.questionnaireState ?? seen;
+  const withdrawn = settled?.state === "cancelled";
   // Once answered, the card shows the answer it got and takes no other.
-  const answers = recorded ?? sent;
+  const answers = settled?.state === "answered" ? (settled.answers ?? {}) : sent;
 
   function answerFor(question: QuestionnaireQuestion): string[] {
     const ids = selected[question.id] ?? [];
@@ -152,7 +170,7 @@ export function QuestionnaireMessage({
     return typed ? [...labels, typed] : labels;
   }
 
-  const canSubmit = !answers && questionnaire.questions.every((question) => answerFor(question).length > 0);
+  const canSubmit = !answers && !withdrawn && questionnaire.questions.every((question) => answerFor(question).length > 0);
 
   function toggle(question: QuestionnaireQuestion, option: QuestionnaireOption) {
     setSelected((current) => {
@@ -190,14 +208,14 @@ export function QuestionnaireMessage({
 
   const lone = questionnaire.questions.length === 1 ? questionnaire.questions[0] : undefined;
   return (
-    <div data-questionnaire-card={answers ? "answered" : "open"}>
+    <div data-questionnaire-card={answers ? "answered" : withdrawn ? "withdrawn" : "open"}>
       <AskCard
         who={questionnaire.harness ?? "Agent"}
         kind={lone?.header}
         icon={<CircleHelp className="size-3.5" />}
-        open={!answers}
+        open={!answers && !withdrawn}
         question={lone ? lone.label : `${questionnaire.questions.length} questions`}
-        status={answers && { tone: "settled", label: "Answered" }}
+        status={answers ? { tone: "settled", label: "Answered" } : withdrawn ? { tone: "settled", label: "Withdrawn" } : null}
       >
         <div className={lone ? undefined : "mt-2 space-y-3"}>
           {questionnaire.questions.map((question) => (
@@ -209,13 +227,13 @@ export function QuestionnaireMessage({
               group={`${message.messageId || message.id}:${question.id}`}
               picked={selected[question.id] ?? []}
               typed={other[question.id] ?? ""}
-              answer={answers ? (answers[question.id] ?? []) : undefined}
+              answer={answers ? (answers[question.id] ?? []) : withdrawn ? [] : undefined}
               onToggle={(option) => toggle(question, option)}
               onType={(value) => typeOther(question, value)}
             />
           ))}
         </div>
-        {!answers && (
+        {!answers && !withdrawn && (
           <button type="button" disabled={!canSubmit} onClick={submit}
             className={actionClass({ variant: "primary", size: "sm" }, "mt-2")}>
             <ArrowUp className="size-3.5" strokeWidth={2.5} />

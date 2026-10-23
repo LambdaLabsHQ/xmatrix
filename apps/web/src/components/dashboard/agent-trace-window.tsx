@@ -1,4 +1,6 @@
 "use client";
+
+import { AnimatedIcon } from "@/components/ui/animated-icon";
 import {
   memo,
   useCallback,
@@ -27,10 +29,11 @@ import {
   X,
 } from "lucide-react";
 import type { ChannelMessage } from "@xmatrix/protocol";
-import { IdentityAvatar } from "@/components/dashboard/identity-avatar";
+import { Face } from "@/components/dashboard/face";
 import { actionClass } from "@/components/ui/action-tone";
 import { noticeClass } from "@/components/ui/status-tone";
 import { cn } from "@/lib/utils";
+import { sameValue } from "../../lib/same-value";
 import {
   buildAgentChannelMessageTraceStream,
   buildAgentConversationTraceTimeline,
@@ -46,7 +49,7 @@ import { CenteredDialogShell, DialogButton } from "./centered-dialog-shell";
 import { RichMessageContent } from "./workspace-shell-rich-message";
 import { AGENT_BUSY_TRACE_STALE_MS } from "./workspace-shell-constants";
 import { tagsFromUsage, traceBlockText, traceFieldValue, traceToolPreviewText } from "./workspace-shell-formatters";
-import { avatarInitials, formatTime, isOlderThan, relativeTime, shortId, traceUsage } from "./workspace-shell-recovered";
+import { formatTime, isOlderThan, relativeTime, shortId, traceUsage } from "./workspace-shell-recovered";
 import {
   TagRow,
   agentTraceGroupsForTarget,
@@ -270,7 +273,7 @@ export const AgentInstanceDetailWindow = memo(function AgentInstanceDetailWindow
           <AgentTraceTimeline rows={scroll.visibleRows} animateAfter={scroll.animateAfter} />
           {traceReconnecting ? (
             <p className="mt-3 flex items-center gap-2 text-xs text-muted-foreground" role="status">
-              <Loader2 className="size-3.5 animate-spin" />
+              <AnimatedIcon icon={Loader2} className="size-3.5 animate-spin" />
               Reconnecting to the Agent host…
             </p>
           ) : traceLive ? (
@@ -577,30 +580,8 @@ function AgentTraceTimeline({ rows, animateAfter }: { rows: AgentTraceRow[]; ani
   );
 }
 
-/*
- * The timeline is rebuilt as new objects on every change, so cards compare by
- * content: a step that did not change skips its (markdown) render entirely.
- */
-function sameTraceItem(
-  { item: left }: { item: AgentTraceTimelineItem },
-  { item: right }: { item: AgentTraceTimelineItem }
-): boolean {
-  return left === right || (
-    left.timestamp === right.timestamp &&
-    left.kind === right.kind &&
-    left.title === right.title &&
-    left.body === right.body &&
-    sameList(left.fields, right.fields, (a, b) => a.label === b.label && a.value === b.value) &&
-    sameList(left.blocks, right.blocks, (a, b) => a.label === b.label && a.text === b.text && a.format === b.format)
-  );
-}
-
-function sameList<T>(left: T[] | undefined, right: T[] | undefined, same: (a: T, b: T) => boolean): boolean {
-  if (left === right) return true;
-  if ((left?.length ?? 0) !== (right?.length ?? 0)) return false;
-  return (left ?? []).every((value, index) => same(value, right![index]!));
-}
-
+/* The timeline is rebuilt as new objects on every change, so cards compare by
+   content: a step that did not change skips its (markdown) render entirely. */
 const AgentTraceTimelineCard = memo(function AgentTraceTimelineCard({ item }: { item: AgentTraceTimelineItem }) {
   const Icon = agentTraceTimelineIcon(item.kind);
   const fields = item.fields || [];
@@ -667,7 +648,7 @@ const AgentTraceTimelineCard = memo(function AgentTraceTimelineCard({ item }: { 
       </div>
     </div>
   );
-}, sameTraceItem);
+}, sameValue);
 
 /** Collapsed until asked for, and mounts its content only once opened. */
 function AgentTraceDisclosure({ label, children }: { label: string; children: ReactNode }) {
@@ -896,14 +877,9 @@ export function AgentInstanceWindowShell({
     >
       <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
         <div className="flex min-w-0 items-center gap-3">
-          <IdentityAvatar
-            kind="agent"
-            label={target.name}
-            status={target.status}
-            imageUrl={target.avatarUrl}
-            initials={avatarInitials(target.name)}
-            size="sm"
-          />
+          {/* Opened from where its face is known, it keeps it; else the exact Instance it traces names it. */}
+          <Face of={target.face ?? { kind: "agent", name: target.name, id: target.instanceId ?? null }}
+            status={target.status} size="sm" />
           <div className="min-w-0">
             <h2 id={labelledBy} className="truncate text-sm font-black">{target.name}</h2>
             <p className="truncate text-xs text-muted-foreground" title={headerContext}>
@@ -933,4 +909,3 @@ export function AgentInstanceWindowShell({
     </CenteredDialogShell>
   );
 }
-

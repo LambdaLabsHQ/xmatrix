@@ -16,7 +16,7 @@ minted UUID beside keys that already identify them.
 | --- | --- | --- |
 | Instance | `(channel_id, channel_instance_id)` | The ordinal is allocated as `MAX + 1` per Channel, rows are never deleted and numbers are never reused. `UNIQUE (channel_id, channel_instance_id)` already exists (migration 0009). An Instance belongs to exactly one Channel. |
 | Run | `(channel_id, channel_instance_id, run_ordinal)` | A Run is the k-th start of one Instance. Reborn and resume keep the Instance and start run `k + 1`; the ordinal is allocated under the Instance row lock and never reused. |
-| Channel About Run | `(channel_id, run_ordinal)`, no instance ordinal | The About Session is not a Channel Instance and receives no instance ordinal (2026-08-15 boundary review). Its k-th start comes from the Channel's `about` counter. The `session:<uuid>` placeholder in the launch binding is replaced by the About Run's own id. |
+| Channel About Run (retired 2026-10-15) | `(channel_id, run_ordinal)`, no instance ordinal | The About Session was not a Channel Instance and received no instance ordinal (2026-08-15 boundary review). Its k-th start came from the Channel's `about` counter; no new one starts, and existing ids still parse. |
 
 Ordinals at or above `8000000000000000` are historical; step 4 deletes them. Instances persisted
 before the ordinal allocator carried the sentinel `0`; the Postgres fact
@@ -70,8 +70,11 @@ forward: an issued ordinal is never reissued, even if its row is removed.
    counter. An Instance written with a natural id takes the ordinal it
    carries.
 3. Each creation path reserves before minting: Hub summon, reborn, handoff,
-   management and scheduled dispatch; registration launch including About;
-   the Hub Run endpoint; database summon, Automation and registration reborn.
+   management and direct scheduled dispatch; registration launch including About;
+   the Hub Run endpoint; database summon, direct Automation Runs and registration reborn.
+   Message Automation occurrences reserve no Run: their canonical messages launch
+   through registration authority, which owns each resulting Run key. See
+   [Automation Run links](../operations/automation-run-links.md).
    Parsers of the old id shapes go with them.
 4. Contract: stop every Run, delete every Run, Instance and dependent row,
    and add CHECK constraints that pin each stored id to its key.

@@ -109,8 +109,12 @@ read M2?
   annotation is written by the Hub as `system`, not as the author. History
   reads and message frames carry it as the message's `supersededBy` field,
   derived only from that annotation; other annotations never enter frames.
-  Clients that already hold the message pick up a judgment made after it
-  arrived by reading the namespace's annotations since their last read.
+  Clients that already hold the message hear a judgment made after it
+  arrived as a `channel_message_superseded` event to the Channel's people,
+  naming the two messages; every window holding M1 folds it then, whether
+  its Channel is open or not, so a Channel never opens on rows that fold a
+  moment later. A client that missed the event gets the field on its next
+  history read.
 - **Failure is harmless.** No key, a timeout or an error records nothing and
   M1 stays whole. The judgment runs after the append commits and never delays
   a send.

@@ -1,3 +1,4 @@
+use crate::bootstrap_prompts::BootstrapPrompts;
 use crate::config::non_empty_env as trimmed_env;
 use crate::protocol::DEFAULT_HUB_URL;
 
@@ -7,20 +8,47 @@ use crate::protocol::DEFAULT_HUB_URL;
 /// through a channel. Runtime adapters may deliver it through different native
 /// mechanisms, but must not add, remove, or weaken behavioral instructions.
 pub fn channel_collaboration_policy(channel_id: &str) -> String {
-    render_prompt(CHANNEL_CONTRACT, &[("channel_id", channel_id)])
+    render_prompt(
+        &BootstrapPrompts::from_env().channel_contract,
+        &[("channel_id", channel_id)],
+    )
 }
 
-// The prompt text lives in `prompts/*.md` so it can be read and reviewed as
-// documents; see `prompts/README.md` for the slots each one fills.
-const BOOTSTRAP: &str = include_str!("../prompts/bootstrap.md");
-const CHANNEL_CONTRACT: &str = include_str!("../prompts/channel-contract.md");
-const GOAL_COMMAND: &str = include_str!("../prompts/goal-command.md");
-const SPACE_RULES: &str = include_str!("../prompts/space-rules.md");
-const WORKING_MODE_AUTONOMOUS: &str = include_str!("../prompts/working-mode-autonomous.md");
-const WORKING_MODE_CAUTIOUS: &str = include_str!("../prompts/working-mode-cautious.md");
+/// A short trusted reminder for runtimes that need an explicit native reply
+/// instruction on each turn. The complete contract is delivered at launch.
+pub fn channel_turn_policy(channel_id: &str) -> String {
+    render_prompt(
+        &BootstrapPrompts::from_env().channel_turn,
+        &[("channel_id", channel_id)],
+    )
+}
 
 /// The Space's rules page, set by the daemon from the Hub's launch data.
 pub const SPACE_RULES_PAGE_ENV: &str = "XMATRIX_SPACE_RULES_PAGE_ID";
+
+/// The Space's connected apps, one name per line, set by the daemon from the
+/// Hub's launch data.
+pub const CONNECTED_APPS_ENV: &str = "XMATRIX_CONNECTED_APPS";
+
+/// An app name sits in the prompt as written: one short line of text.
+pub fn is_app_name(value: &str) -> bool {
+    !value.trim().is_empty() && value.chars().count() <= 80 && !value.chars().any(char::is_control)
+}
+
+fn connected_apps_context(template: &str) -> String {
+    let Some(apps) = trimmed_env(CONNECTED_APPS_ENV) else {
+        return String::new();
+    };
+    let names: Vec<&str> = apps
+        .lines()
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .collect();
+    if let Some(name) = names.iter().find(|name| !is_app_name(name)) {
+        panic!("{CONNECTED_APPS_ENV} names `{name}`, which is not a short single-line name");
+    }
+    render_prompt(template, &[("apps", &names.join(", "))])
+}
 
 /// A page id is opaque: letters, digits and dashes only, so it can sit in
 /// the prompt and in the `xmatrix page read` command it names.
@@ -30,10 +58,10 @@ pub fn is_opaque_page_id(value: &str) -> bool {
         && value.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
 }
 
-fn space_rules_context() -> String {
+fn space_rules_context(template: &str) -> String {
     match trimmed_env(SPACE_RULES_PAGE_ENV) {
         Some(page_id) if is_opaque_page_id(&page_id) => {
-            render_prompt(SPACE_RULES, &[("page_id", &page_id)])
+            render_prompt(template, &[("page_id", &page_id)])
         }
         Some(page_id) => panic!("{SPACE_RULES_PAGE_ENV} is not an opaque page id: `{page_id}`"),
         None => String::new(),
@@ -70,10 +98,10 @@ impl WorkingMode {
         }
     }
 
-    fn prompt(self) -> &'static str {
+    fn prompt(self, prompts: &BootstrapPrompts) -> &str {
         match self {
-            Self::Autonomous => WORKING_MODE_AUTONOMOUS,
-            Self::Cautious => WORKING_MODE_CAUTIOUS,
+            Self::Autonomous => &prompts.working_mode_autonomous,
+            Self::Cautious => &prompts.working_mode_cautious,
         }
     }
 }
@@ -98,20 +126,30 @@ pub fn bootstrap_prompt(
         }
     }
 
+    let prompts = BootstrapPrompts::from_env();
     let identity_context = agent_identity_context();
-    let channel_policy = channel_collaboration_policy("<channel-id>");
+    let channel_id =
+        trimmed_env("XMATRIX_AUTO_JOIN_CHANNEL_ID").unwrap_or_else(|| "<channel-id>".into());
+    let channel_policy = render_prompt(&prompts.channel_contract, &[("channel_id", &channel_id)]);
 
     Some(render_prompt(
-        BOOTSTRAP,
+        &prompts.bootstrap,
         &[
             ("agent_name", agent_name),
             ("launcher", launcher),
             ("hub_url", normalize_hub_url(hub_url)),
             ("identity_context", &identity_context),
-            ("goal_context", goal_command_context(supports_self_goal)),
+            (
+                "goal_context",
+                goal_command_context(supports_self_goal, &prompts),
+            ),
             ("channel_collaboration_policy", &channel_policy),
-            ("space_rules", &space_rules_context()),
-            ("working_mode", WorkingMode::from_env().prompt()),
+            ("space_rules", &space_rules_context(&prompts.space_rules)),
+            (
+                "connected_apps",
+                &connected_apps_context(&prompts.connected_apps),
+            ),
+            ("working_mode", WorkingMode::from_env().prompt(&prompts)),
         ],
     ))
 }
@@ -151,11 +189,11 @@ fn render_prompt(template: &str, slots: &[(&str, &str)]) -> String {
     out
 }
 
-fn goal_command_context(supports_self_goal: bool) -> &'static str {
+fn goal_command_context(supports_self_goal: bool, prompts: &BootstrapPrompts) -> &str {
     if !supports_self_goal {
         return "";
     }
-    GOAL_COMMAND
+    &prompts.goal_command
 }
 
 fn bootstrap_disabled() -> bool {
@@ -188,172 +226,140 @@ fn agent_identity_context() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    static LAUNCH_ENV: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    // Every bootstrap test owns and restores launch state, including when an
+    // assertion fails. Templates and their rendered output are protocol bytes.
+    struct LaunchEnv(Vec<(&'static str, Option<std::ffi::OsString>)>);
+    impl LaunchEnv {
+        fn clean() -> Self {
+            let keys = [
+                crate::bootstrap_prompts::ENV,
+                CONNECTED_APPS_ENV,
+                SPACE_RULES_PAGE_ENV,
+                WorkingMode::ENV,
+                "XMATRIX_BOOTSTRAP_PROMPT",
+                "XMATRIX_DISABLE_BOOTSTRAP_PROMPT",
+                "XMATRIX_AGENT_ROLE_INITIAL_PROMPT",
+                "XMATRIX_AGENT_PROFILE_IDENTITY",
+                "XMATRIX_AUTO_JOIN_CHANNEL_ID",
+            ];
+            let saved = keys
+                .into_iter()
+                .map(|key| (key, std::env::var_os(key)))
+                .collect();
+            // SAFETY: all bootstrap tests serialize process env access.
+            for key in keys {
+                unsafe { std::env::remove_var(key) };
+            }
+            Self(saved)
+        }
+        fn set(&self, key: &str, value: &str) {
+            unsafe { std::env::set_var(key, value) };
+        }
+    }
+    impl Drop for LaunchEnv {
+        fn drop(&mut self) {
+            for (key, value) in &self.0 {
+                unsafe {
+                    match value {
+                        Some(value) => std::env::set_var(key, value),
+                        None => std::env::remove_var(key),
+                    }
+                }
+            }
+        }
+    }
 
     #[test]
-    fn builds_default_prompt_for_any_launcher() {
-        let prompt = bootstrap_prompt("node", "custom-demo", "https://xmatrix.sh", true).unwrap();
-        assert!(prompt.contains("xMatrix is a multi-agent coordination tool"));
-        assert!(prompt.contains("Agent name: custom-demo"));
-        assert!(prompt.contains("/agent rename <name>"));
-        assert!(prompt.contains("ask the human what name you should use"));
+    fn standalone_and_old_hub_launches_keep_the_compact_contract() {
+        let _lock = LAUNCH_ENV.lock().unwrap();
+        let _env = LaunchEnv::clean();
+        let prompt = bootstrap_prompt("node", "demo", "", true).unwrap();
+        assert!(prompt.contains("Agent name: demo"));
         assert!(prompt.contains("Launched via: node"));
-        assert!(prompt.contains("`xmatrix list`"));
-        assert!(prompt.contains("`xmatrix channel history <channel-id>`"));
-        assert!(prompt.contains("also accepts a pasted xmatrix.sh channel URL"));
-        assert!(prompt.contains("`xmatrix channel history <url>`"));
-        assert!(prompt.contains("Do not open a browser"));
-        assert!(prompt.contains("`xmatrix send <channel-id> \"<message>\"`"));
-        assert!(prompt.contains("`xmatrix page automation list <page-id>`"));
-        assert!(prompt.contains("You can control the lifecycle of any Agent Instance"));
-        assert!(!prompt.contains("stop work complete"));
+        assert!(prompt.contains(DEFAULT_HUB_URL));
+        assert!(prompt.contains("xmatrix <command> --help"));
+        assert!(prompt.contains("xMatrix channel contract:"));
+        assert!(prompt.contains("xmatrix send <channel-id>"));
+        assert!(prompt.contains("Working mode: autonomous"));
+        assert!(prompt.contains("xmatrix goal --help"));
         assert!(
-            prompt.contains("Editing an Automation never transfers its captured author identity")
+            !bootstrap_prompt("node", "demo", "", false)
+                .unwrap()
+                .contains("xmatrix goal --help")
         );
-        assert!(prompt.contains("`xmatrix request secrets`"));
+        // Launch token budget: keep the full command reference out of context.
         assert!(
-            prompt.contains(
-                "`xmatrix secret exec [--secret <alias>[=<ENV_NAME>]] -- <cmd> [args...]`"
-            )
+            prompt.len() < 9_000,
+            "launch prompt has {} bytes",
+            prompt.len()
         );
-        assert!(prompt.contains(
-            "`xmatrix request secret-add <secretRef> [--env <ENV_NAME>] --reason \"<why>\""
-        ));
-        assert!(prompt.contains("never ask the human to paste it into chat"));
-        assert!(prompt.contains("messageId=<id>"));
-        assert!(prompt.contains("replied to your message"));
-        assert!(prompt.contains("xMatrix channel contract"));
-        assert!(prompt.contains("Channel-visible replies are explicit"));
-        assert!(prompt.contains("when you have something for someone"));
-        assert!(prompt.contains("promptly send one short channel update"));
-        assert!(prompt.contains("edit that same status message"));
-        assert!(!prompt.contains("Do not narrate progress"));
-        assert!(prompt.contains("plan or todo tool"));
-        assert!(!prompt.contains("MUST first send a short channel update"));
-        assert!(prompt.contains("--stdin"));
-        assert!(prompt.contains("$OutputEncoding"));
-        assert!(prompt.contains("plain `cd ...` as a failed workflow"));
-        assert!(prompt.contains("(no reply)"));
-        for retired in ["xmatrix request run", "--with-secret", "approval card"] {
-            assert!(!prompt.contains(retired), "{retired} is retired");
-        }
-        assert!(prompt.contains("On Windows PowerShell 5.1"));
-        assert!(prompt.contains("one complete argv"));
-        assert!(prompt.contains("--reply-to <messageId>"));
-        assert!(prompt.contains("only a reply carries your answer back"));
-        assert!(prompt.contains("`xmatrix --help`"));
-        for retired in [
-            "channel thread",
-            "xmatrix memory",
-            "--parent",
-            "channel delete ",
-        ] {
-            assert!(!prompt.contains(retired), "{retired} is retired");
-        }
-        assert!(prompt.contains("`xmatrix channel edit-message <channel-id> <messageId>"));
-        assert!(prompt.contains("`xmatrix channel delete-message <channel-id> <messageId>"));
-        assert!(prompt.contains("`xmatrix channel react <channel-id> <messageId> <emoji>`"));
-        assert!(
-            prompt.contains("works by default wherever both this Run and its owner have access")
-        );
-        assert!(prompt.contains("Kept for humans: approving cross-Space reads"));
-        assert!(prompt.contains("use your own judgment"));
-        assert!(prompt.contains("The page tree is the work index"));
-        assert!(prompt.contains("It is not the work index"));
-        assert!(!prompt.contains("see workspace channels"));
     }
 
     #[test]
-    fn working_mode_defaults_to_autonomous_and_follows_the_env() {
-        // SAFETY: test-only env mutation, as in the other bootstrap tests.
-        unsafe { std::env::remove_var(WorkingMode::ENV) };
-        let prompt = bootstrap_prompt("claude", "a", "", true).unwrap();
-        assert!(prompt.ends_with(WORKING_MODE_AUTONOMOUS));
-        assert!(prompt.contains("standing authorization to carry work through to its end"));
-        assert!(prompt.contains("is not finished"));
-        assert!(!prompt.contains("Working mode: cautious"));
-
-        assert_eq!(WorkingMode::parse("cautious"), Ok(WorkingMode::Cautious));
-        assert!(
-            WorkingMode::Cautious
-                .prompt()
-                .contains("merging and releasing need a human's explicit approval")
+    fn hub_templates_replace_compiled_text_and_render_values_once() {
+        let _lock = LAUNCH_ENV.lock().unwrap();
+        let env = LaunchEnv::clean();
+        env.set("XMATRIX_AUTO_JOIN_CHANNEL_ID", "channel-1");
+        env.set(CONNECTED_APPS_ENV, "Gmail\nSentry");
+        env.set(SPACE_RULES_PAGE_ENV, "page-1");
+        env.set(WorkingMode::ENV, "cautious");
+        let mut templates = BootstrapPrompts {
+            bootstrap: "Hub alpha {agent_name}\n{connected_apps}\n{space_rules}\n{working_mode}\n{channel_collaboration_policy}\n".into(),
+            ..BootstrapPrompts::default()
+        };
+        env.set(
+            crate::bootstrap_prompts::ENV,
+            &serde_json::to_string(&templates).unwrap(),
         );
-        let error = WorkingMode::parse("yolo").unwrap_err();
-        assert!(error.contains(WorkingMode::ENV) && error.contains("yolo"));
-    }
-
-    #[test]
-    fn space_rules_page_is_named_before_the_working_mode_only_when_set() {
-        // SAFETY: test-only env mutation, as in the other bootstrap tests.
-        unsafe { std::env::remove_var(SPACE_RULES_PAGE_ENV) };
-        let without = bootstrap_prompt("claude", "a", "", true).unwrap();
-        assert!(!without.contains("Space rules:"));
-
-        unsafe { std::env::set_var(SPACE_RULES_PAGE_ENV, "0b6e-rules") };
-        let with = bootstrap_prompt("claude", "a", "", true).unwrap();
-        unsafe { std::env::remove_var(SPACE_RULES_PAGE_ENV) };
-        let rules = with
-            .find("Space rules: this Space states its standing rules on page:0b6e-rules")
-            .unwrap();
-        assert!(with.contains("`xmatrix page read 0b6e-rules`"));
-        assert!(rules < with.find("Working mode:").unwrap());
+        let prompt = bootstrap_prompt("node", "{working_mode}", "", false).unwrap();
+        assert!(prompt.starts_with("Hub alpha {working_mode}"));
+        assert!(prompt.contains("Apps connected to this Space: Gmail, Sentry"));
+        assert!(prompt.contains("xmatrix connector list"));
+        assert!(prompt.contains("xmatrix page read page-1"));
+        assert!(prompt.contains("Working mode: cautious"));
+        assert!(prompt.contains("xmatrix send channel-1"));
+        assert!(!prompt.contains("Working mode: autonomous"));
+        templates.bootstrap = "Hub beta {agent_name}".into();
+        env.set(
+            crate::bootstrap_prompts::ENV,
+            &serde_json::to_string(&templates).unwrap(),
+        );
         assert_eq!(
-            with.len() - without.len(),
-            with[rules..].len() - without[without.find("Working mode:").unwrap()..].len()
+            bootstrap_prompt("node", "demo", "", false).unwrap(),
+            "Hub beta demo"
         );
+        assert!(channel_turn_policy("channel-1").contains("xmatrix send channel-1"));
+        assert!(channel_turn_policy("channel-1").len() < 400);
+    }
 
-        assert!(is_opaque_page_id("eadbea57-ff54-4cd6-ab69-d1e1fb75e603"));
-        for bad in ["", "a b", "a;rm", "page:x", "a\nb"] {
-            assert!(!is_opaque_page_id(bad), "{bad}");
+    #[test]
+    fn malformed_supplied_templates_never_become_a_compatibility_fallback() {
+        let mut templates = BootstrapPrompts::default();
+        templates.validate().unwrap();
+        templates.schema_version = 2;
+        assert!(templates.validate().is_err());
+        templates.schema_version = 1;
+        templates.bootstrap.clear();
+        assert!(templates.validate().is_err());
+        templates.bootstrap = "bad\0text".into();
+        assert!(templates.validate().is_err());
+        templates.bootstrap = "x".repeat(32 * 1024);
+        assert!(templates.validate().is_err());
+        for bad in ["", "{}", "null", r#"{"schemaVersion":1}"#] {
+            assert!(BootstrapPrompts::from_json(bad).is_err());
         }
     }
 
     #[test]
     fn render_prompt_fills_slots_once_and_drops_empty_slot_lines() {
-        let rendered = render_prompt(
-            "a {x}\n{empty}\n{y}\nkeep {\"json\": 1} {unknown}\n",
-            &[("x", "{y}"), ("empty", ""), ("y", "line\n")],
+        assert_eq!(
+            render_prompt(
+                "a {x}\n{empty}\n{y}\nkeep {\"json\": 1} {unknown}\n",
+                &[("x", "{y}"), ("empty", ""), ("y", "line\n")]
+            ),
+            "a {y}\nline\nkeep {\"json\": 1} {unknown}\n"
         );
-        assert_eq!(rendered, "a {y}\nline\nkeep {\"json\": 1} {unknown}\n");
-    }
-
-    #[test]
-    fn channel_collaboration_policy_is_complete_and_targets_the_channel() {
-        let policy = channel_collaboration_policy("channel-123");
-
-        assert!(policy.contains("xmatrix send channel-123"));
-        assert!(policy.contains("before ending the turn"));
-        // Talk is for people; progress is recorded from the runtime's own plan
-        // (docs/design/conversation-activity.md §5).
-        for spoken in [
-            "a question",
-            "a decision you need",
-            "a finding",
-            "a blocker",
-            "a result",
-            "always your final answer",
-        ] {
-            assert!(policy.contains(spoken), "{spoken}");
-        }
-        assert!(policy.contains("promptly send one short channel update"));
-        assert!(policy.contains("edit that same status message"));
-        assert!(policy.contains("Follow the user\'s reporting preferences"));
-        assert!(!policy.contains("Do not narrate progress"));
-        assert!(policy.contains("plan or todo tool"));
-        assert!(policy.contains("without waking anyone"));
-        assert!(policy.contains("Do not end a turn on a promise"));
-        assert!(policy.contains("merge conflicts runs no CI"));
-        assert!(policy.contains("is subscribed to this channel"));
-        for retired in [
-            "MUST first send a short channel update",
-            "all channel progress must be sent",
-            "before meaningful edits or risky commands",
-        ] {
-            assert!(!policy.contains(retired), "{retired} is retired");
-        }
-        assert!(policy.contains("channel-123 --stdin"));
-        assert!(policy.contains("$OutputEncoding"));
-        assert!(policy.contains("plain `cd ...` as a failed workflow"));
-        assert!(policy.contains("(no reply)"));
     }
 }

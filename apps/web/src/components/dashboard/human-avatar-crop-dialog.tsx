@@ -1,5 +1,6 @@
 "use client";
 
+import { AnimatedIcon } from "@/components/ui/animated-icon";
 import { Loader2, ZoomIn, ZoomOut } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
@@ -173,7 +174,7 @@ export function HumanAvatarCropDialog({
             />
           ) : (
             <div className="flex h-full items-center justify-center text-muted-foreground">
-              <Loader2 className="size-5 animate-spin" />
+              <AnimatedIcon icon={Loader2} className="size-5 animate-spin" />
             </div>
           )}
           {/* Everything outside the inscribed circle is dimmed, not hidden:

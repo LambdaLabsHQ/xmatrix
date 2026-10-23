@@ -57,12 +57,13 @@ const REQUIRED_SHELL_MODULES = Object.freeze([
 
 /**
  * @param {string} [dashboardDir]
+ * @param {string[]} [extraFiles] explicit local dependencies for the owner test
  * @returns {ReadonlyMap<string, string>} filename → source
  */
-function loadWorkspaceShellModuleMap(dashboardDir = __dirname) {
+function loadWorkspaceShellModuleMap(dashboardDir = __dirname, extraFiles = []) {
   const map = new Map();
   const missing = [];
-  for (const file of REQUIRED_SHELL_MODULES) {
+  for (const file of new Set([...REQUIRED_SHELL_MODULES, ...extraFiles])) {
     const full = path.join(dashboardDir, file);
     if (!fs.existsSync(full)) {
       missing.push(file);
@@ -247,9 +248,15 @@ function evaluateExtractedSource(source, bindings = {}) {
  * @param {string[]} names
  * @param {string} [epilogue] statements appended after the functions
  */
-function loadShellFunctions(moduleMap, names, epilogue = "") {
-  const source = names.map((name) => extractFunctionFromShellModules(moduleMap, name).source).join("\n\n");
-  return evaluateExtractedSource(`${source}\n${epilogue}`);
+function loadShellFunctions(moduleMap, names, epilogue = "", bindings = {}) {
+  const protocol = require("@xmatrix/protocol");
+  const moved = new Set(["sameValue", "isPlainObject", "instanceLifecycleReportApplies", "mergeAgentInstancePresence", "mergeLlmUsagePreferringQuotas", "usageWithoutQuota", "mergeUsageAttributes", "accountQuotaUsageFromCandidates", "mergeAccountLevelLlmUsage"]);
+  const source = names.filter(name => !moved.has(name)).map((name) => extractFunctionFromShellModules(moduleMap, name).source).join("\n\n");
+  const { ChannelPresenceConflict, decodeChannelSnapshot, emptyChannelPresence, presenceInstanceId, reduceChannelPresence } = require("@xmatrix/protocol");
+  return { ...protocol, ...evaluateExtractedSource(`${source}\n${epilogue}`, {
+    ...protocol,
+    ChannelPresenceConflict, decodeChannelSnapshot, emptyChannelPresence, presenceInstanceId, reduceChannelPresence, ...bindings,
+  }) };
 }
 
 module.exports = {

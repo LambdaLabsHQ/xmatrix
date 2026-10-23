@@ -1,3 +1,4 @@
+import { trimEnd } from "@xmatrix/protocol";
 import type { Env } from "./types";
 
 /**
@@ -6,7 +7,7 @@ import type { Env } from "./types";
  * sending people to another deployment's origins.
  */
 export function deploymentOrigin(value: string | undefined, label: string): URL {
-  const raw = value?.trim().replace(/\/+$/u, "") ?? "";
+  const raw = trimEnd(value?.trim() ?? "", "/");
   if (!raw) throw new Error(`${label} is not configured`);
   let parsed: URL;
   try {
@@ -27,6 +28,17 @@ export function deploymentOrigin(value: string | undefined, label: string): URL 
 /** The Web app origin, e.g. for links in mail and redirects after OAuth. */
 export function appOrigin(env: Pick<Env, "APP_URL">): string {
   return deploymentOrigin(env.APP_URL, "APP_URL").origin;
+}
+
+/**
+ * Every Web origin this Hub serves: the stable app and, when the deployment
+ * has one, the beta app every beta release deploys. Trust checks accept
+ * exactly these; links and redirects still go to `appOrigin`.
+ */
+export function appOrigins(env: Pick<Env, "APP_URL" | "APP_BETA_URL">): string[] {
+  const origins = [appOrigin(env)];
+  if (env.APP_BETA_URL?.trim()) origins.push(deploymentOrigin(env.APP_BETA_URL, "APP_BETA_URL").origin);
+  return origins;
 }
 
 /** The Hub origin: Better Auth base URL and the JWT issuer and audience. */

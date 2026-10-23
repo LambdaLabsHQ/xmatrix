@@ -38,7 +38,8 @@ bindings = [
   { name = "RELAY_RUNTIME_ROUTE_DIRECTORY", class_name = "RelayRuntimeRouteDirectory" },
   { name = "RELAY_RUNTIME_CHANNEL_FANOUT", class_name = "RelayRuntimeChannelFanout" },
   { name = "DEVICE_AUTH", class_name = "DeviceAuthBroker" },
-  { name = "GITHUB_SUBSCRIPTION_INDEX", class_name = "GitHubSubscriptionIndex" }
+  { name = "GITHUB_SUBSCRIPTION_INDEX", class_name = "GitHubSubscriptionIndex" },
+  { name = "RELAY_X_UPLOAD_EXECUTOR", class_name = "RelayXUploadExecutor" }
 ]
 
 [[r2_buckets]]
@@ -61,6 +62,10 @@ dataset = "xmatrix_hub_test_diagnostics"
 [[analytics_engine_datasets]]
 binding = "RELAY_AUTHORITY_OBSERVABILITY_AE"
 dataset = "xmatrix_hub_test_relay_authority_observability"
+
+[[analytics_engine_datasets]]
+binding = "XMATRIX_USAGE_COST_AE"
+dataset = "xmatrix_hub_test_usage_cost"
 
 [[migrations]]
 tag = "current"
@@ -126,3 +131,14 @@ new_sqlite_classes = ["RelayRuntimeChannelFanout"]
 [[migrations]]
 tag = "github-subscription-index-test"
 new_sqlite_classes = ["GitHubSubscriptionIndex"]
+
+# Per-upload durable execution; approved input and encrypted receipts stay in PostgreSQL.
+[[migrations]]
+tag = "x-upload-executor-test"
+new_sqlite_classes = ["RelayXUploadExecutor"]
+
+# Official Agent prompt documents are bundled with the Hub deployment.
+[[rules]]
+type = "Text"
+globs = ["**/prompts/*.md"]
+fallthrough = true

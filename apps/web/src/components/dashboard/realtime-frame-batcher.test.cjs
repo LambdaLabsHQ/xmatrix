@@ -1,10 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
-const { compileTsModules } = require("./compile-ts-modules.cjs");
-
-const batcherModule = compileTsModules(__dirname, ["realtime-frame-batcher"]);
-const { createRealtimeFrameBatcher, humanFrameBatchKey } = batcherModule.exports;
-test.after(batcherModule.dispose);
+require("./typescript-require.cjs").installTypeScriptRequire();
+const { createRealtimeFrameBatcher, humanFrameBatchKey } = require("./realtime-frame-batcher.ts");
 
 function harness() {
   const applied = [];
@@ -54,5 +51,7 @@ test("presence coalesces per Agent and Instance set; events and messages do not"
   assert.notEqual(presence, humanFrameBatchKey({ type: "enhanced_presence", agent: agent(["i3"]) }));
   const event = { type: "observable_event", event: { id: "e" } };
   assert.notEqual(humanFrameBatchKey(event), humanFrameBatchKey(event));
+  const snapshot = { type: "channel_updated", channel: { id: "a" } };
+  assert.notEqual(humanFrameBatchKey(snapshot), humanFrameBatchKey(snapshot), "snapshots wait but preserve every patch");
   assert.equal(humanFrameBatchKey({ type: "channel_message_received" }), null);
 });

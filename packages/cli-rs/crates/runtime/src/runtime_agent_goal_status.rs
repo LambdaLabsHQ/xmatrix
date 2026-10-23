@@ -196,7 +196,7 @@ pub(crate) fn claude_goal_status_from_transcript_line(
 /// `Goal active: <condition> (<state>)`, `Goal cleared: <condition>`,
 /// `No goal set. …`. Only called on turns we submitted as goal commands, so
 /// prefix matching cannot misfire on ordinary model output.
-pub(crate) fn claude_goal_status_from_result_text(text: &str) -> Option<protocol::AgentGoalStatus> {
+pub fn claude_goal_status_from_result_text(text: &str) -> Option<protocol::AgentGoalStatus> {
     let text = text.trim();
     if let Some(rest) = text.strip_prefix("Goal active:") {
         // Drop the trailing parenthesized evaluator state, e.g. "(not yet
@@ -319,7 +319,7 @@ impl ClaudeTranscriptWatcher {
     /// shows its objective before the first turn produces one. It arrives here
     /// rather than being assigned afterwards: the watcher owns this state, and
     /// a caller reaching in to set it is how the two drift apart.
-    pub(crate) fn new(cwd: Option<&str>, initial: Option<protocol::AgentGoalStatus>) -> Self {
+    pub fn new(cwd: Option<&str>, initial: Option<protocol::AgentGoalStatus>) -> Self {
         let cwd = cwd
             .map(PathBuf::from)
             .or_else(|| std::env::current_dir().ok())
@@ -353,7 +353,7 @@ impl ClaudeTranscriptWatcher {
     }
 
     /// The goal as last observed, for callers that report or attach it.
-    pub(crate) fn current(&self) -> Option<&protocol::AgentGoalStatus> {
+    pub fn current(&self) -> Option<&protocol::AgentGoalStatus> {
         self.latest.as_ref()
     }
 
@@ -422,7 +422,7 @@ impl ClaudeTranscriptWatcher {
 
     /// Applies a status derived outside the transcript (control-command ack
     /// text), which supersedes whatever the transcript last said.
-    pub(crate) fn apply(&mut self, goal: protocol::AgentGoalStatus) {
+    pub fn apply(&mut self, goal: protocol::AgentGoalStatus) {
         self.latest = Some(goal);
     }
 
@@ -431,7 +431,7 @@ impl ClaudeTranscriptWatcher {
     }
 }
 
-pub(crate) fn goal_status_represents_absence(goal: &protocol::AgentGoalStatus) -> bool {
+pub fn goal_status_represents_absence(goal: &protocol::AgentGoalStatus) -> bool {
     goal.active == Some(false)
         && goal
             .objective

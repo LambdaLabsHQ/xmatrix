@@ -9,6 +9,7 @@ import {
   isCompleteAuthResponse,
   isTransientHubStatus,
   refreshNativeSession,
+  revokeNativeSession,
   setNativeSessionCookies,
 } from "@/lib/native-session";
 
@@ -18,12 +19,12 @@ export async function GET(request: Request) {
   const refreshToken = cookies.get(NATIVE_REFRESH_COOKIE);
   const authProvider = normalizeAuthProvider(cookies.get(NATIVE_PROVIDER_COOKIE));
 
-  if (!accessToken || !refreshToken) {
+  if (!refreshToken) {
     return NextResponse.json({ session: null });
   }
 
-  const current = await loadUserFromAccessToken(accessToken);
-  if (current) {
+  const current = accessToken ? await loadUserFromAccessToken(accessToken) : null;
+  if (current && accessToken) {
     return NextResponse.json({
       session: sessionResponse({
         token: accessToken,
@@ -54,16 +55,23 @@ export async function POST(request: Request) {
   return response;
 }
 
-export async function DELETE() {
+export async function DELETE(request: Request) {
+  // Signing out ends the session at the Hub too, so the token this app held stops working.
+  const refreshToken = parseCookieHeader(request.headers.get("cookie")).get(NATIVE_REFRESH_COOKIE);
+  if (refreshToken) await revokeNativeSession(refreshToken);
   const response = NextResponse.json({ ok: true });
   clearNativeSessionCookies(response.cookies);
   return response;
 }
 
+/**
+ * What the app's page may read of its session: the hour-long access token and
+ * who it is. The 30-day refresh token stays in its HTTP-only cookie; the page
+ * reaches account calls through the native-auth route instead.
+ */
 function sessionResponse(payload: AuthResponse) {
   return {
     token: payload.token,
-    refreshToken: payload.refreshToken,
     authProvider: payload.authProvider,
     user: payload.user,
     hubUrl: payload.hubUrl,

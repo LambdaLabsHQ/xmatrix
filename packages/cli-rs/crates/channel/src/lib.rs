@@ -1,6 +1,5 @@
 #![deny(warnings)]
 
-mod about_input;
 mod cross_space_access;
 pub use cross_space_access::cmd_access;
 mod invocation_diagnostics;
@@ -21,6 +20,7 @@ use xmatrix_cli_core::channel_read_context::{OpenedChannelThread, thread_root_ma
 use xmatrix_cli_core::error::{self, CliError};
 use xmatrix_cli_core::hex::sha256_hex;
 use xmatrix_cli_core::human_connection::{HumanConnectionClient, HumanConnectionEvent};
+use xmatrix_cli_core::media_cache::{CachedMedia, LocalCopy};
 use xmatrix_cli_core::protocol::{self, HubRoutes, with_route};
 use xmatrix_cli_core::route_key;
 use xmatrix_cli_core::text_input::{self, TextRoutes, TextSource};
@@ -31,7 +31,7 @@ mod read_context;
 pub use read_context::{ChannelReadContext, load_channel_read_context};
 
 const CHANNEL_FILE_ATTACHMENT_LIMIT: usize = 4;
-const CHANNEL_FILE_ATTACHMENT_MAX_BYTES: u64 = 25 * 1024 * 1024;
+const CHANNEL_FILE_ATTACHMENT_MAX_BYTES: u64 = xmatrix_cli_core::media_cache::MEDIA_MAX_BYTES;
 // Relay authority bounds one channel-history query to 200 enriched rows (older
 // Hubs clamp to 50, and any Hub may return fewer under its page byte budget).
 // Fetching history is still unbounded from the CLI's perspective, but it must
@@ -48,8 +48,6 @@ struct ChannelHistoryResponse {
     messages: Vec<serde_json::Value>,
     #[serde(default)]
     has_more: bool,
-    #[serde(default)]
-    about_input: Option<serde_json::Value>,
 }
 
 pub async fn cmd_channels(
@@ -502,7 +500,7 @@ pub async fn cmd_space(hub_url: &str, token: &str, command: SpaceCommand) -> err
     }
 }
 
-pub async fn cmd_recover_send(
+pub(crate) async fn cmd_recover_send(
     hub_url: &str,
     token: &str,
     channel: &str,
@@ -539,7 +537,60 @@ pub async fn cmd_recover_send(
     Ok(())
 }
 
-pub struct SendOptions<'a> {
+/// What an Agent's message writes into pages (`⟦write page:<id>⟧ … ⟦/write⟧`) goes into those pages now,
+/// as its reply's words would, and the message keeps a note of where each went instead of the words.
+async fn write_message_into_pages(
+    hub_url: &str,
+    token: &str,
+    channel_id: &str,
+    message: &str,
+) -> String {
+    use xmatrix_cli_core::page_co_write::{PageCoWriteConnector, PageWritePart, page_write_parts};
+    let parts = page_write_parts(message);
+    if !parts
+        .iter()
+        .any(|part| matches!(part, PageWritePart::Write { .. }))
+    {
+        return message.to_string();
+    }
+    let connector = PageCoWriteConnector::new(
+        hub_url.to_string(),
+        std::sync::Arc::new(std::sync::RwLock::new(token.to_string())),
+    );
+    let mut sent = String::new();
+    for part in parts {
+        match part {
+            PageWritePart::Text(text) => sent.push_str(&text),
+            PageWritePart::Write { page, body } => {
+                match connector.write_once(channel_id, &page, &body).await {
+                    Ok(problems) if problems.is_empty() => {
+                        eprintln!("{} Wrote into page {page}", "✓".green().bold());
+                        sent.push_str(&format!("(written into page:{page})"));
+                    }
+                    Ok(problems) => {
+                        for problem in &problems {
+                            eprintln!("{} page {page}: {problem}", "⚠".yellow().bold());
+                        }
+                        sent.push_str(&format!(
+                            "(not all written into page:{page}: {})",
+                            problems.join(" ")
+                        ));
+                    }
+                    Err(error) => {
+                        eprintln!(
+                            "{} Could not write into page {page}: {error}; `xmatrix page edit` writes into a page that takes no live words",
+                            "⚠".yellow().bold()
+                        );
+                        sent.push_str(&format!("(could not write into page:{page})"));
+                    }
+                }
+            }
+        }
+    }
+    sent
+}
+
+pub(crate) struct SendOptions<'a> {
     pub message_parts: &'a [String],
     pub attachment_paths: &'a [PathBuf],
     pub read_stdin: bool,
@@ -551,7 +602,7 @@ pub struct SendOptions<'a> {
     pub wait: bool,
 }
 
-pub async fn cmd_send(
+pub(crate) async fn cmd_send(
     hub_url: &str,
     token: &str,
     channel_id: &str,
@@ -639,6 +690,14 @@ pub async fn cmd_send(
             "--final-for requires the authenticated Agent Run session".into(),
         ));
     }
+    // An Agent's message writes into pages as its reply does; a retry of the same send writes nothing again.
+    let written = if has_agent_sender_identity && message_id.is_none() {
+        write_message_into_pages(hub_url, token, channel_id, &message).await
+    } else {
+        message.clone()
+    };
+    let wrote_into_pages = written != message;
+    let message = written;
     eprintln!("Sending message {client_message_id}");
     let uploaded = upload_channel_file_attachments(
         hub_url,
@@ -671,6 +730,15 @@ pub async fn cmd_send(
         "clientMessageId".into(),
         serde_json::Value::String(client_message_id.clone()),
     );
+    // How far this Run has read the Channel: the Hub sends nothing over a
+    // newer message from someone else that it has not read.
+    let read_through = has_agent_sender_identity
+        .then(|| xmatrix_cli_core::read_through::current(channel_id))
+        .flatten();
+    if let Some(sequence) = read_through {
+        payload.insert("readThroughSequence".into(), sequence.into());
+    }
+    let own_instance_id = sender.instance_id.clone();
     for (key, value) in [
         ("senderAgentId", sender.agent_id),
         ("senderAgentName", sender.agent_name),
@@ -692,16 +760,48 @@ pub async fn cmd_send(
     if has_agent_sender_identity {
         xmatrix_cli_core::presentation_barrier::wait_for_current_presentation().await;
     }
-    let response: SendResponse = http::request_journaled_message(
-        &with_route(
-            hub_url,
-            &format!("/api/channels/{}/messages", urlencoding::encode(channel_id)),
-        ),
+    let append_url = with_route(
+        hub_url,
+        &format!("/api/channels/{}/messages", urlencoding::encode(channel_id)),
+    );
+    let mut sent = http::request_journaled_message::<SendResponse>(
+        &append_url,
         token,
-        serde_json::Value::Object(payload),
+        serde_json::Value::Object(payload.clone()),
         has_agent_sender_identity,
     )
-    .await?;
+    .await;
+    // A daemon or Hub from before the read check refuses the field before
+    // anything is journaled or appended; the same send goes without it.
+    if read_through.is_some()
+        && sent
+            .as_ref()
+            .is_err_and(|error| read_through_field_unsupported(&error.to_string()))
+    {
+        payload.remove("readThroughSequence");
+        sent = http::request_journaled_message::<SendResponse>(
+            &append_url,
+            token,
+            serde_json::Value::Object(payload),
+            has_agent_sender_identity,
+        )
+        .await;
+    }
+    let response = match (sent, read_through) {
+        (Ok(response), _) => response,
+        (Err(error), Some(after)) if error.to_string().contains(UNREAD_REFUSAL_CODE) => {
+            return Err(show_unread_messages(
+                hub_url,
+                token,
+                channel_id,
+                after,
+                own_instance_id.as_deref(),
+                wrote_into_pages,
+            )
+            .await);
+        }
+        (Err(error), _) => return Err(error),
+    };
 
     if response.message.message_id != client_message_id
         || response.message.channel_id != *channel_id
@@ -726,6 +826,79 @@ pub async fn cmd_send(
     }
 
     Ok(())
+}
+
+/// The Hub's refusal of a send over messages its sender has not read.
+const UNREAD_REFUSAL_CODE: &str = "channel_read_stale";
+/// Newer messages one refusal prints; a longer gap is read in turns.
+const UNREAD_MESSAGES_SHOWN: u32 = 50;
+
+fn read_through_field_unsupported(error: &str) -> bool {
+    error.contains("Journaled send contains unsupported fields")
+        || (error.contains("unexpected fields") && error.contains("readThroughSequence"))
+}
+
+/// A send was refused because the Channel moved on after `after`, the last
+/// sequence this Run read: show the model what it has not read, count it as
+/// read, and say that nothing was sent.
+async fn show_unread_messages(
+    hub_url: &str,
+    token: &str,
+    channel_id: &str,
+    after: u64,
+    own_instance_id: Option<&str>,
+    wrote_into_pages: bool,
+) -> CliError {
+    let mut messages = match fetch_channel_chat_history(
+        hub_url,
+        token,
+        channel_id,
+        UNREAD_MESSAGES_SHOWN,
+        Some(after),
+    )
+    .await
+    {
+        Ok(messages) => messages,
+        Err(error) => {
+            return CliError::Relay(format!(
+                "Not sent: this Channel has newer messages than the last one you read, and they \
+                 could not be loaded ({error}). Run `xmatrix channel history {channel_id}`, then \
+                 send again."
+            ));
+        }
+    };
+    messages.sort_by(protocol::compare_channel_messages);
+    let unread: Vec<_> = messages
+        .iter()
+        .filter(|message| {
+            own_instance_id.is_none() || message.from.instance_id.as_deref() != own_instance_id
+        })
+        .collect();
+    println!(
+        "{} newer message(s) arrived in this Channel after the last one you read:\n",
+        unread.len()
+    );
+    for message in &unread {
+        print_history_message_with_local_images(message, &HashMap::new(), &[]);
+    }
+    if let Some(through) = messages.iter().filter_map(|message| message.sequence).max() {
+        xmatrix_cli_core::read_through::advance(channel_id, through);
+    }
+    let more = if messages.len() >= UNREAD_MESSAGES_SHOWN as usize {
+        " More may follow them; the next send shows those."
+    } else {
+        ""
+    };
+    let pages = if wrote_into_pages {
+        " Its page writes were already made, so leave the ⟦write⟧ blocks out if you send it again."
+    } else {
+        ""
+    };
+    CliError::Launch(format!(
+        "Your message was not sent: the Channel moved on after the last message you read. \
+         Read the messages above.{more} If your message still fits, send it again; otherwise \
+         send what fits now.{pages}"
+    ))
 }
 
 #[derive(Debug)]
@@ -759,7 +932,7 @@ impl UploadedMessageAttachment {
     }
 }
 
-pub fn load_channel_file_attachments(
+pub(crate) fn load_channel_file_attachments(
     paths: &[PathBuf],
 ) -> error::Result<Vec<PendingFileAttachment>> {
     if paths.len() > CHANNEL_FILE_ATTACHMENT_LIMIT {
@@ -989,7 +1162,7 @@ pub fn channel_image_mime_type(path: &Path) -> Option<&'static str> {
     }
 }
 
-pub fn channel_file_mime_type(path: &Path) -> &'static str {
+pub(crate) fn channel_file_mime_type(path: &Path) -> &'static str {
     if let Some(image) = channel_image_mime_type(path) {
         return image;
     }
@@ -1152,9 +1325,9 @@ pub fn persisted_daemon_agent_run_ancestor_pid() -> Option<u32> {
     #[cfg(windows)]
     {
         let parents = process_parent_ids()?;
-        return tracked_ancestor_pid(std::process::id(), &tracked_pids, |pid| {
+        tracked_ancestor_pid(std::process::id(), &tracked_pids, |pid| {
             parents.get(&pid).copied()
-        });
+        })
     }
     #[cfg(not(windows))]
     tracked_ancestor_pid(std::process::id(), &tracked_pids, parent_process_id)
@@ -1380,32 +1553,10 @@ pub async fn cmd_channel(hub_url: &str, token: &str, command: ChannelCommand) ->
             let channel_id = resolve_channel_reference(hub_url, token, &channel_id).await?;
             cmd_channel_rename(hub_url, token, &channel_id, name).await
         }
-        ChannelCommand::About {
-            channel_id,
-            summary,
-            name,
-            stdin,
-            through,
-            expected_revision,
-        } => {
-            let input = about_input::read(summary, name, stdin).await?;
-            let channel_id = resolve_channel_reference(hub_url, token, &channel_id).await?;
-            cmd_channel_about(
-                hub_url,
-                token,
-                &channel_id,
-                input.summary,
-                input.name,
-                through,
-                expected_revision,
-            )
-            .await
-        }
         ChannelCommand::MetadataHistory {
             channel_id,
             before_revision,
             revision,
-            input,
             limit,
         } => {
             let channel_id = resolve_channel_reference(hub_url, token, &channel_id).await?;
@@ -1418,9 +1569,6 @@ pub async fn cmd_channel(hub_url: &str, token: &str, command: ChannelCommand) ->
             }
             if let Some(n) = revision {
                 route.push_str(&format!("&revision={n}"));
-            }
-            if let Some(id) = input {
-                route.push_str(&format!("&inputId={}", urlencoding::encode(&id)));
             }
             let response: serde_json::Value =
                 http::request_json(&with_route(hub_url, &route), "GET", Some(token), None).await?;
@@ -1514,12 +1662,9 @@ pub async fn cmd_channel(hub_url: &str, token: &str, command: ChannelCommand) ->
             cmd_channel_worktree(hub_url, token, &channel_id, state).await
         }
         ChannelCommand::Send(args) => cmd_send_args(hub_url, token, args).await,
-        ChannelCommand::History {
-            channel_id,
-            authoritative,
-        } => {
+        ChannelCommand::History { channel_id } => {
             let channel_id = resolve_channel_reference(hub_url, token, &channel_id).await?;
-            cmd_channel_history(hub_url, token, &channel_id, authoritative).await
+            cmd_channel_history(hub_url, token, &channel_id).await
         }
         ChannelCommand::Chat { channel_id, limit } => {
             let channel_id = resolve_channel_reference(hub_url, token, &channel_id).await?;
@@ -1948,59 +2093,6 @@ async fn cmd_channel_rename(
     Ok(())
 }
 
-/// The channel's own About session saves its summary, and may name a channel
-/// nobody has named yet, through the ordinary channel update.
-async fn cmd_channel_about(
-    hub_url: &str,
-    token: &str,
-    channel_id: &str,
-    summary: String,
-    name: Option<String>,
-    through: Option<String>,
-    expected_revision: Option<u64>,
-) -> error::Result<()> {
-    #[derive(Deserialize)]
-    struct AboutResponse {
-        channel: protocol::SerializedChannel,
-    }
-
-    let summary = summary.trim().to_string();
-    if summary.is_empty() {
-        return Err(CliError::Launch("channel About summary is required".into()));
-    }
-    let mut body = serde_json::json!({ "summary": summary });
-    if let Some(revision) = expected_revision {
-        body["expectedRevision"] = serde_json::json!(revision);
-    }
-    if let Some(name) = name.map(|name| name.trim().trim_start_matches('#').to_string())
-        && !name.is_empty()
-    {
-        body["name"] = serde_json::Value::String(name);
-    }
-    if let Some(through) = through.map(|through| through.trim().to_string())
-        && !through.is_empty()
-    {
-        body["throughMessageId"] = serde_json::Value::String(through);
-    }
-    let response: AboutResponse = http::request_json(
-        &with_route(
-            hub_url,
-            &format!("/api/channels/{}", urlencoding::encode(channel_id)),
-        ),
-        "PATCH",
-        Some(token),
-        Some(body),
-    )
-    .await?;
-
-    println!(
-        "{} Saved the About of {}",
-        "✓".green().bold(),
-        channel_label(&response.channel)
-    );
-    Ok(())
-}
-
 async fn cmd_channel_visibility(
     hub_url: &str,
     token: &str,
@@ -2095,10 +2187,11 @@ pub async fn load_full_channel_history(
         sort_channel_history(&mut messages);
         return Ok(messages);
     }
-    load_authoritative_channel_history(hub_url, token, channel_id).await
+    load_hub_channel_history(hub_url, token, channel_id).await
 }
 
-async fn load_authoritative_channel_history(
+/// Every page of a Channel's history, read from the Hub.
+async fn load_hub_channel_history(
     hub_url: &str,
     token: &str,
     channel_id: &str,
@@ -2123,9 +2216,6 @@ async fn load_authoritative_channel_history(
 
         let response: ChannelHistoryResponse =
             http::request_json(&with_route(hub_url, &route), "GET", Some(token), None).await?;
-        if let Some(input) = &response.about_input {
-            println!("About authoritative input: {input}");
-        }
         if response.messages.is_empty() {
             if response.has_more {
                 return Err(CliError::Relay(
@@ -2287,17 +2377,8 @@ async fn daemon_cached_channel_history(
     Some((messages, repairs, unreadable.len()))
 }
 
-async fn cmd_channel_history(
-    hub_url: &str,
-    token: &str,
-    channel_id: &str,
-    authoritative: bool,
-) -> error::Result<()> {
-    let messages = if authoritative {
-        load_authoritative_channel_history(hub_url, token, channel_id).await?
-    } else {
-        load_full_channel_history(hub_url, token, channel_id).await?
-    };
+async fn cmd_channel_history(hub_url: &str, token: &str, channel_id: &str) -> error::Result<()> {
+    let messages = load_full_channel_history(hub_url, token, channel_id).await?;
     let threads = match load_channel_read_context(hub_url, token, channel_id).await {
         Ok(context) => {
             println!("{}", context.text);
@@ -2317,6 +2398,10 @@ async fn cmd_channel_history(
     let local_images = materialize_history_image_attachments(hub_url, token, &messages).await;
     for message in &messages {
         print_history_message_with_local_images(message, &local_images, &threads);
+    }
+    // A Run that reads the Channel has read it through what was printed.
+    if let Some(through) = messages.iter().filter_map(|message| message.sequence).max() {
+        xmatrix_cli_core::read_through::advance(channel_id, through);
     }
 
     Ok(())
@@ -2557,9 +2642,10 @@ pub fn format_history_message(message: &protocol::ChannelMessage) -> String {
     )
 }
 
+#[cfg(test)]
 /// Render one history line against a fixed clock, so a whole transcript shares
 /// one anchor and a test can pin the ages it asserts on.
-pub fn format_history_message_at(
+pub(crate) fn format_history_message_at(
     message: &protocol::ChannelMessage,
     read_at: Option<&str>,
 ) -> String {
@@ -2570,7 +2656,7 @@ pub fn format_history_message_at(
 /// coordinates (no data URL / signed URL), prefer a materialized local path so
 /// agents and humans do not see a false "missing data" state for successful
 /// uploads.
-pub fn format_history_message_with_local_images(
+pub(crate) fn format_history_message_with_local_images(
     message: &protocol::ChannelMessage,
     local_images: &HashMap<(String, String), PathBuf>,
     read_at: Option<&str>,
@@ -2793,171 +2879,41 @@ async fn download_message_attachment_product_media(
     expected_mime: &str,
     name: &str,
 ) -> error::Result<PathBuf> {
-    if expected_size == 0 || expected_size > CHANNEL_FILE_ATTACHMENT_MAX_BYTES {
-        return Err(CliError::Http(
-            "Channel attachment is outside the CLI media limit".into(),
-        ));
-    }
-    let stem = xmatrix_cli_core::attachment_cache::cache_stem_for_identity(
-        channel_id,
-        message_id,
-        attachment_id,
-        expected_size,
-    );
-    if let Some(bytes) =
-        xmatrix_cli_core::attachment_cache::read_cached_attachment(&stem, Some(expected_size))
-    {
-        return write_history_attachment_bytes(attachment_id, expected_mime, name, &bytes);
-    }
-    // Every history read lists the same images; one the Hub refused is not
-    // asked for again until the refusal expires.
-    if xmatrix_cli_core::attachment_cache::attachment_recently_refused(&stem) {
-        return Err(CliError::Http(
-            "Channel attachment was refused recently; not requesting it again yet".into(),
-        ));
-    }
+    let media = CachedMedia {
+        stem: xmatrix_cli_core::attachment_cache::cache_stem_for_identity(
+            channel_id,
+            message_id,
+            attachment_id,
+            expected_size,
+        ),
+        expected_size: Some(expected_size),
+        content_hash: None,
+        mime_type: expected_mime,
+        copy: LocalCopy::Named {
+            prefix: "history",
+            id: attachment_id,
+            name,
+        },
+    };
     let url = with_route(hub_url, HubRoutes::MESSAGE_ATTACHMENT_PRODUCT_MEDIA);
     let body = serde_json::json!({
         "channelId": channel_id,
         "messageId": message_id,
         "attachmentId": attachment_id,
     });
-    let broker = xmatrix_cli_core::access::requires_access(&url)
-        .then(xmatrix_cli_core::access::daemon_request_broker)
-        .flatten();
-    let response = if let Some((broker_url, capability)) = broker {
-        reqwest::Client::new()
-            .post(format!("{broker_url}/request/hub-product-media"))
-            .header("x-xmatrix-request-capability", capability)
-            .json(&serde_json::json!({
-                "url": url,
-                "token": token,
-                "expectedSize": expected_size,
-                "body": body,
-            }))
-            .send()
-            .await
-    } else {
-        let request = http::client()?
-            .post(&url)
-            .bearer_auth(token)
-            .header(reqwest::header::CONTENT_TYPE, "application/json")
-            .header(reqwest::header::CACHE_CONTROL, "no-store")
-            .json(&body);
-        http::with_access_header(request, &url)?.send().await
-    }
-    .map_err(|err| CliError::Http(format!("product-media request failed: {err}")))?;
-    if matches!(
-        response.status(),
-        reqwest::StatusCode::FORBIDDEN | reqwest::StatusCode::NOT_FOUND
-    ) {
-        let _ = xmatrix_cli_core::attachment_cache::remember_refused_attachment(&stem);
-    }
-    let response = http::require_success(response, &url).await?;
-    if let Some(length) = response.content_length()
-        && length != expected_size
-    {
-        return Err(CliError::Http(
-            "Channel image attachment length does not match authority".into(),
-        ));
-    }
-    let mime_type = response
-        .headers()
-        .get(reqwest::header::CONTENT_TYPE)
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.split(';').next())
-        .map(|value| value.trim().to_string())
-        .unwrap_or_else(|| expected_mime.to_string());
-    if !mime_type.eq_ignore_ascii_case(expected_mime) && !expected_mime.is_empty() {
-        // Prefer server content-type when present; still require image/*.
-        if !mime_type.starts_with("image/") {
-            return Err(CliError::Http(format!(
-                "Channel image attachment MIME type is not an image: {mime_type}"
-            )));
-        }
-    }
-    let bytes = response
-        .bytes()
+    media
+        .fetch(|| async {
+            http::client()?
+                .post(&url)
+                .bearer_auth(token)
+                .header(reqwest::header::CONTENT_TYPE, "application/json")
+                .header(reqwest::header::CACHE_CONTROL, "no-store")
+                .json(&body)
+                .send()
+                .await
+                .map_err(|err| CliError::Http(format!("product-media request failed: {err}")))
+        })
         .await
-        .map_err(|err| CliError::Http(format!("product-media body read failed: {err}")))?;
-    if expected_size > 0 && bytes.len() as u64 != expected_size {
-        return Err(CliError::Http(
-            "Channel attachment body length does not match authority".into(),
-        ));
-    }
-    let _ = xmatrix_cli_core::attachment_cache::write_cached_attachment(&stem, &bytes);
-    write_history_attachment_bytes(attachment_id, &mime_type, name, &bytes)
-}
-
-fn write_history_attachment_bytes(
-    attachment_id: &str,
-    mime_type: &str,
-    name: &str,
-    bytes: &[u8],
-) -> error::Result<PathBuf> {
-    let extension = channel_image_extension(mime_type, name);
-    let safe_name: String = Path::new(name)
-        .file_stem()
-        .and_then(|value| value.to_str())
-        .unwrap_or("attachment")
-        .chars()
-        .map(|ch| {
-            if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.') {
-                ch
-            } else {
-                '-'
-            }
-        })
-        .collect();
-    let path = xmatrix_cli_core::attachment_cache::attachment_cache_dir().join(format!(
-        "history-{}-{safe_name}.{extension}",
-        &attachment_id[..attachment_id.len().min(12)],
-    ));
-    xmatrix_cli_core::attachment_cache::copy_cached_attachment_to(&path, bytes)?;
-    Ok(path)
-}
-
-fn channel_image_extension(mime_type: &str, name: &str) -> &'static str {
-    let lower_mime = mime_type.to_ascii_lowercase();
-    if lower_mime.contains("png") {
-        return "png";
-    }
-    if lower_mime.contains("jpeg") || lower_mime.contains("jpg") {
-        return "jpg";
-    }
-    if lower_mime.contains("gif") {
-        return "gif";
-    }
-    if lower_mime.contains("webp") {
-        return "webp";
-    }
-    if lower_mime.contains("pdf") {
-        return "pdf";
-    }
-    if lower_mime.contains("mp4") {
-        return "mp4";
-    }
-    if lower_mime.contains("markdown") {
-        return "md";
-    }
-    Path::new(name)
-        .extension()
-        .and_then(|value| value.to_str())
-        .map(|value| match value.to_ascii_lowercase().as_str() {
-            "png" => "png",
-            "jpg" | "jpeg" => "jpg",
-            "gif" => "gif",
-            "webp" => "webp",
-            "mp4" => "mp4",
-            "webm" => "webm",
-            "md" | "markdown" => "md",
-            "txt" => "txt",
-            "pdf" => "pdf",
-            "zip" => "zip",
-            "json" => "json",
-            _ => "bin",
-        })
-        .unwrap_or("bin")
 }
 
 fn shell_quote(value: &str) -> String {
@@ -3061,7 +3017,7 @@ fn fallback_member_label(member: &str) -> String {
         .unwrap_or_else(|| member.to_string())
 }
 
-pub fn short_channel_id(channel_id: &str) -> String {
+pub(crate) fn short_channel_id(channel_id: &str) -> String {
     channel_id.chars().take(8).collect()
 }
 

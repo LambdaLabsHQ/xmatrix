@@ -1,4 +1,5 @@
 import { daemonClientCompatibility as agentInstanceCompatibility } from "../legacy-client-compatibility";
+import { SWITCH_CONTINUATION_FRAME_CAPABILITY } from "../product-agent-model-effort";
 import { plainDeliveryRecord } from "./delivery-record";
 import type {
   AgentInstanceClientMessage,
@@ -40,6 +41,7 @@ import {
 import {
   agentChannelMessageDeliveryIntent,
   agentChannelMessageRequestsInterrupt,
+  agentChannelMessageMaySteer,
   channelMessage,
 } from "./channel-message-frame";
 import {
@@ -52,8 +54,12 @@ type Message<Type extends AgentInstanceClientMessage["type"]> = Extract<
   { type: Type }
 >;
 
-/** A live switch is interactive: fail loudly well before the human retries. */
-export const AGENT_INSTANCE_CONTROL_SWITCH_TIMEOUT_MS = 10_000;
+/**
+ * A running turn must finish cancelling before its live switch is applied.
+ * Claude allows 10s for that cancellation and another 8s for the control
+ * response, so retain enough server-side headroom for both phases.
+ */
+export const AGENT_INSTANCE_CONTROL_SWITCH_TIMEOUT_MS = 30_000;
 
 export const AGENT_INSTANCE_AUTHORITY_REQUIRED_CAPABILITIES = [
   "client_network_sample",
@@ -70,6 +76,8 @@ export const AGENT_INSTANCE_AUTHORITY_REQUIRED_CAPABILITIES = [
   "agent_effort_switch_result",
   "agent_lifecycle",
   "agent_turn_retry",
+  "harness_question_closed",
+  "agent_parameter_control_result",
   "event_publish",
 ] as const;
 
@@ -86,12 +94,9 @@ export interface AgentInstanceRunPrincipal {
   channelId: string;
   machineId: string;
   hostId: string;
-  runKind: "channel-instance" | "channel-about-session";
-  channelWriteAllowed: boolean;
 }
 
 export interface AgentInstanceAuthorityRunBinding {
-  kind: "channel-instance" | "channel-about-session";
   runId: string;
   agentId: string;
   instanceId: string;
@@ -103,8 +108,6 @@ export interface AgentInstanceAuthorityRunBinding {
   instanceStatus: LiveAgentStatus;
   /** Authority version claimed by this connection, retained across hibernation. */
   connectionVersion?: number;
-  /** System management Runs use the channel only as execution scope. */
-  channelDeliveryEnabled?: boolean;
   /** Dense per-channel ordinal for `@agent:N` / memberPresence cards. */
   channelInstanceId?: string;
   cwd?: string;
@@ -143,6 +146,8 @@ export interface AgentInstanceControlSwitchBinding {
 export interface AgentInstanceControlSwitchResult {
   value?: string;
   error?: string;
+  /** The switch cancelled a turn that was running. */
+  interruptedTurn?: boolean;
 }
 
 export type AgentInstanceControlSwitchOutcome = import("../product-agent-model-effort").ProductAgentControlOutcome;
@@ -246,9 +251,7 @@ export class AgentInstanceRuntimeTransport {
           Array.from(this.sockets.entries(), ([, live]) => live),
           session.run.instanceId,
         )) return;
-        if (session.run.kind === "channel-instance") {
-          await this.onPresenceChange?.({ reason: "disconnect", session });
-        }
+        await this.onPresenceChange?.({ reason: "disconnect", session });
       },
     );
 
@@ -277,6 +280,8 @@ export class AgentInstanceRuntimeTransport {
       reportModelSwitch: (ws, message) => this.sockets.ordered.schedule(this.dispatch(ws, message)),
       reportEffortSwitch: (ws, message) => this.sockets.ordered.schedule(this.dispatch(ws, message)),
       reportTurnRetry: (ws, message) => this.sockets.ordered.schedule(this.dispatch(ws, message)),
+      reportQuestionClosed: (ws, message) => this.sockets.ordered.schedule(this.dispatch(ws, message)),
+      reportParameterControl: (ws, message) => this.sockets.ordered.schedule(this.dispatch(ws, message)),
       reportLifecycle: (ws, message) => this.sockets.ordered.schedule(this.dispatch(ws, message)),
       publishEvent: (ws, message) => this.sockets.ordered.schedule(this.dispatch(ws, message)),
       traceHistoryResult: (ws, message) => this.sockets.ordered.schedule(
@@ -314,9 +319,11 @@ export class AgentInstanceRuntimeTransport {
     }
     this.sockets.restore(ws, attachment.session);
     void this.bindLiveDelivery(ws, attachment.session);
-    if (attachment.session.run.kind === "channel-instance") {
-      void this.onPresenceChange?.({ reason: "connect", session: attachment.session });
-    }
+    // Hibernation kept the socket, so the Instance never left: its viewers
+    // already have its card, and what a status report needs to reach them is
+    // kept in the cell's storage. Announcing a join on every wake read the
+    // whole Channel and fanned out across cells for each Instance, and any
+    // frame wakes the object.
     return true;
   }
   accept(ws: WebSocket): void { this.controller.socket.accept(ws); }
@@ -326,8 +333,7 @@ export class AgentInstanceRuntimeTransport {
   }
   handleFrame(ws: WebSocket, frame: string | ArrayBuffer): Promise<void> { return this.sockets.ordered.run(ws, () => this.controller.handleFrame(ws, frame)); }
   liveSessions(): readonly Readonly<AgentInstanceRuntimeSession>[] {
-    return Array.from(this.sockets.entries(), ([, session]) => session)
-      .filter((session) => session.run.kind === "channel-instance");
+    return Array.from(this.sockets.entries(), ([, session]) => session);
   }
 
   /**
@@ -349,7 +355,7 @@ export class AgentInstanceRuntimeTransport {
     const channelId = message.channelId;
     const profilesByName = new Map<string, Set<string>>();
     for (const [, session] of this.sockets.entries()) {
-      if (session.run.channelId !== channelId || session.run.kind !== "channel-instance") continue;
+      if (session.run.channelId !== channelId) continue;
       const name = session.principal.agentName.trim().toLowerCase();
       const ids = profilesByName.get(name) ?? new Set<string>();
       ids.add(session.principal.agentId);
@@ -361,14 +367,12 @@ export class AgentInstanceRuntimeTransport {
     // is work for whoever is here, so it is never stranded.
     const requester = relay?.requesterInstanceId;
     const requesterIsLive = !!requester && Array.from(this.sockets.entries()).some(([, session]) =>
-      session.run.channelId === channelId && session.run.kind === "channel-instance" &&
-      session.run.instanceId === requester);
+      session.run.channelId === channelId && session.run.instanceId === requester);
     let matched = 0;
     let delivered = 0;
     let interrupted = 0;
     for (const [socket, session] of this.sockets.entries()) {
       if (session.run.channelId !== channelId) continue;
-      if (session.run.kind !== "channel-instance") continue;
       if (input.deliveryKind !== "update" && deliveryWasAuthoredBy(input.from, session)) continue;
       // The Instance id alone names the replier: the relay's Agent id is the
       // sender snapshot's, which need not equal this socket principal's agentId.
@@ -394,18 +398,21 @@ export class AgentInstanceRuntimeTransport {
       // the transport facts an Instance needs are added around it.
       const recipient = {
         agentName: session.principal.agentName,
+        instanceId: session.run.instanceId,
         nameIsAmbiguous: (profilesByName.get(session.principal.agentName.trim().toLowerCase())?.size ?? 0) > 1,
         agentId: session.principal.agentId,
         channelInstanceId: session.run.channelInstanceId,
       };
       const deliveryIntent = answerIsAnothers ? "context" : agentChannelMessageDeliveryIntent(message, recipient);
       const interruptRequested = !answerIsAnothers && agentChannelMessageRequestsInterrupt(message, recipient);
+      const steerAllowed = interruptRequested && agentChannelMessageMaySteer(message, recipient);
       const outbound: Extract<AgentInstanceServerMessage, { type: "channel_message_received" }> = {
         type: "channel_message_received",
         message,
         ackRequired: true,
         ...(deliveryIntent === "context" ? { deliveryIntent } : {}),
         ...(interruptRequested ? { interruptRequested: true as const } : {}),
+        ...(steerAllowed ? { steerAllowed: true as const } : {}),
       };
       try {
         this.sockets.send(socket, outbound);
@@ -425,16 +432,33 @@ export class AgentInstanceRuntimeTransport {
    * waits rather than recording an intent: an unanswered request is a failure,
    * not a silent switch.
    */
-  /** Exact-run Hub permit delivery; this live route creates no retry authority. */
+  /** Exact-run terminal receipt only. Retry input must travel as a Channel message. */
   deliverTurnRetry(input: { runId: string; instanceId: string; ownerUserId: string; channelId: string;
     message: Extract<AgentInstanceServerMessage, { type: "agent_turn_retry_decision" }> }): boolean {
+    if (input.message.action !== "stop" || input.message.input !== undefined) return false;
     const targets = Array.from(this.sockets.entries()).filter(([, session]) =>
-      session.run.kind === "channel-instance" && session.run.runId === input.runId &&
+      session.run.runId === input.runId &&
       session.run.instanceId === input.instanceId && session.principal.ownerUserId === input.ownerUserId &&
       session.run.channelId === input.channelId &&
       session.clientCapabilities?.includes("agent_turn_retry"));
     if (targets.length !== 1) return false;
     this.sockets.send(targets[0]![0], input.message);
+    return true;
+  }
+
+  /**
+   * Hand one Instance the instruction to continue the turn its switches
+   * cancelled, on its own socket. False when this cell holds no socket for it
+   * or its runtime predates the frame; the caller then commits the legacy
+   * Channel instruction instead.
+   */
+  deliverSwitchContinuation(input: { channelId: string; instanceId: string; requestIds: string[]; prompt: string }): boolean {
+    const targets = Array.from(this.sockets.entries()).filter(([, session]) =>
+      session.run.instanceId === input.instanceId && session.run.channelId === input.channelId &&
+      session.clientCapabilities?.includes(SWITCH_CONTINUATION_FRAME_CAPABILITY));
+    if (targets.length !== 1) return false;
+    this.sockets.send(targets[0]![0], { type: "agent_switch_continuation", channelId: input.channelId,
+      instanceId: input.instanceId, requestIds: input.requestIds, prompt: input.prompt });
     return true;
   }
 
@@ -446,7 +470,6 @@ export class AgentInstanceRuntimeTransport {
   }): Promise<AgentInstanceControlSwitchOutcome> {
     const wanted = input.target.trim().toLowerCase();
     const candidates = Array.from(this.sockets.entries()).filter(([, session]) =>
-      session.run.kind === "channel-instance" &&
       session.run.channelId === input.channelId &&
       (agentInstanceMentionTarget(session).toLowerCase() === wanted ||
         `${session.principal.agentId}:${session.run.channelInstanceId}`.toLowerCase() === wanted)
@@ -512,18 +535,23 @@ export class AgentInstanceRuntimeTransport {
         message: error instanceof Error ? error.message : String(error),
       };
     }
-    if (result.error?.trim()) return { status: "error", message: result.error.trim() };
+    // A switch that cancelled a running turn owes that turn a continuation,
+    // refused or not; Hub commits it once every switch in the message landed.
+    const continuation = result.interruptedTurn
+      ? { continuation: { instanceId: session.run.instanceId, requestId } } : {};
+    if (result.error?.trim()) return { status: "error", message: result.error.trim(), ...continuation };
     const confirmed = result.value?.trim();
     if (!confirmed) {
-      return { status: "error", message: "The instance did not confirm a selection." };
+      return { status: "error", message: "The instance did not confirm a selection.", ...continuation };
     }
     if (confirmed.toLowerCase() !== selected.toLowerCase()) {
       return {
         status: "error",
         message: `the instance confirmed \`${confirmed}\` instead of \`${selected}\`.`,
+        ...continuation,
       };
     }
-    return { status: "switched", selected: confirmed };
+    return { status: "switched", selected: confirmed, ...continuation };
   }
 
   requestTraceHistory(
@@ -689,9 +717,7 @@ export class AgentInstanceRuntimeTransport {
         failureStage = "relay.bind_delivery";
         await this.bindLiveDelivery(ws, this.sockets.get(ws)!);
         failureStage = "relay.publish_presence";
-        if (authentication.run.kind === "channel-instance") {
-          await this.onPresenceChange?.({ reason: "connect", session: this.sockets.get(ws)! });
-        }
+        await this.onPresenceChange?.({ reason: "connect", session: this.sockets.get(ws)! });
         setupComplete = true;
       }, () => failureStage);
     } finally {
@@ -747,18 +773,16 @@ export class AgentInstanceRuntimeTransport {
           session.run.instanceStatus = message.status;
         }
         session.lastSeenAt = new Date().toISOString();
-        if (session.run.kind === "channel-instance") {
-          await this.onPresenceChange?.({
-            reason: "update",
-            session,
-            status: message.status,
-            ...(session.presentation?.activity
-              ? { activity: session.presentation.activity }
-              : {}),
-          });
-        }
+        await this.onPresenceChange?.({
+          reason: "update",
+          session,
+          status: message.status,
+          ...(session.presentation?.activity
+            ? { activity: session.presentation.activity }
+            : {}),
+        });
       }
-      if (session.run.kind === "channel-instance" && message.type === "client_network_sample") {
+      if (message.type === "client_network_sample") {
         await this.onClientNetworkSample?.({ session, message });
       }
       if (message.type === "unregister") {
@@ -770,9 +794,7 @@ export class AgentInstanceRuntimeTransport {
           reason: "host_expired",
         });
         this.sockets.remove(ws);
-        if (session.run.kind === "channel-instance") {
-          await this.onPresenceChange?.({ reason: "disconnect", session });
-        }
+        await this.onPresenceChange?.({ reason: "disconnect", session });
       }
     });
   }
@@ -1003,7 +1025,7 @@ function deliveryWasAuthoredBy(
 function messageSenderFromDelivery(value: unknown): MessageSender | undefined {
   const record = plainDeliveryRecord(value);
   if (!record) return undefined;
-  const kind = record.kind === "agent" || record.kind === "app" || record.kind === "user"
+  const kind = record.kind === "agent" || record.kind === "app" || record.kind === "user" || record.kind === "system"
     ? record.kind
     : undefined;
   const label = typeof record.label === "string" && record.label.trim()

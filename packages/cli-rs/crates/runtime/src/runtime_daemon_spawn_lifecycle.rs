@@ -127,6 +127,7 @@ async fn handle_daemon_spawn_request(
     failure_repo_pool_binding: &mut Option<DaemonRepoPoolBinding>,
 ) -> error::Result<SpawnedHeadlessAgent> {
     *failure_repo_pool_binding = None;
+    let admitted_at = std::time::Instant::now();
     let registered_intent = resolve_registration_spawn(intent, machine_id)?;
     let intent = &registered_intent;
     let registration = intent
@@ -155,7 +156,6 @@ async fn handle_daemon_spawn_request(
     .await?;
 
     let mut workspace = intent.workspace.clone();
-    let is_management_workspace = daemon_workspace_is_management(workspace.metadata.as_ref());
 
     if let Some(managed_workspace_key) = intent.management_space_id.as_deref() {
         if intent.run_worktree || intent.remote_repo.is_some() {
@@ -168,22 +168,10 @@ async fn handle_daemon_spawn_request(
                 "xMatrix-managed workspace run targeted a different machine".into(),
             ));
         }
-        let cwd = if is_management_workspace {
-            daemon_management_run_workspace_cwd(
-                managed_workspace_key,
-                intent.run_id.as_deref(),
-                intent.execution_key.as_deref(),
-            )?
-        } else {
-            daemon_managed_workspace_cwd(managed_workspace_key)?
-        };
+        let cwd = daemon_managed_workspace_cwd(managed_workspace_key)?;
         std::fs::create_dir_all(&cwd)?;
         workspace.canonical_cwd = cwd.display().to_string();
-        workspace.display_name = if is_management_workspace {
-            "xMatrix management".to_string()
-        } else {
-            "xMatrix managed workspace".to_string()
-        };
+        workspace.display_name = "xMatrix managed workspace".to_string();
         workspace.repo_root = None;
         workspace.git_remote = None;
         workspace.git_branch = None;
@@ -315,18 +303,6 @@ async fn handle_daemon_spawn_request(
     let mut repo_pool_layout: Option<repo_pool::RepoPoolLayout> = None;
     let mut repo_pool_request: Option<repo_pool::LeaseRequest> = None;
     let mut repo_pool_spawn_claim: Option<DaemonRepoPoolSpawnClaim> = None;
-    let remote_repo_checkout_candidates = if intent.remote_repo.is_some() {
-        daemon_local_workspace_cwds(
-            hub_url,
-            &machine_credential,
-            machine_id,
-            host_id,
-            &workspace,
-        )
-        .await
-    } else {
-        Vec::new()
-    };
     let adopted_intent = adopt_retained_repo_pool_authority(intent).await?;
     let intent = adopted_intent.as_ref().unwrap_or(intent);
     let has_resume_pool_authority = daemon_repo_pool_authority(intent)?;
@@ -365,9 +341,14 @@ async fn handle_daemon_spawn_request(
                 "reborn repo pool authority does not match repo identity".into(),
             ));
         }
-        reclaim_worktree_storage_for_registry(run_registry).await;
         let pools_root = repo_pool::default_repo_pools_root()
             .map_err(|error| CliError::Launch(format!("repo pool root unavailable ({error})")))?;
+        // Reclaiming disk serves the launches after this one: it waits for this
+        // lease unless this launch needs the room itself.
+        let reclaim_first = worktree_storage_needs_room(&pools_root);
+        if reclaim_first {
+            reclaim_worktree_storage_for_registry(run_registry).await;
+        }
         let layout = repo_pool::RepoPoolLayout::create(&pools_root, repo_key.clone())
             .map_err(|error| CliError::Launch(format!("repo pool layout unavailable ({error})")))?;
         // The child later receives a Space-scoped GitHub token. Issue that
@@ -455,7 +436,14 @@ async fn handle_daemon_spawn_request(
                         baseline: None,
                     });
                 }
-                let mut lease = if intent.handoff_transfer {
+                let mut lease = if intent.handoff_transfer && intent.resume {
+                    repo_pool::resume_handoff_lease_at(
+                        &layout, &base_repo,
+                        intent.handoff_source_resume_session_key.as_deref().unwrap_or_default(),
+                        intent.handoff_source_instance_id.as_deref().unwrap_or_default(),
+                        intent.slot_id.as_deref().unwrap_or_default(), &request,
+                    ).await
+                } else if intent.handoff_transfer {
                     let source_session = intent
                         .handoff_source_resume_session_key
                         .as_deref()
@@ -580,7 +568,7 @@ async fn handle_daemon_spawn_request(
             execution_key: execution_key.to_string(),
         };
         eprintln!(
-            "{} repo pool slot {} ({} from {})",
+            "{} repo pool slot {} ({} from {}, {} ms after admission)",
             "✓".green().bold(),
             lease.worktree_path.display(),
             if intent.handoff_transfer {
@@ -594,8 +582,15 @@ async fn handle_daemon_spawn_request(
             } else {
                 "created"
             },
-            lease.base_ref
+            lease.base_ref,
+            admitted_at.elapsed().as_millis()
         );
+        if !reclaim_first {
+            let run_registry = run_registry.clone();
+            tokio::spawn(async move {
+                reclaim_worktree_storage_for_registry(&run_registry).await;
+            });
+        }
         if !intent.resume && !intent.handoff_transfer {
             // This lease may have taken the pool's spare; check out the next
             // one now so the next new session skips the full checkout. Its
@@ -681,6 +676,15 @@ async fn handle_daemon_spawn_request(
                     "{} preparing remote repo worktree for {remote_repo} (streaming git fetch progress; stall only if download stops)",
                     "↓".cyan()
                 );
+                // Only this path checks out from the machine's other registered checkouts.
+                let remote_repo_checkout_candidates = daemon_local_workspace_cwds(
+                    hub_url,
+                    &machine_credential,
+                    machine_id,
+                    host_id,
+                    &workspace,
+                )
+                .await;
                 run_worktree::materialize_run_worktree_for_remote_with_candidates(
                     base_cwd,
                     &remote_repo_checkout_candidates,
@@ -753,12 +757,15 @@ async fn handle_daemon_spawn_request(
             agent_name: &intent.agent_name,
             identity_id: intent.identity_id.as_deref(),
             role_initial_prompt: intent.role_initial_prompt.as_deref(),
+            bootstrap_prompts: intent.bootstrap_prompts.as_ref(),
             working_mode: intent.working_mode.as_deref(),
             space_rules_page_id: intent.space_rules_page_id.as_deref(),
+            connected_apps: &intent.connected_apps,
             resume: intent.resume,
             resume_instance_id: intent.resume_instance_id.as_deref(),
             resume_session_key: intent.resume_session_key.as_deref(),
             handoff_source_resume_session_key: intent.handoff_source_resume_session_key.as_deref(),
+            handoff_context: intent.handoff_context.as_ref(),
             goal: intent.goal.as_ref(),
             initial_message_source: intent.initial_message_source.as_ref(),
             requested_model: intent.requested_model.as_deref(),
@@ -928,40 +935,6 @@ pub(crate) fn daemon_managed_workspace_cwd(key: &str) -> error::Result<PathBuf> 
     // collision negligible as machines accumulate workspace keys.
     let dir_name = lowercase_hex(&Sha256::digest(normalized.as_bytes())[..16]);
     Ok(daemon_management_root().join(dir_name))
-}
-
-pub(crate) fn daemon_management_run_workspace_cwd(
-    space_key: &str,
-    run_id: Option<&str>,
-    execution_key: Option<&str>,
-) -> error::Result<PathBuf> {
-    let base = daemon_managed_workspace_cwd(space_key)?;
-    let run_id = run_id
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| CliError::Launch("management Run is missing its Run id".into()))?;
-    let execution_key = execution_key
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| CliError::Launch("management Run is missing its execution key".into()))?;
-    if run_id.len() > 200 || execution_key.len() > 200 {
-        return Err(CliError::Launch(
-            "management Run identity exceeds its path-isolation bound".into(),
-        ));
-    }
-    let material = format!("management-run\0{space_key}\0{run_id}\0{execution_key}");
-    let dir_name = lowercase_hex(&Sha256::digest(material.as_bytes())[..16]);
-    let root = base
-        .parent()
-        .ok_or_else(|| CliError::Launch("management workspace root is unavailable".into()))?;
-    Ok(root.join(dir_name))
-}
-
-fn daemon_workspace_is_management(metadata: Option<&Value>) -> bool {
-    metadata
-        .and_then(|value| value.get("syntheticManagementWorkspace"))
-        .and_then(Value::as_bool)
-        == Some(true)
 }
 
 fn push_unique_workspace_cwd(cwds: &mut Vec<PathBuf>, cwd: &str) {
@@ -1279,9 +1252,7 @@ async fn renew_daemon_command_lease_http(
             "requestId": request_id,
             "relayLease": relay_lease,
         }));
-    let request = http::with_access_header(request, &url)
-        .map_err(|error| DaemonCommandLeaseRenewalError::FenceLost(error.to_string()))?
-        .send();
+    let request = request.send();
     let response = tokio::time::timeout(
         Duration::from_secs(DAEMON_COMMAND_LEASE_RENEW_REQUEST_TIMEOUT_SECS),
         request,
@@ -1557,8 +1528,7 @@ async fn report_daemon_control_result_http(
     let mut retry = 0;
     loop {
         let client = http::client()?;
-        let request =
-            http::with_access_header(client.post(&url).bearer_auth(token).json(&body), &url)?;
+        let request = client.post(&url).bearer_auth(token).json(&body);
         let response = match tokio::time::timeout(
             Duration::from_secs(DAEMON_CONTROL_RESULT_REQUEST_TIMEOUT_SECS),
             request.send(),
@@ -2043,12 +2013,15 @@ struct HeadlessAgentSpawn<'a> {
     agent_name: &'a str,
     identity_id: Option<&'a str>,
     role_initial_prompt: Option<&'a str>,
+    bootstrap_prompts: Option<&'a xmatrix_cli_core::bootstrap_prompts::BootstrapPrompts>,
     working_mode: Option<&'a str>,
     space_rules_page_id: Option<&'a str>,
+    connected_apps: &'a [String],
     resume: bool,
     resume_instance_id: Option<&'a str>,
     resume_session_key: Option<&'a str>,
     handoff_source_resume_session_key: Option<&'a str>,
+    handoff_context: Option<&'a MachineHandoffContext>,
     goal: Option<&'a protocol::AgentGoalStatus>,
     initial_message_source: Option<&'a protocol::AgentRuntimeMessageSource>,
     requested_model: Option<&'a str>,
@@ -2089,12 +2062,15 @@ async fn spawn_headless_agent(
         agent_name,
         identity_id,
         role_initial_prompt,
+        bootstrap_prompts,
         working_mode,
         space_rules_page_id,
+        connected_apps,
         resume,
         resume_instance_id,
         resume_session_key,
         handoff_source_resume_session_key,
+        handoff_context,
         goal,
         initial_message_source,
         requested_model,
@@ -2124,17 +2100,21 @@ async fn spawn_headless_agent(
     );
     let runtime_args = auto_update.runtime_args;
     let mut local_env = apply_authoritative_agent_execution_env(
-        apply_spawn_space_rules(
-            apply_spawn_working_mode(
-                apply_spawn_initial_prompt(BTreeMap::new(), role_initial_prompt),
-                working_mode,
+        apply_spawn_connected_apps(
+            apply_spawn_space_rules(
+                apply_spawn_working_mode(
+                    apply_spawn_initial_prompt(BTreeMap::new(), role_initial_prompt),
+                    working_mode,
+                )?,
+                space_rules_page_id,
             )?,
-            space_rules_page_id,
+            connected_apps,
         )?,
         agent_backend,
         agent_preset_id,
         &auto_update.acp_args,
     )?;
+    local_env = apply_spawn_bootstrap_prompts(local_env, bootstrap_prompts)?;
     local_env.extend(auto_update.env);
     local_env.insert(
         "XMATRIX_AGENT_REGISTRATION".into(),
@@ -2216,6 +2196,9 @@ async fn spawn_headless_agent(
         "CODEX_HOME",
         "GROK_HOME",
         "XMATRIX_GROK_MODEL",
+        xmatrix_cli_core::bootstrap_prompts::ENV,
+        "XMATRIX_BOOTSTRAP_PROMPT",
+        "XMATRIX_DISABLE_BOOTSTRAP_PROMPT",
         "XMATRIX_AGENT_IDENTITY_ID_OVERRIDE",
         "XMATRIX_AGENT_BACKEND",
         "XMATRIX_AGENT_NAME_OVERRIDE",
@@ -2273,7 +2256,6 @@ async fn spawn_headless_agent(
         .args(&runtime_args)
         .current_dir(&workspace.canonical_cwd)
         .env("XMATRIX_HUB_URL", hub_url)
-        .env_remove("XMATRIX_ENVIRONMENT")
         .env("XMATRIX_HEADLESS", "1")
         .env("XMATRIX_AGENT_NAME_OVERRIDE", agent_name)
         .env("XMATRIX_AGENT_NAME", agent_name)
@@ -2333,10 +2315,15 @@ async fn spawn_headless_agent(
     if let Some(resume_session_key) = resume_session_key {
         command.env("XMATRIX_RESUME_SESSION_KEY", resume_session_key);
     }
-    if let Some(source_session_key) = handoff_source_resume_session_key
-        && let Some(dir) = materialize_handoff_session_snapshot(source_session_key) {
-            command.env("XMATRIX_HANDOFF_SESSION_DIR", dir.display().to_string());
-        }
+    // A cross-machine handoff carries the predecessor's conversation; the
+    // same-machine path still points at its session files.
+    if let Some(dir) = handoff_context
+        .and_then(|context| runtime_handoff_context::materialize_handoff_context(
+            context, run_id.or(execution_key).unwrap_or(agent_name)))
+        .or_else(|| handoff_source_resume_session_key.and_then(runtime_handoff_context::materialize_handoff_session_snapshot))
+    {
+        command.env("XMATRIX_HANDOFF_SESSION_DIR", dir.display().to_string());
+    }
     if goal.is_some()
         || initial_message_source.is_some()
         || requested_model.is_some()
@@ -2636,6 +2623,15 @@ async fn spawn_headless_agent(
         _auth_grant: auth_grant,
         _request_grant: request_grant,
     })
+}
+
+/// Whether a new checkout may not find the disk it needs until worktree
+/// storage is reclaimed: the run worktree volume is under its warning mark, or
+/// the pool's own would refuse a new tree.
+fn worktree_storage_needs_room(pools_root: &Path) -> bool {
+    let root = run_worktree::run_worktrees_root();
+    matches!(run_worktree::volume_available_bytes(&root), Some(bytes) if bytes < run_worktree::disk_warn_bytes())
+        || run_worktree::new_worktree_storage_denied_reason(pools_root).is_some()
 }
 
 async fn reclaim_worktree_storage_for_registry(run_registry: &DaemonRunRegistry) {

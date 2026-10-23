@@ -24,6 +24,13 @@ export function triggerNote(events: unknown): string {
   return lines.length ? `Triggered by:\n${lines.join("\n")}` : "";
 }
 
+/** A cadence with connected-app triggers can read their private context even before an event fires. */
+function containsExternalEvents(value: unknown): boolean {
+  if (value === undefined || value === null) return false;
+  return !Array.isArray(value) || value.some((event) => !event || typeof event !== "object" ||
+    Array.isArray(event) || (event as Record<string, unknown>).kind !== "owed");
+}
+
 export interface ScheduledMessagePostCommit {
   channelId: string;
   messageId: string;
@@ -44,7 +51,7 @@ export interface ScheduledMessageDeliveryPort {
   /** Opens the occurrence's own conversation as its authority root; returns its id. */
   openConversation(input: { occurrence: AutomationOccurrenceRow; automation: AutomationExecutionRow;
     /** The Automation's stored name, and what it says to fall back on for a row without one. */
-    storedName: unknown; body: string; userId: string }): Promise<string>;
+    storedName: unknown; body: string; userId: string; privateEvents: boolean }): Promise<string>;
 }
 
 export interface ScheduledMessageDelivery {
@@ -86,7 +93,8 @@ export async function dispatchScheduledMessageOccurrence(
   }
   // An occurrence an event made due names the events, so its Run knows what changed.
   // The PostgreSQL occurrence carries them beside its SQL-row fields.
-  const triggered = triggerNote((occurrence as unknown as { trigger_events?: unknown }).trigger_events);
+  const events = (occurrence as unknown as { trigger_events?: unknown }).trigger_events;
+  const triggered = triggerNote(events);
   if (triggered) body = `${body}\n\n${triggered}`;
   const authorityRootUserId = typeof envRef?.authorityRootUserId === "string" &&
       envRef.authorityRootUserId
@@ -100,7 +108,10 @@ export async function dispatchScheduledMessageOccurrence(
   // never becomes the next one's context; what carries over is on the page.
   // Opened before the prepared boundary, idempotently, so a retry reopens it.
   const channelId = await port.openConversation({ occurrence, automation, userId: authorityRootUserId,
-    storedName: payload.name, body });
+    storedName: payload.name, body,
+    // Even an `owed` event can carry a private pull request URL.
+    privateEvents: containsExternalEvents(payload.triggers) ||
+      (Array.isArray(events) ? events.length > 0 : events !== undefined && events !== null) });
   const appMentions = Array.isArray(expression?.appMentions) ? expression.appMentions
     : Array.isArray(message?.appMentions) ? message.appMentions : undefined;
   // Prepared is the durable delivery-acceptance boundary. Automation edits only

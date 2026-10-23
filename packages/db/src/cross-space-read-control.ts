@@ -105,7 +105,8 @@ export class PostgresCrossSpaceReadRepository {
     work: (tx: DatabaseTransaction) => Promise<T>): Promise<T> {
     const placement = await this.placements.resolveWritable(
       { requestId, operation: `${operation}.placement` }, spaceId, () => new CrossSpaceReadError(
-        "space_placement_unavailable", 503, "Space placement is unavailable", true));
+        "space_placement_unavailable", 503, "Space placement is unavailable", true),
+      () => new CrossSpaceReadError("space_not_found", 404, "Space not found"));
     return this.database.transaction({ requestId, operation, placement: { spaceId,
       shardId: placement.shardId, placementEpoch: placement.placementEpoch } }, work);
   }
@@ -120,8 +121,7 @@ export class PostgresCrossSpaceReadRepository {
 
   /**
    * Prove the exact live Run in its own Space, the way invocation diagnostics
-   * do, and return its owner. Channel About Runs never read outside their
-   * Channel, so they cannot hold a grant.
+   * do, and return its owner.
    */
   private async proveRun(requestId: string, proof: CrossSpaceRunProof): Promise<{
     ownerUserId: string; agentName: string | null; executionKeyDigest: string }> {
@@ -145,8 +145,7 @@ export class PostgresCrossSpaceReadRepository {
           run.channel_id !== proof.channelId || metadata.executionKey !== proof.executionKey ||
           !["starting", "running"].includes(String(run.status)) ||
           metadata.instanceDeletion !== undefined || metadata.instanceHandoff !== undefined ||
-          metadata.executionCancellation !== undefined ||
-          metadata.routedAs === "management_channel_about") {
+          metadata.executionCancellation !== undefined) {
         throw new CrossSpaceReadError("agent_run_forbidden", 403, "Credentials do not match a live Run");
       }
       await requireRunRegistrationAccess(tx, { runId, channelId: proof.channelId,

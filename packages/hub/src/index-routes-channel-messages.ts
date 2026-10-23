@@ -12,8 +12,10 @@ import { runtimeCellsForChannel } from "./runtime-transport/runtime-route-direct
 import { requireAgentRunChannelDelegation } from "./agent-run-channel-delegation";
 import { dispatchProductMessagePostCommit, productMessageControlFinishesBeforeResponse } from "./product-message-post-commit";
 import { productMessageSenderPresentation } from "./message-sender-presentation";
+import { readStoredProfile } from "./human-profile-store";
 import { crossChannelReplyOrigin } from "./product-cross-channel-reply";
 import { messageMutationActor } from "./agent-run-channel-delegation";
+import { questionnaireAnswerTarget, settledQuestionnaireRefusal } from "./questionnaire-answer";
 import {
   requireAuth,
   requireAgentRunPermission,
@@ -25,10 +27,13 @@ import {
 } from "./index-shared";
 import {
   appendChannelMessage,
+  questionnaireCardState,
+  settleQuestionnaireCard,
   channelMessageCommand,
   channelMessageResponse,
   channelMessageResult,
   scheduleChannelLiveDelivery,
+  committedLiveRouting,
 } from "./channel-messages";
 
 type MessageRouteContext = Context<{ Bindings: Env }, "/api/channels/:channelId/messages/:messageId/*">;
@@ -77,6 +82,7 @@ export function registerChannelMessageRoutes(app: Hono<{ Bindings: Env }>): void
         "body",
         "clientMessageId",
         "metadata",
+        "readThroughSequence",
         "replyToMessageId",
         "senderAgentId",
         "senderAgentInstanceId",
@@ -96,6 +102,7 @@ export function registerChannelMessageRoutes(app: Hono<{ Bindings: Env }>): void
       }
       const body = rawBody as {
         awaitsResponse?: unknown;
+        readThroughSequence?: unknown;
         invocationSelections?: unknown;
         finalReplyExecutionId?: string;
         body?: string;
@@ -130,6 +137,10 @@ export function registerChannelMessageRoutes(app: Hono<{ Bindings: Env }>): void
       }
       if (body.awaitsResponse !== undefined && typeof body.awaitsResponse !== "boolean") {
         return c.json({ error: "awaitsResponse must be a boolean" }, 400);
+      }
+      if (body.readThroughSequence !== undefined &&
+          (!Number.isSafeInteger(body.readThroughSequence) || (body.readThroughSequence as number) < 0)) {
+        return c.json({ error: "readThroughSequence must be a non-negative safe integer" }, 400);
       }
       if (body.finalReplyExecutionId !== undefined) {
         if (!principal) return c.json({ error: "Final reply requires an authenticated Agent Run" }, 403);
@@ -292,6 +303,11 @@ export function registerChannelMessageRoutes(app: Hono<{ Bindings: Env }>): void
           ...(body.replyToMessageId ? { replyToMessageId: body.replyToMessageId } : {}),
           ...(Object.keys(appMetadata).length > 0 ? { appMetadata } : {}),
         };
+        // A retained CLI JWT can still carry the name from before onboarding.
+        // Keep its authenticated identity/email fallback for historical accounts.
+        const senderProfile = !principal && !attributedAgent
+          ? await readStoredProfile(c.env, authUser.id) : null;
+        const senderName = senderProfile?.name || authUser.name || authUser.email || authUser.id;
         const appendCommand = {
           commandId: productCommandId(c.req.raw, "append-message", messageId),
           messageId,
@@ -300,6 +316,8 @@ export function registerChannelMessageRoutes(app: Hono<{ Bindings: Env }>): void
           ...(body.invocationSelections === undefined ? {} : { invocationSelections: body.invocationSelections }),
           ...(body.finalReplyExecutionId === undefined ? {} : { finalReplyExecutionId: body.finalReplyExecutionId }),
           ...(body.awaitsResponse === true ? { awaitsResponse: true } : {}),
+          ...(body.readThroughSequence === undefined
+            ? {} : { readThroughSequence: body.readThroughSequence as number }),
           principal: appendPrincipal,
           senderSnapshot: principal
             ? trustedAgentSenderPresentation
@@ -319,10 +337,10 @@ export function registerChannelMessageRoutes(app: Hono<{ Bindings: Env }>): void
                   identityId: `user:${authUser.id}`,
                   kind: "user",
                   userId: authUser.id,
-                  label: authUser.name || authUser.email || authUser.id,
-                  name: authUser.name || authUser.email || authUser.id,
+                  label: senderName,
+                  name: senderName,
                   email: authUser.email,
-                  avatarUrl: authUser.avatarUrl,
+                  avatarUrl: senderProfile ? senderProfile.image ?? undefined : authUser.avatarUrl,
                 },
           ...(principal ? {
             agentRunProof: {
@@ -344,9 +362,29 @@ export function registerChannelMessageRoutes(app: Hono<{ Bindings: Env }>): void
         const agentSendEvidence = rawAgentSubmission === null ? undefined : {
           agentSendFingerprint: await sha256Hex(rawAgentSubmission),
         };
+        // A card's answer reaches the harness only while the card is open. One
+        // to a card already answered or withdrawn is refused with the reason,
+        // rather than arriving at the Instance as a new task.
+        const answerTarget = questionnaireAnswerTarget(body.metadata);
+        if (answerTarget) {
+          const settled = await questionnaireCardState(c.env, {
+            channelId, messageId: answerTarget.cardMessageId, principal: appendPrincipal });
+          if (settled) return c.json(settledQuestionnaireRefusal(settled), 409);
+        }
         const result = await channelMessageResult(() =>
           appendChannelMessage(c.env, channelId, appendCommand, agentSendEvidence));
         if (!result.ok) return result.response;
+        // The card records its answer, so it shows answered however far its
+        // answer message scrolls, and stops waiting on its person.
+        // The answer itself has committed, so a failure here is reported, not
+        // turned into a failed send the person would retry.
+        if (answerTarget) {
+          await settleQuestionnaireCard(c.env, { channelId, messageId: answerTarget.cardMessageId,
+            settlement: { state: "answered", answers: answerTarget.answers } }).catch((error: unknown) =>
+            console.error("Questionnaire answer committed but its card could not record it", {
+              channelId, cardMessageId: answerTarget.cardMessageId,
+              error: error instanceof Error ? error.message : String(error) }));
+        }
         const committed = result.payload;
         const committedSenderSnapshot = committed.senderSnapshot &&
             typeof committed.senderSnapshot === "object" &&
@@ -389,6 +427,7 @@ export function registerChannelMessageRoutes(app: Hono<{ Bindings: Env }>): void
             ...(Object.keys(appMetadata).length > 0 ? { metadata: appMetadata } : {}),
             ...(committedAttachments?.length ? { attachments: committedAttachments } : {}),
           },
+          committedLiveRouting(committed),
         );
         if (typeof message.body === "string") {
           // The message payload's sentAt predates validation and the database
@@ -403,6 +442,8 @@ export function registerChannelMessageRoutes(app: Hono<{ Bindings: Env }>): void
             actorUserId: actorUserId(authUser),
             senderKind: appendPrincipal.kind,
             senderId: appendPrincipal.id,
+            ...(agentInstanceId || attributedAgent?.instanceId
+              ? { senderInstanceId: agentInstanceId || attributedAgent?.instanceId } : {}),
             committedAt: postCommitAt,
             scheduleBackground: (task) => { try { c.executionCtx.waitUntil(task); } catch { /* no ExecutionContext outside Workers */ } },
             ...((principal?.runId || attributedAgent?.runId)
@@ -504,9 +545,8 @@ export function registerChannelMessageRoutes(app: Hono<{ Bindings: Env }>): void
     const actor = await messageMutationActor(c.env, authUser, channelId);
     if (actor instanceof Response) return actor;
     const run = actor.run;
-    if (!run || run.channelWriteAllowed === false) {
-      return c.json({ error: "Subscribing to a pull request requires a writing Agent Run",
-        code: "agent_run_required" }, 403);
+    if (!run) {
+      return c.json({ error: "Subscribing to a pull request requires an Agent Run", code: "agent_run_required" }, 403);
     }
     const body = (await c.req.json().catch(() => ({}))) as { url?: unknown };
     try {

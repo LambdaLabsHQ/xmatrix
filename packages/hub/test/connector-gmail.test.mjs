@@ -5,11 +5,12 @@ import { GMAIL_ACTIONS as ACTIONS, verifyGmail } from "../src/connectors/actions
 import { parseActionCommand } from "../src/connectors/action-parse.ts";
 import { exchangeOAuthGrant, oauthAuthorizeUrl, oauthClient } from "../src/connectors/oauth.ts";
 import { deleteComposioAccount } from "../src/connectors/composio.ts";
-import { agentMailboxOwner, mayUseMailbox, parseMailboxes } from "../src/connectors/gmail-mailboxes.ts";
+import { agentMailboxOwner, GMAIL_SUBSCRIPTIONS, mayUseMailbox, parseMailboxes } from "../src/connectors/gmail-mailboxes.ts";
 import { grantFieldsForgottenOnDisconnect } from "../src/connectors/oauth.ts";
 import { compileCommonJsSourceModule } from "./support/commonjs-source-module.mjs";
 import { getAppConnectorProvider } from "../src/app-connectors.ts";
 import { verifyGitHubAppState } from "../src/index-shared.ts";
+import * as metering from "../src/usage-cost-metering.ts";
 
 const composio = { CONNECTOR_GMAIL_CLIENT_ID: "ac_gmailreadonly", CONNECTOR_COMPOSIO_API_KEY: "composio-project-key" };
 const mailbox = { account: "ca_mailbox1", address: "me@example.com", owner: "user:user-1" };
@@ -56,7 +57,7 @@ test("Connect signs in through Composio as a per-attempt user and stores only th
     const entry = manifest.actions.find(candidate => candidate.id === id);
     const write = id === "send" || id === "reply";
     assert.deepEqual([action.effect, entry?.effect, entry?.defaultPolicy],
-      write ? ["write", "write", "deny"] : ["read", "read", undefined], id);
+      write ? ["write", "write", "ask"] : ["read", "read", undefined], id);
   }
 });
 
@@ -203,6 +204,7 @@ test("forgetting a Gmail grant deletes the Composio account before clearing the 
     "./gmail-mailboxes": { parseMailboxes },
     "./credentials": { connectorCredentialRepository: () => repository },
     "./oauth": { grantFieldsForgottenOnDisconnect, oauthClient },
+    "../usage-cost-metering": metering,
   };
   const { forgetConnectionGrant } = load(name => { assert.ok(dependencies[name], name); return dependencies[name]; }, { crypto, Date, Object });
   const input = { spaceId: "space-1", actorUserId: "admin" };
@@ -301,13 +303,14 @@ test("Check reads every mailbox's profile", async () => {
   assert.deepEqual(checked.calls.map(call => call.body.connected_account_id), ["ca_mailbox1", "ca_mailbox2", "ca_mailbox3"]);
 });
 
-test("Connect adds a mailbox: a repeat replaces its account and keeps its owner, and the list is bounded", async () => {
+test("Connect adds a mailbox: a repeat replaces its account and keeps its owner, and only a list that would not fit is refused", async () => {
   const load = await compileCommonJsSourceModule(new URL("../src/connectors/gmail-mailboxes.ts", import.meta.url));
   let stored = [{ ...mailbox, owner: "user:user-7" }, { account: "ca_mailbox2", address: "two@example.com", owner: "user:user-1" }];
   const deleted = [];
   const profiles = { ca_new1: "ME@example.com", ca_new2: "three@example.com" };
   const http = await import("../src/connectors/http.ts");
   const dependencies = {
+    "./account-list": await import("../src/connectors/account-list.ts"),
     "./composio": {
       composioGet: async (credentials) => ({ emailAddress: profiles[credentials.composioAccountId] }),
       deleteComposioAccount: async (_key, id) => { deleted.push(id); },
@@ -316,6 +319,7 @@ test("Connect adds a mailbox: a repeat replaces its account and keeps its owner,
       resolveForAdmin: async () => ({ values: { mailboxes: JSON.stringify(stored) } }) }) },
     "./http": http,
     "./oauth": { oauthClient: () => ({ clientSecret: "composio-project-key" }) },
+    "../usage-cost-metering": metering,
   };
   const { addConnectedMailbox } = load(name => { assert.ok(dependencies[name], name); return dependencies[name]; },
     { crypto, Date, Object, JSON, encodeURIComponent });
@@ -325,7 +329,58 @@ test("Connect adds a mailbox: a repeat replaces its account and keeps its owner,
   assert.deepEqual(deleted, ["ca_mailbox1"]);
   const added = JSON.parse((await addConnectedMailbox({}, { ...input, account: "ca_new2" })).mailboxes);
   assert.deepEqual(added.at(-1), { account: "ca_new2", address: "three@example.com", owner: "user:user-1" });
-  stored = Array.from({ length: 10 }, (_, index) => ({ account: `ca_full${index}`, address: `m${index}@example.com`, owner: "user:user-1" }));
-  await assert.rejects(addConnectedMailbox({}, { ...input, account: "ca_new2" }), /at most 10/u);
-  assert.equal(deleted.at(-1), "ca_new2");
+  stored = Array.from({ length: 12 }, (_, index) => ({ account: `ca_more${index}`, address: `m${index}@example.com`, owner: "user:user-1" }));
+  assert.equal(JSON.parse((await addConnectedMailbox({}, { ...input, account: "ca_new2" })).mailboxes).length, 13,
+    "mailboxes are not counted");
+  /* Fill the list to just under its stored bound; one more mailbox no longer fits. */
+  const entry = (index) => ({ account: `ca_full${index}`, address: `${"m".repeat(60)}${index}@example.com`, owner: "user:user-1" });
+  stored = [];
+  while (JSON.stringify([...stored, entry(stored.length)]).length < 256 * 1024 - 150) stored.push(entry(stored.length));
+  const room = 256 * 1024 - 30 - JSON.stringify([...stored, { ...entry(0), address: "p@" }]).length;
+  stored.push({ ...entry(stored.length), address: `p@${"d".repeat(room - 4)}.com` });
+  deleted.length = 0;
+  await assert.rejects(addConnectedMailbox({}, { ...input, account: "ca_new2" }), /exceed the 256 KiB this connection stores/u);
+  assert.deepEqual(deleted, ["ca_new2"], "the refused Connect's new Composio account is deleted, and nothing else");
+});
+
+// Approval must show the actual reply destination and hold it stable: a later metadata
+// fetch must not silently redirect an approved email. The provider tests above do not freeze it.
+test("approval freezes reply headers before any send and revalidates the mailbox before writing", async () => {
+  const original = gmail({ id: "18f2a9c0d1e2b3a4", threadId: "18f2a9c0d1e2b300", payload: { headers: [
+    { name: "From", value: "Sender <sender@example.test>" }, { name: "Reply-To", value: "Approved <approved@example.test>" },
+    { name: "Subject", value: "Frozen subject" }, { name: "Message-ID", value: "<frozen@example.test>" }] } });
+  const staged = await fetched([original], () => ACTIONS.reply.prepare(ctx, { id: "18f2a9c0d1e2b3a4", body: "Approved body" }));
+  assert.equal(staged.calls.length, 1);
+  assert.equal(staged.calls[0].body.method, "GET", "preparing never sends");
+  const frozen = staged.result;
+  assert.deepEqual([frozen.from, frozen.to, frozen.subject, frozen.body],
+    ["me@example.com", "approved@example.test", "Re: Frozen subject", "Approved body"]);
+  let checks = 0;
+  const sent = await fetched([gmail({ id: "19a0b1c2d3e4f5a6" })], () => ACTIONS.reply.execute({ ...ctx,
+    authorizeWrite: async () => { checks++; } }, frozen));
+  assert.equal(checks, 1, "policy is checked immediately before the write");
+  assert.equal(sent.calls.length, 1, "sending the approved reply never resolves new headers");
+  assert.match(decodedRaw(sent.calls[0].body.body.raw), /^To: approved@example\.test\r\nSubject: Re: Frozen subject\r\n/u);
+  const changed = { ...ctx, credentials: { ...ctx.credentials,
+    mailboxes: JSON.stringify([{ ...mailbox, account: "ca_reconnected" }]) } };
+  const blocked = await fetched([], () => assert.rejects(ACTIONS.reply.execute(changed, frozen), /mailbox changed/));
+  assert.deepEqual(blocked.calls, []);
+  const revoked = await fetched([], () => assert.rejects(ACTIONS.reply.execute({ ...ctx,
+    authorizeWrite: async () => { throw new Error("disallowed now"); } }, frozen), /disallowed now/));
+  assert.deepEqual(revoked.calls, []);
+});
+
+test("only a mailbox's member subscribes a Channel to its notifications", async () => {
+  const credentials = { mailboxes: JSON.stringify([
+    { account: "ca_owner", address: "owner@example.com", owner: "user:owner" },
+    { account: "ca_agent", address: "agent@example.com", owner: "agent:owner/machine/claude" },
+  ]) };
+  const sync = (source, actorUserId, subscribed = true) =>
+    GMAIL_SUBSCRIPTIONS.sync({ env: {}, spaceId: "space-1", credentials, source, subscribed, actorUserId });
+  assert.equal(await sync("owner@example.com", "owner"), undefined);
+  assert.equal(await sync("*", "owner"), undefined);
+  assert.match(await sync("owner@example.com", "someone-else"), /only a mailbox's own member/);
+  assert.match(await sync("*", "someone-else"), /only a mailbox's own member/);
+  assert.match(await sync("agent@example.com", "owner"), /only a mailbox's own member/);
+  assert.equal(await sync("owner@example.com", "someone-else", false), undefined);
 });

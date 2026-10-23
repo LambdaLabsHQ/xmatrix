@@ -11,7 +11,7 @@ import {
 function instanceSession(model, run = {}) {
   return {
     principal: { ownerUserId: "owner", spaceId: "space", channelId: "channel" },
-    run: { kind: "channel-instance", instanceId: "instance", ...run },
+    run: { instanceId: "instance", ...run },
     presentation: { model },
   };
 }

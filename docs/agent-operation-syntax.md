@@ -20,7 +20,7 @@ must continue importing the same protocol definitions.
 | `@<agentName>:<channelInstanceId>` | Address one exact existing Instance in the current Channel. The ordinal is Channel-local and must come from live inventory. |
 | `@auto repo:<owner/repo>` | Address a new persistent Instance in a managed worktree. |
 | `@auto pwd:"<absolute-path>"` | Start persistently in an explicitly registered directory, in place. |
-| `@<source>:<channelInstanceId>:handoff:@<successor>` | Transfer the source checkout to a new persistent successor Instance in the same Channel and on the same machine. |
+| `@<source>:<channelInstanceId>:handoff:@<successor>` | Stop the source and start a new persistent successor Instance in the same Channel through ordinary launch routing on any machine; a repository checkout travels on a handoff branch. |
 
 Launch uses `@auto` or a direct runtime address such as `@claude` or `@codex`.
 Direct addresses constrain the runtime and accept the same tags; for example,

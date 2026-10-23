@@ -34,7 +34,7 @@ pub fn is_rate_limit_snapshot_map(map: &Map<String, Value>) -> bool {
 }
 
 /// The short label the meters use for a window of `minutes` ("5h", "1w").
-pub fn rate_limit_window_label(minutes: f64) -> Option<String> {
+pub(crate) fn rate_limit_window_label(minutes: f64) -> Option<String> {
     if !minutes.is_finite() || minutes <= 0.0 {
         return None;
     }
@@ -56,7 +56,10 @@ pub fn rate_limit_window_label(minutes: f64) -> Option<String> {
 
 /// Merge `next` into `target`, replacing a window with the same label/window
 /// key (case-insensitively) rather than listing it twice.
-pub fn append_quota_usages(target: &mut Option<Vec<LlmQuotaUsage>>, next: Vec<LlmQuotaUsage>) {
+pub(crate) fn append_quota_usages(
+    target: &mut Option<Vec<LlmQuotaUsage>>,
+    next: Vec<LlmQuotaUsage>,
+) {
     if next.is_empty() {
         return;
     }
@@ -90,7 +93,7 @@ pub fn append_quota_usages(target: &mut Option<Vec<LlmQuotaUsage>>, next: Vec<Ll
 ///
 /// `used` and `limit` settle it outright when the window carries them, so the
 /// windows that report both never depend on that convention at all.
-pub fn normalized_quota_percent(
+pub(crate) fn normalized_quota_percent(
     reported: Option<f64>,
     used: Option<f64>,
     limit: Option<f64>,
@@ -107,7 +110,7 @@ pub fn normalized_quota_percent(
 
 /// A percent derived from `limit` with `used` (or `remaining`), when the
 /// window reports amounts instead of a percent.
-pub fn quota_percent_from_usage_fields(map: &Map<String, Value>) -> Option<f64> {
+pub(crate) fn quota_percent_from_usage_fields(map: &Map<String, Value>) -> Option<f64> {
     let limit = first_f64(map, &["limit", "max", "maximum", "quota", "total"])?;
     if limit <= 0.0 {
         return None;
@@ -134,7 +137,7 @@ fn quota_usage_key(quota: &LlmQuotaUsage) -> String {
 
 /// Keep only the Codex windows (exact `codex` window first) and order them
 /// 5h, 1w, then the rest.
-pub fn prefer_codex_quota_windows(quotas: &mut Option<Vec<LlmQuotaUsage>>) {
+pub(crate) fn prefer_codex_quota_windows(quotas: &mut Option<Vec<LlmQuotaUsage>>) {
     let Some(items) = quotas.as_mut() else {
         return;
     };

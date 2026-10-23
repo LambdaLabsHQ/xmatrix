@@ -3,7 +3,7 @@ import {
   planProductTailCacheEviction,
   type ProductTailCacheEntry,
 } from "./product-tail-cache";
-import type { SerializedChannel } from "@xmatrix/protocol";
+import type { ChannelSnapshot } from "@xmatrix/protocol";
 
 const DB_NAME_PREFIX = "xmatrix-product-tail-cache";
 const DB_VERSION = 2;
@@ -24,12 +24,12 @@ interface ProductChannelCatalogSnapshot {
   key: typeof CATALOG_KEY;
   userId: string;
   cachedAt: number;
-  channels: SerializedChannel[];
+  channels: ChannelSnapshot[];
 }
 
-function catalogChannelForDisk(channel: SerializedChannel): SerializedChannel {
+function catalogChannelForDisk(channel: ChannelSnapshot): ChannelSnapshot {
   const display = { ...channel };
-  delete display.memberPresence;
+  display.presence = undefined;
   delete display.visibleHumanMemberIds;
   delete display.metadata;
   return display;
@@ -131,7 +131,7 @@ export class ProductTailCacheStore {
     }
   }
 
-  async readCatalog(): Promise<SerializedChannel[]> {
+  async readCatalog(): Promise<ChannelSnapshot[]> {
     try {
       const tx = this.db.transaction(CATALOG_STORE, "readonly");
       const row = await request(tx.objectStore(CATALOG_STORE).get(CATALOG_KEY)) as
@@ -143,7 +143,7 @@ export class ProductTailCacheStore {
     }
   }
 
-  async putCatalog(channels: SerializedChannel[]): Promise<void> {
+  async putCatalog(channels: ChannelSnapshot[]): Promise<void> {
     try {
       const snapshot: ProductChannelCatalogSnapshot = {
         key: CATALOG_KEY,

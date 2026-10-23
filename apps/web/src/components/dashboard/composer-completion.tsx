@@ -21,11 +21,12 @@ import {
 } from "lucide-react";
 import {
   WEB_PROXY_ROUTES,
+  faceInitials,
   pageBlocks,
   type SpaceLaunchTargetsResponse,
   type AgentInvocationSelection,
   type AppConnectorCompletionResponse,
-  type SerializedChannel,
+  type ChannelSnapshot,
   type SerializedSpace,
   type SerializedWorkspace,
 } from "@xmatrix/protocol";
@@ -35,11 +36,11 @@ import {
 } from "@/components/dashboard/composer-caret";
 import {
   CompletionOptionButton,
-  avatarInitials,
   stopTouchPropagation,
 } from "@/components/dashboard/completion-option-button";
 import { ContentSkeleton } from "@/components/dashboard/content-skeleton";
 import { IdentityAvatar } from "@/components/dashboard/identity-avatar";
+import { Face } from "@/components/dashboard/face";
 import { MentionCategoryLabel } from "./mention-category-label";
 import { SlashCommandPanel } from "@/components/dashboard/slash-command-panel";
 import { useAuth } from "@/lib/auth-context";
@@ -111,7 +112,7 @@ export type ComposerContextFields = {
   onInvocationSelect?: (value: string, selection: AgentInvocationSelection, label?: string) => void;
   /** Keeps a picked channel or page shown by name; without it the draft holds the id token itself. */
   onReferenceSelect?: (value: string, binding: ComposerReferenceBinding) => void;
-  channel: SerializedChannel | null;
+  channel: ChannelSnapshot | null;
   space: SerializedSpace | null;
   token: string | null;
   workspaces: SerializedWorkspace[];
@@ -1023,12 +1024,15 @@ export function useComposerCompletion({
                               <PlugZap className="size-4" />
                             )}
                           </span>
+                        ) : candidate.face ? (
+                          // A row's face is named as the row is: `codex:1`, not the Agent's bare name.
+                          <Face of={{ ...candidate.face, name: candidate.name }} size="xs" shape="circle" />
                         ) : (
+                          // A row that is no one, as a command an Agent advertises, keeps its own letters.
                           <IdentityAvatar
                             kind={candidate.kind === "agent" ? "agent" : "human"}
                             label={candidate.name}
-                            initials={avatarInitials(candidate.name)}
-                            imageUrl={candidate.avatarUrl}
+                            initials={faceInitials(candidate.name)}
                             size="xs"
                             shape="circle"
                           />

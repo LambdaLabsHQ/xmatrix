@@ -1,11 +1,13 @@
 import { betterAuth, type BetterAuthOptions } from "better-auth";
+import { decodeJwt } from "jose";
 import { APIError } from "better-auth/api";
 import { bearer, emailOTP, jwt } from "better-auth/plugins";
+import { passkey } from "@better-auth/passkey";
 
 import {
 } from "@xmatrix/protocol";
 
-import { AUTH_POSTGRES_MODELS } from "./auth-postgres-models";
+import { AUTH_POSTGRES_MODELS, AUTH_POSTGRES_PASSKEY_SCHEMA } from "./auth-postgres-models";
 import {
   authAuthority,
   authPostgresTransaction,
@@ -24,8 +26,12 @@ import { passwordResetEmail, VERIFIED_PASSWORD_OPTIONS } from "./auth-password-p
 import { runBetterAuthHandlerWithObservedHookFailure } from "./better-auth-request-lifecycle";
 import { mintHandleForNewAccount } from "./human-handle-mint";
 import { mcpOAuthPlugins } from "./mcp-oauth";
-import { appOrigin, hubAuthBaseUrl } from "./deployment-origins";
+import { TWO_FACTOR_REQUIRED, twoFactorPlugins } from "./two-factor";
+import { appOrigin, appOrigins, hubAuthBaseUrl } from "./deployment-origins";
 import type { Env } from "./types";
+
+/** The iOS app's bundle id, the audience of the identity tokens its Sign in with Apple returns. */
+const APPLE_APP_BUNDLE_ID = "sh.xmatrix.app";
 
 type BetterAuthUser = {
   id: string;
@@ -37,6 +43,7 @@ type BetterAuthUser = {
 type BetterAuthSessionResponse = {
   user?: BetterAuthUser;
   token?: string;
+  twoFactorRedirect?: boolean;
 };
 
 type BetterAuthGetSessionResponse = {
@@ -163,6 +170,7 @@ async function handleProductAuthRequestWithDatabase(
     (error) => {
       emailOtpFailure = error;
     },
+    /^\/api\/auth\/callback\/(google|github)$/u.test(new URL(request.url).pathname),
   );
   // Better Auth 1.6 catches failures raised by runInBackgroundOrAwait and
   // otherwise returns 200. Re-raise the request-local failure after its
@@ -187,6 +195,7 @@ function createAuthWithDatabase(
   postgres: boolean,
   behavior: AuthBehaviorHooks,
   observeEmailOtpFailure?: (error: unknown) => void,
+  socialCallback = false,
 ): BetterAuthInstance {
   if (!env.BETTER_AUTH_SECRET) {
     throw new Error("BETTER_AUTH_SECRET is not configured");
@@ -199,16 +208,29 @@ function createAuthWithDatabase(
     socialProviders.google = {
       clientId: env.GOOGLE_CLIENT_ID,
       clientSecret: env.GOOGLE_CLIENT_SECRET,
+      // Always ask which account, so a browser signed in to one Google
+      // account can still sign in to xMatrix with another.
+      prompt: "select_account",
     };
   }
-  // The GitHub App's own OAuth identity. People link it to prove which GitHub
-  // account is theirs, so their pull requests count as their claimed work.
+  // The GitHub App's OAuth identity supports sign-in and explicit profile
+  // linking. Space installations remain separate connector grants.
   if (env.GITHUB_APP_CLIENT_ID && env.GITHUB_APP_CLIENT_SECRET) {
     socialProviders.github = {
       clientId: env.GITHUB_APP_CLIENT_ID,
       clientSecret: env.GITHUB_APP_CLIENT_SECRET,
+      prompt: "select_account",
     };
   }
+
+  // The iOS app's Sign in with Apple hands its identity token straight to
+  // `/sign-in/social`; Apple signs it for the app's bundle id. There is no
+  // web redirect flow for Apple, so no client secret is configured.
+  socialProviders.apple = {
+    clientId: APPLE_APP_BUNDLE_ID,
+    clientSecret: "",
+    appBundleIdentifier: APPLE_APP_BUNDLE_ID,
+  };
 
   const jwtPlugin = postgresJwtPlugin(env, postgres);
   return betterAuth({
@@ -217,8 +239,11 @@ function createAuthWithDatabase(
     basePath: "/api/auth",
     secret: env.BETTER_AUTH_SECRET,
     database,
-    trustedOrigins: Array.from(new Set([appOrigin(env), hubAuthBaseUrl(env)])),
+    trustedOrigins: Array.from(new Set([...appOrigins(env), hubAuthBaseUrl(env)])),
     socialProviders,
+    // A missing/consumed state cannot supply the flow's errorCallbackURL.
+    // Keep that refusal recoverable through the deployment-owned login page.
+    ...(socialCallback ? { onAPIError: { errorURL: `${appOrigin(env)}/login` } } : {}),
     emailAndPassword: {
       ...VERIFIED_PASSWORD_OPTIONS,
       async sendResetPassword({ user, url }) {
@@ -292,6 +317,10 @@ function createAuthWithDatabase(
     },
     advanced: {
       trustedProxyHeaders: true,
+      // Better Auth 1.6.33 stores OAuth state/PKCE for ten minutes but
+      // defaults its signed state cookie to five. Keep the browser proof
+      // for the same window so a slow provider login can still return.
+      cookies: { state: { attributes: { maxAge: 600 } } },
       ...(authCookiePrefix ? { cookiePrefix: authCookiePrefix } : {}),
       ...(authCookieDomain
         ? {
@@ -320,6 +349,16 @@ function createAuthWithDatabase(
       }),
       jwtPlugin,
       bearer(),
+      ...twoFactorPlugins(env, postgres),
+      // Passkeys belong to the app's own domain, so one made on xmatrix.sh
+      // signs in on any of its pages, the beta Web's included; the Hub only
+      // checks them.
+      passkey({
+        rpID: new URL(appOrigin(env)).hostname,
+        rpName: "xMatrix",
+        origin: appOrigins(env),
+        ...(postgres ? { schema: AUTH_POSTGRES_PASSKEY_SCHEMA } : {}),
+      }),
       // Outside AI apps sign in through the PostgreSQL authority only.
       ...(postgres ? mcpOAuthPlugins(env) : []),
     ],
@@ -398,6 +437,11 @@ export async function verifyBetterAuthEmailOtp(
     body: JSON.stringify({ email, otp }),
   });
   const payload = (await response.json().catch(() => ({}))) as BetterAuthSessionResponse;
+  // This route returns tokens and has no step for the code; the browser does.
+  if (payload.twoFactorRedirect) {
+    throw new BetterAuthRequestError(403,
+      "Two-step verification is on for this account. Sign in in your browser.", TWO_FACTOR_REQUIRED);
+  }
   if (!payload.token || !payload.user?.id || !payload.user.email) {
     throw new BetterAuthRequestError(
       503,
@@ -456,8 +500,8 @@ function exchangedSessionUser(user: AuthUser, existingUser?: BetterAuthUserRow):
     ? {
         id: existingUser.id,
         email: existingUser.email,
-        name: user.name || existingUser.name || undefined,
-        avatarUrl: user.avatarUrl || existingUser.image || undefined,
+        name: existingUser.name || undefined,
+        avatarUrl: existingUser.image || undefined,
       }
     : user;
 }
@@ -475,12 +519,18 @@ async function completeSessionExchange(
   };
 }
 
+/**
+ * A session the Hub issues itself, for a terminal, daemon or app that proved
+ * who it is. `label` names what holds it in the person's session list, where
+ * a browser's own sessions show their user agent.
+ */
 export async function createBetterAuthSessionForUser(
   env: Env,
-  user: AuthUser
+  user: AuthUser,
+  label?: string,
 ): Promise<AuthSession> {
   if (authAuthority(env) === "postgres") {
-    return createPostgresSessionForUser(env, user);
+    return createPostgresSessionForUser(env, user, label);
   }
   const authDatabase = requireAuthD1(env);
 
@@ -496,23 +546,12 @@ export async function createBetterAuthSessionForUser(
   }
 
   await authDatabase.batch([
-    existingUser
-      ? authDatabase.prepare(
-          [
-            'UPDATE "user" SET',
-            '"name" = ?,',
-            '"image" = ?,',
-            '"updatedAt" = ?',
-            'WHERE "id" = ?',
-          ].join(" ")
-        ).bind(name, user.avatarUrl || existingUser.image || null, now.toISOString(), existingUser.id)
-      : authDatabase.prepare(
-          [
-            'INSERT INTO "user"',
-            '("id", "name", "email", "emailVerified", "image", "createdAt", "updatedAt")',
-            "VALUES (?, ?, ?, 1, ?, ?, ?)",
-          ].join(" ")
-        ).bind(user.id, name, user.email, user.avatarUrl || null, now.toISOString(), now.toISOString()),
+    ...(!existingUser ? [authDatabase.prepare([
+      'INSERT INTO "user"',
+      '("id", "name", "email", "emailVerified", "image", "createdAt", "updatedAt")',
+      "VALUES (?, ?, ?, 1, ?, ?, ?)",
+    ].join(" ")).bind(user.id, name, user.email, user.avatarUrl || null,
+      now.toISOString(), now.toISOString())] : []),
     authDatabase.prepare(
       [
         'INSERT INTO "session"',
@@ -532,7 +571,7 @@ export async function createBetterAuthSessionForUser(
   return completeSessionExchange(env, sessionToken, sessionUser);
 }
 
-async function createPostgresSessionForUser(env: Env, user: AuthUser): Promise<AuthSession> {
+async function createPostgresSessionForUser(env: Env, user: AuthUser, label?: string): Promise<AuthSession> {
   const { now, expiresAt, sessionToken, sessionId, name } = sessionExchangeFacts(user);
   const existingUser = await authPostgresTransaction(
     env,
@@ -551,15 +590,9 @@ async function createPostgresSessionForUser(env: Env, user: AuthUser): Promise<A
   if (sessionUser.id !== user.id) throw new Error(SESSION_EXCHANGE_USER_MISMATCH);
 
   await authPostgresTransaction(env, "auth.session_exchange.write", async (transaction) => {
-    if (existingUser) {
-      await transaction.query({
-        name: "auth_session_exchange_update_user_v1",
-        text: `UPDATE control.auth_users SET name = $1, image = $2, updated_at = $3
-          WHERE id = $4`,
-        values: [name, user.avatarUrl || existingUser.image || null, now, existingUser.id],
-        maxRows: 0,
-      });
-    } else {
+    // A retained token proves identity; its old profile fields must not
+    // overwrite the name or avatar the person has since chosen.
+    if (!existingUser) {
       await transaction.query({
         name: "auth_session_exchange_insert_user_v1",
         text: `INSERT INTO control.auth_users
@@ -575,15 +608,93 @@ async function createPostgresSessionForUser(env: Env, user: AuthUser): Promise<A
       values: [sessionUser.id, now], maxRows: 0,
     });
     await transaction.query({
-      name: "auth_session_exchange_insert_session_v1",
+      name: "auth_session_exchange_insert_session_v2",
       text: `INSERT INTO control.auth_sessions
-        (id, expires_at, token, created_at, updated_at, user_id)
-        VALUES ($1, $2, $3, $4, $4, $5)`,
-      values: [sessionId, expiresAt, sessionToken, now, sessionUser.id], maxRows: 0,
+        (id, expires_at, token, created_at, updated_at, user_id, user_agent)
+        VALUES ($1, $2, $3, $4, $4, $5, $6)`,
+      values: [sessionId, expiresAt, sessionToken, now, sessionUser.id, label?.slice(0, 256) ?? null], maxRows: 0,
     });
   });
 
   return completeSessionExchange(env, sessionToken, sessionUser);
+}
+
+/**
+ * Starts a Google or GitHub sign-in whose provider answer comes back to
+ * `callbackURL` on this Hub. The browser that follows `url` must also keep
+ * `cookies`: they bind the provider's answer to that browser.
+ */
+export async function startBetterAuthSocialRedirect(env: Env, provider: "google" | "github",
+  callbackURL: string, errorCallbackURL: string): Promise<{ url: string; cookies: string[] }> {
+  const response = await callBetterAuth(env, "/sign-in/social", {
+    method: "POST",
+    body: JSON.stringify({ provider, callbackURL, errorCallbackURL, disableRedirect: true }),
+  });
+  const payload = (await response.json().catch(() => ({}))) as { url?: unknown };
+  if (typeof payload.url !== "string" || !payload.url) {
+    throw new BetterAuthRequestError(503, "Authentication service returned no provider address.");
+  }
+  return { url: payload.url, cookies: response.headers.getSetCookie() };
+}
+
+/** The person a browser request's own session cookie signs in, and when their account was made; null without one. */
+export async function betterAuthUserFromCookies(env: Env, cookieHeader: string | null):
+  Promise<{ user: AuthUser; createdAt: number | null } | null> {
+  if (!cookieHeader) return null;
+  const response = await callBetterAuth(env, "/get-session", { headers: { cookie: cookieHeader } });
+  const payload = (await response.json().catch(() => null)) as
+    (BetterAuthGetSessionResponse & { user?: { createdAt?: string } }) | null;
+  if (!payload?.user?.id || !payload.user.email) return null;
+  const createdAt = payload.user.createdAt ? Date.parse(payload.user.createdAt) : Number.NaN;
+  return { user: authUserFromBetterAuthUser(payload.user), createdAt: Number.isNaN(createdAt) ? null : createdAt };
+}
+
+/**
+ * Ends the session a refresh token names, so neither it nor an access token
+ * minted from it is accepted again. Ending a session that is already gone is
+ * not an error: signing out twice signs out once.
+ */
+export async function revokeBetterAuthSession(env: Env, sessionToken: string): Promise<void> {
+  if (authAuthority(env) === "postgres") {
+    await authPostgresTransaction(env, "auth.session_revoke", async (transaction) => {
+      await transaction.query({
+        name: "auth_session_revoke_v1",
+        text: "DELETE FROM control.auth_sessions WHERE token = $1",
+        values: [sessionToken], maxRows: 0,
+      });
+    });
+    return;
+  }
+  await requireAuthD1(env).prepare('DELETE FROM "session" WHERE "token" = ?').bind(sessionToken).run();
+}
+
+/**
+ * Whether the session an already-verified access token was minted from still
+ * exists. Access tokens are checked by signature alone for their hour, so a
+ * route that turns one into a new session asks this first: a signed-out
+ * session's leftover token must not become a fresh one. A token minted from
+ * no session (an Agent Run's, a test's) has nothing to check.
+ */
+export async function accessTokenSessionAlive(env: Env, verifiedToken: string): Promise<boolean> {
+  let sessionId: unknown;
+  try {
+    sessionId = decodeJwt(verifiedToken).auth_session_id;
+  } catch {
+    return true;
+  }
+  if (typeof sessionId !== "string" || !sessionId) return true;
+  if (authAuthority(env) === "postgres") {
+    const rows = await authPostgresTransaction(env, "auth.session_alive", async (transaction) =>
+      transaction.query<{ id: string }>({
+        name: "auth_session_alive_v1",
+        text: "SELECT id FROM control.auth_sessions WHERE id = $1 AND expires_at > now() LIMIT 1",
+        values: [sessionId], maxRows: 1,
+      }));
+    return rows.length > 0;
+  }
+  const row = await requireAuthD1(env).prepare('SELECT "id" FROM "session" WHERE "id" = ? AND "expiresAt" > ?')
+    .bind(sessionId, new Date().toISOString()).first();
+  return Boolean(row);
 }
 
 async function createBetterAuthJwtForSession(env: Env, sessionToken: string): Promise<string> {

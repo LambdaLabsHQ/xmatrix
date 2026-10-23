@@ -45,3 +45,23 @@ test("preview refuses Agent callers and bounds draft size and range count before
   assert.equal(unavailable.status, 503);
   assert.equal(unavailable.headers.get("cache-control"), "private, no-store");
 });
+
+test("each Human's previews are bounded before the draft is read, even while request limits only log", async () => {
+  const counts = new Map();
+  const env = { RATE_LIMIT_SUMMON_INTENT: { async limit({ key }) {
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+    return { success: counts.get(key) <= 1 };
+  } } };
+  const post = async (id) => {
+    const app = new Hono();
+    registerSummonIntentRoutes(app, async () => ({ id }));
+    return app.request("/api/channels/c/summon-intent", { method: "POST",
+      headers: { "content-type": "application/json" }, body: JSON.stringify({ body, summons }) }, env);
+  };
+  assert.equal((await post("u")).status, 503, "the first preview reaches Jev's configuration check");
+  const refused = await post("u");
+  assert.equal(refused.status, 429);
+  assert.equal(refused.headers.get("Retry-After"), "60");
+  assert.equal((await refused.json()).code, "rate_limited");
+  assert.equal((await post("v")).status, 503, "each Human has their own allowance");
+});

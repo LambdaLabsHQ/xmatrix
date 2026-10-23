@@ -1,5 +1,8 @@
 import type { AgentRegistrationIdentity } from "./agent-caller";
 import type { Env } from "../types";
+import type { XActionCapability } from "./x-accounts";
+import type { XMediaCapability } from "./x-media";
+import type { UpstreamMeter } from "../usage-cost-metering";
 
 /**
  * One provider's Hub-side behavior (docs/design/connector-platform.md §3.1).
@@ -19,7 +22,7 @@ export interface ConnectorProvider {
   /** Provider-side configuration that follows the Space's subscriptions, if the provider keeps any. */
   subscriptions?: ConnectorSubscriptionSync;
   /** One cheap authenticated provider call proving the stored credentials work; throws when they do not. */
-  verify?: (credentials: Readonly<Record<string, string>>) => Promise<void>;
+  verify?: (credentials: Readonly<Record<string, string>>, meter?: UpstreamMeter) => Promise<void>;
 }
 
 /**
@@ -28,7 +31,9 @@ export interface ConnectorProvider {
  * last Channel unsubscribes. A returned string refuses the subscription.
  */
 export interface ConnectorSubscriptionSync {
-  sync(input: { env: Env; spaceId: string; credentials: Readonly<Record<string, string>>; source: string; subscribed: boolean }):
+  sync(input: { env: Env; spaceId: string; credentials: Readonly<Record<string, string>>; source: string; subscribed: boolean;
+    /** The Human the command acts for: its writer, or the owner of the Agent's Run. */
+    actorUserId: string }):
     Promise<string | undefined>;
 }
 
@@ -40,8 +45,21 @@ export interface ConnectorActionStatement {
 }
 
 export interface ConnectorActionContext {
+  /** X accounts scoped to this caller; grants remain inside the Hub. */
+  x?: XActionCapability;
+  /** Channel attachment access and account-bound X video upload receipts. */
+  xMedia?: XMediaCapability;
+  /** Revalidates current Channel policy immediately before an outbound write. */
+  authorizeWrite?: () => Promise<void>;
   /** The connection's decrypted credential values. */
   credentials: Readonly<Record<string, string>>;
+  /** Meters the operator-paid upstream calls (Composio) this action makes, to its Space. */
+  usage?: UpstreamMeter;
+  /**
+   * Stores values the provider itself renewed during the call (a web session's rotated cookies) in the same
+   * encrypted connection credentials, as the Hub's own write. Only fields the manifest declares are accepted.
+   */
+  saveCredentials?: (fields: Readonly<Record<string, string>>) => Promise<void>;
   /**
    * Who runs the action: the Human, or an Agent and the user whose Run it is.
    * `agent` resolves the Agent's registration only when an action needs it.
@@ -75,6 +93,8 @@ export interface ConnectorAction {
   requires: readonly string[];
   /** Validates the statement before any provider call; a string is the reason it is invalid. */
   parse(statement: ConnectorActionStatement): Record<string, string> | string;
+  /** Freeze the provider destination and preview before asking a Human. */
+  prepare?: (context: ConnectorActionContext, input: Record<string, string>) => Promise<Record<string, string>>;
   execute(context: ConnectorActionContext, input: Record<string, string>): Promise<ConnectorActionResult>;
 }
 
@@ -83,6 +103,8 @@ export interface ConnectorCommandInput {
   env: Env;
   channelId: string;
   messageId: string;
+  /** The original command for a later attempt; null publishes an unthreaded decision with no retained message reference. */
+  commandMessageId?: string | null;
   body: string;
   actorUserId: string;
   /** Who wrote the message; an Agent runs write actions only where the Channel allows it. */
@@ -122,6 +144,12 @@ export interface ConnectorEvent {
   /** Bounded markdown posted to subscribed Channels. Untrusted content. */
   body: string;
   url?: string;
+  /**
+   * The provider object the event is about, for a provider whose one delivery
+   * serves several connections that may each read different things (Linear):
+   * each connection takes it only if its own grant reads this object.
+   */
+  subject?: { entity: string; id: string };
 }
 
 export type ConnectorDeliveryResult =

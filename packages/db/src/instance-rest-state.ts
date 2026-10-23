@@ -16,7 +16,6 @@ export function resumableChannelRun(metadata: Readonly<Record<string, unknown>>)
   if (typeof metadata.resumeSessionKey !== "string" || !metadata.resumeSessionKey.trim()) return false;
   if (metadata.instanceDeletion !== undefined || metadata.instanceHandoff !== undefined) return false;
   if (typeof metadata.routedAs === "string" && metadata.routedAs.startsWith("management_")) return false;
-  if (metadata.channelDeliveryEnabled === false) return false;
   return automationRunIdentity(metadata).automationId === undefined;
 }
 

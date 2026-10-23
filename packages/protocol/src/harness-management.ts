@@ -54,6 +54,14 @@ export interface HarnessLogin {
 export interface HarnessManagement {
   /** null means no verified CLI version command. Capture group 1 is the version. */
   version: (HarnessCommand & { regex: string }) | null;
+  /**
+   * The oldest version of `program` that speaks the protocol xMatrix launches
+   * it with, from the vendor's own changelog (`sources`). `program` is the
+   * vendor's name for what `version` reports on (Cursor's is the Cursor CLI,
+   * not the editor): what a person is told is too old. An older install is
+   * never routed to and is offered an update instead; absent means none is known.
+   */
+  minimumVersion?: { program: string; version: string };
   /** null means no verified native recipe for that platform. */
   install: { unix: HarnessCommand | null; windows: HarnessCommand | null };
   update: { unix: HarnessCommand | null; windows: HarnessCommand | null };
@@ -79,8 +87,21 @@ export interface HarnessInventoryItem {
   latestVersion?: string;
   /** Effective automatic updating on this machine: native control or the daemon's own update. */
   autoUpdate?: "enabled" | "disabled" | "unknown";
-  /** The harness's own sign-in status, when its preset has a status command. */
+  /** The harness's own sign-in status: its status command's answer, or for an ACP harness without one,
+   * whether it opened a session when started the way a launch starts it. */
   login?: HarnessLoginState;
+  /** Why a harness started the way a launch starts it refused to open a session, in its own words. */
+  loginDetail?: string;
+  /** When this item alone was probed again after the inventory's `capturedAt`, by an action on it
+   * such as a sign-in. Absent, the item is as old as the inventory. */
+  observedAt?: string;
+}
+
+/** When this item was last observed: its own re-probe, else the whole inventory's capture. */
+export function harnessItemObservedAt(inventory: HarnessInventory, item: HarnessInventoryItem): number {
+  const captured = Date.parse(inventory.capturedAt);
+  const observed = item.observedAt === undefined ? Number.NaN : Date.parse(item.observedAt);
+  return Number.isFinite(observed) && observed > captured ? observed : captured;
 }
 
 export const HARNESS_LOGIN_STATES = ["signed_in", "signed_out", "unknown"] as const;
@@ -98,10 +119,12 @@ const STATUSES = new Set(["ok", "missing", "unsupported", "timeout", "failed", "
 const ID = /^[a-z][a-z0-9-]{0,63}$/u;
 
 /** Fail closed, strip unknown keys, and keep daemon output out of persisted metadata. */
+const TIMESTAMP = /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{1,9})?Z$/u;
+
 export function parseHarnessInventory(value: unknown): HarnessInventory | undefined {
   const input = record(value);
   if (!input || input.schemaVersion !== 1 || typeof input.capturedAt !== "string" ||
-      !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{1,9})?Z$/u.test(input.capturedAt) ||
+      !TIMESTAMP.test(input.capturedAt) ||
       !Number.isFinite(Date.parse(input.capturedAt)) ||
       !Array.isArray(input.items) || input.items.length > 64) return undefined;
   const ids = new Set<string>();
@@ -113,7 +136,7 @@ export function parseHarnessInventory(value: unknown): HarnessInventory | undefi
         !STATUSES.has(item.probeStatus)) return undefined;
     if (item.autoUpdate !== undefined && !AUTO_UPDATE_STATES.has(item.autoUpdate as string)) return undefined;
     if (item.login !== undefined && !(HARNESS_LOGIN_STATES as readonly unknown[]).includes(item.login)) return undefined;
-    for (const [key, max] of [["path", 4096], ["version", 128], ["latestVersion", 128]] as const) {
+    for (const [key, max] of [["path", 4096], ["version", 128], ["latestVersion", 128], ["loginDetail", 300]] as const) {
       if (item[key] !== undefined && (typeof item[key] !== "string" ||
           item[key].length === 0 || item[key].length > max || hasControlCharacter(item[key]))) return undefined;
     }
@@ -128,6 +151,9 @@ export function parseHarnessInventory(value: unknown): HarnessInventory | undefi
       ...(item.latestVersion === undefined ? {} : { latestVersion: item.latestVersion as string }),
       ...(item.autoUpdate === undefined ? {} : { autoUpdate: item.autoUpdate as HarnessInventoryItem["autoUpdate"] }),
       ...(item.login === undefined ? {} : { login: item.login as HarnessLoginState }),
+      ...(item.loginDetail === undefined || item.login !== "signed_out" ? {} : { loginDetail: item.loginDetail as string }),
+      ...(typeof item.observedAt === "string" && TIMESTAMP.test(item.observedAt) && Number.isFinite(Date.parse(item.observedAt))
+        ? { observedAt: item.observedAt } : {}),
     });
   }
   const inventory: HarnessInventory = { schemaVersion: 1, capturedAt: input.capturedAt, items };
@@ -157,6 +183,8 @@ export const MACHINE_HARNESS_UNINSTALL_CAPABILITY = "machine_harness_uninstall_v
 export const MACHINE_HARNESS_RELEASE_CAPABILITY = "machine_harness_release_v1";
 /** A daemon without it cannot parse a `login_*` command, so none is issued or leased to it. */
 export const MACHINE_HARNESS_LOGIN_CAPABILITY = "machine_harness_login_v1";
+/** The daemon registers a starting login before its prompt can be cancelled. */
+export const MACHINE_HARNESS_LOGIN_START_CANCEL_CAPABILITY = "machine_harness_login_start_cancel_v1";
 export const HARNESS_LOGIN_ACTIONS: readonly HarnessAction[] = ["login_start", "login_finish", "login_cancel"];
 /** A harness action no daemon claimed within this long expires and never runs later. */
 export const HARNESS_ACTION_CLAIM_TTL_MS = 10 * 60_000;
@@ -319,4 +347,62 @@ export function harnessActionAvailable(management: HarnessManagement | undefined
       return management.autoUpdate.controls.length > 0 ||
         (["notify", "manual", "unknown"].includes(management.autoUpdate.behavior) && any(management.update));
   }
+}
+
+/** Numeric dot segments in order; a build suffix such as `-4852336` carries no order. */
+export function compareHarnessVersions(left: string, right: string): number | undefined {
+  const segments = (value: string) => value.trim().match(/^v?(\d+(?:\.\d+){0,3})/u)?.[1]?.split(".").map(Number);
+  const a = segments(left);
+  const b = segments(right);
+  if (!a || !b) return undefined;
+  for (let index = 0; index < Math.max(a.length, b.length); index += 1) {
+    const difference = (a[index] ?? 0) - (b[index] ?? 0);
+    if (difference !== 0) return difference < 0 ? -1 : 1;
+  }
+  return 0;
+}
+
+/** What is too old, wherever xMatrix says so: the program, the version its
+ * machine reports and the oldest one xMatrix can talk to. */
+export interface HarnessTooOld {
+  program: string;
+  version: string;
+  minimumVersion: string;
+  /** The machine's name as its owner gave it. */
+  machineName?: string;
+  /** The program's own update, as typed in that machine's terminal. */
+  update?: string;
+}
+
+/** An installed version older than the one xMatrix needs; an unknown version is not judged. */
+export function harnessTooOld(management: Pick<HarnessManagement, "minimumVersion"> | undefined,
+  version: string | undefined): HarnessTooOld | undefined {
+  const minimum = management?.minimumVersion;
+  if (!minimum || !version || compareHarnessVersions(version, minimum.version) !== -1) return undefined;
+  return { program: minimum.program, version, minimumVersion: minimum.version };
+}
+
+/** A dated build without its hash: `2025.09.12-4852336` reads as `2025.09.12`. */
+export function harnessDisplayVersion(version: string): string {
+  return version.replace(/-[0-9a-f]{6,}$/iu, "");
+}
+
+/** "Cursor CLI on Laptop is 2025.09.12, too old for xMatrix, which needs 2026.01.01 or later." */
+export function harnessTooOldSentence(tooOld: HarnessTooOld): string {
+  return `${tooOld.program}${tooOld.machineName ? ` on ${tooOld.machineName}` : ""} is ${harnessDisplayVersion(tooOld.version)}, ` +
+    `too old for xMatrix, which needs ${tooOld.minimumVersion} or later.`;
+}
+
+/** Display argv as documentation; this text is never sent for execution. */
+export function harnessCommandLabel(recipe: HarnessCommand | null | undefined): string | undefined {
+  return recipe ? [recipe.command, ...recipe.args.map((arg) => /\s|["'`]/u.test(arg) ? JSON.stringify(arg) : arg)].join(" ") : undefined;
+}
+
+/** A recipe as a person types it in a terminal: the script, not the shell
+ * wrapping it (`bash -c`, `powershell -Command`). */
+export function harnessCommandLine(recipe: HarnessCommand): string {
+  const script = recipe.command === "powershell" && recipe.args.includes("-Command")
+    ? recipe.args[recipe.args.indexOf("-Command") + 1]
+    : (recipe.command === "bash" || recipe.command === "sh") && recipe.args[0] === "-c" ? recipe.args[1] : undefined;
+  return script ?? harnessCommandLabel(recipe)!;
 }

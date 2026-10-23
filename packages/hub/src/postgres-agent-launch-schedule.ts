@@ -4,7 +4,7 @@ import type { CoordinatorStep } from "./postgres-agent-launch-coordinator";
 export type ScheduledStep = CoordinatorStep | "automation";
 
 export const SCHEDULED_STEPS: readonly ScheduledStep[] = [
-  "registrationPreparation", "registrationStop", "runTerminal", "reborn", "launch", "turnRetry", "automation",
+  "registrationPreparation", "registrationStop", "runTerminal", "reborn", "launch", "turnRetry", "idleSleep", "firstMessageSummon", "automation",
 ];
 
 /** When each kind of a Channel's work is next due; a kind with none is absent. */

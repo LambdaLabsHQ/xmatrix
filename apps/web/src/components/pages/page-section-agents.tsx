@@ -1,8 +1,9 @@
 "use client";
 
-import { createRoot } from "react-dom/client";
-import { avatarInitials } from "@/components/dashboard/completion-option-button";
-import { IdentityAvatar } from "@/components/dashboard/identity-avatar";
+import { useSyncExternalStore } from "react";
+import { createPortal } from "react-dom";
+import type { FaceOf } from "@xmatrix/protocol";
+import { Face } from "@/components/dashboard/face";
 import { COUNT_CHIP_MATERIAL_CLASS } from "@/components/dashboard/workspace-shell-constants";
 import { cn } from "@/lib/utils";
 
@@ -10,7 +11,7 @@ import { cn } from "@/lib/utils";
 export interface SectionAgent {
   name: string;
   busy: boolean;
-  avatarUrl?: string;
+  face: FaceOf;
   conversation: { id: string; name: string | null };
 }
 
@@ -31,8 +32,7 @@ function SectionAgents({ agents, openConversation }: { agents: readonly SectionA
         const label = `${agent.name} · ${agent.busy ? "Working" : "Idle"}${agent.conversation.name
           ? ` · in ${agent.conversation.name}` : ""}`;
         return (
-          <IdentityAvatar key={`${agent.conversation.id}:${agent.name}`} kind="agent" label={agent.name} title={label}
-            imageUrl={agent.avatarUrl} initials={agent.avatarUrl ? avatarInitials(agent.name) : undefined}
+          <Face key={`${agent.conversation.id}:${agent.name}`} of={agent.face} title={label}
             size="xs" shape="circle" onClick={() => openConversation(agent.conversation.id)}
             className={cn("page-section-working rounded-full", agent.busy && "is-busy")} />
         );
@@ -47,11 +47,49 @@ function SectionAgents({ agents, openConversation }: { agents: readonly SectionA
   );
 }
 
-/** Draws the stack into a heading's widget, which is plain DOM; the returned function takes it down. */
+/**
+ * The stacks the headings' widgets hold, which are plain DOM. They are drawn by `SectionAgentsInPage` from
+ * inside the page's own tree, so their faces read as every other face does (face.tsx), not from a tree of
+ * their own that knows neither the reader nor their Space.
+ */
+type Stack = { element: HTMLElement; key: string; agents: readonly SectionAgent[];
+  openConversation: (conversationId: string) => void };
+const stacks = new Map<HTMLElement, Stack>();
+const listeners = new Set<() => void>();
+/** What is drawn, as a new list on every change: the page renders from it, so its render is never stale. */
+let drawn: readonly Stack[] = [];
+let nextKey = 0;
+
+function changed(): void {
+  drawn = [...stacks.values()];
+  for (const listener of listeners) listener();
+}
+
+const drawnNow = () => drawn;
+
+function subscribe(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => { listeners.delete(listener); };
+}
+
+/** Draws the stack into a heading's widget; the returned function takes it down. */
 export function mountSectionAgents(element: HTMLElement, agents: readonly SectionAgent[],
   openConversation: (conversationId: string) => void): () => void {
-  const root = createRoot(element);
-  root.render(<SectionAgents agents={agents} openConversation={openConversation} />);
-  // The editor drops a widget while React may be rendering; unmount after it.
-  return () => queueMicrotask(() => root.unmount());
+  stacks.set(element, { element, key: `section-agents-${nextKey++}`, agents, openConversation });
+  changed();
+  // The editor drops a widget while React may be rendering; take it down after.
+  return () => queueMicrotask(() => {
+    if (stacks.delete(element)) changed();
+  });
+}
+
+/** Every heading's stack, drawn into its widget from the page's tree. */
+export function SectionAgentsInPage() {
+  const current = useSyncExternalStore(subscribe, drawnNow, drawnNow);
+  return (
+    <>
+      {current.map(({ element, key, agents, openConversation }) =>
+        createPortal(<SectionAgents agents={agents} openConversation={openConversation} />, element, key))}
+    </>
+  );
 }

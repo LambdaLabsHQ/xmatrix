@@ -1,26 +1,34 @@
-import { MAX_PAGE_CONVERSATIONS, PageControlError, PostgresPageRepository, readPageConversations,
-  type PagePrincipal } from "@xmatrix/db";
+import { tellPageClaimOverlap } from "./page-claim-overlap";
+import { describePageConversations, MAX_PAGE_CONVERSATIONS, PageControlError, PostgresPageRepository, pageTitle,
+  renamedPageBody, type DatabaseTransaction, type PagePrincipal } from "@xmatrix/db";
 import { ServiceUnavailable } from "./error-contract";
 import { relayResponse } from "./private-response";
 import type { Context, Hono } from "hono";
 import { authorityFailure, requestPrincipal, runPrincipalOf } from "./run-principal";
 import { requireAuth } from "./index-shared";
 import { publishPreReviewVerdict } from "./github-pre-review";
-import { gitHubFileReferenceHref, gitHubFileReferences, pageLineDiff, parseGitHubFileReference, type PageAwareness,
-  type PageChanges, type PageConversation, type PageLink, type PageLinkAnchor, type PageTreeActivity } from "@xmatrix/protocol";
+import { gitHubFileReferenceHref, gitHubFileReferences, immutableContentObjectKey, pageLineDiff, pageMediaFile,
+  pageMediaReferences, parseGitHubFileReference, spaceVisibilityScope, type PageAwareness,
+  type PageBlame, type PageChanges, type PageConversation, type PageLink, type PageLinkAnchor, type PageTreeActivity,
+  type PublicPage } from "@xmatrix/protocol";
 import { canonicalPageMarkdown } from "@xmatrix/protocol/page-document";
 import type { AuthUser } from "./auth";
 import { PAGE_SESSION_HEARTBEAT_PING, PAGE_SESSION_SUBPROTOCOL_PREFIX, pageSessionId } from "./page-session-do";
-import { PAGE_DOCUMENT_FRAGMENT, type PageSessionPresent, type PageSessionPrincipal } from "./page-session";
+import { PAGE_DOCUMENT_FRAGMENT, pageFragmentMarkdown, type PageSessionPresent, type PageSessionPrincipal } from "./page-session";
+import { base64DecodeBytes, base64UrlEncodeBytes } from "./relay-v2-primitives";
+import * as Y from "yjs";
 import { pageConversation, pageTreeDiscussions, workingBySection } from "./page-conversations";
 import { createPostgresAuthorityDatabase } from "./postgres-authority-fleet";
 import { POSTGRES_MESSAGE_CONNECT_TIMEOUT_MS } from "./postgres-message-database-policy";
 import { requireMachineDaemonAuth } from "./index-shared";
 import { tellPageAutomationChannels } from "./page-automation-wake";
+import { tellPageCoWriter } from "./page-co-write-instruction";
 import { fireOwedAutomationTriggers } from "./automation-triggers";
 import { readGitHubFile, type GitHubFileContent } from "./app-connectors";
 import { findAppConnection } from "./apps";
 import type { Env } from "./types";
+import { platformAdminSpaceId } from "./admin-platform-access";
+import { relayContentRepository } from "./relay-r2-upload-private-api";
 
 /**
  * Pages (docs/design/pages-and-conversations.md): the Space's markdown page
@@ -45,18 +53,19 @@ function database(env: Env) {
 }
 
 function repository(env: Env): PostgresPageRepository {
-  return new PostgresPageRepository(database(env));
+  return new PostgresPageRepository(database(env), { creditsWaivedSpaceId: platformAdminSpaceId(env) });
 }
 
 /**
  * The conversations a page's links name, as the caller sees them beside the
  * page (pages-live-document.md §4.4); the most recently linked first.
  */
-async function linkedConversations(env: Env, spaceId: string, caller: PagePrincipal,
-  links: readonly PageLink[]): Promise<PageConversation[]> {
-  const conversationIds = [...new Set(links.map((link) => link.conversationId))].slice(0, MAX_PAGE_CONVERSATIONS);
-  return (await readPageConversations(database(env), { requestId: crypto.randomUUID(), spaceId,
-    principal: caller, conversationIds })).map(pageConversation);
+function linkedConversations(spaceId: string) {
+  return async (tx: DatabaseTransaction, userId: string, links: readonly PageLink[]): Promise<PageConversation[]> => {
+    const conversationIds = [...new Set(links.map((link) => link.conversationId))].slice(0, MAX_PAGE_CONVERSATIONS);
+    // Read in the links' own transaction, as the reader it found.
+    return (await describePageConversations(tx, spaceId, userId, conversationIds)).map(pageConversation);
+  };
 }
 
 const principal = requestPrincipal;
@@ -100,6 +109,16 @@ function cachedGitHubFile(key: string, read: () => Promise<GitHubFileContent>): 
 }
 
 /** The page named by the route, read as the caller, which is also its access check. */
+/** The caller's access to the page and its head, without its text. */
+async function accessAsCaller(c: Context<{ Bindings: Env }>) {
+  const spaceId = c.req.param("spaceId")!;
+  const pageId = c.req.param("pageId")!;
+  const authUser = await requireAuth(c.req.raw, c.env);
+  const page = await repository(c.env).access({ requestId: crypto.randomUUID(), spaceId, pageId,
+    principal: runPrincipalOf(authUser) });
+  return { spaceId, pageId, authUser, page };
+}
+
 async function readAsCaller(c: Context<{ Bindings: Env }>) {
   const spaceId = c.req.param("spaceId")!;
   const pageId = c.req.param("pageId")!;
@@ -109,6 +128,74 @@ async function readAsCaller(c: Context<{ Bindings: Env }>) {
   return { spaceId, pageId, authUser, page };
 }
 
+/**
+ * A file pasted into a page (`xmatrix:page-media/<sha-256>.<ext>`), for a
+ * caller already allowed to read the page: only a file the page's saved text
+ * shows, or one pasted into this very page and not saved yet, and only bytes
+ * the Space holds as page media. A `Range` request is answered in part, so a
+ * video plays from where it is sought.
+ */
+async function pageMediaResponse(c: Context<{ Bindings: Env }>, input: { spaceId: string; pageId: string;
+  body: string; unsaved: boolean; cacheControl: string }): Promise<Response> {
+  const media = pageMediaFile(c.req.param("file") ?? "");
+  if (!media) return c.json({ error: "Not a file pages show", code: "invalid_request" }, 400);
+  const notShown = () => c.json({ error: "The page does not show this file", code: "page_media_not_found" }, 404, NO_STORE);
+  const referenced = pageMediaReferences(input.body).includes(media.file);
+  if (!referenced && !input.unsaved) return notShown();
+  const holding = await relayContentRepository(c.env).pageMediaHolding({ requestId: crypto.randomUUID(),
+    spaceId: input.spaceId, pageId: input.pageId, contentHash: media.contentHash });
+  if (!(referenced ? holding.held : holding.heldForPage)) return notShown();
+  const bucket = c.env.RELAY_PAYLOAD_BUCKET;
+  if (!bucket) throw new ServiceUnavailable("private_storage_unavailable", "Page media is unavailable");
+  const key = immutableContentObjectKey(spaceVisibilityScope(input.spaceId), media.contentHash);
+  const ranged = c.req.raw.headers.has("range");
+  const object = await (ranged ? bucket.get(key, { range: c.req.raw.headers }).catch(() => bucket.get(key))
+    : bucket.get(key));
+  if (!object) return notShown();
+  const headers = new Headers({ "content-type": media.mimeType, "cache-control": input.cacheControl,
+    "x-content-type-options": "nosniff", "accept-ranges": "bytes", etag: object.httpEtag });
+  const range = ranged ? object.range : undefined;
+  if (!range) {
+    headers.set("content-length", String(object.size));
+    return new Response(object.body, { status: 200, headers });
+  }
+  const offset = "suffix" in range ? object.size - range.suffix : range.offset ?? object.size - range.length!;
+  const length = "suffix" in range ? range.suffix : range.length ?? object.size - offset;
+  headers.set("content-length", String(length));
+  headers.set("content-range", `bytes ${offset}-${offset + length - 1}/${object.size}`);
+  return new Response(object.body, { status: 206, headers });
+}
+
+/** A started page's document is at most this much Yjs state. */
+const MAX_STARTED_DOCUMENT_BYTES = 1024 * 1024;
+
+/**
+ * The document a person started writing a new page in, as the page's session will hold it: only the
+ * page's own document, complete, and only what the page schema reads (anything else is dropped).
+ */
+function startedDocument(encoded: string): { update: Uint8Array; markdown: string } {
+  const invalid = () => new PageControlError("invalid_page_document", 400, "document is a page's Yjs document state");
+  let bytes: Uint8Array;
+  try {
+    bytes = base64DecodeBytes(encoded);
+  } catch {
+    throw invalid();
+  }
+  if (bytes.length > MAX_STARTED_DOCUMENT_BYTES) throw invalid();
+  const doc = new Y.Doc();
+  try {
+    Y.applyUpdate(doc, bytes);
+    if (doc.store.pendingStructs || doc.store.pendingDs) throw invalid();
+    if ([...doc.share.keys()].some((name) => name !== PAGE_DOCUMENT_FRAGMENT)) throw invalid();
+    const markdown = pageFragmentMarkdown(doc.getXmlFragment(PAGE_DOCUMENT_FRAGMENT));
+    return { update: Y.encodeStateAsUpdate(doc), markdown };
+  } catch (error) {
+    throw error instanceof PageControlError ? error : invalid();
+  } finally {
+    doc.destroy();
+  }
+}
+
 export function sessionPrincipal(authUser: AuthUser, conversationId?: string): PageSessionPrincipal {
   const run = authUser.agentRun;
   if (!run) return { kind: "user", id: authUser.id, label: authUser.name || authUser.email,
@@ -116,6 +203,27 @@ export function sessionPrincipal(authUser: AuthUser, conversationId?: string): P
   return { kind: "agent", id: run.agentId, label: run.agentName || run.agentId, ownerUserId: run.ownerUserId,
     runProof: { runId: run.runId, instanceId: run.instanceId ?? "", executionKey: run.executionKey },
     conversationId: conversationId ?? run.channelId };
+}
+
+/**
+ * A page is named by the heading its document opens with (pages-live-document.md §4.1), so a
+ * rename edits that line, through the live session like any edit: people on the page see it at
+ * once, and what they are typing elsewhere stays. A head that moves meanwhile is read again once.
+ */
+async function renamePage(env: Env, spaceId: string, pageId: string, authUser: AuthUser, title: string): Promise<void> {
+  const name = pageTitle(title);
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const { page } = await repository(env).read({ requestId: crypto.randomUUID(), spaceId, pageId,
+      principal: runPrincipalOf(authUser) });
+    if (page.title === name) return;
+    const response = await sessionCall(env, spaceId, pageId, "/internal/edit", { principal: sessionPrincipal(authUser),
+      baseRevision: page.headRevision, body: renamedPageBody(page.body, name), conversationIds: [] });
+    if (response.ok) return;
+    if (response.status === 409 && attempt === 0) continue;
+    const refusal = await response.json().catch(() => ({})) as { error?: string; code?: string };
+    throw new PageControlError(refusal.code ?? "page_rename_failed", response.status,
+      refusal.error ?? "The page could not be renamed");
+  }
 }
 
 /** Tells a live session that the head or its settings changed outside it. */
@@ -200,16 +308,33 @@ export function registerPageRoutes(app: Hono<{ Bindings: Env }>): void {
     });
   }));
 
+  // A page is made with a name and markdown, or, when a person starts writing a new page, from the
+  // document they are writing (pages-live-document.md §7): the session starts from that document,
+  // and their editor goes on syncing into it.
   app.post(base, async (c) => run(c, async () => {
     const body = await json(c);
-    return repository(c.env).create({
-      requestId: crypto.randomUUID(), spaceId: c.req.param("spaceId"), principal: await principal(c),
-      title: body.title as string,
+    const spaceId = c.req.param("spaceId");
+    const authUser = await requireAuth(c.req.raw, c.env);
+    const started = typeof body.document === "string" ? startedDocument(body.document) : null;
+    const created = await repository(c.env).create({
+      requestId: crypto.randomUUID(), spaceId, principal: runPrincipalOf(authUser),
+      ...(started ? { body: started.markdown } : {
+        title: body.title as string, ...(typeof body.body === "string" ? { body: body.body } : {}) }),
       ...(body.parentPageId !== undefined ? { parentPageId: body.parentPageId as string | null } : {}),
-      ...(typeof body.body === "string" ? { body: body.body } : {}),
       ...(body.afterPageId !== undefined ? { afterPageId: body.afterPageId as string | null } : {}),
       ...(body.accessMode !== undefined ? { accessMode: body.accessMode as "open" | "restricted" } : {}),
     });
+    if (!started) return created;
+    let seeded = false;
+    try {
+      const response = await sessionCall(c.env, spaceId, created.page.pageId, "/internal/seed", {
+        principal: sessionPrincipal(authUser), document: base64UrlEncodeBytes(started.update),
+      });
+      seeded = response.ok && (await response.json() as { seeded?: boolean }).seeded === true;
+    } catch {
+      // Unseeded, the session loads the page from its markdown, and the editor opens it afresh.
+    }
+    return { ...created, seeded };
   }));
 
   app.get(`${base}/:pageId`, async (c) => run(c, async () => {
@@ -239,9 +364,9 @@ export function registerPageRoutes(app: Hono<{ Bindings: Env }>): void {
   // commits it. Co-authors come only from the session, never from a client.
   app.put(`${base}/:pageId`, async (c) => sessionResponse(c, async () => {
     const body = await json(c);
-    // Reading the page as the caller authorizes them before the session
+    // The caller's access to the page authorizes them before the session
     // shows them anything, including the current text of a conflict.
-    const { spaceId, pageId, authUser } = await readAsCaller(c);
+    const { spaceId, pageId, authUser } = await accessAsCaller(c);
     const conversationIds = stringList(body.conversationIds);
     return sessionCall(c.env, spaceId, pageId, "/internal/edit", {
       principal: sessionPrincipal(authUser, conversationIds[0]), baseRevision: integer(body.baseRevision),
@@ -265,16 +390,26 @@ export function registerPageRoutes(app: Hono<{ Bindings: Env }>): void {
     const spaceId = c.req.param("spaceId");
     const pageId = c.req.param("pageId");
     const caller = await principal(c);
-    // Reading the updates checks the caller may read the page; the rest follows it.
-    const { headRevision, order, updates, owed } = await repository(c.env).blockUpdates({ requestId: crypto.randomUUID(),
-      spaceId, pageId, principal: caller });
-    const [{ claims }, present, { links }] = await Promise.all([
+    // `?scope=sections` is when and where each section last changed and what it owes, alone: a page in the
+    // Web reads its claims, discussions and who is on it on their own, live.
+    if (c.req.query("scope") === "sections") {
+      const { headRevision, order, updates, owed } = await repository(c.env).blockUpdates({
+        requestId: crypto.randomUUID(), spaceId, pageId, principal: caller });
+      return { pageId, headRevision, blocks: [...new Set([...order, ...owed.keys()])].map((blockId) => ({
+        blockId, updated: updates.get(blockId) ?? null, claims: [], present: [], discussions: [],
+        owed: owed.get(blockId) ?? null, working: [] })) };
+    }
+    // Each read checks on its own that the caller may read the page, so they run side by side; the page's
+    // live session is asked who is on it only once the updates' check has passed.
+    const [[{ headRevision, order, updates, owed }, present], { claims }, [links, conversations]] = await Promise.all([
+      repository(c.env).blockUpdates({ requestId: crypto.randomUUID(), spaceId, pageId, principal: caller })
+        .then((read) => Promise.all([read, sessionPresent(c.env, spaceId, pageId)] as const)),
       repository(c.env).claims({ requestId: crypto.randomUUID(), spaceId, pageId, principal: caller }),
-      sessionPresent(c.env, spaceId, pageId),
-      repository(c.env).links({ requestId: crypto.randomUUID(), spaceId, pageId, principal: caller }),
+      repository(c.env).links({ requestId: crypto.randomUUID(), spaceId, pageId, principal: caller,
+        describe: linkedConversations(spaceId) }).then(({ links, described }) => [links, described ?? []] as const),
     ]);
     const discussions = links.filter((link) => link.anchor && !link.resolvedAt);
-    const working = workingBySection(links, await linkedConversations(c.env, spaceId, caller, links));
+    const working = workingBySection(links, conversations);
     // In the page's order; a claim or a person on a section that is gone comes last.
     const blockIds = new Set([...order, ...claims.map((claim) => claim.blockId),
       ...discussions.map((link) => link.blockId), ...owed.keys(),
@@ -299,7 +434,53 @@ export function registerPageRoutes(app: Hono<{ Bindings: Env }>): void {
   app.put(`${base}/:pageId/read`, async (c) => run(c, async () => {
     const body = await json(c);
     return repository(c.env).markRead({ requestId: crypto.randomUUID(), spaceId: c.req.param("spaceId"),
-      pageId: c.req.param("pageId"), principal: await principal(c), revision: integer(body.revision) });
+      pageId: c.req.param("pageId"), principal: await principal(c), revision: integer(body.revision),
+      seen: typeof body.seen === "string" ? body.seen : null });
+  }));
+
+  // Co-writing (docs/design/pages-live-document.md §4.2): a person starts it from the page for a
+  // conversation linked to it. Live, the Agent there joins the page's session and writes into it as
+  // its words come; otherwise its edits wait as suggestions until reviewed.
+  app.post(`${base}/:pageId/co-writing`, async (c) => run(c, async () => {
+    const body = await json(c);
+    const authUser = await requireAuth(c.req.raw, c.env);
+    const at = { spaceId: c.req.param("spaceId"), pageId: c.req.param("pageId"),
+      conversationId: typeof body.conversationId === "string" ? body.conversationId : "" };
+    const started = await repository(c.env).startCoWriting({ requestId: crypto.randomUUID(), ...at,
+      principal: runPrincipalOf(authUser) });
+    if (body.live === true) await tellPageCoWriter(c.env, { ...at, userId: authUser.id, active: true });
+    return started;
+  }));
+  app.delete(`${base}/:pageId/co-writing/:conversationId`, async (c) => run(c, async () => {
+    const authUser = await requireAuth(c.req.raw, c.env);
+    const at = { spaceId: c.req.param("spaceId"), pageId: c.req.param("pageId"),
+      conversationId: c.req.param("conversationId") };
+    const ended = await repository(c.env).endCoWriting({ requestId: crypto.randomUUID(), ...at,
+      principal: runPrincipalOf(authUser) });
+    // A live co-writer leaves the page too; one that never joined has nothing to leave.
+    if (ended.ended) await tellPageCoWriter(c.env, { ...at, userId: authUser.id, active: false });
+    return ended;
+  }));
+  // A person takes back what an Agent co-writing the page live last wrote (page-co-writer.ts).
+  app.post(`${base}/:pageId/co-writing/:conversationId/undo`, async (c) => {
+    try {
+      const { spaceId, pageId, authUser, page } = await accessAsCaller(c);
+      if (authUser.agentRun || !page.canEdit) {
+        throw new PageControlError("page_co_writing_human_only", 403, "Only a person who may edit the page takes back an Agent's change");
+      }
+      return await sessionResponse(c, () => sessionCall(c.env, spaceId, pageId, "/internal/co-write-undo",
+        { principal: sessionPrincipal(authUser), conversationId: c.req.param("conversationId") }));
+    } catch (error) {
+      return failure(c, error);
+    }
+  });
+  app.get(`${base}/:pageId/suggestions`, async (c) => run(c, async () => repository(c.env).suggestions({
+    requestId: crypto.randomUUID(), spaceId: c.req.param("spaceId"), pageId: c.req.param("pageId"),
+    principal: await principal(c) })));
+  app.post(`${base}/:pageId/suggestions/review`, async (c) => run(c, async () => {
+    const body = await json(c);
+    return repository(c.env).reviewSuggestions({ requestId: crypto.randomUUID(), spaceId: c.req.param("spaceId"),
+      pageId: c.req.param("pageId"), principal: await principal(c), through: integer(body.through) });
   }));
 
   // A page's summary, written for the revision its writer read.
@@ -310,8 +491,8 @@ export function registerPageRoutes(app: Hono<{ Bindings: Env }>): void {
       summary: body.summary as string });
   }));
 
-  // Claims: a lease on a block, so the Space sees who is on what. Anyone who
-  // edits the page claims; an owner or admin opens a block for competition.
+  // Claims: who is on a block, so Agents see who is on what. A claim locks
+  // nothing; a second one on a block tells both conversations of each other.
   app.get(`${base}/:pageId/claims`, async (c) => run(c, async () => repository(c.env).claims({
     requestId: crypto.randomUUID(), spaceId: c.req.param("spaceId"), pageId: c.req.param("pageId"),
     principal: await principal(c) })));
@@ -324,6 +505,7 @@ export function registerPageRoutes(app: Hono<{ Bindings: Env }>): void {
       ...(body.minutes !== undefined ? { minutes: integer(body.minutes) } : {}),
       ...(authUser.agentRun ? { conversationId: authUser.agentRun.channelId } : {}) });
     await announceClaims(c);
+    await tellPageClaimOverlap(c.env, { spaceId: c.req.param("spaceId")!, pageId: c.req.param("pageId")!, ...result });
     return result;
   }));
   app.delete(`${base}/:pageId/claims/:claimId`, async (c) => run(c, async () => {
@@ -376,22 +558,40 @@ export function registerPageRoutes(app: Hono<{ Bindings: Env }>): void {
     }
   });
 
-  // A public page for anyone, signed in or not, with who is on it right now.
-  // A page that is not public is not found, whatever the reason.
-  app.get("/api/public/spaces/:spaceId/pages/:pageId", async (c) => {
-    try {
-      const spaceId = c.req.param("spaceId");
-      const pageId = c.req.param("pageId");
-      const { page } = await repository(c.env).publicRead({ requestId: crypto.randomUUID(), spaceId, pageId });
-      // Names and what they are doing; never their conversations or where they are.
-      const present = (await sessionPresent(c.env, spaceId, pageId))
-        .map(({ name, color, kind, activity }) => ({ name, color, kind, activity }));
-      return c.json({ page, present }, 200, { "cache-control": "public, max-age=10" });
-    } catch (error) {
-      // Not public, missing, or in no such Space: all the same to a reader.
-      if (error instanceof PageControlError && error.status === 404) {
-        return c.json({ error: "Page not found", code: "page_not_found" }, 404);
+  // A public page for anyone, signed in or not. A page that is not public is not found, whatever the reason.
+  const publicPage = (path: string, answer: (c: Context<{ Bindings: Env }>, page: PublicPage) => Promise<Response>) =>
+    app.get(`/api/public/spaces/:spaceId/pages/:pageId${path}`, async (c) => {
+      try {
+        const { page } = await repository(c.env).publicRead({ requestId: crypto.randomUUID(),
+          spaceId: c.req.param("spaceId")!, pageId: c.req.param("pageId")! });
+        return await answer(c, page);
+      } catch (error) {
+        // Not public, missing, or in no such Space: all the same to a reader.
+        if (error instanceof PageControlError && error.status === 404) {
+          return c.json({ error: "Page not found", code: "page_not_found" }, 404);
+        }
+        return failure(c, error);
       }
+    });
+
+  // The page, with who is on it right now.
+  publicPage("", async (c, page) => {
+    // Names and what they are doing; never their conversations or where they are.
+    const present = (await sessionPresent(c.env, c.req.param("spaceId")!, c.req.param("pageId")!))
+      .map(({ name, color, kind, activity }) => ({ name, color, kind, activity }));
+    return c.json({ page, present }, 200, { "cache-control": "public, max-age=10" });
+  });
+
+  // A file the page shows: only what its saved text shows.
+  publicPage("/media/:file", (c, page) => pageMediaResponse(c, { spaceId: c.req.param("spaceId")!,
+    pageId: c.req.param("pageId")!, body: page.body, unsaved: false, cacheControl: "public, max-age=300" }));
+
+  app.get(`${base}/:pageId/media/:file`, async (c) => {
+    try {
+      const { spaceId, pageId, page } = await readAsCaller(c);
+      return await pageMediaResponse(c, { spaceId, pageId, body: page.body, unsaved: true,
+        cacheControl: "private, max-age=3600" });
+    } catch (error) {
       return failure(c, error);
     }
   });
@@ -402,14 +602,32 @@ export function registerPageRoutes(app: Hono<{ Bindings: Env }>): void {
       // A page is a document now (pages-live-document.md §4.1). A client that
       // still edits it as markdown text would write where nobody reads, so it
       // is told to reload instead of joining.
-      if ((await json(c)).document !== PAGE_DOCUMENT_FRAGMENT) {
+      const request = await json(c);
+      if (request.document !== PAGE_DOCUMENT_FRAGMENT) {
         return c.json({ error: "This page editor is out of date; reload to keep editing", code: "page_client_outdated" },
           409, NO_STORE);
       }
-      const { spaceId, pageId, authUser, page } = await readAsCaller(c);
+      // The session reads the text itself when it loads: the ticket needs the caller's access alone.
+      const { spaceId, pageId, authUser, page } = await accessAsCaller(c);
+      // An Agent's runtime joins to co-write the page live (page-co-writer.ts): its Run writes, so it must
+      // be able to edit, and a page that takes Agent edits only as suggestions is not written live.
+      const coWriter = request.coWrite === true;
+      // A runtime streaming what its Agent writes from a conversation opens its turns itself.
+      const streams = coWriter && request.stream === true;
+      if (authUser.agentRun && !coWriter) {
+        throw new PageControlError("page_co_writing_required", 403, "An Agent joins only as a page co-writer");
+      }
+      if (coWriter && (!authUser.agentRun || !page.canEdit)) {
+        throw new PageControlError("page_co_writing_forbidden", 403, "Only an Agent that may edit the page co-writes it");
+      }
+      if (coWriter && page.agentSuggestOnly) {
+        throw new PageControlError("page_co_writing_suggest_only", 409,
+          "This page takes Agent edits as suggestions, so it is not co-written live");
+      }
       const ticket = `${crypto.randomUUID()}${crypto.randomUUID()}`.replaceAll("-", "");
       const registered = await sessionCall(c.env, spaceId, pageId, "/internal/ticket", {
-        ticket, principal: sessionPrincipal(authUser), canEdit: page.canEdit,
+        ticket, principal: sessionPrincipal(authUser), canEdit: page.canEdit, ...(coWriter ? { coWriter: true } : {}),
+        ...(streams ? { streams: true } : {}),
       });
       if (!registered.ok) throw new ServiceUnavailable("page_session_unavailable", "Page session is unavailable");
       return c.json({ protocol: `${PAGE_SESSION_SUBPROTOCOL_PREFIX}${ticket}`,
@@ -438,10 +656,16 @@ export function registerPageRoutes(app: Hono<{ Bindings: Env }>): void {
   app.patch(`${base}/:pageId`, async (c) => run(c, async () => {
     const body = await json(c);
     const authUser = await requireAuth(c.req.raw, c.env);
+    if (typeof body.title === "string") await renamePage(c.env, c.req.param("spaceId"), c.req.param("pageId"), authUser, body.title);
+    const structural = ["parentPageId", "afterPageId", "accessMode", "agentSuggestOnly", "access"]
+      .some((field) => body[field] !== undefined);
+    if (!structural) {
+      return repository(c.env).read({ requestId: crypto.randomUUID(), spaceId: c.req.param("spaceId"),
+        pageId: c.req.param("pageId"), principal: runPrincipalOf(authUser) });
+    }
     const result = await repository(c.env).update({
       requestId: crypto.randomUUID(), spaceId: c.req.param("spaceId"), pageId: c.req.param("pageId"),
       principal: runPrincipalOf(authUser),
-      ...(typeof body.title === "string" ? { title: body.title } : {}),
       ...(body.parentPageId !== undefined ? { parentPageId: body.parentPageId as string | null } : {}),
       ...(body.afterPageId !== undefined ? { afterPageId: body.afterPageId as string | null } : {}),
       ...(body.accessMode !== undefined ? { accessMode: body.accessMode as "open" | "restricted" } : {}),
@@ -482,6 +706,23 @@ export function registerPageRoutes(app: Hono<{ Bindings: Env }>): void {
         .sort((a, b) => a.revision - b.revision),
       diff: pageLineDiff(canonicalPageMarkdown(before.body), canonicalPageMarkdown(head.body)),
     };
+  }));
+
+  // Who wrote each piece of the head (pages-live-document.md §3, Facts), and the message a revision's
+  // conversation was at when it was written, to open it there.
+  app.get(`${base}/:pageId/blame`, async (c) => run(c, async (): Promise<PageBlame> =>
+    repository(c.env).blame({ requestId: crypto.randomUUID(), spaceId: c.req.param("spaceId"),
+      pageId: c.req.param("pageId"), principal: await principal(c) })));
+
+  app.get(`${base}/:pageId/revisions/:revision/moment`, async (c) => run(c, async () => {
+    const revision = Number(c.req.param("revision"));
+    const conversationId = c.req.query("conversation") ?? "";
+    if (!Number.isSafeInteger(revision) || revision < 1 || !conversationId) {
+      throw new PageControlError("invalid_request", 400, "a revision and its conversation are required");
+    }
+    return { moment: await repository(c.env).revisionMoment({ requestId: crypto.randomUUID(),
+      spaceId: c.req.param("spaceId"), pageId: c.req.param("pageId"), principal: await principal(c), revision,
+      conversationId }) };
   }));
 
   app.get(`${base}/:pageId/history`, async (c) => run(c, async () => {
@@ -558,13 +799,13 @@ export function registerPageRoutes(app: Hono<{ Bindings: Env }>): void {
     const conversationId = c.req.query("conversationId");
     const spaceId = c.req.param("spaceId");
     const caller = await principal(c);
-    const result = await repository(c.env).links({
-      requestId: crypto.randomUUID(), spaceId, principal: caller,
-      ...(pageId ? { pageId } : {}), ...(conversationId ? { conversationId } : {}),
-    });
     // A page's links come with what the page shows beside each conversation.
-    return pageId ? { ...result, conversations: await linkedConversations(c.env, spaceId, caller, result.links) }
-      : result;
+    const { links, described } = await repository(c.env).links({
+      requestId: crypto.randomUUID(), spaceId, principal: caller,
+      ...(pageId ? { pageId, describe: linkedConversations(spaceId) } : {}),
+      ...(conversationId ? { conversationId } : {}),
+    });
+    return pageId ? { links, conversations: described ?? [] } : { links };
   }));
 
   // The page tree's activity: who is reading or editing each page from a live
@@ -572,12 +813,11 @@ export function registerPageRoutes(app: Hono<{ Bindings: Env }>): void {
   app.get("/api/spaces/:spaceId/page-links/agents", async (c) => run(c, async () => {
     const spaceId = c.req.param("spaceId");
     const caller = await principal(c);
-    const { pages } = await repository(c.env).agentsOnPages({ requestId: crypto.randomUUID(), spaceId, principal: caller });
     // Newest first, so a Space with more open discussions than are read describes the recent ones.
-    const conversationIds = [...new Set(pages.flatMap((page) => page.discussions))].slice(0, MAX_PAGE_CONVERSATIONS);
-    const conversations = new Map((conversationIds.length === 0 ? [] : await readPageConversations(database(c.env), {
-      requestId: crypto.randomUUID(), spaceId, principal: caller, conversationIds,
-    })).map((record) => [record.conversationId, pageConversation(record)]));
+    const { pages, described } = await repository(c.env).agentsOnPages({ requestId: crypto.randomUUID(), spaceId,
+      principal: caller, describe: (tx, userId, discussions) =>
+        describePageConversations(tx, spaceId, userId, discussions.slice(0, MAX_PAGE_CONVERSATIONS)) });
+    const conversations = new Map((described ?? []).map((record) => [record.conversationId, pageConversation(record)]));
     return { pages: pages.map(({ discussions, ...page }): PageTreeActivity =>
       ({ ...page, discussions: pageTreeDiscussions(discussions, conversations) })) };
   }));

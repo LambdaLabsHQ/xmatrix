@@ -1,5 +1,7 @@
 "use client";
+import { GmailNotifications } from "./gmail-notifications";
 
+import { AnimatedIcon } from "@/components/ui/animated-icon";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2, Plus, Trash2 } from "lucide-react";
 import { WEB_PROXY_ROUTES, type SpaceMember } from "@xmatrix/protocol";
@@ -72,8 +74,9 @@ export function GmailMailboxes({ spaceId, token, userId, members, adding, onAdd 
         ))}
         {mailboxes.data?.length === 0 ? <li className="py-2 text-muted-foreground">No mailbox is connected.</li> : null}
       </ul>
+      <GmailNotifications spaceId={spaceId} token={token} userId={userId} mailboxes={mailboxes.data ?? []} />
       <Button size="sm" type="button" disabled={adding} onClick={onAdd}>
-        {adding ? <Loader2 className="animate-spin" /> : <Plus />} Add mailbox
+        {adding ? <AnimatedIcon icon={Loader2} className="animate-spin" /> : <Plus />} Add mailbox
       </Button>
     </div>
   );

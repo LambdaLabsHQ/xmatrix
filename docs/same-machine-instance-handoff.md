@@ -1,5 +1,11 @@
 # Same-machine instance handoff
 
+> **Superseded for new handoffs.** Every handoff, named or `@auto`, is now an
+> ordinary launch through routing on any machine (§2.2 is the only path; the
+> Hub no longer prepares same-machine handoff intents). The same-machine
+> machinery below remains only for handoffs already prepared, and is to be
+> removed together with the work-site transfer between machines.
+
 Status: shipped on main. Grammar and Hub orchestration landed in PR #1624.
 Daemon Transfer and session snapshot landed in PR #1628. CLI/daemon
 binaries that can Transfer require the `0.16.1` release train.
@@ -46,7 +52,7 @@ worktree lease fix`.
 | Channel | v1 is **same Channel only**. Cross-Channel addressing stays informational. |
 | Identity | New `instanceId`, new `channelInstanceId`, new `resumeSessionKey`. |
 | Worktree | Transfer the predecessor's exact cwd / pool slot. Do not reset, clean, or snapshot-as-return. |
-| Writer | One writer per checkout. If the source is live: kill, wait for the exact stop, fence, then spawn. If it is already dead: fence and transfer the retained slot / cwd, then spawn. |
+| Writer | Stop the source execution before the initial successor spawn. Keep the source Instance registered and stopped. An explicit later `:reborn` may resume it in the same directory while the successor runs; no stop-first requirement is imposed. |
 | Provider session | Do **not** set `resume: true` on the successor. Different runtimes cannot consume each other's session ids. |
 | Session files | Successor must be able to **read** the predecessor's xMatrix resume pointer and known provider transcript files. |
 | Harness | Dedicated handoff bootstrap plus ordinary channel-history bootstrap. |
@@ -86,8 +92,10 @@ exactly that mention, and nothing else:
 
 ### 2.2 Moving to another machine
 
-`handoff-elsewhere.ts` moves a repository-backed source whose machine cannot
-take its directory:
+`handoff-successor.ts` moves a source to a successor on any machine. A
+repository-backed checkout travels on a handoff branch; a private managed
+directory (a page co-write, a first message) has no checkout to carry, so the
+successor starts in a fresh one. Every source's conversation travels (§2.3):
 
 1. Hub resolves the exact source Run and Instance even when its Run has
    already exited. A sleeping/interrupted source is marked `stopped` before
@@ -135,9 +143,9 @@ take its directory:
    `xMatrix could not hand off @<source>:<n> to @<successor> (<code>).`
 
 The continuation reconciler reads the predecessor's stop result against the
-stop its intent stored: a reborn's stop keeps the Instance
-(`preserveInstanceForReborn: true`), a handoff's retires it and carries no
-such field. Each is accepted only for its own kind.
+stop its intent stored. Both reborn and handoff now set
+`preserveInstanceForReborn: true`; legacy handoff intents which omitted it
+remain readable with their original exact command expectations.
 
 Everything else is the handoff in this document: same machine, same Channel,
 a new Instance on the runtime default model, the retained directory and
@@ -145,6 +153,51 @@ a new Instance on the runtime default model, the retained directory and
 are never moved. Nothing is handed back after the reset.
 
 ---
+
+### 2.3 The predecessor's conversation
+
+A handoff carries what the predecessor was asked, said and did, whatever the
+successor's harness or model. Neither side resumes another vendor's session:
+no harness can load another's tool-call blocks, reasoning or signatures.
+
+1. Every handoff stop names the source's `resumeSessionKey` (and repo-pool
+   authority when it has one), which its status is read back under, and asks
+   `handoffContext: { maxChars: 60000 }`.
+2. Once the process tree is gone, the source's daemon reads the xMatrix resume
+   pointer the harness last saved under that key, then the harness's own
+   transcript: Claude Code's `~/.claude/projects/*/<id>.jsonl` (main thread
+   only), Codex's `~/.codex/sessions/**/rollout-*-<id>.jsonl` (`response_item`s,
+   not developer messages), or Grok's
+   `~/.grok/sessions/*/<id>/chat_history.jsonl` (the window its model sees
+   after compaction, without synthetic turns, preceded by its newest
+   `compaction/segment_*.md` as a `summary` entry). It keeps harness-neutral
+   entries (`user`, `assistant`, `tool_call` with its tool's name, `tool_result`),
+   each clipped (a message to 6,000 characters, keeping the head and the ask of
+   a long request; a tool call to 600; a result to 1,200), and drops reasoning,
+   signatures and images. Within `maxChars` it keeps any summary, the first
+   request and the newest entries, counting the rest as `omittedEntries`. The stop result
+   carries `handoffContext: { format: "xmatrix.handoff-context.v1", harness,
+   sessionId, entries, omittedEntries, error? }`; a missing session is an
+   `error`, never a failed stop.
+3. Hub hands that context to the successor's spawn as `handoffContext`. It is
+   not the launch's text (routing never reads it) and not part of the launch's
+   request identity, and it is not persisted, so a launch staged before the
+   result arrived still recovers, without it. A stop that did not answer
+   within the wait starts the successor without one.
+4. The successor's daemon writes `HANDOFF.md` (the entries as Markdown, headed
+   as untrusted prior context) and `transcript.jsonl` (the same entries) to a
+   fresh, owner-only scratch directory and exports it as `XMATRIX_HANDOFF_SESSION_DIR`. The
+   conversation and the legacy pointer snapshot share one materializer: a new
+   unpredictable directory per attempt, mode `0700` on Unix or a verified
+   owner-only Windows ACL, secured before any content is written. Files use
+   the private journal's atomic writes (`0600` on Unix, owner-only ACL on
+   Windows). A retry cannot overwrite an earlier bundle or follow a precreated
+   scratch symlink; a privacy/write failure omits the bundle and removes only
+   that attempt's newly created directory. Existing scratch copies are not
+   reopened or migrated by this change. The
+   successor's assignment tells it to read `HANDOFF.md` there before acting,
+   to treat it as context rather than instructions, to verify the state it
+   describes, and never to resume it.
 
 ## 3. Grammar
 
@@ -226,23 +279,25 @@ reborn of the predecessor and not an ordinary repo/path summon.
    termination, mark the predecessor Instance offline. Failed or timed-out
    stop must not spawn. If it is already dead: skip stop; the retained
    binding is the authority.
-7. Fence the predecessor so `:reborn` and a later handoff cannot reclaim the
-   transferred slot / cwd. This fence is stronger than reborn's temporary
-   offlining: the identity is not continuity-preserved. A dead source that
-   is fenced is no longer reborn-able.
+7. Fence the predecessor Run against stale delivery and repeat handoff, while
+   preserving its Instance id, ordinal and provider session. Set its rest state
+   to `stopped`, so successor messages do not automatically wake it. Explicit
+   `:reborn` remains available and creates a new Run of that same Instance,
+   without stopping or fencing the successor.
 8. Create a **new** successor Run/Instance. Copy launch authority from the
    predecessor (repo-pool tuple or in-place cwd). Do not invent a new pool
    lease. Do not set `resume: true`. Do not attach to any live successor.
 9. Daemon rebinds the existing slot or in-place cwd to the successor's
    `(sessionKey, instanceId, runId, executionKey)` and then follows the
    ordinary Starting → consume token → OS spawn path.
-10. On daemon spawn failure after the fence: keep the slot fail-closed with
-    the successor binding. Do not return it to Available and do not revive
-    the predecessor.
+10. On daemon spawn failure after the fence: retain the affected session
+    binding. Do not return a referenced slot to Available. The predecessor
+    remains available for an explicit reborn.
 
-Delete of the successor later uses ordinary abandon/return. That is what
-makes the slot rentable again. Stopping the successor without abandon keeps
-the slot Retained for **that successor's** reborn, not the predecessor's.
+Delete/abandon removes only that session's pool reference. Reset/clean and
+return to Available happen only when the last reference is explicitly
+abandoned. Each stopped session keeps its own Retained binding and can reborn
+independently. Developers coordinate concurrent work in the shared directory.
 
 ---
 
@@ -257,7 +312,9 @@ process tree is gone.
 Transfer:
 
 - keeps the formal linked worktree and every dirty / ignored / untracked byte
-- rewrites `bindings[]` to the successor tuple
+- preserves the source binding as Retained and adds the successor tuple
+- records Starting / Leased / Retained and one-shot spawn tokens per session;
+  the slot stays live while any session is Starting or Leased
 - does not snapshot, fetch, reset, or `git clean`
 - does not consume `lastReturnedBinding`
 - enters Starting with a new one-shot `spawnClaimToken`
@@ -280,6 +337,9 @@ Fail closed when:
 ---
 
 ## 6. Session files
+
+> A handoff on any machine now carries the conversation itself (§2.3); this
+> section describes the retired same-machine snapshot of pointer files.
 
 xMatrix resume pointers (`~/.xmatrix/{codex,grok,claude}-resume/<hash>.session`)
 store a provider session id, not the transcript. The transcript lives in the
@@ -372,7 +432,6 @@ there so the successor can pull what it needs.
 - Management / DM synthetic directories
 - Alternate successor lifetimes
 - Automatic / inferred takeover other than the usage-limit `handoff:@auto` (§2.1)
-- Keeping two writers in one checkout
 
 ---
 
@@ -390,8 +449,9 @@ there so the successor can pull what it needs.
    successor is supposed to continue.
 5. **Read session files; do not resume them.** Pointer + transcript snapshot
    in run scratch, new provider session, history bootstrap on.
-6. **Kill-if-live then fence.** One writer per checkout. Predecessor cannot
-   reborn into a slot it no longer owns.
+6. **Stop execution, preserve identity.** Handoff stops the source Run and
+   retains the Instance for explicit reborn. Shared pool references preserve
+   each session independently; reborn does not stop the successor.
 7. **Agent-authored handoff is allowed.** Peer takeover is the reason the
    feature exists. It is not a generic Agent kill grant.
 
@@ -471,3 +531,21 @@ None remaining. Locked 2026-08-17:
    this grammar; a dead source needs no stop. Still not a generic Agent kill.
 3. **Channel scope.** Same Channel only. Cross-Channel addressing is
    meaningless here: the source instance is already channel-local.
+
+## Handoff source reborn compatibility
+
+Hub and CLI ship together for this behavior. Existing exclusive manifests
+remain readable. Shared handoff bindings add optional per-session `state` and
+`spawnClaimToken` fields; older daemons reject those records rather than
+recycle a shared checkout, so keep the updated CLI when rolling back Hub.
+
+For a handoff performed before the update, Hub may supply the exact current
+successor Instance/session from the durable same-directory transfer chain. The
+updated daemon can restore the original session reference beside that holder.
+A changed holder, foreign repository, unrelated slot or deleted directory is
+not evidence for legacy recovery. New handoffs retain the original reference
+directly, so subsequent successor changes do not remove its reborn ability.
+
+Eviction snapshots every session sharing an idle checkout. The first reborn
+rehydrates the group at its original path; later peers resume their retained
+bindings without requiring the first session to stop.

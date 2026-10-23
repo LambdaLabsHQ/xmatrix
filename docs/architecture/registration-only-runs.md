@@ -47,8 +47,8 @@ it:
 | `POST` agent run route (`index-routes-channel-agent.ts`) | Profile `run_create` | Removed |
 
 Already on the registration launch: `@xmatrix` management activation, Focus
-review and Channel About (placed by the Space management prompt's summon
-tags), and PostgreSQL Automations.
+review and PostgreSQL Automations. Channel About is no longer a Run: it is a
+text task (`docs/design/channel-metadata-revisions.md`).
 
 ### Admission and authority
 

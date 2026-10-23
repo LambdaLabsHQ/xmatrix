@@ -1,6 +1,4 @@
-import { WEB_PROXY_ROUTES, type SerializedChannel, type SerializedSpace } from "@xmatrix/protocol";
-import type { Dispatch, SetStateAction } from "react";
-import { replaceChannel } from "@/components/dashboard/workspace-admin-views";
+import type { ChannelSnapshot, SerializedSpace } from "@xmatrix/protocol";
 import {
   appViewPath, pagesViewPath, pagesViewSelection, pushBrowserPath, replaceBrowserPath, type AppView,
 } from "@/components/dashboard/workspace-shell-navigation";
@@ -8,14 +6,19 @@ import {
 /** Marks the history entry that opened a conversation beside a page, so closing it steps Back. */
 const PAGE_CONVERSATION_STATE_KEY = "__xmatrixPageConversation";
 import { pageApi, type PageLinkAnchor } from "@/lib/pages/page-client";
-import { createConversation } from "@/components/dashboard/start-conversation";
-import { xmatrixRawResponse } from "@/lib/query/api-client";
-import { UserFacingProblem } from "@/lib/user-facing-error";
+import type { ConversationRequest } from "@/components/dashboard/start-conversation";
+import type { DiscussionQuote } from "@/components/dashboard/selection-discussion";
+
+/** Calls an Agent live in another conversation to a new one: a message in its own, once the new one's first is in. */
+export type ConversationCall = { channel: ChannelSnapshot; body: (conversationId: string) => string };
 
 /** How the workspace shell opens pages and starts conversations about them. */
 export function pageShellActions(input: {
   token: string | null | undefined;
   user: { name?: string | null; email?: string | null } | null | undefined;
+  /** Shows a new conversation at once; `created` settles when the Hub has made it. */
+  beginConversation: (request: ConversationRequest) =>
+    Promise<{ channel: ChannelSnapshot; created: Promise<ChannelSnapshot> }>;
   view: AppView;
   selectedPageId: string | null;
   /** The conversation open beside the page, when one is. */
@@ -26,12 +29,21 @@ export function pageShellActions(input: {
   setView: (view: AppView) => void;
   setSelectedPageId: (pageId: string | null) => void;
   setSelectedChannelId: (channelId: string | null) => void;
-  setChannels: Dispatch<SetStateAction<SerializedChannel[]>>;
   setBrowserPath: (path: string) => void;
   /** Puts the cursor in the conversation's composer. */
   focusComposer: () => void;
-  /** Leaves `text` in a conversation's composer, for when it opens. */
-  seedDraft: (conversationId: string, text: string) => void;
+  /**
+   * Readies a new conversation's composer, for when it opens: the passage it
+   * discusses, which its first message carries.
+   */
+  seedComposer: (conversationId: string, seed: { quote?: DiscussionQuote }) => void;
+  /** Brings a message of the conversation into view, wherever its history has it. */
+  jumpToMessage: (conversationId: string, messageId: string, sequence?: number) => void;
+  /**
+   * Sends a message as the composer does: its row shows in the conversation at once and goes out as soon as the
+   * conversation exists, kept there to send again if it fails.
+   */
+  deliver: (channel: ChannelSnapshot, body: string) => Promise<void>;
 }) {
   const pagesPath = (pageId: string | null, conversationId: string | null) =>
     pagesViewPath(appViewPath(null, "pages", input.currentSpaceId, input.spaces), pageId, conversationId);
@@ -63,8 +75,10 @@ export function pageShellActions(input: {
    * Opens a conversation beside the page it is about (pages-live-document.md
    * §4.4): the page stays, and Back closes the conversation.
    */
-  function openPageConversation(conversationId: string, options: { focus?: boolean } = {}) {
+  function openPageConversation(conversationId: string,
+    options: { focus?: boolean; at?: { messageId: string; sequence: number } } = {}) {
     if (!input.selectedPageId) return;
+    if (options.at) input.jumpToMessage(conversationId, options.at.messageId, options.at.sequence);
     const nextPath = pagesPath(input.selectedPageId, conversationId);
     if (input.selectedChannelId !== conversationId) {
       input.setSelectedChannelId(conversationId);
@@ -103,30 +117,53 @@ export function pageShellActions(input: {
   /**
    * "Discuss" on a page section: a new conversation, linked to that section
    * from the start so the page shows it and the conversation shows the page.
-   * A conversation about a restricted page is closed, like the page.
+   * It opens at once, holding its passage, as a Google Docs comment does; the
+   * Hub creates and links it meanwhile (`planned` hears its id first, so the
+   * page can show the discussion before the link lands), and the answer
+   * settles when both are done.
+   * A conversation about a restricted page is closed, like the page. One about
+   * a passage is named by it only until its first message names it by what was
+   * written, as a new conversation is.
    */
   async function startPageConversation(page: {
     spaceId: string; pageId: string; blockId: string; name: string; restricted: boolean; anchor?: PageLinkAnchor;
-  }, options: { open?: boolean; firstMessage?: string; draft?: string } = {}): Promise<string | null> {
+  }, options: {
+    open?: boolean; firstMessage?: string; quote?: DiscussionQuote; coWrite?: boolean;
+    planned?: (conversationId: string) => void;
+    call?: ConversationCall;
+  } = {}): Promise<string | null> {
     const { token, user } = input;
     if (!token || !user) return null;
-    const channel = await createConversation({ token, spaceId: page.spaceId, memberName: user.name || user.email || "Human",
-      name: page.name, mode: page.restricted ? "closed" : "open", metadata: { fromPageId: page.pageId } });
-    await pageApi.link(page.spaceId, token, { conversationId: channel.id, pageId: page.pageId,
-      ...(page.blockId ? { blockId: page.blockId } : {}), ...(page.anchor ? { anchor: page.anchor } : {}) });
-    input.setChannels((current) => replaceChannel(current, channel));
-    if (options.draft) input.seedDraft(channel.id, options.draft);
-    if (options.firstMessage) {
-      const sent = await xmatrixRawResponse(WEB_PROXY_ROUTES.channel_messages(channel.id), {
-        method: "POST", headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" },
-        body: JSON.stringify({ body: options.firstMessage }), cache: "no-store",
-      });
-      if (!sent.ok) throw new UserFacingProblem("It was created, but its first message wasn't sent; open it and send the message again.");
-    }
+    const { channel, created } = await input.beginConversation({ spaceId: page.spaceId,
+      memberName: user.name || user.email || "Human", name: page.name, mode: page.restricted ? "closed" : "open",
+      metadata: { fromPageId: page.pageId, ...(page.anchor ? { autoName: true } : {}) } });
+    options.planned?.(channel.id);
+    // A comment is sent the moment it is written, as in the conversation itself: its message waits only for the
+    // conversation, not for the page's link to it. Co-writing waits for the Hub's instruction to be there first.
+    const delivered = options.firstMessage && !options.coWrite ? input.deliver(channel, options.firstMessage) : null;
+    if (options.quote) input.seedComposer(channel.id, { quote: options.quote });
+    // A discussion opens beside the page it is about, ready to write in, before it exists.
     // Machinery attached to a page lives in its own conversation; the page stays open.
-    if (options.open === false) return channel.id;
-    // A discussion opens beside the page it is about, ready to write in.
-    openPageConversation(channel.id, { focus: !options.firstMessage });
+    const opened = options.open !== false && !options.firstMessage;
+    if (opened) openPageConversation(channel.id, { focus: true });
+    try {
+      await created;
+      await pageApi.link(page.spaceId, token, { conversationId: channel.id, pageId: page.pageId,
+        ...(page.blockId ? { blockId: page.blockId } : {}), ...(page.anchor ? { anchor: page.anchor } : {}) });
+    } catch (error) {
+      // It never came to be: close it, unless the reader has moved on.
+      if (opened && window.location.href.includes(channel.id)) closePageConversation();
+      throw error;
+    }
+    // Co-writing starts before its Agent is called, so the Hub's instruction to co-write the page live is
+    // in the conversation when the Agent joins it.
+    if (options.coWrite) await pageApi.startCoWriting(page.spaceId, page.pageId, token, channel.id);
+    if (options.firstMessage) {
+      await (delivered ?? input.deliver(channel, options.firstMessage));
+      // Its Instance lives in its own conversation, so it is told there, and answers here.
+      if (options.call) await input.deliver(options.call.channel, options.call.body(channel.id));
+      if (options.open !== false) openPageConversation(channel.id, { focus: false });
+    }
     return channel.id;
   }
 

@@ -112,7 +112,7 @@ impl PresencePatch {
         }
     }
 
-    pub(crate) fn parameters(mut self, parameters: Vec<protocol::HarnessParameter>) -> Self {
+    pub fn parameters(mut self, parameters: Vec<protocol::HarnessParameter>) -> Self {
         if let Some(commands) = self.presentation.commands.as_mut() {
             crate::harness_parameters::add_commands(commands, &parameters);
         }
@@ -120,12 +120,12 @@ impl PresencePatch {
         self
     }
 
-    pub(crate) fn goal(mut self, goal: Option<protocol::AgentGoalStatus>) -> Self {
+    pub fn goal(mut self, goal: Option<protocol::AgentGoalStatus>) -> Self {
         self.goal = Some(goal);
         self
     }
 
-    pub(crate) fn goal_patch(mut self, goal: Option<Option<protocol::AgentGoalStatus>>) -> Self {
+    pub fn goal_patch(mut self, goal: Option<Option<protocol::AgentGoalStatus>>) -> Self {
         self.goal = goal;
         self
     }
@@ -390,11 +390,14 @@ pub(crate) fn send_agent_lifecycle(
             detail,
             snapshot,
             resets_at: None,
+            request_id: None,
         },
     );
 }
 
 pub(crate) struct AgentLifecycleNotice<'a> {
+    /// Names one reported fact; a resend repeats it so Hub keys it once.
+    request_id: Option<&'a str>,
     layer: &'a str,
     status: &'a str,
     reason: Option<&'a str>,
@@ -412,6 +415,7 @@ pub(crate) fn send_agent_lifecycle_with_reset(
     notice: AgentLifecycleNotice<'_>,
 ) {
     let AgentLifecycleNotice {
+        request_id,
         layer,
         status,
         reason,
@@ -420,7 +424,7 @@ pub(crate) fn send_agent_lifecycle_with_reset(
         resets_at,
     } = notice;
     let _ = relay.send_message(protocol::AgentInstanceClientMessage::AgentLifecycle {
-        request_id: None,
+        request_id: request_id.map(str::to_string),
         channel_id: channel_id.map(str::to_string),
         agent_id: Some(agent.id.clone()),
         instance_id: agent.instance_id.clone(),
@@ -431,6 +435,7 @@ pub(crate) fn send_agent_lifecycle_with_reset(
         detail: detail.map(str::to_string),
         snapshot,
         resets_at: resets_at.map(str::to_string),
+        pending_tasks: None,
         ts: None,
     });
 }
@@ -441,18 +446,15 @@ fn take_bootstrap_turn(bootstrap: &mut Option<String>) -> Option<String> {
 
 /// Fold the one-time bootstrap and read-only Channel history into the first
 /// real runtime turn. Submitting the bootstrap as its own turn gives the model
-/// a tool-capable execution window before the current assignment is visible;
-/// an old mention in history can therefore be acted on despite the read-only
-/// marker. Keeping both in one turn makes the current input the only live
-/// assignment while preserving the same context.
+/// a tool-capable execution window before the current input is visible; an
+/// old mention in history can therefore be acted on before the model sees
+/// what came after it. In one turn the model reads the history and the
+/// current input together, with nothing set apart as its assignment.
 fn codex_turn_with_bootstrap(bootstrap: &mut Option<String>, current_input: &str) -> String {
     let Some(bootstrap) = take_bootstrap_turn(bootstrap) else {
         return current_input.to_string();
     };
-    format!(
-        "{bootstrap}\n\nCurrent xMatrix input — this is the only live assignment in this turn:\n\
-         {current_input}"
-    )
+    format!("{bootstrap}\n\n{current_input}")
 }
 
 fn validate_codex_app_cwd(cwd: Option<&str>) -> error::Result<()> {
@@ -785,4 +787,3 @@ fn json_u64(value: &Value) -> Option<u64> {
         .or_else(|| value.as_i64().and_then(|number| u64::try_from(number).ok()))
         .or_else(|| value.as_str()?.trim().parse::<u64>().ok())
 }
-

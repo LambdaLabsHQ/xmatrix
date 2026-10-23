@@ -50,6 +50,34 @@ integration("concurrent Agent saves of one alias leave exactly one secret, reada
   } finally { await f.close(); }
 });
 
+integration("two Spaces keep same-alias values and approvals separate even when a Run's owner belongs to both", async () => {
+  const a = await spaceSecretFixture(), b = await spaceSecretFixture();
+  try {
+    await b.client.query(`INSERT INTO data.space_members(space_id,user_id,role,version,created_at,updated_at)
+      VALUES ($1,$2,'admin',1,now(),now())`, [b.ids.space, a.ids.owner]);
+    for (const [fixture, value] of [[a, "space-a-value"], [b, "space-b-value"]]) {
+      await fixture.secret.put({ spaceId: fixture.ids.space, userId: fixture.ids.admin,
+        secretRef: "shared-alias", value, access: "ask" });
+    }
+    await a.secret.approve({ userId: a.ids.admin, runId: a.ids.run, channelId: a.ids.channel, secretRef: "shared-alias" });
+    assert.equal((await a.secret.runRead(a.run, ["shared-alias"])).secrets[0].value, "space-a-value");
+    await assert.rejects(b.secret.runRead(b.run, ["shared-alias"]), error => error.code === "secret_approval_required");
+    for (const read of [() => a.secret.runRead({ ...a.run, spaceId: b.ids.space }, ["shared-alias"]),
+      () => a.secret.runList({ ...a.run, spaceId: b.ids.space }),
+      () => b.secret.approve({ userId: b.ids.admin, runId: a.ids.run, channelId: b.ids.channel, secretRef: "shared-alias" })]) {
+      await assert.rejects(read(), error => error.status >= 400, "membership in both Spaces does not move the Run or its approval");
+    }
+    await b.secret.put({ spaceId: b.ids.space, userId: b.ids.admin, secretRef: "shared-alias", access: "auto" });
+    assert.equal((await b.secret.runRead(b.run, ["shared-alias"])).secrets[0].value, "space-b-value");
+    const envelope = (await a.client.query(`SELECT encrypted_value_json FROM data.space_secrets
+      WHERE space_id=$1 AND secret_ref='shared-alias'`, [a.ids.space])).rows[0].encrypted_value_json;
+    await b.client.query(`UPDATE data.space_secrets SET encrypted_value_json=$2::jsonb
+      WHERE space_id=$1 AND secret_ref='shared-alias'`, [b.ids.space, JSON.stringify(envelope)]);
+    await assert.rejects(b.secret.runRead(b.run, ["shared-alias"]), error => error.code === "secret_authority_corrupt",
+      "a new Space-bound ciphertext cannot be transplanted to another Space");
+  } finally { await a.close(); await b.close(); }
+});
+
 integration("a Run reads its secrets while a launch holds its Channel and Run rows; saving one still waits (XMATRIX-HUB-6B)", async () => {
   const f = await spaceSecretFixture();
   const launch = new (f.client.constructor)({ connectionString });

@@ -16,6 +16,7 @@ pub(super) fn submission_fingerprint(scope: &SendScope, payload: &Value) -> Opti
             "attachments",
             "finalReplyExecutionId",
             "awaitsResponse",
+            "readThroughSequence",
         ]
         .contains(&key.as_str())
     }) {
@@ -115,6 +116,12 @@ mod tests {
         }
         assert_eq!(
             submission_fingerprint(&scope, &payload).unwrap(),
+            "63d4afbc4c67bcf01c33a37bea66778ed469ccd1bda94980b723bea04811fe15"
+        );
+        let mut read_further = payload.clone();
+        read_further["readThroughSequence"] = json!(41);
+        assert_eq!(
+            submission_fingerprint(&scope, &read_further).unwrap(),
             "63d4afbc4c67bcf01c33a37bea66778ed469ccd1bda94980b723bea04811fe15"
         );
         let mut changed = payload;

@@ -54,9 +54,6 @@ DaemonHost to apply that exact revision. Interpret the result as follows:
 Changing the default affects newly admitted commands only. Existing commands,
 broker requests, wrappers, and Runs retain their immutable admitted Profile.
 
-`xmatrix env list/current/use` remains a compatibility adapter for the built-in
-`production` and `test` names. It no longer stops or replaces the shared daemon.
-
 ## Control one runtime
 
 Use an explicit selector so the target is unambiguous:

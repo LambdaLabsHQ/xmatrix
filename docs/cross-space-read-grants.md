@@ -53,8 +53,7 @@ the Run. It takes an explicit decision by the owner, for that Run and that targe
   key. A new execution of the same Run does not inherit it.
 - A pending request expires after one hour. An approved grant ends after 24
   hours, when the Run stops, or when the owner revokes it
-  (`xmatrix access revoke`), whichever comes first. Management Channel About
-  Runs cannot hold a grant.
+  (`xmatrix access revoke`), whichever comes first.
 - A grant never reaches beyond the owner: each read also requires the owner's
   current read access to the target, so a Channel the owner cannot see stays
   invisible, and losing access ends the grant's reach immediately.

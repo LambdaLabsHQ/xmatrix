@@ -12,10 +12,12 @@ import { POSTGRES_AUTHORITY_TIMEOUTS } from "./postgres-authority-http";
 import type { RoutingEvaluator } from "./agent-routing-evaluation";
 import { boundedOccurrenceAt } from "./bounded-occurrence-time";
 import { summonDecisionEvaluator } from "./summon-decision-content";
+import { meterJev, type JevFeature, type UsageCostEnv } from "./usage-cost-metering";
 import type { Env } from "./types";
+import { publishChannelInvocationsChanged } from "./channel-live-judgment";
 
 /** What Runs, Instances and their launches need from the Worker. */
-export interface RuntimeEnv extends PostgresAuthorityFleetEnv, AppConnectorEnv {
+export interface RuntimeEnv extends PostgresAuthorityFleetEnv, AppConnectorEnv, UsageCostEnv {
   RELAY_PAYLOAD_BUCKET?: R2Bucket;
   RELAY_SUMMON_DECISION_CLOCK?: DurableObjectNamespace;
   JEV_AI_GATEWAY_API_KEY?: string;
@@ -41,10 +43,12 @@ export function runtimeRepository(
 }
 
 /** Moves an Agent Launch along as its daemon reports admission, spawn or failure. */
-export function updateAgentLaunch(env: PostgresAuthorityFleetEnv, input: Omit<
+export async function updateAgentLaunch(env: PostgresAuthorityFleetEnv, input: Omit<
   Parameters<PostgresRuntimeRepository["updateAgentLaunch"]>[0], "requestId" | "at"> & { at?: unknown }) {
-  return runtimeRepository(env).updateAgentLaunch({ ...input, requestId: crypto.randomUUID(),
+  const updated = await runtimeRepository(env).updateAgentLaunch({ ...input, requestId: crypto.randomUUID(),
     at: boundedOccurrenceAt(input.at) });
+  await publishChannelInvocationsChanged(env as Env, input.channelId);
+  return updated;
 }
 
 /** A launch decision's databases: the Space shards and the registration directory. */
@@ -52,13 +56,19 @@ export function runtimePlacement<E extends RuntimeEnv>(env: E) {
   return { env, database: runtimeDatabase(env), directory: runtimeDirectory(env) };
 }
 
-/** Jev for one decision about a message, recording its evidence; none while Jev is unconfigured. */
+/**
+ * Jev for one decision about a message in the Space its Channel is placed in,
+ * recording its evidence and metering each call to that Space; none while Jev
+ * is unconfigured.
+ */
 export function jevEvaluator(env: RuntimeEnv, context: {
-  actorUserId: string; channelId: string; sourceMessageId: string; invocationId: string;
-}): RoutingEvaluator | undefined {
+  feature: JevFeature; actorUserId: string; channelId: string; sourceMessageId: string; invocationId: string;
+}): ((spaceId: string) => RoutingEvaluator) | undefined {
   const apiKey = env.JEV_AI_GATEWAY_API_KEY?.trim();
   if (!apiKey) return undefined;
-  return summonDecisionEvaluator(env, { evaluate: createJevClient({ apiKey, timeoutMs: 5000 }).evaluate, ...context });
+  const { feature, ...decision } = context;
+  return spaceId => summonDecisionEvaluator(env, { ...decision, evaluate: meterJev(env, { feature, scope: { spaceId } },
+    createJevClient({ apiKey, timeoutMs: 5000 }).evaluate) });
 }
 
 /**

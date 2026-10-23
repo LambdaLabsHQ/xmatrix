@@ -1,11 +1,12 @@
+import { publishChannelInvocationsChanged } from "./channel-live-judgment";
 import { captureServerErrorDiagnostic } from "./server-error-diagnostic";
 import type { ChannelAttachment, DraftSummonIntent } from "@xmatrix/protocol";
-import { parseMessageInteraction, createInstanceMentions, filterOperationalMentions, hasRetiredAgentLaunchMention, parseAutoLaunchMentions,
+import { parseMessageInteraction, parseConnectorActionCommand, createInstanceMentions, filterOperationalMentions, hasRetiredAgentLaunchMention, parseAutoLaunchMentions,
   isLaunchHintRejection, parseHarnessCapabilityMentions, PREPARATION_REJECTION_MESSAGES, RETIRED_AGENT_LAUNCH_NOTICE,
-  REGISTRATION_PREPARATION_REJECTION_CODES } from "@xmatrix/protocol";
+  REGISTRATION_PREPARATION_REJECTION_CODES, HARNESS_SIGNED_OUT_NOTICE_KIND, preparationRejectionMessage } from "@xmatrix/protocol";
+import { nameDiscussionByFirstMessage, startChannelAbout } from "./channel-about";
 import {
   dispatchProductAgentMentionsAfterAuthorityMessage,
-  dispatchProductChannelAbout,
   dispatchProductNewConversationStart,
   dispatchProductAgentSystemNotice,
   type ProductAgentMentionAuthorityEnv,
@@ -21,7 +22,7 @@ import { connectorForCommand } from "./connectors/registry";
 import type { Env } from "./types";
 import { relayCrossChannelReply, type CrossChannelReplyOrigin } from "./product-cross-channel-reply";
 import { recordAgentLaunchStage } from "./postgres-observability";
-import { dispatchRegistrationLaunchesAfterMessage, wakeRestingInstances } from "./registration-launch-dispatch";
+import { dispatchRegistrationLaunchesAfterMessage, markFirstMessageSummoned, wakeRestingInstances } from "./registration-launch-dispatch";
 import { runtimeRepository } from "./runtime";
 import { ControlError } from "@xmatrix/db";
 import { AgentLaunchHandoverUnavailable } from "./agent-launch-coordinator-wake";
@@ -32,12 +33,13 @@ import { attachConversationToPage } from "./product-page-attachment";
 import { judgeMessageSupersession } from "./message-supersession";
 import { CHANNEL_ACTIVITY_MESSAGE_KIND } from "@xmatrix/protocol";
 
-/** Product control must finish before the HTTP response. A dropped or timed-out
- * waitUntil can leave a committed command with no daemon request or receipt. */
+/** Product control and durable video admission finish before the HTTP response.
+ * The upload itself runs independently in its durable executor. */
 export function productMessageControlFinishesBeforeResponse(body: string): boolean {
   const plan = parseMessageInteraction(body);
   return !!plan.stop || plan.controls.length > 0 || plan.launches.length > 0 ||
-    plan.reborn.length > 0 || plan.handoff.length > 0;
+    plan.reborn.length > 0 || plan.handoff.length > 0 ||
+    parseConnectorActionCommand("x", body)?.actionId === "upload_video";
 }
 
 export type ProductMessagePostCommitEnv = ProductAgentMentionAuthorityEnv & Env;
@@ -54,6 +56,8 @@ export interface ProductMessagePostCommitInput {
   senderKind: "user" | "agent" | "system";
   senderId: string;
   senderRunId?: string;
+  /** Exact authenticated Instance; senderId is the stable Agent identity. */
+  senderInstanceId?: string;
   committedAt?: string;
   attachments?: ChannelAttachment[];
   sequence?: number;
@@ -68,12 +72,12 @@ export interface ProductMessagePostCommitInput {
 /**
  * When a conversation's About (summary, and its name while automatic) is
  * written: after every fifth message, and after the first one while nobody
- * has named the conversation, so a new conversation is named at once.
+ * has named the conversation (`unnamedOnly`), so a new conversation is named at once.
  */
-export function channelAboutRequestId(channelId: string, sequence: number | undefined): string | undefined {
-  if (sequence === 1) return `channel-about:${channelId}:0`;
+export function channelAboutDue(sequence: number | undefined): { unnamedOnly: boolean } | undefined {
+  if (sequence === 1) return { unnamedOnly: true };
   if (!Number.isInteger(sequence) || sequence! < 5 || sequence! % 5 !== 0) return undefined;
-  return `channel-about:${channelId}:${Math.floor(sequence! / 5)}`;
+  return { unnamedOnly: false };
 }
 
 /**
@@ -140,8 +144,10 @@ export function unconfirmedLaunchNoticeBody(error: unknown, diagnosticId: string
  * lifecycle mentions. actorUserId is resolved from the publishing Run's owner
  * upstream; it is never supplied by the message body. PostgreSQL checks both
  * current Channel permission and the unchanged owner-bound source publication. */
-/** A new conversation's first message that summons nobody, from a Human or an Agent. */
-async function startNewConversation(input: ProductMessagePostCommitInput): Promise<void> {
+/** A new conversation's first message that summons nobody, from a Human or an Agent.
+ * Its Channel's coordinator runs it again for a decision no request finished. */
+export async function startNewConversation(input: Pick<ProductMessagePostCommitInput,
+  "env" | "channelId" | "messageId" | "body" | "actorUserId" | "senderKind">): Promise<void> {
   const { harness } = await dispatchProductNewConversationStart({ env: input.env, channelId: input.channelId,
     messageId: input.messageId, body: input.body, actorUserId: input.actorUserId,
     authorKind: input.senderKind === "agent" ? "agent" : "user" });
@@ -155,11 +161,15 @@ async function startNewConversation(input: ProductMessagePostCommitInput): Promi
  * Channel, and that message goes through this same post-commit pipeline. It
  * launches as the first message's author, whose decision the launch
  * authority checks. Its id derives from the first message, so a retry
- * appends and launches nothing new.
+ * appends and launches nothing new. Once dispatched it is marked summoned;
+ * until then the Channel's coordinator retries it.
  */
 export async function summonFirstMessageHarness(input: { env: ProductMessagePostCommitEnv; channelId: string;
   messageId: string; actorUserId: string; harness: string },
-  dependencies = { append: dispatchProductMessageAppend, postCommit: dispatchProductMessagePostCommit }): Promise<void> {
+  dependencies: { append: typeof dispatchProductMessageAppend; postCommit: typeof dispatchProductMessagePostCommit;
+    summoned: typeof markFirstMessageSummoned } =
+    { append: dispatchProductMessageAppend, postCommit: dispatchProductMessagePostCommit, summoned: markFirstMessageSummoned },
+): Promise<void> {
   // The decision already answered whether to start, so Jev's intent check is skipped.
   const body = `@${input.harness} launch:force`;
   const messageId = firstMessageSummonId(input.messageId);
@@ -172,6 +182,7 @@ export async function summonFirstMessageHarness(input: { env: ProductMessagePost
   await dependencies.postCommit({ env: input.env, channelId: input.channelId, messageId, body,
     actorUserId: input.actorUserId, senderKind: "system", senderId: XMATRIX_SYSTEM_AUTHOR_ID,
     committedAt: new Date().toISOString() });
+  await dependencies.summoned(input.env, { channelId: input.channelId, messageId: input.messageId });
 }
 
 export async function dispatchProductMessageLaunches(input: ProductMessagePostCommitInput,
@@ -206,12 +217,27 @@ export async function dispatchProductMessageLaunches(input: ProductMessagePostCo
     // The system notice is source-bound and idempotent across message retries.
     // A hint already lives on the mention's card: Jev's reading, or how to
     // name the machine. A launch that failed still tells the Channel.
-    for (const code of new Set((rejected ?? []).map(item => item.code))) {
-      if (isLaunchHintRejection(code)) continue;
-      const reason = REGISTRATION_PREPARATION_REJECTION_CODES.includes(code)
-        ? PREPARATION_REJECTION_MESSAGES[code] : PREPARATION_REJECTION_MESSAGES.registration_launch_rejected;
-      await notice({ ...input, sourceMessageId: input.messageId, replyToMessageId: input.messageId,
-        body: `Agent launch failed: ${reason} (${REGISTRATION_PREPARATION_REJECTION_CODES.includes(code) ? code : "registration_launch_rejected"})`,
+    // A too-old or signed-out program is named, and a signed-out one's notice carries what to sign in
+    // and the summon to send again once it is (HARNESS_SIGNED_OUT_NOTICE_KIND).
+    const notices = new Map<string, Record<string, unknown> | undefined>();
+    for (const item of rejected ?? []) {
+      if (isLaunchHintRejection(item.code)) continue;
+      const known = REGISTRATION_PREPARATION_REJECTION_CODES.includes(item.code);
+      const code = known ? item.code : "registration_launch_rejected";
+      const signedOut = code === "registration_harness_signed_out" ? item.signedOut : undefined;
+      // What is too old, or signed out, is named; any other code is its own sentence.
+      const reason = known ? preparationRejectionMessage(code, signedOut ?? item.tooOld) ?? PREPARATION_REJECTION_MESSAGES[code]
+        : PREPARATION_REJECTION_MESSAGES.registration_launch_rejected;
+      const body = `Agent launch failed: ${reason} (${code})`;
+      if (!notices.has(body)) notices.set(body, signedOut && item.sourceMention
+        ? { kind: HARNESS_SIGNED_OUT_NOTICE_KIND, signedOut, sourceMention: item.sourceMention } : undefined);
+    }
+    for (const [body, metadata] of notices) {
+      // xMatrix's first-message summon is a system message, which is not a
+      // Human/Agent reply target. Keep it as the idempotent receipt's source.
+      await notice({ ...input, sourceMessageId: input.messageId, body,
+        ...(input.senderKind !== "system" ? { replyToMessageId: input.messageId } : {}),
+        ...(metadata ? { metadata } : {}),
       }).catch(error => {
         logPostCommitFailure("Launch rejection notice failed", input, error);
         throw new AgentLaunchHandoverUnavailable();
@@ -219,7 +245,7 @@ export async function dispatchProductMessageLaunches(input: ProductMessagePostCo
     }
     if (selectionCount > 0 || directMention) return selectionCount > 0;
     // Nobody was summoned by the first message of a conversation: Jev reads
-    // whether its author wants an Agent to start (only a new, unnamed one).
+    // whether its author wants an Agent to start (an unnamed one or a discussion).
     if (input.sequence === 1) await (dispatch.newConversation ?? startNewConversation)(input);
     return false;
   } catch (error) {
@@ -279,9 +305,11 @@ export async function dispatchProductMessagePostCommit(
     const started = performance.now();
     sideTasks.push(runtimeRepository(input.env).recordAgentLaunchFirstReply({ requestId: crypto.randomUUID(),
       channelId: input.channelId, runId: input.senderRunId, actorUserId: input.actorUserId,
-      at: new Date().toISOString() }).then((result) => {
+      at: new Date().toISOString() }).then(async (result) => {
       if (result.recorded === true) recordAgentLaunchStage({ env: input.env, stage: "first_reply_append",
         outcome: "ok", durationMs: Number(result.launchAgeMs ?? performance.now() - started) });
+      // A Run's reply starts its summon or answers its execution: their chips read it now.
+      await publishChannelInvocationsChanged(input.env, input.channelId);
     }).catch((error) => {
       recordAgentLaunchStage({ env: input.env, stage: "first_reply_append", outcome: "error",
         durationMs: performance.now() - started });
@@ -323,29 +351,27 @@ export async function dispatchProductMessagePostCommit(
   const connector = input.senderKind === "system" ? undefined : connectorForCommand(input.body);
   if (connector?.commands) {
     tasks.push(
-      connector.commands.run({ ...input, senderKind: input.senderKind === "agent" ? "agent" : "user" }).catch((error) => {
+      connector.commands.run({ ...input, senderKind: input.senderKind === "agent" ? "agent" : "user",
+        senderId: input.senderKind === "agent" ? input.senderInstanceId : input.senderId }).catch((error) => {
         logPostCommitFailure(`Product ${connector.id} connector orchestration failed`, input, error);
       }),
     );
   }
-  const aboutRequestId = channelAboutRequestId(input.channelId, input.sequence);
-  if (aboutRequestId) {
+  const about = channelAboutDue(input.sequence);
+  if (about) {
+    // A discussion's first message names it before the About reads it.
+    const named = input.sequence === 1 ? nameDiscussionByFirstMessage(input.env, input).catch((error) => {
+      logPostCommitFailure("Discussion naming failed", input, error);
+    }) : Promise.resolve();
     sideTasks.push(
-      dispatchProductChannelAbout({
-        env: input.env,
-        channelId: input.channelId,
-        requestId: aboutRequestId,
-        triggerMessageId: input.messageId,
-        actorUserId: input.actorUserId,
-        ...(input.sequence === 1 ? { automaticNameOnly: true } : {}),
-      }).catch((error) => {
-        console.error("Product Channel About orchestration failed", {
-          channelId: input.channelId,
-          messageId: input.messageId,
-          requestId: aboutRequestId,
-          error: error instanceof Error ? error.message : String(error),
-        });
-      }),
+      named.then(() => startChannelAbout(input.env, { channelId: input.channelId, unnamedOnly: about.unnamedOnly }))
+        .catch((error) => {
+          console.error("Channel About could not start", {
+            channelId: input.channelId,
+            messageId: input.messageId,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }),
     );
   }
   if (interaction.stop) {

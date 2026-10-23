@@ -5,6 +5,7 @@ import WebKit
 final class NativeBridge: NSObject, WKScriptMessageHandler {
     weak var webView: WKWebView?
     private let subscriptions = AppleSubscriptions()
+    @MainActor private var signInFlow: AppSignIn?
     var onMobileTabStateChanged: ((MobileTabState) -> Void)?
     var onOpenURL: ((URL) -> Void)?
     private static let notificationURLKey = "xmatrix.url"
@@ -68,6 +69,8 @@ final class NativeBridge: NSObject, WKScriptMessageHandler {
         pushDevice: () => invoke("pushDevice"),
         notify: (payload) => invoke("notify", payload),
         openExternal: (url) => invoke("openExternal", { url }),
+        authorizeInBrowser: (request) => invoke("authorizeInBrowser", request),
+        signInWithApple: (request) => invoke("signInWithApple", request),
         getClipboardImages: () => invoke("getClipboardImages"),
         checkCliInstalled: () => invoke("checkCliInstalled"),
         openCliInstall: () => invoke("openCliInstall"),
@@ -119,7 +122,7 @@ final class NativeBridge: NSObject, WKScriptMessageHandler {
     }
 
     static func failurePayload(_ error: Error) -> Any {
-        if AppleSubscriptions.isCancellation(error) {
+        if AppleSubscriptions.isCancellation(error) || AppSignIn.isCancellation(error) {
             return ["name": "AbortError", "message": "The operation was cancelled."]
         }
         // Keep the existing string contract for every actual failure.
@@ -195,6 +198,16 @@ final class NativeBridge: NSObject, WKScriptMessageHandler {
             await UIApplication.shared.open(url)
             return NSNull()
 
+        case "authorizeInBrowser":
+            return try await appSignIn().authorize(
+                url: payload?["url"] as? String ?? "",
+                redirectParam: payload?["redirectParam"] as? String ?? "",
+                ephemeral: boolValue(payload?["ephemeral"])
+            )
+
+        case "signInWithApple":
+            return try await appSignIn().signInWithApple(nonce: payload?["nonce"] as? String ?? "")
+
         case "getClipboardImages":
             return clipboardImages()
 
@@ -216,6 +229,15 @@ final class NativeBridge: NSObject, WKScriptMessageHandler {
                 userInfo: [NSLocalizedDescriptionKey: "Unsupported native bridge method: \(method)"]
             )
         }
+    }
+
+    /// One sign-in at a time, shown over this bridge's page.
+    @MainActor
+    private func appSignIn() -> AppSignIn {
+        let flow = signInFlow ?? AppSignIn()
+        signInFlow = flow
+        flow.anchorView = webView
+        return flow
     }
 
     @MainActor

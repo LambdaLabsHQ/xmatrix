@@ -1,5 +1,6 @@
 "use client";
 
+import { memo } from "react";
 
 /**
  * Shared, bounded SVG definitions used by the CSS material recipes.
@@ -15,7 +16,7 @@
  * shared filters preserve the named references used by older material rules
  * without layout reads, observers, pointer listeners, or per-element bitmaps.
  */
-export function LiquidGlassFilter() {
+export const LiquidGlassFilter = memo(function LiquidGlassFilter() {
   return (
     <svg
       style={{
@@ -40,4 +41,4 @@ export function LiquidGlassFilter() {
       </defs>
     </svg>
   );
-}
+});

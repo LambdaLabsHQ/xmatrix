@@ -9,12 +9,19 @@ import {
   loadBetterAuthSession,
   isTransientAuthSessionError,
   sendBetterAuthOtp,
-  signInWithBetterAuthGoogle,
+  routeAccountCallsThroughApp,
+  signInWithAppleIdToken,
+  signInWithBetterAuthPasskey,
+  signInWithBetterAuthSocial,
   signOutBetterAuth,
-  verifyBetterAuthOtp,
+  verifyBetterAuthOtpWithRetry,
   verifyBetterAuthPassword,
+  verifyBetterAuthSecondFactor,
+  type SignInStep,
+  type SocialSignInProvider,
   type WebAuthSession,
 } from "./auth-client";
+import { sameValue } from "./same-value";
 import {
   isTransientNetworkSessionError,
   isTransientAuthStatus,
@@ -22,6 +29,7 @@ import {
   shouldRefreshAuthSessionState,
 } from "./auth-session-policy";
 import { getDesktopBridge } from "./desktop/bridge";
+import { handDesktopSessionToCli } from "./desktop/session-exchange";
 import { disableBrowserPush, forgetPhonePush, registerPhonePush } from "./push-subscription";
 import { XMatrixQueryProvider } from "./query/query-provider";
 import { xmatrixRawResponse } from "@/lib/query/api-client";
@@ -38,12 +46,22 @@ interface AuthState {
 
 interface AuthContextValue extends AuthState {
   signInWithOtp: (email: string) => Promise<void>;
-  verifyOtp: (email: string, token: string) => Promise<void>;
-  signInWithPassword: (email: string, password: string) => Promise<void>;
-  signInWithGoogle: (redirectTo?: string) => Promise<void>;
+  verifyOtp: (email: string, token: string) => Promise<SignInStep>;
+  signInWithPassword: (email: string, password: string) => Promise<SignInStep>;
+  /** Finishes a sign-in that waits on the authenticator app's code. */
+  verifySecondFactor: (code: string, options: { backup: boolean; trustDevice: boolean }) => Promise<void>;
+  /** `returnTo` is where a completed sign-in goes; a failed one comes back to the page it started on. */
+  signInWithSocial: (provider: SocialSignInProvider, returnTo?: string) => Promise<void>;
+  /** Signs in with a passkey; `autoFill` waits for the browser to offer one in the email field. */
+  signInWithPasskey: (autoFill?: boolean) => Promise<void>;
+  /** Signs in with the identity token the iOS app's Sign in with Apple returned. */
+  signInWithApple: (input: Parameters<typeof signInWithAppleIdToken>[0]) => Promise<SignInStep>;
   setSessionFromAuthResponse: (payload: AuthResponse) => Promise<void>;
-  logout: (options?: { redirectTo?: "/login" | "/account/delete" }) => Promise<void>;
+  /** `redirectTo` may carry the sign-in page's own query, to sign in again to the same request. */
+  logout: (options?: { redirectTo?: LogoutDestination }) => Promise<void>;
 }
+
+type LogoutDestination = "/account/delete" | "/login" | `/login?${string}`;
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
@@ -131,7 +149,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const applySessionState = useCallback((next: Omit<AuthState, "loading">) => {
     setState((prev) => {
       const candidate = { ...next, loading: false };
-      return authStatesEqual(prev, candidate) ? prev : candidate;
+      return sameValue(prev, candidate) ? prev : candidate;
     });
   }, []);
 
@@ -258,6 +276,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       throw new Error("Login response did not include a refresh token");
     }
 
+    await handDesktopSessionToCli(getDesktopBridge(), payload.token);
     await persistNativeSession(payload);
     setState({
       session: authResponseToWebSession(payload),
@@ -267,33 +286,61 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const verifyOtp = async (email: string, token: string) => {
-    await verifyBetterAuthOtp(email, token);
+    if (await verifyBetterAuthOtpWithRetry(email, token) === "two_factor") return "two_factor";
     const next = await loadBetterAuthSessionAfterSignIn();
     if (next.session && next.user) {
+      await handDesktopSessionToCli(getDesktopBridge(), next.session.access_token);
       setState({ ...next, loading: false });
     } else {
       setState((prev) => ({ ...prev, loading: false }));
     }
+    return "signed_in";
   };
 
-  const signInWithGoogle = async (redirectTo?: string) => {
-    if (!isBetterAuthGoogleEnabled()) {
-      throw new Error("Google sign-in is not configured for this account. Use a login code while setup is completed.");
-    }
-    await signInWithBetterAuthGoogle(buildBetterAuthCallbackUrl(redirectTo));
-  };
-
-  const signInWithPassword = async (email: string, password: string) => {
-    await verifyBetterAuthPassword(email, password);
+  /** The session a first or second factor just made, taken up here; a desktop app hands it to its CLI too. */
+  const adoptSignedInSession = async () => {
     const next = await loadBetterAuthSessionAfterSignIn();
     if (!next.session || !next.user) throw new Error("Couldn't confirm sign-in. Try again.");
+    await handDesktopSessionToCli(getDesktopBridge(), next.session.access_token);
     setState({ ...next, loading: false });
   };
 
-  const logout = async (options?: { redirectTo?: "/login" | "/account/delete" }) => {
+  const verifySecondFactor = async (code: string, options: { backup: boolean; trustDevice: boolean }) => {
+    await verifyBetterAuthSecondFactor(code, options);
+    await adoptSignedInSession();
+  };
+
+  const signInWithPasskey = async (autoFill = false) => {
+    await signInWithBetterAuthPasskey(autoFill);
+    await adoptSignedInSession();
+  };
+
+  const signInWithApple = async (input: Parameters<typeof signInWithAppleIdToken>[0]) => {
+    if (await signInWithAppleIdToken(input) === "two_factor") return "two_factor";
+    await adoptSignedInSession();
+    return "signed_in";
+  };
+
+  const signInWithSocial = async (provider: SocialSignInProvider, returnTo?: string) => {
+    if (provider === "google" && !isBetterAuthGoogleEnabled()) {
+      throw new Error("Google sign-in is not configured for this account. Use a login code while setup is completed.");
+    }
+    const callbackURL = buildBetterAuthCallbackUrl(returnTo);
+    await signInWithBetterAuthSocial(provider, callbackURL, buildBetterAuthCallbackUrl(window.location.href),
+      newAccountCallbackUrl(callbackURL));
+  };
+
+  const signInWithPassword = async (email: string, password: string) => {
+    if (await verifyBetterAuthPassword(email, password) === "two_factor") return "two_factor";
+    await adoptSignedInSession();
+    return "signed_in";
+  };
+
+  const logout = async (options?: { redirectTo?: LogoutDestination }) => {
+    const destination = logoutDestination(options?.redirectTo);
     if (mockAuthState) {
       setState(mockAuthState || { session: null, user: null, loading: false });
-      router.push(options?.redirectTo === "/account/delete" ? "/account/delete" : "/login");
+      router.push(destination);
       return;
     }
 
@@ -303,9 +350,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (accessToken) {
       await Promise.allSettled([disableBrowserPush(accessToken), forgetPhonePush(accessToken)]);
     }
-    await Promise.allSettled([clearNativeSession(), signOutBetterAuth()]);
+    // The session ends at the Hub while this app still holds its token; only then is the token forgotten.
+    await signOutBetterAuth().catch(() => undefined);
+    await clearNativeSession();
     setState({ session: null, user: null, loading: false });
-    router.push(options?.redirectTo === "/account/delete" ? "/account/delete" : "/login");
+    router.push(destination);
   };
 
   return (
@@ -315,7 +364,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         signInWithOtp,
         verifyOtp,
         signInWithPassword,
-        signInWithGoogle,
+        verifySecondFactor,
+        signInWithSocial,
+        signInWithApple,
+        signInWithPasskey,
         setSessionFromAuthResponse,
         logout,
       }}
@@ -325,6 +377,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       </XMatrixQueryProvider>
     </AuthContext.Provider>
   );
+}
+
+/** The signed-in reader's bearer token, or null where no one is signed in or nothing provides the session. */
+export function useAuthToken(): string | null {
+  return useContext(AuthContext)?.session?.access_token ?? null;
 }
 
 export function useAuth(): AuthContextValue {
@@ -364,42 +421,33 @@ async function loadSessionState(): Promise<Omit<AuthState, "loading">> {
   return { session: null, user: null };
 }
 
-function authStatesEqual(left: AuthState, right: AuthState): boolean {
-  return (
-    left.loading === right.loading &&
-    left.user?.id === right.user?.id &&
-    left.user?.email === right.user?.email &&
-    left.user?.name === right.user?.name &&
-    left.user?.avatarUrl === right.user?.avatarUrl &&
-    left.session?.access_token === right.session?.access_token &&
-    left.session?.refresh_token === right.session?.refresh_token &&
-    left.session?.expires_at === right.session?.expires_at &&
-    left.session?.token_type === right.session?.token_type &&
-    left.session?.user.id === right.session?.user.id &&
-    left.session?.user.email === right.session?.user.email
-  );
-}
-
+/**
+ * Keeps a native app's session for its next launch. A sign-in that could not
+ * be kept is reported, rather than looking done until the app is reopened.
+ */
 async function persistNativeSession(payload: AuthResponse): Promise<void> {
   if (!isNativeShell()) {
     return;
   }
+  routeAccountCallsThroughApp(true);
 
-  const response = await xmatrixRawResponse(WEB_PROXY_ROUTES.native_session, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(payload),
-  }).catch(() => null);
-
-  if (!response?.ok) {
-    return;
+  for (const waitMs of [0, 700, 1500]) {
+    if (waitMs) await delay(waitMs);
+    const response = await xmatrixRawResponse(WEB_PROXY_ROUTES.native_session, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload),
+    }).catch(() => null);
+    if (response?.ok) return;
   }
+  throw new Error("Signed in, but this app couldn't keep the session. Try again.");
 }
 
 async function clearNativeSession(): Promise<void> {
   if (!isNativeShell()) {
     return;
   }
+  routeAccountCallsThroughApp(false);
 
   await xmatrixRawResponse(WEB_PROXY_ROUTES.native_session, {
     method: "DELETE",
@@ -429,13 +477,21 @@ async function loadNativeSessionState(): Promise<Omit<AuthState, "loading">> {
 
   const payload = (await response.json().catch(() => ({}))) as { session?: AuthResponse | null };
   if (!payload.session?.token || !payload.session.user) {
+    routeAccountCallsThroughApp(false);
     return { session: null, user: null };
   }
 
+  routeAccountCallsThroughApp(true);
   return {
     session: authResponseToWebSession(payload.session),
     user: payload.session.user,
   };
+}
+
+function logoutDestination(requested: LogoutDestination | undefined): LogoutDestination {
+  if (requested === "/account/delete") return requested;
+  // Only the sign-in page's own query comes back; anything else lands on the plain page.
+  return requested?.startsWith("/login?") && !requested.includes("//") ? requested : "/login";
 }
 
 function authResponseToWebSession(payload: AuthResponse): WebAuthSession {
@@ -482,8 +538,12 @@ function normalizeOAuthReturnPath(returnTo?: string): string {
       return "/app";
     }
 
-    for (const param of OAUTH_CALLBACK_PARAMS) {
-      url.searchParams.delete(param);
+    // Only login pages carry this provider's callback artifacts. An outside
+    // app's authorization return has its own state, which must survive.
+    if (url.pathname === "/login" || url.pathname === "/login/password") {
+      for (const param of OAUTH_CALLBACK_PARAMS) {
+        url.searchParams.delete(param);
+      }
     }
 
     const path = `${url.pathname}${url.search}${url.hash}`;
@@ -495,6 +555,18 @@ function normalizeOAuthReturnPath(returnTo?: string): string {
   } catch {
     return "/app";
   }
+}
+
+/**
+ * Where a sign-in that made a new account lands: the same place in the app,
+ * flagged so the app says so. Anywhere else keeps its own flow.
+ */
+function newAccountCallbackUrl(callbackURL: string): string {
+  const url = new URL(callbackURL);
+  // Only the app itself says so; an outside app's authorization query must stay as it was signed.
+  if (url.pathname !== "/app" && !url.pathname.startsWith("/app/")) return callbackURL;
+  url.searchParams.set("new_account", "1");
+  return url.toString();
 }
 
 function isBetterAuthGoogleEnabled(): boolean {

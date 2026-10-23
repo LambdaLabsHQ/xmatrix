@@ -1,5 +1,6 @@
 "use client";
 
+import { AnimatedIcon } from "@/components/ui/animated-icon";
 import {
   useEffect,
   useLayoutEffect,
@@ -146,9 +147,12 @@ function ComposerInputSurface({
   const textareaRef = textareaRefProp ?? internalTextareaRef;
   const boxRef = useRef<HTMLElement | null>(null);
   const { user } = useAuth();
-  // The draft paints what the timeline will chip, from the same member index.
-  const mentionIndex = useMemo(() => buildMentionReadIndex(
-    channelMentionCandidates(channel, localContext, [], space, instanceTargetScope)), [channel, localContext, space, instanceTargetScope]);
+  // Plain text has no addresses to paint. Do not rebuild the interaction
+  // registry on every activity report until a draft actually contains one.
+  const hasMention = /[@＠]/u.test(textareaValue ?? draft);
+  const mentionIndex = useMemo(() => hasMention ? buildMentionReadIndex(
+    channelMentionCandidates(channel, localContext, [], space, instanceTargetScope)) : null,
+  [hasMention, channel, localContext, space, instanceTargetScope]);
   const completion = useComposerCompletion({
     draft,
     onDraftChange,
@@ -268,10 +272,6 @@ function ComposerInputSurface({
         <div className="composer-input-row flex min-w-0 items-end gap-2">
           {inputLeading}
           <div className="relative min-w-0 flex-1">
-          <ComposerTextHighlight value={textareaValue ?? draft} textareaRef={textareaRef}
-            mentionIndex={mentionIndex} currentUserIdentityId={user ? `user:${user.id}` : undefined}
-            references={referenceRanges} summonReadings={summonReadings} summonReadingPending={summonReadingPending}
-            hint={stripEmptyPasteSentinel(textareaValue ?? draft).length === 0 ? placeholder : undefined} />
           <Textarea
             ref={textareaRef}
             value={textareaValue ?? draft}
@@ -311,11 +311,19 @@ function ComposerInputSurface({
             }}
             aria-label={ariaLabel}
             className={cn(
-              "composer-textarea flex-1 resize-none border-0 bg-transparent shadow-none outline-none transition-all duration-200 focus-visible:ring-0",
+              "composer-textarea flex-1 resize-none border-0 bg-transparent shadow-none outline-none transition-[background-color,border-color,box-shadow,opacity] duration-200 focus-visible:ring-0",
               compact ? "min-h-0 p-0 text-sm" : "min-h-9 px-0 py-1.5 text-sm sm:min-h-11 sm:py-2 sm:text-[15px]"
             )}
           />
-          {onSummonStartAnyway && <ComposerSummonOptions readings={summonReadings ?? []}
+          {/* After the textarea: a later sibling's ref is still null while an
+              earlier one's layout effects run, and the mirror reads the
+              textarea's metrics in its own. */}
+          <ComposerTextHighlight value={textareaValue ?? draft} textareaRef={textareaRef}
+            mentionIndex={mentionIndex} currentUserIdentityId={user ? `user:${user.id}` : undefined}
+            references={referenceRanges} summonReadings={summonReadings} summonReadingPending={summonReadingPending}
+            hint={stripEmptyPasteSentinel(textareaValue ?? draft).length === 0 ? placeholder : undefined} />
+          {onSummonStartAnyway && summonReadings?.some(reading => reading.choice !== "summon") &&
+            <ComposerSummonOptions readings={summonReadings}
             textareaRef={textareaRef} disabled={disabled || !enabled || sending} onStartAnyway={onSummonStartAnyway} />}
           </div>
           {inputTrailing}
@@ -339,7 +347,7 @@ function ComposerInputSurface({
             )}
           >
             {sending ? (
-              <Loader2 className="size-5 animate-spin" />
+              <AnimatedIcon icon={Loader2} className="size-5 animate-spin" />
             ) : (
               <ArrowUp className="size-5" strokeWidth={2.5} />
             )}

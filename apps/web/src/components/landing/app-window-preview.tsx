@@ -1,8 +1,9 @@
 "use client";
+import { decodeChannelSnapshot } from "@xmatrix/protocol";
 
 import { useMemo, useRef, useState } from "react";
 import { QueryClient, QueryClientContext } from "@tanstack/react-query";
-import type { AgentRegistrationSummary, ChannelMessage, MessageSender, SerializedChannel, SerializedSpace } from "@xmatrix/protocol";
+import type { AgentRegistrationSummary, ChannelMessage, MessageSender, ChannelSnapshot, SerializedSpace } from "@xmatrix/protocol";
 import { ChannelSidebar, Composer, MessageTimeline, WorkspaceRail } from "@/components/dashboard/workspace-shell-modules";
 import { ChannelHeader } from "@/components/dashboard/workspace-shell-chrome";
 import { buildTimeline } from "@/components/dashboard/workspace-shell-recovered";
@@ -60,8 +61,8 @@ function agentPresence(label: string, iso: (minutesAgo: number) => string, statu
     avatarUrl: agentLogos[label],
     instances: [{
       id: `preview-${label}-1`,
-      channelInstanceId: "1",
-      label: `${label}:1`,
+      channelInstanceId: label === "claude" ? "1" : "2",
+      label: `${label}:${label === "claude" ? "1" : "2"}`,
       connectedAt: iso(30),
       lastSeenAt: iso(0),
       status,
@@ -75,7 +76,7 @@ function agentPresence(label: string, iso: (minutesAgo: number) => string, statu
 function sample(now: number) {
   const iso = (minutesAgo: number) => new Date(now - minutesAgo * MINUTE).toISOString();
   // Only the open conversation has an agent at work.
-  const channel = (id: string, name: string, from: MessageSender, preview: string, minutesAgo: number): SerializedChannel => ({
+  const channel = (id: string, name: string, from: MessageSender, preview: string, minutesAgo: number): ChannelSnapshot => decodeChannelSnapshot({
     id,
     spaceId: space.id,
     name,
@@ -223,10 +224,8 @@ export function AppWindowPreview() {
                 currentUserId={viewer.id}
                 onRename={noop}
                 onVisibilityChange={noop}
-                onMove={noop}
                 renaming={false}
                 updatingVisibility={false}
-                moving={false}
                 onToggleMembers={noop}
                 onOpenSearch={noop}
               />
@@ -254,6 +253,7 @@ export function AppWindowPreview() {
                 onReact={noop}
                 onEdit={noop}
                 onRecall={noop}
+                onUnsentAction={noop}
                 onReply={noop}
                 onOpenThread={noop}
                 onMentionSender={noop}

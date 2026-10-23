@@ -59,6 +59,7 @@ fn retries_keep_the_first_time_and_only_execution_progress_recovers() {
         Some("busy"),
         Some(&AgentRuntimeState {
             waiting: Some(crate::protocol::AgentRuntimeWaiting {
+                count: None,
                 kind: "tool".into(),
                 label: None,
                 details: Vec::new(),
@@ -104,6 +105,7 @@ fn heartbeat_does_not_postpone_stall_but_waits_and_tools_do() {
     );
     let wait = AgentRuntimeState {
         waiting: Some(crate::protocol::AgentRuntimeWaiting {
+            count: None,
             kind: "tool".into(),
             label: None,
             details: Vec::new(),

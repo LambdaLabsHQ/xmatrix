@@ -1,3 +1,4 @@
+import { trimEnd } from "./field-validation.js";
 import type { AgentTraceOrder } from "./trace-order.js";
 import type { AgentStatusChip } from "./agent-status-tags.js";
 import type { AgentRegistrationKey } from "./agent-registration.js";
@@ -70,7 +71,7 @@ export type AppConnectorConnectionStatus = "configured" | "disconnected" | "erro
 export type AppConnectorProviderId =
   | "github" | "webhook" | "sentry" | "linear" | "pagerduty" | "gitlab" | "slack" | "jira" | "vercel"
   | "cloudflare" | "gcp" | "appstoreconnect" | "feishu" | "discord" | "notion" | "bitbucket" | "circleci" | "buildkite" | "stripe" | "grafana"
-  | "opsgenie" | "netlify" | "telegram" | "teams" | "googlechat" | "google" | "googlesearchconsole" | "bingwebmaster" | "googleadsense" | "googleanalytics" | "googlebusinessprofile" | "pagespeed" | "gmail" | "dingtalk" | "wecom" | "openconnector" | "yandexwebmaster";
+  | "opsgenie" | "netlify" | "telegram" | "teams" | "googlechat" | "google" | "googlesearchconsole" | "bingwebmaster" | "googleadsense" | "googleanalytics" | "googleads" | "googlebusinessprofile" | "pagespeed" | "gmail" | "x" | "dingtalk" | "wecom" | "openconnector" | "yandexwebmaster";
 export type AppConnectorProviderKind =
   | "code-host" | "docs" | "webhook" | "observability" | "issue-tracker" | "incident" | "chat" | "deploy" | "ci"
   | "billing" | "gateway";
@@ -796,7 +797,7 @@ export function parseLlmQuotaAccount(value: unknown): LlmQuotaAccount | undefine
 export type AgentSkill = "spec" | "plan" | "build" | "test" | "review" | "ship";
 
 export function normalizeHubUrl(input?: string | null): string {
-  const value = (input || DEFAULT_HUB_URL).trim().replace(/\/+$/, "");
+  const value = trimEnd((input || DEFAULT_HUB_URL).trim(), "/");
   if (value.startsWith("ws://")) {
     return `http://${value.slice("ws://".length)}`.replace(/\/ws$/, "");
   }
@@ -848,6 +849,12 @@ export type ObservabilityEventType =
   | "channel_mention"
   | "channel_attention_updated"
   | "channel_member_read_updated"
+  /** The Hub judged a message superseded by a later one; `metadata` names both. */
+  | "channel_message_superseded"
+  /** What a message's commands came to changed; `metadata` carries `messageId` and the new `commandResult`. */
+  | "channel_message_interactions_updated"
+  /** A launch, stop, continuation, execution or launch choice of the Channel's messages changed. */
+  | "channel_invocations_changed"
   | "channel_history_loaded"
   | "channel_history_replayed"
   | "client_network_sample"

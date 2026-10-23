@@ -3,7 +3,6 @@ const test = require("node:test");
 require("../components/dashboard/typescript-require.cjs").installTypeScriptRequire();
 
 const {
-  authorizationLabel,
   deviceClientLabel,
   deviceProductName,
   nativeAppLabel,
@@ -20,14 +19,13 @@ test("Android is preserved from either native context field", () => {
 test("native login labels distinguish Android from desktop and CLI", () => {
   assert.equal(deviceClientLabel("android"), "Android app");
   assert.equal(nativeAppLabel("android"), "Android app");
-  assert.equal(authorizationLabel("android"), "Android Authorization");
   assert.equal(deviceProductName("android"), "xMatrix Android");
   assert.equal(deviceClientLabel(null), "terminal");
 });
 
-test("mobile browser login returns through the registered app scheme", () => {
+test("an app's browser login returns through the registered app scheme; a terminal's does not", () => {
   assert.equal(nativeLoginReturnUrl("android"), "xmatrix://login");
   assert.equal(nativeLoginReturnUrl("ios"), "xmatrix://login");
-  assert.equal(nativeLoginReturnUrl("desktop"), null);
+  assert.equal(nativeLoginReturnUrl("desktop"), "xmatrix://login");
   assert.equal(nativeLoginReturnUrl(null), null);
 });

@@ -28,7 +28,23 @@ fi
 
 TEAM_ID="${IOS_DEVELOPMENT_TEAM:-}"
 CONFIGURATION="${IOS_CONFIGURATION:-Release}"
-ROOT_PACKAGE_VERSION="$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' "$ROOT_DIR/version.json" | head -n 1)"
+RELEASE_VERSION="$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' "$ROOT_DIR/version.json" | head -n 1)"
+# The release version decides the channel (releaseChannel in
+# scripts/release-version-order.mjs) and so the Web the app loads and trusts:
+# a beta X.Y.Z-beta.N the beta Web, a stable X.Y.Z the stable one.
+BETA_VERSION='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)-beta\.[1-9][0-9]*$'
+STABLE_VERSION='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
+if [[ "$RELEASE_VERSION" =~ $BETA_VERSION ]]; then
+  WEB_URL="https://beta.xmatrix.sh/app"
+elif [[ "$RELEASE_VERSION" =~ $STABLE_VERSION ]]; then
+  WEB_URL="https://xmatrix.sh/app"
+else
+  echo "version.json version '$RELEASE_VERSION' is neither a stable X.Y.Z nor a beta X.Y.Z-beta.N." >&2
+  exit 2
+fi
+# Apple's version is three numbers: a beta X.Y.Z-beta.N ships as X.Y.Z, its
+# build number telling it apart from the stable X.Y.Z build.
+ROOT_PACKAGE_VERSION="${RELEASE_VERSION%%-*}"
 MARKETING_VERSION="${IOS_MARKETING_VERSION:-$ROOT_PACKAGE_VERSION}"
 BUILD_NUMBER="${IOS_BUILD_NUMBER:-$(date +%Y%m%d%H%M)}"
 ARCHIVE_PATH="${IOS_ARCHIVE_PATH:-$ROOT_DIR/build/ios/xMatrix.xcarchive}"
@@ -40,11 +56,6 @@ IPA_PATH="$EXPORT_PATH/xMatrix.ipa"
 
 export DEVELOPER_DIR="$XCODE_DEVELOPER_DIR"
 export PATH="$DEVELOPER_DIR/usr/bin:$DEVELOPER_DIR/Toolchains/XcodeDefault.xctoolchain/usr/bin:/usr/bin:/bin:/usr/sbin:/sbin"
-
-if [[ -z "$ROOT_PACKAGE_VERSION" ]]; then
-  echo "Could not resolve version.json version." >&2
-  exit 2
-fi
 
 if [[ "$MARKETING_VERSION" != "$ROOT_PACKAGE_VERSION" ]]; then
   echo "IOS_MARKETING_VERSION ($MARKETING_VERSION) must match version.json version ($ROOT_PACKAGE_VERSION)." >&2
@@ -69,6 +80,7 @@ run_xcodebuild() {
 
 mkdir -p "$(dirname "$ARCHIVE_PATH")" "$EXPORT_PATH"
 
+echo "Archiving xMatrix $RELEASE_VERSION ($BUILD_NUMBER), which loads $WEB_URL."
 run_xcodebuild \
   -project "$PROJECT_PATH" \
   -scheme "$SCHEME" \
@@ -78,6 +90,7 @@ run_xcodebuild \
   DEVELOPMENT_TEAM="$TEAM_ID" \
   MARKETING_VERSION="$MARKETING_VERSION" \
   CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
+  XMATRIX_WEB_URL="$WEB_URL" \
   -allowProvisioningUpdates \
   archive
 

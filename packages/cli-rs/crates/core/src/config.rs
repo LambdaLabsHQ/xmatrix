@@ -5,7 +5,7 @@ use crate::error::{CliError, Result};
 use crate::hex::sha256_hex;
 use crate::human_connection::derive_connection_url as derive_human_connection_url;
 use crate::profile::ProfileContext;
-use crate::protocol::{AuthUser, DEFAULT_HUB_URL, TEST_HUB_URL, normalize_hub_url};
+use crate::protocol::{AuthUser, DEFAULT_HUB_URL, normalize_hub_url};
 
 /// A configured text value, with surrounding whitespace removed and blanks absent.
 pub fn non_empty_env(name: &str) -> Option<String> {
@@ -94,18 +94,6 @@ pub struct CliConfig {
         default
     )]
     pub machine_seed: Option<String>,
-    #[serde(
-        rename = "activeEnvironment",
-        skip_serializing_if = "Option::is_none",
-        default
-    )]
-    pub active_environment: Option<String>,
-    #[serde(
-        rename = "cloudflaredPath",
-        skip_serializing_if = "Option::is_none",
-        default
-    )]
-    pub cloudflared_path: Option<String>,
 }
 
 pub fn config_dir() -> PathBuf {
@@ -175,8 +163,9 @@ impl ProfileTaskSet {
         }
     }
 
+    #[cfg(test)]
     /// Tasks that are still running.
-    pub fn live(&self) -> usize {
+    pub(crate) fn live(&self) -> usize {
         self.handles
             .lock()
             .map(|handles| {
@@ -319,11 +308,11 @@ pub fn config_path() -> PathBuf {
     profile_state_dir().join("config.json")
 }
 
-pub fn session_path() -> PathBuf {
+pub(crate) fn session_path() -> PathBuf {
     profile_state_dir().join("session.json")
 }
 
-pub fn sessions_dir() -> PathBuf {
+pub(crate) fn sessions_dir() -> PathBuf {
     profile_state_dir().join("sessions")
 }
 
@@ -339,8 +328,6 @@ pub fn session_path_for_hub(hub_url: &str) -> PathBuf {
     let hub = normalized_hub_origin(hub_url);
     let file_name = if hub == DEFAULT_HUB_URL {
         "production.json".to_string()
-    } else if hub == TEST_HUB_URL {
-        "test.json".to_string()
     } else {
         format!("custom-{}.json", sha256_hex(hub.as_bytes()))
     };
@@ -403,7 +390,7 @@ pub fn claude_projects_dir() -> Option<PathBuf> {
     dirs::home_dir().map(|home| home.join(".claude").join("projects"))
 }
 
-pub async fn load_config() -> CliConfig {
+pub(crate) async fn load_config() -> CliConfig {
     let path = config_path();
     match tokio::fs::read_to_string(&path).await {
         Ok(raw) => parse_config(&raw).unwrap_or_else(|err| {
@@ -417,17 +404,6 @@ pub async fn load_config() -> CliConfig {
     }
 }
 
-pub async fn active_environment() -> String {
-    if let Some(context) = active_profile_context() {
-        return context.name;
-    }
-    load_config()
-        .await
-        .active_environment
-        .filter(|value| matches!(value.as_str(), "production" | "test"))
-        .unwrap_or_else(|| "production".to_string())
-}
-
 pub async fn active_hub_url() -> String {
     if let Some(hub) = agent_cli_hub() {
         return hub.to_string();
@@ -435,23 +411,10 @@ pub async fn active_hub_url() -> String {
     if let Some(context) = active_profile_context() {
         return context.hub_origin;
     }
-    match active_environment().await.as_str() {
-        "test" => TEST_HUB_URL.to_string(),
-        _ => DEFAULT_HUB_URL.to_string(),
-    }
+    DEFAULT_HUB_URL.to_string()
 }
 
-pub async fn saved_cloudflared_path() -> Option<PathBuf> {
-    load_config().await.cloudflared_path.map(PathBuf::from)
-}
-
-pub async fn save_cloudflared_path(path: &Path) -> Result<()> {
-    let mut config = load_config().await;
-    config.cloudflared_path = Some(path.to_string_lossy().to_string());
-    write_config(&config).await
-}
-
-pub async fn load_session() -> Option<CliSession> {
+pub(crate) async fn load_session() -> Option<CliSession> {
     let hub_url = active_hub_url().await;
     load_session_for_hub(&hub_url).await
 }
@@ -547,6 +510,22 @@ pub async fn clear_session_for_hub(hub_url: &str) -> Result<()> {
     write_config(&config).await
 }
 
+/// Every session saved under a state root, one per Hub; unreadable files are skipped.
+pub async fn sessions_in_state_root(state_root: &Path) -> Vec<CliSession> {
+    let mut sessions = Vec::new();
+    let Ok(mut entries) = tokio::fs::read_dir(state_root.join("sessions")).await else {
+        return sessions;
+    };
+    while let Ok(Some(entry)) = entries.next_entry().await {
+        if let Ok(raw) = tokio::fs::read_to_string(entry.path()).await
+            && let Ok(session) = parse_session(&raw)
+        {
+            sessions.push(session);
+        }
+    }
+    sessions
+}
+
 pub async fn clear_all_sessions() -> Result<()> {
     clear_all_sessions_in_state_root(&profile_state_dir()).await
 }
@@ -639,7 +618,7 @@ pub async fn machine_identity_for_owner(owner_user_id: &str) -> Result<MachineId
 }
 
 /// `machine:` + SHA-256 of the owner and the host fingerprint.
-pub fn derive_machine_id(owner_user_id: &str, host_fingerprint: &str) -> String {
+pub(crate) fn derive_machine_id(owner_user_id: &str, host_fingerprint: &str) -> String {
     let digest =
         sha256_hex(format!("xmatrix-machine-v1\0{owner_user_id}\0{host_fingerprint}").as_bytes());
     format!("{MACHINE_ID_PREFIX}{digest}")
@@ -675,12 +654,12 @@ fn legacy_machine_ids(config: &CliConfig, machine_id: &str) -> Vec<String> {
 }
 
 /// Legacy ids still waiting for the Hub to adopt them into `machine_id`.
-pub async fn pending_legacy_machine_ids(machine_id: &str) -> Vec<String> {
+pub(crate) async fn pending_legacy_machine_ids(machine_id: &str) -> Vec<String> {
     legacy_machine_ids(&load_config().await, machine_id)
 }
 
 /// Forgets legacy ids after the Hub reported them adopted.
-pub async fn forget_legacy_machine_ids(adopted: &[String]) -> Result<()> {
+pub(crate) async fn forget_legacy_machine_ids(adopted: &[String]) -> Result<()> {
     if adopted.is_empty() {
         return Ok(());
     }
@@ -948,7 +927,7 @@ pub fn unix_now_secs() -> u64 {
         .as_secs()
 }
 
-pub fn renewed_session_expires_at() -> String {
+pub(crate) fn renewed_session_expires_at() -> String {
     unix_now_secs()
         .saturating_add(SESSION_MAX_AGE_SECS)
         .to_string()
@@ -1376,11 +1355,11 @@ mod tests {
         .await
         .unwrap();
         save_session(
-            "test-token".to_string(),
+            "custom-token".to_string(),
             None,
             user,
-            "https://xmatrix-hub.test.xmatrix.sh".to_string(),
-            "wss://xmatrix-hub.test.xmatrix.sh/ws".to_string(),
+            "https://hub.example".to_string(),
+            "wss://hub.example/ws".to_string(),
             None,
         )
         .await
@@ -1394,21 +1373,21 @@ mod tests {
             "production-token"
         );
         assert_eq!(
-            load_session_for_hub("https://xmatrix-hub.test.xmatrix.sh")
+            load_session_for_hub("https://hub.example")
                 .await
                 .unwrap()
                 .token,
-            "test-token"
+            "custom-token"
         );
         assert_eq!(
-            load_session_for_hub("https://xmatrix-hub.test.xmatrix.sh/api/ignored")
+            load_session_for_hub("https://hub.example/api/ignored")
                 .await
                 .unwrap()
                 .token,
-            "test-token"
+            "custom-token"
         );
         assert!(
-            load_session_for_hub("https://xmatrix-hub.test.xmatrix.sh:8443")
+            load_session_for_hub("https://hub.example:8443")
                 .await
                 .is_none()
         );

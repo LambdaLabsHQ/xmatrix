@@ -1,4 +1,4 @@
-import type { SerializedChannel, SerializedSpace } from "@xmatrix/protocol";
+import type { ChannelSnapshot, SerializedSpace } from "@xmatrix/protocol";
 
 export type InternalChannelLink = {
   spaceKey: string | null;
@@ -7,14 +7,14 @@ export type InternalChannelLink = {
 };
 
 export function absoluteChannelUrl(
-  channel: SerializedChannel,
+  channel: ChannelSnapshot,
   spaces: SerializedSpace[],
   origin = typeof window === "undefined" ? "https://xmatrix.sh" : window.location.origin
 ): string {
   return new URL(channelAppPath(channel, spaces), origin).toString();
 }
 
-export function channelAppPath(channel: SerializedChannel, spaces: SerializedSpace[]): string {
+export function channelAppPath(channel: ChannelSnapshot, spaces: SerializedSpace[]): string {
   return `${spaceAppPath(channel.spaceId, spaces)}/channels/${encodeURIComponent(
     channelRouteKey(channel)
   )}`;
@@ -30,7 +30,7 @@ export function spaceRouteKey(space: SerializedSpace | undefined, fallbackId: st
   return `${label}-${entityToken(space?.id || fallbackId, "s")}`;
 }
 
-export function channelRouteKey(channel: SerializedChannel): string {
+export function channelRouteKey(channel: ChannelSnapshot): string {
   const label = slugForRoute(channelTitle(channel) || "channel");
   return `${label}--${channel.id}`;
 }
@@ -41,6 +41,24 @@ export function exactChannelIdFromRouteKey(key: string): string | null {
   const separator = decoded.indexOf("--");
   if (separator < 0) return null;
   return decoded.slice(separator + 2).trim() || null;
+}
+
+// A Channel's own id, as a page names its conversation (`?conversation=<id>`).
+const CHANNEL_ID_SHAPE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
+
+/**
+ * What a route's channel key asks for: a Channel by its id, or a legacy route token to resolve. A bare id
+ * whose last group starts with "c" is an id, not a token.
+ */
+export function routeChannelTarget(key: string): { channelId: string; routeToken: null }
+  | { channelId: null; routeToken: string } | null {
+  const trimmed = key.trim();
+  if (!trimmed) return null;
+  const exact = exactChannelIdFromRouteKey(trimmed);
+  if (exact) return { channelId: exact, routeToken: null };
+  if (CHANNEL_ID_SHAPE.test(trimmed)) return { channelId: trimmed, routeToken: null };
+  const routeToken = routeEntityTokenFromKey(trimmed, "c");
+  return routeToken ? { channelId: null, routeToken } : { channelId: trimmed, routeToken: null };
 }
 
 export function routeEntityTokenFromKey(key: string, prefix: "s" | "c"): string | null {
@@ -73,7 +91,7 @@ export function normalizeRouteKey(value: string): string {
   return decodePathSegment(value).trim().toLowerCase();
 }
 
-export function channelTitle(channel: SerializedChannel): string {
+export function channelTitle(channel: ChannelSnapshot): string {
   return (channel.name || channel.id.slice(0, 10)).replace(/^#/, "");
 }
 
@@ -124,10 +142,10 @@ export function resolveSpaceRouteKey(spaces: SerializedSpace[], key: string | nu
 }
 
 export function resolveChannelRouteKey(
-  channels: SerializedChannel[],
+  channels: ChannelSnapshot[],
   key: string | null,
   spaceId: string | null
-): SerializedChannel | null {
+): ChannelSnapshot | null {
   if (!key) return null;
   const scopedChannels = spaceId
     ? channels.filter((channel) => channel.spaceId === spaceId)

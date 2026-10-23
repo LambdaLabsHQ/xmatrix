@@ -19,7 +19,7 @@ const RECONNECT_MAX: Duration = Duration::from_secs(30);
 /// The Hub's failure code for a Human token it does not accept.
 const HUMAN_AUTH_INVALID: &str = "human_auth_invalid";
 
-pub fn derive_connection_url(hub_url: &str) -> String {
+pub(crate) fn derive_connection_url(hub_url: &str) -> String {
     domain_connection_url(hub_url, "/ws/humans")
 }
 

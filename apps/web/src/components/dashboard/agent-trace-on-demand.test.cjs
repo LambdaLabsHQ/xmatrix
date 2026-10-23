@@ -653,6 +653,26 @@ test("a failing live read backs off and a hidden tab asks rarely", () => {
   assert.equal(next(false, { hidden: true }), 15_000);
 });
 
+test("a host that cannot serve its trace is asked again with backoff, not every interval", async () => {
+  for (const availability of ["unavailable", "expired"]) {
+    let reads = 0;
+    const sync = startAgentTraceHistorySync({
+      instanceIds: ["instance:offline"], refreshIntervalMs: 250,
+      fetchHistory: async () => {
+        reads += 1;
+        return Response.json({ availability, complete: false, events: [], cursor: null,
+          reason: availability === "unavailable" ? "host_offline" : "host_expired" });
+      },
+      onState: () => undefined, onEvents: () => undefined,
+    });
+    await sync.firstDone;
+    // Every 250 ms would be five or six reads; backing off from 500 ms is two.
+    await new Promise((resolve) => setTimeout(resolve, 1_300));
+    sync.cancel();
+    assert.ok(reads <= 3, `${availability}: ${reads} reads in 1.3 s`);
+  }
+});
+
 test("live trace watermark uses the latest instant across offsets and fractional precision", async () => {
   const reads = [];
   const latest = "2026-10-13T08:00:00.123000003Z";

@@ -1,4 +1,4 @@
-import type { Page } from "@playwright/test";
+import { expect, type Page } from "@playwright/test";
 
 /**
  * In-page API fixtures.
@@ -63,9 +63,21 @@ export type FixtureResponder =
       held?: boolean;
     }
   /** One response per call, clamped to the last entry once exhausted. */
-  | { kind: "sequence"; responses: ReadonlyArray<{ status?: number; json: unknown }> }
+  | { kind: "sequence"; responses: ReadonlyArray<{ status?: number; json: unknown }>; delayMs?: number }
+  /** Faces read by id (protocol faces.ts): each id asked for, with its picture in `images` (`user:<id>`, `agent:<id>`) or none. */
+  | { kind: "faces"; images: Readonly<Record<string, string>> }
   /** Mirror the Hub-selected scoped upload path from an upload-intent body. */
   | { kind: "relayV2UploadIntent" }
+  /**
+   * A Channel create, answered as the Hub answers it: the Channel takes the id
+   * the Hub derives from the user and the request's create key, which the
+   * client has already shown it under.
+   */
+  | {
+      kind: "channelCreate"; channel: Record<string, unknown>; userId: string;
+      /** Answer only once the spec calls `releaseFixture(page, id)`, as `deferred` does. */
+      held?: boolean;
+    }
   /**
    * A response the spec releases by hand, for the loading states that only
    * exist while a request is still outstanding. Release it with
@@ -238,6 +250,13 @@ function installInterceptor({
         );
       }
 
+      function faces(rule: Rule, url: URL) {
+        const images = (rule.responder.images as Record<string, string>) || {};
+        const read = (kind: string) => url.searchParams.getAll(kind)
+          .map((id) => ({ id, imageUrl: images[`${kind}:${id}`] ?? null }));
+        return jsonResponse({ users: read("user"), agents: read("agent") }, 200);
+      }
+
       function launchTargets(rule: Rule, url: URL) {
         const segments = url.pathname.split("/").filter(Boolean);
         const spaceId = segments[segments.indexOf("spaces") + 1] || "";
@@ -405,6 +424,19 @@ function installInterceptor({
         }, 200);
       }
 
+      async function channelCreate(rule: Rule, key: string | null) {
+        const channel = rule.responder.channel as Record<string, unknown>;
+        if (!key) return jsonResponse({ channel }, 200);
+        const bytes = new TextEncoder().encode(`create-channel\0${rule.responder.userId as string}\0${key.slice(0, 120)}`);
+        const digest = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)),
+          (byte) => byte.toString(16).padStart(2, "0")).join("");
+        const id = [digest.slice(0, 8), digest.slice(8, 12), digest.slice(12, 16), digest.slice(16, 20),
+          digest.slice(20, 32)].join("-");
+        const created = `created:${rule.id}`;
+        store.state[created] = [...((store.state[created] as string[] | undefined) ?? []), id];
+        return jsonResponse({ channel: { ...channel, id } }, 200);
+      }
+
       const originalFetch = window.fetch.bind(window);
       window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
         const request = input instanceof Request ? input : null;
@@ -436,9 +468,18 @@ function installInterceptor({
           persistLog();
 
           if (rule.responder.kind === "pagedHistory") return pagedHistory(rule, url);
-          if (rule.responder.kind === "sequence") return sequence(rule);
+          if (rule.responder.kind === "sequence") {
+            const delayMs = rule.responder.delayMs as number | undefined;
+            if (delayMs) await new Promise((resolve) => setTimeout(resolve, delayMs));
+            return sequence(rule);
+          }
           if (rule.responder.kind === "relayV2UploadIntent") {
             return relayV2UploadIntent(body);
+          }
+          if (rule.responder.kind === "channelCreate") {
+            const gate = rule.responder.held === true ? store.gateFor(rule.id) : null;
+            if (gate && !gate.released) await gate.promise;
+            return channelCreate(rule, new Headers(init?.headers ?? request?.headers).get("x-xmatrix-idempotency-key"));
           }
           if (rule.responder.kind === "deferred") {
             const gate = store.gateFor(rule.id);
@@ -459,6 +500,7 @@ function installInterceptor({
           if (rule.responder.kind === "launchTargets") {
             return launchTargets(rule, url);
           }
+          if (rule.responder.kind === "faces") return faces(rule, url);
           if (rule.responder.echoRequestId === true) {
             const requestId = method === "GET" ? url.searchParams.get("requestId") : (body ? JSON.parse(body).requestId : undefined);
             return jsonResponse({ ...(rule.responder.json as Record<string, unknown>), requestId },
@@ -616,6 +658,16 @@ export async function fixtureJson(
   });
 }
 
+/** The id a created Channel takes: the Hub derives it from the create key, so a spec cannot name it. */
+export const CREATED_CHANNEL_ID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
+
+/** Channel creates, each answered with this Channel under the id the Hub would give it. */
+export async function fixtureChannelCreate(page: Page, id: string, channel: Record<string, unknown>,
+  options: { held?: boolean } = {}): Promise<void> {
+  await fixtureRule(page, { id, pattern: /\/api\/xmatrix\/channels$/u, method: "POST",
+    responder: { kind: "channelCreate", channel, userId: "e2e-user", ...options } });
+}
+
 /** Stub both paged catalog reads and exact channel resolution. */
 export async function fixtureChannelCatalog(
   page: Page,
@@ -653,6 +705,21 @@ export async function fixtureRequests(page: Page, id: string): Promise<string[]>
   return (await fixtureRequestRecords(page, id)).map((entry) => entry.url);
 }
 
+/** The ids of the Channels a `channelCreate` rule created, in order. */
+export async function fixtureCreatedChannelIds(page: Page, id: string): Promise<string[]> {
+  return page.evaluate(({ storeKey, ruleId }) => {
+    const store = (window as unknown as Record<string, { state: Record<string, unknown> }>)[storeKey];
+    return (store?.state[`created:${ruleId}`] as string[] | undefined) ?? [];
+  }, { storeKey: STORE_KEY, ruleId: id });
+}
+
+/** The one Channel a `channelCreate` rule has created, once it has. */
+export async function fixtureCreatedChannelId(page: Page, id: string): Promise<string> {
+  let created: string[] = [];
+  await expect.poll(async () => (created = await fixtureCreatedChannelIds(page, id)).length).toBe(1);
+  return created[0]!;
+}
+
 /** Parsed JSON bodies a rule received, for specs that assert on what was sent. */
 export async function fixtureRequestBodies(
   page: Page,
@@ -682,4 +749,10 @@ export async function requestedBeforeSequences(
     const value = new URL(url).searchParams.get("beforeSequence");
     return value === null ? null : Number(value);
   });
+}
+
+/** Answers the Web's face reads with `images`, keyed `user:<id>` / `agent:<instanceId>`; any other id has no picture. */
+export async function fixtureFaces(page: Page, images: Readonly<Record<string, string>> = {}) {
+  await fixtureRule(page, { id: "faces", pattern: /\/api\/xmatrix\/spaces\/[^/]+\/faces(?:\?.*)?$/u,
+    responder: { kind: "faces", images } });
 }

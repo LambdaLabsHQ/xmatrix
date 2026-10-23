@@ -1,7 +1,7 @@
 import { plainRecord, utf8ByteLength } from "@xmatrix/protocol";
 import type { AppConnectorProviderManifest } from "@xmatrix/protocol";
 import { dispatchProductMessageAppend } from "../product-message-append";
-import { appCommand, listAppConnections } from "../apps";
+import { appCommand, CONNECTED_APPS_NEED_MEMBER, usableAppConnections } from "../apps";
 import { getChannel } from "../spaces";
 import type { ConnectorCommandInput } from "./provider";
 
@@ -37,7 +37,8 @@ export async function commandScope(manifest: AppConnectorProviderManifest, input
   Promise<CommandScope | string> {
   const principal = { kind: "user" as const, id: input.actorUserId };
   const spaceId = await channelSpace(manifest, input.env, input.channelId, principal);
-  const listed = await listAppConnections(input.env, { spaceId, channelId: input.channelId, actorUserId: input.actorUserId });
+  const listed = await usableAppConnections(input.env, { spaceId, channelId: input.channelId, actorUserId: input.actorUserId });
+  if (!listed) return CONNECTED_APPS_NEED_MEMBER;
   const connection = listed.map(record).find((candidate) => candidate.providerId === manifest.id);
   if (!connection || connection.status !== "configured" || typeof connection.id !== "string") {
     return `connect ${manifest.name} to this Space first`;
@@ -57,7 +58,13 @@ function executionExcerpt(value: string, maximum: number): string {
   return excerpt.trimEnd();
 }
 
-/** Records one execution, runs it, and finalizes it with what happened. */
+/** The Channel's receipt for one command: the action, its outcome and what it returned. */
+export function commandResult(name: string, actionId: string,
+  outcome: { status: "completed" | "failed" | "blocked"; summary: string }): string {
+  return `${name} ${actionId}: ${outcome.status}; ${outcome.summary}${/[.!?。`]$/u.test(outcome.summary.trimEnd()) ? "" : "."}`;
+}
+
+/** Records one execution, runs it, and finalizes it with its receipt. */
 export async function withExecution(
   manifest: AppConnectorProviderManifest,
   input: ConnectorCommandInput,
@@ -81,14 +88,12 @@ export async function withExecution(
       : { reason: executionExcerpt(outcome.summary, 500) }),
     principal: scope.principal,
   });
-  /* A summary that already ends its own sentence, or in a fence, gets no second full stop. */
-  return `${manifest.name} ${action.id}: ${outcome.status}; ${outcome.summary}${/[.!?。`]$/u.test(outcome.summary.trimEnd()) ? "" : "."}`;
+  return commandResult(manifest.name, action.id, outcome);
 }
 
-/* The receipt reports what the Hub already did, so it is a system fact:
-   context for every Instance, never a turn. An Agent's tool call has its
-   answer in the tool result; delivering the receipt as work made the caller's
-   own receipt cancel the turn that was waiting on it. */
+/* Receipts resume the exact calling Instance after its current turn. The
+   trusted caller identity survives approvals and durable execution; provider
+   text and mutable names never decide who receives the result as work. */
 export async function publishCommandStatus(manifest: AppConnectorProviderManifest, input: ConnectorCommandInput,
   lines: readonly string[]): Promise<void> {
   if (lines.length === 0) return;
@@ -97,9 +102,15 @@ export async function publishCommandStatus(manifest: AppConnectorProviderManifes
     messageId: `system:${input.messageId}:${manifest.id}`.slice(0, 200),
     channelId: input.channelId,
     body: `App connector command status:\n${lines.map((line) => `- ${line}`).join("\n")}`,
+    // Paid X work is already charged before I/O. Its receipt must remain
+    // publishable when that call used the final credit or was refused.
+    ...(manifest.id === "x" ? { messageKind: "xmatrix.system.x_receipt" } : {}),
     principal: { kind: "user", id: input.actorUserId },
     appAuthorId: manifest.id,
-    residual: { appMetadata: { xmatrixProvenance: "system_fact" } },
+    residual: { appMetadata: { xmatrixProvenance: "system_fact",
+      ...(input.senderKind === "agent" && input.senderId && input.commandMessageId !== null
+        ? { xmatrixConnectorRequesterInstanceId: input.senderId } : {}) },
+      ...(input.commandMessageId === null ? {} : { replyToMessageId: input.commandMessageId ?? input.messageId }) },
   });
   if (!response.ok) throw await failure(`${manifest.name} connector status`, response);
 }

@@ -1,5 +1,6 @@
 "use client";
 
+import { AnimatedIcon } from "@/components/ui/animated-icon";
 import Link from "next/link";
 import { getDesktopBridge } from "@/lib/desktop/bridge";
 import { AppleSpaceBillingSection } from "./settings-apple-billing";
@@ -21,7 +22,8 @@ import { replaceBrowserPath } from "./workspace-shell-navigation";
 export const SPACE_BILLING_SECTION = "billing";
 
 /** The return parameters `/billing` forwards; removed once they have been acted on. */
-const CHECKOUT_RETURN_PARAMS = ["checkout", "checkout_session_id", "ai_checkout", "ai_checkout_session_id"] as const;
+const CHECKOUT_RETURN_PARAMS = ["checkout", "checkout_session_id", "ai_checkout", "ai_checkout_session_id", "credit_pack_checkout", "credit_pack_session_id"] as const;
+type BillingCommand = "checkout" | "portal" | "reconcile" | "apple-reconcile" | "credits/checkout" | "credits/reconcile";
 
 export type SpaceBilling = SpacePlanBilling & {
   plan: "free" | "pro";
@@ -38,6 +40,21 @@ export type SpaceBilling = SpacePlanBilling & {
     access?: "full" | "read_only";
   } | null;
   seatAdjustmentRequired?: boolean;
+  /** A Pro Space's Agent credits this month (docs/design/agent-credits.md). */
+  credits?: SpaceCredits;
+};
+
+export type SpaceCredits = {
+  periodStart: string;
+  resetsOn: string;
+  included: number;
+  includedUsed: number;
+  packBalance: number;
+  packUsed: number;
+  grace: number;
+  graceUsed: number;
+  paused: boolean;
+  packCredits: number;
 };
 
 function capitalized(value: string): string {
@@ -102,10 +119,12 @@ function StripeSpaceBillingSection({ userId, space }: {
   const [interval, setInterval] = useState<"month" | "year">("month");
   const [seats, setSeats] = useState(1);
   const returned = useCheckoutReturn();
+  const [packSession] = useState(() => typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("credit_pack_session_id"));
+  const [packConfirmed, setPackConfirmed] = useState(false);
   const reconciled = useRef<string | null>(null);
   const command = useMutation({
     mutationKey: [...spaceBillingKey(userId, spaceId ?? ""), "command"],
-    mutationFn: (input: { kind: "checkout" | "portal" | "reconcile" | "apple-reconcile"; body?: unknown }) =>
+    mutationFn: (input: { kind: BillingCommand; body?: unknown }) =>
       xmatrixApiRequest<{ checkoutUrl?: string; portalUrl?: string; billing?: SpaceBilling }>({
         url: `/api/xmatrix/spaces/${encodeURIComponent(spaceId!)}/billing/${input.kind === "apple-reconcile" ? "apple/reconcile" : input.kind}`,
         method: "POST",
@@ -122,13 +141,24 @@ function StripeSpaceBillingSection({ userId, space }: {
     if (billing) setSeats(Math.max(1, billing.seats.used));
   }, [billing]);
 
-  const run = useCallback(async (kind: "checkout" | "portal" | "reconcile" | "apple-reconcile", body?: unknown) => {
+  const run = useCallback(async (kind: BillingCommand, body?: unknown) => {
     try {
       const payload = await command.mutateAsync({ kind, body });
       const destination = payload.checkoutUrl ?? payload.portalUrl;
       if (destination) window.location.assign(destination);
+      return payload;
     } catch {}
   }, [command]);
+
+  useEffect(() => {
+    if (!spaceId || !billing?.canManage || !packSession) return;
+    const key = `${spaceId}:pack:${packSession}`;
+    if (reconciled.current === key) return;
+    reconciled.current = key;
+    void run("credits/reconcile", { sessionId: packSession }).then(payload => {
+      if (payload?.billing) { setPackConfirmed(true); returned.clear(); }
+    });
+  }, [spaceId, billing?.canManage, packSession, run, returned]);
 
   // A return from Checkout is confirmed by asking the Hub to reconcile that
   // session with Stripe; the webhook may not have arrived yet.
@@ -151,6 +181,7 @@ function StripeSpaceBillingSection({ userId, space }: {
   const price = PRO_SEAT_PRICE_USD[interval];
   return (
     <div className="app-settings-section min-w-0 space-y-4" data-testid="space-billing">
+      {packConfirmed && <p role="status" className={noticeClass("settled")}>Credit pack payment confirmed. Its credits were added to the Space.</p>}
       {returned.spaceNotice === "success" && (
         <p className={noticeClass("settled")}>
           {billing?.plan === "pro" ? `Payment received. ${space.name} is on Pro.` : "Payment received. Confirming the checkout with Stripe…"}
@@ -158,7 +189,7 @@ function StripeSpaceBillingSection({ userId, space }: {
       )}
       {returned.spaceNotice === "cancelled" && <p className={noticeClass("settled")}>Checkout was cancelled; nothing was changed.</p>}
       {!billing ? (
-        !error && <div className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="size-4 animate-spin" />Loading plan…</div>
+        !error && <div className="flex items-center gap-2 text-sm text-muted-foreground"><AnimatedIcon icon={Loader2} className="size-4 animate-spin" />Loading plan…</div>
       ) : billing.plan === "pro" ? (
         <>
           <PlanCard
@@ -169,6 +200,7 @@ function StripeSpaceBillingSection({ userId, space }: {
             state={mark && mark.state !== "active" ? { label: mark.state === "blocked" ? "Blocked" : capitalized(subscription?.status ?? "Ending"), title: mark.title, alert: mark.state === "blocked" } : null}
           >
             <SeatPips used={billing.seats.used} limit={billing.seats.limit} />
+            {billing.credits && <CreditUsage credits={billing.credits} />}
             <PlanFeatures features={PRO_PLAN_FEATURES} />
           </PlanCard>
           <BillingWarnings billing={billing} spaceName={space.name} />
@@ -177,20 +209,25 @@ function StripeSpaceBillingSection({ userId, space }: {
           ) : (
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
               {subscription?.billingProvider === "apple" ? <a className={actionClass({ variant: "secondary", size: "md" })} href="https://apps.apple.com/account/subscriptions">Manage in App Store</a> : <button type="button" className={actionClass({ variant: "secondary", size: "md" })} disabled={busy !== null} onClick={() => void run("portal")}>
-                {busy === "portal" ? <Loader2 className="size-4 animate-spin" /> : <ExternalLink className="size-4" />}
+                {busy === "portal" ? <AnimatedIcon icon={Loader2} className="size-4 animate-spin" /> : <ExternalLink className="size-4" />}
                 Manage subscription
               </button>}
               <button type="button" className={actionClass({ variant: "secondary", size: "md" })} disabled={busy !== null} onClick={() => void run(subscription?.billingProvider === "apple" ? "apple-reconcile" : "reconcile")}>
-                <RefreshCw className={cn("size-4", busy === "reconcile" && "animate-spin")} />
+                <AnimatedIcon icon={RefreshCw} className={cn("size-4", busy === "reconcile" && "animate-spin")} />
                 Refresh from {subscription?.billingProvider === "apple" ? "App Store" : "Stripe"}
               </button>
+              {billing.credits && <button type="button" className={actionClass({ variant: "secondary", size: "md" })}
+                disabled={busy !== null || subscription?.access === "read_only"} onClick={() => void run("credits/checkout")}>
+                {busy === "credits/checkout" && <AnimatedIcon icon={Loader2} className="size-4 animate-spin" />}
+                Buy {billing.credits.packCredits.toLocaleString("en-US")} credits · $10
+              </button>}
             </div>
           )}
         </>
       ) : (
         <>
           <PlanCard plan="free" name="Free" title={space.name}>
-            <PlanMeter label="Messages" used={billing.freeUsage.acceptedMessages} limit={billing.freeUsage.limit} />
+            <PlanMeter label="Messages & page edits" used={billing.freeUsage.acceptedMessages} limit={billing.freeUsage.limit} />
             <SeatPips used={billing.seats.used} limit={billing.seats.limit} />
           </PlanCard>
           <BillingWarnings billing={billing} spaceName={space.name} />
@@ -198,7 +235,7 @@ function StripeSpaceBillingSection({ userId, space }: {
             plan="pro"
             name="Pro"
             aside={interval === "year" ? `$${price} a seat, yearly` : `$${price} a seat, monthly`}
-            title="Unmetered messages and room for your whole team."
+            title="Room for your whole team, with Agent credits for every seat."
             stub={billing.canManage ? (
               <div className="space-y-3">
                 <div className="flex flex-wrap items-center justify-between gap-3">
@@ -222,7 +259,7 @@ function StripeSpaceBillingSection({ userId, space }: {
                 </div>
                 <button type="button" className={actionClass({ variant: "primary", size: "lg" }, "w-full")} disabled={busy !== null}
                   onClick={() => void run("checkout", { interval, seatQuantity: seats })}>
-                  {busy === "checkout" && <Loader2 className="size-4 animate-spin" />}
+                  {busy === "checkout" && <AnimatedIcon icon={Loader2} className="size-4 animate-spin" />}
                   Upgrade to Pro for ${price * seats} a {interval === "year" ? "year" : "month"}
                 </button>
                 <p className="text-xs text-muted-foreground">
@@ -247,9 +284,15 @@ function BillingWarnings({ billing, spaceName }: { billing: SpaceBilling; spaceN
       {billing.subscription?.access === "read_only" && (
         <p className={noticeClass("alert")}>{spaceName} is read-only until the past-due payment is resolved.</p>
       )}
+      {billing.credits?.paused && (
+        <p className={noticeClass("alert")}>
+          {spaceName} has used this month&apos;s Agent credits. Agents and apps can write again on{" "}
+          {formatPlanDate(billing.credits.resetsOn)}, or sooner with a credit pack. People can still write.
+        </p>
+      )}
       {billing.seatAdjustmentRequired && (
         <p className={noticeClass("alert")}>
-          More members than purchased seats. Remove members or add seats in the billing portal before sending new messages.
+          More members than purchased seats. Remove extra billable members before sending new messages.
         </p>
       )}
     </>
@@ -311,6 +354,23 @@ function SeatPips({ used, limit }: { used: number; limit: number }) {
           <span key={index} className="app-plan-pip" data-used={index < used ? "true" : undefined} />
         ))}
       </span>
+    </div>
+  );
+}
+
+/** The month's Agent credits: included first, then packs, then the grace. */
+function CreditUsage({ credits }: { credits: SpaceCredits }) {
+  const extra = [
+    credits.packBalance > 0 || credits.packUsed > 0
+      ? `${credits.packBalance.toLocaleString()} pack credits left` : null,
+    credits.graceUsed > 0 ? `${credits.graceUsed.toLocaleString()} of ${credits.grace.toLocaleString()} grace used` : null,
+    `resets ${formatPlanDate(credits.resetsOn)}`,
+  ].filter(Boolean).join(" · ");
+  return (
+    <div className="space-y-1">
+      <PlanMeter label="Agent credits" used={credits.includedUsed} limit={credits.included} />
+      <p className="text-xs text-muted-foreground">{extra}</p>
+      <p className="text-xs text-muted-foreground">Paid X actions use this balance too. <a className="underline" href="/#pricing" target="_blank" rel="noreferrer">See credit prices</a>.</p>
     </div>
   );
 }

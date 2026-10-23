@@ -2,10 +2,11 @@ import type { QueryResultRow } from "pg";
 import { SENTRY_PUBLIC_INTEGRATION_SCOPES, utf8ByteLength } from "@xmatrix/protocol";
 
 import type { AuthorityDatabase, DatabaseTransaction } from "./contracts.js";
-import { AppControlError } from "./app-control.js";
+import { AppControlError, SLACK_WORKSPACE_HELD_SQL, SLACK_WORKSPACE_OWNED_SQL, SLACK_WORKSPACE_TAKEN } from "./app-control.js";
 import { appRequestText as text } from "./app-request-text.js";
 import { decryptSecretValue, encryptSecretValue } from "./secret-value-control.js";
 import { lockDiscordInstallation } from "./discord-installation-lifecycle.js";
+import { reconcileGmailRoutingCredentials } from "./gmail-routing-credential-update.js";
 import { beginSentryAttempt, lockSentryAttempt, consumeSentryAttempt, retireSentryAttempt } from "./sentry-installation-lifecycle.js";
 
 /*
@@ -18,11 +19,25 @@ import { beginSentryAttempt, lockSentryAttempt, consumeSentryAttempt, retireSent
 
 const MAX_FIELDS = 16;
 const MAX_VALUE_BYTES = 8 * 1024;
+/*
+ * A field that holds one grant per connected login grows with the logins a
+ * Space adds, so it gets a bound sized for that rather than for one token.
+ */
+const LIST_VALUE_BYTES: Readonly<Record<string, number>> = {
+  "cloudflare:logins": 256 * 1024, "gmail:mailboxes": 256 * 1024, "x:accounts": 256 * 1024,
+};
+
+/** The largest value a connection may store in one credential field. */
+export function appCredentialValueLimit(providerId: string, field: string): number {
+  return LIST_VALUE_BYTES[`${providerId.toLowerCase()}:${field}`] ?? MAX_VALUE_BYTES;
+}
 const FIELD_NAME = /^[A-Za-z][A-Za-z0-9]{0,63}$/u;
 
 export interface AppCredentialFieldPolicy {
   /** Every field the provider manifest declares. */
   allowed: readonly string[];
+  /** Fields the Hub mints (ingress key, webhook secrets); writing only these is not a credential edit. */
+  generated?: readonly string[];
 }
 
 /** Only the Hub's code exchange may supply this provider-authenticated binding. */
@@ -45,6 +60,16 @@ export interface ResolvedAppCredentials {
   connectionVersion: number;
   connectionGeneration: string;
   values: Record<string, string>;
+  /**
+   * The provider-confirmed OAuth binding these credentials are the grant of,
+   * when one is current. Its generation changes with every Connect (null for
+   * a binding made before generations existed, which any Connect replaces),
+   * so with the credential version it names this grant exactly.
+   * `workspaceShared` says this Space does not hold the Slack workspace's
+   * claim (another Space does, or none since an uninstall), so its bot, shared
+   * by every binding of the workspace, this grant must not use.
+   */
+  oauthGrant?: { grantGeneration: string | null; workspaceShared: boolean };
 }
 
 /* The envelope's additional data binds it to this connection and version, so
@@ -103,12 +128,57 @@ async function readInstallationSnapshot(tx: DatabaseTransaction, spaceId: string
     connectionGeneration: String(rows[0].search_rank_sequence) };
 }
 
+/**
+ * A Slack workspace speaks for one Space. Slack issues one bot per workspace,
+ * and its events carry whatever channels that bot was invited into, so a
+ * second Space bound to the same workspace would read the first Space's
+ * private channels. Disconnecting in xMatrix, a failed check, a revoked token
+ * or deleting the Space leaves that bot in those channels, so the workspace's
+ * claim outlives all of them: only Slack's signed app_uninstalled, dated after
+ * the claim, releases it (retireSlackWorkspace). Until then a Connect from any
+ * other Space is refused; the claiming Space may connect again, which renews
+ * the claim. Serialized per workspace before any connection or credential
+ * lock, so two concurrent Connects cannot both claim.
+ */
+
+export async function claimSlackWorkspace(tx: DatabaseTransaction, installation: AppOAuthInstallation,
+  spaceId: string, at: string): Promise<void> {
+  await tx.query({ name: "slack_workspace_lock_v1", text: "SELECT pg_advisory_xact_lock(hashtextextended($1,0))",
+    values: [`slack:${installation.appClientId}:${installation.installationId}`], maxRows: 1 });
+  const claim = await tx.query<QueryResultRow>({ name: "slack_workspace_claim_read_v1", text: `SELECT space_id
+    FROM data.app_slack_workspace_claims WHERE app_client_id=$1 AND installation_id=$2 FOR UPDATE`,
+  values: [installation.appClientId, installation.installationId], maxRows: 1 });
+  // Bindings made before claims existed still hold their workspace while current.
+  const held = claim[0] ? [] : await tx.query<QueryResultRow>({ name: "slack_workspace_claim_v2", text: `SELECT i.connection_id
+    FROM data.app_connector_oauth_installations i
+    JOIN data.app_connector_connections c ON ${SLACK_WORKSPACE_HELD_SQL("i", "c", "k")}
+    WHERE i.provider_id='slack' AND i.app_client_id=$1 AND i.installation_id=$2 AND i.space_id<>$3
+      AND NOT EXISTS (SELECT 1 FROM data.space_deletions d WHERE d.space_id=i.space_id)
+    LIMIT 1`, values: [installation.appClientId, installation.installationId, spaceId], maxRows: 1 });
+  // A contested claim (no Space: older bindings of two Spaces shared it) is no Space's to take either.
+  if ((claim[0] && (claim[0].space_id === null || String(claim[0].space_id) !== spaceId)) || held[0]) {
+    throw new AppControlError(SLACK_WORKSPACE_TAKEN, 409,
+      "This Slack workspace is already connected to another xMatrix Space; remove the xMatrix app from the Slack workspace to move it");
+  }
+  await tx.query({ name: "slack_workspace_claim_write_v1", text: `INSERT INTO data.app_slack_workspace_claims
+    (app_client_id,installation_id,space_id,claimed_at) VALUES ($1,$2,$3,$4)
+    ON CONFLICT (app_client_id,installation_id) DO UPDATE SET claimed_at=GREATEST(data.app_slack_workspace_claims.claimed_at,EXCLUDED.claimed_at)`,
+  values: [installation.appClientId, installation.installationId, spaceId, new Date(at).toISOString()], maxRows: 0 });
+}
+
 export class PostgresAppCredentialRepository {
   constructor(private readonly database: AuthorityDatabase, private readonly material: string) {
     if (database.cacheMode !== "disabled") throw new AppControlError(
       "cached_authority_forbidden", 500, "App credential authority requires uncached PostgreSQL");
     if (!material) throw new AppControlError("credential_unavailable", 503,
       "Connector credential encryption is not configured");
+  }
+
+  /** Authorize a provider request without reading or decrypting an existing grant. */
+  async authorizeAdmin(input: { requestId: string; spaceId: string; actorUserId: string }): Promise<void> {
+    const spaceId = text(input.spaceId, "spaceId"), userId = text(input.actorUserId, "actorUserId");
+    return this.database.transaction({ requestId: text(input.requestId, "requestId", 200),
+      operation: "app.credentials.authorize-admin" }, tx => requireSpaceAdmin(tx, spaceId, userId));
   }
 
   /**
@@ -142,7 +212,7 @@ export class PostgresAppCredentialRepository {
     for (const [name, value] of [...entries, ...Object.entries(input.initialize ?? {})]) {
       if (!FIELD_NAME.test(name) || !input.policy.allowed.includes(name)) throw new AppControlError(
         "invalid_app_request", 400, "Unsupported connector credential field");
-      if (value !== null && (typeof value !== "string" || !value || utf8ByteLength(value) > MAX_VALUE_BYTES)) {
+      if (value !== null && (typeof value !== "string" || !value || utf8ByteLength(value) > appCredentialValueLimit(providerId, name))) {
         throw new AppControlError("invalid_app_request", 400, `${name} is invalid`);
       }
     }
@@ -196,6 +266,7 @@ export class PostgresAppCredentialRepository {
       operation: "app.credentials.put" }, async (tx) => {
       if (!input.asHub) await requireSpaceAdmin(tx, spaceId, actorUserId);
       if (providerId === "discord" && installation) await lockDiscordInstallation(tx, installation, `${spaceId}:discord`);
+      if (providerId === "slack" && installation) await claimSlackWorkspace(tx, installation, spaceId, input.at);
       if (verified) await lockSentryAttempt(tx, installation!, spaceId, verified.attemptId, String(input.fields.oauthExpiresAt));
       const connectionId = `${spaceId}:${providerId}`;
       const connections = await tx.query<QueryResultRow>({ name: "app_credential_connection_v2", text: `SELECT
@@ -217,15 +288,26 @@ export class PostgresAppCredentialRepository {
       }
       const grant = input.expectedGrant;
       if (grant && (Number(connections[0].version) !== grant.connectionVersion ||
-          Number(current?.version) !== grant.version || String(connections[0].search_rank_sequence) !== grant.connectionGeneration)) {
+          Number(current?.version ?? 0) !== grant.version || String(connections[0].search_rank_sequence) !== grant.connectionGeneration)) {
         throw new AppControlError("credential_changed", 409, "Connector grant changed during the provider request", true);
       }
-      if (input.asHub && (!Number.isSafeInteger(input.expectedVersion) ||
-          input.expectedVersion !== Number(current?.version))) {
+      if ((input.asHub || input.expectedVersion !== undefined) && (!Number.isSafeInteger(input.expectedVersion) ||
+          input.expectedVersion !== Number(current?.version ?? 0))) {
         throw new AppControlError("credential_changed", 409, "Connector credentials changed during refresh", true);
       }
+      const bound = !installation && !input.asHub && current ? (await tx.query<QueryResultRow>({
+        name: "app_oauth_installation_held_v1", text: `SELECT 1 FROM data.app_connector_oauth_installations
+        WHERE connection_id=$1 AND credential_version=$2 FOR UPDATE`, values: [connectionId, Number(current.version)], maxRows: 1 }))[0] : undefined;
+      // Regenerating a Hub-minted field leaves the grant, and so its binding, as it was.
+      const generatedOnly = !!bound && entries.every(([name, value]) => value !== null && !!input.policy.generated?.includes(name));
       // Native installation is an explicit replacement, never a fallback to old manual credentials.
       const values = current && !verified && !expected ? await decryptValues(this.material, current) : {};
+      const previousGmailValues = providerId === "gmail" ? { ...values } : undefined;
+      // Leaving a provider-bound grant for manual credentials keeps none of that
+      // grant's values: a bot only its binding may use must not become manual.
+      if (bound && !generatedOnly) {
+        for (const name of Object.keys(values)) if (!input.policy.generated?.includes(name)) delete values[name];
+      }
       for (const [name, value] of Object.entries(input.initialize ?? {})) {
         if (!values[name]) values[name] = value;
       }
@@ -236,11 +318,16 @@ export class PostgresAppCredentialRepository {
         if (value === null) delete values[name];
         else values[name] = value;
       }
+      if (providerId === "gmail") {
+        await reconcileGmailRoutingCredentials(tx, this.material, { connectionId,
+          previousVersion: Number(current?.version ?? 0), generation: String(connections[0].search_rank_sequence),
+          before: previousGmailValues!, after: values });
+      }
       const names = Object.keys(values).sort();
       if (names.length > MAX_FIELDS) throw new AppControlError("invalid_app_request", 400, "Too many credential fields");
       // Human credential edits replace the credential evidence for the binding.
       // A server refresh preserves it; a new grant replaces it atomically.
-      if (!input.asHub || names.length === 0) {
+      if ((!input.asHub && !generatedOnly) || names.length === 0) {
         if (providerId === "wecom") {
           await tx.query({ name: "wecom_manual_installation_replace_v1", text: `DELETE FROM data.app_wecom_installations WHERE connection_id=$1`, values: [connectionId], maxRows: 0 });
           await tx.query({ name: "wecom_manual_attempt_replace_v1", text: `DELETE FROM data.app_wecom_install_attempts WHERE connection_id=$1`, values: [connectionId], maxRows: 0 });
@@ -280,7 +367,7 @@ export class PostgresAppCredentialRepository {
           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,gen_random_uuid(),$9)`, values: [connectionId, spaceId, providerId,
           installation.appClientId, installation.installationId, version, new Date(input.at).toISOString(),
           installation.eventScopeId ?? null, installation.discordAuthorizedAt ?? null], maxRows: 0 });
-      } else if (input.asHub) {
+      } else if (input.asHub || generatedOnly) {
         await tx.query({ name: "app_oauth_installation_refresh_v1", text: `UPDATE
           data.app_connector_oauth_installations SET credential_version=$2,updated_at=$3
           WHERE connection_id=$1`, values: [connectionId, version, new Date(input.at).toISOString()], maxRows: 0 });
@@ -292,7 +379,7 @@ export class PostgresAppCredentialRepository {
   }
 
   /** Read only original versions after live admin authorization; no grant enters the browser. */
-  async installationSnapshot(input: { requestId: string; spaceId: string; actorUserId: string; providerId?: "discord" }) {
+  async installationSnapshot(input: { requestId: string; spaceId: string; actorUserId: string; providerId?: "discord" | "x" }) {
     const spaceId = text(input.spaceId, "spaceId");
     return this.database.transaction({ requestId: text(input.requestId, "requestId", 200),
       operation: "app.credentials.installation-snapshot" }, async tx => {
@@ -389,16 +476,24 @@ export class PostgresAppCredentialRepository {
     return this.database.transaction({ requestId: text(input.requestId, "requestId", 200),
       operation: "app.credentials.resolve" }, async (tx) => {
       if (actorUserId !== null) await requireSpaceAdmin(tx, spaceId, actorUserId);
-      const rows = await tx.query<QueryResultRow>({ name: "app_credential_resolve_v1", text: `SELECT
-        k.*,c.status,c.created_by,c.provider_id,c.version AS connection_version,c.search_rank_sequence FROM data.app_connector_credentials k
+      const rows = await tx.query<QueryResultRow>({ name: "app_credential_resolve_v3", text: `SELECT
+        k.*,c.status,c.created_by,c.provider_id,c.version AS connection_version,c.search_rank_sequence,
+        i.connection_id AS bound_connection_id,i.grant_generation,
+        (i.provider_id='slack' AND NOT ${SLACK_WORKSPACE_OWNED_SQL("i")}) AS workspace_shared
+        FROM data.app_connector_credentials k
         JOIN data.app_connector_connections c ON c.connection_id=k.connection_id AND c.space_id=k.space_id
+        LEFT JOIN data.app_connector_oauth_installations i ON i.connection_id=k.connection_id AND i.space_id=k.space_id
+          AND i.provider_id=c.provider_id AND i.credential_version=k.version
         WHERE k.connection_id=$1 AND NOT EXISTS (SELECT 1 FROM data.space_deletions d WHERE d.space_id=k.space_id) LIMIT 1`, values: [`${spaceId}:${providerId}`], maxRows: 1 });
       const row = rows[0];
       if (!row) return null;
       return { connectionId: String(row.connection_id), spaceId: String(row.space_id),
         providerId: String(row.provider_id), status: String(row.status), createdBy: String(row.created_by),
         version: Number(row.version), connectionVersion: Number(row.connection_version),
-        connectionGeneration: String(row.search_rank_sequence), values: await decryptValues(this.material, row) };
+        connectionGeneration: String(row.search_rank_sequence), values: await decryptValues(this.material, row),
+        ...(row.bound_connection_id ? { oauthGrant: {
+          grantGeneration: row.grant_generation === null ? null : String(row.grant_generation),
+          workspaceShared: row.workspace_shared === true } } : {}) };
     });
   }
 }

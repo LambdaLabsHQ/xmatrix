@@ -9,10 +9,10 @@ import {
   relayRuntimeSingleCell,
 } from "./relay-authority-locator";
 import { HUB_ROUTES, REPOSITORY_ACCESS_UNAVAILABLE, deriveHumanConnectionUrl, githubRepositoryReference, repositoryAccessUnavailableDetail, stableMachineDaemonId, withMachineSpawnHarness, hasControlCharacter, sha256Hex } from "@xmatrix/protocol";
-import { admitAttempt } from "./auth-attempt-limit";
+import { admitAttempt, loginEmailAttemptLimits } from "./auth-attempt-limit";
 import { launchTargetRepos } from "./launch-target-repositories";
 import type { Env } from "./types";
-import { platformAdminForRequest, testEnvironmentForRequest } from "./index-routes-admin";
+import { platformAdminForRequest } from "./index-routes-admin";
 import { recordAgentLaunchStage } from "./postgres-observability";
 import { mintGitHubRepositoryToken } from "./app-connectors";
 import { listOwnerWorkspaces, workspaceRepository } from "./postgres-workspace-authority";
@@ -21,8 +21,8 @@ import { runtimeRepository, updateAgentLaunch } from "./runtime";
 import { controlErrorResponse } from "./postgres-authority-http";
 import { githubRepositoryTokenRunRefusal, legacyUnboundRepositoryTokenEnabled } from "./github-repository-token-run-binding";
 import { adoptLegacyMachineIds } from "@xmatrix/db";
-import { hasBetterAuthConfig, mockAuthUserForToken, readBearerToken, verifyAuthToken, type AuthSession, type AuthUser } from "./auth";
-import { betterAuthHandlerErrorResponse, betterAuthRouteErrorStatus, createAuth, createBetterAuthSessionForUser, refreshBetterAuthSession, sendBetterAuthLoginOtp, verifyBetterAuthEmailOtp } from "./better-auth";
+import { hasBetterAuthConfig, InvalidAuthTokenError, mockAuthUserForToken, readBearerToken, verifyAuthToken, type AuthSession, type AuthUser } from "./auth";
+import { accessTokenSessionAlive, betterAuthHandlerErrorResponse, betterAuthRouteErrorStatus, createAuth, createBetterAuthSessionForUser, refreshBetterAuthSession, revokeBetterAuthSession, sendBetterAuthLoginOtp, verifyBetterAuthEmailOtp } from "./better-auth";
 import { EMAIL_DELIVERY_CONFIGURATION_ERROR, EmailDeliveryConfigurationError, loginEmailErrorLog } from "./email-delivery";
 import { logAuthMetric } from "./auth-observability";
 import { SESSION_EXCHANGE_USER_MISMATCH } from "./auth-errors";
@@ -31,15 +31,16 @@ import { machineHostnameObservation } from "./machine-hostname-observation";
 import { signMachineDaemonCredential } from "./connections/machine-daemon/auth";
 import { applyMachineDaemonSpawnLaunchResult, dispatchMachineDaemonRunLifecycleReplica, machineSpawnRegistryEvidenceMatches } from "./index-routes-machine-daemon-admission";
 import { RELAY_RUNTIME_MACHINE_DAEMON_WAIT_PATH } from "./runtime-transport/relay-runtime-product-adapter";
-import { LOGIN_RATE_LIMIT_PER_EMAIL, LOGIN_RATE_LIMIT_PER_CLIENT, hubOrigin, betterAuthRouteGroup, logBetterAuthHandlerMetrics, authCorsPreflight, withAuthCors, parseCliRedirectUri, requireAuth, requireMachineDaemonAuth, machineRouteIdentityMatches, appendMachinePrincipal, requireHumanAuth, requestFailure, productCommandId, clientKey, internalClientHeaders, getDeviceAuthBroker, jsonErrors, requestErrorResponse, machineDaemonControl } from "./index-shared";
+import { LOGIN_RATE_LIMIT_PER_CLIENT, hubOrigin, betterAuthRouteGroup, logBetterAuthHandlerMetrics, authCorsPreflight, withAuthCors, parseCliRedirectUri, requireAuth, requireMachineDaemonAuth, machineRouteIdentityMatches, appendMachinePrincipal, requireHumanAuth, requestFailure, productCommandId, clientKey, internalClientHeaders, getDeviceAuthBroker, jsonErrors, requestErrorResponse, machineDaemonControl } from "./index-shared";
 import { appOrigin } from "./deployment-origins";
 import { registerIndexRoutesAuthSpaceInstances } from "./index-routes-auth-space-instances";
-import { linkGitHubInstallation, registerIndexRoutesAuthSpaceManagement } from "./index-routes-auth-space-management";
-import { completeGitHubConnectAuthorization, githubConnectReturnUrl, isGitHubConnectState } from "./github-connect-authorization";
+import { registerIndexRoutesAuthSpaceManagement } from "./index-routes-auth-space-management";
+import { handoffGitHubConnectAuthorization, githubConnectReturnUrl, isGitHubConnectState } from "./github-connect-authorization";
 import { registerMachineExecutionRoutes } from "./index-routes-machine-executions";
+import { SESSION_LABELS, sessionLabel } from "./auth-sessions";
 import { registerReplyRecoveryRoutes } from "./index-routes-reply-recovery";
 import { wakeAgentLaunchCoordinator } from "./agent-launch-coordinator-wake";
-import { getAppConnection } from "./apps";
+import { connectionUseRefused, getAppConnection } from "./apps";
 import { getChannel, getSpace } from "./spaces";
 
 /** Records each successful-session metric, then hands the client its session and endpoints. */
@@ -85,14 +86,23 @@ async function machineDaemonPoll(c: Context<{ Bindings: Env }>, internalPath: st
   };
 }
 
-async function deviceAuthResponse(c: Context<{ Bindings: Env }>, action: "start" | "approve" | "token",
-  authorization?: string): Promise<Response> {
+async function deviceAuthResponse(c: Context<{ Bindings: Env }>,
+  action: "start" | "approve" | "token" | "describe" | "decline", authorization?: string): Promise<Response> {
   const internalUrl = new URL(`/internal/device-auth/${action}`, c.req.url);
+  const location = action === "start" ? requestLocation(c.req.raw) : undefined;
   const response = await getDeviceAuthBroker(c.env).fetch(new Request(internalUrl.toString(), {
-    method: "POST", headers: internalClientHeaders(c.req.raw, authorization ? { authorization } : undefined),
+    method: "POST", headers: internalClientHeaders(c.req.raw, {
+      ...(authorization ? { authorization } : {}), ...(location ? { "x-client-location": location } : {}) }),
     body: await c.req.text(),
   }));
   return relayResponse(response, { "cache-control": "no-store" });
+}
+
+/** Where Cloudflare's edge places a request, coarsely: "City, CC", or the country alone. */
+function requestLocation(request: Request): string | undefined {
+  const cf = (request as Request & { cf?: { city?: unknown; country?: unknown } }).cf;
+  const place = [cf?.city, cf?.country].filter((part): part is string => typeof part === "string" && part.length > 0);
+  return place.length ? place.join(", ") : undefined;
 }
 
 function machineObservations(c: Context<{ Bindings: Env }>, body: Parameters<typeof machineHostnameObservation>[0]) {
@@ -149,7 +159,7 @@ export function registerIndexRoutesAuthSpace(app: Hono<{ Bindings: Env }>): void
     const client = clientKey(c.req.raw);
     if (!await admitAttempt(c.env, [
       { key: `login:client:${await sha256Hex(client)}`, max: LOGIN_RATE_LIMIT_PER_CLIENT },
-      { key: `login:email:${await sha256Hex(email.toLowerCase())}`, max: LOGIN_RATE_LIMIT_PER_EMAIL },
+      ...await loginEmailAttemptLimits(email),
     ])) {
       await logAuthMetric({ routeGroup: "login_code_send", status: 429, outcome: "rate_limited" });
       return c.json({ error: "Too many login attempts. Try again later." }, 429);
@@ -214,6 +224,23 @@ export function registerIndexRoutesAuthSpace(app: Hono<{ Bindings: Env }>): void
     return deviceAuthResponse(c, "approve", authorization);
   });
   app.post(HUB_ROUTES.device_token, async (c) => deviceAuthResponse(c, "token"));
+  app.post(HUB_ROUTES.device_describe, async (c) => deviceAuthResponse(c, "describe"));
+  app.post(HUB_ROUTES.device_decline, async (c) => deviceAuthResponse(c, "decline"));
+  // A signed-out app or terminal ends its own session here, so the token it held stops working.
+  app.post(HUB_ROUTES.sign_out, async (c) => {
+    const body = (await c.req.json<{ refreshToken?: unknown }>().catch(() => ({}))) as { refreshToken?: unknown };
+    const refreshToken = typeof body.refreshToken === "string" ? body.refreshToken.trim() : "";
+    if (!refreshToken) return c.json({ error: "Refresh token is required" }, 400);
+    try {
+      await revokeBetterAuthSession(c.env, refreshToken);
+    } catch (error) {
+      const failure = requestFailure(error);
+      await logAuthMetric({ routeGroup: "sign_out", status: failure.status, outcome: "revoke_failed" });
+      return failureResponse(failure);
+    }
+    await logAuthMetric({ routeGroup: "sign_out", status: 200, outcome: "revoked" });
+    return c.json({ ok: true });
+  });
 
   app.post(HUB_ROUTES.exchange_session, async (c) => {
     const token = readBearerToken(c.req.header("authorization"));
@@ -225,6 +252,7 @@ export function registerIndexRoutesAuthSpace(app: Hono<{ Bindings: Env }>): void
     let authUser: AuthUser;
     try {
       authUser = await verifyAuthToken(token, c.env);
+      if (!await accessTokenSessionAlive(c.env, token)) throw new InvalidAuthTokenError();
     } catch (error) {
       const failure = requestFailure(error);
       await logAuthMetric({ routeGroup: "exchange_session", status: failure.status,
@@ -250,7 +278,8 @@ export function registerIndexRoutesAuthSpace(app: Hono<{ Bindings: Env }>): void
     }
 
     try {
-      const session = await createBetterAuthSessionForUser(c.env, authUser);
+      const session = await createBetterAuthSessionForUser(c.env, authUser,
+        sessionLabel(SESSION_LABELS.cli, c.req.header("user-agent")));
       return await issuedSessionResponse(c, session, [
         { routeGroup: "session_created", outcome: "exchange_session" },
       ]);
@@ -353,21 +382,15 @@ export function registerIndexRoutesAuthSpace(app: Hono<{ Bindings: Env }>): void
   });
   app.get(HUB_ROUTES.me, (c) => jsonErrors(c, async () => {
     const authUser = await requireAuth(c.req.raw, c.env);
-    const [platformAdmin, testEnvironment] = await Promise.all([
-      platformAdminForRequest(authUser, c.env),
-      testEnvironmentForRequest(authUser, c.env),
-    ]);
+    const platformAdmin = await platformAdminForRequest(authUser, c.env);
 
     return c.json({
       user: authUser,
       hubUrl: hubOrigin(c.req.raw),
       relayUrl: deriveHumanConnectionUrl(c.req.url),
       // Clients use these only to decide what to offer. Platform-admin
-      // routes re-check authority, and Test remains an isolated deployment.
-      capabilities: {
-        platformAdmin,
-        testEnvironment,
-      },
+      // routes re-check authority.
+      capabilities: { platformAdmin },
     });
   }));
   app.all("/api/auth/*", async (c) => {
@@ -386,8 +409,7 @@ export function registerIndexRoutesAuthSpace(app: Hono<{ Bindings: Env }>): void
     }
     if (c.req.path === "/api/auth/callback/github" && isGitHubConnectState(c.req.query("state"))) {
       // Connecting GitHub shares the App's registered callback with account linking.
-      return await completeGitHubConnectAuthorization(c.env, c.req.raw,
-        (spaceId, userId, installationId) => linkGitHubInstallation(c.env, spaceId, userId, installationId))
+      return await handoffGitHubConnectAuthorization(c.env, c.req.raw)
         .catch(() => c.redirect(githubConnectReturnUrl(c.env, "failed"), 302));
     }
     let response: Response;
@@ -642,8 +664,18 @@ export function registerIndexRoutesAuthSpace(app: Hono<{ Bindings: Env }>): void
       error: repositoryAccessUnavailableDetail(`${target.owner}/${target.repo}`, reason) }, 409, { "cache-control": "no-store" });
     // Resolved on every mint, so losing access or disconnecting the connector
     // takes effect immediately instead of at the end of some earlier grant.
-    const { connection } = await getAppConnection(c.env, { connectionId: `${spaceId}:github`,
-      actorUserId: principal.ownerUserId, allowMissing: true }) as { connection: { status?: unknown } | null };
+    // Acting with the connection in this Channel is a member's capability: a
+    // viewer, or a participant in their intake, keeps their own Git login.
+    const usable = await getAppConnection(c.env, { connectionId: `${spaceId}:github`,
+      actorUserId: principal.ownerUserId, channelId, use: true, allowMissing: true })
+      .catch((error: unknown) => {
+        if (connectionUseRefused(error)) return undefined;
+        throw error;
+      }) as { connection: { status?: unknown } | null } | undefined;
+    if (!usable) {
+      return c.json({ error: "github_repository_token_requires_member" }, 403, { "cache-control": "no-store" });
+    }
+    const { connection } = usable;
     if (!connection) return refuse("github_not_connected");
     if (connection.status !== "configured") return refuse("github_connection_not_configured");
 

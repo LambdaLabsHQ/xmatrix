@@ -33,7 +33,9 @@ export function boundedPostgresTransaction(client, rewrite = text => text) {
 
 /** An AuthorityDatabase backed by a test's existing connection. */
 export function postgresDatabase(client, rewrite) {
-  return { cacheMode: "disabled", async transaction(_context, callback) {
+  const database = { cacheMode: "disabled",
+    openSession: () => ({ ...database, close: async () => {} }),
+    async transaction(_context, callback) {
     await client.query("BEGIN");
     try {
       const value = await callback(boundedPostgresTransaction(client, rewrite));
@@ -44,6 +46,7 @@ export function postgresDatabase(client, rewrite) {
       throw error;
     }
   } };
+  return database;
 }
 
 /** Independent command transactions, preserving the test's concurrency. */
@@ -224,4 +227,21 @@ export async function connectorSubscriptionChannel(sql, spaceId, index, provider
     VALUES ($1||':relation',$2||':'||$3,$2,$1,'repository',$3||':*','["messages"]',1,'owner',now(),now())`,
     [channelId, spaceId, providerId]);
   return channelId;
+}
+
+/**
+ * A fresh Space with one open conversation for message tests: clears what an
+ * earlier run left in `tables` for that Space, then places and creates both.
+ */
+export async function seedMessageSpace(client, { space, channel, at, tables }) {
+  for (const table of tables) await client.query(`DELETE FROM ${table} WHERE space_id=$1`, [space]);
+  await client.query(`DELETE FROM control.space_placement WHERE space_id=$1`, [space]);
+  await seedTestSpacePlacement(client, space, at);
+  await client.query(`INSERT INTO data.spaces
+    (space_id,owner_user_id,name,search_rank_sequence,version,metadata_json,created_at,updated_at)
+    VALUES ($2,'owner',$2,$3,1,'{}',$1,$1)`, [at, space, `space-rank:${space}`]);
+  await client.query(`INSERT INTO data.channels
+    (channel_id,space_id,name,name_key,mode,search_rank_sequence,version,metadata_json,
+     created_at,updated_at,activity_at)
+    VALUES ($3,$2,'Conversation',$3,'open',$4,1,'{}',$1,$1,$1)`, [at, space, channel, `rank:${channel}`]);
 }

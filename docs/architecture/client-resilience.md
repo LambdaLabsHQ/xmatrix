@@ -140,10 +140,15 @@ the reason comes from the failure's class, never from raw exception text:
 - ESLint forbids rendering `error.message`, `(error as Error).message` and
   `new Error(payload.error || …)` in components and routes.
 - A deduplicated read follows only Query's signal; a caller that stops waiting
-  uses `untilCallerAborts`, so it never aborts the request others share.
+  uses `untilCallerAborts`, so it never aborts the request others share. An
+  already-cancelled caller still observes its shared promise's eventual
+  rejection, while receiving its own cancellation immediately.
 
 The Hub's messages for transient failures name no internal component
 (`postgres_unavailable` says "xMatrix is briefly unavailable; try again").
+A transaction that lost a conflict to a concurrent one is not an outage: it is
+`transaction_conflict`, "xMatrix was busy with a conflicting change; try
+again", with a `Retry-After` of one second.
 
 ### Finding a failure again
 
@@ -168,11 +173,44 @@ An answer is for a person and a machine; a report is for whoever debugs it.
   defects per page at most; cancellations and transient failures are never
   sent.
 
+### Email login recovery
+
+An unanswered email-code check is retried at most twice. After an unanswered
+attempt, a later refusal or exhaustion of those retries may be recovered only
+by an authenticated session whose email matches the requested account,
+ignoring case and surrounding whitespace. A different account's session, no
+session or an unavailable session check preserves the refusal or uncertainty.
+Both recovery paths use the same account check in `auth-client.ts`; a refused
+first attempt never consults an existing session.
+
 ### Web proxy
 
 The web Worker's hop to the Hub (`src/lib/xmatrix-proxy.ts`) answers a dropped
 Hub connection as a retryable `503`. A hop timeout and a failed session refresh
 are not retryable: repeating them only adds load or delays the real error.
+
+### Reads straight from the Hub
+
+The hop through the web Worker costs more than the Hub's own work on a page's
+reads (in production at HKG, about 199 ms median and 615 ms p90 a request,
+against the Hub's 52 ms and 256 ms). So the app, when it runs at its own origin
+(`NEXT_PUBLIC_APP_URL`) and the compatibility gate has admitted it, reads a
+page's tree, text, margin, sections, read position, suggestions and
+Automations, and a conversation's history, from the Hub straight
+(`src/lib/query/hub-read.ts`), as it already opens live sessions and signs in.
+It sends its bearer token and client identity, never a cookie; the Hub answers
+those GET routes, and their preflight, to the app's origin alone
+(`packages/hub/src/direct-read-cors.ts`), and authorizes them as it does
+through the Web. The Web answers the read when the Hub does not: before
+admission, at any other origin (an app shell's), on no answer across origins,
+on `401` (the Web renews the token from the session) and on `426`. The ticket
+a page's live session opens with is asked for the same way (`POST …/live`), as
+the session's socket already goes to the Hub. Other writes keep going through
+the Web. Direct requests use the browser's default cache mode: a mode that
+skips the HTTP cache makes Chrome skip its preflight cache too, and ask again
+before every request. The Hub marks every direct answer `no-store`, so no answer
+is kept, while the preflight's is, for two hours. A build with `NEXT_PUBLIC_XMATRIX_DIRECT_HUB_READS=0` sends everything
+through the Web.
 
 ## Coming back: one connectivity signal
 
@@ -203,6 +241,30 @@ session (`lib/pages/page-client.ts`). It guarantees:
   pong timeout is replaced, and repeated probes never extend the deadline;
 - on resume: a suspended page replaces its socket, a page with no socket dials
   at once, a live socket is probed.
+
+### Human receive transport
+
+The Human connection opens its physical WebSocket in a same-origin Dedicated
+Worker. The Worker parses JSON and transfers lossless, ordered packets to the
+shell. Presence, lifecycle, observable events and Channel snapshots share one
+16 ms window; any other frame flushes earlier state and itself immediately.
+Packets also flush at 256 frames or one million characters. The shell still
+validates messages, applies the existing keyed coalescing and flushes each packet
+without waiting a second window. Invalid frames cannot discard valid neighbors.
+
+Authentication, compatibility, device capabilities, focus, heartbeat and retry
+decisions remain with the existing main-thread owner. The Worker forwards
+physical close codes, including `4401`, and flushes received state before close
+or error. Replacing or stopping the owner retires its packet subscription and
+terminates its Worker; late events cannot reach a replacement session. Local
+retirement uses immediate termination rather than waiting for a close handshake.
+
+A readiness handshake precedes opening the physical socket. Unsupported or
+blocked Workers therefore fall back to a native socket without creating a second
+connection. Infrastructure failure after opening ends that dial; the regular
+reconnect and authentication policy runs before the next native attempt. The
+native fallback uses the same packet policy. The page editor retains its native
+WebSocket and raw binary/text delivery through the shared reconnecting owner.
 
 ### Heartbeats cost nothing
 

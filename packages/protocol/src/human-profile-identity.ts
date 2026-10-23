@@ -1,4 +1,4 @@
-import { hasControlCharacter } from "./field-validation.js";
+import { hasControlCharacter, trimEdges, trimEnd } from "./field-validation.js";
 /**
  * The two names a Human carries, and the one place their rules live.
  *
@@ -175,13 +175,8 @@ export function suggestHumanHandle(displayName: unknown): string | undefined {
   const source = displayName.trim();
   if (isUnusableHumanIdentitySource(source)) return undefined;
 
-  const candidate = source
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/gu, "-")
-    .replace(/-{2,}/gu, "-")
-    .replace(/^-+|-+$/gu, "")
-    .slice(0, HUMAN_HANDLE_MAX_LENGTH)
-    .replace(/-+$/gu, "");
+  const slug = source.toLowerCase().replace(/[^a-z0-9]+/gu, "-");
+  const candidate = trimEnd(trimEdges(slug, "-").slice(0, HUMAN_HANDLE_MAX_LENGTH), "-");
 
   // Dropping the non-ASCII part of a mixed name can leave nothing but digits —
   // `王力2024` reduces to `2024`, which slips past the all-digit check on the
@@ -208,6 +203,18 @@ export function neutralHumanIdentity(shortCode: string): { displayName: string; 
     throw new Error("neutral identity needs a short code of at least 3 alphanumeric characters");
   }
   return { displayName: `User ${code}`, handle: `user-${code}`.slice(0, HUMAN_HANDLE_MAX_LENGTH) };
+}
+
+/**
+ * Whether an account still has no name its person chose: nothing usable (an
+ * email address Better Auth stored as the name, digits, blank) or the
+ * generated `User 3f9a2c` placeholder minted for it. Agents cannot address
+ * such a person, so a client asks for a name before anything is named after it.
+ */
+export function isPlaceholderHumanName(displayName: unknown, userId: string): boolean {
+  if (isUnusableHumanIdentitySource(displayName)) return true;
+  const shortCode = humanHandleShortCode(userId);
+  return shortCode !== undefined && (displayName as string).trim() === neutralHumanIdentity(shortCode).displayName;
 }
 
 /** The short code a generated handle is disambiguated with, taken from an id. */

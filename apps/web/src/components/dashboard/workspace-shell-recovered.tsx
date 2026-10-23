@@ -6,12 +6,13 @@ import { meterTone, type MachineGlanceReading } from "./machine-load";
 import { MachineLoadGlanceBars } from "./machine-load-panel";
 import { useOpenMachine } from "./machine-link";
 import type { PresentedChannelMemberPresence as ChannelMemberPresence } from "./workspace-shell-presence";
-import { channelVisibilityScope, digestCanonicalCloneCborV1, parseLlmQuotaAccount, parseQuotaObservedAt, isUnlistedParameterTag, statusTagIcon, type AgentInvocationSelections, type DraftSummonIntent, type StatusTagIcon } from "@xmatrix/protocol";
+import { isAgentInstruction, agentInstanceMemberPresence, channelPresenceInstances, faceOfSender, presenceInstanceId, crossChannelReplyRelay, channelVisibilityScope, digestCanonicalCloneCborV1, parseLlmQuotaAccount, parseQuotaObservedAt, isUnlistedParameterTag, statusTagIcon, type AgentInvocationSelections, type DraftSummonIntent, type FaceOf, type StatusTagIcon } from "@xmatrix/protocol";
 import { formatLocalClock, formatZonedDateTime } from "./time-display";
 
 import { matchClaimableOutgoing } from "./outgoing-message-claim";
 import { currentHumanDisplayName } from "./human-profile-summary";
 import { messageLinkOrigin } from "./message-link-origin";
+import { foldCommandNotices } from "./command-notices";
 import {
   MessageSendDeadlineError,
   performBoundedMessageAppend,
@@ -38,7 +39,6 @@ export {
   isAgentLlmTraceEvent,
   isAgentSpawnEvent,
   isAgentTraceEvent,
-  isDaemonChannelMember,
   isLlmTraceEvent,
   isOlderThan,
   isOnlinePresence,
@@ -81,7 +81,6 @@ import {
   MARKDOWN_ATTACHMENT_TYPES,
   MAX_COMPRESSED_IMAGE_DIMENSION,
   MAX_IMAGE_ATTACHMENT_BYTES,
-  XMATRIX_SYSTEM_AVATAR_URL,
 } from "./workspace-shell-constants";
 
 import {
@@ -98,7 +97,6 @@ import {
   LlmQuotaUsage,
   LlmUsage,
   OutgoingMessage,
-  agentBusyTraceStaleActivity,
 } from "./workspace-shell-helpers";
 
 import {
@@ -118,6 +116,7 @@ import { threadReplyPreviews } from "./thread-reply-preview";
 import {
   type ComponentProps,
   type ReactNode,
+  memo,
   useEffect,
   useLayoutEffect,
   useRef,
@@ -129,6 +128,7 @@ import { createPortal } from "react-dom";
 import {
   AlertTriangle,
   AtSign,
+  Check,
   Cpu,
   FileText,
   FolderOpen,
@@ -142,7 +142,7 @@ import {
   Zap,
 } from "lucide-react";
 
-import { IdentityAvatar } from "@/components/dashboard/identity-avatar";
+import { Face } from "@/components/dashboard/face";
 
 import type { StatusChip } from "./workspace-shell-domain-types";
 
@@ -181,7 +181,7 @@ import {
 
 import { cn } from "@/lib/utils";
 
-import { WEB_PROXY_ROUTES, agentAvatarUrlFromMetadata } from "@xmatrix/protocol";
+import { WEB_PROXY_ROUTES } from "@xmatrix/protocol";
 
 import type {
   AgentGoalStatus,
@@ -192,7 +192,7 @@ import type {
   SerializedAgent,
   SerializedAgentLaunch,
   SerializedAgentInstance,
-  SerializedChannel,
+  ChannelSnapshot,
   SerializedSpace,
 } from "@xmatrix/protocol";
 import { xmatrixRawResponse, XMatrixApiError } from "@/lib/query/api-client";
@@ -206,20 +206,26 @@ export type PendingAttachment = {
   kind: ChannelAttachment["kind"];
   name: string;
   size: number;
-  status: "reading" | "uploading" | "failed";
+  status: "reading" | "compressing" | "uploading" | "failed";
   progress: number;
   error?: string;
   /** A local object URL for an image, so it can be seen before it is uploaded. */
   previewUrl?: string;
+  /** Keep the existing draft in its slot until a quality change succeeds. */
+  replacesId?: string;
+  original?: boolean;
+  sourceFile?: File;
 };
 
 export function PendingAttachmentCard({
   attachment,
   onOpen,
+  onOriginalChange,
   onRemove,
 }: {
   attachment: PendingAttachment;
   onOpen?: () => void;
+  onOriginalChange?: (original: boolean) => void;
   onRemove: () => void;
 }) {
   const Icon =
@@ -236,29 +242,37 @@ export function PendingAttachmentCard({
       ? progress >= 95
         ? "Verifying upload"
         : `Uploading ${progress}%`
-      : "Preparing";
+      : attachment.status === "compressing"
+        ? `Compressing ${progress}%`
+        : "Preparing";
   return (
     <div className="group relative flex h-20 w-44 shrink-0 overflow-hidden rounded-md border border-border bg-muted">
-      {attachment.previewUrl && onOpen ? (
-        <button
-          type="button"
-          aria-label={`Open ${attachment.name}`}
-          className="block size-20 shrink-0 cursor-zoom-in bg-background"
-          onClick={onOpen}
-        >
-          <LoadingImage
-            src={attachment.previewUrl}
-            alt={attachment.name}
-            className="block h-full w-full object-cover"
-          />
-        </button>
-      ) : attachment.kind === "image" ? (
-        <MediaSkeleton label="Loading image" className="app-media-skeleton-thumb" />
-      ) : (
-        <div className={cn("flex size-20 shrink-0 items-center justify-center", attachment.kind === "video" ? "bg-black text-white" : "bg-background text-muted-foreground")}>
-          <Icon className="size-6" />
-        </div>
-      )}
+      <div className="relative size-20 shrink-0">
+        {attachment.previewUrl && onOpen ? (
+          <button
+            type="button"
+            aria-label={`Open ${attachment.name}`}
+            className="block size-20 shrink-0 cursor-zoom-in bg-background"
+            data-lightbox-origin={attachment.id}
+            onClick={onOpen}
+          >
+            <LoadingImage
+              src={attachment.previewUrl}
+              alt={attachment.name}
+              className="block h-full w-full object-cover"
+            />
+          </button>
+        ) : attachment.kind === "image" ? (
+          <MediaSkeleton label="Loading image" className="app-media-skeleton-thumb" />
+        ) : (
+          <div className={cn("flex size-20 shrink-0 items-center justify-center", attachment.kind === "video" ? "bg-black text-white" : "bg-background text-muted-foreground")}>
+            <Icon className="size-6" />
+          </div>
+        )}
+        {(attachment.kind === "image" || attachment.kind === "video") && (
+          <AttachmentOriginalOption name={attachment.name} checked={attachment.original ?? false} onChange={onOriginalChange} />
+        )}
+      </div>
       <div className="flex min-w-0 flex-1 flex-col justify-center gap-1 px-2 py-2">
         <div className="truncate text-xs font-bold text-foreground" title={attachment.name}>
           {attachment.name}
@@ -289,6 +303,33 @@ export function PendingAttachmentCard({
         <X className="size-3.5" />
       </button>
     </div>
+  );
+}
+
+export function AttachmentOriginalOption({ name, checked, onChange }: {
+  name: string;
+  checked: boolean;
+  onChange?: (original: boolean) => void;
+}) {
+  // A media-badge toggle on the thumbnail itself: a dark scrim pill reads on
+  // both light screenshots and dark photos without covering the preview.
+  return (
+    <label className={cn(
+      "absolute bottom-1 left-1 z-10 inline-flex h-[18px] select-none items-center gap-[3px] rounded-full pl-[3px] pr-1.5 text-[10px] font-medium leading-none backdrop-blur-md has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-white",
+      checked ? "bg-black/60 text-white" : "bg-black/40 text-white/90",
+      onChange ? "cursor-pointer" : "cursor-default opacity-70",
+    )}>
+      <input type="checkbox" checked={checked} disabled={!onChange}
+        aria-label={`Upload original ${name}`} onChange={(event) => onChange?.(event.target.checked)}
+        className="absolute inset-0 m-0 cursor-[inherit] appearance-none rounded-full opacity-0" />
+      <span aria-hidden className={cn(
+        "flex size-3 items-center justify-center rounded-full",
+        checked ? "bg-white text-black" : "ring-[1.25px] ring-inset ring-white/85",
+      )}>
+        {checked && <Check className="size-2.5" strokeWidth={3} />}
+      </span>
+      Original
+    </label>
   );
 }
 
@@ -341,7 +382,7 @@ export /**
  */
 async function appendChannelMessageWithAttachments(input: {
   token: string;
-  channel: Pick<SerializedChannel, "id" | "mode" | "spaceId">;
+  channel: Pick<ChannelSnapshot, "id" | "mode" | "spaceId">;
   clientMessageId: string;
   body: string;
   attachments: readonly ChannelAttachment[];
@@ -353,8 +394,8 @@ async function appendChannelMessageWithAttachments(input: {
   deadlineMs?: number;
 }): Promise<{
   message?: unknown;
-  channel?: SerializedChannel;
-  appConnectorResultChannels?: SerializedChannel[];
+  channel?: ChannelSnapshot;
+  appConnectorResultChannels?: ChannelSnapshot[];
 }> {
   if (input.invocationSelections && input.invocationSelections.sourceBodyHash !== await digestCanonicalCloneCborV1(input.body)) {
     throw new Error("Agent selection does not match the message body");
@@ -400,8 +441,8 @@ async function appendChannelMessageWithAttachments(input: {
   if (outcome.kind === "failed") throw new XMatrixApiError(outcome);
   return outcome.payload as {
     message?: unknown;
-    channel?: SerializedChannel;
-    appConnectorResultChannels?: SerializedChannel[];
+    channel?: ChannelSnapshot;
+    appConnectorResultChannels?: ChannelSnapshot[];
   };
 }
 
@@ -461,30 +502,30 @@ export async function readVideoAttachmentMetadata(file: File): Promise<VideoAtta
   if (typeof document === "undefined") return {};
 
   const objectUrl = URL.createObjectURL(file);
+  const video = document.createElement("video");
   try {
-    const video = document.createElement("video");
     video.muted = true;
     video.playsInline = true;
     video.preload = "metadata";
     await new Promise<void>((resolve, reject) => {
-      video.onloadedmetadata = () => resolve();
-      video.onerror = () => reject(new UserFacingProblem("This video couldn't be read."));
+      const failed = () => {
+        clearTimeout(deadline);
+        reject(new UserFacingProblem("This video couldn't be read."));
+      };
+      const deadline = setTimeout(failed, 5_000);
+      video.onloadedmetadata = () => { clearTimeout(deadline); resolve(); };
+      video.onerror = failed;
       video.src = objectUrl;
     });
 
     const durationMs = Number.isFinite(video.duration) ? Math.round(video.duration * 1000) : undefined;
     const width = video.videoWidth || undefined;
     const height = video.videoHeight || undefined;
-    const seekTarget = Number.isFinite(video.duration) && video.duration > 1 ? Math.min(1, video.duration / 10) : 0;
-    if (seekTarget > 0) {
-      await new Promise<void>((resolve) => {
-        video.onseeked = () => resolve();
-        video.currentTime = seekTarget;
-      });
-    }
-
     return { durationMs, width, height };
   } finally {
+    video.onloadedmetadata = video.onerror = null;
+    video.removeAttribute("src");
+    video.load();
     URL.revokeObjectURL(objectUrl);
   }
 }
@@ -706,9 +747,12 @@ export function appendOutgoingTimelineItems(
   timeline: TimelineItem[],
   outgoing: OutgoingMessage[],
   channelId: string | undefined,
-  currentUser?: { id: string; email: string; name?: string; avatarUrl?: string } | null
+  currentUser?: { id: string; email: string; name?: string } | null
 ): TimelineItem[] {
   if (!channelId || outgoing.length === 0) return timeline;
+  const author = currentUser ? currentHumanDisplayName(currentUser) : "You";
+  // The reader's own face, read as every face of theirs is (face.tsx).
+  const face: FaceOf = currentUser ? { kind: "user", id: currentUser.id, name: author } : { kind: "external", name: author };
   const confirmedClientIds = new Set(
     timeline
       .map((message) => message.clientMessageId)
@@ -723,13 +767,13 @@ export function appendOutgoingTimelineItems(
       id: timelineItemId(message.clientMessageId, undefined),
       channelId: message.channelId,
       clientMessageId: message.clientMessageId,
-      author: currentUser ? currentHumanDisplayName(currentUser) : "You",
+      author,
       body: message.body,
       replyToMessageId: message.replyToMessageId,
       replyTo: message.replyTo,
       attachments: message.attachments.length > 0 ? message.attachments : undefined,
       sentAt: message.sentAt,
-      avatarUrl: currentUser?.avatarUrl,
+      face,
       own: true,
       senderKind: "user",
       // Who the confirmed message will be from, so the row is grouped and
@@ -747,16 +791,27 @@ export function appendOutgoingTimelineItems(
 
 export function buildTimeline(
   history: ChannelMessage[],
-  channel: SerializedChannel | null,
-  channels: SerializedChannel[],
-  events: ObservabilityEvent[],
-  currentUser?: { id: string; email: string; name?: string; avatarUrl?: string } | null,
+  channel: ChannelSnapshot | null,
+  channels: ChannelSnapshot[],
+  events: readonly ObservabilityEvent[],
+  currentUser?: { id: string; email: string; name?: string } | null,
   channelReadCounts: Record<string, number> = {},
   historyCache?: Map<string, ChannelHistoryCacheEntry>,
   outboundClientIdsByMessageId?: Map<string, string>,
   outboundPreviewByClientId?: Map<string, { sentAt: string; attachments: ChannelAttachment[] }>,
   spaceMembers: SerializedSpace["members"] = [],
 ): TimelineItem[] {
+  const channelsById = new Map(channels.map(channel => [channel.id, channel]));
+  const threadsByRoot = new Map<string, ChannelSnapshot>();
+  for (const candidate of channels) {
+    if (candidate.metadata?.kind !== "thread") continue;
+    const parent = metadataString(candidate.metadata, "threadRootChannelId");
+    const root = metadataString(candidate.metadata, "threadRootMessageId");
+    if (parent && root) {
+      const key = JSON.stringify([parent, root]);
+      if (!threadsByRoot.has(key)) threadsByRoot.set(key, candidate);
+    }
+  }
   const currentUserEmail = currentUser?.email.trim().toLowerCase();
   const currentUserIdentityId = currentUser ? `user:${currentUser.id}` : undefined;
   const channelHistory = channel
@@ -768,7 +823,7 @@ export function buildTimeline(
   // An agent sender's identity need not match the member entry its live Instance
   // sits under; the instance id is the one key both sides share, so an agent
   // sender resolves through it before any name lookup.
-  const presenceByInstanceId = new Map<string, ChannelMemberPresence>();
+  const presenceByInstanceId = channel?.presence?.instances;
 
   if (channel) {
     for (const member of channelMembersByPresence(channel)) {
@@ -778,23 +833,21 @@ export function buildTimeline(
       if (email && !presenceByEmail.has(email)) presenceByEmail.set(email, presence);
       const label = (presence.label || member).trim().toLowerCase();
       if (label && !presenceByLabel.has(label)) presenceByLabel.set(label, presence);
-      for (const instance of presence.instances || []) {
-        if (instance.id && !presenceByInstanceId.has(instance.id)) {
-          presenceByInstanceId.set(instance.id, presence);
-        }
-      }
     }
   }
 
   const safeChannelHistory = channelHistory.filter(isValidChannelMessage);
   const historyById = new Map(safeChannelHistory.map((message) => [message.messageId, message]));
-  const messageItems = safeChannelHistory.filter((message) => !isAgentSpawnStatusMessage(message)).map((message) => {
+  const commandNotices = foldCommandNotices(safeChannelHistory);
+  // An instruction to one Agent Instance is its input, not anything said to people.
+  const messageItems = safeChannelHistory.filter((message) => !isAgentSpawnStatusMessage(message) &&
+    !commandNotices.folded.has(message.messageId) && !isAgentInstruction(message.metadata)).map((message) => {
     const senderEmail = message.from.email.trim().toLowerCase();
     const senderLabel = message.from.label.trim().toLowerCase();
     const senderIdentityId = message.from.identityId;
     // A Channel Agent member is keyed by its Instance, not the sender's `agent:` identity.
     const exactSenderInstance = message.from.kind === "agent" && message.from.instanceId
-      ? presenceByInstanceId.get(message.from.instanceId)?.instances?.find(instance => instance.id === message.from.instanceId)
+      ? presenceByInstanceId?.get(presenceInstanceId(message.from.instanceId))
       : undefined;
     const senderInstanceLabel = message.from.instanceLabel;
     const authorLabel =
@@ -808,7 +861,7 @@ export function buildTimeline(
     // shows who answered elsewhere under the link owner's principal. Neither
     // sender is a member here: this Channel's presence, ordinals, and the
     // owner's own-message affordances say nothing about them.
-    const linkOrigin = messageLinkOrigin(message, channels);
+    const linkOrigin = messageLinkOrigin(message, channelsById);
     const linkedSender = linkOrigin?.kind === "link";
     const relayedReply = linkOrigin?.kind === "reply";
     const own =
@@ -820,7 +873,7 @@ export function buildTimeline(
     const matchedPresence = systemNotice || relayedReply
       ? undefined
       : (message.from.kind === "agent" && message.from.instanceId
-          ? presenceByInstanceId.get(message.from.instanceId)
+          ? (channel && presenceByInstanceId?.has(presenceInstanceId(message.from.instanceId)) ? memberPresence(channel, message.from.instanceId) : undefined)
           : undefined) ||
         (senderIdentityId ? presenceByMember.get(senderIdentityId) : undefined) ||
         (message.from.userId ? presenceByMember.get(`user:${message.from.userId}`) : undefined) ||
@@ -831,26 +884,31 @@ export function buildTimeline(
         ? matchedPresence
         : undefined;
     const reservedSystemAgent = isXMatrixMessageSender(message.from) || systemNotice;
-    const matchedAvatar = reservedSystemAgent
-      ? XMATRIX_SYSTEM_AVATAR_URL
-      : historicalSenderAvatarUrl({
-          snapshotAvatarUrl: message.from.avatarUrl,
-          presenceAvatarUrl: presenceAvatarUrl(kindMatchedPresence),
-          ownAvatarUrl: own ? currentUser?.avatarUrl : undefined,
-        });
-    const senderInstanceId = message.from.instanceId;
+    const replyRelay = relayedReply ? crossChannelReplyRelay(message.metadata) : undefined;
+    const senderInstanceId = relayedReply ? replyRelay?.replierInstanceId : message.from.instanceId;
     const senderChannelInstanceId = message.from.channelInstanceId;
     const senderHasInstanceIdentity = Boolean(senderInstanceId || senderChannelInstanceId);
     // `@name:N` here would reach a local namesake, not the sender elsewhere.
     const senderMention = linkedSender || relayedReply ? undefined : mentionForMessageSender(message.from);
     // The committed registration survives disconnect and cross-Channel writes.
     // Older senders may resolve only through their exact Instance, not a local namesake.
-    const senderRegistration = message.from.kind === "agent" && !reservedSystemAgent
-      ? message.from.registration ?? (exactSenderInstance && kindMatchedPresence?.kind === "agent"
-          ? kindMatchedPresence.registration : undefined)
-      : undefined;
+    const senderRegistration = relayedReply ? replyRelay?.replierRegistration
+      : message.from.kind === "agent" && !reservedSystemAgent
+        ? message.from.registration ?? (exactSenderInstance && kindMatchedPresence?.kind === "agent"
+            ? kindMatchedPresence.registration : undefined)
+        : undefined;
     const senderOwner = senderRegistration &&
       spaceMembers.find(member => member.userId === senderRegistration.ownerUserId);
+    const author = own && currentUser ? currentHumanDisplayName(currentUser) : authorLabel;
+    // Whose face the row is drawn with. xMatrix's notices are written under their owner and drawn as xMatrix; a
+    // relayed reply is drawn as who answered elsewhere: an Agent by its registration or Instance, a person by the
+    // picture the relay carried, as it names no account.
+    const face: FaceOf = reservedSystemAgent ? { kind: "system", name: author }
+      : relayedReply ? replyRelay?.replierKind === "agent"
+        ? faceOfSender({ kind: "agent", label: author, userId: "", registration: replyRelay.replierRegistration,
+          instanceId: replyRelay.replierInstanceId })
+        : { kind: "external", name: author, imageUrl: message.from.avatarUrl ?? null }
+      : faceOfSender({ ...message.from, label: author, registration: senderRegistration ?? message.from.registration });
     const matchedInstance = senderHasInstanceIdentity
       ? kindMatchedPresence?.instances?.find(
           (instance) =>
@@ -881,25 +939,6 @@ export function buildTimeline(
               activity: matchedInstance?.activity || kindMatchedPresence?.activity,
             })
         : relayedReply ? undefined : humanPresenceStatus || (own ? "online" : "offline");
-    const senderTraceStaleActivity =
-      message.from.kind === "agent" && !senderInstanceStale
-        ? agentBusyTraceStaleActivity({
-            agentId: senderIdentityId,
-            channelId: message.channelId,
-            events,
-            instance: matchedInstance,
-            fallbackStatus: matchedInstance?.status || "offline",
-            name: authorLabel,
-            activity: matchedInstance?.activity || kindMatchedPresence?.activity,
-          })
-        : undefined;
-    const senderActivity =
-      senderInstanceStale
-        ? "Instance is no longer live"
-        : senderTraceStaleActivity ||
-          matchedInstance?.activity ||
-          kindMatchedPresence?.activity ||
-          (senderStatus === "busy" ? "Processing" : undefined);
     const senderGoal =
       message.from.kind === "agent"
         ? message.from.goal
@@ -942,7 +981,7 @@ export function buildTimeline(
             }
           : undefined;
     const threadChannel = channel && message.messageId
-      ? threadChannelForMessage(channels, channel.id, message.messageId)
+      ? threadsByRoot.get(JSON.stringify([channel.id, message.messageId]))
       : undefined;
     const threadMessages = threadChannel ? historyCache?.get(threadChannel.id)?.messages : undefined;
     const loadedThreadReplyCount = loadedThreadReplyCountForChannel(threadChannel, threadMessages);
@@ -969,7 +1008,7 @@ export function buildTimeline(
       clientMessageId,
       channelId: message.channelId,
       sequence: message.sequence,
-      author: own && currentUser ? currentHumanDisplayName(currentUser) : authorLabel,
+      author,
       body: message.body,
       replyToMessageId: message.replyToMessageId,
       replyTo,
@@ -999,8 +1038,11 @@ export function buildTimeline(
       editedAt: message.editedAt,
       recalledAt: message.recalledAt,
       ...(message.supersededBy && !message.recalledAt ? { supersededBy: message.supersededBy } : {}),
+      ...(message.questionnaireState && !message.recalledAt ? { questionnaireState: message.questionnaireState } : {}),
+      ...(commandNotices.noticesBySource.has(message.messageId)
+        ? { commandNotices: commandNotices.noticesBySource.get(message.messageId) } : {}),
       sentAt: displaySentAt,
-      avatarUrl: matchedAvatar,
+      face,
       own,
       senderKind: relayedReply ? linkOrigin.replierKind ?? message.from.kind : message.from.kind,
       senderId: reservedSystemAgent || relayedReply ? undefined : senderIdentityId,
@@ -1016,7 +1058,6 @@ export function buildTimeline(
       // xMatrix has its own product identity, while the delegated runtime
       // remains the source of truth for whether it is actively working.
       senderStatus,
-      senderActivity,
       senderInstanceStale: reservedSystemAgent ? false : senderInstanceStale,
       ...(linkOrigin ? { linkOrigin } : {}),
       senderGoal: reservedSystemAgent ? undefined : senderGoal,
@@ -1030,16 +1071,6 @@ export function buildTimeline(
   return messageItems.sort(
     (a, b) => new Date(a.sentAt).getTime() - new Date(b.sentAt).getTime()
   );
-}
-
-export function historicalSenderAvatarUrl(input: {
-  snapshotAvatarUrl?: string;
-  presenceAvatarUrl?: string;
-  ownAvatarUrl?: string;
-}): string | undefined {
-  return input.snapshotAvatarUrl ||
-    input.presenceAvatarUrl ||
-    input.ownAvatarUrl;
 }
 
 export function effectiveMentionReadStatuses(
@@ -1159,7 +1190,12 @@ export function humanizeLegacyMachineRunFailureBody(body: string): string {
   ].join("\n");
 }
 
-export function MachineRunFailureNotice({ body, machineName }: { body: string; machineName?: string }) {
+export function MachineRunFailureNotice({ body, machineName, harness }: {
+  body: string;
+  machineName?: string;
+  /** The harness that failed to start, as the notice records it; the name in its text may be a renamed Agent's. */
+  harness?: string;
+}) {
   const lines = humanizeLegacyMachineRunFailureBody(body)
     .split(/\r?\n/u)
     .map((line) => line.trim())
@@ -1178,9 +1214,7 @@ export function MachineRunFailureNotice({ body, machineName }: { body: string; m
         error: startMatch[3],
       }
     : null;
-  // The notice names the harness that failed to start; its icon is the harness's.
   const targetName = startMatch?.[1];
-  const targetAvatarUrl = targetName ? agentAvatarUrlFromMetadata({}, targetName) : undefined;
 
   return (
     <div
@@ -1189,15 +1223,8 @@ export function MachineRunFailureNotice({ body, machineName }: { body: string; m
       data-system-notice="machine_run_failure"
     >
       <div className="flex min-w-0 items-start gap-2.5">
-        {targetName && targetAvatarUrl ? (
-          <IdentityAvatar
-            kind="agent"
-            label={targetName}
-            initials={avatarInitials(targetName)}
-            imageUrl={targetAvatarUrl}
-            size="sm"
-            shape="circle"
-          />
+        {targetName && harness ? (
+          <Face of={{ kind: "agent", name: targetName, harness }} size="sm" shape="circle" />
         ) : (
           <AlertTriangle
             className="mt-0.5 size-4 shrink-0 text-destructive"
@@ -1312,7 +1339,7 @@ export function selectedChannelIdAfterRouteChange({
   routeNamesChannel,
   routeSelectionChanged,
 }: {
-  channels: SerializedChannel[];
+  channels: ChannelSnapshot[];
   current: string | null;
   routeChannelId: string | null;
   routeNamesChannel: boolean;
@@ -1336,7 +1363,7 @@ export function resolveSelectedChannelIdAfterChannelListChange({
   current,
   requestedChannelId,
 }: {
-  channels: SerializedChannel[];
+  channels: ChannelSnapshot[];
   current: string | null;
   requestedChannelId: string | null;
 }): string | null {
@@ -1347,10 +1374,10 @@ export function resolveSelectedChannelIdAfterChannelListChange({
 }
 
 export function threadChannelForMessage(
-  channels: SerializedChannel[],
+  channels: ChannelSnapshot[],
   parentChannelId: string,
   messageId: string
-): SerializedChannel | undefined {
+): ChannelSnapshot | undefined {
   return channels.find(
     (channel) =>
       metadataString(channel.metadata, "threadRootChannelId") === parentChannelId &&
@@ -1360,7 +1387,7 @@ export function threadChannelForMessage(
 }
 
 export function threadReplyCountForChannel(
-  channel?: SerializedChannel,
+  channel?: ChannelSnapshot,
   loadedMessages?: ChannelMessage[]
 ): number | undefined {
   const loadedReplyCount = loadedThreadReplyCountForChannel(channel, loadedMessages);
@@ -1371,7 +1398,7 @@ export function threadReplyCountForChannel(
 }
 
 function loadedThreadReplyMessages(
-  channel?: SerializedChannel,
+  channel?: ChannelSnapshot,
   loadedMessages?: ChannelMessage[],
 ): ChannelMessage[] | undefined {
   if (!channel || !loadedMessages || loadedMessages.length === 0) return undefined;
@@ -1386,14 +1413,14 @@ function loadedThreadReplyMessages(
 }
 
 export function loadedThreadReplyCountForChannel(
-  channel?: SerializedChannel,
+  channel?: ChannelSnapshot,
   loadedMessages?: ChannelMessage[]
 ): number | undefined {
   return loadedThreadReplyMessages(channel, loadedMessages)?.length;
 }
 
 export function threadReplyParticipantsForChannel(
-  channel?: SerializedChannel,
+  channel?: ChannelSnapshot,
   loadedMessages?: ChannelMessage[]
 ): ThreadReplyParticipant[] | undefined {
   const replies = loadedThreadReplyMessages(channel, loadedMessages)
@@ -1422,7 +1449,7 @@ function uniqueThreadReplyParticipants(
       `${reply.from.kind}:${reply.from.label}`;
     if (seen.has(id)) continue;
     seen.add(id);
-    participants.push({ id, author: reply.from.label, avatarUrl: reply.from.avatarUrl });
+    participants.push({ id, author: reply.from.label, face: faceOfSender(reply.from) });
     if (participants.length === 2) break;
   }
   return participants.length > 0 ? participants : undefined;
@@ -1483,11 +1510,11 @@ export function nativePlatformLabel(platform: DesktopContext["platform"]): strin
 }
 
 export function formatMember(
-  channel: SerializedChannel,
+  channel: ChannelSnapshot,
   member: string,
   agentsById?: Map<string, SerializedAgent>
 ): string {
-  const namedMember = channel.memberPresence?.[member]?.label;
+  const namedMember = memberPresence(channel, member).label;
   if (namedMember) return namedMember;
   const agent = agentsById?.get(member);
   if (agent) return agent.name;
@@ -1499,14 +1526,8 @@ export function formatMember(
 
 /* moved to workspace-shell-presence (1) */
 
-export function presenceAvatarUrl(
-  presence: ChannelMemberPresence | undefined
-): string | undefined {
-  return (presence as (ChannelMemberPresence & { avatarUrl?: string }) | undefined)?.avatarUrl;
-}
-
 export function buildAgentWorkItems(
-  channel: SerializedChannel | null,
+  channel: ChannelSnapshot | null,
   events: ObservabilityEvent[],
   launches: readonly SerializedAgentLaunch[] = [],
 ): AgentWorkItem[] {
@@ -1514,64 +1535,61 @@ export function buildAgentWorkItems(
 
   const items: AgentWorkItem[] = [];
 
-  for (const member of channelMembersByPresence(channel)) {
-    const presence = memberPresence(channel, member);
-    if (presence.kind !== "agent") continue;
-
+  for (const instance of channelPresenceInstances(channel.presence)) {
+    const member = instance.id;
+    const presence = agentInstanceMemberPresence(instance);
     const agentLabel = presence.label || member;
-    for (const instance of presence.instances || []) {
-      if (!isChannelResidentPresence(instance)) continue;
-      const avatarUrl = presence.avatarUrl;
-      const target: AgentTraceTarget = {
-        id: member,
-        instanceId: instance.id,
-        instanceIds: agentTraceInstanceIds(instance),
-        exactInstanceIds: [instance.id],
-        instanceScoped: true,
-        channelId: channel.id,
-        connectedAt: instance.connectedAt,
-        name: agentInstanceDisplayName(instance),
-        status: instance.status,
-        avatarUrl,
-        activity: presenceStatusLabel(instance),
-        gitBranch: instance.gitBranch,
-        runtimeState: instance.runtimeState || presence.runtimeState,
-        usage: instance.usage || presence.usage,
-      };
-      const latestEvent = latestAgentWorkEvent(events, target, channel.id);
+    if (!isChannelResidentPresence(instance)) continue;
+    const face: FaceOf = { kind: "agent", name: agentLabel, harness: instance.registration.harness, id: instance.id };
+    const target: AgentTraceTarget = {
+      id: member,
+      instanceId: instance.id,
+      instanceIds: agentTraceInstanceIds(instance),
+      exactInstanceIds: [instance.id],
+      instanceScoped: true,
+      channelId: channel.id,
+      connectedAt: instance.connectedAt,
+      name: agentInstanceDisplayName(instance),
+      status: instance.status,
+      face,
+      activity: presenceStatusLabel(instance),
+      gitBranch: instance.gitBranch,
+      runtimeState: instance.runtimeState || presence.runtimeState,
+      usage: instance.usage || presence.usage,
+    };
+    const latestEvent = latestAgentWorkEvent(events, target, channel.id);
 
-      items.push({
-        key: `${member}:${instance.id}`,
-        agentId: member,
-        instance,
-        sortIndex: items.length,
-        label: instance.label || instance.id,
-        agentLabel,
-        status: instance.status,
-        avatarUrl,
-        avatarKind: "agent",
-        activity: instance.activity || presence.activity,
-        intent: instance.intent || presence.intent,
-        files: instance.files?.length ? instance.files : presence.files,
-        usage: instance.usage || presence.usage,
-        // Same verdict, same inputs as the detail row: the avatar badge shows
-        // what this resolves to instead of deriving a limit of its own.
-        usageLimit: agentInstanceUsageLimit(presence, instance),
-        lastSeenAt: instance.lastSeenAt,
-        latestEvent,
-        target,
-        canStop: true,
-      });
-    }
+    items.push({
+      key: `${member}:${instance.id}`,
+      agentId: member,
+      instance,
+      sortIndex: items.length,
+      label: instance.label || instance.id,
+      agentLabel,
+      status: instance.status,
+      face,
+      activity: instance.activity || presence.activity,
+      intent: instance.intent || presence.intent,
+      files: instance.files?.length ? instance.files : presence.files,
+      usage: instance.usage || presence.usage,
+      // Same verdict, same inputs as the detail row: the avatar badge shows
+      // what this resolves to instead of deriving a limit of its own.
+      usageLimit: agentInstanceUsageLimit(presence, instance),
+      lastSeenAt: instance.lastSeenAt,
+      latestEvent,
+      target,
+      canStop: true,
+    });
   }
 
   const membersWithInstances = new Set(items.map((item) => item.agentId));
+  const representedInstanceIds = new Set(items.map((item) => item.instance.id));
   const visibleMembers = new Set(channelMembersByPresence(channel));
   const launchedInstanceIds = new Set(launches.map((launch) => launch.instanceId));
   for (const launch of launches) {
     const actorId = launch.instanceId;
     if (launch.state === "connected" || launch.state === "cancelled" ||
-        membersWithInstances.has(actorId)) continue;
+        representedInstanceIds.has(launch.instanceId)) continue;
     const failed = launch.state === "failed";
     const label = launch.targetName || actorId;
     const status: SerializedAgentInstance["status"] = failed ? "offline" : "busy";
@@ -1580,14 +1598,15 @@ export function buildAgentWorkItems(
     const instance: SerializedAgentInstance = { id: launch.instanceId,
       label: `run ${shortId(launch.runId)}`, connectedAt: launch.createdAt,
       lastSeenAt: launch.updatedAt, status, activity };
+    // The launch's Instance is recorded with it, so its face is read from the harness it is registered with.
+    const face: FaceOf = { kind: "agent", name: label, id: launch.instanceId };
     const target: AgentTraceTarget = { id: actorId, instanceId: launch.instanceId,
       instanceIds: [launch.instanceId], instanceScoped: true, channelId: channel.id,
-      connectedAt: launch.createdAt, name: label, status, avatarUrl: launch.targetAvatarUrl,
-      activity };
+      connectedAt: launch.createdAt, name: label, status, face, activity };
     items.push({ key: `${actorId}:${launch.instanceId}`,
       agentId: actorId, instance, sortIndex: items.length,
       label: instance.label || "starting", agentLabel: label, status,
-      avatarUrl: launch.targetAvatarUrl, activity, lastSeenAt: launch.updatedAt,
+      face, activity, lastSeenAt: launch.updatedAt,
       target, canStop: false });
   }
   for (const event of latestSpawnEventsByAgent(events, channel)) {
@@ -1597,8 +1616,11 @@ export function buildAgentWorkItems(
     if (!agentId || membersWithInstances.has(agentId) || launchedInstanceIds.has(agentId)) continue;
     if (!visibleMembers.has(agentId)) continue;
 
-    const agentLabel = event.agentName || channel.memberPresence?.[agentId]?.label || agentId;
-    const avatarUrl = channel.memberPresence?.[agentId]?.avatarUrl;
+    const member = memberPresence(channel, agentId);
+    const agentLabel = event.agentName || member.label || agentId;
+    // A spawn names the run, not an Instance: the face is the member's registered harness.
+    const face: FaceOf = { kind: "agent", name: agentLabel,
+      harness: member.kind === "agent" ? member.registration?.harness ?? null : null };
     const runLabel = eventMetadataString(event, "runLabel");
     const launchInstanceId = eventMetadataString(event, "runId") || event.id;
     const timestamp = event.timestamp;
@@ -1621,7 +1643,7 @@ export function buildAgentWorkItems(
       connectedAt: timestamp,
       name: agentLabel,
       status,
-      avatarUrl,
+      face,
       activity,
     };
 
@@ -1640,7 +1662,7 @@ export function buildAgentWorkItems(
       label: runLabel ? `run ${runLabel}` : "starting",
       agentLabel,
       status,
-      avatarUrl,
+      face,
       activity,
       lastSeenAt: timestamp,
       latestEvent: event,
@@ -1679,7 +1701,7 @@ export function traceEventChannelInstanceLabel(event: ObservabilityEvent): strin
 
 export function latestSpawnEventsByAgent(
   events: ObservabilityEvent[],
-  channel: SerializedChannel
+  channel: ChannelSnapshot
 ): ObservabilityEvent[] {
   const byAgent = new Map<string, ObservabilityEvent>();
   const visibleMembers = new Set(channelMembersByPresence(channel));
@@ -1859,7 +1881,7 @@ export function traceInnerPayload(payload: Record<string, unknown> | null): Reco
 
 /* moved to workspace-shell-presence (10) */
 
-export function humanChannelMembersByPresence(channel: SerializedChannel): string[] {
+export function humanChannelMembersByPresence(channel: ChannelSnapshot): string[] {
   return channelMembersByPresence(channel).filter((member) => {
     const presence = memberPresence(channel, member);
     return presence.kind === "user";
@@ -1867,7 +1889,7 @@ export function humanChannelMembersByPresence(channel: SerializedChannel): strin
 }
 
 export function visibleHumanChannelMembers(
-  channel: SerializedChannel,
+  channel: ChannelSnapshot,
   space: SerializedSpace | null
 ): string[] {
   if (channel.visibleHumanMemberIds) {
@@ -1883,7 +1905,7 @@ export function visibleHumanChannelMembers(
   return humanChannelMembersByPresence(channel);
 }
 
-export function channelFocusedHumanMembers(channel: SerializedChannel): string[] {
+export function channelFocusedHumanMembers(channel: ChannelSnapshot): string[] {
   return humanChannelMembersByPresence(channel)
     .filter((member) => {
       const presence = memberPresence(channel, member);
@@ -1892,28 +1914,21 @@ export function channelFocusedHumanMembers(channel: SerializedChannel): string[]
     .sort((left, right) => formatMember(channel, left).localeCompare(formatMember(channel, right)));
 }
 
-export function channelOnlineAgentAvatarItems(channel: SerializedChannel | null): ChannelAgentAvatarItem[] {
+export function channelOnlineAgentAvatarItems(channel: ChannelSnapshot | null): ChannelAgentAvatarItem[] {
   if (!channel) return [];
 
   const items: ChannelAgentAvatarItem[] = [];
-  channelMembersByPresence(channel).forEach((member) => {
-    const presence = memberPresence(channel, member);
-    if (presence.kind !== "agent") return;
-
-    const instances = presence.instances || [];
-    const onlineInstances = instances.filter((instance) =>
-      isChannelResidentPresence(instance)
-    );
-    onlineInstances.forEach((instance, instanceIndex) => {
-      items.push({
-        key: `${member}:${instance.id}`,
-        member,
-        instance,
-        connectedAt: instance.connectedAt,
-        instanceIndex,
-      });
+  for (const instance of channelPresenceInstances(channel.presence)) {
+    const member = instance.id;
+    if (!isChannelResidentPresence(instance)) continue;
+    items.push({
+      key: `${member}:${instance.id}`,
+      member,
+      instance,
+      connectedAt: instance.connectedAt,
+      instanceIndex: items.length,
     });
-  });
+  }
 
   return items.sort(compareChannelAgentAvatarBirthOrder);
 }
@@ -1945,7 +1960,7 @@ export function compareChannelAgentAvatarBirthOrder(
   return left.key.localeCompare(right.key);
 }
 
-export function memberPresenceSummary(channel: SerializedChannel, space: SerializedSpace | null) {
+export function memberPresenceSummary(channel: ChannelSnapshot, space: SerializedSpace | null) {
   return visibleHumanChannelMembers(channel, space).reduce(
     (summary, member) => {
       const presence = memberPresence(channel, member);
@@ -1980,20 +1995,6 @@ export function parseInviteEmails(value: string): string[] {
     .map((email) => email.trim().toLowerCase())
     .filter((email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email));
   return Array.from(new Set(emails));
-}
-
-export function initialsFor(value: string): string {
-  return value
-    .split(/[\s@._-]+/)
-    .filter(Boolean)
-    .map((part) => part[0])
-    .join("")
-    .toUpperCase()
-    .slice(0, 2);
-}
-
-export function avatarInitials(value: string): string {
-  return initialsFor(value) || "XM";
 }
 
 export function GoalStatusBadge({
@@ -2105,7 +2106,7 @@ const STATUS_TAG_ICON_COMPONENTS: Record<StatusTagIcon, ComponentProps<typeof Ta
   fast: Zap,
 };
 
-export function StatusChipBadge({
+export const StatusChipBadge = memo(function StatusChipBadge({
   chip,
   staged,
   expanded,
@@ -2172,7 +2173,7 @@ export function StatusChipBadge({
   return chip.busy || openMachine
     ? <MachineLoadTag tag={tag} name={value} label={title} glance={chip.busy?.glance} onOpen={openMachine} />
     : tag;
-}
+});
 
 /* The Machine tag opens the Machine's load the way its list row shows it, so
    the tag's tone can be read without leaving the conversation. When the reader

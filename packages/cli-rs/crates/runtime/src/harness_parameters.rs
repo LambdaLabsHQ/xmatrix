@@ -169,7 +169,7 @@ pub(crate) fn add_choice_metadata(
 }
 
 /// ACP supplies a complete replacement snapshot, including future finite controls.
-pub(crate) fn acp_parameters(options: &[Value]) -> Vec<protocol::HarnessParameter> {
+pub fn acp_parameters(options: &[Value]) -> Vec<protocol::HarnessParameter> {
     let mut seen = std::collections::HashSet::new();
     options
         .iter()
@@ -184,10 +184,7 @@ pub(crate) fn acp_parameters(options: &[Value]) -> Vec<protocol::HarnessParamete
             }
             let id = option.get("id")?.as_str()?;
             let category = option.get("category").and_then(Value::as_str);
-            if category == Some("model") && !["model", "models"].contains(&id)
-                || category == Some("thought_level")
-                    && !["effort", "reasoning_effort"].contains(&id)
-            {
+            if category == Some("model") && !["model", "models"].contains(&id) {
                 return None;
             }
             if !seen.insert(id.to_string()) {
@@ -343,7 +340,7 @@ fn schema_choices(node: &Value, root: &Value, depth: usize) -> Option<Vec<Value>
     None
 }
 
-pub(crate) fn schema_parameters(schema: &Value) -> Vec<protocol::HarnessParameter> {
+pub fn schema_parameters(schema: &Value) -> Vec<protocol::HarnessParameter> {
     schema
         .get("properties")
         .and_then(Value::as_object)
@@ -529,7 +526,7 @@ pub(crate) fn model_parameters(
 
 /// Provider notices belong in textual controls too, including disabled
 /// switches that intentionally have no visible status chip.
-pub(crate) fn parameter_status(parameter: &protocol::HarnessParameter) -> String {
+pub fn parameter_status(parameter: &protocol::HarnessParameter) -> String {
     format!(
         "{}: {}; choices: {}{}",
         parameter.label,
@@ -543,7 +540,7 @@ pub(crate) fn parameter_status(parameter: &protocol::HarnessParameter) -> String
     )
 }
 
-pub(crate) fn validate<'a>(
+pub fn validate<'a>(
     parameters: &'a [protocol::HarnessParameter],
     id: &str,
     value: &str,
@@ -599,6 +596,75 @@ pub(crate) fn add_commands(
     }
 }
 
+/// The Hub capability that words parameter controls from their facts.
+pub(crate) const PARAMETER_CONTROL_RESULT: &str = "agent_parameter_control_result";
+const PARAMETER_CONTROL_PENDING: &str = "agent_parameter_control_pending_v1";
+
+/// Report what a parameter control did. A Hub that words these gets the facts
+/// (the parameter, its value now, its choices, or the original error); an
+/// older one gets the former channel text.
+pub(crate) async fn report_parameter_control(
+    relay: &crate::agent_instance_connection::AgentInstanceConnectionClient,
+    channel_id: &str,
+    source_message_id: &str,
+    requested: &ParameterCommand,
+    catalog: &[protocol::HarnessParameter],
+    pending: Option<String>,
+    outcome: Result<String, String>,
+) {
+    if !relay.hub_accepts(PARAMETER_CONTROL_RESULT)
+        || pending.is_some() && !relay.hub_accepts(PARAMETER_CONTROL_PENDING)
+    {
+        let notice = outcome.unwrap_or_else(|error| format!("Parameter control failed: {error}"));
+        let _ = relay
+            .send_channel_message(channel_id.to_string(), notice)
+            .await;
+        return;
+    }
+    let _ = relay.send_message(parameter_control_result(
+        channel_id,
+        source_message_id,
+        requested,
+        catalog,
+        pending,
+        outcome.err(),
+    ));
+}
+
+pub(crate) fn parameter_control_result(
+    channel_id: &str,
+    source_message_id: &str,
+    requested: &ParameterCommand,
+    catalog: &[protocol::HarnessParameter],
+    pending: Option<String>,
+    error: Option<String>,
+) -> protocol::AgentInstanceClientMessage {
+    let (parameter, action) = match requested {
+        Ok((id, ParameterAction::Query)) => (Some(id.clone()), "query"),
+        Ok((id, ParameterAction::Select(_))) => (Some(id.clone()), "select"),
+        Ok((id, ParameterAction::Toggle)) => (Some(id.clone()), "toggle"),
+        Err(_) => (None, "query"),
+    };
+    let entry = parameter
+        .as_deref()
+        .and_then(|id| catalog.iter().find(|candidate| candidate.id == id));
+    let error = error.or_else(|| requested.as_ref().err().cloned());
+    protocol::AgentInstanceClientMessage::AgentParameterControlResult {
+        request_id: None,
+        channel_id: channel_id.to_string(),
+        source_message_id: source_message_id.to_string(),
+        parameter,
+        action: action.into(),
+        current: entry.and_then(|entry| entry.current_value.clone()),
+        pending,
+        choices: entry
+            .map(|entry| entry.options.iter().take(100).cloned().collect())
+            .unwrap_or_default(),
+        notice: entry.and_then(|entry| entry.notice.clone()),
+        error,
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ParameterAction {
     Query,
@@ -650,6 +716,41 @@ pub(crate) fn command(text: &str) -> Option<ParameterCommand> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn a_parameter_control_reports_its_facts_not_a_sentence() {
+        let mut fast = choice("fast", "Fast", vec!["on".into(), "off".into()], Some("on".into())).unwrap();
+        fast.notice = Some("cooldown".into());
+        let result = parameter_control_result(
+            "channel-1",
+            "message-1",
+            &Ok(("fast".into(), ParameterAction::Toggle)),
+            std::slice::from_ref(&fast),
+            None,
+            None,
+        );
+        let json = serde_json::to_value(&result).unwrap();
+        assert_eq!(json["type"], "agent_parameter_control_result");
+        assert_eq!(json["sourceMessageId"], "message-1");
+        assert_eq!(json["parameter"], "fast");
+        assert_eq!(json["action"], "toggle");
+        assert_eq!(json["current"], "on");
+        assert_eq!(json["choices"], serde_json::json!(["on", "off"]));
+        assert_eq!(json["notice"], "cooldown");
+        assert!(json.get("error").is_none());
+        // A refused control carries the original error.
+        let refused = parameter_control_result(
+            "channel-1",
+            "message-1",
+            &Err("Use /config <parameter> [value]".into()),
+            &[],
+            None,
+            None,
+        );
+        let json = serde_json::to_value(&refused).unwrap();
+        assert_eq!(json["error"], "Use /config <parameter> [value]");
+        assert!(json.get("parameter").is_none());
+    }
+
     #[test]
     fn parameter_status_includes_provider_notice_for_disabled_and_cooldown_switches() {
         let mut fast = choice(

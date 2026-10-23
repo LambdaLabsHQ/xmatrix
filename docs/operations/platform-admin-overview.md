@@ -26,11 +26,43 @@ narrow screens without horizontal scrolling.
   (messages 7d/30d, Runs by status, Spaces owned, pages created), their own
   messages per day for 30 days, and tables of their Spaces (role, members,
   their messages, plan and billing status), Agent registrations, Machines
-  (status and timestamps), connectors they added (provider and status), and
+  (status and timestamps), connectors they added (provider, status and activity), and
   sessions (signed in, last active, expires).
 - **Spaces**: name, owner, members, Channels, Agents, messages, 7-day messages,
   created, last activity.
 - **Audit**: `GET /api/admin/audit`, every operator read and action, newest first.
+
+### Connector activity in user details
+
+The connector table attributes a connection to its stored `created_by` user.
+Connections are Space resources: the activity includes every caller in that
+Space, including Agents and other members, rather than claiming the adding user
+made every request. Disconnected connections remain visible with their status.
+
+Each connection shows retained execution totals and the last rolling 30 days,
+total counts for queued/completed/failed/blocked/planned, and the latest request
+time. These are connector execution records, not provider HTTP requests: blocked
+and planned work may never call the provider, and a single execution may make
+several HTTP calls. Counts require the exact connection, Space and provider.
+
+Event counts are retained, non-deleted standard event posts in `data.messages`
+(`author_kind = app`, exact provider and Space, canonical `app:<provider>:`
+message ID prefix). This covers GitHub and the shared connector event dispatcher,
+including webhook events. Action receipts use a separate ID prefix and are
+excluded. Each destination Channel counts once; retries under the same message
+ID do not add a row. Events with no Channel post, native paths with other ID
+formats, removed history and raw incoming HTTP attempts cannot be inferred from
+these counts. They must not be presented as the number of webhook requests
+received. Both retained total and rolling 30-day deliveries and the latest event
+time are shown, alongside canonical subscription and distinct subscribed-Channel
+counts. These are current stored subscriptions, not inferred active routes.
+
+Queries aggregate only metadata for the bounded connection list on each physical
+shard, under the existing user-read authorization, audit and database deadlines.
+No new writer, counter authority, backfill or migration is introduced. `usage`
+is an additive optional field: a newer Web with an older Hub shows unavailable
+counts as a dash, while the newer Hub returns real zeroes for an idle connection.
+CSV exports include exact numeric totals, 30-day counts and each execution status.
 
 ## What it deliberately does not show
 

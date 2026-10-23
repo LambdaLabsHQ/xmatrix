@@ -14,7 +14,14 @@ export function pageConversation(record: PageConversationRecord): PageConversati
   const authorKind: string = from.kind;
   const kind = authorKind === "agent" || authorKind === "app" || authorKind === "system"
     ? authorKind : "user";
-  return { ...conversation, lastMessage: { from: { kind, label: String(from.label) }, bodyPreview, sentAt } };
+  const text = (value: unknown) => typeof value === "string" && value ? value : undefined;
+  const avatarUrl = text(from.avatarUrl);
+  const identityId = text(from.identityId);
+  const instanceId = text(from.instanceId);
+  return { ...conversation, lastMessage: { from: { kind, label: String(from.label), userId: text(from.userId) ?? "",
+    ...(identityId ? { identityId } : {}), ...(instanceId ? { instanceId } : {}),
+    ...(from.registration ? { registration: from.registration } : {}), ...(avatarUrl ? { avatarUrl } : {}) },
+  bodyPreview, sentAt } };
 }
 
 /**

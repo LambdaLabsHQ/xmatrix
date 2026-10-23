@@ -5,14 +5,15 @@ import { initialMessageSource } from "./runtime-initial-input.js";
 import { publicLaunchFailureCode, publicLaunchFailureMessage, publicRuntimeErrorCode } from "./runtime-public-failure.js";
 import { requireRunRegistrationAccess } from "./agent-registration-run.js";
 import type { QueryResultRow } from "pg";
+import { resumableChannelRun } from "./instance-rest-state.js";
 import { decodeInvocationPageCursor, encodeInvocationPageCursor, type InvocationPagePosition } from "./runtime-invocation-cursor.js";
 import { readInvocationProgress } from "./runtime-invocation-progress.js";
 import { readContinuationSource } from "./runtime-continuation-source.js";
 import { queryMessageAgentTargets } from "./message-agent-targets.js";
 import { queryMessageExecutions, selectRunExecutionSources } from "./runtime-message-executions.js";
-import { ACTIVE_RUN_STATUS_SQL, isActiveRunStatus, isRunStatus, isTerminalRunStatus, validRunTransition, type RunStatus, PREPARATION_REJECTION_MESSAGES, REGISTRATION_PREPARATION_REJECTION_CODES, preparationRejectionMessage, parseDecisionAnswerFailure,
-  parsePresentedRoutingDecision, rebornFailureReason, agentAvatarUrlFromMetadata, isAgentStatus,
-  isLiveAgentStatus, LIVE_AGENT_STATUS_SQL, normalizeAgentPresetRuntime, type AgentStatus, type AgentLaunchState,
+import { ACTIVE_RUN_STATUS_SQL, isActiveRunStatus, isRunStatus, isTerminalRunStatus, validRunTransition, type RunStatus, PREPARATION_REJECTION_MESSAGES, REGISTRATION_PREPARATION_REJECTION_CODES, preparationRejectionMessage, parseDecisionAnswerFailure, parseHarnessTooOld, parseHarnessSignedOut,
+  parsePresentedRoutingDecision, rebornFailureReason, isAgentStatus,
+  isLiveAgentStatus, LIVE_AGENT_STATUS_SQL, agentPresetById, type HarnessSignedOut, normalizeAgentPresetRuntime, type AgentStatus, type AgentLaunchState,
   type RuntimeOperationFailure, type SerializedAgentContinuation, type SerializedAgentLaunch, type SerializedAgentInvocationRejection, type SerializedAgentStop, type AgentStopPhase, type AgentInvocationQueryPage, type AgentLaunchActivity, type InvocationDiagnosticsReport } from "@xmatrix/protocol";
 import { commandDigest as digest } from "./command-digest.js";
 
@@ -47,7 +48,7 @@ const runtimeCapabilityError = (failure: {
 
 export function runtimeChannelCapability(tx: DatabaseTransaction, channelId: string, userId: string,
   capability: Extract<ChannelCapability,
-    "runtime_history_read" | "runtime_new_work" | "runtime_terminalize">,
+    "runtime_history_read" | "runtime_new_work" | "runtime_terminalize" | "runtime_check">,
 ): Promise<ChannelCapabilityGrant> {
   return requireChannelCapability(tx, { channelId, principal: { kind: "user", id: userId },
     capability, error: runtimeCapabilityError });
@@ -220,12 +221,13 @@ function invocationRunActivity(row: QueryResultRow): AgentLaunchActivity | undef
   };
 }
 
-function invocationTargetAvatar(row: QueryResultRow): string | undefined {
-  const runtime = typeof row.target_runtime === "string" ? row.target_runtime : "custom";
-  return agentAvatarUrlFromMetadata({}, normalizeAgentPresetRuntime(runtime) ?? runtime);
+/** The harness an invocation's Agent runs, which gives it its face (protocol faces.ts). */
+function invocationTargetHarness(row: QueryResultRow): string | undefined {
+  return typeof row.target_runtime === "string" && row.target_runtime
+    ? normalizeAgentPresetRuntime(row.target_runtime) ?? row.target_runtime : undefined;
 }
 
-/** A fenced stop's phase. The Workstation's stop receipt is the only
+/** A fenced stop's phase. The Machine's stop receipt is the only
  * confirmation; a Run that merely left `stopping` some other way is not. */
 function stopReceiptPhase(status: string, runMetadata: Record<string, unknown>): AgentStopPhase {
   const evidence = runMetadata.daemonStopEvidence;
@@ -248,7 +250,7 @@ function serializeAgentStop(row: QueryResultRow): SerializedAgentStop | undefine
     ? iso((evidence as { completedAt?: unknown }).completedAt) : undefined;
   const requestedAt = iso((request as { requestedAt?: unknown }).requestedAt) ?? iso(row.updated_at);
   if (!requestedAt) return undefined;
-  const avatar = invocationTargetAvatar(row);
+  const harness = invocationTargetHarness(row);
   const ordinal = /^[1-9]\d*$/u.test(String(row.channel_instance_id ?? "")) ? String(row.channel_instance_id) : undefined;
   const machineName = typeof row.machine_name === "string" ? row.machine_name.trim().slice(0, 120) : "";
   const phase = stopReceiptPhase(String(row.status), runMetadata);
@@ -256,7 +258,7 @@ function serializeAgentStop(row: QueryResultRow): SerializedAgentStop | undefine
     stopId: `${sourceMessageId}:${row.run_id}`.slice(0, 300),
     channelId: String(row.channel_id), sourceMessageId, runId: String(row.run_id),
     targetName: String(row.target_name || "Agent").slice(0, 80),
-    ...(avatar ? { targetAvatarUrl: avatar } : {}),
+    ...(harness ? { targetHarness: harness } : {}),
     ...(ordinal ? { instanceOrdinal: ordinal } : {}),
     ...(machineName ? { machineName } : {}),
     phase, requestedAt, ...(phase === "confirmed" && confirmedAt ? { confirmedAt } : {}),
@@ -284,12 +286,12 @@ function serializeAgentContinuation(row: QueryResultRow): SerializedAgentContinu
     handoff.runId === source.sourceRunId && handoff.instanceId === source.sourceInstanceId &&
     handoff.sourceMessageId === source.sourceMessageId && handoff.successorInstanceId === source.targetInstanceId
     ? safeAt(handoff.transferredAt) : undefined;
-  const avatar = invocationTargetAvatar(row);
+  const harness = invocationTargetHarness(row);
   // Only a known reborn failure code is public; any other is `reborn_failed`.
   const errorCode = rebornFailureReason(publicRuntimeErrorCode(row.reborn_error_code)).code;
   return [{ ...source, runId: String(row.run_id), channelId: String(row.channel_id),
     targetName: String(row.target_name),
-    ...(avatar ? { targetAvatarUrl: avatar } : {}), createdAt: iso(row.created_at)!,
+    ...(harness ? { targetHarness: harness } : {}), createdAt: iso(row.created_at)!,
     ...(activity && row.run_created_at ? { runCreatedAt: iso(row.run_created_at) } : {}),
     ...(rebornState ? { reborn: { state: rebornState, stopRequired: row.reborn_stop_required === true,
       ...(rebornState === "failed" ? { errorCode } : {}), updatedAt: iso(row.reborn_updated_at)! } } : {}),
@@ -304,7 +306,7 @@ function routingDecisionView(value: unknown): SerializedAgentLaunch["routingDeci
 }
 
 function serializeAgentLaunch(row: QueryResultRow): SerializedAgentLaunch {
-  const targetAvatarUrl = invocationTargetAvatar(row);
+  const targetHarness = invocationTargetHarness(row);
   const errorCode = publicLaunchFailureCode(row.error_code, row.error_message);
   const errorStage = publicRuntimeErrorCode(row.error_stage);
   const errorMessage = row.state === "failed" || row.error_message ? publicLaunchFailureMessage(row.error_code, row.error_message) : undefined;
@@ -318,7 +320,7 @@ function serializeAgentLaunch(row: QueryResultRow): SerializedAgentLaunch {
     channelId: String(row.channel_id),
     sourceMessageId: String(row.trigger_id),
     ...(row.target_name ? { targetName: String(row.target_name) } : {}),
-    ...(targetAvatarUrl ? { targetAvatarUrl } : {}),
+    ...(targetHarness ? { targetHarness } : {}),
     launchKind: String(row.launch_kind),
     ...(sourceMention ? { sourceMention } : {}),
     ...(routingDecision ? { routingDecision } : {}),
@@ -328,7 +330,11 @@ function serializeAgentLaunch(row: QueryResultRow): SerializedAgentLaunch {
     state: String(row.state) as AgentLaunchState,
     attempt: Number(row.attempt),
     retryable: row.retryable === true,
-    ...(row.state === "queued" && row.daemon_offline === true ? { daemonOffline: true } : {}),
+    ...(row.state === "queued" && row.daemon_offline === true ? { daemonOffline: true,
+      // Its first spawn was routed to a daemon that had just dropped (a restart).
+      ...(runMetadata.machineReconnect && typeof runMetadata.machineReconnect === "object" &&
+        (runMetadata.machineReconnect as Record<string, unknown>).controlId === row.control_id
+        ? { machineReconnecting: true } : {}) } : {}),
     ...(errorStage ? { errorStage } : {}),
     ...(errorCode ? { errorCode } : {}),
     ...(errorMessage ? { errorMessage } : {}),
@@ -370,7 +376,10 @@ function serializeInvocationRejections(row: QueryResultRow): SerializedAgentInvo
       sourceMessageId: String(result.sourceMessageId), sourceMention: value.sourceMention,
       targetRef: value.targetRef.slice(0, 300), code,
       ...(routingDecisionView(value.routingDecision) ? { routingDecision: routingDecisionView(value.routingDecision) } : {}),
-      message: known ? preparationRejectionMessage(code, value.answerFailure)!
+      ...(code === "registration_harness_signed_out" && parseHarnessSignedOut(value.signedOut)
+        ? { signedOut: parseHarnessSignedOut(value.signedOut)! } : {}),
+      message: known ? preparationRejectionMessage(code, code === "registration_harness_outdated" ? value.tooOld
+        : code === "registration_harness_signed_out" ? value.signedOut : value.answerFailure)!
         : "This invocation could not be prepared. Review its address and Agent configuration.",
       rejectedAt: iso(row.created_at)!, evidenceExpiresAt: iso(row.expires_at)! }];
   });
@@ -480,10 +489,44 @@ export class PostgresRuntimeRepository {
     });
   }
 
+  /**
+   * Record whether a running, resumable Run rests (docs/instance-sleep.md):
+   * its sleep falls due `windowMs` after it starts resting and is withdrawn
+   * the moment it works again. A Run already resting keeps its due time.
+   * Returns the due time now in force, and whether this call set it.
+   */
+  async markRunResting(input: {
+    requestId: string; actorUserId: string; runId: string; channelId: string;
+    resting: boolean; windowMs: number;
+  }): Promise<{ idleSleepAt: string | null; started: boolean }> {
+    const placement = await this.channelPlacement(input.requestId, input.channelId,
+      "runtime.idle-sleep.locate", "runtime.idle-sleep.placement");
+    return this.spaces.transaction(input.requestId, "runtime.idle-sleep.mark", placement, async tx => {
+      const run = (await tx.query<QueryResultRow>({ name: "runtime_idle_sleep_run_lock_v1", text: `SELECT
+        status,metadata_json,idle_sleep_at FROM data.runs
+        WHERE run_id=$1 AND channel_id=$2 AND owner_user_id=$3 FOR UPDATE`,
+        values: [input.runId, input.channelId, input.actorUserId], maxRows: 1 }))[0];
+      if (!run) return { idleSleepAt: null, started: false };
+      const metadata = (run.metadata_json ?? {}) as Record<string, unknown>;
+      // Only a Run the next message can wake again may sleep (instance-rest-state.ts).
+      const sleeps = input.resting && run.status === "running" && resumableChannelRun(metadata) &&
+        metadata.stopRequest === undefined;
+      const previous = run.idle_sleep_at ? new Date(run.idle_sleep_at as Date).toISOString() : null;
+      if (sleeps && previous) return { idleSleepAt: previous, started: false };
+      if (!sleeps && !previous) return { idleSleepAt: null, started: false };
+      const updated = (await tx.query<QueryResultRow>({ name: "runtime_idle_sleep_mark_v2", text: `UPDATE data.runs
+        SET idle_sleep_at=CASE WHEN $2::boolean THEN clock_timestamp()+($3::integer*interval '1 millisecond') END
+        WHERE run_id=$1 RETURNING idle_sleep_at`,
+        values: [input.runId, sleeps, Math.max(1, Math.trunc(input.windowMs))], maxRows: 1 }))[0];
+      const at = updated?.idle_sleep_at ? new Date(updated.idle_sleep_at as Date).toISOString() : null;
+      return { idleSleepAt: at, started: Boolean(at) };
+    });
+  }
+
   /** Bounded historical outcomes only. They neither reserve capacity nor authorize a launch. */
   async recordRoutingRejections(input: { channelId: string; sourceMessageId: string; actorUserId: string;
     rejected: Array<{ sourceMention: string; code: string; routingDecision?: unknown;
-      answerFailure?: unknown }> }) {
+      answerFailure?: unknown; tooOld?: unknown; signedOut?: unknown }> }) {
     const channelId = text(input.channelId, "channelId", 300);
     const sourceMessageId = text(input.sourceMessageId, "sourceMessageId", 160);
     const commandId = `routing-preflight:${sourceMessageId}`;
@@ -498,8 +541,10 @@ export class PostgresRuntimeRepository {
         throw new RuntimeControlError("invalid_runtime_request", 400, "Invalid source mention");
       const answerFailure = item.code === "routing_parameter_invalid_answer"
         ? parseDecisionAnswerFailure(item.answerFailure) : undefined;
+      const tooOld = item.code === "registration_harness_outdated" ? parseHarnessTooOld(item.tooOld) : undefined;
+      const signedOut = item.code === "registration_harness_signed_out" ? parseHarnessSignedOut(item.signedOut) : undefined;
       return { sourceMention, targetRef: "auto", code: item.code,
-        ...(answerFailure ? { answerFailure } : {}),
+        ...(answerFailure ? { answerFailure } : {}), ...(tooOld ? { tooOld } : {}), ...(signedOut ? { signedOut } : {}),
         ...(item.routingDecision ? { routingDecision: routingDecisionView(item.routingDecision) } : {}) };
     });
     const placement = await this.channelPlacement(commandId, channelId,
@@ -755,7 +800,7 @@ export class PostgresRuntimeRepository {
 
   private async reserveNaturalKey(tx: DatabaseTransaction, input: Record<string, unknown>, at: string) {
     const scope = text(input.scope, "scope", 20);
-    if (scope !== "instance" && scope !== "run" && scope !== "about") throw new RuntimeControlError(
+    if (scope !== "instance" && scope !== "run") throw new RuntimeControlError(
       "invalid_runtime_request", 400, "scope is invalid");
     try {
       const reservation = await reserveNaturalKey(tx, { creationKey: text(input.creationKey, "creationKey", 300),
@@ -1031,13 +1076,13 @@ export class PostgresRuntimeRepository {
       selection: { kind: runId ? "run" : input.sourceMessageIds ? "messages" : "recent-messages",
         limit: input.sourceMessageIds ? selection.sourceMessageIds.length : limit, hasOlderMessages: selection.hasOlderMessages }, ...(selection.run ? { run: selection.run } : {}),
       launches: page.launches.filter((launch) => !runId || launch.runId === runId).map((launch) => {
-        const { sourceMention: _address, errorMessage: _freeformError, targetAvatarUrl: _avatar,
+        const { sourceMention: _address, errorMessage: _freeformError, targetHarness: _face,
           errorCode, errorStage, ...safe } = launch;
         const code = (value: unknown): value is string => typeof value === "string" && /^[a-z][a-z0-9_.-]{0,79}$/u.test(value);
         return { ...safe, ...(code(errorCode) ? { errorCode } : {}), ...(code(errorStage) ? { errorStage } : {}) };
       }),
       rejections: runId ? [] : (page.rejections ?? []).map(({ sourceMention: _address, ...safe }) => safe),
-      continuations: (page.continuations ?? []).map(({ sourceMention: _address, targetAvatarUrl: _avatar, ...safe }) => safe),
+      continuations: (page.continuations ?? []).map(({ sourceMention: _address, targetHarness: _face, ...safe }) => safe),
       targets: (page.targets ?? []).map(({ sourceBodyHash: _hash, sourceMention: _mention, ...safe }) => safe),
       executions: (page.executions ?? []).map(({ sourceBodyHash: _hash, ...safe }) => safe),
       nextCursor: page.nextCursor ?? null };
@@ -1414,8 +1459,10 @@ export class PostgresRuntimeRepository {
     if (!route) return { recorded: false };
     const placement = await this.spaces.resolve(requestId, "runtime.agent-launch.first-reply.placement", route.spaceId);
     return this.spaces.transaction(requestId, "runtime.agent-launch.first-reply", placement, async (tx) => {
+      // The reply is already committed. This observation starts no work and
+      // changes no Channel state, so it must not queue behind a Channel writer.
       await runtimeChannelCapability(tx, channelId, text(input.actorUserId, "actorUserId", 300),
-        "runtime_terminalize");
+        "runtime_check");
       const rows = await tx.query<QueryResultRow>({ name: "runtime_agent_launch_first_reply_v1", text: `UPDATE
         data.agent_launches SET first_reply_at=$3,updated_at=GREATEST(updated_at,$3),version=version+1
         WHERE channel_id=$1 AND run_id=$2 AND state='connected' AND first_reply_at IS NULL
@@ -1439,7 +1486,7 @@ export class PostgresRuntimeRepository {
       await runtimeChannelCapability(tx, channelId, actorUserId, "runtime_new_work");
       // An Instance is found by its Space registration's display name or
       // harness at its Channel slot.
-      const rows = await tx.query<QueryResultRow>({ name: "runtime_reborn_target_v4", text: `SELECT
+      const rows = await tx.query<QueryResultRow>({ name: "runtime_reborn_target_v5", text: `SELECT
           i.instance_id,i.status AS instance_status,i.channel_instance_id,
           r.run_id,r.owner_user_id,r.workspace_machine_id,
           r.workspace_canonical_cwd,r.metadata_json,r.status AS run_status,sr.display_name AS agent_name,
@@ -1451,7 +1498,6 @@ export class PostgresRuntimeRepository {
           AND sr.machine_id=b.machine_id AND sr.harness=b.harness
         WHERE i.channel_id=$1 AND i.channel_instance_id=$3
           AND (lower(sr.display_name)=$4 OR sr.harness=$4)
-          AND COALESCE(r.metadata_json->>'routedAs','')<>'management_channel_about'
         LIMIT 2`, values: [channelId, placement.spaceId,
         channelInstanceId, normalizedAgentName(agentName)], maxRows: 2 });
       if (rows.length > 1) throw new RuntimeControlError(
@@ -1462,8 +1508,6 @@ export class PostgresRuntimeRepository {
       const runMetadata = metadata(row);
       if (runMetadata.instanceDeletion !== undefined) throw new RuntimeControlError(
         "instance_not_found", 404, "Agent Instance was deleted or is being deleted");
-      if (runMetadata.instanceHandoff !== undefined) throw new RuntimeControlError(
-        "instance_not_found", 404, "Agent Instance was already handed off");
       return { target: {
         instanceId: String(row.instance_id), instanceStatus: String(row.instance_status), channelId,
         channelInstanceId: Number(row.channel_instance_id), runId: String(row.run_id),
@@ -1494,7 +1538,7 @@ export class PostgresRuntimeRepository {
     return this.spaces.transaction(requestId, "runtime.kill-targets", placement, async (tx) => {
       await runtimeChannelCapability(tx, channelId, actorUserId, "runtime_terminalize");
       // A registered Run is identified by its Space registration and its Instance.
-      const rows = await tx.query<QueryResultRow>({ name: "runtime_kill_targets_v6", text: `SELECT * FROM (
+      const rows = await tx.query<QueryResultRow>({ name: "runtime_kill_targets_v7", text: `SELECT * FROM (
           SELECT i.instance_id,i.run_id,i.channel_instance_id,r.owner_user_id,
             r.metadata_json,b.owner_user_id AS machine_owner_user_id,sr.display_name AS agent_name,
             r.status AS run_status,i.status AS instance_status
@@ -1508,7 +1552,6 @@ export class PostgresRuntimeRepository {
           OR ($6::text IS NULL AND target.run_status IN (${ACTIVE_RUN_STATUS_SQL})
           AND (target.instance_status<>'offline' OR target.run_status IN ('starting','running')
             OR target.metadata_json ? 'stopRequest')))
-          AND COALESCE(target.metadata_json->>'routedAs','')<>'management_channel_about'
           AND ($3::bigint IS NULL OR (target.channel_instance_id,target.instance_id)>($3::bigint,$4::text))
         ORDER BY target.channel_instance_id,target.instance_id LIMIT $5`, values: [channelId, placement.spaceId,
         cursor?.[0] ?? null, cursor?.[1] ?? null, limit + 1, handoffInstanceId, handoffRunId], maxRows: limit + 1 });
@@ -1599,6 +1642,35 @@ export class PostgresRuntimeRepository {
       return { stopped: rows.map((row) => ({ instanceId: String(row.instance_id),
         mentionTarget: `${String(row.agent_name)}:${Number(row.channel_instance_id)}` })) };
     });
+  }
+
+  /** A Run whose program refused a turn as signed out: recorded on the Run, so
+   * routing passes its registration over until its machine reports a newer
+   * sign-in, and returned as the program and machine its sign-in names.
+   * Undefined for a Run without a registration. */
+  async recordRunSignedOut(input: { requestId: string; runId: string; actorUserId: string }): Promise<HarnessSignedOut | undefined> {
+    const requestId = text(input.requestId, "requestId", 200);
+    const runId = text(input.runId, "runId", 300);
+    const route = await this.entityDirectory.resolve(
+      { requestId, operation: "runtime.run-signed-out.locate" }, "run", runId,
+    );
+    if (!route) return undefined;
+    const placement = await this.spaces.resolve(requestId, "runtime.run-signed-out.placement", route.spaceId);
+    const rows = await this.database.transaction({ requestId, operation: "runtime.run-signed-out",
+      placement: { spaceId: placement.spaceId, shardId: placement.shardId, placementEpoch: placement.placementEpoch } },
+    tx => tx.query<QueryResultRow>({ name: "runtime_run_signed_out_v1", text: `WITH marked AS (
+        UPDATE data.runs SET metadata_json=metadata_json||jsonb_build_object('signedOutAt',statement_timestamp())
+        WHERE run_id=$1 AND owner_user_id=$2 RETURNING run_id)
+      SELECT b.machine_id,b.harness,
+        (SELECT name FROM data.machines m WHERE m.owner_user_id=b.owner_user_id AND m.machine_id=b.machine_id) AS machine_name
+      FROM data.run_agent_registrations b JOIN marked ON marked.run_id=b.run_id WHERE b.owner_user_id=$2 LIMIT 1`,
+    values: [runId, text(input.actorUserId, "actorUserId", 300)], maxRows: 1 }));
+    const row = rows[0];
+    if (!row) return undefined;
+    const harness = String(row.harness);
+    const machineName = typeof row.machine_name === "string" ? row.machine_name.trim() : "";
+    return parseHarnessSignedOut({ harness, program: agentPresetById(harness)?.displayName ?? harness,
+      machineId: String(row.machine_id), ...(machineName ? { machineName } : {}) });
   }
 
   async getRun(input: { requestId: string; runId: string; actorUserId: string; requireExecutionAccess?: boolean }) {

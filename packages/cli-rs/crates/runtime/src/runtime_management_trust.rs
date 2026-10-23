@@ -336,10 +336,13 @@ struct DaemonSpawnRequest {
     identity_id: Option<String>,
     /// The registration's instructions (see `MachineSpawnAgent`).
     role_initial_prompt: Option<String>,
+    bootstrap_prompts: Option<xmatrix_cli_core::bootstrap_prompts::BootstrapPrompts>,
     /// The registration's working mode (see `MachineSpawnAgent`).
     working_mode: Option<String>,
     /// The Space's rules page (see `MachineSpawnAgent`).
     space_rules_page_id: Option<String>,
+    /// The Space's connected apps (see `MachineSpawnAgent`).
+    connected_apps: Vec<String>,
     resume: bool,
     resume_instance_id: Option<String>,
     resume_session_key: Option<String>,
@@ -350,6 +353,7 @@ struct DaemonSpawnRequest {
     handoff_transfer: bool,
     handoff_source_instance_id: Option<String>,
     handoff_source_resume_session_key: Option<String>,
+    handoff_context: Option<MachineHandoffContext>,
     goal: Option<protocol::AgentGoalStatus>,
     run_worktree: bool,
     remote_repo: Option<String>,
@@ -389,8 +393,10 @@ impl DaemonSpawnRequest {
             agent_name,
             identity_id,
             role_initial_prompt,
+            bootstrap_prompts,
             working_mode,
             space_rules_page_id,
+            connected_apps,
             resume,
             resume_instance_id,
             resume_session_key,
@@ -401,6 +407,7 @@ impl DaemonSpawnRequest {
             handoff_transfer,
             handoff_source_instance_id,
             handoff_source_resume_session_key,
+            handoff_context,
             context,
             goal,
             run_worktree,
@@ -436,8 +443,10 @@ impl DaemonSpawnRequest {
             agent_name,
             identity_id,
             role_initial_prompt,
+            bootstrap_prompts,
             working_mode,
             space_rules_page_id,
+            connected_apps,
             resume: resume.unwrap_or(false),
             resume_instance_id,
             resume_session_key,
@@ -448,6 +457,7 @@ impl DaemonSpawnRequest {
             handoff_transfer: handoff_transfer.unwrap_or(false),
             handoff_source_instance_id,
             handoff_source_resume_session_key,
+            handoff_context,
             initial_message_source: context
                 .as_ref()
                 .and_then(|value| value.initial_message_source.clone()),
@@ -1433,7 +1443,7 @@ fn update_daemon_run_status_marker(
 
 fn write_current_run_status(phase: &str, completed: bool, detail: Option<&str>) {
     if phase == "turn_completed" {
-        crate::clear_pending_usage_limit();
+        crate::clear_pending_turn_failure();
     }
     let Some(path) = std::env::var_os("XMATRIX_RUN_STATUS_FILE").map(PathBuf::from) else {
         return;
@@ -1446,13 +1456,34 @@ fn write_current_run_error_status(phase: &str, completed: bool, error: &CliError
         return;
     };
     let detail = truncate_chars(&error.to_string(), 2_000);
+    let signed_out = error
+        .operation_failure()
+        .is_none()
+        .then(|| signed_out_start_failure(phase, &detail))
+        .flatten();
     write_daemon_run_status_marker_with_failure(
         &path,
         phase,
         completed,
         Some(&detail),
-        error.operation_failure(),
+        error.operation_failure().or(signed_out.as_ref()),
     );
+}
+
+/// A start the harness refused because its own account is signed out carries
+/// that as its failure code, so Hub can offer the sign-in. Hub keeps an
+/// operation failure only with a `diag_<uuid>` id (cleanRuntimeOperationFailure).
+pub(crate) fn signed_out_start_failure(
+    phase: &str,
+    detail: &str,
+) -> Option<protocol::AgentOperationFailure> {
+    crate::harness_signed_out_error(detail).then(|| protocol::AgentOperationFailure {
+        code: crate::AGENT_SIGNED_OUT_LIFECYCLE_REASON.to_string(),
+        diagnostic_id: format!("diag_{}", uuid::Uuid::new_v4()),
+        retryable: false,
+        stage: phase.to_string(),
+        origin_stage: None,
+    })
 }
 
 fn write_task_execution_to_path(path: &Path, state: protocol::AgentRuntimeState) {
@@ -1983,14 +2014,6 @@ fn daemon_run_status_file_label(path: &Path) -> Option<String> {
         .filter(|label| !label.trim().is_empty())
 }
 
-fn daemon_run_ids_from_file_label(label: &str) -> (Option<String>, Option<String>) {
-    if label.starts_with("run-") {
-        (Some(label.to_string()), None)
-    } else {
-        (None, Some(label.to_string()))
-    }
-}
-
 fn daemon_run_status_is_terminal(marker: &DaemonRunStatusMarker) -> bool {
     marker.completed
         || matches!(
@@ -2009,8 +2032,22 @@ fn daemon_run_exit_from_status_file(
     if crate::process_tree::process_alive(marker.pid) {
         return None;
     }
+    // Status/log files outlive their receipt cleanup. Only a retained registry
+    // sidecar represents an exit still eligible for recovery; a sanitized file
+    // label is neither a Run identity nor evidence that a report is pending.
+    let run = read_daemon_run_sidecar(&daemon_run_sidecar_path_for_status(status_file_path)?)?;
+    if run.pid != marker.pid
+        || run.status_file_path.as_deref() != Some(status_file_path)
+        || (run.run_id.is_none() && run.execution_key.is_none())
+        || !persisted_profile_lineage_matches(
+            run.profile_id.as_deref(),
+            config::active_profile_context().as_ref(),
+        )
+        || !daemon_run_recovery_files_are_private(&run)
+    {
+        return None;
+    }
     let label = daemon_run_status_file_label(status_file_path)?;
-    let (run_id, execution_key) = daemon_run_ids_from_file_label(&label);
     let parent = status_file_path.parent()?;
     let stdout_log_path = parent.join(format!("{label}.out.log"));
     let stderr_log_path = parent.join(format!("{label}.err.log"));
@@ -2022,10 +2059,10 @@ fn daemon_run_exit_from_status_file(
         connection_retry: marker.connection_retry.clone(),
         wrapper_ready_at_millis: marker.wrapper_ready_at_millis,
         registry_key: None,
-        run_id,
-        execution_key,
-        agent_id: None,
-        agent_name: None,
+        run_id: run.run_id,
+        execution_key: run.execution_key,
+        agent_id: run.agent_id,
+        agent_name: run.agent_name,
         pid: marker.pid,
         status: marker
             .detail
@@ -2225,7 +2262,7 @@ enum DaemonSelfUpdateOutcome {
 
 fn daemon_self_update_release_api_url() -> String {
     std::env::var("XMATRIX_RELEASE_API_URL")
-        .unwrap_or_else(|_| DEFAULT_CLI_RELEASE_API_URL.to_string())
+        .unwrap_or_else(|_| default_cli_release_api_url().to_string())
 }
 
 fn daemon_self_update_interval() -> Duration {
@@ -2604,6 +2641,7 @@ fn polled_daemon_command_control_id(command: &MachineDaemonCommand) -> Option<&s
         | MachineDaemonCommand::MachineQuotaProbe { request_id, .. }
         | MachineDaemonCommand::MachineHarnessAction { request_id, .. }
         | MachineDaemonCommand::MachineTextTask { request_id, .. }
+        | MachineDaemonCommand::MachineSleepAgent { request_id, .. }
         | MachineDaemonCommand::MachineWorktreeAction { request_id, .. } => Some(request_id),
         MachineDaemonCommand::MachineRequestResolve { request_id, .. } => request_id.as_deref(),
     }
@@ -2794,7 +2832,7 @@ async fn handle_polled_daemon_spawn(
 /// whatever else is configured. That is the right outcome for every case we
 /// decline -- a host that is not GitHub, a request that did not say which
 /// repository, a run holding no grant -- so none of them are errors here.
-pub async fn cmd_git_credential(operation: &str) -> error::Result<()> {
+pub(crate) async fn cmd_git_credential(operation: &str) -> error::Result<()> {
     use std::io::Read as _;
 
     // Git only expects an answer to `get`. It sends `store` and `erase` so a

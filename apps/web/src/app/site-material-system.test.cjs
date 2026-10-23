@@ -21,7 +21,7 @@ test("public routes share one warm material layer", () => {
   for (const route of [
     "page.tsx",
     "download/page.tsx",
-    "login/page.tsx",
+    "../components/auth/auth-shell.tsx",
     "billing/page.tsx",
     "console/page.tsx",
   ]) {
@@ -40,7 +40,7 @@ test("Get started renders the product live instead of a screenshot", () => {
   assert.match(quickStartSource, /<AppWindow \/>/);
   assert.match(source("../components/landing/app-window-preview.tsx"), /MessageTimeline[\s\S]*ChannelSidebar|ChannelSidebar[\s\S]*MessageTimeline/);
   assert.doesNotMatch(quickStartSource, /next\/image|\.png|\.webp/);
-  assert.match(source("page.tsx"), /<Hero \/>\s*<QuickStart \/>/);
+  assert.match(source("page.tsx"), /<Hero \/>\s*<AgentStrip \/>\s*<LivePage \/>\s*<QuickStart \/>/);
 });
 
 test("public site labels carry no decorative eyebrow bar", () => {
@@ -84,7 +84,7 @@ test("navbar keeps the 3D logo off a centered sticky wood bar", () => {
   const brandIndex = navbarSource.indexOf("<BrandMark");
   const woodIndex = navbarSource.indexOf('<WoodPanel className="site-navbar-inner');
   assert.ok(brandIndex >= 0 && woodIndex > brandIndex, "brand mark must sit outside the wood bar");
-  assert.match(navbarSource, /iconSrc="\/brand\/xmatrix-icon-transparent\.png"/);
+  assert.match(navbarSource, /iconSrc="\/brand\/xmatrix-icon-transparent-128\.png"/);
   assert.match(navbarSource, /site-navbar-brand/);
   assert.match(navbarSource, /--navbar-wood-reveal/);
   assert.match(navbarSource, /className="site-navbar fixed top-0/);
@@ -97,12 +97,13 @@ test("navbar keeps the 3D logo off a centered sticky wood bar", () => {
 
 test("homepage display headings use the self-hosted Manrope face", () => {
   const globalsCss = source("globals.css");
-  assert.match(globalsCss, /font-family: "Manrope Variable";[\s\S]*?url\("\/fonts\/manrope-latin-wght-normal\.woff2"\)/);
-  assert.ok(fs.existsSync(path.join(appRoot, "../../public/fonts/manrope-latin-wght-normal.woff2")));
-  assert.ok(fs.existsSync(path.join(appRoot, "../../public/fonts/manrope-latin-ext-wght-normal.woff2")));
+  const face = globalsCss.match(/font-family: "Manrope Variable";[\s\S]*?url\("\/fonts\/(manrope-latin-wght-normal\.[0-9a-f]{10}\.woff2)"\)/);
+  assert.ok(face, "Manrope must be served from its content-addressed file");
+  assert.ok(fs.existsSync(path.join(appRoot, "../../public/fonts", face[1])));
+  assert.ok(fs.readdirSync(path.join(appRoot, "../../public/fonts")).some((name) => /^manrope-latin-ext-wght-normal\.[0-9a-f]{10}\.woff2$/.test(name)));
   assert.match(tokensCss, /--font-site-display-family: "Manrope Variable", var\(--font-sans-family\);/);
   assert.match(siteCss, /\.site-display \{\s*font-family: var\(--font-site-display-family\);/);
   assert.match(heroSource, /<h1 className="site-display /);
   assert.doesNotMatch(heroSource, /tracking-\[-0\.055em\]/);
-  assert.match(heroSource, /preload\("\/fonts\/manrope-latin-wght-normal\.woff2", \{ as: "font"/);
+  assert.ok(heroSource.includes(`preload("/fonts/${face[1]}", { as: "font"`), "the hero preloads the face the CSS uses");
 });

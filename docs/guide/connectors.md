@@ -69,7 +69,7 @@ Each app's actions are listed in its panel under **Apps** and in the composer. T
 | --- | --- | --- | --- |
 | GitLab | `gitlab` | Merge requests, pushes, pipelines, issues, comments, releases | `read_issue`, `read_merge_request`, `comment`, `merge`, `retry_pipeline` |
 | Bitbucket | `bitbucket` | Pull requests, comments, pushes, builds | `read_pull_request`, `comment` |
-| Sentry | `sentry` | New issues, regressions, resolved, assigned, ignored, alerts, comments | `read_issue`, `resolve`, `unresolve`, `ignore` |
+| Sentry | `sentry` | New issues, regressions, resolved, assigned, ignored, alerts, comments | `read_issue`, `list_issues`, `resolve`, `unresolve`, `ignore` |
 | Linear | `linear` | Issues, comments, projects | `read_issue`, `comment`, `create_issue` |
 | Jira | `jira` | Issues, comments | `read_issue`, `comment`, `transition` |
 | PagerDuty | `pagerduty` | Triggered, acknowledged, resolved, updates | `read_incident`, `acknowledge`, `resolve`, `note` |
@@ -85,15 +85,17 @@ Each app's actions are listed in its panel under **Apps** and in the composer. T
 | Google Docs, Drive & Sheets | `google` | | `read_doc`, `create_doc`, `append_doc`, `read_sheet`, `update_sheet`, `create_sheet`, `list_files` |
 | Google Search Console | `googlesearchconsole` | | `query`, `inspect_url`, sitemaps, properties, verification |
 | Google Analytics | `googleanalytics` | | `list_properties`, `report` |
+| Google Ads | `googleads` | | `list_accounts`, `read_account`, `query`, `validate_mutations`; `mutate`, `set_campaign_status` (ask by default) |
 | Google Business Profile | `googlebusinessprofile` | | `list_accounts`, `list_locations`, `performance`, `reviews`, `reply_review` |
-| Google AdSense | `googleadsense` | | `list_accounts`, `list_sites`, `report` |
+| Google AdSense | `googleadsense` | | `list_accounts`, `list_sites`, `list_adunits`, `report`, `list_payments`, `list_alerts`, `list_policy_issues` |
 | PageSpeed Insights | `pagespeed` | | `audit`, `field` |
 | Bing Webmaster Tools | `bingwebmaster` | | `list_sites`, `traffic`, `queries`, `pages`, `crawl_stats`, `submit_urls`, `submit_sitemap`, `indexnow` |
 | Yandex Webmaster | `yandexwebmaster` | | `list_hosts`, `summary`, `queries`, `recrawl` |
-| Gmail | `gmail` | | `search`, `read`; `send`, `reply` (off until a Space admin allows them in the channel). Several mailboxes, each used only by the member or Agent it belongs to |
+| Gmail | `gmail` | | `search`, `read`; `send`, `reply` (ask for a Space admin’s approval each time by default). Several mailboxes, each used only by the member or Agent it belongs to |
+| X | `x` | | `accounts`, `read_post`, `timeline`, `media_status`; `post`, `upload_video`, `quote` (ask by default). Explicit account selection; quote posting requires X Enterprise API access |
 | Notion | `notion` | | `read_page`, `append`, `create_page` |
 | Slack | `slack` | Messages, reactions | `post` |
-| App Store Connect | `appstoreconnect` | Version state, build upload, TestFlight review and feedback | `list_apps`, `status`, `builds`, `read_version`, `reviews`, `read_app`, `create_version`, `set_metadata`, `set_build`, `submit`, `cancel_submission`, `release`, `reply_review`, `set_app_info`, `set_age_rating`, `set_price`, `set_availability`, `set_review_contact`, `upload_build`, `upload_screenshot`, `commit_upload`, `read_upload`, `delete_upload`, `build_uploads`, `screenshot_specs`, `screenshots`, `set_screenshots`, `declare_encryption`, `signing`, `register_bundle_id`, `enable_capability`, `create_certificate`, `read_certificate`, `create_profile`, `read_profile`, `testflight`, `feedback`, `crash_log`, `add_to_group`, `submit_beta_review`, `set_test_notes` |
+| App Store Connect | `appstoreconnect` | Version state, build upload, TestFlight review and feedback | `list_apps`, `status`, `builds`, `read_version`, `reviews`, `review_messages`, `web_session`, `create_app`, `privacy`, `set_privacy`, `read_app`, `create_version`, `set_metadata`, `set_build`, `submit`, `cancel_submission`, `release`, `pause_phased_release`, `resume_phased_release`, `complete_phased_release`, `reply_review`, `set_app_info`, `set_age_rating`, `set_price`, `set_availability`, `set_review_contact`, `upload_build`, `upload_screenshot`, `commit_upload`, `read_upload`, `delete_upload`, `build_uploads`, `screenshot_specs`, `screenshots`, `set_screenshots`, `declare_encryption`, `signing`, `register_bundle_id`, `enable_capability`, `create_certificate`, `read_certificate`, `create_profile`, `read_profile`, `testflight`, `feedback`, `crash_log`, `add_to_group`, `submit_beta_review`, `set_test_notes` |
 | Discord | `discord` | | `post` |
 | Telegram | `telegram` | Messages | `send` |
 | Feishu / Lark | `feishu` | Messages | `send` |
@@ -108,12 +110,41 @@ A few examples:
 
 ```text
 @sentry:read_issue:WEB-1A2
+@sentry:list_issues:* firstRelease:xmatrix-v1.2.3
 @linear:create_issue:ENG Login fails on Safari
 @gitlab:comment:group/project!5 Looks good.
 @cloudflare:query_logs:api-worker 30 error
 @google:create_doc:new Launch notes
 @slack:post:C0123456789 Deploy finished.
 ```
+
+## Managing Google Ads
+
+Connect Google Ads in **Apps**, choose the advertiser customer ID in Credentials
+and run Check. This Google connection is separate from Analytics, Search Console
+and Drive. A read or mutation cannot target another advertiser.
+
+```text
+@googleads:read_account:1234567890
+@googleads:query:1234567890 SELECT campaign.id, campaign.name, campaign.status, metrics.clicks, metrics.cost_micros, metrics.conversions FROM campaign WHERE segments.date DURING LAST_7_DAYS LIMIT 50
+@googleads:set_campaign_status:1234567890/987654321 {"status":"PAUSED"}
+```
+
+`validate_mutations` checks proposed advertising changes without applying them.
+`mutate` creates or updates budgets, campaigns, creatives and targeting together;
+new campaigns must be paused. Both `mutate` and campaign status changes ask a
+Space admin to approve each request by default. To enable a campaign, explicitly
+give its currency and expected current average daily budget in integer micros:
+
+```text
+@googleads:set_campaign_status:1234567890/987654321 {"status":"ENABLED","currencyCode":"USD","expectedDailyBudgetMicros":"1000000"}
+```
+
+One million micros is one unit of the account currency. Average daily budgets
+are not hard spending caps; Google can spend above the average on a day. Native
+ad review/serving is asynchronous. Query before repeating any write whose
+outcome was not confirmed. The complete configuration and stable acceptance
+contract is in the [Google Ads connector documentation](https://github.com/LambdaLabsHQ/xmatrix/blob/main/docs/connectors/google-ads.md).
 
 ## Shipping an app to the App Store
 
@@ -132,11 +163,20 @@ With App Store Connect connected, an agent can take a build from upload to the s
 - `create_version` creates the next version with manual release; add `release=after_approval` to let Apple publish it as soon as it is approved. App Review contact and sign-in details carry over from the previous version without appearing in the conversation.
 - `set_build` takes the build number you uploaded, once Apple has processed it. The agent that built the app can upload it without any Apple key on its machine: see [Uploading files](#uploading-files) below.
 - `submit` sends the version to App Review. If Apple refuses because the listing is incomplete, the receipt says what is missing.
-- `release` publishes an approved version that waits for developer release. It cannot be undone; a Space admin can turn it off in a conversation with `@appstoreconnect:policy:release deny`.
+- `release` publishes an approved version that waits for developer release. Add `phased` to roll it out over 7 days; `pause_phased_release` holds that rollout, `resume_phased_release` continues it, and `complete_phased_release` publishes it to everyone. The release itself cannot be undone. A Space admin can turn any of these off in a conversation, for example `@appstoreconnect:policy:release deny`.
 
 `@appstoreconnect:status:com.example.app` shows where every version stands, and `reviews` and `reply_review` cover customer reviews. A version on another platform is written `macos/1.2.0`, `tvos/1.2.0` or `visionos/1.2.0`.
 
-A new app needs a few things once before its first submission. `@appstoreconnect:read_app:com.example.app` shows which are still missing, and an agent can fill in most of them:
+A new app starts with its record. Once the bundle ID is registered (`register_bundle_id`, below) and a Space admin has saved the Web session under Credentials, `create_app` makes the record with its first version, and `set_privacy` answers App Privacy and publishes it; `privacy` reads the answers back. Apple's API has neither, so both go through the App Store Connect website with that session:
+
+```text
+@appstoreconnect:create_app:com.example.app {"name":"Example","sku":"EXAMPLE","locale":"en-US","version":"1.0","platform":"ios"}
+@appstoreconnect:set_privacy:com.example.app {"data":[{"category":"EMAIL_ADDRESS","purposes":["APP_FUNCTIONALITY"],"linked":true,"tracking":false}]}
+```
+
+`set_privacy` replaces every answer the app had; `{"data":[]}` says the app collects nothing. Like the age rating, these answers are your statements to Apple, so give them for what the app actually does.
+
+The record then needs a few things once before its first submission. `@appstoreconnect:read_app:com.example.app` shows which are still missing, and an agent can fill in most of them:
 
 ```text
 @appstoreconnect:set_app_info:com.example.app {"locale":"en-US","name":"Example","subtitle":"Ship faster","privacyPolicyUrl":"https://example.com/privacy","primaryCategory":"PRODUCTIVITY"}
@@ -206,21 +246,55 @@ Subscribe the conversation with `feedback` among its kinds and an agent can pick
 
 ### When App Review rejects a version
 
-The conversation hears the rejection, but Apple offers no way to read the reviewer's message or reply to it outside App Store Connect, so a person reads it there. Once the problem is fixed, `submit` sends the same submission back to review; `cancel_submission` followed by `submit` starts a new one.
+The conversation hears the rejection. `@appstoreconnect:review_messages:com.example.app` then reads the reasons and what the reviewer wrote, once a Space admin has saved a Web session under Credentials. In the xMatrix app that is Sign in to App Store Connect: you sign in on Apple's own page and the app saves the session. In a browser, paste the Cookie header of a signed-in appstoreconnect.apple.com page. Apple keeps it from a day to a month. Replying to the reviewer still happens in App Store Connect. Once the problem is fixed, `submit` sends the same submission back to review; `cancel_submission` followed by `submit` starts a new one.
 
-Apple keeps a few steps for a person in App Store Connect: creating the app record the first time, answering the App Privacy questions, entering the App Review sign-in password if reviewers need one, accepting agreements, and reading and replying to App Review's messages.
+Apple keeps a few steps for a person in App Store Connect: creating the app record the first time, answering the App Privacy questions, entering the App Review sign-in password if reviewers need one, accepting agreements, and replying to App Review.
 
 ## Agents and apps
 
-An agent in a conversation can use the Space's connected apps as tools, with the same actions and the same rules as a person typing the command. You do not configure anything on the agent.
+An agent acts through a visible conversation message, with the same actions
+and rules as a person typing the command. `xmatrix connector list` shows the
+connected apps and their commands; `xmatrix send <channel-id> "<command>"`
+posts one. Its result replies to that message. You do not configure anything
+on the agent.
+
+Gmail search and read post mail content to the conversation receipt, and
+execution history stores a bounded excerpt. Everyone who can read the
+conversation can read that content. Search with
+`@gmail:search:* is:unread newer_than:1h`, or put one connected mailbox address
+in place of `*`. There is no connector MCP or caller-only mail result.
+
+Do not use these actions to retrieve login codes or credentials that must
+stay out of messages. There is no Gmail-to-Space-secret transfer action.
+For an authorized manual login, an agent can request
+`xmatrix request secret-add <fresh-alias> --env QA_LOGIN_CODE --reason "QA login"`;
+a Space admin supplies the code in the request card, never in chat. The agent
+then uses `xmatrix secret exec --secret <fresh-alias>=QA_LOGIN_CODE -- <login-command>`
+to inject it into a process that does not print it or include it in screenshots,
+traces or request logs. This manual secret entry does not verify connector
+mail delivery or automatic login. Saving a value after reading a Channel
+receipt cannot remove its earlier disclosure.
 
 ## Limiting an action
 
-By default every action of a connected app is available in every conversation of the Space, to people and to agents; the service's own permissions still apply. A Space admin can turn an action off in a conversation:
+Gmail sends and replies default to **Ask**. Each request appears in the
+conversation's **Pending approvals** with its sender, recipient, subject and
+body. A Space admin chooses **Allow once** or **Disallow**. Approving one email
+does not approve the next one; nothing is sent while the request waits.
+
+In Apps → Gmail → Channel action policy, choose **Allow**, **Ask**, or
+**Disallow** for send and reply in each conversation:
 
 ```text
-@github:policy:merge deny
-@github:policy:merge default
+@gmail:policy:send ask
+@gmail:policy:reply ask
+@gmail:policy:send allow
+@gmail:policy:send disallow
+@gmail:policy:send default
 ```
 
-`deny` blocks the action in that conversation for everyone. `default` removes the rule.
+**Allow** runs immediately, **Ask** requests approval every time, and
+**Disallow** blocks the action. **Default** removes the override. Existing
+explicit Allow/Disallow rules remain in force; `deny` remains a Disallow alias.
+Other apps keep their current defaults; generic executable actions can also
+use Ask. GitHub's specialized commands support Allow/Disallow only.

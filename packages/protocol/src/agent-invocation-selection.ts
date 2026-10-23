@@ -1,7 +1,8 @@
 import { utf8ByteLength } from "./hex.js";
 import { canonicalRegistrationHarness, parseSpaceAgentRegistrationKey,
   type SpaceAgentRegistrationKey } from "./agent-registration.js";
-import { isOperationalMentionStart, nonOperationalMentionRanges } from "./operational-mention-context.js";
+import { isOperationalMentionStart, nonOperationalMentionRanges,
+  type NonOperationalMentionRange } from "./operational-mention-context.js";
 import { createInstanceMentionScanner, parseHarnessCapabilityMentions } from "./agent-mention.js";
 import { parseAutoLaunchMentions, parseLaunchConditions } from "./agent-auto-mention.js";
 
@@ -59,6 +60,15 @@ function selectionText(value: unknown): value is string {
     matches[0]![0] === value && matches[0]![1] === value.slice(1);
 }
 
+/** The context of a selected token can change even when its text does not.
+ * Shared by draft tracking and strict envelope validation; this grants no target authority. */
+export function isOperationalInvocationSpan(body: string, start: number, end: number,
+  ranges: readonly NonOperationalMentionRange[] = nonOperationalMentionRanges(body)): boolean {
+  return (start === 0 || /[\s([{]/u.test(body[start - 1]!)) &&
+    (end === body.length || /[\s\]}).,!?;，。！？；]/u.test(body[end]!)) &&
+    isOperationalMentionStart(start, ranges);
+}
+
 /** The server supplies the authoritative body hash/revision, not values copied
  * from this envelope. Authorization and concrete invocation syntax are checked
  * by the message/launch authority after parsing. Stale selections never fall
@@ -81,9 +91,7 @@ export function parseAgentInvocationSelections(value: unknown, source: {
         !Number.isSafeInteger(item.start) || !Number.isSafeInteger(item.end) ||
         item.start < previousEnd || item.end <= item.start || item.end > source.body.length ||
         !selectionText(item.text) || source.body.slice(item.start, item.end) !== item.text ||
-        (item.start > 0 && !/[\s([{]/u.test(source.body[item.start - 1]!)) ||
-        (item.end < source.body.length && !/[\s\]}).,!?;，。！？；]/u.test(source.body[item.end]!)) ||
-        !isOperationalMentionStart(item.start, ranges)) throw new Error("Invalid invocation selection span");
+        !isOperationalInvocationSpan(source.body, item.start, item.end, ranges)) throw new Error("Invalid invocation selection span");
     previousEnd = item.end;
     return { start: item.start, end: item.end, text: item.text, target: target(item.target, source.spaceId) };
   });

@@ -37,19 +37,19 @@ test("unknown providers cannot mint App message authors", () => {
   );
 });
 
-test("a connector receipt is a system fact: context for every Instance, never a turn", async () => {
+test("a receipt without a retained Agent caller remains context", () => {
+  const receipt = channelMessage({ channelId: "ch-1", messageId: "system:command:openconnector", sequence: 9,
+    from: { kind: "app", label: "OpenConnector", appId: "openconnector" }, body: "Result",
+    sentAt: "2026-10-02T19:34:41.169Z", metadata: { xmatrixProvenance: "system_fact" } });
+  assert.equal(agentChannelMessageDeliveryIntent(receipt, { agentName: "codex", instanceId: "instance" }), "context");
+});
 
-  // An Agent's connector tool call already has its answer in the tool result;
-  // a receipt delivered as work cancelled the very turn waiting on that call.
-
-  // One receipt writer: no adapter appends its own status message.
-  const receipt = channelMessage({
-    channelId: "ch-1", messageId: "system:mcp:ch-1:run:id:openconnector", sequence: 9,
-    from: { kind: "app", label: "OpenConnector", appId: "openconnector" },
-    body: "App connector command status:\n- OpenConnector search: blocked.",
-    sentAt: "2026-10-02T19:34:41.169Z", metadata: { xmatrixProvenance: "system_fact" },
-  });
-  const caller = { agentName: "claude", channelInstanceId: "3" };
-  assert.equal(agentChannelMessageDeliveryIntent(receipt, caller), "context");
-  assert.equal(agentChannelMessageRequestsInterrupt(receipt, caller), false);
+test("a subscribed App event queues for existing Instances without interpreting provider text", () => {
+  for (const body of ["CI passed", "@auto", "@codex:3:stop", "@codex:3 /model example"]) {
+    const event = channelMessage({ channelId: "ch-1", messageId: "app:event", sequence: 10,
+      from: { kind: "app", label: "GitHub", appId: "github" }, body, sentAt: "2026-10-02T19:34:41.169Z" });
+    const recipient = { agentName: "codex", instanceId: "instance-3", channelInstanceId: "3" };
+    assert.equal(agentChannelMessageDeliveryIntent(event, recipient), "work", body);
+    assert.equal(agentChannelMessageRequestsInterrupt(event, recipient), false, body);
+  }
 });

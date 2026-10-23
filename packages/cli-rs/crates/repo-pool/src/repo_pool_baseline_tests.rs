@@ -8,7 +8,7 @@ async fn baseline_tracks_actual_fetch_tip_and_avoids_false_rewrite_notices() {
     let advertised = commit_on_remote(&remote, &old, "advertised");
     let fetched_tip = commit_on_remote(&remote, &advertised, "moved before fetch");
     run_git(&remote, &["update-ref", "refs/heads/main", &fetched_tip]);
-    let resolved = materialize_advertised_default(&base, "main", &advertised, now_rfc3339())
+    let resolved = materialize_advertised_default(&base, "main", &advertised, now_rfc3339(), false)
         .await
         .ok()
         .expect("confirmation");
@@ -27,12 +27,12 @@ async fn baseline_tracks_actual_fetch_tip_and_avoids_false_rewrite_notices() {
     assert_eq!(rev(&path, "HEAD"), used);
 
     run_git(&remote, &["update-ref", "refs/heads/main", &old]);
-    let rollback = confirm_origin_default_once(&base).await.ok().unwrap();
+    let rollback = confirm_origin_default_once(&base, false).await.ok().unwrap();
     assert_eq!(rollback.history_rewritten, Some(true));
     run_git(&remote, &["update-ref", "refs/heads/trunk", &advertised]);
     run_git(&remote, &["symbolic-ref", "HEAD", "refs/heads/trunk"]);
     assert_eq!(
-        confirm_origin_default_once(&base)
+        confirm_origin_default_once(&base, false)
             .await
             .ok()
             .unwrap()
@@ -41,7 +41,7 @@ async fn baseline_tracks_actual_fetch_tip_and_avoids_false_rewrite_notices() {
     );
     run_git(&base, &["update-ref", "-d", "refs/remotes/origin/trunk"]);
     assert_eq!(
-        confirm_origin_default_once(&base)
+        confirm_origin_default_once(&base, false)
             .await
             .ok()
             .unwrap()

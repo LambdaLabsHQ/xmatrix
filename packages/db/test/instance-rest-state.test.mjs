@@ -13,7 +13,6 @@ test("only a conversation Run with a harness session can rest", () => {
   for (const metadata of [
     { ...resumable, resumeSessionKey: undefined },
     { ...resumable, routedAs: "management_channel_about" },
-    { ...resumable, channelDeliveryEnabled: false },
     { ...resumable, automationId: "automation-1" },
     { ...resumable, instanceDeletion: { state: "pending" } },
     { ...resumable, instanceHandoff: { successorInstanceId: "instance-2" } },

@@ -1,5 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
-import type { SerializedChannel } from "@xmatrix/protocol";
+import type { ChannelSnapshot } from "@xmatrix/protocol";
 import {
   useCallback,
   useEffect,
@@ -25,12 +25,14 @@ type ReadCountsUpdater = (
 type UseChannelReadSyncOptions = {
   accessTokenRef: MutableRefObject<string | undefined>;
   userId: string | undefined;
-  channelsRef: MutableRefObject<SerializedChannel[]>;
+  channelsRef: MutableRefObject<ChannelSnapshot[]>;
   selectedChannelIdRef: MutableRefObject<string | null>;
   timelineActiveRef: MutableRefObject<boolean>;
   viewRef: MutableRefObject<AppView>;
-  setChannels: Dispatch<SetStateAction<SerializedChannel[]>>;
+  setChannels: Dispatch<SetStateAction<ChannelSnapshot[]>>;
   updateChannelReadCounts: ReadCountsUpdater;
+  /** Told as the Hub's answer for a Channel is applied: a read asked before it is older than it. */
+  onReadStateAnswered?: (channelId: string) => void;
 };
 
 export function useChannelReadSync({
@@ -42,6 +44,7 @@ export function useChannelReadSync({
   viewRef,
   setChannels,
   updateChannelReadCounts,
+  onReadStateAnswered,
 }: UseChannelReadSyncOptions) {
   const lastSyncedReadSequenceRef = useRef<Record<string, number>>({});
   const coordinatorRef = useRef<ChannelReadSyncCoordinator<ChannelReadStateUpdate> | null>(null);
@@ -57,6 +60,7 @@ export function useChannelReadSync({
       readState.readSequence || 0,
     );
     lastSyncedReadSequenceRef.current[channelId] = readSequence;
+    onReadStateAnswered?.(channelId);
     setChannels((current) => updateChannelReadState(current, channelId, {
       ...readState,
       readSequence,
@@ -72,7 +76,7 @@ export function useChannelReadSync({
         readStates: new Map([[channelId, { ...readState, readSequence }]]),
       });
     }
-  }, [queryClient, setChannels]);
+  }, [onReadStateAnswered, queryClient, setChannels]);
   const applyReadStateRef = useRef(applyReadState);
   applyReadStateRef.current = applyReadState;
 
@@ -85,6 +89,8 @@ export function useChannelReadSync({
           : Promise.resolve(undefined);
       },
       onSuccess: (channelId, readState) => applyReadStateRef.current(channelId, readState),
+      // The account can change a commit before the reset that starts its session over.
+      reader: () => userIdRef.current,
     });
   }
 
@@ -95,11 +101,15 @@ export function useChannelReadSync({
     const sequence = Math.max(channel?.historyHeadSequence ?? 0, channel?.messageCount ?? 0,
       channel?.attention?.lastMessageSequence ?? 0);
     if (!accessToken || sequence <= 0) return;
-    const readState = await syncChannelReadCursor(accessToken, channelId, sequence, true);
-    // The Hub omits a cleared attention summary, and that absence is the answer.
-    if (readState) applyReadState(channelId, { attention: readState.attention, readSequence: readState.readSequence });
-    updateChannelReadCounts((current) => (current[channelId] || 0) >= sequence
-      ? current : { ...current, [channelId]: sequence });
+    // Written only while the session and reader that asked are still here.
+    await coordinatorRef.current!.respond(channelId, sequence,
+      () => syncChannelReadCursor(accessToken, channelId, sequence, true),
+      (readState) => {
+        // The Hub omits a cleared attention summary, and that absence is the answer.
+        if (readState) applyReadState(channelId, { attention: readState.attention, readSequence: readState.readSequence });
+        updateChannelReadCounts((current) => (current[channelId] || 0) >= sequence
+          ? current : { ...current, [channelId]: sequence });
+      });
   }, [accessTokenRef, applyReadState, channelsRef, updateChannelReadCounts]);
 
   useEffect(() => () => coordinatorRef.current?.reset(), []);
@@ -117,6 +127,7 @@ export function useChannelReadSync({
       !document.hasFocus()
     ) return;
 
+    coordinatorRef.current!.noteRead(channelId, sequence);
     const accessToken = accessTokenRef.current;
     const channelAttentionUnread = channelsRef.current.find((channel) => channel.id === channelId)
       ?.attention?.unreadAttentionCount || 0;
@@ -150,10 +161,13 @@ export function useChannelReadSync({
     lastSyncedReadSequenceRef.current = {};
   }, []);
 
+  const readOnThisDevice = useCallback((channelId: string) => coordinatorRef.current!.readHere(channelId), []);
+
   return {
     markChannelResponded,
     markChannelReadToSequence,
     observeChannelReadSequence,
+    readOnThisDevice,
     resetChannelReadSync,
   };
 }

@@ -35,6 +35,13 @@ const registrationNameJoinSql = (spaceParam: string) => `LEFT JOIN data.run_agen
 const REGISTRATION_AGENT_NAME_SQL = "COALESCE(registration.display_name,r.metadata_json->>'agentName')";
 
 const REPLAY_TTL_MS = 30 * 24 * 60 * 60 * 1_000;
+/**
+ * A Run snapshot's replay only answers a retry of the same registry sequence:
+ * the snapshot head already refuses an older one, and a snapshot without
+ * causal evidence has a fresh id each time. They outnumber every other
+ * lifecycle event, so they keep a day rather than a month.
+ */
+const SNAPSHOT_REPLAY_TTL_MS = 24 * 60 * 60 * 1_000;
 const LEGACY_SNAPSHOT_SETTLE_MS = 60_000;
 
 interface RegistryCausalEvidence {
@@ -113,12 +120,12 @@ async function replay(tx: DatabaseTransaction, spaceId: string, commandId: strin
 }
 
 async function commit(tx: DatabaseTransaction, input: { spaceId: string; commandId: string;
-  requestDigest: string; value: Record<string, unknown>; at: string }) {
+  requestDigest: string; value: Record<string, unknown>; at: string; ttlMs: number }) {
   await commitRuntime(tx, input.spaceId, input.value, input.at,
     { head: "machine_lifecycle_head_advance_v1", outbox: "machine_lifecycle_outbox_v1" });
   await storeScopedCommandReplay(tx, "machine_lifecycle_replay_write_v1", {
     scopeKind: "space", scopeId: input.spaceId, commandId: input.commandId,
-    commandKind: "machine_run_lifecycle", requestDigest: input.requestDigest, result: input.value, at: input.at, ttlMs: REPLAY_TTL_MS,
+    commandKind: "machine_run_lifecycle", requestDigest: input.requestDigest, result: input.value, at: input.at, ttlMs: input.ttlMs,
   });
 }
 
@@ -128,39 +135,6 @@ function failureDetail(payload: Record<string, unknown>): string {
     if (failure) return failure.summary;
   }
   return "Machine Daemon did not complete the Agent Run successfully";
-}
-
-async function channelAboutFollowUp(tx: DatabaseTransaction, runId: string) {
-  const rows = await tx.query<QueryResultRow>({ name: "machine_lifecycle_about_run_v1", text: `SELECT
-    run_id,channel_id,status,metadata_json FROM data.runs WHERE run_id=$1 LIMIT 1`,
-  values: [runId], maxRows: 1 });
-  const run = rows[0];
-  if (!run || !isTerminalRunStatus(run.status)) return undefined;
-  const latestRows = await tx.query<QueryResultRow>({ name: "machine_lifecycle_about_latest_v1", text: `SELECT
-    run_id,status,metadata_json FROM data.runs WHERE channel_id=$1
-    AND metadata_json->>'routedAs'='management_channel_about'
-    ORDER BY created_at DESC,run_id DESC LIMIT 1`, values: [run.channel_id], maxRows: 1 });
-  const latest = latestRows[0];
-  if (!latest || latest.run_id !== runId || !isTerminalRunStatus(latest.status)) return undefined;
-  const body = metadata(latest);
-  const trigger = typeof body.channelAboutTriggerRequestId === "string"
-    ? body.channelAboutTriggerRequestId.trim() : typeof body.sourceMessageId === "string"
-      ? body.sourceMessageId.trim() : "";
-  const pending = typeof body.channelAboutPendingRequestId === "string"
-    ? body.channelAboutPendingRequestId.trim() : trigger;
-  const actor = typeof body.channelAboutPendingActorUserId === "string"
-    ? body.channelAboutPendingActorUserId.trim() : typeof body.summonedByUserId === "string"
-      ? body.summonedByUserId.trim() : "";
-  const spaceId = typeof body.managementSpaceId === "string" ? body.managementSpaceId.trim() : "";
-  if (!trigger || !pending || pending === trigger || !actor || !spaceId) return undefined;
-  const duplicate = await tx.query({ name: "machine_lifecycle_about_successor_v1", text: `SELECT 1
-    FROM data.runs WHERE channel_id=$1 AND run_id<>$2
-      AND metadata_json->>'routedAs'='management_channel_about'
-      AND metadata_json->>'channelAboutTriggerRequestId'=$3 LIMIT 1`,
-  values: [run.channel_id, runId, pending], maxRows: 1 });
-  return duplicate[0] ? undefined : { spaceId, channelId: String(run.channel_id), requestId: pending,
-    successorOfRunId: runId, actorUserId: actor,
-    ...(typeof body.channelAboutPendingMessageId === "string" ? { triggerMessageId: body.channelAboutPendingMessageId } : {}) };
 }
 
 export interface MachineLifecycleInput {
@@ -177,6 +151,23 @@ export interface MachineLifecycleInput {
   repoPool?: Record<string, string>;
   repositoryBaseline?: RepositoryBaseline;
   preserveInstanceForReborn?: boolean;
+}
+
+/** Why a Run nothing in the Channel asked to stop was stopped, and by whom,
+ * so its notice can say so: a withdrawn registration names the change and who
+ * made it, a deleted Instance its owner. Names are as the Space shows them. */
+function stopCause(context: QueryResultRow, runMetadata: Record<string, unknown>):
+  { stopCause?: { code: string; actorName?: string; ownerName?: string; launcherName?: string } } {
+  const name = (value: unknown) => typeof value === "string" && value.trim() ? value.trim().slice(0, 120) : undefined;
+  const deletion = runMetadata.instanceDeletion;
+  const code = typeof context.stop_reason_code === "string" && context.stop_reason_code
+    ? context.stop_reason_code.slice(0, 100)
+    : deletion && typeof deletion === "object" ? "instance_deleted" : undefined;
+  if (!code) return {};
+  const actorName = name(context.access_actor_name), ownerName = name(context.owner_name),
+    launcherName = name(context.launcher_name);
+  return { stopCause: { code, ...(actorName ? { actorName } : {}), ...(ownerName ? { ownerName } : {}),
+    ...(launcherName ? { launcherName } : {}) } };
 }
 
 export class PostgresMachineLifecycleRepository {
@@ -303,14 +294,8 @@ export class PostgresMachineLifecycleRepository {
         : [await this.applyEvent(tx, { ...input, ownerUserId, machineId, hostId, channelId,
           connectionEpoch, eventType, payload, at, spaceId: placement.spaceId, registryCausal })]
           .filter((value): value is string => Boolean(value));
-      const followUps = [];
-      for (const runId of changedRunIds) {
-        const followUp = await channelAboutFollowUp(tx, runId);
-        if (followUp) followUps.push(followUp);
-      }
       const value = { commandId, kind: "machine_run_lifecycle", reused: false,
-        entityId: changedRunIds[0] ?? channelId, entityVersion: 1,
-        changedRunIds, ...(followUps.length ? { channelAboutFollowUps: followUps } : {}) };
+        entityId: changedRunIds[0] ?? channelId, entityVersion: 1, changedRunIds };
       // A failed stop changes no Run, yet the Channel must hear the process may
       // still run; the notice's stable ids keep a replayed result from repeating it.
       const stopNotice = eventType === "machine_stop_result" && input.preserveInstanceForReborn !== true;
@@ -323,12 +308,25 @@ export class PostgresMachineLifecycleRepository {
         input.repositoryBaseline?.relationship === "diverged" && input.repositoryBaseline.noticeKey !== undefined;
       if ((eventType === "machine_run_exited" || spawnFailure || stopNotice || baselineNotice) &&
           typeof payload.runId === "string" && (spawnFailure || stopNotice || changedRunIds.includes(payload.runId))) {
-        const contexts = await tx.query<QueryResultRow>({ name: "machine_lifecycle_notice_context_v5", text: `SELECT
-          r.run_id,r.channel_id,r.owner_user_id,r.status,r.metadata_json->>'routedAs' AS routed_as,r.metadata_json,
+        const contexts = await tx.query<QueryResultRow>({ name: "machine_lifecycle_notice_context_v9", text: `SELECT
+          r.run_id,r.channel_id,r.owner_user_id,r.status,r.metadata_json,
+          (SELECT message.message_id FROM data.agent_launches launch
+            JOIN data.messages message ON message.space_id=launch.space_id AND message.channel_id=launch.channel_id
+              AND message.message_id=launch.trigger_id AND message.deleted_at IS NULL
+            WHERE launch.run_id=r.run_id LIMIT 1) AS summon_message_id,
           (r.metadata_json->'spawnResult'->>'ok'='false' OR
             EXISTS (SELECT 1 FROM data.agent_launches launch WHERE launch.run_id=r.run_id
               AND launch.state='failed' AND launch.spawned_at IS NULL)) AS startup_failed,
-          registration.display_name AS agent_name,machine.name AS machine_name
+          registration.display_name AS agent_name,binding.harness,machine.name AS machine_name,
+          stop_intent.reason_code AS stop_reason_code,owner_member.display_name AS owner_name,
+          launcher.display_name AS launcher_name,
+          -- Whoever last changed this Agent's access in the Space, up to the withdrawal that stopped it.
+          (SELECT actor.display_name FROM data.registration_access_changes change
+            LEFT JOIN data.space_members actor ON actor.space_id=change.space_id AND actor.user_id=change.actor_user_id
+            WHERE change.space_id=binding.space_id AND change.owner_user_id=binding.owner_user_id
+              AND change.machine_id=binding.machine_id AND change.harness=binding.harness
+              AND change.created_at<=COALESCE(stop_intent.created_at,clock_timestamp())
+            ORDER BY change.created_at DESC LIMIT 1) AS access_actor_name
           FROM data.runs r
           JOIN data.run_agent_registrations binding ON binding.run_id=r.run_id AND binding.space_id=$3
           JOIN data.space_agent_registrations registration ON registration.space_id=binding.space_id
@@ -336,14 +334,21 @@ export class PostgresMachineLifecycleRepository {
             AND registration.harness=binding.harness
           LEFT JOIN data.machines machine ON machine.owner_user_id=binding.owner_user_id
             AND machine.machine_id=binding.machine_id
+          LEFT JOIN data.registration_stop_intents stop_intent ON stop_intent.run_id=r.run_id
+          LEFT JOIN data.space_members owner_member ON owner_member.space_id=binding.space_id
+            AND owner_member.user_id=binding.owner_user_id
+          LEFT JOIN data.space_members launcher ON launcher.space_id=binding.space_id
+            AND launcher.user_id=binding.actor_user_id
           WHERE r.run_id=$1 AND r.channel_id=$2 AND r.owner_user_id=$4`,
           values: [payload.runId, channelId, placement.spaceId, ownerUserId], maxRows: 1 });
         const context = contexts[0];
         const notice = context && { runId: String(context.run_id), channelId: String(context.channel_id),
-          ownerUserId: String(context.owner_user_id), agentName: String(context.agent_name), machineId, hostId,
+          ownerUserId: String(context.owner_user_id), agentName: String(context.agent_name),
+          // The notice's face: its Agent's harness, which a renamed Agent's name no longer says.
+          ...(context.harness ? { harness: String(context.harness) } : {}), machineId, hostId,
           // The Channel names the Machine as its owner did; the hostname is only an observation.
           ...(context.machine_name ? { machineName: String(context.machine_name) } : {}) };
-        if (!notice || context!.routed_as === "management_channel_about" ||
+        if (!notice ||
             spawnFailure && (context!.status !== "failed" ||
               metadata(context!).executionCancellation !== undefined)) { /* no Channel notice */ }
         // A stop's Channel feedback is the daemon's actual termination result;
@@ -366,13 +371,19 @@ export class PostgresMachineLifecycleRepository {
           if (automationRunIdentity(runMetadata).automationOccurrenceId === undefined &&
               !(payload.ok === true && channelStop && !startupFailed)) Object.assign(value, {
             stopResultNoticeContext: { ...notice, ok: payload.ok === true,
+              // A channel stop answers on its command, not as another message.
+              ...(channelStop ? { sourceMessageId: (stopRequest as { sourceMessageId: string }).sourceMessageId } : {}),
               ...(startupFailed ? { startupFailed: true } : {}),
+              ...(!channelStop ? stopCause(context!, runMetadata) : {}),
               controlKey: typeof payload.requestId === "string" && payload.requestId ? payload.requestId.slice(0, 200) : notice.runId,
               ...(typeof payload.error === "string" && payload.error.trim() ? { detail: payload.error.trim().slice(0, 2_000) } : {}) },
           });
-        } else Object.assign(value, { startupFailureNoticeContext: notice });
+        } else Object.assign(value, { startupFailureNoticeContext: { ...notice,
+          // A summoned Run's failed start answers on the summon, not as another message.
+          ...(context!.summon_message_id ? { sourceMessageId: String(context!.summon_message_id) } : {}) } });
       }
-      await commit(tx, { spaceId: String(channel.space_id), commandId, requestDigest, value, at });
+      await commit(tx, { spaceId: String(channel.space_id), commandId, requestDigest, value, at,
+        ttlMs: eventType === "machine_run_snapshot" ? SNAPSHOT_REPLAY_TTL_MS : REPLAY_TTL_MS });
       return value;
     });
     await this.publishRuntimeRoutes(commandId, placement,
@@ -487,9 +498,7 @@ export class PostgresMachineLifecycleRepository {
       // A recoverable failure is offered again, to whichever daemon holds the
       // machine next, as a new spawn command: the failed one already completed.
       const retry = input.payload.ok !== true && input.recoverableLaunchFailure === true;
-      // A background session (a Channel's About) has no Instance to connect:
-      // its spawn is its start, so its Run ending later is no failed launch.
-      const launchState = input.payload.ok === true ? run.instance_id ? "spawned" : "connected" : retry ? "queued" : "failed";
+      const launchState = input.payload.ok === true ? "spawned" : retry ? "queued" : "failed";
       const retried = await tx.query({ name: "machine_lifecycle_launch_update_v2", text: `WITH input AS (SELECT
         $1::text AS run_id,$2::text AS launch_state,$3::boolean AS succeeded,
         $4::text AS failure_detail,$5::boolean AS retryable,$6::timestamptz AS at)

@@ -1,11 +1,15 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { DatabaseSync } from "node:sqlite";
 
 import { APP_CONNECTOR_PROVIDER_MANIFESTS } from "../../protocol/src/app-connector-manifests.ts";
 import { parseActionCommand } from "../src/connectors/action-parse.ts";
 import { receiveCloudflareDelivery } from "../src/connectors/cloudflare-events.ts";
 import { CLOUDFLARE_ACTIONS, CLOUDFLARE_SUBSCRIPTIONS, cloudflareGrantContext } from "../src/connectors/cloudflare-api.ts";
 import { connectorProvider } from "../src/connectors/registry.ts";
+import { addCloudflareLogin, parseCloudflareLogins } from "../src/connectors/cloudflare-logins.ts";
+import { refreshOAuthFields } from "../src/connectors/oauth.ts";
+import { readOnlySql } from "../src/connectors/cloudflare-api.ts";
 
 const ACCOUNT = "0123456789abcdef0123456789abcdef";
 const SPACE = "space-1";
@@ -227,5 +231,227 @@ test("a Cloudflare refusal reaches the subscriber with its reason", async () => 
     await assert.rejects(connectorProvider("cloudflare").verify(credentials), /Cloudflare refused the request: filters are required/u);
   } finally {
     api.restore();
+  }
+});
+
+/* Several logins: each reaches its own accounts, and commands name the account they act on. */
+const OTHER = "fedcba9876543210fedcba9876543210";
+const LOGIN_A = "11111111-1111-4111-8111-111111111111";
+const LOGIN_B = "22222222-2222-4222-8222-222222222222";
+function storedLogin(id, accessToken, accounts) {
+  return { id, accessToken, refreshToken: `${accessToken}-refresh`, expiresAt: Date.now() + 3_600_000,
+    accounts, connectedBy: "user-1", connectedAt: "2026-10-17T00:00:00.000Z" };
+}
+const twoLogins = { webhookSecret: "cf-secret", ingressKey: "ingress-key", accountId: ACCOUNT,
+  logins: JSON.stringify([storedLogin(LOGIN_A, "token-a", [{ id: ACCOUNT, name: "Acme" }]),
+    storedLogin(LOGIN_B, "token-b", [{ id: OTHER, name: "Side project" }])]) };
+/* Each token sees only its own account, as two Cloudflare users would. */
+const perToken = { "GET accounts": (call) => call.authorization === "Bearer token-a"
+  ? [{ id: ACCOUNT, name: "Acme" }] : [{ id: OTHER, name: "Side project" }] };
+
+async function actWith(credentialsValue, body, routes) {
+  const parsed = parseActionCommand("cloudflare", body);
+  const action = CLOUDFLARE_ACTIONS[parsed.actionId];
+  const input = action.parse(parsed.statement);
+  assert.equal(typeof input, "object", String(input));
+  return withApi(routes, () => action.execute({ credentials: credentialsValue }, input));
+}
+
+test("a command naming another account runs with the login that reaches it", async () => {
+  const route = `GET accounts/${OTHER}/workers/scripts/side-web/deployments`;
+  const { value, calls } = await actWith(twoLogins, `@cloudflare:list_deployments:${OTHER}/side-web`,
+    { ...perToken, [route]: { deployments: [] } });
+  assert.match(value.summary, /side-web: 0 recent deployments/u);
+  assert.equal(calls.find((call) => call.path.includes("/workers/scripts/")).authorization, "Bearer token-b");
+  assert.match(value.url, new RegExp(`/${OTHER}/workers/`, "u"));
+
+  const plain = await actWith(twoLogins, "@cloudflare:list_deployments:xmatrix-web", { ...perToken, ...history });
+  assert.equal(plain.calls.find((call) => call.path.includes("/workers/scripts/")).authorization, "Bearer token-a",
+    "without an account the default account and its login are used");
+
+  await assert.rejects(actWith(twoLogins, "@cloudflare:list_deployments:0000000000000000000000000000000a/web", perToken),
+    /No connected Cloudflare login reaches account 0000000000000000000000000000000a/u);
+});
+
+test("a refused login does not hide the accounts other logins reach, and list_accounts marks the default", async () => {
+  const revoked = { "GET accounts": (call) => call.authorization === "Bearer token-a" ? [{ id: ACCOUNT, name: "Acme" }] : undefined };
+  const { value } = await actWith(twoLogins, "@cloudflare:list_accounts:*", revoked);
+  assert.match(value.summary, /1 Cloudflare accounts reachable; a connected login was refused/u);
+  assert.match(value.summary, new RegExp(`${ACCOUNT}  Acme  \\(default\\)`, "u"));
+  await assert.rejects(actWith(twoLogins, `@cloudflare:list_deployments:${OTHER}/side-web`, revoked),
+    /No connected Cloudflare login reaches account .*a connected login was refused/u);
+  await assert.rejects(withApi(revoked, () => connectorProvider("cloudflare").verify(twoLogins)), /404/u,
+    "Check reports the refused login so an admin can reconnect it");
+});
+
+test("alerts from a non-default account route to that account's source, and subscriptions follow the same rule", async () => {
+  const alert = { name: "issue", account_id: OTHER, alert_type: "incident_alert", alert_correlation_id: "c2",
+    alert_event: "ALERT_STATE_EVENT_START" };
+  const routed = await receiveCloudflareDelivery({ ...delivery(alert), credentials: twoLogins });
+  assert.equal(routed.events[0].sourceRef, `cloudflare:${OTHER}/incident_alert`);
+  const own = await receiveCloudflareDelivery({ ...delivery({ ...alert, account_id: ACCOUNT }), credentials: twoLogins });
+  assert.equal(own.events[0].sourceRef, "cloudflare:incident_alert");
+  const legacy = await receiveCloudflareDelivery(delivery({ ...alert, account_id: OTHER }));
+  assert.equal(legacy.events[0].sourceRef, "cloudflare:incident_alert", "a single-account connection keeps bare alert types");
+
+  const otherAlerts = { [`GET accounts/${OTHER}/alerting/v3/available_alerts`]: { Status: [{ type: "incident_alert" }] } };
+  const created = await withApi({ ...perToken, ...otherAlerts,
+    [`GET accounts/${OTHER}/alerting/v3/policies`]: [],
+    [`GET accounts/${OTHER}/alerting/v3/destinations/webhooks`]: [],
+    [`POST accounts/${OTHER}/alerting/v3/destinations/webhooks`]: { id: "hook-b" },
+    [`POST accounts/${OTHER}/alerting/v3/policies`]: { id: "policy-b" },
+  }, () => CLOUDFLARE_SUBSCRIPTIONS.sync({ env, spaceId: SPACE, credentials: twoLogins,
+    source: `${OTHER}/incident_alert`, subscribed: true }));
+  assert.equal(created.value, undefined);
+  const policy = created.calls.find((call) => call.method === "POST" && call.path.endsWith("/policies"));
+  assert.equal(policy.body.alert_type, "incident_alert");
+  assert.equal(policy.authorization, "Bearer token-b");
+
+  const refused = await withApi(perToken, () => CLOUDFLARE_SUBSCRIPTIONS.sync({ env, spaceId: SPACE, credentials: twoLogins,
+    source: `${ACCOUNT}/incident_alert`, subscribed: true }));
+  assert.match(refused.value, /is this connection's default account; subscribe to incident_alert/u,
+    "a source no delivery would carry is refused instead of silently never firing");
+});
+
+test("each Connect adds a login; the same login connecting again replaces itself", () => {
+  const acme = [{ id: ACCOUNT, name: "Acme" }];
+  const first = addCloudflareLogin({}, { accessToken: "a1", refreshToken: "r1", expiresAt: 1, accounts: acme, actorUserId: "user-1" });
+  assert.equal(first.accountId, ACCOUNT, "the first login's only account becomes the default");
+  assert.deepEqual([first.oauthToken, first.oauthRefreshToken, first.oauthExpiresAt], [null, null, null]);
+  const second = addCloudflareLogin({ ...first, accountId: ACCOUNT }, { accessToken: "b1", refreshToken: "r2", expiresAt: 1,
+    accounts: [{ id: OTHER, name: "Side" }], actorUserId: "user-2" });
+  assert.equal(second.accountId, undefined, "adding a login never moves the default account");
+  assert.equal(parseCloudflareLogins(second.logins).length, 2);
+  const again = addCloudflareLogin({ logins: second.logins, accountId: ACCOUNT }, { accessToken: "a2", refreshToken: "r3",
+    expiresAt: 1, accounts: acme, actorUserId: "user-1" });
+  assert.deepEqual(parseCloudflareLogins(again.logins).map((login) => login.accessToken).sort(), ["a2", "b1"]);
+
+  const folded = addCloudflareLogin({ oauthToken: "old", oauthRefreshToken: "old-r", oauthExpiresAt: "5", accountId: ACCOUNT },
+    { accessToken: "b1", refreshToken: "r2", expiresAt: 1, accounts: [{ id: OTHER, name: "Side" }], legacyAccounts: acme, actorUserId: "user-2" });
+  assert.deepEqual(parseCloudflareLogins(folded.logins).map((login) => [login.accessToken, login.refreshToken]),
+    [["old", "old-r"], ["b1", "r2"]], "the single grant from before logins keeps working as a login");
+  assert.throws(() => addCloudflareLogin({}, { accessToken: "a", refreshToken: "", expiresAt: 1, accounts: acme, actorUserId: "u" }),
+    /refresh token/u);
+  assert.throws(() => parseCloudflareLogins("[{\"id\":\"x\"}]"), /unreadable/u, "a malformed list fails closed");
+});
+
+test("only a list that exceeds the stored bound is refused", () => {
+  const bulky = { accessToken: "a".repeat(2048), refreshToken: "r".repeat(2048), expiresAt: 1, actorUserId: "user-1" };
+  assert.throws(() => {
+    let next = {};
+    for (let n = 0; n < 80; n += 1) {
+      next = addCloudflareLogin(next, { ...bulky, accounts: [{ id: n.toString(16).padStart(32, "a"), name: "B" }] });
+    }
+  }, /exceed the 256 KiB this connection stores; remove one first/u);
+});
+
+test("only expiring login grants are renewed, and a refused renewal keeps that login's grant", async () => {
+  const stale = { ...storedLogin(LOGIN_A, "token-a", [{ id: ACCOUNT, name: "Acme" }]), expiresAt: Date.now() - 1 };
+  const fresh = storedLogin(LOGIN_B, "token-b", [{ id: OTHER, name: "Side" }]);
+  const revoked = { ...stale, id: "33333333-3333-4333-8333-333333333333", refreshToken: "revoked", accounts: [] };
+  const original = globalThis.fetch;
+  const used = [];
+  globalThis.fetch = async (_url, init) => {
+    const refresh = new URLSearchParams(String(init.body)).get("refresh_token");
+    used.push(refresh);
+    return refresh === "revoked" ? Response.json({ error: "invalid_grant" }, { status: 400 })
+      : Response.json({ access_token: "token-a2", refresh_token: "token-a-refresh2", expires_in: 3600 });
+  };
+  try {
+    const fields = await refreshOAuthFields({ CONNECTOR_CLOUDFLARE_CLIENT_ID: "id", CONNECTOR_CLOUDFLARE_CLIENT_SECRET: "secret" },
+      "cloudflare", { logins: JSON.stringify([stale, fresh, revoked]) });
+    const next = parseCloudflareLogins(fields.logins);
+    assert.deepEqual(used.sort(), ["revoked", "token-a-refresh"], "the unexpired login is not renewed");
+    assert.deepEqual(next.map((login) => login.accessToken), ["token-a2", "token-b", "token-a"]);
+    assert.equal(next[0].refreshToken, "token-a-refresh2");
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test("D1 queries run one read-only statement and show bounded rows", async () => {
+  for (const sql of [
+    "WITH /* ' */ c AS (SELECT 1) DELETE FROM victims RETURNING * -- '",
+    'WITH /* " */ c AS (SELECT 1) DELETE FROM victims RETURNING * -- "',
+    "WITH -- ' \n c AS (SELECT 1) DELETE FROM victims RETURNING * -- '",
+    "SELECT 1 /* ' */; DELETE FROM victims; -- '",
+  ]) {
+    const database = new DatabaseSync(":memory:");
+    try {
+      database.exec("CREATE TABLE victims(id INTEGER); INSERT INTO victims VALUES (1)");
+      database.exec(sql);
+      assert.equal(database.prepare("SELECT count(*) AS n FROM victims").get().n, 0,
+        "the rejected input really is a valid SQLite mutation");
+    } finally { database.close(); }
+    assert.equal(typeof CLOUDFLARE_ACTIONS.query_database.parse({ target: "fixture", text: sql }), "string",
+      `a quote inside a comment cannot conceal a mutation: ${sql}`);
+  }
+  for (const sql of [
+    "SELECT '/* not a comment */', '-- still a string', 'it''s DELETE'",
+    'SELECT "a""--b", `a``/*b`, [a--b] FROM victims',
+    "/* leading ' quote */ WITH c AS (SELECT 1) SELECT * FROM c; -- trailing ' quote",
+  ]) assert.equal(readOnlySql(sql), undefined, sql);
+  for (const sql of ["DELETE FROM users", "SELECT 1; DROP TABLE users", "WITH x AS (SELECT 1) DELETE FROM users",
+    "PRAGMA table_info(users)", "SELECT 1 /* ; */; UPDATE users SET a=1", "SELECT 'unterminated", "SELECT 1 /* unterminated"]) {
+    assert.equal(typeof readOnlySql(sql), "string", sql);
+  }
+  assert.equal(readOnlySql("SELECT 'DELETE; DROP' AS note, deleted_at FROM \"update\" -- ; DROP\n;"), undefined,
+    "keywords and semicolons inside literals, identifiers or comments are not statements");
+  assert.equal(readOnlySql("WITH recent AS (SELECT * FROM PageViews) SELECT COUNT(*) FROM recent"), undefined);
+
+  const db = "ec3c5545-4bb5-42e3-b86a-4935cdf85dba";
+  const rows = Array.from({ length: 60 }, (_, index) => ({ source: index ? "direct" : "pod\tcast", views: index }));
+  const { value, calls } = await actWith(twoLogins, `@cloudflare:query_database:${OTHER}/stockpulse-db SELECT source, views FROM PageViews`, {
+    ...perToken,
+    [`GET accounts/${OTHER}/d1/database`]: [{ name: "stockpulse-db", uuid: db }],
+    [`POST accounts/${OTHER}/d1/database/${db}/query`]: [{ results: rows, success: true, meta: { rows_read: 60 } }],
+  });
+  const query = calls.find((call) => call.method === "POST");
+  assert.deepEqual(query.body, { sql: "SELECT source, views FROM PageViews" });
+  assert.equal(query.authorization, "Bearer token-b");
+  assert.match(value.summary, /stockpulse-db: 60 rows, first 50 shown \(60 rows read\)/u);
+  assert.match(value.summary, /source\tviews\npod cast\t0/u, "tabs in values cannot shift columns");
+  assert.doesNotMatch(value.summary, /\t50\n|\t59/u);
+
+  const listed = await actWith(twoLogins, `@cloudflare:list_databases:${OTHER}`, { ...perToken,
+    [`GET accounts/${OTHER}/d1/database`]: [{ name: "stockpulse-db", uuid: db, num_tables: 0, file_size: 3 * 1_048_576 }] });
+  assert.match(listed.value.summary, new RegExp(`stockpulse-db  ${db}  3\\.0 MiB`, "u"));
+  assert.doesNotMatch(listed.value.summary, /tables/u, "Cloudflare's list reports 0 tables for every database");
+
+  const original = globalThis.fetch;
+  globalThis.fetch = async (url) => new URL(String(url)).pathname.endsWith("/accounts")
+    ? Response.json({ success: true, result: [{ id: ACCOUNT, name: "Acme" }] })
+    : Response.json({ success: false, errors: [{ code: 10000, message: "Authentication error" }] });
+  try {
+    await assert.rejects(CLOUDFLARE_ACTIONS.list_databases.execute({ credentials: { oauthToken: "old-grant" } }, {}),
+      /Reconnect Cloudflare in Apps to grant D1 read access/u, "a grant from before D1 was offered is told how to fix it");
+  } finally {
+    globalThis.fetch = original;
+  }
+  assert.equal(CLOUDFLARE_ACTIONS.query_database.effect, "read");
+});
+
+test("logins are not counted, and every page of accounts is read", async () => {
+  let stored = {};
+  for (let index = 0; index < 12; index++) {
+    const id = index.toString(16).padStart(32, "0");
+    stored = { ...stored, ...addCloudflareLogin(stored, { accessToken: `t${index}`, refreshToken: `r${index}`, expiresAt: 1,
+      accounts: [{ id, name: `Account ${index}` }], actorUserId: "user-1" }) };
+  }
+  assert.equal(parseCloudflareLogins(stored.logins).length, 12, "a Space adds as many logins as it has Cloudflare users");
+
+  const page = (from, count) => Array.from({ length: count }, (_, index) =>
+    ({ id: (from + index).toString(16).padStart(32, "a"), name: `A${from + index}` }));
+  const original = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    const number = Number(new URL(String(url)).searchParams.get("page"));
+    return Response.json({ success: true, result: number === 1 ? page(0, 50) : page(50, 3),
+      result_info: { page: number, total_pages: 2 } });
+  };
+  try {
+    const { value } = { value: await CLOUDFLARE_ACTIONS.list_accounts.execute({ credentials: { oauthToken: "t" } }, {}) };
+    assert.match(value.summary, /^53 Cloudflare accounts reachable/u, "accounts past the first page are reachable");
+  } finally {
+    globalThis.fetch = original;
   }
 });

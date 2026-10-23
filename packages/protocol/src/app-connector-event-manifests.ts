@@ -17,9 +17,9 @@ function writeAction(id: string, label: string, description: string, usage: stri
   return { id, label, description, usage, effect: "write", completion: { trailingDelimiter: ":" } };
 }
 
-/* A write that stays off in every Channel until a Space admin allows it there. */
+/* A write that asks a Space admin to approve each individual request. */
 function gatedWriteAction(id: string, label: string, description: string, usage: string): Action {
-  return { ...writeAction(id, label, description, usage), defaultPolicy: "deny" };
+  return { ...writeAction(id, label, description, usage), defaultPolicy: "ask" };
 }
 
 function readAction(id: string, label: string, description: string, usage: string): Action {
@@ -31,8 +31,8 @@ function withPolicy(actions: Action[]): Action[] {
   return actions.length === 0 ? [] : [...actions, {
     id: "policy",
     label: "Set action policy",
-    description: "Space admins: allow Agents to run a write action in this channel, deny it for everyone, or reset it to the default.",
-    usage: "<action> allow|deny|default",
+    description: "Space admins: allow an action, ask for approval each time, disallow it, or reset its default in this channel.",
+    usage: "<action> allow|ask|disallow|default",
     completion: { trailingDelimiter: ":" },
   }];
 }
@@ -98,6 +98,24 @@ const OAUTH_TOKEN_CREDENTIALS: Credential[] = [
 ];
 
 export const EVENT_CONNECTOR_MANIFESTS: AppConnectorProviderManifest[] = [
+  actionConnector({
+    id: "x", name: "X", kind: "chat",
+    description: "Connect company and personal X accounts separately. Every command names its account; publishing asks for approval by default. Only the connecting member and their Agents use that account. Results are visible in the calling Channel. API usage is billed by X; quote-posting requires Enterprise API access.",
+    oauth: { authorizeUrl: "https://x.com/i/oauth2/authorize", tokenUrl: "https://api.x.com/2/oauth2/token",
+      scopes: ["tweet.read", "users.read", "tweet.write", "media.write", "offline.access"],
+      tokenField: "accounts", clientAuth: "basic", pkce: "S256" },
+    credentials: [{ id: "accounts", label: "X accounts", managed: true,
+      description: "Connect adds an independent encrypted grant for each account. Never entered by hand." }],
+    actions: [
+      readAction("accounts", "List connected accounts", "List only the X accounts this caller owns; no tokens are returned.", "*"),
+      readAction("read_post", "Read post", "Read one post as an explicitly selected connected account.", "<account>/<post id>"),
+      readAction("timeline", "Read account posts", "Read at most 10 recent posts of the selected connected account.", "<account>"),
+      gatedWriteAction("post", "Publish post", "Publish as the explicitly selected account. Optional mediaReceipt must come from this account and Channel's video upload. Asks for approval of the exact account and content by default.", '<account> {"text":"…","mediaReceipt":"optional upload_video receipt"}'),
+      gatedWriteAction("quote", "Quote post (Enterprise)", "Publish a quote as the selected account. X requires Enterprise API access; unavailable on self-serve pay-per-use.", "<account>/<post id> <text>"),
+      gatedWriteAction("upload_video", "Upload video", "Upload one MP4 attachment from this Channel to the selected account. At most 64 MiB; separate approval is needed to publish the uploaded video.", "<account> <message id>/<attachment id>"),
+      readAction("media_status", "Read video processing status", "Check one uploaded video's processing state for its account-bound receipt.", "<account> <upload_video receipt>"),
+    ],
+  }),
   {
     ...actionConnector({
       id: "google", name: "Google Docs, Drive & Sheets", kind: "docs",
@@ -177,16 +195,21 @@ export const EVENT_CONNECTOR_MANIFESTS: AppConnectorProviderManifest[] = [
   {
     ...actionConnector({
       id: "googleadsense", name: "Google AdSense", kind: "observability",
-      description: "Read AdSense accounts, sites and earnings reports for the accounts the connected Google account can see. Read-only.",
+      description: "Read AdSense accounts, sites, ad units, earnings reports, payments, alerts and policy issues for the accounts the connected Google account can see. Read-only.",
       oauth: { authorizeUrl: "https://accounts.google.com/o/oauth2/v2/auth", tokenUrl: "https://oauth2.googleapis.com/token",
         scopes: ["https://www.googleapis.com/auth/adsense.readonly"], tokenField: "oauthToken",
         extraAuthorizeParams: { access_type: "offline", prompt: "consent" } },
       credentials: [...OAUTH_TOKEN_CREDENTIALS],
       actions: [
         readAction("list_accounts", "List accounts", "List the AdSense accounts of the connected Google account with their state and time zone.", "*"),
-        readAction("list_sites", "List sites", "List the sites of an account with their approval state.", "<pub-…>"),
-        readAction("report", "Earnings report", "Estimated earnings, page views, page RPM, impressions and clicks. Defaults: by=date days=7 limit=50.",
-          "<pub-…> [by=date,domain,site,country,platform,page,month|none] [days=1-1095] [limit=1-250]"),
+        readAction("list_sites", "List sites", "List the sites of an account with their approval state and whether Auto ads are on.", "<pub-…>"),
+        readAction("list_adunits", "List ad units", "List the account's ad units with their state, type and size.", "<pub-…>"),
+        readAction("report", "Earnings report",
+          "Earnings, page views, page RPM, impressions, clicks, ad requests, coverage and viewability over whole days in the account time zone, ending yesterday unless include_today. Defaults: by=date days=7 limit=50.",
+          "<pub-…> [by=date,month,domain,site,country,platform,page,format,ad_unit|none] [days=1-1095] [limit=1-250] [domain=example.com] [include_today]"),
+        readAction("list_payments", "List payments", "The unpaid balance and past payments of the account.", "<pub-…>"),
+        readAction("list_alerts", "List alerts", "The account's current AdSense alerts.", "<pub-…>"),
+        readAction("list_policy_issues", "List policy issues", "Policy issues Google found on the account's sites and pages.", "<pub-…>"),
       ],
     }),
     auth: { type: "oauth", scopes: ["https://www.googleapis.com/auth/adsense.readonly"], secretRefs: [] },
@@ -206,6 +229,30 @@ export const EVENT_CONNECTOR_MANIFESTS: AppConnectorProviderManifest[] = [
       ],
     }),
     auth: { type: "oauth", scopes: ["https://www.googleapis.com/auth/analytics.readonly"], secretRefs: [] },
+  },
+  {
+    ...actionConnector({
+      id: "googleads", name: "Google Ads", kind: "observability",
+      description: "Create and manage advertising campaigns, budgets, targeting and creatives; enable or pause campaigns and read spend and conversions for the selected advertiser account.",
+      oauth: { authorizeUrl: "https://accounts.google.com/o/oauth2/v2/auth", tokenUrl: "https://oauth2.googleapis.com/token",
+        scopes: ["https://www.googleapis.com/auth/adwords"], tokenField: "oauthToken",
+        extraAuthorizeParams: { access_type: "offline", prompt: "consent" } },
+      credentials: [...OAUTH_TOKEN_CREDENTIALS,
+        { id: "customerId", label: "Selected advertiser customer ID", required: true,
+          description: "The ten-digit Google Ads advertiser account this connection may act on, with or without dashes. Every query and mutation is restricted to it." },
+        { id: "loginCustomerId", label: "Manager login customer ID",
+          description: "Optional ten-digit manager ID, only when the consenting Google user accesses the advertiser through that manager. Leave empty for direct access." },
+      ],
+      actions: [
+        readAction("list_accounts", "List accessible accounts", "List at most 100 directly accessible customer IDs. Does not traverse manager accounts or change the selected advertiser.", "*"),
+        readAction("read_account", "Read selected account", "Confirm the selected advertiser, currency and report time zone.", "<customer ID>"),
+        readAction("query", "Query campaigns and performance", "Read campaigns, budgets, creatives, targeting, spend and conversions with a bounded SELECT GAQL query. LIMIT is 1-250 (default 250); dates use the account time zone and Micros are integer millionths of its currency.", "<customer ID> <SELECT GAQL query>"),
+        readAction("validate_mutations", "Validate advertising changes", "Validate 1-25 linked Google Ads configuration operations without changing resources or enabling ads. Uses the selected customer and explicit currency.", '<customer ID> {"currencyCode":"USD","mutateOperations":[…]}'),
+        gatedWriteAction("mutate", "Configure advertising", "Atomically create or update budgets, campaigns, ad groups, creatives, assets and targeting. New campaigns must be PAUSED; no account, payer or access changes, removal or campaign activation. Monetary Micros fields are decimal strings in the explicit account currency. Unconfirmed writes are never automatically retried.", '<customer ID> {"currencyCode":"USD","mutateOperations":[…]}'),
+        gatedWriteAction("set_campaign_status", "Enable or pause campaign", "Enable or pause one campaign. Enabling binds the explicit currency and current non-shared average daily budget. Google can spend above the average on a day; it is not a hard daily spending cap.", '<customer ID>/<campaign ID> {"status":"PAUSED"} or {"status":"ENABLED","currencyCode":"USD","expectedDailyBudgetMicros":"10000000"}'),
+      ],
+    }),
+    auth: { type: "oauth", scopes: ["https://www.googleapis.com/auth/adwords"], secretRefs: [] },
   },
   {
     ...actionConnector({
@@ -257,18 +304,25 @@ export const EVENT_CONNECTOR_MANIFESTS: AppConnectorProviderManifest[] = [
   {
     ...actionConnector({
       id: "gmail", name: "Gmail", kind: "docs",
-      description: "Search and read the connected Google account's mail, with every link a message contains, so an Agent can find a verification email and open its link. Signs in through Composio. Connect several mailboxes; each is used only by the member or Agent it belongs to. Sending and replying stay off in every channel until a Space admin allows them there.",
+      description: "Search and read connected mail through visible Channel commands. Results are posted to the Channel and execution history; do not retrieve login codes or credentials that must stay out of messages. Signs in through Composio. Each connected mailbox is used only by the member or Agent it belongs to. Sending and replying ask for a Space admin's approval of each email by default.",
       oauth: { authorizeUrl: "https://backend.composio.dev/api/v3.1/connected_accounts/link",
         tokenUrl: "https://backend.composio.dev/api/v3.1/connected_accounts", scopes: [], tokenField: "mailboxes", flow: "composio" },
       credentials: [{ id: "mailboxes", label: "Mailboxes", managed: true, description: "Each Connect adds a mailbox; a Space admin assigns each one to a member or an Agent. Never typed by hand." }],
       actions: [
-        readAction("search", "Search mail", "The 10 newest messages per mailbox matching a Gmail search (from:, subject:, newer_than:1h, is:unread …), with id, sender, subject and snippet; * searches every mailbox you may use.", "*|<mailbox> [gmail search]"),
-        readAction("read", "Read message", "Headers, text body and every link of one message; open a link yourself when the task needs it.", "<message id>"),
-        gatedWriteAction("send", "Send email", "Send a plain-text email from the connected account; the first line is the subject. Off until a Space admin allows it in the channel.", "<to address> [from:<mailbox>] <subject>\n<body>"),
-        gatedWriteAction("reply", "Reply", "Reply in the thread of one message, to its sender. Off until a Space admin allows it in the channel.", "<message id> <body>"),
+        readAction("search", "Search mail", 'The 10 newest messages per mailbox matching a Gmail query, with id, sender, subject and snippet. Results are posted to this Channel and visible to its members. Use * for all available mailboxes or name one connected mailbox; put the query after it, e.g. @gmail:search:* is:unread newer_than:1h. Do not search for login codes or credentials that must stay out of messages.', "*|<mailbox> [gmail search]"),
+        readAction("read", "Read message", "Headers, text body and every link of one message, posted to this Channel and visible to its members. Do not read login codes or credentials that must stay out of messages; there is no direct transfer to a Space secret.", "<message id>"),
+        gatedWriteAction("send", "Send email", "Send a plain-text email from the connected account; the first line is the subject. Asks a Space admin to approve each request by default.", "<to address> [from:<mailbox>] <subject>\n<body>"),
+        gatedWriteAction("reply", "Reply", "Reply in the thread of one message, to its sender. Asks a Space admin to approve each request by default.", "<message id> <body>"),
       ],
     }),
     auth: { type: "oauth", scopes: ["https://mail.google.com/"], secretRefs: [] },
+    events: {
+      ingress: false,
+      source: { label: "Mailbox", description: "One of your mailboxes with notifications on in Apps → Gmail. Only its owner and their Agents subscribe it.",
+        pattern: "^[^\\s@<>(),;:\"\\\\[\\]]{1,64}@[^\\s@<>(),;:\"\\\\[\\]]{1,189}$", placeholder: "you@gmail.com" },
+      features: [{ id: "message.received", label: "New mail", description: "A new incoming message ID, without email content." }],
+      defaultFeatures: ["message.received"],
+    },
   },
   {
     ...eventConnector({
@@ -353,6 +407,7 @@ export const EVENT_CONNECTOR_MANIFESTS: AppConnectorProviderManifest[] = [
     defaultFeatures: ["issue.created", "issue.regressed", "alert"],
     actions: [
       readAction("read_issue", "Read issue context", "Read one Sentry issue and bounded latest-event exception frames.", "<issue short id or numeric id>"),
+      readAction("list_issues", "List issues", "List up to 25 of a project's most frequent issues (or every project's, *) matching a Sentry search, such as firstRelease:<release> or firstSeen:-24h.", "<project slug or *> <Sentry search>"),
       writeAction("resolve", "Resolve issue", "Mark a Sentry issue resolved.", "<issue short id>"),
       writeAction("unresolve", "Unresolve issue", "Mark a Sentry issue unresolved.", "<issue short id>"),
       writeAction("ignore", "Ignore issue", "Mark a Sentry issue ignored.", "<issue short id>"),
@@ -398,6 +453,8 @@ export const EVENT_CONNECTOR_MANIFESTS: AppConnectorProviderManifest[] = [
         description: "The whole AuthKey_<Key ID>.p8 file Apple let you download once, pasted as text." },
       { id: "webhookSecret", label: "Webhook secret", generated: true,
         description: "xMatrix registers it on the webhook it creates when a channel subscribes to an app; nothing to paste." },
+      { id: "webSession", label: "Web session (App Review messages, new apps, App Privacy)", signIn: "appstoreconnect",
+        description: "Only for what Apple's API cannot do: review_messages, create_app, privacy and set_privacy. In the xMatrix Mac or Windows app, Sign in to App Store Connect saves it: you sign in on Apple's own page and the password never reaches xMatrix. Elsewhere, paste the Cookie header of a signed-in appstoreconnect.apple.com page. Apple keeps it a day to a month; sign in again when review_messages says it lapsed." },
     ],
     source: { label: "App", placeholder: "com.example.app", pattern: "^[a-z0-9][a-z0-9.-]{0,154}$",
       description: "An app's bundle ID; subscribing registers the app's webhook at Apple. * routes webhooks you configured yourself." },
@@ -414,6 +471,11 @@ export const EVENT_CONNECTOR_MANIFESTS: AppConnectorProviderManifest[] = [
       readAction("builds", "List builds", "The newest uploaded builds and whether Apple finished processing them, optionally of one version.", "<com.example.app> [<1.2.0>]"),
       readAction("read_version", "Read version", "A version's state, build, App Review readiness and listing text per language.", "<com.example.app> <1.2.0>"),
       readAction("reviews", "Customer reviews", "The 20 newest App Store reviews with their ids, optionally only unanswered ones.", "<com.example.app> [unanswered]"),
+      readAction("review_messages", "App Review messages", "The newest App Review thread: the rejection reasons and what the reviewer wrote. Needs the web session credential.", "<com.example.app>"),
+      readAction("web_session", "Check web session", "Whether the saved App Store Connect web session still works, and whose it is.", "*"),
+      writeAction("create_app", "Create app record", "Create the App Store app record for a registered bundle ID, with its first version to prepare. Needs the web session credential.", '<com.example.app> {"name":"Example","sku":"EXAMPLE","locale":"en-US","version":"1.0","platform":"ios"}'),
+      readAction("privacy", "Read App Privacy", "What the app's App Privacy answers say it collects, and whether they are published. Needs the web session credential.", "<com.example.app>"),
+      writeAction("set_privacy", "Answer App Privacy", "Replace the app's App Privacy answers and publish them: each data type with its purposes, whether it is linked to the user and used to track. Needs the web session credential.", '<com.example.app> {"data":[{"category":"EMAIL_ADDRESS","purposes":["APP_FUNCTIONALITY"],"linked":true,"tracking":false}]}'),
       readAction("read_app", "Read app record", "What a new app must have before its first submission: names and privacy policy per language, categories, age rating answers, content rights, price and availability.", "<com.example.app>"),
       writeAction("set_app_info", "Set app info", "Set the app's name, subtitle and privacy policy URL for one language, its categories, or its content rights declaration.", '<com.example.app> {"locale":"en-US","name":"…","privacyPolicyUrl":"https://…","primaryCategory":"PRODUCTIVITY"}'),
       writeAction("set_age_rating", "Set age rating answers", "Answer Apple's age rating questionnaire; every answer is given explicitly and Apple computes the rating.", '<com.example.app> {"gambling":false,"violenceRealistic":"NONE"}'),
@@ -448,7 +510,10 @@ export const EVENT_CONNECTOR_MANIFESTS: AppConnectorProviderManifest[] = [
       writeAction("set_build", "Attach build", "Attach a processed build to a version by its build number.", "<com.example.app> <1.2.0> <build number>"),
       writeAction("submit", "Submit for review", "Submit a version with its attached build for App Review.", "<com.example.app> <1.2.0>"),
       writeAction("cancel_submission", "Cancel submission", "Withdraw the app's open review submission so the version can be edited and submitted again.", "<com.example.app> [ios|macos|tvos|visionos]"),
-      writeAction("release", "Release version", "Release an approved version that waits for developer release to the App Store. Cannot be undone.", "<com.example.app> <1.2.0>"),
+      writeAction("release", "Release version", "Release an approved version that waits for developer release. Add phased for a 7-day rollout. Cannot be undone.", "<com.example.app> <1.2.0> [phased]"),
+      writeAction("pause_phased_release", "Pause phased release", "Hold a 7-day App Store rollout on the users who already have it.", "<com.example.app> <1.2.0>"),
+      writeAction("resume_phased_release", "Resume phased release", "Continue a paused 7-day App Store rollout.", "<com.example.app> <1.2.0>"),
+      writeAction("complete_phased_release", "Release to everyone", "End a 7-day rollout and publish the version to every user now. Cannot be undone.", "<com.example.app> <1.2.0>"),
       writeAction("reply_review", "Reply to review", "Publish or replace the developer reply to one customer review.", "<review id> <text>"),
     ],
   }),
@@ -599,30 +664,35 @@ export const EVENT_CONNECTOR_MANIFESTS: AppConnectorProviderManifest[] = [
     id: "cloudflare",
     name: "Cloudflare",
     kind: "deploy",
-    description: "Connect a Cloudflare account: subscribing to an alert type sets up its notification, alerts reach channels and Automations as they fire and resolve, and Agents read Workers logs and deployments and can roll a Worker back.",
+    description: "Connect one or more Cloudflare logins: subscribing to an alert type sets up its notification, alerts reach channels and Automations as they fire and resolve, and Agents read Workers logs, deployments and D1 databases and can roll a Worker back. Every command can name the account it acts on.",
     oauth: { authorizeUrl: "https://dash.cloudflare.com/oauth2/auth", tokenUrl: "https://dash.cloudflare.com/oauth2/token",
       scopes: ["offline_access", "account-settings.read", "notifications.read", "notifications.write",
-        "workers-observability.write", "workers-scripts.edit"],
+        "workers-observability.write", "workers-scripts.edit", "d1.read"],
       tokenField: "oauthToken" },
     credentials: [
+      { id: "logins", label: "Cloudflare logins", managed: true,
+        description: "Each Connect adds an independent encrypted grant for one Cloudflare login. Never entered by hand." },
       ...OAUTH_TOKEN_CREDENTIALS,
       { id: "apiToken", label: "API token",
-        description: "Instead of OAuth: an account API token with Notifications Edit, Workers Observability Write and Workers Scripts Edit." },
-      { id: "accountId", label: "Account ID",
-        description: "Only when your Cloudflare login reaches more than one account: the account to connect." },
+        description: "Instead of OAuth: an account API token with Notifications Edit, Workers Observability Write, Workers Scripts Edit and D1 Read." },
+      { id: "accountId", label: "Default account ID",
+        description: "The account commands and bare alert types use when they name none. Set automatically when the first login reaches one account." },
       { id: "webhookSecret", label: "Webhook secret", generated: true,
         description: "xMatrix registers it on the webhook destination it creates; nothing to paste." },
     ],
-    source: { label: "Alert type", placeholder: "workers_observability_real_time_issue", pattern: "^[a-z0-9_]{1,80}$",
-      description: "A Cloudflare notification alert type; subscribing creates its notification policy. * routes every notification the account already sends to xMatrix." },
+    source: { label: "Alert type", placeholder: "workers_observability_real_time_issue", pattern: "^(?:[a-f0-9]{32}/)?[a-z0-9_]{1,80}$",
+      description: "A Cloudflare notification alert type, for the default account, or <account id>/<alert type> for another; subscribing creates its notification policy. * routes every notification the accounts already send to xMatrix." },
     features: [
       { id: "fired", label: "Fired", description: "The alert fired." },
       { id: "resolved", label: "Resolved", description: "The alert resolved." },
     ],
     actions: [
-      readAction("query_logs", "Query Workers logs", "Count a Worker's log events by message over a recent window.", "<worker> [minutes] [error|warn|log]"),
-      readAction("list_deployments", "List deployments", "List a Worker's five most recent deployments and their versions.", "<worker>"),
-      writeAction("rollback", "Roll back Worker", "Deploy a Worker's previous deployment, or a named version, at 100%.", "<worker> [version id] [reason]"),
+      readAction("list_accounts", "List accounts", "List every account the connected logins reach, with its id.", "*"),
+      readAction("query_logs", "Query Workers logs", "Count a Worker's log events by message over a recent window.", "[<account id>/]<worker> [minutes] [error|warn|log]"),
+      readAction("list_deployments", "List deployments", "List a Worker's five most recent deployments and their versions.", "[<account id>/]<worker>"),
+      writeAction("rollback", "Roll back Worker", "Deploy a Worker's previous deployment, or a named version, at 100%.", "[<account id>/]<worker> [version id] [reason]"),
+      readAction("list_databases", "List D1 databases", "List an account's D1 databases with their ids and sizes.", "<account id>|*"),
+      readAction("query_database", "Query D1", "Run one read-only SELECT on a D1 database; at most 50 rows are shown in the Channel.", "[<account id>/]<database> <SELECT …>"),
     ],
   }),
   eventConnector({

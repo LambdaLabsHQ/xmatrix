@@ -245,7 +245,7 @@
      It is one baked tile (scripts/bake-wood-texture.mjs explains why it is
      not the SVG maps it was baked from). */
   --app-wood-panel-base: oklch(0.83 0.07 76);
-  --app-wood-texture: url("/textures/wood.webp");
+  --app-wood-texture: url("/textures/wood.2f2b459999.webp");
 
   /* VERTICALLY BALANCED light field (user 2026-06-11): no top-to-bottom
      gradient — several narrow anisotropic reflection bands spread across the

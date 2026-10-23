@@ -9,6 +9,7 @@ import type { QueryResultRow } from "pg";
 import type { DatabaseTransaction } from "./contracts.js";
 import { RegistrationAccessError, registrationRouteRefusal } from "./agent-registration-errors.js";
 import { registrationInstructionsSpawnFields } from "./registration-instructions-spawn.js";
+import { connectedAppsSpawnFields } from "./connected-apps-spawn.js";
 import { spaceRulesSpawnFields } from "./space-rules-spawn.js";
 import { requireRegistrationAdmission } from "./agent-registration-access.js";
 import { REGISTRATION_KEY_SQL, registrationKeyValues } from "./agent-registration-rows.js";
@@ -18,6 +19,7 @@ import { commitRuntime, expireInstanceTraceAccess, runtimeChannelCapability } fr
 import { prepareReborn, prepareHandoff, advanceReborn } from "./runtime-reborn.js";
 import { naturalInstanceOrdinal, reserveNaturalKey } from "./natural-keys.js";
 import { readContinuationSource } from "./runtime-continuation-source.js";
+import { handoffResumeSource } from "./handoff-resume-source.js";
 import { currentRegistrationQuotaJoin, recordRegistrationUsageLimit, REGISTRATION_QUOTA_POOL_SQL,
   registrationQuotaReading } from "./agent-registration-quota-probe.js";
 
@@ -110,19 +112,20 @@ export const HANDOFF_SOURCE_FENCE_SQL = `UPDATE data.runs r SET
     AND NOT r.metadata_json ? 'instanceHandoff' AND NOT r.metadata_json ? 'instanceDeletion'
   RETURNING r.run_id`;
 
-type ContinuationPhysical = { workspace?: QueryResultRow };
+type ContinuationPhysical = { workspace?: QueryResultRow; managed?: { key: string; hostname?: string } };
 type ContinuationSource = { remoteRepo?: string; hostname?: string; hostId?: string; canonicalCwd?: string; managedWorkspaceKey?: string;
   repoPool?: Record<string, string> };
 
-/** The directory the successor is admitted to: the predecessor's repository or registered Workspace. */
-function workspaceReference(source: ContinuationSource, physical: ContinuationPhysical): string {
-  return source.remoteRepo ? `repo:${source.remoteRepo}` : String(physical.workspace!.workspace_id);
+/** Managed directories keep the empty Workspace scope of their original admission. */
+function workspaceReferences(source: ContinuationSource, physical: ContinuationPhysical): string[] {
+  return source.remoteRepo ? [`repo:${source.remoteRepo}`]
+    : physical.managed ? [] : [String(physical.workspace!.workspace_id)];
 }
 
 function continuationHost(source: ContinuationSource, physical: ContinuationPhysical): string {
   // The physical query has already established the exact owner + Machine route.
   // Observation availability is independent of continuation authorization.
-  const observation = source.hostname ?? source.hostId ?? physical.workspace?.hostname;
+  const observation = source.hostname ?? source.hostId ?? physical.workspace?.hostname ?? physical.managed?.hostname;
   return typeof observation === "string" ? observation : "";
 }
 
@@ -144,6 +147,13 @@ async function admitContinuation(tx: DatabaseTransaction, input: ContinuationInp
  * harness session only resumes in that exact directory) or its Workspace. */
 function continuationSpawnWorkspace(source: ContinuationSource, key: SpaceAgentRegistrationKey, hostId: string,
   physical: ContinuationPhysical, at: string) {
+  if (physical.managed) return {
+    managementSpaceId: physical.managed.key,
+    workspace: { managedKey: physical.managed.key, ownerUserId: key.ownerUserId, machineId: key.machineId,
+      hostname: hostId || undefined, hostId, canonicalCwd: source.canonicalCwd, displayName: "xMatrix",
+      metadata: { managedWorkspaceKey: physical.managed.key, syntheticManagedWorkspace: true },
+      visibility: "private", createdAt: at, updatedAt: at, lastSeenAt: at },
+  };
   return {
     ...(source.remoteRepo ? { remoteRepo: source.remoteRepo, runWorktree: true } : {}),
     ...(source.remoteRepo && source.repoPool ? source.repoPool : {}),
@@ -213,7 +223,11 @@ export class PostgresRegistrationRebornRepository extends RegistrationPreparatio
     const { source, displayName } = await this.lockedSource(tx, input, key, located.key, "reborn");
     const model = source.useRuntimeDefaultModel ? "" : source.requestedRuntimeModel ?? "";
     const modelResource = model ? source.modelResource ?? model : undefined;
-    const requested = parseRegistrationResourceLimits({ workspaces: [workspaceReference(source, physical)],
+    if (physical.managed && (source.managedWorkspaceKey !== physical.managed.key
+      || source.canonicalCwd !== `.xmatrix-management/${physical.managed.key}` || source.remoteRepo)) {
+      throw new RegistrationAccessError("reborn_source_changed", 409);
+    }
+    const requested = parseRegistrationResourceLimits({ workspaces: workspaceReferences(source, physical),
       models: modelResource ? [modelResource] : [], capabilities: [] });
     const suffix = (await digestCanonicalCloneCborV1(["reborn", input.sourceMessageId, input.sourceInstanceId])).slice(0, 64);
     // The successor is the next Run of the predecessor's Instance, reserved
@@ -222,6 +236,8 @@ export class PostgresRegistrationRebornRepository extends RegistrationPreparatio
       scope: "run", channelInstanceId: Number(source.channelInstanceId), at: new Date().toISOString() })).runId;
     const executionKey = `exec:reborn:${suffix}`;
     const registration = await admitContinuation(tx, input, key, requested, model);
+    const legacyHandoff = source.handedOff && source.remoteRepo && source.repoPool
+      ? await handoffResumeSource(tx, source, input.channelId) : undefined;
     const launch = physical.environment.launch;
     // Preserve a hostname observation independently of the execution target.
     const hostId = continuationHost(source, physical);
@@ -229,6 +245,7 @@ export class PostgresRegistrationRebornRepository extends RegistrationPreparatio
       spawnControlId: `reborn:1-spawn:${suffix}`, resumeInstanceId: input.sourceInstanceId, identityKind: "instance",
       agentName: displayName, summonedByUserId: input.actorUserId,
       sourceMessageId: input.sourceMessageId, useRuntimeDefaultModel: !model, requestedRuntimeModel: model || null, modelResource: modelResource ?? null,
+      ...(source.handedOff ? { resumeAfterHandoff: true } : {}),
       ...(source.managedWorkspaceKey ? { managedWorkspaceKey: source.managedWorkspaceKey } : {}),
       ...(source.remoteRepo ? { remoteRepo: source.remoteRepo, runWorktree: true } : {}) };
     // The successor records the predecessor's Workspace columns verbatim. A
@@ -243,6 +260,7 @@ export class PostgresRegistrationRebornRepository extends RegistrationPreparatio
     const spawn = { type: "machine_spawn_agent", requestId: `reborn:1-spawn:${suffix}`, spaceId, channelId: input.channelId,
       runId, instanceId: input.sourceInstanceId, executionKey, identityId: input.sourceInstanceId,
       resumeInstanceId: input.sourceInstanceId, resume: true, resumeSessionKey: source.resumeSessionKey,
+      ...(source.handedOff && source.remoteRepo && source.repoPool ? { handoffTransfer: true, ...legacyHandoff } : {}),
       ...registrationLaunchSpawnFields(launch, key.harness),
       // The resumed Instance takes its source message as its first prompt: join
       // catch-up alone cannot deliver it to an Instance that never acknowledged
@@ -263,20 +281,22 @@ export class PostgresRegistrationRebornRepository extends RegistrationPreparatio
    * one whose wake can never succeed is left `wake_failed` with its reason, so
    * its Channel sees why and later messages do not keep retrying it.
    */
-  async wakeResting(raw: { commandId: string; channelId: string; sourceMessageId: string; prompt?: string }) {
+  async wakeResting(raw: { commandId: string; channelId: string; sourceMessageId: string; targetInstanceId?: string; prompt?: string }) {
     const channelId = text(raw.channelId), sourceMessageId = text(raw.sourceMessageId);
     const prompt = typeof raw.prompt === "string" ? raw.prompt : "";
     const commandId = text(raw.commandId);
+    const targetInstanceId = raw.targetInstanceId === undefined ? null : text(raw.targetInstanceId);
     const candidates = await this.database.transaction({ requestId: commandId, operation: "registration.wake.candidates",
-      placement: this.placement }, tx => tx.query({ name: "registration_wake_resting_candidates_v1", text: `SELECT
+      placement: this.placement }, tx => tx.query({ name: "registration_wake_resting_candidates_v2", text: `SELECT
         i.instance_id,r.owner_user_id FROM data.instances i
         JOIN data.runs r ON r.run_id=i.run_id AND r.channel_id=i.channel_id
-        WHERE i.channel_id=$1 AND i.status='offline' AND i.rest_state IN ('sleeping','interrupted')
+        WHERE i.channel_id=$1 AND ($2::text IS NULL OR i.instance_id=$2)
+          AND i.status='offline' AND i.rest_state IN ('sleeping','interrupted')
           AND r.status IN (${TERMINAL_RUN_STATUS_SQL})
           AND NOT EXISTS (SELECT 1 FROM data.agent_reborn_intents intent
             WHERE intent.source_instance_id=i.instance_id AND intent.state IN ('waiting','prepared'))
         ORDER BY i.updated_at DESC,i.instance_id LIMIT 16`,
-      values: [channelId], maxRows: MAX_WAKES_PER_MESSAGE }));
+      values: [channelId, targetInstanceId], maxRows: MAX_WAKES_PER_MESSAGE }));
     const woken: Array<{ instanceId: string; intentId: string; state: string }> = [];
     const refused: Array<{ instanceId: string; code: string; permanent: boolean }> = [];
     for (const candidate of candidates) {
@@ -336,7 +356,7 @@ export class PostgresRegistrationRebornRepository extends RegistrationPreparatio
       placement: this.placement }, async tx => {
       const { source, displayName, configuration } = await this.lockedSource(tx, input, key, located.key, "handoff");
       if (source.handedOff) throw new RegistrationAccessError("reborn_source_changed", 409);
-      const requested = parseRegistrationResourceLimits({ workspaces: [workspaceReference(source, physical)], models: [],
+      const requested = parseRegistrationResourceLimits({ workspaces: workspaceReferences(source, physical), models: [],
         capabilities: [] });
       const suffix = (await digestCanonicalCloneCborV1(["handoff", input.sourceMessageId, input.sourceInstanceId,
         key.harness])).slice(0, 64);
@@ -367,13 +387,14 @@ export class PostgresRegistrationRebornRepository extends RegistrationPreparatio
         ...(invocationSource ? { invocationSource } : {}) };
       const instance = { instanceId, runId, channelId: input.channelId, status: "offline", channelInstanceId, spaceId };
       const spaceRules = await spaceRulesSpawnFields(tx, spaceId);
+      const connectedApps = await connectedAppsSpawnFields(tx, spaceId);
       const spawn = { type: "machine_spawn_agent", requestId: `handoff:1-spawn:${suffix}`, spaceId, channelId: input.channelId,
         runId, instanceId, executionKey, identityId: instanceId, resumeSessionKey,
         handoffTransfer: true, handoffSourceInstanceId: input.sourceInstanceId,
         ...(source.resumeSessionKey ? { handoffSourceResumeSessionKey: source.resumeSessionKey } : {}),
         ...registrationLaunchSpawnFields(physical.environment.launch, key.harness),
         agentName: displayName, prompt: input.prompt, sourceMessageId: input.sourceMessageId, context: {},
-        ...registrationInstructionsSpawnFields(configuration), ...spaceRules,
+        ...registrationInstructionsSpawnFields(configuration), ...spaceRules, ...connectedApps,
         ...continuationSpawnWorkspace(source, key, hostId, physical, at) };
       const value = await prepareHandoff(tx, { run, instance, spawnPayload: spawn, channelId: input.channelId,
         sourceRunId: source.runId, sourceInstanceId: input.sourceInstanceId }, input.actorUserId, spaceId, at);
@@ -509,7 +530,7 @@ export class PostgresRegistrationRebornRepository extends RegistrationPreparatio
   /** The successor tuple's machine environment and the predecessor's Workspace
    * row; both live in the directory, not in this Space's shard. */
   private physical(input: ContinuationInput, key: SpaceAgentRegistrationKey,
-    located: { hostId?: string; remoteRepo?: string; canonicalCwd?: string }, operation: "reborn" | "handoff",
+    located: { hostId?: string; remoteRepo?: string; canonicalCwd?: string; managedWorkspaceKey?: string }, operation: "reborn" | "handoff",
     runtimeDefaultModel: boolean) {
     return this.directory.transaction({ requestId: input.commandId, operation: `registration.${operation}.physical` },
       async tx => {
@@ -525,6 +546,20 @@ export class PostgresRegistrationRebornRepository extends RegistrationPreparatio
           FROM control.agent_registration_environments WHERE owner_user_id=$1 AND machine_id=$2 AND harness=$3`,
         values: [key.ownerUserId, key.machineId, key.harness], maxRows: 1 });
         if (!environments[0]) throw new RegistrationAccessError("registration_environment_missing", 409);
+        if (operation === "reborn" && !located.remoteRepo && located.managedWorkspaceKey) {
+          const managedKey = located.managedWorkspaceKey;
+          if (!/^[A-Za-z0-9_:-]{1,128}$/u.test(managedKey)
+            || located.canonicalCwd !== `.xmatrix-management/${managedKey}`) {
+            throw new RegistrationAccessError("reborn_source_changed", 409);
+          }
+          const routes = await tx.query({ name: "registration_continuation_managed_route_v1", text: `SELECT hostname
+            FROM data.machine_daemons WHERE owner_user_id=$1 AND machine_id=$2 AND status='online'
+              AND capabilities_json ? 'registration_launch_v3' AND capabilities_json ? 'registration_managed_v1' LIMIT 2`,
+            values: [key.ownerUserId, key.machineId], maxRows: 2 });
+          if (routes.length !== 1) throw await registrationRouteRefusal(tx, "registration_managed_route_unavailable", key);
+          return { environment: parseAgentRegistrationEnvironment(environments[0].declaration_json), workspace: undefined,
+            managed: { key: managedKey, hostname: typeof routes[0]!.hostname === "string" ? routes[0]!.hostname : undefined } };
+        }
         const workspaces = located.remoteRepo ? [] : await tx.query({ name: "registration_continuation_workspace_v3",
           text: `SELECT w.workspace_id,w.canonical_cwd,w.metadata_json,d.hostname FROM data.workspaces w
             JOIN data.machine_daemons d ON d.owner_user_id=w.owner_user_id AND d.machine_id=w.machine_id
@@ -532,7 +567,7 @@ export class PostgresRegistrationRebornRepository extends RegistrationPreparatio
           values: [key.ownerUserId, key.machineId, located.canonicalCwd], maxRows: 2 });
         const workspace = workspaces[0];
         if (!located.remoteRepo && workspaces.length !== 1) throw new RegistrationAccessError("registration_workspace_or_daemon_unavailable", 409);
-        return { environment: parseAgentRegistrationEnvironment(environments[0].declaration_json), workspace };
+        return { environment: parseAgentRegistrationEnvironment(environments[0].declaration_json), workspace, managed: undefined };
       });
   }
 
@@ -613,16 +648,14 @@ export class PostgresRegistrationRebornRepository extends RegistrationPreparatio
       registration.grantExecutionRevision, registration.policyRevision, registration.policyExecutionRevision,
       JSON.stringify(registration.requested)], maxRows: 0 });
     if (run.handoff === true) {
-      // The predecessor stopped; its directory now belongs to a new Instance,
-      // and the predecessor is fenced so nothing reborns or hands it off again.
+      // The predecessor stopped; fence its writer while keeping its identity.
       const sourceInstanceId = text(object(run.metadata).handoffSourceInstanceId);
       await tx.query({ name: "registration_handoff_instance_v1", text: `INSERT INTO data.instances
         (instance_id,run_id,channel_id,channel_instance_id,status,version,created_at,updated_at)
         VALUES ($1,$2,$3,$4,'offline',1,$5,$5)`,
       values: [instanceId, runId, channelId, Number(instance.channelInstanceId), at], maxRows: 0 });
-      const fenced = await tx.query({ name: "registration_handoff_source_fence_v2", text: HANDOFF_SOURCE_FENCE_SQL,
-      values: [instanceId, object(run.metadata).sourceMessageId ?? null, at, sourceInstanceId, channelId], maxRows: 1 });
-      if (!fenced[0]) throw new RegistrationAccessError("handoff_source_transferred", 409);
+      await this.fenceTransferredSource(tx, sourceInstanceId, instanceId,
+        channelId, object(run.metadata).sourceMessageId, at);
     } else {
       // The predecessor already stopped (the reborn intent waited for it), so the
       // Instance keeps its id and ordinal and moves to the successor Run.
@@ -646,6 +679,19 @@ export class PostgresRegistrationRebornRepository extends RegistrationPreparatio
     await commitRuntime(tx, registration.key.spaceId, { commandId: `reborn-create:${runId}`, kind: "registration_launch",
       entityId: runId, runId, instanceId, status: "starting" }, at);
     return spawnPayload;
+  }
+
+  /** Keep the transferred identity stopped and addressable. Only its writer
+   * authority is fenced; a later explicit reborn may share the directory. */
+  private async fenceTransferredSource(tx: DatabaseTransaction, sourceInstanceId: string, instanceId: string,
+    channelId: string, sourceMessageId: unknown, at: string) {
+    const fenced = await tx.query({ name: "registration_handoff_source_fence_v2", text: HANDOFF_SOURCE_FENCE_SQL,
+      values: [instanceId, sourceMessageId ?? null, at, sourceInstanceId, channelId], maxRows: 1 });
+    if (!fenced[0]) throw new RegistrationAccessError("handoff_source_transferred", 409);
+    await tx.query({ name: "registration_handoff_source_stopped_v1", text: `UPDATE data.instances
+      SET status='offline',rest_state='stopped',rest_reason=NULL,version=version+1,updated_at=$3
+      WHERE instance_id=$1 AND channel_id=$2`, values: [sourceInstanceId, channelId, at], maxRows: 0 });
+    await expireInstanceTraceAccess(tx, sourceInstanceId, at);
   }
 
   /** The predecessor's registration tuple, Workspace and session. */
@@ -677,6 +723,8 @@ export class PostgresRegistrationRebornRepository extends RegistrationPreparatio
       routedAs: typeof metadata.routedAs === "string" ? metadata.routedAs : undefined,
       agentName: typeof metadata.agentName === "string" ? metadata.agentName : undefined,
       handedOff: metadata.instanceHandoff !== undefined || metadata.instanceDeletion !== undefined,
+      handoffSuccessorInstanceId: typeof object(metadata.instanceHandoff).successorInstanceId === "string"
+        ? String(object(metadata.instanceHandoff).successorInstanceId) : undefined,
       repoPool: retainedRepoPool(metadata) };
   }
 }

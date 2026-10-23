@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useLayoutEffect, useRef, type HTMLAttributes, type ReactNode } from "react";
+import { memo, useCallback, useLayoutEffect, useRef, type HTMLAttributes, type ReactNode } from "react";
 
 import { cn } from "@/lib/utils";
 
@@ -25,7 +25,7 @@ import { cn } from "@/lib/utils";
    so a row keeps its DOM and its state across the handover. */
 
 /** Where one row's host sits: in the tail, then in the virtual list's item. */
-export function TimelineRowSlot({ host, ...attributes }: { host: HTMLElement } & HTMLAttributes<HTMLDivElement>) {
+export const TimelineRowSlot = memo(function TimelineRowSlot({ host, ...attributes }: { host: HTMLElement } & HTMLAttributes<HTMLDivElement>) {
   const adopt = useCallback((slot: HTMLDivElement | null) => {
     if (!slot || host.parentElement === slot) return;
     // A move keeps the row's focus, selection and running animations; where
@@ -35,7 +35,7 @@ export function TimelineRowSlot({ host, ...attributes }: { host: HTMLElement } &
     else slot.appendChild(host);
   }, [host]);
   return <div ref={adopt} {...attributes} />;
-}
+});
 
 /** What the tail measured, for the virtual list to land on. */
 export interface TimelineOpeningMeasure {

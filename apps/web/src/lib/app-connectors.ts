@@ -8,6 +8,11 @@ export type AppConnectorManifest = AppConnectorProviderManifest & {
 };
 
 const AGENT_USE_CASES: Record<AppConnectorProviderManifest["id"], string[]> = {
+  x: [
+    "Connect company and personal accounts through separate authorizations.",
+    "Read posts and timelines with results visible in the calling Channel.",
+    "Publish from an explicitly selected account under Channel approval policy; quote posts require X Enterprise API access.",
+  ],
   github: [
     "Dispatch issue triage to a channel-local agent instance.",
     "Keep PR review comments and CI failures attached to the same work session.",
@@ -77,12 +82,17 @@ const AGENT_USE_CASES: Record<AppConnectorProviderManifest["id"], string[]> = {
     "Submit changed URLs or a sitemap to Bing, or push them to every IndexNow engine at once.",
   ],
   googleadsense: [
-    "Read daily AdSense earnings, page views and RPM by site, country or page.",
+    "Read daily AdSense earnings, page views, RPM and viewability by site, ad format, ad unit, country or page.",
+    "Check ad units, payments, alerts and policy issues without opening AdSense.",
     "Let a scheduled Automation track each site's revenue next to its search traffic.",
   ],
   googleanalytics: [
     "Read sessions, users and key events by landing page, channel or country, or only organic search traffic.",
     "Follow a page from Search Console clicks to Google Analytics sessions and conversions.",
+  ],
+  googleads: [
+    "Create paused advertising campaigns, budgets, creatives and targeting, then enable or pause them under the Channel's action policy.",
+    "Read spend and conversions for the selected advertiser and use them to adjust future campaigns.",
   ],
   googlebusinessprofile: [
     "Read each location's search and Maps views, website clicks, calls and direction requests.",
@@ -152,3 +162,22 @@ export const APP_CONNECTORS: AppConnectorManifest[] = APP_CONNECTOR_PROVIDER_MAN
   ...connector,
   agentUseCases: AGENT_USE_CASES[connector.id],
 }));
+
+/* The Apps list puts what asks for the reader's hand first, then what already
+   works, then what could still be connected; names run alphabetically inside
+   each group so an app is found where its name says. */
+export function orderConnectorsForList<T extends Pick<AppConnectorProviderManifest, "id" | "name" | "status">>(
+  connectors: readonly T[],
+  connections: readonly { providerId: string; status: string }[],
+): T[] {
+  const statusByProvider = new Map(connections.map((connection) => [connection.providerId, connection.status]));
+  const group = (connector: T) => {
+    const status = statusByProvider.get(connector.id);
+    if (status === "error") return 0;
+    if (status === "configured") return 1;
+    if (status) return 2;
+    return connector.status === "available" ? 3 : 4;
+  };
+  return [...connectors].sort((left, right) => group(left) - group(right)
+    || left.name.localeCompare(right.name, "en", { sensitivity: "base" }));
+}

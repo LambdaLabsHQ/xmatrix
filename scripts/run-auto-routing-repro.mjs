@@ -79,6 +79,7 @@ try {
   // Through Turbo's shared cache: CI has already built these for the same
   // content, so this restores them instead of compiling them a second time.
   run("pnpm", ["exec", "turbo", "run", "build", "--filter=@xmatrix/protocol", "--filter=@xmatrix/db",
+    "--filter=@xmatrix/billing-official",
     "--output-logs=new-only", ...turboCacheArgs()]);
   if (!needsTcp) run("node", ["--test", "packages/db/test/agent-launch-postgres.test.mjs"], {
     XMATRIX_REQUIRE_POSTGRES_TEST: "true", XMATRIX_TEST_POSTGRES_URL: url.toString(),
@@ -102,10 +103,15 @@ try {
   // Staged registration launches are rechecked while other launch work runs in
   // their Channel; only a real database interleaves the recheck with a commit.
   if (hubSuitePackages) run("node", ["--test", "packages/db/test/page-migration-postgres.test.mjs",
+    // Exercise deletion against the current schema, including registered Run dependencies.
+    "packages/db/test/space-deletion-postgres.test.mjs",
+    "packages/db/test/automation-run-links-postgres.test.mjs",
     "packages/db/test/postgres-fixture-lifecycle.test.mjs",
     "packages/db/test/client-postgres.test.mjs",
     "packages/db/test/page-control-postgres.test.mjs",
     "packages/db/test/agent-registration-launch-postgres.test.mjs", "packages/db/test/agent-lifecycle-cleanup.test.mjs",
+    // Withdrawn, ended and retired registration Runs get exact stop obligations.
+    "packages/db/test/agent-registration-revocation-postgres.test.mjs",
     "packages/db/test/first-message-launch-choice-postgres.test.mjs",
     "packages/db/test/legacy-hostname-retirement-postgres.test.mjs",
     "packages/db/test/machine-harness-inventory-postgres.test.mjs",
@@ -114,20 +120,34 @@ try {
     // A Run's secret read must not wait on a launch holding its Channel row.
     "packages/db/test/space-secret-postgres.test.mjs",
     "packages/db/test/app-credential-postgres.test.mjs",
+    // App Store ownership and organization seats bind for good under concurrent claims.
+    "packages/db/test/apple-billing-postgres.test.mjs",
+    "packages/db/test/credit-pack-postgres.test.mjs",
+    "packages/db/test/paid-call-postgres.test.mjs",
+    // The official plan's Free allowance, credits and grace against the real schema.
+    "packages/billing-official/test/official-billing-postgres.test.mjs",
+    "packages/db/test/outbox-retention-postgres.test.mjs",
     "packages/db/test/discord-lifecycle-postgres.test.mjs",
     "packages/db/test/sentry-event-postgres.test.mjs",
+    "packages/db/test/gmail-routing-postgres.test.mjs",
     "packages/db/test/message-attention-wait-postgres.test.mjs",
     "packages/db/test/github-write-policy-migration-postgres.test.mjs",
     "packages/db/test/message-history-tombstone-senders-postgres.test.mjs",
     // A history page is one fenced statement, and a placed single read must
     // serialize with a Space move on the placement row lock.
     "packages/db/test/message-history-postgres.test.mjs",
+    "packages/db/test/message-human-profile-postgres.test.mjs",
     "packages/db/test/placement-fence-postgres.test.mjs"], {
     XMATRIX_REQUIRE_POSTGRES_TEST: "true", XMATRIX_TEST_POSTGRES_URL: url.toString(),
   });
   // Catalog/metadata fixtures reset their Space closure: run after the other
   // PostgreSQL files, never concurrently with their live authorities.
   if (hubSuitePackages) run("node", ["--test", "packages/db/test/channel-catalog-postgres.test.mjs"], {
+    XMATRIX_REQUIRE_POSTGRES_TEST: "true", XMATRIX_TEST_POSTGRES_URL: url.toString(),
+  });
+  // This fixture resets shared lifecycle tables. Run it alone, including the
+  // first-reply observation's Channel contention regression (XMATRIX-HUB-9A).
+  if (hubSuitePackages) run("node", ["--test", "packages/db/test/agent-launch-postgres.test.mjs"], {
     XMATRIX_REQUIRE_POSTGRES_TEST: "true", XMATRIX_TEST_POSTGRES_URL: url.toString(),
   });
   // Workspace packages whose SQL only a real database proves declare test:postgres.

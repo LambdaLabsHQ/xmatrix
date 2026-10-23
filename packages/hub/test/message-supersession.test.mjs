@@ -63,19 +63,20 @@ test("anything addressed to someone or engaged with stays whole", () => {
   assert.equal(supersessionCandidate([old, now], now), undefined);
 });
 
-function harness(window, probability) {
-  const calls = { evaluate: [], annotate: [] };
+function harness(window, probability, recorded = (request) => request) {
+  const calls = { evaluate: [], annotate: [], publish: [] };
   return {
     calls,
     input: (latest) => ({
       env: {}, channelId: "ch-1", messageId: latest.messageId, sequence: latest.sequence,
       principal: { kind: "agent", id: "agent:claude" },
-      history: async () => ({ messages: window }),
+      history: async () => ({ spaceId: "space-1", messages: window }),
       evaluate: async (request) => {
         calls.evaluate.push(request);
         return { answers: { superseded: { type: "boolean", probability } } };
       },
-      annotate: async (_env, request) => { calls.annotate.push(request); return request; },
+      annotate: async (_env, request) => { calls.annotate.push(request); return recorded(request); },
+      publish: async (_env, delivery) => { calls.publish.push(delivery); },
     }),
   };
 }
@@ -93,6 +94,19 @@ test("a clearly superseded report is recorded as the Hub's system annotation", a
     annotationId: `xmatrix.superseded:${earlier.messageId}`,
     payload: { supersededBy: latest.messageId },
   }]);
+  // Every client holding the earlier message hears the judgment at once.
+  assert.deepEqual(calls.publish, [
+    { channelId: "ch-1", messageId: earlier.messageId, supersededBy: latest.messageId },
+  ]);
+});
+
+test("a judgment already on the message is not announced again", async () => {
+  const earlier = message(claude1, "Progress: running the e2e regression.");
+  const latest = message(claude1, "Progress: regression passed.");
+  const { calls, input } = harness([earlier, latest], 0.93, () => null);
+  assert.equal((await judgeMessageSupersession(input(latest))).reason, "superseded");
+  assert.equal(calls.annotate.length, 1);
+  assert.deepEqual(calls.publish, []);
 });
 
 test("an uncertain judgment, no candidate or no Jev records nothing", async () => {
@@ -101,6 +115,7 @@ test("an uncertain judgment, no candidate or no Jev records nothing", async () =
   const unsure = harness([earlier, latest], 0.55);
   assert.equal((await judgeMessageSupersession(unsure.input(latest))).reason, "still_needed");
   assert.equal(unsure.calls.annotate.length, 0);
+  assert.equal(unsure.calls.publish.length, 0);
 
   const lone = message(yiming, "first message");
   const none = harness([lone], 0.99);

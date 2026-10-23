@@ -186,6 +186,18 @@ export const roomText = (headroom: number | undefined) => headroom === undefined
 export function placementReason(ranking: readonly LaunchPlacementCandidate[], compared: boolean): string {
   const [chosen] = ranking;
   if (!chosen) return "";
+  // The breaker: an environment that just failed to start is tried after every other.
+  const failed = !chosen.startupFailedAt && ranking.find(item => item.startupFailedAt && item.fit >= chosen.fit);
+  if (failed) return `${failed.harness}${failed.machineName ? ` on ${failed.machineName}` : ""} failed to start in the last 30 minutes, so it goes last`;
+  // Measured reply time: a harness that fits as well but answers slower lost on it.
+  const slower = chosen.responseLatencyMs !== undefined && ranking.find(item => item.harness !== chosen.harness &&
+    item.fit >= chosen.fit && item.responseLatencyMs !== undefined && item.responseLatencyMs > chosen.responseLatencyMs! * 1.5);
+  if (slower) return `${slower.harness} fits as well but usually takes ${Math.round(slower.responseLatencyMs! / 1000)}s to reply; ${
+    chosen.harness} takes ${Math.round(chosen.responseLatencyMs! / 1000)}s`;
+  if (chosen.network && ranking.some(item => item.networkQuality !== undefined &&
+    item.networkQuality < (chosen.networkQuality ?? 0))) {
+    return `Fit, available resources and measured HTTPS reliability/tail latency favour this machine`;
+  }
   const fitter = ranking.filter(item => item.fit > chosen.fit + 0.05).sort((left, right) => right.fit - left.fit)[0];
   if (!compared) return `Most room for ${chosen.harness}: ${roomText(chosen.headroom)}`;
   if (fitter) return `${fitter.harness} fits better, but ${fitter.machineName || "its machine"} is ${
@@ -198,4 +210,3 @@ export function placementReason(ranking: readonly LaunchPlacementCandidate[], co
   return `${reason}. ${chosen.described ? "Its description was read"
     : `${chosen.harness} has no description here, so it was judged by name`}`;
 }
-

@@ -70,6 +70,16 @@ El resto de la documentación está en inglés:
 - [Desarrollar xMatrix](../../README.md#hack-on-xmatrix)
 - [Contribuir: prompt requests, no pull requests](../../README.md#contributing-prompt-requests-not-pull-requests)
 
+## Historial de estrellas
+
+<a href="https://www.star-history.com/?repos=LambdaLabsHQ%2Fxmatrix&amp;type=date">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=lambdalabshq/xmatrix&amp;type=date&amp;theme=dark" />
+    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=lambdalabshq/xmatrix&amp;type=date" />
+    <img src="https://api.star-history.com/chart?repos=lambdalabshq/xmatrix&amp;type=date" width="820" alt="Historial de estrellas de xMatrix en GitHub" />
+  </picture>
+</a>
+
 ## Licencia
 
 xMatrix es de **código fuente disponible** bajo la [Functional Source License 1.1, Apache 2.0 future license](../../LICENSE) (FSL-1.1-ALv2). Puedes leer, ejecutar, modificar y autoalojar el código para cualquier fin salvo ofrecer un producto competidor. **Cada versión pasa a Apache 2.0 dos años después de su publicación.** La FSL no es una licencia de código abierto aprobada por la OSI.

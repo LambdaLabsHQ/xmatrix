@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { machineRunFailureNoticeCommand, machineStopResultNoticeCommand, repositoryBaselineNoticeCommand } from "../src/machine-run-failure-notice.ts";
+import { machineRunFailureNoticeCommand, machineStopCauseText, machineStopResultNoticeCommand, repositoryBaselineNoticeCommand,
+  startupFallbackNoticeCommand } from "../src/machine-run-failure-notice.ts";
 
 const base = { runId: "run-1", channelId: "channel-1", agentName: "grok", ownerUserId: "owner",
   ownerEmail: "owner@example.test", machineId: "machine:a", hostId: "cursor" };
@@ -27,12 +28,27 @@ test("Machine notices name the Machine as its owner named it, never its hostname
   for (const body of [start.body, stop.body]) assert.doesNotMatch(body, /cursor/u);
 });
 
+test("a failed start carries its Agent's harness, which gives the notice the Agent's face", async () => {
+  const start = await machineRunFailureNoticeCommand({ ...base, harness: "grok", detail: "boom" });
+  assert.equal(start.residual.appMetadata.harness, "grok");
+  const unnamed = await machineRunFailureNoticeCommand({ ...base, detail: "boom" });
+  assert.equal("harness" in unnamed.residual.appMetadata, false);
+});
+
 test("a notice without the Machine name names no machine", async () => {
   const start = await machineRunFailureNoticeCommand({ ...base, detail: "boom" });
   assert.match(start.body, /^Couldn't start @grok\./u);
   const stop = await machineStopResultNoticeCommand({ ...base, controlKey: "k", ok: false });
   assert.match(stop.body, /^Couldn't stop @grok\./u);
   for (const body of [start.body, stop.body]) assert.doesNotMatch(body, /cursor/u);
+});
+
+test("a failed stop shows the daemon's error after boundary redaction", async () => {
+  const stop = await machineStopResultNoticeCommand({ ...base, controlKey: "k", ok: false,
+    detail: "process tree still alive after SIGKILL: /home/alice/.config/xmatrix/run.pid token=SECRET_SENTINEL" });
+  assert.match(stop.body, /process tree still alive after SIGKILL: \[local path\] token=\[REDACTED\]/u);
+  assert.doesNotMatch(stop.body, /alice|SECRET_SENTINEL|daemon logs/u);
+  assert.equal(stop.residual.appMetadata.stopFailureCode, "process_tree_still_alive");
 });
 
 test("repository preparation failures preserve the cause without publishing private paths", async () => {
@@ -69,3 +85,28 @@ test("fetch stderr survives in both the Channel body and invocation metadata", a
   assert.equal(notice.residual.appMetadata.failureDetail, detail);
   assert.equal(notice.residual.appMetadata.failureCode, "repository_fetch_failed");
 });
+
+test("the Agent that takes over a failed start is named once per failed Run", async () => {
+  const notice = await startupFallbackNoticeCommand({ ...base, agentName: "claude" });
+  assert.equal(notice.body, "@claude is taking this message instead.");
+  assert.equal(notice.residual.appMetadata.source, "startup_fallback");
+  assert.equal(notice.messageKind, "xmatrix.system.runtime-failure");
+  assert.deepEqual(await startupFallbackNoticeCommand({ ...base, agentName: "claude" }), notice);
+  assert.notEqual((await startupFallbackNoticeCommand({ ...base, runId: "run-2", agentName: "claude" })).messageId, notice.messageId);
+  assert.notEqual(notice.messageId, (await machineRunFailureNoticeCommand({ ...base, detail: "boom" })).messageId);
+});
+
+test("a stop nothing in the Channel asked for says why and who caused it", async () => {
+  const stop = await machineStopResultNoticeCommand({ ...base, machineName: "Build Box", controlKey: "k", ok: true,
+    cause: { code: "registration_disabled", actorName: "Daniel" } });
+  assert.equal(stop.body, "Stopped @grok on Build Box. Daniel turned this Agent off in this Space. " +
+    "The Machine confirmed the process tree is terminated.");
+  assert.equal(stop.residual.appMetadata.stopCause, "registration_disabled");
+  const failed = await machineStopResultNoticeCommand({ ...base, controlKey: "k", ok: false,
+    cause: { code: "instance_deleted", ownerName: "Ada" } });
+  assert.match(failed.body, /^Couldn't stop @grok\. Ada deleted this Instance\.\n/u);
+  assert.equal(machineStopCauseText({ code: "registration_membership" }),
+    "This Agent's owner is no longer a member of this Space, so it can't run here.");
+  assert.equal(machineStopCauseText({ code: "something_new" }), undefined, "an unknown cause is not guessed");
+});
+

@@ -1,4 +1,5 @@
-const STABLE_TAG = /^xmatrix-v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/u;
+import { RELEASE_TAG_PATTERN } from "./release-version-order.mjs";
+
 const REQUEST_PATH = ".github/workflows/production-postgres-lifecycle-maintenance-request.yml";
 
 export function lifecycleRequestTitle(dryRun, maxRows) {
@@ -23,7 +24,7 @@ export function requireLifecycleExecutionAuthority(input) {
     throw new Error("maintenance broker must be a successful main-history run");
   }
   if (dryRun !== "true" && dryRun !== "false") throw new Error("dry_run is invalid");
-  if (maxRows !== "10000" && maxRows !== "100000") throw new Error("max_rows is invalid");
+  if (!["10000", "100000", "1000000"].includes(maxRows)) throw new Error("max_rows is invalid");
   const expectedRequestTitle = lifecycleRequestTitle(dryRun, maxRows);
   if (input.broker?.display_title !== expectedRequestTitle) {
     throw new Error("maintenance parameters do not match the broker receipt");
@@ -38,14 +39,24 @@ export function requireLifecycleExecutionAuthority(input) {
   return { brokerRunId, dryRun: dryRun === "true", maxRows: Number(maxRows) };
 }
 
+/**
+ * The release maintenance runs from: the newest successful Production Release
+ * of the line that deploys the Hub. Once betas exist that is the newest beta; a
+ * stable rebuilds an older beta's source and never deploys the Hub, so it never is.
+ * Before the first beta it is the newest release of the single line before it.
+ */
+export function latestMaintenanceRelease(productionRuns) {
+  const releases = productionRuns.filter((run) => run.conclusion === "success" && run.event === "workflow_dispatch"
+    && RELEASE_TAG_PATTERN.test(run.head_branch));
+  const betas = releases.filter((run) => run.head_branch.includes("-beta."));
+  return (betas.length ? betas : releases).sort((left, right) => right.id - left.id)[0];
+}
+
 /** Shared immutable-production boundary for bounded maintenance operators. */
 export function requirePublishedMaintenanceTarget(input) {
-  if (!STABLE_TAG.test(input.tag)) throw new Error("maintenance requires a stable production tag");
+  if (!RELEASE_TAG_PATTERN.test(input.tag)) throw new Error("maintenance requires a production release tag");
   if (input.currentSha !== input.tagCommitSha) throw new Error("maintenance SHA must equal the annotated tag target");
-  const latestProduction = input.productionRuns
-    .filter((run) => run.conclusion === "success" && run.event === "workflow_dispatch"
-      && STABLE_TAG.test(run.head_branch))
-    .sort((left, right) => right.id - left.id)[0];
+  const latestProduction = latestMaintenanceRelease(input.productionRuns);
   if (latestProduction?.head_branch !== input.tag
     || latestProduction?.head_sha !== input.currentSha) {
     throw new Error("tag is not the latest successful exact-SHA Production Release");

@@ -3,10 +3,11 @@ name: Desktop Release
 on:
   workflow_call:
 
-# Desktop publishes only the stable channel from Production Release. The macOS
-# and Windows build machines upload their signed files straight into the
-# release as run-attempt parts; client-publish.yml seals it and moves the
-# channel without transferring any artifact again.
+# Desktop publishes from Production Release to the channel its version names:
+# a beta to dev, a stable to stable. The macOS and Windows build machines upload
+# their signed files straight into the release as run-attempt parts;
+# client-publish.yml seals it and moves the channel without transferring any
+# artifact again.
 concurrency:
   group: desktop-release-stable
   cancel-in-progress: false
@@ -161,10 +162,10 @@ jobs:
             echo "tag_exists=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Require a new stable release version
+      - name: Require a new release version
         if: steps.release_state.outputs.exists == 'true' || steps.release_state.outputs.tag_exists == 'true'
         run: |
-          echo "Stable release ${{ needs.plan.outputs.tag }} already exists or its tag has been consumed." >&2
+          echo "Release ${{ needs.plan.outputs.tag }} already exists or its tag has been consumed." >&2
           echo "Bump version.json before publishing Desktop again; published versions cannot be resumed or replaced." >&2
           exit 1
 
@@ -332,13 +333,10 @@ jobs:
           # The runner is Apple Silicon, so only the arm64 seed can run; both
           # come from the same immutable cli-v<version> release.
           reported="$("$seed_root/arm64/xmatrix" --version | head -n 1)"
-          case "$reported" in
-            *"$DESKTOP_VERSION"*) ;;
-            *)
-              echo "CLI seed reports '$reported'; expected version $DESKTOP_VERSION." >&2
-              exit 1
-              ;;
-          esac
+          if [[ "$reported" != "xmatrix $DESKTOP_VERSION" ]]; then
+            echo "CLI seed reports '$reported'; expected 'xmatrix $DESKTOP_VERSION'." >&2
+            exit 1
+          fi
           echo "CLI_SEED_ROOT=$seed_root" >> "$GITHUB_ENV"
 
       - name: Require macOS release signing identity
@@ -534,6 +532,9 @@ jobs:
               "$app_bundle" "$MACOS_RELEASE_APP_ID" "$MACOS_RELEASE_TEAM_ID" "packaged $arch ZIP app"
             # What people and the updater receive must still carry Apple's ticket.
             xcrun stapler validate "$app_bundle"
+            # ...and run as exactly the release version, which picks its update channel.
+            node "$GITHUB_WORKSPACE/scripts/desktop-app-version.mjs" \
+              "$app_bundle/Contents/Resources/app.asar" "$DESKTOP_VERSION"
           done
 
           node ../../scripts/desktop-updater-manifest.mjs release
@@ -582,7 +583,6 @@ jobs:
           R2_RELEASE_SECRET_ACCESS_KEY: ${{ secrets.R2_RELEASE_SECRET_ACCESS_KEY }}
           XMATRIX_RELEASE_TAG: ${{ needs.plan.outputs.tag }}
           XMATRIX_RELEASE_COMPONENT: desktop
-          XMATRIX_RELEASE_CHANNEL: stable
           XMATRIX_RELEASE_SHA: ${{ github.sha }}
         run: >-
           node scripts/r2-release-store.mjs upload-release-part
@@ -753,8 +753,8 @@ jobs:
           $seed = Join-Path $seedDir 'xmatrix.exe'
           Copy-Item -LiteralPath (Join-Path $downloadDir 'xmatrix-windows-x64.exe') -Destination $seed -Force
           $reported = @(& $seed --version) | Select-Object -First 1
-          if ($LASTEXITCODE -ne 0 -or $reported -notlike "*$($env:DESKTOP_VERSION)*") {
-            throw "CLI seed reports '$reported'; expected version $($env:DESKTOP_VERSION)."
+          if ($LASTEXITCODE -ne 0 -or $reported -cne "xmatrix $($env:DESKTOP_VERSION)") {
+            throw "CLI seed reports '$reported'; expected 'xmatrix $($env:DESKTOP_VERSION)'."
           }
 
       - name: Build Windows installer
@@ -773,6 +773,10 @@ jobs:
           } finally {
             Pop-Location
           }
+          # The installer packs this app: it must run as exactly the release
+          # version, which picks its update channel.
+          node scripts/desktop-app-version.mjs apps/desktop/release/build-win-x64/win-unpacked/resources/app.asar $env:DESKTOP_VERSION
+          if ($LASTEXITCODE -ne 0) { throw 'The packaged Windows app does not run as the release version' }
         env:
           DESKTOP_VERSION: ${{ needs.plan.outputs.version }}
 
@@ -815,4 +819,6 @@ jobs:
       component: desktop
       tag: ${{ needs.plan.outputs.tag }}
       parts: macos,windows
+      # Installed Apps update from stable and new people download it: the
+      # train moves it, as it moves dev. Nothing promotes it later.
     secrets: inherit

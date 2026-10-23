@@ -9,6 +9,7 @@ mod tests {
     use super::*;
     include!("../../core/tests/support/fs_cleanup.rs");
     include!("repo_pool_baseline_tests.rs");
+    include!("repo_pool_fetch_tests.rs");
 
     #[test]
     fn default_pool_root_tracks_the_local_config_root() {
@@ -626,6 +627,8 @@ mod tests {
         assert!(serde_json::from_value::<SlotRecord>(slot_value).is_err());
 
         let binding = BindingRecord {
+            state: None,
+            spawn_claim_token: None,
             session_key: "s".into(),
             instance_id: "i".into(),
             run_id: "r".into(),
@@ -1685,8 +1688,10 @@ mod tests {
             manifest.slots.get(lease.slot_id.as_str()).unwrap().state,
             SlotState::Starting
         );
-        assert_eq!(manifest.bindings[0].session_key, "ho-successor");
-        assert_eq!(manifest.bindings[0].instance_id, "inst-succ");
+        assert_eq!(manifest.bindings[0].session_key, "ho1");
+        assert_eq!(manifest.bindings[0].state, Some(SlotState::Retained));
+        assert_eq!(manifest.bindings[1].session_key, "ho-successor");
+        assert_eq!(manifest.bindings[1].instance_id, "inst-succ");
         assert_eq!(
             transfer_retained_lease_at(&layout, &base, &expected, &successor)
                 .await
@@ -1694,6 +1699,28 @@ mod tests {
                 .code,
             PoolErrorCode::InvalidBinding
         );
+        let successor_authority = authority_for(&successor, &lease.slot_id);
+        claim_starting_lease_at(&layout, &successor_authority, &transferred.spawn_claim_token, &lease.worktree_path)
+            .await.unwrap();
+        let reborn = LeaseRequest { run_id: "reborn-original".into(), execution_key: "reborn-exec".into(), ..req("ho1") };
+        // Older daemons removed this binding on transfer. Recovery must prove
+        // the exact successor, never attach by path or slot id alone.
+        let mut legacy = load_manifest_at(layout.pool_root()).unwrap().unwrap();
+        legacy.bindings.retain(|binding| binding.session_key != "ho1");
+        save_manifest_at(layout.pool_root(), &legacy).unwrap();
+        assert_eq!(resume_handoff_lease_at(&layout, &base, "unrelated-session", &successor.instance_id,
+            lease.slot_id.as_str(), &reborn).await.unwrap_err().code, PoolErrorCode::InvalidBinding);
+        let resumed = resume_handoff_lease_at(&layout, &base, &successor.session_key, &successor.instance_id, lease.slot_id.as_str(), &reborn).await.unwrap();
+        assert_eq!(resumed.worktree_path, lease.worktree_path);
+        claim_starting_lease_at(&layout, &authority_for(&reborn, &lease.slot_id),
+            &resumed.spawn_claim_token, &lease.worktree_path).await.unwrap();
+        mark_retained_at(&layout, &successor).await.unwrap();
+        assert_eq!(load_manifest_at(layout.pool_root()).unwrap().unwrap().slots[lease.slot_id.as_str()].state,
+            SlotState::Leased, "the reborn original still owns a live lease");
+        return_abandoned_slot_at(&layout, &base, &successor).await.unwrap();
+        assert_eq!(std::fs::read_to_string(lease.worktree_path.join("DIRTY.txt")).unwrap(), "keep-me");
+        mark_retained_at(&layout, &reborn).await.unwrap();
+        assert_eq!(retained_binding_for_session_at(&layout, "ho1").await.unwrap().authority.run_id, "reborn-original");
         let _ = remote;
         cleanup_test_dirs(&[&pools, &base, &remote]);
     }
@@ -2797,6 +2824,9 @@ mod tests {
         commit_unpushed_work(&tree, "feat/rest");
         std::fs::write(tree.join("draft.txt"), "uncommitted\n").unwrap();
         mark_retained_at(&layout, &req("rh1")).await.unwrap();
+        let peer = req("rh-peer");
+        transfer_retained_lease_at(&layout, &base, &authority_for(&req("rh1"), &lease.slot_id), &peer).await.unwrap();
+        mark_retained_at(&layout, &peer).await.unwrap();
 
         let outcome = reclaim_pool_slots_at(&pools, &PoolLiveness::default(), 8).await;
         assert_eq!(
@@ -2851,6 +2881,14 @@ mod tests {
             "the session wakes at the path its transcript names"
         );
         assert_eq!(state_of(&layout, &slot), SlotState::Starting);
+        claim_starting_lease_at(&layout, &authority_for(&successor, &lease.slot_id),
+            &woken.spawn_claim_token, &tree).await.unwrap();
+        let peer_binding = retained_binding_for_session_at(&layout, "rh-peer").await.unwrap();
+        let peer_reborn = LeaseRequest { run_id: "peer-reborn".into(), execution_key: "peer-reborn-exec".into(), ..peer };
+        let peer_lease = rebind_retained_lease_at(&layout, &base, &peer_binding.authority, &peer_reborn).await.unwrap();
+        claim_starting_lease_at(&layout, &authority_for(&peer_reborn, &lease.slot_id),
+            &peer_lease.spawn_claim_token, &tree).await.unwrap();
+        assert_eq!(peer_lease.worktree_path, tree, "all sessions recover the same shared directory");
         let branch = git_cmd()
             .args([
                 "-C",
@@ -3021,6 +3059,141 @@ mod tests {
         assert_eq!(record.head_oid, head);
         rehydrate_at_original_path(&layout, &base, &record, &tree).await;
         assert!(tree.join("landed.txt").is_file());
+
+        cleanup_test_dirs(&[&base, &remote, &pools]);
+    }
+
+    /// `git worktree remove --force` with a process still writing into the
+    /// tree deletes git's admin directory, stops on the files, and fails. The
+    /// tree then has nothing left to relock, so eviction finishes the delete.
+    #[tokio::test]
+    async fn an_eviction_git_unregistered_but_could_not_finish_completes_and_its_session_wakes() {
+        if !git_available() {
+            return;
+        }
+        let _floors = NoIdleFloors::enter();
+        let identity_url = "https://github.com/acme/evict-half-removed";
+        let (base, remote) = setup_base_with_local_fetch(identity_url);
+        let pools = unique_temp("eh");
+        let layout = layout_for(identity_url, &pools);
+        let (lease, head) = resting_session_with_commit(&layout, &base, identity_url, "eh1").await;
+        let tree = lease.worktree_path.clone();
+        let slot = lease.slot_id.as_str().to_string();
+        let admin = read_linked_worktree_admin_pointer(&tree).unwrap();
+
+        TEST_UNREGISTER_THEN_FAIL_WORKTREE_REMOVE.with(|c| c.set(true));
+        let outcome = reclaim_pool_slots_at(&pools, &PoolLiveness::default(), 8).await;
+        TEST_UNREGISTER_THEN_FAIL_WORKTREE_REMOVE.with(|c| c.set(false));
+        assert!(!admin.exists(), "the failpoint dropped git's registration");
+        assert_evicted_tree(&outcome, &slot, &tree);
+        let manifest = load_manifest_at(layout.pool_root()).unwrap().unwrap();
+        assert!(!manifest.slots.contains_key(&slot));
+        assert!(manifest.bindings.iter().all(|b| b.session_key != "eh1"));
+
+        // The wake, in the daemon's order: nothing lost to record, no binding
+        // to rebind, and the eviction's record rebuilds the checkout.
+        assert!(
+            !record_lost_retained_checkout_at(&layout, &base, "eh1")
+                .await
+                .unwrap()
+        );
+        assert!(retained_binding_for_session_at(&layout, "eh1").await.is_err());
+        let record = rehydrate_record_for_session_at(&layout, "eh1")
+            .await
+            .unwrap()
+            .expect("the evicted session is recorded");
+        assert_eq!(record.head_oid, head);
+        rehydrate_at_original_path(&layout, &base, &record, &tree).await;
+
+        cleanup_test_dirs(&[&base, &remote, &pools]);
+    }
+
+    /// What an older daemon left behind after that failure: the eviction's
+    /// record, a bound slot, and a tree whose `.git` names a dropped admin dir.
+    #[tokio::test]
+    async fn a_bound_tree_git_unregistered_wakes_from_its_eviction_record() {
+        if !git_available() {
+            return;
+        }
+        let identity_url = "https://github.com/acme/half-removed-wake";
+        let (base, remote) = setup_base_with_local_fetch(identity_url);
+        let pools = unique_temp("hw");
+        let layout = layout_for(identity_url, &pools);
+        let (lease, head) = resting_session_with_commit(&layout, &base, identity_url, "hw1").await;
+        let tree = lease.worktree_path.clone();
+        let manifest = load_manifest_at(layout.pool_root()).unwrap().unwrap();
+        let binding = manifest
+            .bindings
+            .iter()
+            .find(|b| b.session_key == "hw1")
+            .cloned()
+            .unwrap();
+        let slot = manifest.slots.get(lease.slot_id.as_str()).unwrap();
+        let record = capture_rehydrate_record(&tree, &binding, slot, SnapshotOutcome::default())
+            .await
+            .unwrap();
+        std::fs::remove_dir_all(read_linked_worktree_admin_pointer(&tree).unwrap()).unwrap();
+        std::fs::write(tree.join("stray.txt"), "residue\n").unwrap();
+
+        // Nothing says these files were preserved: they are kept, loudly.
+        let error = record_lost_retained_checkout_at(&layout, &base, "hw1")
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, PoolErrorCode::WorktreeCleanupFailed);
+        assert!(tree.join("stray.txt").is_file());
+
+        save_rehydrate_records(&layout, &[record]).unwrap();
+        assert!(
+            record_lost_retained_checkout_at(&layout, &base, "hw1")
+                .await
+                .unwrap()
+        );
+        assert!(!tree.exists(), "the half-removed tree is cleared");
+        let record = rehydrate_record_for_session_at(&layout, "hw1")
+            .await
+            .unwrap()
+            .expect("the eviction's record is kept, not replaced");
+        assert_eq!(record.head_oid, head);
+        rehydrate_at_original_path(&layout, &base, &record, &tree).await;
+
+        cleanup_test_dirs(&[&base, &remote, &pools]);
+    }
+
+    #[tokio::test]
+    async fn one_slot_that_cannot_be_evicted_does_not_stop_the_sweep() {
+        if !git_available() {
+            return;
+        }
+        let _floors = NoIdleFloors::enter();
+        let identity_url = "https://github.com/acme/evict-one-fails";
+        let (base, remote) = setup_base_with_local_fetch(identity_url);
+        let pools = unique_temp("ef");
+        let layout = layout_for(identity_url, &pools);
+        let mut leases = Vec::new();
+        for session in ["ef1", "ef2"] {
+            let lease = lease_available_or_create_at(&layout, &base, identity_url, &req(session))
+                .await
+                .unwrap();
+            mark_retained_at(&layout, &req(session)).await.unwrap();
+            leases.push(lease);
+        }
+        let (stuck, free) = (&leases[0], &leases[1]);
+        let stuck_arg = stuck.worktree_path.display().to_string();
+        run_git(&base, &["worktree", "unlock", &stuck_arg]);
+        run_git(&base, &["worktree", "lock", "--reason", "someone else", &stuck_arg]);
+
+        let outcome = reclaim_pool_slots_at(&pools, &PoolLiveness::default(), 8).await;
+        assert_evicted_tree(&outcome, free.slot_id.as_str(), &free.worktree_path);
+        assert!(stuck.worktree_path.join(".git").is_file());
+        let manifest = load_manifest_at(layout.pool_root()).unwrap().unwrap();
+        assert!(manifest.bindings.iter().any(|b| b.session_key == "ef1"));
+        assert!(!manifest.slots.contains_key(free.slot_id.as_str()));
+        let records = load_rehydrate_records(&layout).unwrap();
+        assert!(
+            records.iter().all(|r| r.session_key != "ef1"),
+            "the kept session wakes in its tree, not from a record"
+        );
+        assert!(records.iter().any(|r| r.session_key == "ef2"));
 
         cleanup_test_dirs(&[&base, &remote, &pools]);
     }
@@ -3316,6 +3489,14 @@ worktree /pools/b\nHEAD 3333333333333333333333333333333333333333\ndetached\n";
 
     #[test]
     fn git_failures_are_classified_without_raw_stderr() {
+        for stderr in [
+            "fatal: pack has 51 unresolved deltas\nfatal: fetch-pack: invalid index-pack output",
+            "fatal: pack has 1 unresolved delta",
+            "fatal: unresolved deltas left after unpacking\nfatal: unpack-objects failed",
+        ] {
+            assert_eq!(classify_git_failure(stderr), GitRunError::MissingDeltaBase);
+        }
+        assert_eq!(classify_git_failure("fatal: fetch-pack: invalid index-pack output"), GitRunError::Failed);
         assert_eq!(
             classify_git_failure(
                 "fatal: Unable to create '/repo/.git/refs/remotes/origin/main.lock': File exists."

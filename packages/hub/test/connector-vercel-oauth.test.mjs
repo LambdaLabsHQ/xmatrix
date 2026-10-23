@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
+import { gmailPollCallback } from "../src/connectors/gmail-poll-oauth.ts";
 import { test } from "node:test";
 import { exchangeOAuthGrant, oauthAuthorizeUrl, oauthClient, verifyOAuthState } from "../src/connectors/oauth.ts";
 import { vercelApiUrl, vercelCompletionUrl, verifyVercel } from "../src/connectors/vercel-api.ts";
 import { connectorProvider } from "../src/connectors/registry.ts";
 import { sentryInstallationClient } from "../src/connectors/sentry-installation.ts";
+import * as metering from "../src/usage-cost-metering.ts";
+import * as githubAuthorization from "../src/github-connect-authorization.ts";
 
 const exchangeOAuthCode = async (...args) => (await exchangeOAuthGrant(...args)).fields;
 
@@ -138,7 +141,10 @@ test("the callback writes credentials only after verified state, provider scope 
   const effects = [];
   const exports = {};
   const dependencies = {
+    "./github-connect-authorization": githubAuthorization,
+    "./index-routes-auth-space-management": { linkGitHubInstallation: () => assert.fail("only GitHub Connect links installations") },
     "./connectors/sentry-installation": { sentryInstallationClient },
+    "./connectors/gmail-poll-oauth": { gmailPollCallback },
     "./connectors/teams-native": { teamsNativeApp: () => undefined },
     "./connectors/googlechat-native": { googleChatNativeApp: () => undefined },
     "./connectors/feishu-native": { feishuNativeApp: () => undefined },
@@ -146,8 +152,12 @@ test("the callback writes credentials only after verified state, provider scope 
     "./connectors/wecom-suite": { wecomNativeSuite: () => undefined },
     "./connectors/dingtalk-native": { dingtalkNativeCompany: () => undefined },
     "./app-connection-check": { checkAppConnection: async () => { effects.push("check"); return { ok: checkPasses }; } },
+    "./billing-paid-calls": { paidXCalls: () => { throw new Error("Vercel must not call X billing"); },
+      paidCallRepository: () => { throw new Error("Vercel must not call X billing"); } },
+    "./admin-platform-access": { platformAdminSpaceId: () => "operator-space" },
     "./app-connectors": { getAppConnectorProvider: () => client.manifest },
-    "./connectors/credentials": { INGRESS_KEY_FIELD: "ingressKey", mintConnectorSecret: () => "fixture-ingress", connectorCredentialRepository: () => ({ put: async () => { effects.push("credentials"); } }) },
+    "./connectors/credentials": { INGRESS_KEY_FIELD: "ingressKey", mintConnectorSecret: () => "fixture-ingress", connectorCredentialRepository: () => ({
+      authorizeAdmin: async () => {}, put: async () => { effects.push("credentials"); } }) },
     "./connectors/oauth": {
       verifyOAuthState: async () => validState ? { client, spaceId: "space-vercel", userId: "admin" } : undefined,
       exchangeOAuthGrant: async () => { effects.push("exchange"); return { fields }; },
@@ -155,12 +165,15 @@ test("the callback writes credentials only after verified state, provider scope 
     },
     "./connectors/vercel-api": { vercelCompletionUrl },
     "./connectors/gmail-mailboxes": { addConnectedMailbox: async () => assert.fail("only a Gmail Connect adds a mailbox") },
+    "./connectors/x-accounts": { connectXAccount: async () => assert.fail("only an X Connect adds an X account") },
+    "./connectors/cloudflare-api": { connectCloudflareLogin: async () => assert.fail("only a Cloudflare Connect adds a login") },
     "./deployment-origins": { appOrigin: () => "https://xmatrix.test" },
     "./index-shared": { connectorHubOrigin: () => "https://hub.test", requireAuth: async () => ({}),
       requireHumanAuth: () => ({ id: signedIn }), jsonErrors: async (_context, run) => run() },
     "@xmatrix/protocol": { HUB_ROUTES: { connector_oauth_complete: "/api/connectors/oauth/complete" } },
     "@xmatrix/db": { ControlError: class ControlError extends Error {} },
     "./apps": { upsertAppConnection: async () => { effects.push("connection"); return {}; } },
+    "./usage-cost-metering": metering,
   };
   runInNewContext(code, { exports, require: name => { assert.ok(dependencies[name], name); return dependencies[name]; }, crypto, URL, console });
   let complete;

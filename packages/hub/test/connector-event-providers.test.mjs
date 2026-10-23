@@ -367,7 +367,7 @@ test("webhook receivers prove deliveries only through deliveryProven", () => {
   const files = readdirSync(source, { recursive: true }).filter((file) => String(file).endsWith(".ts"));
   /* Files that sign outgoing requests or state, or verify a scheme that is not a header HMAC or token. */
   const signers = new Set(["index-shared.ts", "connectors/delivery-proof.ts", "connectors/oauth-pkce.ts",
-    "connectors/actions/chat-webhooks.ts", "connectors/wave2-events.ts"]);
+    "connectors/actions/chat-webhooks.ts", "connectors/wave2-events.ts", "connectors/x-media.ts"]);
   for (const file of files) {
     const text = readFileSync(new URL(String(file), source), "utf8");
     if (/\bhmac(?:Hex|Bytes)\(/u.test(text)) assert.ok(signers.has(String(file).replaceAll("\\", "/")), `${file} computes an HMAC itself`);

@@ -20,8 +20,13 @@ NoProfile does not bypass this setup. Native exit codes are returned to the
 calling provider.
 
 The entrypoints are exact links/copies of the running CLI in its managed config
-directory; only two fixed names are retained. A new CLI replaces them atomically;
-if an active command prevents replacement, launch fails with a retry instruction.
+directory, under a subdirectory keyed by the executable's SHA-256 digest. Each
+revision has at most two fixed shell names, reused by concurrent launches.
+New CLI revisions install separate entrypoints, so an active command cannot
+block an upgrade's Agent launch. Old revision directories and legacy fixed-path
+entrypoints remain untouched because retained Runs may still reference them;
+launch does not scan or delete other revisions. Within the current revision,
+unavailable shell aliases retain the existing retirement behavior.
 Real shell targets are resolved before PATH is changed and propagated explicitly,
 so nested launches do not recursively invoke the entrypoints. No OS installation,
 registry change, global profile edit, or system code-page migration is required.

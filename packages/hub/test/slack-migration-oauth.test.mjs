@@ -59,7 +59,7 @@ test("the Slack callback hands the grant to the signed-in app and escapes a deni
 
   const denied = await app.request(`${HUB_ROUTES.slack_oauth_callback}?error=${encodeURIComponent("<script>x</script>")}`, {}, env);
   assert.equal(denied.status, 400);
-  assert.doesNotMatch(await denied.text(), /<script>/u);
+  assert.doesNotMatch(await denied.text(), /<script/iu);
 });
 
 test("only the user who started the grant can approve it, and nobody else's attempt spends the code", async () => {

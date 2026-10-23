@@ -1,5 +1,6 @@
 import { execFile, spawn, type ChildProcess } from "node:child_process";
 import fs from "node:fs";
+import { releaseNotesPath } from "@xmatrix/protocol";
 import { installAgentPreset } from "./agent-preset-install";
 import os from "node:os";
 import path from "node:path";
@@ -54,6 +55,8 @@ import {
 import type {
   DesktopAgentPresetDiscovery,
   DesktopAgentPresetInput,
+  DesktopDaemonFailure,
+  DesktopDaemonFailureStage,
   DesktopDaemonState,
   DesktopDaemonStatus,
   DesktopSetupStatus,
@@ -68,9 +71,18 @@ import {
   type DesktopNotificationPayload,
 } from "./notifications";
 import { readableUpdateErrorMessage, shouldShowUpdateRecovery } from "./update-errors";
-import { daemonFailureNeedsLogin } from "./daemon-failure";
+import { desktopUpdateFeedUrl, desktopWebUrl, isDesktopWebOrigin } from "./release-channel";
+import { daemonFailureNeedsLogin, redactDaemonDetail } from "./daemon-failure";
 import { DEFAULT_SHELL_BACKGROUND_COLOR, desktopTitleBarOptions } from "./window-chrome";
 import { planWindowOpen } from "./window-navigation";
+import { signInServiceId } from "./sign-in-services";
+import { signInWithWindow } from "./sign-in-window";
+import {
+  authorizeInBrowser,
+  hubSignInStartUrl,
+  isRedirectParam,
+  type BrowserAuthorizationRequest,
+} from "./browser-authorization";
 import {
   aggregateBadge,
   appSpaceKey,
@@ -81,7 +93,6 @@ import {
 } from "./window-registry";
 
 const APP_PROTOCOL = "xmatrix";
-const DEFAULT_WEB_URL = "https://xmatrix.sh/app";
 const CLI_INSTALL_URL = "https://xmatrix.sh/docs";
 const MANUAL_DOWNLOAD_URL = "https://xmatrix.sh/download";
 const UPDATE_CHECK_DELAY_MS = 15_000;
@@ -152,6 +163,12 @@ let daemonHeartbeatInFlight = false;
 let daemonRestartTimer: NodeJS.Timeout | null = null;
 let daemonKeepAliveEnabled = false;
 let daemonStartInFlight: Promise<DesktopDaemonStatus> | null = null;
+/** Why the last start failed; shown and reported until the daemon runs again. */
+let lastDaemonFailure: DesktopDaemonFailure | null = null;
+/** Installing the seed failed: keep-alive restarts leave it until the person retries. */
+let seedInstallFailure: { message: string; failure: DesktopDaemonFailure } | null = null;
+/** The CLI reported this Machine has no name yet (session import): setup from the seed names it. */
+let machineNameRequired = false;
 let appIsQuitting = false;
 type DesktopLocalProfileSelection =
   | { mode: "follow-default" }
@@ -181,11 +198,12 @@ if (!singleInstanceLock) {
 
 app.setName("xMatrix");
 
+/** The page a window opens: this build's channel's Web, unless a development override names another. */
 function getStartUrl(): string {
   return normalizeAppUrl(
     process.env.XMATRIX_DESKTOP_DEV_URL ||
       process.env.XMATRIX_DESKTOP_WEB_URL ||
-      DEFAULT_WEB_URL
+      desktopWebUrl(app.getVersion())
   );
 }
 
@@ -219,12 +237,9 @@ function isTrustedAppUrl(value: string): boolean {
   }
 }
 
+/** This build's own channel's Web; an override of the start page never widens this. */
 function isTrustedWebOrigin(url: URL): boolean {
-  return url.protocol === "https:" && (
-    url.hostname === "xmatrix.sh" ||
-    url.hostname === "www.xmatrix.sh" ||
-    url.hostname === "test.xmatrix.sh"
-  );
+  return isDesktopWebOrigin(url, app.getVersion());
 }
 
 function isLocalDevOrigin(url: URL): boolean {
@@ -969,7 +984,9 @@ function setDaemonStatus(
   state: DesktopDaemonState,
   status: Partial<Omit<DesktopDaemonStatus, "state" | "updatedAt">> = {}
 ) {
-  daemonStatus = createDaemonStatus(state, status);
+  if (state === "running" || state === "stopped") lastDaemonFailure = null;
+  else if (status.failure) lastDaemonFailure = status.failure;
+  daemonStatus = createDaemonStatus(state, { ...status, ...(lastDaemonFailure ? { failure: lastDaemonFailure } : {}) });
   sendDaemonStatus();
   return getDaemonStatus();
 }
@@ -1016,6 +1033,14 @@ function daemonLoginRequiredMessage(output: string) {
     "xMatrix daemon needs a fresh CLI session. Sign in from the desktop app or run xmatrix login.",
     summary,
   ].filter(Boolean).join(" ");
+}
+
+function daemonFailure(stage: DesktopDaemonFailureStage, output: string, exitCode?: number | null): DesktopDaemonFailure {
+  return {
+    stage,
+    detail: redactDaemonDetail(output, app.getPath("home")),
+    ...(typeof exitCode === "number" && Number.isSafeInteger(exitCode) ? { exitCode } : {}),
+  };
 }
 
 function daemonExitMessage(message: string, output: string) {
@@ -1194,10 +1219,10 @@ function flushPendingNotificationReplies() {
  * a missed message.
  */
 function askToNotifyOnce() {
-  const asked = path.join(app.getPath("userData"), "notifications-asked");
-  if (fs.existsSync(asked) || !Notification.isSupported()) return;
+  if (!Notification.isSupported()) return;
   try {
-    fs.writeFileSync(asked, new Date().toISOString());
+    // "wx" fails when the marker exists, so the question is asked only once.
+    fs.writeFileSync(path.join(app.getPath("userData"), "notifications-asked"), new Date().toISOString(), { flag: "wx" });
     new Notification({
       title: "xMatrix notifications are on",
       body: "You will be told here when something is addressed to you.",
@@ -1317,6 +1342,8 @@ function showUpdateNotification(payload?: DesktopNotificationPayload) {
 function configureAutoUpdates() {
   autoUpdater.autoDownload = true;
   autoUpdater.autoInstallOnAppQuit = true;
+  // The packaged app-update.yml names the stable feed; a beta build follows dev.
+  autoUpdater.setFeedURL({ provider: "generic", url: desktopUpdateFeedUrl(app.getVersion()) });
 
   autoUpdater.on("checking-for-update", () => {
     checkingForUpdates = true;
@@ -1335,7 +1362,10 @@ function configureAutoUpdates() {
         type: "info",
         message: "xMatrix update found",
         detail: `Version ${info.version} is downloading in the background.`,
-        buttons: ["OK"],
+        buttons: ["OK", "Release notes"],
+      }).then((response) => {
+        const notesPath = releaseNotesPath(info.version);
+        if (response.response === 1 && notesPath) openExternalUrl(`https://xmatrix.sh${notesPath}`);
       });
     }
     manualUpdateCheck = false;
@@ -1380,12 +1410,15 @@ function configureAutoUpdates() {
         type: "info",
         message: "xMatrix update is ready",
         detail: `Version ${info.version} has been downloaded. Restart xMatrix to install it now.`,
-        buttons: ["Restart", "Later"],
+        buttons: ["Restart", "Later", "Release notes"],
         defaultId: 0,
         cancelId: 1,
       }).then((response) => {
         if (response.response === 0) {
           installDownloadedUpdate();
+        } else if (response.response === 2) {
+          const notesPath = releaseNotesPath(info.version);
+          if (notesPath) openExternalUrl(`https://xmatrix.sh${notesPath}`);
         }
       });
     }
@@ -1608,29 +1641,16 @@ async function installCliFromDesktopSeed(): Promise<DesktopCliInstallResult> {
     env: { ...process.env, PATH: augmentPath(process.env.PATH) },
   });
   if (result.ok) {
+    seedInstallFailure = null;
+    machineNameRequired = false;
     await startDaemonBestEffort();
+  } else {
+    // The same failure as the automatic install: shown with its lines and
+    // reported, not only returned to the button that asked.
+    seedInstallFailure = { message: result.message, failure: daemonFailure("cli_install", result.message, result.exitCode) };
+    setDaemonStatus("error", seedInstallFailure);
   }
   return result;
-}
-
-function switchClientEnvironment(environment: unknown): Promise<{ environment: "production" | "test" }> {
-  if (environment !== "production" && environment !== "test") {
-    return Promise.reject(new Error("Unknown xMatrix environment."));
-  }
-  const executable = resolveCliExecutable();
-  if (!executable) {
-    return Promise.reject(new Error("Install or update the xMatrix CLI before switching environments."));
-  }
-  return new Promise((resolve, reject) => {
-    execFile(executable, ["environment", "use", environment], { timeout: 15_000 }, (error, stdout, stderr) => {
-      if (error) {
-        reject(new Error((stderr || stdout || error.message).trim()));
-        return;
-      }
-      void publishDefaultProfileChanged();
-      resolve({ environment });
-    });
-  });
 }
 
 function augmentPath(value?: string) {
@@ -1786,6 +1806,10 @@ async function importCliSessionPayload(
         : "Update the xMatrix daemon once to enable live session reload.",
     );
   }
+  // A Machine still without a name (an earlier install stopped at naming,
+  // before the CLI named new Machines after their hostname) is set up again
+  // from the seed, which names it, the next time the daemon is started.
+  machineNameRequired = outcome.daemon === "machine-name-required";
   if (requireDaemon && outcome.daemon === "machine-name-required") {
     throw new Error("Name this machine in setup before starting the daemon.");
   }
@@ -1935,14 +1959,18 @@ function powershellSingleQuoted(value: string) {
 }
 
 function runWindowsDaemonTaskCommand(scriptBody: string): Promise<boolean> {
-  if (process.platform !== "win32") return Promise.resolve(false);
+  return runWindowsDaemonTaskCommandOutcome(scriptBody).then((outcome) => outcome.started);
+}
+
+function runWindowsDaemonTaskCommandOutcome(scriptBody: string): Promise<ManagedStart> {
+  if (process.platform !== "win32") return Promise.resolve({ started: false, output: "" });
 
   return new Promise((resolve) => {
     execFile(
       "powershell",
       ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", scriptBody],
       { timeout: 5_000 },
-      (error) => resolve(!error)
+      (error, stdout, stderr) => resolve({ started: !error, output: `${stdout || ""}${stderr || ""}` })
     );
   });
 }
@@ -1953,8 +1981,8 @@ function windowsDaemonTaskIsInstalled(): Promise<boolean> {
   );
 }
 
-function startWindowsDaemonTaskIfInstalled(): Promise<boolean> {
-  return runWindowsDaemonTaskCommand(
+function startWindowsDaemonTaskIfInstalled(): Promise<ManagedStart> {
+  return runWindowsDaemonTaskCommandOutcome(
     [
       "$ErrorActionPreference='Stop'",
       `$taskName=${powershellSingleQuoted(WINDOWS_DAEMON_TASK_NAME)}`,
@@ -1964,11 +1992,16 @@ function startWindowsDaemonTaskIfInstalled(): Promise<boolean> {
   );
 }
 
-async function finishInstalledDaemonStartup(started: boolean, errorMessage: string, waitingMessage: string) {
-  if (!started) return setDaemonStatus("error", { message: errorMessage });
+type ManagedStart = { started: boolean; output: string; exitCode?: number };
+
+async function finishInstalledDaemonStartup(start: ManagedStart, errorMessage: string, notUpMessage: string) {
+  if (!start.started) {
+    return setDaemonStatus("error", { message: errorMessage, failure: daemonFailure("service_start", start.output, start.exitCode) });
+  }
+  const since = Date.now();
   const existing = await waitForExistingDaemonProcess();
   if (existing) return runningLocalDaemonStatus(existing.pid, true);
-  return setDaemonStatus("starting", { message: waitingMessage });
+  return setDaemonStatus("error", { message: notUpMessage, failure: daemonFailure("service_not_up", managedDaemonLogTail(since)) });
 }
 
 async function startWindowsDaemonTaskIfAvailable(options: { force?: boolean } = {}) {
@@ -1990,7 +2023,7 @@ async function startWindowsDaemonTaskIfAvailable(options: { force?: boolean } = 
   const started = await startWindowsDaemonTaskIfInstalled();
   return finishInstalledDaemonStartup(started,
     "xMatrix daemon task is installed, but Windows could not start it.",
-    "xMatrix daemon scheduled task is starting; waiting for the daemon lock owner...",
+    "Windows started the xMatrix daemon task, but the daemon did not come up.",
   );
 }
 
@@ -2012,16 +2045,41 @@ function macDaemonLaunchAgentIsInstalled(): Promise<boolean> {
   });
 }
 
-function kickstartMacDaemonLaunchAgent(options: { force?: boolean } = {}): Promise<boolean> {
+function kickstartMacDaemonLaunchAgent(options: { force?: boolean } = {}): Promise<ManagedStart> {
   const target = macDaemonLaunchAgentTarget();
-  if (!target) return Promise.resolve(false);
+  if (!target) return Promise.resolve({ started: false, output: "" });
 
   const args = ["kickstart", ...(options.force ? ["-k"] : []), target];
   return new Promise((resolve) => {
-    execFile("launchctl", args, { timeout: 5_000 }, (error) => {
-      resolve(!error);
+    execFile("launchctl", args, { timeout: 5_000 }, (error, stdout, stderr) => {
+      const code: unknown = (error as { code?: unknown } | null)?.code;
+      resolve({
+        started: !error,
+        output: `${stdout || ""}${stderr || ""}${error ? `\n${error.message}` : ""}`,
+        ...(typeof code === "number" ? { exitCode: code } : {}),
+      });
     });
   });
+}
+
+/** The managed service's own log, as far as it was written since `since`. */
+function managedDaemonLogTail(since: number): string {
+  if (process.platform !== "darwin") return "";
+  const logPath = path.join(app.getPath("home"), "Library", "Logs", "xmatrix-daemon.err.log");
+  let handle: number | undefined;
+  try {
+    handle = fs.openSync(logPath, "r");
+    const stat = fs.fstatSync(handle);
+    if (stat.mtimeMs < since - 1_000) return "";
+    const length = Math.min(stat.size, DAEMON_OUTPUT_MAX_CHARS);
+    const buffer = Buffer.alloc(length);
+    const read = fs.readSync(handle, buffer, 0, length, stat.size - length);
+    return buffer.subarray(0, read).toString("utf8");
+  } catch {
+    return "";
+  } finally {
+    if (handle !== undefined) fs.closeSync(handle);
+  }
 }
 
 async function startMacDaemonLaunchAgentIfAvailable(options: { force?: boolean } = {}) {
@@ -2037,7 +2095,7 @@ async function startMacDaemonLaunchAgentIfAvailable(options: { force?: boolean }
   const started = await kickstartMacDaemonLaunchAgent(options);
   return finishInstalledDaemonStartup(started,
     "xMatrix daemon LaunchAgent is installed, but macOS could not start it.",
-    "xMatrix daemon LaunchAgent is starting; waiting for the daemon lock owner...",
+    "macOS started the xMatrix daemon LaunchAgent, but the daemon did not come up.",
   );
 }
 
@@ -2086,11 +2144,46 @@ async function startDaemonBestEffortInner() {
   }
 
   const executable = resolveCliExecutable();
+  if (!executable || !path.isAbsolute(executable) || machineNameRequired) {
+    const seeded = await installSeedCliForDaemon();
+    if (seeded) return seeded;
+  }
   if (!executable) {
     return setDaemonStatus("missing", {
       message: "xMatrix CLI was not found. Install the xMatrix CLI to run the local daemon.",
     });
   }
+  return spawnDaemon(executable);
+}
+
+/**
+ * A fresh App has no installed CLI: it signs in through its seed, but nothing
+ * on PATH can run the daemon. Once signed in, it installs the seed, which
+ * registers the login-session service, and starts that. A failed install waits
+ * for the person's retry rather than repeating on every keep-alive check.
+ */
+async function installSeedCliForDaemon(): Promise<DesktopDaemonStatus | null> {
+  const seedPath = desktopCliSeedPath({ resourcesPath: process.resourcesPath, platform: process.platform });
+  if (!selectedCliContext?.session || !fs.existsSync(seedPath)) return null;
+  if (seedInstallFailure) return setDaemonStatus("error", seedInstallFailure);
+  setDaemonStatus("starting", { message: "Installing the xMatrix CLI from this App..." });
+  const result = await installCliFromSeed({
+    seedPath,
+    platform: process.platform,
+    env: { ...process.env, PATH: augmentPath(process.env.PATH) },
+  });
+  if (!result.ok) {
+    seedInstallFailure = { message: result.message, failure: daemonFailure("cli_install", result.message, result.exitCode) };
+    return setDaemonStatus("error", seedInstallFailure);
+  }
+  machineNameRequired = false;
+  return (await startMacDaemonLaunchAgentIfAvailable())
+    ?? (await startWindowsDaemonTaskIfAvailable())
+    ?? (await findExistingDaemonProcess().then((found) => found ? runningLocalDaemonStatus(found.pid, true) : null))
+    ?? spawnDaemon(result.installedPath);
+}
+
+function spawnDaemon(executable: string) {
   setDaemonStatus("starting", { message: `Starting xMatrix daemon from ${executable}...` });
   try {
     daemonProcess = spawn(executable, ["daemon"], {
@@ -2100,7 +2193,7 @@ async function startDaemonBestEffortInner() {
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Could not start xMatrix daemon.";
-    setDaemonStatus("error", { message });
+    setDaemonStatus("error", { message, failure: daemonFailure("spawn", message) });
     scheduleDaemonRestart("Could not start xMatrix daemon; retrying...");
     return getDaemonStatus();
   }
@@ -2129,10 +2222,12 @@ async function startDaemonBestEffortInner() {
     const message = missing
       ? "xmatrix CLI was not found on PATH."
       : daemonExitMessage(error.message || "Could not start xMatrix daemon.", daemonOutput);
+    const needsLogin = daemonFailureNeedsLogin(`${message} ${daemonOutput}`);
     setDaemonStatus(missing ? "missing" : "error", {
       message,
+      ...(!missing && !needsLogin ? { failure: daemonFailure("spawn", `${daemonOutput}\n${error.message}`) } : {}),
     });
-    if (!missing && !daemonFailureNeedsLogin(`${message} ${daemonOutput}`)) {
+    if (!missing && !needsLogin) {
       scheduleDaemonRestart("xMatrix daemon start failed; retrying...");
     }
   });
@@ -2153,9 +2248,27 @@ async function startDaemonBestEffortInner() {
       });
       return;
     }
-    setDaemonStatus(code === 0 || signal ? "stopped" : "error", {
-      message: daemonExitMessage(message, daemonOutput),
-    });
+    if (code !== 0 && !signal) {
+      // The local service the setup registered stops older daemons when it
+      // starts its own (Windows ends them with 0xFFFFFFFF): this one was
+      // replaced, not broken. Only a daemon nobody replaced has failed.
+      void findExistingDaemonProcess().then((found) => {
+        if (daemonProcess) return;
+        if (found) {
+          runningLocalDaemonStatus(found.pid, true);
+          return;
+        }
+        setDaemonStatus("error", {
+          message: daemonExitMessage(message, daemonOutput),
+          failure: daemonFailure("exit", daemonOutput, code),
+        });
+      }, () => setDaemonStatus("error", {
+        message: daemonExitMessage(message, daemonOutput),
+        failure: daemonFailure("exit", daemonOutput, code),
+      }));
+    } else {
+      setDaemonStatus("stopped", { message: daemonExitMessage(message, daemonOutput) });
+    }
     scheduleDaemonRestart(
       signal
         ? daemonExitMessage("xMatrix daemon stopped unexpectedly; restarting daemon...", daemonOutput)
@@ -2166,6 +2279,12 @@ async function startDaemonBestEffortInner() {
   });
 
   return getDaemonStatus();
+}
+
+/** The person asked to start it again: a failed seed install is tried again too. */
+function retryDaemonStart() {
+  seedInstallFailure = null;
+  return startDaemonBestEffort();
 }
 
 async function stopDaemon(options: { disableKeepAlive?: boolean } = {}) {
@@ -2194,6 +2313,7 @@ async function stopDaemon(options: { disableKeepAlive?: boolean } = {}) {
 }
 
 async function restartDaemon() {
+  seedInstallFailure = null;
   enableDaemonKeepAlive();
   clearDaemonRestartTimer();
 
@@ -2502,10 +2622,22 @@ function collectWorkspacePathsFromJson(value: unknown, output: Set<string>): voi
   }
 }
 
+/** The file's text, or "" when it is missing, unreadable or over `maxBytes`. */
+async function readSmallFile(filePath: string, maxBytes: number): Promise<string> {
+  const handle = await fs.promises.open(filePath, "r").catch(() => null);
+  if (!handle) return "";
+  try {
+    const { size } = await handle.stat();
+    return size > maxBytes ? "" : await handle.readFile("utf8");
+  } catch {
+    return "";
+  } finally {
+    await handle.close();
+  }
+}
+
 async function scanJsonWorkspaceFile(filePath: string, output: Set<string>): Promise<void> {
-  const stat = await fs.promises.stat(filePath).catch(() => null);
-  if (!stat || stat.size > 2_000_000) return;
-  const raw = await fs.promises.readFile(filePath, "utf8").catch(() => "");
+  const raw = await readSmallFile(filePath, 2_000_000);
   if (!raw) return;
   const isJsonl = filePath.endsWith(".jsonl");
   for (const line of raw.split(/\r?\n/).slice(0, 2_000)) {
@@ -2802,12 +2934,9 @@ function registerIpcHandlers() {
   ipcMain.handle("desktop:install-cli", secureIpc(() => installCliFromDesktopSeed()));
 
   ipcMain.handle("desktop:get-daemon-status", secureIpc(() => getDaemonStatus()));
-  ipcMain.handle("desktop:start-daemon", secureIpc(() => startDaemonBestEffort()));
+  ipcMain.handle("desktop:start-daemon", secureIpc(() => retryDaemonStart()));
   ipcMain.handle("desktop:stop-daemon", secureIpc(() => stopDaemon()));
   ipcMain.handle("desktop:restart-daemon", secureIpc(() => restartDaemon()));
-  ipcMain.handle("desktop:switch-environment", secureIpc((_event, environment: unknown) =>
-    switchClientEnvironment(environment)
-  ));
   ipcMain.handle("desktop:get-setup-status", secureIpc(() => getDesktopSetupStatus()));
   ipcMain.handle("desktop:save-setup-status", secureIpc((_event, status: DesktopSetupStatus) =>
     saveDesktopSetupStatus(status)
@@ -2826,6 +2955,28 @@ function registerIpcHandlers() {
     revealWorkspacePath(workspacePath)
   ));
   ipcMain.handle("desktop:check-runtime", secureIpc((_event, runtime: string) => checkRuntime(runtime)));
+  ipcMain.handle("desktop:service-sign-in", secureIpc((event, service: unknown, options: unknown) => {
+    const id = signInServiceId(service);
+    if (!id) throw new Error("Unknown sign-in service");
+    const fresh = typeof options === "object" && options !== null && (options as { fresh?: unknown }).fresh === true;
+    return signInWithWindow(id, BrowserWindow.fromWebContents(event.sender), { fresh });
+  }));
+
+  ipcMain.handle("desktop:authorize-in-browser", secureIpc((event, request: unknown) => {
+    const { url, redirectParam } = (typeof request === "object" && request !== null ? request : {}) as
+      Partial<BrowserAuthorizationRequest>;
+    const start = hubSignInStartUrl(url, { allowLocal: !app.isPackaged });
+    if (!start || !isRedirectParam(redirectParam)) throw new Error("Not an xMatrix sign-in page");
+    const window = BrowserWindow.fromWebContents(event.sender);
+    return authorizeInBrowser(start, redirectParam, (page) => shell.openExternal(page), () => {
+      // The browser answered: bring the app that asked back in front of it.
+      if (window && !window.isDestroyed()) {
+        if (window.isMinimized()) window.restore();
+        window.show();
+        window.focus();
+      }
+    });
+  }));
 
   ipcMain.handle("desktop:check-for-updates", secureIpc(() => checkForUpdates(true)));
   ipcMain.handle("desktop:get-update-status", secureIpc(() => getUpdateStatus()));

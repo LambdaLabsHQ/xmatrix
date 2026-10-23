@@ -333,6 +333,22 @@ fn spawn_space_rules_page_comes_only_from_the_launch() {
 }
 
 #[test]
+fn spawn_connected_apps_come_only_from_the_launch() {
+    let mut env = std::collections::BTreeMap::new();
+    env.insert("XMATRIX_CONNECTED_APPS".to_string(), "Stale".to_string());
+    let cleared = super::apply_spawn_connected_apps(env.clone(), &[]).unwrap();
+    assert!(!cleared.contains_key("XMATRIX_CONNECTED_APPS"));
+
+    let apps = vec!["Gmail".to_string(), "App Store Connect".to_string()];
+    let env = super::apply_spawn_connected_apps(env, &apps).unwrap();
+    assert_eq!(
+        env.get("XMATRIX_CONNECTED_APPS").map(String::as_str),
+        Some("Gmail\nApp Store Connect")
+    );
+    assert!(super::apply_spawn_connected_apps(env, &["Gmail\nrm -rf ~".to_string()]).is_err());
+}
+
+#[test]
 fn spawn_env_scrubs_retired_role_values_from_older_state() {
     // A Run resumed from state an older daemon wrote may still carry the
     // retired Role reminder, skills, App requirements, or Role avatar.
@@ -366,7 +382,7 @@ use super::protocol::{
     MessageSender, SerializedAgent,
 };
 use super::{
-    AcpSession, AcpTransportKind, AcpVendorConfig, AgentPresentationAdapter,
+    AcpSession, AcpVendorConfig, AgentPresentationAdapter,
     AgentPresentationFacts, AgentRuntimeStateTracker, CodexAppSession, CodexThreadActivity,
     CodexThreadActivityEvent, CodexTransportKind, CodexTransportRecoveryState,
     DAEMON_COMMAND_ADMISSION_REQUEST_TIMEOUT_SECS, DAEMON_COMMAND_LEASE_RENEW_FAILURE_WINDOW_SECS,
@@ -384,10 +400,10 @@ use super::{
     cached_attachment_fetch_path, claim_daemon_spawn, claude_stream_boundaries_from_line,
     codex_app_agent_env, codex_app_error_is_transient_transport, codex_app_error_message,
     codex_app_spawn_args, codex_auth_failure_requires_exit, codex_config_model_from_str,
-    codex_failure_local_output, codex_goal_dynamic_tools, codex_goal_is_paused,
+    codex_failure_local_output, codex_goal_dynamic_tools,
     codex_goal_set_patch_from_tool_arguments, codex_goal_status_from_app_event,
     codex_goal_status_from_get_response, codex_goal_status_from_response, codex_goal_turn_payload,
-    codex_is_primary_output_phase, codex_model_catalog_from_response, codex_paused_goal_notice,
+    codex_is_primary_output_phase, codex_model_catalog_from_response,
     codex_primary_output_phase, codex_raw_response_delta_text, codex_raw_response_message_text,
     codex_reconnect_attempts, codex_reconnect_wait_timeout, codex_reconnect_wait_timeout_error,
     codex_response_item_id, codex_resume_goal_objective, codex_resume_session_path,
@@ -399,14 +415,14 @@ use super::{
     daemon_broker_binding_from_values, daemon_managed_workspace_cwd,
     daemon_restart_waits_for_lock_from_env, daemon_run_exit_detail,
     daemon_run_exit_from_status_file, daemon_self_update_timeout, daemon_spawn_claim_key,
-    daemon_spawn_cwd_from_values, daemon_spawn_uses_claude_print, daemon_workspace_is_management,
+    daemon_spawn_cwd_from_values, daemon_spawn_uses_claude_print,
     decode_channel_image_attachment_data_url, default_downstream_kkp_flags,
     drain_pending_inbound_channel_messages, drain_ready_inbound_channel_messages,
     encode_submission_enter, event_requests_active_turn_interrupt, external_registration_cwd,
     extract_llm_usage, finish_agent_disconnect, format_incoming_channel_message,
     format_incoming_channel_message_with_context, format_incoming_channel_message_with_local_paths,
     generic_acp_spawn_args, goal_resume_turn_payload, grok_acp_spawn_args,
-    grok_resume_session_path, grok_ws_url_from_banner_line,
+    grok_resume_session_path, StderrTail, with_stderr_tail,
     headless_identity_runtime_mismatch_from_values, image_extension_for_mime_type,
     inbound_channel_message_from_event, inbound_delivery_batch_max_messages_from_env,
     is_bounded_retryable_session_register_error, is_claude_code_agent, is_claude_launcher_token,
@@ -422,11 +438,6 @@ use super::{
     validate_codex_app_cwd, write_daemon_run_status_marker_to_path, write_local_image_files,
     zcode_app_error_message, zcode_cancel_notification, zcode_goal_active_input_id,
     zcode_goal_state_from_value, zcode_is_session_event, zcode_message_id_matches,
-};
-#[cfg(target_os = "macos")]
-use super::{
-    agent_sandbox_temp_grants, agent_sandbox_temp_grants_from_candidates,
-    reject_agent_sandbox_temp_grant,
 };
 #[cfg(unix)]
 use super::{daemon_capability_key, take_daemon_agent_auth_grant};
@@ -546,30 +557,6 @@ fn headless_wrapper_fails_closed_when_no_exact_executable_remains() {
 }
 
 #[test]
-fn management_run_workspaces_are_isolated_per_run() {
-    let first =
-        super::daemon_management_run_workspace_cwd("space-1", Some("run-1"), Some("exec-1"))
-            .expect("first management Run cwd");
-    let same = super::daemon_management_run_workspace_cwd("space-1", Some("run-1"), Some("exec-1"))
-        .expect("stable management Run cwd");
-    let second =
-        super::daemon_management_run_workspace_cwd("space-1", Some("run-2"), Some("exec-2"))
-            .expect("second management Run cwd");
-
-    assert_eq!(first, same);
-    assert_ne!(first, second);
-    assert_eq!(first.parent(), second.parent());
-    assert_eq!(
-        first
-            .file_name()
-            .and_then(|value| value.to_str())
-            .map(str::len),
-        Some(32)
-    );
-    assert!(super::daemon_management_run_workspace_cwd("space-1", None, Some("exec-1")).is_err());
-}
-
-#[test]
 fn daemon_grok_runs_disable_shared_leader_processes() {
     assert_eq!(
         super::daemon_isolated_runtime_args("grok", &[]).expect("default Grok args"),
@@ -661,20 +648,6 @@ fn daemon_managed_workspace_cwd_rejects_path_traversal() {
             "accepted {value:?}"
         );
     }
-}
-
-#[test]
-fn only_management_workspace_metadata_enables_management_projection() {
-    assert!(daemon_workspace_is_management(Some(&serde_json::json!({
-        "syntheticManagementWorkspace": true
-    }))));
-    assert!(!daemon_workspace_is_management(Some(&serde_json::json!({
-        "syntheticManagementWorkspace": false
-    }))));
-    assert!(!daemon_workspace_is_management(Some(&serde_json::json!({
-        "syntheticManagementWorkspace": "true"
-    }))));
-    assert!(!daemon_workspace_is_management(None));
 }
 
 fn assert_workspace_spawn_env(
@@ -790,62 +763,6 @@ fn grok_resume_session_path_is_stable_for_key() {
     assert_ne!(a, c);
     assert!(a.to_string_lossy().contains("grok-resume"));
 }
-
-// macOS-only temp-grant allow-roots logic; rejects e.g. /tmp on Linux CI.
-#[cfg(target_os = "macos")]
-#[test]
-fn macos_sandbox_temp_grants_are_narrow_and_deduplicated() {
-    let temp_root = fs::canonicalize(std::env::temp_dir()).unwrap();
-    let tmp_root = fs::canonicalize("/tmp").unwrap();
-    let grants = agent_sandbox_temp_grants_from_candidates([
-        temp_root.clone(),
-        tmp_root.clone(),
-        tmp_root.clone(),
-    ])
-    .unwrap();
-
-    assert!(grants.rw_dirs.contains(&temp_root));
-    assert!(grants.rw_dirs.contains(&tmp_root));
-    assert_eq!(
-        grants
-            .rw_dirs
-            .iter()
-            .filter(|path| **path == tmp_root)
-            .count(),
-        1
-    );
-    for broad in [
-        "/",
-        "/var",
-        "/private",
-        "/private/var",
-        "/private/var/folders",
-        "/private/var/tmp",
-        "/opt",
-    ] {
-        assert!(
-            reject_agent_sandbox_temp_grant(Path::new(broad)).is_err(),
-            "{broad} should not be accepted as a temp grant"
-        );
-    }
-}
-
-// macOS-only temp-grant allow-roots logic; rejects e.g. /tmp on Linux CI.
-#[cfg(target_os = "macos")]
-#[test]
-fn macos_sandbox_temp_grants_reject_existing_non_temp_dirs() {
-    let root = std::env::current_dir()
-        .unwrap()
-        .join("target")
-        .join(format!("xmatrix-sandbox-non-temp-{}", uuid::Uuid::new_v4()));
-    fs::create_dir_all(&root).unwrap();
-    let result = agent_sandbox_temp_grants_from_candidates([root.clone()]);
-
-    assert!(result.is_err());
-    let _ = fs::remove_dir_all(root);
-}
-
-// macOS-only temp-grant allow-roots logic; rejects e.g. /tmp on Linux CI.
 
 fn test_serialized_agent(name: &str) -> SerializedAgent {
     SerializedAgent {
@@ -1917,7 +1834,7 @@ fn terminal_report_rejection_survives_the_hub_rewriting_the_authority_code() {
     // code with its generic one. Recognising this is the difference between
     // dropping a dead run and re-sending its exit forever.
     assert!(daemon_report_terminal_rejection(&CliError::Http(
-        "The Workstation request could not be processed. \
+        "The Machine request could not be processed. \
          (code=runtime.authority_rejected, retryable=false, status=404)"
             .into()
     )));
@@ -1927,14 +1844,14 @@ fn terminal_report_rejection_survives_the_hub_rewriting_the_authority_code() {
 fn a_report_that_could_still_succeed_is_never_treated_as_terminal() {
     // Retryable, so the run is still ours and the report must be re-sent.
     assert!(!daemon_report_terminal_rejection(&CliError::Http(
-        "The Workstation request could not be processed. \
+        "The Machine request could not be processed. \
          (code=runtime.authority_rejected, retryable=true, status=503)"
             .into()
     )));
     // Non-retryable, but not a missing run: an authorization change must not
     // silently discard the exit of a run that still exists.
     assert!(!daemon_report_terminal_rejection(&CliError::Http(
-        "The Workstation request could not be processed. \
+        "The Machine request could not be processed. \
          (code=runtime.authority_rejected, retryable=false, status=403)"
             .into()
     )));
@@ -2340,4 +2257,38 @@ async fn a_rebuilt_runtime_does_not_wait_forever_for_its_session_exchange() {
     // An explicit token still starts the daemon, without a refreshable session.
     assert!(matches!(state, Ok(None)));
     server.abort();
+}
+
+// Protect the spawn authority boundary: inherited/local text must never replace
+// official Hub documents, and unsupported Hub payloads must fail before spawn.
+#[test]
+fn spawn_bootstrap_templates_replace_inherited_overrides_and_fail_closed() {
+    use xmatrix_cli_core::bootstrap_prompts::{BootstrapPrompts, ENV};
+    let env = std::collections::BTreeMap::from([
+        (ENV.to_string(), "stale Hub body".to_string()),
+        (
+            "XMATRIX_BOOTSTRAP_PROMPT".to_string(),
+            "local override".to_string(),
+        ),
+        (
+            "XMATRIX_DISABLE_BOOTSTRAP_PROMPT".to_string(),
+            "1".to_string(),
+        ),
+    ]);
+    let cleared = super::apply_spawn_bootstrap_prompts(env.clone(), None).unwrap();
+    assert!(cleared.is_empty());
+    let mut prompts = BootstrapPrompts {
+        bootstrap: "fresh Hub body {agent_name}".into(),
+        ..BootstrapPrompts::default()
+    };
+    let applied = super::apply_spawn_bootstrap_prompts(env, Some(&prompts)).unwrap();
+    assert_eq!(applied.len(), 1);
+    assert_eq!(
+        BootstrapPrompts::from_json(&applied[ENV])
+            .unwrap()
+            .bootstrap,
+        "fresh Hub body {agent_name}"
+    );
+    prompts.schema_version = 42;
+    assert!(super::apply_spawn_bootstrap_prompts(applied, Some(&prompts)).is_err());
 }

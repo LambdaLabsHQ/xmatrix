@@ -3,7 +3,7 @@ const test = require("node:test");
 require("./typescript-require.cjs").installTypeScriptRequire();
 
 const {
-  connectStep, defaultInstallPlatform, listNames, setupInstallCommand,
+  connectStep, defaultInstallPlatform, setupInstallCommand, terminalInstallPlatform,
 } = require("./connect-machine.ts");
 
 const INTENT = "0123456789abcdef0123456789abcdef";
@@ -59,8 +59,9 @@ test("the installed harnesses are reported, whatever the Space already has", () 
     { kind: "none-installed", machineName: "Laptop" });
 });
 
-test("names read as a sentence", () => {
-  assert.equal(listNames(["Claude Code"]), "Claude Code");
-  assert.equal(listNames(["Claude Code", "Codex"]), "Claude Code and Codex");
-  assert.equal(listNames(["Claude Code", "Codex", "Gemini"]), "Claude Code, Codex and Gemini");
+test("a signed-in terminal's own platform picks the installers it is shown", () => {
+  assert.equal(terminalInstallPlatform("windows-x86_64"), "windows");
+  assert.equal(terminalInstallPlatform("macos-aarch64"), "unix");
+  assert.equal(terminalInstallPlatform("linux-x86_64"), "unix");
+  assert.equal(terminalInstallPlatform(undefined), undefined);
 });

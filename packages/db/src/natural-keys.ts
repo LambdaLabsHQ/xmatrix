@@ -9,7 +9,7 @@ import type { DatabaseTransaction } from "./contracts.js";
  * ids, then writes rows under those ids.
  */
 
-export type NaturalKeyScope = "instance" | "run" | "about";
+export type NaturalKeyScope = "instance" | "run";
 
 export interface NaturalKeyReservation {
   channelId: string;
@@ -31,7 +31,7 @@ const LEGACY_ORDINAL_BASE = "8000000000000000";
 
 async function bump(tx: DatabaseTransaction, channelId: string, scope: string, count: number,
   floorSql: string): Promise<number> {
-  const name = scope === "instance" || scope === "about" ? scope : "run";
+  const name = scope === "instance" ? scope : "run";
   const rows = await tx.query<{ last_value: string | number }>({ name: `natural_key_counter_bump_${name}_v1`,
     text: `INSERT INTO data.natural_key_counters AS counter (channel_id,scope,last_value)
       VALUES ($1,$2,COALESCE((${floorSql}),0)+$3)
@@ -65,9 +65,8 @@ export async function instanceOrdinalFor(tx: DatabaseTransaction, channelId: str
 
 /**
  * Reserves the key for one creation. `instance` starts a new Instance at run 1;
- * `run` starts the next Run of an existing Instance; `about` starts the next
- * Channel About Run. Replaying a creation key returns its first reservation
- * and refuses a different Channel, scope or Instance.
+ * `run` starts the next Run of an existing Instance. Replaying a creation key
+ * returns its first reservation and refuses a different Channel, scope or Instance.
  */
 export async function reserveNaturalKey(tx: DatabaseTransaction, input: {
   creationKey: string; channelId: string; scope: NaturalKeyScope; channelInstanceId?: number; at: string;
@@ -80,8 +79,7 @@ export async function reserveNaturalKey(tx: DatabaseTransaction, input: {
   if (prior) {
     const reservation = keyed(prior.channel_id, prior.channel_instance_id === null ? null : Number(prior.channel_instance_id),
       Number(prior.run_ordinal));
-    const expectedInstance = input.scope === "about" ? null
-      : input.scope === "run" ? input.channelInstanceId ?? null : reservation.channelInstanceId;
+    const expectedInstance = input.scope === "run" ? input.channelInstanceId ?? null : reservation.channelInstanceId;
     if (reservation.channelId !== input.channelId || reservation.channelInstanceId !== expectedInstance ||
         (input.scope === "instance" && reservation.runOrdinal !== 1)) throw new NaturalKeyError("natural_key_mismatch");
     return reservation;
@@ -90,8 +88,6 @@ export async function reserveNaturalKey(tx: DatabaseTransaction, input: {
   let runOrdinal = 1;
   if (input.scope === "instance") {
     channelInstanceId = await allocateInstanceOrdinals(tx, input.channelId, 1);
-  } else if (input.scope === "about") {
-    runOrdinal = await bump(tx, input.channelId, "about", 1, "SELECT NULL::bigint");
   } else {
     channelInstanceId = input.channelInstanceId ?? 0;
     const exists = await tx.query({ name: "natural_key_reservation_instance_v1", text: `SELECT 1 FROM data.instances

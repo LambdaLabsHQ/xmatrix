@@ -10,6 +10,7 @@ import { xmatrixQueryKeys } from "@/lib/query/query-keys";
 import { pageApi, type PageDocument } from "@/lib/pages/page-client";
 import { pageStatusLine, ReferenceChip } from "@/components/dashboard/page-reference-chip";
 import { InlineRowPreview } from "@/components/dashboard/inline-row-preview";
+import { discussionTitle } from "@/components/dashboard/selection-discussion";
 
 const MAX_CARDS = 4;
 
@@ -132,8 +133,11 @@ function useSectionChange({ spaceId, page, blockId, token }: {
  * says now. Hovering previews the section; a click opens the page. On a phone
  * the channel's Summary plaque carries them instead, so this line is md+ only.
  */
-export function ConversationPageCards({ spaceId, conversationId, token, onOpenPage, excludePageId = null }: {
+export function ConversationPageCards({ spaceId, conversationId, conversationName = null, token, onOpenPage,
+  excludePageId = null }: {
   spaceId: string; conversationId: string; token: string; onOpenPage: (pageId: string) => void;
+  /** The conversation's own title, which a discussion's bookmark does not repeat. */
+  conversationName?: string | null;
   /** Beside a page, that page is already in view. */
   excludePageId?: string | null;
 }) {
@@ -144,19 +148,22 @@ export function ConversationPageCards({ spaceId, conversationId, token, onOpenPa
       data-testid="conversation-page-cards">
       {pages.map((entry) => (
         <ConversationPageBookmark key={entry.pageId} spaceId={spaceId} token={token} entry={entry}
-          onOpen={() => onOpenPage(entry.pageId)} />
+          conversationName={conversationName} onOpen={() => onOpenPage(entry.pageId)} />
       ))}
     </nav>
   );
 }
 
-function ConversationPageBookmark({ spaceId, token, entry: { page, section, blockId, quote }, onOpen }: {
-  spaceId: string; token: string; entry: ConversationPage; onOpen: () => void;
+function ConversationPageBookmark({ spaceId, token, entry: { page, section, blockId, quote: passage }, conversationName,
+  onOpen }: {
+  spaceId: string; token: string; entry: ConversationPage; conversationName: string | null; onOpen: () => void;
 }) {
   const change = useSectionChange({ spaceId, page, blockId, token });
   const heading = section ? `${page.title} › ${section.title}` : page.title;
   const now = pageStatusLine(page, blockId);
-  // A discussion is about its passage; otherwise the last change, else what the section says now.
+  // A discussion is about its passage, unless its title already says it; otherwise the last change,
+  // else what the section says now.
+  const quote = passage && conversationName !== discussionTitle(passage) ? passage : null;
   const detail = quote ? `“${quote}”` : change?.text ?? (now || "—");
   return (
     <ReferenceChip

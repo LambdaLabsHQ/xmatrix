@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 
 const root = new URL("../../../", import.meta.url);
 
@@ -8,9 +8,10 @@ const root = new URL("../../../", import.meta.url);
 export function sourceOffenders(dirs, offends) {
   const offenders = [];
   const walk = (dir) => {
-    for (const name of readdirSync(dir)) {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const name = entry.name;
       const path = new URL(name, dir);
-      if (statSync(path).isDirectory()) {
+      if (entry.isDirectory()) {
         if (name !== "node_modules" && name !== "dist") walk(new URL(`${name}/`, dir));
       } else if (/\.tsx?$/u.test(name) && !/\.test\.tsx?$/u.test(name)) {
         const relative = path.pathname.slice(root.pathname.length);

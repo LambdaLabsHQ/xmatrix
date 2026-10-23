@@ -53,8 +53,20 @@ export async function appCommand(env: SubscriptionIndexEnv, kind: AppCommandKind
     kind));
 }
 
+/**
+ * Record the GitHub user GitHub Connect named as the one handing these
+ * installations to the Space; only installations it links now are recorded.
+ */
+export async function recordGitHubInstallationLinks(env: PostgresAuthorityBindingEnv, input: {
+  spaceId: string; actorUserId: string; githubUserId: number; installationIds: string[];
+}): Promise<string[]> {
+  return (await appRepository(env).recordGitHubInstallationLinks({ requestId: crypto.randomUUID(), ...input,
+    at: new Date().toISOString() })).recorded;
+}
+
 /** One of a Space's app connections, as a user who may see it reads it. */
-export function getAppConnection(env: PostgresAuthorityBindingEnv, input: { connectionId: string; actorUserId: string; allowMissing?: boolean }) {
+export function getAppConnection(env: PostgresAuthorityBindingEnv, input: { connectionId: string; actorUserId: string;
+  channelId?: string; use?: boolean; allowMissing?: boolean }) {
   return appRepository(env).getConnection({ requestId: crypto.randomUUID(), ...input });
 }
 
@@ -76,7 +88,7 @@ export async function findAppConnection(env: PostgresAuthorityBindingEnv, input:
 
 /** Every app connection of a Space a user may see, following the cursor. */
 export async function listAppConnections(env: PostgresAuthorityBindingEnv, input: {
-  spaceId: string; actorUserId: string; channelId?: string;
+  spaceId: string; actorUserId: string; channelId?: string; use?: boolean;
 }): Promise<Record<string, unknown>[]> {
   const repository = appRepository(env);
   const connections: Record<string, unknown>[] = [];
@@ -87,6 +99,30 @@ export async function listAppConnections(env: PostgresAuthorityBindingEnv, input
     cursor = page.cursor;
   } while (cursor);
   return connections;
+}
+
+/** Why a Human who may read the Channel still cannot act with its Space's connections. */
+export const CONNECTED_APPS_NEED_MEMBER = "only Space members use its connected apps; viewers and participants cannot";
+
+/** The authority refused to let this Human act with the Space's connections: their role only reads them. */
+export function connectionUseRefused(error: unknown): boolean {
+  return error instanceof AppControlError && (error.code === "space_not_found" || error.code === "channel_not_found");
+}
+
+/**
+ * The connections a Human may act with in this Channel, or `undefined` when
+ * their role only reads them there: a viewer, or a participant, who writes in
+ * their intake but, as with the Space's secrets, does not use its credentials.
+ */
+export async function usableAppConnections(env: PostgresAuthorityBindingEnv, input: {
+  spaceId: string; actorUserId: string; channelId: string;
+}): Promise<Record<string, unknown>[] | undefined> {
+  try {
+    return await listAppConnections(env, { ...input, use: true });
+  } catch (error) {
+    if (connectionUseRefused(error)) return undefined;
+    throw error;
+  }
 }
 
 /** Every app source relation of a Channel its principal may see, following the cursor. */

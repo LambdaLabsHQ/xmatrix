@@ -42,7 +42,7 @@ pub fn render_channel_read_context(
     threads: &[OpenedChannelThread],
 ) -> String {
     // Escape markup delimiters so user-authored text cannot forge mirror record markers.
-    let mut output = String::from("## Channel context (read-only)\n");
+    let mut output = String::from(CHANNEL_CONTEXT_HEADING);
     if let Some(summary) = summary.filter(|value| !value.trim().is_empty()) {
         let written = source.map(summary_source_label).unwrap_or_default();
         output.push_str(&format!("\nSummary ({written}derived; may lag recent messages; where it contradicts the transcript or the thread list below, they win):\n"));
@@ -52,14 +52,33 @@ pub fn render_channel_read_context(
     } else {
         output.push_str("\nSummary: unavailable.\n");
     }
-    if !threads.is_empty() {
-        output.push_str("\nOpened threads (root message → thread Channel; continue thread-specific work there). Every root message listed here has been picked up, so never report it as unclaimed:\n");
-        for thread in threads {
-            let value = serde_json::to_string(thread).expect("thread fields serialize");
-            output.push_str(&format!("  {}\n", value.replace('<', "\\u003c")));
-        }
-    }
+    push_opened_threads(&mut output, threads);
     output
+}
+
+/// The same block without its Summary, for a reader that is also given the
+/// whole transcript: the Summary is derived from that transcript and adds
+/// nothing to it. `None` when no thread is left to list.
+pub fn render_channel_threads_context(threads: &[OpenedChannelThread]) -> Option<String> {
+    if threads.is_empty() {
+        return None;
+    }
+    let mut output = String::from(CHANNEL_CONTEXT_HEADING);
+    push_opened_threads(&mut output, threads);
+    Some(output)
+}
+
+const CHANNEL_CONTEXT_HEADING: &str = "## Channel context (read-only)\n";
+
+fn push_opened_threads(output: &mut String, threads: &[OpenedChannelThread]) {
+    if threads.is_empty() {
+        return;
+    }
+    output.push_str("\nOpened threads (root message → thread Channel; continue thread-specific work there). Every root message listed here has been picked up, so never report it as unclaimed:\n");
+    for thread in threads {
+        let value = serde_json::to_string(thread).expect("thread fields serialize");
+        output.push_str(&format!("  {}\n", value.replace('<', "\\u003c")));
+    }
 }
 
 /// `by <agent> through #<sequence> at <time>; `: who wrote a summary and how far it reads.
@@ -120,7 +139,7 @@ mod tests {
     #[test]
     fn the_context_names_who_wrote_the_summary_and_how_far_it_reads() {
         let source: ChannelSummarySource = serde_json::from_value(serde_json::json!({
-            "author": { "kind": "run", "runId": "run-1", "agentName": "claude" },
+            "author": { "kind": "task", "agentName": "claude" },
             "generatedAt": "2026-10-02T08:57:23.000Z",
             "throughSequence": 65,
         }))

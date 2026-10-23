@@ -14,9 +14,10 @@ import {
   MachineDaemonConnectionController,
   type MachineDaemonConnectionPort,
 } from "../connections/machine-daemon/controller";
-import { RuntimeClientOperationError } from "./runtime-operation-failure";
+import { RuntimeClientOperationError, supersededMachineDaemonConnection } from "./runtime-operation-failure";
 import { RuntimeSocketState } from "./ordered-socket-dispatch";
 import {
+  MACHINE_DAEMON_CATALOG_HEAL_INTERVAL_MS,
   parseMachineDaemonHibernationAttachment,
   serializeMachineDaemonHibernationAttachment,
   type MachineDaemonHibernationAttachment,
@@ -48,6 +49,7 @@ export const MACHINE_DAEMON_AUTHORITY_REQUIRED_CAPABILITIES = [
   "machine_harness_action_result",
   "machine_worktree_action_result",
   "machine_text_task_result",
+  "machine_sleep_result",
   "machine_command_admitted",
   "reverse_command_delivery",
   "disconnect",
@@ -102,6 +104,12 @@ export interface MachineDaemonRuntimeSession {
   lastSeenAt: string;
   /** Present only while a replacement daemon is fenced from route ownership. */
   activationPhase?: MachineDaemonActivationReceipt["phase"];
+  /**
+   * When this socket may next correct a catalog row that says offline. It rides
+   * the hibernation attachment: waking the object for a frame is not by itself a
+   * reason to read the catalog again.
+   */
+  catalogHealNotBefore?: string;
 }
 
 export interface MachineDaemonRouteIdentity {
@@ -146,6 +154,11 @@ export interface MachineDaemonSocketBackend {
     session: Readonly<MachineDaemonRuntimeSession>,
     details: { code?: number; reason?: string; wasClean?: boolean },
   ): void | Promise<void>;
+  /**
+   * A live socket is proof this connection is online. Catalog offline left
+   * behind by a missed wake is corrected without replacing the socket.
+   */
+  confirmOnline?(session: Readonly<MachineDaemonRuntimeSession>): Promise<void>;
 }
 
 export class MachineDaemonAuthorityCapabilityError extends Error {
@@ -163,6 +176,9 @@ type RouteCloseReason =
   | typeof MACHINE_DAEMON_ROUTE_CLOSE.replacedByRehydrate
   | typeof MACHINE_DAEMON_ROUTE_CLOSE.selfHealedDuplicate
   | typeof MACHINE_DAEMON_ROUTE_CLOSE.failedDeliver;
+
+/** A reverse claim outlived its exact socket binding; never a client request. */
+class MachineDaemonDeliveryBindingLost extends Error {}
 
 /**
  * Pure Authority composition for `/ws/machine-daemons`.
@@ -230,6 +246,7 @@ export class MachineDaemonRuntimeTransport {
       reportHarnessAction: (ws, message) => this.sockets.ordered.schedule(this.dispatch(ws, message)),
       reportWorktreeAction: (ws, message) => this.sockets.ordered.schedule(this.dispatch(ws, message)),
       reportTextTask: (ws, message) => this.sockets.ordered.schedule(this.dispatch(ws, message)),
+      reportSleep: (ws, message) => this.sockets.ordered.schedule(this.dispatch(ws, message)),
       reportWorktreeCleanup: (ws, message) => this.sockets.ordered.schedule(this.dispatch(ws, message)),
       renewCommandLease: (ws, message) => this.sockets.ordered.schedule(this.dispatch(ws, message)),
       admitCommand: (ws, message) => this.sockets.ordered.schedule(this.dispatch(ws, message)),
@@ -248,9 +265,46 @@ export class MachineDaemonRuntimeTransport {
     const input = decodeMachineDaemonConnectionInput(frame, this.controller.socket.isConnected(ws));
     if (input.ok && input.message.type === "ping") {
       this.controller.handleFrame(ws, frame);
+      this.scheduleCatalogHeal(ws);
       return Promise.resolve();
     }
+    this.scheduleCatalogHeal(ws);
     return this.sockets.ordered.run(ws, () => this.controller.handleFrame(ws, frame));
+  }
+
+  /**
+   * The socket is attached, so this connection is online even if a missed
+   * wake wrote the catalog offline. The pong and the caller's frame are not
+   * delayed on the catalog write. A heal that finishes after the socket is
+   * gone unregisters that same generation, so it cannot resurrect a replaced
+   * connection. One check per interval is enough: the daemon's probes wake
+   * this object every minute, and each wake would otherwise cost a catalog
+   * transaction that almost always finds the row already online.
+   */
+  private scheduleCatalogHeal(ws: WebSocket): void {
+    const confirm = this.backend.confirmOnline;
+    if (!confirm) return;
+    const session = this.sockets.get(ws);
+    if (!session || session.activationPhase) return;
+    const now = Date.now();
+    if (session.catalogHealNotBefore && Date.parse(session.catalogHealNotBefore) > now) return;
+    session.catalogHealNotBefore = new Date(now + MACHINE_DAEMON_CATALOG_HEAL_INTERVAL_MS).toISOString();
+    void confirm(session).then(() => {
+      if (this.sockets.get(ws) === session) return;
+      return this.backend.disconnected(session, {
+        code: MACHINE_DAEMON_ROUTE_CLOSE.failedDeliver.code,
+        reason: "catalog heal lost its socket",
+        wasClean: false,
+      });
+    }).catch((error: unknown) => {
+      // The socket's next frame tries again.
+      delete session.catalogHealNotBefore;
+      console.warn("Machine Daemon catalog heal failed", {
+        ownerUserId: session.principal.ownerUserId,
+        machineId: session.principal.machineId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
   }
 
   /**
@@ -405,9 +459,6 @@ export class MachineDaemonRuntimeTransport {
           return;
         }
         delivered = await this.backend.claimPending(session, async (message) => {
-          if (this.sockets.get(ws) !== session || !isWebSocketOpen(ws)) {
-            throw new Error("Machine Daemon pending-command delivery binding is stale");
-          }
           this.sendForSession(ws, session, message);
         });
         if (delivered > 0) session.lastSeenAt = new Date().toISOString();
@@ -475,6 +526,7 @@ export class MachineDaemonRuntimeTransport {
 
   private async dispatch(ws: WebSocket, message: ExecutableMachineDaemonMessage): Promise<void> {
     const requestId = "requestId" in message ? message.requestId : undefined;
+    let superseded = false;
     await this.sockets.authenticatedOperation(ws, requestId, "Machine Daemon", MACHINE_DAEMON_FAILURE_COPY.report, async (session) => {
       const activationMessage = message.type === "machine_activation_prepare" ||
         message.type === "machine_activation_advance";
@@ -484,7 +536,10 @@ export class MachineDaemonRuntimeTransport {
       if (!session.activationPhase && activationMessage) {
         throw new RuntimeClientOperationError("machine_activation_context_required");
       }
-      const output = await this.backend.execute(session, message);
+      const output = await this.backend.execute(session, message).catch((error: unknown) => {
+        superseded = supersededMachineDaemonConnection(error);
+        throw error;
+      });
       this.sockets.sendOutput(ws, output);
       const receipt = activationReceiptFromOutput(output);
       if (receipt) session.activationPhase = receipt.phase;
@@ -505,9 +560,8 @@ export class MachineDaemonRuntimeTransport {
           message.type === "machine_stop_result" ||
           message.type === "machine_run_snapshot" && message.snapshotComplete === true)
       ) {
-        // These reports can issue Channel About successors (a partial snapshot
-        // only records progress and never does). Claiming on this
-        // same frame avoids a Runtime→Runtime wake fetch that would deadlock
+        // Work issued while these reports were applied is claimed on this same
+        // frame, which avoids a Runtime→Runtime wake fetch that would deadlock
         // the isolate. Activation and other inbound frames must not catch-up
         // here: StableGranted already does that once.
         await this.catchUpReverseDelivery(ws, session);
@@ -521,6 +575,11 @@ export class MachineDaemonRuntimeTransport {
         this.onConfirmedInstanceStop?.(message.instanceId.trim());
       }
     });
+    // Nothing this connection sends can pass the epoch fence again. Close it as
+    // the replaced connection it is; the newer one keeps the route online.
+    if (superseded && this.sockets.has(ws)) {
+      this.evictRouteSocket(ws, MACHINE_DAEMON_ROUTE_CLOSE.replacedByConnect);
+    }
   }
 
   private async refresh(ws: WebSocket, message: Message<"refresh_auth">): Promise<void> {
@@ -540,12 +599,24 @@ export class MachineDaemonRuntimeTransport {
   ): Promise<void> {
     // Connect already runs inside this socket's ordered frame. Enqueuing the
     // delivery behind that same frame would deadlock it while awaiting itself.
-    await this.backend.connected?.(session, async (message) => this.sendForSession(ws, session, message));
+    try {
+      await this.backend.connected?.(session, async (message) => this.sendForSession(ws, session, message));
+    } catch (error) {
+      if (!(error instanceof MachineDaemonDeliveryBindingLost)) throw error;
+      // The backend has attempted to release the unsent batch. A replaced socket already
+      // lost its route: do not unregister its successor or answer its old
+      // connect frame. A closed current owner must leave presence too.
+      const current = this.sockets.get(ws) === session;
+      if (current) this.evictRouteSocket(ws, MACHINE_DAEMON_ROUTE_CLOSE.failedDeliver);
+      console.warn("Machine Daemon catch-up lost its delivery binding", {
+        reason: current ? "closed" : "replaced",
+      });
+    }
   }
 
   private sendForSession(ws: WebSocket, session: Readonly<MachineDaemonRuntimeSession>, message: MachineDaemonServerMessage): void {
     if (this.sockets.get(ws) !== session || !isWebSocketOpen(ws)) {
-      throw new RuntimeClientOperationError("machine_delivery_binding_stale");
+      throw new MachineDaemonDeliveryBindingLost("Machine Daemon reverse delivery binding was lost");
     }
     this.sockets.send(ws, message);
   }

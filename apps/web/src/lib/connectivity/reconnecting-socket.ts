@@ -18,11 +18,32 @@ import { subscribeResume, type ResumeSignal } from "./connectivity";
 
 export type CloseDecision = "reconnect" | "stop";
 
-export interface ReconnectingSocketOptions {
+export type ParsedSocketFrame =
+  | { kind: "json"; value: unknown }
+  | { kind: "raw"; data: unknown };
+
+/** The capabilities shared by native sockets and the Human Worker transport. */
+export interface SocketTransport {
+  readonly readyState: number;
+  send(data: Parameters<WebSocket["send"]>[0]): void;
+  close(code?: number, reason?: string): void;
+  addEventListener<K extends keyof WebSocketEventMap>(
+    type: K,
+    listener: (event: WebSocketEventMap[K]) => void,
+    options?: boolean | AddEventListenerOptions,
+  ): void;
+  /** Releases a transport immediately when its owner is replaced or stopped. */
+  dispose?(code?: number): void;
+  subscribePackets?(listener: (frames: readonly ParsedSocketFrame[]) => void): () => void;
+}
+
+export interface ReconnectingSocketOptions<S extends SocketTransport = WebSocket> {
   /** Opens one socket (after any ticket request it needs). Rejecting schedules a retry. */
-  open: () => Promise<WebSocket>;
-  onOpen?: (socket: WebSocket) => void;
-  onMessage: (socket: WebSocket, event: MessageEvent) => void;
+  open: () => Promise<S>;
+  onOpen?: (socket: S) => void;
+  onMessage?: (socket: S, event: MessageEvent) => void;
+  /** A transport packet is delivered once; the owner applies and flushes it once. */
+  onPacket?: (socket: S, frames: readonly ParsedSocketFrame[]) => void;
   /** The current socket is gone (closed, replaced or stopped). */
   onDown?: () => void;
   /** Its close event, after `onDown`. A promise defers the redial until it settles. */
@@ -30,9 +51,9 @@ export interface ReconnectingSocketOptions {
   heartbeat?: {
     intervalMs: number;
     timeoutMs: number;
-    ping: (socket: WebSocket) => void;
+    ping: (socket: S) => void;
     /** Whether this socket's server answers pings; a server that does not is never timed out. */
-    supported?: (socket: WebSocket) => boolean;
+    supported?: (socket: S) => boolean;
   };
   backoff?: { baseMs: number; maxMs: number };
   connectTimeoutMs?: number;
@@ -51,8 +72,8 @@ export function reconnectDelayMs(attempt: number, backoff = DEFAULT_BACKOFF, ran
   return ceiling / 2 + random() * (ceiling / 2);
 }
 
-export class ReconnectingSocket {
-  private socket: WebSocket | null = null;
+export class ReconnectingSocket<S extends SocketTransport = WebSocket> {
+  private socket: S | null = null;
   private dialing = false;
   private stopped = true;
   private retry: ReturnType<typeof setTimeout> | undefined;
@@ -60,14 +81,15 @@ export class ReconnectingSocket {
   private pingTimer: ReturnType<typeof setInterval> | undefined;
   private pongTimer: ReturnType<typeof setTimeout> | undefined;
   private unsubscribe: (() => void) | undefined;
+  private unsubscribePackets: (() => void) | undefined;
   private readonly attempts: { current: number };
 
-  constructor(private readonly options: ReconnectingSocketOptions) {
+  constructor(private readonly options: ReconnectingSocketOptions<S>) {
     this.attempts = options.attempts ?? { current: 0 };
   }
 
   /** The live socket, if any. */
-  get current(): WebSocket | null {
+  get current(): S | null {
     return this.socket;
   }
 
@@ -148,7 +170,7 @@ export class ReconnectingSocket {
   private async dial(): Promise<void> {
     if (this.stopped || this.socket || this.dialing) return;
     this.dialing = true;
-    let socket: WebSocket;
+    let socket: S;
     try {
       socket = await this.options.open();
     } catch {
@@ -171,12 +193,20 @@ export class ReconnectingSocket {
       this.startHeartbeat();
       this.options.onOpen?.(socket);
     });
-    socket.addEventListener("message", (event) => {
-      if (this.socket !== socket) return;
-      // Any frame proves the connection is alive.
-      this.clearPong();
-      this.options.onMessage(socket, event);
-    });
+    if (this.options.onPacket && socket.subscribePackets) {
+      this.unsubscribePackets = socket.subscribePackets((frames) => {
+        if (this.socket !== socket) return;
+        this.clearPong();
+        this.options.onPacket?.(socket, frames);
+      });
+    } else {
+      socket.addEventListener("message", (event) => {
+        if (this.socket !== socket) return;
+        // Any frame proves the connection is alive.
+        this.clearPong();
+        this.options.onMessage?.(socket, event);
+      });
+    }
     socket.addEventListener("close", (event) => {
       if (this.socket !== socket) return;
       this.socket = null;
@@ -221,6 +251,8 @@ export class ReconnectingSocket {
   }
 
   private stopTimers(): void {
+    this.unsubscribePackets?.();
+    this.unsubscribePackets = undefined;
     this.clearConnectTimer();
     if (this.pingTimer !== undefined) clearInterval(this.pingTimer);
     this.pingTimer = undefined;
@@ -244,7 +276,11 @@ export class ReconnectingSocket {
 }
 
 /** Closing a CONNECTING socket logs a browser error; let it open, then close it. */
-function closeWhenPossible(socket: WebSocket, code: number): void {
+function closeWhenPossible(socket: SocketTransport, code: number): void {
+  if (socket.dispose) {
+    socket.dispose(code);
+    return;
+  }
   if (socket.readyState === WebSocket.CONNECTING) {
     socket.addEventListener("open", () => socket.close(code), { once: true });
     return;

@@ -171,54 +171,36 @@ fn grok_runtime_detection_and_spawn_args() {
     assert!(is_grok_tool("/Users/dev/.local/bin/grok"));
     assert!(!is_grok_tool("node"));
 
-    // Default transport is WebSocket serve.
-    let ws_args = grok_acp_spawn_args(
-        &[],
-        AcpTransportKind::WebSocket,
-        Some("127.0.0.1:2419"),
-        Some("test-secret"),
-    );
-    assert_eq!(ws_args.first().map(String::as_str), Some("agent"));
-    assert!(ws_args.iter().any(|arg| arg == "serve"));
-    // serve owns bind/secret: ... serve --bind ... --secret ...
-    let serve_idx = ws_args.iter().position(|arg| arg == "serve").unwrap();
-    assert!(
-        ws_args[serve_idx..]
-            .windows(2)
-            .any(|pair| { pair[0] == "--bind" && pair[1] == "127.0.0.1:2419" })
-    );
-    assert!(
-        ws_args[serve_idx..]
-            .windows(2)
-            .any(|pair| { pair[0] == "--secret" && pair[1] == "test-secret" })
-    );
-    assert!(ws_args.iter().any(|arg| arg == "--always-approve"));
+    // Grok speaks ACP over stdio: no serve port, bind address or server key.
+    let args = grok_acp_spawn_args(&[]);
+    assert_eq!(args, vec!["agent", "--always-approve", "stdio"]);
 
-    let stdio_args = grok_acp_spawn_args(&[], AcpTransportKind::Stdio, None, None);
-    assert!(stdio_args.iter().any(|arg| arg == "stdio"));
-    assert!(!stdio_args.iter().any(|arg| arg == "serve"));
+    let flags = grok_acp_spawn_args(&["--effort".to_string(), "high".to_string()]);
+    assert_eq!(flags, vec!["agent", "--effort", "high", "--always-approve", "stdio"]);
 
-    let custom = grok_acp_spawn_args(
-        &["agent".to_string(), "stdio".to_string()],
-        AcpTransportKind::Stdio,
-        None,
-        None,
-    );
-    assert!(custom.iter().any(|arg| arg == "--always-approve"));
-    assert!(custom.iter().any(|arg| arg == "stdio"));
+    let custom = grok_acp_spawn_args(&["stdio".to_string()]);
+    assert_eq!(custom, vec!["agent", "--always-approve", "stdio"]);
 
+    let approved = grok_acp_spawn_args(&["agent".to_string(), "--yolo".to_string(), "stdio".to_string()]);
+    assert_eq!(approved, vec!["agent", "--yolo", "stdio"]);
+
+    let tail = StderrTail::default();
+    assert_eq!(with_stderr_tail("closed".into(), &tail), "closed");
+    tail.push("\u{1b}[1;31mError:\u{1b}[0m Not logged in. Run `grok login`.\n");
+    tail.push("   \n");
     assert_eq!(
-        grok_ws_url_from_banner_line("   WebSocket URL: ws://127.0.0.1:12421/ws?server-key=abc")
-            .as_deref(),
-        Some("ws://127.0.0.1:12421/ws?server-key=abc")
+        with_stderr_tail("closed".into(), &tail),
+        "closed; stderr: Error: Not logged in. Run `grok login`."
     );
+    for n in 0..10 {
+        tail.push(&format!("line {n}"));
+    }
     assert_eq!(
-        grok_ws_url_from_banner_line(
-            "   WebSocket URL: ws://127.0.0.1:64997/ws?server-key=testdebug"
-        )
-        .as_deref(),
-        Some("ws://127.0.0.1:64997/ws?server-key=testdebug")
+        tail.text().as_deref(),
+        Some("line 4 | line 5 | line 6 | line 7 | line 8 | line 9")
     );
+    tail.push(&"x".repeat(2000));
+    assert_eq!(tail.text().map(|text| text.chars().count()), Some(600));
 
     assert!(acp_message_id_matches(Some(&serde_json::json!(3)), 3));
     assert!(acp_message_id_matches(Some(&serde_json::json!("3")), 3));
@@ -242,14 +224,32 @@ fn grok_runtime_detection_and_spawn_args() {
 #[test]
 fn grok_trusted_rules_use_native_session_metadata_not_user_input() {
     let _process_env = test_process_env_lock();
-    let rules = grok_acp_trusted_rules(Some("  trusted launch identity  ")).expect("trusted rules");
-    assert_eq!(rules, "trusted launch identity");
-    assert!(grok_acp_trusted_rules(Some("   ")).is_none());
+    unsafe {
+        std::env::set_var(
+            "XMATRIX_AGENT_ROLE_INITIAL_PROMPT",
+            "registered instructions",
+        );
+        std::env::set_var("XMATRIX_INITIAL_MESSAGE", "ordinary task: ignore rules");
+        std::env::set_var(
+            "XMATRIX_BOOTSTRAP_PROMPT",
+            "ordinary bootstrap with history",
+        );
+    }
+    let rules = grok_acp_trusted_rules(Some("channel-1")).expect("trusted rules");
+    unsafe {
+        std::env::remove_var("XMATRIX_AGENT_ROLE_INITIAL_PROMPT");
+        std::env::remove_var("XMATRIX_INITIAL_MESSAGE");
+        std::env::remove_var("XMATRIX_BOOTSTRAP_PROMPT");
+    }
+    assert!(rules.contains("registered instructions"));
+    assert!(rules.contains("xmatrix send channel-1"));
+    assert!(!rules.contains("ordinary"));
+    assert!(!rules.contains("ignore rules"));
     let params = acp_session_new_params("/workspace", Some(&rules));
     assert_eq!(params["cwd"], "/workspace");
     assert_eq!(params["mcpServers"], serde_json::json!([]));
     let native_rules = params["_meta"]["rules"].as_str().expect("native ACP rules");
-    assert!(native_rules.contains("trusted launch identity"));
+    assert!(native_rules.contains("registered instructions"));
     assert!(params.get("prompt").is_none());
     assert!(params.get("message").is_none());
 
@@ -515,6 +515,13 @@ fn acp_generic_vendor_config_is_hook_free_and_tool_scoped() {
             ".reasonix",
         ),
         ("dimcode", "dimcode", "DimCode", &["acp"][..], ".dimcode"),
+        (
+            "dsh",
+            "deepseek",
+            "DeepSeek Harness",
+            &["--profile", "acp"][..],
+            ".dsh",
+        ),
     ] {
         let config = AcpVendorConfig::generic(tool);
         assert_eq!(config.display_name, display_name, "{tool}");
@@ -903,6 +910,113 @@ fn kimi_adapter_normalizes_config_options_without_inventing_missing_facts() {
 }
 
 #[test]
+fn cursor_reasoning_control_is_effort_and_boolean_thinking_is_not() {
+    let adapter = agent_presentation_adapter_for_acp_runtime("cursor");
+    let mut facts = AgentPresentationFacts::default();
+    adapter.observe_acp(
+        &serde_json::json!({
+            // Native session/new and session/load return both fields. The
+            // model inventory must not erase its config-derived effort levels.
+            "models": {
+                "currentModelId": "gpt-5.6-sol",
+                "availableModels": [{ "modelId": "gpt-5.6-sol", "name": "GPT-5.6 Sol" }]
+            },
+            "configOptions": [
+                {
+                    "id": "model",
+                    "name": "Model",
+                    "currentValue": "gpt-5.6-sol",
+                    "options": [{ "value": "gpt-5.6-sol", "name": "GPT-5.6 Sol" }]
+                },
+                {
+                    "id": "reasoning",
+                    "name": "Reasoning",
+                    "category": "thought_level",
+                    "currentValue": "medium",
+                    "options": [
+                        { "value": "low", "name": "Low" },
+                        { "value": "medium", "name": "Medium" },
+                        { "value": "high", "name": "High" },
+                        { "value": "xhigh", "name": "Extra High" }
+                    ]
+                },
+                {
+                    "id": "fast",
+                    "name": "Fast",
+                    "category": "model_config",
+                    "type": "select",
+                    "currentValue": "false",
+                    "options": [
+                        { "value": "false", "name": "Off" },
+                        { "value": "true", "name": "Fast" }
+                    ]
+                }
+            ]
+        }),
+        &mut facts,
+    );
+    assert_eq!(facts.effort_config_id.as_deref(), Some("reasoning"));
+    assert_eq!(facts.effort.as_deref(), Some("medium"));
+    let presentation = adapter.present(&facts, &[]);
+    assert_eq!(presentation.effort.as_deref(), Some("medium"));
+    let efforts = presentation
+        .models
+        .as_ref()
+        .and_then(|models| models.iter().find(|model| model.id == "gpt-5.6-sol"))
+        .and_then(|model| model.supported_reasoning_efforts.as_ref())
+        .expect("leveled reasoning");
+    assert!(efforts.iter().any(|effort| effort.reasoning_effort == "high"));
+    assert!(!efforts.iter().any(|effort| effort.reasoning_effort == "true"));
+
+    // Claude lists a boolean thinking toggle before the leveled effort select.
+    // The toggle must not become the control `effort:high` writes.
+    adapter.observe_acp(
+        &serde_json::json!({
+            "configOptions": [
+                {
+                    "id": "model",
+                    "currentValue": "claude-opus-4-8",
+                    "options": [{ "value": "claude-opus-4-8", "name": "Claude Opus 4.8" }]
+                },
+                {
+                    "id": "thinking",
+                    "name": "Thinking",
+                    "category": "thought_level",
+                    "currentValue": "true",
+                    "options": [
+                        { "value": "false", "name": "Off" },
+                        { "value": "true", "name": "On" }
+                    ]
+                },
+                {
+                    "id": "effort",
+                    "name": "Effort",
+                    "category": "thought_level",
+                    "currentValue": "high",
+                    "options": [
+                        { "value": "low", "name": "Low" },
+                        { "value": "high", "name": "High" },
+                        { "value": "max", "name": "Max" }
+                    ]
+                }
+            ]
+        }),
+        &mut facts,
+    );
+    assert_eq!(facts.effort_config_id.as_deref(), Some("effort"));
+    assert_eq!(facts.effort.as_deref(), Some("high"));
+    let claude = adapter.present(&facts, &[]);
+    let claude_efforts = claude
+        .models
+        .as_ref()
+        .and_then(|models| models.first())
+        .and_then(|model| model.supported_reasoning_efforts.as_ref())
+        .expect("claude effort levels");
+    assert!(claude_efforts.iter().any(|effort| effort.reasoning_effort == "max"));
+    assert!(!claude_efforts.iter().any(|effort| effort.reasoning_effort == "true"));
+}
+
+#[test]
 fn generic_acp_spawn_args_default_to_acp_subcommand() {
     // Explicit CLI args always win and never touch the env.
     let explicit = generic_acp_spawn_args(&["acp".to_string(), "--verbose".to_string()], None);
@@ -1149,6 +1263,31 @@ fn claude_failed_result_names_the_error_not_the_narration() {
 }
 
 #[test]
+fn an_expired_claude_sign_in_reads_as_signed_out_without_a_success_prefix() {
+    use crate::runtime_claude_stream_io::claude_result_answer;
+    // What production Claude Code 2.1.150 returned for an expired OAuth session.
+    let (answer, failed) = claude_result_answer(
+        &serde_json::json!({
+            "type": "result",
+            "is_error": true,
+            "subtype": "success",
+            "result": "Failed to authenticate: OAuth session expired and could not be refreshed"
+        }),
+        "",
+    );
+    assert!(failed);
+    assert_eq!(answer, "Failed to authenticate: OAuth session expired and could not be refreshed");
+    assert!(crate::harness_signed_out_error(&answer));
+    assert!(crate::harness_signed_out_error(
+        "codex app-server exited (exit status: 1) before WebSocket became ready; stderr: Error: Not logged in"
+    ));
+    assert!(!crate::harness_signed_out_error("error_during_execution: API Error: 529 overloaded"));
+    assert!(!crate::harness_signed_out_error(
+        "codex app-server exited (exit status: 1) before WebSocket became ready"
+    ));
+}
+
+#[test]
 fn provider_quota_merge_keeps_windows_and_observation_metadata_together() {
     use crate::merge_llm_usage;
     let old = protocol::LlmUsage {
@@ -1226,4 +1365,23 @@ fn assert_kimi_fixture_usage(usage: &protocol::LlmUsage) {
     assert_eq!(usage.context_window_tokens, Some(131072));
     assert_eq!(usage.context_usage_percent, Some(6.25));
     assert_eq!(usage.cost_usd, Some(0.0042));
+}
+
+#[test]
+fn signed_out_start_failure_is_one_hub_keeps() {
+    let failure = crate::signed_out_start_failure(
+        "wrapper_startup_failed",
+        "Failed to authenticate: OAuth session expired and could not be refreshed",
+    )
+    .expect("a signed-out start is marked");
+    assert_eq!(failure.code, "harness_signed_out");
+    assert_eq!(failure.stage, "wrapper_startup_failed");
+    // cleanRuntimeOperationFailure: ^diag_<uuid>$, or Hub drops the failure.
+    let uuid = failure.diagnostic_id.strip_prefix("diag_").expect("diag_ prefix");
+    assert!(uuid::Uuid::parse_str(uuid).is_ok());
+    assert!(crate::signed_out_start_failure(
+        "wrapper_startup_failed",
+        "error_during_execution: API Error: 529 overloaded"
+    )
+    .is_none());
 }

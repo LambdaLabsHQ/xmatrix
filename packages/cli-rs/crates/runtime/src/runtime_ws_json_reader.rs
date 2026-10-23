@@ -131,7 +131,7 @@ impl ProviderInbox {
         }
     }
 
-    pub(crate) fn retryable(&self) -> bool {
+    pub fn retryable(&self) -> bool {
         self.failure
             .lock()
             .unwrap_or_else(|e| e.into_inner())

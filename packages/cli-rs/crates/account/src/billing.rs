@@ -48,7 +48,6 @@ pub async fn query(hub: &str, token: &str, query: Query, json: bool) -> Result<(
 pub fn page_url(hub: &str) -> Result<&'static str> {
     match hub.trim_end_matches('/') {
         protocol::DEFAULT_HUB_URL => Ok("https://xmatrix.sh/billing"),
-        protocol::TEST_HUB_URL => Ok("https://test.xmatrix.sh/billing"),
         _ => Err(CliError::Auth(
             "Custom Hub: open your deployment's billing page manually".into(),
         )),
@@ -156,10 +155,6 @@ mod tests {
         assert_eq!(
             page_url(protocol::DEFAULT_HUB_URL).unwrap(),
             "https://xmatrix.sh/billing"
-        );
-        assert_eq!(
-            page_url(protocol::TEST_HUB_URL).unwrap(),
-            "https://test.xmatrix.sh/billing"
         );
         assert!(page_url("https://example.com").is_err());
     }

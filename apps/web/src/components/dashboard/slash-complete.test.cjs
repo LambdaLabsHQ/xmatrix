@@ -1,3 +1,4 @@
+const { FIXTURE_AGENT_REGISTRATION, decodeChannelSnapshot, channelInstances } = require("./channel-presence-test-fixture.cjs");
 const assert = require("node:assert/strict");
 const test = require("node:test");
 require("./typescript-require.cjs").installTypeScriptRequire();
@@ -57,7 +58,7 @@ function agent(overrides) {
 function twoAgentChannel() {
   const claude = agent({});
   const codex = agent({ id: "agent:2", name: "codex", type: "codex", email: "codex@example.com" });
-  const channel = {
+  const channel = decodeChannelSnapshot({
     id: "channel-1",
     spaceId: "space-1",
     mode: "open",
@@ -65,7 +66,7 @@ function twoAgentChannel() {
     createdAt: "2026-08-16T00:00:00Z",
     updatedAt: "2026-08-16T00:00:00Z",
     memberPresence: {
-      "agent:1": {
+      "agent:1": { registration: FIXTURE_AGENT_REGISTRATION,
         kind: "agent",
         status: "online",
         label: "claude-code",
@@ -82,7 +83,7 @@ function twoAgentChannel() {
           }),
         ],
       },
-      "agent:2": {
+      "agent:2": { registration: FIXTURE_AGENT_REGISTRATION,
         kind: "agent",
         status: "online",
         label: "codex",
@@ -98,7 +99,7 @@ function twoAgentChannel() {
         ],
       },
     },
-  };
+  });
   return { channel, agents: [claude, codex] };
 }
 
@@ -161,8 +162,8 @@ test("channelSlashCommands unions every live instance's commands, deduped by tok
 
 test("channelSlashCommands ranks the instance on this machine first", () => {
   const { channel } = twoAgentChannel();
-  channel.memberPresence["agent:2"].instances[0].hostName = "Devs-MacBook-Pro.local";
-  channel.memberPresence["agent:2"].instances[0].machineId = "machine:local";
+  channelInstances(channel)[1].hostName = "Devs-MacBook-Pro.local";
+  channelInstances(channel)[1].machineId = "machine:local";
   const commands = channelSlashCommands(channel, {
     machineId: "machine:local",
   });
@@ -175,7 +176,7 @@ test("channelSlashCommands ranks the instance on this machine first", () => {
 
 test("channelSlashCommands never ranks a matching hostname as local without identity", () => {
   const { channel } = twoAgentChannel();
-  channel.memberPresence["agent:2"].instances[0].hostName = "Devs-MacBook-Pro.local";
+  channelInstances(channel)[1].hostName = "Devs-MacBook-Pro.local";
   const model = channelSlashCommands(channel, { hostName: "Devs-MacBook-Pro.local" })
     .find(command => command.token === "/model");
   assert.ok(model.targets.every(target => target.local === false));
@@ -306,7 +307,7 @@ function registrationChannel() {
     { token: "/model", label: "Switch model", mode: "typed", argumentSource: "agent-models" },
     { token: "/compact", label: "Compact context", mode: "passthrough" },
   ];
-  return {
+  return decodeChannelSnapshot({
     id: "channel-r",
     spaceId: "space-1",
     mode: "open",
@@ -314,12 +315,12 @@ function registrationChannel() {
     createdAt: "2026-08-16T00:00:00Z",
     updatedAt: "2026-08-16T00:00:00Z",
     memberPresence: {
-      "channel-r:1": {
+      "channel-r:1": { registration: FIXTURE_AGENT_REGISTRATION,
         kind: "agent",
         label: "claude",
         instances: [instance({ id: "channel-r:1", channelId: "channel-r", label: "claude:1", models: CLAUDE_MODELS, commands })],
       },
-      "channel-r:2": {
+      "channel-r:2": { registration: FIXTURE_AGENT_REGISTRATION,
         kind: "agent",
         label: "claude",
         instances: [instance({
@@ -327,7 +328,7 @@ function registrationChannel() {
         })],
       },
     },
-  };
+  });
 }
 
 test("a registration Run with no Profile still offers its slash commands", () => {

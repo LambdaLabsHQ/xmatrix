@@ -11,6 +11,78 @@ Part of the descriptive project profile. Not policy. The index is `project-profi
 - GitHub Actions release and runner-administration workflows/scripts that handle signing keys, App Store Connect credentials, Cloudflare credentials, Supabase keys, Android keystores, GitHub release tokens, runner scaler tokens, SSH authorization, Xcode installation, and CLI binaries.
 - Prompt/agent control paths in the CLI app-server integrations and channel-delivered message text.
 
+### Sign-in sessions and device approval
+
+Signing out ends the session at the Hub, not only on the device: the web and
+native apps call Better Auth's sign-out while they still hold the token, the
+native-session route revokes its refresh token through `POST
+/api/auth/cli/sign-out`, and `xmatrix logout` does the same before clearing its
+local credentials. Access tokens stay valid by signature for their hour, so the
+routes that turn one into a new session (session exchange and device approval)
+first check that the session it was minted from still exists.
+
+A device or terminal waiting for approval is described to the browser only by
+both of its codes: what it says it runs on, roughly where the request came from
+and when. The browser can approve, decline (the requester's next poll reads the
+request as ended, with the reason) or sign out to answer as another account.
+The older loopback CLI sign-in also waits for an explicit approval. Login codes
+are charged per address across both send routes (5 a minute, 20 an hour, 60 a
+day); checking a code is limited per client.
+
+Settings lists where a person is signed in (`GET /api/me/sessions`, the 50 most
+recent, current first) and ends any one of their own sessions, the other
+browsers and apps, or everything else including terminals and daemons. Sessions
+the Hub issues itself carry a label (`xMatrix CLI`, `xMatrix device sign-in`,
+`xMatrix app`) in place of a user agent; older unlabelled ones belong to
+terminals and daemons. A daemon ends the session it stops using when it reloads
+or disconnects, instead of leaving it for the 30-day expiry.
+
+Passkeys (`@better-auth/passkey`, table `control.auth_passkeys`, migration 0204)
+belong to the app's own domain (`rpID` is `APP_URL`'s host, and only that origin
+is accepted), so one made on xmatrix.sh signs in on any of its pages while the
+Hub only verifies them. A browser offers saved passkeys in the email field; a
+passkey sign-in is itself possession plus a device check and is not asked for a
+second factor. The app shells don't offer passkeys to the page yet. A desktop
+app can also sign in by a signed-in phone scanning a device-sign-in code
+(`scanned=1`, so the approving page doesn't try to open an app on the phone).
+
+Every sign-in metric (`logAuthMetric`) is also a point in the diagnostics
+Analytics Engine dataset (`xmatrix_diagnostics`): index1 the person's short
+hash or `auth`, blob1 `auth`, blob2 the provider, blob3 the route group, blob4
+the outcome, blob5 the status. Workers logs keep only some of these lines, too
+few to read a sign-in funnel from.
+
+A desktop or phone app's 30-day session token stays in its HTTP-only cookie.
+`GET /api/xmatrix/native-session` gives the page only the hour-long access
+token, and the page's account calls (two-step verification, linked GitHub,
+outside apps, sign-out) go through `/api/xmatrix/native-auth/*`. That route
+adds the session from the cookie; one capability table defines each permitted
+method, path and response projection. Only the account facts those screens
+consume return to the page, including nested user/session fields; upstream
+session tokens stay out of JSON and readable response headers. Two-factor
+session rotation replaces the native HTTP-only refresh cookie and clears its
+old access cookie, so the next session load refreshes it. Provider-state
+cookies still reach the browser. A write through it must come from the site's
+own origin.
+
+### Apps signing in in place
+
+The desktop and phone apps sign in where they are, without a device code: email
+codes, passwords and Sign in with Apple (iOS, native) run in the app's own page;
+Google and GitHub open the Hub's `/api/auth/app/start` page in the system
+sign-in sheet (iOS `ASWebAuthenticationSession`), a browser tab over the app
+(Android Custom Tabs) or the browser (desktop). The provider returns to
+`/api/auth/app/finish`, which hands the app a one-time code at its own address:
+`xmatrix://auth`, or a loopback port of the desktop app (RFC 8252). Only the page
+that started the flow can redeem the code, at `/api/auth/app/token`, because it
+alone holds the PKCE verifier; the code lasts two minutes, is handed over once,
+and a lost redemption answer is replayed rather than issuing a second session.
+An account with two-step verification is asked for its code in the sheet, and
+the Hub then continues to the app. Apple identity tokens are accepted only for
+the iOS app's bundle id; `/sign-in/social` with an identity token is a first
+factor and waits for the second like any other. Shells without in-place sign-in
+keep the browser device-code flow.
+
 ### Machine approval encryption independence
 
 Plain PostgreSQL machine-request decisions do not require the Secret catalog encryption key.

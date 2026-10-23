@@ -1,5 +1,52 @@
 # Guardrail Review Sources
 
+- 2026-10-21 Web per release channel (P0#4 text): maintainer direction (Daniel)
+  that beta and stable are told apart by version for the Web too, not only for
+  clients. Every beta now deploys the beta Web (`beta.xmatrix.sh`); a stable
+  rebuilds a verified beta's source and deploys the stable Web (`xmatrix.sh`),
+  which desktop, iOS and Android stable builds load. The Hub stays one service
+  with one dataset that every beta deploys, so beta and stable users share
+  Channels; it trusts both exact Web origins and must keep serving the older
+  stable Web until a stable ships the newer one. Reviewed Better Auth trusted
+  origins, credentialed and direct-read CORS, the shared `.xmatrix.sh` session
+  cookie, passkey origins, native shell origin trust, receipts and SEO. Same
+  direction as 2026-10-21 #851: pull requests run a fast tier, client suites
+  and CodeQL gate releases instead of merges.
+
+- 2026-10-19 steer instead of interrupt: maintainer direction (Daniel) that an
+  ordinary Human message steers a busy Instance and only a message that
+  @-addresses it interrupts. It supersedes the 2026-07-13 rule that every fresh
+  message directly interrupts the current turn. Reviewed Hub live and catch-up
+  verdicts, how Claude Code 2.1.303 and Codex 0.163 take input mid-turn
+  (`isReplay` at a tool boundary or a second result; `turn/steer`), Raft's
+  per-runtime in-flight wake contract and Multica's opt-in steer, and the
+  co-write requests that cancelled unrelated turns every few seconds. Hub adds
+  `steerAllowed` beside `interruptRequested`; a runtime that cannot steer, or
+  predates the field, interrupts as before, so no message is lost. Claude
+  steers now; Codex follows. A co-write request stops only a turn answering
+  its page. Issue #737.
+
+- 2026-10-14 Channel retry instructions: maintainer direction requires the
+  continuation itself to be a durable Channel message. Reviewed append replay,
+  canonical history/live identity, reserved metadata, exact pending-report
+  consumption, expiry, ordinary acknowledgements and capability rollout.
+  Private receipts acknowledge stops only; message publication owns retry
+  delivery and cannot wake unrelated Instances. See
+  [capacity recovery](../operations/codex-capacity-retry.md).
+
+- 2026-10-13 scope authorization evidence: production preflight correctly failed
+  closed for v1.0.367 when successful request jobs exposed no step metadata, in
+  three attempts before any production build/deploy. Reviewed the request writer,
+  tagged preflight, independent Hub/Web reuse proofs and archival receipt reader.
+  Scope authorization moves atomically to a dedicated scope-named successful job
+  gated by plan and selected tests; every SHA/workflow/selection check remains.
+  Deployment receipt names carry scope too, with exact historical step evidence
+  retained only for immutable old tags. Negative runtime workflow tests preserve
+  fail-closed behavior for absent, failed, ambiguous or widened evidence.
+  Migration and forward recovery through a new main revision, normal Release
+  Intent and higher immutable tag are documented in
+  [Release Updates](../release-updates.md#scope-evidence-without-job-step-metadata).
+
 - 2026-10-13 Hub-owned capacity recovery: maintainer direction moved classification,
   retry budgets, waiting and visible state from CLI to Hub. Reviewed exact Run
   credentials, current Channel/registration grants, Run lifecycle fencing,
@@ -1006,3 +1053,7 @@ Latest refresh: 2026-08-11.
 - 2026-09-27 conversation activity (hub): maintainer Yiming found Agent progress narration unreadable in conversations and asked for an end-state design. Reviewed the shared channel contract (`bootstrap.rs`), live delivery intent (`channel-message-frame.ts`, where every ordinary message is work for every live peer), the Postgres append, attention and post-commit paths, catalog unread SQL, message annotations and mutation ledger, the Agent socket controller and port, and Jev's question types (choice, score and boolean only, so no model-written text). Activity entries are Hub-written from a typed report and delivered as context; unread is derived rather than moving anyone's cursor; supersession is a boolean Jev judgment recorded as a `system` annotation that fails safe to showing the message whole. The review also found that caller `metadata` on the public and socket send paths could set `xmatrixProvenance: "system_fact"`, making any message look like a system notice that no Agent is woken by; reserved keys are now dropped at both boundaries. See [conversation activity](../design/conversation-activity.md).
 - 2026-09-27 conversation activity (runtime and contract): the shared channel contract told every Agent to post before any work and at each step, which the project profile recorded as deliberate ("rather than relying on traces, host timers, or provider adapters to synthesize progress"). Reviewed the Claude Code stream-json, Codex app-server and ACP adapters, which already observe each runtime's own plan tool, and the Agent socket's unknown-type close. Adapters now report the plan's current step as the presence intent and its completed steps and created pull requests as typed activity, sending a newer frame only to a Hub that advertises it; they add no behavioral rule, so the contract stays one runtime-neutral text. The contract now asks for what someone needs (question, decision, finding, blocker, result, final answer) and no narration; the invocation state on a mention already shows a task was accepted. The profile line was rewritten rather than kept, since it forbade what adapters now do. See [conversation activity](../design/conversation-activity.md).
 - 2026-10-01 Agent Role retirement: the maintainer retired the Agent Role. Roles became persistent goals (page sections kept true by Automations), summon tags for runtime and model, and connectors and secrets for App permissions. Skill management is deferred and gets no replacement. We reviewed the Role Package routes and storage, PostgreSQL and Durable Object; the registration `role_json` snapshot path and its launch fields (`roleInitialPrompt`, `roleReminder`, `roleSkills`, `roleAppRequirements`, `agentAvatarUrl`); the daemon and runtime consumers; the web, iOS and CLI surfaces; and the relay-v2 `role` projection kind. The feature was removed end to end. `roleInitialPrompt` stays on the wire, carrying only the registration's instructions, because every daemon reads it. Daemons ignore the retired spawn fields, and the Durable Object allowlist still accepts them for persisted commands. A stored configuration naming a `role` reads as unassigned. The legacy `roles` web view and URL still open Agents. Under guardrail #3, `role_json` and the Role tables are kept but no longer read or written. Dropping them is a separate contract migration, to run once the production count of non-empty `role_json` rows is confirmed.
+
+- 2026-10-16 duplicate Instance presence review: traced raw catalog Instance keys versus sender `agent:` aliases, reproducing a second avatar from a single Claude message. Replaced member-keyed runtime stores with separate Human devices and a read-only Instance-ID map, a shared lifecycle reducer, required registration-derived avatars, update-only message/live reports and exact-ID deletion. Reviewed reborn's stable Instance/registration versus handoff's new Instance/slot. Legacy wire compatibility is confined to codecs; aggregate Run fields never fan out to siblings. Conflicts are diagnosed and isolated, with bounded per-Instance authoritative repair. Regression evidence and release receipts belong to the implementation PR and work conversation.
+
+- 2026-10-17 OAuth and Space-secret isolation review: Daniel requested a cross-Space credential audit. Reviewed OAuth start/completion, encrypted connector resolution, Composio account selection, Channel-derived connector execution, GitHub Run-bound repository tokens, live Run secret reads/approvals, local secret injection and migrations 0123/0126. PostgreSQL-backed route regressions reproduced state issuance to a non-admin of the target Space and grant exchange after admin revocation; the existing credential write still enforced admin authority. Both external-call entry points now check current target-Space authority before proceeding, without decrypting an old grant. The separate GitHub callback also allowed a forwarded connect link to attribute another authorizer's installations to the initiating Space; anonymous callbacks now only hand off state/code, authenticated completion verifies that initiator and Space authority, and the v2 grant purpose refuses earlier installation-selection grants. Real two-Space tests cover same-alias values, approval separation, forged Run Space and ciphertext transplantation. Historical owner-secret copies and their retained creator-bound envelopes are documented separately from current authorization, as is same-OS-user execution; synthetic tests do not establish whether production copies were unwanted or whether historical disclosure occurred. See [Space credential isolation](../operations/space-credential-isolation.md).

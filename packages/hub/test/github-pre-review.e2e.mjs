@@ -29,10 +29,11 @@ function githubConfiguration() {
     permissions: { metadata: "read", checks: "write", pull_requests: "read" }, routes };
 }
 
-// Pre-review end to end: a claimed pull request gets a review conversation on
-// its block, an Agent of the Space owner's is launched there with the change,
-// and its verdict becomes the xmatrix/pre-review check on the head it reviewed.
-test("a claimed pull request is pre-reviewed by an Agent in its own conversation on the block", async () => {
+// Pre-review end to end: a pull request a member of the Space opens on a block
+// (no claim needed) gets a review conversation there, an Agent of the Space
+// owner's is launched in it with the change, and its verdict becomes the
+// xmatrix/pre-review check on the head it reviewed.
+test("a member's pull request naming a block is pre-reviewed by an Agent in its own conversation there", async () => {
   const userId = `pre-review-${randomUUID()}`;
   const configuration = githubConfiguration();
   await withGitHubUserScenario({ id: userId, email: "pre-review@example.com", name: "Pre Review" }, configuration, secret,
@@ -53,8 +54,6 @@ test("a claimed pull request is pre-reviewed by an Agent in its own conversation
     const pages = `/api/spaces/${encodeURIComponent(spaceId)}/pages`;
     const page = (await json(await worker.fetch(pages, { method: "POST", headers: auth,
       body: JSON.stringify({ title: "Roadmap", body: "# Roadmap\n\n## Search\n\nPrefix search.\n" }) }))).page;
-    await json(await worker.fetch(`${pages}/${encodeURIComponent(page.pageId)}/claims`, { method: "POST",
-      headers: auth, body: JSON.stringify({ blockId: "search" }) }));
 
     const spawn = daemon.inbox.waitFor((message) => message.type === "machine_spawn_agent"
       && message.channelId !== home.id, "pre-review spawn");
@@ -65,7 +64,7 @@ test("a claimed pull request is pre-reviewed by an Agent in its own conversation
         user: { id: 5151, login: "alice" }, head: { sha: "head-1" } } });
     const delivered = await deliverGitHubWebhook(worker, { body, event: "pull_request", deliveryId: randomUUID(), secret });
     assert.equal(delivered.status, 200, await delivered.clone().text());
-    assert.equal(github.checkRuns.find((run) => run.name === "xmatrix/claim")?.conclusion, "success");
+    assert.equal(github.checkRuns.some((run) => run.name === "xmatrix/claim"), false, "naming a block gates nothing");
 
     const command = await spawn;
     assert.match(command.prompt, /Pre-review pull request https:\/\/github\.com\/acme\/widgets\/pull\/7/u);

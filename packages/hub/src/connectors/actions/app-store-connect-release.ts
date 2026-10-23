@@ -29,6 +29,53 @@ const REVIEW_FIELDS = ["contactFirstName", "contactLastName", "contactEmail", "c
 
 const versionPath = (version: AppleResource) => `/v1/appStoreVersions/${encodeURIComponent(version.id)}`;
 
+/**
+ * A version's phased release, if one was enabled. Apple has none until it is created, and the first
+ * version of an app cannot have one. Creating it as INACTIVE makes the following release a 7-day rollout.
+ */
+async function phasedRelease(api: AppStoreConnectApi, version: AppleResource): Promise<AppleResource | undefined> {
+  try {
+    return appleResource((await api.request(`${versionPath(version)}/appStoreVersionPhasedRelease`)).data);
+  } catch (error) {
+    if (error instanceof ProviderRequestError && error.status === 404) return undefined;
+    throw error;
+  }
+}
+
+/** `day 3 of 7` when Apple reports a day of the rollout; anything else is left out. */
+function phasedDay(row: AppleResource): string {
+  const day = text(row.attributes.currentDayNumber);
+  return /^[1-7]$/u.test(day) ? `, day ${day} of 7` : "";
+}
+
+const PHASED_MOVES: Readonly<Record<string, { from: ReadonlySet<string>; done: string; same: string; blocked: string }>> = {
+  PAUSED: { from: new Set(["ACTIVE"]), done: "Paused", same: "already paused", blocked: "only an active phased release can be paused" },
+  ACTIVE: { from: new Set(["PAUSED"]), done: "Resumed", same: "already rolling out", blocked: "only a paused phased release can be resumed" },
+  COMPLETE: { from: new Set(["ACTIVE", "PAUSED"]), done: "Published", same: "already published to everyone",
+    blocked: "only a phased release that has started can be published to everyone" },
+};
+
+/** Move a phased release that has started. Repeating the state it already has changes nothing. */
+async function movePhasedRelease(api: AppStoreConnectApi, input: Record<string, string>, version: AppleResource, target: string): Promise<string> {
+  const move = PHASED_MOVES[target]!;
+  const current = await phasedRelease(api, version);
+  if (!current) {
+    throw new ProviderRequestError(404, `Version ${input.version} has no phased release. Release it with phased; the first version of an app cannot use one`);
+  }
+  const state = text(current.attributes.phasedReleaseState);
+  if (state === target) return `The phased release of ${input.app} ${input.version} is ${move.same}${phasedDay(current)}.`;
+  if (state === "INACTIVE") {
+    throw new ProviderRequestError(409, `The phased release of ${input.version} has not started; it starts when the version is released`);
+  }
+  if (!move.from.has(state)) {
+    throw new ProviderRequestError(409, `The phased release of ${input.version} is ${state || "unknown"}; ${move.blocked}`);
+  }
+  const updated = appleResource((await api.request(`/v1/appStoreVersionPhasedReleases/${encodeURIComponent(current.id)}`, { method: "PATCH",
+    data: { type: "appStoreVersionPhasedReleases", id: current.id, attributes: { phasedReleaseState: target } } })).data) ?? current;
+  const ending = target === "COMPLETE" ? " This cannot be undone." : "";
+  return `${move.done} the phased release of ${input.app} ${input.version}; it is ${text(updated.attributes.phasedReleaseState) || target}${phasedDay(updated)}.${ending}`;
+}
+
 /** Give a new version the App Review contact and sign-in details of the newest earlier version that has them. */
 async function inheritReviewDetail(api: AppStoreConnectApi, version: AppleResource, earlier: AppleResource[]): Promise<string> {
   if (await reviewDetail(api, version)) return "";
@@ -214,15 +261,46 @@ export const APP_STORE_CONNECT_RELEASE_ACTIONS: Record<string, ConnectorAction> 
     return `Canceled the ${text(open[0]!.attributes.state)} review submission of ${input.app}; it is now ${after || "canceling"}. ` +
       "The version can be edited and submitted again.";
   }),
-  release: versionAction("write", appVersion, async ({ api, input, version }) => {
+  release: versionAction("write", statement => {
+    const usage = "name an app and a version: <com.example.app> <1.2.0> [phased]";
+    const app = bundleId(statement.target);
+    const [word = "", flag, ...rest] = statement.text.trim().split(/\s+/u);
+    const ref = versionRef(word);
+    if (!app || !ref || rest.length || (flag && flag !== "phased")) return usage;
+    return { app, ...ref, ...(flag ? { phased: "yes" } : {}) };
+  }, async ({ api, input, version }) => {
     const state = versionState(version);
     if (state !== "PENDING_DEVELOPER_RELEASE") {
       throw new ProviderRequestError(409, `Version ${input.version} is ${state}; only an approved version waiting for developer release can be released`);
     }
+    /* Enable the rollout before the release request: Apple starts an INACTIVE one when the version goes out. */
+    let rollout = await phasedRelease(api, version);
+    if (input.phased) {
+      if (!rollout) {
+        try {
+          rollout = appleResource((await api.request("/v1/appStoreVersionPhasedReleases", { method: "POST", data: {
+            type: "appStoreVersionPhasedReleases", attributes: { phasedReleaseState: "INACTIVE" },
+            relationships: { appStoreVersion: relation("appStoreVersions", version.id) } } })).data);
+        } catch (error) {
+          if (!(error instanceof ProviderRequestError)) throw error;
+          throw new ProviderRequestError(error.status, /first version/iu.test(error.message)
+            ? `${error.message}. Phased release is only for an update, not the first version of an app` : error.message);
+        }
+        if (!rollout) throw new ProviderRequestError(502, "App Store Connect did not return the phased release");
+      } else if (text(rollout.attributes.phasedReleaseState) !== "INACTIVE") {
+        throw new ProviderRequestError(409, `Version ${input.version} already has a phased release (${text(rollout.attributes.phasedReleaseState)}); it cannot be enabled again`);
+      }
+    }
     await api.request("/v1/appStoreVersionReleaseRequests", { method: "POST", data: { type: "appStoreVersionReleaseRequests",
       relationships: { appStoreVersion: relation("appStoreVersions", version.id) } } });
-    return `Released ${input.app} ${input.version} to the App Store; Apple is publishing it. This cannot be undone.`;
+    return rollout
+      ? `Released ${input.app} ${input.version} to the App Store as a 7-day phased release. Apple publishes it to more users each day. ` +
+        "pause_phased_release holds it, resume_phased_release continues it, and complete_phased_release publishes it to everyone. The release itself cannot be undone."
+      : `Released ${input.app} ${input.version} to the App Store; Apple is publishing it. This cannot be undone.`;
   }),
+  pause_phased_release: versionAction("write", appVersion, ({ api, input, version }) => movePhasedRelease(api, input, version, "PAUSED")),
+  resume_phased_release: versionAction("write", appVersion, ({ api, input, version }) => movePhasedRelease(api, input, version, "ACTIVE")),
+  complete_phased_release: versionAction("write", appVersion, ({ api, input, version }) => movePhasedRelease(api, input, version, "COMPLETE")),
   reply_review: {
     effect: "write", requires: ["keyId", "privateKey"],
     parse(statement) {

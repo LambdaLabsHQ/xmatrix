@@ -29,9 +29,6 @@
       "PLATFORM_ADMIN_SPACE_ID": {
         "env": "XMATRIX_PLATFORM_ADMIN_SPACE_ID"
       },
-      "TEST_ENVIRONMENT_ACCESS_SPACE_ID": {
-        "env": "XMATRIX_PLATFORM_ADMIN_SPACE_ID"
-      },
       "XMATRIX_RUNTIME_LOCATION_HINT": {
         "env": "XMATRIX_RUNTIME_LOCATION_HINT"
       }
@@ -41,6 +38,12 @@
     "workerName": "xmatrix-web",
     "origin": "https://xmatrix.sh",
     "workersDev": true,
-    "previewUrls": true
+    "previewUrls": true,
+    "beta": {
+      "workerName": "xmatrix-web-beta",
+      "origin": "https://beta.xmatrix.sh",
+      "workersDev": false,
+      "previewUrls": false
+    }
   }
 }

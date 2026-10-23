@@ -1,4 +1,4 @@
-import type { MachineHandoffExport, MachineHandoffExportResult } from "../handoff-export.js";
+import type { MachineHandoffContext, MachineHandoffContextRequest, MachineHandoffExport, MachineHandoffExportResult } from "../handoff-export.js";
 import type { AgentWorkingMode } from "../agent-registration-configuration.js";
 import type { AgentHarnessSpec, AgentRuntimeExecutionEvidence } from "../authority-foundation.js";
 import type { RoutingQuotaProbeRequest, RoutingQuotaProbeResponse } from "../agent-routing-quota-probe.js";
@@ -179,11 +179,16 @@ export interface MachineDaemonSpawnCommand {
       initial prompt. The wire name predates the retired Agent Role feature;
       daemons of every version read it, so it keeps this spelling. */
   roleInitialPrompt?: string;
+  /** Official Hub text. Legacy daemons ignore this additive versioned field. */
+  bootstrapPrompts?: import("../agent-bootstrap.js").AgentBootstrapPrompts;
   /** The registration's working mode; absent means autonomous. */
   workingMode?: AgentWorkingMode;
   /** The Space's rules page (its governance page). The Agent reads it on
    * demand; the launch carries only its id. */
   spaceRulesPageId?: string;
+  /** Names of the apps connected to the Space that an Agent can act in. The
+   * launch prompt names them; the Agent reads their commands on demand. */
+  connectedApps?: string[];
   resume?: boolean;
   resumeInstanceId?: string;
   resumeSessionKey?: string;
@@ -200,6 +205,8 @@ export interface MachineDaemonSpawnCommand {
   handoffTransfer?: boolean;
   handoffSourceInstanceId?: string;
   handoffSourceResumeSessionKey?: string;
+  /** A handoff predecessor's conversation; the daemon writes it out for the successor. */
+  handoffContext?: MachineHandoffContext;
   context?: MachineDaemonSpawnContext;
   /** @deprecated use context.goal. */
   goal?: AgentGoalStatus;
@@ -331,6 +338,8 @@ export interface MachineDaemonStopCommand {
   worktreeDisposition?: MachineWorktreeDisposition;
   /** Push the checkout to a handoff branch after the stop (`retain` only). */
   handoffExport?: MachineHandoffExport;
+  /** Export the stopped Run's conversation for a handoff successor. */
+  handoffContext?: MachineHandoffContextRequest;
   relayLease?: MachineDaemonCommandLease;
 }
 
@@ -354,6 +363,8 @@ export interface MachineDaemonStopResultReport {
   error?: string;
   /** What became of the stop's `handoffExport`; omitted by daemons that predate it. */
   handoffExport?: MachineHandoffExportResult;
+  /** The conversation a stop's `handoffContext` asked for; omitted by daemons that predate it. */
+  handoffContext?: MachineHandoffContext;
   relayLease?: MachineDaemonCommandLease;
 }
 
@@ -483,6 +494,16 @@ export interface MachineDaemonRunReportAcked {
   runId: string;
 }
 
+/**
+ * Additive receipt: a partial Run snapshot committed. It is the daemon's minute
+ * report, so answering it lets that report prove the Hub still holds the
+ * session; the daemon's own session probe, which wakes the Relay Runtime, is
+ * then rarely needed. Older daemons ignore it.
+ */
+export interface MachineDaemonRunSnapshotAcked {
+  type: "machine_run_snapshot_acked";
+}
+
 export interface MachineDaemonQuotaProbeCommand {
   type: "machine_quota_probe";
   requestId: string;
@@ -513,6 +534,41 @@ export interface MachineDaemonWorktreeActionCommand {
   action: import("../worktree-management.js").WorktreeAction;
   /** Only on `reclaim`. */
   paths?: string[];
+  relayLease?: MachineDaemonCommandLease;
+}
+
+/** The capability a daemon advertises when it puts a Run to sleep on the Hub's word. */
+export const MACHINE_SLEEP_CAPABILITY = "machine_sleep_agent_v1";
+
+/**
+ * The Hub decided a resting Run has been idle long enough to sleep
+ * (docs/instance-sleep.md). The daemon verifies its own facts first: the Run
+ * still rests, with no task execution, background task or other activity for
+ * at least `idleForMillis` by its own clock; only then does it end the process
+ * as a sleep, whose exit report leaves the Instance `sleeping`. Otherwise it
+ * declines.
+ */
+export interface MachineDaemonSleepCommand {
+  type: "machine_sleep_agent";
+  requestId: string;
+  runId: string;
+  executionKey: string;
+  instanceId: string;
+  /** How long the Hub has seen the Run resting: a duration, so clocks need not agree. */
+  idleForMillis: number;
+  relayLease?: MachineDaemonCommandLease;
+}
+
+/** Whether the daemon put the Run to sleep, or why it declined. */
+export interface MachineDaemonSleepResultReport {
+  type: "machine_sleep_result";
+  requestId: string;
+  runId: string;
+  executionKey: string;
+  instanceId: string;
+  slept: boolean;
+  /** Why it declined: `not_idle`, `not_running` or `not_resumable`. */
+  reason?: string;
   relayLease?: MachineDaemonCommandLease;
 }
 
@@ -548,6 +604,7 @@ export interface MachineDaemonQuotaProbeResultReport {
 }
 
 export type MachineDaemonClientMessage =
+  | MachineDaemonSleepResultReport
   | MachineDaemonHarnessActionResultReport
   | MachineDaemonWorktreeActionResultReport
   | MachineDaemonTextTaskResultReport
@@ -580,6 +637,7 @@ type MachineDaemonUnregistered = { requestId?: string } & { type: "unregistered"
 type MachineDaemonShutdown = { reason?: string } & { type: "shutdown_requested" };
 
 export type MachineDaemonServerMessage =
+  | MachineDaemonSleepCommand
   | MachineDaemonHarnessActionCommand
   | MachineDaemonWorktreeActionCommand
   | MachineDaemonTextTaskCommand
@@ -601,4 +659,5 @@ export type MachineDaemonServerMessage =
   | MachineDaemonCommandAdmissionAcked
   | MachineDaemonCommandCompletionAcked
   | MachineDaemonRunReportAcked
+  | MachineDaemonRunSnapshotAcked
   | MachineDaemonActivationReceipt;

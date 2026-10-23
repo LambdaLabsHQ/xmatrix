@@ -90,6 +90,13 @@ test("each section says which revision last changed it, who has claimed it and w
     const owing = await json(await worker.fetch(`${at}/awareness`, { headers: auth }));
     assert.equal(owing.blocks.find((entry) => entry.blockId === "status").owed.reason, "released");
     assert.equal(owing.blocks.find((entry) => entry.blockId === "relay").owed, null);
+    // A page in the Web asks for the sections alone: the same changes and owed updates, nothing it reads live.
+    const sections = await json(await worker.fetch(`${at}/awareness?scope=sections`, { headers: auth }));
+    assert.deepEqual(sections.blocks.map(({ blockId, updated, owed }) => ({ blockId, revision: updated?.revision, owed: owed?.reason })),
+      owing.blocks.filter((entry) => entry.updated || entry.owed).map(({ blockId, updated, owed }) =>
+        ({ blockId, revision: updated?.revision, owed: owed?.reason })));
+    assert.ok(sections.blocks.every((entry) => entry.claims.length === 0 && entry.present.length === 0
+      && entry.discussions.length === 0 && entry.working.length === 0));
     await edit(third, (body) => body.replace("Shipped", "Shipped and verified"));
     const written = await json(await worker.fetch(`${at}/awareness`, { headers: auth }));
     assert.equal(written.blocks.find((entry) => entry.blockId === "status").owed, null, "writing it back settles it");
@@ -100,6 +107,43 @@ test("each section says which revision last changed it, who has claimed it and w
 
     const stranger = await worker.fetch(`/api/spaces/${randomUUID()}/pages/${page.pageId}/awareness`, { headers: auth });
     assert.notEqual(stranger.status, 200, "awareness is read as the page is");
+    const strangerSections = await worker.fetch(`/api/spaces/${randomUUID()}/pages/${page.pageId}/awareness?scope=sections`,
+      { headers: auth });
+    assert.notEqual(strangerSections.status, 200, "so are its sections alone");
+
+    // The app reads a page straight from the Hub, from its own origin only, and only reads.
+    const app = "https://xmatrix.test";
+    const preflight = (origin, method = "GET") => worker.fetch(`${at}/awareness?scope=sections`, { method: "OPTIONS",
+      headers: { origin, "access-control-request-method": method, "access-control-request-headers": "authorization" } });
+    const allowed = await preflight(app);
+    assert.equal(allowed.status, 204);
+    assert.equal(allowed.headers.get("access-control-allow-origin"), app);
+    assert.match(allowed.headers.get("access-control-allow-headers") ?? "", /authorization/u);
+    assert.equal(allowed.headers.get("access-control-allow-credentials"), null, "a bearer, never a cookie");
+    assert.equal((await preflight("https://elsewhere.test")).headers.get("access-control-allow-origin"), null);
+    assert.equal((await preflight(app, "PUT")).headers.get("access-control-allow-origin"), null, "writes go through the Web");
+    // The ticket a live session opens with is asked for straight, as the session itself is.
+    const ticket = await worker.fetch(`${at}/live`, { method: "OPTIONS", headers: { origin: app,
+      "access-control-request-method": "POST", "access-control-request-headers": "authorization, content-type" } });
+    assert.equal(ticket.status, 204);
+    assert.equal(ticket.headers.get("access-control-allow-origin"), app);
+    assert.equal(ticket.headers.get("access-control-allow-methods"), "POST");
+    const direct = await worker.fetch(`${at}/awareness?scope=sections`, { headers: { ...auth, origin: app } });
+    assert.equal(direct.status, 200);
+    assert.equal(direct.headers.get("access-control-allow-origin"), app);
+    assert.match(direct.headers.get("cache-control") ?? "", /no-store/u, "nothing the app reads straight is kept");
+    assert.deepEqual(await direct.json(), await json(await worker.fetch(`${at}/awareness?scope=sections`, { headers: auth })),
+      "the same answer as without an origin");
+    const history = await worker.fetch(`/api/channels/${encodeURIComponent(channel.id)}/history?limit=10`, {
+      method: "OPTIONS", headers: { origin: app, "access-control-request-method": "GET" } });
+    assert.equal(history.headers.get("access-control-allow-origin"), app, "and a conversation's history");
+    const historyRead = await worker.fetch(`/api/channels/${encodeURIComponent(channel.id)}/history?limit=10`,
+      { headers: { ...auth, origin: app } });
+    assert.equal(historyRead.status, 200, await historyRead.clone().text());
+    assert.match(historyRead.headers.get("cache-control") ?? "", /no-store/u);
+    const write = await worker.fetch(at, { method: "PUT", headers: { ...auth, origin: app },
+      body: JSON.stringify({ baseRevision: 0, body: "" }) });
+    assert.equal(write.headers.get("access-control-allow-origin"), null);
   } finally {
     await worker.stop();
   }
