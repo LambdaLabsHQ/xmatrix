@@ -16,8 +16,15 @@ test("production Hub upload and post-deploy smoke bind the authorized release SH
   assert.equal(hub.env.XMATRIX_DEPLOY_SHA, "${{ inputs.deploy_sha }}");
   const deploy = hub.steps.find((step) => step.name === "Deploy tagged Hub to production");
   const smoke = hub.steps.find((step) => step.name === "Verify deployed production Hub health");
+  const edge = hub.steps.find((step) => step.name === "Apply and verify the tagged MCP edge policy");
   assert.match(deploy.run.replace(/\\\n\s*/gu, " "), /wrangler deploy[^\n]*--tag "\$XMATRIX_DEPLOY_SHA"/u);
   assert.match(smoke.run, /--expected-sha "\$XMATRIX_DEPLOY_SHA"/u);
+  // The edge mutation stays inside the existing immutable production job,
+  // after its first deployment and SHA verification, using the protected token.
+  assert.equal(hub.environment, "production");
+  assert.ok(hub.steps.indexOf(edge) > hub.steps.indexOf(smoke));
+  assert.equal(edge.env.CLOUDFLARE_API_TOKEN, "${{ secrets.CLOUDFLARE_API_TOKEN }}");
+  assert.equal(edge.run, "node scripts/mcp-edge-policy.mjs");
 });
 
 test("post-deploy response must identify the public Hub service", () => {

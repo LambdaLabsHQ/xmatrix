@@ -24,6 +24,11 @@ App Store What's New. See [release notes](../release-updates.md#release-notes).
 
 ## Current behavior
 
+The tagged Hub release owns an exact-host `/mcp` Browser Integrity Check
+exception and verifies that anonymous Python-style clients reach the OAuth
+challenge. It uses the existing protected deployment credential, preserves
+unrelated rules, and rejects drift. See [MCP edge compatibility](../design/mcp-server.md#cloudflare-edge-compatibility).
+
 GitHub repository subscriptions include `code-scanning`: signed alert lifecycle
 events reach a subscribed private-content Channel and wake its resting Agent,
 without periodic polling. The exact installation's effective Code scanning alerts

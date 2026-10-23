@@ -18,6 +18,39 @@ An unauthenticated `POST /mcp` answers 401 with
 `WWW-Authenticate: Bearer resource_metadata="…/.well-known/oauth-protected-resource/mcp"`,
 which is how clients discover where to sign in.
 
+### Cloudflare edge compatibility
+
+Browser Integrity Check can reject legitimate non-browser MCP clients with
+Error 1010 before OAuth runs (#923). The immutable Hub release applies
+`scripts/mcp-edge-policy.mjs` using the existing protected Cloudflare deployment
+credential, after the tagged Hub passes its health check. It adds one rule in
+the production Web's zone, verified against the deployment account: skip only
+the `bic` product on the exact Hub hostname and exact `/mcp` path. Other paths,
+custom rules, managed WAF, rate limiting and Hub OAuth remain active.
+
+The first deployment creates the zone's custom-rule entrypoint if absent, or
+appends a single rule without replacing an existing ruleset. Its stable ref is
+`xmatrix_mcp_bic_compatibility`. Retries read that ref; a lost write response
+is resolved by readback, and conflicting configuration fails closed rather than
+being overwritten. API reads and writes have deadlines. The post-deploy probe
+uses `Python-urllib/3.12` without a token and requires the Hub's 401 OAuth
+challenge. A 200 response also fails: bypassing OAuth is not success.
+
+The existing credential must read the exact zone and write its WAF rules.
+Cloudflare accepts account WAF/ruleset write permissions for the zone Rulesets
+API as well as zone WAF write; check effective access rather than inferring it
+from the token's name. No deployment credential is copied to an Agent's local
+environment. See [Cloudflare's ruleset permissions](https://developers.cloudflare.com/ruleset-engine/rulesets-api/create/)
+and [BIC skip products](https://developers.cloudflare.com/waf/custom-rules/skip/options/).
+
+Recovery stays in the same release: retry the failed Hub job after resolving a
+permission or propagation error. The rule does not depend on a Hub schema
+change. To retire the exception, change the tagged policy first, then remove
+only this exact ref's rule through the authorized configuration path, retaining
+the unrelated rules and zone-wide BIC setting. Release logs retain the created
+rule and zone ids for that operation. A valid external app must still verify
+its own authorized read/write after edge reachability is restored.
+
 ## Authorization
 
 - **The Hub is the OAuth 2.1 authorization server** (Better Auth
