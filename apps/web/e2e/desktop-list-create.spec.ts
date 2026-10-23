@@ -96,28 +96,14 @@ test("the page tree leads with New page, and Ctrl+N there makes a page", async (
   await page.keyboard.press("Control+n");
   await expect(page.getByTestId("page-editor").locator(".page-document")).toBeFocused();
   await expect(page.getByTestId("page-title")).toHaveAttribute("data-placeholder", "Untitled");
+  // Its header has nothing until then: no Co-write (an Agent is called with @ in the text), no History or Share.
+  await expect(page.getByTestId("page-controls").getByRole("button")).toHaveCount(0);
   await page.keyboard.type("Plans");
   await page.keyboard.press("Enter");
   await expect.poll(async () => (await fixtureRequestBodies(page, "page-create")).length).toBe(1);
   const [made] = await fixtureRequestBodies(page, "page-create");
   expect(made).toMatchObject({ parentPageId: null });
   expect(startedMarkdown(made!.document)).toBe("# P\n");
-  await expect(page).toHaveURL(/page=p-new/u);
-});
-
-test("a new page's header is empty until its first write makes it", async ({ page }) => {
-  await installPageTreeStubs(page, ["Home"]);
-  await page.goto(`/app/${encodeURIComponent(E2E_SPACE.id)}/pages`, { waitUntil: "domcontentloaded" });
-  await page.locator(".app-sidebar").getByText("Home", { exact: true }).click();
-  await expect(page.locator(".app-page-article")).toBeVisible();
-  await stubPageCreate(page);
-
-  await page.keyboard.press("Control+n");
-  await expect(page.getByTestId("page-editor").locator(".page-document")).toBeFocused();
-  // No Co-write and nothing a made page has (History, Share): an Agent is called with @ in the text.
-  await expect(page.getByTestId("page-controls").getByRole("button")).toHaveCount(0);
-  await page.keyboard.type("Plan");
-  await expect.poll(async () => (await fixtureRequestBodies(page, "page-create")).length).toBe(1);
   await expect(page).toHaveURL(/page=p-new/u);
 });
 
