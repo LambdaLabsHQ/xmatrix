@@ -604,6 +604,12 @@
     color: inherit !important;
   }
 
+  /* A task item's checkbox sits before its paragraph, so first:mt-0 does not
+     clear the reading gap. Only the first paragraph in an item stays flush. */
+  .xmatrix-app .rich-message li > p:first-of-type {
+    margin-top: 0;
+  }
+
   .xmatrix-app :is(.app-search, .app-composer-box, .bg-popover, .app-sidebar .ring-sidebar-border),
   .xmatrix-app .app-sidebar :is(button, a).bg-sidebar-accent {
     position: relative;
@@ -1447,7 +1453,7 @@
 
     .xmatrix-app .rich-message {
       font-size: 0.9375rem;
-      line-height: 1.55;
+      line-height: 1.75;
     }
 
     .xmatrix-app .app-agent-work-dock {
@@ -5948,7 +5954,7 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .app-share
   .xmatrix-app.xmatrix-app-shell .rich-message {
     overflow-wrap: anywhere;
     font-size: 0.96875rem;
-    line-height: 1.55;
+    line-height: 1.75;
   }
 
   .xmatrix-app.xmatrix-app-shell .app-agent-work-dock {

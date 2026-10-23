@@ -94,25 +94,25 @@ export function createMessageMarkdownComponents(
   onOpenInternalAppLink?: (href: string) => boolean
 ): Components {
   return {
-  h1: ({ children, node }) => <h1 className="mt-2 text-lg font-black leading-6 first:mt-0">{renderMentionChildren(children, node)}</h1>,
-  h2: ({ children, node }) => <h2 className="mt-2 text-base font-black leading-6 first:mt-0">{renderMentionChildren(children, node)}</h2>,
-  h3: ({ children, node }) => <h3 className="mt-2 text-[15px] font-black leading-5 first:mt-0">{renderMentionChildren(children, node)}</h3>,
-  h4: ({ children, node }) => <h4 className="mt-2 text-[15px] font-black leading-5 first:mt-0">{renderMentionChildren(children, node)}</h4>,
-  h5: ({ children, node }) => <h5 className="mt-2 text-sm font-bold first:mt-0">{renderMentionChildren(children, node)}</h5>,
-  h6: ({ children, node }) => <h6 className="mt-2 text-sm font-bold first:mt-0">{renderMentionChildren(children, node)}</h6>,
+  h1: ({ children, node }) => <h1 className="mt-5 text-lg font-black leading-7 first:mt-0">{renderMentionChildren(children, node)}</h1>,
+  h2: ({ children, node }) => <h2 className="mt-5 text-base font-black leading-7 first:mt-0">{renderMentionChildren(children, node)}</h2>,
+  h3: ({ children, node }) => <h3 className="mt-4 text-[15px] font-black leading-6 first:mt-0">{renderMentionChildren(children, node)}</h3>,
+  h4: ({ children, node }) => <h4 className="mt-4 text-[15px] font-black leading-6 first:mt-0">{renderMentionChildren(children, node)}</h4>,
+  h5: ({ children, node }) => <h5 className="mt-4 text-sm font-bold first:mt-0">{renderMentionChildren(children, node)}</h5>,
+  h6: ({ children, node }) => <h6 className="mt-4 text-sm font-bold first:mt-0">{renderMentionChildren(children, node)}</h6>,
   // Mentions carry read state, so body text runs pass through the mention
   // renderer. Code spans keep their children untouched.
   p: ({ children, node }) => (
     <p className={RICH_MESSAGE_PARAGRAPH_CLASS_NAME}>{renderMentionChildren(children, node)}</p>
   ),
   blockquote: ({ children }) => (
-    <blockquote className="mt-2 border-l-2 border-primary/60 pl-3 text-muted-foreground first:mt-0">
+    <blockquote className="mt-4 border-l-2 border-primary/60 pl-3 text-muted-foreground first:mt-0">
       <NonOperationalMentions>{children}</NonOperationalMentions>
     </blockquote>
   ),
-  ul: ({ children }) => <ul className="mt-2 list-disc space-y-1 pl-5 first:mt-0">{children}</ul>,
+  ul: ({ children }) => <ul className="mt-4 list-disc space-y-2 pl-5 first:mt-0">{children}</ul>,
   ol: ({ children, start }) => (
-    <ol start={start} className="mt-2 list-decimal space-y-1 pl-5 first:mt-0">{children}</ol>
+    <ol start={start} className="mt-4 list-decimal space-y-2 pl-5 first:mt-0">{children}</ol>
   ),
   li: ({ children, node }) => <li>{renderMentionChildren(children, node)}</li>,
   a: ({ href, children }) => {
@@ -161,17 +161,17 @@ export function createMessageMarkdownComponents(
   },
   pre: MarkdownPre,
   table: ({ children }) => (
-    <div className="message-table-scroll mt-2 max-w-full overflow-x-auto first:mt-0">
+    <div className="message-table-scroll mt-4 max-w-full overflow-x-auto first:mt-0">
       <table className="message-table w-full min-w-max border-collapse text-left text-sm">{children}</table>
     </div>
   ),
   th: ({ children, node }) => (
-    <th scope="col" className="border border-border bg-muted/70 px-2.5 py-1.5 font-bold text-foreground">
+    <th scope="col" className="border border-border bg-muted/70 px-2.5 py-2 font-bold text-foreground">
       {renderMentionChildren(children, node)}
     </th>
   ),
   td: ({ children, node }) => (
-    <td className="border border-border px-2.5 py-1.5 align-top">{renderMentionChildren(children, node)}</td>
+    <td className="border border-border px-2.5 py-2 align-top">{renderMentionChildren(children, node)}</td>
   ),
   del: ({ children }) => <del className="text-muted-foreground"><NonOperationalMentions>{children}</NonOperationalMentions></del>,
   section: ({ children, node: _node, ...props }) => <section {...props}><NonOperationalMentions>{children}</NonOperationalMentions></section>,
@@ -260,7 +260,7 @@ export function MarkdownPre({ children }: { children?: React.ReactNode }) {
 
   const language = markdownCodeLanguage(children);
   return (
-    <div className="message-code-block group/code relative mt-2 w-full min-w-0 max-w-full overflow-hidden rounded-md border border-border bg-muted/70 first:mt-0">
+    <div className="message-code-block group/code relative mt-4 w-full min-w-0 max-w-full overflow-hidden rounded-md border border-border bg-muted/70 first:mt-0">
       <div className="pointer-events-none sticky top-0 right-0 left-0 z-10 flex min-h-8 items-center justify-between gap-2 bg-muted px-3 py-1.5">
         <span className="min-w-0 truncate text-[11px] font-bold uppercase text-muted-foreground">
           {language || "code"}

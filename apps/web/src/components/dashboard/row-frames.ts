@@ -17,9 +17,10 @@ export const MESSAGE_META_CLASS_NAME =
 export const MESSAGE_AUTHOR_NAME_CLASS_NAME = "app-message-author-name shrink-0 whitespace-nowrap text-[15px] font-black";
 export const MESSAGE_TIMESTAMP_CLASS_NAME = "app-message-timestamp shrink-0 tabular-nums";
 export const MESSAGE_HEADER_TIMESTAMP_CLASS_NAME = "shrink-0 text-xs text-muted-foreground";
+/** Reading rhythm for channel prose: line-height 1.75, 16px between paragraphs. */
 export const RICH_MESSAGE_CLASS_NAME =
-  "rich-message mt-0.5 min-w-0 max-w-full break-words [overflow-wrap:anywhere] text-[15px] leading-5 text-foreground";
-export const RICH_MESSAGE_PARAGRAPH_CLASS_NAME = "mt-1 whitespace-pre-wrap first:mt-0";
+  "rich-message mt-0.5 min-w-0 max-w-full break-words [overflow-wrap:anywhere] text-[15px] leading-[1.75] text-foreground";
+export const RICH_MESSAGE_PARAGRAPH_CLASS_NAME = "mt-4 whitespace-pre-wrap first:mt-0";
 
 export const CHANNEL_CHAT_ROW_CLASS_NAME = "app-channel-row app-channel-chat-row app-list-row";
 export const CHANNEL_ROW_TITLE_LINE_CLASS_NAME = "app-channel-row-title-line flex min-w-0 items-baseline gap-2";

@@ -3097,7 +3097,7 @@ export function MarkdownAttachmentViewer({ attachment }: { attachment: ChannelAt
             {error}
           </div>
         ) : content ? (
-          <div className="rich-message max-w-none text-[15px] leading-6">
+          <div className="rich-message max-w-none text-[15px] leading-[1.75]">
             <ReactMarkdown remarkPlugins={markdownRemarkPlugins} components={messageMarkdownComponents}>
               {content}
             </ReactMarkdown>
